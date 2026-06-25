@@ -506,6 +506,115 @@ describe('headless DM combat engine', () => {
     expect(heroToken?.hp).toBe(hero.currentHp)
   })
 
+  it('lets a player spend AP to dodge an enemy attack before damage is rolled', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('goblin', 10)],
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'enemy-attack-token',
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      targetWantsDodge: true,
+      targetDodgeD20: 1,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const heroToken = result.state.map.tokens.find((item) => item.id === 'hero-token')
+    expect(result.state.enemyApByToken.goblin.current).toBe(1)
+    expect(hero.currentAP).toBe(1)
+    expect(hero.currentHp).toBe(30)
+    expect(heroToken?.hp).toBe(30)
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      targetDodged: true,
+      dodgeD20: 1,
+      total: 0,
+    })
+  })
+
+  it('applies enemy attack damage after a failed player dodge', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('goblin', 10)],
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'enemy-attack-token',
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      targetWantsDodge: true,
+      targetDodgeD20: 20,
+      diceValues: [6],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const heroToken = result.state.map.tokens.find((item) => item.id === 'hero-token')
+    expect(result.state.enemyApByToken.goblin.current).toBe(1)
+    expect(hero.currentAP).toBe(1)
+    expect(hero.currentHp).toBeLessThan(30)
+    expect(heroToken?.hp).toBe(hero.currentHp)
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      targetDodged: false,
+      dodgeD20: 20,
+      damageValues: [6],
+    })
+  })
+
   it('resolves player opportunity attacks out of turn through DM authority', () => {
     const combat = state({
       initiativeIndex: 1,

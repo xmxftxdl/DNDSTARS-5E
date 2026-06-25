@@ -18,6 +18,7 @@ import { resolveCombatMovement } from './combatMovementPipeline'
 import { triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
+import { ENEMY_MELEE_ATTACK_BONUS } from './archerBaseFeatures'
 import { proficiencyBonus } from './dnd'
 import { getTokenAbilityMod } from './knockback'
 import { decideDodge } from './aiPolicy'
@@ -87,6 +88,25 @@ export type HeadlessCombatEvent =
       successChance: number
     }
   | {
+      type: 'enemy-attack-resolved'
+      actorTokenId: string
+      targetTokenId: string
+      actionName: string
+      damageValues: number[]
+      diceTotal: number
+      damageBonus: number
+      rawDamage: number
+      damageBeforeDefense: number
+      modifier: number
+      diff: number
+      total: number
+      targetDodged: boolean
+      dodgeD20?: number
+      dodgeAttackBonus?: number
+      dodgeTotal?: number
+      targetAc?: number
+    }
+  | {
       type: 'opportunity-resolved'
       attackerTokenId: string
       targetTokenId: string
@@ -128,6 +148,10 @@ export interface HeadlessEnemyAttackAction {
   targetTokenId: string
   actionIndex?: number
   diceValues?: number[]
+  actorApAlreadySpent?: boolean
+  targetWantsDodge?: boolean
+  targetDodgeD20?: number
+  targetDodgeApAlreadySpent?: boolean
 }
 
 export interface HeadlessOpportunityAttackAction {
@@ -602,7 +626,60 @@ function resolveEnemyAttack(
   const rangeFeet = actionDef.range ?? (actionDef.kind === 'ranged' ? 60 : 5)
   const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, state.map) * (state.map.feetPerCell ?? 5)
   if (distanceFeet > rangeFeet) return fail(state, 'out-of-range', events)
-  if (!spendEnemyAp(state, actorToken.id, 1, events)) return fail(state, 'insufficient-ap', events)
+  if (!action.actorApAlreadySpent && !spendEnemyAp(state, actorToken.id, 1, events)) return fail(state, 'insufficient-ap', events)
+
+  const target = findCharacter(state, targetToken.characterId)
+  const attackBonus = actionDef.toHit ?? ENEMY_MELEE_ATTACK_BONUS
+  let targetDodged = false
+  let dodgeD20: number | undefined
+  let dodgeTotal: number | undefined
+  let targetAc: number | undefined
+  if (action.targetWantsDodge && target) {
+    if (!action.targetDodgeApAlreadySpent && !spendCharacterAp(state, target.id, 1, targetToken.id, events)) {
+      events.push({ type: 'log', text: `${target.name} 尝试闪避，但 AP 不足。` })
+    } else {
+      const d20Values = resolveDiceValues(
+        action.targetDodgeD20 != null ? [action.targetDodgeD20] : undefined,
+        dice,
+        1,
+        20,
+      )
+      if (!d20Values) return fail(state, 'invalid-dice', events)
+      dodgeD20 = d20Values[0]
+      events.push({ type: 'dice-rolled', notation: '1d20', values: [dodgeD20], total: dodgeD20 })
+      targetAc = getAc(target)
+      dodgeTotal = dodgeD20 + attackBonus
+      targetDodged = dodgeTotal < targetAc
+      events.push({
+        type: 'log',
+        text: `${target.name} 闪避 ${actorToken.label} 的 ${actionDef.name}：${dodgeD20}+${attackBonus}=${dodgeTotal} vs AC ${targetAc}，${targetDodged ? '闪避成功' : '闪避失败'}。`,
+      })
+    }
+  }
+
+  if (targetDodged) {
+    events.push({
+      type: 'enemy-attack-resolved',
+      actorTokenId: actorToken.id,
+      targetTokenId: targetToken.id,
+      actionName: actionDef.name,
+      damageValues: [],
+      diceTotal: 0,
+      damageBonus: parsed.bonus,
+      rawDamage: 0,
+      damageBeforeDefense: 0,
+      modifier: 0,
+      diff: 0,
+      total: 0,
+      targetDodged: true,
+      dodgeD20,
+      dodgeAttackBonus: attackBonus,
+      dodgeTotal,
+      targetAc,
+    })
+    maybeEndCombat(state, events)
+    return succeed(state, events)
+  }
 
   const diceValues = resolveDiceValues(action.diceValues, dice, parsed.count, parsed.sides)
   if (!diceValues) return fail(state, 'invalid-dice', events)
@@ -610,7 +687,6 @@ function resolveEnemyAttack(
   events.push({ type: 'dice-rolled', notation: `${parsed.count}d${parsed.sides}`, values: diceValues, total: diceTotal })
   const baseDamage = diceTotal + parsed.bonus
   const attacker = enemyCombatInput(actorToken.poolId)
-  const target = findCharacter(state, targetToken.characterId)
   const adjusted = applyAttackDefenseDamageModifier(
     baseDamage,
     attacker,
@@ -622,6 +698,25 @@ function resolveEnemyAttack(
   events.push({
     type: 'log',
     text: `${actorToken.label} 使用 ${actionDef.name} 攻击 ${targetToken.label}：骰值 ${diceValues.join('+')}，加值 ${parsed.bonus}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
+  })
+  events.push({
+    type: 'enemy-attack-resolved',
+    actorTokenId: actorToken.id,
+    targetTokenId: targetToken.id,
+    actionName: actionDef.name,
+    damageValues: diceValues,
+    diceTotal,
+    damageBonus: parsed.bonus,
+    rawDamage: baseDamage,
+    damageBeforeDefense: baseDamage,
+    modifier: adjusted.modifier,
+    diff: adjusted.diff,
+    total: adjusted.damage,
+    targetDodged: false,
+    dodgeD20,
+    dodgeAttackBonus: dodgeD20 != null ? attackBonus : undefined,
+    dodgeTotal,
+    targetAc,
   })
   maybeEndCombat(state, events)
   return succeed(state, events)
@@ -786,7 +881,15 @@ function applyDamageToTarget(
     const nextTemp = Math.max(0, tempBefore - amount)
     const remaining = Math.max(0, amount - tempBefore)
     const hpAfter = Math.max(0, hpBefore - remaining)
-    updateCharacter(state, character.id, (item) => ({ ...item, currentHp: hpAfter, tempHp: nextTemp }))
+    updateCharacter(state, character.id, (item) => ({
+      ...item,
+      currentHp: hpAfter,
+      tempHp: nextTemp,
+      combatBuffs: {
+        ...triggerOutOfBreath(item, 'damage'),
+        tookDamageThisTurn: true,
+      },
+    }))
     updateToken(state, targetToken.id, (item) => ({ ...item, hp: hpAfter, maxHp: character.maxHp }))
     events.push({ type: 'damage-applied', targetTokenId: targetToken.id, characterId: character.id, amount, hpBefore, hpAfter })
     return

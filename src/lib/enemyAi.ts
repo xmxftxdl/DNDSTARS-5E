@@ -57,6 +57,7 @@ export interface EnemyTurnResult {
   attacked: boolean
   attackerTokenId?: string
   targetTokenId?: string
+  actionIndex?: number
   attack?: EnemyAttackRoll
   /** 物理攻击默认命中；范围法术需敏捷豁免 */
   damageType?: 'physical' | 'aoe'
@@ -154,13 +155,16 @@ function enemyRangedRangeCells(enemy: Token, map: BattleMap): number | null {
 function selectAttackAction(
   block: ReturnType<typeof getEnemyStatBlock>,
   kind: 'melee' | 'ranged',
-): MonsterAction | undefined {
+): { action: MonsterAction; index: number } | undefined {
   if (!block) return undefined
   if (kind === 'ranged') {
-    const ranged = block.actions.find((a) => a.kind === 'ranged' && !!a.damageDice)
-    if (ranged) return ranged
+    const rangedIndex = block.actions.findIndex((a) => a.kind === 'ranged' && !!a.damageDice)
+    if (rangedIndex >= 0) return { action: block.actions[rangedIndex], index: rangedIndex }
   }
-  return getPrimaryAttackAction(block)
+  const primary = getPrimaryAttackAction(block)
+  if (!primary) return undefined
+  const primaryIndex = block.actions.indexOf(primary)
+  return { action: primary, index: Math.max(0, primaryIndex) }
 }
 
 function buildEnemyAttack(
@@ -175,7 +179,8 @@ function buildEnemyAttack(
   // [T7/AC1] 标签/骰面/命中加值来自怪物的结构化主攻击（damageDice/damageType/toHit），
   // 不再硬编码全局 1d6。inferEnemyDamageDiceCount 会从 label 解析 \d+d\d+。
   const block = enemy.poolId ? getEnemyStatBlock(enemy.poolId) : undefined
-  const action = selectAttackAction(block, kind)
+  const selectedAction = selectAttackAction(block, kind)
+  const action = selectedAction?.action
   let sides: number
   let diceLabel: string
   let attackBonus: number
@@ -211,6 +216,7 @@ function buildEnemyAttack(
     attacked: true,
     attackerTokenId: enemy.id,
     targetTokenId: target.id,
+    actionIndex: selectedAction?.index,
     attack: {
       values,
       sides,
@@ -249,6 +255,7 @@ function buildBreathAttack(
     attacked: true,
     attackerTokenId: enemy.id,
     targetTokenId: target.id,
+    actionIndex: enemy.poolId ? getEnemyStatBlock(enemy.poolId)?.actions.indexOf(breath) : undefined,
     damageType: 'aoe',
     saveDC: dc,
     attack: {

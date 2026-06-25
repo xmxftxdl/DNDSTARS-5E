@@ -154,6 +154,7 @@ import {
   type StableMindInterruptResponse,
 } from '../lib/combatInterruptProtocol'
 import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
+import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
   clampGridSize,
   cellKey,
@@ -6017,8 +6018,117 @@ export default function MapsPage() {
 
     const hasEnemyDamage = !!result.attack || (result.damage != null && result.damage > 0)
 
+    const tryResolvePhysicalEnemyAttackWithHeadless = async () => {
+      const damageType = result.damageType ?? 'physical'
+      if (
+        !targetChar ||
+        !result.attack ||
+        !result.attackerTokenId ||
+        !result.targetTokenId ||
+        damageType !== 'physical'
+      ) {
+        return false
+      }
+      const latestMap = useMapStore.getState().maps.find((map) => map.id === liveMapId) ?? activeMap
+      const attackerToken = latestMap.tokens.find((token) => token.id === result.attackerTokenId)
+      if (!attackerToken?.poolId) return false
+      const huntedByTargetRank = huntingMarkTraitRank(targetChar)
+      if ((attackerToken.huntingMarkStacks ?? 0) > 0 && huntedByTargetRank > 0) return false
+      if ((targetChar.combatBuffs?.flexibleBodyBonus ?? 0) > 0) return false
+      const arcaneSurge = findClassTrait(targetChar, 'arcaneSurge')
+      if (arcaneSurge && arcaneSurge.uses > 0) return false
+
+      const actionDef = getEnemyStatBlock(attackerToken.poolId)?.actions[result.actionIndex ?? 0]
+      const attackBonus = actionDef?.toHit ?? ENEMY_MELEE_ATTACK_BONUS
+      const targetDodgeD20 = wantsDodge
+        ? providedDodgeD20 ?? (await rollDiceBoxD20('闪避判定 D20', targetChar.name))
+        : undefined
+      const targetAc = targetChar.ac
+      const expectedDodged = targetDodgeD20 != null ? targetDodgeD20 + attackBonus < targetAc : false
+      const headlessDamageValues = expectedDodged ? undefined : await rollEnemyBaseDamageDice()
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+        type: 'enemy-attack-token',
+        actorTokenId: result.attackerTokenId,
+        targetTokenId: result.targetTokenId,
+        actionIndex: result.actionIndex,
+        diceValues: headlessDamageValues,
+        actorApAlreadySpent: true,
+        targetWantsDodge: !!wantsDodge,
+        targetDodgeD20,
+        targetDodgeApAlreadySpent: dodgeApAlreadySpent,
+      })
+      if (!headless.ok) return false
+      const resolved = enemyAttackResolvedEvent(headless.events)
+      if (!resolved) return false
+
+      applyHeadlessCombatResult(headless)
+      damageRollValues = resolved.damageValues
+      damageRollTotal = resolved.total
+      damageRollBonus = resolved.total - resolved.diceTotal
+      combatLabel = resolved.dodgeD20 != null
+        ? `闪避判定 ${resolved.dodgeD20}+${resolved.dodgeAttackBonus ?? 0}=${resolved.dodgeTotal ?? 0} vs AC ${
+            resolved.targetAc ?? targetAc
+          } ${resolved.targetDodged ? '成功' : '失败'}`
+        : '受击（未尝试闪避）'
+      d20Roll = resolved.dodgeD20 != null
+        ? {
+            value: resolved.dodgeD20,
+            modifier: resolved.dodgeAttackBonus ?? attackBonus,
+            ac: resolved.targetAc ?? targetAc,
+            hit: !resolved.targetDodged,
+            kind: 'dodge',
+          }
+        : undefined
+      if (wantsDodge && !dodgeApAlreadySpent) {
+        const attackerName = latestMap.tokens.find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
+        pushApLog(targetChar, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
+      }
+      if (resolved.targetDodged && canOfferAgileLeap(targetChar)) {
+        const trait = findClassTrait(targetChar, 'agileLeap')
+        const feet = agileLeapMoveFeet(targetChar)
+        const accepted = await requestSharedAgileLeapChoice(targetChar, {
+          feet,
+          uses: trait?.uses ?? 0,
+          maxUses: trait?.maxUses ?? 0,
+        })
+        if (accepted) {
+          const latestTarget = useCharacterStore.getState().characters.find((c) => c.id === targetChar.id) ?? targetChar
+          updateChar(targetChar.id, {
+            combatBuffs: { ...latestTarget.combatBuffs, agileLeapMoveFeet: feet },
+          })
+          combatLabel += ` · 灵巧跳跃：点击地图移动至多 ${feet} 尺`
+          pushCombatLog(`${latestTarget.name} 发动灵巧跳跃：可移动至多 ${feet} 尺，不消耗 AP。`, 'turn')
+        }
+      }
+      if (result.attack) {
+        const enemyRollForDisplay: DiceRoll = {
+          values: damageRollValues,
+          sides: result.attack.sides,
+          bonus: damageRollBonus,
+          total: damageRollTotal,
+          label: combatLabel ? `${result.attack.label} · ${combatLabel}` : result.attack.label,
+          formula:
+            damageRollValues.length > 0
+              ? `${damageRollValues.join(' + ')}${damageRollBonus >= 0 ? ' + ' : ' - '}${Math.abs(damageRollBonus)} = ${damageRollTotal}`
+              : undefined,
+          targetName: result.attack.targetName,
+          d20Roll,
+        }
+        setRoll(enemyRollForDisplay)
+        publishSharedDiceRoll(enemyRollForDisplay)
+        pushCombatLog(
+          `${result.attack.label} → ${result.attack.targetName}：伤害骰 ${damageRollValues.length > 0 ? damageRollValues.join(' + ') : '无'}，加值 ${damageRollBonus}，最终 ${damageRollTotal} 点${combatLabel ? `；${combatLabel}` : ''}`,
+          damageRollTotal > 0 ? 'damage' : 'attack',
+        )
+      }
+      return true
+    }
+
     if (targetChar && hasEnemyDamage) {
       const damageType = result.damageType ?? 'physical'
+      if (await tryResolvePhysicalEnemyAttackWithHeadless()) {
+        return
+      }
       await runEnemyStage('beforeAttackRoll')
 
       if (damageType === 'aoe') {
@@ -6976,6 +7086,14 @@ export default function MapsPage() {
     events: HeadlessCombatEvent[],
   ): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
     events.find((event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> => event.type === 'attack-resolved')
+
+  const enemyAttackResolvedEvent = (
+    events: HeadlessCombatEvent[],
+  ): Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> | undefined =>
+    events.find(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> =>
+        event.type === 'enemy-attack-resolved',
+    )
 
   const enemyDodgePreview = (target: Token, attacker: Character, skill: CombatSkill) => {
     if (!combatActiveRef.current || target.type !== 'enemy') return null
