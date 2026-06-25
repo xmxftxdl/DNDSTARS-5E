@@ -20,7 +20,7 @@ import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './oppor
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
 import { ENEMY_MELEE_ATTACK_BONUS } from './archerBaseFeatures'
 import { proficiencyBonus } from './dnd'
-import { getTokenAbilityMod } from './knockback'
+import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 
@@ -212,6 +212,8 @@ export interface HeadlessAoeAttackAction {
   diceValues?: number[]
   cellCount?: number
   saveMode?: 'half' | 'none' | 'fail-half'
+  knockbackOnFailedSave?: boolean
+  knockbackTurns?: number
 }
 
 export interface HeadlessAoeTargetPacket {
@@ -861,6 +863,9 @@ function resolveAoeAttack(
       events.push({ type: 'dice-rolled', notation: '1d20', values: [saveD20], total: saveD20 })
     }
     if (total > 0) applyDamageToTarget(state, targetToken, total, events)
+    if (action.knockbackOnFailedSave && saveSuccess === false) {
+      applyKnockbackToTarget(state, targetToken, action.knockbackTurns ?? KNOCKBACK_DEFAULT_TURNS, events)
+    }
     events.push({
       type: 'aoe-target-resolved',
       actorTokenId: actorToken.id,
@@ -1304,6 +1309,32 @@ function applyStatusOnHit(
   const patch = skill.statusOnHit === 'burning' ? { burningTurns: turns } : { poisonTurns: turns }
   updateToken(state, targetToken.id, (token) => ({ ...token, ...patch }))
   events.push({ type: 'status-added', targetTokenId: targetToken.id, characterId: targetToken.characterId, condition, turns })
+}
+
+function applyKnockbackToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(KNOCKBACK_DEFAULT_TURNS, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, KNOCKBACK_STATUS_LABEL])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    knockbackTurns: Math.max(token.knockbackTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: KNOCKBACK_STATUS_LABEL,
+    turns: nextTurns,
+  })
 }
 
 function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillId: string) {

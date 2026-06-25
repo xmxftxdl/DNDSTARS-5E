@@ -7520,7 +7520,11 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      if (skill.skillTreeId === 'arrowStorm' || skill.skillTreeId === 'aerialCombo') {
+      if (
+        skill.skillTreeId === 'arrowStorm' ||
+        skill.skillTreeId === 'aerialCombo' ||
+        skill.skillTreeId === 'whirlwindKick'
+      ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
         if (!actorToken) {
@@ -7573,6 +7577,8 @@ export default function MapsPage() {
           skillId: skill.id,
           diceValues,
           saveMode: 'half',
+          knockbackOnFailedSave: skill.skillTreeId === 'whirlwindKick',
+          knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
           cellCount: cells.length,
           targetPackets,
         })

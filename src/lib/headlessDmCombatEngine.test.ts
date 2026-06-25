@@ -726,6 +726,83 @@ describe('headless DM combat engine', () => {
     )
   })
 
+  it('applies knockback only to failed whirlwind kick saves', () => {
+    const whirlwindKick = skill({
+      id: 'whirlwind-kick',
+      name: '旋风飞腿',
+      skillTreeId: 'whirlwindKick',
+      tags: ['melee'],
+      damageCount: 3,
+      damageSides: 4,
+      cooldown: 2,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ saveDC: 12, combatSkills: [skill(), whirlwindKick] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin-a',
+          label: 'Goblin A',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 245,
+          y: 175,
+        }),
+        token({
+          id: 'goblin-b',
+          label: 'Goblin B',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 175,
+          y: 245,
+        }),
+      ]),
+      enemyApByToken: { 'goblin-a': { current: 0, max: 2 }, 'goblin-b': { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'whirlwind-kick',
+      diceValues: [4, 4, 4],
+      saveMode: 'half',
+      knockbackOnFailedSave: true,
+      targetPackets: [
+        { targetTokenId: 'goblin-a', saveD20: 1 },
+        { targetTokenId: 'goblin-b', saveD20: 20 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const failedTarget = result.state.map.tokens.find((item) => item.id === 'goblin-a')
+    const savedTarget = result.state.map.tokens.find((item) => item.id === 'goblin-b')
+    expect(failedTarget?.knockbackTurns).toBe(1)
+    expect(savedTarget?.knockbackTurns ?? 0).toBe(0)
+    expect(result.events).toContainEqual({
+      type: 'status-added',
+      targetTokenId: 'goblin-a',
+      characterId: undefined,
+      condition: '击飞',
+      turns: 1,
+    })
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),
