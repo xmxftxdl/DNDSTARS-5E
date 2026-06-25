@@ -6977,35 +6977,34 @@ export default function MapsPage() {
   ): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
     events.find((event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> => event.type === 'attack-resolved')
 
-  const shouldEnemyConsiderDodge = (target: Token, attacker: Character, skill: CombatSkill) => {
-    if (!combatActiveRef.current || target.type !== 'enemy') return false
+  const enemyDodgePreview = (target: Token, attacker: Character, skill: CombatSkill) => {
+    if (!combatActiveRef.current || target.type !== 'enemy') return null
     const ap = getEnemyApState(target.id)
-    if (ap.current < 1) return false
+    if (ap.current < 1) return null
     const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
     const attackBonus = getEffectiveAbilityMod(attacker, attackAbility) + proficiencyBonus(attacker.level)
     const targetAc = getTokenTargetAc(target) ?? 12
     const diceCount = attackDamageDiceCount(skill, false)
     const estimatedDamage = diceCount * ((skill.damageSides + 1) / 2) + (skill.damageBonus ?? 0)
-    return decideDodge({
+    const decision = decideDodge({
       currentAp: ap.current,
       currentHp: target.hp ?? target.maxHp ?? 1,
       maxHp: target.maxHp ?? target.hp ?? 1,
       targetAc,
       incomingAttackBonus: attackBonus,
       estimatedDamage,
-    }).shouldDodge
+    })
+    return { decision, attackBonus, targetAc }
   }
 
   const canResolveSingleAttackWithHeadless = (
     actor: Character,
     skill: CombatSkill,
-    target: Token,
     opts: { doubleArrow: boolean; targetCount: number },
   ) => {
     if (!isBasicShot(skill) || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
-    if (target.type === 'enemy' && shouldEnemyConsiderDodge(target, actor, skill)) return false
     if (isOutOfBreath(actor)) return false
     const buffs = actor.combatBuffs
     if (
@@ -7233,14 +7232,24 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'accepted')
         return
       }
-      if (canResolveSingleAttackWithHeadless(actor, skill, targets[0], { doubleArrow, targetCount: targets.length })) {
+      if (canResolveSingleAttackWithHeadless(actor, skill, { doubleArrow, targetCount: targets.length })) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
         const targetToken = map.tokens.find((token) => token.id === targets[0].id) ?? targets[0]
         if (actorToken && isBasicShot(skill)) {
           launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, { x: targetToken.x, y: targetToken.y })
         }
-        const diceValues = await rollDiceBoxValues(skill.damageCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
+        const dodgePreview = enemyDodgePreview(targetToken, actor, skill)
+        const targetDodgeD20 = dodgePreview?.decision.shouldDodge
+          ? await rollDiceBoxD20('敌人闪避 D20', targetToken.label)
+          : undefined
+        const expectedTargetDodged =
+          targetDodgeD20 != null && dodgePreview
+            ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
+            : false
+        const diceValues = expectedTargetDodged
+          ? undefined
+          : await rollDiceBoxValues(skill.damageCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',
           actorTokenId: action.actorTokenId,
@@ -7248,6 +7257,7 @@ export default function MapsPage() {
           targetTokenId: targetToken.id,
           skillId: skill.id,
           diceValues,
+          targetDodgeD20,
         })
         if (!headless.ok) {
           acknowledgePlayerAction(action, 'rejected', headless.reason)
@@ -7262,23 +7272,39 @@ export default function MapsPage() {
         }
         applyHeadlessCombatResult(headless)
         pushApLog(actor, resolved.waivedAp ? 0 : resolved.apCost, `使用 ${skill.name}`, `目标 ${targetToken.label}`)
-        const formula = `${resolved.damageValues.join(' + ')}${
-          skill.damageBonus ? ` + ${skill.damageBonus}` : ''
-        } = ${resolved.damageBeforeDefense}，攻防修正${resolved.modifier >= 0 ? '+' : '-'}${Math.abs(resolved.modifier)}（差值${
-          resolved.diff
-        }），最终 ${resolved.total}`
-        const rollForDisplay: DiceRoll = {
-          values: resolved.damageValues,
-          sides: skill.damageSides,
-          bonus: resolved.total - resolved.diceTotal,
-          total: resolved.total,
-          label: `${skill.name} · headless DM`,
-          formula,
-          targetName: targetToken.label,
+        const dodgeEvent = headless.events.find(
+          (event): event is Extract<HeadlessCombatEvent, { type: 'target-dodge-resolved' }> =>
+            event.type === 'target-dodge-resolved',
+        )
+        const formula = resolved.hit
+          ? `${resolved.damageValues.join(' + ')}${
+              skill.damageBonus ? ` + ${skill.damageBonus}` : ''
+            } = ${resolved.damageBeforeDefense}，攻防修正${resolved.modifier >= 0 ? '+' : '-'}${Math.abs(
+              resolved.modifier,
+            )}（差值${resolved.diff}），最终 ${resolved.total}`
+          : '目标闪避成功，未造成伤害'
+        if (resolved.hit) {
+          const rollForDisplay: DiceRoll = {
+            values: resolved.damageValues,
+            sides: skill.damageSides,
+            bonus: resolved.total - resolved.diceTotal,
+            total: resolved.total,
+            label: `${skill.name} · headless DM`,
+            formula,
+            targetName: targetToken.label,
+          }
+          setRoll(rollForDisplay)
+          publishSharedDiceRoll(rollForDisplay)
         }
-        setRoll(rollForDisplay)
-        publishSharedDiceRoll(rollForDisplay)
-        pushCombatLog(`${actor.name} 使用 ${skill.name} → ${targetToken.label}：伤害 ${formula}`, 'damage')
+        const dodgeText = dodgeEvent
+          ? `；${targetToken.label} 闪避判定 ${dodgeEvent.d20Value}+${dodgeEvent.attackBonus}=${dodgeEvent.total} vs AC ${dodgeEvent.targetAc}，${
+              dodgeEvent.dodged ? '成功' : '失败'
+            }`
+          : ''
+        pushCombatLog(
+          `${actor.name} 使用 ${skill.name} → ${targetToken.label}${dodgeText}：${resolved.hit ? `伤害 ${formula}` : formula}`,
+          resolved.hit ? 'damage' : 'attack',
+        )
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return

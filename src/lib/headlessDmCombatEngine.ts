@@ -17,9 +17,10 @@ import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive 
 import { resolveCombatMovement } from './combatMovementPipeline'
 import { triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
-import { getEffectiveAbilityMod } from './archerCombat'
+import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
 import { proficiencyBonus } from './dnd'
 import { getTokenAbilityMod } from './knockback'
+import { decideDodge } from './aiPolicy'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -68,8 +69,22 @@ export type HeadlessCombatEvent =
       diff: number
       total: number
       isCrit: boolean
+      hit: boolean
+      targetDodged: boolean
       waivedAp: boolean
       apCost: number
+    }
+  | {
+      type: 'target-dodge-resolved'
+      actorTokenId: string
+      targetTokenId: string
+      d20Value: number
+      attackBonus: number
+      total: number
+      targetAc: number
+      dodged: boolean
+      reason: string
+      successChance: number
     }
   | {
       type: 'opportunity-resolved'
@@ -103,6 +118,7 @@ export interface HeadlessPlayerAttackAction {
   targetTokenId: string
   skillId: string
   diceValues?: number[]
+  targetDodgeD20?: number
   isCrit?: boolean
 }
 
@@ -425,6 +441,38 @@ function resolvePlayerAttack(
     return fail(state, 'insufficient-ap', events)
   }
 
+  const targetDodge = resolveTargetDodgeAgainstPlayerAttack(state, actorToken, actor, targetToken, skill, action, dice, events)
+  if (!targetDodge) return fail(state, 'invalid-dice', events)
+  if (targetDodge.dodged) {
+    markSkillUsed(state, actor.id, skill.id)
+    if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
+    events.push({
+      type: 'attack-resolved',
+      actorTokenId: actorToken.id,
+      characterId: actor.id,
+      targetTokenId: targetToken.id,
+      skillId: skill.id,
+      skillName: skill.name,
+      damageValues: [],
+      diceTotal: 0,
+      baseDamage: 0,
+      damageBeforeDefense: 0,
+      modifier: 0,
+      diff: 0,
+      total: 0,
+      isCrit: false,
+      hit: false,
+      targetDodged: true,
+      waivedAp: waiveAp,
+      apCost,
+    })
+    events.push({
+      type: 'log',
+      text: `${targetToken.label} 闪避 ${actor.name} 的 ${skill.name} 成功。`,
+    })
+    return succeed(state, events)
+  }
+
   const diceValues = resolveDiceValues(action.diceValues, dice, skill.damageCount, skill.damageSides)
   if (!diceValues) return fail(state, 'invalid-dice', events)
   events.push({
@@ -456,6 +504,8 @@ function resolvePlayerAttack(
     diff: adjusted.diff,
     total: adjusted.damage,
     isCrit: !!action.isCrit,
+    hit: true,
+    targetDodged: false,
     waivedAp: waiveAp,
     apCost,
   })
@@ -465,6 +515,70 @@ function resolvePlayerAttack(
   })
   maybeEndCombat(state, events)
   return succeed(state, events)
+}
+
+function resolveTargetDodgeAgainstPlayerAttack(
+  state: HeadlessDmCombatState,
+  actorToken: Token,
+  actor: Character,
+  targetToken: Token,
+  skill: CombatSkill,
+  action: HeadlessPlayerAttackAction,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): { attempted: boolean; dodged: boolean } | null {
+  if (targetToken.type !== 'enemy') return { attempted: false, dodged: false }
+  const ap = state.enemyApByToken[targetToken.id]
+  if (!ap || ap.current < 1) return { attempted: false, dodged: false }
+  const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
+  const attackBonus = getEffectiveAbilityMod(actor, attackAbility) + proficiencyBonus(actor.level)
+  const targetAc = getTokenTargetAc(targetToken) ?? 12
+  const diceCount = attackDamageDiceCount(skill, false)
+  const estimatedDamage = diceCount * ((skill.damageSides + 1) / 2) + (skill.damageBonus ?? 0)
+  const decision = decideDodge({
+    currentAp: ap.current,
+    currentHp: targetToken.hp ?? targetToken.maxHp ?? 1,
+    maxHp: targetToken.maxHp ?? targetToken.hp ?? 1,
+    targetAc,
+    incomingAttackBonus: attackBonus,
+    estimatedDamage,
+  })
+  if (!decision.shouldDodge) {
+    events.push({
+      type: 'log',
+      text: `${targetToken.label} 保留 AP：不闪避 ${skill.name}（${decision.reason}）。`,
+    })
+    return { attempted: false, dodged: false }
+  }
+  if (!spendEnemyAp(state, targetToken.id, 1, events)) return { attempted: false, dodged: false }
+  const d20Values = resolveDiceValues(
+    action.targetDodgeD20 != null ? [action.targetDodgeD20] : undefined,
+    dice,
+    1,
+    20,
+  )
+  if (!d20Values) return null
+  const d20Value = d20Values[0]
+  events.push({ type: 'dice-rolled', notation: '1d20', values: [d20Value], total: d20Value })
+  const total = d20Value + attackBonus
+  const dodged = total < targetAc
+  events.push({
+    type: 'target-dodge-resolved',
+    actorTokenId: actorToken.id,
+    targetTokenId: targetToken.id,
+    d20Value,
+    attackBonus,
+    total,
+    targetAc,
+    dodged,
+    reason: decision.reason,
+    successChance: decision.successChance,
+  })
+  events.push({
+    type: 'log',
+    text: `${targetToken.label} 花费 1 AP：尝试闪避 ${skill.name}。判定 ${d20Value}+${attackBonus}=${total} vs AC ${targetAc}，${dodged ? '闪避成功' : '闪避失败'}。`,
+  })
+  return { attempted: true, dodged }
 }
 
 function resolveEnemyAttack(

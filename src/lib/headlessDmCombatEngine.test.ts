@@ -338,6 +338,111 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('lets an enemy spend AP to dodge a player attack before damage is rolled', () => {
+    const combat = state({
+      characters: [character({ abilities: { str: 10, dex: 10, con: 25, int: 25, wis: 25, cha: 25 } })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 2,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'basic-shot',
+      targetDodgeD20: 1,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.enemyApByToken.goblin.current).toBe(1)
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.hp).toBe(2)
+    expect(result.events.find((event) => event.type === 'target-dodge-resolved')).toMatchObject({
+      targetTokenId: 'goblin',
+      dodged: true,
+    })
+    expect(result.events.find((event) => event.type === 'attack-resolved')).toMatchObject({
+      hit: false,
+      targetDodged: true,
+      total: 0,
+    })
+  })
+
+  it('continues to damage when the enemy dodge attempt fails', () => {
+    const combat = state({
+      characters: [character({ abilities: { str: 10, dex: 10, con: 25, int: 25, wis: 25, cha: 25 } })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 2,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'basic-shot',
+      targetDodgeD20: 20,
+      diceValues: [8],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.enemyApByToken.goblin.current).toBe(1)
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.hp).toBeLessThan(2)
+    expect(result.events.find((event) => event.type === 'target-dodge-resolved')).toMatchObject({
+      targetTokenId: 'goblin',
+      dodged: false,
+    })
+    expect(result.events.find((event) => event.type === 'attack-resolved')).toMatchObject({
+      hit: true,
+      targetDodged: false,
+      damageValues: [8],
+    })
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),
