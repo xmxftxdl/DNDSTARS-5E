@@ -292,6 +292,72 @@ describe('headless DM combat engine', () => {
     expect(moved?.triggersMoveEffects).toBe(true)
   })
 
+  it('activates double arrow through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          traits: [
+            {
+              id: 'double-arrow',
+              name: '双箭',
+              level: 1,
+              uses: 2,
+              maxUses: 2,
+              description: '',
+              featureKey: 'doubleArrow',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'doubleArrow',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].currentAP).toBe(1)
+    expect(result.state.characters[0].combatBuffs?.doubleArrowReady).toBe(true)
+  })
+
+  it('activates eagle eye and spends a feature use through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          traits: [
+            {
+              id: 'eagle-eye',
+              name: '鹰眼',
+              level: 2,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'eagleEye',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'eagleEye',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatBuffs?.eagleEyeTurns).toBe(3)
+    expect(hero.traits.find((trait) => trait.featureKey === 'eagleEye')?.uses).toBe(0)
+  })
+
   it('rejects movement outside the actor speed and leaves state unchanged', () => {
     const before = state()
     const result = resolveHeadlessDmAction(before, {

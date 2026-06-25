@@ -1,6 +1,6 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { BattleMap, Token } from '../store/maps'
-import type { Character, CombatSkill } from '../types/character'
+import type { Character, ClassFeatureKey, CombatSkill } from '../types/character'
 import {
   applyAttackDefenseDamageModifier,
   characterToCombatInput,
@@ -154,6 +154,13 @@ export interface HeadlessEnemyAttackAction {
   targetDodgeApAlreadySpent?: boolean
 }
 
+export interface HeadlessActivateFeatureAction {
+  type: 'activate-feature'
+  actorTokenId: string
+  characterId: string
+  featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike'>
+}
+
 export interface HeadlessOpportunityAttackAction {
   type: 'opportunity-attack-token'
   actorTokenId: string
@@ -172,6 +179,7 @@ export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
+  | HeadlessActivateFeatureAction
   | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
 
@@ -322,6 +330,8 @@ export function resolveHeadlessDmAction(
       return resolvePlayerAttack(next, action, dice, events)
     case 'enemy-attack-token':
       return resolveEnemyAttack(next, action, dice, events)
+    case 'activate-feature':
+      return resolveActivateFeature(next, action, events)
     case 'opportunity-attack-token':
       return resolveOpportunityAttack(next, action, dice, events)
     case 'end-turn': {
@@ -432,6 +442,81 @@ function resolveMove(
     triggersMoveEffects: movement.triggersMoveEffects,
   })
   events.push({ type: 'log', text: `${actor.name} 移动 ${movement.feet} 尺。` })
+  return succeed(state, events)
+}
+
+function resolveActivateFeature(
+  state: HeadlessDmCombatState,
+  action: HeadlessActivateFeatureAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const current = getCurrentTurn(state)
+  if (current?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
+  const actor = findCharacter(state, action.characterId)
+  if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
+  const trait = actor.traits.find((item) => item.featureKey === action.featureKey)
+  const isToggleOff =
+    (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
+    (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady)
+  if (!trait || (!isToggleOff && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
+
+  if (action.featureKey === 'eagleEye') {
+    if (trait.uses <= 0) return fail(state, 'invalid-skill', events)
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, eagleEyeTurns: 3 },
+      traits: item.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'eagleEye'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活鹰眼。` })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'doubleArrow') {
+    if (actor.combatBuffs?.doubleArrowReady) {
+      updateCharacter(state, actor.id, (item) => ({
+        ...item,
+        combatBuffs: { ...item.combatBuffs, doubleArrowReady: undefined },
+      }))
+      events.push({ type: 'log', text: `${actor.name} 取消双箭。` })
+      return succeed(state, events)
+    }
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, doubleArrowReady: true },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活双箭。` })
+    return succeed(state, events)
+  }
+
+  if (actor.combatBuffs?.preciseStrikeReady) {
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, preciseStrikeReady: undefined },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 取消精准打击。` })
+    return succeed(state, events)
+  }
+  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    combatBuffs: { ...item.combatBuffs, preciseStrikeReady: true },
+  }))
+  events.push({ type: 'log', text: `${actor.name} 准备精准打击。` })
   return succeed(state, events)
 }
 

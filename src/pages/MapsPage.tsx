@@ -7221,90 +7221,33 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'accepted')
         return
       }
-      if (action.featureKey === 'eagleEye') {
-        const trait = findClassTrait(actor, 'eagleEye')
-        if (!trait || trait.uses <= 0) {
-          acknowledgePlayerAction(action, 'rejected', 'feature-unavailable')
+      if (
+        action.featureKey === 'eagleEye' ||
+        action.featureKey === 'doubleArrow' ||
+        action.featureKey === 'preciseStrike'
+      ) {
+        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+          type: 'activate-feature',
+          actorTokenId: action.actorTokenId,
+          characterId: action.characterId,
+          featureKey: action.featureKey,
+        })
+        if (!headless.ok) {
+          acknowledgePlayerAction(action, 'rejected', headless.reason)
           completePlayerActionRequest(action)
           return
         }
-        if (actor.currentAP < 1) {
-          acknowledgePlayerAction(action, 'rejected', 'insufficient-ap')
-          completePlayerActionRequest(action)
-          return
-        }
-        updateChar(actor.id, { currentAP: actor.currentAP - 1 })
-        const ok = useCharacterStore.getState().activateEagleEye(actor.id)
-        if (!ok) {
-          acknowledgePlayerAction(action, 'rejected', 'feature-unavailable')
-          completePlayerActionRequest(action)
-          return
-        }
-        pushApLog(actor, 1, '激活鹰眼')
-        completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted')
-        return
-      }
-      if (action.featureKey === 'doubleArrow') {
-        const trait = findClassTrait(actor, 'doubleArrow')
-        if (!trait || trait.uses <= 0) {
-          acknowledgePlayerAction(action, 'rejected', 'feature-unavailable')
-          completePlayerActionRequest(action)
-          return
-        }
-        const ready = !actor.combatBuffs?.doubleArrowReady
-        if (ready) {
-          if (actor.currentAP < 1) {
-            acknowledgePlayerAction(action, 'rejected', 'insufficient-ap')
-            completePlayerActionRequest(action)
-            return
-          }
-          updateChar(actor.id, {
-            currentAP: actor.currentAP - 1,
-            combatBuffs: { ...actor.combatBuffs, doubleArrowReady: true },
-          })
-          pushApLog(actor, 1, '激活双箭')
-        } else {
-          updateChar(actor.id, {
-            combatBuffs: { ...actor.combatBuffs, doubleArrowReady: undefined },
-          })
-          pushCombatLog(`${actor.name} 取消双箭`, 'turn')
+        applyHeadlessCombatResult(headless)
+        for (const event of headless.events) {
+          if (event.type === 'log') pushCombatLog(event.text, 'turn')
         }
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return
       }
-      if (action.featureKey !== 'preciseStrike') {
-        acknowledgePlayerAction(action, 'rejected', 'unsupported-feature')
-        completePlayerActionRequest(action)
-        return
-      }
-      const trait = findClassTrait(actor, 'preciseStrike')
-      if (!trait || trait.uses <= 0) {
-        acknowledgePlayerAction(action, 'rejected', 'feature-unavailable')
-        completePlayerActionRequest(action)
-        return
-      }
-      const ready = !actor.combatBuffs?.preciseStrikeReady
-      if (ready) {
-        if (actor.currentAP < 1) {
-          acknowledgePlayerAction(action, 'rejected', 'insufficient-ap')
-          completePlayerActionRequest(action)
-          return
-        }
-        updateChar(actor.id, {
-          currentAP: actor.currentAP - 1,
-          combatBuffs: { ...actor.combatBuffs, preciseStrikeReady: true },
-        })
-        pushApLog(actor, 1, '准备精准打击')
-      } else {
-        updateChar(actor.id, {
-          combatBuffs: { ...actor.combatBuffs, preciseStrikeReady: undefined },
-        })
-        pushCombatLog(`${actor.name} 取消精准打击`, 'turn')
-      }
+      acknowledgePlayerAction(action, 'rejected', 'unsupported-feature')
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
       return
     }
 
