@@ -117,6 +117,11 @@ import {
   type CombatResolutionStage,
 } from '../lib/combatResolutionPipeline'
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
+import {
+  resolveHeadlessDmAction,
+  type HeadlessCombatEvent,
+  type HeadlessDmCombatState,
+} from '../lib/headlessDmCombatEngine'
 import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import {
   clampGridSize,
@@ -6362,6 +6367,25 @@ export default function MapsPage() {
     return true
   }
 
+  const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState => ({
+    map,
+    characters: useCharacterStore.getState().characters,
+    active: combatActiveRef.current,
+    round: roundRef.current,
+    initiativeIndex: initiativeIndexRef.current,
+    initiativeOrder: initiativeOrderRef.current,
+    enemyApByToken: enemyApByTokenRef.current,
+  })
+
+  const tokenMovedEvent = (
+    events: HeadlessCombatEvent[],
+    tokenId: string,
+  ): Extract<HeadlessCombatEvent, { type: 'token-moved' }> | undefined =>
+    events.find(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'token-moved' }> =>
+        event.type === 'token-moved' && event.tokenId === tokenId,
+    )
+
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
     if (!isDM || !activeMap || action.mapId !== activeMap.id || action.status !== 'pending') return
     if (!action.combatId || action.combatId !== combatIdRef.current) {
@@ -6614,33 +6638,38 @@ export default function MapsPage() {
         !token ||
         token.type !== 'player' ||
         token.characterId !== actor.id ||
-        !action.targetPosition ||
-        !isTokenAlive(token, useCharacterStore.getState().characters)
+        !action.targetPosition
       ) {
         acknowledgePlayerAction(action, 'rejected', 'invalid-move')
         completePlayerActionRequest(action)
         return
       }
-      if (isMovementLocked(actor.conditions)) {
-        acknowledgePlayerAction(action, 'rejected', 'no-move') // [T4/C4/C8] no-move OR restrained
+
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'move-token',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        targetPosition: action.targetPosition,
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(
+          action,
+          'rejected',
+          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
+        )
         completePlayerActionRequest(action)
         return
       }
-      const targetPosition = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
-      const center = { x: token.x, y: token.y }
-      if (!isWithinMovementRange(center, targetPosition, actor.speed, map)) {
-        acknowledgePlayerAction(action, 'rejected', 'out-of-range')
-        completePlayerActionRequest(action)
-        return
-      }
-      if (!spendAP(actor.id, 1)) {
-        acknowledgePlayerAction(action, 'rejected', 'insufficient-ap')
-        completePlayerActionRequest(action)
-        return
-      }
-      const fromCell = pixelToCell(token.x, token.y, map)
-      const toCell = pixelToCell(targetPosition.x, targetPosition.y, map)
-      const movedFeet = cellDistance(fromCell, toCell) * 5
+
+      const moved = tokenMovedEvent(headless.events, token.id)
+      const targetPosition =
+        moved?.to ??
+        headless.state.map.tokens.find((item) => item.id === token.id) ??
+        snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
+      const movedFeet = moved?.feet ?? 0
+      const headlessActor = headless.state.characters.find((c) => c.id === actor.id)
+      if (headlessActor) updateChar(actor.id, { currentAP: headlessActor.currentAP })
+
       await resolveOpportunityAttacksForMove(token, targetPosition, actor)
       const latestMover = useCharacterStore.getState().characters.find((c) => c.id === actor.id)
       if (!latestMover || latestMover.currentHp <= 0) {
