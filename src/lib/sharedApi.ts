@@ -94,6 +94,8 @@ export async function saveSharedResource<T>(name: string, data: T): Promise<void
       name !== 'dodge' &&
       name !== 'gale-combo' &&
       name !== 'stable-mind' &&
+      name !== 'agile-leap' &&
+      name !== 'combat-interrupts' &&
       name !== 'player-action' &&
       name !== 'player-action-requests' &&
       name !== 'dice' &&

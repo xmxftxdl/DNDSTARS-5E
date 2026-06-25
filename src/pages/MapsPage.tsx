@@ -98,6 +98,28 @@ import {
 const PLAYER_ACTION_DEDUPE_WINDOW_MS = 8000
 const PLAYER_ACTION_QUEUE_LIMIT = 80
 type GaleComboDecision = 'accepted' | 'declined' | 'timeout'
+type StableMindInterruptPayload = Record<string, unknown> & {
+  targetName: string
+  fullDamage: number
+  damageAfterSave: number
+  saveD20: number
+  saveMod: number
+  saveTotal: number
+  dc: number
+}
+type StableMindInterruptResponse = Record<string, unknown> & { useStableMind: boolean }
+type GaleComboInterruptPayload = Record<string, unknown> & {
+  casterName: string
+  triggerLabel: string
+}
+type GaleComboInterruptResponse = Record<string, unknown> & { useGaleCombo: boolean }
+type AgileLeapInterruptPayload = Record<string, unknown> & {
+  targetName: string
+  feet: number
+  uses: number
+  maxUses: number
+}
+type AgileLeapInterruptResponse = Record<string, unknown> & { useAgileLeap: boolean }
 import {
   applyAttackDefenseDamageModifier,
   characterToCombatInput,
@@ -122,6 +144,18 @@ import {
   type HeadlessCombatEvent,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
+import {
+  answerCombatInterrupt,
+  COMBAT_INTERRUPT_RESOURCE,
+  createCombatInterrupt,
+  emptyCombatInterruptQueue,
+  findCombatInterrupt,
+  finishCombatInterrupt,
+  isCombatInterruptExpired,
+  upsertCombatInterrupt,
+  type SharedCombatInterrupt,
+  type SharedCombatInterruptQueueState,
+} from '../lib/combatInterruptQueue'
 import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import {
   clampGridSize,
@@ -471,6 +505,27 @@ export default function MapsPage() {
   }
   const showCombatNotice = (title: string, message: string, tone: 'sky' | 'violet' | 'amber' | 'rose' = 'sky') =>
     showCombatDialog({ title, message, confirmText: '知道了', tone })
+  const publishCombatInterrupt = async (interrupt: SharedCombatInterrupt) => {
+    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    await saveSharedResource<SharedCombatInterruptQueueState>(
+      COMBAT_INTERRUPT_RESOURCE,
+      upsertCombatInterrupt(current, interrupt),
+    )
+  }
+  const answerSharedCombatInterrupt = async (id: string, response: Record<string, unknown>) => {
+    if (!activeMap) return
+    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
+    const next = answerCombatInterrupt(queue, id, response)
+    if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  }
+  const finishSharedCombatInterrupt = async (id: string, response?: Record<string, unknown>) => {
+    if (!activeMap) return
+    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
+    const next = finishCombatInterrupt(queue, id, response)
+    if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  }
   const [sharedDodgeNow, setSharedDodgeNow] = useState(Date.now())
   const [pendingPlayerAction, setPendingPlayerAction] = useState<{
     id: string
@@ -1565,6 +1620,180 @@ export default function MapsPage() {
           maxUses: state.maxUses,
           expiresAt: state.expiresAt,
         })
+      }
+    }
+    void load()
+    const timer = window.setInterval(load, 500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
+
+  useEffect(() => {
+    if (!activeMap) return
+    let cancelled = false
+    const load = async () => {
+      const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+      if (cancelled || !queue || queue.mapId !== activeMap.id) return
+      const now = Date.now()
+
+      if (isDM) {
+        const stablePending = pendingSharedStableMindRef.current
+        if (stablePending) {
+          const interrupt = findCombatInterrupt(queue, stablePending.id)
+          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
+            pendingSharedStableMindRef.current = null
+            await finishSharedCombatInterrupt(stablePending.id, { useStableMind: false })
+            stablePending.resolve(false)
+          } else if (interrupt?.status === 'answered') {
+            const response = interrupt.response as StableMindInterruptResponse | undefined
+            pendingSharedStableMindRef.current = null
+            await finishSharedCombatInterrupt(stablePending.id, response)
+            stablePending.resolve(!!response?.useStableMind)
+          }
+        }
+
+        const galePending = pendingSharedGaleComboRef.current
+        if (galePending) {
+          const interrupt = findCombatInterrupt(queue, galePending.id)
+          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
+            pendingSharedGaleComboRef.current = null
+            await finishSharedCombatInterrupt(galePending.id, { useGaleCombo: false })
+            galePending.resolve('timeout')
+          } else if (interrupt?.status === 'answered') {
+            const response = interrupt.response as GaleComboInterruptResponse | undefined
+            pendingSharedGaleComboRef.current = null
+            await finishSharedCombatInterrupt(galePending.id, response)
+            galePending.resolve(response?.useGaleCombo ? 'accepted' : 'declined')
+          }
+        }
+
+        const agilePending = pendingSharedAgileLeapRef.current
+        if (agilePending) {
+          const interrupt = findCombatInterrupt(queue, agilePending.id)
+          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
+            pendingSharedAgileLeapRef.current = null
+            await finishSharedCombatInterrupt(agilePending.id, { useAgileLeap: false })
+            agilePending.resolve(false)
+          } else if (interrupt?.status === 'answered') {
+            const response = interrupt.response as AgileLeapInterruptResponse | undefined
+            pendingSharedAgileLeapRef.current = null
+            await finishSharedCombatInterrupt(agilePending.id, response)
+            agilePending.resolve(!!response?.useAgileLeap)
+          }
+        }
+        return
+      }
+
+      const pendingInterrupts = queue.interrupts.filter(
+        (interrupt) =>
+          interrupt.mapId === activeMap.id &&
+          interrupt.status === 'pending' &&
+          !isCombatInterruptExpired(interrupt, now),
+      )
+
+      const stableInterrupt = pendingInterrupts.find(
+        (interrupt) =>
+          interrupt.kind === 'stable-mind' &&
+          !suppressedStableMindPromptIdsRef.current.has(interrupt.id),
+      ) as SharedCombatInterrupt<StableMindInterruptPayload, StableMindInterruptResponse> | undefined
+      if (stableInterrupt) {
+        const targetChar = characters.find((c) => c.id === stableInterrupt.targetCharId)
+        const canAnswer =
+          !!targetChar &&
+          targetChar.currentHp > 0 &&
+          (targetChar.id === playerChar?.id ||
+            visibleChars.some((c) => c.id === targetChar.id) ||
+            !targetChar.dmNotes)
+        if (canAnswer) {
+          const payload = stableInterrupt.payload
+          setSharedStableMindPrompt({
+            id: stableInterrupt.id,
+            targetChar,
+            fullDamage: payload.fullDamage,
+            damageAfterSave: payload.damageAfterSave,
+            saveD20: payload.saveD20,
+            saveMod: payload.saveMod,
+            saveTotal: payload.saveTotal,
+            dc: payload.dc,
+            expiresAt: stableInterrupt.expiresAt,
+          })
+        } else {
+          setSharedStableMindPrompt((current) => (current ? null : current))
+        }
+      } else {
+        setSharedStableMindPrompt((current) => (current ? null : current))
+      }
+
+      const galeInterrupt = pendingInterrupts.find(
+        (interrupt) =>
+          interrupt.kind === 'gale-combo' &&
+          !suppressedGaleComboPromptIdsRef.current.has(interrupt.id),
+      ) as SharedCombatInterrupt<GaleComboInterruptPayload, GaleComboInterruptResponse> | undefined
+      if (galeInterrupt) {
+        const casterChar = characters.find((c) => c.id === galeInterrupt.actorCharId)
+        const linkedPlayerCharIds = new Set(
+          (activeMap.tokens ?? [])
+            .filter((token) => token.type === 'player' && !!token.characterId)
+            .map((token) => token.characterId!),
+        )
+        const visibleLinkedPlayerCharIds = [...linkedPlayerCharIds].filter((id) =>
+          characters.some((character) => character.id === id && character.visibleToPlayers !== false),
+        )
+        const canAnswer =
+          !!casterChar &&
+          casterChar.currentHp > 0 &&
+          (casterChar.id === playerChar?.id ||
+            casterChar.id === assignedCharacterId ||
+            visibleChars.some((c) => c.id === casterChar.id) ||
+            (!assignedCharacterId &&
+              visibleLinkedPlayerCharIds.length === 1 &&
+              visibleLinkedPlayerCharIds[0] === casterChar.id) ||
+            !casterChar.dmNotes)
+        if (canAnswer) {
+          setSharedGaleComboPrompt({
+            id: galeInterrupt.id,
+            casterChar,
+            triggerLabel: galeInterrupt.payload.triggerLabel,
+            expiresAt: galeInterrupt.expiresAt,
+          })
+        } else {
+          setSharedGaleComboPrompt((current) => (current ? null : current))
+        }
+      } else {
+        setSharedGaleComboPrompt((current) => (current ? null : current))
+      }
+
+      const agileInterrupt = pendingInterrupts.find(
+        (interrupt) =>
+          interrupt.kind === 'agile-leap' &&
+          !suppressedAgileLeapPromptIdsRef.current.has(interrupt.id),
+      ) as SharedCombatInterrupt<AgileLeapInterruptPayload, AgileLeapInterruptResponse> | undefined
+      if (agileInterrupt) {
+        const targetChar = characters.find((c) => c.id === agileInterrupt.targetCharId)
+        const canAnswer =
+          !!targetChar &&
+          targetChar.currentHp > 0 &&
+          (targetChar.id === playerChar?.id ||
+            targetChar.id === assignedCharacterId ||
+            visibleChars.some((c) => c.id === targetChar.id) ||
+            !targetChar.dmNotes)
+        if (canAnswer) {
+          const payload = agileInterrupt.payload
+          setSharedAgileLeapPrompt({
+            id: agileInterrupt.id,
+            targetChar,
+            feet: payload.feet,
+            uses: payload.uses,
+            maxUses: payload.maxUses,
+            expiresAt: agileInterrupt.expiresAt,
+          })
+        } else {
+          setSharedAgileLeapPrompt((current) => (current ? null : current))
+        }
+      } else {
+        setSharedAgileLeapPrompt((current) => (current ? null : current))
       }
     }
     void load()
@@ -5032,6 +5261,7 @@ export default function MapsPage() {
     seenPlayerActionIdsRef.current.clear()
     processedPlayerActionIdsRef.current.clear()
     seenPlayerActionAckIdsRef.current.clear()
+    suppressedStableMindPromptIdsRef.current.clear()
     suppressedGaleComboPromptIdsRef.current.clear()
     suppressedAgileLeapPromptIdsRef.current.clear()
     pendingSharedDodgeRef.current = null
@@ -5055,6 +5285,10 @@ export default function MapsPage() {
     await clearSharedEventBacklog()
     const writes: Promise<void>[] = [
       clearSharedResource('dice'),
+      saveSharedResource<SharedCombatInterruptQueueState>(
+        COMBAT_INTERRUPT_RESOURCE,
+        emptyCombatInterruptQueue(mapId, updatedAt),
+      ),
       saveSharedResource<SharedDiceEventsState>('dice-events', { mapId, events: [], updatedAt }),
       saveSharedResource<SharedDodgeState>('dodge', {
         id: `${mapId}:combat-start:dodge:${updatedAt}`,
@@ -5287,26 +5521,28 @@ export default function MapsPage() {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const expiresAt = Date.now() + 15000
     return new Promise((resolve) => {
-      pendingSharedStableMindRef.current = {
+      const interrupt = createCombatInterrupt<StableMindInterruptPayload, StableMindInterruptResponse>({
         id,
+        mapId: activeMap.id,
+        kind: 'stable-mind',
+        targetCharId: targetChar.id,
+        payload: {
+          targetName: targetChar.name,
+          fullDamage: save.fullDamage,
+          damageAfterSave: save.damageAfterSave,
+          saveD20: save.saveD20,
+          saveMod: save.saveMod,
+          saveTotal: save.saveTotal,
+          dc: save.dc,
+        },
+        expiresAt,
+      })
+      pendingSharedStableMindRef.current = {
+        id: interrupt.id,
         targetCharId: targetChar.id,
         resolve,
       }
-      void saveSharedResource<SharedStableMindState>('stable-mind', {
-        id,
-        mapId: activeMap.id,
-        status: 'pending',
-        targetCharId: targetChar.id,
-        targetName: targetChar.name,
-        fullDamage: save.fullDamage,
-        damageAfterSave: save.damageAfterSave,
-        saveD20: save.saveD20,
-        saveMod: save.saveMod,
-        saveTotal: save.saveTotal,
-        dc: save.dc,
-        expiresAt,
-        updatedAt: Date.now(),
-      })
+      void publishCombatInterrupt(interrupt)
     })
   }
 
@@ -5328,21 +5564,23 @@ export default function MapsPage() {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const expiresAt = Date.now() + 15000
     return new Promise((resolve) => {
-      pendingSharedGaleComboRef.current = {
+      const interrupt = createCombatInterrupt<GaleComboInterruptPayload, GaleComboInterruptResponse>({
         id,
+        mapId: activeMap.id,
+        kind: 'gale-combo',
+        actorCharId: caster.id,
+        payload: {
+          casterName: caster.name,
+          triggerLabel,
+        },
+        expiresAt,
+      })
+      pendingSharedGaleComboRef.current = {
+        id: interrupt.id,
         casterCharId: caster.id,
         resolve,
       }
-      void saveSharedResource<SharedGaleComboState>('gale-combo', {
-        id,
-        mapId: activeMap.id,
-        status: 'pending',
-        casterCharId: caster.id,
-        casterName: caster.name,
-        triggerLabel,
-        expiresAt,
-        updatedAt: Date.now(),
-      })
+      void publishCombatInterrupt(interrupt)
     })
   }
 
@@ -5364,23 +5602,25 @@ export default function MapsPage() {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const expiresAt = Date.now() + 15000
     return new Promise((resolve) => {
-      pendingSharedAgileLeapRef.current = {
+      const interrupt = createCombatInterrupt<AgileLeapInterruptPayload, AgileLeapInterruptResponse>({
         id,
+        mapId: activeMap.id,
+        kind: 'agile-leap',
+        targetCharId: targetChar.id,
+        payload: {
+          targetName: targetChar.name,
+          feet: params.feet,
+          uses: params.uses,
+          maxUses: params.maxUses,
+        },
+        expiresAt,
+      })
+      pendingSharedAgileLeapRef.current = {
+        id: interrupt.id,
         targetCharId: targetChar.id,
         resolve,
       }
-      void saveSharedResource<SharedAgileLeapState>('agile-leap', {
-        id,
-        mapId: activeMap.id,
-        status: 'pending',
-        targetCharId: targetChar.id,
-        targetName: targetChar.name,
-        feet: params.feet,
-        uses: params.uses,
-        maxUses: params.maxUses,
-        expiresAt,
-        updatedAt: Date.now(),
-      })
+      void publishCombatInterrupt(interrupt)
     })
   }
 
@@ -6022,22 +6262,7 @@ export default function MapsPage() {
     const prompt = sharedStableMindPrompt
     suppressedStableMindPromptIdsRef.current.add(prompt.id)
     setSharedStableMindPrompt(null)
-    await saveSharedResource<SharedStableMindState>('stable-mind', {
-      id: prompt.id,
-      mapId: activeMap.id,
-      status: 'answered',
-      targetCharId: prompt.targetChar.id,
-      targetName: prompt.targetChar.name,
-      fullDamage: prompt.fullDamage,
-      damageAfterSave: prompt.damageAfterSave,
-      saveD20: prompt.saveD20,
-      saveMod: prompt.saveMod,
-      saveTotal: prompt.saveTotal,
-      dc: prompt.dc,
-      useStableMind,
-      expiresAt: prompt.expiresAt,
-      updatedAt: Date.now(),
-    })
+    await answerSharedCombatInterrupt(prompt.id, { useStableMind })
   }
 
   const handleSharedGaleComboChoice = async (useGaleCombo: boolean) => {
@@ -6045,17 +6270,7 @@ export default function MapsPage() {
     const prompt = sharedGaleComboPrompt
     suppressedGaleComboPromptIdsRef.current.add(prompt.id)
     setSharedGaleComboPrompt(null)
-    await saveSharedResource<SharedGaleComboState>('gale-combo', {
-      id: prompt.id,
-      mapId: activeMap.id,
-      status: 'answered',
-      casterCharId: prompt.casterChar.id,
-      casterName: prompt.casterChar.name,
-      triggerLabel: prompt.triggerLabel,
-      useGaleCombo,
-      expiresAt: prompt.expiresAt,
-      updatedAt: Date.now(),
-    })
+    await answerSharedCombatInterrupt(prompt.id, { useGaleCombo })
   }
 
   const handleSharedAgileLeapChoice = async (useAgileLeap: boolean) => {
@@ -6063,19 +6278,7 @@ export default function MapsPage() {
     const prompt = sharedAgileLeapPrompt
     suppressedAgileLeapPromptIdsRef.current.add(prompt.id)
     setSharedAgileLeapPrompt(null)
-    await saveSharedResource<SharedAgileLeapState>('agile-leap', {
-      id: prompt.id,
-      mapId: activeMap.id,
-      status: 'answered',
-      targetCharId: prompt.targetChar.id,
-      targetName: prompt.targetChar.name,
-      feet: prompt.feet,
-      uses: prompt.uses,
-      maxUses: prompt.maxUses,
-      useAgileLeap,
-      expiresAt: prompt.expiresAt,
-      updatedAt: Date.now(),
-    })
+    await answerSharedCombatInterrupt(prompt.id, { useAgileLeap })
   }
 
   const scheduleEnemyTurn = async (enemy: Token) => {
