@@ -15,13 +15,14 @@ import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
 import { tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
 import { resolveCombatMovement, type CombatMovementMode } from './combatMovementPipeline'
-import { triggerOutOfBreath } from './calmMind'
+import { calmBreathState, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
 import { ENEMY_MELEE_ATTACK_BONUS } from './archerBaseFeatures'
 import { proficiencyBonus } from './dnd'
 import { getTokenAbilityMod } from './knockback'
 import { decideDodge } from './aiPolicy'
+import { findClassTrait } from './classFeatures'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -350,6 +351,7 @@ export function resolveHeadlessDmAction(
       if (action.characterId) {
         const actor = findCharacter(next, action.characterId)
         if (!actor) return fail(next, 'invalid-actor', events)
+        applyHeadlessEndTurnEffects(next, actor.id, dice, events)
       }
       advanceHeadlessTurn(next, events)
       return succeed(next, events)
@@ -1143,6 +1145,88 @@ function consumeGaleComboReady(
     combatBuffs: { ...item.combatBuffs, galeComboReady: undefined },
   }))
   events.push({ type: 'log', text: `${character.name} 消耗疾风连击：${actionLabel} 不消耗 AP。` })
+}
+
+function applyStillWatersHealingOnBreathShift(
+  before: Character,
+  after: Character,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): Character {
+  const trait = findClassTrait(after, 'swiftShot')
+  if (!trait || after.currentHp <= 0) return after
+  const beforeState = calmBreathState(before)
+  const afterState = calmBreathState(after)
+  const switched =
+    (beforeState === 'calm' && afterState === 'outOfBreath') ||
+    (beforeState === 'outOfBreath' && afterState === 'calm')
+  if (!switched) return after
+  const count = Math.max(1, trait.level)
+  const values = dice.rollDice(count, 4)
+  const heal = values.reduce((sum, value) => sum + value, 0)
+  events.push({ type: 'dice-rolled', notation: `${count}d4`, values, total: heal })
+  if (heal <= 0) return after
+  const healed = { ...after, currentHp: Math.min(after.maxHp, after.currentHp + heal) }
+  events.push({ type: 'log', text: `${after.name} 波澜不惊回复 ${heal} 点生命值。` })
+  return healed
+}
+
+function syncCharacterTokenHp(state: HeadlessDmCombatState, characterId: string) {
+  const character = findCharacter(state, characterId)
+  if (!character) return
+  for (const token of state.map.tokens) {
+    if (token.characterId !== characterId) continue
+    updateToken(state, token.id, (item) => ({ ...item, hp: character.currentHp, maxHp: character.maxHp }))
+  }
+}
+
+function applyHeadlessEndTurnEffects(
+  state: HeadlessDmCombatState,
+  characterId: string,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+) {
+  const before = findCharacter(state, characterId)
+  if (!before) return
+  updateCharacter(state, characterId, (character) => {
+    const beforeTick = character.combatBuffs ?? {}
+    const firstCalmMindCheck = !!beforeTick.calmMindFirstTurnPending && !!findClassTrait(character, 'calmMind')
+    const canGainInitialCalmMind =
+      firstCalmMindCheck &&
+      !beforeTick.movedFeetThisTurn &&
+      !beforeTick.tookDamageThisTurn &&
+      (beforeTick.outOfBreathTurns ?? 0) <= 0
+    const checkedBuffs = firstCalmMindCheck
+      ? {
+          ...beforeTick,
+          calmMind: canGainInitialCalmMind ? true : undefined,
+          calmMindFirstTurnPending: undefined,
+        }
+      : beforeTick
+    const calmSpirit = findClassTrait(character, 'calmSpirit')
+    const calmStacks =
+      calmSpirit && isCalmMindActive({ ...character, combatBuffs: checkedBuffs })
+        ? Math.min(4, (checkedBuffs.calmSpiritStacks ?? 0) + 1)
+        : checkedBuffs.calmSpiritStacks
+    const stillWaterTempTurns = checkedBuffs.stillWaterTempHpTurns ?? 0
+    const nextStillWaterTempTurns = stillWaterTempTurns > 0 ? stillWaterTempTurns - 1 : 0
+    const stillWaterTempExpired = stillWaterTempTurns > 0 && nextStillWaterTempTurns <= 0
+    const after: Character = {
+      ...character,
+      tempHp: stillWaterTempExpired ? 0 : character.tempHp,
+      combatBuffs: {
+        ...tickOutOfBreathOnEndTurn({ ...character, combatBuffs: checkedBuffs }),
+        calmSpiritStacks: calmStacks && calmStacks > 0 ? calmStacks : undefined,
+        stillWaterTempHpTurns: nextStillWaterTempTurns > 0 ? nextStillWaterTempTurns : undefined,
+      },
+      combatSkills: character.combatSkills.map((skill) => ({
+        ...skill,
+        remaining: Math.max(0, skill.remaining - 1),
+      })),
+    }
+    return applyStillWatersHealingOnBreathShift(character, after, dice, events)
+  })
+  syncCharacterTokenHp(state, characterId)
 }
 
 function advanceHeadlessTurn(state: HeadlessDmCombatState, events: HeadlessCombatEvent[]) {

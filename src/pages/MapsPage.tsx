@@ -7032,6 +7032,28 @@ export default function MapsPage() {
 
   const applyHeadlessCombatResult = (result: HeadlessCombatResult) => {
     if (!result.ok) return
+    let shouldPublishCombatState = false
+    if (combatActiveRef.current !== result.state.active) {
+      setCombatActive(result.state.active)
+      combatActiveRef.current = result.state.active
+      shouldPublishCombatState = true
+    }
+    if (roundRef.current !== result.state.round) {
+      setRound(result.state.round)
+      roundRef.current = result.state.round
+      shouldPublishCombatState = true
+    }
+    if (initiativeIndexRef.current !== result.state.initiativeIndex) {
+      setInitiativeIndex(result.state.initiativeIndex)
+      initiativeIndexRef.current = result.state.initiativeIndex
+      shouldPublishCombatState = true
+    }
+    if (JSON.stringify(initiativeOrderRef.current) !== JSON.stringify(result.state.initiativeOrder)) {
+      setInitiativeOrder(result.state.initiativeOrder)
+      initiativeOrderRef.current = result.state.initiativeOrder
+      shouldPublishCombatState = true
+    }
+
     const currentCharacters = useCharacterStore.getState().characters
     const currentCharactersById = new Map(currentCharacters.map((character) => [character.id, character]))
     for (const nextCharacter of result.state.characters) {
@@ -7053,7 +7075,17 @@ export default function MapsPage() {
     if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(result.state.enemyApByToken)) {
       enemyApByTokenRef.current = result.state.enemyApByToken
       setEnemyApByToken(result.state.enemyApByToken)
-      publishCombatState({ enemyApByToken: result.state.enemyApByToken })
+      shouldPublishCombatState = true
+    }
+
+    if (shouldPublishCombatState) {
+      publishCombatState({
+        active: result.state.active,
+        round: result.state.round,
+        initiativeIndex: result.state.initiativeIndex,
+        initiativeOrder: result.state.initiativeOrder,
+        enemyApByToken: result.state.enemyApByToken,
+      })
     }
 
     for (const event of result.events) {
@@ -7555,9 +7587,27 @@ export default function MapsPage() {
       next.delete(action.characterId)
       return next
     })
+    const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+      type: 'end-turn',
+      actorTokenId: action.actorTokenId,
+      characterId: action.characterId,
+    })
+    if (!headless.ok) {
+      acknowledgePlayerAction(action, 'rejected', headless.reason)
+      completePlayerActionRequest(action)
+      return
+    }
+    const previousRound = roundRef.current
+    applyHeadlessCombatResult(headless)
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      if (event.type === 'turn-advanced' && event.round > previousRound) {
+        pushCombatLog(`进入第 ${event.round} 回合`, 'turn', event.round)
+      }
+    }
     completePlayerActionRequest(action)
     acknowledgePlayerAction(action, 'accepted')
-    advanceInitiative()
   }
 
   const canSendPlayerCombatAction = () => {

@@ -907,6 +907,55 @@ describe('headless DM combat engine', () => {
     expect(secondAdvance.state.enemyApByToken.dragon.current).toBe(2)
   })
 
+  it('applies player end-turn cooldown ticks in headless DM authority', () => {
+    const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', cooldown: 3, remaining: 2 })
+    const combat = state({
+      characters: [character({ combatSkills: [skill(), cooldownSkill] })],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'end-turn',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(1)
+  })
+
+  it('applies first-turn calm mind check when ending a turn in headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { calmMindFirstTurnPending: true },
+          traits: [
+            {
+              id: 'calm-mind',
+              name: '静心',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'calmMind',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'end-turn',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatBuffs?.calmMind).toBe(true)
+    expect(result.state.characters[0].combatBuffs?.calmMindFirstTurnPending).toBeUndefined()
+  })
+
   it('seeded dice roller is reproducible for batch simulations', () => {
     const a = createSeededHeadlessDiceRoller('same-seed').rollDice(4, 6)
     const b = createSeededHeadlessDiceRoller('same-seed').rollDice(4, 6)
