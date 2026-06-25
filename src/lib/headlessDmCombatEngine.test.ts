@@ -358,6 +358,46 @@ describe('headless DM combat engine', () => {
     expect(hero.traits.find((trait) => trait.featureKey === 'eagleEye')?.uses).toBe(0)
   })
 
+  it('spends qi to reduce cooldown through headless DM authority', () => {
+    const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
+    const combat = state({
+      characters: [character({ qi: 3, combatSkills: [skill(), cooldownSkill] })],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'qi-reduce-cooldown',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'cooldown-skill',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.qi).toBe(2)
+    expect(hero.combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(1)
+  })
+
+  it('rejects qi cooldown reduction when qi is unavailable', () => {
+    const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
+    const combat = state({
+      characters: [character({ qi: 0, combatSkills: [skill(), cooldownSkill] })],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'qi-reduce-cooldown',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'cooldown-skill',
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('insufficient-resource')
+    expect(result.state.characters[0].qi).toBe(0)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(2)
+  })
+
   it('rejects movement outside the actor speed and leaves state unchanged', () => {
     const before = state()
     const result = resolveHeadlessDmAction(before, {

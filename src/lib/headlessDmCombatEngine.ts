@@ -161,6 +161,13 @@ export interface HeadlessActivateFeatureAction {
   featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike'>
 }
 
+export interface HeadlessQiReduceCooldownAction {
+  type: 'qi-reduce-cooldown'
+  actorTokenId: string
+  characterId: string
+  skillId: string
+}
+
 export interface HeadlessOpportunityAttackAction {
   type: 'opportunity-attack-token'
   actorTokenId: string
@@ -180,6 +187,7 @@ export type HeadlessCombatAction =
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
   | HeadlessActivateFeatureAction
+  | HeadlessQiReduceCooldownAction
   | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
 
@@ -191,6 +199,7 @@ export type HeadlessCombatFailureReason =
   | 'invalid-skill'
   | 'invalid-dice'
   | 'insufficient-ap'
+  | 'insufficient-resource'
   | 'out-of-range'
   | 'movement-locked'
   | 'unsupported-action'
@@ -332,6 +341,8 @@ export function resolveHeadlessDmAction(
       return resolveEnemyAttack(next, action, dice, events)
     case 'activate-feature':
       return resolveActivateFeature(next, action, events)
+    case 'qi-reduce-cooldown':
+      return resolveQiReduceCooldown(next, action, events)
     case 'opportunity-attack-token':
       return resolveOpportunityAttack(next, action, dice, events)
     case 'end-turn': {
@@ -517,6 +528,49 @@ function resolveActivateFeature(
     combatBuffs: { ...item.combatBuffs, preciseStrikeReady: true },
   }))
   events.push({ type: 'log', text: `${actor.name} 准备精准打击。` })
+  return succeed(state, events)
+}
+
+function resolveQiReduceCooldown(
+  state: HeadlessDmCombatState,
+  action: HeadlessQiReduceCooldownAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const current = getCurrentTurn(state)
+  if (current?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
+  const actor = findCharacter(state, action.characterId)
+  const skill = actor?.combatSkills.find((item) => item.id === action.skillId)
+  if (!actor || actor.currentHp <= 0 || !skill || skill.remaining <= 0) {
+    return fail(state, 'invalid-skill', events)
+  }
+  if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    qi: Math.max(0, (item.qi ?? 0) - 1),
+    combatSkills: item.combatSkills.map((currentSkill) =>
+      currentSkill.id === action.skillId
+        ? { ...currentSkill, remaining: Math.max(0, currentSkill.remaining - 1) }
+        : currentSkill,
+    ),
+  }))
+  const updated = findCharacter(state, actor.id)
+  const updatedSkill = updated?.combatSkills.find((item) => item.id === action.skillId)
+  events.push({
+    type: 'log',
+    text: `${actor.name} 消耗 1 点气：${skill.name} 冷却 -1。剩余气 ${updated?.qi ?? 0}，剩余冷却 ${
+      updatedSkill?.remaining ?? 0
+    }。`,
+  })
   return succeed(state, events)
 }
 

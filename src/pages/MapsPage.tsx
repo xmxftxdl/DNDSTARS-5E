@@ -7525,23 +7525,27 @@ export default function MapsPage() {
     if (action.type === 'qi-reduce-cooldown') {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const skill = actor?.combatSkills.find((s) => s.id === action.skillId)
-      if (!actor || !skill || skill.remaining <= 0 || (actor.qi ?? 0) < 1) {
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      if (!actor || !skill) {
         acknowledgePlayerAction(action, 'rejected', 'invalid-qi-reduce')
         completePlayerActionRequest(action)
         return
       }
-      const ok = useCharacterStore.getState().useQiReduceCooldown(actor.id, skill.id)
-      if (!ok) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-qi-reduce')
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'qi-reduce-cooldown',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        skillId: skill.id,
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(action, 'rejected', headless.reason)
         completePlayerActionRequest(action)
         return
       }
-      const updated = useCharacterStore.getState().characters.find((c) => c.id === actor.id)
-      const updatedSkill = updated?.combatSkills.find((s) => s.id === skill.id)
-      pushCombatLog(
-        `${actor.name} 消耗 1 点气：${skill.name} 冷却 -1。剩余气 ${updated?.qi ?? 0}，剩余冷却 ${updatedSkill?.remaining ?? 0}`,
-        'turn',
-      )
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
       return
