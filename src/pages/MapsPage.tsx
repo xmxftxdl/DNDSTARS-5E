@@ -4053,106 +4053,103 @@ export default function MapsPage() {
   ) => {
     if (!activeMap || targets.length === 0) return []
     const waiveAp = !!opts?.waiveAp
-    const perArrowSkill: CombatSkill = { ...skill, arrowShots: 1 }
-    const perArrowDiceCount = Math.max(1, attackDamageDiceCount(perArrowSkill, false))
-    const damageSides = isBasicShot(perArrowSkill) ? 8 : perArrowSkill.damageSides
+    const perArrowDiceCount = Math.max(1, skill.damageCount)
+    const damageSides = isBasicShot(skill) ? 8 : skill.damageSides
     const comboFist = waiveAp ? findClassTrait(caster, 'comboFist') : undefined
-    invokeSkill(caster.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
-    pushApLog(caster, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`, `${targets.length} 支箭`)
-    const allBaseValues = await rollDiceBoxValues(
-      perArrowDiceCount * targets.length,
-      damageSides,
-      `${skill.name} 伤害`,
-      targets[0]?.label ?? skill.name,
-    )
-    const comboFistValues = comboFist
-      ? await rollDiceBoxValues(comboFist.level, 6, `${skill.name} 连续拳额外伤害`, targets[0]?.label ?? skill.name)
-      : []
+    const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+    const actorToken = map.tokens.find((token) => token.characterId === caster.id)
+    if (!actorToken) return []
 
-    const results: AttackResolveResult[] = []
-    const knockbackQueue: KnockbackPending[] = []
-    let galeComboAfterDamage = false
-    let selfCooldownReduction = 0
+    const packetPlans = []
+    let damagePacketCount = 0
+    for (const target of targets) {
+      const liveTarget = map.tokens.find((token) => token.id === target.id) ?? target
+      const dodgePreview = enemyDodgePreview(liveTarget, caster, skill)
+      const shouldDodge = !!dodgePreview?.decision.shouldDodge
+      const targetDodgeD20 = shouldDodge ? await rollDiceBoxD20('敌人闪避 D20', liveTarget.label) : undefined
+      const expectedDodged =
+        targetDodgeD20 != null && dodgePreview
+          ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
+          : false
+      if (!expectedDodged) damagePacketCount += 1
+      packetPlans.push({ target, targetDodgeD20, targetDodgeMode: shouldDodge ? 'attempt' : 'skip', expectedDodged })
+    }
+
+    const allBaseValues =
+      damagePacketCount > 0
+        ? await rollDiceBoxValues(
+            perArrowDiceCount * damagePacketCount,
+            damageSides,
+            skill.name + ' 伤害',
+            targets[0]?.label ?? skill.name,
+          )
+        : []
+    const comboFistValues =
+      comboFist && damagePacketCount > 0
+        ? await rollDiceBoxValues(comboFist.level, 6, skill.name + ' 连续拳额外伤害', targets[0]?.label ?? skill.name)
+        : []
+
+    let damageCursor = 0
     let comboFistApplied = false
-    for (const [index, target] of targets.entries()) {
-      const start = index * perArrowDiceCount
-      const arrowValues = allBaseValues.slice(start, start + perArrowDiceCount)
-      const applyComboFistHere = !comboFistApplied && comboFistValues.length > 0
-      const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-      const latestTarget = latestMap.tokens.find((token) => token.id === target.id) ?? target
-      const result = await resolveAttack(latestTarget, {
-        skipCleanup: true,
-        skipUseSkill: true,
-        silent: true,
-        skillOverride: perArrowSkill,
-        targetingOverride: {
-          casterId: caster.id,
-          skill: perArrowSkill,
-          waiveAp: waiveAp || undefined,
-        },
-        presetDamageValues: applyComboFistHere ? [...arrowValues, ...comboFistValues] : arrowValues,
-        presetFeatureLabelParts: applyComboFistHere ? [`连续拳+${comboFist!.level}d6`] : undefined,
-        appendFeatureDamageToPreset: true,
-        suppressComboFist: true,
-      })
-      if (result) {
-        results.push(result)
-        if (applyComboFistHere && result.hit) comboFistApplied = true
-        selfCooldownReduction = Math.max(selfCooldownReduction, result.selfCooldownReduction ?? 0)
-        if (result.knockbackPending) knockbackQueue.push(result.knockbackPending)
-        galeComboAfterDamage = galeComboAfterDamage || !!result.galeComboPending
+    const targetPackets = packetPlans.map((plan) => {
+      let diceValues = plan.expectedDodged
+        ? undefined
+        : allBaseValues.slice(damageCursor, damageCursor + perArrowDiceCount)
+      if (!plan.expectedDodged) {
+        damageCursor += perArrowDiceCount
+        if (!comboFistApplied && comboFistValues.length > 0) {
+          diceValues = [...(diceValues ?? []), ...comboFistValues]
+          comboFistApplied = true
+        }
       }
-    }
+      return {
+        targetTokenId: plan.target.id,
+        diceValues,
+        targetDodgeD20: plan.targetDodgeD20,
+        targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
+      }
+    })
 
-    if (selfCooldownReduction > 0) {
-      applySkillCooldownReduction(caster.id, skill.id, selfCooldownReduction)
-    }
-    if (knockbackQueue.length > 0) scheduleKnockbackRolls(knockbackQueue)
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+      type: 'attack-token',
+      actorTokenId: actorToken.id,
+      characterId: caster.id,
+      targetTokenId: targets[0].id,
+      skillId: skill.id,
+      targetPackets,
+    })
+    if (!headless.ok) return []
 
+    applyHeadlessCombatResult(headless)
+    const results = headless.events.filter(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> =>
+        event.type === 'attack-resolved',
+    )
     const totalDamage = results.reduce((sum, result) => sum + result.total, 0)
     const hitCount = results.filter((result) => result.hit).length
-    const signed = (value: number) => `${value >= 0 ? '+' : ''}${value}`
-    const summary = targets
-      .map((target, index) => {
-        const result = results[index]
-        if (!result) return `第${index + 1}支→${target.label}：未结算`
-        if (!result.hit) return `第${index + 1}支→${target.label}：未造成伤害（${result.rollLabel}）`
-        const diceValues = result.values.length > 0 ? result.values : allBaseValues.slice(index * perArrowDiceCount, (index + 1) * perArrowDiceCount)
-        const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
-        const beforeDefense = result.damageBeforeDefense ?? result.total
-        const preDefenseBonus = beforeDefense - diceTotal
-        const defenseText =
-          result.attackDefenseDiff != null
-            ? `，攻防修正${signed(result.attackDefenseModifier ?? 0)}（差值${result.attackDefenseDiff}）`
-            : ''
-        const postDefenseDelta = result.total - (result.damageAfterDefense ?? result.total)
-        const postDefenseText = postDefenseDelta !== 0 ? `，豁免/减免${signed(postDefenseDelta)}` : ''
-        return `第${index + 1}支→${target.label}：骰 ${diceValues.join(' + ')}，加值${signed(preDefenseBonus)}${defenseText}${postDefenseText}，最终 ${result.total} 点`
+    const displayValues = results.flatMap((result) => result.damageValues)
+    const summary = results
+      .map((result, index) => {
+        const target = map.tokens.find((token) => token.id === result.targetTokenId)
+        return result.hit
+          ? '第 ' + (index + 1) + ' 段→' + (target?.label ?? result.targetTokenId) + ' ' + result.total + ' 点'
+          : '第 ' + (index + 1) + ' 段被闪避'
       })
       .join('；')
-    const resolvedValues = results.flatMap((result) => result.values)
-    const displayValues = resolvedValues.length > 0 ? resolvedValues : allBaseValues
     const rollForDisplay: DiceRoll = {
       values: displayValues,
       sides: damageSides,
       bonus: totalDamage - displayValues.reduce((sum, value) => sum + value, 0),
       total: totalDamage,
-      label: `${skill.name} · ${targets.length}支箭 · 命中${hitCount}`,
-      formula: `${summary}；合计 ${totalDamage} 点`,
+      label: skill.name + ' · ' + targets.length + ' 段 · 命中' + hitCount,
+      formula: summary + '；合计 ' + totalDamage + ' 点',
       targetName: targets[0]?.label ?? skill.name,
     }
     setRoll(rollForDisplay)
     publishSharedDiceRoll(rollForDisplay)
-    pushCombatLog(`${caster.name} 使用 ${skill.name}：${summary}，合计 ${totalDamage} 点。`, totalDamage > 0 ? 'damage' : 'attack')
-    if (waiveAp && caster.combatBuffs?.galeComboReady) {
-      consumeGaleComboReady(caster.id, skill.name)
-    }
-    if (galeComboAfterDamage) {
-      await offerGaleComboAfterDamageApplied(caster.id, caster)
-    }
+    pushCombatLog(caster.name + ' 使用 ' + skill.name + '：' + summary + '，合计 ' + totalDamage + ' 点。', totalDamage > 0 ? 'damage' : 'attack')
     return results
   }
-
   const resolveAoeAttack = async (
     clickedCell: GridCell,
     opts?: {
