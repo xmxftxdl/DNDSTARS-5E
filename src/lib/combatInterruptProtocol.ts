@@ -39,11 +39,20 @@ export type AgileLeapInterruptPayload = Record<string, unknown> & {
 }
 export type AgileLeapInterruptResponse = Record<string, unknown> & { useAgileLeap: boolean }
 
+export type OpportunityAttackInterruptPayload = Record<string, unknown> & {
+  attackerName: string
+  targetName: string
+  attackerTokenId: string
+  targetTokenId: string
+}
+export type OpportunityAttackInterruptResponse = Record<string, unknown> & { useOpportunityAttack: boolean }
+
 export interface CombatInterruptPayloadMap {
   dodge: DodgeInterruptPayload
   'stable-mind': StableMindInterruptPayload
   'gale-combo': GaleComboInterruptPayload
   'agile-leap': AgileLeapInterruptPayload
+  'opportunity-attack': OpportunityAttackInterruptPayload
 }
 
 export interface CombatInterruptResponseMap {
@@ -51,6 +60,7 @@ export interface CombatInterruptResponseMap {
   'stable-mind': StableMindInterruptResponse
   'gale-combo': GaleComboInterruptResponse
   'agile-leap': AgileLeapInterruptResponse
+  'opportunity-attack': OpportunityAttackInterruptResponse
 }
 
 export type CombatInterruptByKind<K extends CombatInterruptKind> =
@@ -85,6 +95,8 @@ export function defaultCombatInterruptResponse<K extends CombatInterruptKind>(
       return { useGaleCombo: false } as CombatInterruptResponseMap[K]
     case 'agile-leap':
       return { useAgileLeap: false } as CombatInterruptResponseMap[K]
+    case 'opportunity-attack':
+      return { useOpportunityAttack: false } as CombatInterruptResponseMap[K]
   }
 }
 
@@ -99,7 +111,10 @@ export function resolveCombatInterruptCharacter(
   interrupt: Pick<SharedCombatInterrupt, 'kind' | 'actorCharId' | 'targetCharId'>,
   characters: Character[],
 ): Character | undefined {
-  const characterId = interrupt.kind === 'gale-combo' ? interrupt.actorCharId : interrupt.targetCharId
+  const characterId =
+    interrupt.kind === 'gale-combo' || interrupt.kind === 'opportunity-attack'
+      ? interrupt.actorCharId
+      : interrupt.targetCharId
   return characterId ? characters.find((character) => character.id === characterId) : undefined
 }
 

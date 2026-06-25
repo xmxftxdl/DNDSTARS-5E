@@ -57,6 +57,7 @@ describe('combatInterruptProtocol', () => {
     expect(defaultCombatInterruptResponse('stable-mind')).toEqual({ useStableMind: false })
     expect(defaultCombatInterruptResponse('gale-combo')).toEqual({ useGaleCombo: false })
     expect(defaultCombatInterruptResponse('agile-leap')).toEqual({ useAgileLeap: false })
+    expect(defaultCombatInterruptResponse('opportunity-attack')).toEqual({ useOpportunityAttack: false })
   })
 
   it('type-narrows interrupts by kind', () => {
@@ -145,6 +146,40 @@ describe('combatInterruptProtocol', () => {
     })
 
     expect(candidate.canAnswer).toBe(true)
+  })
+
+  it('routes opportunity attack answers to the attacker character', () => {
+    const attacker = baseCharacter({ id: 'attacker', dmNotes: 'private' })
+    const target = baseCharacter({ id: 'target', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'opp-1',
+      mapId: 'map',
+      kind: 'opportunity-attack',
+      actorCharId: attacker.id,
+      targetCharId: target.id,
+      payload: {
+        attackerName: attacker.name,
+        targetName: target.name,
+        attackerTokenId: 'attacker-token',
+        targetTokenId: 'target-token',
+      },
+      now: 100,
+    })
+
+    expect(
+      resolveCombatInterruptAnswerCandidate(interrupt, {
+        characters: [attacker, target],
+        visibleCharacters: [],
+        assignedCharacterId: attacker.id,
+      }).canAnswer,
+    ).toBe(true)
+    expect(
+      resolveCombatInterruptAnswerCandidate(interrupt, {
+        characters: [attacker, target],
+        visibleCharacters: [],
+        assignedCharacterId: target.id,
+      }).canAnswer,
+    ).toBe(false)
   })
 
   it('rejects dead characters for any interrupt answer', () => {

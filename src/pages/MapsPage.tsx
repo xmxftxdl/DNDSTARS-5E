@@ -148,6 +148,8 @@ import {
   type GaleComboDecision,
   type GaleComboInterruptPayload,
   type GaleComboInterruptResponse,
+  type OpportunityAttackInterruptPayload,
+  type OpportunityAttackInterruptResponse,
   type StableMindInterruptPayload,
   type StableMindInterruptResponse,
 } from '../lib/combatInterruptProtocol'
@@ -461,6 +463,12 @@ export default function MapsPage() {
     maxUses: number
     expiresAt?: number
   } | null>(null)
+  const [sharedOpportunityAttackPrompt, setSharedOpportunityAttackPrompt] = useState<{
+    id: string
+    attackerChar: Character
+    targetName: string
+    expiresAt?: number
+  } | null>(null)
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -572,10 +580,16 @@ export default function MapsPage() {
     targetCharId: string
     resolve: (useAgileLeap: boolean) => void
   } | null>(null)
+  const pendingSharedOpportunityAttackRef = useRef<{
+    id: string
+    attackerCharId: string
+    resolve: (useOpportunityAttack: boolean) => void
+  } | null>(null)
   const suppressedDodgePromptIdsRef = useRef(new Set<string>())
   const suppressedStableMindPromptIdsRef = useRef(new Set<string>())
   const suppressedGaleComboPromptIdsRef = useRef(new Set<string>())
   const suppressedAgileLeapPromptIdsRef = useRef(new Set<string>())
+  const suppressedOpportunityAttackPromptIdsRef = useRef(new Set<string>())
   const playerActionSeqRef = useRef(0)
   const seenPlayerActionIdsRef = useRef(new Set<string>())
   const processedPlayerActionIdsRef = useRef(new Set<string>())
@@ -598,7 +612,8 @@ export default function MapsPage() {
       !sharedDodgePrompt?.expiresAt &&
       !sharedStableMindPrompt?.expiresAt &&
       !sharedGaleComboPrompt?.expiresAt &&
-      !sharedAgileLeapPrompt?.expiresAt
+      !sharedAgileLeapPrompt?.expiresAt &&
+      !sharedOpportunityAttackPrompt?.expiresAt
     ) return
     setSharedDodgeNow(Date.now())
     const timer = window.setInterval(() => setSharedDodgeNow(Date.now()), 250)
@@ -612,6 +627,8 @@ export default function MapsPage() {
     sharedGaleComboPrompt?.expiresAt,
     sharedAgileLeapPrompt?.id,
     sharedAgileLeapPrompt?.expiresAt,
+    sharedOpportunityAttackPrompt?.id,
+    sharedOpportunityAttackPrompt?.expiresAt,
   ])
 
   useEffect(() => {
@@ -1302,6 +1319,7 @@ export default function MapsPage() {
     setSharedStableMindPrompt(null)
     setSharedGaleComboPrompt(null)
     setSharedAgileLeapPrompt(null)
+    setSharedOpportunityAttackPrompt(null)
     setPendingPlayerActionLocked(null)
     setSelectedTokenId(null)
     setSelectedCharacterTokenId(null)
@@ -1716,6 +1734,24 @@ export default function MapsPage() {
             agilePending.resolve(!!response?.useAgileLeap)
           }
         }
+
+        const opportunityPending = pendingSharedOpportunityAttackRef.current
+        if (opportunityPending) {
+          const interrupt = findCombatInterrupt(queue, opportunityPending.id)
+          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
+            pendingSharedOpportunityAttackRef.current = null
+            await finishSharedCombatInterrupt(
+              opportunityPending.id,
+              defaultCombatInterruptResponse('opportunity-attack'),
+            )
+            opportunityPending.resolve(false)
+          } else if (interrupt?.status === 'answered') {
+            const response = interrupt.response as OpportunityAttackInterruptResponse | undefined
+            pendingSharedOpportunityAttackRef.current = null
+            await finishSharedCombatInterrupt(opportunityPending.id, response)
+            opportunityPending.resolve(!!response?.useOpportunityAttack)
+          }
+        }
         return
       }
 
@@ -1824,6 +1860,27 @@ export default function MapsPage() {
         }
       } else {
         setSharedAgileLeapPrompt((current) => (current ? null : current))
+      }
+
+      const opportunityInterrupt = pendingInterrupts.find(
+        (interrupt): interrupt is CombatInterruptByKind<'opportunity-attack'> =>
+          isCombatInterruptKind(interrupt, 'opportunity-attack') &&
+          !suppressedOpportunityAttackPromptIdsRef.current.has(interrupt.id),
+      )
+      if (opportunityInterrupt) {
+        const candidate = resolveCombatInterruptAnswerCandidate(opportunityInterrupt, answerContext)
+        if (candidate.canAnswer && candidate.character) {
+          setSharedOpportunityAttackPrompt({
+            id: opportunityInterrupt.id,
+            attackerChar: candidate.character,
+            targetName: opportunityInterrupt.payload.targetName,
+            expiresAt: opportunityInterrupt.expiresAt,
+          })
+        } else {
+          setSharedOpportunityAttackPrompt((current) => (current ? null : current))
+        }
+      } else {
+        setSharedOpportunityAttackPrompt((current) => (current ? null : current))
       }
     }
     void load()
@@ -4614,6 +4671,7 @@ export default function MapsPage() {
     attackerToken: Token,
     targetToken: Token,
     targetChar?: Character,
+    opts?: { confirmed?: boolean },
   ) => {
     if (!activeMap) return
     const attacker = attackerToken.characterId
@@ -4628,6 +4686,7 @@ export default function MapsPage() {
     const attackerName = attacker?.name ?? attackerToken.label
     if (
       attacker &&
+      !opts?.confirmed &&
       !(await showCombatDialog({
         title: '借机攻击',
         message: `${attackerName} 对 ${targetName} 触发借机攻击。\n是否消耗 1 AP，进行一次近战命中判定？`,
@@ -4718,15 +4777,34 @@ export default function MapsPage() {
     movingToken: Token,
     to: { x: number; y: number },
     movingChar?: Character,
+    attackerTokenIds?: string[],
   ) => {
-    const attackers = opportunityAttackersForMove(movingToken, to, movingChar)
+    const attackers = attackerTokenIds
+      ? attackerTokenIds
+          .map((id) => activeMap?.tokens.find((token) => token.id === id))
+          .filter((token): token is Token => !!token)
+      : opportunityAttackersForMove(movingToken, to, movingChar)
     for (const attacker of attackers) {
       const latestTarget = movingChar
         ? useCharacterStore.getState().characters.find((c) => c.id === movingChar.id)
         : undefined
       if (movingChar && (!latestTarget || latestTarget.currentHp <= 0)) break
       if (!movingChar && !isTokenAlive(movingToken, useCharacterStore.getState().characters)) break
-      await resolveOpportunityAttack(attacker, movingToken, latestTarget)
+      const attackerChar = attacker.characterId
+        ? useCharacterStore.getState().characters.find((c) => c.id === attacker.characterId)
+        : undefined
+      if (attackerChar) {
+        const accepted = await requestSharedOpportunityAttackChoice(attackerChar, {
+          attackerTokenId: attacker.id,
+          targetTokenId: movingToken.id,
+          targetName: latestTarget?.name ?? movingToken.label,
+        })
+        if (!accepted) {
+          pushCombatLog(`${attackerChar.name} 放弃对 ${latestTarget?.name ?? movingToken.label} 的借机攻击。`, 'turn')
+          continue
+        }
+      }
+      await resolveOpportunityAttack(attacker, movingToken, latestTarget, { confirmed: true })
     }
   }
 
@@ -5644,6 +5722,44 @@ export default function MapsPage() {
     })
   }
 
+  const requestSharedOpportunityAttackChoice = (
+    attacker: Character,
+    params: { attackerTokenId: string; targetTokenId: string; targetName: string },
+  ): Promise<boolean> => {
+    if (!activeMap || !isDM) {
+      return showCombatDialog({
+        title: '借机攻击',
+        message: `${attacker.name} 对 ${params.targetName} 触发借机攻击。\n是否消耗 1 AP，进行一次近战命中判定？`,
+        confirmText: '攻击',
+        cancelText: '放过',
+        tone: 'amber',
+      })
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const expiresAt = Date.now() + 15000
+    return new Promise((resolve) => {
+      const interrupt = createCombatInterrupt<OpportunityAttackInterruptPayload, OpportunityAttackInterruptResponse>({
+        id,
+        mapId: activeMap.id,
+        kind: 'opportunity-attack',
+        actorCharId: attacker.id,
+        payload: {
+          attackerName: attacker.name,
+          targetName: params.targetName,
+          attackerTokenId: params.attackerTokenId,
+          targetTokenId: params.targetTokenId,
+        },
+        expiresAt,
+      })
+      pendingSharedOpportunityAttackRef.current = {
+        id: interrupt.id,
+        attackerCharId: attacker.id,
+        resolve,
+      }
+      void publishCombatInterrupt(interrupt)
+    })
+  }
+
   const spendStableMind = (charId: string): boolean => {
     const latest = useCharacterStore.getState().characters.find((c) => c.id === charId)
     const trait = latest ? findClassTrait(latest, 'stableMind') : undefined
@@ -6285,6 +6401,14 @@ export default function MapsPage() {
     await answerSharedCombatInterrupt(prompt.id, { useAgileLeap })
   }
 
+  const handleSharedOpportunityAttackChoice = async (useOpportunityAttack: boolean) => {
+    if (!sharedOpportunityAttackPrompt || !activeMap) return
+    const prompt = sharedOpportunityAttackPrompt
+    suppressedOpportunityAttackPromptIdsRef.current.add(prompt.id)
+    setSharedOpportunityAttackPrompt(null)
+    await answerSharedCombatInterrupt(prompt.id, { useOpportunityAttack })
+  }
+
   const scheduleEnemyTurn = async (enemy: Token) => {
     if (!activeMap) return
     const enemyTurnKey = `${round}-${initiativeIndex}-${enemy.id}`
@@ -6761,6 +6885,7 @@ export default function MapsPage() {
     initiativeIndex: initiativeIndexRef.current,
     initiativeOrder: initiativeOrderRef.current,
     enemyApByToken: enemyApByTokenRef.current,
+    disengagedCharacterIds: [...disengagedCharIds],
   })
 
   const tokenMovedEvent = (
@@ -6770,6 +6895,15 @@ export default function MapsPage() {
     events.find(
       (event): event is Extract<HeadlessCombatEvent, { type: 'token-moved' }> =>
         event.type === 'token-moved' && event.tokenId === tokenId,
+    )
+
+  const opportunityTriggeredEvents = (
+    events: HeadlessCombatEvent[],
+    movingTokenId: string,
+  ): Extract<HeadlessCombatEvent, { type: 'opportunity-triggered' }>[] =>
+    events.filter(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'opportunity-triggered' }> =>
+        event.type === 'opportunity-triggered' && event.movingTokenId === movingTokenId,
     )
 
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
@@ -7101,7 +7235,13 @@ export default function MapsPage() {
       const headlessActor = headless.state.characters.find((c) => c.id === actor.id)
       if (headlessActor) updateChar(actor.id, { currentAP: headlessActor.currentAP })
 
-      await resolveOpportunityAttacksForMove(token, targetPosition, actor)
+      const opportunityEvents = opportunityTriggeredEvents(headless.events, token.id)
+      await resolveOpportunityAttacksForMove(
+        token,
+        targetPosition,
+        actor,
+        opportunityEvents.map((event) => event.attackerTokenId),
+      )
       const latestMover = useCharacterStore.getState().characters.find((c) => c.id === actor.id)
       if (!latestMover || latestMover.currentHp <= 0) {
         pushApLog(actor, 1, '移动', `${movedFeet} 尺，移动被打断`)
@@ -8106,6 +8246,46 @@ export default function MapsPage() {
                     className="rounded-lg bg-sky-500/25 px-4 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/35"
                   >
                     发动灵巧跳跃
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sharedOpportunityAttackPrompt && (
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+              <div
+                role="dialog"
+                aria-labelledby="shared-opportunity-attack-prompt-title"
+                className="relative mx-4 w-full max-w-md rounded-2xl border border-amber-400/35 bg-void-950/95 p-5 shadow-2xl"
+              >
+                {sharedOpportunityAttackPrompt.expiresAt != null && (
+                  <div className="absolute right-5 top-5 rounded-full border border-amber-300/40 bg-amber-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-100">
+                    {Math.max(0, Math.ceil((sharedOpportunityAttackPrompt.expiresAt - sharedDodgeNow) / 1000))}s
+                  </div>
+                )}
+                <h3 id="shared-opportunity-attack-prompt-title" className="text-lg font-semibold text-amber-100">
+                  借机攻击
+                </h3>
+                <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
+                  {`${sharedOpportunityAttackPrompt.attackerChar.name} 对 ${sharedOpportunityAttackPrompt.targetName} 触发借机攻击。\n\n是否消耗 1 AP，进行一次近战命中判定？`}
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSharedOpportunityAttackChoice(false)}
+                    className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80"
+                  >
+                    放过
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="shared-opportunity-attack-use"
+                    data-opportunity-attack-id={sharedOpportunityAttackPrompt.id}
+                    onClick={() => handleSharedOpportunityAttackChoice(true)}
+                    className="rounded-lg bg-amber-500/25 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-500/35"
+                  >
+                    发动借机
                   </button>
                 </div>
               </div>
