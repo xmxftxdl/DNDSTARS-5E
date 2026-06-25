@@ -612,6 +612,47 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('resolves multi-shot packets through headless DM with one AP spend and per-arrow damage', () => {
+    const multiShot = skill({
+      id: 'multi-shot',
+      name: '多重射击',
+      skillTreeId: 'multiShot',
+      damageCount: 1,
+      damageSides: 4,
+      arrowShots: 2,
+      cooldown: 2,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ combatSkills: [skill(), multiShot] })],
+      enemyApByToken: { dragon: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'dragon',
+      skillId: 'multi-shot',
+      targetPackets: [
+        { targetTokenId: 'dragon', diceValues: [4] },
+        { targetTokenId: 'dragon', diceValues: [3] },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const dragon = result.state.map.tokens.find((item) => item.id === 'dragon')
+    const resolved = result.events.filter((event) => event.type === 'attack-resolved')
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatSkills.find((item) => item.id === 'multi-shot')?.remaining).toBe(2)
+    expect(dragon?.hp).toBeLessThan(52)
+    expect(resolved).toHaveLength(2)
+    expect(resolved[0]).toMatchObject({ damageValues: [4], apCost: 1 })
+    expect(resolved[1]).toMatchObject({ damageValues: [3], apCost: 0 })
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),

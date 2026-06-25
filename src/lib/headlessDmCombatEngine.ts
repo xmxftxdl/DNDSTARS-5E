@@ -141,6 +141,16 @@ export interface HeadlessPlayerAttackAction {
   skillId: string
   diceValues?: number[]
   targetDodgeD20?: number
+  targetDodgeMode?: 'auto' | 'attempt' | 'skip'
+  isCrit?: boolean
+  targetPackets?: HeadlessPlayerAttackPacket[]
+}
+
+export interface HeadlessPlayerAttackPacket {
+  targetTokenId: string
+  diceValues?: number[]
+  targetDodgeD20?: number
+  targetDodgeMode?: 'auto' | 'attempt' | 'skip'
   isCrit?: boolean
 }
 
@@ -615,21 +625,27 @@ function resolvePlayerAttack(
 ): HeadlessCombatResult {
   const actor = findCharacter(state, action.characterId)
   const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
-  const targetToken = state.map.tokens.find((item) => item.id === action.targetTokenId)
   const skill = actor?.combatSkills.find((item) => item.id === action.skillId)
   if (!actor || !actorToken || actorToken.characterId !== actor.id || actorToken.type !== 'player') {
     return fail(state, 'invalid-actor', events)
   }
-  if (!targetToken || targetToken.id === actorToken.id || !isTokenAlive(targetToken, state.characters)) {
-    return fail(state, 'invalid-target', events)
-  }
   if (!skill || skill.damageCount < 0 || skill.damageSides < 0 || skill.remaining > 0) {
     return fail(state, 'invalid-skill', events)
   }
-  const rangeFeet = singleTargetRangeFeet(skill)
-  if (rangeFeet != null) {
-    const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, state.map) * (state.map.feetPerCell ?? 5)
-    if (distanceFeet > rangeFeet) return fail(state, 'out-of-range', events)
+  const packets = action.targetPackets?.length
+    ? action.targetPackets
+    : [{ targetTokenId: action.targetTokenId, diceValues: action.diceValues, targetDodgeD20: action.targetDodgeD20, isCrit: action.isCrit }]
+  if (packets.length === 0) return fail(state, 'invalid-target', events)
+  for (const packet of packets) {
+    const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
+    if (!targetToken || targetToken.id === actorToken.id || !isTokenAlive(targetToken, state.characters)) {
+      return fail(state, 'invalid-target', events)
+    }
+    const rangeFeet = singleTargetRangeFeet(skill)
+    if (rangeFeet != null) {
+      const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, state.map) * (state.map.feetPerCell ?? 5)
+      if (distanceFeet > rangeFeet) return fail(state, 'out-of-range', events)
+    }
   }
   const waiveAp = !!actor.combatBuffs?.galeComboReady
   const apCost = Math.max(0, skill.apCost)
@@ -637,11 +653,73 @@ function resolvePlayerAttack(
     return fail(state, 'insufficient-ap', events)
   }
 
-  const targetDodge = resolveTargetDodgeAgainstPlayerAttack(state, actorToken, actor, targetToken, skill, action, dice, events)
-  if (!targetDodge) return fail(state, 'invalid-dice', events)
-  if (targetDodge.dodged) {
-    markSkillUsed(state, actor.id, skill.id)
-    if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
+  let resolvedCount = 0
+  for (const [packetIndex, packet] of packets.entries()) {
+    const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
+    if (!targetToken || !isTokenAlive(targetToken, state.characters)) continue
+    const packetAction: HeadlessPlayerAttackAction = {
+      ...action,
+      targetTokenId: packet.targetTokenId,
+      diceValues: packet.diceValues,
+      targetDodgeD20: packet.targetDodgeD20,
+      targetDodgeMode: packet.targetDodgeMode,
+      isCrit: packet.isCrit,
+      targetPackets: undefined,
+    }
+    const targetDodge = resolveTargetDodgeAgainstPlayerAttack(
+      state,
+      actorToken,
+      actor,
+      targetToken,
+      skill,
+      packetAction,
+      dice,
+      events,
+    )
+    if (!targetDodge) return fail(state, 'invalid-dice', events)
+    if (targetDodge.dodged) {
+      events.push({
+        type: 'attack-resolved',
+        actorTokenId: actorToken.id,
+        characterId: actor.id,
+        targetTokenId: targetToken.id,
+        skillId: skill.id,
+        skillName: skill.name,
+        damageValues: [],
+        diceTotal: 0,
+        baseDamage: 0,
+        damageBeforeDefense: 0,
+        modifier: 0,
+        diff: 0,
+        total: 0,
+        isCrit: false,
+        hit: false,
+        targetDodged: true,
+        waivedAp: waiveAp,
+        apCost: packetIndex === 0 ? apCost : 0,
+      })
+      events.push({
+        type: 'log',
+        text: `${targetToken.label} 闪避 ${actor.name} 的 ${skill.name} 第 ${packetIndex + 1} 段成功。`,
+      })
+      resolvedCount += 1
+      continue
+    }
+
+    const diceValues = resolveDiceValues(packet.diceValues, dice, skill.damageCount, skill.damageSides)
+    if (!diceValues) return fail(state, 'invalid-dice', events)
+    events.push({
+      type: 'dice-rolled',
+      notation: `${skill.damageCount}d${skill.damageSides}`,
+      values: diceValues,
+      total: diceValues.reduce((sum, value) => sum + value, 0),
+    })
+
+    const baseDamage = resolveAttackDamageTotal(actor, skill, diceValues, { isCrit: packet.isCrit })
+    const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
+    const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
+    applyDamageToTarget(state, targetToken, adjusted.damage, events)
+    applyStatusOnHit(state, targetToken, skill, events)
     events.push({
       type: 'attack-resolved',
       actorTokenId: actorToken.id,
@@ -649,66 +727,30 @@ function resolvePlayerAttack(
       targetTokenId: targetToken.id,
       skillId: skill.id,
       skillName: skill.name,
-      damageValues: [],
-      diceTotal: 0,
-      baseDamage: 0,
-      damageBeforeDefense: 0,
-      modifier: 0,
-      diff: 0,
-      total: 0,
-      isCrit: false,
-      hit: false,
-      targetDodged: true,
+      damageValues: diceValues,
+      diceTotal: diceValues.reduce((sum, value) => sum + value, 0),
+      baseDamage,
+      damageBeforeDefense: baseDamage,
+      modifier: adjusted.modifier,
+      diff: adjusted.diff,
+      total: adjusted.damage,
+      isCrit: !!packet.isCrit,
+      hit: true,
+      targetDodged: false,
       waivedAp: waiveAp,
-      apCost,
+      apCost: packetIndex === 0 ? apCost : 0,
     })
     events.push({
       type: 'log',
-      text: `${targetToken.label} 闪避 ${actor.name} 的 ${skill.name} 成功。`,
+      text: `${actor.name} 使用 ${skill.name} 第 ${packetIndex + 1} 段攻击 ${targetToken.label}：骰值 ${diceValues.join(
+        '+',
+      )}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
     })
-    return succeed(state, events)
+    resolvedCount += 1
   }
-
-  const diceValues = resolveDiceValues(action.diceValues, dice, skill.damageCount, skill.damageSides)
-  if (!diceValues) return fail(state, 'invalid-dice', events)
-  events.push({
-    type: 'dice-rolled',
-    notation: `${skill.damageCount}d${skill.damageSides}`,
-    values: diceValues,
-    total: diceValues.reduce((sum, value) => sum + value, 0),
-  })
-
-  const baseDamage = resolveAttackDamageTotal(actor, skill, diceValues, { isCrit: action.isCrit })
-  const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
-  const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
-  applyDamageToTarget(state, targetToken, adjusted.damage, events)
+  if (resolvedCount === 0) return fail(state, 'invalid-target', events)
   markSkillUsed(state, actor.id, skill.id)
   if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
-  applyStatusOnHit(state, targetToken, skill, events)
-  events.push({
-    type: 'attack-resolved',
-    actorTokenId: actorToken.id,
-    characterId: actor.id,
-    targetTokenId: targetToken.id,
-    skillId: skill.id,
-    skillName: skill.name,
-    damageValues: diceValues,
-    diceTotal: diceValues.reduce((sum, value) => sum + value, 0),
-    baseDamage,
-    damageBeforeDefense: baseDamage,
-    modifier: adjusted.modifier,
-    diff: adjusted.diff,
-    total: adjusted.damage,
-    isCrit: !!action.isCrit,
-    hit: true,
-    targetDodged: false,
-    waivedAp: waiveAp,
-    apCost,
-  })
-  events.push({
-    type: 'log',
-    text: `${actor.name} 使用 ${skill.name} 攻击 ${targetToken.label}：骰值 ${diceValues.join('+')}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
-  })
   maybeEndCombat(state, events)
   return succeed(state, events)
 }
@@ -726,12 +768,14 @@ function resolveTargetDodgeAgainstPlayerAttack(
   if (targetToken.type !== 'enemy') return { attempted: false, dodged: false }
   const ap = state.enemyApByToken[targetToken.id]
   if (!ap || ap.current < 1) return { attempted: false, dodged: false }
+  const dodgeMode = action.targetDodgeMode ?? 'auto'
+  if (dodgeMode === 'skip') return { attempted: false, dodged: false }
   const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
   const attackBonus = getEffectiveAbilityMod(actor, attackAbility) + proficiencyBonus(actor.level)
   const targetAc = getTokenTargetAc(targetToken) ?? 12
   const diceCount = attackDamageDiceCount(skill, false)
   const estimatedDamage = diceCount * ((skill.damageSides + 1) / 2) + (skill.damageBonus ?? 0)
-  const decision = decideDodge({
+  const baseDecision = decideDodge({
     currentAp: ap.current,
     currentHp: targetToken.hp ?? targetToken.maxHp ?? 1,
     maxHp: targetToken.maxHp ?? targetToken.hp ?? 1,
@@ -739,6 +783,10 @@ function resolveTargetDodgeAgainstPlayerAttack(
     incomingAttackBonus: attackBonus,
     estimatedDamage,
   })
+  const decision =
+    dodgeMode === 'attempt'
+      ? { ...baseDecision, shouldDodge: true, reason: baseDecision.reason || 'forced-attempt' }
+      : baseDecision
   if (!decision.shouldDodge) {
     events.push({
       type: 'log',

@@ -7319,7 +7319,101 @@ export default function MapsPage() {
         skill.skillTreeId === 'multiShot' ||
         (action.targetTokenIds?.length && skill.skillTreeId === 'rageShot')
       if (isArrowSequence) {
-        await resolveArrowSequenceAttack(actor, skill, targets, { waiveAp })
+        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const perPacketDiceCount = Math.max(1, skill.damageCount)
+        const packetPlans = []
+        let damagePacketCount = 0
+        for (const target of targets) {
+          const liveTarget = map.tokens.find((token) => token.id === target.id) ?? target
+          const dodgePreview = enemyDodgePreview(liveTarget, actor, skill)
+          const shouldDodge = !!dodgePreview?.decision.shouldDodge
+          const targetDodgeD20 = shouldDodge ? await rollDiceBoxD20('敌人闪避 D20', liveTarget.label) : undefined
+          const expectedDodged =
+            targetDodgeD20 != null && dodgePreview
+              ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
+              : false
+          if (!expectedDodged) damagePacketCount += 1
+          packetPlans.push({
+            target,
+            targetDodgeD20,
+            targetDodgeMode: shouldDodge ? 'attempt' : 'skip',
+            expectedDodged,
+          })
+        }
+        const allDamageValues =
+          damagePacketCount > 0
+            ? await rollDiceBoxValues(
+                perPacketDiceCount * damagePacketCount,
+                skill.damageSides,
+                `${skill.name} 伤害`,
+                targets[0]?.label ?? skill.name,
+              )
+            : []
+        let damageCursor = 0
+        const targetPackets = packetPlans.map((plan) => {
+          const diceValues = plan.expectedDodged
+            ? undefined
+            : allDamageValues.slice(damageCursor, damageCursor + perPacketDiceCount)
+          if (!plan.expectedDodged) damageCursor += perPacketDiceCount
+          return {
+            targetTokenId: plan.target.id,
+            diceValues,
+            targetDodgeD20: plan.targetDodgeD20,
+            targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
+          }
+        })
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+          type: 'attack-token',
+          actorTokenId: action.actorTokenId,
+          characterId: action.characterId,
+          targetTokenId: targets[0].id,
+          skillId: skill.id,
+          targetPackets,
+        })
+        if (!headless.ok) {
+          acknowledgePlayerAction(action, 'rejected', headless.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        applyHeadlessCombatResult(headless)
+        const resolvedEvents = headless.events.filter(
+          (event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> =>
+            event.type === 'attack-resolved',
+        )
+        const damageValues = resolvedEvents.flatMap((event) => event.damageValues)
+        const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
+        const diceTotal = damageValues.reduce((sum, value) => sum + value, 0)
+        if (damageValues.length > 0) {
+          const rollForDisplay: DiceRoll = {
+            values: damageValues,
+            sides: skill.damageSides,
+            bonus: total - diceTotal,
+            total,
+            label: `${skill.name} · ${resolvedEvents.length} 段`,
+            formula: resolvedEvents
+              .map((event, index) =>
+                event.hit
+                  ? `第 ${index + 1} 段 ${event.damageValues.join(' + ')}，攻防修正 ${
+                      event.modifier >= 0 ? '+' : ''
+                    }${event.modifier}，最终 ${event.total}`
+                  : `第 ${index + 1} 段被闪避`,
+              )
+              .join('；'),
+            targetName: targets[0]?.label ?? skill.name,
+          }
+          setRoll(rollForDisplay)
+          publishSharedDiceRoll(rollForDisplay)
+        }
+        pushCombatLog(
+          `${actor.name} 使用 ${skill.name}：${resolvedEvents
+            .map((event, index) =>
+              event.hit
+                ? `第 ${index + 1} 段→${map.tokens.find((token) => token.id === event.targetTokenId)?.label ?? event.targetTokenId} ${event.total} 点`
+                : `第 ${index + 1} 段被闪避`,
+            )
+            .join('；')}。`,
+          total > 0 ? 'damage' : 'attack',
+        )
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return
