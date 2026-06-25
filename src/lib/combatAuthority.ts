@@ -1,6 +1,7 @@
 import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type { CombatMutation, PendingDamagePacket } from './combatResolutionPipeline'
+import { statusRefreshTokenPatch } from './combatTokens'
 
 export type CombatAuthorityRole = 'dm' | 'player'
 
@@ -544,7 +545,7 @@ export function executeCombatMutationsAuthority(
         if (token) {
           const patch =
             mutation.mode === 'add'
-              ? conditionTokenPatch(mutation.condition, mutation.turns)
+              ? statusRefreshTokenPatch(token, mutation.condition, mutation.turns)
               : conditionTokenPatch(mutation.condition, 0)
           if (Object.keys(patch).length > 0) {
             next = {

@@ -28,6 +28,55 @@ export function isTokenAlive(token: Token, characters: Character[]): boolean {
 }
 
 /** 战斗阵营：玩家与 NPC 为友方，敌人为敌方 */
+export function resolveEnemyAttackTokens(
+  tokens: Token[],
+  result: { attackerTokenId?: string; targetTokenId?: string },
+): { actorToken: Token | undefined; targetToken: Token | undefined } {
+  return {
+    actorToken: result.attackerTokenId ? tokens.find((t) => t.id === result.attackerTokenId) : undefined,
+    targetToken: result.targetTokenId ? tokens.find((t) => t.id === result.targetTokenId) : undefined,
+  }
+}
+
+export function resolveDodgeOutcome(
+  d20: number,
+  attackBonus: number,
+  targetAc: number,
+  damage = 0,
+): { total: number; dodged: boolean; damageApplied: number } {
+  const total = d20 + attackBonus
+  const dodged = total < targetAc
+  return { total, dodged, damageApplied: dodged ? 0 : damage }
+}
+
+const CONDITION_STATUS_FIELD: Record<
+  string,
+  'burningTurns' | 'igniteTurns' | 'poisonTurns' | 'stunTurns' | 'restrainedTurns' | 'vulnerableTurns' | 'noMoveTurns'
+> = {
+  燃烧: 'burningTurns',
+  点燃: 'igniteTurns',
+  中毒: 'poisonTurns',
+  眩晕: 'stunTurns',
+  束缚: 'restrainedTurns',
+  脆弱: 'vulnerableTurns',
+  无法移动: 'noMoveTurns',
+}
+
+export function statusRefreshTokenPatch(token: Token, condition: string, turns?: number): Partial<Token> {
+  const field = CONDITION_STATUS_FIELD[condition]
+  if (!field) return {}
+  const incoming = turns && turns > 0 ? turns : 0
+  if (incoming <= 0) return {}
+  const current = (token[field] as number | undefined) ?? 0
+  const patch: Partial<Token> = {}
+  patch[field] = Math.max(current, incoming)
+  return patch
+}
+
+export function shouldApplyDotTick(token: Token, characters: Character[], dot: number): boolean {
+  return dot > 0 && isTokenAlive(token, characters)
+}
+
 export function getTokenCombatSide(token: Token): 'ally' | 'enemy' | 'neutral' {
   if (token.type === 'obstacle') return 'neutral'
   return token.type === 'enemy' ? 'enemy' : 'ally'
@@ -58,6 +107,7 @@ export function checkCombatOutcome(
 
 /** @deprecated 战败 token 不再从地图移除，仅保留灰显 */
 export function shouldRemoveTokenOnDefeat(_token: Token): boolean {
+  void _token
   return false
 }
 

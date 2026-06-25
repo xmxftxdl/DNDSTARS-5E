@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Gauge, Zap, Plus, Trash2, SkipForward, X, Timer, Crosshair, Infinity } from 'lucide-react'
+import { Gauge, Zap, Plus, Trash2, SkipForward, X, Timer, Crosshair, Infinity as InfinityIcon } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import QiIndicator from '../map/QiIndicator'
 import { isShadowDancer } from '../../lib/characterClasses'
@@ -49,10 +49,10 @@ export default function SkillBar({
   canAct?: boolean
 }) {
   const character = useCharacterStore((s) => s.characters.find((c) => c.id === charId))
-  const useSkill = useCharacterStore((s) => s.useSkill)
+  const invokeSkill = useCharacterStore((s) => s.useSkill)
   const endTurn = useCharacterStore((s) => s.endTurn)
   const reduceCooldown = useCharacterStore((s) => s.reduceCooldown)
-  const useQiReduceCooldown = useCharacterStore((s) => s.useQiReduceCooldown)
+  const reduceQiCooldown = useCharacterStore((s) => s.useQiReduceCooldown)
   const addSkill = useCharacterStore((s) => s.addSkill)
   const updateSkill = useCharacterStore((s) => s.updateSkill)
   const removeSkill = useCharacterStore((s) => s.removeSkill)
@@ -155,7 +155,7 @@ export default function SkillBar({
             ].join(' ')}
           >
             <div className="mb-1.5 flex items-center justify-center gap-1 text-center text-xs font-bold text-cyan-200">
-              <Infinity className="h-3.5 w-3.5" />
+              <InfinityIcon className="h-3.5 w-3.5" />
               无限
             </div>
             <div
@@ -172,7 +172,7 @@ export default function SkillBar({
                   disabledLabel={!canAct ? '未到回合' : undefined}
                   effectiveCd={effectiveCd(s)}
                   onEdit={() => setEditingId(s.id)}
-                  onUse={() => (onUseSkill ? onUseSkill(s) : useSkill(charId, s.id))}
+                  onUse={() => (onUseSkill ? onUseSkill(s) : invokeSkill(charId, s.id))}
                   onDelete={() => handleDeleteSkill(s)}
                 />
               ))}
@@ -211,7 +211,7 @@ export default function SkillBar({
                         disabledLabel={!canAct ? '未到回合' : undefined}
                         effectiveCd={effectiveCd(s)}
                         onEdit={() => setEditingId(s.id)}
-                        onUse={() => (onUseSkill ? onUseSkill(s) : useSkill(charId, s.id))}
+                        onUse={() => (onUseSkill ? onUseSkill(s) : invokeSkill(charId, s.id))}
                         onDelete={() => handleDeleteSkill(s)}
                       />
                     ) : (
@@ -222,7 +222,7 @@ export default function SkillBar({
                         canQiReduce={canAct && canSpendQi}
                         onEdit={() => setEditingId(s.id)}
                         onReduce={() => reduceCooldown(charId, s.id)}
-                        onQiReduce={() => (onQiReduceSkill ? onQiReduceSkill(s) : useQiReduceCooldown(charId, s.id))}
+                        onQiReduce={() => (onQiReduceSkill ? onQiReduceSkill(s) : reduceQiCooldown(charId, s.id))}
                         onDelete={() => handleDeleteSkill(s)}
                       />
                     ),

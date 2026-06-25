@@ -158,6 +158,8 @@ import {
   isTokenAlive,
   isTokenDefeated,
   pruneInitiativeForToken,
+  resolveEnemyAttackTokens,
+  shouldApplyDotTick,
 } from '../lib/combatTokens'
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import { IGNITE_STATUS_LABEL } from '../lib/ignite'
@@ -234,13 +236,6 @@ import { shouldSendPlayerReadyFeatureToDm } from '../lib/playerFeatureActivation
 // [T15/G3] enemyApReconcile.test.ts 从 './MapsPage' 引用 reconcileEnemyAp —— 维持该 re-export。
 export { reconcileEnemyAp }
 
-let lastSharedCombatSnapshot = ''
-// [T11/AC6 · E6] 已应用的 combat 快照单调水位（按 combatId 分段）。
-// 玩家端用它丢弃乱序/陈旧的 combat 广播；新 combatId（开/换战斗）重置水位，避免跨战斗误判。
-let lastAppliedCombatUpdatedAt = 0
-let lastAppliedCombatId = ''
-
-
 export default function MapsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const maps = useMapStore((s) => s.maps)
@@ -260,8 +255,8 @@ export default function MapsPage() {
   const resetCombatCooldowns = useCharacterStore((s) => s.resetCombatCooldowns)
   const beginTurn = useCharacterStore((s) => s.beginTurn)
   const endTurn = useCharacterStore((s) => s.endTurn)
-  const useSkillStore = useCharacterStore((s) => s.useSkill)
-  const useClassFeature = useCharacterStore((s) => s.useClassFeature)
+  const invokeSkill = useCharacterStore((s) => s.useSkill)
+  const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
   const spendQi = useCharacterStore((s) => s.spendQi)
   const damageChar = useCharacterStore((s) => s.damage)
   const notifyCombatMove = useCharacterStore((s) => s.notifyCombatMove)
@@ -517,6 +512,9 @@ export default function MapsPage() {
   const seenSharedLogIdsRef = useRef(new Set<number>())
   const combatPublishSeqRef = useRef(0)
   const combatIdRef = useRef('')
+  const lastSharedCombatSnapshotRef = useRef('')
+  const lastAppliedCombatUpdatedAtRef = useRef(0)
+  const lastAppliedCombatIdRef = useRef('')
 
   useEffect(() => {
     if (!sharedDodgePrompt?.expiresAt && !sharedStableMindPrompt?.expiresAt && !sharedGaleComboPrompt?.expiresAt) return
@@ -605,7 +603,7 @@ export default function MapsPage() {
   const consumeGaleComboReady = (characterId: string, actionLabel: string) => {
     const latest = useCharacterStore.getState().characters.find((c) => c.id === characterId)
     if (!latest?.combatBuffs?.galeComboReady) return false
-    useClassFeature(characterId, 'galeCombo')
+    activateClassFeature(characterId, 'galeCombo')
     updateChar(characterId, {
       combatBuffs: { ...latest.combatBuffs, galeComboReady: undefined },
     })
@@ -785,13 +783,13 @@ export default function MapsPage() {
     // combatId 变化（新战斗/换战斗）⇒ 重置水位后照常接受。这样陈旧快照不会回退玩家端战斗态，
     // 而真正更新的快照（更大 updatedAt 或新 combatId）一定不被压制。
     const incomingUpdatedAt = state.updatedAt ?? 0
-    if (incomingCombatId === lastAppliedCombatId && incomingUpdatedAt < lastAppliedCombatUpdatedAt) return
+    if (incomingCombatId === lastAppliedCombatIdRef.current && incomingUpdatedAt < lastAppliedCombatUpdatedAtRef.current) return
     const snapshot = JSON.stringify({ state, tokenIds: Array.from(validTokenIds).sort() })
     // equality 短路只在内容真正未变时触发，不压制更新的 apply（内容变 ⇒ snapshot 必不同）。
-    if (snapshot === lastSharedCombatSnapshot) return
-    lastSharedCombatSnapshot = snapshot
-    lastAppliedCombatId = incomingCombatId
-    lastAppliedCombatUpdatedAt = incomingUpdatedAt
+    if (snapshot === lastSharedCombatSnapshotRef.current) return
+    lastSharedCombatSnapshotRef.current = snapshot
+    lastAppliedCombatIdRef.current = incomingCombatId
+    lastAppliedCombatUpdatedAtRef.current = incomingUpdatedAt
     const combatChanged = incomingCombatId !== combatIdRef.current
     applyingSharedCombatRef.current = true
     combatIdRef.current = incomingCombatId
@@ -3037,12 +3035,12 @@ export default function MapsPage() {
       }
     }
 
-    if (doubleArrow && hit) useClassFeature(casterId, 'doubleArrow')
+    if (doubleArrow && hit) activateClassFeature(casterId, 'doubleArrow')
 
     if (caster) {
       const buffPatch: Partial<NonNullable<Character['combatBuffs']>> = {}
       if (caster.combatBuffs?.preciseStrikeReady && hit) {
-        useClassFeature(casterId, 'preciseStrike')
+        activateClassFeature(casterId, 'preciseStrike')
         buffPatch.preciseStrikeReady = undefined
       }
       if (caster.combatBuffs?.calmSpiritCritBonusPercent) {
@@ -3526,7 +3524,7 @@ export default function MapsPage() {
         const splash = Math.floor(total / 2)
         const behindTargets = findArmorPiercingTargets(casterToken, token, splash)
         if (behindTargets.length > 0 && splash > 0) {
-          useClassFeature(casterId, 'armorPiercingArrow')
+          activateClassFeature(casterId, 'armorPiercingArrow')
           for (const behind of behindTargets) {
             await applyDamageToToken(behind, splash, { caster })
           }
@@ -3544,7 +3542,7 @@ export default function MapsPage() {
 
     if (!opts?.skipUseSkill) {
       const waiveAp = !!attackTargeting.waiveAp || !!caster?.combatBuffs?.galeComboReady
-      useSkillStore(casterId, skill.id, waiveAp ? { waiveAp: true } : undefined)
+      invokeSkill(casterId, skill.id, waiveAp ? { waiveAp: true } : undefined)
       pushApLog(caster, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`, `目标 ${token.label}`)
       applySkillCooldownReduction(casterId, skill.id, selfCooldownReduction)
       if (waiveAp && caster?.combatBuffs?.galeComboReady) {
@@ -3636,7 +3634,7 @@ export default function MapsPage() {
     const perArrowSkill: CombatSkill = { ...skill, arrowShots: 1 }
     const perArrowDiceCount = Math.max(1, attackDamageDiceCount(perArrowSkill, false))
     const damageSides = isBasicShot(perArrowSkill) ? 8 : perArrowSkill.damageSides
-    useSkillStore(caster.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
+    invokeSkill(caster.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
     pushApLog(caster, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`, `${targets.length} 支箭`)
     if (waiveAp && caster.combatBuffs?.galeComboReady) {
       consumeGaleComboReady(caster.id, skill.name)
@@ -3923,7 +3921,7 @@ export default function MapsPage() {
     }
 
     const waiveAp = !!aoeTargeting.waiveAp || !!caster?.combatBuffs?.galeComboReady
-    useSkillStore(casterId, skill.id, waiveAp ? { waiveAp: true } : undefined)
+    invokeSkill(casterId, skill.id, waiveAp ? { waiveAp: true } : undefined)
     pushApLog(caster, waiveAp ? 0 : skill.apCost, `释放 ${skill.name}`, `${targets.length} 名目标，覆盖 ${cells.length} 格`)
     applySkillCooldownReduction(casterId, skill.id, selfCooldownReduction)
     if (waiveAp && caster?.combatBuffs?.galeComboReady) {
@@ -4117,7 +4115,7 @@ export default function MapsPage() {
       if (!spendAP(turnCharacter.id, 1)) return
       const target = chooseEnemyTokenByPrompt('追踪箭：给一个已带狩猎印记的目标额外 +1 层印记', (t) => (t.huntingMarkStacks ?? 0) > 0)
       if (!target || !activeMap) return
-      useClassFeature(turnCharacter.id, 'trackingArrow')
+      activateClassFeature(turnCharacter.id, 'trackingArrow')
       const nextStacks = Math.min(4, (target.huntingMarkStacks ?? 0) + 1)
       updateToken(activeMap.id, target.id, { huntingMarkStacks: nextStacks })
       if (nextStacks === 4) await triggerFinaleIfReady(turnCharacter, target)
@@ -4130,7 +4128,7 @@ export default function MapsPage() {
       if (!spendAP(turnCharacter.id, 1)) return
       const target = chooseEnemyTokenByPrompt('影遁之术：消耗目标 2 层狩猎印记，本回合对其攻击 +1D6', (t) => (t.huntingMarkStacks ?? 0) >= 2)
       if (!target || !activeMap) return
-      useClassFeature(turnCharacter.id, 'shadowVeil')
+      activateClassFeature(turnCharacter.id, 'shadowVeil')
       updateToken(activeMap.id, target.id, { huntingMarkStacks: Math.max(0, (target.huntingMarkStacks ?? 0) - 2) })
       updateChar(turnCharacter.id, {
         combatBuffs: { ...turnCharacter.combatBuffs, shadowVeilTargetId: target.id },
@@ -4185,7 +4183,7 @@ export default function MapsPage() {
       }
       if (ready && !spendAP(turnCharacter.id, 2)) return
       pushApLog(turnCharacter, 2, '激活曲终', '等待下一名敌对生物狩猎印记叠至 4 层')
-      useClassFeature(turnCharacter.id, 'finale')
+      activateClassFeature(turnCharacter.id, 'finale')
       updateChar(turnCharacter.id, {
         combatBuffs: { ...turnCharacter.combatBuffs, finaleReady: true },
       })
@@ -4379,7 +4377,7 @@ export default function MapsPage() {
       const pos = snapTokenToGridCenter(point.x, point.y, agileLeapToken, activeMap)
       if (!isWithinMovementRange(center, pos, feet, activeMap)) return
       updateToken(activeMap.id, agileLeapToken.id, pos)
-      useClassFeature(agileLeapChar.id, 'agileLeap')
+      activateClassFeature(agileLeapChar.id, 'agileLeap')
       pushApLog(agileLeapChar, 0, '灵巧跳跃移动', `移动至多 ${feet} 尺`)
       updateChar(agileLeapChar.id, {
         combatBuffs: { ...agileLeapChar.combatBuffs, agileLeapMoveFeet: undefined },
@@ -4579,7 +4577,7 @@ export default function MapsPage() {
       })
       setAoeRectRotation(0)
     } else {
-      useSkillStore(activeChar.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
+      invokeSkill(activeChar.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
       pushApLog(activeChar, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`)
       if (waiveAp) {
         consumeGaleComboReady(activeChar.id, skill.name)
@@ -5241,6 +5239,8 @@ export default function MapsPage() {
   ) => {
     if (!activeMap || !result.attacked || !result.targetTokenId) return
 
+    const liveMapId = activeMap.id
+    const getLiveTokens = () => useMapStore.getState().maps.find((m) => m.id === liveMapId)?.tokens ?? []
     const DEFAULT_AOE_SAVE_DC = 13
     let combatLabel = ''
     let d20Roll:
@@ -5256,8 +5256,10 @@ export default function MapsPage() {
     let damageRollTotal = result.attack?.total ?? 0
     let damageRollBonus = result.attack?.bonus ?? 0
     const enemyFeatureLabels: string[] = []
-    const enemyActorToken = activeMap.tokens.find((t) => t.id === result.attackerTokenId)
-    const enemyTargetToken = activeMap.tokens.find((t) => t.id === result.targetTokenId)
+    const { actorToken: enemyActorToken, targetToken: enemyTargetToken } = resolveEnemyAttackTokens(
+      getLiveTokens(),
+      result,
+    )
     const enemyResolutionSession = createCombatResolutionSessionForAction({
       actorToken: enemyActorToken,
       targetToken: enemyTargetToken,
@@ -5327,7 +5329,7 @@ export default function MapsPage() {
       }
       await runEnemyStage('beforeDamageRoll')
       let values = await rollEnemyBaseDamageDice()
-      const attackerToken = activeMap.tokens.find((t) => t.id === result.attackerTokenId)
+      const attackerToken = getLiveTokens().find((t) => t.id === result.attackerTokenId)
       const huntedByTargetRank = huntingMarkTraitRank(targetChar)
       if (
         attackerToken &&
@@ -5353,7 +5355,7 @@ export default function MapsPage() {
           attackerInput,
           characterToCombatInput(targetChar),
           'physical',
-          (activeMap.tokens.find((t) => t.id === result.targetTokenId)?.vulnerableTurns ?? 0) > 0, // [T4/C3]
+          (getLiveTokens().find((t) => t.id === result.targetTokenId)?.vulnerableTurns ?? 0) > 0, // [T4/C3]
         )
         rawDamage = adjusted.damage
         damageRollBonus = rawDamage - diceTotal
@@ -5371,7 +5373,7 @@ export default function MapsPage() {
       const updated = useCharacterStore.getState().characters.find((c) => c.id === charId)
       if (updated) {
         // [T10/AC1] 经唯一镜像 helper 把 currentHp 写回 token.hp，杜绝任何路径绕过。
-        updateToken(activeMap.id, result.targetTokenId!, characterHpTokenPatch(updated))
+        updateToken(liveMapId, result.targetTokenId!, characterHpTokenPatch(updated))
         if (updated.currentHp <= 0) {
           deferDeathHandling(result.targetTokenId!, charId)
         }
@@ -5392,7 +5394,7 @@ export default function MapsPage() {
             tone: 'violet',
           })
         ) {
-          useClassFeature(before.id, 'arcaneSurge')
+          activateClassFeature(before.id, 'arcaneSurge')
           updateChar(before.id, { currentHp: 1 })
           syncTargetHp(before.id)
           combatLabel = `${combatLabel ? `${combatLabel} · ` : ''}魔法浪涌：生命保留为 1`
@@ -5429,10 +5431,10 @@ export default function MapsPage() {
 
     const applyTokenDamage = (amount: number) => {
       if (!activeMap || !result.targetTokenId || amount <= 0) return
-      const target = activeMap.tokens.find((t) => t.id === result.targetTokenId)
+      const target = getLiveTokens().find((t) => t.id === result.targetTokenId)
       if (!target || target.maxHp == null) return
       const hp = Math.max(0, (target.hp ?? target.maxHp) - amount)
-      updateToken(activeMap.id, target.id, { hp })
+      updateToken(liveMapId, target.id, { hp })
       if (hp <= 0) deferDeathHandling(target.id)
     }
 
@@ -5532,12 +5534,12 @@ export default function MapsPage() {
           wantsDodge,
           () => {
             if (dodgeApAlreadySpent) return true
-            const spent = spendAP(targetChar.id, 1)
-            if (spent) {
-              const attackerName =
-                activeMap.tokens.find((t) => t.id === result.attackerTokenId)?.label ?? '敌人'
-              pushApLog(targetChar, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
-            }
+              const spent = spendAP(targetChar.id, 1)
+              if (spent) {
+                const attackerName =
+                getLiveTokens().find((t) => t.id === result.attackerTokenId)?.label ?? '敌人'
+                pushApLog(targetChar, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
+              }
             return spent
           },
           undefined,
@@ -6063,7 +6065,9 @@ export default function MapsPage() {
         // tick. raw=true keeps the loss exactly the configured constant.
         if (isDM) {
           const dot = dotDamageFor(t)
-          if (dot > 0) void applyDamageToToken(t, dot, { raw: true })
+          if (shouldApplyDotTick(t, useCharacterStore.getState().characters, dot)) {
+            void applyDamageToToken(t, dot, { raw: true })
+          }
         }
 
         if (t.burningTurns && t.burningTurns > 0) {
