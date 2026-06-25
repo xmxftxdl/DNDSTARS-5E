@@ -398,6 +398,69 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(2)
   })
 
+  it('resolves agile leap movement without AP cost through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 0,
+          combatBuffs: { agileLeapMoveFeet: 10 },
+          traits: [
+            {
+              id: 'agile-leap',
+              name: '灵巧跳跃',
+              level: 1,
+              uses: 1,
+              maxUses: 2,
+              description: '',
+              featureKey: 'agileLeap',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 1, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 315, y: 175 },
+      mode: 'agile-leap',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.combatBuffs?.agileLeapMoveFeet).toBeUndefined()
+    expect(hero.traits.find((trait) => trait.featureKey === 'agileLeap')?.uses).toBe(0)
+    expect(result.state.map.tokens.find((item) => item.id === 'hero-token')).toMatchObject({ x: 315, y: 175 })
+    expect(result.events.map((event) => event.type)).not.toContain('ap-spent')
+    expect(result.events.map((event) => event.type)).not.toContain('opportunity-triggered')
+  })
+
   it('rejects movement outside the actor speed and leaves state unchanged', () => {
     const before = state()
     const result = resolveHeadlessDmAction(before, {

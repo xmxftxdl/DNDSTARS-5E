@@ -14,7 +14,7 @@ import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from './
 import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
 import { tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
-import { resolveCombatMovement } from './combatMovementPipeline'
+import { resolveCombatMovement, type CombatMovementMode } from './combatMovementPipeline'
 import { triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
@@ -129,6 +129,7 @@ export interface HeadlessPlayerMoveAction {
   actorTokenId: string
   characterId: string
   targetPosition: { x: number; y: number }
+  mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap'>
 }
 
 export interface HeadlessPlayerAttackAction {
@@ -390,57 +391,84 @@ function resolveMove(
   action: HeadlessPlayerMoveAction,
   events: HeadlessCombatEvent[],
 ): HeadlessCombatResult {
+  const mode = action.mode ?? 'turn-move'
   const movement = resolveCombatMovement({
     map: state.map,
     characters: state.characters,
     actorTokenId: action.actorTokenId,
     characterId: action.characterId,
     targetPosition: action.targetPosition,
-    mode: 'turn-move',
+    mode,
     active: state.active,
     currentTurnTokenId: getCurrentTurn(state)?.tokenId,
   })
   if (!movement.ok) return fail(state, movement.reason, events)
   const actor = movement.actor
   if (!actor) return fail(state, 'invalid-actor', events)
-
-  if (movement.characterPatch?.currentAP != null) {
-    const before = actor.currentAP
-    updateCharacter(state, actor.id, (item) => {
-      const withAp = { ...item, currentAP: movement.characterPatch!.currentAP! }
-      if (!movement.triggersMoveEffects) return withAp
-      return {
-        ...withAp,
-        combatBuffs: {
-          ...triggerOutOfBreath(withAp, 'move'),
-          movedFeetThisTurn: Math.max(1, withAp.combatBuffs?.movedFeetThisTurn ?? 0),
-        },
-      }
-    })
-    events.push({
-      type: 'ap-spent',
-      tokenId: movement.token.id,
-      characterId: actor.id,
-      amount: movement.apCost,
-      before,
-      after: movement.characterPatch.currentAP,
-    })
+  if (mode === 'agile-leap') {
+    const trait = actor.traits.find((item) => item.featureKey === 'agileLeap')
+    if (!trait || trait.uses <= 0) return fail(state, 'invalid-skill', events)
   }
 
-  const opportunityAttackers = findOpportunityAttackersForMove({
-    map: state.map,
-    characters: state.characters,
-    movingToken: movement.token,
-    to: movement.to,
-    disengagedCharacterIds: new Set(state.disengagedCharacterIds ?? []),
-    enemyApByToken: state.enemyApByToken,
-  })
-  for (const attacker of opportunityAttackers) {
-    events.push({
-      type: 'opportunity-triggered',
-      attackerTokenId: attacker.id,
-      movingTokenId: movement.token.id,
+  if (movement.characterPatch) {
+    const before = actor.currentAP
+    updateCharacter(state, actor.id, (item) => {
+      let next: Character = {
+        ...item,
+        ...movement.characterPatch,
+        combatBuffs: movement.characterPatch?.combatBuffs
+          ? { ...item.combatBuffs, ...movement.characterPatch.combatBuffs }
+          : item.combatBuffs,
+      }
+      if (movement.triggersMoveEffects) {
+        next = {
+          ...next,
+          combatBuffs: {
+            ...triggerOutOfBreath(next, 'move'),
+            movedFeetThisTurn: Math.max(1, next.combatBuffs?.movedFeetThisTurn ?? 0),
+          },
+        }
+      }
+      if (mode === 'agile-leap') {
+        next = {
+          ...next,
+          traits: next.traits.map((trait) =>
+            trait.featureKey === 'agileLeap' ? { ...trait, uses: Math.max(0, trait.uses - 1) } : trait,
+          ),
+        }
+      }
+      return {
+        ...next,
+      }
     })
+    if (movement.apCost > 0 && movement.characterPatch.currentAP != null) {
+      events.push({
+        type: 'ap-spent',
+        tokenId: movement.token.id,
+        characterId: actor.id,
+        amount: movement.apCost,
+        before,
+        after: movement.characterPatch.currentAP,
+      })
+    }
+  }
+
+  if (mode === 'turn-move') {
+    const opportunityAttackers = findOpportunityAttackersForMove({
+      map: state.map,
+      characters: state.characters,
+      movingToken: movement.token,
+      to: movement.to,
+      disengagedCharacterIds: new Set(state.disengagedCharacterIds ?? []),
+      enemyApByToken: state.enemyApByToken,
+    })
+    for (const attacker of opportunityAttackers) {
+      events.push({
+        type: 'opportunity-triggered',
+        attackerTokenId: attacker.id,
+        movingTokenId: movement.token.id,
+      })
+    }
   }
 
   updateToken(state, movement.token.id, (item) => ({ ...item, ...movement.to }))
@@ -452,7 +480,10 @@ function resolveMove(
     feet: movement.feet,
     triggersMoveEffects: movement.triggersMoveEffects,
   })
-  events.push({ type: 'log', text: `${actor.name} 移动 ${movement.feet} 尺。` })
+  events.push({
+    type: 'log',
+    text: mode === 'agile-leap' ? `${actor.name} 灵巧跳跃移动 ${movement.feet} 尺。` : `${actor.name} 移动 ${movement.feet} 尺。`,
+  })
   return succeed(state, events)
 }
 

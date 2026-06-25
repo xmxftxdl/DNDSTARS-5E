@@ -121,7 +121,6 @@ import {
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
-import { resolveCombatMovement } from '../lib/combatMovementPipeline'
 import { findOpportunityAttackersForMove } from '../lib/opportunityAttacks'
 import {
   answerCombatInterrupt,
@@ -7418,44 +7417,34 @@ export default function MapsPage() {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const token = map.tokens.find((item) => item.id === action.actorTokenId)
-      const feet = actor?.combatBuffs?.agileLeapMoveFeet ?? 0
-      const trait = actor ? findClassTrait(actor, 'agileLeap') : undefined
-      if (!actor || !token || !action.targetPosition || feet <= 0 || !trait || trait.uses <= 0) {
+      if (!actor || !token || !action.targetPosition) {
         acknowledgePlayerAction(action, 'rejected', 'invalid-agile-leap')
         completePlayerActionRequest(action)
         return
       }
-      const movement = resolveCombatMovement({
-        map,
-        characters: useCharacterStore.getState().characters,
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'move-token',
         actorTokenId: action.actorTokenId,
         characterId: action.characterId,
         targetPosition: action.targetPosition,
         mode: 'agile-leap',
-        active: combatActiveRef.current,
       })
-      if (!movement.ok) {
+      if (!headless.ok) {
         acknowledgePlayerAction(
           action,
           'rejected',
-          movement.reason === 'movement-locked' ? 'no-move' : movement.reason,
+          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
         )
         completePlayerActionRequest(action)
         return
       }
-      updateToken(map.id, token.id, movement.to)
-      activateClassFeature(actor.id, 'agileLeap')
-      const latestActor = useCharacterStore.getState().characters.find((c) => c.id === actor.id) ?? actor
-      updateChar(actor.id, {
-        combatBuffs: {
-          ...latestActor.combatBuffs,
-          ...movement.characterPatch?.combatBuffs,
-          agileLeapMoveFeet: undefined,
-        },
-      })
-      pushApLog(actor, 0, '灵巧跳跃移动', `移动 ${movement.feet} 尺`)
+      applyHeadlessCombatResult(headless)
+      const moved = tokenMovedEvent(headless.events, token.id)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, movement.to)
+      acknowledgePlayerAction(action, 'accepted', undefined, moved?.to ?? { x: token.x, y: token.y })
       return
     }
 
