@@ -7121,7 +7121,7 @@ export default function MapsPage() {
       }
       updateToken(map.id, token.id, targetPosition)
       pushApLog(actor, 1, '移动', `${movedFeet} 尺`)
-      notifyCombatMove(actor.id)
+      if (moved?.triggersMoveEffects) notifyCombatMove(actor.id)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
       return

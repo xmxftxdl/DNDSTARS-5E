@@ -93,6 +93,7 @@ describe('combatMovementPipeline', () => {
     if (!result.ok) return
     expect(result.apCost).toBe(1)
     expect(result.feet).toBe(5)
+    expect(result.triggersMoveEffects).toBe(true)
     expect(result.characterPatch).toMatchObject({ currentAP: 1 })
     expect(result.to).toEqual({ x: 245, y: 175 })
   })
@@ -143,6 +144,7 @@ describe('combatMovementPipeline', () => {
     if (!result.ok) return
     expect(result.apCost).toBe(0)
     expect(result.feet).toBe(10)
+    expect(result.triggersMoveEffects).toBe(false)
     expect(result.characterPatch?.currentAP).toBeUndefined()
     expect(result.characterPatch?.combatBuffs?.agileLeapMoveFeet).toBeUndefined()
   })
@@ -162,6 +164,7 @@ describe('combatMovementPipeline', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.apCost).toBe(0)
+    expect(result.triggersMoveEffects).toBe(false)
     expect(result.to).toEqual({ x: 315, y: 175 })
   })
 })

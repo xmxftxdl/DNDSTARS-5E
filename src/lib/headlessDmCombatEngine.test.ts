@@ -170,6 +170,45 @@ describe('headless DM combat engine', () => {
     expect(result.events.map((event) => event.type)).toContain('token-moved')
   })
 
+  it('applies calm-mind movement effects when a validated move spends AP', () => {
+    const result = resolveHeadlessDmAction(
+      state({
+        characters: [
+          character({
+            combatBuffs: { calmMind: true },
+            traits: [
+              {
+                id: 'calm-mind',
+                name: 'Calm Mind',
+                level: 1,
+                uses: 0,
+                maxUses: 0,
+                description: '',
+                featureKey: 'calmMind',
+              },
+            ],
+          }),
+        ],
+      }),
+      {
+        type: 'move-token',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetPosition: { x: 245, y: 175 },
+      },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatBuffs?.calmMind).toBeUndefined()
+    expect(hero.combatBuffs?.outOfBreathTurns).toBe(2)
+    expect(hero.combatBuffs?.movedFeetThisTurn).toBe(1)
+    const moved = result.events.find((event) => event.type === 'token-moved')
+    expect(moved?.triggersMoveEffects).toBe(true)
+  })
+
   it('rejects movement outside the actor speed and leaves state unchanged', () => {
     const before = state()
     const result = resolveHeadlessDmAction(before, {

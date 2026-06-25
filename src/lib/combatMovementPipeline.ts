@@ -34,6 +34,7 @@ export interface CombatMovementSuccess {
   to: { x: number; y: number }
   feet: number
   apCost: number
+  triggersMoveEffects: boolean
   characterPatch?: Partial<Character>
 }
 
@@ -86,6 +87,7 @@ export function resolveCombatMovement(request: CombatMovementRequest): CombatMov
       to,
       feet,
       apCost: 0,
+      triggersMoveEffects: false,
     }
   }
 
@@ -107,6 +109,7 @@ export function resolveCombatMovement(request: CombatMovementRequest): CombatMov
       to,
       feet,
       apCost: 0,
+      triggersMoveEffects: false,
       characterPatch: {
         combatBuffs: { ...actor.combatBuffs, agileLeapMoveFeet: undefined },
       },
@@ -124,6 +127,7 @@ export function resolveCombatMovement(request: CombatMovementRequest): CombatMov
     to,
     feet,
     apCost: 1,
+    triggersMoveEffects: true,
     characterPatch: { currentAP: actor.currentAP - 1 },
   }
 }

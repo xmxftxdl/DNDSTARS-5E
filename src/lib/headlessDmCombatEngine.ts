@@ -13,6 +13,7 @@ import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
 import { tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
 import { resolveCombatMovement } from './combatMovementPipeline'
+import { triggerOutOfBreath } from './calmMind'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -33,7 +34,14 @@ export type HeadlessCombatEvent =
   | { type: 'ap-spent'; tokenId: string; characterId?: string; amount: number; before: number; after: number }
   | { type: 'dice-rolled'; notation: string; values: number[]; total: number }
   | { type: 'damage-applied'; targetTokenId: string; characterId?: string; amount: number; hpBefore: number; hpAfter: number }
-  | { type: 'token-moved'; tokenId: string; from: { x: number; y: number }; to: { x: number; y: number }; feet: number }
+  | {
+      type: 'token-moved'
+      tokenId: string
+      from: { x: number; y: number }
+      to: { x: number; y: number }
+      feet: number
+      triggersMoveEffects: boolean
+    }
   | { type: 'turn-advanced'; round: number; initiativeIndex: number; tokenId?: string }
   | { type: 'combat-ended'; winner: 'ally' | 'enemy'; message: string }
   | { type: 'status-added'; targetTokenId: string; characterId?: string; condition: string; turns?: number }
@@ -281,7 +289,17 @@ function resolveMove(
 
   if (movement.characterPatch?.currentAP != null) {
     const before = actor.currentAP
-    updateCharacter(state, actor.id, (item) => ({ ...item, currentAP: movement.characterPatch!.currentAP! }))
+    updateCharacter(state, actor.id, (item) => {
+      const withAp = { ...item, currentAP: movement.characterPatch!.currentAP! }
+      if (!movement.triggersMoveEffects) return withAp
+      return {
+        ...withAp,
+        combatBuffs: {
+          ...triggerOutOfBreath(withAp, 'move'),
+          movedFeetThisTurn: Math.max(1, withAp.combatBuffs?.movedFeetThisTurn ?? 0),
+        },
+      }
+    })
     events.push({
       type: 'ap-spent',
       tokenId: movement.token.id,
@@ -299,6 +317,7 @@ function resolveMove(
     from: movement.from,
     to: movement.to,
     feet: movement.feet,
+    triggersMoveEffects: movement.triggersMoveEffects,
   })
   events.push({ type: 'log', text: `${actor.name} 移动 ${movement.feet} 尺。` })
   return succeed(state, events)
