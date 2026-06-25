@@ -122,6 +122,7 @@ import {
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import { resolveCombatMovement } from '../lib/combatMovementPipeline'
+import { findOpportunityAttackersForMove } from '../lib/opportunityAttacks'
 import {
   answerCombatInterrupt,
   COMBAT_INTERRUPT_RESOURCE,
@@ -4579,9 +4580,6 @@ export default function MapsPage() {
     }
   }
 
-  const areOpposedTokens = (a: Token, b: Token) =>
-    (a.type === 'player' && b.type === 'enemy') || (a.type === 'enemy' && b.type === 'player')
-
   const getEnemyApState = (tokenId: string) =>
     enemyApByTokenRef.current[tokenId] ?? { current: 2, max: 2 }
 
@@ -4600,23 +4598,15 @@ export default function MapsPage() {
     to: { x: number; y: number },
     movingChar?: Character,
   ) => {
-    if (!activeMap || (movingChar && disengagedCharIds.has(movingChar.id))) return [] as Token[]
-    const fromCell = pixelToCell(movingToken.x, movingToken.y, activeMap)
-    const toCell = pixelToCell(to.x, to.y, activeMap)
-    return activeMap.tokens.filter((t) => {
-      if (t.id === movingToken.id || !areOpposedTokens(t, movingToken)) return false
-      if (!isTokenAlive(t, useCharacterStore.getState().characters)) return false
-      if (t.characterId) {
-        const attacker = useCharacterStore.getState().characters.find((c) => c.id === t.characterId)
-        if (!attacker || attacker.currentAP < 1 || attacker.currentHp <= 0) return false
-      } else if (t.type === 'enemy') {
-        const ap = getEnemyApState(t.id)
-        if (ap.current < 1) return false
-      } else {
-        return false
-      }
-      const attackerCell = pixelToCell(t.x, t.y, activeMap)
-      return cellDistance(attackerCell, fromCell) <= 1 && cellDistance(attackerCell, toCell) > 1
+    if (!activeMap) return [] as Token[]
+    const disengagedIds = movingChar ? disengagedCharIds : undefined
+    return findOpportunityAttackersForMove({
+      map: activeMap,
+      characters: useCharacterStore.getState().characters,
+      movingToken,
+      to,
+      disengagedCharacterIds: disengagedIds,
+      enemyApByToken: enemyApByTokenRef.current,
     })
   }
 
