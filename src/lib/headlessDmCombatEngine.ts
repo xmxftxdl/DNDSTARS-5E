@@ -54,6 +54,24 @@ export type HeadlessCombatEvent =
   | { type: 'status-added'; targetTokenId: string; characterId?: string; condition: string; turns?: number }
   | { type: 'opportunity-triggered'; attackerTokenId: string; movingTokenId: string }
   | {
+      type: 'attack-resolved'
+      actorTokenId: string
+      characterId: string
+      targetTokenId: string
+      skillId: string
+      skillName: string
+      damageValues: number[]
+      diceTotal: number
+      baseDamage: number
+      damageBeforeDefense: number
+      modifier: number
+      diff: number
+      total: number
+      isCrit: boolean
+      waivedAp: boolean
+      apCost: number
+    }
+  | {
       type: 'opportunity-resolved'
       attackerTokenId: string
       targetTokenId: string
@@ -423,6 +441,24 @@ function resolvePlayerAttack(
   markSkillUsed(state, actor.id, skill.id)
   if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
   applyStatusOnHit(state, targetToken, skill, events)
+  events.push({
+    type: 'attack-resolved',
+    actorTokenId: actorToken.id,
+    characterId: actor.id,
+    targetTokenId: targetToken.id,
+    skillId: skill.id,
+    skillName: skill.name,
+    damageValues: diceValues,
+    diceTotal: diceValues.reduce((sum, value) => sum + value, 0),
+    baseDamage,
+    damageBeforeDefense: baseDamage,
+    modifier: adjusted.modifier,
+    diff: adjusted.diff,
+    total: adjusted.damage,
+    isCrit: !!action.isCrit,
+    waivedAp: waiveAp,
+    apCost,
+  })
   events.push({
     type: 'log',
     text: `${actor.name} 使用 ${skill.name} 攻击 ${targetToken.label}：骰值 ${diceValues.join('+')}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,

@@ -118,6 +118,7 @@ import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
   resolveHeadlessDmAction,
   type HeadlessCombatEvent,
+  type HeadlessCombatResult,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import { resolveCombatMovement } from '../lib/combatMovementPipeline'
@@ -6920,6 +6921,39 @@ export default function MapsPage() {
     disengagedCharacterIds: [...disengagedCharIds],
   })
 
+  const applyHeadlessCombatResult = (result: HeadlessCombatResult) => {
+    if (!result.ok) return
+    const currentCharacters = useCharacterStore.getState().characters
+    const currentCharactersById = new Map(currentCharacters.map((character) => [character.id, character]))
+    for (const nextCharacter of result.state.characters) {
+      const currentCharacter = currentCharactersById.get(nextCharacter.id)
+      if (!currentCharacter || JSON.stringify(currentCharacter) !== JSON.stringify(nextCharacter)) {
+        updateChar(nextCharacter.id, nextCharacter)
+      }
+    }
+
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === result.state.map.id)
+    const currentTokensById = new Map((latestMap?.tokens ?? []).map((token) => [token.id, token]))
+    for (const nextToken of result.state.map.tokens) {
+      const currentToken = currentTokensById.get(nextToken.id)
+      if (!currentToken || JSON.stringify(currentToken) !== JSON.stringify(nextToken)) {
+        updateToken(result.state.map.id, nextToken.id, nextToken)
+      }
+    }
+
+    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(result.state.enemyApByToken)) {
+      enemyApByTokenRef.current = result.state.enemyApByToken
+      setEnemyApByToken(result.state.enemyApByToken)
+      publishCombatState({ enemyApByToken: result.state.enemyApByToken })
+    }
+
+    for (const event of result.events) {
+      if (event.type === 'damage-applied' && event.hpAfter <= 0) {
+        deferDeathHandling(event.targetTokenId, event.characterId)
+      }
+    }
+  }
+
   const tokenMovedEvent = (
     events: HeadlessCombatEvent[],
     tokenId: string,
@@ -6937,6 +6971,68 @@ export default function MapsPage() {
       (event): event is Extract<HeadlessCombatEvent, { type: 'opportunity-triggered' }> =>
         event.type === 'opportunity-triggered' && event.movingTokenId === movingTokenId,
     )
+
+  const attackResolvedEvent = (
+    events: HeadlessCombatEvent[],
+  ): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
+    events.find((event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> => event.type === 'attack-resolved')
+
+  const shouldEnemyConsiderDodge = (target: Token, attacker: Character, skill: CombatSkill) => {
+    if (!combatActiveRef.current || target.type !== 'enemy') return false
+    const ap = getEnemyApState(target.id)
+    if (ap.current < 1) return false
+    const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
+    const attackBonus = getEffectiveAbilityMod(attacker, attackAbility) + proficiencyBonus(attacker.level)
+    const targetAc = getTokenTargetAc(target) ?? 12
+    const diceCount = attackDamageDiceCount(skill, false)
+    const estimatedDamage = diceCount * ((skill.damageSides + 1) / 2) + (skill.damageBonus ?? 0)
+    return decideDodge({
+      currentAp: ap.current,
+      currentHp: target.hp ?? target.maxHp ?? 1,
+      maxHp: target.maxHp ?? target.hp ?? 1,
+      targetAc,
+      incomingAttackBonus: attackBonus,
+      estimatedDamage,
+    }).shouldDodge
+  }
+
+  const canResolveSingleAttackWithHeadless = (
+    actor: Character,
+    skill: CombatSkill,
+    target: Token,
+    opts: { doubleArrow: boolean; targetCount: number },
+  ) => {
+    if (!isBasicShot(skill) || opts.targetCount !== 1 || opts.doubleArrow) return false
+    if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
+    if (getSkillAoeTargeting(skill)) return false
+    if (target.type === 'enemy' && shouldEnemyConsiderDodge(target, actor, skill)) return false
+    if (isOutOfBreath(actor)) return false
+    const buffs = actor.combatBuffs
+    if (
+      buffs?.preciseStrikeReady ||
+      buffs?.calmSpiritCritBonusPercent ||
+      buffs?.doubleArrowReady ||
+      buffs?.shadowVeilTargetId ||
+      buffs?.burstKickExtraD6 ||
+      buffs?.windKickTreatKnockbackTargetId
+    ) {
+      return false
+    }
+    const unsupportedTraitKeys = new Set([
+      'animalMastery',
+      'arcaneDevour',
+      'armorPiercing',
+      'calmMind',
+      'comboFist',
+      'explosiveArrow',
+      'huntingCombo',
+      'huntingMark',
+      'piercingInsight',
+      'silentDraw',
+      'takeoff',
+    ])
+    return !actor.traits.some((trait) => trait.featureKey && unsupportedTraitKeys.has(trait.featureKey))
+  }
 
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
     if (!isDM || !activeMap || action.mapId !== activeMap.id || action.status !== 'pending') return
@@ -7133,6 +7229,56 @@ export default function MapsPage() {
         (action.targetTokenIds?.length && skill.skillTreeId === 'rageShot')
       if (isArrowSequence) {
         await resolveArrowSequenceAttack(actor, skill, targets, { waiveAp })
+        completePlayerActionRequest(action)
+        acknowledgePlayerAction(action, 'accepted')
+        return
+      }
+      if (canResolveSingleAttackWithHeadless(actor, skill, targets[0], { doubleArrow, targetCount: targets.length })) {
+        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
+        const targetToken = map.tokens.find((token) => token.id === targets[0].id) ?? targets[0]
+        if (actorToken && isBasicShot(skill)) {
+          launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, { x: targetToken.x, y: targetToken.y })
+        }
+        const diceValues = await rollDiceBoxValues(skill.damageCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+          type: 'attack-token',
+          actorTokenId: action.actorTokenId,
+          characterId: action.characterId,
+          targetTokenId: targetToken.id,
+          skillId: skill.id,
+          diceValues,
+        })
+        if (!headless.ok) {
+          acknowledgePlayerAction(action, 'rejected', headless.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        const resolved = attackResolvedEvent(headless.events)
+        if (!resolved) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-attack')
+          completePlayerActionRequest(action)
+          return
+        }
+        applyHeadlessCombatResult(headless)
+        pushApLog(actor, resolved.waivedAp ? 0 : resolved.apCost, `使用 ${skill.name}`, `目标 ${targetToken.label}`)
+        const formula = `${resolved.damageValues.join(' + ')}${
+          skill.damageBonus ? ` + ${skill.damageBonus}` : ''
+        } = ${resolved.damageBeforeDefense}，攻防修正${resolved.modifier >= 0 ? '+' : '-'}${Math.abs(resolved.modifier)}（差值${
+          resolved.diff
+        }），最终 ${resolved.total}`
+        const rollForDisplay: DiceRoll = {
+          values: resolved.damageValues,
+          sides: skill.damageSides,
+          bonus: resolved.total - resolved.diceTotal,
+          total: resolved.total,
+          label: `${skill.name} · headless DM`,
+          formula,
+          targetName: targetToken.label,
+        }
+        setRoll(rollForDisplay)
+        publishSharedDiceRoll(rollForDisplay)
+        pushCombatLog(`${actor.name} 使用 ${skill.name} → ${targetToken.label}：伤害 ${formula}`, 'damage')
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return

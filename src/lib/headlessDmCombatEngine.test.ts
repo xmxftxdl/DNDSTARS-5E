@@ -329,6 +329,13 @@ describe('headless DM combat engine', () => {
     expect(dragon?.hp).toBeLessThan(52)
     expect(result.events.some((event) => event.type === 'dice-rolled' && event.total === 8)).toBe(true)
     expect(result.events.some((event) => event.type === 'damage-applied' && event.targetTokenId === 'dragon')).toBe(true)
+    expect(result.events.find((event) => event.type === 'attack-resolved')).toMatchObject({
+      type: 'attack-resolved',
+      actorTokenId: 'hero-token',
+      targetTokenId: 'dragon',
+      skillId: 'basic-shot',
+      damageValues: [8],
+    })
   })
 
   it('rejects player attacks that are not on the current initiative actor', () => {
