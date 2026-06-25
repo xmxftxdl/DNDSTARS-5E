@@ -23,6 +23,7 @@ import { proficiencyBonus } from './dnd'
 import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
+import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -55,6 +56,18 @@ export type HeadlessCombatEvent =
   | { type: 'turn-advanced'; round: number; initiativeIndex: number; tokenId?: string }
   | { type: 'combat-ended'; winner: 'ally' | 'enemy'; message: string }
   | { type: 'status-added'; targetTokenId: string; characterId?: string; condition: string; turns?: number }
+  | {
+      type: 'status-save-resolved'
+      actorTokenId: string
+      targetTokenId: string
+      condition: string
+      ability: 'con'
+      d20Value: number
+      saveMod: number
+      total: number
+      dc: number
+      success: boolean
+    }
   | { type: 'opportunity-triggered'; attackerTokenId: string; movingTokenId: string }
   | {
       type: 'attack-resolved'
@@ -214,11 +227,14 @@ export interface HeadlessAoeAttackAction {
   saveMode?: 'half' | 'none' | 'fail-half'
   knockbackOnFailedSave?: boolean
   knockbackTurns?: number
+  stunOnFailedConSave?: boolean
+  stunTurns?: number
 }
 
 export interface HeadlessAoeTargetPacket {
   targetTokenId: string
   saveD20?: number
+  stunSaveD20?: number
 }
 
 export interface HeadlessOpportunityAttackAction {
@@ -866,6 +882,30 @@ function resolveAoeAttack(
     if (action.knockbackOnFailedSave && saveSuccess === false) {
       applyKnockbackToTarget(state, targetToken, action.knockbackTurns ?? KNOCKBACK_DEFAULT_TURNS, events)
     }
+    if (action.stunOnFailedConSave && packet.stunSaveD20 != null) {
+      const stunValues = resolveDiceValues([packet.stunSaveD20], dice, 1, 20)
+      if (!stunValues) return fail(state, 'invalid-dice', events)
+      const stunD20 = stunValues[0]
+      const stunMod = getTokenAbilityMod(targetToken, 'con', targetCharacter)
+      const stunTotal = stunD20 + stunMod
+      const stunSuccess = stunTotal >= actor.saveDC
+      events.push({ type: 'dice-rolled', notation: '1d20', values: [stunD20], total: stunD20 })
+      events.push({
+        type: 'status-save-resolved',
+        actorTokenId: actorToken.id,
+        targetTokenId: targetToken.id,
+        condition: STUN_STATUS_LABEL,
+        ability: 'con',
+        d20Value: stunD20,
+        saveMod: stunMod,
+        total: stunTotal,
+        dc: actor.saveDC,
+        success: stunSuccess,
+      })
+      if (!stunSuccess) {
+        applyStunToTarget(state, targetToken, action.stunTurns ?? STUN_DEFAULT_TURNS, events)
+      }
+    }
     events.push({
       type: 'aoe-target-resolved',
       actorTokenId: actorToken.id,
@@ -1333,6 +1373,32 @@ function applyKnockbackToTarget(
     targetTokenId: targetToken.id,
     characterId: targetToken.characterId,
     condition: KNOCKBACK_STATUS_LABEL,
+    turns: nextTurns,
+  })
+}
+
+function applyStunToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(STUN_DEFAULT_TURNS, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, STUN_STATUS_LABEL])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    stunTurns: Math.max(token.stunTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: STUN_STATUS_LABEL,
     turns: nextTurns,
   })
 }

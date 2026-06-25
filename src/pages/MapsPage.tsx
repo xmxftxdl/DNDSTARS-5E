@@ -7523,7 +7523,8 @@ export default function MapsPage() {
       if (
         skill.skillTreeId === 'arrowStorm' ||
         skill.skillTreeId === 'aerialCombo' ||
-        skill.skillTreeId === 'whirlwindKick'
+        skill.skillTreeId === 'whirlwindKick' ||
+        skill.skillTreeId === 'focusShot'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
@@ -7538,6 +7539,9 @@ export default function MapsPage() {
           acknowledgePlayerAction(action, 'rejected', 'out-of-range')
           completePlayerActionRequest(action)
           return
+        }
+        if (skill.skillTreeId === 'focusShot') {
+          launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, cellToPixel(anchorCell, map), 'focus')
         }
         const cells = cellsForAoe(
           aoe,
@@ -7562,13 +7566,19 @@ export default function MapsPage() {
           const extra = await rollDiceBoxValues(calm.level, 6, `${skill.name} 静心额外伤害`, targets[0].label)
           diceValues = [...diceValues, ...extra]
         }
+        const shouldStun =
+          skill.skillTreeId === 'focusShot' &&
+          skillGrantsStun(skill.skillTreeId, getSkillRank(actor, skill.skillTreeId))
         const targetPackets = []
         for (const target of targets) {
           const targetChar = target.characterId
             ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
             : undefined
           const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar?.name ?? target.label)
-          targetPackets.push({ targetTokenId: target.id, saveD20 })
+          const stunSaveD20 = shouldStun
+            ? await rollDiceBoxD20('浣撹川璞佸厤 D20', targetChar?.name ?? target.label)
+            : undefined
+          targetPackets.push({ targetTokenId: target.id, saveD20, stunSaveD20 })
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'aoe-attack',
@@ -7576,9 +7586,11 @@ export default function MapsPage() {
           characterId: action.characterId,
           skillId: skill.id,
           diceValues,
-          saveMode: 'half',
+          saveMode: skill.skillTreeId === 'focusShot' ? 'fail-half' : 'half',
           knockbackOnFailedSave: skill.skillTreeId === 'whirlwindKick',
           knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
+          stunOnFailedConSave: shouldStun,
+          stunTurns: STUN_DEFAULT_TURNS,
           cellCount: cells.length,
           targetPackets,
         })
