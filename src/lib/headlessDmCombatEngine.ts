@@ -14,6 +14,7 @@ import { tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
 import { resolveCombatMovement } from './combatMovementPipeline'
 import { triggerOutOfBreath } from './calmMind'
+import { findOpportunityAttackersForMove } from './opportunityAttacks'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -28,6 +29,7 @@ export interface HeadlessDmCombatState {
   initiativeIndex: number
   initiativeOrder: InitiativeEntry[]
   enemyApByToken: Record<string, HeadlessEnemyApState>
+  disengagedCharacterIds?: string[]
 }
 
 export type HeadlessCombatEvent =
@@ -45,6 +47,7 @@ export type HeadlessCombatEvent =
   | { type: 'turn-advanced'; round: number; initiativeIndex: number; tokenId?: string }
   | { type: 'combat-ended'; winner: 'ally' | 'enemy'; message: string }
   | { type: 'status-added'; targetTokenId: string; characterId?: string; condition: string; turns?: number }
+  | { type: 'opportunity-triggered'; attackerTokenId: string; movingTokenId: string }
   | { type: 'log'; text: string }
 
 export interface HeadlessPlayerMoveAction {
@@ -307,6 +310,22 @@ function resolveMove(
       amount: movement.apCost,
       before,
       after: movement.characterPatch.currentAP,
+    })
+  }
+
+  const opportunityAttackers = findOpportunityAttackersForMove({
+    map: state.map,
+    characters: state.characters,
+    movingToken: movement.token,
+    to: movement.to,
+    disengagedCharacterIds: new Set(state.disengagedCharacterIds ?? []),
+    enemyApByToken: state.enemyApByToken,
+  })
+  for (const attacker of opportunityAttackers) {
+    events.push({
+      type: 'opportunity-triggered',
+      attackerTokenId: attacker.id,
+      movingTokenId: movement.token.id,
     })
   }
 

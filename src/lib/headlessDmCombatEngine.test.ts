@@ -170,6 +170,89 @@ describe('headless DM combat engine', () => {
     expect(result.events.map((event) => event.type)).toContain('token-moved')
   })
 
+  it('emits opportunity trigger events when validated movement leaves enemy reach', () => {
+    const combat = state({
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 1, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 385, y: 175 },
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual({
+      type: 'opportunity-triggered',
+      attackerTokenId: 'goblin',
+      movingTokenId: 'hero-token',
+    })
+  })
+
+  it('does not emit opportunity triggers for disengaged movers', () => {
+    const combat = state({
+      disengagedCharacterIds: ['hero'],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 1, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 385, y: 175 },
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events.some((event) => event.type === 'opportunity-triggered')).toBe(false)
+  })
+
   it('applies calm-mind movement effects when a validated move spends AP', () => {
     const result = resolveHeadlessDmAction(
       state({
