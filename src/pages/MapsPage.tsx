@@ -121,6 +121,7 @@ import {
   type HeadlessCombatEvent,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
+import { resolveCombatMovement } from '../lib/combatMovementPipeline'
 import {
   answerCombatInterrupt,
   COMBAT_INTERRUPT_RESOURCE,
@@ -7030,36 +7031,42 @@ export default function MapsPage() {
       const token = map.tokens.find((item) => item.id === action.actorTokenId)
       const feet = actor?.combatBuffs?.agileLeapMoveFeet ?? 0
       const trait = actor ? findClassTrait(actor, 'agileLeap') : undefined
-      if (
-        !actor ||
-        !token ||
-        token.type !== 'player' ||
-        token.characterId !== actor.id ||
-        !action.targetPosition ||
-        feet <= 0 ||
-        !trait ||
-        trait.uses <= 0 ||
-        !isTokenAlive(token, useCharacterStore.getState().characters)
-      ) {
+      if (!actor || !token || !action.targetPosition || feet <= 0 || !trait || trait.uses <= 0) {
         acknowledgePlayerAction(action, 'rejected', 'invalid-agile-leap')
         completePlayerActionRequest(action)
         return
       }
-      const targetPosition = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
-      if (!isWithinMovementRange({ x: token.x, y: token.y }, targetPosition, feet, map)) {
-        acknowledgePlayerAction(action, 'rejected', 'out-of-range')
+      const movement = resolveCombatMovement({
+        map,
+        characters: useCharacterStore.getState().characters,
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        targetPosition: action.targetPosition,
+        mode: 'agile-leap',
+        active: combatActiveRef.current,
+      })
+      if (!movement.ok) {
+        acknowledgePlayerAction(
+          action,
+          'rejected',
+          movement.reason === 'movement-locked' ? 'no-move' : movement.reason,
+        )
         completePlayerActionRequest(action)
         return
       }
-      updateToken(map.id, token.id, targetPosition)
+      updateToken(map.id, token.id, movement.to)
       activateClassFeature(actor.id, 'agileLeap')
       const latestActor = useCharacterStore.getState().characters.find((c) => c.id === actor.id) ?? actor
       updateChar(actor.id, {
-        combatBuffs: { ...latestActor.combatBuffs, agileLeapMoveFeet: undefined },
+        combatBuffs: {
+          ...latestActor.combatBuffs,
+          ...movement.characterPatch?.combatBuffs,
+          agileLeapMoveFeet: undefined,
+        },
       })
-      pushApLog(actor, 0, '灵巧跳跃移动', `移动至多 ${feet} 尺`)
+      pushApLog(actor, 0, '灵巧跳跃移动', `移动 ${movement.feet} 尺`)
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
+      acknowledgePlayerAction(action, 'accepted', undefined, movement.to)
       return
     }
 

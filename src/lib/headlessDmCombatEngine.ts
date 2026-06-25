@@ -10,15 +10,9 @@ import {
 } from './combatStats'
 import { adjustDamageAgainstToken, enemyCombatInput } from './enemyCombatStats'
 import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
-import {
-  cellDistance,
-  isWithinMovementRange,
-  pixelToCell,
-  snapTokenToGridCenter,
-  tokenFootprintDistanceCells,
-} from './gridCombat'
-import { isMovementLocked } from './combatStatus'
+import { tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
+import { resolveCombatMovement } from './combatMovementPipeline'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -271,26 +265,42 @@ function resolveMove(
   action: HeadlessPlayerMoveAction,
   events: HeadlessCombatEvent[],
 ): HeadlessCombatResult {
-  const actor = findCharacter(state, action.characterId)
-  const token = state.map.tokens.find((item) => item.id === action.actorTokenId)
-  if (!actor || !token || token.type !== 'player' || token.characterId !== actor.id || !isTokenAlive(token, state.characters)) {
-    return fail(state, 'invalid-actor', events)
-  }
-  if (isMovementLocked(actor.conditions)) return fail(state, 'movement-locked', events)
+  const movement = resolveCombatMovement({
+    map: state.map,
+    characters: state.characters,
+    actorTokenId: action.actorTokenId,
+    characterId: action.characterId,
+    targetPosition: action.targetPosition,
+    mode: 'turn-move',
+    active: state.active,
+    currentTurnTokenId: getCurrentTurn(state)?.tokenId,
+  })
+  if (!movement.ok) return fail(state, movement.reason, events)
+  const actor = movement.actor
+  if (!actor) return fail(state, 'invalid-actor', events)
 
-  const target = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, state.map)
-  if (!isWithinMovementRange({ x: token.x, y: token.y }, target, actor.speed, state.map)) {
-    return fail(state, 'out-of-range', events)
+  if (movement.characterPatch?.currentAP != null) {
+    const before = actor.currentAP
+    updateCharacter(state, actor.id, (item) => ({ ...item, currentAP: movement.characterPatch!.currentAP! }))
+    events.push({
+      type: 'ap-spent',
+      tokenId: movement.token.id,
+      characterId: actor.id,
+      amount: movement.apCost,
+      before,
+      after: movement.characterPatch.currentAP,
+    })
   }
-  if (!spendCharacterAp(state, actor.id, 1, token.id, events)) return fail(state, 'insufficient-ap', events)
 
-  const from = { x: token.x, y: token.y }
-  const fromCell = pixelToCell(token.x, token.y, state.map)
-  const toCell = pixelToCell(target.x, target.y, state.map)
-  const feet = cellDistance(fromCell, toCell) * (state.map.feetPerCell ?? 5)
-  updateToken(state, token.id, (item) => ({ ...item, ...target }))
-  events.push({ type: 'token-moved', tokenId: token.id, from, to: target, feet })
-  events.push({ type: 'log', text: `${actor.name} 移动 ${feet} 尺。` })
+  updateToken(state, movement.token.id, (item) => ({ ...item, ...movement.to }))
+  events.push({
+    type: 'token-moved',
+    tokenId: movement.token.id,
+    from: movement.from,
+    to: movement.to,
+    feet: movement.feet,
+  })
+  events.push({ type: 'log', text: `${actor.name} 移动 ${movement.feet} 尺。` })
   return succeed(state, events)
 }
 
