@@ -7524,7 +7524,9 @@ export default function MapsPage() {
         skill.skillTreeId === 'arrowStorm' ||
         skill.skillTreeId === 'aerialCombo' ||
         skill.skillTreeId === 'whirlwindKick' ||
-        skill.skillTreeId === 'focusShot'
+        skill.skillTreeId === 'focusShot' ||
+        skill.skillTreeId === 'spiralBlade' ||
+        skill.skillTreeId === 'windTraceShot'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
@@ -7566,14 +7568,34 @@ export default function MapsPage() {
           const extra = await rollDiceBoxValues(calm.level, 6, `${skill.name} 静心额外伤害`, targets[0].label)
           diceValues = [...diceValues, ...extra]
         }
+        const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+        const windExtra = windTraceExtraDiceCount(skill.skillTreeId, skillRank, actor, targets[0], targets.length)
+        if (windExtra > 0) {
+          const extra = await rollDiceBoxValues(windExtra, 6, `${skill.name} 棰濆浼ゅ`, targets[0].label)
+          diceValues = [...diceValues, ...extra]
+        }
+        const saveMode =
+          skill.skillTreeId === 'focusShot'
+            ? 'fail-half'
+            : skill.skillTreeId === 'spiralBlade'
+              ? 'none'
+              : skill.skillTreeId === 'windTraceShot'
+                ? undefined
+                : 'half'
+        const selfCooldownReduction =
+          skill.skillTreeId === 'windTraceShot' && skillRank >= 4 && isCalmMindActive(actor) ? 1 : 0
         const shouldStun =
           skill.skillTreeId === 'focusShot' &&
-          skillGrantsStun(skill.skillTreeId, getSkillRank(actor, skill.skillTreeId))
+          skillGrantsStun(skill.skillTreeId, skillRank)
         const targetPackets = []
         for (const target of targets) {
           const targetChar = target.characterId
             ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
             : undefined
+          if (!saveMode) {
+            targetPackets.push({ targetTokenId: target.id, saveD20: undefined, stunSaveD20: undefined })
+            continue
+          }
           const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar?.name ?? target.label)
           const stunSaveD20 = shouldStun
             ? await rollDiceBoxD20('浣撹川璞佸厤 D20', targetChar?.name ?? target.label)
@@ -7586,11 +7608,12 @@ export default function MapsPage() {
           characterId: action.characterId,
           skillId: skill.id,
           diceValues,
-          saveMode: skill.skillTreeId === 'focusShot' ? 'fail-half' : 'half',
+          saveMode,
           knockbackOnFailedSave: skill.skillTreeId === 'whirlwindKick',
           knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
           stunOnFailedConSave: shouldStun,
           stunTurns: STUN_DEFAULT_TURNS,
+          selfCooldownReduction,
           cellCount: cells.length,
           targetPackets,
         })

@@ -888,6 +888,128 @@ describe('headless DM combat engine', () => {
     )
   })
 
+  it('supports spiral blade no-damage dex saves in AOE packets', () => {
+    const spiralBlade = skill({
+      id: 'spiral-blade',
+      name: '螺旋刀刃',
+      skillTreeId: 'spiralBlade',
+      tags: ['melee'],
+      damageCount: 2,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ saveDC: 12, combatSkills: [skill(), spiralBlade] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin-a',
+          label: 'Goblin A',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 245,
+          y: 175,
+        }),
+        token({
+          id: 'goblin-b',
+          label: 'Goblin B',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 175,
+          y: 245,
+        }),
+      ]),
+      enemyApByToken: { 'goblin-a': { current: 0, max: 2 }, 'goblin-b': { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'spiral-blade',
+      diceValues: [6, 6],
+      saveMode: 'none',
+      targetPackets: [
+        { targetTokenId: 'goblin-a', saveD20: 1 },
+        { targetTokenId: 'goblin-b', saveD20: 20 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const failedTarget = result.state.map.tokens.find((item) => item.id === 'goblin-a')
+    const savedTarget = result.state.map.tokens.find((item) => item.id === 'goblin-b')
+    expect(failedTarget?.hp).toBeLessThan(20)
+    expect(savedTarget?.hp).toBe(20)
+  })
+
+  it('applies AOE self cooldown reduction after marking the skill used', () => {
+    const windTraceShot = skill({
+      id: 'wind-trace-shot',
+      name: '风痕贯射',
+      skillTreeId: 'windTraceShot',
+      tags: ['ranged'],
+      damageCount: 5,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ combatSkills: [skill(), windTraceShot] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 30,
+          maxHp: 30,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'wind-trace-shot',
+      diceValues: [6, 6, 6, 6, 6, 6, 6],
+      selfCooldownReduction: 1,
+      targetPackets: [{ targetTokenId: 'goblin' }],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'wind-trace-shot')?.remaining).toBe(3)
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),

@@ -229,6 +229,7 @@ export interface HeadlessAoeAttackAction {
   knockbackTurns?: number
   stunOnFailedConSave?: boolean
   stunTurns?: number
+  selfCooldownReduction?: number
 }
 
 export interface HeadlessAoeTargetPacket {
@@ -941,6 +942,7 @@ function resolveAoeAttack(
   }
   if (resolvedCount === 0) return fail(state, 'invalid-target', events)
   markSkillUsed(state, actor.id, skill.id)
+  reduceSkillCooldown(state, actor.id, skill.id, action.selfCooldownReduction ?? 0)
   if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
   maybeEndCombat(state, events)
   return succeed(state, events)
@@ -1414,6 +1416,16 @@ function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillI
             remaining: Math.max(0, skill.cooldown - skill.cdReduction),
           }
         : skill,
+    ),
+  }))
+}
+
+function reduceSkillCooldown(state: HeadlessDmCombatState, characterId: string, skillId: string, amount: number) {
+  if (amount <= 0) return
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    combatSkills: character.combatSkills.map((skill) =>
+      skill.id === skillId ? { ...skill, remaining: Math.max(0, skill.remaining - amount) } : skill,
     ),
   }))
 }
