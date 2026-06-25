@@ -7519,9 +7519,19 @@ export default function MapsPage() {
         snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
       const movedFeet = moved?.feet ?? 0
       const headlessActor = headless.state.characters.find((c) => c.id === actor.id)
-      if (headlessActor) updateChar(actor.id, { currentAP: headlessActor.currentAP })
 
       const opportunityEvents = opportunityTriggeredEvents(headless.events, token.id)
+      if (opportunityEvents.length === 0) {
+        applyHeadlessCombatResult(headless)
+        for (const event of headless.events) {
+          if (event.type === 'log') pushCombatLog(event.text, 'turn')
+        }
+        completePlayerActionRequest(action)
+        acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
+        return
+      }
+
+      if (headlessActor) updateChar(actor.id, { currentAP: headlessActor.currentAP })
       await resolveOpportunityAttacksForMove(
         token,
         targetPosition,
