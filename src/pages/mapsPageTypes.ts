@@ -63,13 +63,34 @@ export interface SharedGaleComboState {
   updatedAt: number
 }
 
+export interface SharedAgileLeapState {
+  id: string
+  mapId: string
+  status: 'pending' | 'answered' | 'done'
+  targetCharId: string
+  targetName: string
+  feet: number
+  uses: number
+  maxUses: number
+  useAgileLeap?: boolean
+  expiresAt?: number
+  updatedAt: number
+}
+
 export interface SharedPlayerActionState {
   id: string
   mapId: string
   combatId?: string
   sourceMode: 'player'
   status: 'pending' | 'done'
-  type: 'end-turn' | 'attack-token' | 'aoe-attack' | 'move-token' | 'qi-reduce-cooldown' | 'activate-feature'
+  type:
+    | 'end-turn'
+    | 'attack-token'
+    | 'aoe-attack'
+    | 'move-token'
+    | 'agile-leap-move'
+    | 'qi-reduce-cooldown'
+    | 'activate-feature'
   actorTokenId: string
   characterId: string
   targetTokenId?: string

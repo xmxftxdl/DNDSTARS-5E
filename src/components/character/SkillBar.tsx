@@ -70,6 +70,8 @@ export default function SkillBar({
     s.skillTreeId === 'basicShot' || s.name === '基础射击' || s.cooldown <= 0
   const columns = Array.from({ length: MAX_COOLDOWN + 1 }, (_, i) => i)
   const infiniteSkills = c.combatSkills.filter(isInfiniteSkill)
+  const galeComboWaivesAp = !!c.combatBuffs?.galeComboReady
+  const canPayForSkill = (skill: CombatSkill) => galeComboWaivesAp || c.currentAP >= skill.apCost
 
   const handleDeleteSkill = (skill: CombatSkill) => {
     if (skill.skillTreeId) return
@@ -167,8 +169,8 @@ export default function SkillBar({
                 <ReadySkill
                   key={s.id}
                   skill={s}
-                  canUse={canAct && !s.usedThisTurn && c.currentAP >= s.apCost}
-                  notEnoughAP={c.currentAP < s.apCost}
+                  canUse={canAct && !s.usedThisTurn && canPayForSkill(s)}
+                  notEnoughAP={!galeComboWaivesAp && c.currentAP < s.apCost}
                   disabledLabel={!canAct ? '未到回合' : undefined}
                   effectiveCd={effectiveCd(s)}
                   onEdit={() => setEditingId(s.id)}
@@ -206,8 +208,8 @@ export default function SkillBar({
                       <ReadySkill
                         key={s.id}
                         skill={s}
-                        canUse={canAct && !s.usedThisTurn && c.currentAP >= s.apCost}
-                        notEnoughAP={c.currentAP < s.apCost}
+                        canUse={canAct && !s.usedThisTurn && canPayForSkill(s)}
+                        notEnoughAP={!galeComboWaivesAp && c.currentAP < s.apCost}
                         disabledLabel={!canAct ? '未到回合' : undefined}
                         effectiveCd={effectiveCd(s)}
                         onEdit={() => setEditingId(s.id)}

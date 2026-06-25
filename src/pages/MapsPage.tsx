@@ -201,6 +201,7 @@ import type {
   SharedDodgeState,
   SharedStableMindState,
   SharedGaleComboState,
+  SharedAgileLeapState,
   SharedPlayerActionState,
   SharedPlayerActionRequestQueueState,
   SharedPlayerActionProcessedState,
@@ -423,6 +424,14 @@ export default function MapsPage() {
     triggerLabel: string
     expiresAt?: number
   } | null>(null)
+  const [sharedAgileLeapPrompt, setSharedAgileLeapPrompt] = useState<{
+    id: string
+    targetChar: Character
+    feet: number
+    uses: number
+    maxUses: number
+    expiresAt?: number
+  } | null>(null)
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -501,9 +510,15 @@ export default function MapsPage() {
     casterCharId: string
     resolve: (decision: GaleComboDecision) => void
   } | null>(null)
+  const pendingSharedAgileLeapRef = useRef<{
+    id: string
+    targetCharId: string
+    resolve: (useAgileLeap: boolean) => void
+  } | null>(null)
   const suppressedDodgePromptIdsRef = useRef(new Set<string>())
   const suppressedStableMindPromptIdsRef = useRef(new Set<string>())
   const suppressedGaleComboPromptIdsRef = useRef(new Set<string>())
+  const suppressedAgileLeapPromptIdsRef = useRef(new Set<string>())
   const playerActionSeqRef = useRef(0)
   const seenPlayerActionIdsRef = useRef(new Set<string>())
   const processedPlayerActionIdsRef = useRef(new Set<string>())
@@ -522,7 +537,12 @@ export default function MapsPage() {
   const lastAppliedCombatIdRef = useRef('')
 
   useEffect(() => {
-    if (!sharedDodgePrompt?.expiresAt && !sharedStableMindPrompt?.expiresAt && !sharedGaleComboPrompt?.expiresAt) return
+    if (
+      !sharedDodgePrompt?.expiresAt &&
+      !sharedStableMindPrompt?.expiresAt &&
+      !sharedGaleComboPrompt?.expiresAt &&
+      !sharedAgileLeapPrompt?.expiresAt
+    ) return
     setSharedDodgeNow(Date.now())
     const timer = window.setInterval(() => setSharedDodgeNow(Date.now()), 250)
     return () => window.clearInterval(timer)
@@ -533,6 +553,8 @@ export default function MapsPage() {
     sharedStableMindPrompt?.expiresAt,
     sharedGaleComboPrompt?.id,
     sharedGaleComboPrompt?.expiresAt,
+    sharedAgileLeapPrompt?.id,
+    sharedAgileLeapPrompt?.expiresAt,
   ])
 
   useEffect(() => {
@@ -1222,6 +1244,7 @@ export default function MapsPage() {
     setSharedDodgePrompt(null)
     setSharedStableMindPrompt(null)
     setSharedGaleComboPrompt(null)
+    setSharedAgileLeapPrompt(null)
     setPendingPlayerActionLocked(null)
     setSelectedTokenId(null)
     setSelectedCharacterTokenId(null)
@@ -1476,6 +1499,82 @@ export default function MapsPage() {
     }
   }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
 
+  useEffect(() => {
+    if (!activeMap) return
+    let cancelled = false
+    const load = async () => {
+      const state = await loadSharedResource<SharedAgileLeapState>('agile-leap')
+      if (cancelled || !state || state.mapId !== activeMap.id) return
+      if (suppressedAgileLeapPromptIdsRef.current.has(state.id)) return
+      if (isDM) {
+        const pending = pendingSharedAgileLeapRef.current
+        if (!pending || pending.id !== state.id) return
+        if (
+          state.status === 'pending' &&
+          state.expiresAt != null &&
+          Date.now() >= state.expiresAt
+        ) {
+          pendingSharedAgileLeapRef.current = null
+          await saveSharedResource<SharedAgileLeapState>('agile-leap', {
+            ...state,
+            status: 'done',
+            useAgileLeap: false,
+            updatedAt: Date.now(),
+          })
+          pending.resolve(false)
+          return
+        }
+        if (state.status === 'answered') {
+          pendingSharedAgileLeapRef.current = null
+          await saveSharedResource<SharedAgileLeapState>('agile-leap', {
+            ...state,
+            status: 'done',
+            updatedAt: Date.now(),
+          })
+          pending.resolve(!!state.useAgileLeap)
+        }
+        return
+      }
+
+      if (
+        state.status === 'pending' &&
+        state.expiresAt != null &&
+        Date.now() >= state.expiresAt
+      ) {
+        setSharedAgileLeapPrompt((current) => (current?.id === state.id ? null : current))
+        return
+      }
+      if (state.status !== 'pending') {
+        setSharedAgileLeapPrompt((current) => (current?.id === state.id ? null : current))
+        return
+      }
+      const targetChar = characters.find((c) => c.id === state.targetCharId)
+      const canAnswer =
+        !!targetChar &&
+        targetChar.currentHp > 0 &&
+        (targetChar.id === playerChar?.id ||
+          targetChar.id === assignedCharacterId ||
+          visibleChars.some((c) => c.id === targetChar.id) ||
+          !targetChar.dmNotes)
+      if (canAnswer) {
+        setSharedAgileLeapPrompt({
+          id: state.id,
+          targetChar,
+          feet: state.feet,
+          uses: state.uses,
+          maxUses: state.maxUses,
+          expiresAt: state.expiresAt,
+        })
+      }
+    }
+    void load()
+    const timer = window.setInterval(load, 500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
+
   const canControlPlayerTurn =
     combatActive &&
     currentInitiativeToken?.type === 'player' &&
@@ -1505,7 +1604,8 @@ export default function MapsPage() {
   const canAgileLeapMove =
     !!agileLeapChar &&
     !!agileLeapToken &&
-    (isDM || agileLeapChar.id === playerChar?.id)
+    !isDM &&
+    agileLeapChar.id === playerChar?.id
 
   const moveCircle = useMemo(() => {
     if (!showMoveRange || !activeMap || !myPlayerToken || !turnCharacter) return undefined
@@ -2667,6 +2767,7 @@ export default function MapsPage() {
       presetDamageValues?: number[]
       presetFeatureLabelParts?: string[]
       appendFeatureDamageToPreset?: boolean
+      suppressComboFist?: boolean
     },
   ): Promise<AttackResolveResult | undefined> => {
     const attackTargeting = opts?.targetingOverride ?? targeting
@@ -3010,7 +3111,7 @@ export default function MapsPage() {
 
       const comboFist = findClassTrait(caster, 'comboFist')
       const waivedApAttack = !!attackTargeting.waiveAp || !!caster.combatBuffs?.galeComboReady
-      if (hit && comboFist && waivedApAttack) {
+      if (hit && comboFist && waivedApAttack && !opts?.suppressComboFist) {
         const extraValues = await rollDiceBoxValues(comboFist.level, 6, `${skill.name} 连续拳额外伤害`, token.label)
         values.push(...extraValues)
         total += extraValues.reduce((sum, value) => sum + value, 0)
@@ -3639,25 +3740,28 @@ export default function MapsPage() {
     const perArrowSkill: CombatSkill = { ...skill, arrowShots: 1 }
     const perArrowDiceCount = Math.max(1, attackDamageDiceCount(perArrowSkill, false))
     const damageSides = isBasicShot(perArrowSkill) ? 8 : perArrowSkill.damageSides
+    const comboFist = waiveAp ? findClassTrait(caster, 'comboFist') : undefined
     invokeSkill(caster.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
     pushApLog(caster, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`, `${targets.length} 支箭`)
-    if (waiveAp && caster.combatBuffs?.galeComboReady) {
-      consumeGaleComboReady(caster.id, skill.name)
-    }
     const allBaseValues = await rollDiceBoxValues(
       perArrowDiceCount * targets.length,
       damageSides,
       `${skill.name} 伤害`,
       targets[0]?.label ?? skill.name,
     )
+    const comboFistValues = comboFist
+      ? await rollDiceBoxValues(comboFist.level, 6, `${skill.name} 连续拳额外伤害`, targets[0]?.label ?? skill.name)
+      : []
 
     const results: AttackResolveResult[] = []
     const knockbackQueue: KnockbackPending[] = []
     let galeComboAfterDamage = false
     let selfCooldownReduction = 0
+    let comboFistApplied = false
     for (const [index, target] of targets.entries()) {
       const start = index * perArrowDiceCount
       const arrowValues = allBaseValues.slice(start, start + perArrowDiceCount)
+      const applyComboFistHere = !comboFistApplied && comboFistValues.length > 0
       const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
       const latestTarget = latestMap.tokens.find((token) => token.id === target.id) ?? target
       const result = await resolveAttack(latestTarget, {
@@ -3670,11 +3774,14 @@ export default function MapsPage() {
           skill: perArrowSkill,
           waiveAp: waiveAp || undefined,
         },
-        presetDamageValues: arrowValues,
+        presetDamageValues: applyComboFistHere ? [...arrowValues, ...comboFistValues] : arrowValues,
+        presetFeatureLabelParts: applyComboFistHere ? [`连续拳+${comboFist!.level}d6`] : undefined,
         appendFeatureDamageToPreset: true,
+        suppressComboFist: true,
       })
       if (result) {
         results.push(result)
+        if (applyComboFistHere && result.hit) comboFistApplied = true
         selfCooldownReduction = Math.max(selfCooldownReduction, result.selfCooldownReduction ?? 0)
         if (result.knockbackPending) knockbackQueue.push(result.knockbackPending)
         galeComboAfterDamage = galeComboAfterDamage || !!result.galeComboPending
@@ -3721,6 +3828,9 @@ export default function MapsPage() {
     setRoll(rollForDisplay)
     publishSharedDiceRoll(rollForDisplay)
     pushCombatLog(`${caster.name} 使用 ${skill.name}：${summary}，合计 ${totalDamage} 点。`, totalDamage > 0 ? 'damage' : 'attack')
+    if (waiveAp && caster.combatBuffs?.galeComboReady) {
+      consumeGaleComboReady(caster.id, skill.name)
+    }
     if (galeComboAfterDamage) {
       await offerGaleComboAfterDamageApplied(caster.id, caster)
     }
@@ -4381,12 +4491,13 @@ export default function MapsPage() {
       const center = { x: agileLeapCircle.centerX, y: agileLeapCircle.centerY }
       const pos = snapTokenToGridCenter(point.x, point.y, agileLeapToken, activeMap)
       if (!isWithinMovementRange(center, pos, feet, activeMap)) return
-      updateToken(activeMap.id, agileLeapToken.id, pos)
-      activateClassFeature(agileLeapChar.id, 'agileLeap')
-      pushApLog(agileLeapChar, 0, '灵巧跳跃移动', `移动至多 ${feet} 尺`)
-      updateChar(agileLeapChar.id, {
-        combatBuffs: { ...agileLeapChar.combatBuffs, agileLeapMoveFeet: undefined },
-      })
+      if (!sendPlayerAgileLeapMoveRequest(pos, feet)) {
+        void showCombatNotice(
+          pendingPlayerActionRef.current ? '等待 DM 确认' : '无法移动',
+          pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '灵巧跳跃当前不可用。',
+          'amber',
+        )
+      }
       return
     }
 
@@ -4922,13 +5033,16 @@ export default function MapsPage() {
     processedPlayerActionIdsRef.current.clear()
     seenPlayerActionAckIdsRef.current.clear()
     suppressedGaleComboPromptIdsRef.current.clear()
+    suppressedAgileLeapPromptIdsRef.current.clear()
     pendingSharedDodgeRef.current = null
     pendingSharedStableMindRef.current = null
     pendingSharedGaleComboRef.current = null
+    pendingSharedAgileLeapRef.current = null
     setDodgePrompt(null)
     setSharedDodgePrompt(null)
     setSharedStableMindPrompt(null)
     setSharedGaleComboPrompt(null)
+    setSharedAgileLeapPrompt(null)
     setPendingPlayerActionLocked(null)
     setRollRequestPreview(null)
     setDiceBoxD20(null)
@@ -4971,6 +5085,17 @@ export default function MapsPage() {
         casterCharId: '',
         casterName: '',
         triggerLabel: '',
+        updatedAt,
+      }),
+      saveSharedResource<SharedAgileLeapState>('agile-leap', {
+        id: `${mapId}:combat-start:agile-leap:${updatedAt}`,
+        mapId,
+        status: 'done',
+        targetCharId: '',
+        targetName: '',
+        feet: 0,
+        uses: 0,
+        maxUses: 0,
         updatedAt,
       }),
       saveSharedResource<SharedPlayerActionState>('player-action', {
@@ -5215,6 +5340,44 @@ export default function MapsPage() {
         casterCharId: caster.id,
         casterName: caster.name,
         triggerLabel,
+        expiresAt,
+        updatedAt: Date.now(),
+      })
+    })
+  }
+
+  const requestSharedAgileLeapChoice = (
+    targetChar: Character,
+    params: { feet: number; uses: number; maxUses: number },
+  ): Promise<boolean> => {
+    if (!activeMap || !isDM) {
+      return showCombatDialog({
+        title: '灵巧跳跃',
+        message:
+          `闪避成功！是否无需消耗 AP 移动 ${params.feet} 尺？\n\n` +
+          `该移动无视困难地形和障碍物。长休剩余 ${params.uses}/${params.maxUses} 次。`,
+        confirmText: '发动',
+        cancelText: '不发动',
+        tone: 'sky',
+      })
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const expiresAt = Date.now() + 15000
+    return new Promise((resolve) => {
+      pendingSharedAgileLeapRef.current = {
+        id,
+        targetCharId: targetChar.id,
+        resolve,
+      }
+      void saveSharedResource<SharedAgileLeapState>('agile-leap', {
+        id,
+        mapId: activeMap.id,
+        status: 'pending',
+        targetCharId: targetChar.id,
+        targetName: targetChar.name,
+        feet: params.feet,
+        uses: params.uses,
+        maxUses: params.maxUses,
         expiresAt,
         updatedAt: Date.now(),
       })
@@ -5613,14 +5776,10 @@ export default function MapsPage() {
           if (canOfferAgileLeap(targetChar)) {
             const trait = findClassTrait(targetChar, 'agileLeap')
             const feet = agileLeapMoveFeet(targetChar)
-            const accepted = await showCombatDialog({
-              title: '灵巧跳跃',
-              message:
-                `闪避成功！是否无需消耗 AP 移动 ${feet} 尺？\n\n` +
-                `该移动无视困难地形和障碍物。长休剩余 ${trait?.uses ?? 0}/${trait?.maxUses ?? 0} 次。`,
-              confirmText: '发动',
-              cancelText: '不发动',
-              tone: 'sky',
+            const accepted = await requestSharedAgileLeapChoice(targetChar, {
+              feet,
+              uses: trait?.uses ?? 0,
+              maxUses: trait?.maxUses ?? 0,
             })
             if (accepted) {
               const latestTarget = useCharacterStore.getState().characters.find((c) => c.id === targetChar.id) ?? targetChar
@@ -5894,6 +6053,26 @@ export default function MapsPage() {
       casterName: prompt.casterChar.name,
       triggerLabel: prompt.triggerLabel,
       useGaleCombo,
+      expiresAt: prompt.expiresAt,
+      updatedAt: Date.now(),
+    })
+  }
+
+  const handleSharedAgileLeapChoice = async (useAgileLeap: boolean) => {
+    if (!sharedAgileLeapPrompt || !activeMap) return
+    const prompt = sharedAgileLeapPrompt
+    suppressedAgileLeapPromptIdsRef.current.add(prompt.id)
+    setSharedAgileLeapPrompt(null)
+    await saveSharedResource<SharedAgileLeapState>('agile-leap', {
+      id: prompt.id,
+      mapId: activeMap.id,
+      status: 'answered',
+      targetCharId: prompt.targetChar.id,
+      targetName: prompt.targetChar.name,
+      feet: prompt.feet,
+      uses: prompt.uses,
+      maxUses: prompt.maxUses,
+      useAgileLeap,
       expiresAt: prompt.expiresAt,
       updatedAt: Date.now(),
     })
@@ -6629,6 +6808,45 @@ export default function MapsPage() {
       return
     }
 
+    if (action.type === 'agile-leap-move') {
+      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const token = map.tokens.find((item) => item.id === action.actorTokenId)
+      const feet = actor?.combatBuffs?.agileLeapMoveFeet ?? 0
+      const trait = actor ? findClassTrait(actor, 'agileLeap') : undefined
+      if (
+        !actor ||
+        !token ||
+        token.type !== 'player' ||
+        token.characterId !== actor.id ||
+        !action.targetPosition ||
+        feet <= 0 ||
+        !trait ||
+        trait.uses <= 0 ||
+        !isTokenAlive(token, useCharacterStore.getState().characters)
+      ) {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-agile-leap')
+        completePlayerActionRequest(action)
+        return
+      }
+      const targetPosition = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
+      if (!isWithinMovementRange({ x: token.x, y: token.y }, targetPosition, feet, map)) {
+        acknowledgePlayerAction(action, 'rejected', 'out-of-range')
+        completePlayerActionRequest(action)
+        return
+      }
+      updateToken(map.id, token.id, targetPosition)
+      activateClassFeature(actor.id, 'agileLeap')
+      const latestActor = useCharacterStore.getState().characters.find((c) => c.id === actor.id) ?? actor
+      updateChar(actor.id, {
+        combatBuffs: { ...latestActor.combatBuffs, agileLeapMoveFeet: undefined },
+      })
+      pushApLog(actor, 0, '灵巧跳跃移动', `移动至多 ${feet} 尺`)
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
+      return
+    }
+
     if (action.type === 'move-token') {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
@@ -6888,6 +7106,33 @@ export default function MapsPage() {
       updatedAt: Date.now(),
     }
     return submitPlayerActionRequest(action, `${turnCharacter.name} 移动 ${movedFeet} 尺`)
+  }
+
+  const sendPlayerAgileLeapMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
+    if (!activeMap || mode !== 'player' || playerCombatLocked || !combatActiveRef.current || !combatActive) return false
+    if (pendingPlayerActionRef.current) return false
+    const actor = agileLeapChar
+    const token = agileLeapToken
+    if (!actor || !token || actor.id !== playerChar?.id || token.characterId !== actor.id) return false
+    if ((actor.combatBuffs?.agileLeapMoveFeet ?? 0) <= 0) return false
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    const action: SharedPlayerActionState = {
+      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'agile-leap-move',
+      actorTokenId: token.id,
+      characterId: actor.id,
+      targetPosition,
+      round,
+      initiativeIndex,
+      seq,
+      updatedAt: Date.now(),
+    }
+    return submitPlayerActionRequest(action, `${actor.name} 灵巧跳跃 ${movedFeet} 尺`)
   }
 
   const sendPlayerQiReduceCooldownRequest = (skill: CombatSkill) => {
@@ -7608,6 +7853,46 @@ export default function MapsPage() {
                     className="rounded-lg bg-cyan-500/25 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/35"
                   >
                     发动疾风连击
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sharedAgileLeapPrompt && (
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+              <div
+                role="dialog"
+                aria-labelledby="shared-agile-leap-prompt-title"
+                className="relative mx-4 w-full max-w-md rounded-2xl border border-sky-400/35 bg-void-950/95 p-5 shadow-2xl"
+              >
+                {sharedAgileLeapPrompt.expiresAt != null && (
+                  <div className="absolute right-5 top-5 rounded-full border border-sky-300/40 bg-sky-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-sky-100">
+                    {Math.max(0, Math.ceil((sharedAgileLeapPrompt.expiresAt - sharedDodgeNow) / 1000))}s
+                  </div>
+                )}
+                <h3 id="shared-agile-leap-prompt-title" className="text-lg font-semibold text-sky-100">
+                  灵巧跳跃
+                </h3>
+                <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
+                  {`${sharedAgileLeapPrompt.targetChar.name} 闪避成功。\n\n是否发动灵巧跳跃？发动后可不消耗 AP 移动 ${sharedAgileLeapPrompt.feet} 尺，无视困难地形和障碍物。\n长休剩余 ${sharedAgileLeapPrompt.uses}/${sharedAgileLeapPrompt.maxUses} 次。`}
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSharedAgileLeapChoice(false)}
+                    className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80"
+                  >
+                    不发动
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="shared-agile-leap-use"
+                    data-agile-leap-id={sharedAgileLeapPrompt.id}
+                    onClick={() => handleSharedAgileLeapChoice(true)}
+                    className="rounded-lg bg-sky-500/25 px-4 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/35"
+                  >
+                    发动灵巧跳跃
                   </button>
                 </div>
               </div>

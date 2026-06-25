@@ -93,6 +93,17 @@ describe('agileLeap', () => {
     expect(canOfferAgileLeap(makeCharacter({ traits: [agileLeapTrait(1, 0)] }))).toBe(false)
     expect(canOfferAgileLeap(makeCharacter({ traits: [agileLeapTrait(1, 1)] }))).toBe(true)
   })
+
+  it('is not offered again while a leap movement is already pending', () => {
+    expect(
+      canOfferAgileLeap(
+        makeCharacter({
+          traits: [agileLeapTrait(1, 1)],
+          combatBuffs: { agileLeapMoveFeet: 10 },
+        }),
+      ),
+    ).toBe(false)
+  })
 })
 
 describe('doubleArrow', () => {

@@ -94,7 +94,7 @@
               : Math.min(1.55, 1 + Math.max(0, frameQty - 3) * 0.12)
           const scaleMultiplier = isD4
             ? 0.92
-            : frameQty <= 3
+            : frameQty <= 4
               ? 1.15
               : Math.max(0.96, 1.06 - Math.max(0, frameQty - 4) * 0.02)
           const visualScaleMultiplier = scaleMultiplier * 0.9

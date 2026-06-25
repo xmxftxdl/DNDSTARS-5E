@@ -98,7 +98,7 @@ export function agileLeapMoveFeet(c: Character): number {
 
 export function canOfferAgileLeap(c: Character): boolean {
   const trait = findClassTrait(c, 'agileLeap')
-  return !!trait && trait.uses > 0
+  return !!trait && trait.uses > 0 && (c.combatBuffs?.agileLeapMoveFeet ?? 0) <= 0
 }
 
 export function offerAgileLeap(c: Character): { accepted: boolean; feet: number } {
