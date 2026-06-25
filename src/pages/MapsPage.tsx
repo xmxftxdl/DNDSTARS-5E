@@ -98,6 +98,14 @@ import {
 const PLAYER_ACTION_DEDUPE_WINDOW_MS = 8000
 const PLAYER_ACTION_QUEUE_LIMIT = 80
 type GaleComboDecision = 'accepted' | 'declined' | 'timeout'
+type DodgeInterruptPayload = Record<string, unknown> & {
+  result: EnemyTurnResult
+  targetName: string
+}
+type DodgeInterruptResponse = Record<string, unknown> & {
+  wantsDodge: boolean
+  dodgeD20?: number
+}
 type StableMindInterruptPayload = Record<string, unknown> & {
   targetName: string
   fullDamage: number
@@ -152,6 +160,7 @@ import {
   findCombatInterrupt,
   finishCombatInterrupt,
   isCombatInterruptExpired,
+  markCombatInterruptRolling,
   upsertCombatInterrupt,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
@@ -517,6 +526,13 @@ export default function MapsPage() {
     const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
     const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
     const next = answerCombatInterrupt(queue, id, response)
+    if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+  }
+  const markSharedCombatInterruptRolling = async (id: string, response?: Record<string, unknown>) => {
+    if (!activeMap) return
+    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
+    const next = markCombatInterruptRolling(queue, id, response)
     if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
   }
   const finishSharedCombatInterrupt = async (id: string, response?: Record<string, unknown>) => {
@@ -1639,6 +1655,37 @@ export default function MapsPage() {
       const now = Date.now()
 
       if (isDM) {
+        const dodgePending = pendingSharedDodgeRef.current
+        if (dodgePending) {
+          const interrupt = findCombatInterrupt(queue, dodgePending.id)
+          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
+            pendingSharedDodgeRef.current = null
+            await finishSharedCombatInterrupt(dodgePending.id, { wantsDodge: false })
+            const targetChar = useCharacterStore.getState().characters.find((c) => c.id === dodgePending.targetCharId)
+            if (targetChar) {
+              void finishEnemyAttack(dodgePending.result, targetChar, false, undefined, false).then(dodgePending.onComplete)
+            } else {
+              dodgePending.onComplete()
+            }
+          } else if (interrupt?.status === 'answered') {
+            const response = interrupt.response as DodgeInterruptResponse | undefined
+            pendingSharedDodgeRef.current = null
+            await finishSharedCombatInterrupt(dodgePending.id, response)
+            const targetChar = useCharacterStore.getState().characters.find((c) => c.id === dodgePending.targetCharId)
+            if (targetChar) {
+              void finishEnemyAttack(
+                dodgePending.result,
+                targetChar,
+                !!response?.wantsDodge,
+                response?.dodgeD20,
+                false,
+              ).then(dodgePending.onComplete)
+            } else {
+              dodgePending.onComplete()
+            }
+          }
+        }
+
         const stablePending = pendingSharedStableMindRef.current
         if (stablePending) {
           const interrupt = findCombatInterrupt(queue, stablePending.id)
@@ -1692,6 +1739,33 @@ export default function MapsPage() {
           interrupt.status === 'pending' &&
           !isCombatInterruptExpired(interrupt, now),
       )
+
+      const dodgeInterrupt = pendingInterrupts.find(
+        (interrupt) =>
+          interrupt.kind === 'dodge' &&
+          !suppressedDodgePromptIdsRef.current.has(interrupt.id),
+      ) as SharedCombatInterrupt<DodgeInterruptPayload, DodgeInterruptResponse> | undefined
+      if (dodgeInterrupt) {
+        const targetChar = characters.find((c) => c.id === dodgeInterrupt.targetCharId)
+        const canAnswer =
+          !!targetChar &&
+          targetChar.currentHp > 0 &&
+          (targetChar.id === playerChar?.id ||
+            visibleChars.some((c) => c.id === targetChar.id) ||
+            !targetChar.dmNotes)
+        if (canAnswer) {
+          setSharedDodgePrompt({
+            id: dodgeInterrupt.id,
+            result: dodgeInterrupt.payload.result,
+            targetChar,
+            expiresAt: dodgeInterrupt.expiresAt,
+          })
+        } else {
+          setSharedDodgePrompt((current) => (current ? null : current))
+        }
+      } else {
+        setSharedDodgePrompt((current) => (current ? null : current))
+      }
 
       const stableInterrupt = pendingInterrupts.find(
         (interrupt) =>
@@ -5261,6 +5335,7 @@ export default function MapsPage() {
     seenPlayerActionIdsRef.current.clear()
     processedPlayerActionIdsRef.current.clear()
     seenPlayerActionAckIdsRef.current.clear()
+    suppressedDodgePromptIdsRef.current.clear()
     suppressedStableMindPromptIdsRef.current.clear()
     suppressedGaleComboPromptIdsRef.current.clear()
     suppressedAgileLeapPromptIdsRef.current.clear()
@@ -6150,16 +6225,24 @@ export default function MapsPage() {
       if (isDM && activeMap) {
         const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
         const expiresAt = Date.now() + 15000
-        pendingSharedDodgeRef.current = { id, result, targetCharId: targetChar!.id, onComplete: completeIfCombatContinues }
-        void saveSharedResource<SharedDodgeState>('dodge', {
+        const interrupt = createCombatInterrupt<DodgeInterruptPayload, DodgeInterruptResponse>({
           id,
           mapId: activeMap.id,
-          status: 'pending',
+          kind: 'dodge',
+          targetCharId: targetChar!.id,
+          payload: {
+            result,
+            targetName: targetChar!.name,
+          },
+          expiresAt,
+        })
+        pendingSharedDodgeRef.current = {
+          id: interrupt.id,
           result,
           targetCharId: targetChar!.id,
-          expiresAt,
-          updatedAt: Date.now(),
-        })
+          onComplete: completeIfCombatContinues,
+        }
+        void publishCombatInterrupt(interrupt)
         return
       }
       setDodgePrompt({ result, targetChar: targetChar!, onComplete: completeIfCombatContinues })
@@ -6207,54 +6290,30 @@ export default function MapsPage() {
     const prompt = sharedDodgePrompt
     const latestTarget =
       useCharacterStore.getState().characters.find((c) => c.id === prompt.targetChar.id) ?? prompt.targetChar
-    {
-      suppressedDodgePromptIdsRef.current.add(prompt.id)
-      setSharedDodgePrompt(null)
-      if (wantsDodge) {
-        void saveSharedResource<SharedDodgeState>('dodge', {
-          id: prompt.id,
-          mapId: activeMap.id,
-          status: 'rolling',
-          result: prompt.result,
-          targetCharId: latestTarget.id,
-          wantsDodge,
-          expiresAt: prompt.expiresAt,
-          updatedAt: Date.now(),
-        })
-      }
-      const dodgeD20 = wantsDodge
-        ? await rollDiceBoxD20('闪避判定 D20', latestTarget.name)
-        : undefined
-      if (dodgeD20 != null) {
-        publishSharedDiceRoll({
-          values: [],
-          sides: 20,
-          bonus: 0,
-          total: 0,
-          label: '闪避判定',
-          targetName: latestTarget.name,
-          d20Roll: {
-            value: dodgeD20,
-            modifier: ENEMY_MELEE_ATTACK_BONUS,
-            ac: latestTarget.ac,
-            hit: dodgeD20 + ENEMY_MELEE_ATTACK_BONUS >= latestTarget.ac,
-            kind: 'dodge',
-          },
-        })
-      }
-      void saveSharedResource<SharedDodgeState>('dodge', {
-        id: prompt.id,
-        mapId: activeMap.id,
-        status: 'answered',
-        result: prompt.result,
-        targetCharId: latestTarget.id,
-        wantsDodge,
-        dodgeD20,
-        expiresAt: prompt.expiresAt,
-        updatedAt: Date.now(),
-      })
+    suppressedDodgePromptIdsRef.current.add(prompt.id)
+    setSharedDodgePrompt(null)
+    if (!wantsDodge) {
+      await answerSharedCombatInterrupt(prompt.id, { wantsDodge: false })
       return
     }
+    await markSharedCombatInterruptRolling(prompt.id, { wantsDodge: true })
+    const dodgeD20 = await rollDiceBoxD20('闪避判定 D20', latestTarget.name)
+    publishSharedDiceRoll({
+      values: [],
+      sides: 20,
+      bonus: 0,
+      total: 0,
+      label: '闪避判定',
+      targetName: latestTarget.name,
+      d20Roll: {
+        value: dodgeD20,
+        modifier: ENEMY_MELEE_ATTACK_BONUS,
+        ac: latestTarget.ac,
+        hit: dodgeD20 + ENEMY_MELEE_ATTACK_BONUS >= latestTarget.ac,
+        kind: 'dodge',
+      },
+    })
+    await answerSharedCombatInterrupt(prompt.id, { wantsDodge: true, dodgeD20 })
   }
 
   const handleSharedStableMindChoice = async (useStableMind: boolean) => {

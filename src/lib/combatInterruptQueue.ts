@@ -108,6 +108,25 @@ export function answerCombatInterrupt(
   )
 }
 
+export function markCombatInterruptRolling(
+  queue: SharedCombatInterruptQueueState | null | undefined,
+  id: string,
+  response: Record<string, unknown> | undefined,
+  now = Date.now(),
+): SharedCombatInterruptQueueState | null {
+  return updateCombatInterrupt(
+    queue,
+    id,
+    (interrupt) => ({
+      ...interrupt,
+      status: 'rolling',
+      response: response ?? interrupt.response,
+      updatedAt: now,
+    }),
+    now,
+  )
+}
+
 export function finishCombatInterrupt(
   queue: SharedCombatInterruptQueueState | null | undefined,
   id: string,

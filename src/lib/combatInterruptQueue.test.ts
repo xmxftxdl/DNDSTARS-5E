@@ -6,6 +6,7 @@ import {
   finishCombatInterrupt,
   findCombatInterrupt,
   isCombatInterruptExpired,
+  markCombatInterruptRolling,
   upsertCombatInterrupt,
 } from './combatInterruptQueue'
 
@@ -58,5 +59,23 @@ describe('combatInterruptQueue', () => {
 
     expect(isCombatInterruptExpired(request, 151)).toBe(true)
     expect(isCombatInterruptExpired({ ...request, status: 'answered' }, 151)).toBe(false)
+  })
+
+  it('marks an interrupt as rolling without making it expire as pending', () => {
+    const request = createCombatInterrupt({
+      id: 'i4',
+      mapId: 'm1',
+      kind: 'dodge',
+      targetCharId: 'hero',
+      payload: {},
+      expiresAt: 150,
+      now: 100,
+    })
+    const queue = upsertCombatInterrupt(null, request, 100)
+    const rolling = markCombatInterruptRolling(queue, 'i4', { wantsDodge: true }, 120)!
+
+    expect(findCombatInterrupt(rolling, 'i4')?.status).toBe('rolling')
+    expect(findCombatInterrupt(rolling, 'i4')?.response?.wantsDodge).toBe(true)
+    expect(isCombatInterruptExpired(findCombatInterrupt(rolling, 'i4')!, 151)).toBe(false)
   })
 })
