@@ -12,18 +12,19 @@ import {
 } from './combatStats'
 import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from './enemyCombatStats'
 import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
-import { tokenFootprintDistanceCells } from './gridCombat'
+import { tokenAnchorCellFromPixel, tokenCenterForAnchorCell, tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
 import { resolveCombatMovement, type CombatMovementMode } from './combatMovementPipeline'
 import { calmBreathState, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
 import { ENEMY_MELEE_ATTACK_BONUS } from './archerBaseFeatures'
-import { proficiencyBonus } from './dnd'
+import { proficiencyBonus, type AbilityKey } from './dnd'
 import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
+import { RESTRAINED_STATUS_LABEL } from './tokenStatus'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -61,7 +62,7 @@ export type HeadlessCombatEvent =
       actorTokenId: string
       targetTokenId: string
       condition: string
-      ability: 'con'
+      ability: AbilityKey
       d20Value: number
       saveMod: number
       total: number
@@ -185,9 +186,25 @@ export interface HeadlessPlayerAttackAction {
 export interface HeadlessPlayerAttackPacket {
   targetTokenId: string
   diceValues?: number[]
+  extraDamageValues?: number[]
+  extraDamageSides?: number
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
   isCrit?: boolean
+  effectSave?: HeadlessAttackEffectSavePacket
+  stunOnFailedEffectSave?: boolean
+  restrainedOnFailedEffectSave?: boolean
+  pullOnFailedEffectSave?: boolean
+  pullCells?: number
+  grantBurstKickExtraD6OnHit?: number
+  clearBurstKickExtraD6OnUse?: boolean
+}
+
+export interface HeadlessAttackEffectSavePacket {
+  ability: AbilityKey
+  d20?: number
+  d20Second?: number
+  disadvantage?: boolean
 }
 
 export interface HeadlessEnemyAttackAction {
@@ -739,6 +756,7 @@ function resolvePlayerAttack(
     )
     if (!targetDodge) return fail(state, 'invalid-dice', events)
     if (targetDodge.dodged) {
+      if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
       events.push({
         type: 'attack-resolved',
         actorTokenId: actorToken.id,
@@ -769,18 +787,48 @@ function resolvePlayerAttack(
 
     const diceValues = resolveDiceValues(packet.diceValues, dice, skill.damageCount, skill.damageSides)
     if (!diceValues) return fail(state, 'invalid-dice', events)
+    const extraDamageValues = packet.extraDamageValues
+      ? resolveDiceValues(packet.extraDamageValues, dice, packet.extraDamageValues.length, packet.extraDamageSides ?? 6)
+      : []
+    if (!extraDamageValues) return fail(state, 'invalid-dice', events)
+    const combinedDamageValues = [...diceValues, ...extraDamageValues]
     events.push({
       type: 'dice-rolled',
       notation: `${skill.damageCount}d${skill.damageSides}`,
       values: diceValues,
       total: diceValues.reduce((sum, value) => sum + value, 0),
     })
+    if (extraDamageValues.length > 0) {
+      events.push({
+        type: 'dice-rolled',
+        notation: `${extraDamageValues.length}d${packet.extraDamageSides ?? 6}`,
+        values: extraDamageValues,
+        total: extraDamageValues.reduce((sum, value) => sum + value, 0),
+      })
+    }
 
-    const baseDamage = resolveAttackDamageTotal(actor, skill, diceValues, { isCrit: packet.isCrit })
+    const baseDamage = resolveAttackDamageTotal(actor, skill, combinedDamageValues, { isCrit: packet.isCrit })
     const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
     const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
     applyStatusOnHit(state, targetToken, skill, events)
+    if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
+    if (packet.grantBurstKickExtraD6OnHit && adjusted.damage > 0) {
+      grantBurstKickExtraD6(state, actor.id, packet.grantBurstKickExtraD6OnHit)
+    }
+    const effectSave = resolveAttackEffectSave(state, actorToken, actor, targetToken, packet, dice, events)
+    if (!effectSave) return fail(state, 'invalid-dice', events)
+    if (!effectSave.success) {
+      if (packet.stunOnFailedEffectSave) {
+        applyStunToTarget(state, targetToken, STUN_DEFAULT_TURNS, events)
+      }
+      if (packet.restrainedOnFailedEffectSave) {
+        applyRestrainedToTarget(state, targetToken, 1, events)
+      }
+      if (packet.pullOnFailedEffectSave) {
+        pullTargetTowardActor(state, actorToken, targetToken, packet.pullCells ?? 2, events)
+      }
+    }
     events.push({
       type: 'attack-resolved',
       actorTokenId: actorToken.id,
@@ -788,8 +836,8 @@ function resolvePlayerAttack(
       targetTokenId: targetToken.id,
       skillId: skill.id,
       skillName: skill.name,
-      damageValues: diceValues,
-      diceTotal: diceValues.reduce((sum, value) => sum + value, 0),
+      damageValues: combinedDamageValues,
+      diceTotal: combinedDamageValues.reduce((sum, value) => sum + value, 0),
       baseDamage,
       damageBeforeDefense: baseDamage,
       modifier: adjusted.modifier,
@@ -803,7 +851,7 @@ function resolvePlayerAttack(
     })
     events.push({
       type: 'log',
-      text: `${actor.name} 使用 ${skill.name} 第 ${packetIndex + 1} 段攻击 ${targetToken.label}：骰值 ${diceValues.join(
+      text: `${actor.name} 使用 ${skill.name} 第 ${packetIndex + 1} 段攻击 ${targetToken.label}：骰值 ${combinedDamageValues.join(
         '+',
       )}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
     })
@@ -1016,6 +1064,56 @@ function resolveTargetDodgeAgainstPlayerAttack(
     text: `${targetToken.label} 花费 1 AP：尝试闪避 ${skill.name}。判定 ${d20Value}+${attackBonus}=${total} vs AC ${targetAc}，${dodged ? '闪避成功' : '闪避失败'}。`,
   })
   return { attempted: true, dodged }
+}
+
+function resolveAttackEffectSave(
+  state: HeadlessDmCombatState,
+  actorToken: Token,
+  actor: Character,
+  targetToken: Token,
+  packet: HeadlessPlayerAttackPacket,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): { success: boolean } | null {
+  const save = packet.effectSave
+  if (!save) return { success: true }
+  const firstValues = resolveDiceValues(save.d20 != null ? [save.d20] : undefined, dice, 1, 20)
+  if (!firstValues) return null
+  const secondValues =
+    save.disadvantage || save.d20Second != null
+      ? resolveDiceValues(save.d20Second != null ? [save.d20Second] : undefined, dice, 1, 20)
+      : undefined
+  if (secondValues === null) return null
+  const first = firstValues[0]
+  const second = secondValues?.[0]
+  const d20Value = second != null ? Math.min(first, second) : first
+  const targetCharacter = targetToken.characterId ? findCharacter(state, targetToken.characterId) : undefined
+  const saveMod = getTokenAbilityMod(targetToken, save.ability, targetCharacter)
+  const total = d20Value + saveMod
+  const success = total >= actor.saveDC
+  events.push({
+    type: 'dice-rolled',
+    notation: second != null ? '2d20' : '1d20',
+    values: second != null ? [first, second] : [first],
+    total: d20Value,
+  })
+  events.push({
+    type: 'status-save-resolved',
+    actorTokenId: actorToken.id,
+    targetTokenId: targetToken.id,
+    condition: packet.stunOnFailedEffectSave
+      ? STUN_STATUS_LABEL
+      : packet.restrainedOnFailedEffectSave
+        ? RESTRAINED_STATUS_LABEL
+        : '效果',
+    ability: save.ability,
+    d20Value,
+    saveMod,
+    total,
+    dc: actor.saveDC,
+    success,
+  })
+  return { success }
 }
 
 function resolveEnemyAttack(
@@ -1405,6 +1503,82 @@ function applyStunToTarget(
   })
 }
 
+function applyRestrainedToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(1, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, RESTRAINED_STATUS_LABEL])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    restrainedTurns: Math.max(token.restrainedTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: RESTRAINED_STATUS_LABEL,
+    turns: nextTurns,
+  })
+}
+
+function pullTargetTowardActor(
+  state: HeadlessDmCombatState,
+  actorToken: Token,
+  targetToken: Token,
+  cells: number,
+  events: HeadlessCombatEvent[],
+) {
+  const from = { x: targetToken.x, y: targetToken.y }
+  const targetAnchor = tokenAnchorCellFromPixel(targetToken.x, targetToken.y, targetToken, state.map)
+  const actorAnchor = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, state.map)
+  const dx = actorAnchor.col - targetAnchor.col
+  const dy = actorAnchor.row - targetAnchor.row
+  const len = Math.hypot(dx, dy)
+  if (len <= 0.0001 || cells <= 0) return
+  const nextAnchor = {
+    col: targetAnchor.col + Math.round((dx / len) * cells),
+    row: targetAnchor.row + Math.round((dy / len) * cells),
+  }
+  const to = tokenCenterForAnchorCell(nextAnchor, targetToken, state.map)
+  updateToken(state, targetToken.id, (token) => ({ ...token, ...to }))
+  events.push({
+    type: 'token-moved',
+    tokenId: targetToken.id,
+    from,
+    to,
+    feet: Math.round(Math.hypot(to.x - from.x, to.y - from.y) / Math.max(1, state.map.gridSize) * (state.map.feetPerCell ?? 5)),
+    triggersMoveEffects: false,
+  })
+}
+
+function grantBurstKickExtraD6(state: HeadlessDmCombatState, characterId: string, count: number) {
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    combatBuffs: {
+      ...character.combatBuffs,
+      burstKickExtraD6: Math.max(character.combatBuffs?.burstKickExtraD6 ?? 0, count),
+    },
+  }))
+}
+
+function clearBurstKickExtraD6(state: HeadlessDmCombatState, characterId: string) {
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    combatBuffs: {
+      ...character.combatBuffs,
+      burstKickExtraD6: undefined,
+    },
+  }))
+}
+
 function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillId: string) {
   updateCharacter(state, characterId, (character) => ({
     ...character,
@@ -1580,18 +1754,21 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
 }
 
 function singleTargetRangeFeet(skill: CombatSkill): number | null {
+  if (skill.skillTreeId === 'burstKick') return 5
   if (!skill.tags?.includes('ranged') && skill.skillTreeId !== 'basicShot' && skill.name !== '基础射击') return null
   switch (skill.skillTreeId) {
     case 'multiShot':
       return 30
     case 'clusterShot':
     case 'vineHookShot':
+    case 'bindShot':
       return 20
     case 'basicShot':
       return 90
     case 'netArrow':
     case 'explosiveArrow':
     case 'magicArrow':
+    case 'rageShot':
     case 'windStepShot':
       return 60
     case 'arcaneBreak':

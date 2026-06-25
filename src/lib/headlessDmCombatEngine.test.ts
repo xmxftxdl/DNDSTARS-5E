@@ -1010,6 +1010,207 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'wind-trace-shot')?.remaining).toBe(3)
   })
 
+  it('applies rage shot restraint through headless effect saves', () => {
+    const rageShot = skill({
+      id: 'rage-shot',
+      name: '怒气爆射',
+      skillTreeId: 'rageShot',
+      damageCount: 2,
+      damageSides: 6,
+      cooldown: 3,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ saveDC: 20, combatSkills: [skill(), rageShot] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'rage-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6, 6],
+          targetDodgeMode: 'skip',
+          effectSave: { ability: 'str', d20: 1 },
+          restrainedOnFailedEffectSave: true,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.restrainedTurns).toBe(1)
+    expect(result.events).toContainEqual({
+      type: 'status-added',
+      targetTokenId: 'goblin',
+      characterId: undefined,
+      condition: '束缚',
+      turns: 1,
+    })
+  })
+
+  it('pulls bind shot targets and arms the next burst kick bonus', () => {
+    const bindShot = skill({
+      id: 'bind-shot',
+      name: '捆绑射击',
+      skillTreeId: 'bindShot',
+      damageCount: 1,
+      damageSides: 6,
+      cooldown: 3,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ saveDC: 20, combatSkills: [skill(), bindShot] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 315,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'bind-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6],
+          targetDodgeMode: 'skip',
+          effectSave: { ability: 'str', d20: 1 },
+          pullOnFailedEffectSave: true,
+          pullCells: 2,
+          grantBurstKickExtraD6OnHit: 1,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.x).toBeLessThan(315)
+    expect(result.state.characters[0].combatBuffs?.burstKickExtraD6).toBe(1)
+    expect(result.events.map((event) => event.type)).toContain('token-moved')
+  })
+
+  it('consumes bind shot bonus dice on burst kick and stuns on failed con saves', () => {
+    const burstKick = skill({
+      id: 'burst-kick',
+      name: '爆裂踢',
+      skillTreeId: 'burstKick',
+      tags: ['melee'],
+      damageCount: 2,
+      damageSides: 4,
+      cooldown: 2,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [
+        character({
+          saveDC: 20,
+          combatBuffs: { burstKickExtraD6: 1 },
+          combatSkills: [skill(), burstKick],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'burst-kick',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [4, 4],
+          extraDamageValues: [6],
+          extraDamageSides: 6,
+          targetDodgeMode: 'skip',
+          effectSave: { ability: 'con', d20: 1 },
+          stunOnFailedEffectSave: true,
+          clearBurstKickExtraD6OnUse: true,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const attack = result.events.find((event) => event.type === 'attack-resolved')
+    expect(attack).toMatchObject({ damageValues: [4, 4, 6] })
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.stunTurns).toBe(1)
+    expect(result.state.characters[0].combatBuffs?.burstKickExtraD6).toBeUndefined()
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),

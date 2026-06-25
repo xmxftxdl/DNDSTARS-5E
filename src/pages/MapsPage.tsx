@@ -4062,6 +4062,7 @@ export default function MapsPage() {
 
     const packetPlans = []
     let damagePacketCount = 0
+    const skillRank = skill.skillTreeId ? getSkillRank(caster, skill.skillTreeId) : 0
     for (const target of targets) {
       const liveTarget = map.tokens.find((token) => token.id === target.id) ?? target
       const dodgePreview = enemyDodgePreview(liveTarget, caster, skill)
@@ -4071,8 +4072,12 @@ export default function MapsPage() {
         targetDodgeD20 != null && dodgePreview
           ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
           : false
+      const effectSaveD20 =
+        !expectedDodged && skill.skillTreeId === 'rageShot' && skillRank >= 3
+          ? await rollDiceBoxD20('怒气爆射力量豁免 D20', liveTarget.label)
+          : undefined
       if (!expectedDodged) damagePacketCount += 1
-      packetPlans.push({ target, targetDodgeD20, targetDodgeMode: shouldDodge ? 'attempt' : 'skip', expectedDodged })
+      packetPlans.push({ target, targetDodgeD20, targetDodgeMode: shouldDodge ? 'attempt' : 'skip', expectedDodged, effectSaveD20 })
     }
 
     const allBaseValues =
@@ -4092,13 +4097,14 @@ export default function MapsPage() {
     let damageCursor = 0
     let comboFistApplied = false
     const targetPackets = packetPlans.map((plan) => {
-      let diceValues = plan.expectedDodged
+      const diceValues = plan.expectedDodged
         ? undefined
         : allBaseValues.slice(damageCursor, damageCursor + perArrowDiceCount)
+      let extraDamageValues: number[] | undefined
       if (!plan.expectedDodged) {
         damageCursor += perArrowDiceCount
         if (!comboFistApplied && comboFistValues.length > 0) {
-          diceValues = [...(diceValues ?? []), ...comboFistValues]
+          extraDamageValues = comboFistValues
           comboFistApplied = true
         }
       }
@@ -4107,6 +4113,10 @@ export default function MapsPage() {
         diceValues,
         targetDodgeD20: plan.targetDodgeD20,
         targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
+        extraDamageValues,
+        extraDamageSides: extraDamageValues?.length ? 6 : undefined,
+        effectSave: plan.effectSaveD20 != null ? { ability: 'str' as const, d20: plan.effectSaveD20 } : undefined,
+        restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
       }
     })
 
@@ -7148,7 +7158,12 @@ export default function MapsPage() {
     skill: CombatSkill,
     opts: { doubleArrow: boolean; targetCount: number },
   ) => {
-    if (!isBasicShot(skill) || opts.targetCount !== 1 || opts.doubleArrow) return false
+    const supportedSkill =
+      isBasicShot(skill) ||
+      skill.skillTreeId === 'burstKick' ||
+      skill.skillTreeId === 'bindShot' ||
+      skill.skillTreeId === 'rageShot'
+    if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
     if (isOutOfBreath(actor)) return false
@@ -7158,7 +7173,7 @@ export default function MapsPage() {
       buffs?.calmSpiritCritBonusPercent ||
       buffs?.doubleArrowReady ||
       buffs?.shadowVeilTargetId ||
-      buffs?.burstKickExtraD6 ||
+      (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
       buffs?.windKickTreatKnockbackTargetId
     ) {
       return false
@@ -7320,6 +7335,7 @@ export default function MapsPage() {
         const perPacketDiceCount = Math.max(1, skill.damageCount)
         const packetPlans = []
         let damagePacketCount = 0
+        const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
         for (const target of targets) {
           const liveTarget = map.tokens.find((token) => token.id === target.id) ?? target
           const dodgePreview = enemyDodgePreview(liveTarget, actor, skill)
@@ -7329,12 +7345,17 @@ export default function MapsPage() {
             targetDodgeD20 != null && dodgePreview
               ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
               : false
+          const effectSaveD20 =
+            !expectedDodged && skill.skillTreeId === 'rageShot' && skillRank >= 3
+              ? await rollDiceBoxD20('怒气爆射力量豁免 D20', liveTarget.label)
+              : undefined
           if (!expectedDodged) damagePacketCount += 1
           packetPlans.push({
             target,
             targetDodgeD20,
             targetDodgeMode: shouldDodge ? 'attempt' : 'skip',
             expectedDodged,
+            effectSaveD20,
           })
         }
         const allDamageValues =
@@ -7357,6 +7378,8 @@ export default function MapsPage() {
             diceValues,
             targetDodgeD20: plan.targetDodgeD20,
             targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
+            effectSave: plan.effectSaveD20 != null ? { ability: 'str' as const, d20: plan.effectSaveD20 } : undefined,
+            restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
           }
         })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
@@ -7433,14 +7456,51 @@ export default function MapsPage() {
         const diceValues = expectedTargetDodged
           ? undefined
           : await rollDiceBoxValues(skill.damageCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
+        const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+        const burstKickExtraD6 =
+          !expectedTargetDodged && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
+        const extraDamageValues =
+          burstKickExtraD6 > 0
+            ? await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)
+            : undefined
+        const effectAbility: 'str' | 'con' | undefined =
+          !expectedTargetDodged && skill.skillTreeId === 'burstKick' && skillRank >= 3
+            ? 'con'
+            : !expectedTargetDodged && (skill.skillTreeId === 'rageShot' && skillRank >= 3)
+              ? 'str'
+              : !expectedTargetDodged && skill.skillTreeId === 'bindShot'
+                ? 'str'
+                : undefined
+        const effectSaveD20 = effectAbility
+          ? await rollDiceBoxD20(
+              effectAbility === 'con' ? `${skill.name} 体质豁免 D20` : `${skill.name} 力量豁免 D20`,
+              targetToken.label,
+            )
+          : undefined
+        const targetPacket = {
+          targetTokenId: targetToken.id,
+          diceValues,
+          extraDamageValues,
+          extraDamageSides: extraDamageValues?.length ? 6 : undefined,
+          targetDodgeD20,
+          targetDodgeMode: dodgePreview?.decision.shouldDodge ? ('attempt' as const) : ('skip' as const),
+          effectSave: effectAbility && effectSaveD20 != null ? { ability: effectAbility, d20: effectSaveD20 } : undefined,
+          stunOnFailedEffectSave: skill.skillTreeId === 'burstKick' && skillRank >= 3,
+          restrainedOnFailedEffectSave:
+            (skill.skillTreeId === 'rageShot' && skillRank >= 3) ||
+            (skill.skillTreeId === 'bindShot' && skillRank >= 4),
+          pullOnFailedEffectSave: skill.skillTreeId === 'bindShot',
+          pullCells: skill.skillTreeId === 'bindShot' ? 2 : undefined,
+          grantBurstKickExtraD6OnHit: skill.skillTreeId === 'bindShot' ? 1 : undefined,
+          clearBurstKickExtraD6OnUse: skill.skillTreeId === 'burstKick' && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
+        }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',
           actorTokenId: action.actorTokenId,
           characterId: action.characterId,
           targetTokenId: targetToken.id,
           skillId: skill.id,
-          diceValues,
-          targetDodgeD20,
+          targetPackets: [targetPacket],
         })
         if (!headless.ok) {
           acknowledgePlayerAction(action, 'rejected', headless.reason)
