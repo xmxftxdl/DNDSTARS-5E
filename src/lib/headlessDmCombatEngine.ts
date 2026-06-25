@@ -4,17 +4,22 @@ import type { Character, CombatSkill } from '../types/character'
 import {
   applyAttackDefenseDamageModifier,
   characterToCombatInput,
+  computeCritDamageMultiplier,
+  getAc,
   isMagicDamageSkill,
   resolveAttackDamageTotal,
   type DamageReductionType,
 } from './combatStats'
-import { adjustDamageAgainstToken, enemyCombatInput } from './enemyCombatStats'
+import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from './enemyCombatStats'
 import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
 import { tokenFootprintDistanceCells } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
 import { resolveCombatMovement } from './combatMovementPipeline'
 import { triggerOutOfBreath } from './calmMind'
-import { findOpportunityAttackersForMove } from './opportunityAttacks'
+import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
+import { getEffectiveAbilityMod } from './archerCombat'
+import { proficiencyBonus } from './dnd'
+import { getTokenAbilityMod } from './knockback'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -48,6 +53,22 @@ export type HeadlessCombatEvent =
   | { type: 'combat-ended'; winner: 'ally' | 'enemy'; message: string }
   | { type: 'status-added'; targetTokenId: string; characterId?: string; condition: string; turns?: number }
   | { type: 'opportunity-triggered'; attackerTokenId: string; movingTokenId: string }
+  | {
+      type: 'opportunity-resolved'
+      attackerTokenId: string
+      targetTokenId: string
+      d20Value: number
+      attackBonus: number
+      targetAc: number
+      hit: boolean
+      isCrit: boolean
+      damageValues: number[]
+      rawDamage: number
+      damageBeforeDefense: number
+      modifier: number
+      diff: number
+      total: number
+    }
   | { type: 'log'; text: string }
 
 export interface HeadlessPlayerMoveAction {
@@ -75,6 +96,14 @@ export interface HeadlessEnemyAttackAction {
   diceValues?: number[]
 }
 
+export interface HeadlessOpportunityAttackAction {
+  type: 'opportunity-attack-token'
+  actorTokenId: string
+  targetTokenId: string
+  d20Value?: number
+  damageValues?: number[]
+}
+
 export interface HeadlessEndTurnAction {
   type: 'end-turn'
   actorTokenId: string
@@ -85,6 +114,7 @@ export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
+  | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
 
 export type HeadlessCombatFailureReason =
@@ -200,6 +230,7 @@ export function cloneHeadlessCombatState(state: HeadlessDmCombatState): Headless
     enemyApByToken: Object.fromEntries(
       Object.entries(state.enemyApByToken).map(([tokenId, ap]) => [tokenId, { ...ap }]),
     ),
+    disengagedCharacterIds: state.disengagedCharacterIds?.slice(),
   }
 }
 
@@ -222,7 +253,9 @@ export function resolveHeadlessDmAction(
   if (!next.active) return fail(next, 'combat-ended', events)
 
   const turn = getCurrentTurn(next)
-  if (!turn || turn.tokenId !== action.actorTokenId) return fail(next, 'stale-turn', events)
+  if (action.type !== 'opportunity-attack-token' && (!turn || turn.tokenId !== action.actorTokenId)) {
+    return fail(next, 'stale-turn', events)
+  }
 
   switch (action.type) {
     case 'move-token':
@@ -231,6 +264,8 @@ export function resolveHeadlessDmAction(
       return resolvePlayerAttack(next, action, dice, events)
     case 'enemy-attack-token':
       return resolveEnemyAttack(next, action, dice, events)
+    case 'opportunity-attack-token':
+      return resolveOpportunityAttack(next, action, dice, events)
     case 'end-turn': {
       if (action.characterId) {
         const actor = findCharacter(next, action.characterId)
@@ -437,6 +472,109 @@ function resolveEnemyAttack(
   events.push({
     type: 'log',
     text: `${actorToken.label} 使用 ${actionDef.name} 攻击 ${targetToken.label}：骰值 ${diceValues.join('+')}，加值 ${parsed.bonus}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
+  })
+  maybeEndCombat(state, events)
+  return succeed(state, events)
+}
+
+function resolveOpportunityAttack(
+  state: HeadlessDmCombatState,
+  action: HeadlessOpportunityAttackAction,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  const targetToken = state.map.tokens.find((item) => item.id === action.targetTokenId)
+  if (
+    !actorToken ||
+    !targetToken ||
+    actorToken.id === targetToken.id ||
+    !areOpposedCombatTokens(actorToken, targetToken) ||
+    !isTokenAlive(actorToken, state.characters) ||
+    !isTokenAlive(targetToken, state.characters)
+  ) {
+    return fail(state, 'invalid-target', events)
+  }
+  const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, state.map) * (state.map.feetPerCell ?? 5)
+  if (distanceFeet > 5) return fail(state, 'out-of-range', events)
+
+  const attacker = actorToken.characterId ? findCharacter(state, actorToken.characterId) : undefined
+  const target = targetToken.characterId ? findCharacter(state, targetToken.characterId) : undefined
+  if (actorToken.characterId) {
+    if (!attacker || actorToken.type !== 'player') return fail(state, 'invalid-actor', events)
+    if (!spendCharacterAp(state, attacker.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  } else if (actorToken.type === 'enemy' && actorToken.poolId) {
+    if (!spendEnemyAp(state, actorToken.id, 1, events)) return fail(state, 'insufficient-ap', events)
+  } else {
+    return fail(state, 'invalid-actor', events)
+  }
+
+  const d20Values = resolveDiceValues(
+    action.d20Value != null ? [action.d20Value] : undefined,
+    dice,
+    1,
+    20,
+  )
+  if (!d20Values) return fail(state, 'invalid-dice', events)
+  const d20Value = d20Values[0]
+  events.push({ type: 'dice-rolled', notation: '1d20', values: [d20Value], total: d20Value })
+
+  const attackBonus = attacker
+    ? getEffectiveAbilityMod(attacker, 'str') + proficiencyBonus(attacker.level)
+    : getTokenAbilityMod(actorToken, 'str') + 2
+  const targetAc = target ? getAc(target) : (getTokenTargetAc(targetToken) ?? 12)
+  const hit = d20Value + attackBonus >= targetAc || d20Value >= 20
+  const isCrit = d20Value >= 20
+  let damageValues: number[] = []
+  let rawDamage = 0
+  let damageBeforeDefense = 0
+  let modifier = 0
+  let diff = 0
+  let total = 0
+
+  if (hit) {
+    const resolvedDamageValues = resolveDiceValues(action.damageValues, dice, 1, 6)
+    if (!resolvedDamageValues) return fail(state, 'invalid-dice', events)
+    damageValues = resolvedDamageValues
+    rawDamage = damageValues.reduce((sum, value) => sum + value, 0)
+    events.push({ type: 'dice-rolled', notation: '1d6', values: damageValues, total: rawDamage })
+    const attackerInput = attacker ? characterToCombatInput(attacker) : enemyCombatInput(actorToken.poolId ?? '')
+    const critMultiplier = attackerInput ? computeCritDamageMultiplier(attackerInput) : 1.25
+    damageBeforeDefense = isCrit ? Math.floor(rawDamage * critMultiplier) : rawDamage
+    const adjusted = target
+      ? applyAttackDefenseDamageModifier(
+          damageBeforeDefense,
+          attackerInput,
+          characterToCombatInput(target),
+          'physical',
+          (targetToken.vulnerableTurns ?? 0) > 0 || target.conditions.includes('脆弱'),
+        )
+      : adjustDamageAgainstToken(damageBeforeDefense, attackerInput, targetToken, 'physical')
+    modifier = adjusted.modifier
+    diff = adjusted.diff
+    total = adjusted.damage
+    if (total > 0) applyDamageToTarget(state, targetToken, total, events)
+  }
+
+  events.push({
+    type: 'opportunity-resolved',
+    attackerTokenId: actorToken.id,
+    targetTokenId: targetToken.id,
+    d20Value,
+    attackBonus,
+    targetAc,
+    hit,
+    isCrit,
+    damageValues,
+    rawDamage,
+    damageBeforeDefense,
+    modifier,
+    diff,
+    total,
+  })
+  events.push({
+    type: 'log',
+    text: `${attacker?.name ?? actorToken.label} 借机攻击 ${target?.name ?? targetToken.label}：D20 ${d20Value}+${attackBonus} vs AC ${targetAc}，${hit ? `最终 ${total} 点` : '未命中'}。`,
   })
   maybeEndCombat(state, events)
   return succeed(state, events)

@@ -100,7 +100,6 @@ const PLAYER_ACTION_QUEUE_LIMIT = 80
 import {
   applyAttackDefenseDamageModifier,
   characterToCombatInput,
-  computeCritDamageMultiplier,
   damageModifierFromAttackDefenseDiff,
   formatCritDamagePercent,
   getAc,
@@ -4674,15 +4673,21 @@ export default function MapsPage() {
     opts?: { confirmed?: boolean },
   ) => {
     if (!activeMap) return
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const attacker = attackerToken.characterId
       ? useCharacterStore.getState().characters.find((c) => c.id === attackerToken.characterId)
       : undefined
+    const effectiveTargetChar =
+      targetChar ??
+      (targetToken.characterId
+        ? useCharacterStore.getState().characters.find((c) => c.id === targetToken.characterId)
+        : undefined)
     if (attackerToken.characterId && (!attacker || attacker.currentAP < 1 || attacker.currentHp <= 0)) return
     if (!attackerToken.characterId && attackerToken.type === 'enemy') {
       const ap = getEnemyApState(attackerToken.id)
       if (ap.current < 1) return
     }
-    const targetName = targetChar?.name ?? targetToken.label
+    const targetName = effectiveTargetChar?.name ?? targetToken.label
     const attackerName = attacker?.name ?? attackerToken.label
     if (
       attacker &&
@@ -4697,78 +4702,105 @@ export default function MapsPage() {
     ) {
       return
     }
-    if (attacker) {
-      if (!spendAP(attacker.id, 1)) return
-      pushApLog(attacker, 1, '借机攻击', `目标 ${targetName}`)
-    } else {
-      if (!spendEnemyAp(attackerToken.id, 1)) return
-      pushCombatLog(`${attackerToken.label} 花费 1 AP：借机攻击 ${targetName}`, 'turn')
-    }
 
     const d20 = await rollDiceBoxD20('借机攻击 D20', targetName)
     const attackBonus = attacker
       ? getEffectiveAbilityMod(attacker, 'str') + proficiencyBonus(attacker.level)
       : getTokenAbilityMod(attackerToken, 'str') + 2
-    const targetAc = targetChar ? getAc(targetChar) : (getTokenTargetAc(targetToken) ?? 12)
+    const targetAc = effectiveTargetChar ? getAc(effectiveTargetChar) : (getTokenTargetAc(targetToken) ?? 12)
     const hit = d20 + attackBonus >= targetAc || d20 >= 20
-    const isCrit = d20 >= 20
     let values: number[] = []
-    let total = 0
-    let bonus = 0
     let formula: string | undefined
     if (hit) {
       values = await rollDiceBoxValues(1, 6, '借机攻击 伤害', targetName)
-      const raw = values.reduce((sum, value) => sum + value, 0)
-      const critRaw = isCrit
-        ? Math.floor(raw * (attacker ? computeCritDamageMultiplier(characterToCombatInput(attacker)) : 1.25))
-        : raw
-      const adjusted = targetChar
-        ? applyAttackDefenseDamageModifier(
-            critRaw,
-            attacker ? characterToCombatInput(attacker) : enemyCombatInput(attackerToken.poolId ?? ''),
-            characterToCombatInput(targetChar),
-            'physical',
-            (targetToken.vulnerableTurns ?? 0) > 0, // [T4/C3]
-          )
-        : adjustDamageAgainstToken(critRaw, attacker ? characterToCombatInput(attacker) : enemyCombatInput(attackerToken.poolId ?? ''), targetToken, 'physical')
-      total = adjusted.damage
-      bonus = total - raw
-      const critText = isCrit ? ` × 暴击${attacker ? formatCritDamagePercent(attacker) : '125%'}` : ''
-      formula = `${values.join(' + ')}${critText}${isCrit ? ` = ${critRaw}` : ''} ${adjusted.modifier >= 0 ? '+' : '-'} ${Math.abs(adjusted.modifier)}攻防修正(差值${adjusted.diff}) = ${total}`
-      if (total > 0) {
-        if (targetChar) {
-          damageChar(targetChar.id, total)
-          const updated = useCharacterStore.getState().characters.find((c) => c.id === targetChar.id)
-          if (updated) {
-            // [T10/AC1] 经唯一镜像 helper 写回 token.hp。
-            updateToken(activeMap.id, targetToken.id, characterHpTokenPatch(updated))
-            if (updated.currentHp <= 0) deferDeathHandling(targetToken.id, targetChar.id)
-          }
-        } else if (targetToken.maxHp != null) {
-          const hp = Math.max(0, (targetToken.hp ?? targetToken.maxHp) - total)
-          updateToken(activeMap.id, targetToken.id, { hp })
-          if (hp <= 0) deferDeathHandling(targetToken.id)
-        }
+    }
+
+    const headless = resolveHeadlessDmAction(
+      {
+        ...createHeadlessStateSnapshot(latestMap),
+        map: latestMap,
+      },
+      {
+        type: 'opportunity-attack-token',
+        actorTokenId: attackerToken.id,
+        targetTokenId: targetToken.id,
+        d20Value: d20,
+        damageValues: hit ? values : undefined,
+      },
+    )
+    if (!headless.ok) {
+      pushCombatLog(`${attackerName} 借机攻击未执行：${headless.reason}`, 'system')
+      return
+    }
+
+    const resolved = headless.events.find(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'opportunity-resolved' }> =>
+        event.type === 'opportunity-resolved',
+    )
+    if (!resolved) return
+
+    const syncCharacterIds = new Set<string>()
+    if (attackerToken.characterId) syncCharacterIds.add(attackerToken.characterId)
+    if (targetToken.characterId) syncCharacterIds.add(targetToken.characterId)
+    for (const characterId of syncCharacterIds) {
+      const nextChar = headless.state.characters.find((character) => character.id === characterId)
+      if (nextChar) {
+        updateChar(characterId, {
+          currentAP: nextChar.currentAP,
+          currentHp: nextChar.currentHp,
+          tempHp: nextChar.tempHp,
+        })
       }
+    }
+
+    const nextTargetToken = headless.state.map.tokens.find((token) => token.id === targetToken.id)
+    if (nextTargetToken) updateToken(latestMap.id, targetToken.id, nextTargetToken)
+    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(headless.state.enemyApByToken)) {
+      enemyApByTokenRef.current = headless.state.enemyApByToken
+      setEnemyApByToken(headless.state.enemyApByToken)
+      publishCombatState({ enemyApByToken: headless.state.enemyApByToken })
+    }
+
+    const damageEvent = headless.events.find(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'damage-applied' }> =>
+        event.type === 'damage-applied' && event.targetTokenId === targetToken.id,
+    )
+    if (damageEvent && damageEvent.hpAfter <= 0) {
+      deferDeathHandling(targetToken.id, damageEvent.characterId)
+    }
+
+    const total = resolved.total
+    const bonus = total - resolved.rawDamage
+    if (resolved.hit) {
+      const critText = resolved.isCrit ? ` × 暴击${attacker ? formatCritDamagePercent(attacker) : '125%'}` : ''
+      formula = `${resolved.damageValues.join(' + ')}${critText}${resolved.isCrit ? ` = ${resolved.damageBeforeDefense}` : ''} ${
+        resolved.modifier >= 0 ? '+' : '-'
+      } ${Math.abs(resolved.modifier)}攻防修正(差值${resolved.diff}) = ${resolved.total}`
     }
     setRoll({
       values,
       sides: 6,
       bonus,
       total,
-      label: `借机攻击 · ${d20}+${attackBonus} vs AC${targetAc}${isCrit ? ' 重击' : ''}${hit ? '' : ' 未中'}`,
+      label: `借机攻击 · ${resolved.d20Value}+${resolved.attackBonus} vs AC${resolved.targetAc}${resolved.isCrit ? ' 重击' : ''}${
+        resolved.hit ? '' : ' 未中'
+      }`,
       formula,
       targetName,
       d20Roll: {
-        value: d20,
-        modifier: attackBonus,
-        ac: targetAc,
-        hit,
-        isCrit,
+        value: resolved.d20Value,
+        modifier: resolved.attackBonus,
+        ac: resolved.targetAc,
+        hit: resolved.hit,
+        isCrit: resolved.isCrit,
       },
     })
     pushCombatLog(
-      `${attackerName} 借机攻击 ${targetName}：D20 ${d20} + ${attackBonus} = ${d20 + attackBonus} vs AC ${targetAc}，${hit ? '命中' : '未命中'}${formula ? `；伤害 ${formula}` : ''}；最终 ${total} 点伤害`,
+      `${attackerName} 借机攻击 ${targetName}：D20 ${resolved.d20Value} + ${resolved.attackBonus} = ${
+        resolved.d20Value + resolved.attackBonus
+      } vs AC ${resolved.targetAc}，${resolved.hit ? '命中' : '未命中'}${formula ? `；伤害 ${formula}` : ''}；最终 ${
+        resolved.total
+      } 点伤害`,
       total > 0 ? 'damage' : 'attack',
     )
   }
