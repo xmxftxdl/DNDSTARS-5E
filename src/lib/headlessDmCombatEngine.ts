@@ -108,6 +108,29 @@ export type HeadlessCombatEvent =
       targetAc?: number
     }
   | {
+      type: 'aoe-target-resolved'
+      actorTokenId: string
+      characterId: string
+      targetTokenId: string
+      skillId: string
+      skillName: string
+      damageValues: number[]
+      diceTotal: number
+      baseDamage: number
+      damageBeforeSave: number
+      modifier: number
+      diff: number
+      total: number
+      saveD20?: number
+      saveMod?: number
+      saveTotal?: number
+      saveDc?: number
+      saveSuccess?: boolean
+      saveMode?: 'half' | 'none' | 'fail-half'
+      waivedAp: boolean
+      apCost: number
+    }
+  | {
       type: 'opportunity-resolved'
       attackerTokenId: string
       targetTokenId: string
@@ -180,6 +203,22 @@ export interface HeadlessQiReduceCooldownAction {
   skillId: string
 }
 
+export interface HeadlessAoeAttackAction {
+  type: 'aoe-attack'
+  actorTokenId: string
+  characterId: string
+  skillId: string
+  targetPackets: HeadlessAoeTargetPacket[]
+  diceValues?: number[]
+  cellCount?: number
+  saveMode?: 'half' | 'none' | 'fail-half'
+}
+
+export interface HeadlessAoeTargetPacket {
+  targetTokenId: string
+  saveD20?: number
+}
+
 export interface HeadlessOpportunityAttackAction {
   type: 'opportunity-attack-token'
   actorTokenId: string
@@ -200,6 +239,7 @@ export type HeadlessCombatAction =
   | HeadlessEnemyAttackAction
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
+  | HeadlessAoeAttackAction
   | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
 
@@ -349,6 +389,8 @@ export function resolveHeadlessDmAction(
       return resolveMove(next, action, events)
     case 'attack-token':
       return resolvePlayerAttack(next, action, dice, events)
+    case 'aoe-attack':
+      return resolveAoeAttack(next, action, dice, events)
     case 'enemy-attack-token':
       return resolveEnemyAttack(next, action, dice, events)
     case 'activate-feature':
@@ -745,6 +787,110 @@ function resolvePlayerAttack(
       text: `${actor.name} 使用 ${skill.name} 第 ${packetIndex + 1} 段攻击 ${targetToken.label}：骰值 ${diceValues.join(
         '+',
       )}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
+    })
+    resolvedCount += 1
+  }
+  if (resolvedCount === 0) return fail(state, 'invalid-target', events)
+  markSkillUsed(state, actor.id, skill.id)
+  if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
+  maybeEndCombat(state, events)
+  return succeed(state, events)
+}
+
+function resolveAoeAttack(
+  state: HeadlessDmCombatState,
+  action: HeadlessAoeAttackAction,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actor = findCharacter(state, action.characterId)
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  const skill = actor?.combatSkills.find((item) => item.id === action.skillId)
+  if (!actor || !actorToken || actorToken.characterId !== actor.id || actorToken.type !== 'player') {
+    return fail(state, 'invalid-actor', events)
+  }
+  if (!skill || skill.remaining > 0 || skill.damageSides <= 0) return fail(state, 'invalid-skill', events)
+  if (action.targetPackets.length === 0) return fail(state, 'invalid-target', events)
+  for (const packet of action.targetPackets) {
+    const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
+    if (!targetToken || targetToken.id === actorToken.id || !isTokenAlive(targetToken, state.characters)) {
+      return fail(state, 'invalid-target', events)
+    }
+  }
+
+  const waiveAp = !!actor.combatBuffs?.galeComboReady
+  const apCost = Math.max(0, skill.apCost)
+  if (!waiveAp && apCost > 0 && !spendCharacterAp(state, actor.id, apCost, actorToken.id, events)) {
+    return fail(state, 'insufficient-ap', events)
+  }
+
+  const diceCount = Math.max(skill.damageCount, action.diceValues?.length ?? 0)
+  const diceValues = resolveDiceValues(action.diceValues, dice, diceCount, skill.damageSides)
+  if (!diceValues) return fail(state, 'invalid-dice', events)
+  events.push({
+    type: 'dice-rolled',
+    notation: `${diceCount}d${skill.damageSides}`,
+    values: diceValues,
+    total: diceValues.reduce((sum, value) => sum + value, 0),
+  })
+
+  const baseDamage = resolveAttackDamageTotal(actor, skill, diceValues)
+  const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
+  let resolvedCount = 0
+  for (const [packetIndex, packet] of action.targetPackets.entries()) {
+    const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
+    if (!targetToken || !isTokenAlive(targetToken, state.characters)) continue
+    const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
+    let total = adjusted.damage
+    let saveD20: number | undefined
+    let saveMod: number | undefined
+    let saveTotal: number | undefined
+    let saveSuccess: boolean | undefined
+    const saveMode = action.saveMode
+    const targetCharacter = targetToken.characterId ? findCharacter(state, targetToken.characterId) : undefined
+    if (saveMode && packet.saveD20 != null) {
+      const saveValues = resolveDiceValues([packet.saveD20], dice, 1, 20)
+      if (!saveValues) return fail(state, 'invalid-dice', events)
+      saveD20 = saveValues[0]
+      saveMod = getTokenAbilityMod(targetToken, 'dex', targetCharacter)
+      saveTotal = saveD20 + saveMod
+      saveSuccess = saveTotal >= actor.saveDC
+      if (saveMode === 'half') total = saveSuccess ? Math.floor(adjusted.damage / 2) : adjusted.damage
+      if (saveMode === 'none') total = saveSuccess ? 0 : adjusted.damage
+      if (saveMode === 'fail-half') total = saveSuccess ? adjusted.damage : Math.floor(adjusted.damage / 2)
+      events.push({ type: 'dice-rolled', notation: '1d20', values: [saveD20], total: saveD20 })
+    }
+    if (total > 0) applyDamageToTarget(state, targetToken, total, events)
+    events.push({
+      type: 'aoe-target-resolved',
+      actorTokenId: actorToken.id,
+      characterId: actor.id,
+      targetTokenId: targetToken.id,
+      skillId: skill.id,
+      skillName: skill.name,
+      damageValues: diceValues,
+      diceTotal: diceValues.reduce((sum, value) => sum + value, 0),
+      baseDamage,
+      damageBeforeSave: adjusted.damage,
+      modifier: adjusted.modifier,
+      diff: adjusted.diff,
+      total,
+      saveD20,
+      saveMod,
+      saveTotal,
+      saveDc: saveMode ? actor.saveDC : undefined,
+      saveSuccess,
+      saveMode,
+      waivedAp: waiveAp,
+      apCost: packetIndex === 0 ? apCost : 0,
+    })
+    events.push({
+      type: 'log',
+      text: `${actor.name} 的 ${skill.name} 命中 ${targetToken.label}：基础 ${adjusted.damage}${
+        saveMode && saveD20 != null
+          ? `，敏捷豁免 ${saveD20}+${saveMod} vs DC${actor.saveDC} ${saveSuccess ? '成功' : '失败'}`
+          : ''
+      }，最终 ${total} 点。`,
     })
     resolvedCount += 1
   }

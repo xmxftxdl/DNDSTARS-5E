@@ -7523,6 +7523,106 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      if (skill.skillTreeId === 'arrowStorm' || skill.skillTreeId === 'aerialCombo') {
+        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
+        if (!actorToken) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-aoe-attack')
+          completePlayerActionRequest(action)
+          return
+        }
+        const casterCell = pixelToCell(actorToken.x, actorToken.y, map)
+        const anchorCell = aoe.shape === 'circle' && aoe.origin === 'self' ? casterCell : action.targetCell
+        if (!canPlaceAoe(aoe, casterCell, anchorCell)) {
+          acknowledgePlayerAction(action, 'rejected', 'out-of-range')
+          completePlayerActionRequest(action)
+          return
+        }
+        const cells = cellsForAoe(
+          aoe,
+          aoeOrientFromCell(aoe, casterCell, anchorCell, {
+            skillTreeId: skill.skillTreeId,
+            rectRotation: action.aoeRectRotation ?? 0,
+          }),
+          anchorCell,
+        )
+        const targets = tokensInCells(map, map.tokens, cells).filter(
+          (token) => token.id !== actorToken.id && isTokenAlive(token, useCharacterStore.getState().characters),
+        )
+        if (targets.length === 0) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-target')
+          completePlayerActionRequest(action)
+          return
+        }
+        const baseDiceCount = Math.max(1, attackDamageDiceCount(skill, false))
+        let diceValues = await rollDiceBoxValues(baseDiceCount, skill.damageSides, `${skill.name} 伤害`, targets[0].label)
+        const calm = findClassTrait(actor, 'calmMind')
+        if (calm && isCalmMindActive(actor) && calm.level > 0) {
+          const extra = await rollDiceBoxValues(calm.level, 6, `${skill.name} 静心额外伤害`, targets[0].label)
+          diceValues = [...diceValues, ...extra]
+        }
+        const targetPackets = []
+        for (const target of targets) {
+          const targetChar = target.characterId
+            ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
+            : undefined
+          const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar?.name ?? target.label)
+          targetPackets.push({ targetTokenId: target.id, saveD20 })
+        }
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+          type: 'aoe-attack',
+          actorTokenId: action.actorTokenId,
+          characterId: action.characterId,
+          skillId: skill.id,
+          diceValues,
+          saveMode: 'half',
+          cellCount: cells.length,
+          targetPackets,
+        })
+        if (!headless.ok) {
+          acknowledgePlayerAction(action, 'rejected', headless.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        applyHeadlessCombatResult(headless)
+        const resolvedEvents = headless.events.filter(
+          (event): event is Extract<HeadlessCombatEvent, { type: 'aoe-target-resolved' }> =>
+            event.type === 'aoe-target-resolved',
+        )
+        const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
+        const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
+        const rollForDisplay: DiceRoll = {
+          values: diceValues,
+          sides: skill.damageSides,
+          bonus: total - diceTotal,
+          total,
+          label: `${skill.name} · 覆盖 ${cells.length} 格`,
+          formula: `${diceValues.join(' + ')}${skill.damageBonus ? ` + ${skill.damageBonus}` : ''}`,
+          targetName: resolvedEvents
+            .map((event) => `${map.tokens.find((token) => token.id === event.targetTokenId)?.label ?? event.targetTokenId} ${event.total}`)
+            .join('；'),
+        }
+        setRoll(rollForDisplay)
+        publishSharedDiceRoll(rollForDisplay)
+        pushCombatLog(
+          `${actor.name} 结算 ${skill.name}：覆盖 ${cells.length} 格，${targets.length} 名目标在范围内。${resolvedEvents
+            .map((event) => {
+              const label = map.tokens.find((token) => token.id === event.targetTokenId)?.label ?? event.targetTokenId
+              const saveText =
+                event.saveD20 != null
+                  ? `，敏捷豁免 ${event.saveD20}+${event.saveMod} vs DC${event.saveDc} ${
+                      event.saveSuccess ? '成功半伤' : '失败全伤'
+                    }`
+                  : ''
+              return `${label} ${event.total} 点${saveText}`
+            })
+            .join('；')}`,
+          total > 0 ? 'damage' : 'attack',
+        )
+        completePlayerActionRequest(action)
+        acknowledgePlayerAction(action, 'accepted')
+        return
+      }
       const doubleArrow = canUseDoubleArrow(actor, skill) && !!actor.combatBuffs?.doubleArrowReady
       await resolveAoeAttack(action.targetCell, {
         targetingOverride: {

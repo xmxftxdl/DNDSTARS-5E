@@ -653,6 +653,79 @@ describe('headless DM combat engine', () => {
     expect(resolved[1]).toMatchObject({ damageValues: [3], apCost: 0 })
   })
 
+  it('resolves AOE target packets with shared damage dice and per-target dex saves', () => {
+    const arrowStorm = skill({
+      id: 'arrow-storm',
+      name: '箭雨风暴',
+      skillTreeId: 'arrowStorm',
+      damageCount: 2,
+      damageSides: 6,
+      cooldown: 3,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ saveDC: 12, combatSkills: [skill(), arrowStorm] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin-a',
+          label: 'Goblin A',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 245,
+          y: 175,
+        }),
+        token({
+          id: 'goblin-b',
+          label: 'Goblin B',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 20,
+          maxHp: 20,
+          x: 315,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { 'goblin-a': { current: 0, max: 2 }, 'goblin-b': { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'arrow-storm',
+      diceValues: [6, 6],
+      saveMode: 'half',
+      targetPackets: [
+        { targetTokenId: 'goblin-a', saveD20: 1 },
+        { targetTokenId: 'goblin-b', saveD20: 20 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const resolved = result.events.filter((event) => event.type === 'aoe-target-resolved')
+    expect(result.state.characters[0].currentAP).toBe(1)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'arrow-storm')?.remaining).toBe(3)
+    expect(resolved).toHaveLength(2)
+    expect(resolved[0]).toMatchObject({ targetTokenId: 'goblin-a', saveSuccess: false, apCost: 1 })
+    expect(resolved[1]).toMatchObject({ targetTokenId: 'goblin-b', saveSuccess: true, apCost: 0 })
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin-a')?.hp).toBeLessThan(
+      result.state.map.tokens.find((item) => item.id === 'goblin-b')?.hp ?? 0,
+    )
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),
