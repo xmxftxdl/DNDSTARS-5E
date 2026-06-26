@@ -1343,6 +1343,82 @@ describe('headless DM combat engine', () => {
     expect(attack).toMatchObject({ damageValues: [6, 6, 6, 6, 6, 6, 6] })
   })
 
+  it('resolves wind kick combo knockback bonus, push, cooldown reduction, and temporary knockback cleanup', () => {
+    const windKickCombo = skill({
+      id: 'wind-kick-combo',
+      name: '踏风连踢',
+      skillTreeId: 'windKickCombo',
+      tags: [],
+      damageCount: 3,
+      damageSides: 4,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const hero = character({
+      skillRanks: { windKickCombo: 5 },
+      combatBuffs: { windKickTreatKnockbackTargetId: 'goblin' },
+      combatSkills: [skill(), windKickCombo],
+    })
+    const combat = state({
+      characters: [hero],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'wind-kick-combo',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [4, 4, 4],
+          extraDamageValues: [6],
+          extraDamageSides: 6,
+          targetDodgeMode: 'skip',
+          pushTargetOnHit: true,
+          pushCells: 1,
+          selfCooldownReductionOnHit: 1,
+          clearWindKickTreatKnockbackOnUse: true,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'goblin')
+    const actor = result.state.characters.find((item) => item.id === 'hero')
+    expect(target?.x).toBe(315)
+    expect(actor?.combatBuffs?.windKickTreatKnockbackTargetId).toBeUndefined()
+    expect(actor?.combatSkills.find((item) => item.id === 'wind-kick-combo')?.remaining).toBe(3)
+    const attack = result.events.find((event) => event.type === 'attack-resolved')
+    expect(attack).toMatchObject({ damageValues: [4, 4, 4, 6], hit: true })
+    expect(result.events.some((event) => event.type === 'token-moved' && event.tokenId === 'goblin')).toBe(true)
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),

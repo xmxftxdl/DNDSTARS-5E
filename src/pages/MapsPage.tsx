@@ -7177,7 +7177,8 @@ export default function MapsPage() {
       skill.skillTreeId === 'bindShot' ||
       skill.skillTreeId === 'rageShot' ||
       skill.skillTreeId === 'refluxMagicArrow' ||
-      skill.skillTreeId === 'antiMagicArrow'
+      skill.skillTreeId === 'antiMagicArrow' ||
+      skill.skillTreeId === 'windKickCombo'
     if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
@@ -7189,7 +7190,7 @@ export default function MapsPage() {
       buffs?.doubleArrowReady ||
       buffs?.shadowVeilTargetId ||
       (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
-      buffs?.windKickTreatKnockbackTargetId
+      (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
     ) {
       return false
     }
@@ -7475,11 +7476,21 @@ export default function MapsPage() {
           ? undefined
           : await rollDiceBoxValues(skill.damageCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
         const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+        const windKickTreatsTargetAsKnocked =
+          skill.skillTreeId === 'windKickCombo' && actor.combatBuffs?.windKickTreatKnockbackTargetId === targetToken.id
+        const targetKnockedForWindKick =
+          skill.skillTreeId === 'windKickCombo' &&
+          (!!targetToken.knockbackTurns ||
+            !!targetChar?.conditions.includes(KNOCKBACK_STATUS_LABEL) ||
+            windKickTreatsTargetAsKnocked)
         const burstKickExtraD6 =
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
         const extraDamageParts: number[] = []
         if (burstKickExtraD6 > 0) {
           extraDamageParts.push(...(await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)))
+        }
+        if (!expectedTargetDodged && targetKnockedForWindKick) {
+          extraDamageParts.push(...(await rollDiceBoxValues(1, 6, `${skill.name} 击飞目标额外伤害`, targetToken.label)))
         }
         const targetHasMagicState =
           !!targetToken.burningTurns ||
@@ -7514,6 +7525,17 @@ export default function MapsPage() {
           cooldownReductionAmount > 0
             ? chooseCooldownReductionSkillId(actor, cooldownReductionAmount, `${skill.name} 命中`)
             : undefined
+        const pushTargetOnHit =
+          !expectedTargetDodged &&
+          skill.skillTreeId === 'windKickCombo' &&
+          skillRank >= 3 &&
+          (await showCombatDialog({
+            title: '踏风连踢',
+            message: `是否推动 ${targetToken.label} 5 尺？`,
+            confirmText: '推动',
+            cancelText: '不推动',
+            tone: 'sky',
+          }))
         const targetPacket = {
           targetTokenId: targetToken.id,
           diceValues,
@@ -7530,6 +7552,11 @@ export default function MapsPage() {
           pullCells: skill.skillTreeId === 'bindShot' ? 2 : undefined,
           grantBurstKickExtraD6OnHit: skill.skillTreeId === 'bindShot' ? 1 : undefined,
           clearBurstKickExtraD6OnUse: skill.skillTreeId === 'burstKick' && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
+          pushTargetOnHit,
+          pushCells: pushTargetOnHit ? 1 : undefined,
+          selfCooldownReductionOnHit:
+            skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5 ? 1 : undefined,
+          clearWindKickTreatKnockbackOnUse: windKickTreatsTargetAsKnocked,
           cooldownReductionSkillId,
           cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
           vulnerableOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 3,

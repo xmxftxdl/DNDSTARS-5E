@@ -198,6 +198,10 @@ export interface HeadlessPlayerAttackPacket {
   pullCells?: number
   grantBurstKickExtraD6OnHit?: number
   clearBurstKickExtraD6OnUse?: boolean
+  pushTargetOnHit?: boolean
+  pushCells?: number
+  selfCooldownReductionOnHit?: number
+  clearWindKickTreatKnockbackOnUse?: boolean
   cooldownReductionSkillId?: string
   cooldownReductionAmount?: number
   vulnerableOnHit?: boolean
@@ -765,6 +769,7 @@ function resolvePlayerAttack(
     if (!targetDodge) return fail(state, 'invalid-dice', events)
     if (targetDodge.dodged) {
       if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
+      if (packet.clearWindKickTreatKnockbackOnUse) clearWindKickTreatKnockback(state, actor.id)
       events.push({
         type: 'attack-resolved',
         actorTokenId: actorToken.id,
@@ -821,8 +826,15 @@ function resolvePlayerAttack(
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
     applyStatusOnHit(state, targetToken, skill, events)
     if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
+    if (packet.clearWindKickTreatKnockbackOnUse) clearWindKickTreatKnockback(state, actor.id)
     if (packet.grantBurstKickExtraD6OnHit && adjusted.damage > 0) {
       grantBurstKickExtraD6(state, actor.id, packet.grantBurstKickExtraD6OnHit)
+    }
+    if (packet.selfCooldownReductionOnHit && adjusted.damage > 0) {
+      selfCooldownReduction = Math.max(selfCooldownReduction, packet.selfCooldownReductionOnHit)
+    }
+    if (packet.pushTargetOnHit && adjusted.damage > 0) {
+      pushTargetAwayFromActor(state, actorToken, targetToken, packet.pushCells ?? 1, events)
     }
     if (packet.cooldownReductionSkillId && packet.cooldownReductionAmount && packet.cooldownReductionAmount > 0) {
       cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })
@@ -1638,6 +1650,36 @@ function pullTargetTowardActor(
   })
 }
 
+function pushTargetAwayFromActor(
+  state: HeadlessDmCombatState,
+  actorToken: Token,
+  targetToken: Token,
+  cells: number,
+  events: HeadlessCombatEvent[],
+) {
+  const from = { x: targetToken.x, y: targetToken.y }
+  const targetAnchor = tokenAnchorCellFromPixel(targetToken.x, targetToken.y, targetToken, state.map)
+  const actorAnchor = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, state.map)
+  const dx = targetAnchor.col - actorAnchor.col
+  const dy = targetAnchor.row - actorAnchor.row
+  const len = Math.hypot(dx, dy)
+  if (len <= 0.0001 || cells <= 0) return
+  const nextAnchor = {
+    col: targetAnchor.col + Math.round((dx / len) * cells),
+    row: targetAnchor.row + Math.round((dy / len) * cells),
+  }
+  const to = tokenCenterForAnchorCell(nextAnchor, targetToken, state.map)
+  updateToken(state, targetToken.id, (token) => ({ ...token, ...to }))
+  events.push({
+    type: 'token-moved',
+    tokenId: targetToken.id,
+    from,
+    to,
+    feet: Math.round(Math.hypot(to.x - from.x, to.y - from.y) / Math.max(1, state.map.gridSize) * (state.map.feetPerCell ?? 5)),
+    triggersMoveEffects: false,
+  })
+}
+
 function grantBurstKickExtraD6(state: HeadlessDmCombatState, characterId: string, count: number) {
   updateCharacter(state, characterId, (character) => ({
     ...character,
@@ -1654,6 +1696,16 @@ function clearBurstKickExtraD6(state: HeadlessDmCombatState, characterId: string
     combatBuffs: {
       ...character.combatBuffs,
       burstKickExtraD6: undefined,
+    },
+  }))
+}
+
+function clearWindKickTreatKnockback(state: HeadlessDmCombatState, characterId: string) {
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    combatBuffs: {
+      ...character.combatBuffs,
+      windKickTreatKnockbackTargetId: undefined,
     },
   }))
 }
@@ -1834,6 +1886,7 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
 
 function singleTargetRangeFeet(skill: CombatSkill): number | null {
   if (skill.skillTreeId === 'burstKick') return 5
+  if (skill.skillTreeId === 'windKickCombo') return 5
   if (!skill.tags?.includes('ranged') && skill.skillTreeId !== 'basicShot' && skill.name !== '基础射击') return null
   switch (skill.skillTreeId) {
     case 'multiShot':
