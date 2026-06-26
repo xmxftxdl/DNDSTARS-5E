@@ -167,7 +167,7 @@ export interface HeadlessPlayerMoveAction {
   actorTokenId: string
   characterId: string
   targetPosition: { x: number; y: number }
-  mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap'>
+  mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap' | 'skill-free-move'>
 }
 
 export interface HeadlessPlayerAttackAction {
@@ -202,6 +202,9 @@ export interface HeadlessPlayerAttackPacket {
   pushCells?: number
   selfCooldownReductionOnHit?: number
   clearWindKickTreatKnockbackOnUse?: boolean
+  grantFreeMoveFeetOnHit?: number
+  grantDisengageOnHit?: boolean
+  grantWindKickTreatKnockbackOnHit?: boolean
   cooldownReductionSkillId?: string
   cooldownReductionAmount?: number
   vulnerableOnHit?: boolean
@@ -582,7 +585,12 @@ function resolveMove(
   })
   events.push({
     type: 'log',
-    text: mode === 'agile-leap' ? `${actor.name} 灵巧跳跃移动 ${movement.feet} 尺。` : `${actor.name} 移动 ${movement.feet} 尺。`,
+    text:
+      mode === 'agile-leap'
+        ? `${actor.name} 灵巧跳跃移动 ${movement.feet} 尺。`
+        : mode === 'skill-free-move'
+          ? `${actor.name} 技能移动 ${movement.feet} 尺。`
+          : `${actor.name} 移动 ${movement.feet} 尺。`,
   })
   return succeed(state, events)
 }
@@ -835,6 +843,15 @@ function resolvePlayerAttack(
     }
     if (packet.pushTargetOnHit && adjusted.damage > 0) {
       pushTargetAwayFromActor(state, actorToken, targetToken, packet.pushCells ?? 1, events)
+    }
+    if (packet.grantFreeMoveFeetOnHit && adjusted.damage > 0) {
+      grantSkillFreeMove(state, actor.id, packet.grantFreeMoveFeetOnHit, events)
+    }
+    if (packet.grantDisengageOnHit && adjusted.damage > 0) {
+      grantDisengage(state, actor.id)
+    }
+    if (packet.grantWindKickTreatKnockbackOnHit && adjusted.damage > 0) {
+      grantWindKickTreatKnockback(state, actor.id, targetToken.id)
     }
     if (packet.cooldownReductionSkillId && packet.cooldownReductionAmount && packet.cooldownReductionAmount > 0) {
       cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })
@@ -1710,6 +1727,39 @@ function clearWindKickTreatKnockback(state: HeadlessDmCombatState, characterId: 
   }))
 }
 
+function grantSkillFreeMove(
+  state: HeadlessDmCombatState,
+  characterId: string,
+  feet: number,
+  events: HeadlessCombatEvent[],
+) {
+  const amount = Math.max(0, Math.floor(feet))
+  if (amount <= 0) return
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    combatBuffs: {
+      ...character.combatBuffs,
+      freeMoveFeet: Math.max(character.combatBuffs?.freeMoveFeet ?? 0, amount),
+    },
+  }))
+  const character = findCharacter(state, characterId)
+  events.push({ type: 'log', text: `${character?.name ?? characterId} 获得 ${amount} 尺技能移动，不触发借机攻击。` })
+}
+
+function grantDisengage(state: HeadlessDmCombatState, characterId: string) {
+  state.disengagedCharacterIds = Array.from(new Set([...(state.disengagedCharacterIds ?? []), characterId]))
+}
+
+function grantWindKickTreatKnockback(state: HeadlessDmCombatState, characterId: string, targetTokenId: string) {
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    combatBuffs: {
+      ...character.combatBuffs,
+      windKickTreatKnockbackTargetId: targetTokenId,
+    },
+  }))
+}
+
 function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillId: string) {
   updateCharacter(state, characterId, (character) => ({
     ...character,
@@ -1887,6 +1937,7 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
 function singleTargetRangeFeet(skill: CombatSkill): number | null {
   if (skill.skillTreeId === 'burstKick') return 5
   if (skill.skillTreeId === 'windKickCombo') return 5
+  if (skill.skillTreeId === 'shadowDance') return 15
   if (!skill.tags?.includes('ranged') && skill.skillTreeId !== 'basicShot' && skill.name !== '基础射击') return null
   switch (skill.skillTreeId) {
     case 'multiShot':

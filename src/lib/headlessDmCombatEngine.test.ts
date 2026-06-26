@@ -1419,6 +1419,93 @@ describe('headless DM combat engine', () => {
     expect(result.events.some((event) => event.type === 'token-moved' && event.tokenId === 'goblin')).toBe(true)
   })
 
+  it('grants shadow dance free movement and validates the follow-up skill move through DM authority', () => {
+    const shadowDance = skill({
+      id: 'shadow-dance',
+      name: '影遁舞步',
+      skillTreeId: 'shadowDance',
+      tags: ['melee'],
+      damageCount: 3,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const hero = character({
+      skillRanks: { shadowDance: 3 },
+      combatSkills: [skill(), shadowDance],
+    })
+    const combat = state({
+      characters: [hero],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const attack = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'shadow-dance',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6, 6, 6],
+          targetDodgeMode: 'skip',
+          grantFreeMoveFeetOnHit: 15,
+          grantDisengageOnHit: true,
+          grantWindKickTreatKnockbackOnHit: true,
+        },
+      ],
+    })
+
+    expect(attack.ok).toBe(true)
+    if (!attack.ok) return
+    const afterAttackHero = attack.state.characters.find((item) => item.id === 'hero')
+    expect(afterAttackHero?.currentAP).toBe(1)
+    expect(afterAttackHero?.combatBuffs?.freeMoveFeet).toBe(15)
+    expect(afterAttackHero?.combatBuffs?.windKickTreatKnockbackTargetId).toBe('goblin')
+    expect(attack.state.disengagedCharacterIds).toContain('hero')
+    expect(afterAttackHero?.combatSkills.find((item) => item.id === 'shadow-dance')?.remaining).toBe(4)
+
+    const move = resolveHeadlessDmAction(attack.state, {
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 385, y: 175 },
+      mode: 'skill-free-move',
+    })
+
+    expect(move.ok).toBe(true)
+    if (!move.ok) return
+    const movedHero = move.state.characters.find((item) => item.id === 'hero')
+    expect(movedHero?.currentAP).toBe(1)
+    expect(movedHero?.combatBuffs?.freeMoveFeet).toBeUndefined()
+    expect(move.state.map.tokens.find((item) => item.id === 'hero-token')).toMatchObject({ x: 385, y: 175 })
+    expect(move.events.map((event) => event.type)).not.toContain('ap-spent')
+    expect(move.events.map((event) => event.type)).not.toContain('opportunity-triggered')
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),

@@ -4899,13 +4899,30 @@ export default function MapsPage() {
       const center = { x: freeMoveCircle.centerX, y: freeMoveCircle.centerY }
       const pos = snapTokenToGridCenter(point.x, point.y, myPlayerToken, activeMap)
       if (!isWithinMovementRange(center, pos, feet, activeMap)) return
-      await resolveOpportunityAttacksForMove(myPlayerToken, pos, turnCharacter)
-      const latestMover = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter.id)
-      if (!latestMover || latestMover.currentHp <= 0) return
-      updateToken(activeMap.id, myPlayerToken.id, pos)
-      updateChar(turnCharacter.id, {
-        combatBuffs: { ...turnCharacter.combatBuffs, freeMoveFeet: undefined },
+      if (!isDM) {
+        if (!sendPlayerSkillFreeMoveRequest(pos, feet)) {
+          void showCombatNotice(
+            pendingPlayerActionRef.current ? '等待 DM 确认' : '无法移动',
+            pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '技能移动当前不可用。',
+            'amber',
+          )
+        }
+        setShowMoveRange(false)
+        return
+      }
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'move-token',
+        actorTokenId: myPlayerToken.id,
+        characterId: turnCharacter.id,
+        targetPosition: pos,
+        mode: 'skill-free-move',
       })
+      if (!headless.ok) return
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       pushApLog(turnCharacter, 0, '技能授予移动', `移动至多 ${feet} 尺`)
       setShowMoveRange(false)
       return
@@ -7098,6 +7115,11 @@ export default function MapsPage() {
       shouldPublishCombatState = true
     }
 
+    const nextDisengaged = new Set(result.state.disengagedCharacterIds ?? [])
+    if (JSON.stringify([...disengagedCharIds].sort()) !== JSON.stringify([...nextDisengaged].sort())) {
+      setDisengagedCharIds(nextDisengaged)
+    }
+
     if (shouldPublishCombatState) {
       publishCombatState({
         active: result.state.active,
@@ -7178,7 +7200,9 @@ export default function MapsPage() {
       skill.skillTreeId === 'rageShot' ||
       skill.skillTreeId === 'refluxMagicArrow' ||
       skill.skillTreeId === 'antiMagicArrow' ||
-      skill.skillTreeId === 'windKickCombo'
+      skill.skillTreeId === 'windKickCombo' ||
+      skill.skillTreeId === 'shadowStepShot' ||
+      skill.skillTreeId === 'shadowDance'
     if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
@@ -7557,6 +7581,16 @@ export default function MapsPage() {
           selfCooldownReductionOnHit:
             skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5 ? 1 : undefined,
           clearWindKickTreatKnockbackOnUse: windKickTreatsTargetAsKnocked,
+          grantFreeMoveFeetOnHit:
+            skill.skillTreeId === 'shadowStepShot'
+              ? skillRank >= 4
+                ? 15
+                : 10
+              : skill.skillTreeId === 'shadowDance'
+                ? 15
+                : undefined,
+          grantDisengageOnHit: skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance',
+          grantWindKickTreatKnockbackOnHit: skill.skillTreeId === 'shadowDance' && skillRank >= 3,
           cooldownReductionSkillId,
           cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
           vulnerableOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 3,
@@ -7584,6 +7618,9 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
+        if (resolved.hit && (skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance')) {
+          setShowMoveRange(true)
+        }
         pushApLog(actor, resolved.waivedAp ? 0 : resolved.apCost, `使用 ${skill.name}`, `目标 ${targetToken.label}`)
         const dodgeEvent = headless.events.find(
           (event): event is Extract<HeadlessCombatEvent, { type: 'target-dodge-resolved' }> =>
@@ -7822,6 +7859,41 @@ export default function MapsPage() {
         characterId: action.characterId,
         targetPosition: action.targetPosition,
         mode: 'agile-leap',
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(
+          action,
+          'rejected',
+          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
+        )
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      const moved = tokenMovedEvent(headless.events, token.id)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted', undefined, moved?.to ?? { x: token.x, y: token.y })
+      return
+    }
+
+    if (action.type === 'skill-free-move') {
+      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const token = map.tokens.find((item) => item.id === action.actorTokenId)
+      if (!actor || !token || !action.targetPosition) {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-skill-free-move')
+        completePlayerActionRequest(action)
+        return
+      }
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'move-token',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        targetPosition: action.targetPosition,
+        mode: 'skill-free-move',
       })
       if (!headless.ok) {
         acknowledgePlayerAction(
@@ -8166,6 +8238,29 @@ export default function MapsPage() {
       updatedAt: Date.now(),
     }
     return submitPlayerActionRequest(action, `${actor.name} 灵巧跳跃 ${movedFeet} 尺`)
+  }
+
+  const sendPlayerSkillFreeMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
+    if ((turnCharacter.combatBuffs?.freeMoveFeet ?? 0) <= 0) return false
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    const action: SharedPlayerActionState = {
+      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'skill-free-move',
+      actorTokenId: currentInitiativeToken.id,
+      characterId: turnCharacter.id,
+      targetPosition,
+      round,
+      initiativeIndex,
+      seq,
+      updatedAt: Date.now(),
+    }
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 技能移动 ${movedFeet} 尺`)
   }
 
   const sendPlayerQiReduceCooldownRequest = (skill: CombatSkill) => {

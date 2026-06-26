@@ -89,6 +89,7 @@ export interface SharedPlayerActionState {
     | 'aoe-attack'
     | 'move-token'
     | 'agile-leap-move'
+    | 'skill-free-move'
     | 'qi-reduce-cooldown'
     | 'activate-feature'
   actorTokenId: string
