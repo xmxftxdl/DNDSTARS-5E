@@ -1419,6 +1419,139 @@ describe('headless DM combat engine', () => {
     expect(result.events.some((event) => event.type === 'token-moved' && event.tokenId === 'goblin')).toBe(true)
   })
 
+  it('rejects rise kick unless the actor is prone and does not spend AP', () => {
+    const riseKick = skill({
+      id: 'rise-kick',
+      name: '起身踢',
+      skillTreeId: 'riseKick',
+      tags: ['melee'],
+      damageCount: 2,
+      damageSides: 4,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ combatSkills: [skill(), riseKick], conditions: [] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'rise-kick',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [4, 4],
+          targetDodgeMode: 'skip',
+          clearActorConditionOnHit: '倒地',
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('invalid-skill')
+    expect(result.state.characters[0].currentAP).toBe(2)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'rise-kick')?.remaining).toBe(0)
+  })
+
+  it('resolves rise kick by clearing prone and granting high-rank free movement on damage', () => {
+    const riseKick = skill({
+      id: 'rise-kick',
+      name: '起身踢',
+      skillTreeId: 'riseKick',
+      tags: ['melee'],
+      damageCount: 4,
+      damageSides: 4,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [
+        character({
+          conditions: ['倒地'],
+          skillRanks: { riseKick: 4 },
+          combatSkills: [skill(), riseKick],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'rise-kick',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [4, 4, 4, 4],
+          targetDodgeMode: 'skip',
+          clearActorConditionOnHit: '倒地',
+          grantFreeMoveFeetOnHit: 10,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const actor = result.state.characters.find((item) => item.id === 'hero')
+    expect(actor?.conditions).not.toContain('倒地')
+    expect(actor?.combatBuffs?.freeMoveFeet).toBe(10)
+    expect(actor?.currentAP).toBe(1)
+    expect(actor?.combatSkills.find((item) => item.id === 'rise-kick')?.remaining).toBe(4)
+    const attack = result.events.find((event) => event.type === 'attack-resolved')
+    expect(attack).toMatchObject({ damageValues: [4, 4, 4, 4], hit: true })
+  })
+
   it('grants shadow dance free movement and validates the follow-up skill move through DM authority', () => {
     const shadowDance = skill({
       id: 'shadow-dance',

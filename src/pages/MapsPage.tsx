@@ -7202,7 +7202,8 @@ export default function MapsPage() {
       skill.skillTreeId === 'antiMagicArrow' ||
       skill.skillTreeId === 'windKickCombo' ||
       skill.skillTreeId === 'shadowStepShot' ||
-      skill.skillTreeId === 'shadowDance'
+      skill.skillTreeId === 'shadowDance' ||
+      skill.skillTreeId === 'riseKick'
     if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
@@ -7581,8 +7582,11 @@ export default function MapsPage() {
           selfCooldownReductionOnHit:
             skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5 ? 1 : undefined,
           clearWindKickTreatKnockbackOnUse: windKickTreatsTargetAsKnocked,
+          clearActorConditionOnHit: skill.skillTreeId === 'riseKick' ? '倒地' : undefined,
           grantFreeMoveFeetOnHit:
-            skill.skillTreeId === 'shadowStepShot'
+            skill.skillTreeId === 'riseKick' && skillRank >= 4
+              ? 10
+              : skill.skillTreeId === 'shadowStepShot'
               ? skillRank >= 4
                 ? 15
                 : 10
@@ -7618,7 +7622,12 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
-        if (resolved.hit && (skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance')) {
+        if (
+          resolved.hit &&
+          (skill.skillTreeId === 'shadowStepShot' ||
+            skill.skillTreeId === 'shadowDance' ||
+            (skill.skillTreeId === 'riseKick' && skillRank >= 4))
+        ) {
           setShowMoveRange(true)
         }
         pushApLog(actor, resolved.waivedAp ? 0 : resolved.apCost, `使用 ${skill.name}`, `目标 ${targetToken.label}`)

@@ -202,6 +202,7 @@ export interface HeadlessPlayerAttackPacket {
   pushCells?: number
   selfCooldownReductionOnHit?: number
   clearWindKickTreatKnockbackOnUse?: boolean
+  clearActorConditionOnHit?: string
   grantFreeMoveFeetOnHit?: number
   grantDisengageOnHit?: boolean
   grantWindKickTreatKnockbackOnHit?: boolean
@@ -728,6 +729,9 @@ function resolvePlayerAttack(
   if (!skill || skill.damageCount < 0 || skill.damageSides < 0 || skill.remaining > 0) {
     return fail(state, 'invalid-skill', events)
   }
+  if (skill.skillTreeId === 'riseKick' && !actor.conditions.includes('倒地')) {
+    return fail(state, 'invalid-skill', events)
+  }
   const packets = action.targetPackets?.length
     ? action.targetPackets
     : [{ targetTokenId: action.targetTokenId, diceValues: action.diceValues, targetDodgeD20: action.targetDodgeD20, isCrit: action.isCrit }]
@@ -843,6 +847,9 @@ function resolvePlayerAttack(
     }
     if (packet.pushTargetOnHit && adjusted.damage > 0) {
       pushTargetAwayFromActor(state, actorToken, targetToken, packet.pushCells ?? 1, events)
+    }
+    if (packet.clearActorConditionOnHit && adjusted.damage > 0) {
+      clearActorCondition(state, actor.id, packet.clearActorConditionOnHit, events)
     }
     if (packet.grantFreeMoveFeetOnHit && adjusted.damage > 0) {
       grantSkillFreeMove(state, actor.id, packet.grantFreeMoveFeetOnHit, events)
@@ -1727,6 +1734,21 @@ function clearWindKickTreatKnockback(state: HeadlessDmCombatState, characterId: 
   }))
 }
 
+function clearActorCondition(
+  state: HeadlessDmCombatState,
+  characterId: string,
+  condition: string,
+  events: HeadlessCombatEvent[],
+) {
+  const actor = findCharacter(state, characterId)
+  if (!actor?.conditions.includes(condition)) return
+  updateCharacter(state, characterId, (character) => ({
+    ...character,
+    conditions: character.conditions.filter((item) => item !== condition),
+  }))
+  events.push({ type: 'log', text: `${actor.name} 解除${condition}状态。` })
+}
+
 function grantSkillFreeMove(
   state: HeadlessDmCombatState,
   characterId: string,
@@ -1936,6 +1958,7 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
 
 function singleTargetRangeFeet(skill: CombatSkill): number | null {
   if (skill.skillTreeId === 'burstKick') return 5
+  if (skill.skillTreeId === 'riseKick') return 5
   if (skill.skillTreeId === 'windKickCombo') return 5
   if (skill.skillTreeId === 'shadowDance') return 15
   if (!skill.tags?.includes('ranged') && skill.skillTreeId !== 'basicShot' && skill.name !== '基础射击') return null
