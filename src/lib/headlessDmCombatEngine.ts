@@ -24,7 +24,7 @@ import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } f
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
-import { RESTRAINED_STATUS_LABEL, VULNERABLE_STATUS_LABEL } from './tokenStatus'
+import { NO_MOVE_STATUS_LABEL, RESTRAINED_STATUS_LABEL, VULNERABLE_STATUS_LABEL } from './tokenStatus'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -206,6 +206,8 @@ export interface HeadlessPlayerAttackPacket {
   grantFreeMoveFeetOnHit?: number
   grantDisengageOnHit?: boolean
   grantWindKickTreatKnockbackOnHit?: boolean
+  noMoveOnHit?: boolean
+  noMoveTurns?: number
   cooldownReductionSkillId?: string
   cooldownReductionAmount?: number
   vulnerableOnHit?: boolean
@@ -859,6 +861,9 @@ function resolvePlayerAttack(
     }
     if (packet.grantWindKickTreatKnockbackOnHit && adjusted.damage > 0) {
       grantWindKickTreatKnockback(state, actor.id, targetToken.id)
+    }
+    if (packet.noMoveOnHit && adjusted.damage > 0) {
+      applyNoMoveToTarget(state, targetToken, packet.noMoveTurns ?? 1, events)
     }
     if (packet.cooldownReductionSkillId && packet.cooldownReductionAmount && packet.cooldownReductionAmount > 0) {
       cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })
@@ -1583,6 +1588,32 @@ function applyRestrainedToTarget(
     targetTokenId: targetToken.id,
     characterId: targetToken.characterId,
     condition: RESTRAINED_STATUS_LABEL,
+    turns: nextTurns,
+  })
+}
+
+function applyNoMoveToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(1, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, NO_MOVE_STATUS_LABEL])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    noMoveTurns: Math.max(token.noMoveTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: NO_MOVE_STATUS_LABEL,
     turns: nextTurns,
   })
 }

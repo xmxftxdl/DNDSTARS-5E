@@ -5217,7 +5217,7 @@ export default function MapsPage() {
         }
         if (!isDM) {
           let targetTokenIds: string[] | undefined
-          if (activeMap && targeting.skill.skillTreeId === 'multiShot') {
+          if (activeMap && (targeting.skill.skillTreeId === 'multiShot' || targeting.skill.skillTreeId === 'encircle')) {
             const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
             targetTokenIds = Array.from({ length: shots }, () => tok.id)
           } else if (activeMap && targeting.skill.skillTreeId === 'rageShot') {
@@ -5250,7 +5250,7 @@ export default function MapsPage() {
           }
           return
         }
-        if (targeting.skill.skillTreeId === 'multiShot') {
+        if (targeting.skill.skillTreeId === 'multiShot' || targeting.skill.skillTreeId === 'encircle') {
           const caster = characters.find((c) => c.id === targeting.casterId)
           if (caster && activeMap) {
             const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
@@ -7368,8 +7368,13 @@ export default function MapsPage() {
         const shots = Math.max(1, skill.arrowShots ?? 1)
         targets = Array.from({ length: shots }, () => targets[0])
       }
+      if (skill.skillTreeId === 'encircle' && targets.length === 1) {
+        const shots = Math.max(1, skill.arrowShots ?? 1)
+        targets = Array.from({ length: shots }, () => targets[0])
+      }
       const isArrowSequence =
         skill.skillTreeId === 'multiShot' ||
+        skill.skillTreeId === 'encircle' ||
         (action.targetTokenIds?.length && skill.skillTreeId === 'rageShot')
       if (isArrowSequence) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
@@ -7399,6 +7404,16 @@ export default function MapsPage() {
             effectSaveD20,
           })
         }
+        const allPacketsTargetSame = targets.length > 0 && targets.every((target) => target.id === targets[0].id)
+        const shouldEncircleStun =
+          skill.skillTreeId === 'encircle' &&
+          skillRank >= 5 &&
+          allPacketsTargetSame &&
+          targets.length >= Math.max(1, skill.arrowShots ?? 1) &&
+          packetPlans.every((plan) => !plan.expectedDodged)
+        const encircleStunSaveD20 = shouldEncircleStun
+          ? await rollDiceBoxD20(`${skill.name} 体质豁免 D20`, targets[0].label)
+          : undefined
         const allDamageValues =
           damagePacketCount > 0
             ? await rollDiceBoxValues(
@@ -7409,18 +7424,30 @@ export default function MapsPage() {
               )
             : []
         let damageCursor = 0
+        let encircleStunAssigned = false
         const targetPackets = packetPlans.map((plan) => {
           const diceValues = plan.expectedDodged
             ? undefined
             : allDamageValues.slice(damageCursor, damageCursor + perPacketDiceCount)
           if (!plan.expectedDodged) damageCursor += perPacketDiceCount
+          const applyEncircleStun =
+            !plan.expectedDodged && encircleStunSaveD20 != null && !encircleStunAssigned
+          if (applyEncircleStun) encircleStunAssigned = true
           return {
             targetTokenId: plan.target.id,
             diceValues,
             targetDodgeD20: plan.targetDodgeD20,
             targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
-            effectSave: plan.effectSaveD20 != null ? { ability: 'str' as const, d20: plan.effectSaveD20 } : undefined,
+            effectSave:
+              plan.effectSaveD20 != null
+                ? { ability: 'str' as const, d20: plan.effectSaveD20 }
+                : applyEncircleStun
+                  ? { ability: 'con' as const, d20: encircleStunSaveD20 }
+                  : undefined,
             restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
+            stunOnFailedEffectSave: applyEncircleStun,
+            noMoveOnHit: skill.skillTreeId === 'encircle',
+            noMoveTurns: skill.skillTreeId === 'encircle' ? 1 : undefined,
           }
         })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {

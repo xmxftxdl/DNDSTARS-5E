@@ -653,6 +653,85 @@ describe('headless DM combat engine', () => {
     expect(resolved[1]).toMatchObject({ damageValues: [3], apCost: 0 })
   })
 
+  it('resolves encircle packets with no-move and one stun save when all arrows target the same enemy', () => {
+    const encircle = skill({
+      id: 'encircle',
+      name: '包围',
+      skillTreeId: 'encircle',
+      damageCount: 2,
+      damageSides: 6,
+      arrowShots: 5,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ skillRanks: { encircle: 5 }, combatSkills: [skill(), encircle] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 80,
+          maxHp: 80,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'encircle',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6, 6],
+          targetDodgeMode: 'skip',
+          noMoveOnHit: true,
+          noMoveTurns: 1,
+          effectSave: { ability: 'con', d20: 1 },
+          stunOnFailedEffectSave: true,
+        },
+        { targetTokenId: 'goblin', diceValues: [6, 6], targetDodgeMode: 'skip', noMoveOnHit: true, noMoveTurns: 1 },
+        { targetTokenId: 'goblin', diceValues: [6, 6], targetDodgeMode: 'skip', noMoveOnHit: true, noMoveTurns: 1 },
+        { targetTokenId: 'goblin', diceValues: [6, 6], targetDodgeMode: 'skip', noMoveOnHit: true, noMoveTurns: 1 },
+        { targetTokenId: 'goblin', diceValues: [6, 6], targetDodgeMode: 'skip', noMoveOnHit: true, noMoveTurns: 1 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'goblin')
+    const resolved = result.events.filter((event) => event.type === 'attack-resolved')
+    expect(result.state.characters[0].currentAP).toBe(1)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'encircle')?.remaining).toBe(4)
+    expect(target?.hp).toBeLessThan(80)
+    expect(target?.noMoveTurns).toBe(1)
+    expect(target?.stunTurns).toBeGreaterThan(0)
+    expect(resolved).toHaveLength(5)
+    expect(result.events.find((event) => event.type === 'status-save-resolved')).toMatchObject({
+      targetTokenId: 'goblin',
+      condition: '眩晕',
+      ability: 'con',
+      success: false,
+    })
+  })
+
   it('resolves AOE target packets with shared damage dice and per-target dex saves', () => {
     const arrowStorm = skill({
       id: 'arrow-storm',
