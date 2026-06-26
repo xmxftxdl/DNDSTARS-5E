@@ -7203,7 +7203,8 @@ export default function MapsPage() {
       skill.skillTreeId === 'windKickCombo' ||
       skill.skillTreeId === 'shadowStepShot' ||
       skill.skillTreeId === 'shadowDance' ||
-      skill.skillTreeId === 'riseKick'
+      skill.skillTreeId === 'riseKick' ||
+      skill.skillTreeId === 'explosiveArrow'
     if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
@@ -7557,6 +7558,21 @@ export default function MapsPage() {
           extraDamageParts.push(...(await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label)))
         }
         const extraDamageValues = extraDamageParts.length > 0 ? extraDamageParts : undefined
+        const packetIsCrit = !!(action as typeof action & { isCrit?: boolean }).isCrit
+        const explosiveArrowCritDice =
+          !expectedTargetDodged && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
+            ? skillRank >= 5
+              ? 4
+              : skillRank >= 2
+                ? 3
+                : 2
+            : 0
+        const explosiveArrowFireValues =
+          explosiveArrowCritDice > 0
+            ? await rollDiceBoxValues(explosiveArrowCritDice, 6, `${skill.name} 重击火焰伤害`, targetToken.label)
+            : undefined
+        const explosiveArrowBurnTurns =
+          explosiveArrowCritDice > 0 ? (skillRank >= 4 ? 2 : 1) : undefined
         const effectAbility: 'str' | 'con' | undefined =
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' && skillRank >= 3
             ? 'con'
@@ -7593,7 +7609,10 @@ export default function MapsPage() {
           diceValues,
           extraDamageValues,
           extraDamageSides: extraDamageValues?.length ? 6 : undefined,
+          postCritDamageValues: explosiveArrowFireValues,
+          postCritDamageSides: explosiveArrowFireValues?.length ? 6 : undefined,
           targetDodgeD20,
+          isCrit: packetIsCrit || undefined,
           targetDodgeMode: dodgePreview?.decision.shouldDodge ? ('attempt' as const) : ('skip' as const),
           effectSave: effectAbility && effectSaveD20 != null ? { ability: effectAbility, d20: effectSaveD20 } : undefined,
           stunOnFailedEffectSave: skill.skillTreeId === 'burstKick' && skillRank >= 3,
@@ -7622,6 +7641,10 @@ export default function MapsPage() {
                 : undefined,
           grantDisengageOnHit: skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance',
           grantWindKickTreatKnockbackOnHit: skill.skillTreeId === 'shadowDance' && skillRank >= 3,
+          burningOnHit: explosiveArrowCritDice > 0,
+          burningTurns: explosiveArrowBurnTurns,
+          igniteOnHit: explosiveArrowCritDice > 0,
+          igniteTurns: explosiveArrowBurnTurns,
           cooldownReductionSkillId,
           cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
           vulnerableOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 3,

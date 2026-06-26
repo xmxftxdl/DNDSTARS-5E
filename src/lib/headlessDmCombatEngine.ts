@@ -188,6 +188,8 @@ export interface HeadlessPlayerAttackPacket {
   diceValues?: number[]
   extraDamageValues?: number[]
   extraDamageSides?: number
+  postCritDamageValues?: number[]
+  postCritDamageSides?: number
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
   isCrit?: boolean
@@ -208,6 +210,10 @@ export interface HeadlessPlayerAttackPacket {
   grantWindKickTreatKnockbackOnHit?: boolean
   noMoveOnHit?: boolean
   noMoveTurns?: number
+  burningOnHit?: boolean
+  burningTurns?: number
+  igniteOnHit?: boolean
+  igniteTurns?: number
   cooldownReductionSkillId?: string
   cooldownReductionAmount?: number
   vulnerableOnHit?: boolean
@@ -818,7 +824,17 @@ function resolvePlayerAttack(
       ? resolveDiceValues(packet.extraDamageValues, dice, packet.extraDamageValues.length, packet.extraDamageSides ?? 6)
       : []
     if (!extraDamageValues) return fail(state, 'invalid-dice', events)
-    const combinedDamageValues = [...diceValues, ...extraDamageValues]
+    const postCritDamageValues = packet.postCritDamageValues
+      ? resolveDiceValues(
+          packet.postCritDamageValues,
+          dice,
+          packet.postCritDamageValues.length,
+          packet.postCritDamageSides ?? 6,
+        )
+      : []
+    if (!postCritDamageValues) return fail(state, 'invalid-dice', events)
+    const preCritDamageValues = [...diceValues, ...extraDamageValues]
+    const combinedDamageValues = [...preCritDamageValues, ...postCritDamageValues]
     events.push({
       type: 'dice-rolled',
       notation: `${skill.damageCount}d${skill.damageSides}`,
@@ -833,8 +849,18 @@ function resolvePlayerAttack(
         total: extraDamageValues.reduce((sum, value) => sum + value, 0),
       })
     }
+    if (postCritDamageValues.length > 0) {
+      events.push({
+        type: 'dice-rolled',
+        notation: `${postCritDamageValues.length}d${packet.postCritDamageSides ?? 6}`,
+        values: postCritDamageValues,
+        total: postCritDamageValues.reduce((sum, value) => sum + value, 0),
+      })
+    }
 
-    const baseDamage = resolveAttackDamageTotal(actor, skill, combinedDamageValues, { isCrit: packet.isCrit })
+    const baseDamage =
+      resolveAttackDamageTotal(actor, skill, preCritDamageValues, { isCrit: packet.isCrit }) +
+      postCritDamageValues.reduce((sum, value) => sum + value, 0)
     const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
     const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
@@ -864,6 +890,12 @@ function resolvePlayerAttack(
     }
     if (packet.noMoveOnHit && adjusted.damage > 0) {
       applyNoMoveToTarget(state, targetToken, packet.noMoveTurns ?? 1, events)
+    }
+    if (packet.burningOnHit && adjusted.damage > 0) {
+      applyBurningToTarget(state, targetToken, packet.burningTurns ?? 1, events)
+    }
+    if (packet.igniteOnHit && adjusted.damage > 0) {
+      applyIgniteToTarget(state, targetToken, packet.igniteTurns ?? 1, events)
     }
     if (packet.cooldownReductionSkillId && packet.cooldownReductionAmount && packet.cooldownReductionAmount > 0) {
       cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })
@@ -1501,6 +1533,7 @@ function applyStatusOnHit(
   events: HeadlessCombatEvent[],
 ) {
   if (!skill.statusOnHit) return
+  if (skill.skillTreeId === 'explosiveArrow') return
   const condition = skill.statusOnHit === 'burning' ? '燃烧' : '中毒'
   const turns = skill.statusDuration ?? (skill.statusOnHit === 'burning' ? 3 : 4)
   if (targetToken.characterId) {
@@ -1614,6 +1647,58 @@ function applyNoMoveToTarget(
     targetTokenId: targetToken.id,
     characterId: targetToken.characterId,
     condition: NO_MOVE_STATUS_LABEL,
+    turns: nextTurns,
+  })
+}
+
+function applyBurningToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(1, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, '燃烧'])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    burningTurns: Math.max(token.burningTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: '燃烧',
+    turns: nextTurns,
+  })
+}
+
+function applyIgniteToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(1, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, '点燃'])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    igniteTurns: Math.max(token.igniteTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: '点燃',
     turns: nextTurns,
   })
 }

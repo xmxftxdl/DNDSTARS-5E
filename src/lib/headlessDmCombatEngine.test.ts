@@ -1422,6 +1422,91 @@ describe('headless DM combat engine', () => {
     expect(attack).toMatchObject({ damageValues: [6, 6, 6, 6, 6, 6, 6] })
   })
 
+  it('resolves explosive arrow critical fire dice after the crit multiplier and applies fire marks', () => {
+    const explosiveArrow = skill({
+      id: 'explosive-arrow',
+      name: '爆裂箭',
+      skillTreeId: 'explosiveArrow',
+      damageCount: 1,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+      statusOnHit: 'burning',
+      statusDuration: 3,
+    })
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+          skillRanks: { explosiveArrow: 4 },
+          combatSkills: [skill(), explosiveArrow],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'explosive-arrow',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6],
+          postCritDamageValues: [6, 6],
+          postCritDamageSides: 6,
+          targetDodgeMode: 'skip',
+          isCrit: true,
+          burningOnHit: true,
+          burningTurns: 2,
+          igniteOnHit: true,
+          igniteTurns: 2,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'goblin')
+    const attack = result.events.find((event) => event.type === 'attack-resolved')
+    expect(attack).toMatchObject({
+      damageValues: [6, 6, 6],
+      damageBeforeDefense: 19,
+      isCrit: true,
+      hit: true,
+    })
+    expect(target?.burningTurns).toBe(2)
+    expect(target?.igniteTurns).toBe(2)
+    expect(result.events.filter((event) => event.type === 'status-added').map((event) => event.condition)).toEqual([
+      '燃烧',
+      '点燃',
+    ])
+  })
+
   it('resolves wind kick combo knockback bonus, push, cooldown reduction, and temporary knockback cleanup', () => {
     const windKickCombo = skill({
       id: 'wind-kick-combo',
