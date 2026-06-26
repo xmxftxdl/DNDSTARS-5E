@@ -24,7 +24,7 @@ import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } f
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
-import { RESTRAINED_STATUS_LABEL } from './tokenStatus'
+import { RESTRAINED_STATUS_LABEL, VULNERABLE_STATUS_LABEL } from './tokenStatus'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -198,6 +198,12 @@ export interface HeadlessPlayerAttackPacket {
   pullCells?: number
   grantBurstKickExtraD6OnHit?: number
   clearBurstKickExtraD6OnUse?: boolean
+  cooldownReductionSkillId?: string
+  cooldownReductionAmount?: number
+  vulnerableOnHit?: boolean
+  vulnerableTurns?: number
+  clearTargetStatusesOnHit?: boolean
+  selfCooldownReductionPerClearedStatus?: boolean
 }
 
 export interface HeadlessAttackEffectSavePacket {
@@ -732,6 +738,8 @@ function resolvePlayerAttack(
   }
 
   let resolvedCount = 0
+  let selfCooldownReduction = 0
+  const cooldownReductions: Array<{ skillId: string; amount: number }> = []
   for (const [packetIndex, packet] of packets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
     if (!targetToken || !isTokenAlive(targetToken, state.characters)) continue
@@ -816,6 +824,16 @@ function resolvePlayerAttack(
     if (packet.grantBurstKickExtraD6OnHit && adjusted.damage > 0) {
       grantBurstKickExtraD6(state, actor.id, packet.grantBurstKickExtraD6OnHit)
     }
+    if (packet.cooldownReductionSkillId && packet.cooldownReductionAmount && packet.cooldownReductionAmount > 0) {
+      cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })
+    }
+    const clearedStatuses = packet.clearTargetStatusesOnHit ? clearTargetStatusesFromTarget(state, targetToken) : 0
+    if (packet.selfCooldownReductionPerClearedStatus && clearedStatuses > 0) {
+      selfCooldownReduction = Math.max(selfCooldownReduction, clearedStatuses)
+    }
+    if (packet.vulnerableOnHit) {
+      applyVulnerableToTarget(state, targetToken, packet.vulnerableTurns ?? 1, events)
+    }
     const effectSave = resolveAttackEffectSave(state, actorToken, actor, targetToken, packet, dice, events)
     if (!effectSave) return fail(state, 'invalid-dice', events)
     if (!effectSave.success) {
@@ -859,6 +877,10 @@ function resolvePlayerAttack(
   }
   if (resolvedCount === 0) return fail(state, 'invalid-target', events)
   markSkillUsed(state, actor.id, skill.id)
+  for (const reduction of cooldownReductions) {
+    reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
+  }
+  reduceSkillCooldown(state, actor.id, skill.id, selfCooldownReduction)
   if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
   maybeEndCombat(state, events)
   return succeed(state, events)
@@ -1529,6 +1551,63 @@ function applyRestrainedToTarget(
   })
 }
 
+function applyVulnerableToTarget(
+  state: HeadlessDmCombatState,
+  targetToken: Token,
+  turns: number,
+  events: HeadlessCombatEvent[],
+) {
+  const nextTurns = Math.max(1, turns)
+  if (targetToken.characterId) {
+    updateCharacter(state, targetToken.characterId, (character) => ({
+      ...character,
+      conditions: Array.from(new Set([...character.conditions, VULNERABLE_STATUS_LABEL])),
+    }))
+  }
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    vulnerableTurns: Math.max(token.vulnerableTurns ?? 0, nextTurns),
+  }))
+  events.push({
+    type: 'status-added',
+    targetTokenId: targetToken.id,
+    characterId: targetToken.characterId,
+    condition: VULNERABLE_STATUS_LABEL,
+    turns: nextTurns,
+  })
+}
+
+function clearTargetStatusesFromTarget(state: HeadlessDmCombatState, targetToken: Token): number {
+  const statusFields = [
+    'burningTurns',
+    'igniteTurns',
+    'poisonTurns',
+    'stunTurns',
+    'knockbackTurns',
+    'restrainedTurns',
+    'vulnerableTurns',
+  ] as const
+  let removed = 0
+  updateToken(state, targetToken.id, (token) => {
+    const patch: Partial<Token> = {}
+    for (const field of statusFields) {
+      if ((token[field] ?? 0) > 0) {
+        patch[field] = 0
+        removed += 1
+      }
+    }
+    return Object.keys(patch).length > 0 ? { ...token, ...patch } : token
+  })
+  if (targetToken.characterId) {
+    const targetCharacter = findCharacter(state, targetToken.characterId)
+    if (targetCharacter && targetCharacter.conditions.length > 0) {
+      removed += targetCharacter.conditions.length
+      updateCharacter(state, targetCharacter.id, (character) => ({ ...character, conditions: [] }))
+    }
+  }
+  return removed
+}
+
 function pullTargetTowardActor(
   state: HeadlessDmCombatState,
   actorToken: Token,
@@ -1769,9 +1848,11 @@ function singleTargetRangeFeet(skill: CombatSkill): number | null {
     case 'explosiveArrow':
     case 'magicArrow':
     case 'rageShot':
+    case 'refluxMagicArrow':
     case 'windStepShot':
       return 60
     case 'arcaneBreak':
+    case 'antiMagicArrow':
       return 90
     default:
       return 90

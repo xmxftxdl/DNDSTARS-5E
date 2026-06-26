@@ -1211,6 +1211,138 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatBuffs?.burstKickExtraD6).toBeUndefined()
   })
 
+  it('reduces a selected skill cooldown after reflux magic arrow hits', () => {
+    const refluxMagicArrow = skill({
+      id: 'reflux-magic-arrow',
+      name: '回流魔箭',
+      skillTreeId: 'refluxMagicArrow',
+      damageCount: 3,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const coolingSkill = skill({ id: 'cooling-skill', name: '冷却中技能', cooldown: 3, remaining: 2 })
+    const combat = state({
+      characters: [character({ combatSkills: [skill(), refluxMagicArrow, coolingSkill] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 30,
+          maxHp: 30,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'reflux-magic-arrow',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6, 6, 6],
+          targetDodgeMode: 'skip',
+          cooldownReductionSkillId: 'cooling-skill',
+          cooldownReductionAmount: 1,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooling-skill')?.remaining).toBe(1)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'reflux-magic-arrow')?.remaining).toBe(4)
+  })
+
+  it('clears target statuses and reduces anti-magic arrow cooldown by removed count', () => {
+    const antiMagicArrow = skill({
+      id: 'anti-magic-arrow',
+      name: '破魔箭',
+      skillTreeId: 'antiMagicArrow',
+      damageCount: 5,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ combatSkills: [skill(), antiMagicArrow] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+          burningTurns: 2,
+          poisonTurns: 1,
+          vulnerableTurns: 1,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'anti-magic-arrow',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6, 6, 6, 6, 6],
+          extraDamageValues: [6, 6],
+          extraDamageSides: 6,
+          targetDodgeMode: 'skip',
+          vulnerableOnHit: true,
+          clearTargetStatusesOnHit: true,
+          selfCooldownReductionPerClearedStatus: true,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'goblin')
+    expect(target?.burningTurns ?? 0).toBe(0)
+    expect(target?.poisonTurns ?? 0).toBe(0)
+    expect(target?.vulnerableTurns).toBe(1)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === 'anti-magic-arrow')?.remaining).toBe(1)
+    const attack = result.events.find((event) => event.type === 'attack-resolved')
+    expect(attack).toMatchObject({ damageValues: [6, 6, 6, 6, 6, 6, 6] })
+  })
+
   it('rejects player attacks that are not on the current initiative actor', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),

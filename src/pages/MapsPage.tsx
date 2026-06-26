@@ -2589,6 +2589,19 @@ export default function MapsPage() {
     pushCombatLog(`${latest.name} 因 ${reason}：${skill.name} CD -${amount}`, 'turn')
   }
 
+  const chooseCooldownReductionSkillId = (caster: Character, amount: number, reason: string) => {
+    const latest = useCharacterStore.getState().characters.find((c) => c.id === caster.id)
+    if (!latest) return undefined
+    const skills = latest.combatSkills.filter((s) => s.remaining > 0)
+    if (skills.length === 0) return undefined
+    const picked = window.prompt(
+      `${reason}\n选择要 CD -${amount} 的技能编号：\n${skills
+        .map((s, i) => `${i + 1}. ${s.name}（剩余 ${s.remaining}）`)
+        .join('\n')}`,
+    )
+    return skills[Number(picked) - 1]?.id
+  }
+
   const resolveAbilitySave = async (
     caster: Character,
     token: Token,
@@ -7162,7 +7175,9 @@ export default function MapsPage() {
       isBasicShot(skill) ||
       skill.skillTreeId === 'burstKick' ||
       skill.skillTreeId === 'bindShot' ||
-      skill.skillTreeId === 'rageShot'
+      skill.skillTreeId === 'rageShot' ||
+      skill.skillTreeId === 'refluxMagicArrow' ||
+      skill.skillTreeId === 'antiMagicArrow'
     if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
@@ -7442,6 +7457,9 @@ export default function MapsPage() {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
         const targetToken = map.tokens.find((token) => token.id === targets[0].id) ?? targets[0]
+        const targetChar = targetToken.characterId
+          ? useCharacterStore.getState().characters.find((character) => character.id === targetToken.characterId)
+          : undefined
         if (actorToken && isBasicShot(skill)) {
           launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, { x: targetToken.x, y: targetToken.y })
         }
@@ -7459,10 +7477,23 @@ export default function MapsPage() {
         const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
         const burstKickExtraD6 =
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
-        const extraDamageValues =
-          burstKickExtraD6 > 0
-            ? await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)
-            : undefined
+        const extraDamageParts: number[] = []
+        if (burstKickExtraD6 > 0) {
+          extraDamageParts.push(...(await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)))
+        }
+        const targetHasMagicState =
+          !!targetToken.burningTurns ||
+          !!targetToken.igniteTurns ||
+          !!targetToken.poisonTurns ||
+          !!targetToken.stunTurns ||
+          !!targetToken.knockbackTurns ||
+          !!targetToken.restrainedTurns ||
+          !!targetToken.vulnerableTurns ||
+          (targetChar?.conditions.length ?? 0) > 0
+        if (!expectedTargetDodged && skill.skillTreeId === 'antiMagicArrow' && targetHasMagicState) {
+          extraDamageParts.push(...(await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label)))
+        }
+        const extraDamageValues = extraDamageParts.length > 0 ? extraDamageParts : undefined
         const effectAbility: 'str' | 'con' | undefined =
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' && skillRank >= 3
             ? 'con'
@@ -7477,6 +7508,12 @@ export default function MapsPage() {
               targetToken.label,
             )
           : undefined
+        const cooldownReductionAmount =
+          !expectedTargetDodged && skill.skillTreeId === 'refluxMagicArrow' ? 1 : 0
+        const cooldownReductionSkillId =
+          cooldownReductionAmount > 0
+            ? chooseCooldownReductionSkillId(actor, cooldownReductionAmount, `${skill.name} 命中`)
+            : undefined
         const targetPacket = {
           targetTokenId: targetToken.id,
           diceValues,
@@ -7493,6 +7530,12 @@ export default function MapsPage() {
           pullCells: skill.skillTreeId === 'bindShot' ? 2 : undefined,
           grantBurstKickExtraD6OnHit: skill.skillTreeId === 'bindShot' ? 1 : undefined,
           clearBurstKickExtraD6OnUse: skill.skillTreeId === 'burstKick' && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
+          cooldownReductionSkillId,
+          cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
+          vulnerableOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 3,
+          vulnerableTurns: 1,
+          clearTargetStatusesOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 4,
+          selfCooldownReductionPerClearedStatus: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 5,
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',
