@@ -912,6 +912,12 @@ function resolvePlayerAttack(
       cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })
     }
     const clearedStatuses = packet.clearTargetStatusesOnHit ? clearTargetStatusesFromTarget(state, targetToken) : 0
+    if (clearedStatuses > 0) {
+      events.push({
+        type: 'log',
+        text: `${skill.name} 移除 ${targetToken.label} ${clearedStatuses} 个状态。`,
+      })
+    }
     if (packet.selfCooldownReductionPerClearedStatus && clearedStatuses > 0) {
       selfCooldownReduction = Math.max(selfCooldownReduction, clearedStatuses)
     }
@@ -963,9 +969,21 @@ function resolvePlayerAttack(
   if (resolvedCount === 0) return fail(state, 'invalid-target', events)
   markSkillUsed(state, actor.id, skill.id)
   for (const reduction of cooldownReductions) {
-    reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
+    const result = reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
+    if (result.reduced > 0) {
+      events.push({
+        type: 'log',
+        text: `${actor.name}：${result.skillName} 冷却 -${result.reduced}（${result.before}→${result.after}）。`,
+      })
+    }
   }
-  reduceSkillCooldown(state, actor.id, skill.id, selfCooldownReduction)
+  const selfReduction = reduceSkillCooldown(state, actor.id, skill.id, selfCooldownReduction)
+  if (selfReduction.reduced > 0) {
+    events.push({
+      type: 'log',
+      text: `${actor.name}：${selfReduction.skillName} 冷却 -${selfReduction.reduced}（${selfReduction.before}→${selfReduction.after}）。`,
+    })
+  }
   if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
   maybeEndCombat(state, events)
   return succeed(state, events)
@@ -1097,7 +1115,13 @@ function resolveAoeAttack(
   }
   if (resolvedCount === 0) return fail(state, 'invalid-target', events)
   markSkillUsed(state, actor.id, skill.id)
-  reduceSkillCooldown(state, actor.id, skill.id, action.selfCooldownReduction ?? 0)
+  const selfReduction = reduceSkillCooldown(state, actor.id, skill.id, action.selfCooldownReduction ?? 0)
+  if (selfReduction.reduced > 0) {
+    events.push({
+      type: 'log',
+      text: `${actor.name}：${selfReduction.skillName} 冷却 -${selfReduction.reduced}（${selfReduction.before}→${selfReduction.after}）。`,
+    })
+  }
   if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
   maybeEndCombat(state, events)
   return succeed(state, events)
@@ -1929,14 +1953,27 @@ function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillI
   }))
 }
 
-function reduceSkillCooldown(state: HeadlessDmCombatState, characterId: string, skillId: string, amount: number) {
-  if (amount <= 0) return
+function reduceSkillCooldown(
+  state: HeadlessDmCombatState,
+  characterId: string,
+  skillId: string,
+  amount: number,
+): { skillName: string; before: number; after: number; reduced: number } {
+  const character = findCharacter(state, characterId)
+  const skill = character?.combatSkills.find((item) => item.id === skillId)
+  if (!skill || amount <= 0) {
+    const current = skill?.remaining ?? 0
+    return { skillName: skill?.name ?? skillId, before: current, after: current, reduced: 0 }
+  }
+  const before = skill.remaining
+  const after = Math.max(0, before - amount)
   updateCharacter(state, characterId, (character) => ({
     ...character,
     combatSkills: character.combatSkills.map((skill) =>
-      skill.id === skillId ? { ...skill, remaining: Math.max(0, skill.remaining - amount) } : skill,
+      skill.id === skillId ? { ...skill, remaining: after } : skill,
     ),
   }))
+  return { skillName: skill.name, before, after, reduced: before - after }
 }
 
 function consumeGaleComboReady(

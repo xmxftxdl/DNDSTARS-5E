@@ -1419,6 +1419,10 @@ describe('headless DM combat engine', () => {
     if (!result.ok) return
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooling-skill')?.remaining).toBe(1)
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'reflux-magic-arrow')?.remaining).toBe(4)
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者：冷却中技能 冷却 -1（2→1）。',
+    })
   })
 
   it('clears target statuses and reduces anti-magic arrow cooldown by removed count', () => {
@@ -1490,6 +1494,14 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'anti-magic-arrow')?.remaining).toBe(1)
     const attack = result.events.find((event) => event.type === 'attack-resolved')
     expect(attack).toMatchObject({ damageValues: [6, 6, 6, 6, 6, 6, 6] })
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '破魔箭 移除 Goblin 3 个状态。',
+    })
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者：破魔箭 冷却 -3（4→1）。',
+    })
   })
 
   it('resolves explosive arrow critical fire dice after the crit multiplier and applies fire marks', () => {
