@@ -1507,6 +1507,100 @@ describe('headless DM combat engine', () => {
     ])
   })
 
+  it('halves cluster shot damage only in the 10 to 20 feet falloff band', () => {
+    const clusterShot = skill({
+      id: 'cluster-shot',
+      name: '集束射击',
+      skillTreeId: 'clusterShot',
+      damageCount: 2,
+      damageSides: 6,
+      cooldown: 3,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+          combatSkills: [skill(), clusterShot],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'near-goblin',
+          label: 'Near Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+        token({
+          id: 'far-goblin',
+          label: 'Far Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          x: 385,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { 'near-goblin': { current: 0, max: 2 }, 'far-goblin': { current: 0, max: 2 } },
+    })
+
+    const near = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'near-goblin',
+      skillId: 'cluster-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'near-goblin',
+          diceValues: [6, 6],
+          targetDodgeMode: 'skip',
+          halveDamageOnRangeFeet: { minExclusive: 10, maxInclusive: 20 },
+        },
+      ],
+    })
+    const far = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'far-goblin',
+      skillId: 'cluster-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'far-goblin',
+          diceValues: [6, 6],
+          targetDodgeMode: 'skip',
+          halveDamageOnRangeFeet: { minExclusive: 10, maxInclusive: 20 },
+        },
+      ],
+    })
+
+    expect(near.ok).toBe(true)
+    expect(far.ok).toBe(true)
+    if (!near.ok || !far.ok) return
+    const nearAttack = near.events.find((event) => event.type === 'attack-resolved')
+    const farAttack = far.events.find((event) => event.type === 'attack-resolved')
+    expect(nearAttack).toMatchObject({ targetTokenId: 'near-goblin' })
+    expect(farAttack).toMatchObject({ targetTokenId: 'far-goblin' })
+    if (nearAttack?.type !== 'attack-resolved' || farAttack?.type !== 'attack-resolved') return
+    expect(farAttack.total).toBe(Math.floor(nearAttack.total / 2))
+  })
+
   it('resolves wind kick combo knockback bonus, push, cooldown reduction, and temporary knockback cleanup', () => {
     const windKickCombo = skill({
       id: 'wind-kick-combo',

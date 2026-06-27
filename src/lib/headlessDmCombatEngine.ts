@@ -190,6 +190,7 @@ export interface HeadlessPlayerAttackPacket {
   extraDamageSides?: number
   postCritDamageValues?: number[]
   postCritDamageSides?: number
+  halveDamageOnRangeFeet?: { minExclusive: number; maxInclusive: number }
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
   isCrit?: boolean
@@ -862,7 +863,15 @@ function resolvePlayerAttack(
       resolveAttackDamageTotal(actor, skill, preCritDamageValues, { isCrit: packet.isCrit }) +
       postCritDamageValues.reduce((sum, value) => sum + value, 0)
     const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
-    const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
+    const adjustedBase = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
+    const rangeFeet = tokenFootprintDistanceCells(actorToken, targetToken, state.map) * (state.map.feetPerCell ?? 5)
+    const shouldHalveByRange =
+      !!packet.halveDamageOnRangeFeet &&
+      rangeFeet > packet.halveDamageOnRangeFeet.minExclusive &&
+      rangeFeet <= packet.halveDamageOnRangeFeet.maxInclusive
+    const adjusted = shouldHalveByRange
+      ? { ...adjustedBase, damage: Math.floor(adjustedBase.damage / 2) }
+      : adjustedBase
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
     applyStatusOnHit(state, targetToken, skill, events)
     if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)

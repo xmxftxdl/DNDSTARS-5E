@@ -7200,6 +7200,7 @@ export default function MapsPage() {
       skill.skillTreeId === 'rageShot' ||
       skill.skillTreeId === 'refluxMagicArrow' ||
       skill.skillTreeId === 'antiMagicArrow' ||
+      skill.skillTreeId === 'clusterShot' ||
       skill.skillTreeId === 'windKickCombo' ||
       skill.skillTreeId === 'shadowStepShot' ||
       skill.skillTreeId === 'shadowDance' ||
@@ -7611,6 +7612,10 @@ export default function MapsPage() {
           extraDamageSides: extraDamageValues?.length ? 6 : undefined,
           postCritDamageValues: explosiveArrowFireValues,
           postCritDamageSides: explosiveArrowFireValues?.length ? 6 : undefined,
+          halveDamageOnRangeFeet:
+            skill.skillTreeId === 'clusterShot'
+              ? { minExclusive: 10, maxInclusive: 20 }
+              : undefined,
           targetDodgeD20,
           isCrit: packetIsCrit || undefined,
           targetDodgeMode: dodgePreview?.decision.shouldDodge ? ('attempt' as const) : ('skip' as const),
