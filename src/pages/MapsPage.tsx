@@ -7447,6 +7447,7 @@ export default function MapsPage() {
                   ? { ability: 'con' as const, d20: encircleStunSaveD20 }
                   : undefined,
             restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
+            smallOrMediumOnly: skill.skillTreeId === 'rageShot',
             stunOnFailedEffectSave: applyEncircleStun,
             noMoveOnHit: skill.skillTreeId === 'encircle',
             noMoveTurns: skill.skillTreeId === 'encircle' ? 1 : undefined,
@@ -7626,6 +7627,7 @@ export default function MapsPage() {
             (skill.skillTreeId === 'bindShot' && skillRank >= 4),
           pullOnFailedEffectSave: skill.skillTreeId === 'bindShot',
           pullCells: skill.skillTreeId === 'bindShot' ? 2 : undefined,
+          smallOrMediumOnly: skill.skillTreeId === 'bindShot' || skill.skillTreeId === 'rageShot',
           grantBurstKickExtraD6OnHit: skill.skillTreeId === 'bindShot' ? 1 : undefined,
           clearBurstKickExtraD6OnUse: skill.skillTreeId === 'burstKick' && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
           pushTargetOnHit,

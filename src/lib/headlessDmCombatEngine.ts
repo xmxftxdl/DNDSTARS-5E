@@ -25,6 +25,7 @@ import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
 import { NO_MOVE_STATUS_LABEL, RESTRAINED_STATUS_LABEL, VULNERABLE_STATUS_LABEL } from './tokenStatus'
+import { creatureSizeToFootprintCells, sizeFromTokenSize } from './monsterTypes'
 
 export interface HeadlessEnemyApState {
   current: number
@@ -199,6 +200,7 @@ export interface HeadlessPlayerAttackPacket {
   restrainedOnFailedEffectSave?: boolean
   pullOnFailedEffectSave?: boolean
   pullCells?: number
+  smallOrMediumOnly?: boolean
   grantBurstKickExtraD6OnHit?: number
   clearBurstKickExtraD6OnUse?: boolean
   pushTargetOnHit?: boolean
@@ -919,13 +921,14 @@ function resolvePlayerAttack(
     const effectSave = resolveAttackEffectSave(state, actorToken, actor, targetToken, packet, dice, events)
     if (!effectSave) return fail(state, 'invalid-dice', events)
     if (!effectSave.success) {
+      const effectAllowedBySize = !packet.smallOrMediumOnly || isSmallOrMediumToken(targetToken)
       if (packet.stunOnFailedEffectSave) {
         applyStunToTarget(state, targetToken, STUN_DEFAULT_TURNS, events)
       }
-      if (packet.restrainedOnFailedEffectSave) {
+      if (packet.restrainedOnFailedEffectSave && effectAllowedBySize) {
         applyRestrainedToTarget(state, targetToken, 1, events)
       }
-      if (packet.pullOnFailedEffectSave) {
+      if (packet.pullOnFailedEffectSave && effectAllowedBySize) {
         pullTargetTowardActor(state, actorToken, targetToken, packet.pullCells ?? 2, events)
       }
     }
@@ -1797,6 +1800,10 @@ function pullTargetTowardActor(
     feet: Math.round(Math.hypot(to.x - from.x, to.y - from.y) / Math.max(1, state.map.gridSize) * (state.map.feetPerCell ?? 5)),
     triggersMoveEffects: false,
   })
+}
+
+function isSmallOrMediumToken(token: Token): boolean {
+  return creatureSizeToFootprintCells(token.creatureSize ?? sizeFromTokenSize(token.size)) <= 1
 }
 
 function pushTargetAwayFromActor(

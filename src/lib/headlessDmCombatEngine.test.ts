@@ -1206,6 +1206,7 @@ describe('headless DM combat engine', () => {
           effectSave: { ability: 'str', d20: 1 },
           pullOnFailedEffectSave: true,
           pullCells: 2,
+          smallOrMediumOnly: true,
           grantBurstKickExtraD6OnHit: 1,
         },
       ],
@@ -1216,6 +1217,75 @@ describe('headless DM combat engine', () => {
     expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.x).toBeLessThan(315)
     expect(result.state.characters[0].combatBuffs?.burstKickExtraD6).toBe(1)
     expect(result.events.map((event) => event.type)).toContain('token-moved')
+  })
+
+  it('does not pull or restrain large bind shot targets but still arms burst kick bonus', () => {
+    const bindShot = skill({
+      id: 'bind-shot',
+      name: '捆绑射击',
+      skillTreeId: 'bindShot',
+      damageCount: 1,
+      damageSides: 6,
+      cooldown: 3,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [character({ saveDC: 20, combatSkills: [skill(), bindShot] })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'ogre',
+          label: 'Ogre',
+          type: 'enemy',
+          poolId: 'ogre',
+          hp: 40,
+          maxHp: 40,
+          x: 315,
+          y: 175,
+          creatureSize: '大型',
+          size: 2,
+        }),
+      ]),
+      enemyApByToken: { ogre: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'ogre',
+      skillId: 'bind-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'ogre',
+          diceValues: [6],
+          targetDodgeMode: 'skip',
+          effectSave: { ability: 'str', d20: 1 },
+          restrainedOnFailedEffectSave: true,
+          pullOnFailedEffectSave: true,
+          pullCells: 2,
+          smallOrMediumOnly: true,
+          grantBurstKickExtraD6OnHit: 1,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'ogre')
+    expect(target?.x).toBe(315)
+    expect(target?.restrainedTurns ?? 0).toBe(0)
+    expect(result.state.characters[0].combatBuffs?.burstKickExtraD6).toBe(1)
+    expect(result.events.map((event) => event.type)).not.toContain('token-moved')
   })
 
   it('consumes bind shot bonus dice on burst kick and stuns on failed con saves', () => {
