@@ -248,7 +248,7 @@ export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
   characterId: string
-  featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater'>
+  featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater' | 'finale'>
 }
 
 export interface HeadlessQiReduceCooldownAction {
@@ -628,7 +628,8 @@ function resolveActivateFeature(
   const trait = actor.traits.find((item) => item.featureKey === action.featureKey)
   const isToggleOff =
     (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
-    (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady)
+    (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady) ||
+    (action.featureKey === 'finale' && !!actor.combatBuffs?.finaleReady)
   const requiresUse = action.featureKey !== 'stillWater'
   if (!trait || (!isToggleOff && requiresUse && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
 
@@ -694,6 +695,29 @@ function resolveActivateFeature(
       type: 'log',
       text: `${actor.name} 激活心如止水：15尺内 ${affected} 名友方获得 ${tempHp} 临时生命，2回合免气喘。`,
     })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'finale') {
+    if (actor.combatBuffs?.finaleReady) {
+      updateCharacter(state, actor.id, (item) => ({
+        ...item,
+        combatBuffs: { ...item.combatBuffs, finaleReady: undefined },
+      }))
+      events.push({ type: 'log', text: `${actor.name} 取消曲终待触发。` })
+      return succeed(state, events)
+    }
+    if (!spendCharacterAp(state, actor.id, 2, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, finaleReady: true },
+      traits: item.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'finale'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活曲终：等待下一名敌对生物狩猎印记叠至 4 层。` })
     return succeed(state, events)
   }
 

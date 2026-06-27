@@ -457,6 +457,84 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('activates finale through headless DM authority with two AP and one feature use', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 2,
+          traits: [
+            {
+              id: 'finale',
+              name: '曲终',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'finale',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'finale',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.combatBuffs?.finaleReady).toBe(true)
+    expect(hero.traits.find((trait) => trait.featureKey === 'finale')?.uses).toBe(0)
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者 激活曲终：等待下一名敌对生物狩猎印记叠至 4 层。',
+    })
+  })
+
+  it('cancels finale readiness through headless DM authority without spending AP', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 1,
+          combatBuffs: { finaleReady: true },
+          traits: [
+            {
+              id: 'finale',
+              name: '曲终',
+              level: 1,
+              uses: 0,
+              maxUses: 1,
+              description: '',
+              featureKey: 'finale',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'finale',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatBuffs?.finaleReady).toBeUndefined()
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者 取消曲终待触发。',
+    })
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({
