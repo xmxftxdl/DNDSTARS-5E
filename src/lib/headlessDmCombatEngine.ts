@@ -248,7 +248,7 @@ export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
   characterId: string
-  featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike'>
+  featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater'>
 }
 
 export interface HeadlessQiReduceCooldownAction {
@@ -629,7 +629,8 @@ function resolveActivateFeature(
   const isToggleOff =
     (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
     (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady)
-  if (!trait || (!isToggleOff && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
+  const requiresUse = action.featureKey !== 'stillWater'
+  if (!trait || (!isToggleOff && requiresUse && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
 
   if (action.featureKey === 'eagleEye') {
     if (trait.uses <= 0) return fail(state, 'invalid-skill', events)
@@ -662,6 +663,37 @@ function resolveActivateFeature(
       combatBuffs: { ...item.combatBuffs, doubleArrowReady: true },
     }))
     events.push({ type: 'log', text: `${actor.name} 激活双箭。` })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'stillWater') {
+    if (!isCalmMindActive(actor)) return fail(state, 'invalid-skill', events)
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    const tempHp = Math.max(1, trait.level) * 10
+    let affected = 0
+    for (const allyToken of state.map.tokens) {
+      if (allyToken.type !== 'player' || !allyToken.characterId) continue
+      const ally = findCharacter(state, allyToken.characterId)
+      if (!ally || ally.currentHp <= 0) continue
+      const distanceFeet = tokenFootprintDistanceCells(actorToken, allyToken, state.map) * (state.map.feetPerCell ?? 5)
+      if (distanceFeet > 15) continue
+      affected += 1
+      updateCharacter(state, ally.id, (item) => ({
+        ...item,
+        tempHp: Math.max(item.tempHp ?? 0, tempHp),
+        combatBuffs: {
+          ...item.combatBuffs,
+          stillWaterBreathImmunityTurns: 2,
+          stillWaterTempHpTurns: 10,
+          outOfBreathTurns: undefined,
+          calmMind: findClassTrait(item, 'calmMind') ? true : item.combatBuffs?.calmMind,
+        },
+      }))
+    }
+    events.push({
+      type: 'log',
+      text: `${actor.name} 激活心如止水：15尺内 ${affected} 名友方获得 ${tempHp} 临时生命，2回合免气喘。`,
+    })
     return succeed(state, events)
   }
 

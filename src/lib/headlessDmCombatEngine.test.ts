@@ -358,6 +358,105 @@ describe('headless DM combat engine', () => {
     expect(hero.traits.find((trait) => trait.featureKey === 'eagleEye')?.uses).toBe(0)
   })
 
+  it('activates still water through headless DM authority for allies within 15 feet', () => {
+    const stillWater = {
+      id: 'still-water',
+      name: '心如止水',
+      level: 2,
+      uses: 0,
+      maxUses: 0,
+      description: '',
+      featureKey: 'stillWater' as const,
+    }
+    const calmMind = {
+      id: 'calm-mind',
+      name: '静心',
+      level: 1,
+      uses: 0,
+      maxUses: 0,
+      description: '',
+      featureKey: 'calmMind' as const,
+    }
+    const combat = state({
+      characters: [
+        character({
+          traits: [stillWater, calmMind],
+          combatBuffs: { calmMind: true },
+          currentAP: 2,
+        }),
+        character({
+          id: 'ally-near',
+          name: '近处友方',
+          tempHp: 5,
+          traits: [calmMind],
+          combatBuffs: { outOfBreathTurns: 1 },
+        }),
+        character({
+          id: 'ally-far',
+          name: '远处友方',
+          traits: [calmMind],
+          combatBuffs: { outOfBreathTurns: 1 },
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'ally-near-token',
+          label: 'Near Ally',
+          type: 'player',
+          characterId: 'ally-near',
+          hp: 30,
+          maxHp: 30,
+          x: 385,
+          y: 175,
+        }),
+        token({
+          id: 'ally-far-token',
+          label: 'Far Ally',
+          type: 'player',
+          characterId: 'ally-far',
+          hp: 30,
+          maxHp: 30,
+          x: 455,
+          y: 175,
+        }),
+      ]),
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'stillWater',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters.find((item) => item.id === 'hero')!
+    const near = result.state.characters.find((item) => item.id === 'ally-near')!
+    const far = result.state.characters.find((item) => item.id === 'ally-far')!
+    expect(hero.currentAP).toBe(1)
+    expect(hero.tempHp).toBe(20)
+    expect(near.tempHp).toBe(20)
+    expect(near.combatBuffs?.outOfBreathTurns).toBeUndefined()
+    expect(near.combatBuffs?.stillWaterBreathImmunityTurns).toBe(2)
+    expect(far.tempHp).toBe(0)
+    expect(far.combatBuffs?.outOfBreathTurns).toBe(1)
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者 激活心如止水：15尺内 2 名友方获得 20 临时生命，2回合免气喘。',
+    })
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({

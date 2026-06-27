@@ -7310,7 +7310,8 @@ export default function MapsPage() {
       if (
         action.featureKey === 'eagleEye' ||
         action.featureKey === 'doubleArrow' ||
-        action.featureKey === 'preciseStrike'
+        action.featureKey === 'preciseStrike' ||
+        action.featureKey === 'stillWater'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
