@@ -846,6 +846,46 @@ describe('headless DM combat engine', () => {
     )
   })
 
+  it('activates flexible body through headless DM authority by spending AP and qi', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 2,
+          qi: 2,
+          traits: [
+            {
+              id: 'flexible-body',
+              name: '灵活身躯',
+              level: 3,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'flexibleBody',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'flexibleBody',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.qi).toBe(1)
+    expect(hero.combatBuffs?.flexibleBodyBonus).toBe(9)
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者 激活灵活身躯：下次闪避/敏捷豁免 +9。',
+    })
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({

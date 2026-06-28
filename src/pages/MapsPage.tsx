@@ -4588,16 +4588,23 @@ export default function MapsPage() {
     if (key === 'flexibleBody') {
       const trait = findClassTrait(turnCharacter, 'flexibleBody')
       if (!trait) return
-      if (!spendAP(turnCharacter.id, 1)) return
-      if (!spendQi(turnCharacter.id, 1)) {
-        await showCombatNotice('气不足', '需要 1 点气。', 'amber')
+      if (!activeMap) return
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'flexibleBody',
+      })
+      if (!headless.ok) {
+        await showCombatNotice('灵活身躯', headless.reason, 'amber')
         return
       }
-      const bonus = 5 + (trait.level - 1) * 2
-      updateChar(turnCharacter.id, {
-        combatBuffs: { ...turnCharacter.combatBuffs, flexibleBodyBonus: bonus },
-      })
-      pushApLog(turnCharacter, 1, '激活灵活身躯', `下次闪避/敏捷豁免 +${bonus}`)
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       return
     }
   }
@@ -7277,7 +7284,8 @@ export default function MapsPage() {
         action.featureKey === 'stillWater' ||
         action.featureKey === 'finale' ||
         action.featureKey === 'shadowVeil' ||
-        action.featureKey === 'trackingArrow'
+        action.featureKey === 'trackingArrow' ||
+        action.featureKey === 'flexibleBody'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const target = action.targetTokenId ? map.tokens.find((token) => token.id === action.targetTokenId) : undefined

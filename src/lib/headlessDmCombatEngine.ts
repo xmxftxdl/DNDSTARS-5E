@@ -258,6 +258,7 @@ export interface HeadlessActivateFeatureAction {
     | 'illusionDance'
     | 'shadowVeil'
     | 'trackingArrow'
+    | 'flexibleBody'
   >
   targetTokenId?: string
   targetTokenIds?: string[]
@@ -650,7 +651,7 @@ function resolveActivateFeature(
     (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
     (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady) ||
     (action.featureKey === 'finale' && !!actor.combatBuffs?.finaleReady)
-  const requiresUse = action.featureKey !== 'stillWater'
+  const requiresUse = action.featureKey !== 'stillWater' && action.featureKey !== 'flexibleBody'
   if (!trait || (!isToggleOff && requiresUse && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
 
   if (action.featureKey === 'eagleEye') {
@@ -796,6 +797,19 @@ function resolveActivateFeature(
       const latestTarget = state.map.tokens.find((token) => token.id === targetToken.id) ?? targetToken
       resolveFinaleTrigger(state, actor, latestTarget, finaleDamageValues, events)
     }
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'flexibleBody') {
+    if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    const bonus = 5 + (Math.max(1, trait.level) - 1) * 2
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      qi: Math.max(0, (item.qi ?? 0) - 1),
+      combatBuffs: { ...item.combatBuffs, flexibleBodyBonus: bonus },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活灵活身躯：下次闪避/敏捷豁免 +${bonus}。` })
     return succeed(state, events)
   }
 
