@@ -4476,14 +4476,36 @@ export default function MapsPage() {
     if (key === 'trackingArrow') {
       const trait = findClassTrait(turnCharacter, 'trackingArrow')
       if (!trait || trait.uses <= 0) return
-      if (!spendAP(turnCharacter.id, 1)) return
       const target = chooseEnemyTokenByPrompt('追踪箭：给一个已带狩猎印记的目标额外 +1 层印记', (t) => (t.huntingMarkStacks ?? 0) > 0)
       if (!target || !activeMap) return
-      activateClassFeature(turnCharacter.id, 'trackingArrow')
-      const nextStacks = Math.min(4, (target.huntingMarkStacks ?? 0) + 1)
-      updateToken(activeMap.id, target.id, { huntingMarkStacks: nextStacks })
-      if (nextStacks === 4) await triggerFinaleIfReady(turnCharacter, target)
-      pushApLog(turnCharacter, 1, '激活追踪箭', `${target.label} 狩猎印记 +1`)
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const finaleWillTrigger = (target.huntingMarkStacks ?? 0) >= 3 && !!turnCharacter.combatBuffs?.finaleReady
+      const finaleTrait = findClassTrait(turnCharacter, 'finale')
+      const finaleDamageValues = finaleWillTrigger
+        ? [
+            ...(await rollDiceBoxValues(6, 10, '曲终力场伤害', target.label)),
+            ...(finaleTrait && finaleTrait.level > 1
+              ? await rollDiceBoxValues(finaleTrait.level - 1, 8, '曲终等级额外伤害', target.label)
+              : []),
+          ]
+        : undefined
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'trackingArrow',
+        targetTokenId: target.id,
+        finaleDamageValues,
+      })
+      if (!headless.ok) {
+        await showCombatNotice('追踪箭', headless.reason, 'amber')
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, event.text.includes('曲终触发') ? 'damage' : 'turn')
+      }
       return
     }
     if (key === 'shadowVeil') {
@@ -7254,15 +7276,33 @@ export default function MapsPage() {
         action.featureKey === 'preciseStrike' ||
         action.featureKey === 'stillWater' ||
         action.featureKey === 'finale' ||
-        action.featureKey === 'shadowVeil'
+        action.featureKey === 'shadowVeil' ||
+        action.featureKey === 'trackingArrow'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const target = action.targetTokenId ? map.tokens.find((token) => token.id === action.targetTokenId) : undefined
+        const finaleWillTrigger = !!(
+          action.featureKey === 'trackingArrow' &&
+          target &&
+          (target.huntingMarkStacks ?? 0) >= 3 &&
+          actor.combatBuffs?.finaleReady
+        )
+        const finaleTrait = findClassTrait(actor, 'finale')
+        const finaleDamageValues = finaleWillTrigger
+          ? [
+              ...(await rollDiceBoxValues(6, 10, '曲终力场伤害', target?.label ?? '目标')),
+              ...(finaleTrait && finaleTrait.level > 1
+                ? await rollDiceBoxValues(finaleTrait.level - 1, 8, '曲终等级额外伤害', target?.label ?? '目标')
+                : []),
+            ]
+          : undefined
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'activate-feature',
           actorTokenId: action.actorTokenId,
           characterId: action.characterId,
           featureKey: action.featureKey,
           targetTokenId: action.targetTokenId,
+          finaleDamageValues,
         })
         if (!headless.ok) {
           acknowledgePlayerAction(action, 'rejected', headless.reason)

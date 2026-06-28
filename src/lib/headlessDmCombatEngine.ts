@@ -250,11 +250,19 @@ export interface HeadlessActivateFeatureAction {
   characterId: string
   featureKey: Extract<
     ClassFeatureKey,
-    'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater' | 'finale' | 'illusionDance' | 'shadowVeil'
+    | 'eagleEye'
+    | 'doubleArrow'
+    | 'preciseStrike'
+    | 'stillWater'
+    | 'finale'
+    | 'illusionDance'
+    | 'shadowVeil'
+    | 'trackingArrow'
   >
   targetTokenId?: string
   targetTokenIds?: string[]
   targetPackets?: HeadlessFeatureTargetPacket[]
+  finaleDamageValues?: number[]
 }
 
 export interface HeadlessFeatureTargetPacket {
@@ -758,6 +766,36 @@ function resolveActivateFeature(
       ),
     }))
     events.push({ type: 'log', text: `${actor.name} 激活影遁之术：${targetToken.label} 印记 -2，本回合攻击 +1D6。` })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'trackingArrow') {
+    const targetToken = state.map.tokens.find((item) => item.id === action.targetTokenId)
+    if (!targetToken || targetToken.type !== 'enemy' || !isTokenAlive(targetToken, state.characters)) {
+      return fail(state, 'invalid-target', events)
+    }
+    if ((targetToken.huntingMarkStacks ?? 0) <= 0) return fail(state, 'invalid-target', events)
+    const nextStacks = Math.min(4, (targetToken.huntingMarkStacks ?? 0) + 1)
+    const finaleWillTrigger = nextStacks === 4 && !!actor.combatBuffs?.finaleReady
+    const finaleDamageValues = finaleWillTrigger
+      ? resolveFinaleDamageValues(action.finaleDamageValues, dice, findClassTrait(actor, 'finale')?.level ?? 1)
+      : []
+    if (!finaleDamageValues) return fail(state, 'invalid-dice', events)
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateToken(state, targetToken.id, (token) => ({ ...token, huntingMarkStacks: nextStacks }))
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      traits: item.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'trackingArrow'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活追踪箭：${targetToken.label} 狩猎印记 +1（${nextStacks}/4）。` })
+    if (finaleWillTrigger) {
+      const latestTarget = state.map.tokens.find((token) => token.id === targetToken.id) ?? targetToken
+      resolveFinaleTrigger(state, actor, latestTarget, finaleDamageValues, events)
+    }
     return succeed(state, events)
   }
 
@@ -1721,6 +1759,50 @@ function applyDamageToTarget(
   const hpAfter = Math.max(0, hpBefore - amount)
   updateToken(state, targetToken.id, (item) => ({ ...item, hp: hpAfter }))
   events.push({ type: 'damage-applied', targetTokenId: targetToken.id, amount, hpBefore, hpAfter })
+}
+
+function resolveFinaleDamageValues(
+  provided: number[] | undefined,
+  roller: HeadlessDiceRoller,
+  traitLevel: number,
+): number[] | null {
+  const d10 = resolveDiceValues(provided?.slice(0, 6), roller, 6, 10)
+  if (!d10) return null
+  const extraCount = Math.max(0, traitLevel - 1)
+  const d8 = resolveDiceValues(provided?.slice(6), roller, extraCount, 8)
+  if (!d8) return null
+  return [...d10, ...d8]
+}
+
+function resolveFinaleTrigger(
+  state: HeadlessDmCombatState,
+  actor: Character,
+  targetToken: Token,
+  damageValues: number[],
+  events: HeadlessCombatEvent[],
+) {
+  const total = damageValues.reduce((sum, value) => sum + value, 0)
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    combatBuffs: { ...item.combatBuffs, finaleReady: undefined },
+  }))
+  updateToken(state, targetToken.id, (token) => ({
+    ...token,
+    huntingMarkStacks: 0,
+  }))
+  applyStunToTarget(state, targetToken, STUN_DEFAULT_TURNS, events)
+  const latestTarget = state.map.tokens.find((token) => token.id === targetToken.id) ?? targetToken
+  applyDamageToTarget(state, latestTarget, total, events)
+  events.push({
+    type: 'dice-rolled',
+    notation: `6d10${damageValues.length > 6 ? `+${damageValues.length - 6}d8` : ''}`,
+    values: damageValues,
+    total,
+  })
+  events.push({
+    type: 'log',
+    text: `${actor.name} 的曲终触发：${targetToken.label} 狩猎印记达到 4 层，${damageValues.join(' + ')} = ${total} 点力场伤害，眩晕并移除所有狩猎印记。`,
+  })
 }
 
 function adjustDamageForTarget(

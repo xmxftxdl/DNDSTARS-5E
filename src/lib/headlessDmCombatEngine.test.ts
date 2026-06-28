@@ -699,6 +699,153 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('activates tracking arrow by adding one hunting mark through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 2,
+          traits: [
+            {
+              id: 'tracking-arrow',
+              name: '追踪箭',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'trackingArrow',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          huntingMarkStacks: 2,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'trackingArrow',
+      targetTokenId: 'goblin',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const goblin = result.state.map.tokens.find((item) => item.id === 'goblin')!
+    expect(hero.currentAP).toBe(1)
+    expect(hero.traits.find((trait) => trait.featureKey === 'trackingArrow')?.uses).toBe(0)
+    expect(goblin.huntingMarkStacks).toBe(3)
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者 激活追踪箭：Goblin 狩猎印记 +1（3/4）。',
+    })
+  })
+
+  it('triggers finale through tracking arrow when hunting marks reach four', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 2,
+          combatBuffs: { finaleReady: true },
+          traits: [
+            {
+              id: 'tracking-arrow',
+              name: '追踪箭',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'trackingArrow',
+            },
+            {
+              id: 'finale',
+              name: '曲终',
+              level: 2,
+              uses: 0,
+              maxUses: 1,
+              description: '',
+              featureKey: 'finale',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 50,
+          maxHp: 50,
+          huntingMarkStacks: 3,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'trackingArrow',
+      targetTokenId: 'goblin',
+      finaleDamageValues: [10, 10, 10, 10, 10, 10, 8],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const goblin = result.state.map.tokens.find((item) => item.id === 'goblin')!
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatBuffs?.finaleReady).toBeUndefined()
+    expect(goblin.huntingMarkStacks).toBe(0)
+    expect(goblin.stunTurns).toBe(1)
+    expect(goblin.hp).toBe(0)
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'dice-rolled',
+        notation: '6d10+1d8',
+        values: [10, 10, 10, 10, 10, 10, 8],
+        total: 68,
+      }),
+    )
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({
