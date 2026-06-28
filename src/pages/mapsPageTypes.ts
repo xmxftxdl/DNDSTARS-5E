@@ -91,6 +91,7 @@ export interface SharedPlayerActionState {
     | 'agile-leap-move'
     | 'skill-free-move'
     | 'qi-reduce-cooldown'
+    | 'calm-spirit'
     | 'activate-feature'
   actorTokenId: string
   characterId: string
@@ -101,6 +102,7 @@ export interface SharedPlayerActionState {
   aoeRectRotation?: number
   skillId?: string
   featureKey?: ClassFeatureKey
+  calmSpiritEffect?: 'move' | 'crit'
   round: number
   initiativeIndex: number
   seq: number

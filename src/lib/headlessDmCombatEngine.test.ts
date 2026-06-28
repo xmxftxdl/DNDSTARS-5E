@@ -886,6 +886,72 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('spends one calm spirit stack to arm free movement through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { calmSpiritStacks: 3 },
+          traits: [
+            {
+              id: 'calm-spirit',
+              name: '安定心神',
+              level: 2,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'calmSpirit',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'calm-spirit',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      effect: 'move',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatBuffs?.calmSpiritStacks).toBe(2)
+    expect(result.state.characters[0].combatBuffs?.calmSpiritMoveFeet).toBe(15)
+  })
+
+  it('spends two calm spirit stacks to arm crit bonus through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { calmSpiritStacks: 4 },
+          traits: [
+            {
+              id: 'calm-spirit',
+              name: '安定心神',
+              level: 3,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'calmSpirit',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'calm-spirit',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      effect: 'crit',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatBuffs?.calmSpiritStacks).toBe(2)
+    expect(result.state.characters[0].combatBuffs?.calmSpiritCritBonusPercent).toBe(40)
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({

@@ -4944,31 +4944,54 @@ export default function MapsPage() {
   }
 
   const handleCalmSpiritMove = () => {
-    const ch = spendCalmSpiritStacks(1)
-    const trait = ch && findClassTrait(ch, 'calmSpirit')
-    if (!ch || !trait) return
-    const feet = 10 + (trait.level - 1) * 5
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === ch.id) ?? ch
-    updateChar(ch.id, {
-      combatBuffs: {
-        ...latest.combatBuffs,
-        calmSpiritMoveFeet: feet,
-      },
+    const ch = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter?.id)
+    if (!ch || !activeMap || !findClassTrait(ch, 'calmSpirit')) return
+    if (!isDM) {
+      if (sendPlayerCalmSpiritRequest('move')) setShowMoveRange(true)
+      return
+    }
+    const actorToken = activeMap.tokens.find((token) => token.characterId === ch.id)
+    if (!actorToken) return
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+      type: 'calm-spirit',
+      actorTokenId: actorToken.id,
+      characterId: ch.id,
+      effect: 'move',
     })
-    pushCombatLog(`${ch.name} 发动安定心神：可移动至多 ${feet} 尺且不失去静心`, 'turn')
+    if (!headless.ok) {
+      void showCombatNotice('安定心神', headless.reason, 'amber')
+      return
+    }
+    applyHeadlessCombatResult(headless)
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
     setShowMoveRange(true)
   }
 
   const handleCalmSpiritCrit = () => {
-    const ch = spendCalmSpiritStacks(2)
-    const trait = ch && findClassTrait(ch, 'calmSpirit')
-    if (!ch || !trait) return
-    const bonus = 20 + (trait.level - 1) * 10
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === ch.id) ?? ch
-    updateChar(ch.id, {
-      combatBuffs: { ...latest.combatBuffs, calmSpiritCritBonusPercent: bonus },
+    const ch = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter?.id)
+    if (!ch || !activeMap || !findClassTrait(ch, 'calmSpirit')) return
+    if (!isDM) {
+      sendPlayerCalmSpiritRequest('crit')
+      return
+    }
+    const actorToken = activeMap.tokens.find((token) => token.characterId === ch.id)
+    if (!actorToken) return
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+      type: 'calm-spirit',
+      actorTokenId: actorToken.id,
+      characterId: ch.id,
+      effect: 'crit',
     })
-    pushCombatLog(`${ch.name} 发动安定心神：下一次攻击暴击率 +${bonus}%`, 'turn')
+    if (!headless.ok) {
+      void showCombatNotice('安定心神', headless.reason, 'amber')
+      return
+    }
+    applyHeadlessCombatResult(headless)
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
   }
 
   const handleCalmSpiritCooldown = () => {
@@ -7330,6 +7353,33 @@ export default function MapsPage() {
       return
     }
 
+    if (action.type === 'calm-spirit') {
+      if (!action.calmSpiritEffect) {
+        acknowledgePlayerAction(action, 'rejected', 'unsupported-action')
+        completePlayerActionRequest(action)
+        return
+      }
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'calm-spirit',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        effect: action.calmSpiritEffect,
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(action, 'rejected', headless.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (action.type === 'attack-token') {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const skill = actor?.combatSkills.find((s) => s.id === action.skillId)
@@ -8198,6 +8248,28 @@ export default function MapsPage() {
     }
     const featureName = findClassTrait(turnCharacter, featureKey)?.name ?? featureKey
     return submitPlayerActionRequest(action, `${turnCharacter.name} 激活${featureName}`)
+  }
+
+  const sendPlayerCalmSpiritRequest = (effect: 'move' | 'crit') => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    const action: SharedPlayerActionState = {
+      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'calm-spirit',
+      actorTokenId: currentInitiativeToken.id,
+      characterId: turnCharacter.id,
+      calmSpiritEffect: effect,
+      round,
+      initiativeIndex,
+      seq,
+      updatedAt: Date.now(),
+    }
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 发动安定心神`)
   }
 
   const sendPlayerAttackTokenRequest = (targetToken: Token, skill: CombatSkill, targetTokenIds?: string[]) => {

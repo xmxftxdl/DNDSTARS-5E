@@ -278,6 +278,13 @@ export interface HeadlessQiReduceCooldownAction {
   skillId: string
 }
 
+export interface HeadlessCalmSpiritAction {
+  type: 'calm-spirit'
+  actorTokenId: string
+  characterId: string
+  effect: 'move' | 'crit'
+}
+
 export interface HeadlessAoeAttackAction {
   type: 'aoe-attack'
   actorTokenId: string
@@ -320,6 +327,7 @@ export type HeadlessCombatAction =
   | HeadlessEnemyAttackAction
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
+  | HeadlessCalmSpiritAction
   | HeadlessAoeAttackAction
   | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
@@ -478,6 +486,8 @@ export function resolveHeadlessDmAction(
       return resolveActivateFeature(next, action, dice, events)
     case 'qi-reduce-cooldown':
       return resolveQiReduceCooldown(next, action, events)
+    case 'calm-spirit':
+      return resolveCalmSpirit(next, action, events)
     case 'opportunity-attack-token':
       return resolveOpportunityAttack(next, action, dice, events)
     case 'end-turn': {
@@ -955,6 +965,56 @@ function resolveQiReduceCooldown(
       updatedSkill?.remaining ?? 0
     }。`,
   })
+  return succeed(state, events)
+}
+
+function resolveCalmSpirit(
+  state: HeadlessDmCombatState,
+  action: HeadlessCalmSpiritAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const current = getCurrentTurn(state)
+  if (current?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
+  const actor = findCharacter(state, action.characterId)
+  if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
+  const trait = findClassTrait(actor, 'calmSpirit')
+  if (!trait) return fail(state, 'invalid-skill', events)
+  const cost = action.effect === 'move' ? 1 : 2
+  const stacks = actor.combatBuffs?.calmSpiritStacks ?? 0
+  if (stacks < cost) return fail(state, 'insufficient-resource', events)
+  const nextStacks = stacks - cost
+  if (action.effect === 'move') {
+    const feet = 10 + (Math.max(1, trait.level) - 1) * 5
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: {
+        ...item.combatBuffs,
+        calmSpiritStacks: nextStacks > 0 ? nextStacks : undefined,
+        calmSpiritMoveFeet: feet,
+      },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 发动安定心神：消耗 1 枚静心标记，可移动至多 ${feet} 尺且不失去静心。` })
+    return succeed(state, events)
+  }
+  const bonus = 20 + (Math.max(1, trait.level) - 1) * 10
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    combatBuffs: {
+      ...item.combatBuffs,
+      calmSpiritStacks: nextStacks > 0 ? nextStacks : undefined,
+      calmSpiritCritBonusPercent: bonus,
+    },
+  }))
+  events.push({ type: 'log', text: `${actor.name} 发动安定心神：消耗 2 枚静心标记，下一次攻击暴击率 +${bonus}%。` })
   return succeed(state, events)
 }
 
