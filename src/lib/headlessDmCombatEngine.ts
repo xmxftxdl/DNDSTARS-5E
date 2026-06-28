@@ -259,6 +259,7 @@ export interface HeadlessActivateFeatureAction {
     | 'shadowVeil'
     | 'trackingArrow'
     | 'flexibleBody'
+    | 'showtime'
   >
   targetTokenId?: string
   targetTokenIds?: string[]
@@ -821,6 +822,23 @@ function resolveActivateFeature(
       combatBuffs: { ...item.combatBuffs, flexibleBodyBonus: bonus },
     }))
     events.push({ type: 'log', text: `${actor.name} 激活灵活身躯：下次闪避/敏捷豁免 +${bonus}。` })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'showtime') {
+    if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      qi: Math.max(0, (item.qi ?? 0) - 1),
+      combatBuffs: { ...item.combatBuffs, showtimeTurns: 2 },
+      traits: item.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'showtime'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活演出时间：持续 2 回合。` })
     return succeed(state, events)
   }
 

@@ -4607,6 +4607,28 @@ export default function MapsPage() {
       }
       return
     }
+    if (key === 'showtime') {
+      const trait = findClassTrait(turnCharacter, 'showtime')
+      if (!trait || trait.uses <= 0) return
+      if (!activeMap) return
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'showtime',
+      })
+      if (!headless.ok) {
+        await showCombatNotice('演出时间', headless.reason, 'amber')
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      return
+    }
   }
 
   const getEnemyApState = (tokenId: string) =>
@@ -7310,7 +7332,8 @@ export default function MapsPage() {
         action.featureKey === 'finale' ||
         action.featureKey === 'shadowVeil' ||
         action.featureKey === 'trackingArrow' ||
-        action.featureKey === 'flexibleBody'
+        action.featureKey === 'flexibleBody' ||
+        action.featureKey === 'showtime'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const target = action.targetTokenId ? map.tokens.find((token) => token.id === action.targetTokenId) : undefined

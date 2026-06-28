@@ -886,6 +886,43 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('activates showtime through headless DM authority by spending AP, qi, and one use', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 2,
+          qi: 2,
+          traits: [
+            {
+              id: 'showtime',
+              name: '演出时间',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'showtime',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'showtime',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.qi).toBe(1)
+    expect(hero.combatBuffs?.showtimeTurns).toBe(2)
+    expect(hero.traits.find((trait) => trait.featureKey === 'showtime')?.uses).toBe(0)
+  })
+
   it('spends one calm spirit stack to arm free movement through headless DM authority', () => {
     const combat = state({
       characters: [
