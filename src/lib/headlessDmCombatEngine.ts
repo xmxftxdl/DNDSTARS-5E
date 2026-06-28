@@ -250,8 +250,9 @@ export interface HeadlessActivateFeatureAction {
   characterId: string
   featureKey: Extract<
     ClassFeatureKey,
-    'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater' | 'finale' | 'illusionDance'
+    'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater' | 'finale' | 'illusionDance' | 'shadowVeil'
   >
+  targetTokenId?: string
   targetTokenIds?: string[]
   targetPackets?: HeadlessFeatureTargetPacket[]
 }
@@ -734,6 +735,30 @@ function resolveActivateFeature(
 
   if (action.featureKey === 'illusionDance') {
     return resolveIllusionDanceFeature(state, action, actorToken, actor, trait, dice, events)
+  }
+
+  if (action.featureKey === 'shadowVeil') {
+    const targetToken = state.map.tokens.find((item) => item.id === action.targetTokenId)
+    if (!targetToken || targetToken.type !== 'enemy' || !isTokenAlive(targetToken, state.characters)) {
+      return fail(state, 'invalid-target', events)
+    }
+    if ((targetToken.huntingMarkStacks ?? 0) < 2) return fail(state, 'invalid-target', events)
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateToken(state, targetToken.id, (token) => ({
+      ...token,
+      huntingMarkStacks: Math.max(0, (token.huntingMarkStacks ?? 0) - 2),
+    }))
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, shadowVeilTargetId: targetToken.id },
+      traits: item.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'shadowVeil'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活影遁之术：${targetToken.label} 印记 -2，本回合攻击 +1D6。` })
+    return succeed(state, events)
   }
 
   if (actor.combatBuffs?.preciseStrikeReady) {

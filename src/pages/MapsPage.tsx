@@ -4489,15 +4489,25 @@ export default function MapsPage() {
     if (key === 'shadowVeil') {
       const trait = findClassTrait(turnCharacter, 'shadowVeil')
       if (!trait || trait.uses <= 0) return
-      if (!spendAP(turnCharacter.id, 1)) return
       const target = chooseEnemyTokenByPrompt('影遁之术：消耗目标 2 层狩猎印记，本回合对其攻击 +1D6', (t) => (t.huntingMarkStacks ?? 0) >= 2)
       if (!target || !activeMap) return
-      activateClassFeature(turnCharacter.id, 'shadowVeil')
-      updateToken(activeMap.id, target.id, { huntingMarkStacks: Math.max(0, (target.huntingMarkStacks ?? 0) - 2) })
-      updateChar(turnCharacter.id, {
-        combatBuffs: { ...turnCharacter.combatBuffs, shadowVeilTargetId: target.id },
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'shadowVeil',
+        targetTokenId: target.id,
       })
-      pushApLog(turnCharacter, 1, '激活影遁之术', `${target.label} 印记 -2，本回合攻击 +1D6`)
+      if (!headless.ok) {
+        await showCombatNotice('影遁之术', headless.reason, 'amber')
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       return
     }
     if (key === 'stillWater') {
@@ -7243,7 +7253,8 @@ export default function MapsPage() {
         action.featureKey === 'doubleArrow' ||
         action.featureKey === 'preciseStrike' ||
         action.featureKey === 'stillWater' ||
-        action.featureKey === 'finale'
+        action.featureKey === 'finale' ||
+        action.featureKey === 'shadowVeil'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
@@ -7251,6 +7262,7 @@ export default function MapsPage() {
           actorTokenId: action.actorTokenId,
           characterId: action.characterId,
           featureKey: action.featureKey,
+          targetTokenId: action.targetTokenId,
         })
         if (!headless.ok) {
           acknowledgePlayerAction(action, 'rejected', headless.reason)
