@@ -282,7 +282,8 @@ export interface HeadlessCalmSpiritAction {
   type: 'calm-spirit'
   actorTokenId: string
   characterId: string
-  effect: 'move' | 'crit'
+  effect: 'move' | 'crit' | 'cooldown' | 'extraTurn'
+  skillId?: string
 }
 
 export interface HeadlessAoeAttackAction {
@@ -988,7 +989,14 @@ function resolveCalmSpirit(
   if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
   const trait = findClassTrait(actor, 'calmSpirit')
   if (!trait) return fail(state, 'invalid-skill', events)
-  const cost = action.effect === 'move' ? 1 : 2
+  const cost =
+    action.effect === 'move'
+      ? 1
+      : action.effect === 'crit'
+        ? 2
+        : action.effect === 'cooldown'
+          ? 3
+          : 4
   const stacks = actor.combatBuffs?.calmSpiritStacks ?? 0
   if (stacks < cost) return fail(state, 'insufficient-resource', events)
   const nextStacks = stacks - cost
@@ -1003,6 +1011,38 @@ function resolveCalmSpirit(
       },
     }))
     events.push({ type: 'log', text: `${actor.name} 发动安定心神：消耗 1 枚静心标记，可移动至多 ${feet} 尺且不失去静心。` })
+    return succeed(state, events)
+  }
+  if (action.effect === 'cooldown') {
+    const skill = actor.combatSkills.find((item) => item.id === action.skillId)
+    if (!skill || skill.remaining <= 0) return fail(state, 'invalid-skill', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: {
+        ...item.combatBuffs,
+        calmSpiritStacks: nextStacks > 0 ? nextStacks : undefined,
+      },
+      combatSkills: item.combatSkills.map((currentSkill) =>
+        currentSkill.id === skill.id ? { ...currentSkill, remaining: Math.max(0, currentSkill.remaining - 1) } : currentSkill,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 发动安定心神：消耗 3 枚静心标记，${skill.name} CD -1。` })
+    return succeed(state, events)
+  }
+  if (action.effect === 'extraTurn') {
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      currentAP: item.actionPoints,
+      combatSkills: item.combatSkills.map((skill) => ({ ...skill, usedThisTurn: false })),
+      combatBuffs: {
+        ...item.combatBuffs,
+        calmSpiritStacks: undefined,
+      },
+    }))
+    events.push({
+      type: 'log',
+      text: `${actor.name} 发动安定心神：消耗 4 枚静心标记，获得一个完整回合，AP 回满为 ${actor.actionPoints}/${actor.actionPoints}。`,
+    })
     return succeed(state, events)
   }
   const bonus = 20 + (Math.max(1, trait.level) - 1) * 10

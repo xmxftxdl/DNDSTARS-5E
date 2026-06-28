@@ -102,7 +102,7 @@ export interface SharedPlayerActionState {
   aoeRectRotation?: number
   skillId?: string
   featureKey?: ClassFeatureKey
-  calmSpiritEffect?: 'move' | 'crit'
+  calmSpiritEffect?: 'move' | 'crit' | 'cooldown' | 'extraTurn'
   round: number
   initiativeIndex: number
   seq: number

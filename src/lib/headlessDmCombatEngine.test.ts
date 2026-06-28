@@ -952,6 +952,81 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatBuffs?.calmSpiritCritBonusPercent).toBe(40)
   })
 
+  it('spends three calm spirit stacks to reduce a selected cooldown through headless DM authority', () => {
+    const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', cooldown: 3, remaining: 2 })
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { calmSpiritStacks: 3 },
+          combatSkills: [skill(), cooldownSkill],
+          traits: [
+            {
+              id: 'calm-spirit',
+              name: '安定心神',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'calmSpirit',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'calm-spirit',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      effect: 'cooldown',
+      skillId: 'cooldown-skill',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.combatBuffs?.calmSpiritStacks).toBeUndefined()
+    expect(hero.combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(1)
+  })
+
+  it('spends four calm spirit stacks to refresh AP and skill use through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 0,
+          actionPoints: 2,
+          combatBuffs: { calmSpiritStacks: 4 },
+          combatSkills: [skill({ usedThisTurn: true })],
+          traits: [
+            {
+              id: 'calm-spirit',
+              name: '安定心神',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'calmSpirit',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'calm-spirit',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      effect: 'extraTurn',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(2)
+    expect(hero.combatBuffs?.calmSpiritStacks).toBeUndefined()
+    expect(hero.combatSkills[0].usedThisTurn).toBe(false)
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({
