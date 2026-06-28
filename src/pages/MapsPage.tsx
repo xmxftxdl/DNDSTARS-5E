@@ -168,7 +168,6 @@ import {
   snapTokenToGridCenter,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
-  tokenFootprintDistanceCells,
   tokenOccupiedCellsAt,
   type GridCell,
 } from '../lib/gridCombat'
@@ -2638,121 +2637,11 @@ export default function MapsPage() {
     return candidates[Number(picked) - 1] ?? null
   }
 
-  const getLatestActiveMap = () =>
-    activeMap ? useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap : undefined
-
   const uniqueTokenIds = (ids: string[]) => Array.from(new Set(ids.filter(Boolean)))
-
-  const sortTokensByInitiative = (tokens: Token[]) => {
-    const order = initiativeOrderRef.current
-    const orderIndex = new Map(order.map((entry, index) => [entry.tokenId, index]))
-    return [...tokens].sort(
-      (a, b) =>
-        (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
-          (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
-        a.label.localeCompare(b.label),
-    )
-  }
 
   const illusionDanceTargetLimit = (caster: Character) => {
     const trait = findClassTrait(caster, 'illusionDance')
     return Math.min(3, Math.max(1, trait?.level ?? 1))
-  }
-
-  const illusionDancePullPosition = (casterToken: Token, target: Token, map: BattleMap) => {
-    if (tokenFootprintDistanceCells(casterToken, target, map) <= 2) return { x: target.x, y: target.y }
-
-    const g = Math.max(1, map.gridSize)
-    const cols = Math.max(1, Math.floor((map.width - map.gridOffsetX) / g))
-    const rows = Math.max(1, Math.floor((map.height - map.gridOffsetY) / g))
-    const blocked = occupiedCells(map.tokens, map, target.id)
-    const casterCell = pixelToCell(casterToken.x, casterToken.y, map)
-    const dirX = target.x - casterToken.x
-    const dirY = target.y - casterToken.y
-    const dirLen = Math.max(1, Math.hypot(dirX, dirY))
-    let best: { x: number; y: number; score: number } | null = null
-
-    for (let col = casterCell.col - 6; col <= casterCell.col + 6; col++) {
-      for (let row = casterCell.row - 6; row <= casterCell.row + 6; row++) {
-        const candidate = tokenCenterForAnchorCell({ col, row }, target, map)
-        const candidateToken = { ...target, ...candidate }
-        const cells = tokenOccupiedCellsAt(candidateToken, map, candidate)
-        if (cells.some((cell) => cell.col < 0 || cell.row < 0 || cell.col >= cols || cell.row >= rows)) continue
-        if (cells.some((cell) => blocked.has(cellKey(cell)))) continue
-        if (tokenFootprintDistanceCells(casterToken, candidateToken, map) > 2) continue
-
-        const relX = candidate.x - casterToken.x
-        const relY = candidate.y - casterToken.y
-        const projection = (relX * dirX + relY * dirY) / dirLen
-        if (projection < -0.5) continue
-        const lineDistance = Math.abs(relX * dirY - relY * dirX) / dirLen
-        const distanceMoved = Math.hypot(candidate.x - target.x, candidate.y - target.y)
-        const frontDistance = Math.abs(projection - g * 2)
-        const score = lineDistance * 4 + frontDistance + distanceMoved * 0.2
-        if (!best || score < best.score) best = { ...candidate, score }
-      }
-    }
-
-    return best ? { x: best.x, y: best.y } : { x: target.x, y: target.y }
-  }
-
-  const resolveIllusionDance = async (caster: Character, targetTokenIds: string[]) => {
-    const map = getLatestActiveMap()
-    if (!map) return false
-    const trait = findClassTrait(caster, 'illusionDance')
-    if (!trait || trait.uses <= 0) {
-      await showCombatNotice('迷幻舞步', '本场次数已用完。', 'amber')
-      return false
-    }
-    if (caster.currentAP < 1) {
-      await showCombatNotice('行动点不足', '需要 1 AP。', 'amber')
-      return false
-    }
-    if ((caster.qi ?? 0) < 1) {
-      await showCombatNotice('气不足', '需要 1 点气。', 'amber')
-      return false
-    }
-    const casterToken = map.tokens.find((token) => token.characterId === caster.id)
-    if (!casterToken) return false
-    const limit = illusionDanceTargetLimit(caster)
-    const selectedIds = uniqueTokenIds(targetTokenIds).slice(0, limit)
-    const targets = sortTokensByInitiative(
-      selectedIds
-        .map((id) => map.tokens.find((token) => token.id === id))
-        .filter((token): token is Token =>
-          !!token && isEnemyTarget(token) && isTokenAlive(token, useCharacterStore.getState().characters),
-        ),
-    )
-    if (targets.length === 0) return false
-
-    updateChar(caster.id, {
-      currentAP: caster.currentAP - 1,
-      qi: (caster.qi ?? 0) - 1,
-      traits: caster.traits.map((t) =>
-        t.featureKey === 'illusionDance' ? { ...t, uses: Math.max(0, t.uses - 1) } : t,
-      ),
-    })
-
-    const labels: string[] = []
-    for (const target of targets) {
-      const latestMap = getLatestActiveMap() ?? map
-      const latestTarget = latestMap.tokens.find((token) => token.id === target.id) ?? target
-      const targetChar = latestTarget.characterId
-        ? useCharacterStore.getState().characters.find((c) => c.id === latestTarget.characterId)
-        : undefined
-      const save = await resolveAbilitySave(caster, latestTarget, targetChar, 'wis', '迷幻舞步感知豁免')
-      if (!save.success) {
-        updateToken(latestMap.id, latestTarget.id, {
-          ...illusionDancePullPosition(casterToken, latestTarget, latestMap),
-          noMoveTurns: 1,
-          illusionDanceTurns: 1,
-        })
-        addConditionToCharacter(latestTarget.characterId, NO_MOVE_STATUS_LABEL)
-      }
-      labels.push(`${latestTarget.label}：${abilitySaveLabel('感知豁免', save, '成功', '失败，被拉近且不能移动')}`)
-    }
-    pushApLog(caster, 1, '激活迷幻舞步', labels.join('；'))
-    return true
   }
 
   const beginIllusionDanceTargeting = (caster: Character) => {
@@ -2798,9 +2687,33 @@ export default function MapsPage() {
       }
       return
     }
-    void resolveIllusionDance(caster, selectedIds).then((ok) => {
-      if (ok) setFeatureTargeting(null)
-    })
+    const casterToken = activeMap?.tokens.find((token) => token.characterId === caster.id)
+    if (!casterToken || !activeMap) return
+    void (async () => {
+      const targetPackets = []
+      for (const targetId of selectedIds) {
+        const target = activeMap.tokens.find((token) => token.id === targetId)
+        const values = await rollDiceBoxValues(1, 20, '迷幻舞步感知豁免', target?.label ?? '目标')
+        targetPackets.push({ targetTokenId: targetId, saveD20: values[0] ?? 1 })
+      }
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: casterToken.id,
+        characterId: caster.id,
+        featureKey: 'illusionDance',
+        targetTokenIds: selectedIds,
+        targetPackets,
+      })
+      if (!headless.ok) {
+        void showCombatNotice('迷幻舞步', headless.reason, 'amber')
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      setFeatureTargeting(null)
+    })()
   }
 
   const handleFeatureTargetTokenClick = (tokenId: string) => {
@@ -7297,11 +7210,29 @@ export default function MapsPage() {
           : action.targetTokenId
             ? [action.targetTokenId]
             : []
-        const ok = await resolveIllusionDance(actor, targetIds)
-        if (!ok) {
-          acknowledgePlayerAction(action, 'rejected', 'invalid-target')
+        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const targetPackets = []
+        for (const targetId of uniqueTokenIds(targetIds).slice(0, illusionDanceTargetLimit(actor))) {
+          const target = map.tokens.find((token) => token.id === targetId)
+          const values = await rollDiceBoxValues(1, 20, '迷幻舞步感知豁免', target?.label ?? '目标')
+          targetPackets.push({ targetTokenId: targetId, saveD20: values[0] ?? 1 })
+        }
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+          type: 'activate-feature',
+          actorTokenId: action.actorTokenId,
+          characterId: action.characterId,
+          featureKey: 'illusionDance',
+          targetTokenIds: targetIds,
+          targetPackets,
+        })
+        if (!headless.ok) {
+          acknowledgePlayerAction(action, 'rejected', headless.reason)
           completePlayerActionRequest(action)
           return
+        }
+        applyHeadlessCombatResult(headless)
+        for (const event of headless.events) {
+          if (event.type === 'log') pushCombatLog(event.text, 'turn')
         }
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')

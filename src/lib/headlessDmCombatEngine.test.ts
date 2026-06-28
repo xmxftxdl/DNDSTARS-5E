@@ -535,6 +535,104 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('resolves illusion dance saves, resource spend, pull, and no-move through headless DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 2,
+          qi: 2,
+          traits: [
+            {
+              id: 'illusion-dance',
+              name: '迷幻舞步',
+              level: 2,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'illusionDance',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'dragon',
+          label: '红龙雏龙',
+          type: 'enemy',
+          poolId: 'wyrmling-red',
+          hp: 52,
+          maxHp: 52,
+          x: 455,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('dragon', 15), entry('goblin', 10)],
+      enemyApByToken: { dragon: { current: 2, max: 2 }, goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'illusionDance',
+      targetTokenIds: ['dragon', 'goblin'],
+      targetPackets: [
+        { targetTokenId: 'dragon', saveD20: 1 },
+        { targetTokenId: 'goblin', saveD20: 20 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const dragon = result.state.map.tokens.find((item) => item.id === 'dragon')!
+    const goblin = result.state.map.tokens.find((item) => item.id === 'goblin')!
+    expect(hero.currentAP).toBe(1)
+    expect(hero.qi).toBe(1)
+    expect(hero.traits.find((trait) => trait.featureKey === 'illusionDance')?.uses).toBe(0)
+    expect(dragon.x).toBeLessThan(455)
+    expect(dragon.noMoveTurns).toBe(1)
+    expect(dragon.illusionDanceTurns).toBe(1)
+    expect(goblin.x).toBe(245)
+    expect(goblin.noMoveTurns ?? 0).toBe(0)
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'status-save-resolved',
+        targetTokenId: 'dragon',
+        condition: '迷幻舞步',
+        success: false,
+      }),
+    )
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'status-save-resolved',
+        targetTokenId: 'goblin',
+        condition: '迷幻舞步',
+        success: true,
+      }),
+    )
+  })
+
   it('spends qi to reduce cooldown through headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({

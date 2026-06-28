@@ -248,7 +248,17 @@ export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
   characterId: string
-  featureKey: Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater' | 'finale'>
+  featureKey: Extract<
+    ClassFeatureKey,
+    'eagleEye' | 'doubleArrow' | 'preciseStrike' | 'stillWater' | 'finale' | 'illusionDance'
+  >
+  targetTokenIds?: string[]
+  targetPackets?: HeadlessFeatureTargetPacket[]
+}
+
+export interface HeadlessFeatureTargetPacket {
+  targetTokenId: string
+  saveD20?: number
 }
 
 export interface HeadlessQiReduceCooldownAction {
@@ -455,7 +465,7 @@ export function resolveHeadlessDmAction(
     case 'enemy-attack-token':
       return resolveEnemyAttack(next, action, dice, events)
     case 'activate-feature':
-      return resolveActivateFeature(next, action, events)
+      return resolveActivateFeature(next, action, dice, events)
     case 'qi-reduce-cooldown':
       return resolveQiReduceCooldown(next, action, events)
     case 'opportunity-attack-token':
@@ -610,6 +620,7 @@ function resolveMove(
 function resolveActivateFeature(
   state: HeadlessDmCombatState,
   action: HeadlessActivateFeatureAction,
+  dice: HeadlessDiceRoller,
   events: HeadlessCombatEvent[],
 ): HeadlessCombatResult {
   const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
@@ -721,6 +732,10 @@ function resolveActivateFeature(
     return succeed(state, events)
   }
 
+  if (action.featureKey === 'illusionDance') {
+    return resolveIllusionDanceFeature(state, action, actorToken, actor, trait, dice, events)
+  }
+
   if (actor.combatBuffs?.preciseStrikeReady) {
     updateCharacter(state, actor.id, (item) => ({
       ...item,
@@ -735,6 +750,91 @@ function resolveActivateFeature(
     combatBuffs: { ...item.combatBuffs, preciseStrikeReady: true },
   }))
   events.push({ type: 'log', text: `${actor.name} 准备精准打击。` })
+  return succeed(state, events)
+}
+
+function resolveIllusionDanceFeature(
+  state: HeadlessDmCombatState,
+  action: HeadlessActivateFeatureAction,
+  actorToken: Token,
+  actor: Character,
+  trait: NonNullable<Character['traits'][number]>,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+  const limit = Math.min(3, Math.max(1, trait.level))
+  const packetByTarget = new Map((action.targetPackets ?? []).map((packet) => [packet.targetTokenId, packet]))
+  const requestedIds =
+    action.targetPackets?.map((packet) => packet.targetTokenId) ??
+    action.targetTokenIds ??
+    []
+  const uniqueIds = Array.from(new Set(requestedIds.filter(Boolean))).slice(0, limit)
+  const orderIndex = new Map(state.initiativeOrder.map((entry, index) => [entry.tokenId, index]))
+  const targets = uniqueIds
+    .map((id) => state.map.tokens.find((token) => token.id === id))
+    .filter((token): token is Token => !!token && token.type === 'enemy' && isTokenAlive(token, state.characters))
+    .sort(
+      (a, b) =>
+        (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+          (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
+        a.label.localeCompare(b.label),
+    )
+  if (targets.length === 0) return fail(state, 'invalid-target', events)
+
+  const saveRolls = new Map<string, number>()
+  for (const target of targets) {
+    const packet = packetByTarget.get(target.id)
+    const values = resolveDiceValues(packet?.saveD20 != null ? [packet.saveD20] : undefined, dice, 1, 20)
+    if (!values) return fail(state, 'invalid-dice', events)
+    saveRolls.set(target.id, values[0])
+  }
+
+  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    qi: Math.max(0, (item.qi ?? 0) - 1),
+    traits: item.traits.map((currentTrait) =>
+      currentTrait.featureKey === 'illusionDance'
+        ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+        : currentTrait,
+    ),
+  }))
+
+  const labels: string[] = []
+  for (const target of targets) {
+    const latestTarget = state.map.tokens.find((token) => token.id === target.id) ?? target
+    const targetCharacter = latestTarget.characterId ? findCharacter(state, latestTarget.characterId) : undefined
+    const d20Value = saveRolls.get(target.id) ?? 1
+    const saveMod = getTokenAbilityMod(latestTarget, 'wis', targetCharacter)
+    const total = d20Value + saveMod
+    const success = total >= actor.saveDC
+    events.push({ type: 'dice-rolled', notation: '1d20', values: [d20Value], total: d20Value })
+    events.push({
+      type: 'status-save-resolved',
+      actorTokenId: actorToken.id,
+      targetTokenId: latestTarget.id,
+      condition: '迷幻舞步',
+      ability: 'wis',
+      d20Value,
+      saveMod,
+      total,
+      dc: actor.saveDC,
+      success,
+    })
+    if (!success) {
+      const distanceCells = tokenFootprintDistanceCells(actorToken, latestTarget, state.map)
+      pullTargetTowardActor(state, actorToken, latestTarget, Math.max(0, distanceCells - 2), events)
+      const pulledTarget = state.map.tokens.find((token) => token.id === latestTarget.id) ?? latestTarget
+      applyNoMoveToTarget(state, pulledTarget, 1, events)
+      updateToken(state, pulledTarget.id, (token) => ({
+        ...token,
+        illusionDanceTurns: Math.max(token.illusionDanceTurns ?? 0, 1),
+      }))
+    }
+    labels.push(`${latestTarget.label}：感知豁免 ${d20Value}+${saveMod} vs DC${actor.saveDC} ${success ? '成功' : '失败，被拉近且不能移动'}`)
+  }
+  events.push({ type: 'log', text: `${actor.name} 激活迷幻舞步：${labels.join('；')}。` })
   return succeed(state, events)
 }
 
