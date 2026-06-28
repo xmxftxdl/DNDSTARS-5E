@@ -4535,54 +4535,45 @@ export default function MapsPage() {
     if (key === 'stillWater') {
       const trait = findClassTrait(turnCharacter, 'stillWater')
       if (!trait) return
-      if (!isCalmMindActive(turnCharacter)) {
-        await showCombatNotice('心如止水', '需要处于静心状态时激活。', 'amber')
+      if (!activeMap) return
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'stillWater',
+      })
+      if (!headless.ok) {
+        await showCombatNotice('心如止水', headless.reason, 'amber')
         return
       }
-      if (!spendAP(turnCharacter.id, 1)) return
-      if (!activeMap || !myPlayerToken) return
-      const tempHp = trait.level * 10
-      const casterToken = activeMap.tokens.find((t) => t.characterId === turnCharacter.id) ?? myPlayerToken
-      const sourceCell = pixelToCell(casterToken.x, casterToken.y, activeMap)
-      let affected = 0
-      for (const allyToken of activeMap.tokens) {
-        if (!allyToken.characterId || allyToken.type !== 'player') continue
-        const ally = useCharacterStore.getState().characters.find((c) => c.id === allyToken.characterId)
-        if (!ally || ally.currentHp <= 0) continue
-        const allyCell = pixelToCell(allyToken.x, allyToken.y, activeMap)
-        if (cellDistance(sourceCell, allyCell) > 3) continue
-        updateChar(ally.id, {
-          tempHp: Math.max(ally.tempHp ?? 0, tempHp),
-          combatBuffs: {
-            ...ally.combatBuffs,
-            stillWaterBreathImmunityTurns: 2,
-            stillWaterTempHpTurns: 10,
-            outOfBreathTurns: undefined,
-            calmMind: findClassTrait(ally, 'calmMind') ? true : ally.combatBuffs?.calmMind,
-          },
-        })
-        affected++
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
       }
-      pushApLog(turnCharacter, 1, '激活心如止水', `15尺内 ${affected} 名友方获得 ${tempHp} 临时生命，2回合免气喘`)
       return
     }
     if (key === 'finale') {
       const trait = findClassTrait(turnCharacter, 'finale')
-      if (!trait || trait.uses <= 0) return
-      const ready = !turnCharacter.combatBuffs?.finaleReady
-      if (!ready) {
-        updateChar(turnCharacter.id, {
-          combatBuffs: { ...turnCharacter.combatBuffs, finaleReady: undefined },
-        })
-        pushCombatLog(`${turnCharacter.name} 取消曲终待触发`, 'turn')
+      if (!trait || (!turnCharacter.combatBuffs?.finaleReady && trait.uses <= 0)) return
+      if (!activeMap) return
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'finale',
+      })
+      if (!headless.ok) {
+        await showCombatNotice('曲终', headless.reason, 'amber')
         return
       }
-      if (ready && !spendAP(turnCharacter.id, 2)) return
-      pushApLog(turnCharacter, 2, '激活曲终', '等待下一名敌对生物狩猎印记叠至 4 层')
-      activateClassFeature(turnCharacter.id, 'finale')
-      updateChar(turnCharacter.id, {
-        combatBuffs: { ...turnCharacter.combatBuffs, finaleReady: true },
-      })
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       return
     }
     if (key === 'flexibleBody') {
