@@ -113,7 +113,6 @@ import {
 } from '../lib/combatResolutionPipeline'
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
-  resolveHeadlessGaleComboConsumption,
   resolveHeadlessGaleComboChoice,
   resolveHeadlessDmAction,
   startHeadlessCombat,
@@ -270,7 +269,6 @@ export default function MapsPage() {
 
   const characters = useCharacterStore((s) => s.characters)
   const endTurn = useCharacterStore((s) => s.endTurn)
-  const invokeSkill = useCharacterStore((s) => s.useSkill)
   const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
   const notifyCombatMove = useCharacterStore((s) => s.notifyCombatMove)
   const spendAP = useCharacterStore((s) => s.spendAP)
@@ -673,20 +671,6 @@ export default function MapsPage() {
       `${character.name} ${spentText}：${action}${detail ? `（${detail}）` : ''}。剩余 AP ${remaining}/${character.actionPoints}`,
       'turn',
     )
-  }
-
-  const consumeGaleComboReady = (characterId: string, actionLabel: string) => {
-    if (!activeMap) return false
-    const headless = resolveHeadlessGaleComboConsumption(createHeadlessStateSnapshot(activeMap), {
-      characterId,
-      actionLabel,
-    })
-    if (!headless.ok) return false
-    applyHeadlessCombatResult({ ok: true, state: headless.state, events: headless.events })
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
-    return true
   }
 
   const galeComboUnavailableReason = (caster: Character) => {
@@ -3224,10 +3208,14 @@ export default function MapsPage() {
       })
       setAoeRectRotation(0)
     } else {
-      invokeSkill(activeChar.id, skill.id, waiveAp ? { waiveAp: true } : undefined)
-      pushApLog(activeChar, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`)
-      if (waiveAp) {
-        consumeGaleComboReady(activeChar.id, skill.name)
+      if (!isDM) {
+        if (!sendPlayerUseSkillRequest(skill)) {
+          void showCombatNotice('无法执行', '当前技能无法提交给 DM 结算。', 'amber')
+        }
+        return
+      }
+      if (!sendDmLocalUseSkillRequest(skill)) {
+        void showCombatNotice('无法执行', '当前技能无法提交给 DM 结算。', 'amber')
       }
     }
   }
@@ -4211,7 +4199,6 @@ export default function MapsPage() {
       if (!attackerToken?.poolId) return false
       const huntedByTargetRank = huntingMarkTraitRank(targetChar)
       if ((attackerToken.huntingMarkStacks ?? 0) > 0 && huntedByTargetRank > 0) return false
-      if ((targetChar.combatBuffs?.flexibleBodyBonus ?? 0) > 0) return false
       const arcaneSurge = findClassTrait(targetChar, 'arcaneSurge')
       if (arcaneSurge && arcaneSurge.uses > 0) return false
 
@@ -4220,7 +4207,7 @@ export default function MapsPage() {
       const targetDodgeD20 = wantsDodge
         ? providedDodgeD20 ?? (await rollDiceBoxD20('闪避判定 D20', targetChar.name))
         : undefined
-      const targetAc = targetChar.ac
+      const targetAc = targetChar.ac + (wantsDodge ? Math.max(0, targetChar.combatBuffs?.flexibleBodyBonus ?? 0) : 0)
       const expectedDodged = targetDodgeD20 != null ? targetDodgeD20 + attackBonus < targetAc : false
       const headlessDamageValues = expectedDodged ? undefined : await rollEnemyBaseDamageDice()
       const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
@@ -5348,6 +5335,33 @@ export default function MapsPage() {
       return
     }
 
+    if (action.type === 'use-skill') {
+      if (!action.skillId) {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-skill')
+        completePlayerActionRequest(action)
+        return
+      }
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'use-skill',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        skillId: action.skillId,
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(action, 'rejected', headless.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (action.type === 'attack-token') {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const skill = actor?.combatSkills.find((s) => s.id === action.skillId)
@@ -6424,6 +6438,14 @@ export default function MapsPage() {
     )
   }
 
+  const sendDmLocalUseSkillRequest = (skill: CombatSkill) =>
+    submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'use-skill',
+        skillId: skill.id,
+      }),
+    )
+
   const sendPlayerEndTurnRequest = () => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const seq = playerActionSeqRef.current + 1
@@ -6546,6 +6568,30 @@ export default function MapsPage() {
       updatedAt: Date.now(),
     }
     return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 ${targeting.skill.name}`)
+  }
+
+  const sendPlayerUseSkillRequest = (skill: CombatSkill) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const waiveAp = !!turnCharacter.combatBuffs?.galeComboReady
+    if (!waiveAp && turnCharacter.currentAP < skill.apCost) return false
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    const action: SharedPlayerActionState = {
+      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'use-skill',
+      actorTokenId: currentInitiativeToken.id,
+      characterId: turnCharacter.id,
+      skillId: skill.id,
+      round,
+      initiativeIndex,
+      seq,
+      updatedAt: Date.now(),
+    }
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 ${skill.name}`)
   }
 
   const sendPlayerMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {

@@ -89,6 +89,7 @@ export interface SharedPlayerActionState {
     | 'aoe-attack'
     | 'move-token'
     | 'disengage'
+    | 'use-skill'
     | 'agile-leap-move'
     | 'skill-free-move'
     | 'qi-reduce-cooldown'

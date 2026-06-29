@@ -202,6 +202,13 @@ export interface HeadlessDisengageAction {
   characterId: string
 }
 
+export interface HeadlessUseSkillAction {
+  type: 'use-skill'
+  actorTokenId: string
+  characterId: string
+  skillId: string
+}
+
 export interface HeadlessPlayerAttackAction {
   type: 'attack-token'
   actorTokenId: string
@@ -402,6 +409,7 @@ export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
   | HeadlessEnemyMoveAction
   | HeadlessDisengageAction
+  | HeadlessUseSkillAction
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
   | HeadlessStableMindAction
@@ -578,6 +586,8 @@ export function resolveHeadlessDmAction(
       return resolveEnemyMove(next, action, events)
     case 'disengage':
       return resolveDisengage(next, action, events)
+    case 'use-skill':
+      return resolveUseSkill(next, action, events)
     case 'attack-token':
       return resolvePlayerAttack(next, action, dice, events)
     case 'aoe-attack':
@@ -780,6 +790,39 @@ function resolveDisengage(
   events.push({
     type: 'log',
     text: `${actor.name} 撤离：本回合移动不触发借机攻击。`,
+  })
+  return succeed(state, events)
+}
+
+function resolveUseSkill(
+  state: HeadlessDmCombatState,
+  action: HeadlessUseSkillAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const actor = findCharacter(state, action.characterId)
+  const skill = actor?.combatSkills.find((item) => item.id === action.skillId)
+  if (!actor || actor.currentHp <= 0 || !skill || skill.damageCount > 0) return fail(state, 'invalid-skill', events)
+  if (skill.remaining > 0 || (skill.usedThisTurn && skill.cooldown > 0)) return fail(state, 'invalid-skill', events)
+
+  const waiveAp = !!actor.combatBuffs?.galeComboReady
+  const apCost = Math.max(0, skill.apCost)
+  if (!waiveAp && apCost > 0 && !spendCharacterAp(state, actor.id, apCost, actorToken.id, events)) {
+    return fail(state, 'insufficient-ap', events)
+  }
+  markSkillUsed(state, actor.id, skill.id)
+  if (waiveAp) consumeGaleComboReady(state, actor.id, skill.name, events)
+  events.push({
+    type: 'log',
+    text: `${actor.name} 使用 ${skill.name}${waiveAp ? '（疾风连击，不消耗 AP）' : apCost > 0 ? `，消耗 ${apCost} AP` : ''}。`,
   })
   return succeed(state, events)
 }
@@ -2087,6 +2130,7 @@ function resolveEnemyAttack(
   let targetAc: number | undefined
   if (action.targetWantsDodge && target) {
     const windBladeFreeDodge = (target.combatBuffs?.windBladeFreeDodgeTurns ?? 0) > 0
+    const flexibleBodyBonus = Math.max(0, target.combatBuffs?.flexibleBodyBonus ?? 0)
     if (
       !windBladeFreeDodge &&
       !action.targetDodgeApAlreadySpent &&
@@ -2103,9 +2147,16 @@ function resolveEnemyAttack(
       if (!d20Values) return fail(state, 'invalid-dice', events)
       dodgeD20 = d20Values[0]
       events.push({ type: 'dice-rolled', notation: '1d20', values: [dodgeD20], total: dodgeD20 })
-      targetAc = getAc(target)
+      targetAc = getAc(target) + flexibleBodyBonus
       dodgeTotal = dodgeD20 + attackBonus
       targetDodged = dodgeTotal < targetAc
+      if (flexibleBodyBonus > 0) {
+        updateCharacter(state, target.id, (item) => ({
+          ...item,
+          combatBuffs: { ...item.combatBuffs, flexibleBodyBonus: undefined },
+        }))
+        events.push({ type: 'log', text: `${target.name} 的灵活身躯生效：本次闪避 AC +${flexibleBodyBonus}。` })
+      }
       if (windBladeFreeDodge && !action.targetDodgeApAlreadySpent) {
         events.push({ type: 'log', text: `${target.name} 的风刃乱舞生效：本次闪避不消耗 AP。` })
       }
@@ -2807,7 +2858,7 @@ function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillI
         ? {
             ...skill,
             usedThisTurn: true,
-            remaining: Math.max(0, skill.cooldown - skill.cdReduction),
+            remaining: skillCooldownRemaining(skill),
           }
         : skill,
     ),

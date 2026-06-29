@@ -243,6 +243,81 @@ describe('headless DM combat engine', () => {
     expect(result.reason).toBe('insufficient-ap')
   })
 
+  it('uses a non-damage skill through DM authority and spends AP', () => {
+    const utility = skill({
+      id: 'utility-skill',
+      name: '辅助技能',
+      apCost: 1,
+      cooldown: 2,
+      damageCount: 0,
+      damageSides: 0,
+    })
+    const result = resolveHeadlessDmAction(
+      state({ characters: [character({ combatSkills: [skill(), utility] })] }),
+      {
+        type: 'use-skill',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        skillId: 'utility-skill',
+      },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const resolvedSkill = hero.combatSkills.find((item) => item.id === 'utility-skill')
+    expect(hero.currentAP).toBe(1)
+    expect(resolvedSkill?.remaining).toBe(2)
+    expect(resolvedSkill?.usedThisTurn).toBe(true)
+  })
+
+  it('uses Gale Combo to waive AP for a non-damage skill', () => {
+    const utility = skill({
+      id: 'utility-skill',
+      name: '辅助技能',
+      apCost: 1,
+      cooldown: 1,
+      damageCount: 0,
+      damageSides: 0,
+    })
+    const result = resolveHeadlessDmAction(
+      state({
+        characters: [
+          character({
+            currentAP: 0,
+            combatBuffs: { galeComboReady: true },
+            combatSkills: [skill(), utility],
+            traits: [
+              {
+                id: 'gale-combo',
+                name: '疾风连击',
+                level: 1,
+                uses: 1,
+                maxUses: 1,
+                description: '',
+                featureKey: 'galeCombo',
+              },
+            ],
+          }),
+        ],
+      }),
+      {
+        type: 'use-skill',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        skillId: 'utility-skill',
+      },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.combatBuffs?.galeComboReady).toBeUndefined()
+    expect(hero.traits.find((item) => item.featureKey === 'galeCombo')?.uses).toBe(0)
+    expect(result.events.some((event) => event.type === 'ap-spent')).toBe(false)
+  })
+
   it('validates enemy movement through DM authority and spends enemy AP', () => {
     const result = resolveHeadlessDmAction(
       state({ initiativeIndex: 1 }),
@@ -3183,6 +3258,58 @@ describe('headless DM combat engine', () => {
       targetTokenId: 'hero-token',
       targetDodged: true,
       dodgeD20: 1,
+      total: 0,
+    })
+  })
+
+  it('applies flexible body bonus to the enemy attack dodge check and clears it', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [character({ combatBuffs: { flexibleBodyBonus: 5 } })],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('goblin', 10)],
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'enemy-attack-token',
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      targetWantsDodge: true,
+      targetDodgeD20: 11,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.currentHp).toBe(30)
+    expect(hero.combatBuffs?.flexibleBodyBonus).toBeUndefined()
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
+      targetDodged: true,
+      dodgeD20: 11,
+      targetAc: 19,
       total: 0,
     })
   })
