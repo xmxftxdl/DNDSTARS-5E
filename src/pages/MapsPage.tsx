@@ -3202,25 +3202,29 @@ export default function MapsPage() {
       setShowMoveRange(false)
       return
     }
-    if (!spendAP(turnCharacter.id, 1)) return
-    await resolveOpportunityAttacksForMove(myPlayerToken, pos, turnCharacter)
-    const latestMover = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter.id)
-    if (!latestMover || latestMover.currentHp <= 0) return
-    updateToken(activeMap.id, myPlayerToken.id, pos)
-    pushApLog(turnCharacter, 1, '移动', `${movedFeet} 尺`)
-    notifyCombatMove(turnCharacter.id)
+    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'move-token', targetPosition: pos }))) {
+      void showCombatNotice('无法移动', '当前移动无法提交给 DM 结算。', 'amber')
+      return
+    }
     setShowMoveRange(false)
   }
 
   const handleDisengage = () => {
     if (!canControlPlayerTurn || !turnCharacter) return
     if (disengagedCharIds.has(turnCharacter.id)) return
-    if (!spendAP(turnCharacter.id, 2)) {
-      void showCombatNotice('行动点不足', '撤离需要 2 AP。', 'amber')
+    if (!isDM) {
+      if (!sendPlayerDisengageRequest()) {
+        void showCombatNotice(
+          pendingPlayerActionRef.current ? '等待 DM 确认' : '行动点不足',
+          pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '撤离需要 2 AP。',
+          'amber',
+        )
+      }
       return
     }
-    pushApLog(turnCharacter, 2, '撤离', '本回合移动不触发借机攻击')
-    setDisengagedCharIds((prev) => new Set(prev).add(turnCharacter.id))
+    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'disengage' }))) {
+      void showCombatNotice('无法撤离', '当前撤离无法提交给 DM 结算。', 'amber')
+    }
   }
 
   const handleCalmSpiritMove = () => {
@@ -6397,6 +6401,27 @@ export default function MapsPage() {
       return
     }
 
+    if (action.type === 'disengage') {
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'disengage',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(action, 'rejected', headless.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (action.type === 'agile-leap-move') {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
@@ -6844,6 +6869,28 @@ export default function MapsPage() {
       updatedAt: Date.now(),
     }
     return submitPlayerActionRequest(action, `${turnCharacter.name} 移动 ${movedFeet} 尺`)
+  }
+
+  const sendPlayerDisengageRequest = () => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    if (turnCharacter.currentAP < 2) return false
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    const action: SharedPlayerActionState = {
+      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'disengage',
+      actorTokenId: currentInitiativeToken.id,
+      characterId: turnCharacter.id,
+      round,
+      initiativeIndex,
+      seq,
+      updatedAt: Date.now(),
+    }
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 撤离`)
   }
 
   const sendPlayerAgileLeapMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {

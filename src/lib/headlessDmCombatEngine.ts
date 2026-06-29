@@ -171,6 +171,12 @@ export interface HeadlessPlayerMoveAction {
   mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap' | 'skill-free-move'>
 }
 
+export interface HeadlessDisengageAction {
+  type: 'disengage'
+  actorTokenId: string
+  characterId: string
+}
+
 export interface HeadlessPlayerAttackAction {
   type: 'attack-token'
   actorTokenId: string
@@ -369,6 +375,7 @@ export interface HeadlessEndTurnAction {
 
 export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
+  | HeadlessDisengageAction
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
   | HeadlessStableMindAction
@@ -384,6 +391,7 @@ export type HeadlessCombatFailureReason =
   | 'stale-turn'
   | 'invalid-actor'
   | 'invalid-target'
+  | 'invalid-action'
   | 'invalid-skill'
   | 'invalid-dice'
   | 'insufficient-ap'
@@ -534,6 +542,8 @@ export function resolveHeadlessDmAction(
   switch (action.type) {
     case 'move-token':
       return resolveMove(next, action, events)
+    case 'disengage':
+      return resolveDisengage(next, action, events)
     case 'attack-token':
       return resolvePlayerAttack(next, action, dice, events)
     case 'aoe-attack':
@@ -708,6 +718,34 @@ function resolveMove(
         : mode === 'skill-free-move'
           ? `${actor.name} 技能移动 ${movement.feet} 尺。`
           : `${actor.name} 移动 ${movement.feet} 尺。`,
+  })
+  return succeed(state, events)
+}
+
+function resolveDisengage(
+  state: HeadlessDmCombatState,
+  action: HeadlessDisengageAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const actor = findCharacter(state, action.characterId)
+  if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
+  if ((state.disengagedCharacterIds ?? []).includes(actor.id)) {
+    return fail(state, 'invalid-action', events)
+  }
+  if (!spendCharacterAp(state, actor.id, 2, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  grantDisengage(state, actor.id)
+  events.push({
+    type: 'log',
+    text: `${actor.name} 撤离：本回合移动不触发借机攻击。`,
   })
   return succeed(state, events)
 }

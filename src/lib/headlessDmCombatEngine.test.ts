@@ -171,6 +171,46 @@ describe('headless DM combat engine', () => {
     expect(result.events.map((event) => event.type)).toContain('token-moved')
   })
 
+  it('validates disengage through DM authority and spends 2 AP', () => {
+    const result = resolveHeadlessDmAction(state(), {
+      type: 'disengage',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].currentAP).toBe(0)
+    expect(result.state.disengagedCharacterIds).toContain('hero')
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'ap-spent',
+        tokenId: 'hero-token',
+        characterId: 'hero',
+        amount: 2,
+        before: 2,
+        after: 0,
+      }),
+    )
+  })
+
+  it('rejects disengage when AP is insufficient', () => {
+    const result = resolveHeadlessDmAction(
+      state({
+        characters: [character({ currentAP: 1 })],
+      }),
+      {
+        type: 'disengage',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+      },
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('insufficient-ap')
+  })
+
   it('emits opportunity trigger events when validated movement leaves enemy reach', () => {
     const combat = state({
       map: map([
