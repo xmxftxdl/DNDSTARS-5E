@@ -268,7 +268,6 @@ export default function MapsPage() {
   const removeToken = useMapStore((s) => s.removeToken)
 
   const characters = useCharacterStore((s) => s.characters)
-  const endTurn = useCharacterStore((s) => s.endTurn)
   const spendAP = useCharacterStore((s) => s.spendAP)
   const updateChar = useCharacterStore((s) => s.update)
 
@@ -7240,7 +7239,6 @@ export default function MapsPage() {
       }
       return
     }
-    if (activeChar) endTurn(activeChar.id)
   }
 
   const ModeToggle = forcedMode ? null : (
