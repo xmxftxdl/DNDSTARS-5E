@@ -3395,6 +3395,76 @@ describe('headless DM combat engine', () => {
     expect(heroToken?.hp).toBe(hero.currentHp)
   })
 
+  it('resolves lethal enemy damage with arcane surge inside the same headless transaction', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentHp: 2,
+          traits: [
+            {
+              id: 'arcane-surge',
+              name: '魔法浪涌',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'arcaneSurge',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: '新冒险者',
+          type: 'player',
+          characterId: 'hero',
+          hp: 2,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('goblin', 10)],
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(
+      combat,
+      {
+        type: 'enemy-attack-token',
+        actorTokenId: 'goblin',
+        targetTokenId: 'hero-token',
+        diceValues: [6],
+        useArcaneSurgeOnLethal: true,
+      },
+      createFixedHeadlessDiceRoller([]),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const heroToken = result.state.map.tokens.find((item) => item.id === 'hero-token')
+    expect(hero.currentHp).toBe(1)
+    expect(heroToken?.hp).toBe(1)
+    expect(hero.traits.find((trait) => trait.featureKey === 'arcaneSurge')?.uses).toBe(0)
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
+      arcaneSurgeUsed: true,
+    })
+    expect(result.events.some((event) => event.type === 'combat-ended')).toBe(false)
+  })
+
   it('adds hunting mark backlash dice when a marked enemy attacks the hunter', () => {
     const combat = state({
       initiativeIndex: 1,

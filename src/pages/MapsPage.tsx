@@ -4219,6 +4219,21 @@ export default function MapsPage() {
 
     const hasEnemyDamage = !!result.attack || (result.damage != null && result.damage > 0)
 
+    const maybeUseArcaneSurgeFromPreview = async (preview: HeadlessCombatResult, character: Character) => {
+      if (!preview.ok) return false
+      const surge = findClassTrait(character, 'arcaneSurge')
+      if (!surge || surge.uses <= 0 || character.currentHp <= 0) return false
+      const previewCharacter = preview.state.characters.find((item) => item.id === character.id)
+      if (!previewCharacter || previewCharacter.currentHp > 0) return false
+      return showCombatDialog({
+        title: '魔法浪涌',
+        message: `${character.name} 将受到致命伤害。\n是否消耗 1 次使用，把生命改为 1？`,
+        confirmText: '发动',
+        cancelText: '不发动',
+        tone: 'violet',
+      })
+    }
+
     const tryResolvePhysicalEnemyAttackWithHeadless = async () => {
       const damageType = result.damageType ?? 'physical'
       if (
@@ -4234,8 +4249,6 @@ export default function MapsPage() {
       const attackerToken = latestMap.tokens.find((token) => token.id === result.attackerTokenId)
       if (!attackerToken?.poolId) return false
       const huntedByTargetRank = huntingMarkTraitRank(targetChar)
-      const arcaneSurge = findClassTrait(targetChar, 'arcaneSurge')
-      if (arcaneSurge && arcaneSurge.uses > 0) return false
 
       const actionDef = getEnemyStatBlock(attackerToken.poolId)?.actions[result.actionIndex ?? 0]
       const attackBonus = actionDef?.toHit ?? ENEMY_MELEE_ATTACK_BONUS
@@ -4249,7 +4262,8 @@ export default function MapsPage() {
         !expectedDodged && (attackerToken.huntingMarkStacks ?? 0) > 0 && huntedByTargetRank > 0
           ? await rollDiceBoxValues(huntedByTargetRank, 4, '狩猎印记反噬伤害', result.attack.targetName)
           : undefined
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+      const headlessSnapshot = createHeadlessStateSnapshot(latestMap)
+      const headlessAction = {
         type: 'enemy-attack-token',
         actorTokenId: result.attackerTokenId,
         targetTokenId: result.targetTokenId,
@@ -4260,7 +4274,16 @@ export default function MapsPage() {
         targetWantsDodge: !!wantsDodge,
         targetDodgeD20,
         targetDodgeApAlreadySpent: dodgeApAlreadySpent,
-      })
+      } as const
+      const preview = resolveHeadlessDmAction(headlessSnapshot, headlessAction)
+      if (!preview.ok) return false
+      const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
+      const headless = useArcaneSurgeOnLethal
+        ? resolveHeadlessDmAction(headlessSnapshot, {
+            ...headlessAction,
+            useArcaneSurgeOnLethal: true,
+          })
+        : preview
       if (!headless.ok) return false
       const resolved = enemyAttackResolvedEvent(headless.events)
       if (!resolved) return false
@@ -4291,6 +4314,9 @@ export default function MapsPage() {
             resolved.targetAc ?? targetAc
           } ${resolved.targetDodged ? '成功' : '失败'}`
         : '受击（未尝试闪避）'
+      if (resolved.arcaneSurgeUsed) {
+        combatLabel = `${combatLabel} · 魔法浪涌：生命保留为 1`
+      }
       d20Roll = resolved.dodgeD20 != null
         ? {
             value: resolved.dodgeD20,
@@ -4358,8 +4384,6 @@ export default function MapsPage() {
       if (!attackerToken?.poolId) return false
       const actionDef = getEnemyStatBlock(attackerToken.poolId)?.actions[result.actionIndex ?? 0]
       if (!actionDef || actionDef.kind !== 'aoe' || !actionDef.save) return false
-      const arcaneSurge = findClassTrait(targetChar, 'arcaneSurge')
-      if (arcaneSurge && arcaneSurge.uses > 0) return false
 
       await runEnemyStage('beforeDamageRoll')
       const values = await rollEnemyBaseDamageDice()
@@ -4386,7 +4410,8 @@ export default function MapsPage() {
         })
       }
 
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+      const headlessSnapshot = createHeadlessStateSnapshot(latestMap)
+      const headlessAction = {
         type: 'enemy-attack-token',
         actorTokenId: result.attackerTokenId,
         targetTokenId: result.targetTokenId,
@@ -4395,14 +4420,23 @@ export default function MapsPage() {
         saveD20,
         useStableMind,
         actorApAlreadySpent: enemyAttackApAlreadySpent,
-      })
+      } as const
+      const preview = resolveHeadlessDmAction(headlessSnapshot, headlessAction)
+      if (!preview.ok) return false
+      const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
+      const headless = useArcaneSurgeOnLethal
+        ? resolveHeadlessDmAction(headlessSnapshot, {
+            ...headlessAction,
+            useArcaneSurgeOnLethal: true,
+          })
+        : preview
       if (!headless.ok) return false
       const resolved = enemyAttackResolvedEvent(headless.events)
       if (!resolved) return false
 
       combatLabel = `豁免 ${resolved.saveD20 ?? saveD20}+${resolved.saveMod ?? saveMod} vs DC${resolved.saveDc ?? actionDef.save.dc} ${
         resolved.saveSuccess ? `成功（半伤，实际 ${resolved.total}）` : `失败（全额，实际 ${resolved.total}）`
-      }${resolved.stableMindUsed ? ' · 残影脱身：已抵消全部伤害' : ''}`
+      }${resolved.stableMindUsed ? ' · 残影脱身：已抵消全部伤害' : ''}${resolved.arcaneSurgeUsed ? ' · 魔法浪涌：生命保留为 1' : ''}`
       d20Roll = {
         value: resolved.saveD20 ?? saveD20,
         modifier: resolved.saveMod ?? saveMod,

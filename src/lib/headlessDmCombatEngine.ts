@@ -149,6 +149,7 @@ export type HeadlessCombatEvent =
       saveDc?: number
       saveSuccess?: boolean
       stableMindUsed?: boolean
+      arcaneSurgeUsed?: boolean
     }
   | {
       type: 'aoe-target-resolved'
@@ -329,6 +330,7 @@ export interface HeadlessEnemyAttackAction {
   targetWantsDodge?: boolean
   targetDodgeD20?: number
   targetDodgeApAlreadySpent?: boolean
+  useArcaneSurgeOnLethal?: boolean
 }
 
 export interface HeadlessStableMindAction {
@@ -2251,7 +2253,12 @@ function resolveEnemyAttack(
       stableMindUsed = true
       finalDamage = 0
     }
-    if (finalDamage > 0) applyDamageToTarget(state, targetToken, finalDamage, events)
+    const damageApplication =
+      finalDamage > 0
+        ? applyDamageToTarget(state, targetToken, finalDamage, events, {
+            useArcaneSurgeOnLethal: action.useArcaneSurgeOnLethal,
+          })
+        : undefined
     events.push({
       type: 'log',
       text: `${actorToken.label} 使用 ${actionDef.name}：${target.name} 豁免 ${saveD20}+${saveMod}=${saveTotal} vs DC ${actionDef.save.dc}，${saveSuccess ? `成功，受到 ${finalDamage} 点` : `失败，受到 ${finalDamage} 点`}。`,
@@ -2276,6 +2283,7 @@ function resolveEnemyAttack(
       saveDc: actionDef.save.dc,
       saveSuccess,
       stableMindUsed,
+      arcaneSurgeUsed: damageApplication?.arcaneSurgeUsed,
     })
     maybeEndCombat(state, events)
     return succeed(state, events)
@@ -2371,7 +2379,9 @@ function resolveEnemyAttack(
     enemyDamageType(actionDef.damageType),
     target?.conditions.includes('脆弱') ?? false,
   )
-  applyDamageToTarget(state, targetToken, adjusted.damage, events)
+  const damageApplication = applyDamageToTarget(state, targetToken, adjusted.damage, events, {
+    useArcaneSurgeOnLethal: action.useArcaneSurgeOnLethal,
+  })
   events.push({
     type: 'log',
     text: `${actorToken.label} 使用 ${actionDef.name} 攻击 ${targetToken.label}：骰值 ${allDamageValues.join('+')}，加值 ${parsed.bonus}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
@@ -2394,6 +2404,7 @@ function resolveEnemyAttack(
     dodgeAttackBonus: dodgeD20 != null ? attackBonus : undefined,
     dodgeTotal,
     targetAc,
+    arcaneSurgeUsed: damageApplication.arcaneSurgeUsed,
   })
   maybeEndCombat(state, events)
   return succeed(state, events)
@@ -2545,18 +2556,45 @@ function spendEnemyAp(
   return true
 }
 
+interface HeadlessDamageApplicationOptions {
+  useArcaneSurgeOnLethal?: boolean
+}
+
+interface HeadlessDamageApplicationResult {
+  hpBefore: number
+  hpAfter: number
+  arcaneSurgeUsed: boolean
+}
+
 function applyDamageToTarget(
   state: HeadlessDmCombatState,
   targetToken: Token,
   amount: number,
   events: HeadlessCombatEvent[],
-) {
+  options: HeadlessDamageApplicationOptions = {},
+): HeadlessDamageApplicationResult {
   const character = targetToken.characterId ? findCharacter(state, targetToken.characterId) : undefined
   if (character) {
     const hpBefore = character.currentHp
     const tempBefore = character.tempHp ?? 0
+    const remainingAfterTemp = Math.max(0, amount - tempBefore)
+    const wouldBeLethal = hpBefore > 0 && hpBefore - remainingAfterTemp <= 0
+    const arcaneTrait = character.traits.find((trait) => trait.featureKey === 'arcaneSurge')
+    if (options.useArcaneSurgeOnLethal && wouldBeLethal && arcaneTrait && arcaneTrait.uses > 0) {
+      updateCharacter(state, character.id, (item) => ({
+        ...item,
+        currentHp: 1,
+        traits: item.traits.map((trait) =>
+          trait.featureKey === 'arcaneSurge' ? { ...trait, uses: Math.max(0, trait.uses - 1) } : trait,
+        ),
+      }))
+      updateToken(state, targetToken.id, (item) => ({ ...item, hp: 1, maxHp: character.maxHp }))
+      events.push({ type: 'damage-applied', targetTokenId: targetToken.id, characterId: character.id, amount, hpBefore, hpAfter: 1 })
+      events.push({ type: 'log', text: `${character.name} 发动魔法浪涌：生命保留为 1。` })
+      return { hpBefore, hpAfter: 1, arcaneSurgeUsed: true }
+    }
     const nextTemp = Math.max(0, tempBefore - amount)
-    const remaining = Math.max(0, amount - tempBefore)
+    const remaining = remainingAfterTemp
     const hpAfter = Math.max(0, hpBefore - remaining)
     updateCharacter(state, character.id, (item) => ({
       ...item,
@@ -2569,12 +2607,13 @@ function applyDamageToTarget(
     }))
     updateToken(state, targetToken.id, (item) => ({ ...item, hp: hpAfter, maxHp: character.maxHp }))
     events.push({ type: 'damage-applied', targetTokenId: targetToken.id, characterId: character.id, amount, hpBefore, hpAfter })
-    return
+    return { hpBefore, hpAfter, arcaneSurgeUsed: false }
   }
   const hpBefore = targetToken.hp ?? targetToken.maxHp ?? 0
   const hpAfter = Math.max(0, hpBefore - amount)
   updateToken(state, targetToken.id, (item) => ({ ...item, hp: hpAfter }))
   events.push({ type: 'damage-applied', targetTokenId: targetToken.id, amount, hpBefore, hpAfter })
+  return { hpBefore, hpAfter, arcaneSurgeUsed: false }
 }
 
 function resolveFinaleDamageValues(
