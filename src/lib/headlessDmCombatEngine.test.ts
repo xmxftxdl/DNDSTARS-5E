@@ -1520,6 +1520,81 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(2)
   })
 
+  it('arms agile leap as an off-turn headless interrupt and spends one use', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentAP: 0,
+          traits: [
+            {
+              id: 'agile-leap',
+              name: '灵巧跳跃',
+              level: 1,
+              uses: 2,
+              maxUses: 2,
+              description: '',
+              featureKey: 'agileLeap',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'agile-leap-ready',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      feet: 10,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.combatBuffs?.agileLeapMoveFeet).toBe(10)
+    expect(hero.traits.find((trait) => trait.featureKey === 'agileLeap')?.uses).toBe(1)
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'log',
+        text: expect.stringContaining('发动灵巧跳跃'),
+      }),
+    )
+  })
+
+  it('rejects agile leap arming when no uses remain', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          traits: [
+            {
+              id: 'agile-leap',
+              name: '灵巧跳跃',
+              level: 1,
+              uses: 0,
+              maxUses: 2,
+              description: '',
+              featureKey: 'agileLeap',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'agile-leap-ready',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      feet: 10,
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('invalid-skill')
+    expect(result.state.characters[0].combatBuffs?.agileLeapMoveFeet).toBeUndefined()
+  })
+
   it('resolves agile leap movement without AP cost through headless DM authority', () => {
     const combat = state({
       characters: [
@@ -1577,7 +1652,7 @@ describe('headless DM combat engine', () => {
     const hero = result.state.characters[0]
     expect(hero.currentAP).toBe(0)
     expect(hero.combatBuffs?.agileLeapMoveFeet).toBeUndefined()
-    expect(hero.traits.find((trait) => trait.featureKey === 'agileLeap')?.uses).toBe(0)
+    expect(hero.traits.find((trait) => trait.featureKey === 'agileLeap')?.uses).toBe(1)
     expect(result.state.map.tokens.find((item) => item.id === 'hero-token')).toMatchObject({ x: 315, y: 175 })
     expect(result.events.map((event) => event.type)).not.toContain('ap-spent')
     expect(result.events.map((event) => event.type)).not.toContain('opportunity-triggered')

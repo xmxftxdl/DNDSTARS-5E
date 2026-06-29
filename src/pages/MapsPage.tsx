@@ -3907,6 +3907,25 @@ export default function MapsPage() {
     })
   }
 
+  const armSharedAgileLeapMove = (targetChar: Character, feet: number, targetTokenId?: string) => {
+    if (!activeMap) return false
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const actorTokenId = targetTokenId ?? latestMap.tokens.find((token) => token.characterId === targetChar.id)?.id
+    if (!actorTokenId) return false
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+      type: 'agile-leap-ready',
+      actorTokenId,
+      characterId: targetChar.id,
+      feet,
+    })
+    if (!headless.ok) return false
+    applyHeadlessCombatResult(headless)
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
+    return true
+  }
+
   const requestSharedOpportunityAttackChoice = (
     attacker: Character,
     params: { attackerTokenId: string; targetTokenId: string; targetName: string },
@@ -4294,12 +4313,9 @@ export default function MapsPage() {
           maxUses: trait?.maxUses ?? 0,
         })
         if (accepted) {
-          const latestTarget = useCharacterStore.getState().characters.find((c) => c.id === targetChar.id) ?? targetChar
-          updateChar(targetChar.id, {
-            combatBuffs: { ...latestTarget.combatBuffs, agileLeapMoveFeet: feet },
-          })
-          combatLabel += ` · 灵巧跳跃：点击地图移动至多 ${feet} 尺`
-          pushCombatLog(`${latestTarget.name} 发动灵巧跳跃：可移动至多 ${feet} 尺，不消耗 AP。`, 'turn')
+          if (armSharedAgileLeapMove(targetChar, feet, result.targetTokenId)) {
+            combatLabel += ` · 灵巧跳跃：点击地图移动至多 ${feet} 尺`
+          }
         }
       }
       if (result.attack) {
@@ -4648,12 +4664,9 @@ export default function MapsPage() {
               maxUses: trait?.maxUses ?? 0,
             })
             if (accepted) {
-              const latestTarget = useCharacterStore.getState().characters.find((c) => c.id === targetChar.id) ?? targetChar
-              updateChar(targetChar.id, {
-                combatBuffs: { ...latestTarget.combatBuffs, agileLeapMoveFeet: feet },
-              })
-              combatLabel += ` · 灵巧跳跃：点击地图移动至多 ${feet} 尺`
-              pushCombatLog(`${latestTarget.name} 发动灵巧跳跃：可移动至多 ${feet} 尺，不消耗 AP。`, 'turn')
+              if (armSharedAgileLeapMove(targetChar, feet, result.targetTokenId)) {
+                combatLabel += ` · 灵巧跳跃：点击地图移动至多 ${feet} 尺`
+              }
             }
           }
         }

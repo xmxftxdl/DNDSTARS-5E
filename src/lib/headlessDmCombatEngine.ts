@@ -25,7 +25,7 @@ import { resolveCombatMovement, type CombatMovementMode } from './combatMovement
 import { beginCalmMindTurn, calmBreathState, initCalmMindForCombat, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
-import { ENEMY_MELEE_ATTACK_BONUS } from './archerBaseFeatures'
+import { ENEMY_MELEE_ATTACK_BONUS, agileLeapMoveFeet } from './archerBaseFeatures'
 import { proficiencyBonus, type AbilityKey } from './dnd'
 import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
@@ -343,6 +343,13 @@ export interface HeadlessArcaneSurgeAction {
   characterId: string
 }
 
+export interface HeadlessAgileLeapReadyAction {
+  type: 'agile-leap-ready'
+  actorTokenId: string
+  characterId: string
+  feet: number
+}
+
 export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
@@ -433,6 +440,7 @@ export type HeadlessCombatAction =
   | HeadlessEnemyAttackAction
   | HeadlessStableMindAction
   | HeadlessArcaneSurgeAction
+  | HeadlessAgileLeapReadyAction
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
   | HeadlessCalmSpiritAction
@@ -597,6 +605,7 @@ export function resolveHeadlessDmAction(
     action.type !== 'opportunity-attack-token' &&
     action.type !== 'stable-mind' &&
     action.type !== 'arcane-surge' &&
+    action.type !== 'agile-leap-ready' &&
     (!turn || turn.tokenId !== action.actorTokenId)
   ) {
     return fail(next, 'stale-turn', events)
@@ -621,6 +630,8 @@ export function resolveHeadlessDmAction(
       return resolveStableMind(next, action, events)
     case 'arcane-surge':
       return resolveArcaneSurge(next, action, events)
+    case 'agile-leap-ready':
+      return resolveAgileLeapReady(next, action, events)
     case 'activate-feature':
       return resolveActivateFeature(next, action, dice, events)
     case 'qi-reduce-cooldown':
@@ -704,10 +715,6 @@ function resolveMove(
   if (!movement.ok) return fail(state, movement.reason, events)
   const actor = movement.actor
   if (!actor) return fail(state, 'invalid-actor', events)
-  if (mode === 'agile-leap') {
-    const trait = actor.traits.find((item) => item.featureKey === 'agileLeap')
-    if (!trait || trait.uses <= 0) return fail(state, 'invalid-skill', events)
-  }
 
   if (movement.characterPatch) {
     const before = actor.currentAP
@@ -726,14 +733,6 @@ function resolveMove(
             ...triggerOutOfBreath(next, 'move'),
             movedFeetThisTurn: Math.max(1, next.combatBuffs?.movedFeetThisTurn ?? 0),
           },
-        }
-      }
-      if (mode === 'agile-leap') {
-        next = {
-          ...next,
-          traits: next.traits.map((trait) =>
-            trait.featureKey === 'agileLeap' ? { ...trait, uses: Math.max(0, trait.uses - 1) } : trait,
-          ),
         }
       }
       return {
@@ -850,6 +849,41 @@ function resolveUseSkill(
   events.push({
     type: 'log',
     text: `${actor.name} 使用 ${skill.name}${waiveAp ? '（疾风连击，不消耗 AP）' : apCost > 0 ? `，消耗 ${apCost} AP` : ''}。`,
+  })
+  return succeed(state, events)
+}
+
+function resolveAgileLeapReady(
+  state: HeadlessDmCombatState,
+  action: HeadlessAgileLeapReadyAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((token) => token.id === action.actorTokenId)
+  const actor = findCharacter(state, action.characterId)
+  if (!actorToken || !actor || actorToken.type !== 'player' || actorToken.characterId !== actor.id || actor.currentHp <= 0) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const trait = actor.traits.find((item) => item.featureKey === 'agileLeap')
+  if (!trait || trait.uses <= 0 || (actor.combatBuffs?.agileLeapMoveFeet ?? 0) > 0) {
+    return fail(state, 'invalid-skill', events)
+  }
+  const maxFeet = agileLeapMoveFeet(actor)
+  const feet = Math.min(Math.max(0, action.feet), maxFeet)
+  if (feet <= 0) return fail(state, 'invalid-skill', events)
+
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    traits: item.traits.map((existing) =>
+      existing.featureKey === 'agileLeap' ? { ...existing, uses: Math.max(0, existing.uses - 1) } : existing,
+    ),
+    combatBuffs: {
+      ...item.combatBuffs,
+      agileLeapMoveFeet: feet,
+    },
+  }))
+  events.push({
+    type: 'log',
+    text: `${actor.name} 发动灵巧跳跃：可移动至多 ${feet} 尺，不消耗 AP。`,
   })
   return succeed(state, events)
 }
