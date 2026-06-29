@@ -7224,7 +7224,7 @@ export default function MapsPage() {
         return next
       })
       if (isDM) {
-        advanceInitiative()
+        submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'end-turn' }))
       } else {
         sendPlayerEndTurnRequest()
       }
