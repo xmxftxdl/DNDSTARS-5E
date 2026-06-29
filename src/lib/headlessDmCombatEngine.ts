@@ -143,6 +143,12 @@ export type HeadlessCombatEvent =
       dodgeAttackBonus?: number
       dodgeTotal?: number
       targetAc?: number
+      saveD20?: number
+      saveMod?: number
+      saveTotal?: number
+      saveDc?: number
+      saveSuccess?: boolean
+      stableMindUsed?: boolean
     }
   | {
       type: 'aoe-target-resolved'
@@ -317,6 +323,8 @@ export interface HeadlessEnemyAttackAction {
   actionIndex?: number
   diceValues?: number[]
   huntingBacklashValues?: number[]
+  saveD20?: number
+  useStableMind?: boolean
   actorApAlreadySpent?: boolean
   targetWantsDodge?: boolean
   targetDodgeD20?: number
@@ -1129,9 +1137,21 @@ function resolveStableMind(
   }
   const actor = findCharacter(state, action.characterId)
   if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
+  const stableMind = consumeStableMind(state, actorToken, actor, events)
+  if (stableMind === 'invalid') return fail(state, 'invalid-skill', events)
+  if (stableMind === 'insufficient-ap') return fail(state, 'insufficient-ap', events)
+  return succeed(state, events)
+}
+
+function consumeStableMind(
+  state: HeadlessDmCombatState,
+  actorToken: Token,
+  actor: Character,
+  events: HeadlessCombatEvent[],
+): 'ok' | 'invalid' | 'insufficient-ap' {
   const trait = actor.traits.find((item) => item.featureKey === 'stableMind')
-  if (!trait || trait.uses <= 0) return fail(state, 'invalid-skill', events)
-  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  if (!trait || trait.uses <= 0) return 'invalid'
+  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return 'insufficient-ap'
   updateCharacter(state, actor.id, (item) => ({
     ...item,
     traits: item.traits.map((currentTrait) =>
@@ -1141,7 +1161,7 @@ function resolveStableMind(
     ),
   }))
   events.push({ type: 'log', text: `${actor.name} 发动残影脱身：抵消敏捷豁免后仍会受到的伤害。` })
-  return succeed(state, events)
+  return 'ok'
 }
 
 function resolveArcaneSurge(
@@ -2174,6 +2194,58 @@ function resolveEnemyAttack(
 
   const target = findCharacter(state, targetToken.characterId)
   const attackBonus = actionDef.toHit ?? ENEMY_MELEE_ATTACK_BONUS
+  if (actionDef.kind === 'aoe' && actionDef.save) {
+    if (!target) return fail(state, 'invalid-target', events)
+    const diceValues = resolveDiceValues(action.diceValues, dice, parsed.count, parsed.sides)
+    if (!diceValues) return fail(state, 'invalid-dice', events)
+    const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
+    events.push({ type: 'dice-rolled', notation: `${parsed.count}d${parsed.sides}`, values: diceValues, total: diceTotal })
+    const fullDamage = Math.max(0, diceTotal + parsed.bonus)
+    const saveValues = resolveDiceValues(action.saveD20 != null ? [action.saveD20] : undefined, dice, 1, 20)
+    if (!saveValues) return fail(state, 'invalid-dice', events)
+    const saveD20 = saveValues[0]
+    events.push({ type: 'dice-rolled', notation: '1d20', values: [saveD20], total: saveD20 })
+    const saveMod = getEffectiveAbilityMod(target, actionDef.save.ability)
+    const saveTotal = saveD20 + saveMod
+    const saveSuccess = saveTotal >= actionDef.save.dc
+    let finalDamage = saveSuccess ? Math.floor(fullDamage / 2) : fullDamage
+    let stableMindUsed = false
+    if (action.useStableMind && saveSuccess && finalDamage > 0) {
+      const stableMind = consumeStableMind(state, targetToken, target, events)
+      if (stableMind === 'invalid') return fail(state, 'invalid-skill', events)
+      if (stableMind === 'insufficient-ap') return fail(state, 'insufficient-ap', events)
+      stableMindUsed = true
+      finalDamage = 0
+    }
+    if (finalDamage > 0) applyDamageToTarget(state, targetToken, finalDamage, events)
+    events.push({
+      type: 'log',
+      text: `${actorToken.label} 使用 ${actionDef.name}：${target.name} 豁免 ${saveD20}+${saveMod}=${saveTotal} vs DC ${actionDef.save.dc}，${saveSuccess ? `成功，受到 ${finalDamage} 点` : `失败，受到 ${finalDamage} 点`}。`,
+    })
+    events.push({
+      type: 'enemy-attack-resolved',
+      actorTokenId: actorToken.id,
+      targetTokenId: targetToken.id,
+      actionName: actionDef.name,
+      damageValues: diceValues,
+      diceTotal,
+      damageBonus: parsed.bonus,
+      rawDamage: fullDamage,
+      damageBeforeDefense: fullDamage,
+      modifier: 0,
+      diff: 0,
+      total: finalDamage,
+      targetDodged: false,
+      saveD20,
+      saveMod,
+      saveTotal,
+      saveDc: actionDef.save.dc,
+      saveSuccess,
+      stableMindUsed,
+    })
+    maybeEndCombat(state, events)
+    return succeed(state, events)
+  }
   let targetDodged = false
   let dodgeD20: number | undefined
   let dodgeTotal: number | undefined

@@ -4326,8 +4326,147 @@ export default function MapsPage() {
       return true
     }
 
+    const tryResolveEnemyAoeAttackWithHeadless = async () => {
+      const damageType = result.damageType ?? 'physical'
+      if (
+        !targetChar ||
+        !result.attack ||
+        !result.attackerTokenId ||
+        !result.targetTokenId ||
+        damageType !== 'aoe'
+      ) {
+        return false
+      }
+      const latestMap = useMapStore.getState().maps.find((map) => map.id === liveMapId) ?? activeMap
+      const attackerToken = latestMap.tokens.find((token) => token.id === result.attackerTokenId)
+      if (!attackerToken?.poolId) return false
+      const actionDef = getEnemyStatBlock(attackerToken.poolId)?.actions[result.actionIndex ?? 0]
+      if (!actionDef || actionDef.kind !== 'aoe' || !actionDef.save) return false
+      const arcaneSurge = findClassTrait(targetChar, 'arcaneSurge')
+      if (arcaneSurge && arcaneSurge.uses > 0) return false
+
+      await runEnemyStage('beforeDamageRoll')
+      const values = await rollEnemyBaseDamageDice()
+      const diceTotal = values.reduce((sum, value) => sum + value, 0)
+      const fullDamage = Math.max(0, diceTotal + result.attack.bonus)
+      updateEnemyDamageContext(fullDamage)
+      await runEnemyStage('damageRolled')
+
+      const saveD20 = await rollDiceBoxD20('豁免判定 D20', targetChar.name)
+      const saveMod = getEffectiveAbilityMod(targetChar, actionDef.save.ability)
+      const saveTotal = saveD20 + saveMod
+      const saveSuccess = saveTotal >= actionDef.save.dc
+      const damageAfterSave = saveSuccess ? Math.floor(fullDamage / 2) : fullDamage
+      let useStableMind = false
+      const stableMindTrait = findClassTrait(targetChar, 'stableMind')
+      if (saveSuccess && damageAfterSave > 0 && stableMindTrait && stableMindTrait.uses > 0 && targetChar.currentAP >= 1) {
+        useStableMind = await requestSharedStableMindChoice(targetChar, {
+          fullDamage,
+          damageAfterSave,
+          saveD20,
+          saveMod,
+          saveTotal,
+          dc: actionDef.save.dc,
+        })
+      }
+
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+        type: 'enemy-attack-token',
+        actorTokenId: result.attackerTokenId,
+        targetTokenId: result.targetTokenId,
+        actionIndex: result.actionIndex,
+        diceValues: values,
+        saveD20,
+        useStableMind,
+        actorApAlreadySpent: enemyAttackApAlreadySpent,
+      })
+      if (!headless.ok) return false
+      const resolved = enemyAttackResolvedEvent(headless.events)
+      if (!resolved) return false
+
+      combatLabel = `豁免 ${resolved.saveD20 ?? saveD20}+${resolved.saveMod ?? saveMod} vs DC${resolved.saveDc ?? actionDef.save.dc} ${
+        resolved.saveSuccess ? `成功（半伤，实际 ${resolved.total}）` : `失败（全额，实际 ${resolved.total}）`
+      }${resolved.stableMindUsed ? ' · 残影脱身：已抵消全部伤害' : ''}`
+      d20Roll = {
+        value: resolved.saveD20 ?? saveD20,
+        modifier: resolved.saveMod ?? saveMod,
+        ac: resolved.saveDc ?? actionDef.save.dc,
+        hit: !!resolved.saveSuccess,
+        kind: 'save',
+      }
+      damageRollValues = resolved.damageValues
+      damageRollTotal = resolved.total
+      damageRollBonus = resolved.total - resolved.diceTotal
+      if (enemyResolutionSession) {
+        enemyResolutionSession.context.attackRoll = {
+          values: [d20Roll.value],
+          sides: 20,
+          bonus: d20Roll.modifier,
+          total: d20Roll.value + d20Roll.modifier,
+          ac: d20Roll.ac,
+          hit: d20Roll.hit,
+          crit: false,
+          label: 'save',
+        }
+        enemyResolutionSession.context.pendingDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
+          ...packet,
+          amount: resolved.total,
+        }))
+      }
+      await runEnemyStage('attackRollResolved')
+      if (resolved.total > 0) await runEnemyStage('beforeDamageApplied')
+      applyHeadlessCombatResult(headless)
+      const enemyApEvent = headless.events.find(
+        (event): event is Extract<HeadlessCombatEvent, { type: 'ap-spent' }> =>
+          event.type === 'ap-spent' && event.tokenId === result.attackerTokenId && !event.characterId,
+      )
+      if (enemyApEvent) {
+        enemyAttackApAlreadySpent = true
+        const ap = headless.state.enemyApByToken[result.attackerTokenId] ?? {
+          current: enemyApEvent.after,
+          max: getEnemyApState(result.attackerTokenId).max,
+        }
+        pushCombatLog(`${attackerToken.label} 花费 ${enemyApEvent.amount} AP：攻击 ${targetChar.name}。剩余 AP ${ap.current}/${ap.max}`, 'turn')
+      }
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      if (resolved.total > 0) {
+        if (enemyResolutionSession) {
+          enemyResolutionSession.context.appliedDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
+            ...packet,
+            amount: resolved.total,
+          }))
+        }
+        await runEnemyStage('damageApplied')
+      }
+      const enemyRollForDisplay: DiceRoll = {
+        values: damageRollValues,
+        sides: result.attack.sides,
+        bonus: damageRollBonus,
+        total: damageRollTotal,
+        label: `${result.attack.label} · ${combatLabel}`,
+        formula:
+          damageRollValues.length > 0
+            ? `${damageRollValues.join(' + ')}${damageRollBonus >= 0 ? ' + ' : ' - '}${Math.abs(damageRollBonus)} = ${damageRollTotal}`
+            : undefined,
+        targetName: result.attack.targetName,
+        d20Roll,
+      }
+      setRoll(enemyRollForDisplay)
+      publishSharedDiceRoll(enemyRollForDisplay)
+      pushCombatLog(
+        `${result.attack.label} → ${result.attack.targetName}：伤害骰 ${damageRollValues.length > 0 ? damageRollValues.join(' + ') : '无'}，加值 ${damageRollBonus}，最终 ${damageRollTotal} 点；${combatLabel}`,
+        damageRollTotal > 0 ? 'damage' : 'attack',
+      )
+      return true
+    }
+
     if (targetChar && hasEnemyDamage) {
       const damageType = result.damageType ?? 'physical'
+      if (await tryResolveEnemyAoeAttackWithHeadless()) {
+        return
+      }
       if (await tryResolvePhysicalEnemyAttackWithHeadless()) {
         return
       }

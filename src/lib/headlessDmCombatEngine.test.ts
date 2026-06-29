@@ -3606,6 +3606,76 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('resolves enemy aoe saves and stable mind through headless DM authority', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentAP: 2,
+          traits: [
+            {
+              id: 'stable-mind',
+              name: '残影脱身',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'stableMind',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'dragon',
+          label: '红龙雏龙',
+          type: 'enemy',
+          poolId: 'wyrmling-red',
+          hp: 52,
+          maxHp: 52,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('dragon', 10)],
+      enemyApByToken: { dragon: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'enemy-attack-token',
+      actorTokenId: 'dragon',
+      targetTokenId: 'hero-token',
+      actionIndex: 1,
+      diceValues: [6, 6, 6, 6],
+      saveD20: 20,
+      useStableMind: true,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentHp).toBe(30)
+    expect(hero.currentAP).toBe(1)
+    expect(hero.traits.find((trait) => trait.featureKey === 'stableMind')?.uses).toBe(0)
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
+      actionName: '火焰吐息',
+      saveD20: 20,
+      saveSuccess: true,
+      stableMindUsed: true,
+      total: 0,
+    })
+  })
+
   it('resolves player opportunity attacks out of turn through DM authority', () => {
     const combat = state({
       initiativeIndex: 1,
