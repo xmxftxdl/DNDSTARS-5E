@@ -3284,6 +3284,72 @@ describe('headless DM combat engine', () => {
     expect(heroToken?.hp).toBe(hero.currentHp)
   })
 
+  it('adds hunting mark backlash dice when a marked enemy attacks the hunter', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          traits: [
+            {
+              id: 'hunting-mark',
+              name: '狩猎印记',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'huntingMark',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: '新冒险者',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+          huntingMarkStacks: 1,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('goblin', 10)],
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(
+      combat,
+      {
+        type: 'enemy-attack-token',
+        actorTokenId: 'goblin',
+        targetTokenId: 'hero-token',
+        diceValues: [1],
+        huntingBacklashValues: [4],
+      },
+      createFixedHeadlessDiceRoller([]),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d4', values: [4], total: 4 })
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
+      damageValues: [1, 4],
+      diceTotal: 5,
+    })
+  })
+
   it('lets a player spend AP to dodge an enemy attack before damage is rolled', () => {
     const combat = state({
       initiativeIndex: 1,

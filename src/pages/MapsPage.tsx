@@ -4205,7 +4205,6 @@ export default function MapsPage() {
       const attackerToken = latestMap.tokens.find((token) => token.id === result.attackerTokenId)
       if (!attackerToken?.poolId) return false
       const huntedByTargetRank = huntingMarkTraitRank(targetChar)
-      if ((attackerToken.huntingMarkStacks ?? 0) > 0 && huntedByTargetRank > 0) return false
       const arcaneSurge = findClassTrait(targetChar, 'arcaneSurge')
       if (arcaneSurge && arcaneSurge.uses > 0) return false
 
@@ -4217,12 +4216,17 @@ export default function MapsPage() {
       const targetAc = targetChar.ac + (wantsDodge ? Math.max(0, targetChar.combatBuffs?.flexibleBodyBonus ?? 0) : 0)
       const expectedDodged = targetDodgeD20 != null ? targetDodgeD20 + attackBonus < targetAc : false
       const headlessDamageValues = expectedDodged ? undefined : await rollEnemyBaseDamageDice()
+      const huntingBacklashValues =
+        !expectedDodged && (attackerToken.huntingMarkStacks ?? 0) > 0 && huntedByTargetRank > 0
+          ? await rollDiceBoxValues(huntedByTargetRank, 4, '狩猎印记反噬伤害', result.attack.targetName)
+          : undefined
       const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
         type: 'enemy-attack-token',
         actorTokenId: result.attackerTokenId,
         targetTokenId: result.targetTokenId,
         actionIndex: result.actionIndex,
         diceValues: headlessDamageValues,
+        huntingBacklashValues,
         actorApAlreadySpent: enemyAttackApAlreadySpent,
         targetWantsDodge: !!wantsDodge,
         targetDodgeD20,

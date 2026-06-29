@@ -316,6 +316,7 @@ export interface HeadlessEnemyAttackAction {
   targetTokenId: string
   actionIndex?: number
   diceValues?: number[]
+  huntingBacklashValues?: number[]
   actorApAlreadySpent?: boolean
   targetWantsDodge?: boolean
   targetDodgeD20?: number
@@ -2201,8 +2202,19 @@ function resolveEnemyAttack(
 
   const diceValues = resolveDiceValues(action.diceValues, dice, parsed.count, parsed.sides)
   if (!diceValues) return fail(state, 'invalid-dice', events)
-  const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
+  let allDamageValues = [...diceValues]
+  let diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
   events.push({ type: 'dice-rolled', notation: `${parsed.count}d${parsed.sides}`, values: diceValues, total: diceTotal })
+  const huntingBacklashRank = actorToken.huntingMarkStacks && actorToken.huntingMarkStacks > 0 ? huntingMarkTraitRank(target) : 0
+  if (huntingBacklashRank > 0) {
+    const backlashValues = resolveDiceValues(action.huntingBacklashValues, dice, huntingBacklashRank, 4)
+    if (!backlashValues) return fail(state, 'invalid-dice', events)
+    const backlashTotal = backlashValues.reduce((sum, value) => sum + value, 0)
+    events.push({ type: 'dice-rolled', notation: `${huntingBacklashRank}d4`, values: backlashValues, total: backlashTotal })
+    events.push({ type: 'log', text: `${target?.name ?? targetToken.label} 受到狩猎印记反噬 +${huntingBacklashRank}d4。` })
+    allDamageValues = [...allDamageValues, ...backlashValues]
+    diceTotal += backlashTotal
+  }
   const baseDamage = diceTotal + parsed.bonus
   const attacker = enemyCombatInput(actorToken.poolId)
   const adjusted = applyAttackDefenseDamageModifier(
@@ -2215,14 +2227,14 @@ function resolveEnemyAttack(
   applyDamageToTarget(state, targetToken, adjusted.damage, events)
   events.push({
     type: 'log',
-    text: `${actorToken.label} 使用 ${actionDef.name} 攻击 ${targetToken.label}：骰值 ${diceValues.join('+')}，加值 ${parsed.bonus}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
+    text: `${actorToken.label} 使用 ${actionDef.name} 攻击 ${targetToken.label}：骰值 ${allDamageValues.join('+')}，加值 ${parsed.bonus}，攻防修正 ${adjusted.modifier}，最终 ${adjusted.damage} 点。`,
   })
   events.push({
     type: 'enemy-attack-resolved',
     actorTokenId: actorToken.id,
     targetTokenId: targetToken.id,
     actionName: actionDef.name,
-    damageValues: diceValues,
+    damageValues: allDamageValues,
     diceTotal,
     damageBonus: parsed.bonus,
     rawDamage: baseDamage,
@@ -3182,6 +3194,11 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
 
 function activeCharacterIds(state: HeadlessDmCombatState): Set<string> {
   return new Set(state.map.tokens.map((token) => token.characterId).filter((id): id is string => !!id))
+}
+
+function huntingMarkTraitRank(character?: Character): number {
+  if (!character) return 0
+  return Math.max(0, findClassTrait(character, 'huntingMark')?.level ?? 0)
 }
 
 function skillCooldownRemaining(skill: Pick<CombatSkill, 'cooldown' | 'cdReduction'>): number {
