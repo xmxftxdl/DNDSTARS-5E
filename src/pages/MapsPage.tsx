@@ -7189,7 +7189,7 @@ export default function MapsPage() {
       skill.skillTreeId === 'shadowDance' ||
       skill.skillTreeId === 'riseKick' ||
       skill.skillTreeId === 'explosiveArrow'
-    if (!supportedSkill || opts.targetCount !== 1 || opts.doubleArrow) return false
+    if (!supportedSkill || opts.targetCount !== 1) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
     if (isOutOfBreath(actor)) return false
@@ -7197,7 +7197,6 @@ export default function MapsPage() {
     if (
       buffs?.preciseStrikeReady ||
       buffs?.calmSpiritCritBonusPercent ||
-      buffs?.doubleArrowReady ||
       buffs?.shadowVeilTargetId ||
       (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
       (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
@@ -7581,9 +7580,10 @@ export default function MapsPage() {
           targetDodgeD20 != null && dodgePreview
             ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
             : false
+        const damageDiceCount = doubleArrow ? attackDamageDiceCount(skill, true) : skill.damageCount
         const diceValues = expectedTargetDodged
           ? undefined
-          : await rollDiceBoxValues(skill.damageCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
+          : await rollDiceBoxValues(damageDiceCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
         const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
         const windKickTreatsTargetAsKnocked =
           skill.skillTreeId === 'windKickCombo' && actor.combatBuffs?.windKickTreatKnockbackTargetId === targetToken.id
@@ -7594,7 +7594,14 @@ export default function MapsPage() {
             windKickTreatsTargetAsKnocked)
         const burstKickExtraD6 =
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
+        const doubleArrowTrait = doubleArrow ? findClassTrait(actor, 'doubleArrow') : undefined
+        const doubleArrowExtraSides = doubleArrowTrait ? doubleArrowExtraDamageSides(doubleArrowTrait.level) : undefined
         const extraDamageParts: number[] = []
+        if (!expectedTargetDodged && doubleArrowExtraSides) {
+          extraDamageParts.push(
+            ...(await rollDiceBoxValues(1, doubleArrowExtraSides, `${skill.name} 双箭额外伤害`, targetToken.label)),
+          )
+        }
         if (burstKickExtraD6 > 0) {
           extraDamageParts.push(...(await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)))
         }
@@ -7662,9 +7669,10 @@ export default function MapsPage() {
           }))
         const targetPacket = {
           targetTokenId: targetToken.id,
+          damageDiceCount,
           diceValues,
           extraDamageValues,
-          extraDamageSides: extraDamageValues?.length ? 6 : undefined,
+          extraDamageSides: extraDamageValues?.length ? doubleArrowExtraSides ?? 6 : undefined,
           postCritDamageValues: explosiveArrowFireValues,
           postCritDamageSides: explosiveArrowFireValues?.length ? 6 : undefined,
           halveDamageOnRangeFeet:
@@ -7712,6 +7720,8 @@ export default function MapsPage() {
           vulnerableTurns: 1,
           clearTargetStatusesOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 4,
           selfCooldownReductionPerClearedStatus: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 5,
+          clearDoubleArrowReadyOnUse: doubleArrow || undefined,
+          spendDoubleArrowUseOnHit: doubleArrow || undefined,
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',

@@ -186,6 +186,7 @@ export interface HeadlessPlayerAttackAction {
 
 export interface HeadlessPlayerAttackPacket {
   targetTokenId: string
+  damageDiceCount?: number
   diceValues?: number[]
   extraDamageValues?: number[]
   extraDamageSides?: number
@@ -223,6 +224,8 @@ export interface HeadlessPlayerAttackPacket {
   vulnerableTurns?: number
   clearTargetStatusesOnHit?: boolean
   selfCooldownReductionPerClearedStatus?: boolean
+  clearDoubleArrowReadyOnUse?: boolean
+  spendDoubleArrowUseOnHit?: boolean
 }
 
 export interface HeadlessAttackEffectSavePacket {
@@ -1198,6 +1201,8 @@ function resolvePlayerAttack(
 
   let resolvedCount = 0
   let selfCooldownReduction = 0
+  let shouldClearDoubleArrowReady = false
+  let shouldSpendDoubleArrowUse = false
   const cooldownReductions: Array<{ skillId: string; amount: number }> = []
   for (const [packetIndex, packet] of packets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
@@ -1223,6 +1228,7 @@ function resolvePlayerAttack(
     )
     if (!targetDodge) return fail(state, 'invalid-dice', events)
     if (targetDodge.dodged) {
+      if (packet.clearDoubleArrowReadyOnUse) shouldClearDoubleArrowReady = true
       if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
       if (packet.clearWindKickTreatKnockbackOnUse) clearWindKickTreatKnockback(state, actor.id)
       events.push({
@@ -1253,7 +1259,8 @@ function resolvePlayerAttack(
       continue
     }
 
-    const diceValues = resolveDiceValues(packet.diceValues, dice, skill.damageCount, skill.damageSides)
+    const damageDiceCount = packet.damageDiceCount ?? skill.damageCount
+    const diceValues = resolveDiceValues(packet.diceValues, dice, damageDiceCount, skill.damageSides)
     if (!diceValues) return fail(state, 'invalid-dice', events)
     const extraDamageValues = packet.extraDamageValues
       ? resolveDiceValues(packet.extraDamageValues, dice, packet.extraDamageValues.length, packet.extraDamageSides ?? 6)
@@ -1272,7 +1279,7 @@ function resolvePlayerAttack(
     const combinedDamageValues = [...preCritDamageValues, ...postCritDamageValues]
     events.push({
       type: 'dice-rolled',
-      notation: `${skill.damageCount}d${skill.damageSides}`,
+      notation: `${damageDiceCount}d${skill.damageSides}`,
       values: diceValues,
       total: diceValues.reduce((sum, value) => sum + value, 0),
     })
@@ -1308,6 +1315,8 @@ function resolvePlayerAttack(
       : adjustedBase
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
     applyStatusOnHit(state, targetToken, skill, events)
+    if (packet.clearDoubleArrowReadyOnUse) shouldClearDoubleArrowReady = true
+    if (packet.spendDoubleArrowUseOnHit && adjusted.damage > 0) shouldSpendDoubleArrowUse = true
     if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
     if (packet.clearWindKickTreatKnockbackOnUse) clearWindKickTreatKnockback(state, actor.id)
     if (packet.grantBurstKickExtraD6OnHit && adjusted.damage > 0) {
@@ -1400,6 +1409,14 @@ function resolvePlayerAttack(
   }
   if (resolvedCount === 0) return fail(state, 'invalid-target', events)
   markSkillUsed(state, actor.id, skill.id)
+  if (shouldSpendDoubleArrowUse) spendFeatureUse(state, actor.id, 'doubleArrow')
+  if (shouldClearDoubleArrowReady) {
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, doubleArrowReady: undefined },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 的双箭效果已结算。` })
+  }
   for (const reduction of cooldownReductions) {
     const result = reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
     if (result.reduced > 0) {
@@ -2435,6 +2452,21 @@ function markSkillUsed(state: HeadlessDmCombatState, characterId: string, skillI
         : skill,
     ),
   }))
+}
+
+function spendFeatureUse(state: HeadlessDmCombatState, characterId: string, featureKey: ClassFeatureKey): boolean {
+  const character = findCharacter(state, characterId)
+  const trait = character?.traits.find((item) => item.featureKey === featureKey)
+  if (!character || !trait || trait.maxUses <= 0 || trait.uses <= 0) return false
+  updateCharacter(state, characterId, (item) => ({
+    ...item,
+    traits: item.traits.map((currentTrait) =>
+      currentTrait.featureKey === featureKey
+        ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+        : currentTrait,
+    ),
+  }))
+  return true
 }
 
 function reduceSkillCooldown(

@@ -3317,4 +3317,60 @@ describe('headless DM combat engine', () => {
     expect(damageIndex).toBeGreaterThanOrEqual(0)
     expect(galeComboIndex).toBeGreaterThan(damageIndex)
   })
+
+  it('resolves Double Arrow through headless attack packets', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { doubleArrowReady: true },
+          traits: [
+            {
+              id: 'double-arrow',
+              name: '双箭',
+              level: 1,
+              uses: 2,
+              maxUses: 2,
+              description: '',
+              featureKey: 'doubleArrow',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(
+      combat,
+      {
+        type: 'attack-token',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetTokenId: 'dragon',
+        skillId: 'basic-shot',
+        targetPackets: [
+          {
+            targetTokenId: 'dragon',
+            damageDiceCount: 2,
+            diceValues: [4, 5],
+            extraDamageValues: [3],
+            extraDamageSides: 4,
+            targetDodgeMode: 'skip',
+            clearDoubleArrowReadyOnUse: true,
+            spendDoubleArrowUseOnHit: true,
+          },
+        ],
+      },
+      createFixedHeadlessDiceRoller([]),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatBuffs?.doubleArrowReady).toBeUndefined()
+    expect(hero.traits.find((trait) => trait.featureKey === 'doubleArrow')?.uses).toBe(1)
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved?.damageValues).toEqual([4, 5, 3])
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '2d8', values: [4, 5], total: 9 })
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d4', values: [3], total: 3 })
+  })
 })
