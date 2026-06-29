@@ -22,7 +22,7 @@ import {
 } from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive, shouldApplyDotTick } from './combatTokens'
 import { resolveCombatMovement, type CombatMovementMode } from './combatMovementPipeline'
-import { calmBreathState, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
+import { beginCalmMindTurn, calmBreathState, initCalmMindForCombat, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
 import { ENEMY_MELEE_ATTACK_BONUS } from './archerBaseFeatures'
@@ -30,6 +30,7 @@ import { proficiencyBonus, type AbilityKey } from './dnd'
 import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
+import { resetCombatTraitUses } from './traitRegistry'
 import { IGNITE_STATUS_LABEL } from './ignite'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
 import {
@@ -72,6 +73,7 @@ export type HeadlessCombatEvent =
       triggersMoveEffects: boolean
     }
   | { type: 'turn-advanced'; round: number; initiativeIndex: number; tokenId?: string }
+  | { type: 'turn-started'; round: number; initiativeIndex: number; tokenId: string; characterId?: string }
   | { type: 'combat-ended'; winner: 'ally' | 'enemy'; message: string }
   | { type: 'status-added'; targetTokenId: string; characterId?: string; condition: string; turns?: number }
   | {
@@ -536,12 +538,18 @@ export function cloneHeadlessCombatState(state: HeadlessDmCombatState): Headless
   }
 }
 
-export function startHeadlessCombat(state: HeadlessDmCombatState): HeadlessDmCombatState {
+export function startHeadlessCombat(
+  state: HeadlessDmCombatState,
+  dice: HeadlessDiceRoller = createSeededHeadlessDiceRoller(`${state.round}:start-combat`),
+): HeadlessDmCombatState {
   const next = cloneHeadlessCombatState(state)
+  const events: HeadlessCombatEvent[] = []
   next.active = next.initiativeOrder.length > 0
   next.round = Math.max(1, next.round || 1)
   next.initiativeIndex = Math.min(Math.max(0, next.initiativeIndex || 0), Math.max(0, next.initiativeOrder.length - 1))
+  resetCombatStartCharacters(next, dice, events)
   resetRoundAp(next)
+  applyHeadlessCurrentTurnStart(next, events)
   return next
 }
 
@@ -2971,11 +2979,58 @@ function advanceHeadlessTurn(state: HeadlessDmCombatState, events: HeadlessComba
     const token = turn ? state.map.tokens.find((item) => item.id === turn.tokenId) : undefined
     const decision = decideTurnAction(token, state.characters)
     if (decision === 'player' || decision === 'enemy') {
+      applyHeadlessCurrentTurnStart(state, events)
       events.push({ type: 'turn-advanced', round: state.round, initiativeIndex: state.initiativeIndex, tokenId: turn?.tokenId })
       return
     }
     guard -= 1
   } while (guard > 0)
+}
+
+function applyHeadlessCurrentTurnStart(state: HeadlessDmCombatState, events: HeadlessCombatEvent[]) {
+  const turn = getCurrentTurn(state)
+  const token = turn ? state.map.tokens.find((item) => item.id === turn.tokenId) : undefined
+  if (!token || token.type !== 'player' || !token.characterId) return
+  if (!isTokenAlive(token, state.characters)) return
+  applyHeadlessBeginTurnEffects(state, token, events)
+}
+
+function applyHeadlessBeginTurnEffects(
+  state: HeadlessDmCombatState,
+  token: Token,
+  events: HeadlessCombatEvent[],
+) {
+  if (!token.characterId) return
+  const key = `turn-${state.round}-${state.initiativeIndex}-${token.id}`
+  const current = findCharacter(state, token.characterId)
+  if (!current || current.combatBuffs?.turnStartKey === key) return
+
+  updateCharacter(state, token.characterId, (character) => {
+    let combatBuffs = beginCalmMindTurn(character)
+    const eagleTurns = combatBuffs.eagleEyeTurns ?? 0
+    if (eagleTurns > 0) {
+      const next = eagleTurns - 1
+      combatBuffs = { ...combatBuffs, eagleEyeTurns: next > 0 ? next : undefined }
+    }
+    return {
+      ...character,
+      combatBuffs: {
+        ...combatBuffs,
+        steadyDrawUsedThisTurn: undefined,
+        movedFeetThisTurn: undefined,
+        tookDamageThisTurn: undefined,
+        turnStartKey: key,
+      },
+      combatSkills: character.combatSkills.map((skill) => ({ ...skill, usedThisTurn: false })),
+    }
+  })
+  events.push({
+    type: 'turn-started',
+    round: state.round,
+    initiativeIndex: state.initiativeIndex,
+    tokenId: token.id,
+    characterId: token.characterId,
+  })
 }
 
 function decrementTokenStatus(
@@ -3040,9 +3095,13 @@ function applyHeadlessRoundWrapEffects(state: HeadlessDmCombatState, events: Hea
 }
 
 function resetRoundAp(state: HeadlessDmCombatState) {
+  const participantIds = activeCharacterIds(state)
   state.characters = state.characters.map((character) => ({
     ...character,
-    currentAP: character.currentHp > 0 ? character.actionPoints : character.currentAP,
+    currentAP:
+      participantIds.has(character.id) && character.currentHp > 0
+        ? character.actionPoints
+        : character.currentAP,
   }))
   const nextEnemyApByToken: Record<string, HeadlessEnemyApState> = {}
   for (const token of state.map.tokens) {
@@ -3060,6 +3119,53 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
   if (!outcome.ended) return
   state.active = false
   events.push({ type: 'combat-ended', winner: outcome.winner, message: outcome.message })
+}
+
+function activeCharacterIds(state: HeadlessDmCombatState): Set<string> {
+  return new Set(state.map.tokens.map((token) => token.characterId).filter((id): id is string => !!id))
+}
+
+function skillCooldownRemaining(skill: Pick<CombatSkill, 'cooldown' | 'cdReduction'>): number {
+  if (skill.cooldown <= 0) return 0
+  return Math.max(1, skill.cooldown - skill.cdReduction)
+}
+
+function resetCombatStartCharacters(
+  state: HeadlessDmCombatState,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+) {
+  const participantIds = activeCharacterIds(state)
+  for (const characterId of participantIds) {
+    if (!findCharacter(state, characterId)) continue
+    updateCharacter(state, characterId, (character) => {
+      const hasRuneArrow = !!findClassTrait(character, 'runeArrow')
+      let runeArrowApplied = false
+      const reset = resetCombatTraitUses({
+        ...character,
+        currentAP: character.actionPoints,
+        combatSkills: character.combatSkills.map((skill) => {
+          const runeReset = hasRuneArrow && !runeArrowApplied && isMagicDamageSkill(skill)
+          if (runeReset) runeArrowApplied = true
+          return {
+            ...skill,
+            remaining: runeReset ? 0 : skillCooldownRemaining(skill),
+            usedThisTurn: false,
+          }
+        }),
+      })
+      return applyStillWatersHealingOnBreathShift(
+        reset,
+        {
+          ...reset,
+          combatBuffs: initCalmMindForCombat(reset),
+        },
+        dice,
+        events,
+      )
+    })
+    syncCharacterTokenHp(state, characterId)
+  }
 }
 
 function singleTargetRangeFeet(skill: CombatSkill): number | null {

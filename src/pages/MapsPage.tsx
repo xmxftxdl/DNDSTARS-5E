@@ -116,6 +116,7 @@ import {
   resolveHeadlessGaleComboConsumption,
   resolveHeadlessGaleComboChoice,
   resolveHeadlessDmAction,
+  startHeadlessCombat,
   type HeadlessCombatEvent,
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
@@ -268,8 +269,6 @@ export default function MapsPage() {
   const removeToken = useMapStore((s) => s.removeToken)
 
   const characters = useCharacterStore((s) => s.characters)
-  const resetCombatCooldowns = useCharacterStore((s) => s.resetCombatCooldowns)
-  const beginTurn = useCharacterStore((s) => s.beginTurn)
   const endTurn = useCharacterStore((s) => s.endTurn)
   const invokeSkill = useCharacterStore((s) => s.useSkill)
   const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
@@ -610,7 +609,6 @@ export default function MapsPage() {
   useEffect(() => {
     enemyApByTokenRef.current = enemyApByToken
   }, [enemyApByToken])
-  const playerTurnStartedRef = useRef(new Set<string>())
   const multiStrikeHitsRef = useRef<Record<string, number>>({})
   const combatActiveRef = useRef(false)
   const playerActionResultBaselinesRef = useRef<Record<string, PlayerActionResultBaseline>>({})
@@ -3669,7 +3667,6 @@ export default function MapsPage() {
     enemyAppliedKeysRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
-    playerTurnStartedRef.current.clear()
     multiStrikeHitsRef.current = {}
     setDisengagedCharIds(new Set())
     clearPlayerCombatUI()
@@ -3689,7 +3686,6 @@ export default function MapsPage() {
         updateChar(cid, { conditions: [], combatBuffs: {}, tempHp: 0 })
       }
     }
-    for (const cid of charIds) resetCombatCooldowns(cid)
     const initialEnemyAp: Record<string, { current: number; max: number }> = {}
     for (const token of activeMap.tokens) {
       if (token.type === 'enemy') initialEnemyAp[token.id] = { current: 2, max: 2 }
@@ -3705,13 +3701,25 @@ export default function MapsPage() {
     setInitiativeIndex(0)
     initiativeIndexRef.current = 0
     setInitiativeScroll(0)
-    publishCombatState({
-      combatId: nextCombatId,
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const started = startHeadlessCombat({
+      map: latestMap,
+      characters: useCharacterStore.getState().characters,
       active: true,
       round: 1,
       initiativeIndex: 0,
       initiativeOrder: order,
       enemyApByToken: initialEnemyAp,
+      disengagedCharacterIds: [],
+    })
+    applyHeadlessCombatResult({ ok: true, state: started, events: [] })
+    publishCombatState({
+      combatId: nextCombatId,
+      active: started.active,
+      round: started.round,
+      initiativeIndex: started.initiativeIndex,
+      initiativeOrder: started.initiativeOrder,
+      enemyApByToken: started.enemyApByToken,
     })
     pushCombatLog(`战斗开始：${order.length} 名单位加入先攻`, 'system', 1)
   }
@@ -3736,7 +3744,6 @@ export default function MapsPage() {
     enemyAppliedKeysRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
-    playerTurnStartedRef.current.clear()
     multiStrikeHitsRef.current = {}
     setDisengagedCharIds(new Set())
     clearPlayerCombatUI()
@@ -6845,30 +6852,8 @@ export default function MapsPage() {
       return
     }
     if (!turnCharacter?.id || currentInitiativeToken?.type !== 'player') return
-    if (!isDM) {
-      setActiveCharId(turnCharacter.id)
-      return
-    }
-    const key = `turn-${round}-${initiativeIndex}-${currentInitiativeToken.id}`
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter.id)
-    if (latest?.combatBuffs?.turnStartKey === key) {
-      setActiveCharId(turnCharacter.id)
-      return
-    }
-    if (playerTurnStartedRef.current.has(key)) return
-    playerTurnStartedRef.current.add(key)
-    beginTurn(turnCharacter.id)
-    const afterBegin = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter.id)
-    if (afterBegin) {
-      updateChar(turnCharacter.id, {
-        combatBuffs: {
-          ...afterBegin.combatBuffs,
-          turnStartKey: key,
-        },
-      })
-    }
     setActiveCharId(turnCharacter.id)
-  }, [canControlPlayerTurn, turnCharacter?.id, round, initiativeIndex, currentInitiativeToken?.id, currentInitiativeToken?.type, isDM])
+  }, [canControlPlayerTurn, turnCharacter?.id, currentInitiativeToken?.type])
 
   useEffect(() => {
     if (!combatActive || !activeMap || !currentInitiativeToken) return

@@ -144,14 +144,46 @@ function state(overrides: Partial<HeadlessDmCombatState> = {}): HeadlessDmCombat
 
 describe('headless DM combat engine', () => {
   it('starts combat by resetting player and enemy AP at round scope', () => {
+    const calmMind = {
+      id: 'calm-mind',
+      name: '静心',
+      level: 1,
+      uses: 0,
+      maxUses: 0,
+      description: '',
+      featureKey: 'calmMind' as const,
+    }
+    const hero = character({
+      currentAP: 0,
+      combatBuffs: {
+        eagleEyeTurns: 2,
+        movedFeetThisTurn: 10,
+        tookDamageThisTurn: true,
+      },
+      combatSkills: [
+        skill({ usedThisTurn: true }),
+        skill({ id: 'cooldown-skill', name: '冷却技能', cooldown: 3, cdReduction: 1, remaining: 0, usedThisTurn: true }),
+      ],
+      traits: [calmMind],
+    })
+    const bench = character({ id: 'bench', name: '未参战角色', currentAP: 0 })
     const started = startHeadlessCombat(
       state({
-        characters: [character({ currentAP: 0 })],
+        characters: [hero, bench],
         enemyApByToken: { dragon: { current: 0, max: 2 } },
       }),
     )
 
     expect(started.characters[0].currentAP).toBe(2)
+    expect(started.characters[0].combatSkills[0].usedThisTurn).toBe(false)
+    expect(started.characters[0].combatSkills[1].remaining).toBe(2)
+    expect(started.characters[0].combatSkills[1].usedThisTurn).toBe(false)
+    expect(started.characters[0].combatBuffs?.calmMind).toBe(true)
+    expect(started.characters[0].combatBuffs?.eagleEyeTurns).toBe(1)
+    expect(started.characters[0].combatBuffs?.movedFeetThisTurn).toBeUndefined()
+    expect(started.characters[0].combatBuffs?.tookDamageThisTurn).toBeUndefined()
+    expect(started.characters[0].combatBuffs?.turnStartKey).toBe('turn-1-0-hero-token')
+    expect(started.characters.find((item) => item.id === 'bench')?.currentAP).toBe(0)
     expect(started.enemyApByToken.dragon).toEqual({ current: 2, max: 2 })
   })
 
@@ -3459,6 +3491,49 @@ describe('headless DM combat engine', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(1)
+  })
+
+  it('applies player turn-start effects when headless DM advances to a player turn', () => {
+    const calmMind = {
+      id: 'calm-mind',
+      name: '静心',
+      level: 1,
+      uses: 0,
+      maxUses: 0,
+      description: '',
+      featureKey: 'calmMind' as const,
+    }
+    const hero = character({
+      combatBuffs: {
+        eagleEyeTurns: 2,
+        movedFeetThisTurn: 15,
+        tookDamageThisTurn: true,
+      },
+      combatSkills: [skill({ usedThisTurn: true })],
+      traits: [calmMind],
+    })
+    const combat = state({
+      characters: [hero],
+      initiativeIndex: 0,
+      initiativeOrder: [entry('dragon', 20), entry('hero-token', 10)],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'end-turn',
+      actorTokenId: 'dragon',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const nextHero = result.state.characters[0]
+    expect(result.state.initiativeIndex).toBe(1)
+    expect(nextHero.combatSkills[0].usedThisTurn).toBe(false)
+    expect(nextHero.combatBuffs?.calmMind).toBe(true)
+    expect(nextHero.combatBuffs?.eagleEyeTurns).toBe(1)
+    expect(nextHero.combatBuffs?.movedFeetThisTurn).toBeUndefined()
+    expect(nextHero.combatBuffs?.tookDamageThisTurn).toBeUndefined()
+    expect(nextHero.combatBuffs?.turnStartKey).toBe('turn-1-1-hero-token')
+    expect(result.events.some((event) => event.type === 'turn-started' && event.characterId === 'hero')).toBe(true)
   })
 
   it('applies first-turn calm mind check when ending a turn in headless DM authority', () => {
