@@ -211,6 +211,52 @@ describe('headless DM combat engine', () => {
     expect(result.reason).toBe('insufficient-ap')
   })
 
+  it('validates enemy movement through DM authority and spends enemy AP', () => {
+    const result = resolveHeadlessDmAction(
+      state({ initiativeIndex: 1 }),
+      {
+        type: 'enemy-move-token',
+        actorTokenId: 'dragon',
+        targetPosition: { x: 385, y: 175 },
+        apCost: 1,
+      },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.enemyApByToken.dragon).toEqual({ current: 1, max: 2 })
+    expect(result.state.map.tokens.find((item) => item.id === 'dragon')).toMatchObject({ x: 385, y: 175 })
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: 'ap-spent',
+        tokenId: 'dragon',
+        amount: 1,
+        before: 2,
+        after: 1,
+      }),
+    )
+    expect(result.events.map((event) => event.type)).toContain('token-moved')
+  })
+
+  it('rejects enemy movement when enemy AP is insufficient', () => {
+    const result = resolveHeadlessDmAction(
+      state({
+        initiativeIndex: 1,
+        enemyApByToken: { dragon: { current: 0, max: 2 } },
+      }),
+      {
+        type: 'enemy-move-token',
+        actorTokenId: 'dragon',
+        targetPosition: { x: 385, y: 175 },
+        apCost: 1,
+      },
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('insufficient-ap')
+  })
+
   it('emits opportunity trigger events when validated movement leaves enemy reach', () => {
     const combat = state({
       map: map([

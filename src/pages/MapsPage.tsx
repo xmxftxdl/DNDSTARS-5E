@@ -2921,6 +2921,40 @@ export default function MapsPage() {
     return true
   }
 
+  const resolveEnemyMoveThroughHeadless = async (
+    enemy: Token,
+    targetPosition: { x: number; y: number },
+    apCost: number,
+    actionLabel: string,
+  ) => {
+    if (!activeMap) return false
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+      type: 'enemy-move-token',
+      actorTokenId: enemy.id,
+      targetPosition,
+      apCost,
+    })
+    if (!headless.ok) {
+      pushCombatLog(`${enemy.label} ${actionLabel}失败：${headless.reason}`, 'system')
+      return false
+    }
+    const moved = tokenMovedEvent(headless.events, enemy.id)
+    const apEvent = headless.events.find(
+      (event): event is Extract<HeadlessCombatEvent, { type: 'ap-spent' }> =>
+        event.type === 'ap-spent' && event.tokenId === enemy.id && !event.characterId,
+    )
+    applyHeadlessCombatResult(headless)
+    if (apEvent) {
+      const ap = headless.state.enemyApByToken[enemy.id] ?? { current: apEvent.after, max: getEnemyApState(enemy.id).max }
+      pushCombatLog(
+        `${enemy.label} 花费 ${apEvent.amount} AP：${actionLabel}${moved ? ` ${moved.feet} 尺` : ''}。剩余 AP ${ap.current}/${ap.max}`,
+        'turn',
+      )
+    }
+    return true
+  }
+
   const opportunityAttackersForMove = (
     movingToken: Token,
     to: { x: number; y: number },
@@ -4938,9 +4972,11 @@ export default function MapsPage() {
         enemyTurnTimersRef.current.push(id)
         return
       }
-      updateToken(activeMap.id, enemy.id, { x: result.newPosition.x, y: result.newPosition.y })
-      spendEnemyAp(enemy.id, moveApSpent)
-      pushCombatLog(`${enemy.label} 花费 ${moveApSpent} AP：移动。剩余 AP ${getEnemyApState(enemy.id).current}/2`, 'turn')
+      if (!(await resolveEnemyMoveThroughHeadless(latestEnemy, result.newPosition, moveApSpent, '移动'))) {
+        const id = window.setTimeout(advanceEnemyIfCurrent, 300)
+        enemyTurnTimersRef.current.push(id)
+        return
+      }
     }
 
     const pushTimer = (fn: () => void, ms: number) => {
@@ -4970,10 +5006,6 @@ export default function MapsPage() {
             pushTimer(async () => {
               if (!isStillEnemyTurn()) return
               const moveApSpent = nextResult.moveApSpent ?? 1
-              if (!spendEnemyAp(enemy.id, moveApSpent)) {
-                pushTimer(advanceEnemyIfCurrent, 300)
-                return
-              }
               await resolveOpportunityAttacksForMove(latestEnemy, nextResult.newPosition!)
               if (!isStillEnemyTurn()) return
               const stillAliveMap = useMapStore.getState().maps.find((m) => m.id === activeMap.id)
@@ -4982,11 +5014,10 @@ export default function MapsPage() {
                 pushTimer(advanceEnemyIfCurrent, ADVANCE_DELAY_MS)
                 return
               }
-              updateToken(activeMap.id, enemy.id, { x: nextResult.newPosition!.x, y: nextResult.newPosition!.y })
-              pushCombatLog(
-                `${enemy.label} 花费 ${moveApSpent} AP：继续移动。剩余 AP ${getEnemyApState(enemy.id).current}/2`,
-                'turn',
-              )
+              if (!(await resolveEnemyMoveThroughHeadless(stillAliveEnemy, nextResult.newPosition!, moveApSpent, '继续移动'))) {
+                pushTimer(advanceEnemyIfCurrent, 300)
+                return
+              }
               pushTimer(advanceEnemyIfCurrent, nextResult.attacked ? TOKEN_MOVE_MS : 300)
             }, DICE_ROLL_MS + 5000)
             return

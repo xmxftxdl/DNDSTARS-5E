@@ -12,7 +12,14 @@ import {
 } from './combatStats'
 import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from './enemyCombatStats'
 import { getEnemyStatBlock, getPrimaryAttackAction } from './enemyStatBlocks'
-import { tokenAnchorCellFromPixel, tokenCenterForAnchorCell, tokenFootprintDistanceCells } from './gridCombat'
+import {
+  cellDistance,
+  pixelToCell,
+  snapTokenToGridCenter,
+  tokenAnchorCellFromPixel,
+  tokenCenterForAnchorCell,
+  tokenFootprintDistanceCells,
+} from './gridCombat'
 import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
 import { resolveCombatMovement, type CombatMovementMode } from './combatMovementPipeline'
 import { calmBreathState, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
@@ -25,6 +32,7 @@ import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
 import { NO_MOVE_STATUS_LABEL, RESTRAINED_STATUS_LABEL, VULNERABLE_STATUS_LABEL } from './tokenStatus'
+import { isTokenMovementLocked } from './combatStatus'
 import { creatureSizeToFootprintCells, sizeFromTokenSize } from './monsterTypes'
 
 export interface HeadlessEnemyApState {
@@ -169,6 +177,13 @@ export interface HeadlessPlayerMoveAction {
   characterId: string
   targetPosition: { x: number; y: number }
   mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap' | 'skill-free-move'>
+}
+
+export interface HeadlessEnemyMoveAction {
+  type: 'enemy-move-token'
+  actorTokenId: string
+  targetPosition: { x: number; y: number }
+  apCost?: number
 }
 
 export interface HeadlessDisengageAction {
@@ -375,6 +390,7 @@ export interface HeadlessEndTurnAction {
 
 export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
+  | HeadlessEnemyMoveAction
   | HeadlessDisengageAction
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
@@ -542,6 +558,8 @@ export function resolveHeadlessDmAction(
   switch (action.type) {
     case 'move-token':
       return resolveMove(next, action, events)
+    case 'enemy-move-token':
+      return resolveEnemyMove(next, action, events)
     case 'disengage':
       return resolveDisengage(next, action, events)
     case 'attack-token':
@@ -747,6 +765,39 @@ function resolveDisengage(
     type: 'log',
     text: `${actor.name} 撤离：本回合移动不触发借机攻击。`,
   })
+  return succeed(state, events)
+}
+
+function resolveEnemyMove(
+  state: HeadlessDmCombatState,
+  action: HeadlessEnemyMoveAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (!actorToken || actorToken.type !== 'enemy' || !actorToken.poolId || !isTokenAlive(actorToken, state.characters)) {
+    return fail(state, 'invalid-actor', events)
+  }
+  if (isTokenMovementLocked(actorToken)) return fail(state, 'movement-locked', events)
+
+  const apCost = Math.max(1, Math.floor(action.apCost ?? 1))
+  const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, state.map)
+  const from = { x: actorToken.x, y: actorToken.y }
+  const feetPerCell = state.map.feetPerCell ?? 5
+  const feet = cellDistance(pixelToCell(from.x, from.y, state.map), pixelToCell(to.x, to.y, state.map)) * feetPerCell
+  const maxFeet = apCost * 30
+  if (feet > maxFeet) return fail(state, 'out-of-range', events)
+  if (!spendEnemyAp(state, actorToken.id, apCost, events)) return fail(state, 'insufficient-ap', events)
+
+  updateToken(state, actorToken.id, (item) => ({ ...item, ...to }))
+  events.push({
+    type: 'token-moved',
+    tokenId: actorToken.id,
+    from,
+    to,
+    feet,
+    triggersMoveEffects: false,
+  })
+  events.push({ type: 'log', text: `${actorToken.label} 移动 ${feet} 尺。` })
   return succeed(state, events)
 }
 
