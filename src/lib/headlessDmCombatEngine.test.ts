@@ -2376,8 +2376,10 @@ describe('headless DM combat engine', () => {
         {
           targetTokenId: 'goblin',
           diceValues: [6],
-          postCritDamageValues: [6, 6],
-          postCritDamageSides: 6,
+          postCritDamageGroups: [
+            { values: [6, 6], sides: 6 },
+            { values: [12], sides: 12 },
+          ],
           targetDodgeMode: 'skip',
           isCrit: true,
           burningOnHit: true,
@@ -2393,11 +2395,13 @@ describe('headless DM combat engine', () => {
     const target = result.state.map.tokens.find((item) => item.id === 'goblin')
     const attack = result.events.find((event) => event.type === 'attack-resolved')
     expect(attack).toMatchObject({
-      damageValues: [6, 6, 6],
-      damageBeforeDefense: 19,
+      damageValues: [6, 6, 6, 12],
+      damageBeforeDefense: 31,
       isCrit: true,
       hit: true,
     })
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '2d6', values: [6, 6], total: 12 })
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d12', values: [12], total: 12 })
     expect(target?.burningTurns).toBe(2)
     expect(target?.igniteTurns).toBe(2)
     expect(result.events.filter((event) => event.type === 'status-added').map((event) => event.condition)).toEqual([

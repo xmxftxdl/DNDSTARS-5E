@@ -191,6 +191,7 @@ export interface HeadlessPlayerAttackPacket {
   extraDamageGroups?: HeadlessExtraDamageGroup[]
   extraDamageValues?: number[]
   extraDamageSides?: number
+  postCritDamageGroups?: HeadlessExtraDamageGroup[]
   postCritDamageValues?: number[]
   postCritDamageSides?: number
   halveDamageOnRangeFeet?: { minExclusive: number; maxInclusive: number }
@@ -1294,15 +1295,23 @@ function resolvePlayerAttack(
       if (values.length > 0) extraDamageGroups.push({ values, sides: group.sides })
     }
     const extraDamageValues = extraDamageGroups.flatMap((group) => group.values)
-    const postCritDamageValues = packet.postCritDamageValues
-      ? resolveDiceValues(
-          packet.postCritDamageValues,
-          dice,
-          packet.postCritDamageValues.length,
-          packet.postCritDamageSides ?? 6,
-        )
-      : []
-    if (!postCritDamageValues) return fail(state, 'invalid-dice', events)
+    const postCritDamageGroups: Array<{ values: number[]; sides: number }> = []
+    if (packet.postCritDamageValues) {
+      const values = resolveDiceValues(
+        packet.postCritDamageValues,
+        dice,
+        packet.postCritDamageValues.length,
+        packet.postCritDamageSides ?? 6,
+      )
+      if (!values) return fail(state, 'invalid-dice', events)
+      postCritDamageGroups.push({ values, sides: packet.postCritDamageSides ?? 6 })
+    }
+    for (const group of packet.postCritDamageGroups ?? []) {
+      const values = resolveDiceValues(group.values, dice, group.values?.length ?? 0, group.sides)
+      if (!values) return fail(state, 'invalid-dice', events)
+      if (values.length > 0) postCritDamageGroups.push({ values, sides: group.sides })
+    }
+    const postCritDamageValues = postCritDamageGroups.flatMap((group) => group.values)
     const preCritDamageValues = [...diceValues, ...extraDamageValues]
     const combinedDamageValues = [...preCritDamageValues, ...postCritDamageValues]
     events.push({
@@ -1319,12 +1328,12 @@ function resolvePlayerAttack(
         total: group.values.reduce((sum, value) => sum + value, 0),
       })
     }
-    if (postCritDamageValues.length > 0) {
+    for (const group of postCritDamageGroups) {
       events.push({
         type: 'dice-rolled',
-        notation: `${postCritDamageValues.length}d${packet.postCritDamageSides ?? 6}`,
-        values: postCritDamageValues,
-        total: postCritDamageValues.reduce((sum, value) => sum + value, 0),
+        notation: `${group.values.length}d${group.sides}`,
+        values: group.values,
+        total: group.values.reduce((sum, value) => sum + value, 0),
       })
     }
 

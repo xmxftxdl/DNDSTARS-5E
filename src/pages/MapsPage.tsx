@@ -7205,7 +7205,6 @@ export default function MapsPage() {
     if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
     const unsupportedTraitKeys = new Set([
       'armorPiercing',
-      'explosiveArrow',
       'huntingCombo',
       'takeoff',
     ])
@@ -7697,6 +7696,7 @@ export default function MapsPage() {
         }
         const preciseStrikeReady = !!actor.combatBuffs?.preciseStrikeReady
         const packetIsCrit = preciseStrikeReady || !!(action as typeof action & { isCrit?: boolean }).isCrit
+        const postCritDamageGroups: Array<{ values: number[]; sides: number }> = []
         const explosiveArrowCritDice =
           !expectedTargetDodged && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
             ? skillRank >= 5
@@ -7705,12 +7705,21 @@ export default function MapsPage() {
                 ? 3
                 : 2
             : 0
-        const explosiveArrowFireValues =
-          explosiveArrowCritDice > 0
-            ? await rollDiceBoxValues(explosiveArrowCritDice, 6, `${skill.name} 重击火焰伤害`, targetToken.label)
-            : undefined
+        if (explosiveArrowCritDice > 0) {
+          postCritDamageGroups.push({
+            values: await rollDiceBoxValues(explosiveArrowCritDice, 6, `${skill.name} explosive arrow crit fire`, targetToken.label),
+            sides: 6,
+          })
+        }
+        const explosiveArrowTrait = findClassTrait(actor, 'explosiveArrow')
+        if (!expectedTargetDodged && packetIsCrit && explosiveArrowTrait) {
+          postCritDamageGroups.push({
+            values: await rollDiceBoxValues(explosiveArrowTrait.level, 12, `${skill.name} explosive arrow feature fire`, targetToken.label),
+            sides: 12,
+          })
+        }
         const explosiveArrowBurnTurns =
-          explosiveArrowCritDice > 0 ? (skillRank >= 4 ? 2 : 1) : undefined
+          postCritDamageGroups.length > 0 ? (skill.skillTreeId === 'explosiveArrow' && skillRank >= 4 ? 2 : 1) : undefined
         const effectAbility: 'str' | 'con' | undefined =
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' && skillRank >= 3
             ? 'con'
@@ -7747,8 +7756,7 @@ export default function MapsPage() {
           damageDiceCount,
           diceValues,
           extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
-          postCritDamageValues: explosiveArrowFireValues,
-          postCritDamageSides: explosiveArrowFireValues?.length ? 6 : undefined,
+          postCritDamageGroups: postCritDamageGroups.length > 0 ? postCritDamageGroups : undefined,
           halveDamageOnRangeFeet:
             skill.skillTreeId === 'clusterShot'
               ? { minExclusive: 10, maxInclusive: 20 }
@@ -7784,9 +7792,9 @@ export default function MapsPage() {
                 : undefined,
           grantDisengageOnHit: skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance',
           grantWindKickTreatKnockbackOnHit: skill.skillTreeId === 'shadowDance' && skillRank >= 3,
-          burningOnHit: explosiveArrowCritDice > 0,
+          burningOnHit: postCritDamageGroups.length > 0,
           burningTurns: explosiveArrowBurnTurns,
-          igniteOnHit: explosiveArrowCritDice > 0,
+          igniteOnHit: postCritDamageGroups.length > 0,
           igniteTurns: explosiveArrowBurnTurns,
           cooldownReductionSkillId,
           cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
