@@ -2534,12 +2534,28 @@ export default function MapsPage() {
 
   const handleActivateFeature = async (key: ClassFeatureKey) => {
     if (!canControlPlayerTurn || !turnCharacter) return
-    if (!isDM && shouldSendPlayerReadyFeatureToDm(key)) {
-      sendPlayerActivateFeatureRequest(key)
-      return
-    }
     if (key === 'illusionDance') {
       beginIllusionDanceTargeting(turnCharacter)
+      return
+    }
+    if (!isDM && key === 'trackingArrow') {
+      const trait = findClassTrait(turnCharacter, 'trackingArrow')
+      if (!trait || trait.uses <= 0) return
+      const target = chooseEnemyTokenByPrompt('追踪箭：给一个已带狩猎印记的目标额外 +1 层印记', (t) => (t.huntingMarkStacks ?? 0) > 0)
+      if (!target) return
+      sendPlayerActivateFeatureRequest(key, { targetTokenId: target.id })
+      return
+    }
+    if (!isDM && key === 'shadowVeil') {
+      const trait = findClassTrait(turnCharacter, 'shadowVeil')
+      if (!trait || trait.uses <= 0) return
+      const target = chooseEnemyTokenByPrompt('影遁之术：消耗目标 2 层狩猎印记，本回合对其攻击 +1D6', (t) => (t.huntingMarkStacks ?? 0) >= 2)
+      if (!target) return
+      sendPlayerActivateFeatureRequest(key, { targetTokenId: target.id })
+      return
+    }
+    if (!isDM && shouldSendPlayerReadyFeatureToDm(key)) {
+      sendPlayerActivateFeatureRequest(key)
       return
     }
     if (key === 'eagleEye' || key === 'doubleArrow' || key === 'preciseStrike') {
