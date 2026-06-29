@@ -191,20 +191,14 @@ import {
   isTokenDefeated,
   pruneInitiativeForToken,
   resolveEnemyAttackTokens,
-  shouldApplyDotTick,
 } from '../lib/combatTokens'
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
-import { IGNITE_STATUS_LABEL } from '../lib/ignite'
-import { dotDamageFor } from '../lib/statusDamage'
 import {
   getTokenAbilityMod,
   KNOCKBACK_DEFAULT_TURNS,
   KNOCKBACK_STATUS_LABEL,
 } from '../lib/knockback'
-import {
-  STUN_DEFAULT_TURNS,
-  STUN_STATUS_LABEL,
-} from '../lib/stun'
+import { STUN_DEFAULT_TURNS } from '../lib/stun'
 import { getSkillRank, skillGrantsStun } from '../lib/archerSkillTree'
 import { modeFromPort } from '../lib/appMode'
 import {
@@ -235,10 +229,6 @@ import type {
   CombatLogEntry,
 } from './mapsPageTypes'
 import {
-  STATUS_LABEL,
-  RESTRAINED_STATUS_LABEL,
-  VULNERABLE_STATUS_LABEL,
-  NO_MOVE_STATUS_LABEL,
   TOKEN_MOVE_MS,
   DICE_ROLL_MS,
   ADVANCE_DELAY_MS,
@@ -283,7 +273,6 @@ export default function MapsPage() {
   const endTurn = useCharacterStore((s) => s.endTurn)
   const invokeSkill = useCharacterStore((s) => s.useSkill)
   const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
-  const damageChar = useCharacterStore((s) => s.damage)
   const notifyCombatMove = useCharacterStore((s) => s.notifyCombatMove)
   const spendAP = useCharacterStore((s) => s.spendAP)
   const updateChar = useCharacterStore((s) => s.update)
@@ -1091,34 +1080,6 @@ export default function MapsPage() {
       tokenIds.forEach((tokenId) => removeToken(activeMap.id, tokenId))
     }
     setDeleteSelectMode(false)
-  }
-
-  const resetRoundApForActiveMap = (reason: string) => {
-    const currentCharacters = useCharacterStore.getState().characters
-    if (mode !== 'dm') return { characters: currentCharacters, saved: Promise.resolve(Date.now()) }
-    if (!activeMap) return { characters: currentCharacters, saved: Promise.resolve(Date.now()) }
-    const charIds = new Set(
-      activeMap.tokens
-        .map((token) => token.characterId)
-        .filter((id): id is string => !!id),
-    )
-    if (charIds.size === 0) return { characters: currentCharacters, saved: Promise.resolve(Date.now()) }
-    const characterState = useCharacterStore.getState()
-    let changed = false
-    const nextCharacters = characterState.characters.map((ch) => {
-      if (!charIds.has(ch.id)) return ch
-      if (ch.currentAP === ch.actionPoints) return ch
-      changed = true
-      return { ...ch, currentAP: ch.actionPoints }
-    })
-    if (changed) {
-      const updatedAt = Date.now()
-      console.info('[combat-ap-reset]', { reason, round, mapId: activeMap.id })
-      useCharacterStore.setState({ characters: nextCharacters })
-      const saved = useCharacterStore.getState().saveSharedNow(updatedAt)
-      return { characters: nextCharacters, saved }
-    }
-    return { characters: nextCharacters, saved: Promise.resolve(Date.now()) }
   }
 
   useEffect(() => {
@@ -2417,13 +2378,6 @@ export default function MapsPage() {
     return tokenHasKnockback(latestToken, latestChar)
   }
 
-  const addConditionToCharacter = (charId: string | undefined, label: string) => {
-    if (!charId) return
-    const ch = useCharacterStore.getState().characters.find((c) => c.id === charId)
-    if (!ch || ch.conditions.includes(label)) return
-    updateChar(charId, { conditions: [...ch.conditions, label] })
-  }
-
   const chooseCooldownReductionSkillId = (caster: Character, amount: number, reason: string) => {
     const latest = useCharacterStore.getState().characters.find((c) => c.id === caster.id)
     if (!latest) return undefined
@@ -2552,22 +2506,6 @@ export default function MapsPage() {
     return true
   }
 
-  const applyDirectFeatureDamage = (token: Token, amount: number, label: string) => {
-    if (!activeMap || amount <= 0) return
-    if (token.characterId) {
-      damageChar(token.characterId, amount)
-      const updated = useCharacterStore.getState().characters.find((c) => c.id === token.characterId)
-      // [T10/AC1] 经唯一镜像 helper 写回 token.hp。
-      if (updated) updateToken(activeMap.id, token.id, characterHpTokenPatch(updated))
-      if (updated && updated.currentHp <= 0) deferDeathHandling(token.id, token.characterId)
-    } else if (token.maxHp != null) {
-      const hp = Math.max(0, (token.hp ?? token.maxHp) - amount)
-      updateToken(activeMap.id, token.id, { hp })
-      if (hp <= 0) deferDeathHandling(token.id)
-    }
-    pushCombatLog(`${label} 对 ${token.label} 造成 ${amount} 点伤害`, 'damage')
-  }
-
   const eagleStrikeExtraDiceCount = (rank: number) => {
     if (rank <= 0) return 0
     return rank === 1 ? 3 : 4
@@ -2590,27 +2528,6 @@ export default function MapsPage() {
 
   const huntingMarkTraitRank = (caster?: Character) =>
     caster ? (findClassTrait(caster, 'huntingMark')?.level ?? 0) : 0
-
-  const triggerFinaleIfReady = async (caster: Character | undefined, target: Token) => {
-    if (!activeMap || !caster?.combatBuffs?.finaleReady) return false
-    const trait = findClassTrait(caster, 'finale')
-    if (!trait) return false
-    const d10 = await rollDiceBoxValues(6, 10, '曲终力场伤害', target.label)
-    const d8 = trait.level > 1 ? await rollDiceBoxValues(trait.level - 1, 8, '曲终等级额外伤害', target.label) : []
-    const total = [...d10, ...d8].reduce((sum, value) => sum + value, 0)
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === caster.id)
-    updateChar(caster.id, {
-      combatBuffs: { ...(latest?.combatBuffs ?? caster.combatBuffs), finaleReady: undefined },
-    })
-    updateToken(activeMap.id, target.id, { huntingMarkStacks: 0, stunTurns: STUN_DEFAULT_TURNS })
-    addConditionToCharacter(target.characterId, STUN_STATUS_LABEL)
-    applyDirectFeatureDamage(target, total, '曲终')
-    pushCombatLog(
-      `${caster.name} 的曲终触发：${target.label} 狩猎印记达到 4 层，${[...d10, ...d8].join(' + ')} = ${total} 点力场伤害，眩晕并移除所有狩猎印记`,
-      'damage',
-    )
-    return true
-  }
 
   const huntingComboTraitRank = (caster?: Character) =>
     caster ? (findClassTrait(caster, 'huntingCombo')?.level ?? 0) : 0
@@ -2638,71 +2555,6 @@ export default function MapsPage() {
       '蛛',
       '史莱姆',
     ].some((part) => key.includes(part))
-  }
-
-  const applyDamageToToken = async (
-    target: Token,
-    amount: number,
-    opts?: { damageType?: 'physical' | 'magic'; caster?: Character; raw?: boolean },
-  ) => {
-    if (!activeMap) return
-    const damageType = opts?.damageType ?? 'physical'
-    const attackerInput = opts?.caster ? characterToCombatInput(opts.caster) : undefined
-    if (target.characterId) {
-      const ch = useCharacterStore.getState().characters.find((c) => c.id === target.characterId)
-      // [T3] raw=true (DOT ticks) bypasses the attack/defense modifier so the per-tick
-      // HP loss is exactly the configured constant, independent of defender resistances.
-      const finalAmount = opts?.raw
-        ? amount
-        : ch
-        ? applyAttackDefenseDamageModifier(
-            amount,
-            attackerInput,
-            characterToCombatInput(ch),
-            damageType,
-            (target.vulnerableTurns ?? 0) > 0, // [T4/C3]
-          ).damage
-        : amount
-      damageChar(target.characterId, finalAmount)
-      const updated = useCharacterStore.getState().characters.find((c) => c.id === target.characterId)
-      if (updated) {
-        // [T10/AC1] DOT 每回合掉血路径同样经唯一镜像 helper 写回 token.hp。
-        const patch: Partial<Token> = characterHpTokenPatch(updated)
-        if (
-          finalAmount > 0 &&
-          opts?.caster &&
-          huntingMarkTraitRank(opts.caster) > 0 &&
-          isEnemyTarget(target)
-        ) {
-          patch.huntingMarkStacks = Math.min(4, (target.huntingMarkStacks ?? 0) + 1)
-        }
-        updateToken(activeMap.id, target.id, patch)
-        if (opts?.caster && patch.huntingMarkStacks === 4) {
-          await triggerFinaleIfReady(opts.caster, target)
-        }
-        if (updated.currentHp <= 0) {
-          deferDeathHandling(target.id, target.characterId)
-        }
-      }
-    } else if (target.maxHp != null) {
-      const hp = Math.max(0, (target.hp ?? target.maxHp) - amount)
-      const patch: Partial<Token> = { hp }
-      if (
-        amount > 0 &&
-        opts?.caster &&
-        huntingMarkTraitRank(opts.caster) > 0 &&
-        isEnemyTarget(target)
-      ) {
-        patch.huntingMarkStacks = Math.min(4, (target.huntingMarkStacks ?? 0) + 1)
-      }
-      updateToken(activeMap.id, target.id, patch)
-      if (opts?.caster && patch.huntingMarkStacks === 4) {
-        await triggerFinaleIfReady(opts.caster, target)
-      }
-      if (hp <= 0) {
-        deferDeathHandling(target.id)
-      }
-    }
   }
 
   const handleActivateFeature = async (key: ClassFeatureKey) => {
@@ -5019,201 +4871,35 @@ export default function MapsPage() {
     }
   }
 
-  const nextRound = () => {
-    if (activeMap) {
-      for (const t of activeMap.tokens) {
-        const patch: Partial<Token> = {}
-        let charConds: string[] | null = null
-        const ch = t.characterId
-          ? useCharacterStore.getState().characters.find((c) => c.id === t.characterId)
-          : null
-        if (ch) charConds = [...ch.conditions]
-
-        // [T3/C1] Damage-over-time: burning/ignite/poison now actually deal HP each round
-        // (the tick previously only decremented counters — three DOT statuses were purely
-        // decorative). DM-only (AC0): computed once on the authority and broadcast via
-        // updateToken; players never tick locally, so no double-application. Applied as the
-        // summed total BEFORE the counter decrements, so a 1-turn DOT still deals its last
-        // tick. raw=true keeps the loss exactly the configured constant.
-        if (isDM) {
-          const dot = dotDamageFor(t)
-          if (shouldApplyDotTick(t, useCharacterStore.getState().characters, dot)) {
-            void applyDamageToToken(t, dot, { raw: true })
-          }
-        }
-
-        if (t.burningTurns && t.burningTurns > 0) {
-          patch.burningTurns = t.burningTurns - 1
-          if (patch.burningTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== STATUS_LABEL.burning)
-          }
-        }
-        if (t.igniteTurns && t.igniteTurns > 0) {
-          patch.igniteTurns = t.igniteTurns - 1
-          if (patch.igniteTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== IGNITE_STATUS_LABEL)
-          }
-        }
-        if (t.poisonTurns && t.poisonTurns > 0) {
-          patch.poisonTurns = t.poisonTurns - 1
-          if (patch.poisonTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== STATUS_LABEL.poison)
-          }
-        }
-        if (t.knockbackTurns && t.knockbackTurns > 0) {
-          patch.knockbackTurns = t.knockbackTurns - 1
-          if (patch.knockbackTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== KNOCKBACK_STATUS_LABEL)
-          }
-        }
-        if (t.stunTurns && t.stunTurns > 0) {
-          patch.stunTurns = t.stunTurns - 1
-          if (patch.stunTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== STUN_STATUS_LABEL)
-          }
-        }
-        if (t.restrainedTurns && t.restrainedTurns > 0) {
-          patch.restrainedTurns = t.restrainedTurns - 1
-          if (patch.restrainedTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== RESTRAINED_STATUS_LABEL)
-          }
-        }
-        if (t.vulnerableTurns && t.vulnerableTurns > 0) {
-          patch.vulnerableTurns = t.vulnerableTurns - 1
-          if (patch.vulnerableTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== VULNERABLE_STATUS_LABEL)
-          }
-        }
-        if (t.noMoveTurns && t.noMoveTurns > 0) {
-          patch.noMoveTurns = t.noMoveTurns - 1
-          if (patch.noMoveTurns === 0 && charConds) {
-            charConds = charConds.filter((c) => c !== NO_MOVE_STATUS_LABEL)
-          }
-        }
-        if (t.illusionDanceTurns && t.illusionDanceTurns > 0) {
-          patch.illusionDanceTurns = t.illusionDanceTurns - 1
-        }
-
-        if (Object.keys(patch).length > 0) {
-          updateToken(activeMap.id, t.id, patch)
-        }
-        if (t.characterId && ch && charConds && charConds.length !== ch.conditions.length) {
-          updateChar(t.characterId, { conditions: charConds })
-        }
-      }
-      if (round === 1) {
-        const charIds = new Set(
-          activeMap.tokens
-            .map((token) => token.characterId)
-            .filter((id): id is string => !!id),
-        )
-        const chars = useCharacterStore.getState().characters
-        for (const charId of charIds) {
-          const ch = chars.find((c) => c.id === charId)
-          if (ch && findClassTrait(ch, 'silentDraw') && !ch.combatBuffs?.silentDrawUsed) {
-            updateChar(charId, {
-              combatBuffs: { ...ch.combatBuffs, silentDrawUsed: true },
-            })
-          }
-        }
-      }
-    }
-    const next = round + 1
-    const roundApReset = resetRoundApForActiveMap('next-round')
-    const nextCharacters = roundApReset.characters
-    const nextEnemyAp: Record<string, { current: number; max: number }> = {}
-    for (const token of activeMap.tokens) {
-      if (token.type === 'enemy' && isTokenAlive(token, nextCharacters)) {
-        nextEnemyAp[token.id] = { current: 2, max: 2 }
-      }
-    }
-    enemyApByTokenRef.current = nextEnemyAp
-    setEnemyApByToken(nextEnemyAp)
-    pushCombatLog(`进入第 ${next} 回合`, 'turn', next)
-    setRound(next)
-    roundRef.current = next
-    orderedCombatPublishRef.current = true
-    void (async () => {
-      try {
-        await roundApReset.saved
-        await publishCombatState({
-          active: true,
-          round: next,
-          initiativeIndex: 0,
-          initiativeOrder: initiativeOrderRef.current,
-          enemyApByToken: nextEnemyAp,
-        })
-      } finally {
-        orderedCombatPublishRef.current = false
-      }
-    })()
-  }
-
   const advanceInitiativeCore = () => {
     const order = initiativeOrderRef.current
-    if (order.length === 0) return
-    const chars = useCharacterStore.getState().characters
+    if (order.length === 0 || !activeMap) return
     const idx = initiativeIndexRef.current
-    const current = order[idx]
+    const current = order[idx] ?? order[0]
     if (!current) {
-      // [T2/A11] Index points past/at a hole. Reset to 0, but if entry 0 already
-      // acted this round (its dedupe key is present), force one guarded advance so
-      // the queue cannot stall at index 0 instead of silently parking.
       setInitiativeIndex(0)
       initiativeIndexRef.current = 0
-      const head = order[0]
-      if (head) {
-        const headKey = `${roundRef.current}-0-${head.tokenId}`
-        if (enemyAppliedKeysRef.current.has(headKey)) {
-          window.setTimeout(() => requestAdvance(), 0)
-        }
-      }
       return
     }
-
-    const curToken = activeMap?.tokens.find((t) => t.id === current.tokenId)
-    if (curToken?.characterId) endTurn(curToken.characterId)
-    let next = idx + 1
-    while (next < order.length) {
-      const entry = order[next]
-      const tok = activeMap?.tokens.find((t) => t.id === entry.tokenId)
-      if (!tok) {
-        // [T2/A9] Compute the prune first, then write refs + state at top level —
-        // doing ref side-effects INSIDE a setInitiativeOrder updater double-fires
-        // under React18/StrictMode and desyncs initiativeIndexRef from state.
-        const pruned = pruneInitiativeForToken(initiativeOrderRef.current, idx, entry.tokenId)
-        initiativeIndexRef.current = pruned.index
-        initiativeOrderRef.current = pruned.order
-        setInitiativeOrder(pruned.order)
-        setInitiativeIndex(pruned.index)
-        // recursive continuation of the in-progress advance (exempt from the guard)
-        window.setTimeout(() => advanceInitiativeCore(), 0)
-        return
-      }
-      if (!isTokenAlive(tok, chars)) {
-        next += 1
-        continue
-      }
-      break
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const curToken = latestMap.tokens.find((token) => token.id === current.tokenId)
+    const previousRound = roundRef.current
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
+      type: 'end-turn',
+      actorTokenId: current.tokenId,
+      characterId: curToken?.characterId,
+    })
+    if (!headless.ok) {
+      pushCombatLog(`回合推进失败：${headless.reason}`, 'system')
+      return
     }
-
-    if (tryEndCombatIfNeeded()) return
-
-    if (next >= order.length) {
-      nextRound()
-      setInitiativeIndex(0)
-      initiativeIndexRef.current = 0
-      setInitiativeScroll(0)
-    } else {
-      setInitiativeIndex(next)
-      initiativeIndexRef.current = next
-      publishCombatState({
-        active: true,
-        round,
-        initiativeIndex: next,
-        initiativeOrder: order,
-        enemyApByToken: enemyApByTokenRef.current,
-      })
+    applyHeadlessCombatResult(headless)
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      if (event.type === 'turn-advanced' && event.round > previousRound) {
+        pushCombatLog(`进入第 ${event.round} 回合`, 'turn', event.round)
+        setInitiativeScroll(0)
+      }
     }
   }
 

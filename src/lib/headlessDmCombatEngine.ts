@@ -20,7 +20,7 @@ import {
   tokenCenterForAnchorCell,
   tokenFootprintDistanceCells,
 } from './gridCombat'
-import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive } from './combatTokens'
+import { checkCombatOutcome, decideTurnAction, hasActionableActor, isTokenAlive, shouldApplyDotTick } from './combatTokens'
 import { resolveCombatMovement, type CombatMovementMode } from './combatMovementPipeline'
 import { calmBreathState, isCalmMindActive, tickOutOfBreathOnEndTurn, triggerOutOfBreath } from './calmMind'
 import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './opportunityAttacks'
@@ -30,9 +30,17 @@ import { proficiencyBonus, type AbilityKey } from './dnd'
 import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
+import { IGNITE_STATUS_LABEL } from './ignite'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
-import { NO_MOVE_STATUS_LABEL, RESTRAINED_STATUS_LABEL, VULNERABLE_STATUS_LABEL } from './tokenStatus'
+import {
+  BURNING_STATUS_LABEL,
+  NO_MOVE_STATUS_LABEL,
+  POISON_STATUS_LABEL,
+  RESTRAINED_STATUS_LABEL,
+  VULNERABLE_STATUS_LABEL,
+} from './tokenStatus'
 import { isTokenMovementLocked } from './combatStatus'
+import { dotDamageFor } from './statusDamage'
 import { creatureSizeToFootprintCells, sizeFromTokenSize } from './monsterTypes'
 
 export interface HeadlessEnemyApState {
@@ -2953,6 +2961,9 @@ function advanceHeadlessTurn(state: HeadlessDmCombatState, events: HeadlessComba
     const wrapped = state.initiativeIndex + 1 >= state.initiativeOrder.length
     state.initiativeIndex = wrapped ? 0 : state.initiativeIndex + 1
     if (wrapped) {
+      applyHeadlessRoundWrapEffects(state, events)
+      maybeEndCombat(state, events)
+      if (!state.active) return
       state.round += 1
       resetRoundAp(state)
     }
@@ -2967,16 +2978,81 @@ function advanceHeadlessTurn(state: HeadlessDmCombatState, events: HeadlessComba
   } while (guard > 0)
 }
 
+function decrementTokenStatus(
+  token: Token,
+  patch: Partial<Token>,
+  field: 'burningTurns' | 'igniteTurns' | 'poisonTurns' | 'knockbackTurns' | 'stunTurns' | 'restrainedTurns' | 'vulnerableTurns' | 'noMoveTurns' | 'illusionDanceTurns',
+  conditions: string[] | null,
+  conditionLabel?: string,
+): string[] | null {
+  const current = token[field] ?? 0
+  if (current <= 0) return conditions
+  patch[field] = Math.max(0, current - 1)
+  if (patch[field] === 0 && conditions && conditionLabel) {
+    return conditions.filter((condition) => condition !== conditionLabel)
+  }
+  return conditions
+}
+
+function applyHeadlessRoundWrapEffects(state: HeadlessDmCombatState, events: HeadlessCombatEvent[]) {
+  const tokens = [...state.map.tokens]
+  for (const token of tokens) {
+    const latestToken = state.map.tokens.find((item) => item.id === token.id)
+    if (!latestToken) continue
+    const dot = dotDamageFor(latestToken)
+    if (shouldApplyDotTick(latestToken, state.characters, dot)) {
+      applyDamageToTarget(state, latestToken, dot, events)
+    }
+
+    const afterDamageToken = state.map.tokens.find((item) => item.id === token.id) ?? latestToken
+    const character = afterDamageToken.characterId ? findCharacter(state, afterDamageToken.characterId) : undefined
+    let conditions = character ? [...character.conditions] : null
+    const patch: Partial<Token> = {}
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'burningTurns', conditions, BURNING_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'igniteTurns', conditions, IGNITE_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'poisonTurns', conditions, POISON_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'knockbackTurns', conditions, KNOCKBACK_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'stunTurns', conditions, STUN_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'restrainedTurns', conditions, RESTRAINED_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'vulnerableTurns', conditions, VULNERABLE_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'noMoveTurns', conditions, NO_MOVE_STATUS_LABEL)
+    conditions = decrementTokenStatus(afterDamageToken, patch, 'illusionDanceTurns', conditions)
+
+    if (Object.keys(patch).length > 0) {
+      updateToken(state, afterDamageToken.id, (item) => ({ ...item, ...patch }))
+    }
+    if (character && conditions && conditions.length !== character.conditions.length) {
+      updateCharacter(state, character.id, (item) => ({ ...item, conditions }))
+    }
+  }
+
+  if (state.round === 1) {
+    const characterIds = new Set(state.map.tokens.map((token) => token.characterId).filter((id): id is string => !!id))
+    for (const characterId of characterIds) {
+      const character = findCharacter(state, characterId)
+      if (!character || !findClassTrait(character, 'silentDraw') || character.combatBuffs?.silentDrawUsed) continue
+      updateCharacter(state, character.id, (item) => ({
+        ...item,
+        combatBuffs: { ...item.combatBuffs, silentDrawUsed: true },
+      }))
+    }
+  }
+}
+
 function resetRoundAp(state: HeadlessDmCombatState) {
   state.characters = state.characters.map((character) => ({
     ...character,
     currentAP: character.currentHp > 0 ? character.actionPoints : character.currentAP,
   }))
+  const nextEnemyApByToken: Record<string, HeadlessEnemyApState> = {}
   for (const token of state.map.tokens) {
     if (token.type !== 'enemy') continue
     const existing = state.enemyApByToken[token.id]
-    state.enemyApByToken[token.id] = { current: existing?.max ?? 2, max: existing?.max ?? 2 }
+    if (isTokenAlive(token, state.characters)) {
+      nextEnemyApByToken[token.id] = { current: existing?.max ?? 2, max: existing?.max ?? 2 }
+    }
   }
+  state.enemyApByToken = nextEnemyApByToken
 }
 
 function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEvent[]) {

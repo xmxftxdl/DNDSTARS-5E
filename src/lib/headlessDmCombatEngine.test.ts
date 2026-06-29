@@ -3392,6 +3392,58 @@ describe('headless DM combat engine', () => {
     expect(secondAdvance.state.enemyApByToken.dragon.current).toBe(2)
   })
 
+  it('applies round wrap status ticks and DOT through headless DM authority', () => {
+    const woundedHero = character({
+      currentHp: 20,
+      currentAP: 0,
+      conditions: ['燃烧'],
+    })
+    const combat = state({
+      characters: [woundedHero],
+      initiativeIndex: 1,
+      enemyApByToken: { dragon: { current: 0, max: 2 } },
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: woundedHero.id,
+          hp: 20,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+          burningTurns: 1,
+        }),
+        token({
+          id: 'dragon',
+          label: 'Dragon',
+          type: 'enemy',
+          poolId: 'wyrmling-red',
+          hp: 52,
+          maxHp: 52,
+          x: 455,
+          y: 175,
+        }),
+      ]),
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'end-turn',
+      actorTokenId: 'dragon',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters.find((item) => item.id === woundedHero.id)
+    const heroToken = result.state.map.tokens.find((item) => item.id === 'hero-token')
+    expect(result.state.round).toBe(2)
+    expect(hero?.currentAP).toBe(2)
+    expect(hero?.currentHp).toBeLessThan(20)
+    expect(hero?.conditions).not.toContain('燃烧')
+    expect(heroToken?.burningTurns).toBe(0)
+    expect(result.state.enemyApByToken.dragon.current).toBe(2)
+  })
+
   it('applies player end-turn cooldown ticks in headless DM authority', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', cooldown: 3, remaining: 2 })
     const combat = state({
