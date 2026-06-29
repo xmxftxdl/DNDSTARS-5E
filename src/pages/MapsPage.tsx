@@ -269,7 +269,6 @@ export default function MapsPage() {
 
   const characters = useCharacterStore((s) => s.characters)
   const endTurn = useCharacterStore((s) => s.endTurn)
-  const notifyCombatMove = useCharacterStore((s) => s.notifyCombatMove)
   const spendAP = useCharacterStore((s) => s.spendAP)
   const updateChar = useCharacterStore((s) => s.update)
 
@@ -6464,12 +6463,14 @@ export default function MapsPage() {
         return
       }
 
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+      const moveAction = {
         type: 'move-token',
         actorTokenId: action.actorTokenId,
         characterId: action.characterId,
         targetPosition: action.targetPosition,
-      })
+      } as const
+      const headlessSnapshot = createHeadlessStateSnapshot(map)
+      const headless = resolveHeadlessDmAction(headlessSnapshot, moveAction)
       if (!headless.ok) {
         acknowledgePlayerAction(
           action,
@@ -6486,7 +6487,6 @@ export default function MapsPage() {
         headless.state.map.tokens.find((item) => item.id === token.id) ??
         snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
       const movedFeet = moved?.feet ?? 0
-      const headlessActor = headless.state.characters.find((c) => c.id === actor.id)
 
       const opportunityEvents = opportunityTriggeredEvents(headless.events, token.id)
       if (opportunityEvents.length === 0) {
@@ -6499,7 +6499,20 @@ export default function MapsPage() {
         return
       }
 
-      if (headlessActor) updateChar(actor.id, { currentAP: headlessActor.currentAP })
+      const deferred = resolveHeadlessDmAction(headlessSnapshot, {
+        ...moveAction,
+        deferTokenMove: true,
+      })
+      if (!deferred.ok) {
+        acknowledgePlayerAction(
+          action,
+          'rejected',
+          deferred.reason === 'movement-locked' ? 'no-move' : deferred.reason,
+        )
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(deferred)
       await resolveOpportunityAttacksForMove(
         token,
         targetPosition,
@@ -6513,9 +6526,24 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'accepted', 'mover-defeated', { x: token.x, y: token.y })
         return
       }
-      updateToken(map.id, token.id, targetPosition)
+      const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
+      const committed = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMapAfterOpportunity), {
+        type: 'commit-token-move',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        targetPosition,
+        feet: movedFeet,
+      })
+      if (!committed.ok) {
+        completePlayerActionRequest(action)
+        acknowledgePlayerAction(action, 'rejected', committed.reason)
+        return
+      }
+      applyHeadlessCombatResult(committed)
+      for (const event of committed.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
       pushApLog(actor, 1, '移动', `${movedFeet} 尺`)
-      if (moved?.triggersMoveEffects) notifyCombatMove(actor.id)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
       return

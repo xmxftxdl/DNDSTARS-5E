@@ -460,6 +460,78 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('can defer player token movement until opportunity attacks are resolved', () => {
+    const combat = state({
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 1, max: 2 } },
+    })
+
+    const deferred = resolveHeadlessDmAction(combat, {
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 385, y: 175 },
+      deferTokenMove: true,
+    })
+
+    expect(deferred.ok).toBe(true)
+    if (!deferred.ok) return
+    expect(deferred.state.characters[0].currentAP).toBe(1)
+    expect(deferred.state.map.tokens.find((item) => item.id === 'hero-token')).toMatchObject({ x: 175, y: 175 })
+    expect(deferred.events).toContainEqual(
+      expect.objectContaining({
+        type: 'token-moved',
+        tokenId: 'hero-token',
+        to: { x: 385, y: 175 },
+      }),
+    )
+    expect(deferred.events).toContainEqual({
+      type: 'opportunity-triggered',
+      attackerTokenId: 'goblin',
+      movingTokenId: 'hero-token',
+    })
+
+    const committed = resolveHeadlessDmAction(deferred.state, {
+      type: 'commit-token-move',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 385, y: 175 },
+      feet: 15,
+    })
+
+    expect(committed.ok).toBe(true)
+    if (!committed.ok) return
+    expect(committed.state.map.tokens.find((item) => item.id === 'hero-token')).toMatchObject({ x: 385, y: 175 })
+    expect(committed.events).toContainEqual(
+      expect.objectContaining({
+        type: 'token-moved',
+        tokenId: 'hero-token',
+        feet: 15,
+      }),
+    )
+  })
+
   it('does not emit opportunity triggers for disengaged movers', () => {
     const combat = state({
       disengagedCharacterIds: ['hero'],

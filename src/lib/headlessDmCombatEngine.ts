@@ -198,6 +198,7 @@ export interface HeadlessPlayerMoveAction {
   characterId: string
   targetPosition: { x: number; y: number }
   mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap' | 'skill-free-move' | 'calm-spirit-move'>
+  deferTokenMove?: boolean
 }
 
 export interface HeadlessEnemyMoveAction {
@@ -433,6 +434,14 @@ export interface HeadlessEndTurnAction {
   characterId?: string
 }
 
+export interface HeadlessCommitTokenMoveAction {
+  type: 'commit-token-move'
+  actorTokenId: string
+  characterId: string
+  targetPosition: { x: number; y: number }
+  feet?: number
+}
+
 export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
   | HeadlessEnemyMoveAction
@@ -449,6 +458,7 @@ export type HeadlessCombatAction =
   | HeadlessAoeAttackAction
   | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
+  | HeadlessCommitTokenMoveAction
 
 export type HeadlessCombatFailureReason =
   | 'combat-ended'
@@ -642,6 +652,8 @@ export function resolveHeadlessDmAction(
       return resolveCalmSpirit(next, action, events)
     case 'opportunity-attack-token':
       return resolveOpportunityAttack(next, action, dice, events)
+    case 'commit-token-move':
+      return resolveCommitTokenMove(next, action, events)
     case 'end-turn': {
       if (action.characterId) {
         const actor = findCharacter(next, action.characterId)
@@ -771,7 +783,9 @@ function resolveMove(
     }
   }
 
-  updateToken(state, movement.token.id, (item) => ({ ...item, ...movement.to }))
+  if (!action.deferTokenMove) {
+    updateToken(state, movement.token.id, (item) => ({ ...item, ...movement.to }))
+  }
   events.push({
     type: 'token-moved',
     tokenId: movement.token.id,
@@ -780,17 +794,54 @@ function resolveMove(
     feet: movement.feet,
     triggersMoveEffects: movement.triggersMoveEffects,
   })
+  if (!action.deferTokenMove) {
+    events.push({
+      type: 'log',
+      text:
+        mode === 'agile-leap'
+          ? `${actor.name} 灵巧跳跃移动 ${movement.feet} 尺。`
+          : mode === 'skill-free-move'
+            ? `${actor.name} 技能移动 ${movement.feet} 尺。`
+            : mode === 'calm-spirit-move'
+              ? `${actor.name} 安定心神移动 ${movement.feet} 尺。`
+            : `${actor.name} 移动 ${movement.feet} 尺。`,
+    })
+  }
+  return succeed(state, events)
+}
+
+function resolveCommitTokenMove(
+  state: HeadlessDmCombatState,
+  action: HeadlessCommitTokenMoveAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  const actor = findCharacter(state, action.characterId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !actor ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, state.map)
+  const from = { x: actorToken.x, y: actorToken.y }
+  updateToken(state, actorToken.id, (item) => ({ ...item, ...to }))
+  const feet =
+    action.feet ??
+    cellDistance(pixelToCell(from.x, from.y, state.map), pixelToCell(to.x, to.y, state.map)) *
+      (state.map.feetPerCell ?? 5)
   events.push({
-    type: 'log',
-    text:
-      mode === 'agile-leap'
-        ? `${actor.name} 灵巧跳跃移动 ${movement.feet} 尺。`
-        : mode === 'skill-free-move'
-          ? `${actor.name} 技能移动 ${movement.feet} 尺。`
-          : mode === 'calm-spirit-move'
-            ? `${actor.name} 安定心神移动 ${movement.feet} 尺。`
-          : `${actor.name} 移动 ${movement.feet} 尺。`,
+    type: 'token-moved',
+    tokenId: actorToken.id,
+    from,
+    to,
+    feet,
+    triggersMoveEffects: false,
   })
+  events.push({ type: 'log', text: `${actor.name} 移动 ${feet} 尺。` })
   return succeed(state, events)
 }
 
