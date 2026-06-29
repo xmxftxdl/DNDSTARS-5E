@@ -329,6 +329,12 @@ export interface HeadlessStableMindAction {
   characterId: string
 }
 
+export interface HeadlessArcaneSurgeAction {
+  type: 'arcane-surge'
+  actorTokenId: string
+  characterId: string
+}
+
 export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
@@ -418,6 +424,7 @@ export type HeadlessCombatAction =
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
   | HeadlessStableMindAction
+  | HeadlessArcaneSurgeAction
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
   | HeadlessCalmSpiritAction
@@ -581,6 +588,7 @@ export function resolveHeadlessDmAction(
   if (
     action.type !== 'opportunity-attack-token' &&
     action.type !== 'stable-mind' &&
+    action.type !== 'arcane-surge' &&
     (!turn || turn.tokenId !== action.actorTokenId)
   ) {
     return fail(next, 'stale-turn', events)
@@ -603,6 +611,8 @@ export function resolveHeadlessDmAction(
       return resolveEnemyAttack(next, action, dice, events)
     case 'stable-mind':
       return resolveStableMind(next, action, events)
+    case 'arcane-surge':
+      return resolveArcaneSurge(next, action, events)
     case 'activate-feature':
       return resolveActivateFeature(next, action, dice, events)
     case 'qi-reduce-cooldown':
@@ -1131,6 +1141,37 @@ function resolveStableMind(
     ),
   }))
   events.push({ type: 'log', text: `${actor.name} 发动残影脱身：抵消敏捷豁免后仍会受到的伤害。` })
+  return succeed(state, events)
+}
+
+function resolveArcaneSurge(
+  state: HeadlessDmCombatState,
+  action: HeadlessArcaneSurgeAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const actor = findCharacter(state, action.characterId)
+  if (!actor) return fail(state, 'invalid-actor', events)
+  const trait = actor.traits.find((item) => item.featureKey === 'arcaneSurge')
+  if (!trait || trait.uses <= 0) return fail(state, 'invalid-skill', events)
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    currentHp: 1,
+    traits: item.traits.map((currentTrait) =>
+      currentTrait.featureKey === 'arcaneSurge'
+        ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+        : currentTrait,
+    ),
+  }))
+  syncCharacterTokenHp(state, actor.id)
+  events.push({ type: 'log', text: `${actor.name} 发动魔法浪涌：生命保留为 1。` })
   return succeed(state, events)
 }
 

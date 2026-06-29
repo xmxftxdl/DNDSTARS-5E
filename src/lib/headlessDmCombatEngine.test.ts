@@ -647,6 +647,42 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('resolves arcane surge as an interrupt outside the actor turn', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentHp: 6,
+          traits: [
+            {
+              id: 'arcane-surge',
+              name: '魔法浪涌',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'arcaneSurge',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'arcane-surge',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const heroToken = result.state.map.tokens.find((item) => item.id === 'hero-token')
+    expect(hero.currentHp).toBe(1)
+    expect(heroToken?.hp).toBe(1)
+    expect(hero.traits.find((trait) => trait.featureKey === 'arcaneSurge')?.uses).toBe(0)
+  })
+
   it('rejects stable mind when AP is unavailable', () => {
     const combat = state({
       initiativeIndex: 1,

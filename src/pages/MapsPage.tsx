@@ -269,7 +269,6 @@ export default function MapsPage() {
 
   const characters = useCharacterStore((s) => s.characters)
   const endTurn = useCharacterStore((s) => s.endTurn)
-  const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
   const notifyCombatMove = useCharacterStore((s) => s.notifyCombatMove)
   const spendAP = useCharacterStore((s) => s.spendAP)
   const updateChar = useCharacterStore((s) => s.update)
@@ -4144,9 +4143,20 @@ export default function MapsPage() {
             tone: 'violet',
           })
         ) {
-          activateClassFeature(before.id, 'arcaneSurge')
-          updateChar(before.id, { currentHp: 1 })
-          syncTargetHp(before.id)
+          const liveMap = useMapStore.getState().maps.find((map) => map.id === liveMapId) ?? activeMap
+          const actorToken = liveMap.tokens.find((token) => token.type === 'player' && token.characterId === before.id)
+          const headless = actorToken
+            ? resolveHeadlessDmAction(createHeadlessStateSnapshot(liveMap), {
+                type: 'arcane-surge',
+                actorTokenId: actorToken.id,
+                characterId: before.id,
+              })
+            : null
+          if (!headless?.ok) return
+          applyHeadlessCombatResult(headless)
+          for (const event of headless.events) {
+            if (event.type === 'log') pushCombatLog(event.text, 'turn')
+          }
           combatLabel = `${combatLabel ? `${combatLabel} · ` : ''}魔法浪涌：生命保留为 1`
           return
         }
