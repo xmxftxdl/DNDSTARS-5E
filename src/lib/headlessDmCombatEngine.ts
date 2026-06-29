@@ -336,6 +336,7 @@ export interface HeadlessAoeTargetPacket {
   targetTokenId: string
   saveD20?: number
   stunSaveD20?: number
+  extraDamageGroups?: HeadlessExtraDamageGroup[]
 }
 
 export interface HeadlessOpportunityAttackAction {
@@ -1584,7 +1585,24 @@ function resolveAoeAttack(
   for (const [packetIndex, packet] of action.targetPackets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
     if (!targetToken || !isTokenAlive(targetToken, state.characters)) continue
-    const adjusted = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
+    const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
+    for (const group of packet.extraDamageGroups ?? []) {
+      const values = resolveDiceValues(group.values, dice, group.values?.length ?? 0, group.sides)
+      if (!values) return fail(state, 'invalid-dice', events)
+      if (values.length > 0) extraDamageGroups.push({ values, sides: group.sides })
+    }
+    for (const group of extraDamageGroups) {
+      events.push({
+        type: 'dice-rolled',
+        notation: `${group.values.length}d${group.sides}`,
+        values: group.values,
+        total: group.values.reduce((sum, value) => sum + value, 0),
+      })
+    }
+    const targetDamageValues = [...diceValues, ...extraDamageGroups.flatMap((group) => group.values)]
+    const targetBaseDamage =
+      extraDamageGroups.length > 0 ? resolveAttackDamageTotal(actor, skill, targetDamageValues) : baseDamage
+    const adjusted = adjustDamageForTarget(state, targetBaseDamage, actor, targetToken, damageType)
     let total = adjusted.damage
     let saveD20: number | undefined
     let saveMod: number | undefined
@@ -1639,9 +1657,9 @@ function resolveAoeAttack(
       targetTokenId: targetToken.id,
       skillId: skill.id,
       skillName: skill.name,
-      damageValues: diceValues,
-      diceTotal: diceValues.reduce((sum, value) => sum + value, 0),
-      baseDamage,
+      damageValues: targetDamageValues,
+      diceTotal: targetDamageValues.reduce((sum, value) => sum + value, 0),
+      baseDamage: targetBaseDamage,
       damageBeforeSave: adjusted.damage,
       modifier: adjusted.modifier,
       diff: adjusted.diff,

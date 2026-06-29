@@ -7203,10 +7203,7 @@ export default function MapsPage() {
     }
     if (opts.doubleArrow && buffs?.preciseStrikeReady) return false
     if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
-    const unsupportedTraitKeys = new Set([
-      'takeoff',
-    ])
-    return !actor.traits.some((trait) => trait.featureKey && unsupportedTraitKeys.has(trait.featureKey))
+    return true
   }
 
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
@@ -7980,20 +7977,39 @@ export default function MapsPage() {
         const shouldStun =
           skill.skillTreeId === 'focusShot' &&
           skillGrantsStun(skill.skillTreeId, skillRank)
+        const takeoffTrait = skill.skillTreeId === 'whirlwindKick' ? findClassTrait(actor, 'takeoff') : undefined
         const targetPackets = []
         for (const target of targets) {
           const targetChar = target.characterId
             ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
             : undefined
+          const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
+          if (takeoffTrait && tokenHasKnockbackNow(target, targetChar)) {
+            const count = Math.min(3, takeoffTrait.level)
+            extraDamageGroups.push({
+              values: await rollDiceBoxValues(count, 6, `${skill.name} takeoff extra damage`, target.label),
+              sides: 6,
+            })
+          }
           if (!saveMode) {
-            targetPackets.push({ targetTokenId: target.id, saveD20: undefined, stunSaveD20: undefined })
+            targetPackets.push({
+              targetTokenId: target.id,
+              saveD20: undefined,
+              stunSaveD20: undefined,
+              extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
+            })
             continue
           }
           const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar?.name ?? target.label)
           const stunSaveD20 = shouldStun
             ? await rollDiceBoxD20('浣撹川璞佸厤 D20', targetChar?.name ?? target.label)
             : undefined
-          targetPackets.push({ targetTokenId: target.id, saveD20, stunSaveD20 })
+          targetPackets.push({
+            targetTokenId: target.id,
+            saveD20,
+            stunSaveD20,
+            extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
+          })
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'aoe-attack',

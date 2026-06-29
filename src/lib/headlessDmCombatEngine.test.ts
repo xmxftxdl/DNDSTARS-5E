@@ -1699,6 +1699,83 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('applies per-target AOE extra damage without changing other targets', () => {
+    const whirlwindKick = skill({
+      id: 'whirlwind-kick',
+      name: 'Whirlwind Kick',
+      skillTreeId: 'whirlwindKick',
+      tags: ['melee'],
+      damageCount: 3,
+      damageSides: 4,
+      cooldown: 2,
+      remaining: 0,
+    })
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+          saveDC: 12,
+          combatSkills: [skill(), whirlwindKick],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'knocked',
+          label: 'Knocked',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+        token({
+          id: 'standing',
+          label: 'Standing',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 175,
+          y: 245,
+        }),
+      ]),
+      enemyApByToken: { knocked: { current: 0, max: 2 }, standing: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'whirlwind-kick',
+      diceValues: [4, 4, 4],
+      saveMode: 'half',
+      targetPackets: [
+        { targetTokenId: 'knocked', saveD20: 1, extraDamageGroups: [{ values: [6], sides: 6 }] },
+        { targetTokenId: 'standing', saveD20: 1 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const knocked = result.state.map.tokens.find((item) => item.id === 'knocked')
+    const standing = result.state.map.tokens.find((item) => item.id === 'standing')
+    expect(knocked?.hp).toBe(22)
+    expect(standing?.hp).toBe(28)
+    const resolved = result.events.filter((event) => event.type === 'aoe-target-resolved')
+    expect(resolved[0]).toMatchObject({ targetTokenId: 'knocked', damageValues: [4, 4, 4, 6], total: 18 })
+    expect(resolved[1]).toMatchObject({ targetTokenId: 'standing', damageValues: [4, 4, 4], total: 12 })
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d6', values: [6], total: 6 })
+  })
+
   it('applies focus shot stun only to failed constitution saves', () => {
     const focusShot = skill({
       id: 'focus-shot',
