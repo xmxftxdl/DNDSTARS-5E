@@ -116,6 +116,7 @@ import {
 } from '../lib/combatResolutionPipeline'
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
+  resolveHeadlessGaleComboConsumption,
   resolveHeadlessGaleComboChoice,
   resolveHeadlessDmAction,
   type HeadlessCombatEvent,
@@ -702,13 +703,16 @@ export default function MapsPage() {
   }
 
   const consumeGaleComboReady = (characterId: string, actionLabel: string) => {
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === characterId)
-    if (!latest?.combatBuffs?.galeComboReady) return false
-    activateClassFeature(characterId, 'galeCombo')
-    updateChar(characterId, {
-      combatBuffs: { ...latest.combatBuffs, galeComboReady: undefined },
+    if (!activeMap) return false
+    const headless = resolveHeadlessGaleComboConsumption(createHeadlessStateSnapshot(activeMap), {
+      characterId,
+      actionLabel,
     })
-    pushCombatLog(`${latest.name} 消耗疾风连击：${actionLabel} 不消耗 AP。`, 'turn')
+    if (!headless.ok) return false
+    applyHeadlessCombatResult({ ok: true, state: headless.state, events: headless.events })
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
     return true
   }
 

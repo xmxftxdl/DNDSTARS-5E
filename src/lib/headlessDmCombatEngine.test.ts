@@ -6,6 +6,7 @@ import {
   createFixedHeadlessDiceRoller,
   createSeededHeadlessDiceRoller,
   resolveHeadlessDmAction,
+  resolveHeadlessGaleComboConsumption,
   resolveHeadlessGaleComboChoice,
   startHeadlessCombat,
   type HeadlessDmCombatState,
@@ -3233,6 +3234,38 @@ describe('headless DM combat engine', () => {
     const hero = result.state.characters[0]
     expect(hero.combatBuffs?.galeComboReady).toBe(true)
     expect(hero.traits[0].uses).toBe(1)
+  })
+
+  it('consumes a prepared Gale Combo marker through the headless framework', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { galeComboReady: true },
+          traits: [
+            {
+              id: 'gale-combo',
+              name: '疾风连击',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'galeCombo',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessGaleComboConsumption(combat, {
+      characterId: 'hero',
+      actionLabel: '基础射击',
+    })
+
+    expect(result.ok).toBe(true)
+    const hero = result.state.characters[0]
+    expect(hero.combatBuffs?.galeComboReady).toBeUndefined()
+    expect(hero.traits[0].uses).toBe(0)
+    expect(result.events.some((event) => event.type === 'log' && event.text.includes('消耗疾风连击'))).toBe(true)
   })
 
   it('uses Gale Combo to waive the next attack AP, then spends one use and clears the marker', () => {

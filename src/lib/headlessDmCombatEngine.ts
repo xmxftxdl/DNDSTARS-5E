@@ -377,6 +377,13 @@ export interface HeadlessGaleComboChoiceResult {
   reason?: 'not-found' | 'unavailable'
 }
 
+export interface HeadlessGaleComboConsumptionResult {
+  ok: boolean
+  state: HeadlessDmCombatState
+  events: HeadlessCombatEvent[]
+  reason?: 'not-found' | 'unavailable'
+}
+
 export interface HeadlessDiceRoller {
   rollDice(count: number, sides: number, label?: string): number[]
 }
@@ -544,6 +551,21 @@ export function resolveHeadlessGaleComboChoice(
     type: 'log',
     text: `${character.name} 发动疾风连击：下一次技能或基础射击不消耗 AP。`,
   })
+  return { ok: true, state: next, events }
+}
+
+export function resolveHeadlessGaleComboConsumption(
+  state: HeadlessDmCombatState,
+  params: { characterId: string; actionLabel: string },
+): HeadlessGaleComboConsumptionResult {
+  const next = cloneHeadlessCombatState(state)
+  const events: HeadlessCombatEvent[] = []
+  const character = findCharacter(next, params.characterId)
+  if (!character) return { ok: false, state: next, events, reason: 'not-found' }
+  if (!character.combatBuffs?.galeComboReady) {
+    return { ok: false, state: next, events, reason: 'unavailable' }
+  }
+  consumeGaleComboReady(next, character.id, params.actionLabel, events)
   return { ok: true, state: next, events }
 }
 
@@ -2443,9 +2465,9 @@ function consumeGaleComboReady(
   characterId: string,
   actionLabel: string,
   events: HeadlessCombatEvent[],
-) {
+): boolean {
   const character = findCharacter(state, characterId)
-  if (!character?.combatBuffs?.galeComboReady) return
+  if (!character?.combatBuffs?.galeComboReady) return false
   updateCharacter(state, characterId, (item) => ({
     ...item,
     traits: item.traits.map((trait) =>
@@ -2456,6 +2478,7 @@ function consumeGaleComboReady(
     combatBuffs: { ...item.combatBuffs, galeComboReady: undefined },
   }))
   events.push({ type: 'log', text: `${character.name} 消耗疾风连击：${actionLabel} 不消耗 AP。` })
+  return true
 }
 
 function applyStillWatersHealingOnBreathShift(
