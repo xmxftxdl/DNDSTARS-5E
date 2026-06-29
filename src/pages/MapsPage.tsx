@@ -116,6 +116,7 @@ import {
 } from '../lib/combatResolutionPipeline'
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
+  resolveHeadlessGaleComboChoice,
   resolveHeadlessDmAction,
   type HeadlessCombatEvent,
   type HeadlessCombatResult,
@@ -741,11 +742,20 @@ export default function MapsPage() {
       )
       return false
     }
-    const refreshedCaster = useCharacterStore.getState().characters.find((c) => c.id === casterId) ?? latestCaster
-    updateChar(casterId, {
-      combatBuffs: { ...refreshedCaster.combatBuffs, galeComboReady: true },
+    if (!activeMap) return false
+    const headless = resolveHeadlessGaleComboChoice(createHeadlessStateSnapshot(activeMap), {
+      characterId: casterId,
+      accepted: true,
+      triggerLabel,
     })
-    pushCombatLog(`${refreshedCaster.name} 发动疾风连击：下一次技能或基础射击不消耗 AP。`, 'turn')
+    if (!headless.ok) {
+      pushCombatLog(`${latestCaster.name} 疾风连击发动失败：${headless.reason ?? 'unavailable'}。`, 'system')
+      return false
+    }
+    applyHeadlessCombatResult({ ok: true, state: headless.state, events: headless.events })
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
     return true
   }
 
