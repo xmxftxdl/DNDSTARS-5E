@@ -7204,10 +7204,7 @@ export default function MapsPage() {
     if (opts.doubleArrow && buffs?.preciseStrikeReady) return false
     if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
     const unsupportedTraitKeys = new Set([
-      'animalMastery',
-      'arcaneDevour',
       'armorPiercing',
-      'comboFist',
       'explosiveArrow',
       'huntingCombo',
       'takeoff',
@@ -7618,6 +7615,27 @@ export default function MapsPage() {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(huntingMarkRank, 8, `${skill.name} 狩猎印记额外伤害`, targetToken.label),
             sides: 8,
+          })
+        }
+        const animalMasteryTrait = findClassTrait(actor, 'animalMastery')
+        if (!expectedTargetDodged && animalMasteryTrait && isBeastLikeTarget(targetToken)) {
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(animalMasteryTrait.level, 6, `${skill.name} animal mastery extra damage`, targetToken.label),
+            sides: 6,
+          })
+        }
+        const arcaneDevourTrait = findClassTrait(actor, 'arcaneDevour')
+        if (!expectedTargetDodged && arcaneDevourTrait && isMagicDamageSkill(skill)) {
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(arcaneDevourTrait.level, 6, `${skill.name} arcane devour extra damage`, targetToken.label),
+            sides: 6,
+          })
+        }
+        const comboFistTrait = actor.combatBuffs?.galeComboReady ? findClassTrait(actor, 'comboFist') : undefined
+        if (!expectedTargetDodged && comboFistTrait) {
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(comboFistTrait.level, 6, `${skill.name} combo fist extra damage`, targetToken.label),
+            sides: 6,
           })
         }
         const piercingInsightTrait = findClassTrait(actor, 'piercingInsight')
