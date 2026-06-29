@@ -3038,42 +3038,13 @@ export default function MapsPage() {
       pushCombatLog(`${attackerName} 借机攻击未执行：${headless.reason}`, 'system')
       return
     }
+    applyHeadlessCombatResult(headless)
 
     const resolved = headless.events.find(
       (event): event is Extract<HeadlessCombatEvent, { type: 'opportunity-resolved' }> =>
         event.type === 'opportunity-resolved',
     )
     if (!resolved) return
-
-    const syncCharacterIds = new Set<string>()
-    if (attackerToken.characterId) syncCharacterIds.add(attackerToken.characterId)
-    if (targetToken.characterId) syncCharacterIds.add(targetToken.characterId)
-    for (const characterId of syncCharacterIds) {
-      const nextChar = headless.state.characters.find((character) => character.id === characterId)
-      if (nextChar) {
-        updateChar(characterId, {
-          currentAP: nextChar.currentAP,
-          currentHp: nextChar.currentHp,
-          tempHp: nextChar.tempHp,
-        })
-      }
-    }
-
-    const nextTargetToken = headless.state.map.tokens.find((token) => token.id === targetToken.id)
-    if (nextTargetToken) updateToken(latestMap.id, targetToken.id, nextTargetToken)
-    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(headless.state.enemyApByToken)) {
-      enemyApByTokenRef.current = headless.state.enemyApByToken
-      setEnemyApByToken(headless.state.enemyApByToken)
-      publishCombatState({ enemyApByToken: headless.state.enemyApByToken })
-    }
-
-    const damageEvent = headless.events.find(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'damage-applied' }> =>
-        event.type === 'damage-applied' && event.targetTokenId === targetToken.id,
-    )
-    if (damageEvent && damageEvent.hpAfter <= 0) {
-      deferDeathHandling(targetToken.id, damageEvent.characterId)
-    }
 
     const total = resolved.total
     const bonus = total - resolved.rawDamage
