@@ -4620,6 +4620,28 @@ export default function MapsPage() {
       }
       return
     }
+    if (key === 'windBlade') {
+      const trait = findClassTrait(turnCharacter, 'windBlade')
+      if (!trait) return
+      if (!activeMap) return
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: 'windBlade',
+      })
+      if (!headless.ok) {
+        await showCombatNotice('风刃乱舞', headless.reason, 'amber')
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      return
+    }
   }
 
   const getEnemyApState = (tokenId: string) =>
@@ -6235,8 +6257,9 @@ export default function MapsPage() {
       } else if (wantsDodge != null) {
         const estimatedDamage = Math.max(1, result.damage ?? result.attack?.total ?? 0)
         const flexibleBonus = targetChar.combatBuffs?.flexibleBodyBonus ?? 0
+        const windBladeFreeDodge = (targetChar.combatBuffs?.windBladeFreeDodgeTurns ?? 0) > 0
         const dodgeTarget = flexibleBonus > 0 ? { ...targetChar, ac: targetChar.ac + flexibleBonus } : targetChar
-        const canResolveDodge = wantsDodge && (dodgeApAlreadySpent || canAttemptDodge(targetChar))
+        const canResolveDodge = wantsDodge && (windBladeFreeDodge || dodgeApAlreadySpent || canAttemptDodge(targetChar))
         const dodgeD20 =
           canResolveDodge
             ? providedDodgeD20 ?? (await rollDiceBoxD20('D20', targetChar.name))
@@ -6246,6 +6269,10 @@ export default function MapsPage() {
           estimatedDamage,
           wantsDodge,
           () => {
+            if (windBladeFreeDodge) {
+              pushCombatLog(`${targetChar.name} 的风刃乱舞生效：本次闪避不消耗 AP。`, 'turn')
+              return true
+            }
             if (dodgeApAlreadySpent) return true
               const spent = spendAP(targetChar.id, 1)
               if (spent) {
@@ -6498,18 +6525,23 @@ export default function MapsPage() {
     }
     let dodgeApSpent = false
     if (wantsDodge) {
-      if (!canAttemptDodge(latest)) {
+      const windBladeFreeDodge = (latest.combatBuffs?.windBladeFreeDodgeTurns ?? 0) > 0
+      if (!windBladeFreeDodge && !canAttemptDodge(latest)) {
         void showCombatNotice('行动点不足', '无法尝试闪避。', 'amber')
         return
       }
-      const spent = spendAP(latest.id, 1)
-      if (!spent) {
-        void showCombatNotice('行动点不足', '无法尝试闪避。', 'amber')
-        return
+      if (!windBladeFreeDodge) {
+        const spent = spendAP(latest.id, 1)
+        if (!spent) {
+          void showCombatNotice('行动点不足', '无法尝试闪避。', 'amber')
+          return
+        }
+        const attackerName = activeMap?.tokens.find((t) => t.id === result.attackerTokenId)?.label ?? '敌人'
+        pushApLog(latest, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
+        dodgeApSpent = true
+      } else {
+        pushCombatLog(`${latest.name} 的风刃乱舞生效：本次闪避不消耗 AP。`, 'turn')
       }
-      const attackerName = activeMap?.tokens.find((t) => t.id === result.attackerTokenId)?.label ?? '敌人'
-      pushApLog(latest, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
-      dodgeApSpent = true
     }
     setDodgePrompt(null)
     void finishEnemyAttack(result, latest, wantsDodge, undefined, dodgeApSpent).then(onComplete)
@@ -7324,7 +7356,8 @@ export default function MapsPage() {
         action.featureKey === 'shadowVeil' ||
         action.featureKey === 'trackingArrow' ||
         action.featureKey === 'flexibleBody' ||
-        action.featureKey === 'showtime'
+        action.featureKey === 'showtime' ||
+        action.featureKey === 'windBlade'
       ) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const target = action.targetTokenId ? map.tokens.find((token) => token.id === action.targetTokenId) : undefined

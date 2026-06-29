@@ -923,6 +923,42 @@ describe('headless DM combat engine', () => {
     expect(hero.traits.find((trait) => trait.featureKey === 'showtime')?.uses).toBe(0)
   })
 
+  it('activates wind blade through headless DM authority by spending qi', () => {
+    const combat = state({
+      characters: [
+        character({
+          currentAP: 0,
+          qi: 2,
+          traits: [
+            {
+              id: 'wind-blade',
+              name: '风刃乱舞',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'windBlade',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'windBlade',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.qi).toBe(1)
+    expect(hero.combatBuffs?.windBladeFreeDodgeTurns).toBe(1)
+  })
+
   it('spends one calm spirit stack to arm free movement through headless DM authority', () => {
     const combat = state({
       characters: [
@@ -2796,6 +2832,65 @@ describe('headless DM combat engine', () => {
     expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
       actorTokenId: 'goblin',
       targetTokenId: 'hero-token',
+      targetDodged: true,
+      dodgeD20: 1,
+      total: 0,
+    })
+  })
+
+  it('lets wind blade dodge an enemy attack without spending AP', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentAP: 0,
+          combatBuffs: { windBladeFreeDodgeTurns: 1 },
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 12,
+          maxHp: 12,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      initiativeOrder: [entry('hero-token', 20), entry('goblin', 10)],
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'enemy-attack-token',
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      targetWantsDodge: true,
+      targetDodgeD20: 1,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.currentHp).toBe(30)
+    expect(result.events).toContainEqual({
+      type: 'log',
+      text: '新冒险者 的风刃乱舞生效：本次闪避不消耗 AP。',
+    })
+    expect(result.events.find((event) => event.type === 'enemy-attack-resolved')).toMatchObject({
       targetDodged: true,
       dodgeD20: 1,
       total: 0,

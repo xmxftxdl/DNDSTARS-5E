@@ -260,6 +260,7 @@ export interface HeadlessActivateFeatureAction {
     | 'trackingArrow'
     | 'flexibleBody'
     | 'showtime'
+    | 'windBlade'
   >
   targetTokenId?: string
   targetTokenIds?: string[]
@@ -663,7 +664,10 @@ function resolveActivateFeature(
     (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
     (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady) ||
     (action.featureKey === 'finale' && !!actor.combatBuffs?.finaleReady)
-  const requiresUse = action.featureKey !== 'stillWater' && action.featureKey !== 'flexibleBody'
+  const requiresUse =
+    action.featureKey !== 'stillWater' &&
+    action.featureKey !== 'flexibleBody' &&
+    action.featureKey !== 'windBlade'
   if (!trait || (!isToggleOff && requiresUse && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
 
   if (action.featureKey === 'eagleEye') {
@@ -839,6 +843,17 @@ function resolveActivateFeature(
       ),
     }))
     events.push({ type: 'log', text: `${actor.name} 激活演出时间：持续 2 回合。` })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'windBlade') {
+    if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      qi: Math.max(0, (item.qi ?? 0) - 1),
+      combatBuffs: { ...item.combatBuffs, windBladeFreeDodgeTurns: 1 },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活风刃乱舞：下回合开始前，回合外闪避不消耗 AP。` })
     return succeed(state, events)
   }
 
@@ -1628,7 +1643,12 @@ function resolveEnemyAttack(
   let dodgeTotal: number | undefined
   let targetAc: number | undefined
   if (action.targetWantsDodge && target) {
-    if (!action.targetDodgeApAlreadySpent && !spendCharacterAp(state, target.id, 1, targetToken.id, events)) {
+    const windBladeFreeDodge = (target.combatBuffs?.windBladeFreeDodgeTurns ?? 0) > 0
+    if (
+      !windBladeFreeDodge &&
+      !action.targetDodgeApAlreadySpent &&
+      !spendCharacterAp(state, target.id, 1, targetToken.id, events)
+    ) {
       events.push({ type: 'log', text: `${target.name} 尝试闪避，但 AP 不足。` })
     } else {
       const d20Values = resolveDiceValues(
@@ -1643,6 +1663,9 @@ function resolveEnemyAttack(
       targetAc = getAc(target)
       dodgeTotal = dodgeD20 + attackBonus
       targetDodged = dodgeTotal < targetAc
+      if (windBladeFreeDodge && !action.targetDodgeApAlreadySpent) {
+        events.push({ type: 'log', text: `${target.name} 的风刃乱舞生效：本次闪避不消耗 AP。` })
+      }
       events.push({
         type: 'log',
         text: `${target.name} 闪避 ${actorToken.label} 的 ${actionDef.name}：${dodgeD20}+${attackBonus}=${dodgeTotal} vs AC ${targetAc}，${targetDodged ? '闪避成功' : '闪避失败'}。`,

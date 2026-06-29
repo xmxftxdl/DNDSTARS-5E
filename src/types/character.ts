@@ -42,6 +42,8 @@ export interface CombatBuffs {
   stillWaterTempHpTurns?: number
   /** 演出时间剩余回合 */
   showtimeTurns?: number
+  /** Wind Blade: off-turn dodge does not spend AP until next own turn starts. */
+  windBladeFreeDodgeTurns?: number
   /** 疾风连击已就绪：下一次技能/基础射击免 AP */
   galeComboReady?: boolean
   /** 灵巧跳跃：剩余可免费移动尺数（闪避成功后） */
