@@ -3659,21 +3659,8 @@ export default function MapsPage() {
     setDisengagedCharIds(new Set())
     clearPlayerCombatUI()
     const order = buildInitiativeOrder(activeMap.tokens, characters)
-    const charIds = new Set<string>()
-    for (const entry of order) {
-      const tok = activeMap.tokens.find((t) => t.id === entry.tokenId)
-      if (tok?.characterId) charIds.add(tok.characterId)
-    }
     const shouldClearStatuses =
       isDM && window.confirm('开始战斗前是否清除当前地图所有参战单位的状态？')
-    if (shouldClearStatuses) {
-      for (const token of activeMap.tokens) {
-        updateToken(activeMap.id, token.id, TOKEN_STATUS_CLEAR_PATCH)
-      }
-      for (const cid of charIds) {
-        updateChar(cid, { conditions: [], combatBuffs: {}, tempHp: 0 })
-      }
-    }
     const initialEnemyAp: Record<string, { current: number; max: number }> = {}
     for (const token of activeMap.tokens) {
       if (token.type === 'enemy') initialEnemyAp[token.id] = { current: 2, max: 2 }
@@ -3690,16 +3677,20 @@ export default function MapsPage() {
     initiativeIndexRef.current = 0
     setInitiativeScroll(0)
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const started = startHeadlessCombat({
-      map: latestMap,
-      characters: useCharacterStore.getState().characters,
-      active: true,
-      round: 1,
-      initiativeIndex: 0,
-      initiativeOrder: order,
-      enemyApByToken: initialEnemyAp,
-      disengagedCharacterIds: [],
-    })
+    const started = startHeadlessCombat(
+      {
+        map: latestMap,
+        characters: useCharacterStore.getState().characters,
+        active: true,
+        round: 1,
+        initiativeIndex: 0,
+        initiativeOrder: order,
+        enemyApByToken: initialEnemyAp,
+        disengagedCharacterIds: [],
+      },
+      undefined,
+      { clearStatuses: shouldClearStatuses },
+    )
     applyHeadlessCombatResult({ ok: true, state: started, events: [] })
     publishCombatState({
       combatId: nextCombatId,

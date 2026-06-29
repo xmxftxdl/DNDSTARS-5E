@@ -40,7 +40,7 @@ import {
   RESTRAINED_STATUS_LABEL,
   VULNERABLE_STATUS_LABEL,
 } from './tokenStatus'
-import { isTokenMovementLocked } from './combatStatus'
+import { TOKEN_STATUS_CLEAR_PATCH, isTokenMovementLocked } from './combatStatus'
 import { dotDamageFor } from './statusDamage'
 import { creatureSizeToFootprintCells, sizeFromTokenSize } from './monsterTypes'
 
@@ -58,6 +58,10 @@ export interface HeadlessDmCombatState {
   initiativeOrder: InitiativeEntry[]
   enemyApByToken: Record<string, HeadlessEnemyApState>
   disengagedCharacterIds?: string[]
+}
+
+export interface HeadlessStartCombatOptions {
+  clearStatuses?: boolean
 }
 
 export type HeadlessCombatEvent =
@@ -549,12 +553,14 @@ export function cloneHeadlessCombatState(state: HeadlessDmCombatState): Headless
 export function startHeadlessCombat(
   state: HeadlessDmCombatState,
   dice: HeadlessDiceRoller = createSeededHeadlessDiceRoller(`${state.round}:start-combat`),
+  options: HeadlessStartCombatOptions = {},
 ): HeadlessDmCombatState {
   const next = cloneHeadlessCombatState(state)
   const events: HeadlessCombatEvent[] = []
   next.active = next.initiativeOrder.length > 0
   next.round = Math.max(1, next.round || 1)
   next.initiativeIndex = Math.min(Math.max(0, next.initiativeIndex || 0), Math.max(0, next.initiativeOrder.length - 1))
+  if (options.clearStatuses) clearCombatStartStatuses(next)
   resetCombatStartCharacters(next, dice, events)
   resetRoundAp(next)
   applyHeadlessCurrentTurnStart(next, events)
@@ -3179,6 +3185,21 @@ function activeCharacterIds(state: HeadlessDmCombatState): Set<string> {
 function skillCooldownRemaining(skill: Pick<CombatSkill, 'cooldown' | 'cdReduction'>): number {
   if (skill.cooldown <= 0) return 0
   return Math.max(1, skill.cooldown - skill.cdReduction)
+}
+
+function clearCombatStartStatuses(state: HeadlessDmCombatState) {
+  const participantIds = activeCharacterIds(state)
+  for (const token of state.map.tokens) {
+    updateToken(state, token.id, (item) => ({ ...item, ...TOKEN_STATUS_CLEAR_PATCH }))
+  }
+  for (const characterId of participantIds) {
+    updateCharacter(state, characterId, (character) => ({
+      ...character,
+      conditions: [],
+      combatBuffs: {},
+      tempHp: 0,
+    }))
+  }
 }
 
 function resetCombatStartCharacters(

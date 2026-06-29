@@ -187,6 +187,59 @@ describe('headless DM combat engine', () => {
     expect(started.enemyApByToken.dragon).toEqual({ current: 2, max: 2 })
   })
 
+  it('can clear map combat statuses during headless combat start', () => {
+    const hero = character({
+      conditions: ['燃烧', '眩晕'],
+      tempHp: 5,
+      combatBuffs: { outOfBreathTurns: 2, calmSpiritStacks: 3 },
+    })
+    const started = startHeadlessCombat(
+      state({
+        characters: [hero],
+        map: map([
+          token({
+            id: 'hero-token',
+            label: '新冒险者',
+            type: 'player',
+            characterId: hero.id,
+            hp: hero.currentHp,
+            maxHp: hero.maxHp,
+            x: 175,
+            y: 175,
+            burningTurns: 2,
+            huntingMarkStacks: 3,
+          }),
+          token({
+            id: 'dragon',
+            label: '红龙雏龙',
+            type: 'enemy',
+            poolId: 'wyrmling-red',
+            hp: 52,
+            maxHp: 52,
+            x: 455,
+            y: 175,
+            stunTurns: 1,
+            poisonTurns: 2,
+          }),
+        ]),
+      }),
+      undefined,
+      { clearStatuses: true },
+    )
+
+    const nextHero = started.characters[0]
+    const heroToken = started.map.tokens.find((item) => item.id === 'hero-token')
+    const dragon = started.map.tokens.find((item) => item.id === 'dragon')
+    expect(nextHero.conditions).toEqual([])
+    expect(nextHero.tempHp).toBe(0)
+    expect(nextHero.combatBuffs?.outOfBreathTurns).toBeUndefined()
+    expect(nextHero.combatBuffs?.calmSpiritStacks).toBeUndefined()
+    expect(heroToken?.burningTurns).toBe(0)
+    expect(heroToken?.huntingMarkStacks).toBe(0)
+    expect(dragon?.stunTurns).toBe(0)
+    expect(dragon?.poisonTurns).toBe(0)
+  })
+
   it('accepts player movement only through DM validation and spends AP', () => {
     const result = resolveHeadlessDmAction(state(), {
       type: 'move-token',
