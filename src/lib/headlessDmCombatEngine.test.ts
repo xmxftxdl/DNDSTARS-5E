@@ -3373,4 +3373,55 @@ describe('headless DM combat engine', () => {
     expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '2d8', values: [4, 5], total: 9 })
     expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d4', values: [3], total: 3 })
   })
+
+  it('resolves Precise Strike consumption through headless attack packets', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { preciseStrikeReady: true },
+          traits: [
+            {
+              id: 'precise-strike',
+              name: '精准打击',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'preciseStrike',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(
+      combat,
+      {
+        type: 'attack-token',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetTokenId: 'dragon',
+        skillId: 'basic-shot',
+        targetPackets: [
+          {
+            targetTokenId: 'dragon',
+            diceValues: [6],
+            targetDodgeMode: 'skip',
+            isCrit: true,
+            clearPreciseStrikeReadyOnHit: true,
+            spendPreciseStrikeUseOnHit: true,
+          },
+        ],
+      },
+      createFixedHeadlessDiceRoller([]),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.combatBuffs?.preciseStrikeReady).toBeUndefined()
+    expect(hero.traits.find((trait) => trait.featureKey === 'preciseStrike')?.uses).toBe(0)
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved?.isCrit).toBe(true)
+  })
 })

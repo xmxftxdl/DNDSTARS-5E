@@ -7195,7 +7195,6 @@ export default function MapsPage() {
     if (isOutOfBreath(actor)) return false
     const buffs = actor.combatBuffs
     if (
-      buffs?.preciseStrikeReady ||
       buffs?.calmSpiritCritBonusPercent ||
       buffs?.shadowVeilTargetId ||
       (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
@@ -7203,6 +7202,7 @@ export default function MapsPage() {
     ) {
       return false
     }
+    if (opts.doubleArrow && buffs?.preciseStrikeReady) return false
     const unsupportedTraitKeys = new Set([
       'animalMastery',
       'arcaneDevour',
@@ -7621,7 +7621,8 @@ export default function MapsPage() {
           extraDamageParts.push(...(await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label)))
         }
         const extraDamageValues = extraDamageParts.length > 0 ? extraDamageParts : undefined
-        const packetIsCrit = !!(action as typeof action & { isCrit?: boolean }).isCrit
+        const preciseStrikeReady = !!actor.combatBuffs?.preciseStrikeReady
+        const packetIsCrit = preciseStrikeReady || !!(action as typeof action & { isCrit?: boolean }).isCrit
         const explosiveArrowCritDice =
           !expectedTargetDodged && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
             ? skillRank >= 5
@@ -7722,6 +7723,8 @@ export default function MapsPage() {
           selfCooldownReductionPerClearedStatus: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 5,
           clearDoubleArrowReadyOnUse: doubleArrow || undefined,
           spendDoubleArrowUseOnHit: doubleArrow || undefined,
+          clearPreciseStrikeReadyOnHit: preciseStrikeReady || undefined,
+          spendPreciseStrikeUseOnHit: preciseStrikeReady || undefined,
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',

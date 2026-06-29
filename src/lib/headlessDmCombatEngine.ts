@@ -226,6 +226,8 @@ export interface HeadlessPlayerAttackPacket {
   selfCooldownReductionPerClearedStatus?: boolean
   clearDoubleArrowReadyOnUse?: boolean
   spendDoubleArrowUseOnHit?: boolean
+  clearPreciseStrikeReadyOnHit?: boolean
+  spendPreciseStrikeUseOnHit?: boolean
 }
 
 export interface HeadlessAttackEffectSavePacket {
@@ -1203,6 +1205,8 @@ function resolvePlayerAttack(
   let selfCooldownReduction = 0
   let shouldClearDoubleArrowReady = false
   let shouldSpendDoubleArrowUse = false
+  let shouldClearPreciseStrikeReady = false
+  let shouldSpendPreciseStrikeUse = false
   const cooldownReductions: Array<{ skillId: string; amount: number }> = []
   for (const [packetIndex, packet] of packets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
@@ -1317,6 +1321,8 @@ function resolvePlayerAttack(
     applyStatusOnHit(state, targetToken, skill, events)
     if (packet.clearDoubleArrowReadyOnUse) shouldClearDoubleArrowReady = true
     if (packet.spendDoubleArrowUseOnHit && adjusted.damage > 0) shouldSpendDoubleArrowUse = true
+    if (packet.clearPreciseStrikeReadyOnHit && adjusted.damage > 0) shouldClearPreciseStrikeReady = true
+    if (packet.spendPreciseStrikeUseOnHit && adjusted.damage > 0) shouldSpendPreciseStrikeUse = true
     if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
     if (packet.clearWindKickTreatKnockbackOnUse) clearWindKickTreatKnockback(state, actor.id)
     if (packet.grantBurstKickExtraD6OnHit && adjusted.damage > 0) {
@@ -1416,6 +1422,14 @@ function resolvePlayerAttack(
       combatBuffs: { ...item.combatBuffs, doubleArrowReady: undefined },
     }))
     events.push({ type: 'log', text: `${actor.name} 的双箭效果已结算。` })
+  }
+  if (shouldSpendPreciseStrikeUse) spendFeatureUse(state, actor.id, 'preciseStrike')
+  if (shouldClearPreciseStrikeReady) {
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, preciseStrikeReady: undefined },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 的精准打击效果已结算。` })
   }
   for (const reduction of cooldownReductions) {
     const result = reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
