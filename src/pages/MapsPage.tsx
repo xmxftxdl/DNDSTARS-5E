@@ -103,7 +103,6 @@ import {
   getAc,
   getAttackDefenseDiff,
   isMagicDamageSkill,
-  resolveAttackDamageTotal,
 } from '../lib/combatStats'
 import {
   CombatResolutionRunner,
@@ -121,7 +120,6 @@ import {
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
-import { findOpportunityAttackersForMove } from '../lib/opportunityAttacks'
 import {
   answerCombatInterrupt,
   COMBAT_INTERRUPT_RESOURCE,
@@ -152,13 +150,12 @@ import {
   type StableMindInterruptPayload,
   type StableMindInterruptResponse,
 } from '../lib/combatInterruptProtocol'
-import { adjustDamageAgainstToken, enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
+import { enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
   clampGridSize,
   cellKey,
   cellToPixel,
-  DND_FEET_PER_CELL,
   gridSizeBounds,
   isWithinMovementRange,
   cellDistance,
@@ -200,17 +197,11 @@ import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import { IGNITE_STATUS_LABEL } from '../lib/ignite'
 import { dotDamageFor } from '../lib/statusDamage'
 import {
-  formatKnockbackSaveLabel,
   getTokenAbilityMod,
   KNOCKBACK_DEFAULT_TURNS,
   KNOCKBACK_STATUS_LABEL,
-  resolveKnockbackSave,
-  skillGrantsKnockbackOnHit,
-  type KnockbackSaveResult,
 } from '../lib/knockback'
 import {
-  formatConSaveLabel,
-  resolveConSave,
   STUN_DEFAULT_TURNS,
   STUN_STATUS_LABEL,
 } from '../lib/stun'
@@ -257,7 +248,6 @@ import {
 import {
   reconcileEnemyAp,
   singleTargetRangeFeet,
-  statusDuration,
   buildInitiativeOrder,
   tokenIntersectsDeleteRect,
   seededDieValue,
@@ -293,7 +283,6 @@ export default function MapsPage() {
   const endTurn = useCharacterStore((s) => s.endTurn)
   const invokeSkill = useCharacterStore((s) => s.useSkill)
   const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
-  const spendQi = useCharacterStore((s) => s.spendQi)
   const damageChar = useCharacterStore((s) => s.damage)
   const notifyCombatMove = useCharacterStore((s) => s.notifyCombatMove)
   const spendAP = useCharacterStore((s) => s.spendAP)
@@ -357,7 +346,6 @@ export default function MapsPage() {
   const afterRollCallbacksRef = useRef<(() => void)[]>([])
   const pendingDeathKeysRef = useRef(new Set<string>())
   const d20RequestCounterRef = useRef(0)
-  const resolvingAoeRef = useRef(false)
   const applyingSharedCombatRef = useRef(false)
   const advancingTurnRef = useRef(false)
   const orderedCombatPublishRef = useRef(false)
@@ -759,6 +747,19 @@ export default function MapsPage() {
       if (event.type === 'log') pushCombatLog(event.text, 'turn')
     }
     return true
+  }
+
+  const maybeOfferGaleComboAfterHeadlessDamage = async (
+    caster: Character,
+    skill: CombatSkill,
+    events: HeadlessCombatEvent[],
+  ) => {
+    if (skill.skillTreeId !== 'whirlwindKick') return false
+    const causedKnockback = events.some(
+      (event) => event.type === 'status-added' && event.condition === KNOCKBACK_STATUS_LABEL,
+    )
+    if (!causedKnockback) return false
+    return offerGaleComboAfterDamageApplied(caster.id, caster)
   }
 
   const publishSharedDiceEvent = (event: SharedDiceState) => {
@@ -2384,14 +2385,6 @@ export default function MapsPage() {
     enemyTurnTimersRef.current.push(watchdog)
   }
 
-  type KnockbackPending = {
-    tokenId: string
-    tokenLabel: string
-    targetCharId?: string
-    casterId: string
-    skill: CombatSkill
-  }
-
   const handleRollDone = () => {
     setRoll(null)
     const callbacks = afterRollCallbacksRef.current
@@ -2400,148 +2393,6 @@ export default function MapsPage() {
     const next = afterRollRef.current
     afterRollRef.current = null
     next?.()
-  }
-
-  const applyKnockbackFromSave = async (
-    tokenId: string,
-    targetCharId: string | undefined,
-    caster: Character,
-    casterId: string,
-    save: KnockbackSaveResult,
-    options?: { tokenPatch?: Partial<Token> },
-  ): Promise<boolean> => {
-    if (!activeMap || save.success) return false
-    if (options?.tokenPatch) {
-      options.tokenPatch.knockbackTurns = Math.max(
-        options.tokenPatch.knockbackTurns ?? 0,
-        KNOCKBACK_DEFAULT_TURNS,
-      )
-    } else {
-      updateToken(activeMap.id, tokenId, { knockbackTurns: KNOCKBACK_DEFAULT_TURNS })
-    }
-    if (targetCharId) {
-      const ch = useCharacterStore.getState().characters.find((c) => c.id === targetCharId)
-      if (ch && !ch.conditions.includes(KNOCKBACK_STATUS_LABEL)) {
-        updateChar(targetCharId, { conditions: [...ch.conditions, KNOCKBACK_STATUS_LABEL] })
-      }
-    }
-    void casterId
-    void caster
-    return true
-  }
-
-  const resolveAnimatedKnockbackSave = async (
-    caster: Character,
-    token: Token,
-    targetChar: Character | undefined,
-    label: string,
-    options?: { disadvantage?: boolean },
-  ) => {
-    const d20 = await rollDiceBoxD20(`${label} D20`, token.label)
-    const d20Second = options?.disadvantage
-      ? await rollDiceBoxD20(`${label} 劣势 D20`, token.label)
-      : undefined
-    return resolveKnockbackSave(caster, token, targetChar, {
-      disadvantage: options?.disadvantage,
-      d20,
-      d20Second,
-    })
-  }
-
-  const resolveAnimatedConSave = async (
-    caster: Character,
-    token: Token,
-    targetChar: Character | undefined,
-    label: string,
-    options?: { disadvantage?: boolean },
-  ) => {
-    const d20 = await rollDiceBoxD20(`${label} D20`, token.label)
-    const d20Second = options?.disadvantage
-      ? await rollDiceBoxD20(`${label} 劣势 D20`, token.label)
-      : undefined
-    return resolveConSave(caster, token, targetChar, {
-      disadvantage: options?.disadvantage,
-      d20,
-      d20Second,
-    })
-  }
-
-  const showKnockbackSaveRoll = (
-    pending: KnockbackPending,
-    index: number,
-    queue: KnockbackPending[],
-  ) => {
-    void (async () => {
-      if (!activeMap) return
-      const caster = useCharacterStore.getState().characters.find((c) => c.id === pending.casterId)
-      const token = activeMap.tokens.find((t) => t.id === pending.tokenId)
-      if (!caster || !token) {
-        if (index + 1 < queue.length) {
-          afterRollRef.current = () => showKnockbackSaveRoll(queue[index + 1], index + 1, queue)
-        }
-        return
-      }
-      const targetChar = pending.targetCharId
-        ? useCharacterStore.getState().characters.find((c) => c.id === pending.targetCharId)
-        : undefined
-      const save = await resolveAnimatedKnockbackSave(caster, token, targetChar, '击飞敏捷豁免', {
-        disadvantage: pending.skill.knockbackSaveDisadvantage,
-      })
-      const galeComboTriggered = await applyKnockbackFromSave(pending.tokenId, pending.targetCharId, caster, pending.casterId, save)
-      const saveLabel = formatKnockbackSaveLabel(save)
-
-      if (index + 1 < queue.length) {
-        afterRollRef.current = () => showKnockbackSaveRoll(queue[index + 1], index + 1, queue)
-      }
-
-      setRoll({
-        values: [],
-        sides: 20,
-        bonus: 0,
-        total: 0,
-        label: saveLabel,
-        targetName: pending.tokenLabel,
-        d20Roll: {
-          value: save.saveD20,
-          modifier: save.saveMod,
-          ac: save.dc,
-          hit: save.success,
-          kind: 'save',
-        },
-      })
-      if (galeComboTriggered) {
-        void offerGaleComboAfterDamageApplied(pending.casterId, caster)
-      }
-    })()
-  }
-
-  const scheduleKnockbackRolls = (queue: KnockbackPending[]) => {
-    if (queue.length === 0) return
-    afterRollRef.current = () => showKnockbackSaveRoll(queue[0], 0, queue)
-  }
-
-  const dexSaveDamageMode = (skillTreeId?: string): 'half' | 'none' | 'fail-half' | null => {
-    if (skillTreeId === 'focusShot') return 'fail-half'
-    if (skillTreeId === 'aerialCombo' || skillTreeId === 'arrowStorm' || skillTreeId === 'whirlwindKick') return 'half'
-    if (skillTreeId === 'spiralBlade') return 'none'
-    return null
-  }
-
-  const formatSkillDexSaveLabel = (
-    save: KnockbackSaveResult,
-    mode: 'half' | 'none' | 'fail-half',
-  ) => {
-    const roll =
-      save.saveD20Second != null
-        ? `（劣势 ${save.saveD20}/${save.saveD20Second}）`
-        : ''
-    const successText =
-      mode === 'half' ? '成功，伤害减半' : mode === 'fail-half' ? '成功，全额伤害' : '成功，未受伤害'
-    const failText =
-      mode === 'half' ? '失败，全额伤害' : mode === 'fail-half' ? '失败，伤害减半' : '失败，受到伤害'
-    return `敏捷豁免${roll} ${save.saveD20}+${save.saveMod} vs DC${save.dc} ${
-      save.success ? successText : failText
-    }`
   }
 
   const tokenHasKnockback = (token: Token, targetChar?: Character) =>
@@ -2566,38 +2417,11 @@ export default function MapsPage() {
     return tokenHasKnockback(latestToken, latestChar)
   }
 
-  const applySkillCooldownReduction = (charId: string, skillId: string, amount: number) => {
-    if (amount <= 0) return
-    const ch = useCharacterStore.getState().characters.find((c) => c.id === charId)
-    if (!ch) return
-    updateChar(charId, {
-      combatSkills: ch.combatSkills.map((s) =>
-        s.id === skillId ? { ...s, remaining: Math.max(0, s.remaining - amount) } : s,
-      ),
-    })
-  }
-
   const addConditionToCharacter = (charId: string | undefined, label: string) => {
     if (!charId) return
     const ch = useCharacterStore.getState().characters.find((c) => c.id === charId)
     if (!ch || ch.conditions.includes(label)) return
     updateChar(charId, { conditions: [...ch.conditions, label] })
-  }
-
-  const chooseCooldownSkillToReduce = (caster: Character, amount: number, reason: string) => {
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === caster.id)
-    if (!latest) return
-    const skills = latest.combatSkills.filter((s) => s.remaining > 0)
-    if (skills.length === 0) return
-    const picked = window.prompt(
-      `${reason}\n选择要 CD -${amount} 的技能编号：\n${skills
-        .map((s, i) => `${i + 1}. ${s.name}（剩余 ${s.remaining}）`)
-        .join('\n')}`,
-    )
-    const skill = skills[Number(picked) - 1]
-    if (!skill) return
-    applySkillCooldownReduction(latest.id, skill.id, amount)
-    pushCombatLog(`${latest.name} 因 ${reason}：${skill.name} CD -${amount}`, 'turn')
   }
 
   const chooseCooldownReductionSkillId = (caster: Character, amount: number, reason: string) => {
@@ -2612,27 +2436,6 @@ export default function MapsPage() {
     )
     return skills[Number(picked) - 1]?.id
   }
-
-  const resolveAbilitySave = async (
-    caster: Character,
-    token: Token,
-    targetChar: Character | undefined,
-    ability: 'str' | 'dex' | 'con' | 'wis',
-    label: string,
-  ) => {
-    const d20 = await rollDiceBoxD20(`${label} D20`, token.label)
-    const saveMod = getTokenAbilityMod(token, ability, targetChar)
-    const saveTotal = d20 + saveMod
-    const success = saveTotal >= caster.saveDC
-    return { d20, saveMod, saveTotal, dc: caster.saveDC, success }
-  }
-
-  const abilitySaveLabel = (
-    label: string,
-    save: { d20: number; saveMod: number; dc: number; success: boolean },
-    successText: string,
-    failText: string,
-  ) => `${label} ${save.d20}+${save.saveMod} vs DC${save.dc} ${save.success ? successText : failText}`
 
   const chooseEnemyTokenByPrompt = (reason: string, filter?: (token: Token) => boolean): Token | null => {
     if (!activeMap) return null
@@ -2749,73 +2552,6 @@ export default function MapsPage() {
     return true
   }
 
-  const resolveEnemyAutoDodge = async (
-    token: Token,
-    attacker: Character | undefined,
-    skill: CombatSkill,
-    isAoeTarget?: boolean,
-  ) => {
-    if (!combatActive || !activeMap || !attacker || token.type !== 'enemy' || isAoeTarget) return null
-    const ap = getEnemyApState(token.id)
-    if (ap.current < 1) return null
-    const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
-    const attackBonus = getEffectiveAbilityMod(attacker, attackAbility) + proficiencyBonus(attacker.level)
-    const targetAc = getTokenTargetAc(token) ?? 12
-    const diceCount = attackDamageDiceCount(skill, false)
-    const estimatedDamage = diceCount * ((skill.damageSides + 1) / 2) + (skill.damageBonus ?? 0)
-    const decision = decideDodge({
-      currentAp: ap.current,
-      currentHp: token.hp ?? token.maxHp ?? 1,
-      maxHp: token.maxHp ?? token.hp ?? 1,
-      targetAc,
-      incomingAttackBonus: attackBonus,
-      estimatedDamage,
-    })
-    if (!decision.shouldDodge) {
-      pushCombatLog(
-        `${token.label} 保留AP：不闪避 ${skill.name}（${decision.reason}，成功率${Math.round(decision.successChance * 100)}%，预估伤害${Math.round(estimatedDamage)}）`,
-        'turn',
-      )
-      return null
-    }
-    if (!spendEnemyAp(token.id, 1)) return null
-    const d20 = await rollDiceBoxD20('敌人闪避 D20', token.label)
-    const total = d20 + attackBonus
-    const dodged = total < targetAc
-    pushCombatLog(
-      `${token.label} 花费 1 AP：尝试闪避 ${skill.name}。判定 ${d20}+${attackBonus}=${total} vs AC ${targetAc}，${dodged ? '闪避成功' : '闪避失败'}`,
-      dodged ? 'attack' : 'turn',
-    )
-    return { dodged, d20, attackBonus, total, targetAc }
-  }
-
-  const findArmorPiercingTargets = (
-    casterToken: Token,
-    primaryTarget: Token,
-    splashDamage: number,
-  ): Token[] => {
-    if (!activeMap || splashDamage <= 0) return []
-    const dx = primaryTarget.x - casterToken.x
-    const dy = primaryTarget.y - casterToken.y
-    const len = Math.hypot(dx, dy)
-    if (len < 1) return []
-    const ux = dx / len
-    const uy = dy / len
-    const rangePx = (15 / DND_FEET_PER_CELL) * Math.max(1, activeMap.gridSize)
-    const halfWidthPx = Math.max(6, activeMap.gridSize * 0.5)
-    return activeMap.tokens.filter((t) => {
-      if (t.id === casterToken.id || t.id === primaryTarget.id) return false
-      if (!isEnemyTarget(t)) return false
-      if (!isTokenAlive(t, characters)) return false
-      const tx = t.x - primaryTarget.x
-      const ty = t.y - primaryTarget.y
-      const forward = tx * ux + ty * uy
-      if (forward <= 0 || forward > rangePx) return false
-      const perpendicular = Math.abs(tx * -uy + ty * ux)
-      return perpendicular <= halfWidthPx
-    })
-  }
-
   const applyDirectFeatureDamage = (token: Token, amount: number, label: string) => {
     if (!activeMap || amount <= 0) return
     if (token.characterId) {
@@ -2830,17 +2566,6 @@ export default function MapsPage() {
       if (hp <= 0) deferDeathHandling(token.id)
     }
     pushCombatLog(`${label} 对 ${token.label} 造成 ${amount} 点伤害`, 'damage')
-  }
-
-  const moveTokenByCells = (token: Token, dx: number, dy: number, cells: number) => {
-    if (!activeMap || cells <= 0) return
-    const from = tokenAnchorCellFromPixel(token.x, token.y, token, activeMap)
-    const len = Math.hypot(dx, dy) || 1
-    const to = {
-      col: from.col + Math.round((dx / len) * cells),
-      row: from.row + Math.round((dy / len) * cells),
-    }
-    updateToken(activeMap.id, token.id, tokenCenterForAnchorCell(to, token, activeMap))
   }
 
   const eagleStrikeExtraDiceCount = (rank: number) => {
@@ -2890,6 +2615,11 @@ export default function MapsPage() {
   const huntingComboTraitRank = (caster?: Character) =>
     caster ? (findClassTrait(caster, 'huntingCombo')?.level ?? 0) : 0
 
+  const calmSpiritCritThreshold = (caster?: Character) => {
+    const bonus = caster?.combatBuffs?.calmSpiritCritBonusPercent ?? 0
+    return Math.max(1, 20 - Math.floor(bonus / 5))
+  }
+
   const isEnemyTarget = (token: Token): boolean => token.type === 'enemy'
 
   const isBeastLikeTarget = (token: Token): boolean => {
@@ -2908,1314 +2638,6 @@ export default function MapsPage() {
       '蛛',
       '史莱姆',
     ].some((part) => key.includes(part))
-  }
-
-  const huntingComboCritBonusMultiplier = (caster: Character | undefined, token: Token) => {
-    if (!caster || (token.huntingMarkStacks ?? 0) <= 0) return 0
-    const rank = huntingComboTraitRank(caster)
-    return rank > 0 ? 0.2 + (rank - 1) * 0.05 : 0
-  }
-
-  const calmSpiritCritThreshold = (caster?: Character) => {
-    const bonus = caster?.combatBuffs?.calmSpiritCritBonusPercent ?? 0
-    return Math.max(1, 20 - Math.floor(bonus / 5))
-  }
-
-  const resolvePlayerDamageTotal = (
-    caster: Character,
-    skill: CombatSkill,
-    values: number[],
-    opts: { isCrit: boolean; target: Token },
-  ) => {
-    const base = values.reduce((sum, value) => sum + value, 0) + skill.damageBonus
-    let total = resolveAttackDamageTotal(caster, skill, values, { isCrit: opts.isCrit })
-    if (opts.isCrit) {
-      const extraCrit = huntingComboCritBonusMultiplier(caster, opts.target)
-      if (extraCrit > 0) {
-        total += Math.floor(base * extraCrit)
-      }
-    }
-    return total
-  }
-
-  const appendArcherFeatureDamageDice = async (
-    values: number[],
-    caster: Character,
-    token: Token,
-    skillName: string,
-  ): Promise<{ values: number[]; labelParts: string[] }> => {
-    const next = [...values]
-    const labelParts: string[] = []
-    const calm = findClassTrait(caster, 'calmMind')
-    if (calm && isCalmMindActive(caster) && calm.level > 0) {
-      const extra = await rollDiceBoxValues(calm.level, 6, `${skillName} 静心额外伤害`, token.label)
-      next.push(...extra)
-      labelParts.push(`静心+${calm.level}d6`)
-    }
-    const hmRank = huntingMarkTraitRank(caster)
-    if (hmRank > 0 && (token.huntingMarkStacks ?? 0) > 0) {
-      const extra = await rollDiceBoxValues(hmRank, 8, `${skillName} 狩猎印记额外伤害`, token.label)
-      next.push(...extra)
-      labelParts.push(`印记+${hmRank}d8`)
-    }
-    const animalMastery = findClassTrait(caster, 'animalMastery')
-    if (animalMastery && isBeastLikeTarget(token)) {
-      const extra = await rollDiceBoxValues(animalMastery.level, 6, `${skillName} 动物学专精额外伤害`, token.label)
-      next.push(...extra)
-      labelParts.push(`动物学+${animalMastery.level}d6`)
-    }
-    if (caster.combatBuffs?.shadowVeilTargetId === token.id) {
-      const extra = await rollDiceBoxValues(1, 6, `${skillName} 影遁之术额外伤害`, token.label)
-      next.push(...extra)
-      labelParts.push('影遁+1d6')
-    }
-    return { values: next, labelParts }
-  }
-
-  const appendDoubleArrowDamageDice = async (
-    values: number[],
-    caster: Character,
-    enabled: boolean,
-    targetName: string,
-  ): Promise<{ values: number[]; labelParts: string[] }> => {
-    if (!enabled) return { values, labelParts: [] }
-    const trait = findClassTrait(caster, 'doubleArrow')
-    if (!trait) return { values, labelParts: [] }
-    const extraSides = doubleArrowExtraDamageSides(trait.level)
-    const extra = await rollDiceBoxValues(1, extraSides, '双箭额外伤害', targetName)
-    return {
-      values: [...values, ...extra],
-      labelParts: [`双箭+1d${extraSides}`],
-    }
-  }
-
-  type AttackResolveResult = {
-    hit: boolean
-    total: number
-    values: number[]
-    rollLabel: string
-    d20Roll?: DiceRoll['d20Roll']
-    knockbackPending?: KnockbackPending
-    selfCooldownReduction?: number
-    damageBeforeDefense?: number
-    damageAfterDefense?: number
-    attackDefenseDiff?: number | null
-    attackDefenseModifier?: number
-    galeComboPending?: boolean
-  }
-
-  const resolveAttack = async (
-    token: Token,
-    opts?: {
-      skipCleanup?: boolean
-      skipUseSkill?: boolean
-      silent?: boolean
-      aoeTargetCount?: number
-      skillOverride?: CombatSkill
-      targetingOverride?: {
-        casterId: string
-        skill: CombatSkill
-        doubleArrow?: boolean
-        waiveAp?: boolean
-      }
-      presetDamageValues?: number[]
-      presetFeatureLabelParts?: string[]
-      appendFeatureDamageToPreset?: boolean
-      suppressComboFist?: boolean
-    },
-  ): Promise<AttackResolveResult | undefined> => {
-    const attackTargeting = opts?.targetingOverride ?? targeting
-    if (!attackTargeting || !activeMap) return
-    token = latestTokenSnapshot(token)
-    const { casterId, doubleArrow } = attackTargeting
-    const skill = opts?.skillOverride ?? attackTargeting.skill
-    const liveCharacters = useCharacterStore.getState().characters
-    const caster = liveCharacters.find((c) => c.id === casterId)
-    const casterToken = activeMap.tokens.find((t) => t.characterId === casterId)
-    const targetChar = token.characterId
-      ? liveCharacters.find((c) => c.id === token.characterId)
-      : undefined
-    const targetAc = targetChar ? getAc(targetChar) : (getTokenTargetAc(token) ?? 12)
-    const isRanged =
-      skill.tags?.includes('ranged') || skill.name === '远程射击' || skill.name === '基础射击'
-    const resolutionSession = createCombatResolutionSessionForAction({
-      actorToken: casterToken,
-      targetToken: token,
-      actorCharacterId: casterId,
-      targetCharacterId: targetChar?.id ?? token.characterId,
-      skill,
-      tags: [
-        'player-action',
-        'attack',
-        isRanged ? 'ranged' : 'melee',
-        opts?.aoeTargetCount != null ? 'aoe-target' : 'single-target',
-      ],
-    })
-    await runCombatResolutionStage(resolutionSession, 'actionDeclared')
-    if (!opts?.silent && casterToken && isBasicShot(skill)) {
-      launchArrowProjectile({ x: casterToken.x, y: casterToken.y }, { x: token.x, y: token.y })
-    }
-    const isAoeResolution = opts?.aoeTargetCount != null
-    const outOfBreath = caster && !isAoeResolution ? isOutOfBreath(caster) : false
-    const calmSpiritCritBonus = caster?.combatBuffs?.calmSpiritCritBonusPercent ?? 0
-    const skillRank = caster && skill.skillTreeId ? getSkillRank(caster, skill.skillTreeId) : 0
-    const targetKnockedBeforeAttack = tokenHasKnockbackNow(token, targetChar)
-    const windKickTreatsTargetAsKnocked = () =>
-      useCharacterStore.getState().characters
-        .find((c) => c.id === casterId)
-        ?.combatBuffs?.windKickTreatKnockbackTargetId === token.id
-    const huntingComboIgnoresDodge =
-      !!caster && huntingComboTraitRank(caster) > 0 && (token.huntingMarkStacks ?? 0) > 0
-    const windTraceMarkedAdvantage =
-      skill.skillTreeId === 'windTraceShot' &&
-      skillRank >= 5 &&
-      (opts?.aoeTargetCount ?? 0) === 1 &&
-      (token.huntingMarkStacks ?? 0) > 0
-    const effectiveAdvantage = windTraceMarkedAdvantage && !outOfBreath
-    const advantageCancelled = windTraceMarkedAdvantage && outOfBreath
-    const effectiveDisadvantage = outOfBreath && !windTraceMarkedAdvantage
-    /** 气喘会要求命中骰；风痕贯射 5 阶在单目标带印记时也会要求命中骰来处理优势暴击 */
-    const needsAttackRoll = !!(
-      caster &&
-      skill.damageCount > 0 &&
-      (outOfBreath || windTraceMarkedAdvantage || calmSpiritCritBonus > 0)
-    )
-
-    let values: number[]
-    let total: number
-    let hit = true
-    let isCrit = false
-    let rollLabel: string
-    let d20Roll:
-      | { value: number; modifier: number; ac: number; hit: boolean; isCrit?: boolean }
-      | undefined
-    let selfCooldownReduction = 0
-    let featureExtraLabelParts: string[] = []
-    let critFormulaLabel = ''
-    let enemyDodgeLabel = ''
-    let enemyDodgeChecked = false
-
-    await runCombatResolutionStage(resolutionSession, 'beforeAttackRoll')
-
-    if (needsAttackRoll) {
-      const forceCrit = !!caster!.combatBuffs?.preciseStrikeReady
-      const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
-      const attackD20 = await rollDiceBoxD20(`${skill.name} D20`, token.label)
-      const attackD20Second = effectiveAdvantage
-        ? await rollDiceBoxD20(`${skill.name} 优势 D20`, token.label)
-        : undefined
-      const atk = resolveRangedAttackRoll(caster!, skill, huntingComboIgnoresDodge ? 0 : targetAc, !!(doubleArrow && isRanged), {
-        targetHuntingMarks: token.huntingMarkStacks ?? 0,
-        advantage: effectiveAdvantage,
-        disadvantage: effectiveDisadvantage,
-        critThreshold: calmSpiritCritThreshold(caster),
-        forceCrit,
-        ability: attackAbility,
-        d20: attackD20,
-        d20Second: attackD20Second,
-        damageValues: [],
-      })
-      hit = atk.hit
-      isCrit = atk.isCrit || (effectiveAdvantage && windTraceMarkedAdvantage && atk.hit)
-      if (hit && caster) {
-        const enemyDodge = await resolveEnemyAutoDodge(token, caster, skill, opts?.aoeTargetCount != null)
-        if (enemyDodge) {
-          enemyDodgeChecked = true
-          enemyDodgeLabel = `敌人闪避 ${enemyDodge.d20}+${enemyDodge.attackBonus}=${enemyDodge.total} vs AC${enemyDodge.targetAc}${enemyDodge.dodged ? '，成功' : '，失败'}`
-          if (enemyDodge.dodged) {
-            hit = false
-            isCrit = false
-          }
-        }
-      }
-      if (resolutionSession) {
-        resolutionSession.context.attackRoll = {
-          values: atk.d20Second != null ? [attackD20, attackD20Second ?? attackD20] : [attackD20],
-          sides: 20,
-          bonus: atk.attackBonus,
-          total: atk.attackTotal,
-          ac: atk.ac,
-          hit,
-          crit: isCrit,
-          label: skill.name,
-        }
-      }
-      await runCombatResolutionStage(resolutionSession, 'attackRollResolved')
-      if (hit) {
-        await runCombatResolutionStage(resolutionSession, 'beforeDamageRoll')
-        const diceCount = attackDamageDiceCount(skill, !!(doubleArrow && isRanged))
-        const damageSides = isBasicShot(skill) ? 8 : skill.damageSides
-        values =
-          opts?.presetDamageValues?.slice() ??
-          await rollDiceBoxValues(diceCount, damageSides, `${skill.name} 伤害`, token.label)
-        featureExtraLabelParts = opts?.presetFeatureLabelParts?.slice() ?? []
-        const extraD6Count = windTraceExtraDiceCount(skill.skillTreeId, skillRank, caster!, token, opts?.aoeTargetCount)
-        if (extraD6Count > 0) {
-          const extraValues = await rollDiceBoxValues(extraD6Count, 6, `${skill.name} 额外伤害`, token.label)
-          values = [...values, ...extraValues]
-          featureExtraLabelParts.push(`额外+${extraD6Count}d6`)
-        }
-        if (skill.skillTreeId === 'eagleStrike') {
-          const extraD6Count = eagleStrikeExtraDiceCount(skillRank)
-          if (extraD6Count > 0) {
-            const extraValues = await rollDiceBoxValues(extraD6Count, 6, `${skill.name} 击飞伤害`, token.label)
-            values = [...values, ...extraValues]
-            featureExtraLabelParts.push(`击飞伤害+${extraD6Count}d6`)
-          }
-        }
-        if (
-          skill.skillTreeId === 'windKickCombo' &&
-          (targetKnockedBeforeAttack || windKickTreatsTargetAsKnocked())
-        ) {
-          const extraValues = await rollDiceBoxValues(1, 6, `${skill.name} 击飞额外伤害`, token.label)
-          values = [...values, ...extraValues]
-          featureExtraLabelParts.push('击飞目标+1d6')
-        }
-        const doubleArrowExtra = await appendDoubleArrowDamageDice(
-          values,
-          caster!,
-          !!(doubleArrow && isRanged),
-          token.label,
-        )
-        values = doubleArrowExtra.values
-        featureExtraLabelParts = [...featureExtraLabelParts, ...doubleArrowExtra.labelParts]
-        const featureExtra = await appendArcherFeatureDamageDice(values, caster!, token, skill.name)
-        values = featureExtra.values
-        featureExtraLabelParts = [...featureExtraLabelParts, ...featureExtra.labelParts]
-        const critApplies = isCrit && !(doubleArrow && isRanged)
-        if (critApplies && caster) {
-          const comboCrit = huntingComboCritBonusMultiplier(caster, token)
-          critFormulaLabel = ` × 暴击${formatCritDamagePercent(caster)}${comboCrit > 0 ? ` + 狩猎连击${Math.round(comboCrit * 100)}%` : ''}`
-        }
-        total = caster
-          ? resolvePlayerDamageTotal(caster, skill, values, {
-              isCrit: critApplies,
-              target: token,
-            })
-          : values.reduce((a, b) => a + b, 0) + skill.damageBonus
-      } else {
-        values = []
-        total = 0
-      }
-      d20Roll = {
-        value: atk.d20,
-        modifier: atk.attackBonus,
-        ac: atk.ac,
-        hit,
-        isCrit,
-      }
-
-      const d20Text =
-        atk.d20Second != null ? `${attackD20}/${attackD20Second}取${atk.d20}` : `${atk.d20}`
-      const stateText = effectiveAdvantage
-        ? '优势'
-        : advantageCancelled
-          ? '优势/气喘抵消'
-          : effectiveDisadvantage
-            ? '气喘·劣势'
-            : calmSpiritCritBonus > 0
-              ? `安定心神暴击+${calmSpiritCritBonus}%`
-              : '命中'
-      const dodgeText = huntingComboIgnoresDodge ? ' · 狩猎连击：忽视闪避' : ''
-      const abilityMod = getEffectiveAbilityMod(caster!, attackAbility)
-      const prof = atk.attackBonus - abilityMod
-      const abilityLabel = attackAbility === 'str' ? '力量' : attackAbility === 'dex' ? '敏捷' : attackAbility
-      const attackFormula = `${d20Text} + ${abilityLabel}调整${abilityMod >= 0 ? '+' : ''}${abilityMod}${prof ? ` + 熟练${prof >= 0 ? '+' : ''}${prof}` : ''} = ${atk.attackTotal}`
-      rollLabel = `${skill.name}${doubleArrow && isRanged ? '（双箭）' : ''}${forceCrit ? '（精准打击）' : ''}（${stateText}）· 命中 ${attackFormula} vs AC${atk.ac}${isCrit ? ' 重击' : ''}${hit ? '' : ' 未中'}`
-      rollLabel += dodgeText
-    } else {
-      const forceCrit = !!caster?.combatBuffs?.preciseStrikeReady
-      const diceCount = attackDamageDiceCount(skill, !!doubleArrow)
-      const damageSides = isBasicShot(skill) ? 8 : skill.damageSides
-      if (caster) {
-        const enemyDodge = await resolveEnemyAutoDodge(token, caster, skill, opts?.aoeTargetCount != null)
-        if (enemyDodge) {
-          enemyDodgeChecked = true
-          enemyDodgeLabel = `敌人闪避 ${enemyDodge.d20}+${enemyDodge.attackBonus}=${enemyDodge.total} vs AC${enemyDodge.targetAc}${enemyDodge.dodged ? '，成功' : '，失败'}`
-          if (enemyDodge.dodged) {
-            hit = false
-            isCrit = false
-          }
-        }
-      }
-      if (resolutionSession) {
-        resolutionSession.context.attackRoll = {
-          values: [],
-          sides: 20,
-          bonus: 0,
-          total: 0,
-          ac: targetAc,
-          hit,
-          crit: isCrit,
-          label: `${skill.name} automatic`,
-        }
-      }
-      await runCombatResolutionStage(resolutionSession, 'attackRollResolved')
-      if (hit) {
-        await runCombatResolutionStage(resolutionSession, 'beforeDamageRoll')
-      values =
-        opts?.presetDamageValues?.slice() ??
-        await rollDiceBoxValues(diceCount, damageSides, `${skill.name} 伤害`, token.label)
-      featureExtraLabelParts = opts?.presetFeatureLabelParts?.slice() ?? []
-      if (caster && (!opts?.presetDamageValues || opts?.appendFeatureDamageToPreset)) {
-        const extraD6Count = windTraceExtraDiceCount(skill.skillTreeId, skillRank, caster, token, opts?.aoeTargetCount)
-        if (extraD6Count > 0) {
-          const extraValues = await rollDiceBoxValues(extraD6Count, 6, `${skill.name} 额外伤害`, token.label)
-          values = [...values, ...extraValues]
-          featureExtraLabelParts.push(`额外+${extraD6Count}d6`)
-        }
-        if (skill.skillTreeId === 'eagleStrike') {
-          const extraD6Count = eagleStrikeExtraDiceCount(skillRank)
-          if (extraD6Count > 0) {
-            const extraValues = await rollDiceBoxValues(extraD6Count, 6, `${skill.name} 击飞伤害`, token.label)
-            values = [...values, ...extraValues]
-            featureExtraLabelParts.push(`击飞伤害+${extraD6Count}d6`)
-          }
-        }
-        if (
-          skill.skillTreeId === 'windKickCombo' &&
-          (targetKnockedBeforeAttack || windKickTreatsTargetAsKnocked())
-        ) {
-          const extraValues = await rollDiceBoxValues(1, 6, `${skill.name} 击飞额外伤害`, token.label)
-          values = [...values, ...extraValues]
-          featureExtraLabelParts.push('击飞目标+1d6')
-        }
-        const doubleArrowExtra = await appendDoubleArrowDamageDice(
-          values,
-          caster,
-          !!doubleArrow,
-          token.label,
-        )
-        values = doubleArrowExtra.values
-        featureExtraLabelParts = [...featureExtraLabelParts, ...doubleArrowExtra.labelParts]
-        const featureExtra = await appendArcherFeatureDamageDice(values, caster, token, skill.name)
-        values = featureExtra.values
-        featureExtraLabelParts = [...featureExtraLabelParts, ...featureExtra.labelParts]
-      }
-      if (caster) {
-        if (forceCrit) isCrit = true
-        if (isCrit) {
-          const comboCrit = huntingComboCritBonusMultiplier(caster, token)
-          critFormulaLabel = ` × 暴击${formatCritDamagePercent(caster)}${comboCrit > 0 ? ` + 狩猎连击${Math.round(comboCrit * 100)}%` : ''}`
-        }
-        total = resolvePlayerDamageTotal(caster, skill, values, { isCrit, target: token })
-      } else {
-        total = values.reduce((a, b) => a + b, 0) + skill.damageBonus
-      }
-      } else {
-        values = []
-        total = 0
-        featureExtraLabelParts = []
-      }
-      const diceLabel = `${diceCount}d${damageSides}${skill.damageBonus ? `+${skill.damageBonus}` : ''}`
-      rollLabel = `${skill.name}${doubleArrow ? '（双箭）' : ''}${forceCrit ? '（精准打击）' : ''} ${diceLabel}${isCrit ? ' 重击' : ''}`
-    }
-
-    if (hit && caster) {
-      const casterTokenId = activeMap.tokens.find((t) => t.characterId === casterId)?.id
-      const isFirstInInitiative =
-        combatActive &&
-        round === 1 &&
-        initiativeOrder.length > 0 &&
-        initiativeOrder[0]?.tokenId === casterTokenId
-      if (
-        isFirstInInitiative &&
-        findClassTrait(caster, 'silentDraw') &&
-        !caster.combatBuffs?.silentDrawUsed
-      ) {
-        const sd = findClassTrait(caster, 'silentDraw')!
-        const extraValues = await rollDiceBoxValues(sd.level, 6, `${skill.name} 无声起弦额外伤害`, token.label)
-        values.push(...extraValues)
-        total += extraValues.reduce((sum, value) => sum + value, 0)
-        featureExtraLabelParts.push(`无声起弦+${sd.level}d6`)
-      }
-
-      if (findClassTrait(caster, 'arcaneDevour') && isMagicDamageSkill(skill)) {
-        const trait = findClassTrait(caster, 'arcaneDevour')!
-        const extra = Array.from({ length: trait.level }, () => 1 + Math.floor(Math.random() * 6)).reduce(
-          (a, b) => a + b,
-          0,
-        )
-        values.push(extra)
-        total += extra
-      }
-
-      const takeoff = findClassTrait(caster, 'takeoff')
-      if (takeoff && skill.skillTreeId === 'whirlwindKick' && targetKnockedBeforeAttack) {
-        const count = Math.min(3, takeoff.level)
-        const extraValues = await rollDiceBoxValues(count, 6, `${skill.name} 起飞额外伤害`, token.label)
-        values.push(...extraValues)
-        total += extraValues.reduce((sum, value) => sum + value, 0)
-        featureExtraLabelParts.push(`起飞+${count}d6`)
-      }
-
-      const enemyDodge = !enemyDodgeChecked
-        ? await resolveEnemyAutoDodge(token, caster, skill, opts?.aoeTargetCount != null)
-        : null
-      if (enemyDodge) {
-        enemyDodgeLabel = `敌人闪避 ${enemyDodge.d20}+${enemyDodge.attackBonus}=${enemyDodge.total} vs AC${enemyDodge.targetAc}${enemyDodge.dodged ? '，成功' : '，失败'}`
-        if (enemyDodge.dodged) {
-          hit = false
-          isCrit = false
-          values = []
-          total = 0
-          featureExtraLabelParts = []
-        }
-      }
-
-      const comboFist = findClassTrait(caster, 'comboFist')
-      const waivedApAttack = !!attackTargeting.waiveAp || !!caster.combatBuffs?.galeComboReady
-      if (hit && comboFist && waivedApAttack && !opts?.suppressComboFist) {
-        const extraValues = await rollDiceBoxValues(comboFist.level, 6, `${skill.name} 连续拳额外伤害`, token.label)
-        values.push(...extraValues)
-        total += extraValues.reduce((sum, value) => sum + value, 0)
-        featureExtraLabelParts.push(`连续拳+${comboFist.level}d6`)
-      }
-    }
-
-    if (hit && caster) {
-      const pi = findClassTrait(caster, 'piercingInsight')
-      if (pi) {
-        const hpThresholdPercent = piercingInsightHpThresholdPercent(pi.level)
-        const hpThresholdRatio = hpThresholdPercent / 100
-        let lowHp = false
-        if (targetChar) {
-          lowHp = targetChar.maxHp > 0 && targetChar.currentHp / targetChar.maxHp < hpThresholdRatio
-        } else if (token.maxHp != null) {
-          const cur = token.hp ?? token.maxHp
-          lowHp = token.maxHp > 0 && cur / token.maxHp < hpThresholdRatio
-        }
-        if (lowHp) {
-          const diceCount = piercingInsightExtraD4(pi.level)
-          const extraValues = await rollDiceBoxValues(diceCount, 4, `${skill.name} 看破额外伤害`, token.label)
-          values.push(...extraValues)
-          total += extraValues.reduce((sum, value) => sum + value, 0)
-          featureExtraLabelParts.push(`看破+${diceCount}d4（生命值<${hpThresholdPercent}%）`)
-        }
-      }
-    }
-
-    if (doubleArrow && hit) activateClassFeature(casterId, 'doubleArrow')
-
-    if (caster) {
-      const buffPatch: Partial<NonNullable<Character['combatBuffs']>> = {}
-      if (caster.combatBuffs?.preciseStrikeReady && hit) {
-        activateClassFeature(casterId, 'preciseStrike')
-        buffPatch.preciseStrikeReady = undefined
-      }
-      if (caster.combatBuffs?.calmSpiritCritBonusPercent) {
-        buffPatch.calmSpiritCritBonusPercent = undefined
-      }
-      if (skill.skillTreeId === 'burstKick' && caster.combatBuffs?.burstKickExtraD6) {
-        buffPatch.burstKickExtraD6 = undefined
-      }
-      if (skill.skillTreeId === 'windKickCombo' && caster.combatBuffs?.windKickTreatKnockbackTargetId) {
-        buffPatch.windKickTreatKnockbackTargetId = undefined
-      }
-      if (caster.combatBuffs?.shadowVeilTargetId === token.id) {
-        buffPatch.shadowVeilTargetId = undefined
-      }
-      if (hit && findClassTrait(caster, 'silentDraw') && !caster.combatBuffs?.silentDrawUsed) {
-        const casterTokenId = activeMap.tokens.find((t) => t.characterId === casterId)?.id
-        const isFirstInInitiative =
-          combatActive &&
-          round === 1 &&
-          initiativeOrder.length > 0 &&
-          initiativeOrder[0]?.tokenId === casterTokenId
-        if (isFirstInInitiative) buffPatch.silentDrawUsed = true
-      }
-      if (Object.keys(buffPatch).length > 0) {
-        updateChar(casterId, { combatBuffs: { ...caster.combatBuffs, ...buffPatch } })
-      }
-    }
-
-    const burnTurns = hit ? statusDuration(skill, 'burning') : undefined
-    const poisonTurns = hit ? statusDuration(skill, 'poison') : undefined
-    const tokenPatch: Partial<Token> = {}
-    let knockbackPending: KnockbackPending | undefined
-    let dexSaveLabel = ''
-    let stunSaveLabel = ''
-    let damageBonusForRoll = skill.damageBonus
-    let damageBeforeDefense = total
-    let damageAfterDefense = total
-    let attackDefenseDiff: number | null = null
-    let attackDefenseModifier = 0
-    let appliedDamageAmount = 0
-    let pendingGaleComboAfterDamage = false
-    let pendingDexSave:
-      | { mode: 'half' | 'none' | 'fail-half'; success: boolean }
-      | null = null
-
-    if (hit) {
-      const dexMode = dexSaveDamageMode(skill.skillTreeId)
-      if (caster && dexMode && total > 0) {
-        const save = await resolveAnimatedKnockbackSave(caster, token, targetChar, `${skill.name} 敏捷豁免`, {
-          disadvantage: skill.knockbackSaveDisadvantage,
-        })
-        dexSaveLabel = formatSkillDexSaveLabel(save, dexMode)
-        pendingDexSave = { mode: dexMode, success: save.success }
-        if (
-          !save.success &&
-          skill.skillTreeId === 'whirlwindKick' &&
-          skillGrantsKnockbackOnHit(caster, skill)
-        ) {
-          pendingGaleComboAfterDamage =
-            (await applyKnockbackFromSave(token.id, token.characterId, caster, casterId, save, { tokenPatch })) ||
-            pendingGaleComboAfterDamage
-        }
-      }
-      if (caster && casterToken && skill.skillTreeId === 'clusterShot') {
-        const distFeet = cellDistance(
-          pixelToCell(casterToken.x, casterToken.y, activeMap),
-          pixelToCell(token.x, token.y, activeMap),
-        ) * 5
-        if (distFeet > 10 && distFeet <= 20) {
-          total = Math.floor(total / 2)
-          featureExtraLabelParts.push('集束射击远距减半')
-        }
-      }
-      if (caster && skill.skillTreeId === 'burstKick' && (caster.combatBuffs?.burstKickExtraD6 ?? 0) > 0) {
-        const count = caster.combatBuffs?.burstKickExtraD6 ?? 0
-        const extraValues = await rollDiceBoxValues(count, 6, `${skill.name} 捆绑射击额外伤害`, token.label)
-        values.push(...extraValues)
-        total += extraValues.reduce((sum, value) => sum + value, 0)
-        featureExtraLabelParts.push(`捆绑射击+${count}d6`)
-      }
-      const explosiveArrowTrait = caster ? findClassTrait(caster, 'explosiveArrow') : undefined
-      if (caster && isCrit && explosiveArrowTrait) {
-        const fireDice = explosiveArrowTrait.level
-        const fireValues = await rollDiceBoxValues(fireDice, 12, `${skill.name} 爆裂箭矢重击火焰`, token.label)
-        values.push(...fireValues)
-        total += fireValues.reduce((sum, value) => sum + value, 0)
-        tokenPatch.burningTurns = Math.max(tokenPatch.burningTurns ?? 0, 1)
-        tokenPatch.igniteTurns = Math.max(tokenPatch.igniteTurns ?? 0, 1)
-        featureExtraLabelParts.push(`爆裂箭矢+${fireDice}d12，火焰标记+1`)
-      }
-      if (caster && skill.skillTreeId === 'antiMagicArrow') {
-        const hasMagicState =
-          !!token.burningTurns ||
-          !!token.igniteTurns ||
-          !!token.poisonTurns ||
-          !!token.stunTurns ||
-          !!token.knockbackTurns ||
-          !!token.restrainedTurns ||
-          !!token.vulnerableTurns ||
-          (targetChar?.conditions.length ?? 0) > 0
-        if (hasMagicState) {
-          const extraValues = await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, token.label)
-          values.push(...extraValues)
-          total += extraValues.reduce((sum, value) => sum + value, 0)
-          featureExtraLabelParts.push('魔法状态+2d6')
-        }
-      }
-      damageBeforeDefense = total
-      if (resolutionSession) {
-        const rolledTotal = values.reduce((sum, value) => sum + value, 0)
-        resolutionSession.context.damageRoll = {
-          values: [...values],
-          sides: isBasicShot(skill) ? 8 : skill.damageSides,
-          bonus: total - rolledTotal,
-          total,
-          label: skill.name,
-        }
-        resolutionSession.context.pendingDamage = [
-          {
-            id: `${resolutionSession.context.actionId}:damage:${token.id}`,
-            source: {
-              tokenId: casterToken?.id ?? '',
-              characterId: casterId,
-            },
-            target: {
-              tokenId: token.id,
-              characterId: targetChar?.id ?? token.characterId,
-            },
-            amount: total,
-            damageType: caster && isMagicDamageSkill(skill) ? 'magic' : 'physical',
-            roll: resolutionSession.context.damageRoll,
-            tags: [skill.skillTreeId ?? skill.id],
-          },
-        ]
-      }
-      await runCombatResolutionStage(resolutionSession, 'damageRolled')
-      await runCombatResolutionStage(resolutionSession, 'beforeDamageApplied')
-
-      if (total > 0) {
-        const damageType = caster && isMagicDamageSkill(skill) ? 'magic' : 'physical'
-        const attackerInput = caster ? characterToCombatInput(caster) : undefined
-        const adjustedDamage =
-          targetChar != null
-            ? applyAttackDefenseDamageModifier(
-                total,
-                attackerInput,
-                characterToCombatInput(targetChar),
-                damageType,
-                (token.vulnerableTurns ?? 0) > 0, // [T4/C3]
-              )
-            : adjustDamageAgainstToken(total, attackerInput, token, damageType)
-        let finalDamage = adjustedDamage.damage
-        attackDefenseDiff = adjustedDamage.diff
-        attackDefenseModifier = adjustedDamage.modifier
-        damageAfterDefense = finalDamage
-        if (pendingDexSave) {
-          if (pendingDexSave.mode === 'fail-half' && !pendingDexSave.success) {
-            finalDamage = Math.floor(finalDamage / 2)
-          } else if (pendingDexSave.success && pendingDexSave.mode !== 'fail-half') {
-            finalDamage = pendingDexSave.mode === 'half' ? Math.floor(finalDamage / 2) : 0
-          }
-        }
-        damageBonusForRoll = finalDamage - values.reduce((a, b) => a + b, 0)
-        total = finalDamage
-        appliedDamageAmount = finalDamage
-        if (token.characterId) {
-          damageChar(token.characterId, finalDamage)
-          const updated = useCharacterStore.getState().characters.find((c) => c.id === token.characterId)
-          if (updated) {
-            tokenPatch.hp = updated.currentHp
-            tokenPatch.maxHp = updated.maxHp
-            if (updated.currentHp <= 0) {
-              deferDeathHandling(token.id, token.characterId)
-            }
-          }
-        } else if (token.maxHp != null) {
-          tokenPatch.hp = Math.max(0, (token.hp ?? token.maxHp) - finalDamage)
-          if (tokenPatch.hp <= 0) deferDeathHandling(token.id)
-        }
-        if ((token.illusionDanceTurns ?? 0) > 0) {
-          tokenPatch.illusionDanceTurns = 0
-        }
-      }
-      if (resolutionSession) {
-        resolutionSession.context.appliedDamage = appliedDamageAmount > 0
-          ? [
-              {
-                id: `${resolutionSession.context.actionId}:applied:${token.id}`,
-                source: {
-                  tokenId: casterToken?.id ?? '',
-                  characterId: casterId,
-                },
-                target: {
-                  tokenId: token.id,
-                  characterId: targetChar?.id ?? token.characterId,
-                },
-                amount: appliedDamageAmount,
-                damageType: caster && isMagicDamageSkill(skill) ? 'magic' : 'physical',
-                roll: resolutionSession.context.damageRoll,
-                tags: [skill.skillTreeId ?? skill.id],
-              },
-            ]
-          : []
-      }
-      await runCombatResolutionStage(resolutionSession, 'damageApplied')
-      if (burnTurns) tokenPatch.burningTurns = burnTurns
-      if (poisonTurns) tokenPatch.poisonTurns = poisonTurns
-      if (
-        total > 0 &&
-        caster &&
-        huntingMarkTraitRank(caster) > 0 &&
-        isEnemyTarget(token)
-      ) {
-        tokenPatch.huntingMarkStacks = Math.min(4, (token.huntingMarkStacks ?? 0) + 1)
-      }
-
-      const multiStrike = caster ? findClassTrait(caster, 'multiStrike') : undefined
-      if (caster && multiStrike && total > 0) {
-        const hitKey = `${caster.id}:${token.id}`
-        const hits = (multiStrikeHitsRef.current[hitKey] ?? 0) + 1
-        multiStrikeHitsRef.current[hitKey] = hits
-        const useMultiStrike =
-          hits >= 3 &&
-          (caster.qi ?? 0) >= 1 &&
-          (await showCombatDialog({
-            title: '多重打击',
-            message: `${token.label} 本回合已受到 ${hits} 段攻击。\n是否消耗 1 点气，使其进行一次具有劣势的体质豁免，失败则眩晕 1 回合？`,
-            confirmText: '发动',
-            cancelText: '暂不发动',
-            tone: 'violet',
-          }))
-        if (useMultiStrike) {
-          if (spendQi(caster.id, 1)) {
-            const save = await resolveAnimatedConSave(caster, token, targetChar, '多重打击体质豁免', {
-              disadvantage: true,
-            })
-            stunSaveLabel = formatConSaveLabel(save)
-            if (!save.success) tokenPatch.stunTurns = STUN_DEFAULT_TURNS
-            multiStrikeHitsRef.current[hitKey] = 0
-          }
-        }
-      }
-
-      if (caster && skill.skillTreeId === 'rageShot' && skillRank >= 3) {
-        const save = await resolveAbilitySave(caster, token, targetChar, 'str', '怒气爆射力量豁免')
-        featureExtraLabelParts.push(abilitySaveLabel('力量豁免', save, '成功，未束缚', '失败，束缚'))
-        if (!save.success) {
-          tokenPatch.restrainedTurns = 1
-          addConditionToCharacter(token.characterId, RESTRAINED_STATUS_LABEL)
-        }
-      }
-
-      if (caster && casterToken && skill.skillTreeId === 'bindShot') {
-        const save = await resolveAbilitySave(caster, token, targetChar, 'str', '捆绑射击力量豁免')
-        featureExtraLabelParts.push(abilitySaveLabel('力量豁免', save, '成功，未拉近', '失败，拉近'))
-        if (!save.success) {
-          const tc = pixelToCell(token.x, token.y, activeMap)
-          const cc = pixelToCell(casterToken.x, casterToken.y, activeMap)
-          moveTokenByCells(token, cc.col - tc.col, cc.row - tc.row, 2)
-          if (skillRank >= 4) {
-            tokenPatch.restrainedTurns = 1
-            addConditionToCharacter(token.characterId, RESTRAINED_STATUS_LABEL)
-          }
-        }
-        updateChar(caster.id, {
-          combatBuffs: { ...caster.combatBuffs, burstKickExtraD6: 1 },
-        })
-      }
-
-      if (caster && skill.skillTreeId === 'riseKick') {
-        updateChar(caster.id, {
-          conditions: caster.conditions.filter((c) => c !== '倒地'),
-          combatBuffs: {
-            ...caster.combatBuffs,
-            freeMoveFeet: skillRank >= 4 ? 10 : caster.combatBuffs?.freeMoveFeet,
-          },
-        })
-        featureExtraLabelParts.push(skillRank >= 4 ? '解除倒地，获得免费移动10尺' : '解除倒地')
-        if (skillRank >= 4) setShowMoveRange(true)
-      }
-
-      if (caster && casterToken && skill.skillTreeId === 'windKickCombo') {
-        const treatedKnockback = windKickTreatsTargetAsKnocked()
-        if ((targetKnockedBeforeAttack || treatedKnockback) && skillRank >= 5) {
-          selfCooldownReduction = Math.max(selfCooldownReduction, 1)
-          featureExtraLabelParts.push('目标击飞，踏风连踢 CD -1')
-        }
-        if (
-          await showCombatDialog({
-            title: '踏风连踢',
-            message: `是否推动 ${token.label} 5 尺？`,
-            confirmText: '推动',
-            cancelText: '不推动',
-            tone: 'sky',
-          })
-        ) {
-          const tc = pixelToCell(token.x, token.y, activeMap)
-          const cc = pixelToCell(casterToken.x, casterToken.y, activeMap)
-          moveTokenByCells(token, tc.col - cc.col, tc.row - cc.row, 1)
-          featureExtraLabelParts.push('推动5尺')
-        }
-      }
-
-      if (caster && skill.skillTreeId === 'refluxMagicArrow') {
-        const amount = isCrit && skillRank >= 3 ? 2 : 1
-        chooseCooldownSkillToReduce(caster, amount, `${skill.name} 命中`)
-      }
-
-      if (caster && skill.skillTreeId === 'encircle') {
-        const casterTokenForStatus = activeMap.tokens.find((t) => t.characterId === caster.id)
-        if (casterTokenForStatus) {
-          updateToken(activeMap.id, casterTokenForStatus.id, { noMoveTurns: 1 })
-          addConditionToCharacter(caster.id, NO_MOVE_STATUS_LABEL)
-        }
-        if (skillRank >= 5 && (skill.arrowShots ?? 0) >= 5) {
-          const save = await resolveAnimatedConSave(caster, token, targetChar, `${skill.name} 体质豁免`)
-          stunSaveLabel = formatConSaveLabel(save)
-          if (!save.success) tokenPatch.stunTurns = STUN_DEFAULT_TURNS
-        }
-      }
-
-      if (caster && skill.skillTreeId === 'antiMagicArrow') {
-        if (skillRank >= 3) {
-          tokenPatch.vulnerableTurns = 1
-          addConditionToCharacter(token.characterId, VULNERABLE_STATUS_LABEL)
-          featureExtraLabelParts.push('脆弱1回合')
-        }
-        if (skillRank >= 4) {
-          let removed = 0
-          const clearPatch: Partial<Token> = {}
-          for (const key of ['burningTurns', 'igniteTurns', 'poisonTurns', 'stunTurns', 'knockbackTurns', 'restrainedTurns', 'vulnerableTurns'] as const) {
-            if ((token[key] ?? 0) > 0) {
-              clearPatch[key] = 0
-              removed++
-            }
-          }
-          if (Object.keys(clearPatch).length > 0) updateToken(activeMap.id, token.id, clearPatch)
-          if (targetChar && targetChar.conditions.length > 0) {
-            removed += targetChar.conditions.length
-            updateChar(targetChar.id, { conditions: [] })
-          }
-          if (removed > 0) {
-            featureExtraLabelParts.push(`移除${removed}个状态`)
-            if (skillRank >= 5) selfCooldownReduction = Math.max(selfCooldownReduction, removed)
-          }
-        }
-      }
-
-      if (caster && skill.skillTreeId === 'shadowStepShot') {
-        updateChar(caster.id, {
-          combatBuffs: { ...caster.combatBuffs, freeMoveFeet: skillRank >= 4 ? 15 : 10 },
-        })
-        setDisengagedCharIds((prev) => new Set(prev).add(caster.id))
-        setShowMoveRange(true)
-        featureExtraLabelParts.push(`影步移动${skillRank >= 4 ? 15 : 10}尺，不触发借机`)
-      }
-
-      if (caster && skill.skillTreeId === 'shadowDance') {
-        updateChar(caster.id, {
-          combatBuffs: {
-            ...caster.combatBuffs,
-            freeMoveFeet: 15,
-            windKickTreatKnockbackTargetId: skillRank >= 3 ? token.id : undefined,
-          },
-        })
-        setDisengagedCharIds((prev) => new Set(prev).add(caster.id))
-        setShowMoveRange(true)
-        featureExtraLabelParts.push(skillRank >= 3 ? '影遁移动，不触发借机；踏风连踢视为击飞' : '影遁移动，不触发借机')
-      }
-
-      if (caster && findClassTrait(caster, 'swiftRecall') && isMagicDamageSkill(skill)) {
-        const appliedStatus =
-          !!tokenPatch.burningTurns ||
-          !!tokenPatch.poisonTurns ||
-          !!tokenPatch.stunTurns ||
-          !!tokenPatch.knockbackTurns ||
-          !!tokenPatch.restrainedTurns ||
-          !!tokenPatch.vulnerableTurns ||
-          !!tokenPatch.noMoveTurns
-        if (appliedStatus) {
-          if (
-            await showCombatDialog({
-              title: '迅捷回溯',
-              message: '获得 1 枚通用令牌。是否用于一个技能 CD -1？\n取消则回复 1 AP。',
-              confirmText: 'CD -1',
-              cancelText: '回复 1 AP',
-              tone: 'violet',
-            })
-          ) {
-            chooseCooldownSkillToReduce(caster, 1, '迅捷回溯')
-          } else {
-            const latest = useCharacterStore.getState().characters.find((c) => c.id === caster.id)
-            if (latest) updateChar(caster.id, { currentAP: Math.min(latest.actionPoints, latest.currentAP + 1) })
-          }
-          featureExtraLabelParts.push('迅捷回溯')
-        }
-      }
-
-      if (caster && findClassTrait(caster, 'arcaneDance')) {
-        const choice = window.prompt('魔能狂舞：选择附加状态（fire/poison/ice/acid/force/mind），留空则不触发')
-        const picked = choice?.trim().toLowerCase()
-        if (picked === 'fire') {
-          tokenPatch.burningTurns = Math.max(tokenPatch.burningTurns ?? 0, 1)
-          addConditionToCharacter(token.characterId, STATUS_LABEL.burning)
-          featureExtraLabelParts.push('魔能狂舞：燃烧')
-        } else if (picked === 'poison') {
-          tokenPatch.poisonTurns = Math.max(tokenPatch.poisonTurns ?? 0, 1)
-          addConditionToCharacter(token.characterId, STATUS_LABEL.poison)
-          featureExtraLabelParts.push('魔能狂舞：中毒')
-        } else if (picked === 'ice' || picked === 'acid' || picked === 'force' || picked === 'mind') {
-          tokenPatch.noMoveTurns = Math.max(tokenPatch.noMoveTurns ?? 0, 1)
-          addConditionToCharacter(token.characterId, NO_MOVE_STATUS_LABEL)
-          featureExtraLabelParts.push(`魔能狂舞：${picked}`)
-        }
-      }
-
-      const grantsKnockback =
-        caster &&
-        skillGrantsKnockbackOnHit(caster, skill) &&
-        skill.skillTreeId !== 'whirlwindKick'
-      if (grantsKnockback) {
-        knockbackPending = {
-          tokenId: token.id,
-          tokenLabel: token.label,
-          targetCharId: token.characterId,
-          casterId,
-          skill,
-        }
-      }
-
-      const stunSkillRank =
-        caster && skill.skillTreeId ? getSkillRank(caster, skill.skillTreeId) : 0
-      const grantsStun =
-        hit &&
-        caster &&
-        skill.skillTreeId != null &&
-        skillGrantsStun(skill.skillTreeId, stunSkillRank)
-      if (grantsStun) {
-        const save = await resolveAnimatedConSave(caster!, token, targetChar, `${skill.name} 体质豁免`)
-        stunSaveLabel = formatConSaveLabel(save)
-        if (!save.success) {
-          tokenPatch.stunTurns = STUN_DEFAULT_TURNS
-        }
-      }
-
-      if (Object.keys(tokenPatch).length > 0) {
-        updateToken(activeMap.id, token.id, tokenPatch)
-        if (tokenPatch.hp != null && tokenPatch.hp <= 0) {
-          deferDeathHandling(token.id, token.characterId)
-        }
-      }
-      if (token.characterId) {
-        const ch = useCharacterStore.getState().characters.find((c) => c.id === token.characterId)
-        if (ch) {
-          const conds = [...ch.conditions]
-          if (burnTurns && !conds.includes(STATUS_LABEL.burning)) conds.push(STATUS_LABEL.burning)
-          if (poisonTurns && !conds.includes(STATUS_LABEL.poison)) conds.push(STATUS_LABEL.poison)
-          if (tokenPatch.stunTurns && !conds.includes(STUN_STATUS_LABEL)) {
-            conds.push(STUN_STATUS_LABEL)
-          }
-          if (tokenPatch.restrainedTurns && !conds.includes(RESTRAINED_STATUS_LABEL)) {
-            conds.push(RESTRAINED_STATUS_LABEL)
-          }
-          if (tokenPatch.vulnerableTurns && !conds.includes(VULNERABLE_STATUS_LABEL)) {
-            conds.push(VULNERABLE_STATUS_LABEL)
-          }
-          if (tokenPatch.noMoveTurns && !conds.includes(NO_MOVE_STATUS_LABEL)) {
-            conds.push(NO_MOVE_STATUS_LABEL)
-          }
-          if (conds.length !== ch.conditions.length) {
-            updateChar(token.characterId, { conditions: conds })
-          }
-        }
-      }
-      if (
-        caster &&
-        casterToken &&
-        isCrit &&
-        canUseArmorPiercing(caster, skill, true)
-      ) {
-        const splash = Math.floor(total / 2)
-        const behindTargets = findArmorPiercingTargets(casterToken, token, splash)
-        if (behindTargets.length > 0 && splash > 0) {
-          activateClassFeature(casterId, 'armorPiercingArrow')
-          for (const behind of behindTargets) {
-            await applyDamageToToken(behind, splash, { caster })
-          }
-          featureExtraLabelParts.push(`穿甲箭溅射${behindTargets.length}名目标，各${splash}`)
-        }
-      }
-    }
-
-    if (caster && skill.skillTreeId === 'windTraceShot' && skillRank >= 4 && isCalmMindActive(caster)) {
-      selfCooldownReduction = Math.max(selfCooldownReduction, 1)
-    }
-    if (hit && caster && skill.skillTreeId === 'eagleStrike' && targetKnockedBeforeAttack) {
-      selfCooldownReduction = Math.max(selfCooldownReduction, skillRank >= 4 ? 3 : 2)
-    }
-
-    if (!opts?.skipUseSkill) {
-      const waiveAp = !!attackTargeting.waiveAp || !!caster?.combatBuffs?.galeComboReady
-      invokeSkill(casterId, skill.id, waiveAp ? { waiveAp: true } : undefined)
-      pushApLog(caster, waiveAp ? 0 : skill.apCost, `使用 ${skill.name}`, `目标 ${token.label}`)
-      applySkillCooldownReduction(casterId, skill.id, selfCooldownReduction)
-      if (waiveAp && caster?.combatBuffs?.galeComboReady) {
-        consumeGaleComboReady(casterId, skill.name)
-      }
-      if (caster && isBasicShot(skill) && caster.combatBuffs?.doubleArrowReady) {
-        updateChar(casterId, {
-          combatBuffs: { ...caster.combatBuffs, doubleArrowReady: undefined },
-        })
-      }
-    }
-    if (caster && tokenPatch.huntingMarkStacks === 4) {
-      await triggerFinaleIfReady(caster, token)
-    }
-    await runCombatResolutionStage(resolutionSession, 'afterDamageApplied')
-    const extraLabels = [...featureExtraLabelParts, enemyDodgeLabel, dexSaveLabel, stunSaveLabel].filter(Boolean).join(' · ')
-    const finalLabel = extraLabels ? `${rollLabel} · ${extraLabels}` : rollLabel
-    const diceFormula = values.length > 0 ? values.join(' + ') : '0'
-    const fixedFormula = skill.damageBonus ? ` + ${skill.damageBonus}` : ''
-    const beforeDefenseFormula =
-      critFormulaLabel || skill.damageBonus || damageBeforeDefense !== values.reduce((sum, value) => sum + value, 0)
-        ? ` = ${damageBeforeDefense}`
-        : ''
-    const attackDefenseFormula =
-      attackDefenseDiff != null
-        ? `，攻防修正 ${attackDefenseModifier >= 0 ? '+' : '-'}${Math.abs(attackDefenseModifier)}（差值${attackDefenseDiff}）`
-        : ''
-    const dexSaveFormula =
-      pendingDexSave && damageAfterDefense !== total
-        ? `，豁免后${total}`
-        : ''
-    const damageFormula =
-      hit && values.length > 0
-        ? `骰值 ${diceFormula}${fixedFormula}${critFormulaLabel}${beforeDefenseFormula}${attackDefenseFormula}${dexSaveFormula}，最终 ${total}`
-        : undefined
-    if (!opts?.silent) {
-      const rollForDisplay: DiceRoll = {
-        values: hit ? values : [],
-        sides: isBasicShot(skill) ? 8 : skill.damageSides,
-        bonus: damageBonusForRoll,
-        total: hit ? total : 0,
-        label: finalLabel,
-        formula: damageFormula,
-        targetName: token.label,
-        d20Roll,
-      }
-      setRoll(rollForDisplay)
-      publishSharedDiceRoll(rollForDisplay)
-      pushCombatLog(
-        `${caster?.name ?? '角色'} 使用 ${skill.name} → ${token.label}：${finalLabel}。${hit ? `伤害 ${damageFormula ?? total}` : '未命中'}，最终 ${hit ? total : 0} 点。`,
-        hit ? 'damage' : 'attack',
-      )
-      if (knockbackPending) {
-        scheduleKnockbackRolls([knockbackPending])
-      }
-    }
-    if (!opts?.silent && pendingGaleComboAfterDamage && caster) {
-      await offerGaleComboAfterDamageApplied(casterId, caster)
-    }
-    await runCombatResolutionStage(resolutionSession, 'actionResolved')
-    if (!opts?.skipCleanup) {
-      setTargeting(null)
-      setAoePreviewCell(null)
-    }
-    return {
-      hit,
-      total,
-      values,
-      rollLabel: finalLabel,
-      d20Roll,
-      knockbackPending,
-      selfCooldownReduction,
-      damageBeforeDefense,
-      damageAfterDefense,
-      attackDefenseDiff,
-      attackDefenseModifier,
-      galeComboPending: pendingGaleComboAfterDamage,
-    }
-  }
-
-  const resolveAoeAttack = async (
-    clickedCell: GridCell,
-    opts?: {
-      targetingOverride?: {
-        casterId: string
-        skill: CombatSkill
-        doubleArrow?: boolean
-        aoe: SkillAoeTargeting
-        waiveAp?: boolean
-      }
-      rectRotationOverride?: number
-    },
-  ) => {
-    if (resolvingAoeRef.current) return
-    const aoeTargeting = opts?.targetingOverride ?? targeting
-    if (!aoeTargeting?.aoe || !activeMap) return
-    const { skill, casterId, aoe } = aoeTargeting
-    const caster = useCharacterStore.getState().characters.find((c) => c.id === casterId)
-    const casterToken = activeMap.tokens.find((t) => t.characterId === casterId)
-    if (!caster || !casterToken) return
-
-    const casterCell = pixelToCell(casterToken.x, casterToken.y, activeMap)
-    const anchorCell =
-      aoe.shape === 'circle' && aoe.origin === 'self' ? casterCell : clickedCell
-    if (!canPlaceAoe(aoe, casterCell, anchorCell)) {
-      await showCombatNotice(
-        '超出施法距离',
-        aoe.shape === 'line'
-          ? '瞄准点超出施法距离。'
-          : aoe.shape === 'rect'
-            ? '矩形中心超出施法距离。'
-            : '圆心超出施法距离。',
-        'amber',
-      )
-      return
-    }
-
-    const cells = cellsForAoe(
-      aoe,
-      aoeOrientFromCell(aoe, casterCell, anchorCell, {
-        skillTreeId: skill.skillTreeId,
-        rectRotation: opts?.rectRotationOverride,
-      }),
-      anchorCell,
-    )
-    resolvingAoeRef.current = true
-    setTargeting(null)
-    setAoePreviewCell(null)
-    if (skill.skillTreeId === 'focusShot') {
-      launchArrowProjectile({ x: casterToken.x, y: casterToken.y }, cellToPixel(anchorCell, activeMap), 'focus')
-    }
-    const targets = tokensInCells(activeMap, activeMap.tokens, cells).filter(
-      (t) => t.id !== casterToken.id,
-    )
-    if (targets.length === 0) {
-      setRoll({
-        values: [],
-        sides: isBasicShot(skill) ? 8 : skill.damageSides,
-        bonus: 0,
-        total: 0,
-        label: `${skill.name} · ${cells.length} 格 · 无目标`,
-        targetName: '—',
-      })
-      resolvingAoeRef.current = false
-      return
-    }
-
-    const aoeResolutionSession = createCombatResolutionSessionForAction({
-      actorToken: casterToken,
-      targetToken: targets[0],
-      actorCharacterId: casterId,
-      targetCharacterId: targets[0]?.characterId,
-      skill,
-      tags: ['player-action', 'aoe', aoe.shape],
-    })
-    await runCombatResolutionStage(aoeResolutionSession, 'actionDeclared')
-    await runCombatResolutionStage(aoeResolutionSession, 'beforeDamageRoll')
-
-    const hitLines: string[] = []
-    const knockbackQueue: KnockbackPending[] = []
-    let galeComboAfterDamage = false
-    let combinedValues: number[] = []
-    let combinedTotal = 0
-    let anyHit = false
-    let selfCooldownReduction = 0
-    const skillRank = getSkillRank(caster, skill.skillTreeId ?? '')
-    const fallbackAoeDiceCount =
-      skill.damageCount <= 0 && skill.skillTreeId === 'aerialCombo'
-        ? Math.max(2, skillRank + 1)
-        : skill.damageCount <= 0 && skill.skillTreeId === 'arrowStorm'
-          ? Math.max(2, skillRank + 1)
-          : 0
-    const baseDiceCount = Math.max(attackDamageDiceCount(skill, false), fallbackAoeDiceCount)
-    const damageSides = isBasicShot(skill) ? 8 : skill.damageSides
-    let sharedValues = await rollDiceBoxValues(baseDiceCount, damageSides, `${skill.name} 伤害`, targets[0]?.label ?? skill.name)
-    const sharedLabelParts: string[] = []
-    const windExtra = windTraceExtraDiceCount(skill.skillTreeId, skillRank, caster, targets[0], targets.length)
-    if (windExtra > 0) {
-      const extraValues = await rollDiceBoxValues(windExtra, 6, `${skill.name} 额外伤害`, targets[0]?.label ?? skill.name)
-      sharedValues = [...sharedValues, ...extraValues]
-    }
-    if (skill.skillTreeId === 'eagleStrike') {
-      const eagleExtra = eagleStrikeExtraDiceCount(skillRank)
-      if (eagleExtra > 0) {
-        const extraValues = await rollDiceBoxValues(eagleExtra, 6, `${skill.name} 击飞伤害`, targets[0]?.label ?? skill.name)
-        sharedValues = [...sharedValues, ...extraValues]
-      }
-    }
-    const calm = findClassTrait(caster, 'calmMind')
-    if (calm && isCalmMindActive(caster) && calm.level > 0) {
-      const extra = await rollDiceBoxValues(calm.level, 6, `${skill.name} 静心额外伤害`, targets[0]?.label ?? skill.name)
-      sharedValues = [...sharedValues, ...extra]
-      sharedLabelParts.push(`静心+${calm.level}d6`)
-    }
-    if (aoeResolutionSession) {
-      const sharedTotal = sharedValues.reduce((sum, value) => sum + value, 0) + skill.damageBonus
-      aoeResolutionSession.context.damageRoll = {
-        values: [...sharedValues],
-        sides: damageSides,
-        bonus: skill.damageBonus,
-        total: sharedTotal,
-        label: skill.name,
-      }
-      aoeResolutionSession.context.pendingDamage = targets.map((target) => ({
-        id: `${aoeResolutionSession.context.actionId}:aoe:${target.id}`,
-        source: {
-          tokenId: casterToken.id,
-          characterId: casterId,
-        },
-        target: {
-          tokenId: target.id,
-          characterId: target.characterId,
-        },
-        amount: sharedTotal,
-        damageType: isMagicDamageSkill(skill) ? 'magic' : 'physical',
-        roll: aoeResolutionSession.context.damageRoll,
-        tags: [skill.skillTreeId ?? skill.id, 'aoe'],
-      }))
-    }
-    await runCombatResolutionStage(aoeResolutionSession, 'damageRolled')
-    await runCombatResolutionStage(aoeResolutionSession, 'beforeDamageApplied')
-
-    for (const token of targets) {
-      const result = await resolveAttack(token, {
-        skipCleanup: true,
-        skipUseSkill: true,
-        silent: true,
-        aoeTargetCount: targets.length,
-        targetingOverride: {
-          casterId,
-          skill,
-          doubleArrow: aoeTargeting.doubleArrow,
-          waiveAp: aoeTargeting.waiveAp,
-        },
-        presetDamageValues: sharedValues,
-        presetFeatureLabelParts: sharedLabelParts,
-      })
-      if (result) {
-        anyHit = true
-        combinedTotal += result.total
-        selfCooldownReduction = Math.max(selfCooldownReduction, result.selfCooldownReduction ?? 0)
-        const [, ...effectLabels] = result.rollLabel.split(' · ')
-        if (result.attackDefenseDiff != null) {
-          effectLabels.unshift(
-            `攻防修正${(result.attackDefenseModifier ?? 0) >= 0 ? '+' : ''}${result.attackDefenseModifier ?? 0}（差值${result.attackDefenseDiff}）`,
-          )
-        }
-        hitLines.push(
-          `${token.label} ${result.total}${effectLabels.length > 0 ? `（${effectLabels.join(' · ')}）` : ''}`,
-        )
-        if (result.knockbackPending) knockbackQueue.push(result.knockbackPending)
-        galeComboAfterDamage = galeComboAfterDamage || !!result.galeComboPending
-      }
-    }
-    combinedValues = anyHit ? sharedValues : []
-    if (aoeResolutionSession) {
-      aoeResolutionSession.context.appliedDamage = hitLines.map((line, index) => ({
-        id: `${aoeResolutionSession.context.actionId}:aoe-applied:${targets[index]?.id ?? index}`,
-        source: {
-          tokenId: casterToken.id,
-          characterId: casterId,
-        },
-        target: {
-          tokenId: targets[index]?.id ?? '',
-          characterId: targets[index]?.characterId,
-        },
-        amount: Number(line.match(/\s(\d+)/)?.[1] ?? 0),
-        damageType: isMagicDamageSkill(skill) ? 'magic' : 'physical',
-        roll: aoeResolutionSession.context.damageRoll,
-        tags: [skill.skillTreeId ?? skill.id, 'aoe'],
-      }))
-    }
-    await runCombatResolutionStage(aoeResolutionSession, 'damageApplied')
-
-    if (skill.skillTreeId === 'windTraceShot' && skillRank >= 4 && isCalmMindActive(caster)) {
-      selfCooldownReduction = Math.max(selfCooldownReduction, 1)
-    }
-
-    const waiveAp = !!aoeTargeting.waiveAp || !!caster?.combatBuffs?.galeComboReady
-    invokeSkill(casterId, skill.id, waiveAp ? { waiveAp: true } : undefined)
-    pushApLog(caster, waiveAp ? 0 : skill.apCost, `释放 ${skill.name}`, `${targets.length} 名目标，覆盖 ${cells.length} 格`)
-    applySkillCooldownReduction(casterId, skill.id, selfCooldownReduction)
-    if (waiveAp && caster?.combatBuffs?.galeComboReady) {
-      consumeGaleComboReady(casterId, skill.name)
-    }
-
-    const cellCount = cells.length
-    const sharedRollSum = combinedValues.reduce((sum, value) => sum + value, 0)
-    const sharedRollTotal = sharedRollSum + skill.damageBonus
-    setRoll({
-      values: anyHit ? combinedValues : [],
-      sides: isBasicShot(skill) ? 8 : skill.damageSides,
-      bonus: skill.damageBonus,
-      total: anyHit ? sharedRollTotal : 0,
-      label: `${skill.name} · ${cellCount} 格 · ${targets.length} 名在范围内${anyHit ? '' : '（无命中）'}`,
-      formula: anyHit
-        ? `${combinedValues.join(' + ')}${skill.damageBonus ? ` + ${skill.damageBonus}` : ''} = ${sharedRollTotal}`
-        : undefined,
-      targetName: hitLines.length > 0 ? hitLines.join('；') : '—',
-    })
-    pushCombatLog(
-      `${caster.name} 结算 ${skill.name}：覆盖 ${cells.length} 格，${targets.length} 名目标在范围内。伤害骰 ${combinedValues.length > 0 ? combinedValues.join(' + ') : '无'}${skill.damageBonus ? `，技能加值 ${skill.damageBonus}` : ''}，豁免前基础 ${sharedRollTotal}。${hitLines.length > 0 ? `逐个目标：${hitLines.join('；')}` : '无目标受击'}`,
-      anyHit ? 'damage' : 'attack',
-    )
-    if (knockbackQueue.length > 0) {
-      scheduleKnockbackRolls(knockbackQueue)
-    }
-    await runCombatResolutionStage(aoeResolutionSession, 'afterDamageApplied')
-    if (galeComboAfterDamage) {
-      await offerGaleComboAfterDamageApplied(casterId, caster)
-    }
-    await runCombatResolutionStage(aoeResolutionSession, 'actionResolved')
-    resolvingAoeRef.current = false
   }
 
   const applyDamageToToken = async (
@@ -4973,10 +3395,9 @@ export default function MapsPage() {
         setAoePreviewCell(null)
         return
       }
-      void resolveAoeAttack(aoeCasterCell).finally(() => {
-        setTargeting(null)
-        setAoePreviewCell(null)
-      })
+      void showCombatNotice('无法执行', '当前范围攻击无法提交给 DM 结算。', 'amber')
+      setTargeting(null)
+      setAoePreviewCell(null)
       return
     }
     if (!aoeHighlight?.valid) return
@@ -4986,10 +3407,9 @@ export default function MapsPage() {
       setAoePreviewCell(null)
       return
     }
-    void resolveAoeAttack(cell).finally(() => {
-      setTargeting(null)
-      setAoePreviewCell(null)
-    })
+    void showCombatNotice('无法执行', '当前范围攻击无法提交给 DM 结算。', 'amber')
+    setTargeting(null)
+    setAoePreviewCell(null)
   }
 
   const handleSelectToken = (tokenId: string | null) => {
@@ -5028,10 +3448,9 @@ export default function MapsPage() {
             setAoePreviewCell(null)
             return
           }
-          void resolveAoeAttack(aoeCasterCell).finally(() => {
-            setTargeting(null)
-            setAoePreviewCell(null)
-          })
+          void showCombatNotice('无法执行', '当前范围攻击无法提交给 DM 结算。', 'amber')
+          setTargeting(null)
+          setAoePreviewCell(null)
           return
         }
         return
@@ -5049,10 +3468,9 @@ export default function MapsPage() {
           setAoePreviewCell(null)
           return
         }
-        void resolveAoeAttack(clickedCell).finally(() => {
-          setTargeting(null)
-          setAoePreviewCell(null)
-        })
+        void showCombatNotice('无法执行', '当前范围攻击无法提交给 DM 结算。', 'amber')
+        setTargeting(null)
+        setAoePreviewCell(null)
         return
       }
       setSelectedTokenId(tokenId)
@@ -7750,6 +6168,7 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
+        await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
         if (
           resolved.hit &&
           (skill.skillTreeId === 'shadowStepShot' ||
@@ -7933,6 +6352,7 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
+        await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
         const resolvedEvents = headless.events.filter(
           (event): event is Extract<HeadlessCombatEvent, { type: 'aoe-target-resolved' }> =>
             event.type === 'aoe-target-resolved',
@@ -10084,3 +8504,4 @@ export default function MapsPage() {
     </div>
   )
 }
+import { findOpportunityAttackersForMove } from '../lib/opportunityAttacks'
