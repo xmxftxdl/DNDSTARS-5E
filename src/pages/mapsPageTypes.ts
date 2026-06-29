@@ -81,7 +81,7 @@ export interface SharedPlayerActionState {
   id: string
   mapId: string
   combatId?: string
-  sourceMode: 'player'
+  sourceMode: 'player' | 'dm'
   status: 'pending' | 'done'
   type:
     | 'end-turn'

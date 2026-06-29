@@ -3983,121 +3983,6 @@ export default function MapsPage() {
     }
   }
 
-  const resolveArrowSequenceAttack = async (
-    caster: Character,
-    skill: CombatSkill,
-    targets: Token[],
-    opts?: { waiveAp?: boolean },
-  ) => {
-    if (!activeMap || targets.length === 0) return []
-    const waiveAp = !!opts?.waiveAp
-    const perArrowDiceCount = Math.max(1, skill.damageCount)
-    const damageSides = isBasicShot(skill) ? 8 : skill.damageSides
-    const comboFist = waiveAp ? findClassTrait(caster, 'comboFist') : undefined
-    const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-    const actorToken = map.tokens.find((token) => token.characterId === caster.id)
-    if (!actorToken) return []
-
-    const packetPlans = []
-    let damagePacketCount = 0
-    const skillRank = skill.skillTreeId ? getSkillRank(caster, skill.skillTreeId) : 0
-    for (const target of targets) {
-      const liveTarget = map.tokens.find((token) => token.id === target.id) ?? target
-      const dodgePreview = enemyDodgePreview(liveTarget, caster, skill)
-      const shouldDodge = !!dodgePreview?.decision.shouldDodge
-      const targetDodgeD20 = shouldDodge ? await rollDiceBoxD20('敌人闪避 D20', liveTarget.label) : undefined
-      const expectedDodged =
-        targetDodgeD20 != null && dodgePreview
-          ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
-          : false
-      const effectSaveD20 =
-        !expectedDodged && skill.skillTreeId === 'rageShot' && skillRank >= 3
-          ? await rollDiceBoxD20('怒气爆射力量豁免 D20', liveTarget.label)
-          : undefined
-      if (!expectedDodged) damagePacketCount += 1
-      packetPlans.push({ target, targetDodgeD20, targetDodgeMode: shouldDodge ? 'attempt' : 'skip', expectedDodged, effectSaveD20 })
-    }
-
-    const allBaseValues =
-      damagePacketCount > 0
-        ? await rollDiceBoxValues(
-            perArrowDiceCount * damagePacketCount,
-            damageSides,
-            skill.name + ' 伤害',
-            targets[0]?.label ?? skill.name,
-          )
-        : []
-    const comboFistValues =
-      comboFist && damagePacketCount > 0
-        ? await rollDiceBoxValues(comboFist.level, 6, skill.name + ' 连续拳额外伤害', targets[0]?.label ?? skill.name)
-        : []
-
-    let damageCursor = 0
-    let comboFistApplied = false
-    const targetPackets = packetPlans.map((plan) => {
-      const diceValues = plan.expectedDodged
-        ? undefined
-        : allBaseValues.slice(damageCursor, damageCursor + perArrowDiceCount)
-      let extraDamageValues: number[] | undefined
-      if (!plan.expectedDodged) {
-        damageCursor += perArrowDiceCount
-        if (!comboFistApplied && comboFistValues.length > 0) {
-          extraDamageValues = comboFistValues
-          comboFistApplied = true
-        }
-      }
-      return {
-        targetTokenId: plan.target.id,
-        diceValues,
-        targetDodgeD20: plan.targetDodgeD20,
-        targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
-        extraDamageValues,
-        extraDamageSides: extraDamageValues?.length ? 6 : undefined,
-        effectSave: plan.effectSaveD20 != null ? { ability: 'str' as const, d20: plan.effectSaveD20 } : undefined,
-        restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
-      }
-    })
-
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-      type: 'attack-token',
-      actorTokenId: actorToken.id,
-      characterId: caster.id,
-      targetTokenId: targets[0].id,
-      skillId: skill.id,
-      targetPackets,
-    })
-    if (!headless.ok) return []
-
-    applyHeadlessCombatResult(headless)
-    const results = headless.events.filter(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> =>
-        event.type === 'attack-resolved',
-    )
-    const totalDamage = results.reduce((sum, result) => sum + result.total, 0)
-    const hitCount = results.filter((result) => result.hit).length
-    const displayValues = results.flatMap((result) => result.damageValues)
-    const summary = results
-      .map((result, index) => {
-        const target = map.tokens.find((token) => token.id === result.targetTokenId)
-        return result.hit
-          ? '第 ' + (index + 1) + ' 段→' + (target?.label ?? result.targetTokenId) + ' ' + result.total + ' 点'
-          : '第 ' + (index + 1) + ' 段被闪避'
-      })
-      .join('；')
-    const rollForDisplay: DiceRoll = {
-      values: displayValues,
-      sides: damageSides,
-      bonus: totalDamage - displayValues.reduce((sum, value) => sum + value, 0),
-      total: totalDamage,
-      label: skill.name + ' · ' + targets.length + ' 段 · 命中' + hitCount,
-      formula: summary + '；合计 ' + totalDamage + ' 点',
-      targetName: targets[0]?.label ?? skill.name,
-    }
-    setRoll(rollForDisplay)
-    publishSharedDiceRoll(rollForDisplay)
-    pushCombatLog(caster.name + ' 使用 ' + skill.name + '：' + summary + '，合计 ' + totalDamage + ' 点。', totalDamage > 0 ? 'damage' : 'attack')
-    return results
-  }
   const resolveAoeAttack = async (
     clickedCell: GridCell,
     opts?: {
@@ -5083,6 +4968,11 @@ export default function MapsPage() {
     }
     if (isSelfOriginCircleAoe(targeting.aoe)) {
       if (requestPlayerAoe(aoeCasterCell)) return
+      if (sendDmLocalAoeAttackRequest(aoeCasterCell)) {
+        setTargeting(null)
+        setAoePreviewCell(null)
+        return
+      }
       void resolveAoeAttack(aoeCasterCell).finally(() => {
         setTargeting(null)
         setAoePreviewCell(null)
@@ -5091,6 +4981,11 @@ export default function MapsPage() {
     }
     if (!aoeHighlight?.valid) return
     if (requestPlayerAoe(cell)) return
+    if (sendDmLocalAoeAttackRequest(cell)) {
+      setTargeting(null)
+      setAoePreviewCell(null)
+      return
+    }
     void resolveAoeAttack(cell).finally(() => {
       setTargeting(null)
       setAoePreviewCell(null)
@@ -5128,6 +5023,11 @@ export default function MapsPage() {
             }
             return
           }
+          if (sendDmLocalAoeAttackRequest(aoeCasterCell)) {
+            setTargeting(null)
+            setAoePreviewCell(null)
+            return
+          }
           void resolveAoeAttack(aoeCasterCell).finally(() => {
             setTargeting(null)
             setAoePreviewCell(null)
@@ -5142,6 +5042,11 @@ export default function MapsPage() {
             setTargeting(null)
             setAoePreviewCell(null)
           }
+          return
+        }
+        if (sendDmLocalAoeAttackRequest(clickedCell)) {
+          setTargeting(null)
+          setAoePreviewCell(null)
           return
         }
         void resolveAoeAttack(clickedCell).finally(() => {
@@ -5219,77 +5124,38 @@ export default function MapsPage() {
           }
           return
         }
-        if (targeting.skill.skillTreeId === 'multiShot' || targeting.skill.skillTreeId === 'encircle') {
-          const caster = characters.find((c) => c.id === targeting.casterId)
-          if (caster && activeMap) {
-            const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
-            const selectedTargets = Array.from({ length: shots }, () => tok)
-            const waiveAp = !!targeting.waiveAp
-            if (!waiveAp && caster.currentAP < targeting.skill.apCost) {
-              void showCombatNotice('行动点不足', `需要 ${targeting.skill.apCost} AP。`, 'amber')
-              releaseSkillTarget()
-              return
-            }
-            void (async () => {
-              try {
-                await resolveArrowSequenceAttack(caster, targeting.skill, selectedTargets, { waiveAp })
-                setTargeting(null)
-                setAoePreviewCell(null)
-              } finally {
-                releaseSkillTarget()
-              }
-            })()
-            return
+        let dmTargetTokenIds: string[] | undefined
+        if (activeMap && (targeting.skill.skillTreeId === 'multiShot' || targeting.skill.skillTreeId === 'encircle')) {
+          const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
+          dmTargetTokenIds = Array.from({ length: shots }, () => tok.id)
+        } else if (activeMap && targeting.skill.skillTreeId === 'rageShot') {
+          const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
+          const selectedTargets: Token[] = [tok]
+          const candidates = activeMap.tokens.filter((t) => {
+            if (t.characterId === targeting.casterId) return false
+            if (!isTokenAlive(t, characters)) return false
+            const targetCell = pixelToCell(t.x, t.y, activeMap)
+            return new Set(rangedRangeCells.map(cellKey)).has(cellKey(targetCell))
+          })
+          for (let shot = 1; shot < shots; shot++) {
+            const picked = candidates.length
+              ? window.prompt(
+                  `${targeting.skill.name}: choose arrow ${shot + 1}/${shots} target, empty keeps ${tok.label}:\n${candidates
+                    .map((t, i) => `${i + 1}. ${t.label}`)
+                    .join('\n')}`,
+                )
+              : null
+            selectedTargets.push(candidates[Number(picked) - 1] ?? tok)
           }
+          dmTargetTokenIds = selectedTargets.map((target) => target.id)
         }
-        if (targeting.skill.skillTreeId === 'rageShot') {
-          const caster = characters.find((c) => c.id === targeting.casterId)
-          if (caster && activeMap) {
-            const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
-            const selectedTargets: Token[] = [tok]
-            const candidates = activeMap.tokens.filter((t) => {
-              if (t.characterId === targeting.casterId) return false
-              if (!isTokenAlive(t, characters)) return false
-              const targetCell = pixelToCell(t.x, t.y, activeMap)
-              return new Set(rangedRangeCells.map(cellKey)).has(cellKey(targetCell))
-            })
-            for (let shot = 1; shot < shots; shot++) {
-              const picked = candidates.length
-                ? window.prompt(
-                    `${targeting.skill.name}：选择第 ${shot + 1}/${shots} 支箭目标，留空则继续射向 ${tok.label}：\n${candidates
-                      .map((t, i) => `${i + 1}. ${t.label}`)
-                      .join('\n')}`,
-                  )
-                : null
-              selectedTargets.push(candidates[Number(picked) - 1] ?? tok)
-            }
-            const waiveAp = !!targeting.waiveAp
-            if (!waiveAp && caster.currentAP < targeting.skill.apCost) {
-              void showCombatNotice('行动点不足', `需要 ${targeting.skill.apCost} AP。`, 'amber')
-              releaseSkillTarget()
-              return
-            }
-            void (async () => {
-              try {
-                await resolveArrowSequenceAttack(caster, targeting.skill, selectedTargets, { waiveAp })
-                setTargeting(null)
-                setAoePreviewCell(null)
-              } finally {
-                releaseSkillTarget()
-              }
-            })()
-            return
-          }
+        if (sendDmLocalAttackTokenRequest(tok, targeting.skill, dmTargetTokenIds)) {
+          setTargeting(null)
+          setAoePreviewCell(null)
+          window.setTimeout(releaseSkillTarget, 1000)
+        } else {
+          releaseSkillTarget()
         }
-        const attackTargeting = {
-          casterId: targeting.casterId,
-          skill: targeting.skill,
-          doubleArrow: targeting.doubleArrow,
-          waiveAp: targeting.waiveAp,
-        }
-        setTargeting(null)
-        setAoePreviewCell(null)
-        void resolveAttack(tok, { targetingOverride: attackTargeting }).finally(releaseSkillTarget)
         return
       }
     }
@@ -7176,21 +7042,7 @@ export default function MapsPage() {
     skill: CombatSkill,
     opts: { doubleArrow: boolean; targetCount: number },
   ) => {
-    const supportedSkill =
-      isBasicShot(skill) ||
-      skill.skillTreeId === 'burstKick' ||
-      skill.skillTreeId === 'bindShot' ||
-      skill.skillTreeId === 'rageShot' ||
-      skill.skillTreeId === 'refluxMagicArrow' ||
-      skill.skillTreeId === 'antiMagicArrow' ||
-      skill.skillTreeId === 'clusterShot' ||
-      skill.skillTreeId === 'windKickCombo' ||
-      skill.skillTreeId === 'shadowStepShot' ||
-      skill.skillTreeId === 'shadowDance' ||
-      skill.skillTreeId === 'riseKick' ||
-      skill.skillTreeId === 'explosiveArrow' ||
-      skill.skillTreeId === 'eagleStrike'
-    if (!supportedSkill || opts.targetCount !== 1) return false
+    if (opts.targetCount !== 1) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
     const buffs = actor.combatBuffs
@@ -7200,8 +7052,6 @@ export default function MapsPage() {
     ) {
       return false
     }
-    if (opts.doubleArrow && buffs?.preciseStrikeReady) return false
-    if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
     return true
   }
 
@@ -7946,16 +7796,10 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'accepted')
         return
       }
-      await resolveAttack(targets[0], {
-        targetingOverride: {
-          casterId: actor.id,
-          skill,
-          doubleArrow,
-          waiveAp: waiveAp || undefined,
-        },
-      })
+      void doubleArrow
+      void waiveAp
+      acknowledgePlayerAction(action, 'rejected', 'unsupported-attack')
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
       return
     }
 
@@ -7974,14 +7818,7 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      if (
-        skill.skillTreeId === 'arrowStorm' ||
-        skill.skillTreeId === 'aerialCombo' ||
-        skill.skillTreeId === 'whirlwindKick' ||
-        skill.skillTreeId === 'focusShot' ||
-        skill.skillTreeId === 'spiralBlade' ||
-        skill.skillTreeId === 'windTraceShot'
-      ) {
+      if (skill.damageCount > 0 && skill.damageSides > 0) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
         if (!actorToken) {
@@ -8134,19 +7971,9 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'accepted')
         return
       }
-      const doubleArrow = canUseDoubleArrow(actor, skill) && !!actor.combatBuffs?.doubleArrowReady
-      await resolveAoeAttack(action.targetCell, {
-        targetingOverride: {
-          casterId: actor.id,
-          skill,
-          doubleArrow,
-          aoe,
-          waiveAp: waiveAp || undefined,
-        },
-        rectRotationOverride: action.aoeRectRotation ?? 0,
-      })
+      void aoe
+      acknowledgePlayerAction(action, 'rejected', 'unsupported-aoe-attack')
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
       return
     }
 
@@ -8396,6 +8223,60 @@ export default function MapsPage() {
       await publishSharedEvent<SharedPlayerActionState>('player-action-player-to-dm', action)
     })()
     return true
+  }
+
+  const createDmLocalPlayerAction = (
+    patch: Pick<SharedPlayerActionState, 'type'> &
+      Partial<Omit<SharedPlayerActionState, 'id' | 'mapId' | 'combatId' | 'sourceMode' | 'status' | 'round' | 'initiativeIndex' | 'seq' | 'updatedAt'>>,
+  ): SharedPlayerActionState | null => {
+    if (!isDM || !activeMap || !turnCharacter || !currentInitiativeToken) return null
+    if (currentInitiativeToken.type !== 'player' || currentInitiativeToken.characterId !== turnCharacter.id) return null
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    return {
+      id: `${activeMap.id}:dm-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'dm',
+      status: 'pending',
+      actorTokenId: currentInitiativeToken.id,
+      characterId: turnCharacter.id,
+      round: roundRef.current,
+      initiativeIndex: initiativeIndexRef.current,
+      seq,
+      updatedAt: Date.now(),
+      ...patch,
+    }
+  }
+
+  const submitDmLocalPlayerAction = (action: SharedPlayerActionState | null) => {
+    if (!action) return false
+    void handlePlayerActionRequest(action)
+    return true
+  }
+
+  const sendDmLocalAttackTokenRequest = (targetToken: Token, skill: CombatSkill, targetTokenIds?: string[]) => {
+    if (getSkillAoeTargeting(skill)) return false
+    return submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'attack-token',
+        targetTokenId: targetToken.id,
+        targetTokenIds,
+        skillId: skill.id,
+      }),
+    )
+  }
+
+  const sendDmLocalAoeAttackRequest = (targetCell: GridCell) => {
+    if (!targeting?.aoe) return false
+    return submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'aoe-attack',
+        skillId: targeting.skill.id,
+        targetCell,
+        aoeRectRotation,
+      }),
+    )
   }
 
   const sendPlayerEndTurnRequest = () => {
