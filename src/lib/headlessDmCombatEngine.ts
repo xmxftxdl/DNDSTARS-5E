@@ -181,6 +181,7 @@ export interface HeadlessPlayerAttackAction {
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
   ignoreTargetDodge?: boolean
+  attackRoll?: HeadlessAttackRollPacket
   isCrit?: boolean
   additionalCritMultiplier?: number
   targetPackets?: HeadlessPlayerAttackPacket[]
@@ -200,6 +201,7 @@ export interface HeadlessPlayerAttackPacket {
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
   ignoreTargetDodge?: boolean
+  attackRoll?: HeadlessAttackRollPacket
   isCrit?: boolean
   additionalCritMultiplier?: number
   effectSave?: HeadlessAttackEffectSavePacket
@@ -240,11 +242,21 @@ export interface HeadlessPlayerAttackPacket {
   clearShadowVeilTargetOnUse?: boolean
   addHuntingMarkOnDamage?: boolean
   markSilentDrawUsedOnHit?: boolean
+  clearCalmSpiritCritBonusOnUse?: boolean
 }
 
 export interface HeadlessExtraDamageGroup {
   values?: number[]
   sides: number
+}
+
+export interface HeadlessAttackRollPacket {
+  d20?: number
+  d20Second?: number
+  ability?: AbilityKey
+  targetAc?: number
+  critThreshold?: number
+  forceCrit?: boolean
 }
 
 export interface HeadlessAttackEffectSavePacket {
@@ -1227,6 +1239,7 @@ function resolvePlayerAttack(
   let shouldSpendPreciseStrikeUse = false
   let shouldClearShadowVeilTarget = false
   let shouldSpendArmorPiercingUse = false
+  let shouldClearCalmSpiritCritBonus = false
   const cooldownReductions: Array<{ skillId: string; amount: number }> = []
   for (const [packetIndex, packet] of packets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
@@ -1238,9 +1251,51 @@ function resolvePlayerAttack(
       targetDodgeD20: packet.targetDodgeD20,
       targetDodgeMode: packet.targetDodgeMode,
       ignoreTargetDodge: packet.ignoreTargetDodge,
+      attackRoll: packet.attackRoll,
       isCrit: packet.isCrit,
       additionalCritMultiplier: packet.additionalCritMultiplier,
       targetPackets: undefined,
+    }
+    let effectiveIsCrit = !!packet.isCrit
+    if (packet.clearCalmSpiritCritBonusOnUse) shouldClearCalmSpiritCritBonus = true
+    if (packet.attackRoll) {
+      const attackRoll = resolveHeadlessPlayerAttackRoll(actor, targetToken, skill, packet.attackRoll, dice, events)
+      if (!attackRoll) return fail(state, 'invalid-dice', events)
+      effectiveIsCrit = attackRoll.isCrit
+      if (!attackRoll.hit) {
+        if (packet.clearCalmSpiritCritBonusOnUse) {
+          updateCharacter(state, actor.id, (item) => ({
+            ...item,
+            combatBuffs: { ...item.combatBuffs, calmSpiritCritBonusPercent: undefined },
+          }))
+        }
+        events.push({
+          type: 'attack-resolved',
+          actorTokenId: actorToken.id,
+          characterId: actor.id,
+          targetTokenId: targetToken.id,
+          skillId: skill.id,
+          skillName: skill.name,
+          damageValues: [],
+          diceTotal: 0,
+          baseDamage: 0,
+          damageBeforeDefense: 0,
+          modifier: 0,
+          diff: 0,
+          total: 0,
+          isCrit: false,
+          hit: false,
+          targetDodged: false,
+          waivedAp: waiveAp,
+          apCost: packetIndex === 0 ? apCost : 0,
+        })
+        events.push({
+          type: 'log',
+          text: `${actor.name} misses ${targetToken.label} with ${skill.name}: ${attackRoll.d20}+${attackRoll.attackBonus} vs AC ${attackRoll.targetAc}.`,
+        })
+        resolvedCount += 1
+        continue
+      }
     }
     const targetDodge = resolveTargetDodgeAgainstPlayerAttack(
       state,
@@ -1350,11 +1405,11 @@ function resolvePlayerAttack(
 
     const preCritRawDamage = preCritDamageValues.reduce((sum, value) => sum + value, 0) + skill.damageBonus
     const additionalCritDamage =
-      packet.isCrit && packet.additionalCritMultiplier
+      effectiveIsCrit && packet.additionalCritMultiplier
         ? Math.floor(preCritRawDamage * packet.additionalCritMultiplier)
         : 0
     const baseDamage =
-      resolveAttackDamageTotal(actor, skill, preCritDamageValues, { isCrit: packet.isCrit }) +
+      resolveAttackDamageTotal(actor, skill, preCritDamageValues, { isCrit: effectiveIsCrit }) +
       additionalCritDamage +
       postCritDamageValues.reduce((sum, value) => sum + value, 0)
     const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
@@ -1368,7 +1423,7 @@ function resolvePlayerAttack(
       ? { ...adjustedBase, damage: Math.floor(adjustedBase.damage / 2) }
       : adjustedBase
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
-    if (packet.armorPiercingSplashOnCrit && packet.isCrit && adjusted.damage > 0) {
+    if (packet.armorPiercingSplashOnCrit && effectiveIsCrit && adjusted.damage > 0) {
       const splashDamage = Math.floor(adjusted.damage / 2)
       const splashTargets =
         splashDamage > 0
@@ -1481,7 +1536,7 @@ function resolvePlayerAttack(
       modifier: adjusted.modifier,
       diff: adjusted.diff,
       total: adjusted.damage,
-      isCrit: !!packet.isCrit,
+      isCrit: effectiveIsCrit,
       hit: true,
       targetDodged: false,
       waivedAp: waiveAp,
@@ -1520,6 +1575,12 @@ function resolvePlayerAttack(
       combatBuffs: { ...item.combatBuffs, shadowVeilTargetId: undefined },
     }))
     events.push({ type: 'log', text: `${actor.name} 的影遁之术效果已结算。` })
+  }
+  if (shouldClearCalmSpiritCritBonus) {
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, calmSpiritCritBonusPercent: undefined },
+    }))
   }
   for (const reduction of cooldownReductions) {
     const result = reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
@@ -1799,6 +1860,40 @@ function findArmorPiercingSplashTargets(
     const perpendicular = Math.abs(tx * -uy + ty * ux)
     return perpendicular <= halfWidthPx
   })
+}
+
+function resolveHeadlessPlayerAttackRoll(
+  actor: Character,
+  targetToken: Token,
+  skill: CombatSkill,
+  packet: HeadlessAttackRollPacket,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): { d20: number; attackBonus: number; attackTotal: number; targetAc: number; hit: boolean; isCrit: boolean } | null {
+  const firstValues = resolveDiceValues(packet.d20 != null ? [packet.d20] : undefined, dice, 1, 20)
+  if (!firstValues) return null
+  const secondValues =
+    packet.d20Second != null ? resolveDiceValues([packet.d20Second], dice, 1, 20) : undefined
+  if (secondValues === null) return null
+  const d20 = secondValues ? Math.max(firstValues[0], secondValues[0]) : firstValues[0]
+  events.push({
+    type: 'dice-rolled',
+    notation: secondValues ? '2d20' : '1d20',
+    values: secondValues ? [firstValues[0], secondValues[0]] : [firstValues[0]],
+    total: d20,
+  })
+  const ability = packet.ability ?? (skill.tags?.includes('melee') ? 'str' : 'dex')
+  const attackBonus = getEffectiveAbilityMod(actor, ability) + proficiencyBonus(actor.level)
+  const targetAc = packet.targetAc ?? getTokenTargetAc(targetToken) ?? 12
+  const attackTotal = d20 + attackBonus
+  const critThreshold = Math.max(1, Math.min(20, packet.critThreshold ?? 20))
+  const isCrit = !!packet.forceCrit || d20 >= critThreshold
+  const hit = !!packet.forceCrit || isCrit || attackTotal >= targetAc
+  events.push({
+    type: 'log',
+    text: `${actor.name} attack roll ${skill.name}: ${d20}+${attackBonus}=${attackTotal} vs AC ${targetAc}${isCrit ? ' crit' : ''}${hit ? '' : ' miss'}.`,
+  })
+  return { d20, attackBonus, attackTotal, targetAc, hit, isCrit }
 }
 
 function resolveAttackEffectSave(

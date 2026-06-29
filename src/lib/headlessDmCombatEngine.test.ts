@@ -3800,4 +3800,116 @@ describe('headless DM combat engine', () => {
     expect(side?.hp).toBe(40)
     expect(hero?.traits.find((item) => item.featureKey === 'armorPiercingArrow')?.uses).toBe(0)
   })
+
+  it('resolves required player attack rolls before dodge and damage', () => {
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'basic-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          attackRoll: { d20: 1, ability: 'dex', targetAc: 20 },
+          targetDodgeMode: 'attempt',
+          targetDodgeD20: 1,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.hp).toBe(40)
+    expect(result.state.enemyApByToken.goblin.current).toBe(2)
+    expect(result.events.some((event) => event.type === 'target-dodge-resolved')).toBe(false)
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved).toMatchObject({ hit: false, targetDodged: false, total: 0 })
+  })
+
+  it('uses calm spirit crit threshold on required attack rolls and clears the bonus', () => {
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+          combatBuffs: { calmSpiritCritBonusPercent: 40 },
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'basic-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          attackRoll: { d20: 12, ability: 'dex', targetAc: 20, critThreshold: 12 },
+          diceValues: [8],
+          targetDodgeMode: 'skip',
+          clearCalmSpiritCritBonusOnUse: true,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].combatBuffs?.calmSpiritCritBonusPercent).toBeUndefined()
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved).toMatchObject({ hit: true, isCrit: true, damageBeforeDefense: 10 })
+  })
 })

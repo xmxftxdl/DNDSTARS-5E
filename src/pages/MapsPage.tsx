@@ -7192,10 +7192,8 @@ export default function MapsPage() {
     if (!supportedSkill || opts.targetCount !== 1) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
-    if (isOutOfBreath(actor)) return false
     const buffs = actor.combatBuffs
     if (
-      buffs?.calmSpiritCritBonusPercent ||
       (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
       (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
     ) {
@@ -7562,18 +7560,53 @@ export default function MapsPage() {
         const huntingComboRankForAttack = huntingComboTraitRank(actor)
         const huntingComboIgnoresDodge =
           huntingComboRankForAttack > 0 && (targetToken.huntingMarkStacks ?? 0) > 0
-        const dodgePreview = huntingComboIgnoresDodge ? null : enemyDodgePreview(targetToken, actor, skill)
+        const preciseStrikeReady = !!actor.combatBuffs?.preciseStrikeReady
+        const outOfBreathForAttack = isOutOfBreath(actor)
+        const calmSpiritCritBonus = actor.combatBuffs?.calmSpiritCritBonusPercent ?? 0
+        const needsAttackRoll = outOfBreathForAttack || calmSpiritCritBonus > 0
+        const attackAbility: 'str' | 'dex' = skill.tags?.includes('melee') ? 'str' : 'dex'
+        const targetAcForAttack = huntingComboIgnoresDodge
+          ? 0
+          : targetChar
+            ? getAc(targetChar)
+            : (getTokenTargetAc(targetToken) ?? 12)
+        const attackRollD20 = needsAttackRoll ? await rollDiceBoxD20(`${skill.name} D20`, targetToken.label) : undefined
+        const attackRollPreview =
+          needsAttackRoll && attackRollD20 != null
+            ? resolveRangedAttackRoll(actor, skill, targetAcForAttack, !!doubleArrow, {
+                d20: attackRollD20,
+                damageValues: [],
+                ability: attackAbility,
+                critThreshold: calmSpiritCritThreshold(actor),
+                forceCrit: preciseStrikeReady,
+              })
+            : undefined
+        const attackRollHit = attackRollPreview?.hit ?? true
+        const packetIsCrit =
+          !!attackRollPreview?.isCrit || preciseStrikeReady || !!(action as typeof action & { isCrit?: boolean }).isCrit
+        const attackRollPacket =
+          needsAttackRoll && attackRollD20 != null
+            ? {
+                d20: attackRollD20,
+                ability: attackAbility,
+                targetAc: targetAcForAttack,
+                critThreshold: calmSpiritCritThreshold(actor),
+                forceCrit: preciseStrikeReady || undefined,
+              }
+            : undefined
+        const dodgePreview = attackRollHit && !huntingComboIgnoresDodge ? enemyDodgePreview(targetToken, actor, skill) : null
         const targetDodgeD20 = dodgePreview?.decision.shouldDodge
-          ? await rollDiceBoxD20('敌人闪避 D20', targetToken.label)
+          ? await rollDiceBoxD20('enemy dodge D20', targetToken.label)
           : undefined
         const expectedTargetDodged =
           targetDodgeD20 != null && dodgePreview
             ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
             : false
         const damageDiceCount = doubleArrow ? attackDamageDiceCount(skill, true) : skill.damageCount
-        const diceValues = expectedTargetDodged
-          ? undefined
-          : await rollDiceBoxValues(damageDiceCount, skill.damageSides, `${skill.name} 伤害`, targetToken.label)
+        const shouldRollDamage = attackRollHit && !expectedTargetDodged
+        const diceValues = shouldRollDamage
+          ? await rollDiceBoxValues(damageDiceCount, skill.damageSides, `${skill.name} damage`, targetToken.label)
+          : undefined
         const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
         const windKickTreatsTargetAsKnocked =
           skill.skillTreeId === 'windKickCombo' && actor.combatBuffs?.windKickTreatKnockbackTargetId === targetToken.id
@@ -7583,53 +7616,53 @@ export default function MapsPage() {
             !!targetChar?.conditions.includes(KNOCKBACK_STATUS_LABEL) ||
             windKickTreatsTargetAsKnocked)
         const burstKickExtraD6 =
-          !expectedTargetDodged && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
+          shouldRollDamage && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
         const doubleArrowTrait = doubleArrow ? findClassTrait(actor, 'doubleArrow') : undefined
         const doubleArrowExtraSides = doubleArrowTrait ? doubleArrowExtraDamageSides(doubleArrowTrait.level) : undefined
         const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
-        if (!expectedTargetDodged && doubleArrowExtraSides) {
+        if (shouldRollDamage && doubleArrowExtraSides) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(1, doubleArrowExtraSides, `${skill.name} 双箭额外伤害`, targetToken.label),
             sides: doubleArrowExtraSides,
           })
         }
         const shadowVeilApplies = actor.combatBuffs?.shadowVeilTargetId === targetToken.id
-        if (!expectedTargetDodged && shadowVeilApplies) {
+        if (shouldRollDamage && shadowVeilApplies) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(1, 6, `${skill.name} 影遁之术额外伤害`, targetToken.label),
             sides: 6,
           })
         }
         const calmMindTrait = findClassTrait(actor, 'calmMind')
-        if (!expectedTargetDodged && calmMindTrait && isCalmMindActive(actor) && calmMindTrait.level > 0) {
+        if (shouldRollDamage && calmMindTrait && isCalmMindActive(actor) && calmMindTrait.level > 0) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(calmMindTrait.level, 6, `${skill.name} 静心额外伤害`, targetToken.label),
             sides: 6,
           })
         }
         const huntingMarkRank = huntingMarkTraitRank(actor)
-        if (!expectedTargetDodged && huntingMarkRank > 0 && (targetToken.huntingMarkStacks ?? 0) > 0) {
+        if (shouldRollDamage && huntingMarkRank > 0 && (targetToken.huntingMarkStacks ?? 0) > 0) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(huntingMarkRank, 8, `${skill.name} 狩猎印记额外伤害`, targetToken.label),
             sides: 8,
           })
         }
         const animalMasteryTrait = findClassTrait(actor, 'animalMastery')
-        if (!expectedTargetDodged && animalMasteryTrait && isBeastLikeTarget(targetToken)) {
+        if (shouldRollDamage && animalMasteryTrait && isBeastLikeTarget(targetToken)) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(animalMasteryTrait.level, 6, `${skill.name} animal mastery extra damage`, targetToken.label),
             sides: 6,
           })
         }
         const arcaneDevourTrait = findClassTrait(actor, 'arcaneDevour')
-        if (!expectedTargetDodged && arcaneDevourTrait && isMagicDamageSkill(skill)) {
+        if (shouldRollDamage && arcaneDevourTrait && isMagicDamageSkill(skill)) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(arcaneDevourTrait.level, 6, `${skill.name} arcane devour extra damage`, targetToken.label),
             sides: 6,
           })
         }
         const comboFistTrait = actor.combatBuffs?.galeComboReady ? findClassTrait(actor, 'comboFist') : undefined
-        if (!expectedTargetDodged && comboFistTrait) {
+        if (shouldRollDamage && comboFistTrait) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(comboFistTrait.level, 6, `${skill.name} combo fist extra damage`, targetToken.label),
             sides: 6,
@@ -7641,7 +7674,7 @@ export default function MapsPage() {
         const piercingInsightThreshold =
           piercingInsightTrait && targetMaxHp > 0 ? piercingInsightHpThresholdPercent(piercingInsightTrait.level) / 100 : 0
         const piercingInsightApplies =
-          !expectedTargetDodged &&
+          shouldRollDamage &&
           !!piercingInsightTrait &&
           targetMaxHp > 0 &&
           targetHp / targetMaxHp < piercingInsightThreshold
@@ -7654,7 +7687,7 @@ export default function MapsPage() {
         }
         const silentDrawTrait = findClassTrait(actor, 'silentDraw')
         const silentDrawApplies =
-          !expectedTargetDodged &&
+          shouldRollDamage &&
           !!silentDrawTrait &&
           !actor.combatBuffs?.silentDrawUsed &&
           liveRound === 1 &&
@@ -7671,7 +7704,7 @@ export default function MapsPage() {
             sides: 6,
           })
         }
-        if (!expectedTargetDodged && targetKnockedForWindKick) {
+        if (shouldRollDamage && targetKnockedForWindKick) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(1, 6, `${skill.name} 击飞目标额外伤害`, targetToken.label),
             sides: 6,
@@ -7686,17 +7719,15 @@ export default function MapsPage() {
           !!targetToken.restrainedTurns ||
           !!targetToken.vulnerableTurns ||
           (targetChar?.conditions.length ?? 0) > 0
-        if (!expectedTargetDodged && skill.skillTreeId === 'antiMagicArrow' && targetHasMagicState) {
+        if (shouldRollDamage && skill.skillTreeId === 'antiMagicArrow' && targetHasMagicState) {
           extraDamageGroups.push({
             values: await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label),
             sides: 6,
           })
         }
-        const preciseStrikeReady = !!actor.combatBuffs?.preciseStrikeReady
-        const packetIsCrit = preciseStrikeReady || !!(action as typeof action & { isCrit?: boolean }).isCrit
         const postCritDamageGroups: Array<{ values: number[]; sides: number }> = []
         const explosiveArrowCritDice =
-          !expectedTargetDodged && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
+          shouldRollDamage && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
             ? skillRank >= 5
               ? 4
               : skillRank >= 2
@@ -7710,7 +7741,7 @@ export default function MapsPage() {
           })
         }
         const explosiveArrowTrait = findClassTrait(actor, 'explosiveArrow')
-        if (!expectedTargetDodged && packetIsCrit && explosiveArrowTrait) {
+        if (shouldRollDamage && packetIsCrit && explosiveArrowTrait) {
           postCritDamageGroups.push({
             values: await rollDiceBoxValues(explosiveArrowTrait.level, 12, `${skill.name} explosive arrow feature fire`, targetToken.label),
             sides: 12,
@@ -7719,11 +7750,11 @@ export default function MapsPage() {
         const explosiveArrowBurnTurns =
           postCritDamageGroups.length > 0 ? (skill.skillTreeId === 'explosiveArrow' && skillRank >= 4 ? 2 : 1) : undefined
         const effectAbility: 'str' | 'con' | undefined =
-          !expectedTargetDodged && skill.skillTreeId === 'burstKick' && skillRank >= 3
+          shouldRollDamage && skill.skillTreeId === 'burstKick' && skillRank >= 3
             ? 'con'
-            : !expectedTargetDodged && (skill.skillTreeId === 'rageShot' && skillRank >= 3)
+            : shouldRollDamage && (skill.skillTreeId === 'rageShot' && skillRank >= 3)
               ? 'str'
-              : !expectedTargetDodged && skill.skillTreeId === 'bindShot'
+              : shouldRollDamage && skill.skillTreeId === 'bindShot'
                 ? 'str'
                 : undefined
         const effectSaveD20 = effectAbility
@@ -7760,6 +7791,7 @@ export default function MapsPage() {
               ? { minExclusive: 10, maxInclusive: 20 }
               : undefined,
           targetDodgeD20,
+          attackRoll: attackRollPacket,
           isCrit: packetIsCrit || undefined,
           targetDodgeMode: dodgePreview?.decision.shouldDodge ? ('attempt' as const) : ('skip' as const),
           ignoreTargetDodge: huntingComboIgnoresDodge || undefined,
@@ -7813,6 +7845,7 @@ export default function MapsPage() {
           clearPreciseStrikeReadyOnHit: preciseStrikeReady || undefined,
           spendPreciseStrikeUseOnHit: preciseStrikeReady || undefined,
           clearShadowVeilTargetOnUse: shadowVeilApplies || undefined,
+          clearCalmSpiritCritBonusOnUse: calmSpiritCritBonus > 0 || undefined,
           addHuntingMarkOnDamage: huntingMarkRank > 0 || undefined,
           markSilentDrawUsedOnHit: silentDrawApplies || undefined,
         }
