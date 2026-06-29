@@ -51,7 +51,7 @@ import DiceRollOverlay from '../components/DiceRollOverlay'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
 import DiceBoxRollOverlay from '../components/DiceBoxRollOverlay'
-import { useMapStore, characterHpTokenPatch } from '../store/maps'
+import { useMapStore } from '../store/maps'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
 import {
@@ -74,7 +74,7 @@ import {
   piercingInsightExtraD4,
   piercingInsightHpThresholdPercent,
 } from '../lib/traitRegistry'
-import { isCalmMindActive, isOutOfBreath, triggerOutOfBreath } from '../lib/calmMind'
+import { isCalmMindActive, isOutOfBreath } from '../lib/calmMind'
 import {
   agileLeapMoveFeet,
   canAttemptDodge,
@@ -82,21 +82,18 @@ import {
   canOfferGaleCombo,
   ENEMY_MELEE_ATTACK_BONUS,
   formatDodgePrompt,
-  resolvePhysicalEnemyHit,
 } from '../lib/archerBaseFeatures'
 import { TOKEN_STATUS_CLEAR_PATCH, isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import {
   attackDamageDiceCount,
   doubleArrowExtraDamageSides,
   getEffectiveAbilityMod,
-  resolveDexSaveDamage,
   resolveRangedAttackRoll,
 } from '../lib/archerCombat'
 
 const PLAYER_ACTION_DEDUPE_WINDOW_MS = 8000
 const PLAYER_ACTION_QUEUE_LIMIT = 80
 import {
-  applyAttackDefenseDamageModifier,
   characterToCombatInput,
   damageModifierFromAttackDefenseDiff,
   formatCritDamagePercent,
@@ -268,7 +265,6 @@ export default function MapsPage() {
   const removeToken = useMapStore((s) => s.removeToken)
 
   const characters = useCharacterStore((s) => s.characters)
-  const spendAP = useCharacterStore((s) => s.spendAP)
   const updateChar = useCharacterStore((s) => s.update)
 
   const [mode, setMode] = useState<Mode | null>(() => {
@@ -2742,16 +2738,6 @@ export default function MapsPage() {
   const getEnemyApState = (tokenId: string) =>
     enemyApByTokenRef.current[tokenId] ?? { current: 2, max: 2 }
 
-  const spendEnemyAp = (tokenId: string, cost: number) => {
-    const ap = getEnemyApState(tokenId)
-    if (ap.current < cost) return false
-    const nextAp = { ...ap, current: Math.max(0, ap.current - cost) }
-    enemyApByTokenRef.current = { ...enemyApByTokenRef.current, [tokenId]: nextAp }
-    setEnemyApByToken((current) => ({ ...current, [tokenId]: nextAp }))
-    publishCombatState({ enemyApByToken: enemyApByTokenRef.current })
-    return true
-  }
-
   const resolveEnemyMoveThroughHeadless = async (
     enemy: Token,
     targetPosition: { x: number; y: number },
@@ -3962,24 +3948,6 @@ export default function MapsPage() {
     })
   }
 
-  const spendStableMind = (charId: string): boolean => {
-    if (!activeMap) return false
-    const liveMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const actorToken = liveMap.tokens.find((token) => token.type === 'player' && token.characterId === charId)
-    if (!actorToken) return false
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(liveMap), {
-      type: 'stable-mind',
-      actorTokenId: actorToken.id,
-      characterId: charId,
-    })
-    if (!headless.ok) return false
-    applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
-    return true
-  }
-
   const finishEnemyAttack = async (
     result: EnemyTurnResult,
     targetChar: Character | undefined,
@@ -3992,7 +3960,6 @@ export default function MapsPage() {
 
     const liveMapId = activeMap.id
     const getLiveTokens = () => useMapStore.getState().maps.find((m) => m.id === liveMapId)?.tokens ?? []
-    const DEFAULT_AOE_SAVE_DC = 13
     let combatLabel = ''
     let d20Roll:
       | {
@@ -4022,20 +3989,6 @@ export default function MapsPage() {
     const runEnemyStage = (stage: CombatResolutionStage) =>
       runCombatResolutionStage(enemyResolutionSession, stage)
     let enemyAttackApAlreadySpent = actorApAlreadySpent
-    const spendEnemyAttackApForFallback = () => {
-      if (enemyAttackApAlreadySpent) return true
-      if (!result.attackerTokenId) return false
-      if (!spendEnemyAp(result.attackerTokenId, 1)) return false
-      enemyAttackApAlreadySpent = true
-      const attackerName = getLiveTokens().find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
-      const targetName =
-        getLiveTokens().find((token) => token.id === result.targetTokenId)?.label ??
-        result.attack?.targetName ??
-        '目标'
-      const ap = getEnemyApState(result.attackerTokenId)
-      pushCombatLog(`${attackerName} 花费 1 AP：攻击 ${targetName}。剩余 AP ${ap.current}/${ap.max}`, 'turn')
-      return true
-    }
     await runEnemyStage('actionDeclared')
 
     const inferEnemyDamageDiceCount = (attack: NonNullable<EnemyTurnResult['attack']>) => {
@@ -4087,132 +4040,6 @@ export default function MapsPage() {
       if (rollTotal !== amount) {
         enemyResolutionSession.context.scratch.damageAdjustment = amount - rollTotal
       }
-    }
-
-    const resolveEnemyDamageDice = async () => {
-      if (!result.attack || result.damage == null || result.damage <= 0) {
-        return result.damage ?? 0
-      }
-      await runEnemyStage('beforeDamageRoll')
-      let values = await rollEnemyBaseDamageDice()
-      const attackerToken = getLiveTokens().find((t) => t.id === result.attackerTokenId)
-      const huntedByTargetRank = huntingMarkTraitRank(targetChar)
-      if (
-        attackerToken &&
-        (attackerToken.huntingMarkStacks ?? 0) > 0 &&
-        huntedByTargetRank > 0
-      ) {
-        const markValues = await rollDiceBoxValues(
-          huntedByTargetRank,
-          4,
-          '狩猎印记反噬伤害',
-          result.attack.targetName,
-        )
-        values = [...values, ...markValues]
-        enemyFeatureLabels.push(`狩猎印记反噬+${huntedByTargetRank}d4`)
-      }
-      damageRollValues = values
-      const diceTotal = values.reduce((sum, value) => sum + value, 0)
-      let rawDamage = diceTotal + result.attack.bonus
-      const attackerInput = attackerToken?.poolId ? enemyCombatInput(attackerToken.poolId) : undefined
-      if (attackerInput && targetChar) {
-        const adjusted = applyAttackDefenseDamageModifier(
-          rawDamage,
-          attackerInput,
-          characterToCombatInput(targetChar),
-          'physical',
-          (getLiveTokens().find((t) => t.id === result.targetTokenId)?.vulnerableTurns ?? 0) > 0, // [T4/C3]
-        )
-        rawDamage = adjusted.damage
-        damageRollBonus = rawDamage - diceTotal
-        enemyFeatureLabels.push(`攻防修正${adjusted.modifier >= 0 ? '+' : ''}${adjusted.modifier}(差值${adjusted.diff})`)
-      } else {
-        damageRollBonus = result.attack.bonus
-      }
-      damageRollTotal = Math.max(0, rawDamage)
-      updateEnemyDamageContext(damageRollTotal)
-      await runEnemyStage('damageRolled')
-      return damageRollTotal
-    }
-
-    const syncTargetHp = (charId: string) => {
-      const updated = useCharacterStore.getState().characters.find((c) => c.id === charId)
-      if (updated) {
-        // [T10/AC1] 经唯一镜像 helper 把 currentHp 写回 token.hp，杜绝任何路径绕过。
-        updateToken(liveMapId, result.targetTokenId!, characterHpTokenPatch(updated))
-        if (updated.currentHp <= 0) {
-          deferDeathHandling(result.targetTokenId!, charId)
-        }
-      }
-    }
-
-    const applyFullDamage = async (charId: string, amount: number) => {
-      if (amount <= 0) return
-      const before = useCharacterStore.getState().characters.find((c) => c.id === charId)
-      const surge = before ? findClassTrait(before, 'arcaneSurge') : undefined
-      if (before && surge && surge.uses > 0 && before.currentHp > 0 && before.currentHp - amount <= 0) {
-        if (
-          await showCombatDialog({
-            title: '魔法浪涌',
-            message: `${before.name} 将受到致命伤害。\n是否消耗 1 次使用，把生命改为 1？`,
-            confirmText: '发动',
-            cancelText: '不发动',
-            tone: 'violet',
-          })
-        ) {
-          const liveMap = useMapStore.getState().maps.find((map) => map.id === liveMapId) ?? activeMap
-          const actorToken = liveMap.tokens.find((token) => token.type === 'player' && token.characterId === before.id)
-          const headless = actorToken
-            ? resolveHeadlessDmAction(createHeadlessStateSnapshot(liveMap), {
-                type: 'arcane-surge',
-                actorTokenId: actorToken.id,
-                characterId: before.id,
-              })
-            : null
-          if (!headless?.ok) return
-          applyHeadlessCombatResult(headless)
-          for (const event of headless.events) {
-            if (event.type === 'log') pushCombatLog(event.text, 'turn')
-          }
-          combatLabel = `${combatLabel ? `${combatLabel} · ` : ''}魔法浪涌：生命保留为 1`
-          return
-        }
-      }
-      let after = before
-      if (before) {
-        let remaining = amount
-        const beforeTemp = before.tempHp ?? 0
-        const nextTemp = Math.max(0, beforeTemp - remaining)
-        remaining = Math.max(0, remaining - beforeTemp)
-        const nextHp = Math.max(0, before.currentHp - remaining)
-        updateChar(charId, {
-          tempHp: nextTemp,
-          currentHp: nextHp,
-          combatBuffs: {
-            ...triggerOutOfBreath(before, 'damage'),
-            tookDamageThisTurn: true,
-          },
-        })
-        after = useCharacterStore.getState().characters.find((c) => c.id === charId)
-      }
-      syncTargetHp(charId)
-      if (before && after) {
-        enemyFeatureLabels.push(
-          `HP ${before.currentHp}/${before.maxHp} → ${after.currentHp}/${after.maxHp}` +
-            ((before.tempHp ?? 0) !== (after.tempHp ?? 0)
-              ? `，临时生命 ${before.tempHp ?? 0} → ${after.tempHp ?? 0}`
-              : ''),
-        )
-      }
-    }
-
-    const applyTokenDamage = (amount: number) => {
-      if (!activeMap || !result.targetTokenId || amount <= 0) return
-      const target = getLiveTokens().find((t) => t.id === result.targetTokenId)
-      if (!target || target.maxHp == null) return
-      const hp = Math.max(0, (target.hp ?? target.maxHp) - amount)
-      updateToken(liveMapId, target.id, { hp })
-      if (hp <= 0) deferDeathHandling(target.id)
     }
 
     const hasEnemyDamage = !!result.attack || (result.damage != null && result.damage > 0)
@@ -4518,247 +4345,14 @@ export default function MapsPage() {
       if (await tryResolvePhysicalEnemyAttackWithHeadless()) {
         return
       }
-      if (!spendEnemyAttackApForFallback()) return
-      await runEnemyStage('beforeAttackRoll')
-
-      if (damageType === 'aoe') {
-        let estimatedDamage = Math.max(1, result.damage ?? result.attack?.total ?? 0)
-        if (result.attack) {
-          await runEnemyStage('beforeDamageRoll')
-          const values = await rollEnemyBaseDamageDice()
-          damageRollValues = values
-          const diceTotal = values.reduce((sum, value) => sum + value, 0)
-          damageRollBonus = result.attack.bonus
-          damageRollTotal = Math.max(0, diceTotal + result.attack.bonus)
-          estimatedDamage = Math.max(1, damageRollTotal)
-          updateEnemyDamageContext(damageRollTotal)
-          await runEnemyStage('damageRolled')
-        }
-        const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar.name)
-        const save = resolveDexSaveDamage(
-          targetChar,
-          estimatedDamage,
-          result.saveDC ?? DEFAULT_AOE_SAVE_DC,
-          saveD20,
-        )
-        let finalDamage = save.damage
-        let stableMindNote = ''
-        const stableMindTrait = findClassTrait(targetChar, 'stableMind')
-        if (save.success && save.damage > 0 && stableMindTrait && stableMindTrait.uses > 0 && targetChar.currentAP >= 1) {
-          const wantsStableMind = await requestSharedStableMindChoice(targetChar, {
-            fullDamage: estimatedDamage,
-            damageAfterSave: save.damage,
-            saveD20: save.saveD20,
-            saveMod: save.saveMod,
-            saveTotal: save.saveTotal,
-            dc: save.dc,
-          })
-          if (wantsStableMind && spendStableMind(targetChar.id)) {
-            finalDamage = 0
-            stableMindNote = ' · 残影脱身：已抵消全部伤害'
-          }
-        }
-        combatLabel = `敏捷豁免 ${save.saveD20}+${save.saveMod} vs DC${save.dc} ${save.success ? `成功（半伤，实际 ${finalDamage}）` : `失败（全额，实际 ${finalDamage}）`}${stableMindNote}`
-        d20Roll = {
-          value: save.saveD20,
-          modifier: save.saveMod,
-          ac: save.dc,
-          hit: save.success,
-          kind: 'save',
-        }
-        if (enemyResolutionSession) {
-          enemyResolutionSession.context.attackRoll = {
-            values: [save.saveD20],
-            sides: 20,
-            bonus: save.saveMod,
-            total: save.saveTotal,
-            ac: save.dc,
-            hit: save.success,
-            crit: false,
-            label: 'dex-save',
-          }
-        }
-        await runEnemyStage('attackRollResolved')
-        if (finalDamage > 0) {
-          if (enemyResolutionSession) {
-            enemyResolutionSession.context.pendingDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-              ...packet,
-              amount: finalDamage,
-            }))
-          }
-          await runEnemyStage('beforeDamageApplied')
-          await applyFullDamage(targetChar.id, finalDamage)
-          if (enemyResolutionSession) {
-            enemyResolutionSession.context.appliedDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-              ...packet,
-              amount: finalDamage,
-            }))
-          }
-          await runEnemyStage('damageApplied')
-        }
-      } else if (wantsDodge != null) {
-        const estimatedDamage = Math.max(1, result.damage ?? result.attack?.total ?? 0)
-        const flexibleBonus = targetChar.combatBuffs?.flexibleBodyBonus ?? 0
-        const windBladeFreeDodge = (targetChar.combatBuffs?.windBladeFreeDodgeTurns ?? 0) > 0
-        const dodgeTarget = flexibleBonus > 0 ? { ...targetChar, ac: targetChar.ac + flexibleBonus } : targetChar
-        const canResolveDodge = wantsDodge && (windBladeFreeDodge || dodgeApAlreadySpent || canAttemptDodge(targetChar))
-        const dodgeD20 =
-          canResolveDodge
-            ? providedDodgeD20 ?? (await rollDiceBoxD20('D20', targetChar.name))
-            : undefined
-        const resolved = resolvePhysicalEnemyHit(
-          dodgeTarget,
-          estimatedDamage,
-          wantsDodge,
-          () => {
-            if (windBladeFreeDodge) {
-              pushCombatLog(`${targetChar.name} 的风刃乱舞生效：本次闪避不消耗 AP。`, 'turn')
-              return true
-            }
-            if (dodgeApAlreadySpent) return true
-              const spent = spendAP(targetChar.id, 1)
-              if (spent) {
-                const attackerName =
-                getLiveTokens().find((t) => t.id === result.attackerTokenId)?.label ?? '敌人'
-                pushApLog(targetChar, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
-              }
-            return spent
-          },
-          undefined,
-          dodgeD20,
-        )
-        if (flexibleBonus > 0 && wantsDodge) {
-          updateChar(targetChar.id, {
-            combatBuffs: { ...targetChar.combatBuffs, flexibleBodyBonus: undefined },
-          })
-        }
-        combatLabel = flexibleBonus > 0 && wantsDodge ? `${resolved.combatLabel} · 灵活身躯+${flexibleBonus}` : resolved.combatLabel
-        if (resolved.dodgeRoll) {
-          d20Roll = {
-            value: resolved.dodgeRoll.d20,
-            modifier: resolved.dodgeRoll.attackBonus,
-            ac: resolved.dodgeRoll.targetAc,
-            hit: !resolved.dodged,
-            kind: 'dodge',
-          }
-        }
-        if (enemyResolutionSession) {
-          enemyResolutionSession.context.attackRoll = d20Roll
-            ? {
-                values: [d20Roll.value],
-                sides: 20,
-                bonus: d20Roll.modifier,
-                total: d20Roll.value + d20Roll.modifier,
-                ac: d20Roll.ac,
-                hit: d20Roll.hit,
-                crit: false,
-                label: 'dodge',
-              }
-            : {
-                values: [],
-                sides: 20,
-                bonus: 0,
-                total: 0,
-                ac: targetChar.ac,
-                hit: !resolved.dodged,
-                crit: false,
-                label: 'no-dodge',
-              }
-        }
-        await runEnemyStage('attackRollResolved')
-        if (!resolved.dodged && resolved.damageDealt > 0) {
-          const pendingDamage = await resolveEnemyDamageDice()
-          if (enemyResolutionSession) {
-            enemyResolutionSession.context.pendingDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-              ...packet,
-              amount: pendingDamage,
-            }))
-          }
-          await runEnemyStage('beforeDamageApplied')
-          await applyFullDamage(targetChar.id, pendingDamage)
-          if (enemyResolutionSession) {
-            enemyResolutionSession.context.appliedDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-              ...packet,
-              amount: pendingDamage,
-            }))
-          }
-          await runEnemyStage('damageApplied')
-        }
-        if (resolved.dodged) {
-          damageRollValues = []
-          damageRollTotal = 0
-          if (canOfferAgileLeap(targetChar)) {
-            const trait = findClassTrait(targetChar, 'agileLeap')
-            const feet = agileLeapMoveFeet(targetChar)
-            const accepted = await requestSharedAgileLeapChoice(targetChar, {
-              feet,
-              uses: trait?.uses ?? 0,
-              maxUses: trait?.maxUses ?? 0,
-            })
-            if (accepted) {
-              if (armSharedAgileLeapMove(targetChar, feet, result.targetTokenId)) {
-                combatLabel += ` · 灵巧跳跃：点击地图移动至多 ${feet} 尺`
-              }
-            }
-          }
-        }
-      }
+      pushCombatLog(`${result.attack?.label ?? '敌人攻击'} 未能通过 DM 引擎验证，已取消结算（${damageType}）。`, 'turn')
+      return
     } else if (result.targetCharacterId != null && hasEnemyDamage) {
-      if (!spendEnemyAttackApForFallback()) return
-      await runEnemyStage('beforeAttackRoll')
-      if (enemyResolutionSession) {
-        enemyResolutionSession.context.attackRoll = {
-          values: [],
-          sides: 20,
-          bonus: 0,
-          total: 0,
-          ac: 0,
-          hit: true,
-          crit: false,
-          label: 'direct-damage',
-        }
-      }
-      await runEnemyStage('attackRollResolved')
-      const pendingDamage = await resolveEnemyDamageDice()
-      await runEnemyStage('beforeDamageApplied')
-      await applyFullDamage(result.targetCharacterId, pendingDamage)
-      if (enemyResolutionSession) {
-        enemyResolutionSession.context.appliedDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-          ...packet,
-          amount: pendingDamage,
-        }))
-      }
-      await runEnemyStage('damageApplied')
-      const fallback = useCharacterStore.getState().characters.find((c) => c.id === result.targetCharacterId)
-      if (fallback && fallback.currentHp <= 0 && result.targetTokenId) {
-        deferDeathHandling(result.targetTokenId, result.targetCharacterId)
-      }
+      pushCombatLog(`${result.attack?.label ?? '敌人攻击'} 缺少可验证目标 token，已取消结算。`, 'turn')
+      return
     } else if (!targetChar && hasEnemyDamage) {
-      if (!spendEnemyAttackApForFallback()) return
-      await runEnemyStage('beforeAttackRoll')
-      if (enemyResolutionSession) {
-        enemyResolutionSession.context.attackRoll = {
-          values: [],
-          sides: 20,
-          bonus: 0,
-          total: 0,
-          ac: 0,
-          hit: true,
-          crit: false,
-          label: 'direct-token-damage',
-        }
-      }
-      await runEnemyStage('attackRollResolved')
-      const pendingDamage = await resolveEnemyDamageDice()
-      await runEnemyStage('beforeDamageApplied')
-      applyTokenDamage(pendingDamage)
-      if (enemyResolutionSession) {
-        enemyResolutionSession.context.appliedDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-          ...packet,
-          amount: pendingDamage,
-        }))
-      }
-      await runEnemyStage('damageApplied')
+      pushCombatLog(`${result.attack?.label ?? '敌人攻击'} 缺少绑定角色，已取消结算。`, 'turn')
+      return
     }
     // [T7/AC4] 移除死分支：EnemyTurnResult.targetTokenPatch 从无生产者，已连同接口字段删除。
     if (result.attack) {
