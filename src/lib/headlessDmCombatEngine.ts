@@ -188,6 +188,7 @@ export interface HeadlessPlayerAttackPacket {
   targetTokenId: string
   damageDiceCount?: number
   diceValues?: number[]
+  extraDamageGroups?: HeadlessExtraDamageGroup[]
   extraDamageValues?: number[]
   extraDamageSides?: number
   postCritDamageValues?: number[]
@@ -229,6 +230,13 @@ export interface HeadlessPlayerAttackPacket {
   clearPreciseStrikeReadyOnHit?: boolean
   spendPreciseStrikeUseOnHit?: boolean
   clearShadowVeilTargetOnUse?: boolean
+  addHuntingMarkOnDamage?: boolean
+  markSilentDrawUsedOnHit?: boolean
+}
+
+export interface HeadlessExtraDamageGroup {
+  values?: number[]
+  sides: number
 }
 
 export interface HeadlessAttackEffectSavePacket {
@@ -1269,10 +1277,23 @@ function resolvePlayerAttack(
     const damageDiceCount = packet.damageDiceCount ?? skill.damageCount
     const diceValues = resolveDiceValues(packet.diceValues, dice, damageDiceCount, skill.damageSides)
     if (!diceValues) return fail(state, 'invalid-dice', events)
-    const extraDamageValues = packet.extraDamageValues
-      ? resolveDiceValues(packet.extraDamageValues, dice, packet.extraDamageValues.length, packet.extraDamageSides ?? 6)
-      : []
-    if (!extraDamageValues) return fail(state, 'invalid-dice', events)
+    const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
+    if (packet.extraDamageValues) {
+      const values = resolveDiceValues(
+        packet.extraDamageValues,
+        dice,
+        packet.extraDamageValues.length,
+        packet.extraDamageSides ?? 6,
+      )
+      if (!values) return fail(state, 'invalid-dice', events)
+      extraDamageGroups.push({ values, sides: packet.extraDamageSides ?? 6 })
+    }
+    for (const group of packet.extraDamageGroups ?? []) {
+      const values = resolveDiceValues(group.values, dice, group.values?.length ?? 0, group.sides)
+      if (!values) return fail(state, 'invalid-dice', events)
+      if (values.length > 0) extraDamageGroups.push({ values, sides: group.sides })
+    }
+    const extraDamageValues = extraDamageGroups.flatMap((group) => group.values)
     const postCritDamageValues = packet.postCritDamageValues
       ? resolveDiceValues(
           packet.postCritDamageValues,
@@ -1290,12 +1311,12 @@ function resolvePlayerAttack(
       values: diceValues,
       total: diceValues.reduce((sum, value) => sum + value, 0),
     })
-    if (extraDamageValues.length > 0) {
+    for (const group of extraDamageGroups) {
       events.push({
         type: 'dice-rolled',
-        notation: `${extraDamageValues.length}d${packet.extraDamageSides ?? 6}`,
-        values: extraDamageValues,
-        total: extraDamageValues.reduce((sum, value) => sum + value, 0),
+        notation: `${group.values.length}d${group.sides}`,
+        values: group.values,
+        total: group.values.reduce((sum, value) => sum + value, 0),
       })
     }
     if (postCritDamageValues.length > 0) {
@@ -1358,6 +1379,20 @@ function resolvePlayerAttack(
     }
     if (packet.igniteOnHit && adjusted.damage > 0) {
       applyIgniteToTarget(state, targetToken, packet.igniteTurns ?? 1, events)
+    }
+    if (packet.addHuntingMarkOnDamage && adjusted.damage > 0 && targetToken.type === 'enemy') {
+      updateToken(state, targetToken.id, (token) => ({
+        ...token,
+        huntingMarkStacks: Math.min(4, (token.huntingMarkStacks ?? 0) + 1),
+      }))
+      events.push({ type: 'log', text: `${targetToken.label} 获得 1 层狩猎印记。` })
+    }
+    if (packet.markSilentDrawUsedOnHit && adjusted.damage > 0) {
+      updateCharacter(state, actor.id, (item) => ({
+        ...item,
+        combatBuffs: { ...item.combatBuffs, silentDrawUsed: true },
+      }))
+      events.push({ type: 'log', text: `${actor.name} 的无声起弦已生效。` })
     }
     if (packet.cooldownReductionSkillId && packet.cooldownReductionAmount && packet.cooldownReductionAmount > 0) {
       cooldownReductions.push({ skillId: packet.cooldownReductionSkillId, amount: packet.cooldownReductionAmount })

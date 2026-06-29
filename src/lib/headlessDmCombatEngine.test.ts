@@ -3475,4 +3475,92 @@ describe('headless DM combat engine', () => {
     expect(resolved?.damageValues).toEqual([5, 4])
     expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d6', values: [4], total: 4 })
   })
+
+  it('resolves grouped feature damage, hunting mark gain, and Silent Draw marking through headless packets', () => {
+    const combat = state({
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'dragon',
+          label: 'Dragon',
+          type: 'enemy',
+          poolId: 'wyrmling-red',
+          hp: 20,
+          maxHp: 52,
+          huntingMarkStacks: 1,
+          x: 455,
+          y: 175,
+        }),
+      ]),
+      characters: [
+        character({
+          traits: [
+            {
+              id: 'silent-draw',
+              name: '无声起弦',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'silentDraw',
+            },
+            {
+              id: 'hunting-mark',
+              name: '狩猎印记',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'huntingMark',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(
+      combat,
+      {
+        type: 'attack-token',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetTokenId: 'dragon',
+        skillId: 'basic-shot',
+        targetPackets: [
+          {
+            targetTokenId: 'dragon',
+            diceValues: [5],
+            extraDamageGroups: [
+              { values: [2], sides: 6 },
+              { values: [7], sides: 8 },
+            ],
+            targetDodgeMode: 'skip',
+            addHuntingMarkOnDamage: true,
+            markSilentDrawUsedOnHit: true,
+          },
+        ],
+      },
+      createFixedHeadlessDiceRoller([]),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    const dragon = result.state.map.tokens.find((item) => item.id === 'dragon')
+    expect(hero.combatBuffs?.silentDrawUsed).toBe(true)
+    expect(dragon?.huntingMarkStacks).toBe(2)
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved?.damageValues).toEqual([5, 2, 7])
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d6', values: [2], total: 2 })
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d8', values: [7], total: 7 })
+  })
 })

@@ -7207,13 +7207,9 @@ export default function MapsPage() {
       'animalMastery',
       'arcaneDevour',
       'armorPiercing',
-      'calmMind',
       'comboFist',
       'explosiveArrow',
       'huntingCombo',
-      'huntingMark',
-      'piercingInsight',
-      'silentDraw',
       'takeoff',
     ])
     return !actor.traits.some((trait) => trait.featureKey && unsupportedTraitKeys.has(trait.featureKey))
@@ -7596,21 +7592,75 @@ export default function MapsPage() {
           !expectedTargetDodged && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
         const doubleArrowTrait = doubleArrow ? findClassTrait(actor, 'doubleArrow') : undefined
         const doubleArrowExtraSides = doubleArrowTrait ? doubleArrowExtraDamageSides(doubleArrowTrait.level) : undefined
-        const extraDamageParts: number[] = []
+        const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
         if (!expectedTargetDodged && doubleArrowExtraSides) {
-          extraDamageParts.push(
-            ...(await rollDiceBoxValues(1, doubleArrowExtraSides, `${skill.name} 双箭额外伤害`, targetToken.label)),
-          )
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(1, doubleArrowExtraSides, `${skill.name} 双箭额外伤害`, targetToken.label),
+            sides: doubleArrowExtraSides,
+          })
         }
         const shadowVeilApplies = actor.combatBuffs?.shadowVeilTargetId === targetToken.id
         if (!expectedTargetDodged && shadowVeilApplies) {
-          extraDamageParts.push(...(await rollDiceBoxValues(1, 6, `${skill.name} 影遁之术额外伤害`, targetToken.label)))
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(1, 6, `${skill.name} 影遁之术额外伤害`, targetToken.label),
+            sides: 6,
+          })
+        }
+        const calmMindTrait = findClassTrait(actor, 'calmMind')
+        if (!expectedTargetDodged && calmMindTrait && isCalmMindActive(actor) && calmMindTrait.level > 0) {
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(calmMindTrait.level, 6, `${skill.name} 静心额外伤害`, targetToken.label),
+            sides: 6,
+          })
+        }
+        const huntingMarkRank = huntingMarkTraitRank(actor)
+        if (!expectedTargetDodged && huntingMarkRank > 0 && (targetToken.huntingMarkStacks ?? 0) > 0) {
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(huntingMarkRank, 8, `${skill.name} 狩猎印记额外伤害`, targetToken.label),
+            sides: 8,
+          })
+        }
+        const piercingInsightTrait = findClassTrait(actor, 'piercingInsight')
+        const targetHp = targetChar?.currentHp ?? targetToken.hp ?? targetToken.maxHp ?? 0
+        const targetMaxHp = targetChar?.maxHp ?? targetToken.maxHp ?? targetHp
+        const piercingInsightThreshold =
+          piercingInsightTrait && targetMaxHp > 0 ? piercingInsightHpThresholdPercent(piercingInsightTrait.level) / 100 : 0
+        const piercingInsightApplies =
+          !expectedTargetDodged &&
+          !!piercingInsightTrait &&
+          targetMaxHp > 0 &&
+          targetHp / targetMaxHp < piercingInsightThreshold
+        if (piercingInsightApplies && piercingInsightTrait) {
+          const diceCount = piercingInsightExtraD4(piercingInsightTrait.level)
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(diceCount, 4, `${skill.name} 看破额外伤害`, targetToken.label),
+            sides: 4,
+          })
+        }
+        const silentDrawTrait = findClassTrait(actor, 'silentDraw')
+        const silentDrawApplies =
+          !expectedTargetDodged &&
+          !!silentDrawTrait &&
+          !actor.combatBuffs?.silentDrawUsed &&
+          liveRound === 1 &&
+          initiativeOrderRef.current[0]?.tokenId === action.actorTokenId
+        if (silentDrawApplies && silentDrawTrait) {
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(silentDrawTrait.level, 6, `${skill.name} 无声起弦额外伤害`, targetToken.label),
+            sides: 6,
+          })
         }
         if (burstKickExtraD6 > 0) {
-          extraDamageParts.push(...(await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)))
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label),
+            sides: 6,
+          })
         }
         if (!expectedTargetDodged && targetKnockedForWindKick) {
-          extraDamageParts.push(...(await rollDiceBoxValues(1, 6, `${skill.name} 击飞目标额外伤害`, targetToken.label)))
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(1, 6, `${skill.name} 击飞目标额外伤害`, targetToken.label),
+            sides: 6,
+          })
         }
         const targetHasMagicState =
           !!targetToken.burningTurns ||
@@ -7622,9 +7672,11 @@ export default function MapsPage() {
           !!targetToken.vulnerableTurns ||
           (targetChar?.conditions.length ?? 0) > 0
         if (!expectedTargetDodged && skill.skillTreeId === 'antiMagicArrow' && targetHasMagicState) {
-          extraDamageParts.push(...(await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label)))
+          extraDamageGroups.push({
+            values: await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label),
+            sides: 6,
+          })
         }
-        const extraDamageValues = extraDamageParts.length > 0 ? extraDamageParts : undefined
         const preciseStrikeReady = !!actor.combatBuffs?.preciseStrikeReady
         const packetIsCrit = preciseStrikeReady || !!(action as typeof action & { isCrit?: boolean }).isCrit
         const explosiveArrowCritDice =
@@ -7676,8 +7728,7 @@ export default function MapsPage() {
           targetTokenId: targetToken.id,
           damageDiceCount,
           diceValues,
-          extraDamageValues,
-          extraDamageSides: extraDamageValues?.length ? doubleArrowExtraSides ?? 6 : undefined,
+          extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
           postCritDamageValues: explosiveArrowFireValues,
           postCritDamageSides: explosiveArrowFireValues?.length ? 6 : undefined,
           halveDamageOnRangeFeet:
@@ -7730,6 +7781,8 @@ export default function MapsPage() {
           clearPreciseStrikeReadyOnHit: preciseStrikeReady || undefined,
           spendPreciseStrikeUseOnHit: preciseStrikeReady || undefined,
           clearShadowVeilTargetOnUse: shadowVeilApplies || undefined,
+          addHuntingMarkOnDamage: huntingMarkRank > 0 || undefined,
+          markSilentDrawUsedOnHit: silentDrawApplies || undefined,
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',
