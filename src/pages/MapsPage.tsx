@@ -7196,13 +7196,13 @@ export default function MapsPage() {
     const buffs = actor.combatBuffs
     if (
       buffs?.calmSpiritCritBonusPercent ||
-      buffs?.shadowVeilTargetId ||
       (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
       (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
     ) {
       return false
     }
     if (opts.doubleArrow && buffs?.preciseStrikeReady) return false
+    if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
     const unsupportedTraitKeys = new Set([
       'animalMastery',
       'arcaneDevour',
@@ -7602,6 +7602,10 @@ export default function MapsPage() {
             ...(await rollDiceBoxValues(1, doubleArrowExtraSides, `${skill.name} 双箭额外伤害`, targetToken.label)),
           )
         }
+        const shadowVeilApplies = actor.combatBuffs?.shadowVeilTargetId === targetToken.id
+        if (!expectedTargetDodged && shadowVeilApplies) {
+          extraDamageParts.push(...(await rollDiceBoxValues(1, 6, `${skill.name} 影遁之术额外伤害`, targetToken.label)))
+        }
         if (burstKickExtraD6 > 0) {
           extraDamageParts.push(...(await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label)))
         }
@@ -7725,6 +7729,7 @@ export default function MapsPage() {
           spendDoubleArrowUseOnHit: doubleArrow || undefined,
           clearPreciseStrikeReadyOnHit: preciseStrikeReady || undefined,
           spendPreciseStrikeUseOnHit: preciseStrikeReady || undefined,
+          clearShadowVeilTargetOnUse: shadowVeilApplies || undefined,
         }
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',

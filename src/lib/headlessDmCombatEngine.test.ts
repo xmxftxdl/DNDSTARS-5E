@@ -3424,4 +3424,55 @@ describe('headless DM combat engine', () => {
     const resolved = result.events.find((event) => event.type === 'attack-resolved')
     expect(resolved?.isCrit).toBe(true)
   })
+
+  it('resolves Shadow Veil bonus damage and clears its target marker through headless packets', () => {
+    const combat = state({
+      characters: [
+        character({
+          combatBuffs: { shadowVeilTargetId: 'dragon' },
+          traits: [
+            {
+              id: 'shadow-veil',
+              name: '影遁之术',
+              level: 1,
+              uses: 0,
+              maxUses: 0,
+              description: '',
+              featureKey: 'shadowVeil',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(
+      combat,
+      {
+        type: 'attack-token',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetTokenId: 'dragon',
+        skillId: 'basic-shot',
+        targetPackets: [
+          {
+            targetTokenId: 'dragon',
+            diceValues: [5],
+            extraDamageValues: [4],
+            extraDamageSides: 6,
+            targetDodgeMode: 'skip',
+            clearShadowVeilTargetOnUse: true,
+          },
+        ],
+      },
+      createFixedHeadlessDiceRoller([]),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.combatBuffs?.shadowVeilTargetId).toBeUndefined()
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved?.damageValues).toEqual([5, 4])
+    expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d6', values: [4], total: 4 })
+  })
 })

@@ -228,6 +228,7 @@ export interface HeadlessPlayerAttackPacket {
   spendDoubleArrowUseOnHit?: boolean
   clearPreciseStrikeReadyOnHit?: boolean
   spendPreciseStrikeUseOnHit?: boolean
+  clearShadowVeilTargetOnUse?: boolean
 }
 
 export interface HeadlessAttackEffectSavePacket {
@@ -1207,6 +1208,7 @@ function resolvePlayerAttack(
   let shouldSpendDoubleArrowUse = false
   let shouldClearPreciseStrikeReady = false
   let shouldSpendPreciseStrikeUse = false
+  let shouldClearShadowVeilTarget = false
   const cooldownReductions: Array<{ skillId: string; amount: number }> = []
   for (const [packetIndex, packet] of packets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
@@ -1233,6 +1235,7 @@ function resolvePlayerAttack(
     if (!targetDodge) return fail(state, 'invalid-dice', events)
     if (targetDodge.dodged) {
       if (packet.clearDoubleArrowReadyOnUse) shouldClearDoubleArrowReady = true
+      if (packet.clearShadowVeilTargetOnUse) shouldClearShadowVeilTarget = true
       if (packet.clearBurstKickExtraD6OnUse) clearBurstKickExtraD6(state, actor.id)
       if (packet.clearWindKickTreatKnockbackOnUse) clearWindKickTreatKnockback(state, actor.id)
       events.push({
@@ -1320,6 +1323,7 @@ function resolvePlayerAttack(
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
     applyStatusOnHit(state, targetToken, skill, events)
     if (packet.clearDoubleArrowReadyOnUse) shouldClearDoubleArrowReady = true
+    if (packet.clearShadowVeilTargetOnUse) shouldClearShadowVeilTarget = true
     if (packet.spendDoubleArrowUseOnHit && adjusted.damage > 0) shouldSpendDoubleArrowUse = true
     if (packet.clearPreciseStrikeReadyOnHit && adjusted.damage > 0) shouldClearPreciseStrikeReady = true
     if (packet.spendPreciseStrikeUseOnHit && adjusted.damage > 0) shouldSpendPreciseStrikeUse = true
@@ -1430,6 +1434,13 @@ function resolvePlayerAttack(
       combatBuffs: { ...item.combatBuffs, preciseStrikeReady: undefined },
     }))
     events.push({ type: 'log', text: `${actor.name} 的精准打击效果已结算。` })
+  }
+  if (shouldClearShadowVeilTarget) {
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, shadowVeilTargetId: undefined },
+    }))
+    events.push({ type: 'log', text: `${actor.name} 的影遁之术效果已结算。` })
   }
   for (const reduction of cooldownReductions) {
     const result = reduceSkillCooldown(state, actor.id, reduction.skillId, reduction.amount)
