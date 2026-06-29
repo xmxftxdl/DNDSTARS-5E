@@ -4111,6 +4111,7 @@ export default function MapsPage() {
     wantsDodge: boolean | null,
     providedDodgeD20?: number,
     dodgeApAlreadySpent = false,
+    actorApAlreadySpent = false,
   ) => {
     if (!activeMap || !result.attacked || !result.targetTokenId) return
 
@@ -4145,6 +4146,21 @@ export default function MapsPage() {
     })
     const runEnemyStage = (stage: CombatResolutionStage) =>
       runCombatResolutionStage(enemyResolutionSession, stage)
+    let enemyAttackApAlreadySpent = actorApAlreadySpent
+    const spendEnemyAttackApForFallback = () => {
+      if (enemyAttackApAlreadySpent) return true
+      if (!result.attackerTokenId) return false
+      if (!spendEnemyAp(result.attackerTokenId, 1)) return false
+      enemyAttackApAlreadySpent = true
+      const attackerName = getLiveTokens().find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
+      const targetName =
+        getLiveTokens().find((token) => token.id === result.targetTokenId)?.label ??
+        result.attack?.targetName ??
+        '目标'
+      const ap = getEnemyApState(result.attackerTokenId)
+      pushCombatLog(`${attackerName} 花费 1 AP：攻击 ${targetName}。剩余 AP ${ap.current}/${ap.max}`, 'turn')
+      return true
+    }
     await runEnemyStage('actionDeclared')
 
     const inferEnemyDamageDiceCount = (attack: NonNullable<EnemyTurnResult['attack']>) => {
@@ -4349,7 +4365,7 @@ export default function MapsPage() {
         targetTokenId: result.targetTokenId,
         actionIndex: result.actionIndex,
         diceValues: headlessDamageValues,
-        actorApAlreadySpent: true,
+        actorApAlreadySpent: enemyAttackApAlreadySpent,
         targetWantsDodge: !!wantsDodge,
         targetDodgeD20,
         targetDodgeApAlreadySpent: dodgeApAlreadySpent,
@@ -4359,6 +4375,23 @@ export default function MapsPage() {
       if (!resolved) return false
 
       applyHeadlessCombatResult(headless)
+      const enemyApEvent = headless.events.find(
+        (event): event is Extract<HeadlessCombatEvent, { type: 'ap-spent' }> =>
+          event.type === 'ap-spent' && event.tokenId === result.attackerTokenId && !event.characterId,
+      )
+      if (enemyApEvent) {
+        enemyAttackApAlreadySpent = true
+        const attackerName = latestMap.tokens.find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
+        const targetName =
+          latestMap.tokens.find((token) => token.id === result.targetTokenId)?.label ??
+          result.attack?.targetName ??
+          '目标'
+        const ap = headless.state.enemyApByToken[result.attackerTokenId] ?? {
+          current: enemyApEvent.after,
+          max: getEnemyApState(result.attackerTokenId).max,
+        }
+        pushCombatLog(`${attackerName} 花费 ${enemyApEvent.amount} AP：攻击 ${targetName}。剩余 AP ${ap.current}/${ap.max}`, 'turn')
+      }
       damageRollValues = resolved.damageValues
       damageRollTotal = resolved.total
       damageRollBonus = resolved.total - resolved.diceTotal
@@ -4426,6 +4459,7 @@ export default function MapsPage() {
       if (await tryResolvePhysicalEnemyAttackWithHeadless()) {
         return
       }
+      if (!spendEnemyAttackApForFallback()) return
       await runEnemyStage('beforeAttackRoll')
 
       if (damageType === 'aoe') {
@@ -4614,6 +4648,7 @@ export default function MapsPage() {
         }
       }
     } else if (result.targetCharacterId != null && hasEnemyDamage) {
+      if (!spendEnemyAttackApForFallback()) return
       await runEnemyStage('beforeAttackRoll')
       if (enemyResolutionSession) {
         enemyResolutionSession.context.attackRoll = {
@@ -4643,6 +4678,7 @@ export default function MapsPage() {
         deferDeathHandling(result.targetTokenId, result.targetCharacterId)
       }
     } else if (!targetChar && hasEnemyDamage) {
+      if (!spendEnemyAttackApForFallback()) return
       await runEnemyStage('beforeAttackRoll')
       if (enemyResolutionSession) {
         enemyResolutionSession.context.attackRoll = {
@@ -4772,28 +4808,15 @@ export default function MapsPage() {
       onComplete()
       return
     }
-    let dodgeApSpent = false
     if (wantsDodge) {
       const windBladeFreeDodge = (latest.combatBuffs?.windBladeFreeDodgeTurns ?? 0) > 0
       if (!windBladeFreeDodge && !canAttemptDodge(latest)) {
         void showCombatNotice('行动点不足', '无法尝试闪避。', 'amber')
         return
       }
-      if (!windBladeFreeDodge) {
-        const spent = spendAP(latest.id, 1)
-        if (!spent) {
-          void showCombatNotice('行动点不足', '无法尝试闪避。', 'amber')
-          return
-        }
-        const attackerName = activeMap?.tokens.find((t) => t.id === result.attackerTokenId)?.label ?? '敌人'
-        pushApLog(latest, 1, '尝试闪避', `应对 ${attackerName} 的攻击`)
-        dodgeApSpent = true
-      } else {
-        pushCombatLog(`${latest.name} 的风刃乱舞生效：本次闪避不消耗 AP。`, 'turn')
-      }
     }
     setDodgePrompt(null)
-    void finishEnemyAttack(result, latest, wantsDodge, undefined, dodgeApSpent).then(onComplete)
+    void finishEnemyAttack(result, latest, wantsDodge).then(onComplete)
   }
 
   const handleSharedDodgeChoice = async (wantsDodge: boolean) => {
@@ -4932,19 +4955,10 @@ export default function MapsPage() {
 
     const attack = () => {
       if (!isStillEnemyTurn()) return
-      if (!spendEnemyAp(enemy.id, 1)) {
+      if (getEnemyApState(enemy.id).current < 1) {
         pushTimer(advanceEnemyIfCurrent, 300)
         return
       }
-      const remainingAp = getEnemyApState(enemy.id).current
-      const targetName =
-        activeMap.tokens.find((t) => t.id === result.targetTokenId)?.label ??
-        result.attack?.targetName ??
-        '目标'
-      pushCombatLog(
-        `${enemy.label} 花费 1 AP：攻击 ${targetName}。剩余 AP ${remainingAp}/2`,
-        'turn',
-      )
       applyEnemyAttack(result, () => {
         const apLeft = getEnemyApState(enemy.id).current
         const latestMap = useMapStore.getState().maps.find((m) => m.id === activeMap.id)
@@ -4980,19 +4994,10 @@ export default function MapsPage() {
           if (nextResult.attacked && !nextResult.newPosition) {
             pushTimer(() => {
               if (!isStillEnemyTurn()) return
-              if (!spendEnemyAp(enemy.id, 1)) {
+              if (getEnemyApState(enemy.id).current < 1) {
                 pushTimer(advanceEnemyIfCurrent, 300)
                 return
               }
-              const nextRemainingAp = getEnemyApState(enemy.id).current
-              const nextTargetName =
-                latestMap.tokens.find((t) => t.id === nextResult.targetTokenId)?.label ??
-                nextResult.attack?.targetName ??
-                '目标'
-              pushCombatLog(
-                `${enemy.label} 花费 1 AP：继续攻击 ${nextTargetName}。剩余 AP ${nextRemainingAp}/2`,
-                'turn',
-              )
               applyEnemyAttack(nextResult, () => {
                 pushTimer(advanceEnemyIfCurrent, ADVANCE_DELAY_MS)
               })
