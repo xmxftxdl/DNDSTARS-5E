@@ -5843,16 +5843,20 @@ export default function MapsPage() {
   }
 
   const spendStableMind = (charId: string): boolean => {
-    const latest = useCharacterStore.getState().characters.find((c) => c.id === charId)
-    const trait = latest ? findClassTrait(latest, 'stableMind') : undefined
-    if (!latest || !trait || trait.uses <= 0 || latest.currentAP < 1) return false
-    updateChar(latest.id, {
-      currentAP: latest.currentAP - 1,
-      traits: latest.traits.map((t) =>
-        t.featureKey === 'stableMind' ? { ...t, uses: Math.max(0, t.uses - 1) } : t,
-      ),
+    if (!activeMap) return false
+    const liveMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const actorToken = liveMap.tokens.find((token) => token.type === 'player' && token.characterId === charId)
+    if (!actorToken) return false
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(liveMap), {
+      type: 'stable-mind',
+      actorTokenId: actorToken.id,
+      characterId: charId,
     })
-    pushApLog(latest, 1, '残影脱身', '抵消敏捷豁免后仍会受到的伤害')
+    if (!headless.ok) return false
+    applyHeadlessCombatResult(headless)
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
     return true
   }
 

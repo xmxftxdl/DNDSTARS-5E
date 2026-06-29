@@ -244,6 +244,12 @@ export interface HeadlessEnemyAttackAction {
   targetDodgeApAlreadySpent?: boolean
 }
 
+export interface HeadlessStableMindAction {
+  type: 'stable-mind'
+  actorTokenId: string
+  characterId: string
+}
+
 export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
@@ -328,6 +334,7 @@ export type HeadlessCombatAction =
   | HeadlessPlayerMoveAction
   | HeadlessPlayerAttackAction
   | HeadlessEnemyAttackAction
+  | HeadlessStableMindAction
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
   | HeadlessCalmSpiritAction
@@ -472,7 +479,11 @@ export function resolveHeadlessDmAction(
   if (!next.active) return fail(next, 'combat-ended', events)
 
   const turn = getCurrentTurn(next)
-  if (action.type !== 'opportunity-attack-token' && (!turn || turn.tokenId !== action.actorTokenId)) {
+  if (
+    action.type !== 'opportunity-attack-token' &&
+    action.type !== 'stable-mind' &&
+    (!turn || turn.tokenId !== action.actorTokenId)
+  ) {
     return fail(next, 'stale-turn', events)
   }
 
@@ -485,6 +496,8 @@ export function resolveHeadlessDmAction(
       return resolveAoeAttack(next, action, dice, events)
     case 'enemy-attack-token':
       return resolveEnemyAttack(next, action, dice, events)
+    case 'stable-mind':
+      return resolveStableMind(next, action, events)
     case 'activate-feature':
       return resolveActivateFeature(next, action, dice, events)
     case 'qi-reduce-cooldown':
@@ -871,6 +884,37 @@ function resolveActivateFeature(
     combatBuffs: { ...item.combatBuffs, preciseStrikeReady: true },
   }))
   events.push({ type: 'log', text: `${actor.name} 准备精准打击。` })
+  return succeed(state, events)
+}
+
+function resolveStableMind(
+  state: HeadlessDmCombatState,
+  action: HeadlessStableMindAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const actor = findCharacter(state, action.characterId)
+  if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
+  const trait = actor.traits.find((item) => item.featureKey === 'stableMind')
+  if (!trait || trait.uses <= 0) return fail(state, 'invalid-skill', events)
+  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    traits: item.traits.map((currentTrait) =>
+      currentTrait.featureKey === 'stableMind'
+        ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+        : currentTrait,
+    ),
+  }))
+  events.push({ type: 'log', text: `${actor.name} 发动残影脱身：抵消敏捷豁免后仍会受到的伤害。` })
   return succeed(state, events)
 }
 

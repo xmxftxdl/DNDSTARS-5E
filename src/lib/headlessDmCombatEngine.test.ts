@@ -358,6 +358,80 @@ describe('headless DM combat engine', () => {
     expect(hero.traits.find((trait) => trait.featureKey === 'eagleEye')?.uses).toBe(0)
   })
 
+  it('resolves stable mind as an interrupt outside the actor turn', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentAP: 2,
+          traits: [
+            {
+              id: 'stable-mind',
+              name: '残影脱身',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'stableMind',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'stable-mind',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.traits.find((trait) => trait.featureKey === 'stableMind')?.uses).toBe(0)
+    expect(result.events).toContainEqual({
+      type: 'ap-spent',
+      tokenId: 'hero-token',
+      characterId: 'hero',
+      amount: 1,
+      before: 2,
+      after: 1,
+    })
+  })
+
+  it('rejects stable mind when AP is unavailable', () => {
+    const combat = state({
+      initiativeIndex: 1,
+      characters: [
+        character({
+          currentAP: 0,
+          traits: [
+            {
+              id: 'stable-mind',
+              name: '残影脱身',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'stableMind',
+            },
+          ],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'stable-mind',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('insufficient-ap')
+  })
+
   it('activates still water through headless DM authority for allies within 15 feet', () => {
     const stillWater = {
       id: 'still-water',
