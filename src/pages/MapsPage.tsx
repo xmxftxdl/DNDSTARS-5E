@@ -65,10 +65,8 @@ import {
 import type { Character } from '../types/character'
 import type { ClassFeatureKey, CombatSkill } from '../types/character'
 import {
-  canArmDoubleArrow,
   canUseArmorPiercing,
   canUseDoubleArrow,
-  eagleEyeDexBonus,
   isBasicShot,
   findClassTrait,
 } from '../lib/classFeatures'
@@ -4410,81 +4408,26 @@ export default function MapsPage() {
       beginIllusionDanceTargeting(turnCharacter)
       return
     }
-    if (key === 'eagleEye') {
-      const currentTrait = findClassTrait(turnCharacter, 'eagleEye')
-      if (!currentTrait || currentTrait.uses <= 0) return
-      if (!spendAP(turnCharacter.id, 1)) {
-        await showCombatNotice('行动点不足', '需要 1 AP。', 'amber')
-        return
-      }
-      pushApLog(turnCharacter, 1, '激活鹰眼')
-      const ok = useCharacterStore.getState().activateEagleEye(turnCharacter.id)
-      if (ok) {
-        const updated = useCharacterStore.getState().characters.find((c) => c.id === turnCharacter.id)
-        const trait = updated && findClassTrait(updated, 'eagleEye')
-        if (trait) {
-          await showCombatNotice(
-            '鹰眼',
-            `鹰眼已激活：3 回合内敏捷 +${eagleEyeDexBonus(trait.level)}（调整值 +${Math.floor(eagleEyeDexBonus(trait.level) / 2)}）（剩余 ${trait.uses}/${trait.maxUses} 次/长休）`,
-            'sky',
-          )
-        }
-      }
-      return
-    }
-    if (key === 'doubleArrow') {
-      if (!canArmDoubleArrow(turnCharacter)) {
-        await showCombatNotice('双箭', '本场次数已用完。', 'amber')
-        return
-      }
-      const ready = !turnCharacter.combatBuffs?.doubleArrowReady
-      if (ready && !spendAP(turnCharacter.id, 1)) {
-        await showCombatNotice('行动点不足', '需要 1 AP。', 'amber')
-        return
-      }
-      if (ready) pushApLog(turnCharacter, 1, '激活双箭')
-      updateChar(turnCharacter.id, {
-        combatBuffs: {
-          ...turnCharacter.combatBuffs,
-          doubleArrowReady: ready || undefined,
-        },
+    if (key === 'eagleEye' || key === 'doubleArrow' || key === 'preciseStrike') {
+      if (!activeMap) return
+      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
+      if (!actorToken) return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
+        type: 'activate-feature',
+        actorTokenId: actorToken.id,
+        characterId: turnCharacter.id,
+        featureKey: key as Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike'>,
       })
-      const trait = findClassTrait(turnCharacter, 'doubleArrow')
-      if (ready) {
-        await showCombatNotice(
-          '双箭',
-          `双箭已就绪：下次单箭射击将改为 2 支箭矢\n剩余 ${trait?.uses ?? 0} / ${trait?.maxUses ?? 0} 次`,
-          'sky',
-        )
-      } else {
-        await showCombatNotice('双箭', '已取消双箭。', 'sky')
-      }
-      return
-    }
-    if (key === 'preciseStrike') {
-      const trait = findClassTrait(turnCharacter, 'preciseStrike')
-      if (!trait || trait.uses <= 0) {
-        await showCombatNotice('精准打击', '本场次数已用完。', 'amber')
+      const title = key === 'eagleEye' ? '鹰眼' : key === 'doubleArrow' ? '双箭' : '精准打击'
+      if (!headless.ok) {
+        await showCombatNotice(title, headless.reason, 'amber')
         return
       }
-      const ready = !turnCharacter.combatBuffs?.preciseStrikeReady
-      if (ready) {
-        if (turnCharacter.currentAP < 1) {
-          await showCombatNotice('行动点不足', '需要 1 AP。', 'amber')
-          return
-        }
-        updateChar(turnCharacter.id, {
-          currentAP: turnCharacter.currentAP - 1,
-          combatBuffs: { ...turnCharacter.combatBuffs, preciseStrikeReady: true },
-        })
-        pushApLog(turnCharacter, 1, '准备精准打击')
-        await showCombatNotice('精准打击', '已就绪：下一次攻击必定重击。', 'sky')
-      } else {
-        updateChar(turnCharacter.id, {
-          combatBuffs: { ...turnCharacter.combatBuffs, preciseStrikeReady: undefined },
-        })
-        await showCombatNotice('精准打击', '已取消精准打击。', 'sky')
+      applyHeadlessCombatResult(headless)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
       }
+      await showCombatNotice(title, '已更新。', 'sky')
       return
     }
     if (key === 'trackingArrow') {
