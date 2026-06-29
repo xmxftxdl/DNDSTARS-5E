@@ -92,6 +92,7 @@ export interface SharedPlayerActionState {
     | 'use-skill'
     | 'agile-leap-move'
     | 'skill-free-move'
+    | 'calm-spirit-move'
     | 'qi-reduce-cooldown'
     | 'calm-spirit'
     | 'activate-feature'

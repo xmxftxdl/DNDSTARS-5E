@@ -2975,11 +2975,27 @@ export default function MapsPage() {
       const center = { x: calmSpiritMoveCircle.centerX, y: calmSpiritMoveCircle.centerY }
       const pos = snapTokenToGridCenter(point.x, point.y, myPlayerToken, activeMap)
       if (!isWithinMovementRange(center, pos, feet, activeMap)) return
-      updateToken(activeMap.id, myPlayerToken.id, pos)
-      pushApLog(turnCharacter, 0, '安定心神移动', `移动至多 ${feet} 尺`)
-      updateChar(turnCharacter.id, {
-        combatBuffs: { ...turnCharacter.combatBuffs, calmSpiritMoveFeet: undefined },
-      })
+      if (!isDM) {
+        if (!sendPlayerCalmSpiritMoveRequest(pos, feet)) {
+          void showCombatNotice(
+            pendingPlayerActionRef.current ? '等待 DM 确认' : '无法移动',
+            pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '安定心神移动当前不可用。',
+            'amber',
+          )
+        }
+        setShowMoveRange(false)
+        return
+      }
+      if (
+        !submitDmLocalPlayerAction(
+          createDmLocalPlayerAction({
+            type: 'calm-spirit-move',
+            targetPosition: pos,
+          }),
+        )
+      ) {
+        void showCombatNotice('无法移动', '安定心神移动当前不可用。', 'amber')
+      }
       setShowMoveRange(false)
       return
     }
@@ -6197,6 +6213,41 @@ export default function MapsPage() {
       return
     }
 
+    if (action.type === 'calm-spirit-move') {
+      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const token = map.tokens.find((item) => item.id === action.actorTokenId)
+      if (!actor || !token || !action.targetPosition) {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-calm-spirit-move')
+        completePlayerActionRequest(action)
+        return
+      }
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'move-token',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        targetPosition: action.targetPosition,
+        mode: 'calm-spirit-move',
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(
+          action,
+          'rejected',
+          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
+        )
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      const moved = tokenMovedEvent(headless.events, token.id)
+      for (const event of headless.events) {
+        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      }
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted', undefined, moved?.to ?? { x: token.x, y: token.y })
+      return
+    }
+
     if (action.type === 'move-token') {
       const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
@@ -6678,6 +6729,29 @@ export default function MapsPage() {
       updatedAt: Date.now(),
     }
     return submitPlayerActionRequest(action, `${turnCharacter.name} 技能移动 ${movedFeet} 尺`)
+  }
+
+  const sendPlayerCalmSpiritMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
+    if ((turnCharacter.combatBuffs?.calmSpiritMoveFeet ?? 0) <= 0) return false
+    const seq = playerActionSeqRef.current + 1
+    playerActionSeqRef.current = seq
+    const action: SharedPlayerActionState = {
+      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+      mapId: activeMap.id,
+      combatId: combatIdRef.current,
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'calm-spirit-move',
+      actorTokenId: currentInitiativeToken.id,
+      characterId: turnCharacter.id,
+      targetPosition,
+      round,
+      initiativeIndex,
+      seq,
+      updatedAt: Date.now(),
+    }
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 安定心神移动 ${movedFeet} 尺`)
   }
 
   const sendPlayerQiReduceCooldownRequest = (skill: CombatSkill) => {

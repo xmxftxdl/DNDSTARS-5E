@@ -1313,6 +1313,29 @@ describe('headless DM combat engine', () => {
     expect(result.state.characters[0].combatBuffs?.calmSpiritMoveFeet).toBe(15)
   })
 
+  it('resolves calm spirit movement through headless DM authority', () => {
+    const combat = state({
+      characters: [character({ currentAP: 0, combatBuffs: { calmSpiritMoveFeet: 15 } })],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 385, y: 175 },
+      mode: 'calm-spirit-move',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(0)
+    expect(hero.combatBuffs?.calmSpiritMoveFeet).toBeUndefined()
+    expect(result.state.map.tokens.find((item) => item.id === 'hero-token')).toMatchObject({ x: 385, y: 175 })
+    expect(result.events.map((event) => event.type)).not.toContain('ap-spent')
+    expect(result.events.map((event) => event.type)).not.toContain('opportunity-triggered')
+  })
+
   it('spends two calm spirit stacks to arm crit bonus through headless DM authority', () => {
     const combat = state({
       characters: [

@@ -190,7 +190,7 @@ export interface HeadlessPlayerMoveAction {
   actorTokenId: string
   characterId: string
   targetPosition: { x: number; y: number }
-  mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap' | 'skill-free-move'>
+  mode?: Extract<CombatMovementMode, 'turn-move' | 'agile-leap' | 'skill-free-move' | 'calm-spirit-move'>
 }
 
 export interface HeadlessEnemyMoveAction {
@@ -767,6 +767,8 @@ function resolveMove(
         ? `${actor.name} 灵巧跳跃移动 ${movement.feet} 尺。`
         : mode === 'skill-free-move'
           ? `${actor.name} 技能移动 ${movement.feet} 尺。`
+          : mode === 'calm-spirit-move'
+            ? `${actor.name} 安定心神移动 ${movement.feet} 尺。`
           : `${actor.name} 移动 ${movement.feet} 尺。`,
   })
   return succeed(state, events)

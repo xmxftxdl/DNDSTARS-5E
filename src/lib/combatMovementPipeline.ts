@@ -4,7 +4,7 @@ import { isMovementLocked } from './combatStatus'
 import { isTokenAlive } from './combatTokens'
 import { cellDistance, isWithinMovementRange, pixelToCell, snapTokenToGridCenter } from './gridCombat'
 
-export type CombatMovementMode = 'turn-move' | 'agile-leap' | 'skill-free-move' | 'dm-override'
+export type CombatMovementMode = 'turn-move' | 'agile-leap' | 'skill-free-move' | 'calm-spirit-move' | 'dm-override'
 
 export type CombatMovementFailureReason =
   | 'combat-ended'
@@ -67,7 +67,7 @@ export function resolveCombatMovement(request: CombatMovementRequest): CombatMov
     if (
       request.currentTurnTokenId &&
       request.currentTurnTokenId !== token.id &&
-      (request.mode === 'turn-move' || request.mode === 'skill-free-move')
+      (request.mode === 'turn-move' || request.mode === 'skill-free-move' || request.mode === 'calm-spirit-move')
     ) {
       return { ok: false, reason: 'stale-turn' }
     }
@@ -102,6 +102,8 @@ export function resolveCombatMovement(request: CombatMovementRequest): CombatMov
       ? actor.combatBuffs?.agileLeapMoveFeet ?? 0
       : request.mode === 'skill-free-move'
         ? actor.combatBuffs?.freeMoveFeet ?? 0
+        : request.mode === 'calm-spirit-move'
+          ? actor.combatBuffs?.calmSpiritMoveFeet ?? 0
         : actor.speed
   if (movementFeet <= 0) return { ok: false, reason: 'out-of-range' }
   if (!isWithinMovementRange(from, to, movementFeet, request.map)) {
@@ -138,6 +140,23 @@ export function resolveCombatMovement(request: CombatMovementRequest): CombatMov
       triggersMoveEffects: false,
       characterPatch: {
         combatBuffs: { ...actor.combatBuffs, freeMoveFeet: undefined },
+      },
+    }
+  }
+
+  if (request.mode === 'calm-spirit-move') {
+    return {
+      ok: true,
+      mode: request.mode,
+      token,
+      actor,
+      from,
+      to,
+      feet,
+      apCost: 0,
+      triggersMoveEffects: false,
+      characterPatch: {
+        combatBuffs: { ...actor.combatBuffs, calmSpiritMoveFeet: undefined },
       },
     }
   }

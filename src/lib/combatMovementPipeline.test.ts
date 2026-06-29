@@ -171,6 +171,28 @@ describe('combatMovementPipeline', () => {
     expect(result.characterPatch?.combatBuffs?.freeMoveFeet).toBeUndefined()
   })
 
+  it('accepts calm spirit movement without AP and clears the prepared movement buff', () => {
+    const actor = character({ currentAP: 0, combatBuffs: { calmSpiritMoveFeet: 15 } })
+    const result = resolveCombatMovement({
+      map: map([token()]),
+      characters: [actor],
+      actorTokenId: 'hero-token',
+      characterId: actor.id,
+      targetPosition: { x: 385, y: 175 },
+      mode: 'calm-spirit-move',
+      active: true,
+      currentTurnTokenId: 'hero-token',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.apCost).toBe(0)
+    expect(result.feet).toBe(15)
+    expect(result.triggersMoveEffects).toBe(false)
+    expect(result.characterPatch?.currentAP).toBeUndefined()
+    expect(result.characterPatch?.combatBuffs?.calmSpiritMoveFeet).toBeUndefined()
+  })
+
   it('lets DM override movement move defeated tokens without AP checks', () => {
     const actor = character({ currentHp: 0, currentAP: 0 })
     const result = resolveCombatMovement({
