@@ -7188,7 +7188,8 @@ export default function MapsPage() {
       skill.skillTreeId === 'shadowStepShot' ||
       skill.skillTreeId === 'shadowDance' ||
       skill.skillTreeId === 'riseKick' ||
-      skill.skillTreeId === 'explosiveArrow'
+      skill.skillTreeId === 'explosiveArrow' ||
+      skill.skillTreeId === 'eagleStrike'
     if (!supportedSkill || opts.targetCount !== 1) return false
     if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
     if (getSkillAoeTargeting(skill)) return false
@@ -7615,6 +7616,8 @@ export default function MapsPage() {
           (!!targetToken.knockbackTurns ||
             !!targetChar?.conditions.includes(KNOCKBACK_STATUS_LABEL) ||
             windKickTreatsTargetAsKnocked)
+        const targetKnockedForEagleStrike =
+          skill.skillTreeId === 'eagleStrike' && tokenHasKnockbackNow(targetToken, targetChar)
         const burstKickExtraD6 =
           shouldRollDamage && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
         const doubleArrowTrait = doubleArrow ? findClassTrait(actor, 'doubleArrow') : undefined
@@ -7710,6 +7713,15 @@ export default function MapsPage() {
             sides: 6,
           })
         }
+        if (shouldRollDamage && skill.skillTreeId === 'eagleStrike') {
+          const count = eagleStrikeExtraDiceCount(skillRank)
+          if (count > 0) {
+            extraDamageGroups.push({
+              values: await rollDiceBoxValues(count, 6, `${skill.name} eagle strike knockback damage`, targetToken.label),
+              sides: 6,
+            })
+          }
+        }
         const targetHasMagicState =
           !!targetToken.burningTurns ||
           !!targetToken.igniteTurns ||
@@ -7749,28 +7761,31 @@ export default function MapsPage() {
         }
         const explosiveArrowBurnTurns =
           postCritDamageGroups.length > 0 ? (skill.skillTreeId === 'explosiveArrow' && skillRank >= 4 ? 2 : 1) : undefined
-        const effectAbility: 'str' | 'con' | undefined =
+        const effectAbility: 'str' | 'dex' | 'con' | undefined =
           shouldRollDamage && skill.skillTreeId === 'burstKick' && skillRank >= 3
             ? 'con'
             : shouldRollDamage && (skill.skillTreeId === 'rageShot' && skillRank >= 3)
               ? 'str'
               : shouldRollDamage && skill.skillTreeId === 'bindShot'
                 ? 'str'
-                : undefined
+                : shouldRollDamage && skill.skillTreeId === 'eagleStrike'
+                  ? 'dex'
+                  : undefined
         const effectSaveD20 = effectAbility
-          ? await rollDiceBoxD20(
-              effectAbility === 'con' ? `${skill.name} 体质豁免 D20` : `${skill.name} 力量豁免 D20`,
-              targetToken.label,
-            )
+          ? await rollDiceBoxD20(`${skill.name} effect save D20`, targetToken.label)
           : undefined
+        const effectSaveD20Second =
+          shouldRollDamage && skill.skillTreeId === 'eagleStrike' && skillRank >= 5
+            ? await rollDiceBoxD20(`${skill.name} effect save disadvantage D20`, targetToken.label)
+            : undefined
         const cooldownReductionAmount =
-          !expectedTargetDodged && skill.skillTreeId === 'refluxMagicArrow' ? 1 : 0
+          shouldRollDamage && skill.skillTreeId === 'refluxMagicArrow' ? 1 : 0
         const cooldownReductionSkillId =
           cooldownReductionAmount > 0
             ? chooseCooldownReductionSkillId(actor, cooldownReductionAmount, `${skill.name} 命中`)
             : undefined
         const pushTargetOnHit =
-          !expectedTargetDodged &&
+          shouldRollDamage &&
           skill.skillTreeId === 'windKickCombo' &&
           skillRank >= 3 &&
           (await showCombatDialog({
@@ -7799,8 +7814,18 @@ export default function MapsPage() {
             huntingComboIgnoresDodge && packetIsCrit
               ? 0.2 + (huntingComboRankForAttack - 1) * 0.05
               : undefined,
-          effectSave: effectAbility && effectSaveD20 != null ? { ability: effectAbility, d20: effectSaveD20 } : undefined,
+          effectSave:
+            effectAbility && effectSaveD20 != null
+              ? {
+                  ability: effectAbility,
+                  d20: effectSaveD20,
+                  d20Second: effectSaveD20Second,
+                  disadvantage: skill.skillTreeId === 'eagleStrike' && skillRank >= 5,
+                }
+              : undefined,
           stunOnFailedEffectSave: skill.skillTreeId === 'burstKick' && skillRank >= 3,
+          knockbackOnFailedEffectSave: skill.skillTreeId === 'eagleStrike',
+          knockbackTurns: skill.skillTreeId === 'eagleStrike' ? KNOCKBACK_DEFAULT_TURNS : undefined,
           restrainedOnFailedEffectSave:
             (skill.skillTreeId === 'rageShot' && skillRank >= 3) ||
             (skill.skillTreeId === 'bindShot' && skillRank >= 4),
@@ -7812,7 +7837,13 @@ export default function MapsPage() {
           pushTargetOnHit,
           pushCells: pushTargetOnHit ? 1 : undefined,
           selfCooldownReductionOnHit:
-            skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5 ? 1 : undefined,
+            skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5
+              ? 1
+              : targetKnockedForEagleStrike
+                ? skillRank >= 4
+                  ? 3
+                  : 2
+                : undefined,
           clearWindKickTreatKnockbackOnUse: windKickTreatsTargetAsKnocked,
           clearActorConditionOnHit: skill.skillTreeId === 'riseKick' ? '倒地' : undefined,
           grantFreeMoveFeetOnHit:

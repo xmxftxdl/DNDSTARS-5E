@@ -206,6 +206,8 @@ export interface HeadlessPlayerAttackPacket {
   additionalCritMultiplier?: number
   effectSave?: HeadlessAttackEffectSavePacket
   stunOnFailedEffectSave?: boolean
+  knockbackOnFailedEffectSave?: boolean
+  knockbackTurns?: number
   restrainedOnFailedEffectSave?: boolean
   pullOnFailedEffectSave?: boolean
   pullCells?: number
@@ -1514,6 +1516,9 @@ function resolvePlayerAttack(
       const effectAllowedBySize = !packet.smallOrMediumOnly || isSmallOrMediumToken(targetToken)
       if (packet.stunOnFailedEffectSave) {
         applyStunToTarget(state, targetToken, STUN_DEFAULT_TURNS, events)
+      }
+      if (packet.knockbackOnFailedEffectSave) {
+        applyKnockbackToTarget(state, targetToken, packet.knockbackTurns ?? KNOCKBACK_DEFAULT_TURNS, events)
       }
       if (packet.restrainedOnFailedEffectSave && effectAllowedBySize) {
         applyRestrainedToTarget(state, targetToken, 1, events)

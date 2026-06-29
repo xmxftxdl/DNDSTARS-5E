@@ -2657,6 +2657,81 @@ describe('headless DM combat engine', () => {
     expect(result.events.some((event) => event.type === 'token-moved' && event.tokenId === 'goblin')).toBe(true)
   })
 
+  it('resolves eagle strike knockback save disadvantage and cooldown reduction through headless DM', () => {
+    const eagleStrike = skill({
+      id: 'eagle-strike',
+      name: 'Eagle Strike',
+      skillTreeId: 'eagleStrike',
+      tags: ['melee'],
+      damageCount: 3,
+      damageSides: 6,
+      cooldown: 4,
+      remaining: 0,
+    })
+    const hero = character({
+      saveDC: 12,
+      skillRanks: { eagleStrike: 5 },
+      combatSkills: [skill(), eagleStrike],
+    })
+    const combat = state({
+      characters: [hero],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'goblin',
+          label: 'Goblin',
+          type: 'enemy',
+          hp: 80,
+          maxHp: 80,
+          knockbackTurns: 1,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { goblin: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'goblin',
+      skillId: 'eagle-strike',
+      targetPackets: [
+        {
+          targetTokenId: 'goblin',
+          diceValues: [6, 6, 6],
+          extraDamageGroups: [{ values: [6, 6, 6, 6], sides: 6 }],
+          targetDodgeMode: 'skip',
+          effectSave: { ability: 'dex', d20: 15, d20Second: 1, disadvantage: true },
+          knockbackOnFailedEffectSave: true,
+          knockbackTurns: 1,
+          selfCooldownReductionOnHit: 3,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'goblin')
+    const actor = result.state.characters.find((item) => item.id === 'hero')
+    expect(target?.knockbackTurns).toBe(1)
+    expect(actor?.combatSkills.find((item) => item.id === 'eagle-strike')?.remaining).toBe(1)
+    const attack = result.events.find((event) => event.type === 'attack-resolved')
+    expect(attack).toMatchObject({ damageValues: [6, 6, 6, 6, 6, 6, 6], hit: true })
+    const save = result.events.find((event) => event.type === 'status-save-resolved')
+    expect(save).toMatchObject({ targetTokenId: 'goblin', d20Value: 1, success: false })
+  })
+
   it('rejects rise kick unless the actor is prone and does not spend AP', () => {
     const riseKick = skill({
       id: 'rise-kick',
