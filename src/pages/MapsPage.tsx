@@ -7205,7 +7205,6 @@ export default function MapsPage() {
     if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
     const unsupportedTraitKeys = new Set([
       'armorPiercing',
-      'huntingCombo',
       'takeoff',
     ])
     return !actor.traits.some((trait) => trait.featureKey && unsupportedTraitKeys.has(trait.featureKey))
@@ -7564,7 +7563,10 @@ export default function MapsPage() {
         if (actorToken && isBasicShot(skill)) {
           launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, { x: targetToken.x, y: targetToken.y })
         }
-        const dodgePreview = enemyDodgePreview(targetToken, actor, skill)
+        const huntingComboRankForAttack = huntingComboTraitRank(actor)
+        const huntingComboIgnoresDodge =
+          huntingComboRankForAttack > 0 && (targetToken.huntingMarkStacks ?? 0) > 0
+        const dodgePreview = huntingComboIgnoresDodge ? null : enemyDodgePreview(targetToken, actor, skill)
         const targetDodgeD20 = dodgePreview?.decision.shouldDodge
           ? await rollDiceBoxD20('敌人闪避 D20', targetToken.label)
           : undefined
@@ -7764,6 +7766,11 @@ export default function MapsPage() {
           targetDodgeD20,
           isCrit: packetIsCrit || undefined,
           targetDodgeMode: dodgePreview?.decision.shouldDodge ? ('attempt' as const) : ('skip' as const),
+          ignoreTargetDodge: huntingComboIgnoresDodge || undefined,
+          additionalCritMultiplier:
+            huntingComboIgnoresDodge && packetIsCrit
+              ? 0.2 + (huntingComboRankForAttack - 1) * 0.05
+              : undefined,
           effectSave: effectAbility && effectSaveD20 != null ? { ability: effectAbility, d20: effectSaveD20 } : undefined,
           stunOnFailedEffectSave: skill.skillTreeId === 'burstKick' && skillRank >= 3,
           restrainedOnFailedEffectSave:

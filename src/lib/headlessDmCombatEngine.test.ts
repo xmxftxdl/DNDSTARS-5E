@@ -3567,4 +3567,69 @@ describe('headless DM combat engine', () => {
     expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d6', values: [2], total: 2 })
     expect(result.events).toContainEqual({ type: 'dice-rolled', notation: '1d8', values: [7], total: 7 })
   })
+
+  it('lets hunting combo packets ignore target dodge and add critical damage', () => {
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'marked-goblin',
+          label: 'Marked Goblin',
+          type: 'enemy',
+          poolId: 'goblin',
+          hp: 40,
+          maxHp: 40,
+          huntingMarkStacks: 1,
+          x: 245,
+          y: 175,
+        }),
+      ]),
+      enemyApByToken: { 'marked-goblin': { current: 2, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'marked-goblin',
+      skillId: 'basic-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'marked-goblin',
+          diceValues: [8],
+          targetDodgeMode: 'attempt',
+          targetDodgeD20: 20,
+          ignoreTargetDodge: true,
+          isCrit: true,
+          additionalCritMultiplier: 0.2,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.enemyApByToken['marked-goblin'].current).toBe(2)
+    expect(result.events.some((event) => event.type === 'target-dodge-resolved')).toBe(false)
+    const resolved = result.events.find((event) => event.type === 'attack-resolved')
+    expect(resolved).toMatchObject({
+      damageValues: [8],
+      damageBeforeDefense: 11,
+      isCrit: true,
+      hit: true,
+    })
+  })
 })

@@ -180,7 +180,9 @@ export interface HeadlessPlayerAttackAction {
   diceValues?: number[]
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
+  ignoreTargetDodge?: boolean
   isCrit?: boolean
+  additionalCritMultiplier?: number
   targetPackets?: HeadlessPlayerAttackPacket[]
 }
 
@@ -197,7 +199,9 @@ export interface HeadlessPlayerAttackPacket {
   halveDamageOnRangeFeet?: { minExclusive: number; maxInclusive: number }
   targetDodgeD20?: number
   targetDodgeMode?: 'auto' | 'attempt' | 'skip'
+  ignoreTargetDodge?: boolean
   isCrit?: boolean
+  additionalCritMultiplier?: number
   effectSave?: HeadlessAttackEffectSavePacket
   stunOnFailedEffectSave?: boolean
   restrainedOnFailedEffectSave?: boolean
@@ -1228,7 +1232,9 @@ function resolvePlayerAttack(
       diceValues: packet.diceValues,
       targetDodgeD20: packet.targetDodgeD20,
       targetDodgeMode: packet.targetDodgeMode,
+      ignoreTargetDodge: packet.ignoreTargetDodge,
       isCrit: packet.isCrit,
+      additionalCritMultiplier: packet.additionalCritMultiplier,
       targetPackets: undefined,
     }
     const targetDodge = resolveTargetDodgeAgainstPlayerAttack(
@@ -1337,8 +1343,14 @@ function resolvePlayerAttack(
       })
     }
 
+    const preCritRawDamage = preCritDamageValues.reduce((sum, value) => sum + value, 0) + skill.damageBonus
+    const additionalCritDamage =
+      packet.isCrit && packet.additionalCritMultiplier
+        ? Math.floor(preCritRawDamage * packet.additionalCritMultiplier)
+        : 0
     const baseDamage =
       resolveAttackDamageTotal(actor, skill, preCritDamageValues, { isCrit: packet.isCrit }) +
+      additionalCritDamage +
       postCritDamageValues.reduce((sum, value) => sum + value, 0)
     const damageType = isMagicDamageSkill(skill) ? 'magic' : 'physical'
     const adjustedBase = adjustDamageForTarget(state, baseDamage, actor, targetToken, damageType)
@@ -1656,6 +1668,13 @@ function resolveTargetDodgeAgainstPlayerAttack(
   events: HeadlessCombatEvent[],
 ): { attempted: boolean; dodged: boolean } | null {
   if (targetToken.type !== 'enemy') return { attempted: false, dodged: false }
+  if (action.ignoreTargetDodge) {
+    events.push({
+      type: 'log',
+      text: `${actor.name} ignores ${targetToken.label} dodge with ${skill.name}.`,
+    })
+    return { attempted: false, dodged: false }
+  }
   const ap = state.enemyApByToken[targetToken.id]
   if (!ap || ap.current < 1) return { attempted: false, dodged: false }
   const dodgeMode = action.targetDodgeMode ?? 'auto'
