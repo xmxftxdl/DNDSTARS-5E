@@ -7204,7 +7204,6 @@ export default function MapsPage() {
     if (opts.doubleArrow && buffs?.preciseStrikeReady) return false
     if (opts.doubleArrow && buffs?.shadowVeilTargetId) return false
     const unsupportedTraitKeys = new Set([
-      'armorPiercing',
       'takeoff',
     ])
     return !actor.traits.some((trait) => trait.featureKey && unsupportedTraitKeys.has(trait.featureKey))
@@ -7809,6 +7808,9 @@ export default function MapsPage() {
           vulnerableTurns: 1,
           clearTargetStatusesOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 4,
           selfCooldownReductionPerClearedStatus: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 5,
+          armorPiercingSplashOnCrit: canUseArmorPiercing(actor, skill, packetIsCrit) || undefined,
+          armorPiercingRangeFeet: 15,
+          spendArmorPiercingUseOnSplash: canUseArmorPiercing(actor, skill, packetIsCrit) || undefined,
           clearDoubleArrowReadyOnUse: doubleArrow || undefined,
           spendDoubleArrowUseOnHit: doubleArrow || undefined,
           clearPreciseStrikeReadyOnHit: preciseStrikeReady || undefined,

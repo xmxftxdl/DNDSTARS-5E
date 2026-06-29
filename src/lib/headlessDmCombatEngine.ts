@@ -230,6 +230,9 @@ export interface HeadlessPlayerAttackPacket {
   vulnerableTurns?: number
   clearTargetStatusesOnHit?: boolean
   selfCooldownReductionPerClearedStatus?: boolean
+  armorPiercingSplashOnCrit?: boolean
+  armorPiercingRangeFeet?: number
+  spendArmorPiercingUseOnSplash?: boolean
   clearDoubleArrowReadyOnUse?: boolean
   spendDoubleArrowUseOnHit?: boolean
   clearPreciseStrikeReadyOnHit?: boolean
@@ -1222,6 +1225,7 @@ function resolvePlayerAttack(
   let shouldClearPreciseStrikeReady = false
   let shouldSpendPreciseStrikeUse = false
   let shouldClearShadowVeilTarget = false
+  let shouldSpendArmorPiercingUse = false
   const cooldownReductions: Array<{ skillId: string; amount: number }> = []
   for (const [packetIndex, packet] of packets.entries()) {
     const targetToken = state.map.tokens.find((item) => item.id === packet.targetTokenId)
@@ -1363,6 +1367,23 @@ function resolvePlayerAttack(
       ? { ...adjustedBase, damage: Math.floor(adjustedBase.damage / 2) }
       : adjustedBase
     applyDamageToTarget(state, targetToken, adjusted.damage, events)
+    if (packet.armorPiercingSplashOnCrit && packet.isCrit && adjusted.damage > 0) {
+      const splashDamage = Math.floor(adjusted.damage / 2)
+      const splashTargets =
+        splashDamage > 0
+          ? findArmorPiercingSplashTargets(state, actorToken, targetToken, packet.armorPiercingRangeFeet ?? 15)
+          : []
+      if (splashTargets.length > 0) {
+        for (const splashTarget of splashTargets) {
+          applyDamageToTarget(state, splashTarget, splashDamage, events)
+        }
+        if (packet.spendArmorPiercingUseOnSplash) shouldSpendArmorPiercingUse = true
+        events.push({
+          type: 'log',
+          text: `${actor.name} armor piercing splash hits ${splashTargets.length} target(s) for ${splashDamage}.`,
+        })
+      }
+    }
     applyStatusOnHit(state, targetToken, skill, events)
     if (packet.clearDoubleArrowReadyOnUse) shouldClearDoubleArrowReady = true
     if (packet.clearShadowVeilTargetOnUse) shouldClearShadowVeilTarget = true
@@ -1484,6 +1505,7 @@ function resolvePlayerAttack(
     events.push({ type: 'log', text: `${actor.name} 的双箭效果已结算。` })
   }
   if (shouldSpendPreciseStrikeUse) spendFeatureUse(state, actor.id, 'preciseStrike')
+  if (shouldSpendArmorPiercingUse) spendFeatureUse(state, actor.id, 'armorPiercingArrow')
   if (shouldClearPreciseStrikeReady) {
     updateCharacter(state, actor.id, (item) => ({
       ...item,
@@ -1732,6 +1754,33 @@ function resolveTargetDodgeAgainstPlayerAttack(
     text: `${targetToken.label} 花费 1 AP：尝试闪避 ${skill.name}。判定 ${d20Value}+${attackBonus}=${total} vs AC ${targetAc}，${dodged ? '闪避成功' : '闪避失败'}。`,
   })
   return { attempted: true, dodged }
+}
+
+function findArmorPiercingSplashTargets(
+  state: HeadlessDmCombatState,
+  actorToken: Token,
+  primaryTarget: Token,
+  rangeFeet: number,
+): Token[] {
+  const dx = primaryTarget.x - actorToken.x
+  const dy = primaryTarget.y - actorToken.y
+  const len = Math.hypot(dx, dy)
+  if (len < 1) return []
+  const ux = dx / len
+  const uy = dy / len
+  const rangePx = (rangeFeet / (state.map.feetPerCell ?? 5)) * Math.max(1, state.map.gridSize)
+  const halfWidthPx = Math.max(6, Math.max(1, state.map.gridSize) * 0.5)
+  return state.map.tokens.filter((token) => {
+    if (token.id === actorToken.id || token.id === primaryTarget.id) return false
+    if (token.type !== 'enemy') return false
+    if (!isTokenAlive(token, state.characters)) return false
+    const tx = token.x - primaryTarget.x
+    const ty = token.y - primaryTarget.y
+    const forward = tx * ux + ty * uy
+    if (forward <= 0 || forward > rangePx) return false
+    const perpendicular = Math.abs(tx * -uy + ty * ux)
+    return perpendicular <= halfWidthPx
+  })
 }
 
 function resolveAttackEffectSave(

@@ -3632,4 +3632,95 @@ describe('headless DM combat engine', () => {
       hit: true,
     })
   })
+
+  it('applies armor-piercing splash behind a critical basic shot and spends the feature use', () => {
+    const combat = state({
+      characters: [
+        character({
+          abilities: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+          traits: [
+            {
+              id: 'armor-piercing-arrow',
+              name: 'Armor Piercing Arrow',
+              level: 1,
+              uses: 1,
+              maxUses: 1,
+              description: '',
+              featureKey: 'armorPiercingArrow',
+            },
+          ],
+        }),
+      ],
+      map: map([
+        token({
+          id: 'hero-token',
+          label: 'Hero',
+          type: 'player',
+          characterId: 'hero',
+          hp: 30,
+          maxHp: 30,
+          x: 175,
+          y: 175,
+        }),
+        token({
+          id: 'target',
+          label: 'Target',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 245,
+          y: 175,
+        }),
+        token({
+          id: 'behind',
+          label: 'Behind',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 455,
+          y: 175,
+        }),
+        token({
+          id: 'side',
+          label: 'Side',
+          type: 'enemy',
+          hp: 40,
+          maxHp: 40,
+          x: 455,
+          y: 245,
+        }),
+      ]),
+      enemyApByToken: { target: { current: 0, max: 2 }, behind: { current: 0, max: 2 }, side: { current: 0, max: 2 } },
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'target',
+      skillId: 'basic-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'target',
+          diceValues: [8],
+          targetDodgeMode: 'skip',
+          isCrit: true,
+          armorPiercingSplashOnCrit: true,
+          armorPiercingRangeFeet: 15,
+          spendArmorPiercingUseOnSplash: true,
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const target = result.state.map.tokens.find((item) => item.id === 'target')
+    const behind = result.state.map.tokens.find((item) => item.id === 'behind')
+    const side = result.state.map.tokens.find((item) => item.id === 'side')
+    const hero = result.state.characters.find((item) => item.id === 'hero')
+    expect(target?.hp).toBe(30)
+    expect(behind?.hp).toBe(35)
+    expect(side?.hp).toBe(40)
+    expect(hero?.traits.find((item) => item.featureKey === 'armorPiercingArrow')?.uses).toBe(0)
+  })
 })
