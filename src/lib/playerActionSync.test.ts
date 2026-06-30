@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { isAuthoritativeActionSnapshotReady } from './playerActionSync'
+import {
+  buildPlayerActionRequestQueueState,
+  buildSharedPlayerAction,
+  isAuthoritativeActionSnapshotReady,
+  queuedPlayerActionsForDm,
+  waitForAuthoritativeActionSnapshot,
+} from './playerActionSync'
 
 describe('player action sync barrier', () => {
   it('is ready when no authoritative appliedAt barrier is provided', () => {
@@ -11,5 +17,140 @@ describe('player action sync barrier', () => {
     expect(isAuthoritativeActionSnapshotReady(1000, 999, 1000)).toBe(false)
     expect(isAuthoritativeActionSnapshotReady(1000, 1000, 1000)).toBe(true)
     expect(isAuthoritativeActionSnapshotReady(1000, 1200, 1100)).toBe(true)
+  })
+
+  it('builds canonical player and DM action envelopes', () => {
+    expect(
+      buildSharedPlayerAction({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        sourceMode: 'player',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        round: 2,
+        initiativeIndex: 1,
+        seq: 7,
+        now: 1234,
+        patch: { type: 'move-token', targetPosition: { x: 10, y: 20 } },
+      }),
+    ).toMatchObject({
+      id: 'map-1:player-action:1234:7',
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      sourceMode: 'player',
+      status: 'pending',
+      type: 'move-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 10, y: 20 },
+      round: 2,
+      initiativeIndex: 1,
+      seq: 7,
+      updatedAt: 1234,
+    })
+
+    expect(
+      buildSharedPlayerAction({
+        mapId: 'map-1',
+        sourceMode: 'dm',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        round: 1,
+        initiativeIndex: 0,
+        seq: 1,
+        now: 99,
+        patch: { type: 'end-turn' },
+      }).id,
+    ).toBe('map-1:dm-action:99:1')
+  })
+
+  it('merges queued player action requests without replaying duplicates or stale combat actions', () => {
+    const action = buildSharedPlayerAction({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 4,
+      now: 4000,
+      patch: { type: 'end-turn' },
+    })
+    const oldLive = { ...action, id: 'old-live', seq: 1, updatedAt: 1000 }
+    const staleCombat = { ...action, id: 'stale-combat', combatId: 'combat-old', seq: 2, updatedAt: 2000 }
+    const duplicate = { ...action, seq: 3, updatedAt: 3000 }
+
+    const queue = buildPlayerActionRequestQueueState({
+      action,
+      current: {
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        requests: [oldLive, staleCombat, duplicate],
+        updatedAt: 3000,
+      },
+      updatedAt: 5000,
+    })
+
+    expect(queue.requests.map((item) => item.id)).toEqual(['old-live', action.id])
+    expect(queue.updatedAt).toBe(5000)
+  })
+
+  it('returns queued DM actions in deterministic order and skips processed ids', () => {
+    const base = {
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      sourceMode: 'player' as const,
+      status: 'pending' as const,
+      type: 'end-turn' as const,
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+    }
+    const queued = queuedPlayerActionsForDm({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      processedActionIds: new Set(['done']),
+      queue: {
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        updatedAt: 5000,
+        requests: [
+          { ...base, id: 'late', seq: 2, updatedAt: 2000 },
+          { ...base, id: 'done', seq: 1, updatedAt: 1000 },
+          { ...base, id: 'early', seq: 1, updatedAt: 1000 },
+          { ...base, id: 'other-map', mapId: 'map-2', seq: 3, updatedAt: 3000 },
+        ],
+      },
+    })
+
+    expect(queued.map((action) => action.id)).toEqual(['early', 'late'])
+  })
+
+  it('waits for authoritative snapshots before resolving', async () => {
+    let now = 0
+    let mapsUpdatedAt = 0
+    let charactersUpdatedAt = 0
+    let sleeps = 0
+
+    await waitForAuthoritativeActionSnapshot({
+      appliedAt: 100,
+      now: () => now,
+      pollMs: 10,
+      timeoutMs: 100,
+      loadMapsUpdatedAt: async () => mapsUpdatedAt,
+      loadCharactersUpdatedAt: async () => charactersUpdatedAt,
+      sleep: async (ms) => {
+        sleeps += 1
+        now += ms
+        if (sleeps === 2) {
+          mapsUpdatedAt = 100
+          charactersUpdatedAt = 100
+        }
+      },
+    })
+
+    expect(sleeps).toBe(2)
   })
 })

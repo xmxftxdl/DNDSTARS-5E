@@ -97,7 +97,6 @@ import {
 import {
   buildPlayerActionAck,
   buildPlayerActionProcessedState,
-  PLAYER_ACTION_QUEUE_LIMIT,
 } from '../lib/playerActionAck'
 import {
   characterToCombatInput,
@@ -245,7 +244,13 @@ import {
   tokenIntersectsDeleteRect,
   seededDieValue,
 } from './mapsPageHelpers'
-import { isAuthoritativeActionSnapshotReady } from '../lib/playerActionSync'
+import {
+  buildPlayerActionRequestQueueState,
+  buildSharedPlayerAction,
+  queuedPlayerActionsForDm,
+  waitForAuthoritativeActionSnapshot,
+  type SharedPlayerActionPatch,
+} from '../lib/playerActionSync'
 import {
   capturePlayerActionResultBaseline,
   type PlayerActionResultBaseline,
@@ -6207,19 +6212,10 @@ export default function MapsPage() {
 
   const appendPlayerActionRequest = async (action: SharedPlayerActionState) => {
     const current = await loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests')
-    const liveRequests = (current?.requests ?? []).filter((request) => {
-      if (!request || request.id === action.id || request.status !== 'pending') return false
-      if (request.mapId !== action.mapId) return false
-      if (action.combatId && request.combatId && request.combatId !== action.combatId) return false
-      return true
-    })
-    const requests = [...liveRequests, action].slice(-PLAYER_ACTION_QUEUE_LIMIT)
-    await saveSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests', {
-      mapId: action.mapId,
-      combatId: action.combatId,
-      requests,
-      updatedAt: Date.now(),
-    })
+    await saveSharedResource<SharedPlayerActionRequestQueueState>(
+      'player-action-requests',
+      buildPlayerActionRequestQueueState({ action, current, updatedAt: Date.now() }),
+    )
   }
 
   const submitPlayerActionRequest = (action: SharedPlayerActionState, label: string) => {
@@ -6232,27 +6228,25 @@ export default function MapsPage() {
   }
 
   const createDmLocalPlayerAction = (
-    patch: Pick<SharedPlayerActionState, 'type'> &
-      Partial<Omit<SharedPlayerActionState, 'id' | 'mapId' | 'combatId' | 'sourceMode' | 'status' | 'round' | 'initiativeIndex' | 'seq' | 'updatedAt'>>,
+    patch: SharedPlayerActionPatch,
   ): SharedPlayerActionState | null => {
     if (!isDM || !activeMap || !turnCharacter || !currentInitiativeToken) return null
     if (currentInitiativeToken.type !== 'player' || currentInitiativeToken.characterId !== turnCharacter.id) return null
     const seq = playerActionSeqRef.current + 1
     playerActionSeqRef.current = seq
-    return {
-      id: `${activeMap.id}:dm-action:${Date.now()}:${seq}`,
+    const now = Date.now()
+    return buildSharedPlayerAction({
       mapId: activeMap.id,
       combatId: combatIdRef.current,
       sourceMode: 'dm',
-      status: 'pending',
       actorTokenId: currentInitiativeToken.id,
       characterId: turnCharacter.id,
       round: roundRef.current,
       initiativeIndex: initiativeIndexRef.current,
       seq,
-      updatedAt: Date.now(),
-      ...patch,
-    }
+      now,
+      patch,
+    })
   }
 
   const submitDmLocalPlayerAction = (action: SharedPlayerActionState | null) => {
@@ -6583,17 +6577,13 @@ export default function MapsPage() {
   }
 
   const waitForAuthoritativePlayerActionSync = async (appliedAt?: number) => {
-    if (appliedAt) {
-      const deadline = Date.now() + 3000
-      while (Date.now() < deadline) {
-        const [mapsState, charactersState] = await Promise.all([
-          loadSharedResource<{ updatedAt?: number }>('maps'),
-          loadSharedResource<{ updatedAt?: number }>('characters'),
-        ])
-        if (isAuthoritativeActionSnapshotReady(appliedAt, mapsState?.updatedAt, charactersState?.updatedAt)) break
-        await new Promise((resolve) => window.setTimeout(resolve, 100))
-      }
-    }
+    await waitForAuthoritativeActionSnapshot({
+      appliedAt,
+      loadMapsUpdatedAt: async () => (await loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
+      loadCharactersUpdatedAt: async () =>
+        (await loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
+      sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+    })
     await Promise.all([
       useMapStore.getState().loadShared(),
       useCharacterStore.getState().loadShared(),
@@ -6618,15 +6608,12 @@ export default function MapsPage() {
       await hydrateProcessedActions()
       const queue = await loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests')
       if (cancelled || !queue?.requests?.length) return
-      const actions = queue.requests
-        .filter((action) => {
-          if (!action || action.status !== 'pending') return false
-          if (action.mapId !== activeMap.id) return false
-          if (combatIdRef.current && action.combatId && action.combatId !== combatIdRef.current) return false
-          if (processedPlayerActionIdsRef.current.has(action.id)) return false
-          return true
-        })
-        .sort((a, b) => (a.updatedAt - b.updatedAt) || (a.seq - b.seq))
+      const actions = queuedPlayerActionsForDm({
+        queue,
+        mapId: activeMap.id,
+        combatId: combatIdRef.current,
+        processedActionIds: processedPlayerActionIdsRef.current,
+      })
       for (const action of actions) {
         if (cancelled) return
         await handlePlayerActionRequest(action)
