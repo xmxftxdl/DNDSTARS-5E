@@ -1242,6 +1242,29 @@ export default function MapsPage() {
     setShowMoveRange(false)
   }
 
+  const clearSharedInterruptPrompts = () => {
+    setDodgePrompt(null)
+    setSharedDodgePrompt(null)
+    setSharedStableMindPrompt(null)
+    setSharedGaleComboPrompt(null)
+    setSharedAgileLeapPrompt(null)
+    setSharedOpportunityAttackPrompt(null)
+  }
+
+  const clearSharedInterruptLocalState = () => {
+    suppressedDodgePromptIdsRef.current.clear()
+    suppressedStableMindPromptIdsRef.current.clear()
+    suppressedGaleComboPromptIdsRef.current.clear()
+    suppressedAgileLeapPromptIdsRef.current.clear()
+    suppressedOpportunityAttackPromptIdsRef.current.clear()
+    pendingSharedDodgeRef.current = null
+    pendingSharedStableMindRef.current = null
+    pendingSharedGaleComboRef.current = null
+    pendingSharedAgileLeapRef.current = null
+    pendingSharedOpportunityAttackRef.current = null
+    clearSharedInterruptPrompts()
+  }
+
   const clearPlayerCombatEndUI = () => {
     clearPlayerCombatUI()
     const pendingDialog = combatDialogRef.current
@@ -1251,12 +1274,7 @@ export default function MapsPage() {
     setFeatureTargeting(null)
     setAoePreviewCell(null)
     setAoeRectRotation(0)
-    setDodgePrompt(null)
-    setSharedDodgePrompt(null)
-    setSharedStableMindPrompt(null)
-    setSharedGaleComboPrompt(null)
-    setSharedAgileLeapPrompt(null)
-    setSharedOpportunityAttackPrompt(null)
+    clearSharedInterruptPrompts()
     setPendingPlayerActionLocked(null)
     setSelectedTokenId(null)
     setSelectedCharacterTokenId(null)
@@ -3156,19 +3174,7 @@ export default function MapsPage() {
     seenPlayerActionIdsRef.current.clear()
     processedPlayerActionIdsRef.current.clear()
     seenPlayerActionAckIdsRef.current.clear()
-    suppressedDodgePromptIdsRef.current.clear()
-    suppressedStableMindPromptIdsRef.current.clear()
-    suppressedGaleComboPromptIdsRef.current.clear()
-    suppressedAgileLeapPromptIdsRef.current.clear()
-    pendingSharedDodgeRef.current = null
-    pendingSharedStableMindRef.current = null
-    pendingSharedGaleComboRef.current = null
-    pendingSharedAgileLeapRef.current = null
-    setDodgePrompt(null)
-    setSharedDodgePrompt(null)
-    setSharedStableMindPrompt(null)
-    setSharedGaleComboPrompt(null)
-    setSharedAgileLeapPrompt(null)
+    clearSharedInterruptLocalState()
     setPendingPlayerActionLocked(null)
     setRollRequestPreview(null)
     setDiceBoxD20(null)
