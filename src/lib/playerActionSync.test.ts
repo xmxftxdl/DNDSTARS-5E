@@ -3,6 +3,7 @@ import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
   consumePlayerActionAck,
+  createSharedPlayerActionEnvelope,
   hydratedProcessedPlayerActionIdsForDm,
   isAuthoritativeActionSnapshotReady,
   loadDmPlayerActionBatch,
@@ -70,6 +71,52 @@ describe('player action sync barrier', () => {
         patch: { type: 'end-turn' },
       }).id,
     ).toBe('map-1:dm-action:99:1')
+  })
+
+  it('creates a shared player action envelope from valid UI context', () => {
+    let seq = 0
+
+    expect(
+      createSharedPlayerActionEnvelope({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        sourceMode: 'player',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        round: 2,
+        initiativeIndex: 1,
+        nextSeq: () => {
+          seq += 1
+          return seq
+        },
+        now: () => 1234,
+        patch: { type: 'move-token', targetPosition: { x: 10, y: 20 } },
+      }),
+    ).toMatchObject({
+      id: 'map-1:player-action:1234:1',
+      type: 'move-token',
+      targetPosition: { x: 10, y: 20 },
+    })
+    expect(seq).toBe(1)
+  })
+
+  it('does not consume a sequence number when required action context is missing', () => {
+    const nextSeq = vi.fn(() => 1)
+
+    expect(
+      createSharedPlayerActionEnvelope({
+        mapId: undefined,
+        sourceMode: 'player',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        round: 1,
+        initiativeIndex: 0,
+        nextSeq,
+        now: () => 1234,
+        patch: { type: 'end-turn' },
+      }),
+    ).toBeNull()
+    expect(nextSeq).not.toHaveBeenCalled()
   })
 
   it('merges queued player action requests without replaying duplicates or stale combat actions', () => {

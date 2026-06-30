@@ -253,8 +253,8 @@ import { buildCombatMessageQueueReset } from '../lib/sharedCombatReset'
 import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
-  buildSharedPlayerAction,
   consumePlayerActionAck,
+  createSharedPlayerActionEnvelope,
   loadDmPlayerActionBatch,
   submitPlayerActionRequestWithLock,
   syncAuthoritativePlayerActionState,
@@ -5690,10 +5690,7 @@ export default function MapsPage() {
   ): SharedPlayerActionState | null => {
     if (!isDM || !activeMap || !turnCharacter || !currentInitiativeToken) return null
     if (currentInitiativeToken.type !== 'player' || currentInitiativeToken.characterId !== turnCharacter.id) return null
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const now = Date.now()
-    return buildSharedPlayerAction({
+    return createSharedPlayerActionEnvelope({
       mapId: activeMap.id,
       combatId: combatIdRef.current,
       sourceMode: 'dm',
@@ -5701,8 +5698,10 @@ export default function MapsPage() {
       characterId: turnCharacter.id,
       round: roundRef.current,
       initiativeIndex: initiativeIndexRef.current,
-      seq,
-      now,
+      nextSeq: () => {
+        playerActionSeqRef.current += 1
+        return playerActionSeqRef.current
+      },
       patch,
     })
   }
@@ -5752,11 +5751,7 @@ export default function MapsPage() {
     if (!activeMap) return null
     const actorTokenId = actorOverride?.tokenId ?? currentInitiativeToken?.id
     const characterId = actorOverride?.characterId ?? turnCharacter?.id
-    if (!actorTokenId || !characterId) return null
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const now = Date.now()
-    return buildSharedPlayerAction({
+    return createSharedPlayerActionEnvelope({
       mapId: activeMap.id,
       combatId: combatIdRef.current,
       sourceMode: 'player',
@@ -5764,8 +5759,10 @@ export default function MapsPage() {
       characterId,
       round,
       initiativeIndex,
-      seq,
-      now,
+      nextSeq: () => {
+        playerActionSeqRef.current += 1
+        return playerActionSeqRef.current
+      },
       patch,
     })
   }

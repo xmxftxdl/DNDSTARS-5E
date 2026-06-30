@@ -64,6 +64,33 @@ export function buildSharedPlayerAction(input: BuildSharedPlayerActionInput): Sh
   }
 }
 
+export function createSharedPlayerActionEnvelope(input: {
+  mapId?: string
+  combatId?: string
+  sourceMode: SharedPlayerActionState['sourceMode']
+  actorTokenId?: string
+  characterId?: string
+  round: number
+  initiativeIndex: number
+  nextSeq: () => number
+  now?: () => number
+  patch: SharedPlayerActionPatch
+}): SharedPlayerActionState | null {
+  if (!input.mapId || !input.actorTokenId || !input.characterId) return null
+  return buildSharedPlayerAction({
+    mapId: input.mapId,
+    combatId: input.combatId,
+    sourceMode: input.sourceMode,
+    actorTokenId: input.actorTokenId,
+    characterId: input.characterId,
+    round: input.round,
+    initiativeIndex: input.initiativeIndex,
+    seq: input.nextSeq(),
+    now: input.now?.() ?? Date.now(),
+    patch: input.patch,
+  })
+}
+
 export function buildPlayerActionRequestQueueState(input: {
   action: SharedPlayerActionState
   current?: SharedPlayerActionRequestQueueState | null
