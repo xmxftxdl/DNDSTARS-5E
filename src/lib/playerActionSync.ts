@@ -1,5 +1,6 @@
 import type {
   SharedPlayerActionAckState,
+  SharedPlayerActionProcessedState,
   SharedPlayerActionRequestQueueState,
   SharedPlayerActionState,
 } from '../pages/mapsPageTypes'
@@ -96,6 +97,53 @@ export function queuedPlayerActionsForDm(input: {
       return true
     })
     .sort((a, b) => (a.updatedAt - b.updatedAt) || (a.seq - b.seq))
+}
+
+export function hydratedProcessedPlayerActionIdsForDm(input: {
+  processed?: { mapId?: string; combatId?: string; actionIds?: string[] } | null
+  mapId: string
+  combatId?: string
+}): Set<string> | undefined {
+  const processed = input.processed
+  if (!processed?.actionIds?.length) return undefined
+  if (processed.mapId && processed.mapId !== input.mapId) return undefined
+  if (input.combatId && processed.combatId && processed.combatId !== input.combatId) return undefined
+  return new Set(processed.actionIds)
+}
+
+export async function loadDmPlayerActionBatch(input: {
+  mapId: string
+  combatId?: string
+  currentProcessedActionIds: ReadonlySet<string>
+  loadProcessed: () => Promise<SharedPlayerActionProcessedState | null>
+  loadQueue: () => Promise<SharedPlayerActionRequestQueueState | null>
+  loadLatestAction: () => Promise<SharedPlayerActionState | null>
+}): Promise<{
+  processedActionIds?: Set<string>
+  actions: SharedPlayerActionState[]
+}> {
+  const processed = await input.loadProcessed()
+  const processedActionIds =
+    hydratedProcessedPlayerActionIdsForDm({
+      processed,
+      mapId: input.mapId,
+      combatId: input.combatId,
+    }) ?? input.currentProcessedActionIds
+
+  const queue = await input.loadQueue()
+  const queuedActions = queuedPlayerActionsForDm({
+    queue,
+    mapId: input.mapId,
+    combatId: input.combatId,
+    processedActionIds,
+  })
+
+  const latestAction = await input.loadLatestAction()
+  return {
+    processedActionIds:
+      processedActionIds !== input.currentProcessedActionIds ? new Set(processedActionIds) : undefined,
+    actions: latestAction ? [...queuedActions, latestAction] : queuedActions,
+  }
 }
 
 export interface PendingPlayerActionLock {

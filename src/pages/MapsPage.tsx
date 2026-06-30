@@ -247,7 +247,7 @@ import {
 import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
-  queuedPlayerActionsForDm,
+  loadDmPlayerActionBatch,
   resolvePlayerActionAckDecision,
   shouldClearPendingPlayerActionAfterAck,
   waitForAuthoritativeActionSnapshot,
@@ -6479,32 +6479,21 @@ export default function MapsPage() {
       handlePlayerActionRequest,
     )
     let cancelled = false
-    const hydrateProcessedActions = async () => {
-      const processed = await loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed')
-      if (cancelled || !processed?.actionIds?.length) return
-      if (processed.mapId && processed.mapId !== activeMap.id) return
-      if (combatIdRef.current && processed.combatId && processed.combatId !== combatIdRef.current) return
-      processedPlayerActionIdsRef.current = new Set(processed.actionIds)
-    }
-    const loadQueuedActions = async () => {
-      await hydrateProcessedActions()
-      const queue = await loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests')
-      if (cancelled || !queue?.requests?.length) return
-      const actions = queuedPlayerActionsForDm({
-        queue,
+    const load = async () => {
+      const batch = await loadDmPlayerActionBatch({
         mapId: activeMap.id,
         combatId: combatIdRef.current,
-        processedActionIds: processedPlayerActionIdsRef.current,
+        currentProcessedActionIds: processedPlayerActionIdsRef.current,
+        loadProcessed: () => loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed'),
+        loadQueue: () => loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests'),
+        loadLatestAction: () => loadSharedResource<SharedPlayerActionState>('player-action'),
       })
-      for (const action of actions) {
+      if (cancelled) return
+      if (batch.processedActionIds) processedPlayerActionIdsRef.current = batch.processedActionIds
+      for (const action of batch.actions) {
         if (cancelled) return
         await handlePlayerActionRequest(action)
       }
-    }
-    const load = async () => {
-      await loadQueuedActions()
-      const action = await loadSharedResource<SharedPlayerActionState>('player-action')
-      if (!cancelled && action) await handlePlayerActionRequest(action)
     }
     void load()
     const timer = window.setInterval(load, 500)

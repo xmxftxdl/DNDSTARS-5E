@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
+  hydratedProcessedPlayerActionIdsForDm,
   isAuthoritativeActionSnapshotReady,
+  loadDmPlayerActionBatch,
   queuedPlayerActionsForDm,
   resolvePlayerActionAckDecision,
   shouldClearPendingPlayerActionAfterAck,
@@ -128,6 +130,72 @@ describe('player action sync barrier', () => {
     })
 
     expect(queued.map((action) => action.id)).toEqual(['early', 'late'])
+  })
+
+  it('hydrates processed action ids only for the current map and combat', () => {
+    expect(
+      hydratedProcessedPlayerActionIdsForDm({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        processed: { mapId: 'map-1', combatId: 'combat-1', actionIds: ['a', 'b'] },
+      }),
+    ).toEqual(new Set(['a', 'b']))
+
+    expect(
+      hydratedProcessedPlayerActionIdsForDm({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        processed: { mapId: 'map-2', combatId: 'combat-1', actionIds: ['a'] },
+      }),
+    ).toBeUndefined()
+
+    expect(
+      hydratedProcessedPlayerActionIdsForDm({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        processed: { mapId: 'map-1', combatId: 'combat-old', actionIds: ['a'] },
+      }),
+    ).toBeUndefined()
+  })
+
+  it('loads the DM player-action batch from processed ids, queued requests, and latest fallback', async () => {
+    const base = buildSharedPlayerAction({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      now: 1000,
+      patch: { type: 'end-turn' },
+    })
+    const processed = { ...base, id: 'processed', seq: 1, updatedAt: 1000 }
+    const queued = { ...base, id: 'queued', seq: 2, updatedAt: 2000 }
+    const latest = { ...base, id: 'latest', seq: 3, updatedAt: 3000 }
+
+    const batch = await loadDmPlayerActionBatch({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      currentProcessedActionIds: new Set(),
+      loadProcessed: async () => ({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        actionIds: ['processed'],
+        updatedAt: 4000,
+      }),
+      loadQueue: async () => ({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        requests: [processed, queued],
+        updatedAt: 4000,
+      }),
+      loadLatestAction: async () => latest,
+    })
+
+    expect(batch.processedActionIds).toEqual(new Set(['processed']))
+    expect(batch.actions.map((action) => action.id)).toEqual(['queued', 'latest'])
   })
 
   it('decides whether a player ack should be consumed by the current pending action', () => {
