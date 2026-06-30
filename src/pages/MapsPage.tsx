@@ -6287,24 +6287,35 @@ export default function MapsPage() {
       }),
     )
 
-  const sendPlayerEndTurnRequest = () => {
-    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+  const createPlayerActionRequest = (
+    patch: SharedPlayerActionPatch,
+    actorOverride?: { tokenId: string; characterId: string },
+  ): SharedPlayerActionState | null => {
+    if (!activeMap) return null
+    const actorTokenId = actorOverride?.tokenId ?? currentInitiativeToken?.id
+    const characterId = actorOverride?.characterId ?? turnCharacter?.id
+    if (!actorTokenId || !characterId) return null
     const seq = playerActionSeqRef.current + 1
     playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
+    const now = Date.now()
+    return buildSharedPlayerAction({
       mapId: activeMap.id,
       combatId: combatIdRef.current,
       sourceMode: 'player',
-      status: 'pending',
-      type: 'end-turn',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
+      actorTokenId,
+      characterId,
       round,
       initiativeIndex,
       seq,
-      updatedAt: Date.now(),
-    }
+      now,
+      patch,
+    })
+  }
+
+  const sendPlayerEndTurnRequest = () => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const action = createPlayerActionRequest({ type: 'end-turn' })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 结束回合`)
   }
 
@@ -6313,25 +6324,13 @@ export default function MapsPage() {
     opts?: { targetTokenId?: string; targetTokenIds?: string[] },
   ) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'activate-feature',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       targetTokenId: opts?.targetTokenId,
       targetTokenIds: opts?.targetTokenIds,
       featureKey,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     const featureName = findClassTrait(turnCharacter, featureKey)?.name ?? featureKey
     return submitPlayerActionRequest(action, `${turnCharacter.name} 激活${featureName}`)
   }
@@ -6341,73 +6340,37 @@ export default function MapsPage() {
     opts?: { skillId?: string },
   ) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'calm-spirit',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       calmSpiritEffect: effect,
       skillId: opts?.skillId,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 发动安定心神`)
   }
 
   const sendPlayerAttackTokenRequest = (targetToken: Token, skill: CombatSkill, targetTokenIds?: string[]) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     if (getSkillAoeTargeting(skill)) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'attack-token',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       targetTokenId: targetToken.id,
       targetTokenIds,
       skillId: skill.id,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 ${skill.name}`)
   }
 
   const sendPlayerAoeAttackRequest = (targetCell: GridCell) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !targeting?.aoe) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'aoe-attack',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       skillId: targeting.skill.id,
       targetCell,
       aoeRectRotation,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 ${targeting.skill.name}`)
   }
 
@@ -6415,68 +6378,30 @@ export default function MapsPage() {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const waiveAp = !!turnCharacter.combatBuffs?.galeComboReady
     if (!waiveAp && turnCharacter.currentAP < skill.apCost) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'use-skill',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       skillId: skill.id,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 ${skill.name}`)
   }
 
   const sendPlayerMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
     if (turnCharacter.currentAP < 1) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'move-token',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       targetPosition,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 移动 ${movedFeet} 尺`)
   }
 
   const sendPlayerDisengageRequest = () => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     if (turnCharacter.currentAP < 2) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
-      type: 'disengage',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    const action = createPlayerActionRequest({ type: 'disengage' })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 撤离`)
   }
 
@@ -6487,92 +6412,47 @@ export default function MapsPage() {
     const token = agileLeapToken
     if (!actor || !token || actor.id !== playerChar?.id || token.characterId !== actor.id) return false
     if ((actor.combatBuffs?.agileLeapMoveFeet ?? 0) <= 0) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
-      type: 'agile-leap-move',
-      actorTokenId: token.id,
-      characterId: actor.id,
-      targetPosition,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    const action = createPlayerActionRequest(
+      {
+        type: 'agile-leap-move',
+        targetPosition,
+      },
+      { tokenId: token.id, characterId: actor.id },
+    )
+    if (!action) return false
     return submitPlayerActionRequest(action, `${actor.name} 灵巧跳跃 ${movedFeet} 尺`)
   }
 
   const sendPlayerSkillFreeMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
     if ((turnCharacter.combatBuffs?.freeMoveFeet ?? 0) <= 0) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'skill-free-move',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       targetPosition,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 技能移动 ${movedFeet} 尺`)
   }
 
   const sendPlayerCalmSpiritMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
     if ((turnCharacter.combatBuffs?.calmSpiritMoveFeet ?? 0) <= 0) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'calm-spirit-move',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       targetPosition,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 安定心神移动 ${movedFeet} 尺`)
   }
 
   const sendPlayerQiReduceCooldownRequest = (skill: CombatSkill) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     if (skill.remaining <= 0 || (turnCharacter.qi ?? 0) < 1) return false
-    const seq = playerActionSeqRef.current + 1
-    playerActionSeqRef.current = seq
-    const action: SharedPlayerActionState = {
-      id: `${activeMap.id}:player-action:${Date.now()}:${seq}`,
-      mapId: activeMap.id,
-      combatId: combatIdRef.current,
-      sourceMode: 'player',
-      status: 'pending',
+    const action = createPlayerActionRequest({
       type: 'qi-reduce-cooldown',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
       skillId: skill.id,
-      round,
-      initiativeIndex,
-      seq,
-      updatedAt: Date.now(),
-    }
+    })
+    if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 消耗气降低冷却`)
   }
 
