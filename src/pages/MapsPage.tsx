@@ -90,8 +90,11 @@ import {
   getEffectiveAbilityMod,
   resolveRangedAttackRoll,
 } from '../lib/archerCombat'
+import {
+  preflightPlayerActionAuthority,
+  reservePlayerActionExecution,
+} from '../lib/playerActionAuthorityRouter'
 
-const PLAYER_ACTION_DEDUPE_WINDOW_MS = 8000
 const PLAYER_ACTION_QUEUE_LIMIT = 80
 import {
   characterToCombatInput,
@@ -4812,23 +4815,6 @@ export default function MapsPage() {
     })()
   }
 
-  const getPlayerActionExecutionKey = (action: SharedPlayerActionState) => {
-    return action.id
-  }
-
-  const reservePlayerActionExecution = (action: SharedPlayerActionState) => {
-    if (action.type !== 'attack-token' && action.type !== 'aoe-attack') return true
-    const now = Date.now()
-    const recent = recentPlayerActionKeysRef.current
-    for (const [key, at] of recent) {
-      if (now - at > PLAYER_ACTION_DEDUPE_WINDOW_MS) recent.delete(key)
-    }
-    const key = getPlayerActionExecutionKey(action)
-    if (recent.has(key)) return false
-    recent.set(key, now)
-    return true
-  }
-
   const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState => ({
     map,
     characters: useCharacterStore.getState().characters,
@@ -4980,41 +4966,30 @@ export default function MapsPage() {
   }
 
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
-    if (!isDM || !activeMap || action.mapId !== activeMap.id || action.status !== 'pending') return
-    if (!action.combatId || action.combatId !== combatIdRef.current) {
-      acknowledgePlayerAction(action, 'rejected', 'stale-combat')
-      completePlayerActionRequest(action)
-      return
-    }
     const liveRound = roundRef.current
     const liveIndex = initiativeIndexRef.current
     const current = initiativeOrderRef.current[liveIndex]
-    if (!combatActiveRef.current || !current) {
-      acknowledgePlayerAction(action, 'rejected', 'combat-ended')
+    const preflight = preflightPlayerActionAuthority(action, {
+      isDm: isDM,
+      activeMap,
+      combatId: combatIdRef.current,
+      combatActive: combatActiveRef.current,
+      round: liveRound,
+      initiativeIndex: liveIndex,
+      currentTokenId: current?.tokenId,
+      processedActionIds: processedPlayerActionIdsRef.current,
+      seenActionIds: seenPlayerActionIdsRef.current,
+    })
+    if (preflight.status === 'ignored') return
+    if (preflight.status === 'rejected') {
+      acknowledgePlayerAction(action, 'rejected', preflight.reason)
       completePlayerActionRequest(action)
       return
     }
-    if (processedPlayerActionIdsRef.current.has(action.id)) return
-    if (seenPlayerActionIdsRef.current.has(action.id)) return
+    if (!activeMap) return
     seenPlayerActionIdsRef.current.add(action.id)
 
-    const liveCurrentToken = activeMap.tokens.find((token) => token.id === current?.tokenId)
-    const validTurn =
-      combatActiveRef.current &&
-      action.round === liveRound &&
-      action.initiativeIndex === liveIndex &&
-      current?.tokenId === action.actorTokenId &&
-      liveCurrentToken?.id === action.actorTokenId &&
-      liveCurrentToken?.type === 'player' &&
-      liveCurrentToken.characterId === action.characterId
-
-    if (!validTurn) {
-      acknowledgePlayerAction(action, 'rejected', 'stale-turn')
-      completePlayerActionRequest(action)
-      return
-    }
-
-    if (!reservePlayerActionExecution(action)) {
+    if (!reservePlayerActionExecution(action, recentPlayerActionKeysRef.current)) {
       acknowledgePlayerAction(action, 'rejected', 'duplicate-action')
       completePlayerActionRequest(action)
       return
