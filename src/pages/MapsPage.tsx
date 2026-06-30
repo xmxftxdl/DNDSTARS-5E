@@ -94,8 +94,11 @@ import {
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
-
-const PLAYER_ACTION_QUEUE_LIMIT = 80
+import {
+  buildPlayerActionAck,
+  buildPlayerActionProcessedState,
+  PLAYER_ACTION_QUEUE_LIMIT,
+} from '../lib/playerActionAck'
 import {
   characterToCombatInput,
   damageModifierFromAttackDefenseDiff,
@@ -245,7 +248,6 @@ import {
 import { isAuthoritativeActionSnapshotReady } from '../lib/playerActionSync'
 import {
   capturePlayerActionResultBaseline,
-  summarizePlayerActionResult,
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import { shouldSendPlayerReadyFeatureToDm } from '../lib/playerFeatureActivation'
@@ -4748,33 +4750,28 @@ export default function MapsPage() {
     if (!activeMap || mode !== 'dm') return
     const appliedAt = Date.now()
     const baseline = playerActionResultBaselinesRef.current[action.id]
-    const result =
+    const afterBaseline =
       status === 'accepted' && baseline
-        ? summarizePlayerActionResult(
-            action,
-            baseline,
-            capturePlayerActionResultBaseline({
+        ? capturePlayerActionResultBaseline({
               characters: useCharacterStore.getState().characters,
               map: useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap,
               enemyApByToken: enemyApByTokenRef.current,
-            }),
-          )
+            })
         : undefined
     delete playerActionResultBaselinesRef.current[action.id]
-    const ack: SharedPlayerActionAckState = {
-      id: `${action.id}:ack:${appliedAt}`,
+    const ack = buildPlayerActionAck({
+      action,
       mapId: activeMap.id,
       combatId: combatIdRef.current,
-      actionId: action.id,
       status,
       reason,
       acceptedPosition,
-      appliedAt: status === 'accepted' ? appliedAt : undefined,
-      result,
       round,
       initiativeIndex,
-      updatedAt: appliedAt,
-    }
+      appliedAt,
+      before: baseline,
+      after: afterBaseline,
+    })
     void (async () => {
       if (status === 'accepted') {
         const currentCharacters = useCharacterStore.getState().characters
@@ -4804,14 +4801,10 @@ export default function MapsPage() {
     processedPlayerActionIdsRef.current.add(action.id)
     void (async () => {
       const current = await loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed')
-      const currentIds = current?.combatId === action.combatId ? (current?.actionIds ?? []) : []
-      const ids = [...new Set([...currentIds, action.id])].slice(-PLAYER_ACTION_QUEUE_LIMIT * 3)
-      await saveSharedResource<SharedPlayerActionProcessedState>('player-action-processed', {
-        mapId: action.mapId,
-        combatId: action.combatId,
-        actionIds: ids,
-        updatedAt: Date.now(),
-      })
+      await saveSharedResource<SharedPlayerActionProcessedState>(
+        'player-action-processed',
+        buildPlayerActionProcessedState({ action, current, updatedAt: Date.now() }),
+      )
     })()
   }
 
