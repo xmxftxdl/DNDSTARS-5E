@@ -247,6 +247,7 @@ import {
   reconcileEnemyAp,
   resolveSharedCombatStateApply,
 } from '../lib/sharedCombatSync'
+import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
   buildSharedPlayerAction,
   loadDmPlayerActionBatch,
@@ -1129,21 +1130,17 @@ export default function MapsPage() {
     if (!activeMap || !mode) return
     let cancelled = false
     const applyDiceEvent = (state: SharedDiceState) => {
-      if (
-        cancelled ||
-        !state ||
-        state.mapId !== activeMap.id ||
-        state.sourceMode === mode ||
-        Date.now() - state.updatedAt > 60000
-      ) {
-        return
-      }
-      if (state.status === 'rolling') {
-        return
-      }
-      if (seenSharedDiceIdsRef.current.has(state.id) || !state.roll) return
-      seenSharedDiceIdsRef.current.add(state.id)
-      setRoll({ ...state.roll })
+      if (cancelled) return
+      const decision = resolveSharedDiceEventApply({
+        state,
+        mapId: activeMap.id,
+        mode,
+        now: Date.now(),
+        seenIds: seenSharedDiceIdsRef.current,
+      })
+      if (decision.status !== 'apply') return
+      seenSharedDiceIdsRef.current.add(decision.id)
+      setRoll({ ...decision.roll })
     }
     const load = async () => {
       const eventState = await loadSharedResource<SharedDiceEventsState>('dice-events')
