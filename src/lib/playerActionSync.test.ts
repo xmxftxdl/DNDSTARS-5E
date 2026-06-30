@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
+  consumePlayerActionAck,
   hydratedProcessedPlayerActionIdsForDm,
   isAuthoritativeActionSnapshotReady,
   loadDmPlayerActionBatch,
@@ -333,6 +334,99 @@ describe('player action sync barrier', () => {
     })
     expect(shouldClearPendingPlayerActionAfterAck({ id: 'action-2' }, 'action-2')).toBe(true)
     expect(shouldClearPendingPlayerActionAfterAck({ id: 'other' }, 'action-2')).toBe(false)
+  })
+
+  it('consumes an accepted ack after authoritative sync and the unlock delay', async () => {
+    const seenAckIds = new Set<string>()
+    let pendingAction: { id: string; label?: string } | null = { id: 'action-1' }
+    const calls: string[] = []
+
+    const result = await consumePlayerActionAck({
+      ack: {
+        id: 'ack-1',
+        mapId: 'map-1',
+        actionId: 'action-1',
+        status: 'accepted',
+        appliedAt: 1234,
+        round: 1,
+        initiativeIndex: 0,
+        updatedAt: 1234,
+      },
+      mapId: 'map-1',
+      seenAckIds,
+      getPendingAction: () => pendingAction,
+      waitForAuthoritativeSync: async (appliedAt) => {
+        calls.push(`sync:${appliedAt}`)
+      },
+      sleep: async (ms) => {
+        calls.push(`sleep:${ms}`)
+      },
+      clearPendingAction: () => {
+        calls.push('clear')
+        pendingAction = null
+      },
+    })
+
+    expect(result).toBe('handled')
+    expect([...seenAckIds]).toEqual(['ack-1'])
+    expect(calls).toEqual(['sync:1234', 'sleep:100', 'clear'])
+    expect(pendingAction).toBeNull()
+  })
+
+  it('does not clear a different pending action after an ack wait', async () => {
+    let pendingAction: { id: string; label?: string } | null = { id: 'action-1' }
+    const clearPendingAction = vi.fn()
+
+    const result = await consumePlayerActionAck({
+      ack: {
+        id: 'ack-1',
+        mapId: 'map-1',
+        actionId: 'action-1',
+        status: 'accepted',
+        appliedAt: 1234,
+        round: 1,
+        initiativeIndex: 0,
+        updatedAt: 1234,
+      },
+      mapId: 'map-1',
+      seenAckIds: new Set(),
+      getPendingAction: () => pendingAction,
+      waitForAuthoritativeSync: async () => {
+        pendingAction = { id: 'action-2' }
+      },
+      sleep: async () => undefined,
+      clearPendingAction,
+    })
+
+    expect(result).toBe('handled')
+    expect(clearPendingAction).not.toHaveBeenCalled()
+  })
+
+  it('stops ack consumption when the caller is cancelled', async () => {
+    const clearPendingAction = vi.fn()
+
+    const result = await consumePlayerActionAck({
+      ack: {
+        id: 'ack-1',
+        mapId: 'map-1',
+        actionId: 'action-1',
+        status: 'accepted',
+        appliedAt: 1234,
+        round: 1,
+        initiativeIndex: 0,
+        updatedAt: 1234,
+      },
+      mapId: 'map-1',
+      seenAckIds: new Set(),
+      getPendingAction: () => ({ id: 'action-1' }),
+      waitForAuthoritativeSync: async () => undefined,
+      sleep: async () => undefined,
+      clearPendingAction,
+      isCancelled: () => true,
+    })
+
+    expect(result).toBe('cancelled')
+    expect(clearPendingAction).not.toHaveBeenCalled()
   })
 
   it('waits for authoritative snapshots before resolving', async () => {

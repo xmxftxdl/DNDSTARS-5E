@@ -254,10 +254,9 @@ import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
   buildSharedPlayerAction,
+  consumePlayerActionAck,
   loadDmPlayerActionBatch,
   publishPlayerActionRequest,
-  resolvePlayerActionAckDecision,
-  shouldClearPendingPlayerActionAfterAck,
   waitForAuthoritativeActionSnapshot,
   type SharedPlayerActionPatch,
 } from '../lib/playerActionSync'
@@ -5964,26 +5963,16 @@ export default function MapsPage() {
     if (mode !== 'player' || !activeMap) return
     let cancelled = false
     const applyAck = (ack: SharedPlayerActionAckState | null) => {
-      const decision = resolvePlayerActionAckDecision({
+      void consumePlayerActionAck({
         ack,
         mapId: activeMap.id,
         seenAckIds: seenPlayerActionAckIdsRef.current,
-        pendingAction: pendingPlayerActionRef.current,
+        getPendingAction: () => pendingPlayerActionRef.current,
+        waitForAuthoritativeSync: waitForAuthoritativePlayerActionSync,
+        sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+        clearPendingAction: () => setPendingPlayerActionLocked(null),
+        isCancelled: () => cancelled,
       })
-      if (decision.markSeenAckId) seenPlayerActionAckIdsRef.current.add(decision.markSeenAckId)
-      if (decision.status !== 'handle') return
-      void (async () => {
-        await waitForAuthoritativePlayerActionSync(decision.waitForAppliedAt)
-        if (cancelled) return
-        window.setTimeout(() => {
-          if (
-            !cancelled &&
-            shouldClearPendingPlayerActionAfterAck(pendingPlayerActionRef.current, decision.actionId)
-          ) {
-            setPendingPlayerActionLocked(null)
-          }
-        }, 100)
-      })()
     }
     const unsubscribe = subscribeSharedEvent<SharedPlayerActionAckState>(
       'player-action-dm-to-player',

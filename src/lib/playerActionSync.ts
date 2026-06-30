@@ -207,6 +207,38 @@ export function shouldClearPendingPlayerActionAfterAck(
   return pendingAction?.id === actionId
 }
 
+export async function consumePlayerActionAck(input: {
+  ack?: SharedPlayerActionAckState | null
+  mapId: string
+  seenAckIds: Set<string>
+  getPendingAction: () => PendingPlayerActionLock | null | undefined
+  waitForAuthoritativeSync: (appliedAt?: number) => Promise<void>
+  sleep: (ms: number) => Promise<void>
+  clearPendingAction: () => void
+  isCancelled?: () => boolean
+  unlockDelayMs?: number
+}): Promise<'ignored' | 'handled' | 'cancelled'> {
+  const decision = resolvePlayerActionAckDecision({
+    ack: input.ack,
+    mapId: input.mapId,
+    seenAckIds: input.seenAckIds,
+    pendingAction: input.getPendingAction(),
+  })
+  if (decision.markSeenAckId) input.seenAckIds.add(decision.markSeenAckId)
+  if (decision.status !== 'handle') return 'ignored'
+
+  await input.waitForAuthoritativeSync(decision.waitForAppliedAt)
+  if (input.isCancelled?.()) return 'cancelled'
+
+  await input.sleep(input.unlockDelayMs ?? 100)
+  if (input.isCancelled?.()) return 'cancelled'
+
+  if (shouldClearPendingPlayerActionAfterAck(input.getPendingAction(), decision.actionId)) {
+    input.clearPendingAction()
+  }
+  return 'handled'
+}
+
 export async function waitForAuthoritativeActionSnapshot(input: {
   appliedAt?: number
   loadMapsUpdatedAt: () => Promise<number | undefined>
