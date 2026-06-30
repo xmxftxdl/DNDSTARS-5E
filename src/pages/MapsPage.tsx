@@ -139,11 +139,8 @@ import {
 } from '../lib/combatInterruptSync'
 import {
   defaultCombatInterruptResponse,
-  isCombatInterruptKind,
-  resolveCombatInterruptAnswerCandidate,
   type AgileLeapInterruptPayload,
   type AgileLeapInterruptResponse,
-  type CombatInterruptByKind,
   type DodgeInterruptPayload,
   type DodgeInterruptResponse,
   type GaleComboDecision,
@@ -154,6 +151,7 @@ import {
   type StableMindInterruptPayload,
   type StableMindInterruptResponse,
 } from '../lib/combatInterruptProtocol'
+import { resolveCombatInterruptPromptSelection } from '../lib/combatInterruptPrompts'
 import { enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
@@ -1707,12 +1705,6 @@ export default function MapsPage() {
         return
       }
 
-      const pendingInterrupts = queue.interrupts.filter(
-        (interrupt) =>
-          interrupt.mapId === activeMap.id &&
-          interrupt.status === 'pending' &&
-          !isCombatInterruptExpired(interrupt, now),
-      )
       const answerContext = {
         characters,
         visibleCharacters: visibleChars,
@@ -1720,117 +1712,85 @@ export default function MapsPage() {
         assignedCharacterId,
         tokens: activeMap.tokens,
       }
+      const selection = resolveCombatInterruptPromptSelection({
+        queue,
+        mapId: activeMap.id,
+        now,
+        answerContext,
+        suppressed: {
+          dodge: suppressedDodgePromptIdsRef.current,
+          'stable-mind': suppressedStableMindPromptIdsRef.current,
+          'gale-combo': suppressedGaleComboPromptIdsRef.current,
+          'agile-leap': suppressedAgileLeapPromptIdsRef.current,
+          'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
+        },
+      })
 
-      const dodgeInterrupt = pendingInterrupts.find(
-        (interrupt): interrupt is CombatInterruptByKind<'dodge'> =>
-          isCombatInterruptKind(interrupt, 'dodge') &&
-          !suppressedDodgePromptIdsRef.current.has(interrupt.id),
-      )
-      if (dodgeInterrupt) {
-        const candidate = resolveCombatInterruptAnswerCandidate(dodgeInterrupt, answerContext)
-        if (candidate.canAnswer && candidate.character) {
-          setSharedDodgePrompt({
-            id: dodgeInterrupt.id,
-            result: dodgeInterrupt.payload.result,
-            targetChar: candidate.character,
-            expiresAt: dodgeInterrupt.expiresAt,
-          })
-        } else {
-          setSharedDodgePrompt((current) => (current ? null : current))
-        }
+      const dodgePrompt = selection.dodge
+      if (dodgePrompt) {
+        setSharedDodgePrompt({
+          id: dodgePrompt.interrupt.id,
+          result: dodgePrompt.interrupt.payload.result,
+          targetChar: dodgePrompt.character,
+          expiresAt: dodgePrompt.interrupt.expiresAt,
+        })
       } else {
         setSharedDodgePrompt((current) => (current ? null : current))
       }
 
-      const stableInterrupt = pendingInterrupts.find(
-        (interrupt): interrupt is CombatInterruptByKind<'stable-mind'> =>
-          isCombatInterruptKind(interrupt, 'stable-mind') &&
-          !suppressedStableMindPromptIdsRef.current.has(interrupt.id),
-      )
-      if (stableInterrupt) {
-        const candidate = resolveCombatInterruptAnswerCandidate(stableInterrupt, answerContext)
-        if (candidate.canAnswer && candidate.character) {
-          const payload = stableInterrupt.payload
-          setSharedStableMindPrompt({
-            id: stableInterrupt.id,
-            targetChar: candidate.character,
-            fullDamage: payload.fullDamage,
-            damageAfterSave: payload.damageAfterSave,
-            saveD20: payload.saveD20,
-            saveMod: payload.saveMod,
-            saveTotal: payload.saveTotal,
-            dc: payload.dc,
-            expiresAt: stableInterrupt.expiresAt,
-          })
-        } else {
-          setSharedStableMindPrompt((current) => (current ? null : current))
-        }
+      const stablePrompt = selection['stable-mind']
+      if (stablePrompt) {
+        const payload = stablePrompt.interrupt.payload
+        setSharedStableMindPrompt({
+          id: stablePrompt.interrupt.id,
+          targetChar: stablePrompt.character,
+          fullDamage: payload.fullDamage,
+          damageAfterSave: payload.damageAfterSave,
+          saveD20: payload.saveD20,
+          saveMod: payload.saveMod,
+          saveTotal: payload.saveTotal,
+          dc: payload.dc,
+          expiresAt: stablePrompt.interrupt.expiresAt,
+        })
       } else {
         setSharedStableMindPrompt((current) => (current ? null : current))
       }
 
-      const galeInterrupt = pendingInterrupts.find(
-        (interrupt): interrupt is CombatInterruptByKind<'gale-combo'> =>
-          isCombatInterruptKind(interrupt, 'gale-combo') &&
-          !suppressedGaleComboPromptIdsRef.current.has(interrupt.id),
-      )
-      if (galeInterrupt) {
-        const candidate = resolveCombatInterruptAnswerCandidate(galeInterrupt, answerContext)
-        if (candidate.canAnswer && candidate.character) {
-          setSharedGaleComboPrompt({
-            id: galeInterrupt.id,
-            casterChar: candidate.character,
-            triggerLabel: galeInterrupt.payload.triggerLabel,
-            expiresAt: galeInterrupt.expiresAt,
-          })
-        } else {
-          setSharedGaleComboPrompt((current) => (current ? null : current))
-        }
+      const galePrompt = selection['gale-combo']
+      if (galePrompt) {
+        setSharedGaleComboPrompt({
+          id: galePrompt.interrupt.id,
+          casterChar: galePrompt.character,
+          triggerLabel: galePrompt.interrupt.payload.triggerLabel,
+          expiresAt: galePrompt.interrupt.expiresAt,
+        })
       } else {
         setSharedGaleComboPrompt((current) => (current ? null : current))
       }
 
-      const agileInterrupt = pendingInterrupts.find(
-        (interrupt): interrupt is CombatInterruptByKind<'agile-leap'> =>
-          isCombatInterruptKind(interrupt, 'agile-leap') &&
-          !suppressedAgileLeapPromptIdsRef.current.has(interrupt.id),
-      )
-      if (agileInterrupt) {
-        const candidate = resolveCombatInterruptAnswerCandidate(agileInterrupt, answerContext)
-        if (candidate.canAnswer && candidate.character) {
-          const payload = agileInterrupt.payload
-          setSharedAgileLeapPrompt({
-            id: agileInterrupt.id,
-            targetChar: candidate.character,
-            feet: payload.feet,
-            uses: payload.uses,
-            maxUses: payload.maxUses,
-            expiresAt: agileInterrupt.expiresAt,
-          })
-        } else {
-          setSharedAgileLeapPrompt((current) => (current ? null : current))
-        }
+      const agilePrompt = selection['agile-leap']
+      if (agilePrompt) {
+        const payload = agilePrompt.interrupt.payload
+        setSharedAgileLeapPrompt({
+          id: agilePrompt.interrupt.id,
+          targetChar: agilePrompt.character,
+          feet: payload.feet,
+          uses: payload.uses,
+          maxUses: payload.maxUses,
+          expiresAt: agilePrompt.interrupt.expiresAt,
+        })
       } else {
         setSharedAgileLeapPrompt((current) => (current ? null : current))
       }
 
-      const opportunityInterrupt = pendingInterrupts.find(
-        (interrupt): interrupt is CombatInterruptByKind<'opportunity-attack'> =>
-          isCombatInterruptKind(interrupt, 'opportunity-attack') &&
-          !suppressedOpportunityAttackPromptIdsRef.current.has(interrupt.id),
-      )
-      if (opportunityInterrupt) {
-        const candidate = resolveCombatInterruptAnswerCandidate(opportunityInterrupt, answerContext)
-        if (candidate.canAnswer && candidate.character) {
-          setSharedOpportunityAttackPrompt({
-            id: opportunityInterrupt.id,
-            attackerChar: candidate.character,
-            targetName: opportunityInterrupt.payload.targetName,
-            expiresAt: opportunityInterrupt.expiresAt,
-          })
-        } else {
-          setSharedOpportunityAttackPrompt((current) => (current ? null : current))
-        }
+      const opportunityPrompt = selection['opportunity-attack']
+      if (opportunityPrompt) {
+        setSharedOpportunityAttackPrompt({
+          id: opportunityPrompt.interrupt.id,
+          attackerChar: opportunityPrompt.character,
+          targetName: opportunityPrompt.interrupt.payload.targetName,
+          expiresAt: opportunityPrompt.interrupt.expiresAt,
+        })
       } else {
         setSharedOpportunityAttackPrompt((current) => (current ? null : current))
       }
