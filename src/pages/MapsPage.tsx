@@ -148,7 +148,15 @@ import {
   type StableMindInterruptPayload,
   type StableMindInterruptResponse,
 } from '../lib/combatInterruptProtocol'
-import { resolveCombatInterruptPromptSelection } from '../lib/combatInterruptPrompts'
+import {
+  buildCombatInterruptPromptViews,
+  resolveCombatInterruptPromptSelection,
+  type SharedAgileLeapPromptView,
+  type SharedDodgePromptView,
+  type SharedGaleComboPromptView,
+  type SharedOpportunityAttackPromptView,
+  type SharedStableMindPromptView,
+} from '../lib/combatInterruptPrompts'
 import { enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
@@ -409,43 +417,12 @@ export default function MapsPage() {
     targetChar: Character
     onComplete: () => void
   } | null>(null)
-  const [sharedDodgePrompt, setSharedDodgePrompt] = useState<{
-    id: string
-    result: EnemyTurnResult
-    targetChar: Character
-    expiresAt?: number
-  } | null>(null)
-  const [sharedStableMindPrompt, setSharedStableMindPrompt] = useState<{
-    id: string
-    targetChar: Character
-    fullDamage: number
-    damageAfterSave: number
-    saveD20: number
-    saveMod: number
-    saveTotal: number
-    dc: number
-    expiresAt?: number
-  } | null>(null)
-  const [sharedGaleComboPrompt, setSharedGaleComboPrompt] = useState<{
-    id: string
-    casterChar: Character
-    triggerLabel: string
-    expiresAt?: number
-  } | null>(null)
-  const [sharedAgileLeapPrompt, setSharedAgileLeapPrompt] = useState<{
-    id: string
-    targetChar: Character
-    feet: number
-    uses: number
-    maxUses: number
-    expiresAt?: number
-  } | null>(null)
-  const [sharedOpportunityAttackPrompt, setSharedOpportunityAttackPrompt] = useState<{
-    id: string
-    attackerChar: Character
-    targetName: string
-    expiresAt?: number
-  } | null>(null)
+  const [sharedDodgePrompt, setSharedDodgePrompt] = useState<SharedDodgePromptView | null>(null)
+  const [sharedStableMindPrompt, setSharedStableMindPrompt] = useState<SharedStableMindPromptView | null>(null)
+  const [sharedGaleComboPrompt, setSharedGaleComboPrompt] = useState<SharedGaleComboPromptView | null>(null)
+  const [sharedAgileLeapPrompt, setSharedAgileLeapPrompt] = useState<SharedAgileLeapPromptView | null>(null)
+  const [sharedOpportunityAttackPrompt, setSharedOpportunityAttackPrompt] =
+    useState<SharedOpportunityAttackPromptView | null>(null)
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -1392,72 +1369,34 @@ export default function MapsPage() {
           'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
         },
       })
+      const views = buildCombatInterruptPromptViews(selection)
 
-      const dodgePrompt = selection.dodge
-      if (dodgePrompt) {
-        setSharedDodgePrompt({
-          id: dodgePrompt.interrupt.id,
-          result: dodgePrompt.interrupt.payload.result,
-          targetChar: dodgePrompt.character,
-          expiresAt: dodgePrompt.interrupt.expiresAt,
-        })
+      if (views.dodge) {
+        setSharedDodgePrompt(views.dodge)
       } else {
         setSharedDodgePrompt((current) => (current ? null : current))
       }
 
-      const stablePrompt = selection['stable-mind']
-      if (stablePrompt) {
-        const payload = stablePrompt.interrupt.payload
-        setSharedStableMindPrompt({
-          id: stablePrompt.interrupt.id,
-          targetChar: stablePrompt.character,
-          fullDamage: payload.fullDamage,
-          damageAfterSave: payload.damageAfterSave,
-          saveD20: payload.saveD20,
-          saveMod: payload.saveMod,
-          saveTotal: payload.saveTotal,
-          dc: payload.dc,
-          expiresAt: stablePrompt.interrupt.expiresAt,
-        })
+      if (views.stableMind) {
+        setSharedStableMindPrompt(views.stableMind)
       } else {
         setSharedStableMindPrompt((current) => (current ? null : current))
       }
 
-      const galePrompt = selection['gale-combo']
-      if (galePrompt) {
-        setSharedGaleComboPrompt({
-          id: galePrompt.interrupt.id,
-          casterChar: galePrompt.character,
-          triggerLabel: galePrompt.interrupt.payload.triggerLabel,
-          expiresAt: galePrompt.interrupt.expiresAt,
-        })
+      if (views.galeCombo) {
+        setSharedGaleComboPrompt(views.galeCombo)
       } else {
         setSharedGaleComboPrompt((current) => (current ? null : current))
       }
 
-      const agilePrompt = selection['agile-leap']
-      if (agilePrompt) {
-        const payload = agilePrompt.interrupt.payload
-        setSharedAgileLeapPrompt({
-          id: agilePrompt.interrupt.id,
-          targetChar: agilePrompt.character,
-          feet: payload.feet,
-          uses: payload.uses,
-          maxUses: payload.maxUses,
-          expiresAt: agilePrompt.interrupt.expiresAt,
-        })
+      if (views.agileLeap) {
+        setSharedAgileLeapPrompt(views.agileLeap)
       } else {
         setSharedAgileLeapPrompt((current) => (current ? null : current))
       }
 
-      const opportunityPrompt = selection['opportunity-attack']
-      if (opportunityPrompt) {
-        setSharedOpportunityAttackPrompt({
-          id: opportunityPrompt.interrupt.id,
-          attackerChar: opportunityPrompt.character,
-          targetName: opportunityPrompt.interrupt.payload.targetName,
-          expiresAt: opportunityPrompt.interrupt.expiresAt,
-        })
+      if (views.opportunityAttack) {
+        setSharedOpportunityAttackPrompt(views.opportunityAttack)
       } else {
         setSharedOpportunityAttackPrompt((current) => (current ? null : current))
       }

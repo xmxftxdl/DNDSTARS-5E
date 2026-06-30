@@ -13,7 +13,10 @@ import type {
   OpportunityAttackInterruptPayload,
   StableMindInterruptPayload,
 } from './combatInterruptProtocol'
-import { resolveCombatInterruptPromptSelection } from './combatInterruptPrompts'
+import {
+  buildCombatInterruptPromptViews,
+  resolveCombatInterruptPromptSelection,
+} from './combatInterruptPrompts'
 
 function character(id: string, patch: Partial<Character> = {}): Character {
   return {
@@ -203,5 +206,82 @@ describe('combat interrupt prompt selection', () => {
 
     expect(selection['stable-mind']?.character.id).toBe(hero.id)
     expect(selection['agile-leap']?.character.id).toBe(hero.id)
+  })
+
+  it('builds UI prompt views from the selected interrupts', () => {
+    const hero = character('hero')
+    const ally = character('ally')
+    const dodge = createCombatInterrupt<DodgeInterruptPayload>({
+      id: 'dodge-1',
+      mapId: 'map-1',
+      kind: 'dodge',
+      targetCharId: hero.id,
+      payload: { targetName: hero.name, result: { moved: false, attacked: true, message: 'hit' } },
+      expiresAt: 2000,
+      now: 100,
+    })
+    const stable = createCombatInterrupt<StableMindInterruptPayload>({
+      id: 'stable-1',
+      mapId: 'map-1',
+      kind: 'stable-mind',
+      targetCharId: hero.id,
+      payload: {
+        targetName: hero.name,
+        fullDamage: 10,
+        damageAfterSave: 5,
+        saveD20: 12,
+        saveMod: 1,
+        saveTotal: 13,
+        dc: 12,
+      },
+      now: 101,
+    })
+    const opportunity = createCombatInterrupt<OpportunityAttackInterruptPayload>({
+      id: 'opp-1',
+      mapId: 'map-1',
+      kind: 'opportunity-attack',
+      actorCharId: ally.id,
+      payload: {
+        attackerName: ally.name,
+        targetName: hero.name,
+        attackerTokenId: 'ally-token',
+        targetTokenId: 'hero-token',
+      },
+      now: 102,
+    })
+
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([dodge, stable, opportunity]),
+      mapId: 'map-1',
+      now: 1000,
+      answerContext: {
+        characters: [hero, ally],
+        visibleCharacters: [hero, ally],
+        playerCharId: hero.id,
+        tokens: [token('hero-token', hero.id), token('ally-token', ally.id)],
+      },
+      suppressed: {},
+    })
+
+    const views = buildCombatInterruptPromptViews(selection)
+    expect(views.dodge).toMatchObject({
+      id: 'dodge-1',
+      targetChar: hero,
+      expiresAt: 2000,
+    })
+    expect(views.stableMind).toMatchObject({
+      id: 'stable-1',
+      fullDamage: 10,
+      damageAfterSave: 5,
+      saveD20: 12,
+      saveMod: 1,
+      saveTotal: 13,
+      dc: 12,
+    })
+    expect(views.opportunityAttack).toMatchObject({
+      id: 'opp-1',
+      attackerChar: ally,
+      targetName: hero.name,
+    })
   })
 })
