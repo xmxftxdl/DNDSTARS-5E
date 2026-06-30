@@ -123,18 +123,20 @@ import {
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import {
-  answerCombatInterrupt,
   COMBAT_INTERRUPT_RESOURCE,
   createCombatInterrupt,
   emptyCombatInterruptQueue,
   findCombatInterrupt,
-  finishCombatInterrupt,
   isCombatInterruptExpired,
-  markCombatInterruptRolling,
-  upsertCombatInterrupt,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
 } from '../lib/combatInterruptQueue'
+import {
+  answerSharedCombatInterrupt as persistAnswerSharedCombatInterrupt,
+  finishSharedCombatInterrupt as persistFinishSharedCombatInterrupt,
+  markSharedCombatInterruptRolling as persistMarkSharedCombatInterruptRolling,
+  publishSharedCombatInterrupt as persistPublishSharedCombatInterrupt,
+} from '../lib/combatInterruptSync'
 import {
   defaultCombatInterruptResponse,
   isCombatInterruptKind,
@@ -490,32 +492,31 @@ export default function MapsPage() {
   const showCombatNotice = (title: string, message: string, tone: 'sky' | 'violet' | 'amber' | 'rose' = 'sky') =>
     showCombatDialog({ title, message, confirmText: '知道了', tone })
   const publishCombatInterrupt = async (interrupt: SharedCombatInterrupt) => {
-    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    await saveSharedResource<SharedCombatInterruptQueueState>(
-      COMBAT_INTERRUPT_RESOURCE,
-      upsertCombatInterrupt(current, interrupt),
-    )
+    await persistPublishSharedCombatInterrupt({ loadSharedResource, saveSharedResource, interrupt })
   }
   const answerSharedCombatInterrupt = async (id: string, response: Record<string, unknown>) => {
     if (!activeMap) return
-    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
-    const next = answerCombatInterrupt(queue, id, response)
-    if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+    await persistAnswerSharedCombatInterrupt({ loadSharedResource, saveSharedResource, mapId: activeMap.id, id, response })
   }
   const markSharedCombatInterruptRolling = async (id: string, response?: Record<string, unknown>) => {
     if (!activeMap) return
-    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
-    const next = markCombatInterruptRolling(queue, id, response)
-    if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+    await persistMarkSharedCombatInterruptRolling({
+      loadSharedResource,
+      saveSharedResource,
+      mapId: activeMap.id,
+      id,
+      response,
+    })
   }
   const finishSharedCombatInterrupt = async (id: string, response?: Record<string, unknown>) => {
     if (!activeMap) return
-    const current = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const queue = current && current.mapId === activeMap.id ? current : emptyCombatInterruptQueue(activeMap.id)
-    const next = finishCombatInterrupt(queue, id, response)
-    if (next) await saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+    await persistFinishSharedCombatInterrupt({
+      loadSharedResource,
+      saveSharedResource,
+      mapId: activeMap.id,
+      id,
+      response,
+    })
   }
   const [sharedDodgeNow, setSharedDodgeNow] = useState(Date.now())
   const [pendingPlayerAction, setPendingPlayerAction] = useState<{
