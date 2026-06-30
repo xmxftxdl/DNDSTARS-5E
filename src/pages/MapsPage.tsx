@@ -247,6 +247,7 @@ import {
   reconcileEnemyAp,
   resolveSharedCombatStateApply,
 } from '../lib/sharedCombatSync'
+import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
   buildSharedPlayerAction,
@@ -1169,12 +1170,7 @@ export default function MapsPage() {
       if (incoming.length === 0) return
       for (const entry of incoming) seenSharedLogIdsRef.current.add(entry.id)
       setCombatLog((current) => {
-        const merged = [...incoming, ...current]
-        const unique = new Map<number, CombatLogEntry>()
-        for (const entry of merged) unique.set(entry.id, entry)
-        return [...unique.values()]
-          .sort((a, b) => b.id - a.id)
-          .slice(0, 80)
+        return mergeSharedCombatLogEntries(current, incoming)
       })
     }
     void load()
