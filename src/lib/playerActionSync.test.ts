@@ -5,6 +5,7 @@ import {
   hydratedProcessedPlayerActionIdsForDm,
   isAuthoritativeActionSnapshotReady,
   loadDmPlayerActionBatch,
+  publishPlayerActionRequest,
   queuedPlayerActionsForDm,
   resolvePlayerActionAckDecision,
   shouldClearPendingPlayerActionAfterAck,
@@ -196,6 +197,51 @@ describe('player action sync barrier', () => {
 
     expect(batch.processedActionIds).toEqual(new Set(['processed']))
     expect(batch.actions.map((action) => action.id)).toEqual(['queued', 'latest'])
+  })
+
+  it('publishes a player action by appending the queue before broadcasting the event', async () => {
+    const action = buildSharedPlayerAction({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 2,
+      now: 2000,
+      patch: { type: 'end-turn' },
+    })
+    const calls: string[] = []
+    let savedQueueIds: string[] = []
+    let publishedActionId = ''
+
+    await publishPlayerActionRequest({
+      action,
+      now: () => 3000,
+      loadQueue: async () => {
+        calls.push('load')
+        return {
+          mapId: 'map-1',
+          combatId: 'combat-1',
+          requests: [{ ...action, id: 'old-action', seq: 1, updatedAt: 1000 }],
+          updatedAt: 1000,
+        }
+      },
+      saveQueue: async (queue) => {
+        calls.push('save')
+        savedQueueIds = queue.requests.map((item) => item.id)
+        expect(queue.updatedAt).toBe(3000)
+      },
+      publishAction: async (eventAction) => {
+        calls.push('publish')
+        publishedActionId = eventAction.id
+      },
+    })
+
+    expect(calls).toEqual(['load', 'save', 'publish'])
+    expect(savedQueueIds).toEqual(['old-action', action.id])
+    expect(publishedActionId).toBe(action.id)
   })
 
   it('decides whether a player ack should be consumed by the current pending action', () => {

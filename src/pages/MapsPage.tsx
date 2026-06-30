@@ -245,9 +245,9 @@ import {
   seededDieValue,
 } from './mapsPageHelpers'
 import {
-  buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
   loadDmPlayerActionBatch,
+  publishPlayerActionRequest,
   resolvePlayerActionAckDecision,
   shouldClearPendingPlayerActionAfterAck,
   waitForAuthoritativeActionSnapshot,
@@ -6212,20 +6212,14 @@ export default function MapsPage() {
     return isTokenAlive(currentInitiativeToken, useCharacterStore.getState().characters)
   }
 
-  const appendPlayerActionRequest = async (action: SharedPlayerActionState) => {
-    const current = await loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests')
-    await saveSharedResource<SharedPlayerActionRequestQueueState>(
-      'player-action-requests',
-      buildPlayerActionRequestQueueState({ action, current, updatedAt: Date.now() }),
-    )
-  }
-
   const submitPlayerActionRequest = (action: SharedPlayerActionState, label: string) => {
     setPendingPlayerActionLocked({ id: action.id, label })
-    void (async () => {
-      await appendPlayerActionRequest(action)
-      await publishSharedEvent<SharedPlayerActionState>('player-action-player-to-dm', action)
-    })()
+    void publishPlayerActionRequest({
+      action,
+      loadQueue: () => loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests'),
+      saveQueue: (queue) => saveSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests', queue),
+      publishAction: (eventAction) => publishSharedEvent<SharedPlayerActionState>('player-action-player-to-dm', eventAction),
+    })
     return true
   }
 

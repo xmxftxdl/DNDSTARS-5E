@@ -82,6 +82,24 @@ export function buildPlayerActionRequestQueueState(input: {
   }
 }
 
+export async function publishPlayerActionRequest(input: {
+  action: SharedPlayerActionState
+  loadQueue: () => Promise<SharedPlayerActionRequestQueueState | null>
+  saveQueue: (queue: SharedPlayerActionRequestQueueState) => Promise<void>
+  publishAction: (action: SharedPlayerActionState) => Promise<void>
+  now?: () => number
+}): Promise<void> {
+  const current = await input.loadQueue()
+  await input.saveQueue(
+    buildPlayerActionRequestQueueState({
+      action: input.action,
+      current,
+      updatedAt: input.now?.() ?? Date.now(),
+    }),
+  )
+  await input.publishAction(input.action)
+}
+
 export function queuedPlayerActionsForDm(input: {
   queue?: SharedPlayerActionRequestQueueState | null
   mapId: string
