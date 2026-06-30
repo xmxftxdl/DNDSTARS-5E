@@ -98,6 +98,7 @@ import {
   buildPlayerActionAck,
   buildPlayerActionProcessedState,
 } from '../lib/playerActionAck'
+import { publishPlayerActionAckWithSnapshots } from '../lib/playerActionAckPublish'
 import {
   characterToCombatInput,
   damageModifierFromAttackDefenseDiff,
@@ -4244,27 +4245,23 @@ export default function MapsPage() {
       before: baseline,
       after: afterBaseline,
     })
-    void (async () => {
-      if (status === 'accepted') {
-        const currentCharacters = useCharacterStore.getState().characters
-        const currentMaps = useMapStore.getState().maps
-        const currentSelectedId = useMapStore.getState().selectedId
-        await Promise.all([
-          saveSharedResource('characters', {
-            characters: currentCharacters,
-            selectedId: useCharacterStore.getState().selectedId,
+    const snapshots =
+      status === 'accepted'
+        ? {
+            characters: useCharacterStore.getState().characters,
+            characterSelectedId: useCharacterStore.getState().selectedId,
+            maps: useMapStore.getState().maps,
+            mapSelectedId: useMapStore.getState().selectedId,
             updatedAt: appliedAt,
-          }),
-          saveSharedResource('maps', {
-            maps: currentMaps,
-            selectedId: currentSelectedId,
-            updatedAt: appliedAt,
-          }),
-        ])
-      }
-      await saveSharedResource('player-action-ack', ack)
-      await publishSharedEvent<SharedPlayerActionAckState>('player-action-dm-to-player', ack)
-    })()
+          }
+        : undefined
+    void publishPlayerActionAckWithSnapshots({
+      ack,
+      snapshots,
+      saveSharedResource,
+      publishAck: (eventAck) =>
+        publishSharedEvent<SharedPlayerActionAckState>('player-action-dm-to-player', eventAck),
+    })
   }
 
   const completePlayerActionRequest = (action: SharedPlayerActionState) => {
