@@ -125,7 +125,6 @@ import {
 import {
   COMBAT_INTERRUPT_RESOURCE,
   createCombatInterrupt,
-  emptyCombatInterruptQueue,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
 } from '../lib/combatInterruptQueue'
@@ -245,6 +244,7 @@ import {
   reconcileEnemyAp,
   resolveSharedCombatStateApply,
 } from '../lib/sharedCombatSync'
+import { buildCombatMessageQueueReset } from '../lib/sharedCombatReset'
 import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
@@ -3495,94 +3495,30 @@ export default function MapsPage() {
     const updatedAt = Date.now()
     const queueCombatId = options.combatId ?? combatIdRef.current
     await clearSharedEventBacklog()
+    const reset = buildCombatMessageQueueReset({
+      mapId,
+      combatId: queueCombatId,
+      updatedAt,
+      clearCombatLog: options.clearCombatLog,
+    })
     const writes: Promise<void>[] = [
       clearSharedResource('dice'),
       saveSharedResource<SharedCombatInterruptQueueState>(
         COMBAT_INTERRUPT_RESOURCE,
-        emptyCombatInterruptQueue(mapId, updatedAt),
+        reset.interruptQueue,
       ),
-      saveSharedResource<SharedDiceEventsState>('dice-events', { mapId, events: [], updatedAt }),
-      saveSharedResource<SharedDodgeState>('dodge', {
-        id: `${mapId}:combat-start:dodge:${updatedAt}`,
-        mapId,
-        status: 'done',
-        result: { moved: false, attacked: false, message: 'cleared' },
-        targetCharId: '',
-        updatedAt,
-      }),
-      saveSharedResource<SharedStableMindState>('stable-mind', {
-        id: `${mapId}:combat-start:stable-mind:${updatedAt}`,
-        mapId,
-        status: 'done',
-        targetCharId: '',
-        targetName: '',
-        fullDamage: 0,
-        damageAfterSave: 0,
-        saveD20: 0,
-        saveMod: 0,
-        saveTotal: 0,
-        dc: 0,
-        updatedAt,
-      }),
-      saveSharedResource<SharedGaleComboState>('gale-combo', {
-        id: `${mapId}:combat-start:gale-combo:${updatedAt}`,
-        mapId,
-        status: 'done',
-        casterCharId: '',
-        casterName: '',
-        triggerLabel: '',
-        updatedAt,
-      }),
-      saveSharedResource<SharedAgileLeapState>('agile-leap', {
-        id: `${mapId}:combat-start:agile-leap:${updatedAt}`,
-        mapId,
-        status: 'done',
-        targetCharId: '',
-        targetName: '',
-        feet: 0,
-        uses: 0,
-        maxUses: 0,
-        updatedAt,
-      }),
-      saveSharedResource<SharedPlayerActionState>('player-action', {
-        id: `${mapId}:combat-start:player-action:${updatedAt}`,
-        mapId,
-        combatId: queueCombatId,
-        sourceMode: 'player',
-        status: 'done',
-        type: 'end-turn',
-        actorTokenId: '',
-        characterId: '',
-        round: 1,
-        initiativeIndex: 0,
-        seq: 0,
-        updatedAt,
-      }),
-      saveSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests', {
-        mapId,
-        combatId: queueCombatId,
-        requests: [],
-        updatedAt,
-      }),
-      saveSharedResource<SharedPlayerActionProcessedState>('player-action-processed', {
-        mapId,
-        combatId: queueCombatId,
-        actionIds: [],
-        updatedAt,
-      }),
-      saveSharedResource<SharedPlayerActionAckState>('player-action-ack', {
-        id: `${mapId}:combat-start:player-action-ack:${updatedAt}`,
-        mapId,
-        combatId: queueCombatId,
-        actionId: '',
-        status: 'accepted',
-        round: 1,
-        initiativeIndex: 0,
-        updatedAt,
-      }),
+      saveSharedResource<SharedDiceEventsState>('dice-events', reset.diceEvents),
+      saveSharedResource<SharedDodgeState>('dodge', reset.dodge),
+      saveSharedResource<SharedStableMindState>('stable-mind', reset.stableMind),
+      saveSharedResource<SharedGaleComboState>('gale-combo', reset.galeCombo),
+      saveSharedResource<SharedAgileLeapState>('agile-leap', reset.agileLeap),
+      saveSharedResource<SharedPlayerActionState>('player-action', reset.playerAction),
+      saveSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests', reset.playerActionRequests),
+      saveSharedResource<SharedPlayerActionProcessedState>('player-action-processed', reset.playerActionProcessed),
+      saveSharedResource<SharedPlayerActionAckState>('player-action-ack', reset.playerActionAck),
     ]
-    if (options.clearCombatLog) {
-      writes.push(saveSharedResource<SharedCombatLogState>('combat-log', { mapId, entries: [], updatedAt }))
+    if (reset.combatLog) {
+      writes.push(saveSharedResource<SharedCombatLogState>('combat-log', reset.combatLog))
     }
     await Promise.all(writes)
   }
