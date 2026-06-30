@@ -238,12 +238,15 @@ import {
   DEATH_KEY_WATCHDOG_MS,
 } from './mapsPageConstants'
 import {
-  reconcileEnemyAp,
   singleTargetRangeFeet,
   buildInitiativeOrder,
   tokenIntersectsDeleteRect,
   seededDieValue,
 } from './mapsPageHelpers'
+import {
+  reconcileEnemyAp,
+  resolveSharedCombatStateApply,
+} from '../lib/sharedCombatSync'
 import {
   buildSharedPlayerAction,
   loadDmPlayerActionBatch,
@@ -854,35 +857,25 @@ export default function MapsPage() {
   const applySharedCombatState = (state: SharedCombatState | null) => {
     if (!state || !activeMap || state.mapId !== activeMap.id) return
     const latestMap = useMapStore.getState().maps.find((map) => map.id === state.mapId) ?? activeMap
-    if (state.active && (state.initiativeOrder?.length ?? 0) > 0 && latestMap.tokens.length === 0) return
     const validTokenIds = new Set(latestMap.tokens.map((token) => token.id))
-    const initiativeOrder = (state.initiativeOrder ?? []).filter((entry) => validTokenIds.has(entry.tokenId))
-    const initiativeIndex = initiativeOrder.length > 0
-      ? Math.min(Math.max(0, state.initiativeIndex ?? 0), initiativeOrder.length - 1)
-      : 0
-    const active = Boolean(state.active && initiativeOrder.length > 0)
-    // [T10/AC4] 硬化撕裂读：字段缺失而本端持有已花 AP 时保留本端，避免凭空恢复 AP 到 {2,2}。
-    const enemyApByToken = reconcileEnemyAp(
-      state.enemyApByToken,
-      enemyApByTokenRef.current,
+    const decision = resolveSharedCombatStateApply({
+      state,
+      mapId: activeMap.id,
       validTokenIds,
-    )
-    const incomingCombatId = state.combatId ?? ''
-    // [T11/AC6 · E6] 单调 guard：同一 combatId 下丢弃 updatedAt 严格更旧的乱序广播。
-    // combatId 变化（新战斗/换战斗）⇒ 重置水位后照常接受。这样陈旧快照不会回退玩家端战斗态，
-    // 而真正更新的快照（更大 updatedAt 或新 combatId）一定不被压制。
-    const incomingUpdatedAt = state.updatedAt ?? 0
-    if (incomingCombatId === lastAppliedCombatIdRef.current && incomingUpdatedAt < lastAppliedCombatUpdatedAtRef.current) return
-    const snapshot = JSON.stringify({ state, tokenIds: Array.from(validTokenIds).sort() })
-    // equality 短路只在内容真正未变时触发，不压制更新的 apply（内容变 ⇒ snapshot 必不同）。
-    if (snapshot === lastSharedCombatSnapshotRef.current) return
-    lastSharedCombatSnapshotRef.current = snapshot
-    lastAppliedCombatIdRef.current = incomingCombatId
-    lastAppliedCombatUpdatedAtRef.current = incomingUpdatedAt
-    const combatChanged = incomingCombatId !== combatIdRef.current
+      currentCombatId: combatIdRef.current,
+      currentEnemyApByToken: enemyApByTokenRef.current,
+      lastAppliedCombatId: lastAppliedCombatIdRef.current,
+      lastAppliedUpdatedAt: lastAppliedCombatUpdatedAtRef.current,
+      lastSnapshot: lastSharedCombatSnapshotRef.current,
+      isDm: isDM,
+    })
+    if (decision.status !== 'apply') return
+    lastSharedCombatSnapshotRef.current = decision.snapshot
+    lastAppliedCombatIdRef.current = decision.incomingCombatId
+    lastAppliedCombatUpdatedAtRef.current = decision.incomingUpdatedAt
     applyingSharedCombatRef.current = true
-    combatIdRef.current = incomingCombatId
-    if (combatChanged || !active) {
+    combatIdRef.current = decision.incomingCombatId
+    if (decision.shouldResetPlayerActionState) {
       setPendingPlayerActionLocked(null)
       seenPlayerActionAckIdsRef.current.clear()
       seenPlayerActionIdsRef.current.clear()
@@ -890,21 +883,19 @@ export default function MapsPage() {
       playerActionResultBaselinesRef.current = {}
       clearPlayerCombatUI()
     }
-    if (active) {
-      setPlayerCombatEndedLocked(false)
-    } else if (!isDM && incomingCombatId) {
-      setPlayerCombatEndedLocked(true)
+    if (decision.playerCombatEndedLocked !== undefined) {
+      setPlayerCombatEndedLocked(decision.playerCombatEndedLocked)
     }
-    setCombatActive(active)
-    combatActiveRef.current = active
-    setRound(state.round)
-    roundRef.current = state.round
-    setInitiativeOrder(initiativeOrder)
-    initiativeOrderRef.current = initiativeOrder
-    setInitiativeIndex(initiativeIndex)
-    initiativeIndexRef.current = initiativeIndex
-    enemyApByTokenRef.current = enemyApByToken
-    setEnemyApByToken(enemyApByToken)
+    setCombatActive(decision.active)
+    combatActiveRef.current = decision.active
+    setRound(decision.round)
+    roundRef.current = decision.round
+    setInitiativeOrder(decision.initiativeOrder)
+    initiativeOrderRef.current = decision.initiativeOrder
+    setInitiativeIndex(decision.initiativeIndex)
+    initiativeIndexRef.current = decision.initiativeIndex
+    enemyApByTokenRef.current = decision.enemyApByToken
+    setEnemyApByToken(decision.enemyApByToken)
     window.setTimeout(() => {
       applyingSharedCombatRef.current = false
     }, 0)

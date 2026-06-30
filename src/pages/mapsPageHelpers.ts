@@ -1,6 +1,5 @@
 // [T15/G3] MapsPage 纯 helper 抽取。从 MapsPage.tsx 原样搬出——不改名、不改逻辑。
 // 这些是 god-object 中无闭包依赖的模块级纯函数，搬到独立边界后 MapsPage 直接 import 回去。
-// reconcileEnemyAp 维持 export（enemyApReconcile.test.ts 经 MapsPage re-export 引用）。
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
 import { getEffectiveAbilityMod } from '../lib/archerCombat'
@@ -8,32 +7,6 @@ import { isBasicShot } from '../lib/classFeatures'
 import type { Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import type { StatusType } from '../lib/sharedCombatTypes'
-
-/**
- * [T10/AC4 · E13] enemyAP 的「读到的快照」如何调和进当前态。
- * enemyApByToken 本就是 SharedCombatState 的字段、随 publishCombatState 持久化、loadShared 时 restore —
- * 已是服务端持久化（重连/刷新可恢复已花 AP）。本 helper 只硬化「撕裂读」边界：
- *  - 快照带了 enemyApByToken（即便是 {}）⇒ 这是权威全量，按它来（过滤掉已不存在的 token）。
- *  - 快照里该字段缺失（undefined，撕裂/旧形状）且本端仍持有已花 AP ⇒ 保留本端，不要把已花 AP
- *    冲回空（空会让 tokenHp 显示回落到默认 {2,2}，等于凭空恢复 AP）。
- * 纯函数，便于 T13 在不挂载组件下单测 restore-fires 与 torn-read-preserve 两条路径。
- */
-export function reconcileEnemyAp(
-  incoming: Record<string, { current: number; max: number }> | undefined,
-  existing: Record<string, { current: number; max: number }>,
-  validTokenIds: Set<string>,
-): Record<string, { current: number; max: number }> {
-  // 撕裂读：字段缺失但本端已有已花 AP ⇒ 原样保留（仅过滤无效 token）。
-  if (incoming === undefined && Object.keys(existing).length > 0) {
-    return Object.fromEntries(
-      Object.entries(existing).filter(([tokenId]) => validTokenIds.has(tokenId)),
-    )
-  }
-  // 字段存在（含 {}）⇒ 权威全量，按它来。
-  return Object.fromEntries(
-    Object.entries(incoming ?? {}).filter(([tokenId]) => validTokenIds.has(tokenId)),
-  )
-}
 
 const SINGLE_TARGET_RANGE_FEET: Record<string, number> = {
   basicShot: 90,
