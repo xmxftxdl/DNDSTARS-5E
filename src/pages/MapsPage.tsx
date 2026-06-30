@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   Map as MapIcon,
   Upload,
@@ -1242,6 +1242,17 @@ export default function MapsPage() {
     clearSharedInterruptPrompts()
   }
 
+  const setNullablePromptView = <T,>(
+    setter: Dispatch<SetStateAction<T | null>>,
+    next: T | undefined,
+  ) => {
+    if (next) {
+      setter(next)
+      return
+    }
+    setter((current) => (current ? null : current))
+  }
+
   const clearPlayerCombatEndUI = () => {
     clearPlayerCombatUI()
     const pendingDialog = combatDialogRef.current
@@ -1371,35 +1382,11 @@ export default function MapsPage() {
       })
       const views = buildCombatInterruptPromptViews(selection)
 
-      if (views.dodge) {
-        setSharedDodgePrompt(views.dodge)
-      } else {
-        setSharedDodgePrompt((current) => (current ? null : current))
-      }
-
-      if (views.stableMind) {
-        setSharedStableMindPrompt(views.stableMind)
-      } else {
-        setSharedStableMindPrompt((current) => (current ? null : current))
-      }
-
-      if (views.galeCombo) {
-        setSharedGaleComboPrompt(views.galeCombo)
-      } else {
-        setSharedGaleComboPrompt((current) => (current ? null : current))
-      }
-
-      if (views.agileLeap) {
-        setSharedAgileLeapPrompt(views.agileLeap)
-      } else {
-        setSharedAgileLeapPrompt((current) => (current ? null : current))
-      }
-
-      if (views.opportunityAttack) {
-        setSharedOpportunityAttackPrompt(views.opportunityAttack)
-      } else {
-        setSharedOpportunityAttackPrompt((current) => (current ? null : current))
-      }
+      setNullablePromptView(setSharedDodgePrompt, views.dodge)
+      setNullablePromptView(setSharedStableMindPrompt, views.stableMind)
+      setNullablePromptView(setSharedGaleComboPrompt, views.galeCombo)
+      setNullablePromptView(setSharedAgileLeapPrompt, views.agileLeap)
+      setNullablePromptView(setSharedOpportunityAttackPrompt, views.opportunityAttack)
     }
     void load()
     const timer = window.setInterval(load, 500)
