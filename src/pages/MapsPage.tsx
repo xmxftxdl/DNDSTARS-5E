@@ -126,11 +126,10 @@ import {
   COMBAT_INTERRUPT_RESOURCE,
   createCombatInterrupt,
   emptyCombatInterruptQueue,
-  findCombatInterrupt,
-  isCombatInterruptExpired,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
 } from '../lib/combatInterruptQueue'
+import { resolveDmCombatInterruptSettlements } from '../lib/combatInterruptDmSettlement'
 import {
   answerSharedCombatInterrupt as persistAnswerSharedCombatInterrupt,
   finishSharedCombatInterrupt as persistFinishSharedCombatInterrupt,
@@ -138,7 +137,6 @@ import {
   publishSharedCombatInterrupt as persistPublishSharedCombatInterrupt,
 } from '../lib/combatInterruptSync'
 import {
-  defaultCombatInterruptResponse,
   type AgileLeapInterruptPayload,
   type AgileLeapInterruptResponse,
   type DodgeInterruptPayload,
@@ -1602,97 +1600,71 @@ export default function MapsPage() {
       const now = Date.now()
 
       if (isDM) {
-        const dodgePending = pendingSharedDodgeRef.current
-        if (dodgePending) {
-          const interrupt = findCombatInterrupt(queue, dodgePending.id)
-          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
-            pendingSharedDodgeRef.current = null
-            await finishSharedCombatInterrupt(dodgePending.id, defaultCombatInterruptResponse('dodge'))
-            const targetChar = useCharacterStore.getState().characters.find((c) => c.id === dodgePending.targetCharId)
-            if (targetChar) {
-              void finishEnemyAttack(dodgePending.result, targetChar, false, undefined, false).then(dodgePending.onComplete)
-            } else {
-              dodgePending.onComplete()
+        const settlements = resolveDmCombatInterruptSettlements({
+          queue,
+          mapId: activeMap.id,
+          now,
+          pending: {
+            dodge: pendingSharedDodgeRef.current?.id,
+            stableMind: pendingSharedStableMindRef.current?.id,
+            galeCombo: pendingSharedGaleComboRef.current?.id,
+            agileLeap: pendingSharedAgileLeapRef.current?.id,
+            opportunityAttack: pendingSharedOpportunityAttackRef.current?.id,
+          },
+        })
+        for (const settlement of settlements) {
+          switch (settlement.kind) {
+            case 'dodge': {
+              const pending = pendingSharedDodgeRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedDodgeRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              const targetChar = useCharacterStore.getState().characters.find((c) => c.id === pending.targetCharId)
+              if (targetChar) {
+                void finishEnemyAttack(
+                  pending.result,
+                  targetChar,
+                  settlement.wantsDodge,
+                  settlement.dodgeD20,
+                  false,
+                ).then(pending.onComplete)
+              } else {
+                pending.onComplete()
+              }
+              break
             }
-          } else if (interrupt?.status === 'answered') {
-            const response = interrupt.response as DodgeInterruptResponse | undefined
-            pendingSharedDodgeRef.current = null
-            await finishSharedCombatInterrupt(dodgePending.id, response)
-            const targetChar = useCharacterStore.getState().characters.find((c) => c.id === dodgePending.targetCharId)
-            if (targetChar) {
-              void finishEnemyAttack(
-                dodgePending.result,
-                targetChar,
-                !!response?.wantsDodge,
-                response?.dodgeD20,
-                false,
-              ).then(dodgePending.onComplete)
-            } else {
-              dodgePending.onComplete()
+            case 'stable-mind': {
+              const pending = pendingSharedStableMindRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedStableMindRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.useStableMind)
+              break
             }
-          }
-        }
-
-        const stablePending = pendingSharedStableMindRef.current
-        if (stablePending) {
-          const interrupt = findCombatInterrupt(queue, stablePending.id)
-          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
-            pendingSharedStableMindRef.current = null
-            await finishSharedCombatInterrupt(stablePending.id, defaultCombatInterruptResponse('stable-mind'))
-            stablePending.resolve(false)
-          } else if (interrupt?.status === 'answered') {
-            const response = interrupt.response as StableMindInterruptResponse | undefined
-            pendingSharedStableMindRef.current = null
-            await finishSharedCombatInterrupt(stablePending.id, response)
-            stablePending.resolve(!!response?.useStableMind)
-          }
-        }
-
-        const galePending = pendingSharedGaleComboRef.current
-        if (galePending) {
-          const interrupt = findCombatInterrupt(queue, galePending.id)
-          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
-            pendingSharedGaleComboRef.current = null
-            await finishSharedCombatInterrupt(galePending.id, defaultCombatInterruptResponse('gale-combo'))
-            galePending.resolve('timeout')
-          } else if (interrupt?.status === 'answered') {
-            const response = interrupt.response as GaleComboInterruptResponse | undefined
-            pendingSharedGaleComboRef.current = null
-            await finishSharedCombatInterrupt(galePending.id, response)
-            galePending.resolve(response?.useGaleCombo ? 'accepted' : 'declined')
-          }
-        }
-
-        const agilePending = pendingSharedAgileLeapRef.current
-        if (agilePending) {
-          const interrupt = findCombatInterrupt(queue, agilePending.id)
-          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
-            pendingSharedAgileLeapRef.current = null
-            await finishSharedCombatInterrupt(agilePending.id, defaultCombatInterruptResponse('agile-leap'))
-            agilePending.resolve(false)
-          } else if (interrupt?.status === 'answered') {
-            const response = interrupt.response as AgileLeapInterruptResponse | undefined
-            pendingSharedAgileLeapRef.current = null
-            await finishSharedCombatInterrupt(agilePending.id, response)
-            agilePending.resolve(!!response?.useAgileLeap)
-          }
-        }
-
-        const opportunityPending = pendingSharedOpportunityAttackRef.current
-        if (opportunityPending) {
-          const interrupt = findCombatInterrupt(queue, opportunityPending.id)
-          if (interrupt && isCombatInterruptExpired(interrupt, now)) {
-            pendingSharedOpportunityAttackRef.current = null
-            await finishSharedCombatInterrupt(
-              opportunityPending.id,
-              defaultCombatInterruptResponse('opportunity-attack'),
-            )
-            opportunityPending.resolve(false)
-          } else if (interrupt?.status === 'answered') {
-            const response = interrupt.response as OpportunityAttackInterruptResponse | undefined
-            pendingSharedOpportunityAttackRef.current = null
-            await finishSharedCombatInterrupt(opportunityPending.id, response)
-            opportunityPending.resolve(!!response?.useOpportunityAttack)
+            case 'gale-combo': {
+              const pending = pendingSharedGaleComboRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedGaleComboRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.decision)
+              break
+            }
+            case 'agile-leap': {
+              const pending = pendingSharedAgileLeapRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedAgileLeapRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.useAgileLeap)
+              break
+            }
+            case 'opportunity-attack': {
+              const pending = pendingSharedOpportunityAttackRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedOpportunityAttackRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.useOpportunityAttack)
+              break
+            }
           }
         }
         return
