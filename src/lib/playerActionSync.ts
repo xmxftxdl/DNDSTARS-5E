@@ -3,7 +3,7 @@ import type {
   SharedPlayerActionProcessedState,
   SharedPlayerActionRequestQueueState,
   SharedPlayerActionState,
-} from '../pages/mapsPageTypes'
+} from './sharedCombatTypes'
 import { PLAYER_ACTION_QUEUE_LIMIT } from './playerActionAck'
 
 export function isAuthoritativeActionSnapshotReady(

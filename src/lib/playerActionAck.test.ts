@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
-import type { SharedPlayerActionState } from '../pages/mapsPageTypes'
+import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildPlayerActionAck,
   buildPlayerActionProcessedState,

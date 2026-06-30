@@ -7,7 +7,7 @@ import { getEffectiveAbilityMod } from '../lib/archerCombat'
 import { isBasicShot } from '../lib/classFeatures'
 import type { Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
-import type { StatusType } from './mapsPageTypes'
+import type { StatusType } from '../lib/sharedCombatTypes'
 
 /**
  * [T10/AC4 · E13] enemyAP 的「读到的快照」如何调和进当前态。

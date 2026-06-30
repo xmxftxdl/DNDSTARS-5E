@@ -1,13 +1,13 @@
-// [T15/G3] MapsPage 共享类型抽取。纯类型声明，无运行时——从 MapsPage.tsx 原样搬出，
-// 不改名、不改结构，仅为给 7000+ 行的 god-object 拆出独立的类型边界。
-// 这些 Shared* 形状是 DM/玩家两端通过 sharedApi 广播/读取的契约。
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
-import type { GridCell } from '../lib/gridCombat'
-import type { EnemyTurnResult } from '../lib/enemyAi'
-import type { ClassFeatureKey } from '../types/character'
 import type { DiceRoll } from '../components/DiceRollOverlay'
-import type { PlayerActionResultSummary } from '../lib/playerActionResult'
+import type { ClassFeatureKey } from '../types/character'
+import type { EnemyTurnResult } from './enemyAi'
+import type { GridCell } from './gridCombat'
+import type { PlayerActionResultSummary } from './playerActionResult'
 
+// Shared DM/player state contracts transported through sharedApi.
+// Keep these runtime-free so UI, sync helpers, and headless services can depend
+// on the same protocol types without importing page modules.
 export type Mode = 'dm' | 'player'
 
 export interface SharedCombatState {
@@ -163,11 +163,8 @@ export interface SharedDiceEventsState {
   updatedAt: number
 }
 
-// T-P2-398 (398-A, strangler): result-broadcast path. DM emits ONE seedless
-// roll-request carrying the already-decided values; each end self-renders the
-// @values face independently. Intentionally NO seed/diceSeed field (AC2) — the
-// terminal face is carried by `values`, not reproduced from a seed. Lives on a
-// dedicated channel so it never touches the old dice-stream frame path (AC4).
+// Result-broadcast path. DM emits one roll-request carrying the already-decided
+// values; each end renders the same terminal face from `values`.
 export interface SharedRollRequestEvent {
   eventId: string
   mapId: string
@@ -194,7 +191,8 @@ export interface SharedCombatLogState {
 }
 
 export type StatusType = 'burning' | 'poison'
-export type CombatLogEntry = {
+
+export interface CombatLogEntry {
   id: number
   round: number
   text: string

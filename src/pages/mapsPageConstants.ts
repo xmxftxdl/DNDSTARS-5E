@@ -9,7 +9,7 @@ import {
   VULNERABLE_STATUS_LABEL as CANON_VULNERABLE_LABEL,
   NO_MOVE_STATUS_LABEL as CANON_NO_MOVE_LABEL,
 } from '../lib/tokenStatus'
-import type { StatusType } from './mapsPageTypes'
+import type { StatusType } from '../lib/sharedCombatTypes'
 
 // [T5/C6] alias the canonical labels from tokenStatus.ts (single source) — these consts
 // keep their names so the ~20 reference sites are unchanged, but the literals live in one place.

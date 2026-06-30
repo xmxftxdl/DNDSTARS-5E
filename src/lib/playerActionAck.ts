@@ -2,7 +2,7 @@ import type {
   SharedPlayerActionAckState,
   SharedPlayerActionProcessedState,
   SharedPlayerActionState,
-} from '../pages/mapsPageTypes'
+} from './sharedCombatTypes'
 import {
   summarizePlayerActionResult,
   type PlayerActionResultBaseline,

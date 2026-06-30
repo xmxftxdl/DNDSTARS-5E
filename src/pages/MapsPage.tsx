@@ -229,7 +229,7 @@ import type {
   SharedRollRequestPayload,
   SharedCombatLogState,
   CombatLogEntry,
-} from './mapsPageTypes'
+} from '../lib/sharedCombatTypes'
 import {
   TOKEN_MOVE_MS,
   DICE_ROLL_MS,
