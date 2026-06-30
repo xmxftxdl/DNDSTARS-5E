@@ -10,6 +10,7 @@ import {
   queuedPlayerActionsForDm,
   resolvePlayerActionAckDecision,
   shouldClearPendingPlayerActionAfterAck,
+  syncAuthoritativePlayerActionState,
   waitForAuthoritativeActionSnapshot,
 } from './playerActionSync'
 
@@ -453,5 +454,40 @@ describe('player action sync barrier', () => {
     })
 
     expect(sleeps).toBe(2)
+  })
+
+  it('reloads authoritative player action state after the snapshot barrier', async () => {
+    let now = 0
+    let mapsUpdatedAt = 0
+    let charactersUpdatedAt = 0
+    const calls: string[] = []
+
+    await syncAuthoritativePlayerActionState({
+      appliedAt: 100,
+      now: () => now,
+      pollMs: 10,
+      timeoutMs: 100,
+      loadMapsUpdatedAt: async () => {
+        calls.push('watermark:maps')
+        return mapsUpdatedAt
+      },
+      loadCharactersUpdatedAt: async () => {
+        calls.push('watermark:characters')
+        return charactersUpdatedAt
+      },
+      sleep: async (ms) => {
+        now += ms
+        mapsUpdatedAt = 100
+        charactersUpdatedAt = 100
+      },
+      loadMaps: async () => {
+        calls.push('reload:maps')
+      },
+      loadCharacters: async () => {
+        calls.push('reload:characters')
+      },
+    })
+
+    expect(calls.slice(-2).sort()).toEqual(['reload:characters', 'reload:maps'])
   })
 })

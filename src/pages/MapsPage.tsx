@@ -257,7 +257,7 @@ import {
   consumePlayerActionAck,
   loadDmPlayerActionBatch,
   publishPlayerActionRequest,
-  waitForAuthoritativeActionSnapshot,
+  syncAuthoritativePlayerActionState,
   type SharedPlayerActionPatch,
 } from '../lib/playerActionSync'
 import {
@@ -5914,17 +5914,15 @@ export default function MapsPage() {
   }
 
   const waitForAuthoritativePlayerActionSync = async (appliedAt?: number) => {
-    await waitForAuthoritativeActionSnapshot({
+    await syncAuthoritativePlayerActionState({
       appliedAt,
       loadMapsUpdatedAt: async () => (await loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
       loadCharactersUpdatedAt: async () =>
         (await loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
       sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+      loadMaps: () => useMapStore.getState().loadShared(),
+      loadCharacters: () => useCharacterStore.getState().loadShared(),
     })
-    await Promise.all([
-      useMapStore.getState().loadShared(),
-      useCharacterStore.getState().loadShared(),
-    ])
   }
 
   useEffect(() => {

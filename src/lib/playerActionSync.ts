@@ -262,6 +262,29 @@ export async function waitForAuthoritativeActionSnapshot(input: {
   }
 }
 
+export async function syncAuthoritativePlayerActionState(input: {
+  appliedAt?: number
+  loadMapsUpdatedAt: () => Promise<number | undefined>
+  loadCharactersUpdatedAt: () => Promise<number | undefined>
+  loadMaps: () => Promise<unknown>
+  loadCharacters: () => Promise<unknown>
+  sleep: (ms: number) => Promise<void>
+  now?: () => number
+  timeoutMs?: number
+  pollMs?: number
+}): Promise<void> {
+  await waitForAuthoritativeActionSnapshot({
+    appliedAt: input.appliedAt,
+    loadMapsUpdatedAt: input.loadMapsUpdatedAt,
+    loadCharactersUpdatedAt: input.loadCharactersUpdatedAt,
+    sleep: input.sleep,
+    now: input.now,
+    timeoutMs: input.timeoutMs,
+    pollMs: input.pollMs,
+  })
+  await Promise.all([input.loadMaps(), input.loadCharacters()])
+}
+
 function shouldKeepQueuedPlayerActionRequest(
   action: SharedPlayerActionState,
   request: SharedPlayerActionState | undefined,
