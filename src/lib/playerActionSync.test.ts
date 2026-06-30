@@ -10,6 +10,7 @@ import {
   queuedPlayerActionsForDm,
   resolvePlayerActionAckDecision,
   shouldClearPendingPlayerActionAfterAck,
+  submitPlayerActionRequestWithLock,
   syncAuthoritativePlayerActionState,
   waitForAuthoritativeActionSnapshot,
 } from './playerActionSync'
@@ -244,6 +245,42 @@ describe('player action sync barrier', () => {
     expect(calls).toEqual(['load', 'save', 'publish'])
     expect(savedQueueIds).toEqual(['old-action', action.id])
     expect(publishedActionId).toBe(action.id)
+  })
+
+  it('locks the pending player action before publishing the request', async () => {
+    const action = buildSharedPlayerAction({
+      mapId: 'map-1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      now: 1000,
+      patch: { type: 'end-turn' },
+    })
+    const calls: string[] = []
+
+    await submitPlayerActionRequestWithLock({
+      action,
+      label: '结束回合',
+      lockPendingAction: (pending) => {
+        calls.push(`lock:${pending.id}:${pending.label}`)
+      },
+      loadQueue: async () => {
+        calls.push('load')
+        return null
+      },
+      saveQueue: async () => {
+        calls.push('save')
+      },
+      publishAction: async () => {
+        calls.push('publish')
+      },
+      now: () => 2000,
+    })
+
+    expect(calls).toEqual([`lock:${action.id}:结束回合`, 'load', 'save', 'publish'])
   })
 
   it('decides whether a player ack should be consumed by the current pending action', () => {

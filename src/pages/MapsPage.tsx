@@ -256,7 +256,7 @@ import {
   buildSharedPlayerAction,
   consumePlayerActionAck,
   loadDmPlayerActionBatch,
-  publishPlayerActionRequest,
+  submitPlayerActionRequestWithLock,
   syncAuthoritativePlayerActionState,
   type SharedPlayerActionPatch,
 } from '../lib/playerActionSync'
@@ -5674,9 +5674,10 @@ export default function MapsPage() {
   }
 
   const submitPlayerActionRequest = (action: SharedPlayerActionState, label: string) => {
-    setPendingPlayerActionLocked({ id: action.id, label })
-    void publishPlayerActionRequest({
+    void submitPlayerActionRequestWithLock({
       action,
+      label,
+      lockPendingAction: setPendingPlayerActionLocked,
       loadQueue: () => loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests'),
       saveQueue: (queue) => saveSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests', queue),
       publishAction: (eventAction) => publishSharedEvent<SharedPlayerActionState>('player-action-player-to-dm', eventAction),

@@ -100,6 +100,25 @@ export async function publishPlayerActionRequest(input: {
   await input.publishAction(input.action)
 }
 
+export async function submitPlayerActionRequestWithLock(input: {
+  action: SharedPlayerActionState
+  label: string
+  lockPendingAction: (pending: { id: string; label: string }) => void
+  loadQueue: () => Promise<SharedPlayerActionRequestQueueState | null>
+  saveQueue: (queue: SharedPlayerActionRequestQueueState) => Promise<void>
+  publishAction: (action: SharedPlayerActionState) => Promise<void>
+  now?: () => number
+}): Promise<void> {
+  input.lockPendingAction({ id: input.action.id, label: input.label })
+  await publishPlayerActionRequest({
+    action: input.action,
+    loadQueue: input.loadQueue,
+    saveQueue: input.saveQueue,
+    publishAction: input.publishAction,
+    now: input.now,
+  })
+}
+
 export function queuedPlayerActionsForDm(input: {
   queue?: SharedPlayerActionRequestQueueState | null
   mapId: string
