@@ -3,25 +3,17 @@ import {
   type SharedCombatInterruptQueueState,
 } from './combatInterruptQueue'
 import type {
-  SharedAgileLeapState,
   SharedCombatLogState,
   SharedDiceEventsState,
-  SharedDodgeState,
-  SharedGaleComboState,
   SharedPlayerActionAckState,
   SharedPlayerActionProcessedState,
   SharedPlayerActionRequestQueueState,
   SharedPlayerActionState,
-  SharedStableMindState,
 } from './sharedCombatTypes'
 
 export interface CombatMessageQueueResetState {
   interruptQueue: SharedCombatInterruptQueueState
   diceEvents: SharedDiceEventsState
-  dodge: SharedDodgeState
-  stableMind: SharedStableMindState
-  galeCombo: SharedGaleComboState
-  agileLeap: SharedAgileLeapState
   playerAction: SharedPlayerActionState
   playerActionRequests: SharedPlayerActionRequestQueueState
   playerActionProcessed: SharedPlayerActionProcessedState
@@ -39,48 +31,6 @@ export function buildCombatMessageQueueReset(input: {
   return {
     interruptQueue: emptyCombatInterruptQueue(mapId, updatedAt),
     diceEvents: { mapId, events: [], updatedAt },
-    dodge: {
-      id: `${mapId}:combat-start:dodge:${updatedAt}`,
-      mapId,
-      status: 'done',
-      result: { moved: false, attacked: false, message: 'cleared' },
-      targetCharId: '',
-      updatedAt,
-    },
-    stableMind: {
-      id: `${mapId}:combat-start:stable-mind:${updatedAt}`,
-      mapId,
-      status: 'done',
-      targetCharId: '',
-      targetName: '',
-      fullDamage: 0,
-      damageAfterSave: 0,
-      saveD20: 0,
-      saveMod: 0,
-      saveTotal: 0,
-      dc: 0,
-      updatedAt,
-    },
-    galeCombo: {
-      id: `${mapId}:combat-start:gale-combo:${updatedAt}`,
-      mapId,
-      status: 'done',
-      casterCharId: '',
-      casterName: '',
-      triggerLabel: '',
-      updatedAt,
-    },
-    agileLeap: {
-      id: `${mapId}:combat-start:agile-leap:${updatedAt}`,
-      mapId,
-      status: 'done',
-      targetCharId: '',
-      targetName: '',
-      feet: 0,
-      uses: 0,
-      maxUses: 0,
-      updatedAt,
-    },
     playerAction: {
       id: `${mapId}:combat-start:player-action:${updatedAt}`,
       mapId,

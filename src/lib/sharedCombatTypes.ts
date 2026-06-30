@@ -1,7 +1,6 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import type { ClassFeatureKey } from '../types/character'
-import type { EnemyTurnResult } from './enemyAi'
 import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 
@@ -18,62 +17,6 @@ export interface SharedCombatState {
   initiativeIndex: number
   initiativeOrder: InitiativeEntry[]
   enemyApByToken?: Record<string, { current: number; max: number }>
-  updatedAt: number
-}
-
-export interface SharedDodgeState {
-  id: string
-  mapId: string
-  status: 'pending' | 'rolling' | 'answered' | 'done'
-  result: EnemyTurnResult
-  targetCharId: string
-  wantsDodge?: boolean
-  dodgeD20?: number
-  dodgeApSpent?: boolean
-  expiresAt?: number
-  updatedAt: number
-}
-
-export interface SharedStableMindState {
-  id: string
-  mapId: string
-  status: 'pending' | 'answered' | 'done'
-  targetCharId: string
-  targetName: string
-  fullDamage: number
-  damageAfterSave: number
-  saveD20: number
-  saveMod: number
-  saveTotal: number
-  dc: number
-  useStableMind?: boolean
-  expiresAt?: number
-  updatedAt: number
-}
-
-export interface SharedGaleComboState {
-  id: string
-  mapId: string
-  status: 'pending' | 'answered' | 'done'
-  casterCharId: string
-  casterName: string
-  triggerLabel: string
-  useGaleCombo?: boolean
-  expiresAt?: number
-  updatedAt: number
-}
-
-export interface SharedAgileLeapState {
-  id: string
-  mapId: string
-  status: 'pending' | 'answered' | 'done'
-  targetCharId: string
-  targetName: string
-  feet: number
-  uses: number
-  maxUses: number
-  useAgileLeap?: boolean
-  expiresAt?: number
   updatedAt: number
 }
 

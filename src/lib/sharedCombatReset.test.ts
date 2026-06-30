@@ -11,15 +11,6 @@ describe('shared combat reset', () => {
 
     expect(reset.interruptQueue).toEqual({ mapId: 'map-1', interrupts: [], updatedAt: 123 })
     expect(reset.diceEvents).toEqual({ mapId: 'map-1', events: [], updatedAt: 123 })
-    expect(reset.dodge).toMatchObject({
-      id: 'map-1:combat-start:dodge:123',
-      mapId: 'map-1',
-      status: 'done',
-      targetCharId: '',
-    })
-    expect(reset.stableMind.status).toBe('done')
-    expect(reset.galeCombo.status).toBe('done')
-    expect(reset.agileLeap.status).toBe('done')
     expect(reset.playerAction).toMatchObject({
       id: 'map-1:combat-start:player-action:123',
       combatId: 'combat-1',
