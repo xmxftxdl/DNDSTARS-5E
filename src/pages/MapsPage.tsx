@@ -248,6 +248,8 @@ import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
   queuedPlayerActionsForDm,
+  resolvePlayerActionAckDecision,
+  shouldClearPendingPlayerActionAfterAck,
   waitForAuthoritativeActionSnapshot,
   type SharedPlayerActionPatch,
 } from '../lib/playerActionSync'
@@ -6517,18 +6519,22 @@ export default function MapsPage() {
     if (mode !== 'player' || !activeMap) return
     let cancelled = false
     const applyAck = (ack: SharedPlayerActionAckState | null) => {
-      if (!ack || ack.mapId !== activeMap.id) return
-      if (seenPlayerActionAckIdsRef.current.has(ack.id)) return
-      seenPlayerActionAckIdsRef.current.add(ack.id)
-      const current = pendingPlayerActionRef.current
-      if (!current || current.id !== ack.actionId) return
+      const decision = resolvePlayerActionAckDecision({
+        ack,
+        mapId: activeMap.id,
+        seenAckIds: seenPlayerActionAckIdsRef.current,
+        pendingAction: pendingPlayerActionRef.current,
+      })
+      if (decision.markSeenAckId) seenPlayerActionAckIdsRef.current.add(decision.markSeenAckId)
+      if (decision.status !== 'handle') return
       void (async () => {
-        if (ack.status === 'accepted') {
-          await waitForAuthoritativePlayerActionSync(ack.appliedAt)
-        }
+        await waitForAuthoritativePlayerActionSync(decision.waitForAppliedAt)
         if (cancelled) return
         window.setTimeout(() => {
-          if (!cancelled && pendingPlayerActionRef.current?.id === ack.actionId) {
+          if (
+            !cancelled &&
+            shouldClearPendingPlayerActionAfterAck(pendingPlayerActionRef.current, decision.actionId)
+          ) {
             setPendingPlayerActionLocked(null)
           }
         }, 100)

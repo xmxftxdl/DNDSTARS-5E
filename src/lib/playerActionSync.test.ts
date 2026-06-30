@@ -4,6 +4,8 @@ import {
   buildSharedPlayerAction,
   isAuthoritativeActionSnapshotReady,
   queuedPlayerActionsForDm,
+  resolvePlayerActionAckDecision,
+  shouldClearPendingPlayerActionAfterAck,
   waitForAuthoritativeActionSnapshot,
 } from './playerActionSync'
 
@@ -126,6 +128,97 @@ describe('player action sync barrier', () => {
     })
 
     expect(queued.map((action) => action.id)).toEqual(['early', 'late'])
+  })
+
+  it('decides whether a player ack should be consumed by the current pending action', () => {
+    const ack = {
+      id: 'ack-1',
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      actionId: 'action-1',
+      status: 'accepted' as const,
+      appliedAt: 1234,
+      round: 1,
+      initiativeIndex: 0,
+      updatedAt: 1234,
+    }
+
+    expect(
+      resolvePlayerActionAckDecision({
+        ack: null,
+        mapId: 'map-1',
+        seenAckIds: new Set(),
+        pendingAction: { id: 'action-1' },
+      }),
+    ).toEqual({ status: 'ignored' })
+
+    expect(
+      resolvePlayerActionAckDecision({
+        ack: { ...ack, mapId: 'other-map' },
+        mapId: 'map-1',
+        seenAckIds: new Set(),
+        pendingAction: { id: 'action-1' },
+      }),
+    ).toEqual({ status: 'ignored' })
+
+    expect(
+      resolvePlayerActionAckDecision({
+        ack,
+        mapId: 'map-1',
+        seenAckIds: new Set(['ack-1']),
+        pendingAction: { id: 'action-1' },
+      }),
+    ).toEqual({ status: 'ignored' })
+
+    expect(
+      resolvePlayerActionAckDecision({
+        ack,
+        mapId: 'map-1',
+        seenAckIds: new Set(),
+        pendingAction: { id: 'other-action' },
+      }),
+    ).toEqual({ status: 'ignored', markSeenAckId: 'ack-1' })
+
+    expect(
+      resolvePlayerActionAckDecision({
+        ack,
+        mapId: 'map-1',
+        seenAckIds: new Set(),
+        pendingAction: { id: 'action-1' },
+      }),
+    ).toEqual({
+      status: 'handle',
+      markSeenAckId: 'ack-1',
+      actionId: 'action-1',
+      waitForAppliedAt: 1234,
+    })
+  })
+
+  it('does not wait for authoritative snapshots on rejected acks but still clears matching pending action', () => {
+    const decision = resolvePlayerActionAckDecision({
+      ack: {
+        id: 'ack-2',
+        mapId: 'map-1',
+        actionId: 'action-2',
+        status: 'rejected',
+        reason: 'stale-turn',
+        round: 1,
+        initiativeIndex: 0,
+        updatedAt: 2000,
+      },
+      mapId: 'map-1',
+      seenAckIds: new Set(),
+      pendingAction: { id: 'action-2' },
+    })
+
+    expect(decision).toEqual({
+      status: 'handle',
+      markSeenAckId: 'ack-2',
+      actionId: 'action-2',
+      waitForAppliedAt: undefined,
+    })
+    expect(shouldClearPendingPlayerActionAfterAck({ id: 'action-2' }, 'action-2')).toBe(true)
+    expect(shouldClearPendingPlayerActionAfterAck({ id: 'other' }, 'action-2')).toBe(false)
   })
 
   it('waits for authoritative snapshots before resolving', async () => {

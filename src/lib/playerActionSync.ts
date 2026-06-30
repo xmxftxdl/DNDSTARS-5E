@@ -1,4 +1,5 @@
 import type {
+  SharedPlayerActionAckState,
   SharedPlayerActionRequestQueueState,
   SharedPlayerActionState,
 } from '../pages/mapsPageTypes'
@@ -95,6 +96,49 @@ export function queuedPlayerActionsForDm(input: {
       return true
     })
     .sort((a, b) => (a.updatedAt - b.updatedAt) || (a.seq - b.seq))
+}
+
+export interface PendingPlayerActionLock {
+  id: string
+  label?: string
+}
+
+export type PlayerActionAckDecision =
+  | { status: 'ignored'; markSeenAckId?: string }
+  | {
+      status: 'handle'
+      markSeenAckId: string
+      actionId: string
+      waitForAppliedAt?: number
+    }
+
+export function resolvePlayerActionAckDecision(input: {
+  ack?: SharedPlayerActionAckState | null
+  mapId: string
+  seenAckIds: ReadonlySet<string>
+  pendingAction?: PendingPlayerActionLock | null
+}): PlayerActionAckDecision {
+  const ack = input.ack
+  if (!ack || ack.mapId !== input.mapId) return { status: 'ignored' }
+  if (input.seenAckIds.has(ack.id)) return { status: 'ignored' }
+
+  if (!input.pendingAction || input.pendingAction.id !== ack.actionId) {
+    return { status: 'ignored', markSeenAckId: ack.id }
+  }
+
+  return {
+    status: 'handle',
+    markSeenAckId: ack.id,
+    actionId: ack.actionId,
+    waitForAppliedAt: ack.status === 'accepted' ? ack.appliedAt : undefined,
+  }
+}
+
+export function shouldClearPendingPlayerActionAfterAck(
+  pendingAction: PendingPlayerActionLock | null | undefined,
+  actionId: string,
+): boolean {
+  return pendingAction?.id === actionId
 }
 
 export async function waitForAuthoritativeActionSnapshot(input: {
