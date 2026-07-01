@@ -4397,6 +4397,18 @@ export default function MapsPage() {
         event.type === 'token-moved' && event.tokenId === tokenId,
     )
 
+  const settleSimpleHeadlessMoveAction = (
+    action: SharedPlayerActionState,
+    token: Token,
+    result: HeadlessCombatResult,
+  ): boolean => {
+    const moved = result.ok ? tokenMovedEvent(result.events, token.id) : undefined
+    return settleHeadlessPlayerAction(action, result, {
+      acceptedPosition: moved?.to ?? { x: token.x, y: token.y },
+      rejectReason: (reason) => (reason === 'movement-locked' ? 'no-move' : reason),
+    })
+  }
+
   const opportunityTriggeredEvents = (
     events: HeadlessCombatEvent[],
     movingTokenId: string,
@@ -5404,22 +5416,7 @@ export default function MapsPage() {
         targetPosition: action.targetPosition,
         mode: 'agile-leap',
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(
-          action,
-          'rejected',
-          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
-        )
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      const moved = tokenMovedEvent(headless.events, token.id)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, moved?.to ?? { x: token.x, y: token.y })
+      settleSimpleHeadlessMoveAction(action, token, headless)
       return
     }
 
@@ -5439,22 +5436,7 @@ export default function MapsPage() {
         targetPosition: action.targetPosition,
         mode: 'skill-free-move',
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(
-          action,
-          'rejected',
-          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
-        )
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      const moved = tokenMovedEvent(headless.events, token.id)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, moved?.to ?? { x: token.x, y: token.y })
+      settleSimpleHeadlessMoveAction(action, token, headless)
       return
     }
 
@@ -5474,22 +5456,7 @@ export default function MapsPage() {
         targetPosition: action.targetPosition,
         mode: 'calm-spirit-move',
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(
-          action,
-          'rejected',
-          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
-        )
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      const moved = tokenMovedEvent(headless.events, token.id)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, moved?.to ?? { x: token.x, y: token.y })
+      settleSimpleHeadlessMoveAction(action, token, headless)
       return
     }
 
