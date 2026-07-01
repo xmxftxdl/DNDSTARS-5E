@@ -65,3 +65,19 @@ export function buildPlayerActionProcessedState(input: {
     updatedAt: input.updatedAt,
   }
 }
+
+export async function persistPlayerActionProcessedState(input: {
+  action: SharedPlayerActionState
+  loadCurrent: () => Promise<SharedPlayerActionProcessedState | null>
+  saveProcessed: (processed: SharedPlayerActionProcessedState) => Promise<void>
+  now?: () => number
+}): Promise<void> {
+  const current = await input.loadCurrent()
+  await input.saveProcessed(
+    buildPlayerActionProcessedState({
+      action: input.action,
+      current,
+      updatedAt: input.now?.() ?? Date.now(),
+    }),
+  )
+}

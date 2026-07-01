@@ -5,6 +5,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildPlayerActionAck,
   buildPlayerActionProcessedState,
+  persistPlayerActionProcessedState,
 } from './playerActionAck'
 import type { PlayerActionResultBaseline } from './playerActionResult'
 
@@ -185,5 +186,36 @@ describe('player action ack helpers', () => {
         updatedAt: 3000,
       }).actionIds,
     ).toEqual(['new-combat-action'])
+  })
+
+  it('persists processed action state through load and save callbacks', async () => {
+    const calls: string[] = []
+    let saved: ReturnType<typeof buildPlayerActionProcessedState> | undefined
+
+    await persistPlayerActionProcessedState({
+      action: makeAction({ id: 'action-3' }),
+      now: () => 3000,
+      loadCurrent: async () => {
+        calls.push('load')
+        return {
+          mapId: 'map-1',
+          combatId: 'combat-1',
+          actionIds: ['action-1', 'action-2'],
+          updatedAt: 2000,
+        }
+      },
+      saveProcessed: async (processed) => {
+        calls.push('save')
+        saved = processed
+      },
+    })
+
+    expect(calls).toEqual(['load', 'save'])
+    expect(saved).toMatchObject({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      actionIds: ['action-1', 'action-2', 'action-3'],
+      updatedAt: 3000,
+    })
   })
 })

@@ -97,7 +97,7 @@ import {
 } from '../lib/playerActionAuthorityRouter'
 import {
   buildPlayerActionAck,
-  buildPlayerActionProcessedState,
+  persistPlayerActionProcessedState,
 } from '../lib/playerActionAck'
 import { publishPlayerActionAckWithSnapshots } from '../lib/playerActionAckPublish'
 import {
@@ -4268,13 +4268,12 @@ export default function MapsPage() {
     // Requests are append-only from the player side. DM completion is represented
     // by player-action-ack so we never overwrite a newer player request snapshot.
     processedPlayerActionIdsRef.current.add(action.id)
-    void (async () => {
-      const current = await loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed')
-      await saveSharedResource<SharedPlayerActionProcessedState>(
-        'player-action-processed',
-        buildPlayerActionProcessedState({ action, current, updatedAt: Date.now() }),
-      )
-    })()
+    void persistPlayerActionProcessedState({
+      action,
+      loadCurrent: () => loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed'),
+      saveProcessed: (processed) =>
+        saveSharedResource<SharedPlayerActionProcessedState>('player-action-processed', processed),
+    })
   }
 
   const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState => ({
