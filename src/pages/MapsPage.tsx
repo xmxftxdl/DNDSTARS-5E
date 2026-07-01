@@ -96,6 +96,8 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
+  buildCommitPlayerMoveAction,
+  buildDeferredPlayerMoveAction,
   playerMoveRejectReason,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
@@ -5496,10 +5498,7 @@ export default function MapsPage() {
         return
       }
 
-      const deferred = resolveHeadlessDmAction(headlessSnapshot, {
-        ...moveAction,
-        deferTokenMove: true,
-      })
+      const deferred = resolveHeadlessDmAction(headlessSnapshot, buildDeferredPlayerMoveAction(moveAction))
       if (!deferred.ok) {
         acknowledgePlayerAction(
           action,
@@ -5524,13 +5523,10 @@ export default function MapsPage() {
         return
       }
       const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
-      const committed = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMapAfterOpportunity), {
-        type: 'commit-token-move',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        targetPosition,
-        feet: movedFeet,
-      })
+      const committed = resolveHeadlessDmAction(
+        createHeadlessStateSnapshot(latestMapAfterOpportunity),
+        buildCommitPlayerMoveAction({ moveAction, targetPosition, feet: movedFeet }),
+      )
       if (!committed.ok) {
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'rejected', committed.reason)

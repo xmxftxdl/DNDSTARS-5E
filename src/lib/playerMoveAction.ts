@@ -2,6 +2,7 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { snapTokenToGridCenter } from './gridCombat'
 import type {
+  HeadlessCommitTokenMoveAction,
   HeadlessCombatFailureReason,
   HeadlessCombatResult,
   HeadlessPlayerMoveAction,
@@ -94,4 +95,25 @@ export function summarizeHeadlessPlayerMovePreview(input: {
 
 export function playerMoveRejectReason(reason: HeadlessCombatFailureReason): string {
   return reason === 'movement-locked' ? 'no-move' : reason
+}
+
+export function buildDeferredPlayerMoveAction(moveAction: HeadlessPlayerMoveAction): HeadlessPlayerMoveAction {
+  return {
+    ...moveAction,
+    deferTokenMove: true,
+  }
+}
+
+export function buildCommitPlayerMoveAction(input: {
+  moveAction: HeadlessPlayerMoveAction
+  targetPosition: { x: number; y: number }
+  feet: number
+}): HeadlessCommitTokenMoveAction {
+  return {
+    type: 'commit-token-move',
+    actorTokenId: input.moveAction.actorTokenId,
+    characterId: input.moveAction.characterId,
+    targetPosition: input.targetPosition,
+    feet: input.feet,
+  }
 }

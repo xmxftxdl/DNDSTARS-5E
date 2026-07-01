@@ -4,6 +4,8 @@ import type { Character } from '../types/character'
 import type { HeadlessCombatResult } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
+  buildCommitPlayerMoveAction,
+  buildDeferredPlayerMoveAction,
   playerMoveRejectReason,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
@@ -149,5 +151,34 @@ describe('player move action helpers', () => {
   it('maps movement lock failures to the player-facing no-move reason', () => {
     expect(playerMoveRejectReason('movement-locked')).toBe('no-move')
     expect(playerMoveRejectReason('out-of-range')).toBe('out-of-range')
+  })
+
+  it('builds deferred and commit move actions without losing actor identity', () => {
+    const prepared = preparePlayerMoveAction({
+      action: makeAction(),
+      map: makeMap(),
+      characters: [makeCharacter()],
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    expect(buildDeferredPlayerMoveAction(prepared.moveAction)).toEqual({
+      ...prepared.moveAction,
+      deferTokenMove: true,
+    })
+    expect(
+      buildCommitPlayerMoveAction({
+        moveAction: prepared.moveAction,
+        targetPosition: { x: 250, y: 150 },
+        feet: 15,
+      }),
+    ).toEqual({
+      type: 'commit-token-move',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 250, y: 150 },
+      feet: 15,
+    })
   })
 })
