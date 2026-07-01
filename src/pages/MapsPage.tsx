@@ -4357,6 +4357,37 @@ export default function MapsPage() {
     }
   }
 
+  const settleHeadlessPlayerAction = (
+    action: SharedPlayerActionState,
+    result: HeadlessCombatResult,
+    options?: {
+      acceptedPosition?: { x: number; y: number }
+      acceptedReason?: string
+      previousRound?: number
+      rejectReason?: (reason: string) => string
+    },
+  ): boolean => {
+    if (!result.ok) {
+      acknowledgePlayerAction(action, 'rejected', options?.rejectReason?.(result.reason) ?? result.reason)
+      completePlayerActionRequest(action)
+      return false
+    }
+    applyHeadlessCombatResult(result)
+    for (const event of result.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      if (
+        options?.previousRound != null &&
+        event.type === 'turn-advanced' &&
+        event.round > options.previousRound
+      ) {
+        pushCombatLog(`杩涘叆绗?${event.round} 鍥炲悎`, 'turn', event.round)
+      }
+    }
+    completePlayerActionRequest(action)
+    acknowledgePlayerAction(action, 'accepted', options?.acceptedReason, options?.acceptedPosition)
+    return true
+  }
+
   const tokenMovedEvent = (
     events: HeadlessCombatEvent[],
     tokenId: string,
@@ -4572,17 +4603,7 @@ export default function MapsPage() {
         effect: action.calmSpiritEffect,
         skillId: action.skillId,
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(action, 'rejected', headless.reason)
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
+      settleHeadlessPlayerAction(action, headless)
       return
     }
 
@@ -4599,17 +4620,7 @@ export default function MapsPage() {
         characterId: action.characterId,
         skillId: action.skillId,
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(action, 'rejected', headless.reason)
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
+      settleHeadlessPlayerAction(action, headless)
       return
     }
 
@@ -5373,17 +5384,7 @@ export default function MapsPage() {
         actorTokenId: action.actorTokenId,
         characterId: action.characterId,
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(action, 'rejected', headless.reason)
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
+      settleHeadlessPlayerAction(action, headless)
       return
     }
 
@@ -5609,17 +5610,7 @@ export default function MapsPage() {
         characterId: action.characterId,
         skillId: skill.id,
       })
-      if (!headless.ok) {
-        acknowledgePlayerAction(action, 'rejected', headless.reason)
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
+      settleHeadlessPlayerAction(action, headless)
       return
     }
 
