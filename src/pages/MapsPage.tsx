@@ -96,6 +96,11 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
+  playerMoveRejectReason,
+  preparePlayerMoveAction,
+  summarizeHeadlessPlayerMovePreview,
+} from '../lib/playerMoveAction'
+import {
   buildPlayerActionAck,
   persistPlayerActionProcessedState,
 } from '../lib/playerActionAck'
@@ -4409,15 +4414,6 @@ export default function MapsPage() {
     })
   }
 
-  const opportunityTriggeredEvents = (
-    events: HeadlessCombatEvent[],
-    movingTokenId: string,
-  ): Extract<HeadlessCombatEvent, { type: 'opportunity-triggered' }>[] =>
-    events.filter(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'opportunity-triggered' }> =>
-        event.type === 'opportunity-triggered' && event.movingTokenId === movingTokenId,
-    )
-
   const attackResolvedEvent = (
     events: HeadlessCombatEvent[],
   ): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
@@ -5461,48 +5457,36 @@ export default function MapsPage() {
     }
 
     if (action.type === 'move-token') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const token = map.tokens.find((item) => item.id === action.actorTokenId)
-      if (
-        !actor ||
-        !token ||
-        token.type !== 'player' ||
-        token.characterId !== actor.id ||
-        !action.targetPosition
-      ) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-move')
+      const preparedMove = preparePlayerMoveAction({
+        action,
+        map,
+        characters: useCharacterStore.getState().characters,
+      })
+      if (!preparedMove.ok) {
+        acknowledgePlayerAction(action, 'rejected', preparedMove.reason)
         completePlayerActionRequest(action)
         return
       }
-
-      const moveAction = {
-        type: 'move-token',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        targetPosition: action.targetPosition,
-      } as const
+      const { actor, token, moveAction } = preparedMove
       const headlessSnapshot = createHeadlessStateSnapshot(map)
       const headless = resolveHeadlessDmAction(headlessSnapshot, moveAction)
-      if (!headless.ok) {
-        acknowledgePlayerAction(
-          action,
-          'rejected',
-          headless.reason === 'movement-locked' ? 'no-move' : headless.reason,
-        )
+      const preview = summarizeHeadlessPlayerMovePreview({
+        result: headless,
+        token,
+        requestedPosition: moveAction.targetPosition,
+        map,
+      })
+      if (!preview.ok) {
+        acknowledgePlayerAction(action, 'rejected', playerMoveRejectReason(preview.reason))
         completePlayerActionRequest(action)
         return
       }
 
-      const moved = tokenMovedEvent(headless.events, token.id)
-      const targetPosition =
-        moved?.to ??
-        headless.state.map.tokens.find((item) => item.id === token.id) ??
-        snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, token, map)
-      const movedFeet = moved?.feet ?? 0
+      const targetPosition = preview.targetPosition
+      const movedFeet = preview.movedFeet
 
-      const opportunityEvents = opportunityTriggeredEvents(headless.events, token.id)
-      if (opportunityEvents.length === 0) {
+      if (preview.opportunityAttackerTokenIds.length === 0) {
         applyHeadlessCombatResult(headless)
         for (const event of headless.events) {
           if (event.type === 'log') pushCombatLog(event.text, 'turn')
@@ -5530,7 +5514,7 @@ export default function MapsPage() {
         token,
         targetPosition,
         actor,
-        opportunityEvents.map((event) => event.attackerTokenId),
+        preview.opportunityAttackerTokenIds,
       )
       const latestMover = useCharacterStore.getState().characters.find((c) => c.id === actor.id)
       if (!latestMover || latestMover.currentHp <= 0) {
