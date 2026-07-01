@@ -4370,6 +4370,7 @@ export default function MapsPage() {
     options?: {
       acceptedPosition?: { x: number; y: number }
       acceptedReason?: string
+      beforeComplete?: () => void
       previousRound?: number
       rejectReason?: (reason: string) => string
     },
@@ -4390,6 +4391,7 @@ export default function MapsPage() {
         pushCombatLog(`杩涘叆绗?${event.round} 鍥炲悎`, 'turn', event.round)
       }
     }
+    options?.beforeComplete?.()
     completePlayerActionRequest(action)
     acknowledgePlayerAction(action, 'accepted', options?.acceptedReason, options?.acceptedPosition)
     return true
@@ -5533,13 +5535,10 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'rejected', committed.reason)
         return
       }
-      applyHeadlessCombatResult(committed)
-      for (const event of committed.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      pushApLog(actor, 1, '移动', `${movedFeet} 尺`)
-      completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
+      settleHeadlessPlayerAction(action, committed, {
+        acceptedPosition: targetPosition,
+        beforeComplete: () => pushApLog(actor, 1, '移动', `${movedFeet} 尺`),
+      })
       return
     }
 
