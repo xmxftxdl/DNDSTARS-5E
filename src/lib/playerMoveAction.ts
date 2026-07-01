@@ -117,3 +117,40 @@ export function buildCommitPlayerMoveAction(input: {
     feet: input.feet,
   }
 }
+
+export type PlayerMoveCommitAfterOpportunityResult =
+  | {
+      ok: true
+      commitAction: HeadlessCommitTokenMoveAction
+    }
+  | {
+      ok: false
+      reason: 'mover-defeated'
+      acceptedPosition: { x: number; y: number }
+    }
+
+export function buildPlayerMoveCommitAfterOpportunity(input: {
+  moveAction: HeadlessPlayerMoveAction
+  targetPosition: { x: number; y: number }
+  feet: number
+  token: Token
+  characters: Character[]
+}): PlayerMoveCommitAfterOpportunityResult {
+  const mover = input.characters.find((character) => character.id === input.moveAction.characterId)
+  if (!mover || mover.currentHp <= 0) {
+    return {
+      ok: false,
+      reason: 'mover-defeated',
+      acceptedPosition: { x: input.token.x, y: input.token.y },
+    }
+  }
+
+  return {
+    ok: true,
+    commitAction: buildCommitPlayerMoveAction({
+      moveAction: input.moveAction,
+      targetPosition: input.targetPosition,
+      feet: input.feet,
+    }),
+  }
+}

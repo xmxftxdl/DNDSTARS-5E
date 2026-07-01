@@ -96,8 +96,8 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
-  buildCommitPlayerMoveAction,
   buildDeferredPlayerMoveAction,
+  buildPlayerMoveCommitAfterOpportunity,
   playerMoveRejectReason,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
@@ -5489,12 +5489,7 @@ export default function MapsPage() {
       const movedFeet = preview.movedFeet
 
       if (preview.opportunityAttackerTokenIds.length === 0) {
-        applyHeadlessCombatResult(headless)
-        for (const event of headless.events) {
-          if (event.type === 'log') pushCombatLog(event.text, 'turn')
-        }
-        completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted', undefined, targetPosition)
+        settleHeadlessPlayerAction(action, headless, { acceptedPosition: targetPosition })
         return
       }
 
@@ -5515,17 +5510,23 @@ export default function MapsPage() {
         actor,
         preview.opportunityAttackerTokenIds,
       )
-      const latestMover = useCharacterStore.getState().characters.find((c) => c.id === actor.id)
-      if (!latestMover || latestMover.currentHp <= 0) {
+      const afterOpportunity = buildPlayerMoveCommitAfterOpportunity({
+        moveAction,
+        targetPosition,
+        feet: movedFeet,
+        token,
+        characters: useCharacterStore.getState().characters,
+      })
+      if (!afterOpportunity.ok) {
         pushApLog(actor, 1, '移动', `${movedFeet} 尺，移动被打断`)
         completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted', 'mover-defeated', { x: token.x, y: token.y })
+        acknowledgePlayerAction(action, 'accepted', afterOpportunity.reason, afterOpportunity.acceptedPosition)
         return
       }
       const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
       const committed = resolveHeadlessDmAction(
         createHeadlessStateSnapshot(latestMapAfterOpportunity),
-        buildCommitPlayerMoveAction({ moveAction, targetPosition, feet: movedFeet }),
+        afterOpportunity.commitAction,
       )
       if (!committed.ok) {
         completePlayerActionRequest(action)

@@ -6,6 +6,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildCommitPlayerMoveAction,
   buildDeferredPlayerMoveAction,
+  buildPlayerMoveCommitAfterOpportunity,
   playerMoveRejectReason,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
@@ -179,6 +180,50 @@ describe('player move action helpers', () => {
       characterId: 'hero',
       targetPosition: { x: 250, y: 150 },
       feet: 15,
+    })
+  })
+
+  it('builds the post-opportunity commit only when the mover is still alive', () => {
+    const prepared = preparePlayerMoveAction({
+      action: makeAction(),
+      map: makeMap(),
+      characters: [makeCharacter()],
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    expect(
+      buildPlayerMoveCommitAfterOpportunity({
+        moveAction: prepared.moveAction,
+        targetPosition: { x: 250, y: 150 },
+        feet: 15,
+        token: prepared.token,
+        characters: [makeCharacter({ currentHp: 1 })],
+      }),
+    ).toEqual({
+      ok: true,
+      commitAction: {
+        type: 'commit-token-move',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetPosition: { x: 250, y: 150 },
+        feet: 15,
+      },
+    })
+
+    expect(
+      buildPlayerMoveCommitAfterOpportunity({
+        moveAction: prepared.moveAction,
+        targetPosition: { x: 250, y: 150 },
+        feet: 15,
+        token: prepared.token,
+        characters: [makeCharacter({ currentHp: 0 })],
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'mover-defeated',
+      acceptedPosition: { x: 100, y: 100 },
     })
   })
 })
