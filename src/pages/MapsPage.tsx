@@ -103,6 +103,11 @@ import {
   summarizeHeadlessPlayerMovePreview,
 } from '../lib/playerMoveAction'
 import {
+  buildHeadlessEndTurnAction,
+  clearCharacterScopedRecord,
+  removeDisengagedCharacterId,
+} from '../lib/playerEndTurnAction'
+import {
   buildPlayerActionAck,
   persistPlayerActionProcessedState,
 } from '../lib/playerActionAck'
@@ -4178,11 +4183,13 @@ export default function MapsPage() {
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const curToken = latestMap.tokens.find((token) => token.id === current.tokenId)
     const previousRound = roundRef.current
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
-      type: 'end-turn',
-      actorTokenId: current.tokenId,
-      characterId: curToken?.characterId,
-    })
+    const headless = resolveHeadlessDmAction(
+      createHeadlessStateSnapshot(latestMap),
+      buildHeadlessEndTurnAction({
+        actorTokenId: current.tokenId,
+        characterId: curToken?.characterId,
+      }),
+    )
     if (!headless.ok) {
       pushCombatLog(`回合推进失败：${headless.reason}`, 'system')
       return
@@ -5567,21 +5574,16 @@ export default function MapsPage() {
       return
     }
 
-    for (const key of Object.keys(multiStrikeHitsRef.current)) {
-      if (key.startsWith(`${action.characterId}:`)) delete multiStrikeHitsRef.current[key]
-    }
-    setDisengagedCharIds((prev) => {
-      if (!prev.has(action.characterId)) return prev
-      const next = new Set(prev)
-      next.delete(action.characterId)
-      return next
-    })
+    multiStrikeHitsRef.current = clearCharacterScopedRecord(multiStrikeHitsRef.current, action.characterId)
+    setDisengagedCharIds((prev) => removeDisengagedCharacterId(prev, action.characterId))
     const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-      type: 'end-turn',
-      actorTokenId: action.actorTokenId,
-      characterId: action.characterId,
-    })
+    const headless = resolveHeadlessDmAction(
+      createHeadlessStateSnapshot(map),
+      buildHeadlessEndTurnAction({
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+      }),
+    )
     if (!headless.ok) {
       acknowledgePlayerAction(action, 'rejected', headless.reason)
       completePlayerActionRequest(action)
@@ -6045,15 +6047,8 @@ export default function MapsPage() {
     setDodgePrompt(null)
 
     if (combatActive && canControlPlayerTurn && turnCharacter) {
-      for (const key of Object.keys(multiStrikeHitsRef.current)) {
-        if (key.startsWith(`${turnCharacter.id}:`)) delete multiStrikeHitsRef.current[key]
-      }
-      setDisengagedCharIds((prev) => {
-        if (!prev.has(turnCharacter.id)) return prev
-        const next = new Set(prev)
-        next.delete(turnCharacter.id)
-        return next
-      })
+      multiStrikeHitsRef.current = clearCharacterScopedRecord(multiStrikeHitsRef.current, turnCharacter.id)
+      setDisengagedCharIds((prev) => removeDisengagedCharacterId(prev, turnCharacter.id))
       if (isDM) {
         submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'end-turn' }))
       } else {
