@@ -91,6 +91,7 @@ import {
   resolveRangedAttackRoll,
 } from '../lib/archerCombat'
 import {
+  canSubmitPlayerCombatAction,
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
@@ -5662,15 +5663,18 @@ export default function MapsPage() {
   }
 
   const canSendPlayerCombatAction = () => {
-    if (!activeMap || mode !== 'player') return false
-    if (playerCombatLocked) return false
-    if (!combatActiveRef.current || !combatActive) return false
-    if (!turnCharacter || !currentInitiativeToken) return false
-    if (pendingPlayerActionRef.current) return false
-    if (currentInitiativeToken.type !== 'player') return false
-    if (currentInitiativeToken.characterId !== turnCharacter.id) return false
-    if (turnCharacter.id !== playerChar?.id) return false
-    return isTokenAlive(currentInitiativeToken, useCharacterStore.getState().characters)
+    return canSubmitPlayerCombatAction({
+      activeMap,
+      mode,
+      playerCombatLocked,
+      combatActive,
+      combatActiveSnapshot: combatActiveRef.current,
+      turnCharacter,
+      currentInitiativeToken,
+      pendingAction: pendingPlayerActionRef.current,
+      playerCharacter: playerChar,
+      characters: useCharacterStore.getState().characters,
+    })
   }
 
   const submitPlayerActionRequest = (action: SharedPlayerActionState, label: string) => {

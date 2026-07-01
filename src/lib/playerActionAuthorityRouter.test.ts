@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
+import type { Character } from '../types/character'
 import {
+  canSubmitPlayerCombatAction,
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
   type PlayerActionAuthorityAction,
@@ -48,6 +50,14 @@ function makeAction(patch: Partial<PlayerActionAuthorityAction> = {}): PlayerAct
     initiativeIndex: 0,
     ...patch,
   }
+}
+
+function makeCharacter(patch: Partial<Character> = {}): Character {
+  return {
+    id: 'hero',
+    currentHp: 10,
+    ...patch,
+  } as Character
 }
 
 function makeContext(patch: Partial<Parameters<typeof preflightPlayerActionAuthority>[1]> = {}) {
@@ -128,5 +138,44 @@ describe('player action authority router', () => {
         now: 1002 + 8001,
       }),
     ).toBe(true)
+  })
+
+  it('allows the assigned player to submit during their live turn', () => {
+    expect(
+      canSubmitPlayerCombatAction({
+        activeMap: makeMap(),
+        mode: 'player',
+        playerCombatLocked: false,
+        combatActive: true,
+        combatActiveSnapshot: true,
+        turnCharacter: makeCharacter(),
+        currentInitiativeToken: makeToken(),
+        pendingAction: null,
+        playerCharacter: makeCharacter(),
+        characters: [makeCharacter()],
+      }),
+    ).toBe(true)
+  })
+
+  it('blocks player submissions while locked, stale, pending, unassigned, or defeated', () => {
+    const base = {
+      activeMap: makeMap(),
+      mode: 'player' as const,
+      playerCombatLocked: false,
+      combatActive: true,
+      combatActiveSnapshot: true,
+      turnCharacter: makeCharacter(),
+      currentInitiativeToken: makeToken(),
+      pendingAction: null,
+      playerCharacter: makeCharacter(),
+      characters: [makeCharacter()],
+    }
+
+    expect(canSubmitPlayerCombatAction({ ...base, playerCombatLocked: true })).toBe(false)
+    expect(canSubmitPlayerCombatAction({ ...base, combatActiveSnapshot: false })).toBe(false)
+    expect(canSubmitPlayerCombatAction({ ...base, pendingAction: { id: 'action-1' } })).toBe(false)
+    expect(canSubmitPlayerCombatAction({ ...base, playerCharacter: makeCharacter({ id: 'other' }) })).toBe(false)
+    expect(canSubmitPlayerCombatAction({ ...base, characters: [makeCharacter({ currentHp: 0 })] })).toBe(false)
+    expect(canSubmitPlayerCombatAction({ ...base, currentInitiativeToken: makeToken({ type: 'enemy' }) })).toBe(false)
   })
 })

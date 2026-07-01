@@ -1,4 +1,7 @@
 import type { BattleMap, Token } from '../store/maps'
+import type { Character } from '../types/character'
+import { isTokenAlive } from './combatTokens'
+import type { PendingPlayerActionLock } from './playerActionSync'
 import type { ClassFeatureKey } from './traitRegistry'
 
 export const PLAYER_ACTION_DEDUPE_WINDOW_MS = 8000
@@ -73,6 +76,29 @@ export function preflightPlayerActionAuthority(
   }
 
   return { status: 'accepted', currentToken }
+}
+
+export function canSubmitPlayerCombatAction(input: {
+  activeMap?: BattleMap
+  mode?: 'dm' | 'player' | null
+  playerCombatLocked: boolean
+  combatActive: boolean
+  combatActiveSnapshot: boolean
+  turnCharacter?: Pick<Character, 'id'> | null
+  currentInitiativeToken?: Token
+  pendingAction?: PendingPlayerActionLock | null
+  playerCharacter?: Pick<Character, 'id'> | null
+  characters: Character[]
+}): boolean {
+  if (!input.activeMap || input.mode !== 'player') return false
+  if (input.playerCombatLocked) return false
+  if (!input.combatActiveSnapshot || !input.combatActive) return false
+  if (!input.turnCharacter || !input.currentInitiativeToken) return false
+  if (input.pendingAction) return false
+  if (input.currentInitiativeToken.type !== 'player') return false
+  if (input.currentInitiativeToken.characterId !== input.turnCharacter.id) return false
+  if (input.turnCharacter.id !== input.playerCharacter?.id) return false
+  return isTokenAlive(input.currentInitiativeToken, input.characters)
 }
 
 export function playerActionNeedsExecutionDedupe(action: Pick<PlayerActionAuthorityAction, 'type'>): boolean {
