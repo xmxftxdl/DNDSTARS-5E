@@ -4395,7 +4395,7 @@ export default function MapsPage() {
         event.type === 'turn-advanced' &&
         event.round > options.previousRound
       ) {
-        pushCombatLog(`杩涘叆绗?${event.round} 鍥炲悎`, 'turn', event.round)
+        pushCombatLog(`进入第 ${event.round} 回合`, 'turn', event.round)
       }
     }
     options?.beforeComplete?.()
@@ -5321,7 +5321,7 @@ export default function MapsPage() {
           }
           const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar?.name ?? target.label)
           const stunSaveD20 = shouldStun
-            ? await rollDiceBoxD20('浣撹川璞佸厤 D20', targetChar?.name ?? target.label)
+            ? await rollDiceBoxD20('体质豁免 D20', targetChar?.name ?? target.label)
             : undefined
           targetPackets.push({
             targetTokenId: target.id,

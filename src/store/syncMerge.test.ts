@@ -7,14 +7,14 @@ import {
 import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
 import type { Character } from '../types/character'
 
-// [T13/AC6] 鍚屾鍚堝苟鍥炲綊锛氱帺瀹剁鍦ㄥ悎骞跺绔紙DM 鏉冨▉锛夊揩鐓ф椂锛屽繀椤讳繚鐣?DM 鐨勮閲?AP/token 浣嶇疆锛?
-// 涓斾笉瑕嗙洊闈炵櫧鍚嶅崟瀛楁銆傝娴嬬殑鏄袱涓湡瀹炲悎骞跺嚱鏁帮紙AC0 鍒氬姞 export 鐨?LIVE 浠ｇ爜锛夛紝涓嶇 dead 妗嗘灦銆?
-// 杩欐鏄€岀帺瀹朵笉寰楄秺鏉冨啓鎴樻枟鏉冨▉鎬併€嶇殑鍚堝苟闃茬嚎 鈥斺€?DM-authority 鐨勫厹搴曘€?
+// [T13/AC6] 同步合并回归：玩家端在合并对端（DM 权威）快照时，
+// 必须保留 DM 的血量/AP/token 位置，且不要覆盖非白名单字段。
+// 这里测试真实合并函数，确保玩家不能越权写战斗权威状态。
 
 function char(patch: Partial<Character>): Character {
   return {
     id: 'hero',
-    name: '鑻遍泟',
+    name: '英雄',
     currentHp: 30,
     maxHp: 40,
     tempHp: 0,
@@ -42,7 +42,7 @@ function token(patch: Partial<Token>): Token {
 function map(patch: Partial<BattleMap>): BattleMap {
   return {
     id: 'map1',
-    name: '鍦板浘',
+    name: '地图',
     width: 800,
     height: 600,
     gridSize: 50,
@@ -54,13 +54,13 @@ function map(patch: Partial<BattleMap>): BattleMap {
   }
 }
 
-describe('T13/AC6 鈥?mergePlayerWritableCharacter keeps DM-authoritative fields', () => {
+describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', () => {
   it('keeps DM HP/AP from the shared snapshot during combat (player local value discarded)', () => {
-    // 鐜╁鏈湴鎶婅嚜宸辨不鍒版弧琛€銆丄P 鎷夋弧锛堣秺鏉冿級锛孌M 鏉冨▉蹇収璇翠粬琚墦鍒?12 琛€銆丄P 宸茶姳鍏夈€?
+    // 玩家本地把自己治满血、AP 拉满（越权），DM 权威快照说他被打到 12 血、AP 已花光。
     const local = char({ currentHp: 40, maxHp: 40, actionPoints: 2, currentAP: 2 })
     const shared = char({ currentHp: 12, maxHp: 40, actionPoints: 0, currentAP: 0 })
     const merged = mergePlayerWritableCharacter(local, shared)
-    // DM 鏉冨▉琛€閲?AP 鑳滃嚭锛堜笉琚帺瀹舵湰鍦拌鐩栵級
+    // DM 权威血量/AP 胜出（不被玩家本地覆盖）。
     expect(merged.currentHp).toBe(12)
     expect(merged.actionPoints).toBe(0)
     expect(merged.currentAP).toBe(0)
@@ -144,12 +144,12 @@ describe('T13/AC6 鈥?mergePlayerWritableCharacter keeps DM-authoritative fields
   })
 
   it('does NOT clobber non-whitelisted local fields (only the whitelist comes from shared)', () => {
-    // name 涓嶅湪鐧藉悕鍗?鈬?淇濈暀鏈湴鍊硷紝涓嶈瀵圭瑕嗙洊銆?
-    const local = char({ name: '鐜╁鏀圭殑鍚嶅瓧', currentHp: 40 })
-    const shared = char({ name: 'DM鏀圭殑鍚嶅瓧', currentHp: 12 })
+    // name 不在白名单，保留本地值，不被对端覆盖。
+    const local = char({ name: '玩家改的名字', currentHp: 40 })
+    const shared = char({ name: 'DM改的名字', currentHp: 12 })
     const merged = mergePlayerWritableCharacter(local, shared)
-    expect(merged.name).toBe('鐜╁鏀圭殑鍚嶅瓧') // 闈炵櫧鍚嶅崟瀛楁淇濈暀鏈湴
-    expect(merged.currentHp).toBe(12) // 鐧藉悕鍗曞瓧娈靛彇瀵圭
+    expect(merged.name).toBe('玩家改的名字') // 非白名单字段保留本地。
+    expect(merged.currentHp).toBe(12) // 白名单字段取对端。
   })
 })
 
@@ -188,10 +188,10 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
     const e1 = result.tokens.find((t) => t.id === 'e1')!
-    // DM 鏉冨▉浣嶇疆瑕嗙洊鐜╁鏈湴浣嶇疆
+    // DM 权威位置覆盖玩家本地位置。
     expect(e1.x).toBe(500)
     expect(e1.y).toBe(700)
-    // 鎴樻枟瀛楁鍚屾牱鍙?DM 鏉冨▉鍊?
+    // 战斗字段同样取 DM 权威值。
     expect(e1.hp).toBe(3)
     expect(e1.illusionDanceTurns).toBe(1)
   })
@@ -201,10 +201,10 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 999, y: 888, hp: 15, maxHp: 30 })] })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
     const p1 = result.tokens.find((t) => t.id === 'p1')!
-    // 鐜╁鑷繁 token 鐨勪綅缃繚鐣欐湰鍦帮紙dmControlledPosition 浠呭闈?player 鐢熸晥锛?
+    // 玩家自己 token 的位置保留本地（dmControlledPosition 仅对非 player 生效）。
     expect(p1.x).toBe(120)
     expect(p1.y).toBe(130)
-    // 浣嗘垬鏂楀瓧娈碉紙hp 绛夛級浠嶅彇 DM 鏉冨▉鍊?
+    // 但战斗字段（hp 等）仍取 DM 权威值。
     expect(p1.hp).toBe(15)
   })
 
