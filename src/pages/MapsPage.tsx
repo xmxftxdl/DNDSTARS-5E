@@ -78,10 +78,7 @@ import {
   formatDodgePrompt,
 } from '../lib/archerBaseFeatures'
 import { TOKEN_STATUS_CLEAR_PATCH, isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
-import {
-  attackDamageDiceCount,
-  getEffectiveAbilityMod,
-} from '../lib/archerCombat'
+import { getEffectiveAbilityMod } from '../lib/archerCombat'
 import {
   canSubmitPlayerCombatAction,
   preflightPlayerActionAuthority,
@@ -241,7 +238,7 @@ import {
 import { applyGridDetectPatch, detectGridFromBlob, detectImageGrid } from '../lib/gridDetect'
 import { getImage } from '../lib/imageStore'
 import { clearEnemyAiWarnings, planEnemyTurn, type EnemyTurnResult } from '../lib/enemyAi'
-import { decideDodge } from '../lib/aiPolicy'
+import { buildEnemyDodgePreview } from '../lib/enemyDodgePreview'
 import {
   checkCombatOutcome,
   decideTurnAction,
@@ -4082,23 +4079,13 @@ export default function MapsPage() {
   }
 
   const enemyDodgePreview = (target: Token, attacker: Character, skill: CombatSkill) => {
-    if (!combatActiveRef.current || target.type !== 'enemy') return null
-    const ap = getEnemyApState(target.id)
-    if (ap.current < 1) return null
-    const attackAbility = skill.tags?.includes('melee') ? 'str' : 'dex'
-    const attackBonus = getEffectiveAbilityMod(attacker, attackAbility) + proficiencyBonus(attacker.level)
-    const targetAc = getTokenTargetAc(target) ?? 12
-    const diceCount = attackDamageDiceCount(skill, false)
-    const estimatedDamage = diceCount * ((skill.damageSides + 1) / 2) + (skill.damageBonus ?? 0)
-    const decision = decideDodge({
-      currentAp: ap.current,
-      currentHp: target.hp ?? target.maxHp ?? 1,
-      maxHp: target.maxHp ?? target.hp ?? 1,
-      targetAc,
-      incomingAttackBonus: attackBonus,
-      estimatedDamage,
+    return buildEnemyDodgePreview({
+      combatActive: combatActiveRef.current,
+      target,
+      attacker,
+      skill,
+      enemyAp: getEnemyApState(target.id),
     })
-    return { decision, attackBonus, targetAc }
   }
 
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
