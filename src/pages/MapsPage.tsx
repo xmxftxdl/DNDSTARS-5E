@@ -115,6 +115,10 @@ import {
   planEnemyAttackSettlement,
 } from '../lib/enemyAttackAction'
 import {
+  buildAgileLeapReadyAction,
+  planAgileLeapReadySettlement,
+} from '../lib/agileLeapAction'
+import {
   buildGaleComboChoiceParams,
   planGaleComboChoiceSettlement,
 } from '../lib/galeComboAction'
@@ -2984,16 +2988,16 @@ export default function MapsPage() {
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const actorTokenId = targetTokenId ?? latestMap.tokens.find((token) => token.characterId === targetChar.id)?.id
     if (!actorTokenId) return false
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
-      type: 'agile-leap-ready',
+    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), buildAgileLeapReadyAction({
       actorTokenId,
       characterId: targetChar.id,
       feet,
-    })
-    if (!headless.ok) return false
+    }))
+    const settlement = planAgileLeapReadySettlement(headless)
+    if (settlement.status === 'rejected') return false
     applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    for (const log of settlement.logs) {
+      pushCombatLog(log.text, log.kind)
     }
     return true
   }
