@@ -5,6 +5,7 @@ import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildArrowSequenceTargetPackets,
+  buildAoeTargetPackets,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -340,6 +341,61 @@ describe('player attack action helpers', () => {
         effectSave: undefined,
         stunOnFailedEffectSave: false,
         noMoveOnHit: true,
+      },
+    ])
+  })
+
+  it('builds aoe target packets with saves, stun saves, and takeoff extra damage', async () => {
+    const d20Queue = [12, 9]
+    const result = await buildAoeTargetPackets({
+      actor: makeCharacter({
+        traits: [{ id: 'takeoff', name: '起飞', level: 2, uses: 0, maxUses: 0, description: '', featureKey: 'takeoff' }],
+      }),
+      skill: makeSkill({ skillTreeId: 'whirlwindKick', damageSides: 6 }),
+      targets: [makeToken()],
+      saveMode: 'half',
+      shouldStun: true,
+      targetHasKnockbackNow: () => true,
+      rollD20: async () => d20Queue.shift() ?? 1,
+      rollValues: async (count, sides) => {
+        expect({ count, sides }).toEqual({ count: 2, sides: 6 })
+        return [5, 4]
+      },
+    })
+
+    expect(result.targetPackets).toEqual([
+      {
+        targetTokenId: 'target-token',
+        saveD20: 12,
+        stunSaveD20: 9,
+        extraDamageGroups: [{ values: [5, 4], sides: 6 }],
+      },
+    ])
+  })
+
+  it('builds aoe target packets without save rolls when save mode is absent', async () => {
+    let d20Rolled = false
+    const result = await buildAoeTargetPackets({
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'windTraceShot' }),
+      targets: [makeToken()],
+      saveMode: undefined,
+      shouldStun: false,
+      targetHasKnockbackNow: () => false,
+      rollD20: async () => {
+        d20Rolled = true
+        return 1
+      },
+      rollValues: async () => [1],
+    })
+
+    expect(d20Rolled).toBe(false)
+    expect(result.targetPackets).toEqual([
+      {
+        targetTokenId: 'target-token',
+        saveD20: undefined,
+        stunSaveD20: undefined,
+        extraDamageGroups: undefined,
       },
     ])
   })

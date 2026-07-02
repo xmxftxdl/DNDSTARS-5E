@@ -89,6 +89,7 @@ import {
 } from '../lib/playerActionAuthorityRouter'
 import {
   buildArrowSequenceTargetPackets,
+  buildAoeTargetPackets,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -4741,40 +4742,20 @@ export default function MapsPage() {
         const shouldStun =
           skill.skillTreeId === 'focusShot' &&
           skillGrantsStun(skill.skillTreeId, skillRank)
-        const takeoffTrait = skill.skillTreeId === 'whirlwindKick' ? findClassTrait(actor, 'takeoff') : undefined
-        const targetPackets = []
-        for (const target of targets) {
-          const targetChar = target.characterId
-            ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
-            : undefined
-          const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
-          if (takeoffTrait && tokenHasKnockbackNow(target, targetChar)) {
-            const count = Math.min(3, takeoffTrait.level)
-            extraDamageGroups.push({
-              values: await rollDiceBoxValues(count, 6, `${skill.name} takeoff extra damage`, target.label),
-              sides: 6,
-            })
-          }
-          if (!saveMode) {
-            targetPackets.push({
-              targetTokenId: target.id,
-              saveD20: undefined,
-              stunSaveD20: undefined,
-              extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
-            })
-            continue
-          }
-          const saveD20 = await rollDiceBoxD20('敏捷豁免 D20', targetChar?.name ?? target.label)
-          const stunSaveD20 = shouldStun
-            ? await rollDiceBoxD20('体质豁免 D20', targetChar?.name ?? target.label)
-            : undefined
-          targetPackets.push({
-            targetTokenId: target.id,
-            saveD20,
-            stunSaveD20,
-            extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
-          })
-        }
+        const { targetPackets } = await buildAoeTargetPackets({
+          actor,
+          skill,
+          targets,
+          saveMode,
+          shouldStun,
+          resolveTargetCharacter: (target) =>
+            target.characterId
+              ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
+              : undefined,
+          targetHasKnockbackNow: tokenHasKnockbackNow,
+          rollD20: rollDiceBoxD20,
+          rollValues: rollDiceBoxValues,
+        })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'aoe-attack',
           actorTokenId: action.actorTokenId,

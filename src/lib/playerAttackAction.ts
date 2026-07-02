@@ -16,7 +16,7 @@ import {
   targetDodgeResolvedEvent,
   type HeadlessEventOf,
 } from './headlessCombatEvents'
-import type { HeadlessCombatEvent, HeadlessPlayerAttackPacket } from './headlessDmCombatEngine'
+import type { HeadlessAoeTargetPacket, HeadlessCombatEvent, HeadlessPlayerAttackPacket } from './headlessDmCombatEngine'
 import { KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { getSkillAoeTargeting } from './skillTargeting'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
@@ -570,6 +570,70 @@ export async function buildArrowSequenceTargetPackets(
   })
 
   return { targetPackets, skillRank, damagePacketCount }
+}
+
+export interface AoeTargetPacketBuildInput {
+  actor: Character
+  skill: CombatSkill
+  targets: Token[]
+  saveMode?: 'half' | 'none' | 'fail-half'
+  shouldStun: boolean
+  resolveTargetCharacter?: (target: Token) => Character | undefined
+  targetHasKnockbackNow: (target: Token, targetChar?: Character) => boolean
+  rollD20: (label: string, targetName: string) => Promise<number>
+  rollValues: (count: number, sides: number, label: string, targetName: string) => Promise<number[]>
+}
+
+export interface AoeTargetPacketBuildResult {
+  targetPackets: HeadlessAoeTargetPacket[]
+}
+
+export async function buildAoeTargetPackets(input: AoeTargetPacketBuildInput): Promise<AoeTargetPacketBuildResult> {
+  const {
+    actor,
+    skill,
+    targets,
+    saveMode,
+    shouldStun,
+    resolveTargetCharacter,
+    targetHasKnockbackNow,
+    rollD20,
+    rollValues,
+  } = input
+  const takeoffTrait = skill.skillTreeId === 'whirlwindKick' ? findClassTrait(actor, 'takeoff') : undefined
+  const targetPackets: HeadlessAoeTargetPacket[] = []
+
+  for (const target of targets) {
+    const targetChar = resolveTargetCharacter?.(target)
+    const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
+    if (takeoffTrait && targetHasKnockbackNow(target, targetChar)) {
+      const count = Math.min(3, takeoffTrait.level)
+      extraDamageGroups.push({
+        values: await rollValues(count, 6, `${skill.name} takeoff extra damage`, target.label),
+        sides: 6,
+      })
+    }
+    if (!saveMode) {
+      targetPackets.push({
+        targetTokenId: target.id,
+        saveD20: undefined,
+        stunSaveD20: undefined,
+        extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
+      })
+      continue
+    }
+    const targetName = targetChar?.name ?? target.label
+    const saveD20 = await rollD20('敏捷豁免 D20', targetName)
+    const stunSaveD20 = shouldStun ? await rollD20('体质豁免 D20', targetName) : undefined
+    targetPackets.push({
+      targetTokenId: target.id,
+      saveD20,
+      stunSaveD20,
+      extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
+    })
+  }
+
+  return { targetPackets }
 }
 
 function eagleStrikeExtraDiceCountForPacket(rank: number): number {
