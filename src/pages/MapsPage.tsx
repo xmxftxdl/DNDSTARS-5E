@@ -94,6 +94,7 @@ import {
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
+import { preparePlayerAttackAction } from '../lib/playerAttackAction'
 import {
   planPlayerMoveAfterOpportunity,
   planPlayerMoveAfterPreview,
@@ -4628,46 +4629,17 @@ export default function MapsPage() {
     }
 
     if (action.type === 'attack-token') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      const skill = actor?.combatSkills.find((s) => s.id === action.skillId)
-      const targetIds = action.targetTokenIds?.length
-        ? action.targetTokenIds
-        : action.targetTokenId
-          ? [action.targetTokenId]
-          : []
-      let targets = targetIds
-        .map((targetId) => activeMap.tokens.find((t) => t.id === targetId))
-        .filter((target): target is Token => !!target)
-      if (
-        !actor ||
-        !skill ||
-        getSkillAoeTargeting(skill) ||
-        targets.length === 0 ||
-        targets.some((target) => !isTokenAlive(target, useCharacterStore.getState().characters))
-      ) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-attack')
+      const preparedAttack = preparePlayerAttackAction({
+        action,
+        map: activeMap,
+        characters: useCharacterStore.getState().characters,
+      })
+      if (!preparedAttack.ok) {
+        acknowledgePlayerAction(action, 'rejected', preparedAttack.reason)
         completePlayerActionRequest(action)
         return
       }
-      const waiveAp = !!actor.combatBuffs?.galeComboReady
-      if (!waiveAp && actor.currentAP < skill.apCost) {
-        acknowledgePlayerAction(action, 'rejected', 'insufficient-ap')
-        completePlayerActionRequest(action)
-        return
-      }
-      const doubleArrow = canUseDoubleArrow(actor, skill) && !!actor.combatBuffs?.doubleArrowReady
-      if (skill.skillTreeId === 'multiShot' && targets.length === 1) {
-        const shots = Math.max(1, skill.arrowShots ?? 1)
-        targets = Array.from({ length: shots }, () => targets[0])
-      }
-      if (skill.skillTreeId === 'encircle' && targets.length === 1) {
-        const shots = Math.max(1, skill.arrowShots ?? 1)
-        targets = Array.from({ length: shots }, () => targets[0])
-      }
-      const isArrowSequence =
-        skill.skillTreeId === 'multiShot' ||
-        skill.skillTreeId === 'encircle' ||
-        (action.targetTokenIds?.length && skill.skillTreeId === 'rageShot')
+      const { actor, skill, targets, waiveAp, doubleArrow, isArrowSequence } = preparedAttack
       if (isArrowSequence) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
         const perPacketDiceCount = Math.max(1, skill.damageCount)
