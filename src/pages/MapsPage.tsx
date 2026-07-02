@@ -90,6 +90,7 @@ import {
 import {
   buildArrowSequenceTargetPackets,
   buildAoeTargetPackets,
+  buildPreparedAoeHeadlessAction,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -231,10 +232,8 @@ import {
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import {
   getTokenAbilityMod,
-  KNOCKBACK_DEFAULT_TURNS,
   KNOCKBACK_STATUS_LABEL,
 } from '../lib/knockback'
-import { STUN_DEFAULT_TURNS } from '../lib/stun'
 import { modeFromPort } from '../lib/appMode'
 import {
   currentPlayerSlot,
@@ -4663,7 +4662,6 @@ export default function MapsPage() {
         calmExtraDiceCount,
         windExtraDiceCount,
         saveMode,
-        selfCooldownReduction,
         shouldStun,
       } = preparedAoe
       if (skill.skillTreeId === 'focusShot') {
@@ -4692,21 +4690,13 @@ export default function MapsPage() {
         rollD20: rollDiceBoxD20,
         rollValues: rollDiceBoxValues,
       })
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'aoe-attack',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        skillId: skill.id,
+      const headlessAction = buildPreparedAoeHeadlessAction({
+        action,
+        prepared: preparedAoe,
         diceValues,
-        saveMode,
-        knockbackOnFailedSave: skill.skillTreeId === 'whirlwindKick',
-        knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
-        stunOnFailedConSave: shouldStun,
-        stunTurns: STUN_DEFAULT_TURNS,
-        selfCooldownReduction,
-        cellCount: cells.length,
         targetPackets,
       })
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
       if (!headless.ok) {
         acknowledgePlayerAction(action, 'rejected', headless.reason)
         completePlayerActionRequest(action)

@@ -6,6 +6,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildArrowSequenceTargetPackets,
   buildAoeTargetPackets,
+  buildPreparedAoeHeadlessAction,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -436,6 +437,53 @@ describe('player attack action helpers', () => {
       shouldStun: false,
     })
     expect(result.ok && result.cells.length).toBeGreaterThan(0)
+  })
+
+  it('builds a headless AOE action from a prepared AOE context', () => {
+    const skill = makeSkill({ skillTreeId: 'whirlwindKick', damageCount: 3, damageSides: 6 })
+    const actorToken = makeToken({
+      id: 'hero-token',
+      label: 'Hero Token',
+      type: 'player',
+      characterId: 'hero',
+      x: 100,
+      y: 100,
+    })
+    const action = makeAction({
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      targetCell: { col: 2, row: 2 },
+    })
+    const prepared = preparePlayerAoeAttackAction({
+      action,
+      map: makeMap([actorToken, makeToken({ id: 'target-token', x: 100, y: 100 })]),
+      characters: [makeCharacter({ combatSkills: [skill] })],
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const result = buildPreparedAoeHeadlessAction({
+      action,
+      prepared,
+      diceValues: [4, 5, 6],
+      targetPackets: [{ targetTokenId: 'target-token', saveD20: 12 }],
+    })
+
+    expect(result).toMatchObject({
+      type: 'aoe-attack',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: 'skill-1',
+      diceValues: [4, 5, 6],
+      saveMode: 'half',
+      knockbackOnFailedSave: true,
+      knockbackTurns: 1,
+      stunOnFailedConSave: false,
+      stunTurns: 1,
+      selfCooldownReduction: 0,
+      cellCount: prepared.cells.length,
+      targetPackets: [{ targetTokenId: 'target-token', saveD20: 12 }],
+    })
   })
 
   it('rejects AOE preparation when AP is insufficient or placement is out of range', () => {

@@ -17,7 +17,12 @@ import {
   targetDodgeResolvedEvent,
   type HeadlessEventOf,
 } from './headlessCombatEvents'
-import type { HeadlessAoeTargetPacket, HeadlessCombatEvent, HeadlessPlayerAttackPacket } from './headlessDmCombatEngine'
+import type {
+  HeadlessAoeAttackAction,
+  HeadlessAoeTargetPacket,
+  HeadlessCombatEvent,
+  HeadlessPlayerAttackPacket,
+} from './headlessDmCombatEngine'
 import { KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import {
   aoeOrientFromCell,
@@ -28,6 +33,7 @@ import {
   type SkillAoeTargeting,
 } from './skillTargeting'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
+import { STUN_DEFAULT_TURNS } from './stun'
 import { piercingInsightExtraD4, piercingInsightHpThresholdPercent } from './traitRegistry'
 
 export type PlayerAttackPrepareResult =
@@ -195,6 +201,30 @@ export function preparePlayerAoeAttackAction(input: {
     saveMode,
     selfCooldownReduction,
     shouldStun,
+  }
+}
+
+export function buildPreparedAoeHeadlessAction(input: {
+  action: SharedPlayerActionState
+  prepared: Extract<PlayerAoeAttackPrepareResult, { ok: true }>
+  diceValues: number[]
+  targetPackets: HeadlessAoeTargetPacket[]
+}): HeadlessAoeAttackAction {
+  const { action, prepared, diceValues, targetPackets } = input
+  return {
+    type: 'aoe-attack',
+    actorTokenId: action.actorTokenId,
+    characterId: action.characterId,
+    skillId: prepared.skill.id,
+    diceValues,
+    saveMode: prepared.saveMode,
+    knockbackOnFailedSave: prepared.skill.skillTreeId === 'whirlwindKick',
+    knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
+    stunOnFailedConSave: prepared.shouldStun,
+    stunTurns: STUN_DEFAULT_TURNS,
+    selfCooldownReduction: prepared.selfCooldownReduction,
+    cellCount: prepared.cells.length,
+    targetPackets,
   }
 }
 
