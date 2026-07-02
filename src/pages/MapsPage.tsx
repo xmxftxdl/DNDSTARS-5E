@@ -136,6 +136,15 @@ import {
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import {
+  aoeTargetResolvedEvents,
+  apSpentEvent,
+  attackResolvedEvent,
+  attackResolvedEvents,
+  enemyAttackResolvedEvent,
+  opportunityResolvedEvent,
+  targetDodgeResolvedEvent,
+} from '../lib/headlessCombatEvents'
+import {
   createHeadlessCombatSnapshot,
   planHeadlessCombatResultApplication,
 } from '../lib/headlessCombatBridge'
@@ -290,18 +299,6 @@ const runtimeId = (prefix?: string) =>
   prefix ? `${prefix}-${runtimeNow()}-${runtimeRandomSuffix()}` : `${runtimeNow()}-${runtimeRandomSuffix()}`
 const runtimeNumericId = () => runtimeNow() + Math.random()
 const randomDieValue = (sides: number) => 1 + Math.floor(Math.random() * sides)
-const attackResolvedEvent = (
-  events: HeadlessCombatEvent[],
-): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
-  events.find((event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> => event.type === 'attack-resolved')
-
-const enemyAttackResolvedEvent = (
-  events: HeadlessCombatEvent[],
-): Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> | undefined =>
-  events.find(
-    (event): event is Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> =>
-      event.type === 'enemy-attack-resolved',
-  )
 
 export default function MapsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -2279,10 +2276,7 @@ export default function MapsPage() {
       return false
     }
     const moved = tokenMovedEvent(headless.events, enemy.id)
-    const apEvent = headless.events.find(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'ap-spent' }> =>
-        event.type === 'ap-spent' && event.tokenId === enemy.id && !event.characterId,
-    )
+    const apEvent = apSpentEvent(headless.events, { tokenId: enemy.id, characterId: null })
     applyHeadlessCombatResult(headless)
     if (apEvent) {
       const ap = headless.state.enemyApByToken[enemy.id] ?? { current: apEvent.after, max: getEnemyApState(enemy.id).max }
@@ -2379,10 +2373,7 @@ export default function MapsPage() {
     }
     applyHeadlessCombatResult(headless)
 
-    const resolved = headless.events.find(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'opportunity-resolved' }> =>
-        event.type === 'opportunity-resolved',
-    )
+    const resolved = opportunityResolvedEvent(headless.events)
     if (!resolved) return
 
     const total = resolved.total
@@ -3560,10 +3551,7 @@ export default function MapsPage() {
       if (!resolved) return false
 
       applyHeadlessCombatResult(headless)
-      const enemyApEvent = headless.events.find(
-        (event): event is Extract<HeadlessCombatEvent, { type: 'ap-spent' }> =>
-          event.type === 'ap-spent' && event.tokenId === result.attackerTokenId && !event.characterId,
-      )
+      const enemyApEvent = apSpentEvent(headless.events, { tokenId: result.attackerTokenId, characterId: null })
       if (enemyApEvent) {
         enemyAttackApAlreadySpent = true
         const attackerName = latestMap.tokens.find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
@@ -3737,10 +3725,7 @@ export default function MapsPage() {
       await runEnemyStage('attackRollResolved')
       if (resolved.total > 0) await runEnemyStage('beforeDamageApplied')
       applyHeadlessCombatResult(headless)
-      const enemyApEvent = headless.events.find(
-        (event): event is Extract<HeadlessCombatEvent, { type: 'ap-spent' }> =>
-          event.type === 'ap-spent' && event.tokenId === result.attackerTokenId && !event.characterId,
-      )
+      const enemyApEvent = apSpentEvent(headless.events, { tokenId: result.attackerTokenId, characterId: null })
       if (enemyApEvent) {
         enemyAttackApAlreadySpent = true
         const ap = headless.state.enemyApByToken[result.attackerTokenId] ?? {
@@ -4778,10 +4763,7 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
-        const resolvedEvents = headless.events.filter(
-          (event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> =>
-            event.type === 'attack-resolved',
-        )
+        const resolvedEvents = attackResolvedEvents(headless.events)
         const damageValues = resolvedEvents.flatMap((event) => event.damageValues)
         const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
         const diceTotal = damageValues.reduce((sum, value) => sum + value, 0)
@@ -5182,10 +5164,7 @@ export default function MapsPage() {
           setShowMoveRange(true)
         }
         pushApLog(actor, resolved.waivedAp ? 0 : resolved.apCost, `使用 ${skill.name}`, `目标 ${targetToken.label}`)
-        const dodgeEvent = headless.events.find(
-          (event): event is Extract<HeadlessCombatEvent, { type: 'target-dodge-resolved' }> =>
-            event.type === 'target-dodge-resolved',
-        )
+        const dodgeEvent = targetDodgeResolvedEvent(headless.events)
         const formula = resolved.hit
           ? `${resolved.damageValues.join(' + ')}${
               skill.damageBonus ? ` + ${skill.damageBonus}` : ''
@@ -5357,10 +5336,7 @@ export default function MapsPage() {
         }
         applyHeadlessCombatResult(headless)
         await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
-        const resolvedEvents = headless.events.filter(
-          (event): event is Extract<HeadlessCombatEvent, { type: 'aoe-target-resolved' }> =>
-            event.type === 'aoe-target-resolved',
-        )
+        const resolvedEvents = aoeTargetResolvedEvents(headless.events)
         const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
         const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
         const rollForDisplay: DiceRoll = {
