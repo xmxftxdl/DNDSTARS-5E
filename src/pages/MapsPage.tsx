@@ -295,8 +295,10 @@ import {
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import {
+  illusionDanceTargetLimit,
   preparePlayerFeatureActivationAction,
   shouldSendPlayerReadyFeatureToDm,
+  uniqueFeatureTargetIds,
 } from '../lib/playerFeatureActivation'
 import {
   buildSimpleHeadlessPlayerAction,
@@ -1893,13 +1895,6 @@ export default function MapsPage() {
     return candidates[Number(picked) - 1] ?? null
   }
 
-  const uniqueTokenIds = (ids: string[]) => Array.from(new Set(ids.filter(Boolean)))
-
-  const illusionDanceTargetLimit = (caster: Character) => {
-    const trait = findClassTrait(caster, 'illusionDance')
-    return Math.min(3, Math.max(1, trait?.level ?? 1))
-  }
-
   const beginIllusionDanceTargeting = (caster: Character) => {
     const trait = findClassTrait(caster, 'illusionDance')
     if (!trait || trait.uses <= 0) {
@@ -1930,7 +1925,7 @@ export default function MapsPage() {
     if (!featureTargeting) return
     const caster = useCharacterStore.getState().characters.find((c) => c.id === featureTargeting.casterId)
     if (!caster) return
-    const selectedIds = uniqueTokenIds(tokenIds).slice(0, featureTargeting.maxTargets)
+    const selectedIds = uniqueFeatureTargetIds(tokenIds).slice(0, featureTargeting.maxTargets)
     if (selectedIds.length === 0) return
     if (!isDM) {
       if (
