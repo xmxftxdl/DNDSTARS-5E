@@ -3,12 +3,13 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import { isCalmMindActive, isOutOfBreath } from './calmMind'
 import { attackDamageDiceCount, doubleArrowExtraDamageSides, resolveRangedAttackRoll } from './archerCombat'
-import { getSkillRank } from './archerSkillTree'
+import { getSkillRank, skillGrantsStun } from './archerSkillTree'
 import { canUseArmorPiercing, canUseDoubleArrow, findClassTrait } from './classFeatures'
 import { isTokenAlive } from './combatTokens'
 import { getAc, isMagicDamageSkill } from './combatStats'
 import type { AbilityKey } from './dnd'
 import { getTokenTargetAc } from './enemyCombatStats'
+import { pixelToCell, type GridCell } from './gridCombat'
 import {
   aoeTargetResolvedEvents,
   attackResolvedEvent,
@@ -18,7 +19,14 @@ import {
 } from './headlessCombatEvents'
 import type { HeadlessAoeTargetPacket, HeadlessCombatEvent, HeadlessPlayerAttackPacket } from './headlessDmCombatEngine'
 import { KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
-import { getSkillAoeTargeting } from './skillTargeting'
+import {
+  aoeOrientFromCell,
+  canPlaceAoe,
+  cellsForAoe,
+  getSkillAoeTargeting,
+  tokensInCells,
+  type SkillAoeTargeting,
+} from './skillTargeting'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import { piercingInsightExtraD4, piercingInsightHpThresholdPercent } from './traitRegistry'
 
@@ -85,6 +93,108 @@ export function preparePlayerAttackAction(input: {
     waiveAp,
     doubleArrow,
     isArrowSequence,
+  }
+}
+
+export type PlayerAoeAttackPrepareResult =
+  | {
+      ok: true
+      actor: Character
+      skill: CombatSkill
+      aoe: SkillAoeTargeting
+      actorToken: Token
+      casterCell: GridCell
+      anchorCell: GridCell
+      cells: GridCell[]
+      targets: Token[]
+      waiveAp: boolean
+      skillRank: number
+      baseDiceCount: number
+      calmExtraDiceCount: number
+      windExtraDiceCount: number
+      saveMode?: 'half' | 'none' | 'fail-half'
+      selfCooldownReduction: number
+      shouldStun: boolean
+    }
+  | {
+      ok: false
+      reason: 'invalid-aoe-attack' | 'insufficient-ap' | 'unsupported-aoe-attack' | 'out-of-range' | 'invalid-target'
+    }
+
+export function preparePlayerAoeAttackAction(input: {
+  action: SharedPlayerActionState
+  map: BattleMap
+  characters: Character[]
+}): PlayerAoeAttackPrepareResult {
+  const { action, map, characters } = input
+  const actor = characters.find((character) => character.id === action.characterId)
+  const skill = actor?.combatSkills.find((item) => item.id === action.skillId)
+  const aoe = skill ? getSkillAoeTargeting(skill) : null
+  if (action.type !== 'aoe-attack' || !actor || !skill || !aoe || !action.targetCell) {
+    return { ok: false, reason: 'invalid-aoe-attack' }
+  }
+
+  const waiveAp = !!actor.combatBuffs?.galeComboReady
+  if (!waiveAp && actor.currentAP < skill.apCost) return { ok: false, reason: 'insufficient-ap' }
+  if (skill.damageCount <= 0 || skill.damageSides <= 0) return { ok: false, reason: 'unsupported-aoe-attack' }
+
+  const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
+  if (!actorToken) return { ok: false, reason: 'invalid-aoe-attack' }
+
+  const casterCell = pixelToCell(actorToken.x, actorToken.y, map)
+  const anchorCell = aoe.shape === 'circle' && aoe.origin === 'self' ? casterCell : action.targetCell
+  if (!canPlaceAoe(aoe, casterCell, anchorCell)) return { ok: false, reason: 'out-of-range' }
+
+  const orientFrom = aoeOrientFromCell(aoe, casterCell, anchorCell, {
+    skillTreeId: skill.skillTreeId,
+    rectRotation: action.aoeRectRotation ?? 0,
+  })
+  const cells = cellsForAoe(aoe, orientFrom, anchorCell)
+  const targets = tokensInCells(map, map.tokens, cells).filter(
+    (token) => token.id !== actorToken.id && isTokenAlive(token, characters),
+  )
+  if (targets.length === 0) return { ok: false, reason: 'invalid-target' }
+
+  const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+  const calm = findClassTrait(actor, 'calmMind')
+  const calmExtraDiceCount = calm && isCalmMindActive(actor) && calm.level > 0 ? calm.level : 0
+  const windExtraDiceCount = windTraceExtraDiceCountForAoe(
+    skill.skillTreeId,
+    skillRank,
+    actor,
+    targets[0],
+    targets.length,
+  )
+  const saveMode =
+    skill.skillTreeId === 'focusShot'
+      ? 'fail-half'
+      : skill.skillTreeId === 'spiralBlade'
+        ? 'none'
+        : skill.skillTreeId === 'windTraceShot'
+          ? undefined
+          : 'half'
+  const selfCooldownReduction =
+    skill.skillTreeId === 'windTraceShot' && skillRank >= 4 && isCalmMindActive(actor) ? 1 : 0
+  const shouldStun = skill.skillTreeId === 'focusShot' && skillGrantsStun(skill.skillTreeId, skillRank)
+
+  return {
+    ok: true,
+    actor,
+    skill,
+    aoe,
+    actorToken,
+    casterCell,
+    anchorCell,
+    cells,
+    targets,
+    waiveAp,
+    skillRank,
+    baseDiceCount: Math.max(1, attackDamageDiceCount(skill, false)),
+    calmExtraDiceCount,
+    windExtraDiceCount,
+    saveMode,
+    selfCooldownReduction,
+    shouldStun,
   }
 }
 
@@ -639,6 +749,21 @@ export async function buildAoeTargetPackets(input: AoeTargetPacketBuildInput): P
 function eagleStrikeExtraDiceCountForPacket(rank: number): number {
   if (rank <= 0) return 0
   return rank === 1 ? 3 : 4
+}
+
+function windTraceExtraDiceCountForAoe(
+  skillTreeId: string | undefined,
+  rank: number,
+  caster: Character,
+  token: Token,
+  aoeTargetCount?: number,
+): number {
+  if (skillTreeId !== 'windTraceShot') return 0
+  let count = 0
+  if ((aoeTargetCount ?? 0) === 1) count += 2
+  if (rank >= 2 && isCalmMindActive(caster)) count += 1
+  if (rank >= 3) count += token.huntingMarkStacks ?? 0
+  return count
 }
 
 function huntingMarkTraitRankForPacket(caster?: Character): number {

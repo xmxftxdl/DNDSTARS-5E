@@ -95,6 +95,7 @@ import {
   planAoeAttackDisplay,
   planArrowSequenceDisplay,
   planSingleAttackDisplay,
+  preparePlayerAoeAttackAction,
   preparePlayerAttackAction,
 } from '../lib/playerAttackAction'
 import {
@@ -205,13 +206,13 @@ import {
 } from '../lib/gridCombat'
 import {
   aoeConfirmHint,
+  aoeOrientFromCell,
   aoeUsesMouseAim,
   canPlaceAoe,
   isSelfOriginCircleAoe,
   cellsForAoe,
   formatAoeHint,
   getSkillAoeTargeting,
-  tokensInCells,
   type SkillAoeTargeting,
 } from '../lib/skillTargeting'
 import { applyGridDetectPatch, detectGridFromBlob, detectImageGrid } from '../lib/gridDetect'
@@ -234,7 +235,6 @@ import {
   KNOCKBACK_STATUS_LABEL,
 } from '../lib/knockback'
 import { STUN_DEFAULT_TURNS } from '../lib/stun'
-import { getSkillRank, skillGrantsStun } from '../lib/archerSkillTree'
 import { modeFromPort } from '../lib/appMode'
 import {
   currentPlayerSlot,
@@ -1439,29 +1439,17 @@ export default function MapsPage() {
     if (!casterToken) return null
     return pixelToCell(casterToken.x, casterToken.y, activeMap)
   })()
-
-  const aoeOrientFromCell = (
-    aoe: SkillAoeTargeting,
-    casterCell: GridCell,
-    anchorCell: GridCell,
-    opts?: { skillTreeId?: string; rectRotation?: number },
-  ): GridCell => {
-    const skillTreeId = opts?.skillTreeId ?? targeting?.skill.skillTreeId
-    if (aoe.shape !== 'rect' || skillTreeId !== 'arrowStorm') return casterCell
-    const rotation = opts?.rectRotation ?? aoeRectRotation
-    const dir = [
-      { col: 0, row: -1 },
-      { col: 1, row: 0 },
-      { col: 0, row: 1 },
-      { col: -1, row: 0 },
-    ][((rotation % 4) + 4) % 4]
-    return { col: anchorCell.col - dir.col, row: anchorCell.row - dir.row }
-  }
+  const activeMapGridSize = activeMap?.gridSize ?? 1
+  const activeMapGridOffsetX = activeMap?.gridOffsetX ?? 0
+  const activeMapGridOffsetY = activeMap?.gridOffsetY ?? 0
 
   const aoeHighlight = useMemo(() => {
-    if (!targeting?.aoe || !aoePreviewCell || !aoeCasterCell || !activeMap) return undefined
+    if (!targeting?.aoe || !aoePreviewCell || !aoeCasterCell) return undefined
     const valid = canPlaceAoe(targeting.aoe, aoeCasterCell, aoePreviewCell)
-    const orientFrom = aoeOrientFromCell(targeting.aoe, aoeCasterCell, aoePreviewCell)
+    const orientFrom = aoeOrientFromCell(targeting.aoe, aoeCasterCell, aoePreviewCell, {
+      skillTreeId: targeting.skill.skillTreeId,
+      rectRotation: aoeRectRotation,
+    })
     const cells = cellsForAoe(targeting.aoe, orientFrom, aoePreviewCell)
     const isSelfCircle =
       targeting.aoe.shape === 'circle' && targeting.aoe.origin === 'self'
@@ -1480,8 +1468,8 @@ export default function MapsPage() {
             )
           : undefined
     const cellCenterToPixel = (cell: GridCell) => ({
-      x: activeMap.gridOffsetX + (cell.col + 0.5) * activeMap.gridSize,
-      y: activeMap.gridOffsetY + (cell.row + 0.5) * activeMap.gridSize,
+      x: activeMapGridOffsetX + (cell.col + 0.5) * activeMapGridSize,
+      y: activeMapGridOffsetY + (cell.row + 0.5) * activeMapGridSize,
     })
     const areaCenterCell = isSelfCircle ? aoeCasterCell : aoePreviewCell
     const areaCenter = cellCenterToPixel(areaCenterCell)
@@ -1490,7 +1478,7 @@ export default function MapsPage() {
         ? {
             centerX: areaCenter.x,
             centerY: areaCenter.y,
-            radiusPx: movementRadiusPx(targeting.aoe.radiusFeet, activeMap),
+            radiusPx: targeting.aoe.radiusFeet / 5 * activeMapGridSize,
           }
         : undefined
     const areaPolygon = (() => {
@@ -1511,8 +1499,8 @@ export default function MapsPage() {
       const uy = dy / len
       const px = -uy
       const py = ux
-      const w = aoe.widthFeet / 5 * activeMap.gridSize
-      const h = (aoe.shape === 'line' ? aoe.lengthFeet : aoe.heightFeet) / 5 * activeMap.gridSize
+      const w = aoe.widthFeet / 5 * activeMapGridSize
+      const h = (aoe.shape === 'line' ? aoe.lengthFeet : aoe.heightFeet) / 5 * activeMapGridSize
       if (aoe.shape === 'line') {
         const start = origin
         const end = { x: origin.x + ux * h, y: origin.y + uy * h }
@@ -1538,7 +1526,7 @@ export default function MapsPage() {
       areaCircle,
       areaPolygon,
     }
-  }, [targeting, aoePreviewCell, aoeCasterCell, activeMap, aoeRectRotation])
+  }, [targeting, aoePreviewCell, aoeCasterCell, activeMapGridSize, activeMapGridOffsetX, activeMapGridOffsetY, aoeRectRotation])
 
   const rangedRangeCells = (() => {
     if (!targeting || targeting.aoe || !activeMap) return [] as GridCell[]
@@ -1982,21 +1970,6 @@ export default function MapsPage() {
       submitIllusionDanceTargets(nextIds)
     }
     return true
-  }
-
-  const windTraceExtraDiceCount = (
-    skillTreeId: string | undefined,
-    rank: number,
-    caster: Character,
-    token: Token,
-    aoeTargetCount?: number,
-  ) => {
-    if (skillTreeId !== 'windTraceShot') return 0
-    let count = 0
-    if ((aoeTargetCount ?? 0) === 1) count += 2
-    if (rank >= 2 && isCalmMindActive(caster)) count += 1
-    if (rank >= 3) count += token.huntingMarkStacks ?? 0
-    return count
   }
 
   const huntingMarkTraitRank = (caster?: Character) =>
@@ -4668,138 +4641,95 @@ export default function MapsPage() {
     }
 
     if (action.type === 'aoe-attack') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      const skill = actor?.combatSkills.find((s) => s.id === action.skillId)
-      const aoe = skill ? getSkillAoeTargeting(skill) : null
-      if (!actor || !skill || !aoe || !action.targetCell) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-aoe-attack')
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const preparedAoe = preparePlayerAoeAttackAction({
+        action,
+        map,
+        characters: useCharacterStore.getState().characters,
+      })
+      if (!preparedAoe.ok) {
+        acknowledgePlayerAction(action, 'rejected', preparedAoe.reason)
         completePlayerActionRequest(action)
         return
       }
-      const waiveAp = !!actor.combatBuffs?.galeComboReady
-      if (!waiveAp && actor.currentAP < skill.apCost) {
-        acknowledgePlayerAction(action, 'rejected', 'insufficient-ap')
+      const {
+        actor,
+        skill,
+        actorToken,
+        anchorCell,
+        cells,
+        targets,
+        baseDiceCount,
+        calmExtraDiceCount,
+        windExtraDiceCount,
+        saveMode,
+        selfCooldownReduction,
+        shouldStun,
+      } = preparedAoe
+      if (skill.skillTreeId === 'focusShot') {
+        launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, cellToPixel(anchorCell, map), 'focus')
+      }
+      let diceValues = await rollDiceBoxValues(baseDiceCount, skill.damageSides, `${skill.name} 伤害`, targets[0].label)
+      if (calmExtraDiceCount > 0) {
+        const extra = await rollDiceBoxValues(calmExtraDiceCount, 6, `${skill.name} 静心额外伤害`, targets[0].label)
+        diceValues = [...diceValues, ...extra]
+      }
+      if (windExtraDiceCount > 0) {
+        const extra = await rollDiceBoxValues(windExtraDiceCount, 6, `${skill.name} 额外伤害`, targets[0].label)
+        diceValues = [...diceValues, ...extra]
+      }
+      const { targetPackets } = await buildAoeTargetPackets({
+        actor,
+        skill,
+        targets,
+        saveMode,
+        shouldStun,
+        resolveTargetCharacter: (target) =>
+          target.characterId
+            ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
+            : undefined,
+        targetHasKnockbackNow: tokenHasKnockbackNow,
+        rollD20: rollDiceBoxD20,
+        rollValues: rollDiceBoxValues,
+      })
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
+        type: 'aoe-attack',
+        actorTokenId: action.actorTokenId,
+        characterId: action.characterId,
+        skillId: skill.id,
+        diceValues,
+        saveMode,
+        knockbackOnFailedSave: skill.skillTreeId === 'whirlwindKick',
+        knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
+        stunOnFailedConSave: shouldStun,
+        stunTurns: STUN_DEFAULT_TURNS,
+        selfCooldownReduction,
+        cellCount: cells.length,
+        targetPackets,
+      })
+      if (!headless.ok) {
+        acknowledgePlayerAction(action, 'rejected', headless.reason)
         completePlayerActionRequest(action)
         return
       }
-      if (skill.damageCount > 0 && skill.damageSides > 0) {
-        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-        const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
-        if (!actorToken) {
-          acknowledgePlayerAction(action, 'rejected', 'invalid-aoe-attack')
-          completePlayerActionRequest(action)
-          return
-        }
-        const casterCell = pixelToCell(actorToken.x, actorToken.y, map)
-        const anchorCell = aoe.shape === 'circle' && aoe.origin === 'self' ? casterCell : action.targetCell
-        if (!canPlaceAoe(aoe, casterCell, anchorCell)) {
-          acknowledgePlayerAction(action, 'rejected', 'out-of-range')
-          completePlayerActionRequest(action)
-          return
-        }
-        if (skill.skillTreeId === 'focusShot') {
-          launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, cellToPixel(anchorCell, map), 'focus')
-        }
-        const cells = cellsForAoe(
-          aoe,
-          aoeOrientFromCell(aoe, casterCell, anchorCell, {
-            skillTreeId: skill.skillTreeId,
-            rectRotation: action.aoeRectRotation ?? 0,
-          }),
-          anchorCell,
-        )
-        const targets = tokensInCells(map, map.tokens, cells).filter(
-          (token) => token.id !== actorToken.id && isTokenAlive(token, useCharacterStore.getState().characters),
-        )
-        if (targets.length === 0) {
-          acknowledgePlayerAction(action, 'rejected', 'invalid-target')
-          completePlayerActionRequest(action)
-          return
-        }
-        const baseDiceCount = Math.max(1, attackDamageDiceCount(skill, false))
-        let diceValues = await rollDiceBoxValues(baseDiceCount, skill.damageSides, `${skill.name} 伤害`, targets[0].label)
-        const calm = findClassTrait(actor, 'calmMind')
-        if (calm && isCalmMindActive(actor) && calm.level > 0) {
-          const extra = await rollDiceBoxValues(calm.level, 6, `${skill.name} 静心额外伤害`, targets[0].label)
-          diceValues = [...diceValues, ...extra]
-        }
-        const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
-        const windExtra = windTraceExtraDiceCount(skill.skillTreeId, skillRank, actor, targets[0], targets.length)
-        if (windExtra > 0) {
-          const extra = await rollDiceBoxValues(windExtra, 6, `${skill.name} 棰濆浼ゅ`, targets[0].label)
-          diceValues = [...diceValues, ...extra]
-        }
-        const saveMode =
-          skill.skillTreeId === 'focusShot'
-            ? 'fail-half'
-            : skill.skillTreeId === 'spiralBlade'
-              ? 'none'
-              : skill.skillTreeId === 'windTraceShot'
-                ? undefined
-                : 'half'
-        const selfCooldownReduction =
-          skill.skillTreeId === 'windTraceShot' && skillRank >= 4 && isCalmMindActive(actor) ? 1 : 0
-        const shouldStun =
-          skill.skillTreeId === 'focusShot' &&
-          skillGrantsStun(skill.skillTreeId, skillRank)
-        const { targetPackets } = await buildAoeTargetPackets({
-          actor,
-          skill,
-          targets,
-          saveMode,
-          shouldStun,
-          resolveTargetCharacter: (target) =>
-            target.characterId
-              ? useCharacterStore.getState().characters.find((character) => character.id === target.characterId)
-              : undefined,
-          targetHasKnockbackNow: tokenHasKnockbackNow,
-          rollD20: rollDiceBoxD20,
-          rollValues: rollDiceBoxValues,
-        })
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-          type: 'aoe-attack',
-          actorTokenId: action.actorTokenId,
-          characterId: action.characterId,
-          skillId: skill.id,
-          diceValues,
-          saveMode,
-          knockbackOnFailedSave: skill.skillTreeId === 'whirlwindKick',
-          knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
-          stunOnFailedConSave: shouldStun,
-          stunTurns: STUN_DEFAULT_TURNS,
-          selfCooldownReduction,
-          cellCount: cells.length,
-          targetPackets,
-        })
-        if (!headless.ok) {
-          acknowledgePlayerAction(action, 'rejected', headless.reason)
-          completePlayerActionRequest(action)
-          return
-        }
-        applyHeadlessCombatResult(headless)
-        await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
-        const display = planAoeAttackDisplay({
-          actor,
-          skill,
-          diceValues,
-          cellCount: cells.length,
-          targetCount: targets.length,
-          events: headless.events,
-          targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
-        })
-        setRoll(display.roll)
-        publishSharedDiceRoll(display.roll)
-        pushCombatLog(display.combatLog.text, display.combatLog.kind)
-        completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted')
-        return
-      }
-      void aoe
-      acknowledgePlayerAction(action, 'rejected', 'unsupported-aoe-attack')
+      applyHeadlessCombatResult(headless)
+      await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
+      const display = planAoeAttackDisplay({
+        actor,
+        skill,
+        diceValues,
+        cellCount: cells.length,
+        targetCount: targets.length,
+        events: headless.events,
+        targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
+      })
+      setRoll(display.roll)
+      publishSharedDiceRoll(display.roll)
+      pushCombatLog(display.combatLog.text, display.combatLog.kind)
       completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
       return
     }
-
     if (action.type === 'move-token') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const preparedMove = preparePlayerMoveAction({

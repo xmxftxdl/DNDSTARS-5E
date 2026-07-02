@@ -270,6 +270,23 @@ export function cellsForAoe(
   }
 }
 
+export function aoeOrientFromCell(
+  aoe: SkillAoeTargeting,
+  casterCell: GridCell,
+  anchorCell: GridCell,
+  opts?: { skillTreeId?: string; rectRotation?: number },
+): GridCell {
+  if (aoe.shape !== 'rect' || opts?.skillTreeId !== 'arrowStorm') return casterCell
+  const rotation = opts?.rectRotation ?? 0
+  const dir = [
+    { col: 0, row: -1 },
+    { col: 1, row: 0 },
+    { col: 0, row: 1 },
+    { col: -1, row: 0 },
+  ][((rotation % 4) + 4) % 4]
+  return { col: anchorCell.col - dir.col, row: anchorCell.row - dir.row }
+}
+
 export function canPlaceAoe(
   aoe: SkillAoeTargeting,
   casterCell: GridCell,

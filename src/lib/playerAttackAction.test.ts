@@ -11,6 +11,7 @@ import {
   planAoeAttackDisplay,
   planArrowSequenceDisplay,
   planSingleAttackDisplay,
+  preparePlayerAoeAttackAction,
   preparePlayerAttackAction,
 } from './playerAttackAction'
 
@@ -398,6 +399,87 @@ describe('player attack action helpers', () => {
         extraDamageGroups: undefined,
       },
     ])
+  })
+
+  it('prepares a self-origin AOE attack with covered targets and shared save mode', () => {
+    const skill = makeSkill({ skillTreeId: 'whirlwindKick', damageCount: 3, damageSides: 6 })
+    const actorToken = makeToken({
+      id: 'hero-token',
+      label: 'Hero Token',
+      type: 'player',
+      characterId: 'hero',
+      x: 100,
+      y: 100,
+    })
+    const target = makeToken({ id: 'target-token', label: 'Target', x: 100, y: 100 })
+
+    const result = preparePlayerAoeAttackAction({
+      action: makeAction({
+        type: 'aoe-attack',
+        actorTokenId: 'hero-token',
+        targetCell: { col: 20, row: 20 },
+      }),
+      map: makeMap([actorToken, target]),
+      characters: [makeCharacter({ combatSkills: [skill] })],
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      actor: { id: 'hero' },
+      skill: { skillTreeId: 'whirlwindKick' },
+      actorToken: { id: 'hero-token' },
+      casterCell: { col: 2, row: 2 },
+      anchorCell: { col: 2, row: 2 },
+      targets: [{ id: 'target-token' }],
+      baseDiceCount: 3,
+      saveMode: 'half',
+      shouldStun: false,
+    })
+    expect(result.ok && result.cells.length).toBeGreaterThan(0)
+  })
+
+  it('rejects AOE preparation when AP is insufficient or placement is out of range', () => {
+    const actorToken = makeToken({
+      id: 'hero-token',
+      type: 'player',
+      characterId: 'hero',
+      x: 25,
+      y: 25,
+    })
+    const target = makeToken({ id: 'target-token', x: 25, y: 25 })
+
+    expect(
+      preparePlayerAoeAttackAction({
+        action: makeAction({
+          type: 'aoe-attack',
+          actorTokenId: 'hero-token',
+          targetCell: { col: 0, row: 0 },
+        }),
+        map: makeMap([actorToken, target]),
+        characters: [
+          makeCharacter({
+            currentAP: 0,
+            combatSkills: [makeSkill({ skillTreeId: 'whirlwindKick', damageCount: 3, damageSides: 6 })],
+          }),
+        ],
+      }),
+    ).toEqual({ ok: false, reason: 'insufficient-ap' })
+
+    expect(
+      preparePlayerAoeAttackAction({
+        action: makeAction({
+          type: 'aoe-attack',
+          actorTokenId: 'hero-token',
+          targetCell: { col: 20, row: 20 },
+        }),
+        map: makeMap([actorToken, target]),
+        characters: [
+          makeCharacter({
+            combatSkills: [makeSkill({ skillTreeId: 'aerialCombo', damageCount: 2, damageSides: 6 })],
+          }),
+        ],
+      }),
+    ).toEqual({ ok: false, reason: 'out-of-range' })
   })
 
   it('rejects invalid targets, aoe skills, dead targets, and insufficient AP', () => {

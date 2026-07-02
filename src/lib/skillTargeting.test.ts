@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import { cellToPixel, tokenCenterForAnchorCell } from './gridCombat'
-import { tokensInCells } from './skillTargeting'
+import { aoeOrientFromCell, tokensInCells } from './skillTargeting'
 
 function map(tokens: Token[]): BattleMap {
   return {
@@ -47,5 +47,23 @@ describe('AOE token coverage targeting', () => {
     const m = map([large, medium])
 
     expect(tokensInCells(m, m.tokens, [{ col: 4, row: 5 }]).map((t) => t.id)).toEqual(['large'])
+  })
+
+  it('uses the requested arrow storm rotation when choosing the rect orientation cell', () => {
+    const aoe = { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 15, placeRangeFeet: 90 } as const
+    const casterCell = { col: 5, row: 5 }
+    const anchorCell = { col: 10, row: 10 }
+
+    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { skillTreeId: 'arrowStorm', rectRotation: 0 })).toEqual({
+      col: 10,
+      row: 11,
+    })
+    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { skillTreeId: 'arrowStorm', rectRotation: 1 })).toEqual({
+      col: 9,
+      row: 10,
+    })
+    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { skillTreeId: 'multiShot', rectRotation: 1 })).toEqual(
+      casterCell,
+    )
   })
 })
