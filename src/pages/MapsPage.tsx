@@ -107,6 +107,10 @@ import {
   summarizeHeadlessPlayerMovePreview,
 } from '../lib/playerMoveAction'
 import {
+  buildEnemyMoveAction,
+  planEnemyMoveSettlement,
+} from '../lib/enemyMoveAction'
+import {
   buildHeadlessEndTurnAction,
   clearCharacterScopedRecord,
   removeDisengagedCharacterId,
@@ -1994,25 +1998,27 @@ export default function MapsPage() {
   ) => {
     if (!activeMap) return false
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), {
-      type: 'enemy-move-token',
-      actorTokenId: enemy.id,
-      targetPosition,
-      apCost,
+    const headless = resolveHeadlessDmAction(
+      createHeadlessStateSnapshot(latestMap),
+      buildEnemyMoveAction({
+        enemy,
+        targetPosition,
+        apCost,
+      }),
+    )
+    const settlement = planEnemyMoveSettlement({
+      result: headless,
+      enemy,
+      actionLabel,
+      fallbackApMax: getEnemyApState(enemy.id).max,
     })
-    if (!headless.ok) {
-      pushCombatLog(`${enemy.label} ${actionLabel}失败：${headless.reason}`, 'system')
+    if (settlement.status === 'rejected') {
+      pushCombatLog(settlement.log.text, settlement.log.kind)
       return false
     }
-    const moved = tokenMovedEvent(headless.events, enemy.id)
-    const apEvent = apSpentEvent(headless.events, { tokenId: enemy.id, characterId: null })
     applyHeadlessCombatResult(headless)
-    if (apEvent) {
-      const ap = headless.state.enemyApByToken[enemy.id] ?? { current: apEvent.after, max: getEnemyApState(enemy.id).max }
-      pushCombatLog(
-        `${enemy.label} 花费 ${apEvent.amount} AP：${actionLabel}${moved ? ` ${moved.feet} 尺` : ''}。剩余 AP ${ap.current}/${ap.max}`,
-        'turn',
-      )
+    if (settlement.log) {
+      pushCombatLog(settlement.log.text, settlement.log.kind)
     }
     return true
   }
