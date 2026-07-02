@@ -88,6 +88,7 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
+  buildArrowSequenceTargetPackets,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -4540,78 +4541,14 @@ export default function MapsPage() {
       const { actor, skill, targets, waiveAp, doubleArrow, isArrowSequence } = preparedAttack
       if (isArrowSequence) {
         const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-        const perPacketDiceCount = Math.max(1, skill.damageCount)
-        const packetPlans = []
-        let damagePacketCount = 0
-        const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
-        for (const target of targets) {
-          const liveTarget = map.tokens.find((token) => token.id === target.id) ?? target
-          const dodgePreview = enemyDodgePreview(liveTarget, actor, skill)
-          const shouldDodge = !!dodgePreview?.decision.shouldDodge
-          const targetDodgeD20 = shouldDodge ? await rollDiceBoxD20('敌人闪避 D20', liveTarget.label) : undefined
-          const expectedDodged =
-            targetDodgeD20 != null && dodgePreview
-              ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
-              : false
-          const effectSaveD20 =
-            !expectedDodged && skill.skillTreeId === 'rageShot' && skillRank >= 3
-              ? await rollDiceBoxD20('怒气爆射力量豁免 D20', liveTarget.label)
-              : undefined
-          if (!expectedDodged) damagePacketCount += 1
-          packetPlans.push({
-            target,
-            targetDodgeD20,
-            targetDodgeMode: shouldDodge ? 'attempt' : 'skip',
-            expectedDodged,
-            effectSaveD20,
-          })
-        }
-        const allPacketsTargetSame = targets.length > 0 && targets.every((target) => target.id === targets[0].id)
-        const shouldEncircleStun =
-          skill.skillTreeId === 'encircle' &&
-          skillRank >= 5 &&
-          allPacketsTargetSame &&
-          targets.length >= Math.max(1, skill.arrowShots ?? 1) &&
-          packetPlans.every((plan) => !plan.expectedDodged)
-        const encircleStunSaveD20 = shouldEncircleStun
-          ? await rollDiceBoxD20(`${skill.name} 体质豁免 D20`, targets[0].label)
-          : undefined
-        const allDamageValues =
-          damagePacketCount > 0
-            ? await rollDiceBoxValues(
-                perPacketDiceCount * damagePacketCount,
-                skill.damageSides,
-                `${skill.name} 伤害`,
-                targets[0]?.label ?? skill.name,
-              )
-            : []
-        let damageCursor = 0
-        let encircleStunAssigned = false
-        const targetPackets = packetPlans.map((plan) => {
-          const diceValues = plan.expectedDodged
-            ? undefined
-            : allDamageValues.slice(damageCursor, damageCursor + perPacketDiceCount)
-          if (!plan.expectedDodged) damageCursor += perPacketDiceCount
-          const applyEncircleStun =
-            !plan.expectedDodged && encircleStunSaveD20 != null && !encircleStunAssigned
-          if (applyEncircleStun) encircleStunAssigned = true
-          return {
-            targetTokenId: plan.target.id,
-            diceValues,
-            targetDodgeD20: plan.targetDodgeD20,
-            targetDodgeMode: plan.targetDodgeMode as 'attempt' | 'skip',
-            effectSave:
-              plan.effectSaveD20 != null
-                ? { ability: 'str' as const, d20: plan.effectSaveD20 }
-                : applyEncircleStun
-                  ? { ability: 'con' as const, d20: encircleStunSaveD20 }
-                  : undefined,
-            restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
-            smallOrMediumOnly: skill.skillTreeId === 'rageShot',
-            stunOnFailedEffectSave: applyEncircleStun,
-            noMoveOnHit: skill.skillTreeId === 'encircle',
-            noMoveTurns: skill.skillTreeId === 'encircle' ? 1 : undefined,
-          }
+        const { targetPackets } = await buildArrowSequenceTargetPackets({
+          actor,
+          skill,
+          targets,
+          resolveTarget: (target) => map.tokens.find((token) => token.id === target.id) ?? target,
+          rollD20: rollDiceBoxD20,
+          rollValues: rollDiceBoxValues,
+          enemyDodgePreview,
         })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',

@@ -4,6 +4,7 @@ import type { Character, CombatSkill } from '../types/character'
 import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
+  buildArrowSequenceTargetPackets,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -35,6 +36,10 @@ function makeCharacter(patch: Partial<Character> = {}): Character {
   return {
     id: 'hero',
     name: 'Hero',
+    charClass: '弓手',
+    level: 1,
+    abilities: { str: 10, dex: 14, con: 10, int: 10, wis: 10, cha: 10 },
+    skills: [],
     currentHp: 10,
     currentAP: 2,
     combatSkills: [makeSkill()],
@@ -288,6 +293,55 @@ describe('player attack action helpers', () => {
       diceValues: undefined,
       extraDamageGroups: undefined,
     })
+  })
+
+  it('builds arrow sequence packets by slicing shared damage dice per non-dodged packet', async () => {
+    const d20Queue = [1, 20]
+    const result = await buildArrowSequenceTargetPackets({
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'multiShot', damageCount: 1, damageSides: 4, arrowShots: 2 }),
+      targets: [makeToken(), makeToken()],
+      rollD20: async () => d20Queue.shift() ?? 1,
+      rollValues: async (count, sides) => {
+        expect({ count, sides }).toEqual({ count: 1, sides: 4 })
+        return [3]
+      },
+      enemyDodgePreview: () => ({ decision: { shouldDodge: true }, attackBonus: 4, targetAc: 20 }),
+    })
+
+    expect(result).toMatchObject({
+      damagePacketCount: 1,
+      targetPackets: [
+        { targetDodgeD20: 1, targetDodgeMode: 'attempt', diceValues: undefined },
+        { targetDodgeD20: 20, targetDodgeMode: 'attempt', diceValues: [3] },
+      ],
+    })
+  })
+
+  it('builds encircle stun on the first non-dodged packet when all arrows hit the same target', async () => {
+    const result = await buildArrowSequenceTargetPackets({
+      actor: makeCharacter({ skillRanks: { encircle: 5 } }),
+      skill: makeSkill({ skillTreeId: 'encircle', damageCount: 1, damageSides: 4, arrowShots: 2 }),
+      targets: [makeToken(), makeToken()],
+      rollD20: async () => 13,
+      rollValues: async () => [2, 4],
+      enemyDodgePreview: () => ({ decision: { shouldDodge: false }, attackBonus: 4, targetAc: 12 }),
+    })
+
+    expect(result.targetPackets).toMatchObject([
+      {
+        diceValues: [2],
+        effectSave: { ability: 'con', d20: 13 },
+        stunOnFailedEffectSave: true,
+        noMoveOnHit: true,
+      },
+      {
+        diceValues: [4],
+        effectSave: undefined,
+        stunOnFailedEffectSave: false,
+        noMoveOnHit: true,
+      },
+    ])
   })
 
   it('rejects invalid targets, aoe skills, dead targets, and insufficient AP', () => {

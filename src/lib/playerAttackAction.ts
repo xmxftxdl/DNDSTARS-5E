@@ -464,6 +464,114 @@ export async function buildSingleAttackTargetPacket(
   }
 }
 
+export interface ArrowSequenceTargetPacketBuildInput {
+  actor: Character
+  skill: CombatSkill
+  targets: Token[]
+  resolveTarget?: (target: Token) => Token
+  rollD20: (label: string, targetName: string) => Promise<number>
+  rollValues: (count: number, sides: number, label: string, targetName: string) => Promise<number[]>
+  enemyDodgePreview: (
+    target: Token,
+    attacker: Character,
+    skill: CombatSkill,
+  ) => EnemyDodgePreviewForPacket | null
+}
+
+export interface ArrowSequenceTargetPacketBuildResult {
+  targetPackets: HeadlessPlayerAttackPacket[]
+  skillRank: number
+  damagePacketCount: number
+}
+
+export async function buildArrowSequenceTargetPackets(
+  input: ArrowSequenceTargetPacketBuildInput,
+): Promise<ArrowSequenceTargetPacketBuildResult> {
+  const { actor, skill, targets, resolveTarget, rollD20, rollValues, enemyDodgePreview } = input
+  const perPacketDiceCount = Math.max(1, skill.damageCount)
+  const packetPlans: Array<{
+    target: Token
+    targetDodgeD20?: number
+    targetDodgeMode: 'attempt' | 'skip'
+    expectedDodged: boolean
+    effectSaveD20?: number
+  }> = []
+  let damagePacketCount = 0
+  const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+
+  for (const target of targets) {
+    const liveTarget = resolveTarget?.(target) ?? target
+    const dodgePreview = enemyDodgePreview(liveTarget, actor, skill)
+    const shouldDodge = !!dodgePreview?.decision.shouldDodge
+    const targetDodgeD20 = shouldDodge ? await rollD20('敌人闪避 D20', liveTarget.label) : undefined
+    const expectedDodged =
+      targetDodgeD20 != null && dodgePreview
+        ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
+        : false
+    const effectSaveD20 =
+      !expectedDodged && skill.skillTreeId === 'rageShot' && skillRank >= 3
+        ? await rollD20('怒气爆射力量豁免 D20', liveTarget.label)
+        : undefined
+    if (!expectedDodged) damagePacketCount += 1
+    packetPlans.push({
+      target,
+      targetDodgeD20,
+      targetDodgeMode: shouldDodge ? 'attempt' : 'skip',
+      expectedDodged,
+      effectSaveD20,
+    })
+  }
+
+  const allPacketsTargetSame = targets.length > 0 && targets.every((target) => target.id === targets[0].id)
+  const shouldEncircleStun =
+    skill.skillTreeId === 'encircle' &&
+    skillRank >= 5 &&
+    allPacketsTargetSame &&
+    targets.length >= Math.max(1, skill.arrowShots ?? 1) &&
+    packetPlans.every((plan) => !plan.expectedDodged)
+  const encircleStunSaveD20 = shouldEncircleStun
+    ? await rollD20(`${skill.name} 体质豁免 D20`, targets[0].label)
+    : undefined
+  const allDamageValues =
+    damagePacketCount > 0
+      ? await rollValues(
+          perPacketDiceCount * damagePacketCount,
+          skill.damageSides,
+          `${skill.name} 伤害`,
+          targets[0]?.label ?? skill.name,
+        )
+      : []
+  let damageCursor = 0
+  let encircleStunAssigned = false
+  const targetPackets = packetPlans.map((plan) => {
+    const diceValues = plan.expectedDodged
+      ? undefined
+      : allDamageValues.slice(damageCursor, damageCursor + perPacketDiceCount)
+    if (!plan.expectedDodged) damageCursor += perPacketDiceCount
+    const applyEncircleStun = !plan.expectedDodged && encircleStunSaveD20 != null && !encircleStunAssigned
+    if (applyEncircleStun) encircleStunAssigned = true
+    return {
+      targetTokenId: plan.target.id,
+      diceValues,
+      targetDodgeD20: plan.targetDodgeD20,
+      targetDodgeMode: plan.targetDodgeMode,
+      effectSave:
+        plan.effectSaveD20 != null
+          ? { ability: 'str' as const, d20: plan.effectSaveD20 }
+          : applyEncircleStun
+            ? { ability: 'con' as const, d20: encircleStunSaveD20 }
+            : undefined,
+      restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
+      smallOrMediumOnly: skill.skillTreeId === 'rageShot',
+      stunOnFailedEffectSave: applyEncircleStun,
+      noMoveOnHit: skill.skillTreeId === 'encircle',
+      noMoveTurns: skill.skillTreeId === 'encircle' ? 1 : undefined,
+    }
+  })
+
+  return { targetPackets, skillRank, damagePacketCount }
+}
+
 function eagleStrikeExtraDiceCountForPacket(rank: number): number {
   if (rank <= 0) return 0
   return rank === 1 ? 3 : 4
