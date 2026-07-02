@@ -97,6 +97,48 @@ export function playerMoveRejectReason(reason: HeadlessCombatFailureReason): str
   return reason === 'movement-locked' ? 'no-move' : reason
 }
 
+export type PlayerMovePreviewPlan =
+  | {
+      status: 'rejected'
+      reason: string
+    }
+  | {
+      status: 'accepted'
+      acceptedPosition: { x: number; y: number }
+    }
+  | {
+      status: 'opportunity'
+      targetPosition: { x: number; y: number }
+      movedFeet: number
+      opportunityAttackerTokenIds: string[]
+      deferredMoveAction: HeadlessPlayerMoveAction
+    }
+
+export function planPlayerMoveAfterPreview(input: {
+  preview: PlayerMovePreviewResult
+  moveAction: HeadlessPlayerMoveAction
+}): PlayerMovePreviewPlan {
+  if (!input.preview.ok) {
+    return {
+      status: 'rejected',
+      reason: playerMoveRejectReason(input.preview.reason),
+    }
+  }
+  if (input.preview.opportunityAttackerTokenIds.length === 0) {
+    return {
+      status: 'accepted',
+      acceptedPosition: input.preview.targetPosition,
+    }
+  }
+  return {
+    status: 'opportunity',
+    targetPosition: input.preview.targetPosition,
+    movedFeet: input.preview.movedFeet,
+    opportunityAttackerTokenIds: input.preview.opportunityAttackerTokenIds,
+    deferredMoveAction: buildDeferredPlayerMoveAction(input.moveAction),
+  }
+}
+
 export function buildDeferredPlayerMoveAction(moveAction: HeadlessPlayerMoveAction): HeadlessPlayerMoveAction {
   return {
     ...moveAction,

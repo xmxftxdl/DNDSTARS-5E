@@ -8,6 +8,7 @@ import {
   buildDeferredPlayerMoveAction,
   buildPlayerMoveCommitAfterOpportunity,
   playerMoveRejectReason,
+  planPlayerMoveAfterPreview,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
 } from './playerMoveAction'
@@ -152,6 +153,54 @@ describe('player move action helpers', () => {
   it('maps movement lock failures to the player-facing no-move reason', () => {
     expect(playerMoveRejectReason('movement-locked')).toBe('no-move')
     expect(playerMoveRejectReason('out-of-range')).toBe('out-of-range')
+  })
+
+  it('plans the next movement step after the headless preview', () => {
+    const prepared = preparePlayerMoveAction({
+      action: makeAction(),
+      map: makeMap(),
+      characters: [makeCharacter()],
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    expect(
+      planPlayerMoveAfterPreview({
+        moveAction: prepared.moveAction,
+        preview: { ok: false, reason: 'movement-locked' },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'no-move' })
+
+    expect(
+      planPlayerMoveAfterPreview({
+        moveAction: prepared.moveAction,
+        preview: {
+          ok: true,
+          targetPosition: { x: 200, y: 100 },
+          movedFeet: 10,
+          opportunityAttackerTokenIds: [],
+        },
+      }),
+    ).toEqual({ status: 'accepted', acceptedPosition: { x: 200, y: 100 } })
+
+    expect(
+      planPlayerMoveAfterPreview({
+        moveAction: prepared.moveAction,
+        preview: {
+          ok: true,
+          targetPosition: { x: 200, y: 100 },
+          movedFeet: 10,
+          opportunityAttackerTokenIds: ['goblin-token'],
+        },
+      }),
+    ).toEqual({
+      status: 'opportunity',
+      targetPosition: { x: 200, y: 100 },
+      movedFeet: 10,
+      opportunityAttackerTokenIds: ['goblin-token'],
+      deferredMoveAction: { ...prepared.moveAction, deferTokenMove: true },
+    })
   })
 
   it('builds deferred and commit move actions without losing actor identity', () => {

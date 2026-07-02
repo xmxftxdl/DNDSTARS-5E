@@ -95,9 +95,8 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
-  buildDeferredPlayerMoveAction,
   buildPlayerMoveCommitAfterOpportunity,
-  playerMoveRejectReason,
+  planPlayerMoveAfterPreview,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
 } from '../lib/playerMoveAction'
@@ -5393,21 +5392,18 @@ export default function MapsPage() {
         requestedPosition: moveAction.targetPosition,
         map,
       })
-      if (!preview.ok) {
-        acknowledgePlayerAction(action, 'rejected', playerMoveRejectReason(preview.reason))
+      const movePlan = planPlayerMoveAfterPreview({ preview, moveAction })
+      if (movePlan.status === 'rejected') {
+        acknowledgePlayerAction(action, 'rejected', movePlan.reason)
         completePlayerActionRequest(action)
         return
       }
-
-      const targetPosition = preview.targetPosition
-      const movedFeet = preview.movedFeet
-
-      if (preview.opportunityAttackerTokenIds.length === 0) {
-        settleHeadlessPlayerAction(action, headless, { acceptedPosition: targetPosition })
+      if (movePlan.status === 'accepted') {
+        settleHeadlessPlayerAction(action, headless, { acceptedPosition: movePlan.acceptedPosition })
         return
       }
 
-      const deferred = resolveHeadlessDmAction(headlessSnapshot, buildDeferredPlayerMoveAction(moveAction))
+      const deferred = resolveHeadlessDmAction(headlessSnapshot, movePlan.deferredMoveAction)
       if (!deferred.ok) {
         acknowledgePlayerAction(
           action,
@@ -5420,19 +5416,19 @@ export default function MapsPage() {
       applyHeadlessCombatResult(deferred)
       await resolveOpportunityAttacksForMove(
         token,
-        targetPosition,
+        movePlan.targetPosition,
         actor,
-        preview.opportunityAttackerTokenIds,
+        movePlan.opportunityAttackerTokenIds,
       )
       const afterOpportunity = buildPlayerMoveCommitAfterOpportunity({
         moveAction,
-        targetPosition,
-        feet: movedFeet,
+        targetPosition: movePlan.targetPosition,
+        feet: movePlan.movedFeet,
         token,
         characters: useCharacterStore.getState().characters,
       })
       if (!afterOpportunity.ok) {
-        pushApLog(actor, 1, '移动', `${movedFeet} 尺，移动被打断`)
+        pushApLog(actor, 1, '移动', `${movePlan.movedFeet} 尺，移动被打断`)
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted', afterOpportunity.reason, afterOpportunity.acceptedPosition)
         return
@@ -5448,8 +5444,8 @@ export default function MapsPage() {
         return
       }
       settleHeadlessPlayerAction(action, committed, {
-        acceptedPosition: targetPosition,
-        beforeComplete: () => pushApLog(actor, 1, '移动', `${movedFeet} 尺`),
+        acceptedPosition: movePlan.targetPosition,
+        beforeComplete: () => pushApLog(actor, 1, '移动', `${movePlan.movedFeet} 尺`),
       })
       return
     }
