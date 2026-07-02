@@ -291,6 +291,8 @@ import {
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import {
+  buildFinaleDamageValues,
+  buildIllusionDanceTargetPackets,
   illusionDanceTargetLimit,
   preparePlayerFeatureActivationAction,
   shouldSendPlayerReadyFeatureToDm,
@@ -4440,12 +4442,10 @@ export default function MapsPage() {
       }
 
       if (preparedFeature.kind === 'illusionDance') {
-        const targetPackets = []
-        for (const targetId of preparedFeature.rollTargetIds) {
-          const target = preparedFeature.map.tokens.find((token) => token.id === targetId)
-          const values = await rollDiceBoxValues(1, 20, '迷幻舞步感知豁免', target?.label ?? '目标')
-          targetPackets.push({ targetTokenId: targetId, saveD20: values[0] ?? 1 })
-        }
+        const targetPackets = await buildIllusionDanceTargetPackets({
+          prepared: preparedFeature,
+          rollValues: rollDiceBoxValues,
+        })
         const headless = resolveHeadlessDmAction(
           createHeadlessStateSnapshot(preparedFeature.map),
           preparedFeature.buildHeadlessAction(targetPackets),
@@ -4454,19 +4454,10 @@ export default function MapsPage() {
         return
       }
 
-      const finaleDamageValues = preparedFeature.finaleWillTrigger
-        ? [
-            ...(await rollDiceBoxValues(6, 10, '曲终力场伤害', preparedFeature.target?.label ?? '目标')),
-            ...(preparedFeature.finaleExtraD8Count > 0
-              ? await rollDiceBoxValues(
-                  preparedFeature.finaleExtraD8Count,
-                  8,
-                  '曲终等级额外伤害',
-                  preparedFeature.target?.label ?? '目标',
-                )
-              : []),
-          ]
-        : undefined
+      const finaleDamageValues = await buildFinaleDamageValues({
+        prepared: preparedFeature,
+        rollValues: rollDiceBoxValues,
+      })
       const headless = resolveHeadlessDmAction(
         createHeadlessStateSnapshot(preparedFeature.map),
         preparedFeature.buildHeadlessAction(finaleDamageValues),

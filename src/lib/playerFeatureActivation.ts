@@ -140,3 +140,34 @@ export function preparePlayerFeatureActivationAction(input: {
     }),
   }
 }
+
+type RollFeatureValues = (count: number, sides: number, label: string, targetName: string) => Promise<number[]>
+
+export async function buildIllusionDanceTargetPackets(input: {
+  prepared: Extract<PlayerFeatureActivationPrepareResult, { ok: true; kind: 'illusionDance' }>
+  rollValues: RollFeatureValues
+}): Promise<HeadlessFeatureTargetPacket[]> {
+  const { prepared, rollValues } = input
+  const targetPackets: HeadlessFeatureTargetPacket[] = []
+  for (const targetId of prepared.rollTargetIds) {
+    const target = prepared.map.tokens.find((token) => token.id === targetId)
+    const values = await rollValues(1, 20, '迷幻舞步感知豁免', target?.label ?? '目标')
+    targetPackets.push({ targetTokenId: targetId, saveD20: values[0] ?? 1 })
+  }
+  return targetPackets
+}
+
+export async function buildFinaleDamageValues(input: {
+  prepared: Extract<PlayerFeatureActivationPrepareResult, { ok: true; kind: 'standard' }>
+  rollValues: RollFeatureValues
+}): Promise<number[] | undefined> {
+  const { prepared, rollValues } = input
+  if (!prepared.finaleWillTrigger) return undefined
+  const targetName = prepared.target?.label ?? '目标'
+  const values = await rollValues(6, 10, '曲终力场伤害', targetName)
+  if (prepared.finaleExtraD8Count <= 0) return values
+  return [
+    ...values,
+    ...(await rollValues(prepared.finaleExtraD8Count, 8, '曲终等级额外伤害', targetName)),
+  ]
+}

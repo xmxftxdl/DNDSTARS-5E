@@ -3,6 +3,8 @@ import type { BattleMap } from '../store/maps'
 import type { Character } from '../types/character'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
+  buildFinaleDamageValues,
+  buildIllusionDanceTargetPackets,
   illusionDanceTargetLimit,
   preparePlayerFeatureActivationAction,
   shouldSendPlayerReadyFeatureToDm,
@@ -112,6 +114,47 @@ describe('player feature activation routing', () => {
     })
   })
 
+  it('builds illusion dance save packets by rolling once per limited target', async () => {
+    const result = preparePlayerFeatureActivationAction({
+      action: makeAction({
+        featureKey: 'illusionDance',
+        targetTokenIds: ['target-1', 'target-2'],
+      }),
+      map: makeMap({
+        tokens: [
+          makeMap().tokens[0],
+          { ...makeMap().tokens[0], id: 'target-2', label: 'Target 2' },
+        ],
+      }),
+      characters: [
+        makeCharacter({
+          traits: [{ id: 'illusionDance', name: 'Illusion Dance', featureKey: 'illusionDance', level: 2, uses: 1, maxUses: 1, description: '' }],
+        }),
+      ],
+    })
+    expect(result.ok && result.kind === 'illusionDance').toBe(true)
+    if (!result.ok || result.kind !== 'illusionDance') return
+
+    const calls: Array<{ count: number; sides: number; targetName: string }> = []
+    const values = [13, 7]
+    const packets = await buildIllusionDanceTargetPackets({
+      prepared: result,
+      rollValues: async (count, sides, _label, targetName) => {
+        calls.push({ count, sides, targetName })
+        return [values.shift() ?? 1]
+      },
+    })
+
+    expect(calls).toEqual([
+      { count: 1, sides: 20, targetName: 'Target 1' },
+      { count: 1, sides: 20, targetName: 'Target 2' },
+    ])
+    expect(packets).toEqual([
+      { targetTokenId: 'target-1', saveD20: 13 },
+      { targetTokenId: 'target-2', saveD20: 7 },
+    ])
+  })
+
   it('prepares standard feature activation and tracks finale pre-roll needs for tracking arrow', () => {
     const result = preparePlayerFeatureActivationAction({
       action: makeAction({ featureKey: 'trackingArrow', targetTokenId: 'target-1' }),
@@ -136,6 +179,37 @@ describe('player feature activation routing', () => {
       targetTokenId: 'target-1',
       finaleDamageValues: [10, 10, 10, 10, 10, 10, 8, 7],
     })
+  })
+
+  it('builds finale damage values only when tracking arrow will trigger finale', async () => {
+    const prepared = preparePlayerFeatureActivationAction({
+      action: makeAction({ featureKey: 'trackingArrow', targetTokenId: 'target-1' }),
+      map: makeMap({ tokens: [{ ...makeMap().tokens[0], huntingMarkStacks: 3 }] }),
+      characters: [
+        makeCharacter({
+          combatBuffs: { finaleReady: true },
+          traits: [{ id: 'finale', name: 'Finale', featureKey: 'finale', level: 3, uses: 1, maxUses: 1, description: '' }],
+        }),
+      ],
+    })
+    expect(prepared.ok && prepared.kind === 'standard').toBe(true)
+    if (!prepared.ok || prepared.kind !== 'standard') return
+
+    const calls: Array<{ count: number; sides: number; targetName: string }> = []
+    const rolls = [[10, 9, 8, 7, 6, 5], [4, 3]]
+    const values = await buildFinaleDamageValues({
+      prepared,
+      rollValues: async (count, sides, _label, targetName) => {
+        calls.push({ count, sides, targetName })
+        return rolls.shift() ?? []
+      },
+    })
+
+    expect(calls).toEqual([
+      { count: 6, sides: 10, targetName: 'Target 1' },
+      { count: 2, sides: 8, targetName: 'Target 1' },
+    ])
+    expect(values).toEqual([10, 9, 8, 7, 6, 5, 4, 3])
   })
 
   it('rejects unsupported or malformed feature activation requests', () => {
