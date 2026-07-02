@@ -1,7 +1,38 @@
 import type { DiceRoll, D20AttackRoll } from '../components/DiceRollOverlay'
 import type { EnemyAttackRoll } from './enemyAi'
-import type { HeadlessCombatResult } from './headlessDmCombatEngine'
+import type { HeadlessCombatResult, HeadlessEnemyAttackAction } from './headlessDmCombatEngine'
 import { apSpentEvent, enemyAttackResolvedEvent } from './headlessCombatEvents'
+
+export function buildEnemyAttackHeadlessAction(input: {
+  actorTokenId: string
+  targetTokenId: string
+  actionIndex?: number
+  diceValues?: number[]
+  huntingBacklashValues?: number[]
+  saveD20?: number
+  useStableMind?: boolean
+  actorApAlreadySpent?: boolean
+  targetWantsDodge?: boolean
+  targetDodgeD20?: number
+  targetDodgeApAlreadySpent?: boolean
+  useArcaneSurgeOnLethal?: boolean
+}): HeadlessEnemyAttackAction {
+  return {
+    type: 'enemy-attack-token',
+    actorTokenId: input.actorTokenId,
+    targetTokenId: input.targetTokenId,
+    ...(input.actionIndex !== undefined ? { actionIndex: input.actionIndex } : {}),
+    ...(input.diceValues !== undefined ? { diceValues: input.diceValues } : {}),
+    ...(input.huntingBacklashValues !== undefined ? { huntingBacklashValues: input.huntingBacklashValues } : {}),
+    ...(input.saveD20 !== undefined ? { saveD20: input.saveD20 } : {}),
+    ...(input.useStableMind !== undefined ? { useStableMind: input.useStableMind } : {}),
+    ...(input.actorApAlreadySpent !== undefined ? { actorApAlreadySpent: input.actorApAlreadySpent } : {}),
+    ...(input.targetWantsDodge !== undefined ? { targetWantsDodge: input.targetWantsDodge } : {}),
+    ...(input.targetDodgeD20 !== undefined ? { targetDodgeD20: input.targetDodgeD20 } : {}),
+    ...(input.targetDodgeApAlreadySpent !== undefined ? { targetDodgeApAlreadySpent: input.targetDodgeApAlreadySpent } : {}),
+    ...(input.useArcaneSurgeOnLethal !== undefined ? { useArcaneSurgeOnLethal: input.useArcaneSurgeOnLethal } : {}),
+  }
+}
 
 export type EnemyAttackSettlementPlan =
   | {

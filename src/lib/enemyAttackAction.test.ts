@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EnemyAttackRoll } from './enemyAi'
 import {
+  buildEnemyAttackHeadlessAction,
   planEnemyAttackApLog,
   planEnemyAttackSettlement,
 } from './enemyAttackAction'
@@ -60,6 +61,58 @@ function makeResult(patch: Partial<HeadlessCombatResult> = {}): HeadlessCombatRe
 }
 
 describe('enemy attack action helpers', () => {
+  it('builds physical enemy attack actions for headless resolution', () => {
+    expect(
+      buildEnemyAttackHeadlessAction({
+        actorTokenId: 'goblin',
+        targetTokenId: 'hero-token',
+        actionIndex: 1,
+        diceValues: [5],
+        huntingBacklashValues: [3],
+        actorApAlreadySpent: true,
+        targetWantsDodge: true,
+        targetDodgeD20: 12,
+        targetDodgeApAlreadySpent: false,
+      }),
+    ).toEqual({
+      type: 'enemy-attack-token',
+      actorTokenId: 'goblin',
+      targetTokenId: 'hero-token',
+      actionIndex: 1,
+      diceValues: [5],
+      huntingBacklashValues: [3],
+      actorApAlreadySpent: true,
+      targetWantsDodge: true,
+      targetDodgeD20: 12,
+      targetDodgeApAlreadySpent: false,
+    })
+  })
+
+  it('builds enemy save attack actions for headless resolution', () => {
+    expect(
+      buildEnemyAttackHeadlessAction({
+        actorTokenId: 'dragon',
+        targetTokenId: 'hero-token',
+        actionIndex: 0,
+        diceValues: [4, 6, 2, 1],
+        saveD20: 15,
+        useStableMind: true,
+        actorApAlreadySpent: true,
+        useArcaneSurgeOnLethal: true,
+      }),
+    ).toEqual({
+      type: 'enemy-attack-token',
+      actorTokenId: 'dragon',
+      targetTokenId: 'hero-token',
+      actionIndex: 0,
+      diceValues: [4, 6, 2, 1],
+      saveD20: 15,
+      useStableMind: true,
+      actorApAlreadySpent: true,
+      useArcaneSurgeOnLethal: true,
+    })
+  })
+
   it('plans accepted enemy attack display from headless events', () => {
     const plan = planEnemyAttackSettlement({
       result: makeResult(),

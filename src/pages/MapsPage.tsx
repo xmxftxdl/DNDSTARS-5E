@@ -111,6 +111,7 @@ import {
   planEnemyMoveSettlement,
 } from '../lib/enemyMoveAction'
 import {
+  buildEnemyAttackHeadlessAction,
   planEnemyAttackApLog,
   planEnemyAttackSettlement,
 } from '../lib/enemyAttackAction'
@@ -3170,8 +3171,7 @@ export default function MapsPage() {
           ? await rollDiceBoxValues(huntedByTargetRank, 4, '狩猎印记反噬伤害', result.attack.targetName)
           : undefined
       const headlessSnapshot = createHeadlessStateSnapshot(latestMap)
-      const headlessAction = {
-        type: 'enemy-attack-token',
+      const headlessAction = buildEnemyAttackHeadlessAction({
         actorTokenId: result.attackerTokenId,
         targetTokenId: result.targetTokenId,
         actionIndex: result.actionIndex,
@@ -3181,7 +3181,7 @@ export default function MapsPage() {
         targetWantsDodge: !!wantsDodge,
         targetDodgeD20,
         targetDodgeApAlreadySpent: dodgeApAlreadySpent,
-      } as const
+      })
       const preview = resolveHeadlessDmAction(headlessSnapshot, headlessAction)
       if (!preview.ok) return false
       const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
@@ -3314,8 +3314,7 @@ export default function MapsPage() {
       }
 
       const headlessSnapshot = createHeadlessStateSnapshot(latestMap)
-      const headlessAction = {
-        type: 'enemy-attack-token',
+      const headlessAction = buildEnemyAttackHeadlessAction({
         actorTokenId: result.attackerTokenId,
         targetTokenId: result.targetTokenId,
         actionIndex: result.actionIndex,
@@ -3323,7 +3322,7 @@ export default function MapsPage() {
         saveD20,
         useStableMind,
         actorApAlreadySpent: enemyAttackApAlreadySpent,
-      } as const
+      })
       const preview = resolveHeadlessDmAction(headlessSnapshot, headlessAction)
       if (!preview.ok) return false
       const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
