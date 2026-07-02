@@ -294,7 +294,10 @@ import {
   capturePlayerActionResultBaseline,
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
-import { shouldSendPlayerReadyFeatureToDm } from '../lib/playerFeatureActivation'
+import {
+  preparePlayerFeatureActivationAction,
+  shouldSendPlayerReadyFeatureToDm,
+} from '../lib/playerFeatureActivation'
 import {
   buildSimpleHeadlessPlayerAction,
   isSimpleHeadlessPlayerActionType,
@@ -4491,98 +4494,51 @@ export default function MapsPage() {
     })
 
     if (action.type === 'activate-feature') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      if (!actor || !action.featureKey) {
-        acknowledgePlayerAction(action, 'rejected', 'unsupported-feature')
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const preparedFeature = preparePlayerFeatureActivationAction({
+        action,
+        map,
+        characters: useCharacterStore.getState().characters,
+      })
+      if (!preparedFeature.ok) {
+        acknowledgePlayerAction(action, 'rejected', preparedFeature.reason)
         completePlayerActionRequest(action)
         return
       }
-      if (action.featureKey === 'illusionDance') {
-        const targetIds = action.targetTokenIds?.length
-          ? action.targetTokenIds
-          : action.targetTokenId
-            ? [action.targetTokenId]
-            : []
-        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+
+      if (preparedFeature.kind === 'illusionDance') {
         const targetPackets = []
-        for (const targetId of uniqueTokenIds(targetIds).slice(0, illusionDanceTargetLimit(actor))) {
-          const target = map.tokens.find((token) => token.id === targetId)
+        for (const targetId of preparedFeature.rollTargetIds) {
+          const target = preparedFeature.map.tokens.find((token) => token.id === targetId)
           const values = await rollDiceBoxValues(1, 20, '迷幻舞步感知豁免', target?.label ?? '目标')
           targetPackets.push({ targetTokenId: targetId, saveD20: values[0] ?? 1 })
         }
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-          type: 'activate-feature',
-          actorTokenId: action.actorTokenId,
-          characterId: action.characterId,
-          featureKey: 'illusionDance',
-          targetTokenIds: targetIds,
-          targetPackets,
-        })
-        if (!headless.ok) {
-          acknowledgePlayerAction(action, 'rejected', headless.reason)
-          completePlayerActionRequest(action)
-          return
-        }
-        applyHeadlessCombatResult(headless)
-        for (const event of headless.events) {
-          if (event.type === 'log') pushCombatLog(event.text, 'turn')
-        }
-        completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted')
-        return
-      }
-      if (
-        action.featureKey === 'eagleEye' ||
-        action.featureKey === 'doubleArrow' ||
-        action.featureKey === 'preciseStrike' ||
-        action.featureKey === 'stillWater' ||
-        action.featureKey === 'finale' ||
-        action.featureKey === 'shadowVeil' ||
-        action.featureKey === 'trackingArrow' ||
-        action.featureKey === 'flexibleBody' ||
-        action.featureKey === 'showtime' ||
-        action.featureKey === 'windBlade'
-      ) {
-        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-        const target = action.targetTokenId ? map.tokens.find((token) => token.id === action.targetTokenId) : undefined
-        const finaleWillTrigger = !!(
-          action.featureKey === 'trackingArrow' &&
-          target &&
-          (target.huntingMarkStacks ?? 0) >= 3 &&
-          actor.combatBuffs?.finaleReady
+        const headless = resolveHeadlessDmAction(
+          createHeadlessStateSnapshot(preparedFeature.map),
+          preparedFeature.buildHeadlessAction(targetPackets),
         )
-        const finaleTrait = findClassTrait(actor, 'finale')
-        const finaleDamageValues = finaleWillTrigger
-          ? [
-              ...(await rollDiceBoxValues(6, 10, '曲终力场伤害', target?.label ?? '目标')),
-              ...(finaleTrait && finaleTrait.level > 1
-                ? await rollDiceBoxValues(finaleTrait.level - 1, 8, '曲终等级额外伤害', target?.label ?? '目标')
-                : []),
-            ]
-          : undefined
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-          type: 'activate-feature',
-          actorTokenId: action.actorTokenId,
-          characterId: action.characterId,
-          featureKey: action.featureKey,
-          targetTokenId: action.targetTokenId,
-          finaleDamageValues,
-        })
-        if (!headless.ok) {
-          acknowledgePlayerAction(action, 'rejected', headless.reason)
-          completePlayerActionRequest(action)
-          return
-        }
-        applyHeadlessCombatResult(headless)
-        for (const event of headless.events) {
-          if (event.type === 'log') pushCombatLog(event.text, 'turn')
-        }
-        completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted')
+        settleHeadlessPlayerAction(action, headless)
         return
       }
-      acknowledgePlayerAction(action, 'rejected', 'unsupported-feature')
-      completePlayerActionRequest(action)
+
+      const finaleDamageValues = preparedFeature.finaleWillTrigger
+        ? [
+            ...(await rollDiceBoxValues(6, 10, '曲终力场伤害', preparedFeature.target?.label ?? '目标')),
+            ...(preparedFeature.finaleExtraD8Count > 0
+              ? await rollDiceBoxValues(
+                  preparedFeature.finaleExtraD8Count,
+                  8,
+                  '曲终等级额外伤害',
+                  preparedFeature.target?.label ?? '目标',
+                )
+              : []),
+          ]
+        : undefined
+      const headless = resolveHeadlessDmAction(
+        createHeadlessStateSnapshot(preparedFeature.map),
+        preparedFeature.buildHeadlessAction(finaleDamageValues),
+      )
+      settleHeadlessPlayerAction(action, headless)
       return
     }
 
