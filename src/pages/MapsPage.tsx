@@ -111,6 +111,10 @@ import {
   planEnemyMoveSettlement,
 } from '../lib/enemyMoveAction'
 import {
+  planEnemyAttackApLog,
+  planEnemyAttackSettlement,
+} from '../lib/enemyAttackAction'
+import {
   buildGaleComboChoiceParams,
   planGaleComboChoiceSettlement,
 } from '../lib/galeComboAction'
@@ -154,7 +158,6 @@ import {
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import {
-  apSpentEvent,
   enemyAttackResolvedEvent,
 } from '../lib/headlessCombatEvents'
 import {
@@ -3199,19 +3202,19 @@ export default function MapsPage() {
       if (!resolved) return false
 
       applyHeadlessCombatResult(headless)
-      const enemyApEvent = apSpentEvent(headless.events, { tokenId: result.attackerTokenId, characterId: null })
-      if (enemyApEvent) {
+      const attackerName = latestMap.tokens.find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
+      const targetName =
+        latestMap.tokens.find((token) => token.id === result.targetTokenId)?.label ?? result.attack?.targetName ?? '目标'
+      const enemyApLog = planEnemyAttackApLog({
+        result: headless,
+        actorTokenId: result.attackerTokenId,
+        attackerName,
+        targetName,
+        fallbackApMax: getEnemyApState(result.attackerTokenId).max,
+      })
+      if (enemyApLog) {
         enemyAttackApAlreadySpent = true
-        const attackerName = latestMap.tokens.find((token) => token.id === result.attackerTokenId)?.label ?? '敌人'
-        const targetName =
-          latestMap.tokens.find((token) => token.id === result.targetTokenId)?.label ??
-          result.attack?.targetName ??
-          '目标'
-        const ap = headless.state.enemyApByToken[result.attackerTokenId] ?? {
-          current: enemyApEvent.after,
-          max: getEnemyApState(result.attackerTokenId).max,
-        }
-        pushCombatLog(`${attackerName} 花费 ${enemyApEvent.amount} AP：攻击 ${targetName}。剩余 AP ${ap.current}/${ap.max}`, 'turn')
+        pushCombatLog(enemyApLog.text, enemyApLog.kind)
       }
       damageRollValues = resolved.damageValues
       damageRollTotal = resolved.total
@@ -3252,25 +3255,24 @@ export default function MapsPage() {
         }
       }
       if (result.attack) {
-        const enemyRollForDisplay: DiceRoll = {
-          values: damageRollValues,
-          sides: result.attack.sides,
-          bonus: damageRollBonus,
-          total: damageRollTotal,
-          label: combatLabel ? `${result.attack.label} · ${combatLabel}` : result.attack.label,
-          formula:
-            damageRollValues.length > 0
-              ? `${damageRollValues.join(' + ')}${damageRollBonus >= 0 ? ' + ' : ' - '}${Math.abs(damageRollBonus)} = ${damageRollTotal}`
-              : undefined,
-          targetName: result.attack.targetName,
+        const display = planEnemyAttackSettlement({
+          result: headless,
+          attack: result.attack,
+          combatLabel,
           d20Roll,
+        })
+        if (display.status === 'rejected') {
+          pushCombatLog(display.log.text, display.log.kind)
+          return false
         }
-        setRoll(enemyRollForDisplay)
-        publishSharedDiceRoll(enemyRollForDisplay)
-        pushCombatLog(
-          `${result.attack.label} → ${result.attack.targetName}：伤害骰 ${damageRollValues.length > 0 ? damageRollValues.join(' + ') : '无'}，加值 ${damageRollBonus}，最终 ${damageRollTotal} 点${combatLabel ? `；${combatLabel}` : ''}`,
-          damageRollTotal > 0 ? 'damage' : 'attack',
-        )
+        if (display.status === 'accepted') {
+          damageRollValues = display.damageValues
+          damageRollTotal = display.damageTotal
+          damageRollBonus = display.damageBonus
+          setRoll(display.roll)
+          publishSharedDiceRoll(display.roll)
+          pushCombatLog(display.combatLog.text, display.combatLog.kind)
+        }
       }
       return true
     }
@@ -3373,14 +3375,16 @@ export default function MapsPage() {
       await runEnemyStage('attackRollResolved')
       if (resolved.total > 0) await runEnemyStage('beforeDamageApplied')
       applyHeadlessCombatResult(headless)
-      const enemyApEvent = apSpentEvent(headless.events, { tokenId: result.attackerTokenId, characterId: null })
-      if (enemyApEvent) {
+      const enemyApLog = planEnemyAttackApLog({
+        result: headless,
+        actorTokenId: result.attackerTokenId,
+        attackerName: attackerToken.label,
+        targetName: targetChar.name,
+        fallbackApMax: getEnemyApState(result.attackerTokenId).max,
+      })
+      if (enemyApLog) {
         enemyAttackApAlreadySpent = true
-        const ap = headless.state.enemyApByToken[result.attackerTokenId] ?? {
-          current: enemyApEvent.after,
-          max: getEnemyApState(result.attackerTokenId).max,
-        }
-        pushCombatLog(`${attackerToken.label} 花费 ${enemyApEvent.amount} AP：攻击 ${targetChar.name}。剩余 AP ${ap.current}/${ap.max}`, 'turn')
+        pushCombatLog(enemyApLog.text, enemyApLog.kind)
       }
       for (const event of headless.events) {
         if (event.type === 'log') pushCombatLog(event.text, 'turn')
@@ -3394,25 +3398,24 @@ export default function MapsPage() {
         }
         await runEnemyStage('damageApplied')
       }
-      const enemyRollForDisplay: DiceRoll = {
-        values: damageRollValues,
-        sides: result.attack.sides,
-        bonus: damageRollBonus,
-        total: damageRollTotal,
-        label: `${result.attack.label} · ${combatLabel}`,
-        formula:
-          damageRollValues.length > 0
-            ? `${damageRollValues.join(' + ')}${damageRollBonus >= 0 ? ' + ' : ' - '}${Math.abs(damageRollBonus)} = ${damageRollTotal}`
-            : undefined,
-        targetName: result.attack.targetName,
+      const display = planEnemyAttackSettlement({
+        result: headless,
+        attack: result.attack,
+        combatLabel,
         d20Roll,
+      })
+      if (display.status === 'rejected') {
+        pushCombatLog(display.log.text, display.log.kind)
+        return false
       }
-      setRoll(enemyRollForDisplay)
-      publishSharedDiceRoll(enemyRollForDisplay)
-      pushCombatLog(
-        `${result.attack.label} → ${result.attack.targetName}：伤害骰 ${damageRollValues.length > 0 ? damageRollValues.join(' + ') : '无'}，加值 ${damageRollBonus}，最终 ${damageRollTotal} 点；${combatLabel}`,
-        damageRollTotal > 0 ? 'damage' : 'attack',
-      )
+      if (display.status === 'accepted') {
+        damageRollValues = display.damageValues
+        damageRollTotal = display.damageTotal
+        damageRollBonus = display.damageBonus
+        setRoll(display.roll)
+        publishSharedDiceRoll(display.roll)
+        pushCombatLog(display.combatLog.text, display.combatLog.kind)
+      }
       return true
     }
 
