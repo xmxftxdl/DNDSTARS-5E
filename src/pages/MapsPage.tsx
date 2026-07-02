@@ -96,6 +96,7 @@ import {
 } from '../lib/playerActionAuthorityRouter'
 import {
   canResolveSingleAttackWithHeadless,
+  planSingleAttackDisplay,
   preparePlayerAttackAction,
 } from '../lib/playerAttackAction'
 import {
@@ -141,11 +142,9 @@ import {
 import {
   aoeTargetResolvedEvents,
   apSpentEvent,
-  attackResolvedEvent,
   attackResolvedEvents,
   enemyAttackResolvedEvent,
   opportunityResolvedEvent,
-  targetDodgeResolvedEvent,
 } from '../lib/headlessCombatEvents'
 import {
   createHeadlessCombatSnapshot,
@@ -5098,12 +5097,18 @@ export default function MapsPage() {
           completePlayerActionRequest(action)
           return
         }
-        const resolved = attackResolvedEvent(headless.events)
-        if (!resolved) {
-          acknowledgePlayerAction(action, 'rejected', 'invalid-attack')
+        const display = planSingleAttackDisplay({
+          actor,
+          skill,
+          targetToken,
+          events: headless.events,
+        })
+        if (!display.ok) {
+          acknowledgePlayerAction(action, 'rejected', display.reason)
           completePlayerActionRequest(action)
           return
         }
+        const { resolved } = display
         applyHeadlessCombatResult(headless)
         await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
         if (
@@ -5114,37 +5119,12 @@ export default function MapsPage() {
         ) {
           setShowMoveRange(true)
         }
-        pushApLog(actor, resolved.waivedAp ? 0 : resolved.apCost, `使用 ${skill.name}`, `目标 ${targetToken.label}`)
-        const dodgeEvent = targetDodgeResolvedEvent(headless.events)
-        const formula = resolved.hit
-          ? `${resolved.damageValues.join(' + ')}${
-              skill.damageBonus ? ` + ${skill.damageBonus}` : ''
-            } = ${resolved.damageBeforeDefense}，攻防修正${resolved.modifier >= 0 ? '+' : '-'}${Math.abs(
-              resolved.modifier,
-            )}（差值${resolved.diff}），最终 ${resolved.total}`
-          : '目标闪避成功，未造成伤害'
-        if (resolved.hit) {
-          const rollForDisplay: DiceRoll = {
-            values: resolved.damageValues,
-            sides: skill.damageSides,
-            bonus: resolved.total - resolved.diceTotal,
-            total: resolved.total,
-            label: `${skill.name} · headless DM`,
-            formula,
-            targetName: targetToken.label,
-          }
-          setRoll(rollForDisplay)
-          publishSharedDiceRoll(rollForDisplay)
+        pushApLog(actor, display.apLog.amount, display.apLog.action, display.apLog.detail)
+        if (display.roll) {
+          setRoll(display.roll)
+          publishSharedDiceRoll(display.roll)
         }
-        const dodgeText = dodgeEvent
-          ? `；${targetToken.label} 闪避判定 ${dodgeEvent.d20Value}+${dodgeEvent.attackBonus}=${dodgeEvent.total} vs AC ${dodgeEvent.targetAc}，${
-              dodgeEvent.dodged ? '成功' : '失败'
-            }`
-          : ''
-        pushCombatLog(
-          `${actor.name} 使用 ${skill.name} → ${targetToken.label}${dodgeText}：${resolved.hit ? `伤害 ${formula}` : formula}`,
-          resolved.hit ? 'damage' : 'attack',
-        )
+        pushCombatLog(display.combatLog.text, display.combatLog.kind)
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return

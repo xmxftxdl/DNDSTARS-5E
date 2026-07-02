@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
+import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
-import { canResolveSingleAttackWithHeadless, preparePlayerAttackAction } from './playerAttackAction'
+import {
+  canResolveSingleAttackWithHeadless,
+  planSingleAttackDisplay,
+  preparePlayerAttackAction,
+} from './playerAttackAction'
 
 function makeSkill(patch: Partial<CombatSkill> = {}): CombatSkill {
   return {
@@ -26,6 +31,7 @@ function makeSkill(patch: Partial<CombatSkill> = {}): CombatSkill {
 function makeCharacter(patch: Partial<Character> = {}): Character {
   return {
     id: 'hero',
+    name: 'Hero',
     currentHp: 10,
     currentAP: 2,
     combatSkills: [makeSkill()],
@@ -47,6 +53,50 @@ function makeToken(patch: Partial<Token> = {}): Token {
     size: 1,
     hp: 10,
     maxHp: 10,
+    ...patch,
+  }
+}
+
+function makeAttackResolved(
+  patch: Partial<Extract<HeadlessCombatEvent, { type: 'attack-resolved' }>> = {},
+): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> {
+  return {
+    type: 'attack-resolved',
+    actorTokenId: 'hero-token',
+    characterId: 'hero',
+    targetTokenId: 'target-token',
+    skillId: 'skill-1',
+    skillName: 'Skill',
+    damageValues: [4],
+    diceTotal: 4,
+    baseDamage: 4,
+    damageBeforeDefense: 4,
+    modifier: 2,
+    diff: 10,
+    total: 6,
+    isCrit: false,
+    hit: true,
+    targetDodged: false,
+    waivedAp: false,
+    apCost: 1,
+    ...patch,
+  }
+}
+
+function makeTargetDodgeResolved(
+  patch: Partial<Extract<HeadlessCombatEvent, { type: 'target-dodge-resolved' }>> = {},
+): Extract<HeadlessCombatEvent, { type: 'target-dodge-resolved' }> {
+  return {
+    type: 'target-dodge-resolved',
+    actorTokenId: 'hero-token',
+    targetTokenId: 'target-token',
+    d20Value: 12,
+    attackBonus: 5,
+    total: 17,
+    targetAc: 14,
+    dodged: false,
+    reason: 'attempt',
+    successChance: 0.45,
     ...patch,
   }
 }
@@ -229,5 +279,74 @@ describe('player attack action helpers', () => {
         { doubleArrow: false, targetCount: 1 },
       ),
     ).toBe(true)
+  })
+
+  it('plans single attack display from headless hit events', () => {
+    const result = planSingleAttackDisplay({
+      actor: makeCharacter(),
+      skill: makeSkill(),
+      targetToken: makeToken(),
+      events: [makeTargetDodgeResolved(), makeAttackResolved()],
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      formula: '4 = 4，攻防修正+2（差值10），最终6',
+      roll: {
+        values: [4],
+        sides: 8,
+        bonus: 2,
+        total: 6,
+        label: 'Skill · headless DM',
+        targetName: 'Target',
+      },
+      apLog: { amount: 1, action: '使用 Skill', detail: '目标 Target' },
+      combatLog: { kind: 'damage' },
+    })
+    expect(result.ok && result.combatLog.text).toContain('Target 闪避判定 12+5=17 vs AC 14，失败')
+  })
+
+  it('plans a no-roll attack log when the target dodges', () => {
+    const result = planSingleAttackDisplay({
+      actor: makeCharacter(),
+      skill: makeSkill(),
+      targetToken: makeToken(),
+      events: [
+        makeTargetDodgeResolved({ dodged: true }),
+        makeAttackResolved({
+          damageValues: [],
+          diceTotal: 0,
+          baseDamage: 0,
+          damageBeforeDefense: 0,
+          modifier: 0,
+          diff: 0,
+          total: 0,
+          hit: false,
+          targetDodged: true,
+          waivedAp: true,
+        }),
+      ],
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      roll: undefined,
+      apLog: { amount: 0 },
+      combatLog: {
+        kind: 'attack',
+        text: expect.stringContaining('目标闪避成功，未造成伤害'),
+      },
+    })
+  })
+
+  it('rejects display planning when headless did not resolve an attack', () => {
+    expect(
+      planSingleAttackDisplay({
+        actor: makeCharacter(),
+        skill: makeSkill(),
+        targetToken: makeToken(),
+        events: [],
+      }),
+    ).toEqual({ ok: false, reason: 'invalid-attack' })
   })
 })

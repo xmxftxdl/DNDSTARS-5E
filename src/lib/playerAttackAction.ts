@@ -1,7 +1,10 @@
+import type { DiceRoll } from '../components/DiceRollOverlay'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import { canUseDoubleArrow } from './classFeatures'
 import { isTokenAlive } from './combatTokens'
+import { attackResolvedEvent, targetDodgeResolvedEvent, type HeadlessEventOf } from './headlessCombatEvents'
+import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import { getSkillAoeTargeting } from './skillTargeting'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 
@@ -88,6 +91,81 @@ export function canResolveSingleAttackWithHeadless(
     return false
   }
   return true
+}
+
+export type SingleAttackDisplayPlan =
+  | {
+      ok: false
+      reason: 'invalid-attack'
+    }
+  | {
+      ok: true
+      resolved: HeadlessEventOf<'attack-resolved'>
+      formula: string
+      roll?: DiceRoll
+      apLog: {
+        amount: number
+        action: string
+        detail: string
+      }
+      combatLog: {
+        text: string
+        kind: 'attack' | 'damage'
+      }
+    }
+
+export function planSingleAttackDisplay(input: {
+  actor: Character
+  skill: CombatSkill
+  targetToken: Token
+  events: HeadlessCombatEvent[]
+}): SingleAttackDisplayPlan {
+  const { actor, skill, targetToken, events } = input
+  const resolved = attackResolvedEvent(events)
+  if (!resolved) return { ok: false, reason: 'invalid-attack' }
+
+  const dodgeEvent = targetDodgeResolvedEvent(events)
+  const formula = resolved.hit
+    ? `${resolved.damageValues.join(' + ')}${
+        skill.damageBonus ? ` + ${skill.damageBonus}` : ''
+      } = ${resolved.damageBeforeDefense}，攻防修正${resolved.modifier >= 0 ? '+' : '-'}${Math.abs(
+        resolved.modifier,
+      )}（差值${resolved.diff}），最终${resolved.total}`
+    : '目标闪避成功，未造成伤害'
+  const roll: DiceRoll | undefined = resolved.hit
+    ? {
+        values: resolved.damageValues,
+        sides: skill.damageSides,
+        bonus: resolved.total - resolved.diceTotal,
+        total: resolved.total,
+        label: `${skill.name} · headless DM`,
+        formula,
+        targetName: targetToken.label,
+      }
+    : undefined
+  const dodgeText = dodgeEvent
+    ? `，${targetToken.label} 闪避判定 ${dodgeEvent.d20Value}+${dodgeEvent.attackBonus}=${dodgeEvent.total} vs AC ${dodgeEvent.targetAc}，${
+        dodgeEvent.dodged ? '成功' : '失败'
+      }`
+    : ''
+
+  return {
+    ok: true,
+    resolved,
+    formula,
+    roll,
+    apLog: {
+      amount: resolved.waivedAp ? 0 : resolved.apCost,
+      action: `使用 ${skill.name}`,
+      detail: `目标 ${targetToken.label}`,
+    },
+    combatLog: {
+      text: `${actor.name} 使用 ${skill.name} → ${targetToken.label}${dodgeText}，${
+        resolved.hit ? `伤害 ${formula}` : formula
+      }`,
+      kind: resolved.hit ? 'damage' : 'attack',
+    },
+  }
 }
 
 function expandRepeatedAttackTargets(skill: CombatSkill, targets: Token[]): Token[] {
