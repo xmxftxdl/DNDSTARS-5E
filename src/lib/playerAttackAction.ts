@@ -4,6 +4,7 @@ import type { Character, CombatSkill } from '../types/character'
 import { canUseDoubleArrow } from './classFeatures'
 import { isTokenAlive } from './combatTokens'
 import {
+  aoeTargetResolvedEvents,
   attackResolvedEvent,
   attackResolvedEvents,
   targetDodgeResolvedEvent,
@@ -226,6 +227,61 @@ export function planArrowSequenceDisplay(input: {
             : `第 ${index + 1} 段被闪避`,
         )
         .join('；')}。`,
+      kind: total > 0 ? 'damage' : 'attack',
+    },
+  }
+}
+
+export interface AoeAttackDisplayPlan {
+  resolvedEvents: HeadlessEventOf<'aoe-target-resolved'>[]
+  roll: DiceRoll
+  combatLog: {
+    text: string
+    kind: 'attack' | 'damage'
+  }
+}
+
+export function planAoeAttackDisplay(input: {
+  actor: Character
+  skill: CombatSkill
+  diceValues: number[]
+  cellCount: number
+  targetCount: number
+  events: HeadlessCombatEvent[]
+  targetLabelById?: (tokenId: string) => string
+}): AoeAttackDisplayPlan {
+  const { actor, skill, diceValues, cellCount, targetCount, events, targetLabelById } = input
+  const resolvedEvents = aoeTargetResolvedEvents(events)
+  const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
+  const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
+  const roll: DiceRoll = {
+    values: diceValues,
+    sides: skill.damageSides,
+    bonus: total - diceTotal,
+    total,
+    label: `${skill.name} · 覆盖 ${cellCount} 格`,
+    formula: `${diceValues.join(' + ')}${skill.damageBonus ? ` + ${skill.damageBonus}` : ''}`,
+    targetName: resolvedEvents
+      .map((event) => `${targetLabelById?.(event.targetTokenId) ?? event.targetTokenId} ${event.total}`)
+      .join('，'),
+  }
+
+  return {
+    resolvedEvents,
+    roll,
+    combatLog: {
+      text: `${actor.name} 结算 ${skill.name}：覆盖 ${cellCount} 格，${targetCount} 名目标在范围内。${resolvedEvents
+        .map((event) => {
+          const label = targetLabelById?.(event.targetTokenId) ?? event.targetTokenId
+          const saveText =
+            event.saveD20 != null
+              ? `，敏捷豁免 ${event.saveD20}+${event.saveMod} vs DC${event.saveDc} ${
+                  event.saveSuccess ? '成功半伤' : '失败全伤'
+                }`
+              : ''
+          return `${label} ${event.total} 点${saveText}`
+        })
+        .join('；')}`,
       kind: total > 0 ? 'damage' : 'attack',
     },
   }

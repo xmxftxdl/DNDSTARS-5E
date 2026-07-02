@@ -96,6 +96,7 @@ import {
 } from '../lib/playerActionAuthorityRouter'
 import {
   canResolveSingleAttackWithHeadless,
+  planAoeAttackDisplay,
   planArrowSequenceDisplay,
   planSingleAttackDisplay,
   preparePlayerAttackAction,
@@ -141,7 +142,6 @@ import {
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import {
-  aoeTargetResolvedEvents,
   apSpentEvent,
   enemyAttackResolvedEvent,
   opportunityResolvedEvent,
@@ -5244,37 +5244,18 @@ export default function MapsPage() {
         }
         applyHeadlessCombatResult(headless)
         await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
-        const resolvedEvents = aoeTargetResolvedEvents(headless.events)
-        const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
-        const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
-        const rollForDisplay: DiceRoll = {
-          values: diceValues,
-          sides: skill.damageSides,
-          bonus: total - diceTotal,
-          total,
-          label: `${skill.name} · 覆盖 ${cells.length} 格`,
-          formula: `${diceValues.join(' + ')}${skill.damageBonus ? ` + ${skill.damageBonus}` : ''}`,
-          targetName: resolvedEvents
-            .map((event) => `${map.tokens.find((token) => token.id === event.targetTokenId)?.label ?? event.targetTokenId} ${event.total}`)
-            .join('；'),
-        }
-        setRoll(rollForDisplay)
-        publishSharedDiceRoll(rollForDisplay)
-        pushCombatLog(
-          `${actor.name} 结算 ${skill.name}：覆盖 ${cells.length} 格，${targets.length} 名目标在范围内。${resolvedEvents
-            .map((event) => {
-              const label = map.tokens.find((token) => token.id === event.targetTokenId)?.label ?? event.targetTokenId
-              const saveText =
-                event.saveD20 != null
-                  ? `，敏捷豁免 ${event.saveD20}+${event.saveMod} vs DC${event.saveDc} ${
-                      event.saveSuccess ? '成功半伤' : '失败全伤'
-                    }`
-                  : ''
-              return `${label} ${event.total} 点${saveText}`
-            })
-            .join('；')}`,
-          total > 0 ? 'damage' : 'attack',
-        )
+        const display = planAoeAttackDisplay({
+          actor,
+          skill,
+          diceValues,
+          cellCount: cells.length,
+          targetCount: targets.length,
+          events: headless.events,
+          targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
+        })
+        setRoll(display.roll)
+        publishSharedDiceRoll(display.roll)
+        pushCombatLog(display.combatLog.text, display.combatLog.kind)
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return

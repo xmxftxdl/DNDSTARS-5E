@@ -5,6 +5,7 @@ import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   canResolveSingleAttackWithHeadless,
+  planAoeAttackDisplay,
   planArrowSequenceDisplay,
   planSingleAttackDisplay,
   preparePlayerAttackAction,
@@ -98,6 +99,35 @@ function makeTargetDodgeResolved(
     dodged: false,
     reason: 'attempt',
     successChance: 0.45,
+    ...patch,
+  }
+}
+
+function makeAoeTargetResolved(
+  patch: Partial<Extract<HeadlessCombatEvent, { type: 'aoe-target-resolved' }>> = {},
+): Extract<HeadlessCombatEvent, { type: 'aoe-target-resolved' }> {
+  return {
+    type: 'aoe-target-resolved',
+    actorTokenId: 'hero-token',
+    characterId: 'hero',
+    targetTokenId: 'target-token',
+    skillId: 'skill-1',
+    skillName: 'Skill',
+    damageValues: [4, 5],
+    diceTotal: 9,
+    baseDamage: 9,
+    damageBeforeSave: 11,
+    modifier: 2,
+    diff: 10,
+    total: 6,
+    saveD20: 14,
+    saveMod: 2,
+    saveTotal: 16,
+    saveDc: 12,
+    saveSuccess: true,
+    saveMode: 'half',
+    waivedAp: false,
+    apCost: 1,
     ...patch,
   }
 }
@@ -395,5 +425,47 @@ describe('player attack action helpers', () => {
       },
     })
     expect(result.roll?.formula).toBe('第 1 段 3 + 2，攻防修正+1，最终 6；第 2 段被闪避')
+  })
+
+  it('plans aoe display from resolved target packets', () => {
+    const result = planAoeAttackDisplay({
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'arrowStorm', damageSides: 6, damageBonus: 2 }),
+      diceValues: [4, 5],
+      cellCount: 7,
+      targetCount: 2,
+      events: [
+        makeAoeTargetResolved({ targetTokenId: 'goblin-token', total: 6 }),
+        makeAoeTargetResolved({
+          targetTokenId: 'dragon-token',
+          total: 11,
+          saveD20: 4,
+          saveMod: 1,
+          saveTotal: 5,
+          saveSuccess: false,
+        }),
+      ],
+      targetLabelById: (tokenId) =>
+        tokenId === 'goblin-token' ? 'Goblin' : tokenId === 'dragon-token' ? 'Dragon' : tokenId,
+    })
+
+    expect(result).toMatchObject({
+      resolvedEvents: [{ total: 6 }, { total: 11 }],
+      roll: {
+        values: [4, 5],
+        sides: 6,
+        bonus: 8,
+        total: 17,
+        label: 'Skill · 覆盖 7 格',
+        formula: '4 + 5 + 2',
+        targetName: 'Goblin 6，Dragon 11',
+      },
+      combatLog: {
+        kind: 'damage',
+        text: expect.stringContaining('Hero 结算 Skill：覆盖 7 格，2 名目标在范围内。'),
+      },
+    })
+    expect(result.combatLog.text).toContain('Goblin 6 点，敏捷豁免 14+2 vs DC12 成功半伤')
+    expect(result.combatLog.text).toContain('Dragon 11 点，敏捷豁免 4+1 vs DC12 失败全伤')
   })
 })
