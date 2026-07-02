@@ -1,7 +1,6 @@
 import { Package, Sparkles, Wand2, Swords } from 'lucide-react'
 import type { Character } from '../../types/character'
-
-export type CharDockPanel = 'inventory' | 'features' | 'spells' | 'skills'
+import type { CharDockPanel } from './characterRailConfig'
 
 const DOCK_BUTTONS: { panel: CharDockPanel; icon: typeof Package; label: string; color: string }[] = [
   { panel: 'inventory', icon: Package, label: '装备', color: 'text-amber-300 hover:bg-amber-500/25' },
@@ -62,11 +61,4 @@ export default function CharacterRailEntry({
       </div>
     </div>
   )
-}
-
-export const CHAR_PANEL_TITLES: Record<CharDockPanel, string> = {
-  inventory: '装备栏',
-  features: '特性',
-  spells: '法术栏',
-  skills: '技能栏',
 }

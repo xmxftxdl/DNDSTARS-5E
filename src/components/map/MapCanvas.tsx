@@ -65,7 +65,10 @@ function useStatusAnimation(
   const active = options?.active ?? true
   const fps = options?.fps ?? STATUS_ANIM_FPS
   const callbackRef = useRef(callback)
-  callbackRef.current = callback
+
+  useEffect(() => {
+    callbackRef.current = callback
+  }, [callback])
 
   useEffect(() => {
     if (!active) return
@@ -883,15 +886,19 @@ export default function MapCanvas({
 
   // Clear measurement lines when leaving measurement mode.
   useEffect(() => {
-    if (!measureMode) {
+    if (measureMode) return
+    const timer = window.setTimeout(() => {
       setSegments([])
       setPending(null)
       setCursor(null)
-    }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [measureMode])
 
   useEffect(() => {
-    if (!deleteSelectMode) setDeleteDrag(null)
+    if (deleteSelectMode) return
+    const timer = window.setTimeout(() => setDeleteDrag(null), 0)
+    return () => window.clearTimeout(timer)
   }, [deleteSelectMode])
 
   // 网格对齐：方向键微调

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Lock, ArrowUpCircle, GitBranch, Sparkles } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import {
@@ -319,12 +319,6 @@ export default function SkillTreeTab({ charId }: { charId: string }) {
     [bySection, sections],
   )
 
-  useEffect(() => {
-    if (allVisible.length > 0 && !allVisible.some((s) => s.id === selectedId)) {
-      setSelectedId(allVisible[0].id)
-    }
-  }, [allVisible, selectedId])
-
   if (!c) return null
 
   if (!isArcherLineClass(c.charClass)) {
@@ -336,6 +330,7 @@ export default function SkillTreeTab({ charId }: { charId: string }) {
   }
 
   const selected = allVisible.find((s) => s.id === selectedId) ?? allVisible[0]
+  const effectiveSelectedId = selected?.id ?? selectedId
   const skillPoints = getAvailableSkillPoints(c)
   const earned = Math.floor(c.level / 5) * 2
 
@@ -376,7 +371,7 @@ export default function SkillTreeTab({ charId }: { charId: string }) {
                 section={section}
                 skills={bySection?.[section] ?? []}
                 c={c}
-                selectedId={selectedId}
+                selectedId={effectiveSelectedId}
                 onSelect={setSelectedId}
               />
             ))}

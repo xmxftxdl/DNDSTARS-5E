@@ -37,15 +37,14 @@ import type { InfiniteAction } from '../components/character/SkillBar'
 import BulletMatchPanel from '../components/map/BulletMatchPanel'
 import { isHeavyGunner } from '../lib/bulletMatch'
 import FeaturesTab from '../components/character/FeaturesTab'
-import CharacterRailEntry, {
-  CHAR_PANEL_TITLES,
-  type CharDockPanel,
-} from '../components/map/CharacterRailEntry'
+import CharacterRailEntry from '../components/map/CharacterRailEntry'
+import { CHAR_PANEL_TITLES, type CharDockPanel } from '../components/map/characterRailConfig'
 import QiIndicator from '../components/map/QiIndicator'
 import MapInventoryPanel from '../components/map/MapInventoryPanel'
 import MapSpellsPanel from '../components/map/MapSpellsPanel'
 import EnemyPoolPicker from '../components/map/EnemyPoolPicker'
-import EnemyDetailPanel, { canShowEnemyDetail } from '../components/map/EnemyDetailPanel'
+import EnemyDetailPanel from '../components/map/EnemyDetailPanel'
+import { canShowEnemyDetail } from '../components/map/enemyDetailPanelUtils'
 import CharacterDetailPanel from '../components/map/CharacterDetailPanel'
 import DiceRollOverlay from '../components/DiceRollOverlay'
 import type { DiceRoll } from '../components/DiceRollOverlay'
@@ -259,7 +258,6 @@ import {
   seededDieValue,
 } from './mapsPageHelpers'
 import {
-  reconcileEnemyAp,
   resolveSharedCombatStateApply,
 } from '../lib/sharedCombatSync'
 import { buildCombatMessageQueueReset } from '../lib/sharedCombatReset'
@@ -278,9 +276,6 @@ import {
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import { shouldSendPlayerReadyFeatureToDm } from '../lib/playerFeatureActivation'
-// [T15/G3] enemyApReconcile.test.ts 从 './MapsPage' 引用 reconcileEnemyAp —— 维持该 re-export。
-export { reconcileEnemyAp }
-
 const runtimeNow = () => Date.now()
 const runtimeRandomSuffix = () => Math.random().toString(36).slice(2)
 const runtimeId = (prefix?: string) =>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reconcileEnemyAp } from './MapsPage'
+import { reconcileEnemyAp } from '../lib/sharedCombatSync'
 
 // [T10/AC4 · E13] enemyApByToken 本就是 SharedCombatState 的字段、随 publishCombatState 持久化、
 // loadShared 时 restore（已是服务端持久化）。这里验证 restore 路径确实生效，并硬化撕裂读边界：

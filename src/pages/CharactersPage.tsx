@@ -20,7 +20,8 @@ type Mode = 'player' | 'dm'
 
 export default function CharactersPage() {
   const forcedMode = modeFromPort()
-  const [mode, setMode] = useState<Mode>(forcedMode ?? 'player')
+  const [selectedMode, setSelectedMode] = useState<Mode>('player')
+  const mode = forcedMode ?? selectedMode
   const [showCreate, setShowCreate] = useState(false)
   const [newCharName, setNewCharName] = useState('新冒险者')
   const createNameRef = useRef<HTMLInputElement>(null)
@@ -45,10 +46,6 @@ export default function CharactersPage() {
   useEffect(() => {
     if (showCreate) createNameRef.current?.focus()
   }, [showCreate])
-
-  useEffect(() => {
-    if (forcedMode) setMode(forcedMode)
-  }, [forcedMode])
 
   useEffect(() => {
     const bump = () => setAssignmentTick((value) => value + 1)
@@ -141,7 +138,7 @@ export default function CharactersPage() {
 
             <div className={`glass flex items-center rounded-xl p-1 ${forcedMode ? 'hidden' : ''}`}>
               <button
-                onClick={() => setMode('player')}
+                onClick={() => setSelectedMode('player')}
                 className={[
                   'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
                   mode === 'player' ? 'bg-arcane-500/25 text-arcane-100' : 'text-slate-400 hover:text-slate-200',
@@ -151,7 +148,7 @@ export default function CharactersPage() {
                 玩家版
               </button>
               <button
-                onClick={() => setMode('dm')}
+                onClick={() => setSelectedMode('dm')}
                 className={[
                   'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
                   mode === 'dm' ? 'bg-ember-500/25 text-ember-400' : 'text-slate-400 hover:text-slate-200',

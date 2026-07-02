@@ -491,7 +491,3 @@ export default function EnemyDetailPanel({
     </div>
   )
 }
-
-export function canShowEnemyDetail(token: Token): boolean {
-  return token.type === 'enemy'
-}
