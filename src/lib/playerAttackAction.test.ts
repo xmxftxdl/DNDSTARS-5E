@@ -7,6 +7,7 @@ import {
   buildArrowSequenceTargetPackets,
   buildAoeTargetPackets,
   buildPreparedAoeHeadlessAction,
+  buildPreparedAttackHeadlessAction,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -230,6 +231,32 @@ describe('player attack action helpers', () => {
       },
     })
     expect(rollCalls).toEqual([{ count: 1, sides: 8, label: 'Skill damage', targetName: 'Target' }])
+  })
+
+  it('builds a headless attack action from a prepared attack context', () => {
+    const prepared = preparePlayerAttackAction({
+      action: makeAction(),
+      map: makeMap(),
+      characters: [makeCharacter()],
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const result = buildPreparedAttackHeadlessAction({
+      action: makeAction(),
+      prepared,
+      targetTokenId: 'target-token',
+      targetPackets: [{ targetTokenId: 'target-token', diceValues: [5] }],
+    })
+
+    expect(result).toEqual({
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'target-token',
+      skillId: 'skill-1',
+      targetPackets: [{ targetTokenId: 'target-token', diceValues: [5] }],
+    })
   })
 
   it('builds double arrow and hunting mark extra damage groups without duplicating extra dice', async () => {

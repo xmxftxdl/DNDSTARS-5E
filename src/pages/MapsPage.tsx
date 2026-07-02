@@ -91,6 +91,7 @@ import {
   buildArrowSequenceTargetPackets,
   buildAoeTargetPackets,
   buildPreparedAoeHeadlessAction,
+  buildPreparedAttackHeadlessAction,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
@@ -4523,14 +4524,13 @@ export default function MapsPage() {
           rollValues: rollDiceBoxValues,
           enemyDodgePreview,
         })
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-          type: 'attack-token',
-          actorTokenId: action.actorTokenId,
-          characterId: action.characterId,
+        const headlessAction = buildPreparedAttackHeadlessAction({
+          action,
+          prepared: preparedAttack,
           targetTokenId: targets[0].id,
-          skillId: skill.id,
           targetPackets,
         })
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
         if (!headless.ok) {
           acknowledgePlayerAction(action, 'rejected', headless.reason)
           completePlayerActionRequest(action)
@@ -4587,14 +4587,13 @@ export default function MapsPage() {
               tone: 'sky',
             }),
         })
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-          type: 'attack-token',
-          actorTokenId: action.actorTokenId,
-          characterId: action.characterId,
+        const headlessAction = buildPreparedAttackHeadlessAction({
+          action,
+          prepared: preparedAttack,
           targetTokenId: targetToken.id,
-          skillId: skill.id,
           targetPackets: [targetPacket],
         })
+        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
         if (!headless.ok) {
           acknowledgePlayerAction(action, 'rejected', headless.reason)
           completePlayerActionRequest(action)

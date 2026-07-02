@@ -21,6 +21,7 @@ import type {
   HeadlessAoeAttackAction,
   HeadlessAoeTargetPacket,
   HeadlessCombatEvent,
+  HeadlessPlayerAttackAction,
   HeadlessPlayerAttackPacket,
 } from './headlessDmCombatEngine'
 import { KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
@@ -224,6 +225,23 @@ export function buildPreparedAoeHeadlessAction(input: {
     stunTurns: STUN_DEFAULT_TURNS,
     selfCooldownReduction: prepared.selfCooldownReduction,
     cellCount: prepared.cells.length,
+    targetPackets,
+  }
+}
+
+export function buildPreparedAttackHeadlessAction(input: {
+  action: SharedPlayerActionState
+  prepared: Extract<PlayerAttackPrepareResult, { ok: true }>
+  targetTokenId: string
+  targetPackets: HeadlessPlayerAttackPacket[]
+}): HeadlessPlayerAttackAction {
+  const { action, prepared, targetTokenId, targetPackets } = input
+  return {
+    type: 'attack-token',
+    actorTokenId: action.actorTokenId,
+    characterId: action.characterId,
+    targetTokenId,
+    skillId: prepared.skill.id,
     targetPackets,
   }
 }
