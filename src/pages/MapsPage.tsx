@@ -111,6 +111,10 @@ import {
   planEnemyMoveSettlement,
 } from '../lib/enemyMoveAction'
 import {
+  buildGaleComboChoiceParams,
+  planGaleComboChoiceSettlement,
+} from '../lib/galeComboAction'
+import {
   buildHeadlessEndTurnAction,
   clearCharacterScopedRecord,
   removeDisengagedCharacterId,
@@ -4027,18 +4031,24 @@ export default function MapsPage() {
       return false
     }
     if (!activeMap) return false
-    const headless = resolveHeadlessGaleComboChoice(createHeadlessStateSnapshot(activeMap), {
-      characterId: casterId,
-      accepted: true,
-      triggerLabel,
+    const headless = resolveHeadlessGaleComboChoice(
+      createHeadlessStateSnapshot(activeMap),
+      buildGaleComboChoiceParams({
+        characterId: casterId,
+        triggerLabel,
+      }),
+    )
+    const settlement = planGaleComboChoiceSettlement({
+      result: headless,
+      casterName: latestCaster.name,
     })
-    if (!headless.ok) {
-      pushCombatLog(`${latestCaster.name} 疾风连击发动失败：${headless.reason ?? 'unavailable'}。`, 'system')
+    if (settlement.status === 'rejected') {
+      pushCombatLog(settlement.log.text, settlement.log.kind)
       return false
     }
     applyHeadlessCombatResult({ ok: true, state: headless.state, events: headless.events })
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    for (const log of settlement.logs) {
+      pushCombatLog(log.text, log.kind)
     }
     return true
   }
