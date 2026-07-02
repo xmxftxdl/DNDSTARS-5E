@@ -4617,6 +4617,11 @@ export default function MapsPage() {
       const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), prepared.headlessAction)
       if (prepared.settlement === 'move' && prepared.token) {
         settleSimpleHeadlessMoveAction(action, prepared.token, headless)
+      } else if (prepared.settlement === 'end-turn') {
+        const previousRound = roundRef.current
+        multiStrikeHitsRef.current = clearCharacterScopedRecord(multiStrikeHitsRef.current, action.characterId)
+        setDisengagedCharIds((prev) => removeDisengagedCharacterId(prev, action.characterId))
+        settleHeadlessPlayerAction(action, headless, { previousRound })
       } else {
         settleHeadlessPlayerAction(action, headless)
       }
@@ -5449,37 +5454,8 @@ export default function MapsPage() {
       return
     }
 
-    if (action.type !== 'end-turn') {
-      acknowledgePlayerAction(action, 'rejected', 'unsupported-action')
-      completePlayerActionRequest(action)
-      return
-    }
-
-    multiStrikeHitsRef.current = clearCharacterScopedRecord(multiStrikeHitsRef.current, action.characterId)
-    setDisengagedCharIds((prev) => removeDisengagedCharacterId(prev, action.characterId))
-    const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-    const headless = resolveHeadlessDmAction(
-      createHeadlessStateSnapshot(map),
-      buildHeadlessEndTurnAction({
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-      }),
-    )
-    if (!headless.ok) {
-      acknowledgePlayerAction(action, 'rejected', headless.reason)
-      completePlayerActionRequest(action)
-      return
-    }
-    const previousRound = roundRef.current
-    applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      if (event.type === 'turn-advanced' && event.round > previousRound) {
-        pushCombatLog(`进入第 ${event.round} 回合`, 'turn', event.round)
-      }
-    }
+    acknowledgePlayerAction(action, 'rejected', 'unsupported-action')
     completePlayerActionRequest(action)
-    acknowledgePlayerAction(action, 'accepted')
   }
 
   const canSendPlayerCombatAction = () => {

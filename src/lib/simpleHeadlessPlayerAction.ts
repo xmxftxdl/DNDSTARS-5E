@@ -3,6 +3,7 @@ import type { Character } from '../types/character'
 import type {
   HeadlessCalmSpiritAction,
   HeadlessDisengageAction,
+  HeadlessEndTurnAction,
   HeadlessPlayerMoveAction,
   HeadlessQiReduceCooldownAction,
   HeadlessUseSkillAction,
@@ -12,6 +13,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 type SimpleHeadlessAction =
   | HeadlessCalmSpiritAction
   | HeadlessDisengageAction
+  | HeadlessEndTurnAction
   | HeadlessPlayerMoveAction
   | HeadlessQiReduceCooldownAction
   | HeadlessUseSkillAction
@@ -21,6 +23,7 @@ const SIMPLE_ACTION_TYPES = new Set<SharedPlayerActionState['type']>([
   'calm-spirit',
   'calm-spirit-move',
   'disengage',
+  'end-turn',
   'qi-reduce-cooldown',
   'skill-free-move',
   'use-skill',
@@ -30,7 +33,7 @@ export type SimpleHeadlessPlayerActionResult =
   | {
       ok: true
       headlessAction: SimpleHeadlessAction
-      settlement: 'standard' | 'move'
+      settlement: 'standard' | 'move' | 'end-turn'
       token?: Token
     }
   | { ok: false; reason: string }
@@ -56,6 +59,16 @@ export function buildSimpleHeadlessPlayerAction(input: {
         actorTokenId: action.actorTokenId,
         characterId: action.characterId,
       })
+    case 'end-turn':
+      return {
+        ok: true,
+        settlement: 'end-turn',
+        headlessAction: {
+          type: 'end-turn',
+          actorTokenId: action.actorTokenId,
+          characterId: action.characterId,
+        },
+      }
     case 'agile-leap-move':
       return buildMoveAction(input, 'agile-leap', 'invalid-agile-leap')
     case 'skill-free-move':

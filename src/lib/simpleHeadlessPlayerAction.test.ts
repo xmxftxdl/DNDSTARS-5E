@@ -91,6 +91,7 @@ describe('simple headless player action builder', () => {
   it('recognizes action types that can be routed without page-specific dice prompts', () => {
     expect(isSimpleHeadlessPlayerActionType('use-skill')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('qi-reduce-cooldown')).toBe(true)
+    expect(isSimpleHeadlessPlayerActionType('end-turn')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('attack-token')).toBe(false)
     expect(isSimpleHeadlessPlayerActionType('move-token')).toBe(false)
   })
@@ -139,6 +140,18 @@ describe('simple headless player action builder', () => {
         type: 'move-token',
         targetPosition: { x: 150, y: 100 },
         mode: 'agile-leap',
+      },
+    })
+  })
+
+  it('builds end-turn actions with a dedicated settlement mode', () => {
+    expect(buildSimpleHeadlessPlayerAction(baseInput(makeAction({ type: 'end-turn' })))).toMatchObject({
+      ok: true,
+      settlement: 'end-turn',
+      headlessAction: {
+        type: 'end-turn',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
       },
     })
   })
