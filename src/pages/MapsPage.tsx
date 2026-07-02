@@ -115,6 +115,11 @@ import {
   planGaleComboChoiceSettlement,
 } from '../lib/galeComboAction'
 import {
+  buildOpportunityAttackAction,
+  planOpportunityAttackSettlement,
+  shouldRollOpportunityDamage,
+} from '../lib/opportunityAttackAction'
+import {
   buildHeadlessEndTurnAction,
   clearCharacterScopedRecord,
   removeDisengagedCharacterId,
@@ -151,7 +156,6 @@ import {
 import {
   apSpentEvent,
   enemyAttackResolvedEvent,
-  opportunityResolvedEvent,
 } from '../lib/headlessCombatEvents'
 import {
   createHeadlessCombatSnapshot,
@@ -2086,69 +2090,35 @@ export default function MapsPage() {
       ? getEffectiveAbilityMod(attacker, 'str') + proficiencyBonus(attacker.level)
       : getTokenAbilityMod(attackerToken, 'str') + 2
     const targetAc = effectiveTargetChar ? getAc(effectiveTargetChar) : (getTokenTargetAc(targetToken) ?? 12)
-    const hit = d20 + attackBonus >= targetAc || d20 >= 20
-    let values: number[] = []
-    let formula: string | undefined
-    if (hit) {
-      values = await rollDiceBoxValues(1, 6, '借机攻击 伤害', targetName)
-    }
+    const hit = shouldRollOpportunityDamage({ d20Value: d20, attackBonus, targetAc })
+    const values = hit ? await rollDiceBoxValues(1, 6, '借机攻击 伤害', targetName) : []
 
     const headless = resolveHeadlessDmAction(
       {
         ...createHeadlessStateSnapshot(latestMap),
         map: latestMap,
       },
-      {
-        type: 'opportunity-attack-token',
-        actorTokenId: attackerToken.id,
+      buildOpportunityAttackAction({
+        attackerTokenId: attackerToken.id,
         targetTokenId: targetToken.id,
         d20Value: d20,
         damageValues: hit ? values : undefined,
-      },
+      }),
     )
-    if (!headless.ok) {
-      pushCombatLog(`${attackerName} 借机攻击未执行：${headless.reason}`, 'system')
+    const settlement = planOpportunityAttackSettlement({
+      result: headless,
+      attackerName,
+      targetName,
+      critDamageLabel: attacker ? formatCritDamagePercent(attacker) : '125%',
+    })
+    if (settlement.status === 'rejected') {
+      pushCombatLog(settlement.log.text, settlement.log.kind)
       return
     }
     applyHeadlessCombatResult(headless)
-
-    const resolved = opportunityResolvedEvent(headless.events)
-    if (!resolved) return
-
-    const total = resolved.total
-    const bonus = total - resolved.rawDamage
-    if (resolved.hit) {
-      const critText = resolved.isCrit ? ` × 暴击${attacker ? formatCritDamagePercent(attacker) : '125%'}` : ''
-      formula = `${resolved.damageValues.join(' + ')}${critText}${resolved.isCrit ? ` = ${resolved.damageBeforeDefense}` : ''} ${
-        resolved.modifier >= 0 ? '+' : '-'
-      } ${Math.abs(resolved.modifier)}攻防修正(差值${resolved.diff}) = ${resolved.total}`
-    }
-    setRoll({
-      values,
-      sides: 6,
-      bonus,
-      total,
-      label: `借机攻击 · ${resolved.d20Value}+${resolved.attackBonus} vs AC${resolved.targetAc}${resolved.isCrit ? ' 重击' : ''}${
-        resolved.hit ? '' : ' 未中'
-      }`,
-      formula,
-      targetName,
-      d20Roll: {
-        value: resolved.d20Value,
-        modifier: resolved.attackBonus,
-        ac: resolved.targetAc,
-        hit: resolved.hit,
-        isCrit: resolved.isCrit,
-      },
-    })
-    pushCombatLog(
-      `${attackerName} 借机攻击 ${targetName}：D20 ${resolved.d20Value} + ${resolved.attackBonus} = ${
-        resolved.d20Value + resolved.attackBonus
-      } vs AC ${resolved.targetAc}，${resolved.hit ? '命中' : '未命中'}${formula ? `；伤害 ${formula}` : ''}；最终 ${
-        resolved.total
-      } 点伤害`,
-      total > 0 ? 'damage' : 'attack',
-    )
+    if (settlement.status === 'ignored') return
+    setRoll(settlement.roll)
+    pushCombatLog(settlement.combatLog.text, settlement.combatLog.kind)
   }
 
   const resolveOpportunityAttacksForMove = async (
