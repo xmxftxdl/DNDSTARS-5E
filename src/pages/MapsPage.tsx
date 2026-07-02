@@ -282,6 +282,18 @@ const runtimeId = (prefix?: string) =>
   prefix ? `${prefix}-${runtimeNow()}-${runtimeRandomSuffix()}` : `${runtimeNow()}-${runtimeRandomSuffix()}`
 const runtimeNumericId = () => runtimeNow() + Math.random()
 const randomDieValue = (sides: number) => 1 + Math.floor(Math.random() * sides)
+const attackResolvedEvent = (
+  events: HeadlessCombatEvent[],
+): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
+  events.find((event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> => event.type === 'attack-resolved')
+
+const enemyAttackResolvedEvent = (
+  events: HeadlessCombatEvent[],
+): Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> | undefined =>
+  events.find(
+    (event): event is Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> =>
+      event.type === 'enemy-attack-resolved',
+  )
 
 export default function MapsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -301,12 +313,12 @@ export default function MapsPage() {
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
 
-  const [mode, setMode] = useState<Mode | null>(() => {
-    const portMode = modeFromPort()
-    if (portMode) return portMode
+  const forcedMode = modeFromPort()
+  const [selectedMode, setSelectedMode] = useState<Mode | null>(() => {
     const saved = window.localStorage.getItem('stars-map-role')
     return saved === 'dm' || saved === 'player' ? saved : null
   })
+  const mode = forcedMode ?? selectedMode
   const [combatActive, setCombatActive] = useState(false)
   const [playerCombatEndedLocked, setPlayerCombatEndedLocked] = useState(false)
   const [round, setRound] = useState(1)
@@ -519,6 +531,9 @@ export default function MapsPage() {
   }
   const resolvingSkillTargetRef = useRef<{ key: string; at: number } | null>(null)
   const [showMoveRange, setShowMoveRange] = useState(false)
+  const clearPlayerCombatUI = () => {
+    setShowMoveRange(false)
+  }
   const [disengagedCharIds, setDisengagedCharIds] = useState<Set<string>>(() => new Set())
   const enemyAppliedKeysRef = useRef(new Set<string>())
   // [T1] dedupe set so the turn-driver doesn't stack multiple skip timers for the
@@ -583,7 +598,6 @@ export default function MapsPage() {
       !sharedAgileLeapPrompt?.expiresAt &&
       !sharedOpportunityAttackPrompt?.expiresAt
     ) return
-    setSharedDodgeNow(runtimeNow())
     const timer = window.setInterval(() => setSharedDodgeNow(runtimeNow()), 250)
     return () => window.clearInterval(timer)
   }, [
@@ -674,58 +688,6 @@ export default function MapsPage() {
     if (trait.uses <= 0) return '疾风连击次数不足'
     if (caster.combatBuffs?.galeComboReady) return '疾风连击已就绪'
     return ''
-  }
-
-  const offerGaleComboAfterDamageApplied = async (
-    casterId: string,
-    fallbackCaster: Character,
-    triggerLabel = '对目标造成击飞，且目标豁免失败',
-  ) => {
-    const latestCaster = useCharacterStore.getState().characters.find((c) => c.id === casterId) ?? fallbackCaster
-    if (!canOfferGaleCombo(latestCaster)) {
-      const reason = galeComboUnavailableReason(latestCaster)
-      pushCombatLog(`${latestCaster.name} 满足疾风连击触发条件，但不能发动${reason ? `：${reason}` : ''}。`, 'system')
-      return false
-    }
-    pushCombatLog(`${latestCaster.name} 触发疾风连击：当前结算完成，等待确认。`, 'turn')
-    const decision = await requestSharedGaleComboChoice(latestCaster, triggerLabel)
-    if (decision !== 'accepted') {
-      pushCombatLog(
-        decision === 'timeout'
-          ? `${latestCaster.name} 疾风连击确认超时，未发动。`
-          : `${latestCaster.name} 暂不发动疾风连击。`,
-        decision === 'timeout' ? 'system' : 'turn',
-      )
-      return false
-    }
-    if (!activeMap) return false
-    const headless = resolveHeadlessGaleComboChoice(createHeadlessStateSnapshot(activeMap), {
-      characterId: casterId,
-      accepted: true,
-      triggerLabel,
-    })
-    if (!headless.ok) {
-      pushCombatLog(`${latestCaster.name} 疾风连击发动失败：${headless.reason ?? 'unavailable'}。`, 'system')
-      return false
-    }
-    applyHeadlessCombatResult({ ok: true, state: headless.state, events: headless.events })
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
-    return true
-  }
-
-  const maybeOfferGaleComboAfterHeadlessDamage = async (
-    caster: Character,
-    skill: CombatSkill,
-    events: HeadlessCombatEvent[],
-  ) => {
-    if (skill.skillTreeId !== 'whirlwindKick') return false
-    const causedKnockback = events.some(
-      (event) => event.type === 'status-added' && event.condition === KNOCKBACK_STATUS_LABEL,
-    )
-    if (!causedKnockback) return false
-    return offerGaleComboAfterDamageApplied(caster.id, caster)
   }
 
   const publishSharedDiceEvent = (event: SharedDiceState) => {
@@ -932,7 +894,6 @@ export default function MapsPage() {
   }
 
   const isDM = mode === 'dm'
-  const forcedMode = modeFromPort()
   const playerSlot = currentPlayerSlot()
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
@@ -1179,20 +1140,17 @@ export default function MapsPage() {
   // [T8/AC2 · D2] 任何地图切换都清空选中态：不仅 DM 下拉，也覆盖程序化 select()、
   // 远端/玩家跟随、removeMap 自动重选。监听 activeMap?.id 即可统一处理所有路径。
   useEffect(() => {
-    setSelectedTokenId(null)
+    const timer = window.setTimeout(() => setSelectedTokenId(null), 0)
+    return () => window.clearTimeout(timer)
   }, [activeMap?.id])
 
   const chooseMode = (next: Mode) => {
     if (forcedMode && next !== forcedMode) return
     window.localStorage.setItem('stars-map-role', next)
-    setMode(next)
+    setSelectedMode(next)
     setSelectedTokenId(null)
     closeCharDock()
   }
-
-  useEffect(() => {
-    if (forcedMode && mode !== forcedMode) setMode(forcedMode)
-  }, [forcedMode, mode])
 
   useEffect(() => {
     const bump = () => setPlayerAssignmentTick((value) => value + 1)
@@ -1228,10 +1186,6 @@ export default function MapsPage() {
   const closeCharDock = () => {
     setActiveCharId(null)
     setCharPanel(null)
-  }
-
-  const clearPlayerCombatUI = () => {
-    setShowMoveRange(false)
   }
 
   const clearSharedInterruptPrompts = () => {
@@ -1296,121 +1250,6 @@ export default function MapsPage() {
       assignedCharacterId,
     }) ?? visibleChars[0]
 
-  useEffect(() => {
-    if (!activeMap) return
-    let cancelled = false
-    const load = async () => {
-      const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-      if (cancelled || !queue || queue.mapId !== activeMap.id) return
-      const now = runtimeNow()
-
-      if (isDM) {
-        const settlements = resolveDmCombatInterruptSettlements({
-          queue,
-          mapId: activeMap.id,
-          now,
-          pending: {
-            dodge: pendingSharedDodgeRef.current?.id,
-            stableMind: pendingSharedStableMindRef.current?.id,
-            galeCombo: pendingSharedGaleComboRef.current?.id,
-            agileLeap: pendingSharedAgileLeapRef.current?.id,
-            opportunityAttack: pendingSharedOpportunityAttackRef.current?.id,
-          },
-        })
-        for (const settlement of settlements) {
-          switch (settlement.kind) {
-            case 'dodge': {
-              const pending = pendingSharedDodgeRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedDodgeRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
-              const targetChar = useCharacterStore.getState().characters.find((c) => c.id === pending.targetCharId)
-              if (targetChar) {
-                void finishEnemyAttack(
-                  pending.result,
-                  targetChar,
-                  settlement.wantsDodge,
-                  settlement.dodgeD20,
-                  false,
-                ).then(pending.onComplete)
-              } else {
-                pending.onComplete()
-              }
-              break
-            }
-            case 'stable-mind': {
-              const pending = pendingSharedStableMindRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedStableMindRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
-              pending.resolve(settlement.useStableMind)
-              break
-            }
-            case 'gale-combo': {
-              const pending = pendingSharedGaleComboRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedGaleComboRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
-              pending.resolve(settlement.decision)
-              break
-            }
-            case 'agile-leap': {
-              const pending = pendingSharedAgileLeapRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedAgileLeapRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
-              pending.resolve(settlement.useAgileLeap)
-              break
-            }
-            case 'opportunity-attack': {
-              const pending = pendingSharedOpportunityAttackRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedOpportunityAttackRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
-              pending.resolve(settlement.useOpportunityAttack)
-              break
-            }
-          }
-        }
-        return
-      }
-
-      const answerContext = {
-        characters,
-        visibleCharacters: visibleChars,
-        playerCharId: playerChar?.id,
-        assignedCharacterId,
-        tokens: activeMap.tokens,
-      }
-      const selection = resolveCombatInterruptPromptSelection({
-        queue,
-        mapId: activeMap.id,
-        now,
-        answerContext,
-        suppressed: {
-          dodge: suppressedDodgePromptIdsRef.current,
-          'stable-mind': suppressedStableMindPromptIdsRef.current,
-          'gale-combo': suppressedGaleComboPromptIdsRef.current,
-          'agile-leap': suppressedAgileLeapPromptIdsRef.current,
-          'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
-        },
-      })
-      const views = buildCombatInterruptPromptViews(selection)
-
-      setNullablePromptView(setSharedDodgePrompt, views.dodge)
-      setNullablePromptView(setSharedStableMindPrompt, views.stableMind)
-      setNullablePromptView(setSharedGaleComboPrompt, views.galeCombo)
-      setNullablePromptView(setSharedAgileLeapPrompt, views.agileLeap)
-      setNullablePromptView(setSharedOpportunityAttackPrompt, views.opportunityAttack)
-    }
-    void load()
-    const timer = window.setInterval(load, 500)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
-
   const canControlPlayerTurn =
     combatActive &&
     currentInitiativeToken?.type === 'player' &&
@@ -1432,10 +1271,10 @@ export default function MapsPage() {
     [characters],
   )
 
-  const agileLeapToken = useMemo(() => {
+  const agileLeapToken = (() => {
     if (!agileLeapChar || !activeMap) return undefined
     return activeMap.tokens.find((t) => t.characterId === agileLeapChar.id)
-  }, [agileLeapChar, activeMap])
+  })()
 
   const canAgileLeapMove =
     !!agileLeapChar &&
@@ -1443,7 +1282,7 @@ export default function MapsPage() {
     !isDM &&
     agileLeapChar.id === playerChar?.id
 
-  const moveCircle = useMemo(() => {
+  const moveCircle = (() => {
     if (!showMoveRange || !activeMap || !myPlayerToken || !turnCharacter) return undefined
     const feet = turnCharacter.speed
     return {
@@ -1451,9 +1290,9 @@ export default function MapsPage() {
       centerY: myPlayerToken.y,
       radiusPx: movementRadiusPx(feet, activeMap),
     }
-  }, [showMoveRange, activeMap, myPlayerToken, turnCharacter])
+  })()
 
-  const agileLeapCircle = useMemo(() => {
+  const agileLeapCircle = (() => {
     if (!canAgileLeapMove || !agileLeapChar || !agileLeapToken || !activeMap) return undefined
     const feet = agileLeapChar.combatBuffs!.agileLeapMoveFeet!
     return {
@@ -1461,9 +1300,9 @@ export default function MapsPage() {
       centerY: agileLeapToken.y,
       radiusPx: movementRadiusPx(feet, activeMap),
     }
-  }, [canAgileLeapMove, agileLeapChar, agileLeapToken, activeMap])
+  })()
 
-  const calmSpiritMoveCircle = useMemo(() => {
+  const calmSpiritMoveCircle = (() => {
     if (!activeMap || !myPlayerToken || !turnCharacter) return undefined
     const feet = turnCharacter.combatBuffs?.calmSpiritMoveFeet ?? 0
     if (feet <= 0) return undefined
@@ -1472,9 +1311,9 @@ export default function MapsPage() {
       centerY: myPlayerToken.y,
       radiusPx: movementRadiusPx(feet, activeMap),
     }
-  }, [activeMap, myPlayerToken, turnCharacter])
+  })()
 
-  const freeMoveCircle = useMemo(() => {
+  const freeMoveCircle = (() => {
     if (!activeMap || !myPlayerToken || !turnCharacter) return undefined
     const feet = turnCharacter.combatBuffs?.freeMoveFeet ?? 0
     if (feet <= 0) return undefined
@@ -1483,7 +1322,7 @@ export default function MapsPage() {
       centerY: myPlayerToken.y,
       radiusPx: movementRadiusPx(feet, activeMap),
     }
-  }, [activeMap, myPlayerToken, turnCharacter])
+  })()
 
   const activeMoveCircle = agileLeapCircle ?? calmSpiritMoveCircle ?? freeMoveCircle ?? moveCircle
   const inMoveSelectMode =
@@ -1505,14 +1344,20 @@ export default function MapsPage() {
     const mine = playerChar
     if (!mine) {
       if (activeCharId) {
-        setActiveCharId(null)
-        setCharPanel(null)
+        const timer = window.setTimeout(() => {
+          setActiveCharId(null)
+          setCharPanel(null)
+        }, 0)
+        return () => window.clearTimeout(timer)
       }
       return
     }
     if (activeCharId && activeCharId !== mine.id) {
-      setActiveCharId(null)
-      setCharPanel(null)
+      const timer = window.setTimeout(() => {
+        setActiveCharId(null)
+        setCharPanel(null)
+      }, 0)
+      return () => window.clearTimeout(timer)
     }
   }, [isDM, playerChar?.id, activeCharId])
 
@@ -1571,16 +1416,17 @@ export default function MapsPage() {
     if (!selectedTokenId) return
     const stillPresent = activeMap?.tokens.some((t) => t.id === selectedTokenId)
     if (!stillPresent || defeatedTokenIds.includes(selectedTokenId)) {
-      setSelectedTokenId(null)
+      const timer = window.setTimeout(() => setSelectedTokenId(null), 0)
+      return () => window.clearTimeout(timer)
     }
   }, [selectedTokenId, activeMap?.tokens, defeatedTokenIds])
 
-  const aoeCasterCell = useMemo((): GridCell | null => {
+  const aoeCasterCell = ((): GridCell | null => {
     if (!activeMap || !targeting) return null
     const casterToken = activeMap.tokens.find((t) => t.characterId === targeting.casterId)
     if (!casterToken) return null
     return pixelToCell(casterToken.x, casterToken.y, activeMap)
-  }, [activeMap, targeting])
+  })()
 
   const aoeOrientFromCell = (
     aoe: SkillAoeTargeting,
@@ -1682,7 +1528,7 @@ export default function MapsPage() {
     }
   }, [targeting, aoePreviewCell, aoeCasterCell, activeMap, aoeRectRotation])
 
-  const rangedRangeCells = useMemo(() => {
+  const rangedRangeCells = (() => {
     if (!targeting || targeting.aoe || !activeMap) return [] as GridCell[]
     const rangeFeet = singleTargetRangeFeet(targeting.skill)
     if (rangeFeet == null) return [] as GridCell[]
@@ -1694,14 +1540,20 @@ export default function MapsPage() {
       casterCell,
       casterCell,
     )
-  }, [targeting, activeMap])
+  })()
 
   useEffect(() => {
+    let timer = 0
     if (!targeting?.aoe || !aoeCasterCell) {
-      if (!targeting?.aoe) setAoePreviewCell(null)
-      return
+      if (!targeting?.aoe) {
+        timer = window.setTimeout(() => setAoePreviewCell(null), 0)
+      }
+      return () => {
+        if (timer) window.clearTimeout(timer)
+      }
     }
-    setAoePreviewCell(aoeCasterCell)
+    timer = window.setTimeout(() => setAoePreviewCell(aoeCasterCell), 0)
+    return () => window.clearTimeout(timer)
   }, [targeting?.aoe, targeting?.casterId, aoeCasterCell])
 
   useEffect(() => {
@@ -1769,7 +1621,7 @@ export default function MapsPage() {
     showMoveRange,
   ])
 
-  const tokenBadges = useMemo(() => {
+  const tokenBadges = (() => {
     const badges: Record<
       string,
       {
@@ -1825,9 +1677,9 @@ export default function MapsPage() {
       if (Object.keys(entry).length > 0) badges[t.id] = entry
     }
     return badges
-  }, [activeMap?.tokens, characters, combatActive, initiativeOrder, round])
+  })()
 
-  const tokenHoverLabels = useMemo(() => {
+  const tokenHoverLabels = (() => {
     if (!targeting || targeting.aoe || !activeMap) return {}
     const caster = characters.find((c) => c.id === targeting.casterId)
     if (!caster || targeting.skill.damageCount <= 0) return {}
@@ -1853,7 +1705,7 @@ export default function MapsPage() {
       labels[token.id] = `伤害 ${modifier >= 0 ? '+' : ''}${modifier}`
     }
     return labels
-  }, [activeMap, characters, targeting])
+  })()
 
   const launchArrowProjectile = (
     from: { x: number; y: number },
@@ -1891,6 +1743,87 @@ export default function MapsPage() {
     afterRollCallbacksRef.current.push(resolve)
     const watchdog = window.setTimeout(resolve, DEATH_KEY_WATCHDOG_MS)
     enemyTurnTimersRef.current.push(watchdog)
+  }
+
+  const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState => ({
+    map,
+    characters: useCharacterStore.getState().characters,
+    active: combatActiveRef.current,
+    round: roundRef.current,
+    initiativeIndex: initiativeIndexRef.current,
+    initiativeOrder: initiativeOrderRef.current,
+    enemyApByToken: enemyApByTokenRef.current,
+    disengagedCharacterIds: [...disengagedCharIds],
+  })
+
+  const applyHeadlessCombatResult = (result: HeadlessCombatResult) => {
+    if (!result.ok) return
+    let shouldPublishCombatState = false
+    if (combatActiveRef.current !== result.state.active) {
+      setCombatActive(result.state.active)
+      combatActiveRef.current = result.state.active
+      shouldPublishCombatState = true
+    }
+    if (roundRef.current !== result.state.round) {
+      setRound(result.state.round)
+      roundRef.current = result.state.round
+      shouldPublishCombatState = true
+    }
+    if (initiativeIndexRef.current !== result.state.initiativeIndex) {
+      setInitiativeIndex(result.state.initiativeIndex)
+      initiativeIndexRef.current = result.state.initiativeIndex
+      shouldPublishCombatState = true
+    }
+    if (JSON.stringify(initiativeOrderRef.current) !== JSON.stringify(result.state.initiativeOrder)) {
+      setInitiativeOrder(result.state.initiativeOrder)
+      initiativeOrderRef.current = result.state.initiativeOrder
+      shouldPublishCombatState = true
+    }
+
+    const currentCharacters = useCharacterStore.getState().characters
+    const currentCharactersById = new Map(currentCharacters.map((character) => [character.id, character]))
+    for (const nextCharacter of result.state.characters) {
+      const currentCharacter = currentCharactersById.get(nextCharacter.id)
+      if (!currentCharacter || JSON.stringify(currentCharacter) !== JSON.stringify(nextCharacter)) {
+        updateChar(nextCharacter.id, nextCharacter)
+      }
+    }
+
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === result.state.map.id)
+    const currentTokensById = new Map((latestMap?.tokens ?? []).map((token) => [token.id, token]))
+    for (const nextToken of result.state.map.tokens) {
+      const currentToken = currentTokensById.get(nextToken.id)
+      if (!currentToken || JSON.stringify(currentToken) !== JSON.stringify(nextToken)) {
+        updateToken(result.state.map.id, nextToken.id, nextToken)
+      }
+    }
+
+    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(result.state.enemyApByToken)) {
+      enemyApByTokenRef.current = result.state.enemyApByToken
+      setEnemyApByToken(result.state.enemyApByToken)
+      shouldPublishCombatState = true
+    }
+
+    const nextDisengaged = new Set(result.state.disengagedCharacterIds ?? [])
+    if (JSON.stringify([...disengagedCharIds].sort()) !== JSON.stringify([...nextDisengaged].sort())) {
+      setDisengagedCharIds(nextDisengaged)
+    }
+
+    if (shouldPublishCombatState) {
+      publishCombatState({
+        active: result.state.active,
+        round: result.state.round,
+        initiativeIndex: result.state.initiativeIndex,
+        initiativeOrder: result.state.initiativeOrder,
+        enemyApByToken: result.state.enemyApByToken,
+      })
+    }
+
+    for (const event of result.events) {
+      if (event.type === 'damage-applied' && event.hpAfter <= 0) {
+        deferDeathHandling(event.targetTokenId, event.characterId)
+      }
+    }
   }
 
   const handleRollDone = () => {
@@ -3091,7 +3024,10 @@ export default function MapsPage() {
   }
 
   useEffect(() => {
-    setInitiativeScroll((s) => ensureInitiativeVisible(initiativeIndex, s))
+    const timer = window.setTimeout(() => {
+      setInitiativeScroll((s) => ensureInitiativeVisible(initiativeIndex, s))
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [initiativeIndex, initiativeOrder.length])
 
   const clearEnemyTurnTimers = () => {
@@ -3457,14 +3393,14 @@ export default function MapsPage() {
     })
   }
 
-  const finishEnemyAttack = async (
+  async function finishEnemyAttack(
     result: EnemyTurnResult,
     targetChar: Character | undefined,
     wantsDodge: boolean | null,
     providedDodgeD20?: number,
     dodgeApAlreadySpent = false,
     actorApAlreadySpent = false,
-  ) => {
+  ) {
     if (!activeMap || !result.attacked || !result.targetTokenId) return
 
     const liveMapId = activeMap.id
@@ -3893,6 +3829,121 @@ export default function MapsPage() {
     await runEnemyStage('actionResolved')
   }
 
+  useEffect(() => {
+    if (!activeMap) return
+    let cancelled = false
+    const load = async () => {
+      const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+      if (cancelled || !queue || queue.mapId !== activeMap.id) return
+      const now = runtimeNow()
+
+      if (isDM) {
+        const settlements = resolveDmCombatInterruptSettlements({
+          queue,
+          mapId: activeMap.id,
+          now,
+          pending: {
+            dodge: pendingSharedDodgeRef.current?.id,
+            stableMind: pendingSharedStableMindRef.current?.id,
+            galeCombo: pendingSharedGaleComboRef.current?.id,
+            agileLeap: pendingSharedAgileLeapRef.current?.id,
+            opportunityAttack: pendingSharedOpportunityAttackRef.current?.id,
+          },
+        })
+        for (const settlement of settlements) {
+          switch (settlement.kind) {
+            case 'dodge': {
+              const pending = pendingSharedDodgeRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedDodgeRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              const targetChar = useCharacterStore.getState().characters.find((c) => c.id === pending.targetCharId)
+              if (targetChar) {
+                void finishEnemyAttack(
+                  pending.result,
+                  targetChar,
+                  settlement.wantsDodge,
+                  settlement.dodgeD20,
+                  false,
+                ).then(pending.onComplete)
+              } else {
+                pending.onComplete()
+              }
+              break
+            }
+            case 'stable-mind': {
+              const pending = pendingSharedStableMindRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedStableMindRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.useStableMind)
+              break
+            }
+            case 'gale-combo': {
+              const pending = pendingSharedGaleComboRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedGaleComboRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.decision)
+              break
+            }
+            case 'agile-leap': {
+              const pending = pendingSharedAgileLeapRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedAgileLeapRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.useAgileLeap)
+              break
+            }
+            case 'opportunity-attack': {
+              const pending = pendingSharedOpportunityAttackRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedOpportunityAttackRef.current = null
+              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              pending.resolve(settlement.useOpportunityAttack)
+              break
+            }
+          }
+        }
+        return
+      }
+
+      const answerContext = {
+        characters,
+        visibleCharacters: visibleChars,
+        playerCharId: playerChar?.id,
+        assignedCharacterId,
+        tokens: activeMap.tokens,
+      }
+      const selection = resolveCombatInterruptPromptSelection({
+        queue,
+        mapId: activeMap.id,
+        now,
+        answerContext,
+        suppressed: {
+          dodge: suppressedDodgePromptIdsRef.current,
+          'stable-mind': suppressedStableMindPromptIdsRef.current,
+          'gale-combo': suppressedGaleComboPromptIdsRef.current,
+          'agile-leap': suppressedAgileLeapPromptIdsRef.current,
+          'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
+        },
+      })
+      const views = buildCombatInterruptPromptViews(selection)
+
+      setNullablePromptView(setSharedDodgePrompt, views.dodge)
+      setNullablePromptView(setSharedStableMindPrompt, views.stableMind)
+      setNullablePromptView(setSharedGaleComboPrompt, views.galeCombo)
+      setNullablePromptView(setSharedAgileLeapPrompt, views.agileLeap)
+      setNullablePromptView(setSharedOpportunityAttackPrompt, views.opportunityAttack)
+    }
+    void load()
+    const timer = window.setInterval(load, 500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
+
   const applyEnemyAttack = (result: EnemyTurnResult, onComplete: () => void) => {
     if (!activeMap || !result.attacked || !result.targetTokenId) {
       onComplete()
@@ -4293,85 +4344,56 @@ export default function MapsPage() {
     })
   }
 
-  const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState => ({
-    map,
-    characters: useCharacterStore.getState().characters,
-    active: combatActiveRef.current,
-    round: roundRef.current,
-    initiativeIndex: initiativeIndexRef.current,
-    initiativeOrder: initiativeOrderRef.current,
-    enemyApByToken: enemyApByTokenRef.current,
-    disengagedCharacterIds: [...disengagedCharIds],
-  })
+  const offerGaleComboAfterDamageApplied = async (
+    casterId: string,
+    fallbackCaster: Character,
+    triggerLabel = '对目标造成击飞，且目标豁免失败',
+  ) => {
+    const latestCaster = useCharacterStore.getState().characters.find((c) => c.id === casterId) ?? fallbackCaster
+    if (!canOfferGaleCombo(latestCaster)) {
+      const reason = galeComboUnavailableReason(latestCaster)
+      pushCombatLog(`${latestCaster.name} 满足疾风连击触发条件，但不能发动${reason ? `：${reason}` : ''}。`, 'system')
+      return false
+    }
+    pushCombatLog(`${latestCaster.name} 触发疾风连击：当前结算完成，等待确认。`, 'turn')
+    const decision = await requestSharedGaleComboChoice(latestCaster, triggerLabel)
+    if (decision !== 'accepted') {
+      pushCombatLog(
+        decision === 'timeout'
+          ? `${latestCaster.name} 疾风连击确认超时，未发动。`
+          : `${latestCaster.name} 暂不发动疾风连击。`,
+        decision === 'timeout' ? 'system' : 'turn',
+      )
+      return false
+    }
+    if (!activeMap) return false
+    const headless = resolveHeadlessGaleComboChoice(createHeadlessStateSnapshot(activeMap), {
+      characterId: casterId,
+      accepted: true,
+      triggerLabel,
+    })
+    if (!headless.ok) {
+      pushCombatLog(`${latestCaster.name} 疾风连击发动失败：${headless.reason ?? 'unavailable'}。`, 'system')
+      return false
+    }
+    applyHeadlessCombatResult({ ok: true, state: headless.state, events: headless.events })
+    for (const event of headless.events) {
+      if (event.type === 'log') pushCombatLog(event.text, 'turn')
+    }
+    return true
+  }
 
-  const applyHeadlessCombatResult = (result: HeadlessCombatResult) => {
-    if (!result.ok) return
-    let shouldPublishCombatState = false
-    if (combatActiveRef.current !== result.state.active) {
-      setCombatActive(result.state.active)
-      combatActiveRef.current = result.state.active
-      shouldPublishCombatState = true
-    }
-    if (roundRef.current !== result.state.round) {
-      setRound(result.state.round)
-      roundRef.current = result.state.round
-      shouldPublishCombatState = true
-    }
-    if (initiativeIndexRef.current !== result.state.initiativeIndex) {
-      setInitiativeIndex(result.state.initiativeIndex)
-      initiativeIndexRef.current = result.state.initiativeIndex
-      shouldPublishCombatState = true
-    }
-    if (JSON.stringify(initiativeOrderRef.current) !== JSON.stringify(result.state.initiativeOrder)) {
-      setInitiativeOrder(result.state.initiativeOrder)
-      initiativeOrderRef.current = result.state.initiativeOrder
-      shouldPublishCombatState = true
-    }
-
-    const currentCharacters = useCharacterStore.getState().characters
-    const currentCharactersById = new Map(currentCharacters.map((character) => [character.id, character]))
-    for (const nextCharacter of result.state.characters) {
-      const currentCharacter = currentCharactersById.get(nextCharacter.id)
-      if (!currentCharacter || JSON.stringify(currentCharacter) !== JSON.stringify(nextCharacter)) {
-        updateChar(nextCharacter.id, nextCharacter)
-      }
-    }
-
-    const latestMap = useMapStore.getState().maps.find((map) => map.id === result.state.map.id)
-    const currentTokensById = new Map((latestMap?.tokens ?? []).map((token) => [token.id, token]))
-    for (const nextToken of result.state.map.tokens) {
-      const currentToken = currentTokensById.get(nextToken.id)
-      if (!currentToken || JSON.stringify(currentToken) !== JSON.stringify(nextToken)) {
-        updateToken(result.state.map.id, nextToken.id, nextToken)
-      }
-    }
-
-    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(result.state.enemyApByToken)) {
-      enemyApByTokenRef.current = result.state.enemyApByToken
-      setEnemyApByToken(result.state.enemyApByToken)
-      shouldPublishCombatState = true
-    }
-
-    const nextDisengaged = new Set(result.state.disengagedCharacterIds ?? [])
-    if (JSON.stringify([...disengagedCharIds].sort()) !== JSON.stringify([...nextDisengaged].sort())) {
-      setDisengagedCharIds(nextDisengaged)
-    }
-
-    if (shouldPublishCombatState) {
-      publishCombatState({
-        active: result.state.active,
-        round: result.state.round,
-        initiativeIndex: result.state.initiativeIndex,
-        initiativeOrder: result.state.initiativeOrder,
-        enemyApByToken: result.state.enemyApByToken,
-      })
-    }
-
-    for (const event of result.events) {
-      if (event.type === 'damage-applied' && event.hpAfter <= 0) {
-        deferDeathHandling(event.targetTokenId, event.characterId)
-      }
-    }
+  const maybeOfferGaleComboAfterHeadlessDamage = async (
+    caster: Character,
+    skill: CombatSkill,
+    events: HeadlessCombatEvent[],
+  ) => {
+    if (skill.skillTreeId !== 'whirlwindKick') return false
+    const causedKnockback = events.some(
+      (event) => event.type === 'status-added' && event.condition === KNOCKBACK_STATUS_LABEL,
+    )
+    if (!causedKnockback) return false
+    return offerGaleComboAfterDamageApplied(caster.id, caster)
   }
 
   const settleHeadlessPlayerAction = (
@@ -4427,19 +4449,6 @@ export default function MapsPage() {
       rejectReason: (reason) => (reason === 'movement-locked' ? 'no-move' : reason),
     })
   }
-
-  const attackResolvedEvent = (
-    events: HeadlessCombatEvent[],
-  ): Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> | undefined =>
-    events.find((event): event is Extract<HeadlessCombatEvent, { type: 'attack-resolved' }> => event.type === 'attack-resolved')
-
-  const enemyAttackResolvedEvent = (
-    events: HeadlessCombatEvent[],
-  ): Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> | undefined =>
-    events.find(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'enemy-attack-resolved' }> =>
-        event.type === 'enemy-attack-resolved',
-    )
 
   const enemyDodgePreview = (target: Token, attacker: Character, skill: CombatSkill) => {
     if (!combatActiveRef.current || target.type !== 'enemy') return null
@@ -6013,11 +6022,12 @@ export default function MapsPage() {
 
   useEffect(() => {
     if (!canControlPlayerTurn) {
-      clearPlayerCombatUI()
-      return
+      const timer = window.setTimeout(() => clearPlayerCombatUI(), 0)
+      return () => window.clearTimeout(timer)
     }
     if (!turnCharacter?.id || currentInitiativeToken?.type !== 'player') return
-    setActiveCharId(turnCharacter.id)
+    const timer = window.setTimeout(() => setActiveCharId(turnCharacter.id), 0)
+    return () => window.clearTimeout(timer)
   }, [canControlPlayerTurn, turnCharacter?.id, currentInitiativeToken?.type])
 
   useEffect(() => {
