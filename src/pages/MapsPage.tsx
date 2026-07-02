@@ -96,6 +96,7 @@ import {
 } from '../lib/playerActionAuthorityRouter'
 import {
   canResolveSingleAttackWithHeadless,
+  planArrowSequenceDisplay,
   planSingleAttackDisplay,
   preparePlayerAttackAction,
 } from '../lib/playerAttackAction'
@@ -142,7 +143,6 @@ import {
 import {
   aoeTargetResolvedEvents,
   apSpentEvent,
-  attackResolvedEvents,
   enemyAttackResolvedEvent,
   opportunityResolvedEvent,
 } from '../lib/headlessCombatEvents'
@@ -4713,41 +4713,18 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
-        const resolvedEvents = attackResolvedEvents(headless.events)
-        const damageValues = resolvedEvents.flatMap((event) => event.damageValues)
-        const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
-        const diceTotal = damageValues.reduce((sum, value) => sum + value, 0)
-        if (damageValues.length > 0) {
-          const rollForDisplay: DiceRoll = {
-            values: damageValues,
-            sides: skill.damageSides,
-            bonus: total - diceTotal,
-            total,
-            label: `${skill.name} · ${resolvedEvents.length} 段`,
-            formula: resolvedEvents
-              .map((event, index) =>
-                event.hit
-                  ? `第 ${index + 1} 段 ${event.damageValues.join(' + ')}，攻防修正 ${
-                      event.modifier >= 0 ? '+' : ''
-                    }${event.modifier}，最终 ${event.total}`
-                  : `第 ${index + 1} 段被闪避`,
-              )
-              .join('；'),
-            targetName: targets[0]?.label ?? skill.name,
-          }
-          setRoll(rollForDisplay)
-          publishSharedDiceRoll(rollForDisplay)
+        const display = planArrowSequenceDisplay({
+          actor,
+          skill,
+          targets,
+          events: headless.events,
+          targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
+        })
+        if (display.roll) {
+          setRoll(display.roll)
+          publishSharedDiceRoll(display.roll)
         }
-        pushCombatLog(
-          `${actor.name} 使用 ${skill.name}：${resolvedEvents
-            .map((event, index) =>
-              event.hit
-                ? `第 ${index + 1} 段→${map.tokens.find((token) => token.id === event.targetTokenId)?.label ?? event.targetTokenId} ${event.total} 点`
-                : `第 ${index + 1} 段被闪避`,
-            )
-            .join('；')}。`,
-          total > 0 ? 'damage' : 'attack',
-        )
+        pushCombatLog(display.combatLog.text, display.combatLog.kind)
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return

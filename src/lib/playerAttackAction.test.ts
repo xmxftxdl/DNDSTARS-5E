@@ -5,6 +5,7 @@ import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   canResolveSingleAttackWithHeadless,
+  planArrowSequenceDisplay,
   planSingleAttackDisplay,
   preparePlayerAttackAction,
 } from './playerAttackAction'
@@ -348,5 +349,51 @@ describe('player attack action helpers', () => {
         events: [],
       }),
     ).toEqual({ ok: false, reason: 'invalid-attack' })
+  })
+
+  it('plans arrow sequence display by aggregating resolved attack packets', () => {
+    const result = planArrowSequenceDisplay({
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'multiShot', damageSides: 4 }),
+      targets: [makeToken({ label: 'Goblin' })],
+      events: [
+        makeAttackResolved({
+          targetTokenId: 'goblin-token',
+          damageValues: [3, 2],
+          diceTotal: 5,
+          damageBeforeDefense: 5,
+          modifier: 1,
+          total: 6,
+        }),
+        makeAttackResolved({
+          targetTokenId: 'goblin-token',
+          damageValues: [],
+          diceTotal: 0,
+          damageBeforeDefense: 0,
+          modifier: 0,
+          total: 0,
+          hit: false,
+          targetDodged: true,
+        }),
+      ],
+      targetLabelById: (tokenId) => (tokenId === 'goblin-token' ? 'Goblin' : tokenId),
+    })
+
+    expect(result).toMatchObject({
+      resolvedEvents: [{ total: 6 }, { total: 0 }],
+      roll: {
+        values: [3, 2],
+        sides: 4,
+        bonus: 1,
+        total: 6,
+        label: 'Skill · 2 段',
+        targetName: 'Goblin',
+      },
+      combatLog: {
+        kind: 'damage',
+        text: 'Hero 使用 Skill：第 1 段→Goblin 6 点；第 2 段被闪避。',
+      },
+    })
+    expect(result.roll?.formula).toBe('第 1 段 3 + 2，攻防修正+1，最终 6；第 2 段被闪避')
   })
 })

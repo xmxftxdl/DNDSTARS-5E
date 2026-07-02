@@ -3,7 +3,12 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import { canUseDoubleArrow } from './classFeatures'
 import { isTokenAlive } from './combatTokens'
-import { attackResolvedEvent, targetDodgeResolvedEvent, type HeadlessEventOf } from './headlessCombatEvents'
+import {
+  attackResolvedEvent,
+  attackResolvedEvents,
+  targetDodgeResolvedEvent,
+  type HeadlessEventOf,
+} from './headlessCombatEvents'
 import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import { getSkillAoeTargeting } from './skillTargeting'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
@@ -164,6 +169,64 @@ export function planSingleAttackDisplay(input: {
         resolved.hit ? `伤害 ${formula}` : formula
       }`,
       kind: resolved.hit ? 'damage' : 'attack',
+    },
+  }
+}
+
+export interface ArrowSequenceDisplayPlan {
+  resolvedEvents: HeadlessEventOf<'attack-resolved'>[]
+  roll?: DiceRoll
+  combatLog: {
+    text: string
+    kind: 'attack' | 'damage'
+  }
+}
+
+export function planArrowSequenceDisplay(input: {
+  actor: Character
+  skill: CombatSkill
+  targets: Token[]
+  events: HeadlessCombatEvent[]
+  targetLabelById?: (tokenId: string) => string
+}): ArrowSequenceDisplayPlan {
+  const { actor, skill, targets, events, targetLabelById } = input
+  const resolvedEvents = attackResolvedEvents(events)
+  const damageValues = resolvedEvents.flatMap((event) => event.damageValues)
+  const total = resolvedEvents.reduce((sum, event) => sum + event.total, 0)
+  const diceTotal = damageValues.reduce((sum, value) => sum + value, 0)
+  const roll: DiceRoll | undefined =
+    damageValues.length > 0
+      ? {
+          values: damageValues,
+          sides: skill.damageSides,
+          bonus: total - diceTotal,
+          total,
+          label: `${skill.name} · ${resolvedEvents.length} 段`,
+          formula: resolvedEvents
+            .map((event, index) =>
+              event.hit
+                ? `第 ${index + 1} 段 ${event.damageValues.join(' + ')}，攻防修正${
+                    event.modifier >= 0 ? '+' : ''
+                  }${event.modifier}，最终 ${event.total}`
+                : `第 ${index + 1} 段被闪避`,
+            )
+            .join('；'),
+          targetName: targets[0]?.label ?? skill.name,
+        }
+      : undefined
+
+  return {
+    resolvedEvents,
+    roll,
+    combatLog: {
+      text: `${actor.name} 使用 ${skill.name}：${resolvedEvents
+        .map((event, index) =>
+          event.hit
+            ? `第 ${index + 1} 段→${targetLabelById?.(event.targetTokenId) ?? event.targetTokenId} ${event.total} 点`
+            : `第 ${index + 1} 段被闪避`,
+        )
+        .join('；')}。`,
+      kind: total > 0 ? 'damage' : 'attack',
     },
   }
 }
