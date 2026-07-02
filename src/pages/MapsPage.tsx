@@ -291,8 +291,7 @@ import {
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import {
-  buildFinaleDamageValues,
-  buildIllusionDanceTargetPackets,
+  buildPreparedFeatureActivationHeadlessAction,
   illusionDanceTargetLimit,
   preparePlayerFeatureActivationAction,
   shouldSendPlayerReadyFeatureToDm,
@@ -4230,26 +4229,13 @@ export default function MapsPage() {
         return
       }
 
-      if (preparedFeature.kind === 'illusionDance') {
-        const targetPackets = await buildIllusionDanceTargetPackets({
-          prepared: preparedFeature,
-          rollValues: rollDiceBoxValues,
-        })
-        const headless = resolveHeadlessDmAction(
-          createHeadlessStateSnapshot(preparedFeature.map),
-          preparedFeature.buildHeadlessAction(targetPackets),
-        )
-        settleHeadlessPlayerAction(action, headless)
-        return
-      }
-
-      const finaleDamageValues = await buildFinaleDamageValues({
+      const headlessAction = await buildPreparedFeatureActivationHeadlessAction({
         prepared: preparedFeature,
         rollValues: rollDiceBoxValues,
       })
       const headless = resolveHeadlessDmAction(
         createHeadlessStateSnapshot(preparedFeature.map),
-        preparedFeature.buildHeadlessAction(finaleDamageValues),
+        headlessAction,
       )
       settleHeadlessPlayerAction(action, headless)
       return

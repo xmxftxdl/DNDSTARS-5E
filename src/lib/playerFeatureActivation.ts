@@ -157,6 +157,25 @@ export async function buildIllusionDanceTargetPackets(input: {
   return targetPackets
 }
 
+export async function buildPreparedFeatureActivationHeadlessAction(input: {
+  prepared: Extract<PlayerFeatureActivationPrepareResult, { ok: true }>
+  rollValues: RollFeatureValues
+}): Promise<HeadlessActivateFeatureAction> {
+  if (input.prepared.kind === 'illusionDance') {
+    const targetPackets = await buildIllusionDanceTargetPackets({
+      prepared: input.prepared,
+      rollValues: input.rollValues,
+    })
+    return input.prepared.buildHeadlessAction(targetPackets)
+  }
+
+  const finaleDamageValues = await buildFinaleDamageValues({
+    prepared: input.prepared,
+    rollValues: input.rollValues,
+  })
+  return input.prepared.buildHeadlessAction(finaleDamageValues)
+}
+
 export async function buildFinaleDamageValues(input: {
   prepared: Extract<PlayerFeatureActivationPrepareResult, { ok: true; kind: 'standard' }>
   rollValues: RollFeatureValues

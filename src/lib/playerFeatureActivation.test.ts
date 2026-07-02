@@ -5,6 +5,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildFinaleDamageValues,
   buildIllusionDanceTargetPackets,
+  buildPreparedFeatureActivationHeadlessAction,
   illusionDanceTargetLimit,
   preparePlayerFeatureActivationAction,
   shouldSendPlayerReadyFeatureToDm,
@@ -210,6 +211,71 @@ describe('player feature activation routing', () => {
       { count: 2, sides: 8, targetName: 'Target 1' },
     ])
     expect(values).toEqual([10, 9, 8, 7, 6, 5, 4, 3])
+  })
+
+  it('builds prepared illusion dance headless actions with save target packets', async () => {
+    const prepared = preparePlayerFeatureActivationAction({
+      action: makeAction({
+        featureKey: 'illusionDance',
+        targetTokenIds: ['target-1', 'target-2'],
+      }),
+      map: makeMap({
+        tokens: [
+          makeMap().tokens[0],
+          { ...makeMap().tokens[0], id: 'target-2', label: 'Target 2' },
+        ],
+      }),
+      characters: [
+        makeCharacter({
+          traits: [{ id: 'illusionDance', name: 'Illusion Dance', featureKey: 'illusionDance', level: 2, uses: 1, maxUses: 1, description: '' }],
+        }),
+      ],
+    })
+    expect(prepared.ok && prepared.kind === 'illusionDance').toBe(true)
+    if (!prepared.ok) return
+
+    const action = await buildPreparedFeatureActivationHeadlessAction({
+      prepared,
+      rollValues: async (_count, _sides, _label, targetName) => [targetName === 'Target 1' ? 15 : 8],
+    })
+
+    expect(action).toMatchObject({
+      type: 'activate-feature',
+      featureKey: 'illusionDance',
+      targetTokenIds: ['target-1', 'target-2'],
+      targetPackets: [
+        { targetTokenId: 'target-1', saveD20: 15 },
+        { targetTokenId: 'target-2', saveD20: 8 },
+      ],
+    })
+  })
+
+  it('builds prepared standard feature headless actions with finale damage values', async () => {
+    const prepared = preparePlayerFeatureActivationAction({
+      action: makeAction({ featureKey: 'trackingArrow', targetTokenId: 'target-1' }),
+      map: makeMap({ tokens: [{ ...makeMap().tokens[0], huntingMarkStacks: 3 }] }),
+      characters: [
+        makeCharacter({
+          combatBuffs: { finaleReady: true },
+          traits: [{ id: 'finale', name: 'Finale', featureKey: 'finale', level: 2, uses: 1, maxUses: 1, description: '' }],
+        }),
+      ],
+    })
+    expect(prepared.ok && prepared.kind === 'standard').toBe(true)
+    if (!prepared.ok) return
+
+    const rolls = [[10, 9, 8, 7, 6, 5], [4]]
+    const action = await buildPreparedFeatureActivationHeadlessAction({
+      prepared,
+      rollValues: async () => rolls.shift() ?? [],
+    })
+
+    expect(action).toMatchObject({
+      type: 'activate-feature',
+      featureKey: 'trackingArrow',
+      targetTokenId: 'target-1',
+      finaleDamageValues: [10, 9, 8, 7, 6, 5, 4],
+    })
   })
 
   it('rejects unsupported or malformed feature activation requests', () => {
