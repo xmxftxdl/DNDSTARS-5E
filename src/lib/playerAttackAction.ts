@@ -71,6 +71,25 @@ export function preparePlayerAttackAction(input: {
   }
 }
 
+export function canResolveSingleAttackWithHeadless(
+  actor: Character,
+  skill: CombatSkill,
+  opts: { doubleArrow: boolean; targetCount: number },
+): boolean {
+  void opts.doubleArrow
+  if (opts.targetCount !== 1) return false
+  if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
+  if (getSkillAoeTargeting(skill)) return false
+  const buffs = actor.combatBuffs
+  if (
+    (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
+    (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
+  ) {
+    return false
+  }
+  return true
+}
+
 function expandRepeatedAttackTargets(skill: CombatSkill, targets: Token[]): Token[] {
   if ((skill.skillTreeId === 'multiShot' || skill.skillTreeId === 'encircle') && targets.length === 1) {
     const shots = Math.max(1, skill.arrowShots ?? 1)

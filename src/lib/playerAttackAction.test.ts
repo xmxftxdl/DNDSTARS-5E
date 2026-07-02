@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
-import { preparePlayerAttackAction } from './playerAttackAction'
+import { canResolveSingleAttackWithHeadless, preparePlayerAttackAction } from './playerAttackAction'
 
 function makeSkill(patch: Partial<CombatSkill> = {}): CombatSkill {
   return {
@@ -174,5 +174,60 @@ describe('player attack action helpers', () => {
     })
 
     expect(result).toMatchObject({ ok: true, doubleArrow: true })
+  })
+
+  it('checks whether a single attack can use the headless single-target path', () => {
+    const actor = makeCharacter()
+    expect(canResolveSingleAttackWithHeadless(actor, makeSkill(), { doubleArrow: false, targetCount: 1 })).toBe(true)
+    expect(canResolveSingleAttackWithHeadless(actor, makeSkill(), { doubleArrow: true, targetCount: 2 })).toBe(false)
+    expect(
+      canResolveSingleAttackWithHeadless(actor, makeSkill({ remaining: 1 }), {
+        doubleArrow: false,
+        targetCount: 1,
+      }),
+    ).toBe(false)
+    expect(
+      canResolveSingleAttackWithHeadless(actor, makeSkill({ damageCount: 0 }), {
+        doubleArrow: false,
+        targetCount: 1,
+      }),
+    ).toBe(false)
+    expect(
+      canResolveSingleAttackWithHeadless(actor, makeSkill({ skillTreeId: 'whirlwindKick' }), {
+        doubleArrow: false,
+        targetCount: 1,
+      }),
+    ).toBe(false)
+  })
+
+  it('keeps pending buff-specific damage on the matching single-target skill only', () => {
+    expect(
+      canResolveSingleAttackWithHeadless(
+        makeCharacter({ combatBuffs: { burstKickExtraD6: 1 } }),
+        makeSkill({ skillTreeId: 'basicShot' }),
+        { doubleArrow: false, targetCount: 1 },
+      ),
+    ).toBe(false)
+    expect(
+      canResolveSingleAttackWithHeadless(
+        makeCharacter({ combatBuffs: { burstKickExtraD6: 1 } }),
+        makeSkill({ skillTreeId: 'burstKick' }),
+        { doubleArrow: false, targetCount: 1 },
+      ),
+    ).toBe(true)
+    expect(
+      canResolveSingleAttackWithHeadless(
+        makeCharacter({ combatBuffs: { windKickTreatKnockbackTargetId: 'target-token' } }),
+        makeSkill({ skillTreeId: 'basicShot' }),
+        { doubleArrow: false, targetCount: 1 },
+      ),
+    ).toBe(false)
+    expect(
+      canResolveSingleAttackWithHeadless(
+        makeCharacter({ combatBuffs: { windKickTreatKnockbackTargetId: 'target-token' } }),
+        makeSkill({ skillTreeId: 'windKickCombo' }),
+        { doubleArrow: false, targetCount: 1 },
+      ),
+    ).toBe(true)
   })
 })

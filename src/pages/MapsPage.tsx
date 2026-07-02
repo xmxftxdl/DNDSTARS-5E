@@ -94,7 +94,10 @@ import {
   preflightPlayerActionAuthority,
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
-import { preparePlayerAttackAction } from '../lib/playerAttackAction'
+import {
+  canResolveSingleAttackWithHeadless,
+  preparePlayerAttackAction,
+} from '../lib/playerAttackAction'
 import {
   planPlayerMoveAfterOpportunity,
   planPlayerMoveAfterPreview,
@@ -4450,24 +4453,6 @@ export default function MapsPage() {
       estimatedDamage,
     })
     return { decision, attackBonus, targetAc }
-  }
-
-  const canResolveSingleAttackWithHeadless = (
-    actor: Character,
-    skill: CombatSkill,
-    opts: { doubleArrow: boolean; targetCount: number },
-  ) => {
-    if (opts.targetCount !== 1) return false
-    if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
-    if (getSkillAoeTargeting(skill)) return false
-    const buffs = actor.combatBuffs
-    if (
-      (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
-      (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
-    ) {
-      return false
-    }
-    return true
   }
 
   const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
