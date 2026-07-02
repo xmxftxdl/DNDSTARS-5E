@@ -2314,23 +2314,7 @@ export default function MapsPage() {
       if (sendPlayerCalmSpiritRequest('move')) setShowMoveRange(true)
       return
     }
-    const actorToken = activeMap.tokens.find((token) => token.characterId === ch.id)
-    if (!actorToken) return
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-      type: 'calm-spirit',
-      actorTokenId: actorToken.id,
-      characterId: ch.id,
-      effect: 'move',
-    })
-    if (!headless.ok) {
-      void showCombatNotice('安定心神', headless.reason, 'amber')
-      return
-    }
-    applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
-    setShowMoveRange(true)
+    if (sendDmLocalCalmSpiritRequest('move')) setShowMoveRange(true)
   }
 
   const handleCalmSpiritCrit = () => {
@@ -2340,22 +2324,7 @@ export default function MapsPage() {
       sendPlayerCalmSpiritRequest('crit')
       return
     }
-    const actorToken = activeMap.tokens.find((token) => token.characterId === ch.id)
-    if (!actorToken) return
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-      type: 'calm-spirit',
-      actorTokenId: actorToken.id,
-      characterId: ch.id,
-      effect: 'crit',
-    })
-    if (!headless.ok) {
-      void showCombatNotice('安定心神', headless.reason, 'amber')
-      return
-    }
-    applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
+    sendDmLocalCalmSpiritRequest('crit')
   }
 
   const handleCalmSpiritCooldown = () => {
@@ -2378,23 +2347,7 @@ export default function MapsPage() {
       sendPlayerCalmSpiritRequest('cooldown', { skillId: skill.id })
       return
     }
-    const actorToken = activeMap.tokens.find((token) => token.characterId === ch.id)
-    if (!actorToken) return
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-      type: 'calm-spirit',
-      actorTokenId: actorToken.id,
-      characterId: ch.id,
-      effect: 'cooldown',
-      skillId: skill.id,
-    })
-    if (!headless.ok) {
-      void showCombatNotice('安定心神', headless.reason, 'amber')
-      return
-    }
-    applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
+    sendDmLocalCalmSpiritRequest('cooldown', { skillId: skill.id })
   }
 
   const handleCalmSpiritExtraTurn = () => {
@@ -2404,23 +2357,9 @@ export default function MapsPage() {
       sendPlayerCalmSpiritRequest('extraTurn')
       return
     }
-    const actorToken = activeMap.tokens.find((token) => token.characterId === ch.id)
-    if (!actorToken) return
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-      type: 'calm-spirit',
-      actorTokenId: actorToken.id,
-      characterId: ch.id,
-      effect: 'extraTurn',
-    })
-    if (!headless.ok) {
-      void showCombatNotice('安定心神', headless.reason, 'amber')
-      return
+    if (sendDmLocalCalmSpiritRequest('extraTurn')) {
+      void showCombatNotice('安定心神', '已获得一个完整回合：AP 回满，技能本回合使用限制重置。', 'sky')
     }
-    applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-    }
-    void showCombatNotice('安定心神', '已获得一个完整回合：AP 回满，技能本回合使用限制重置。', 'sky')
   }
 
   const handleUseSkill = (skill: CombatSkill) => {
@@ -4667,6 +4606,18 @@ export default function MapsPage() {
         featureKey,
         targetTokenId: opts?.targetTokenId,
         targetTokenIds: opts?.targetTokenIds,
+      }),
+    )
+
+  const sendDmLocalCalmSpiritRequest = (
+    effect: NonNullable<SharedPlayerActionState['calmSpiritEffect']>,
+    opts?: { skillId?: string },
+  ) =>
+    submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'calm-spirit',
+        calmSpiritEffect: effect,
+        skillId: opts?.skillId,
       }),
     )
 
