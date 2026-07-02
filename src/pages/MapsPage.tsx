@@ -136,6 +136,14 @@ import {
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
 import {
+  createHeadlessCombatSnapshot,
+  planHeadlessCombatResultApplication,
+} from '../lib/headlessCombatBridge'
+import {
+  planHeadlessPlayerActionSettlement,
+  tokenMovedEvent,
+} from '../lib/headlessPlayerActionSettlement'
+import {
   COMBAT_INTERRUPT_RESOURCE,
   createCombatInterrupt,
   type SharedCombatInterrupt,
@@ -1745,71 +1753,66 @@ export default function MapsPage() {
     enemyTurnTimersRef.current.push(watchdog)
   }
 
-  const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState => ({
-    map,
-    characters: useCharacterStore.getState().characters,
-    active: combatActiveRef.current,
-    round: roundRef.current,
-    initiativeIndex: initiativeIndexRef.current,
-    initiativeOrder: initiativeOrderRef.current,
-    enemyApByToken: enemyApByTokenRef.current,
-    disengagedCharacterIds: [...disengagedCharIds],
-  })
+  const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState =>
+    createHeadlessCombatSnapshot({
+      map,
+      characters: useCharacterStore.getState().characters,
+      active: combatActiveRef.current,
+      round: roundRef.current,
+      initiativeIndex: initiativeIndexRef.current,
+      initiativeOrder: initiativeOrderRef.current,
+      enemyApByToken: enemyApByTokenRef.current,
+      disengagedCharacterIds: disengagedCharIds,
+    })
 
   const applyHeadlessCombatResult = (result: HeadlessCombatResult) => {
-    if (!result.ok) return
-    let shouldPublishCombatState = false
-    if (combatActiveRef.current !== result.state.active) {
-      setCombatActive(result.state.active)
-      combatActiveRef.current = result.state.active
-      shouldPublishCombatState = true
+    const latestMap = result.ok
+      ? useMapStore.getState().maps.find((map) => map.id === result.state.map.id)
+      : undefined
+    const plan = planHeadlessCombatResultApplication({
+      result,
+      currentActive: combatActiveRef.current,
+      currentRound: roundRef.current,
+      currentInitiativeIndex: initiativeIndexRef.current,
+      currentInitiativeOrder: initiativeOrderRef.current,
+      currentCharacters: useCharacterStore.getState().characters,
+      currentMap: latestMap,
+      currentEnemyApByToken: enemyApByTokenRef.current,
+      currentDisengagedCharacterIds: disengagedCharIds,
+    })
+    if (!plan.ok || !result.ok) return
+
+    if (plan.active !== undefined) {
+      setCombatActive(plan.active)
+      combatActiveRef.current = plan.active
     }
-    if (roundRef.current !== result.state.round) {
-      setRound(result.state.round)
-      roundRef.current = result.state.round
-      shouldPublishCombatState = true
+    if (plan.round !== undefined) {
+      setRound(plan.round)
+      roundRef.current = plan.round
     }
-    if (initiativeIndexRef.current !== result.state.initiativeIndex) {
-      setInitiativeIndex(result.state.initiativeIndex)
-      initiativeIndexRef.current = result.state.initiativeIndex
-      shouldPublishCombatState = true
+    if (plan.initiativeIndex !== undefined) {
+      setInitiativeIndex(plan.initiativeIndex)
+      initiativeIndexRef.current = plan.initiativeIndex
     }
-    if (JSON.stringify(initiativeOrderRef.current) !== JSON.stringify(result.state.initiativeOrder)) {
-      setInitiativeOrder(result.state.initiativeOrder)
-      initiativeOrderRef.current = result.state.initiativeOrder
-      shouldPublishCombatState = true
+    if (plan.initiativeOrder !== undefined) {
+      setInitiativeOrder(plan.initiativeOrder)
+      initiativeOrderRef.current = plan.initiativeOrder
+    }
+    for (const nextCharacter of plan.charactersToUpdate) {
+      updateChar(nextCharacter.id, nextCharacter)
+    }
+    for (const nextToken of plan.tokensToUpdate) {
+      updateToken(result.state.map.id, nextToken.id, nextToken)
+    }
+    if (plan.enemyApByToken !== undefined) {
+      enemyApByTokenRef.current = plan.enemyApByToken
+      setEnemyApByToken(plan.enemyApByToken)
+    }
+    if (plan.disengagedCharacterIds !== undefined) {
+      setDisengagedCharIds(new Set(plan.disengagedCharacterIds))
     }
 
-    const currentCharacters = useCharacterStore.getState().characters
-    const currentCharactersById = new Map(currentCharacters.map((character) => [character.id, character]))
-    for (const nextCharacter of result.state.characters) {
-      const currentCharacter = currentCharactersById.get(nextCharacter.id)
-      if (!currentCharacter || JSON.stringify(currentCharacter) !== JSON.stringify(nextCharacter)) {
-        updateChar(nextCharacter.id, nextCharacter)
-      }
-    }
-
-    const latestMap = useMapStore.getState().maps.find((map) => map.id === result.state.map.id)
-    const currentTokensById = new Map((latestMap?.tokens ?? []).map((token) => [token.id, token]))
-    for (const nextToken of result.state.map.tokens) {
-      const currentToken = currentTokensById.get(nextToken.id)
-      if (!currentToken || JSON.stringify(currentToken) !== JSON.stringify(nextToken)) {
-        updateToken(result.state.map.id, nextToken.id, nextToken)
-      }
-    }
-
-    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(result.state.enemyApByToken)) {
-      enemyApByTokenRef.current = result.state.enemyApByToken
-      setEnemyApByToken(result.state.enemyApByToken)
-      shouldPublishCombatState = true
-    }
-
-    const nextDisengaged = new Set(result.state.disengagedCharacterIds ?? [])
-    if (JSON.stringify([...disengagedCharIds].sort()) !== JSON.stringify([...nextDisengaged].sort())) {
-      setDisengagedCharIds(nextDisengaged)
-    }
-
-    if (shouldPublishCombatState) {
+    if (plan.shouldPublishCombatState) {
       publishCombatState({
         active: result.state.active,
         round: result.state.round,
@@ -1819,10 +1822,8 @@ export default function MapsPage() {
       })
     }
 
-    for (const event of result.events) {
-      if (event.type === 'damage-applied' && event.hpAfter <= 0) {
-        deferDeathHandling(event.targetTokenId, event.characterId)
-      }
+    for (const event of plan.deathEvents) {
+      deferDeathHandling(event.targetTokenId, event.characterId)
     }
   }
 
@@ -4407,36 +4408,28 @@ export default function MapsPage() {
       rejectReason?: (reason: string) => string
     },
   ): boolean => {
-    if (!result.ok) {
-      acknowledgePlayerAction(action, 'rejected', options?.rejectReason?.(result.reason) ?? result.reason)
-      completePlayerActionRequest(action)
+    const plan = planHeadlessPlayerActionSettlement({
+      action,
+      result,
+      acceptedPosition: options?.acceptedPosition,
+      acceptedReason: options?.acceptedReason,
+      previousRound: options?.previousRound,
+      rejectReason: options?.rejectReason,
+    })
+    if (plan.status === 'rejected') {
+      acknowledgePlayerAction(action, 'rejected', plan.ackReason)
+      if (plan.shouldComplete) completePlayerActionRequest(action)
       return false
     }
     applyHeadlessCombatResult(result)
-    for (const event of result.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      if (
-        options?.previousRound != null &&
-        event.type === 'turn-advanced' &&
-        event.round > options.previousRound
-      ) {
-        pushCombatLog(`进入第 ${event.round} 回合`, 'turn', event.round)
-      }
+    for (const log of plan.logs) {
+      pushCombatLog(log.text, log.kind, log.round)
     }
     options?.beforeComplete?.()
-    completePlayerActionRequest(action)
-    acknowledgePlayerAction(action, 'accepted', options?.acceptedReason, options?.acceptedPosition)
+    if (plan.shouldComplete) completePlayerActionRequest(action)
+    acknowledgePlayerAction(action, 'accepted', plan.acceptedReason, plan.acceptedPosition)
     return true
   }
-
-  const tokenMovedEvent = (
-    events: HeadlessCombatEvent[],
-    tokenId: string,
-  ): Extract<HeadlessCombatEvent, { type: 'token-moved' }> | undefined =>
-    events.find(
-      (event): event is Extract<HeadlessCombatEvent, { type: 'token-moved' }> =>
-        event.type === 'token-moved' && event.tokenId === tokenId,
-    )
 
   const settleSimpleHeadlessMoveAction = (
     action: SharedPlayerActionState,
