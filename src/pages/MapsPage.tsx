@@ -130,6 +130,7 @@ import {
 import {
   buildHeadlessEndTurnAction,
   clearCharacterScopedRecord,
+  planHeadlessEndTurnSettlement,
   removeDisengagedCharacterId,
 } from '../lib/playerEndTurnAction'
 import {
@@ -3874,17 +3875,17 @@ export default function MapsPage() {
         characterId: curToken?.characterId,
       }),
     )
-    if (!headless.ok) {
-      pushCombatLog(`回合推进失败：${headless.reason}`, 'system')
+    const settlement = planHeadlessEndTurnSettlement({ result: headless, previousRound })
+    if (settlement.status === 'rejected') {
+      pushCombatLog(settlement.log.text, settlement.log.kind)
       return
     }
     applyHeadlessCombatResult(headless)
-    for (const event of headless.events) {
-      if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      if (event.type === 'turn-advanced' && event.round > previousRound) {
-        pushCombatLog(`进入第 ${event.round} 回合`, 'turn', event.round)
-        setInitiativeScroll(0)
-      }
+    for (const log of settlement.logs) {
+      pushCombatLog(log.text, log.kind, log.round)
+    }
+    if (settlement.shouldResetInitiativeScroll) {
+      setInitiativeScroll(0)
     }
   }
 

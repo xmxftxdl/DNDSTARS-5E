@@ -1,4 +1,4 @@
-import type { HeadlessEndTurnAction } from './headlessDmCombatEngine'
+import type { HeadlessCombatResult, HeadlessEndTurnAction } from './headlessDmCombatEngine'
 
 export function clearCharacterScopedRecord<T>(
   record: Record<string, T>,
@@ -32,5 +32,47 @@ export function buildHeadlessEndTurnAction(input: {
     type: 'end-turn',
     actorTokenId: input.actorTokenId,
     characterId: input.characterId,
+  }
+}
+
+export type HeadlessEndTurnSettlementPlan =
+  | {
+      status: 'rejected'
+      log: { text: string; kind: 'system' }
+    }
+  | {
+      status: 'accepted'
+      logs: Array<{ text: string; kind: 'turn'; round?: number }>
+      shouldResetInitiativeScroll: boolean
+    }
+
+export function planHeadlessEndTurnSettlement(input: {
+  result: HeadlessCombatResult
+  previousRound: number
+}): HeadlessEndTurnSettlementPlan {
+  if (!input.result.ok) {
+    return {
+      status: 'rejected',
+      log: {
+        text: `回合推进失败：${input.result.reason}`,
+        kind: 'system',
+      },
+    }
+  }
+
+  const logs: Array<{ text: string; kind: 'turn'; round?: number }> = []
+  let shouldResetInitiativeScroll = false
+  for (const event of input.result.events) {
+    if (event.type === 'log') logs.push({ text: event.text, kind: 'turn' })
+    if (event.type === 'turn-advanced' && event.round > input.previousRound) {
+      logs.push({ text: `进入第 ${event.round} 回合`, kind: 'turn', round: event.round })
+      shouldResetInitiativeScroll = true
+    }
+  }
+
+  return {
+    status: 'accepted',
+    logs,
+    shouldResetInitiativeScroll,
   }
 }
