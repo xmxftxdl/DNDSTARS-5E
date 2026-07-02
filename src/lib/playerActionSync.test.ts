@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Token } from '../store/maps'
+import type { Character } from '../types/character'
 import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
   consumePlayerActionAck,
+  createDmLocalPlayerActionEnvelope,
+  createPlayerActionEnvelope,
   createSharedPlayerActionEnvelope,
   hydratedProcessedPlayerActionIdsForDm,
   isAuthoritativeActionSnapshotReady,
@@ -15,6 +19,13 @@ import {
   syncAuthoritativePlayerActionState,
   waitForAuthoritativeActionSnapshot,
 } from './playerActionSync'
+
+const hero = { id: 'hero', name: 'Hero' } as unknown as Character
+const heroToken = {
+  id: 'hero-token',
+  type: 'player',
+  characterId: 'hero',
+} as unknown as Token
 
 describe('player action sync barrier', () => {
   it('is ready when no authoritative appliedAt barrier is provided', () => {
@@ -117,6 +128,95 @@ describe('player action sync barrier', () => {
       }),
     ).toBeNull()
     expect(nextSeq).not.toHaveBeenCalled()
+  })
+
+  it('creates DM local player actions only for the current player token', () => {
+    let seq = 0
+    const nextSeq = () => {
+      seq += 1
+      return seq
+    }
+
+    expect(
+      createDmLocalPlayerActionEnvelope({
+        isDm: true,
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        turnCharacter: hero,
+        currentInitiativeToken: heroToken,
+        round: 1,
+        initiativeIndex: 0,
+        nextSeq,
+        now: () => 1000,
+        patch: { type: 'end-turn' },
+      }),
+    ).toMatchObject({
+      id: 'map-1:dm-action:1000:1',
+      sourceMode: 'dm',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      type: 'end-turn',
+    })
+
+    expect(
+      createDmLocalPlayerActionEnvelope({
+        isDm: true,
+        mapId: 'map-1',
+        turnCharacter: hero,
+        currentInitiativeToken: { ...heroToken, type: 'enemy' } as unknown as Token,
+        round: 1,
+        initiativeIndex: 0,
+        nextSeq,
+        now: () => 1001,
+        patch: { type: 'end-turn' },
+      }),
+    ).toBeNull()
+    expect(seq).toBe(1)
+  })
+
+  it('creates player actions from current initiative or an explicit actor override', () => {
+    let seq = 0
+    const nextSeq = () => {
+      seq += 1
+      return seq
+    }
+
+    expect(
+      createPlayerActionEnvelope({
+        mapId: 'map-1',
+        combatId: 'combat-1',
+        turnCharacter: hero,
+        currentInitiativeToken: heroToken,
+        round: 2,
+        initiativeIndex: 1,
+        nextSeq,
+        now: () => 2000,
+        patch: { type: 'move-token', targetPosition: { x: 10, y: 20 } },
+      }),
+    ).toMatchObject({
+      id: 'map-1:player-action:2000:1',
+      sourceMode: 'player',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetPosition: { x: 10, y: 20 },
+    })
+
+    expect(
+      createPlayerActionEnvelope({
+        mapId: 'map-1',
+        actorOverride: { tokenId: 'leap-token', characterId: 'leaper' },
+        round: 2,
+        initiativeIndex: 1,
+        nextSeq,
+        now: () => 2001,
+        patch: { type: 'agile-leap-move', targetPosition: { x: 30, y: 40 } },
+      }),
+    ).toMatchObject({
+      id: 'map-1:player-action:2001:2',
+      actorTokenId: 'leap-token',
+      characterId: 'leaper',
+      type: 'agile-leap-move',
+    })
   })
 
   it('merges queued player action requests without replaying duplicates or stale combat actions', () => {

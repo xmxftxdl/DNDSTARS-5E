@@ -4,6 +4,8 @@ import type {
   SharedPlayerActionRequestQueueState,
   SharedPlayerActionState,
 } from './sharedCombatTypes'
+import type { Token } from '../store/maps'
+import type { Character } from '../types/character'
 import { PLAYER_ACTION_QUEUE_LIMIT } from './playerActionAck'
 
 export function isAuthoritativeActionSnapshotReady(
@@ -87,6 +89,64 @@ export function createSharedPlayerActionEnvelope(input: {
     initiativeIndex: input.initiativeIndex,
     seq: input.nextSeq(),
     now: input.now?.() ?? Date.now(),
+    patch: input.patch,
+  })
+}
+
+export function createDmLocalPlayerActionEnvelope(input: {
+  isDm: boolean
+  mapId?: string
+  combatId?: string
+  turnCharacter?: Character | null
+  currentInitiativeToken?: Token | null
+  round: number
+  initiativeIndex: number
+  nextSeq: () => number
+  now?: () => number
+  patch: SharedPlayerActionPatch
+}): SharedPlayerActionState | null {
+  const token = input.currentInitiativeToken
+  const character = input.turnCharacter
+  if (!input.isDm || !input.mapId || !token || !character) return null
+  if (token.type !== 'player' || token.characterId !== character.id) return null
+  return createSharedPlayerActionEnvelope({
+    mapId: input.mapId,
+    combatId: input.combatId,
+    sourceMode: 'dm',
+    actorTokenId: token.id,
+    characterId: character.id,
+    round: input.round,
+    initiativeIndex: input.initiativeIndex,
+    nextSeq: input.nextSeq,
+    now: input.now,
+    patch: input.patch,
+  })
+}
+
+export function createPlayerActionEnvelope(input: {
+  mapId?: string
+  combatId?: string
+  turnCharacter?: Character | null
+  currentInitiativeToken?: Token | null
+  actorOverride?: { tokenId: string; characterId: string }
+  round: number
+  initiativeIndex: number
+  nextSeq: () => number
+  now?: () => number
+  patch: SharedPlayerActionPatch
+}): SharedPlayerActionState | null {
+  const actorTokenId = input.actorOverride?.tokenId ?? input.currentInitiativeToken?.id
+  const characterId = input.actorOverride?.characterId ?? input.turnCharacter?.id
+  return createSharedPlayerActionEnvelope({
+    mapId: input.mapId,
+    combatId: input.combatId,
+    sourceMode: 'player',
+    actorTokenId,
+    characterId,
+    round: input.round,
+    initiativeIndex: input.initiativeIndex,
+    nextSeq: input.nextSeq,
+    now: input.now,
     patch: input.patch,
   })
 }

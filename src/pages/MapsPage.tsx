@@ -299,7 +299,8 @@ import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
   consumePlayerActionAck,
-  createSharedPlayerActionEnvelope,
+  createDmLocalPlayerActionEnvelope,
+  createPlayerActionEnvelope,
   loadDmPlayerActionBatch,
   submitPlayerActionRequestWithLock,
   syncAuthoritativePlayerActionState,
@@ -4506,14 +4507,12 @@ export default function MapsPage() {
   const createDmLocalPlayerAction = (
     patch: SharedPlayerActionPatch,
   ): SharedPlayerActionState | null => {
-    if (!isDM || !activeMap || !turnCharacter || !currentInitiativeToken) return null
-    if (currentInitiativeToken.type !== 'player' || currentInitiativeToken.characterId !== turnCharacter.id) return null
-    return createSharedPlayerActionEnvelope({
-      mapId: activeMap.id,
+    return createDmLocalPlayerActionEnvelope({
+      isDm: isDM,
+      mapId: activeMap?.id,
       combatId: combatIdRef.current,
-      sourceMode: 'dm',
-      actorTokenId: currentInitiativeToken.id,
-      characterId: turnCharacter.id,
+      turnCharacter,
+      currentInitiativeToken,
       round: roundRef.current,
       initiativeIndex: initiativeIndexRef.current,
       nextSeq: () => {
@@ -4591,15 +4590,12 @@ export default function MapsPage() {
     patch: SharedPlayerActionPatch,
     actorOverride?: { tokenId: string; characterId: string },
   ): SharedPlayerActionState | null => {
-    if (!activeMap) return null
-    const actorTokenId = actorOverride?.tokenId ?? currentInitiativeToken?.id
-    const characterId = actorOverride?.characterId ?? turnCharacter?.id
-    return createSharedPlayerActionEnvelope({
-      mapId: activeMap.id,
+    return createPlayerActionEnvelope({
+      mapId: activeMap?.id,
       combatId: combatIdRef.current,
-      sourceMode: 'player',
-      actorTokenId,
-      characterId,
+      turnCharacter,
+      currentInitiativeToken,
+      actorOverride,
       round,
       initiativeIndex,
       nextSeq: () => {
