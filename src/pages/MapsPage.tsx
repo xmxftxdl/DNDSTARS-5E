@@ -2228,20 +2228,9 @@ export default function MapsPage() {
         setShowMoveRange(false)
         return
       }
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'move-token',
-        actorTokenId: myPlayerToken.id,
-        characterId: turnCharacter.id,
-        targetPosition: pos,
-        mode: 'skill-free-move',
-      })
-      if (!headless.ok) return
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
+      if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'skill-free-move', targetPosition: pos }))) {
+        void showCombatNotice('无法移动', '技能移动当前不可用。', 'amber')
       }
-      pushApLog(turnCharacter, 0, '技能授予移动', `移动至多 ${feet} 尺`)
       setShowMoveRange(false)
       return
     }
