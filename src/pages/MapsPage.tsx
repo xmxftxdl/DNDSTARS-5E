@@ -293,6 +293,10 @@ import {
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import { shouldSendPlayerReadyFeatureToDm } from '../lib/playerFeatureActivation'
+import {
+  buildSimpleHeadlessPlayerAction,
+  isSimpleHeadlessPlayerActionType,
+} from '../lib/simpleHeadlessPlayerAction'
 const runtimeNow = () => Date.now()
 const runtimeRandomSuffix = () => Math.random().toString(36).slice(2)
 const runtimeId = (prefix?: string) =>
@@ -4598,38 +4602,24 @@ export default function MapsPage() {
       return
     }
 
-    if (action.type === 'calm-spirit') {
-      if (!action.calmSpiritEffect) {
-        acknowledgePlayerAction(action, 'rejected', 'unsupported-action')
+    if (isSimpleHeadlessPlayerActionType(action.type)) {
+      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const prepared = buildSimpleHeadlessPlayerAction({
+        action,
+        map,
+        characters: useCharacterStore.getState().characters,
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
         completePlayerActionRequest(action)
         return
       }
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'calm-spirit',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        effect: action.calmSpiritEffect,
-        skillId: action.skillId,
-      })
-      settleHeadlessPlayerAction(action, headless)
-      return
-    }
-
-    if (action.type === 'use-skill') {
-      if (!action.skillId) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-skill')
-        completePlayerActionRequest(action)
-        return
+      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), prepared.headlessAction)
+      if (prepared.settlement === 'move' && prepared.token) {
+        settleSimpleHeadlessMoveAction(action, prepared.token, headless)
+      } else {
+        settleHeadlessPlayerAction(action, headless)
       }
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'use-skill',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        skillId: action.skillId,
-      })
-      settleHeadlessPlayerAction(action, headless)
       return
     }
 
@@ -5377,77 +5367,6 @@ export default function MapsPage() {
       return
     }
 
-    if (action.type === 'disengage') {
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'disengage',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-      })
-      settleHeadlessPlayerAction(action, headless)
-      return
-    }
-
-    if (action.type === 'agile-leap-move') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const token = map.tokens.find((item) => item.id === action.actorTokenId)
-      if (!actor || !token || !action.targetPosition) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-agile-leap')
-        completePlayerActionRequest(action)
-        return
-      }
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'move-token',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        targetPosition: action.targetPosition,
-        mode: 'agile-leap',
-      })
-      settleSimpleHeadlessMoveAction(action, token, headless)
-      return
-    }
-
-    if (action.type === 'skill-free-move') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const token = map.tokens.find((item) => item.id === action.actorTokenId)
-      if (!actor || !token || !action.targetPosition) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-skill-free-move')
-        completePlayerActionRequest(action)
-        return
-      }
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'move-token',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        targetPosition: action.targetPosition,
-        mode: 'skill-free-move',
-      })
-      settleSimpleHeadlessMoveAction(action, token, headless)
-      return
-    }
-
-    if (action.type === 'calm-spirit-move') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const token = map.tokens.find((item) => item.id === action.actorTokenId)
-      if (!actor || !token || !action.targetPosition) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-calm-spirit-move')
-        completePlayerActionRequest(action)
-        return
-      }
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'move-token',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        targetPosition: action.targetPosition,
-        mode: 'calm-spirit-move',
-      })
-      settleSimpleHeadlessMoveAction(action, token, headless)
-      return
-    }
-
     if (action.type === 'move-token') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const preparedMove = preparePlayerMoveAction({
@@ -5527,25 +5446,6 @@ export default function MapsPage() {
         acceptedPosition: targetPosition,
         beforeComplete: () => pushApLog(actor, 1, '移动', `${movedFeet} 尺`),
       })
-      return
-    }
-
-    if (action.type === 'qi-reduce-cooldown') {
-      const actor = useCharacterStore.getState().characters.find((c) => c.id === action.characterId)
-      const skill = actor?.combatSkills.find((s) => s.id === action.skillId)
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      if (!actor || !skill) {
-        acknowledgePlayerAction(action, 'rejected', 'invalid-qi-reduce')
-        completePlayerActionRequest(action)
-        return
-      }
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
-        type: 'qi-reduce-cooldown',
-        actorTokenId: action.actorTokenId,
-        characterId: action.characterId,
-        skillId: skill.id,
-      })
-      settleHeadlessPlayerAction(action, headless)
       return
     }
 
