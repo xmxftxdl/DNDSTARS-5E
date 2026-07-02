@@ -794,7 +794,8 @@ export function pendingTraitChoices(c: Character): TraitChoiceGroup[] {
   )
 }
 
-export function createClassTrait(key: ClassFeatureKey, _charLevel = 1): Trait {
+export function createClassTrait(key: ClassFeatureKey, charLevel = 1): Trait {
+  void charLevel
   const def = getClassFeatureDef(key)!
   const featureRank = 1
   const maxUses = def.maxUsesAtRank?.(featureRank) ?? 0

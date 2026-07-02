@@ -278,7 +278,7 @@ export function runMapBattleSimulation(config: MapSimulationConfig): MapSimulati
   let distanceClosed = 0
 
   for (let run = 0; run < config.runs; run++) {
-    let actors = config.actors.map((actor) => ({ ...actor }))
+    const actors = config.actors.map((actor) => ({ ...actor }))
     let rounds = 0
 
     while (
@@ -309,7 +309,7 @@ export function runMapBattleSimulation(config: MapSimulationConfig): MapSimulati
             continue
           }
 
-          let targetIndex = actors.findIndex((other) => other.id === target.id)
+          const targetIndex = actors.findIndex((other) => other.id === target.id)
           if (targetIndex < 0) break
           let targetActor = actors[targetIndex]
           if (targetActor.team === 'enemy') {
@@ -395,7 +395,7 @@ export function runMapBattleSimulationDetailed(config: MapSimulationConfig): Map
   let distanceClosedTotal = 0
 
   for (let run = 0; run < config.runs; run++) {
-    let actors = config.actors.map((actor) => ({ ...actor }))
+    const actors = config.actors.map((actor) => ({ ...actor }))
     const log: string[] = []
     let rounds = 0
     let enemyDodges = 0

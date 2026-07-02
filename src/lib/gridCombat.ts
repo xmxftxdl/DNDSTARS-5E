@@ -281,7 +281,8 @@ export function clampGridSize(size: number, map: Pick<BattleMap, 'width'>): numb
 }
 
 /** 角色 token 默认占格倍数（识别底图网格时配合 builtinGrid 渲染贴合） */
-export function defaultTokenSizeForMap(_map: BattleMap): number {
+export function defaultTokenSizeForMap(map: BattleMap): number {
+  void map
   return 1
 }
 

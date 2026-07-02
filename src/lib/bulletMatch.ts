@@ -43,7 +43,7 @@ function randomType(): number {
 }
 
 function randomGridNoImmediateMatches(): number[] {
-  let grid = Array.from({ length: BULLET_CELL_COUNT }, () => randomType())
+  const grid = Array.from({ length: BULLET_CELL_COUNT }, () => randomType())
   for (let i = 0; i < 80; i++) {
     const matches = findMatchIndices(grid)
     if (matches.size === 0) break
@@ -271,7 +271,7 @@ export async function playCascadeAnimation(
   if (!plan) return null
 
   let grid = [...start.grid]
-  let ready = [...start.ready]
+  const ready = [...start.ready]
 
   hooks.onSwapBegin(grid, ready, a, b)
   await waitFrame()

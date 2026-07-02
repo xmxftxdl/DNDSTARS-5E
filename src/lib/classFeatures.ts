@@ -68,7 +68,8 @@ export function nextFeatureUpgradeCharacterLevel(charLevel: number): number | nu
   return null
 }
 
-export function featureRankFromCharacterLevel(_charLevel: number): number {
+export function featureRankFromCharacterLevel(charLevel: number): number {
+  void charLevel
   return 1
 }
 

@@ -281,6 +281,13 @@ import { shouldSendPlayerReadyFeatureToDm } from '../lib/playerFeatureActivation
 // [T15/G3] enemyApReconcile.test.ts 从 './MapsPage' 引用 reconcileEnemyAp —— 维持该 re-export。
 export { reconcileEnemyAp }
 
+const runtimeNow = () => Date.now()
+const runtimeRandomSuffix = () => Math.random().toString(36).slice(2)
+const runtimeId = (prefix?: string) =>
+  prefix ? `${prefix}-${runtimeNow()}-${runtimeRandomSuffix()}` : `${runtimeNow()}-${runtimeRandomSuffix()}`
+const runtimeNumericId = () => runtimeNow() + Math.random()
+const randomDieValue = (sides: number) => 1 + Math.floor(Math.random() * sides)
+
 export default function MapsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const maps = useMapStore((s) => s.maps)
@@ -459,7 +466,7 @@ export default function MapsPage() {
   }) =>
     new Promise<boolean>((resolve) => {
       setCombatDialogLocked({
-        id: Date.now() + Math.random(),
+        id: runtimeNumericId(),
         title: input.title,
         message: input.message,
         confirmText: input.confirmText ?? '确认',
@@ -502,7 +509,7 @@ export default function MapsPage() {
       response,
     })
   }
-  const [sharedDodgeNow, setSharedDodgeNow] = useState(Date.now())
+  const [sharedDodgeNow, setSharedDodgeNow] = useState(runtimeNow)
   const [pendingPlayerAction, setPendingPlayerAction] = useState<{
     id: string
     label: string
@@ -581,8 +588,8 @@ export default function MapsPage() {
       !sharedAgileLeapPrompt?.expiresAt &&
       !sharedOpportunityAttackPrompt?.expiresAt
     ) return
-    setSharedDodgeNow(Date.now())
-    const timer = window.setInterval(() => setSharedDodgeNow(Date.now()), 250)
+    setSharedDodgeNow(runtimeNow())
+    const timer = window.setInterval(() => setSharedDodgeNow(runtimeNow()), 250)
     return () => window.clearInterval(timer)
   }, [
     sharedDodgePrompt?.id,
@@ -626,7 +633,7 @@ export default function MapsPage() {
     roundOverride = round,
   ) => {
     const entry: CombatLogEntry = {
-      id: Date.now() + Math.random(),
+      id: runtimeNumericId(),
       round: roundOverride,
       text,
       kind,
@@ -644,7 +651,7 @@ export default function MapsPage() {
           await saveSharedResource<SharedCombatLogState>('combat-log', {
             mapId,
             entries: [entry, ...entries.filter((item) => item.id !== entry.id)].slice(0, 100),
-            updatedAt: Date.now(),
+            updatedAt: runtimeNow(),
           })
         })
       void combatLogSaveQueueRef.current
@@ -737,7 +744,7 @@ export default function MapsPage() {
       await saveSharedResource<SharedDiceEventsState>('dice-events', {
         mapId: activeMap.id,
         events: nextEvents,
-        updatedAt: Date.now(),
+        updatedAt: runtimeNow(),
       })
     })()
   }
@@ -748,26 +755,26 @@ export default function MapsPage() {
   const publishRollRequest = (payload: SharedRollRequestPayload) => {
     if (!activeMap || !mode) return
     const targetMode = mode === 'dm' ? 'player' : 'dm'
-    const eventId = `${payload.requestId}:roll-request:${Date.now()}:${Math.random().toString(36).slice(2)}`
+    const eventId = `${payload.requestId}:roll-request:${runtimeId()}`
     void publishSharedEvent<SharedRollRequestEvent>(`dice-roll-request-${mode}-to-${targetMode}`, {
       ...payload,
       eventId,
       mapId: activeMap.id,
       sourceMode: mode,
-      updatedAt: Date.now(),
+      updatedAt: runtimeNow(),
     })
   }
 
   const rollDiceBoxD20 = (label: string, targetName: string): Promise<number> => {
     const id = d20RequestCounterRef.current + 1
     d20RequestCounterRef.current = id
-    const requestKey = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:d20:${Date.now()}:${id}:${label}:${targetName}`
+    const requestKey = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:d20:${runtimeNow()}:${id}:${label}:${targetName}`
     const flyIndex = seededDieValue(`${requestKey}:fly`, 8) - 1
     // T-P2-398 (398-A): decide the face up front so both ends @-relabel to the
     // same value. RNG moved from the iframe physics into JS — same uniform
     // distribution, now broadcastable.
-    const value = 1 + Math.floor(Math.random() * 20)
-    const rollRequestId = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:rr-d20:${Date.now()}:${id}`
+    const value = randomDieValue(20)
+    const rollRequestId = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:rr-d20:${runtimeNow()}:${id}`
     publishRollRequest({ requestId: rollRequestId, kind: 'd20', count: 1, sides: 20, values: [value], label, targetName })
     return new Promise((resolve) => {
       setDiceBoxD20({ id, label, targetName, value, requestKey, flyIndex, resolve })
@@ -784,11 +791,11 @@ export default function MapsPage() {
     diceBoxRollRequestCounterRef.current = id
     const safeCount = Math.max(1, Math.min(12, Math.round(count)))
     const safeSides = Math.max(2, Math.min(100, Math.round(sides)))
-    const requestKey = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:dice:${Date.now()}:${id}:${safeCount}d${safeSides}:${label}:${targetName}`
+    const requestKey = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:dice:${runtimeNow()}:${id}:${safeCount}d${safeSides}:${label}:${targetName}`
     const flyIndex = seededDieValue(`${requestKey}:fly`, 8) - 1
     // T-P2-398 (398-A): decide faces up front (see rollDiceBoxD20) and broadcast.
-    const values = Array.from({ length: safeCount }, () => 1 + Math.floor(Math.random() * safeSides))
-    const rollRequestId = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:rr-dice:${Date.now()}:${id}`
+    const values = Array.from({ length: safeCount }, () => randomDieValue(safeSides))
+    const rollRequestId = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:rr-dice:${runtimeNow()}:${id}`
     publishRollRequest({ requestId: rollRequestId, kind: 'dice', count: safeCount, sides: safeSides, values, label, targetName })
     return new Promise((resolve) => {
       setDiceBoxRoll({ id, count: safeCount, sides: safeSides, label, targetName, values, requestKey, flyIndex, resolve })
@@ -797,7 +804,7 @@ export default function MapsPage() {
 
   const publishSharedDiceRoll = (roll: DiceRoll) => {
     if (!activeMap || !mode) return
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const id = runtimeId()
     seenSharedDiceIdsRef.current.add(id)
     const event: SharedDiceState = {
       id,
@@ -805,7 +812,7 @@ export default function MapsPage() {
       sourceMode: mode,
       status: 'result',
       roll,
-      updatedAt: Date.now(),
+      updatedAt: runtimeNow(),
     }
     publishSharedDiceEvent(event)
     void saveSharedResource<SharedDiceState>('dice', event)
@@ -828,7 +835,7 @@ export default function MapsPage() {
       initiativeIndex,
       initiativeOrder,
       enemyApByToken: enemyApByTokenRef.current,
-      updatedAt: Date.now(),
+      updatedAt: runtimeNow(),
       ...patch,
     }
     const task = (async () => {
@@ -1088,7 +1095,7 @@ export default function MapsPage() {
           !event ||
           event.mapId !== activeMap.id ||
           event.sourceMode === mode ||
-          Date.now() - event.updatedAt > 60000 ||
+          runtimeNow() - event.updatedAt > 60000 ||
           seenRollRequestIdsRef.current.has(event.requestId)
         ) {
           return
@@ -1120,7 +1127,7 @@ export default function MapsPage() {
         state,
         mapId: activeMap.id,
         mode,
-        now: Date.now(),
+        now: runtimeNow(),
         seenIds: seenSharedDiceIdsRef.current,
       })
       if (decision.status !== 'apply') return
@@ -1300,7 +1307,7 @@ export default function MapsPage() {
     const load = async () => {
       const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
       if (cancelled || !queue || queue.mapId !== activeMap.id) return
-      const now = Date.now()
+      const now = runtimeNow()
 
       if (isDM) {
         const settlements = resolveDmCombatInterruptSettlements({
@@ -1858,7 +1865,7 @@ export default function MapsPage() {
     to: { x: number; y: number },
     kind: MapProjectile['kind'] = 'arrow',
   ) => {
-    const id = `${kind ?? 'arrow'}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const id = runtimeId(kind ?? 'arrow')
     setProjectiles((current) => [...current, { id, from, to, kind }])
     window.setTimeout(() => {
       setProjectiles((current) => current.filter((p) => p.id !== id))
@@ -2932,8 +2939,9 @@ export default function MapsPage() {
         if (!isDM && pendingPlayerActionRef.current) return
         const targetActionKey = `${targeting.casterId}:${targeting.skill.id}:${tok.id}`
         const activeTargetAction = resolvingSkillTargetRef.current
-        if (activeTargetAction?.key === targetActionKey && Date.now() - activeTargetAction.at < 3000) return
-        resolvingSkillTargetRef.current = { key: targetActionKey, at: Date.now() }
+        const now = runtimeNow()
+        if (activeTargetAction?.key === targetActionKey && now - activeTargetAction.at < 3000) return
+        resolvingSkillTargetRef.current = { key: targetActionKey, at: now }
         const releaseSkillTarget = () => {
           if (resolvingSkillTargetRef.current?.key === targetActionKey) {
             resolvingSkillTargetRef.current = null
@@ -3121,7 +3129,7 @@ export default function MapsPage() {
     setRoll(null)
     afterRollRef.current = null
 
-    const updatedAt = Date.now()
+    const updatedAt = runtimeNow()
     const queueCombatId = options.combatId ?? combatIdRef.current
     await clearSharedEventBacklog()
     const reset = buildCombatMessageQueueReset({
@@ -3150,7 +3158,7 @@ export default function MapsPage() {
 
   const startCombat = async () => {
     if (!activeMap) return
-    const nextCombatId = `${activeMap.id}:combat:${Date.now()}:${Math.random().toString(36).slice(2)}`
+    const nextCombatId = runtimeId(`${activeMap.id}:combat`)
     combatIdRef.current = nextCombatId
     clearEnemyTurnTimers()
     setCombatLog([])
@@ -3291,8 +3299,8 @@ export default function MapsPage() {
     },
   ): Promise<boolean> => {
     if (!activeMap || !isDM) return Promise.resolve(false)
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const expiresAt = Date.now() + 15000
+    const id = runtimeId()
+    const expiresAt = runtimeNow() + 15000
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<StableMindInterruptPayload, StableMindInterruptResponse>({
         id,
@@ -3334,8 +3342,8 @@ export default function MapsPage() {
         tone: 'violet',
       }).then((accepted) => (accepted ? 'accepted' : 'declined'))
     }
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const expiresAt = Date.now() + 15000
+    const id = runtimeId()
+    const expiresAt = runtimeNow() + 15000
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<GaleComboInterruptPayload, GaleComboInterruptResponse>({
         id,
@@ -3372,8 +3380,8 @@ export default function MapsPage() {
         tone: 'sky',
       })
     }
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const expiresAt = Date.now() + 15000
+    const id = runtimeId()
+    const expiresAt = runtimeNow() + 15000
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<AgileLeapInterruptPayload, AgileLeapInterruptResponse>({
         id,
@@ -3429,8 +3437,8 @@ export default function MapsPage() {
         tone: 'amber',
       })
     }
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const expiresAt = Date.now() + 15000
+    const id = runtimeId()
+    const expiresAt = runtimeNow() + 15000
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<OpportunityAttackInterruptPayload, OpportunityAttackInterruptResponse>({
         id,
@@ -3921,8 +3929,8 @@ export default function MapsPage() {
 
     if (canDodge) {
       if (isDM && activeMap) {
-        const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-        const expiresAt = Date.now() + 15000
+        const id = runtimeId()
+        const expiresAt = runtimeNow() + 15000
         const interrupt = createCombatInterrupt<DodgeInterruptPayload, DodgeInterruptResponse>({
           id,
           mapId: activeMap.id,
@@ -4235,7 +4243,7 @@ export default function MapsPage() {
     acceptedPosition?: { x: number; y: number },
   ) => {
     if (!activeMap || mode !== 'dm') return
-    const appliedAt = Date.now()
+    const appliedAt = runtimeNow()
     const baseline = playerActionResultBaselinesRef.current[action.id]
     const afterBaseline =
       status === 'accepted' && baseline

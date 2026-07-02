@@ -13,6 +13,7 @@ import {
   TRAIT_CHOICE_GROUPS,
   type ClassFeatureKey,
 } from './traitRegistry'
+import type { Character } from '../types/character'
 
 const DOC_GROUPS = [
   ['archer-lv1', 1, ['doubleArrow', 'armorPiercingArrow']],
@@ -33,6 +34,46 @@ const DOC_GROUPS = [
   ['shadowdancer-lv35', 35, ['critBlock', 'fateShackle']],
   ['shadowdancer-lv40', 40, ['showtime', 'windBlade']],
 ] as const
+
+function shadowDancerForQi(patch: Partial<Character>): Character {
+  return {
+    id: 'qi-test',
+    name: '影舞者',
+    player: '',
+    avatar: '',
+    accent: '',
+    race: '',
+    charClass: '影舞者',
+    level: 30,
+    background: '',
+    experience: 0,
+    reputation: 0,
+    abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+    savingThrows: [],
+    skills: [],
+    maxHp: 1,
+    currentHp: 1,
+    tempHp: 0,
+    hitDice: '1d6',
+    ac: 10,
+    speed: 30,
+    initiativeBonus: 0,
+    saveDC: 10,
+    actionPoints: 2,
+    currentAP: 2,
+    passivePerception: 10,
+    inspiration: 0,
+    mana: 0,
+    maxMana: 0,
+    traits: [],
+    combatSkills: [],
+    conditions: [],
+    notes: '',
+    dmNotes: '',
+    visibleToPlayers: true,
+    ...patch,
+  }
+}
 
 const DOC_FEATURE_KEYS = new Set<ClassFeatureKey>([
   'doubleArrow',
@@ -133,8 +174,8 @@ describe('archer document feature config', () => {
 
   it('preserves current shadow dancer qi while syncing derived character data', () => {
     expect(maxQiForLevel(30)).toBe(99)
-    expect(syncQiForCharacter({ charClass: '\u5f71\u821e\u8005', level: 30, qi: 98 } as any).qi).toBe(98)
-    expect(syncQiForCharacter({ charClass: '\u5f71\u821e\u8005', level: 30 } as any).qi).toBe(99)
-    expect(syncQiForCharacter({ charClass: '\u5f71\u821e\u8005', level: 30, qi: 120 } as any).qi).toBe(99)
+    expect(syncQiForCharacter(shadowDancerForQi({ qi: 98 })).qi).toBe(98)
+    expect(syncQiForCharacter(shadowDancerForQi({ qi: undefined })).qi).toBe(99)
+    expect(syncQiForCharacter(shadowDancerForQi({ qi: 120 })).qi).toBe(99)
   })
 })

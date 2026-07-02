@@ -91,7 +91,7 @@ export function pushTokenFromPoint(
 ): { x: number; y: number } {
   const tokenCell = pixelToCell(token.x, token.y, map)
   const fromCell = pixelToCell(from.x, from.y, map)
-  let { dc, dr } = normalizeStep(tokenCell.col - fromCell.col, tokenCell.row - fromCell.row)
+  const { dc, dr } = normalizeStep(tokenCell.col - fromCell.col, tokenCell.row - fromCell.row)
   const next: GridCell = {
     col: tokenCell.col + dc * cells,
     row: tokenCell.row + dr * cells,
