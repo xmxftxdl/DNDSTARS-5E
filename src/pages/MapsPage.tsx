@@ -1913,44 +1913,16 @@ export default function MapsPage() {
     if (!caster) return
     const selectedIds = uniqueFeatureTargetIds(tokenIds).slice(0, featureTargeting.maxTargets)
     if (selectedIds.length === 0) return
-    if (!isDM) {
-      if (
-        sendPlayerActivateFeatureRequest('illusionDance', {
+    const sent = isDM
+      ? sendDmLocalActivateFeatureRequest('illusionDance', {
           targetTokenId: selectedIds[0],
           targetTokenIds: selectedIds,
         })
-      ) {
-        setFeatureTargeting(null)
-      }
-      return
-    }
-    const casterToken = activeMap?.tokens.find((token) => token.characterId === caster.id)
-    if (!casterToken || !activeMap) return
-    void (async () => {
-      const targetPackets = []
-      for (const targetId of selectedIds) {
-        const target = activeMap.tokens.find((token) => token.id === targetId)
-        const values = await rollDiceBoxValues(1, 20, '迷幻舞步感知豁免', target?.label ?? '目标')
-        targetPackets.push({ targetTokenId: targetId, saveD20: values[0] ?? 1 })
-      }
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: casterToken.id,
-        characterId: caster.id,
-        featureKey: 'illusionDance',
-        targetTokenIds: selectedIds,
-        targetPackets,
-      })
-      if (!headless.ok) {
-        void showCombatNotice('迷幻舞步', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      setFeatureTargeting(null)
-    })()
+      : sendPlayerActivateFeatureRequest('illusionDance', {
+          targetTokenId: selectedIds[0],
+          targetTokenIds: selectedIds,
+        })
+    if (sent) setFeatureTargeting(null)
   }
 
   const handleFeatureTargetTokenClick = (tokenId: string) => {
@@ -1985,216 +1957,30 @@ export default function MapsPage() {
       beginIllusionDanceTargeting(turnCharacter)
       return
     }
-    if (!isDM && key === 'trackingArrow') {
-      const trait = findClassTrait(turnCharacter, 'trackingArrow')
-      if (!trait || trait.uses <= 0) return
-      const target = chooseEnemyTokenByPrompt('追踪箭：给一个已带狩猎印记的目标额外 +1 层印记', (t) => (t.huntingMarkStacks ?? 0) > 0)
-      if (!target) return
-      sendPlayerActivateFeatureRequest(key, { targetTokenId: target.id })
-      return
-    }
-    if (!isDM && key === 'shadowVeil') {
-      const trait = findClassTrait(turnCharacter, 'shadowVeil')
-      if (!trait || trait.uses <= 0) return
-      const target = chooseEnemyTokenByPrompt('影遁之术：消耗目标 2 层狩猎印记，本回合对其攻击 +1D6', (t) => (t.huntingMarkStacks ?? 0) >= 2)
-      if (!target) return
-      sendPlayerActivateFeatureRequest(key, { targetTokenId: target.id })
-      return
-    }
-    if (!isDM && shouldSendPlayerReadyFeatureToDm(key)) {
-      sendPlayerActivateFeatureRequest(key)
-      return
-    }
-    if (key === 'eagleEye' || key === 'doubleArrow' || key === 'preciseStrike') {
-      if (!activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: key as Extract<ClassFeatureKey, 'eagleEye' | 'doubleArrow' | 'preciseStrike'>,
-      })
-      const title = key === 'eagleEye' ? '鹰眼' : key === 'doubleArrow' ? '双箭' : '精准打击'
-      if (!headless.ok) {
-        await showCombatNotice(title, headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      await showCombatNotice(title, '已更新。', 'sky')
-      return
-    }
+
+    const sendActiveFeature = (opts?: { targetTokenId?: string; targetTokenIds?: string[] }) =>
+      isDM ? sendDmLocalActivateFeatureRequest(key, opts) : sendPlayerActivateFeatureRequest(key, opts)
+
     if (key === 'trackingArrow') {
       const trait = findClassTrait(turnCharacter, 'trackingArrow')
       if (!trait || trait.uses <= 0) return
       const target = chooseEnemyTokenByPrompt('追踪箭：给一个已带狩猎印记的目标额外 +1 层印记', (t) => (t.huntingMarkStacks ?? 0) > 0)
-      if (!target || !activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const finaleWillTrigger = (target.huntingMarkStacks ?? 0) >= 3 && !!turnCharacter.combatBuffs?.finaleReady
-      const finaleTrait = findClassTrait(turnCharacter, 'finale')
-      const finaleDamageValues = finaleWillTrigger
-        ? [
-            ...(await rollDiceBoxValues(6, 10, '曲终力场伤害', target.label)),
-            ...(finaleTrait && finaleTrait.level > 1
-              ? await rollDiceBoxValues(finaleTrait.level - 1, 8, '曲终等级额外伤害', target.label)
-              : []),
-          ]
-        : undefined
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'trackingArrow',
-        targetTokenId: target.id,
-        finaleDamageValues,
-      })
-      if (!headless.ok) {
-        await showCombatNotice('追踪箭', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, event.text.includes('曲终触发') ? 'damage' : 'turn')
-      }
+      if (!target) return
+      sendActiveFeature({ targetTokenId: target.id })
       return
     }
+
     if (key === 'shadowVeil') {
       const trait = findClassTrait(turnCharacter, 'shadowVeil')
       if (!trait || trait.uses <= 0) return
       const target = chooseEnemyTokenByPrompt('影遁之术：消耗目标 2 层狩猎印记，本回合对其攻击 +1D6', (t) => (t.huntingMarkStacks ?? 0) >= 2)
-      if (!target || !activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'shadowVeil',
-        targetTokenId: target.id,
-      })
-      if (!headless.ok) {
-        await showCombatNotice('影遁之术', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
+      if (!target) return
+      sendActiveFeature({ targetTokenId: target.id })
       return
     }
-    if (key === 'stillWater') {
-      const trait = findClassTrait(turnCharacter, 'stillWater')
-      if (!trait) return
-      if (!activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'stillWater',
-      })
-      if (!headless.ok) {
-        await showCombatNotice('心如止水', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      return
-    }
-    if (key === 'finale') {
-      const trait = findClassTrait(turnCharacter, 'finale')
-      if (!trait || (!turnCharacter.combatBuffs?.finaleReady && trait.uses <= 0)) return
-      if (!activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'finale',
-      })
-      if (!headless.ok) {
-        await showCombatNotice('曲终', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      return
-    }
-    if (key === 'flexibleBody') {
-      const trait = findClassTrait(turnCharacter, 'flexibleBody')
-      if (!trait) return
-      if (!activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'flexibleBody',
-      })
-      if (!headless.ok) {
-        await showCombatNotice('灵活身躯', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      return
-    }
-    if (key === 'showtime') {
-      const trait = findClassTrait(turnCharacter, 'showtime')
-      if (!trait || trait.uses <= 0) return
-      if (!activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'showtime',
-      })
-      if (!headless.ok) {
-        await showCombatNotice('演出时间', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      return
-    }
-    if (key === 'windBlade') {
-      const trait = findClassTrait(turnCharacter, 'windBlade')
-      if (!trait) return
-      if (!activeMap) return
-      const actorToken = activeMap.tokens.find((token) => token.characterId === turnCharacter.id)
-      if (!actorToken) return
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(activeMap), {
-        type: 'activate-feature',
-        actorTokenId: actorToken.id,
-        characterId: turnCharacter.id,
-        featureKey: 'windBlade',
-      })
-      if (!headless.ok) {
-        await showCombatNotice('风刃乱舞', headless.reason, 'amber')
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      for (const event of headless.events) {
-        if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      return
+
+    if (shouldSendPlayerReadyFeatureToDm(key)) {
+      sendActiveFeature()
     }
   }
 
@@ -4346,6 +4132,9 @@ export default function MapsPage() {
       rejectReason: options?.rejectReason,
     })
     if (plan.status === 'rejected') {
+      if (action.sourceMode === 'dm') {
+        pushCombatLog(`本地行动未执行：${plan.ackReason ?? 'unknown'}`, 'system')
+      }
       acknowledgePlayerAction(action, 'rejected', plan.ackReason)
       if (plan.shouldComplete) completePlayerActionRequest(action)
       return false
@@ -4881,6 +4670,19 @@ export default function MapsPage() {
       createDmLocalPlayerAction({
         type: 'use-skill',
         skillId: skill.id,
+      }),
+    )
+
+  const sendDmLocalActivateFeatureRequest = (
+    featureKey: ClassFeatureKey,
+    opts?: { targetTokenId?: string; targetTokenIds?: string[] },
+  ) =>
+    submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'activate-feature',
+        featureKey,
+        targetTokenId: opts?.targetTokenId,
+        targetTokenIds: opts?.targetTokenIds,
       }),
     )
 
