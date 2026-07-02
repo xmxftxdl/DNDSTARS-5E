@@ -114,6 +114,8 @@ export type PlayerMovePreviewPlan =
       deferredMoveAction: HeadlessPlayerMoveAction
     }
 
+export type PlayerMoveOpportunityPlan = Extract<PlayerMovePreviewPlan, { status: 'opportunity' }>
+
 export function planPlayerMoveAfterPreview(input: {
   preview: PlayerMovePreviewResult
   moveAction: HeadlessPlayerMoveAction
@@ -136,6 +138,65 @@ export function planPlayerMoveAfterPreview(input: {
     movedFeet: input.preview.movedFeet,
     opportunityAttackerTokenIds: input.preview.opportunityAttackerTokenIds,
     deferredMoveAction: buildDeferredPlayerMoveAction(input.moveAction),
+  }
+}
+
+export type PlayerMoveAfterOpportunityPlan =
+  | {
+      status: 'interrupted'
+      acceptedReason: 'mover-defeated'
+      acceptedPosition: { x: number; y: number }
+      apLog: PlayerMoveApLog
+    }
+  | {
+      status: 'commit'
+      commitAction: HeadlessCommitTokenMoveAction
+      acceptedPosition: { x: number; y: number }
+      apLog: PlayerMoveApLog
+    }
+
+export interface PlayerMoveApLog {
+  amount: number
+  action: string
+  detail: string
+}
+
+export function planPlayerMoveAfterOpportunity(input: {
+  moveAction: HeadlessPlayerMoveAction
+  movePlan: PlayerMoveOpportunityPlan
+  token: Token
+  characters: Character[]
+}): PlayerMoveAfterOpportunityPlan {
+  const commit = buildPlayerMoveCommitAfterOpportunity({
+    moveAction: input.moveAction,
+    targetPosition: input.movePlan.targetPosition,
+    feet: input.movePlan.movedFeet,
+    token: input.token,
+    characters: input.characters,
+  })
+
+  if (!commit.ok) {
+    return {
+      status: 'interrupted',
+      acceptedReason: commit.reason,
+      acceptedPosition: commit.acceptedPosition,
+      apLog: {
+        amount: 1,
+        action: '移动',
+        detail: `${input.movePlan.movedFeet} 尺，移动被打断`,
+      },
+    }
+  }
+
+  return {
+    status: 'commit',
+    commitAction: commit.commitAction,
+    acceptedPosition: input.movePlan.targetPosition,
+    apLog: {
+      amount: 1,
+      action: '移动',
+      detail: `${input.movePlan.movedFeet} 尺`,
+    },
   }
 }
 

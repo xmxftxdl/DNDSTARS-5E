@@ -8,6 +8,7 @@ import {
   buildDeferredPlayerMoveAction,
   buildPlayerMoveCommitAfterOpportunity,
   playerMoveRejectReason,
+  planPlayerMoveAfterOpportunity,
   planPlayerMoveAfterPreview,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
@@ -273,6 +274,64 @@ describe('player move action helpers', () => {
       ok: false,
       reason: 'mover-defeated',
       acceptedPosition: { x: 100, y: 100 },
+    })
+  })
+
+  it('plans post-opportunity movement settlement and AP logs', () => {
+    const prepared = preparePlayerMoveAction({
+      action: makeAction(),
+      map: makeMap(),
+      characters: [makeCharacter()],
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const movePlan = planPlayerMoveAfterPreview({
+      moveAction: prepared.moveAction,
+      preview: {
+        ok: true,
+        targetPosition: { x: 250, y: 150 },
+        movedFeet: 15,
+        opportunityAttackerTokenIds: ['goblin-token'],
+      },
+    })
+
+    expect(movePlan.status).toBe('opportunity')
+    if (movePlan.status !== 'opportunity') return
+
+    expect(
+      planPlayerMoveAfterOpportunity({
+        moveAction: prepared.moveAction,
+        movePlan,
+        token: prepared.token,
+        characters: [makeCharacter({ currentHp: 1 })],
+      }),
+    ).toEqual({
+      status: 'commit',
+      commitAction: {
+        type: 'commit-token-move',
+        actorTokenId: 'hero-token',
+        characterId: 'hero',
+        targetPosition: { x: 250, y: 150 },
+        feet: 15,
+      },
+      acceptedPosition: { x: 250, y: 150 },
+      apLog: { amount: 1, action: '移动', detail: '15 尺' },
+    })
+
+    expect(
+      planPlayerMoveAfterOpportunity({
+        moveAction: prepared.moveAction,
+        movePlan,
+        token: prepared.token,
+        characters: [makeCharacter({ currentHp: 0 })],
+      }),
+    ).toEqual({
+      status: 'interrupted',
+      acceptedReason: 'mover-defeated',
+      acceptedPosition: { x: 100, y: 100 },
+      apLog: { amount: 1, action: '移动', detail: '15 尺，移动被打断' },
     })
   })
 })

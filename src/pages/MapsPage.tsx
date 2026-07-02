@@ -95,7 +95,7 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
-  buildPlayerMoveCommitAfterOpportunity,
+  planPlayerMoveAfterOpportunity,
   planPlayerMoveAfterPreview,
   preparePlayerMoveAction,
   summarizeHeadlessPlayerMovePreview,
@@ -5420,17 +5420,21 @@ export default function MapsPage() {
         actor,
         movePlan.opportunityAttackerTokenIds,
       )
-      const afterOpportunity = buildPlayerMoveCommitAfterOpportunity({
+      const afterOpportunity = planPlayerMoveAfterOpportunity({
         moveAction,
-        targetPosition: movePlan.targetPosition,
-        feet: movePlan.movedFeet,
+        movePlan,
         token,
         characters: useCharacterStore.getState().characters,
       })
-      if (!afterOpportunity.ok) {
-        pushApLog(actor, 1, '移动', `${movePlan.movedFeet} 尺，移动被打断`)
+      if (afterOpportunity.status === 'interrupted') {
+        pushApLog(actor, afterOpportunity.apLog.amount, afterOpportunity.apLog.action, afterOpportunity.apLog.detail)
         completePlayerActionRequest(action)
-        acknowledgePlayerAction(action, 'accepted', afterOpportunity.reason, afterOpportunity.acceptedPosition)
+        acknowledgePlayerAction(
+          action,
+          'accepted',
+          afterOpportunity.acceptedReason,
+          afterOpportunity.acceptedPosition,
+        )
         return
       }
       const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
@@ -5444,8 +5448,9 @@ export default function MapsPage() {
         return
       }
       settleHeadlessPlayerAction(action, committed, {
-        acceptedPosition: movePlan.targetPosition,
-        beforeComplete: () => pushApLog(actor, 1, '移动', `${movePlan.movedFeet} 尺`),
+        acceptedPosition: afterOpportunity.acceptedPosition,
+        beforeComplete: () =>
+          pushApLog(actor, afterOpportunity.apLog.amount, afterOpportunity.apLog.action, afterOpportunity.apLog.detail),
       })
       return
     }
