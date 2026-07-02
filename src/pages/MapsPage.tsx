@@ -101,6 +101,7 @@ import {
   planPlayerMoveAfterOpportunity,
   planPlayerMoveAfterPreview,
   preparePlayerMoveAction,
+  playerMoveRejectReason,
   summarizeHeadlessPlayerMovePreview,
 } from '../lib/playerMoveAction'
 import {
@@ -4074,7 +4075,7 @@ export default function MapsPage() {
     const moved = result.ok ? tokenMovedEvent(result.events, token.id) : undefined
     return settleHeadlessPlayerAction(action, result, {
       acceptedPosition: moved?.to ?? { x: token.x, y: token.y },
-      rejectReason: (reason) => (reason === 'movement-locked' ? 'no-move' : reason),
+      rejectReason: playerMoveRejectReason,
     })
   }
 
@@ -4425,11 +4426,7 @@ export default function MapsPage() {
 
       const deferred = resolveHeadlessDmAction(headlessSnapshot, movePlan.deferredMoveAction)
       if (!deferred.ok) {
-        acknowledgePlayerAction(
-          action,
-          'rejected',
-          deferred.reason === 'movement-locked' ? 'no-move' : deferred.reason,
-        )
+        acknowledgePlayerAction(action, 'rejected', playerMoveRejectReason(deferred.reason))
         completePlayerActionRequest(action)
         return
       }

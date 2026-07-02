@@ -93,7 +93,7 @@ export function summarizeHeadlessPlayerMovePreview(input: {
   }
 }
 
-export function playerMoveRejectReason(reason: HeadlessCombatFailureReason): string {
+export function playerMoveRejectReason(reason: string): string {
   return reason === 'movement-locked' ? 'no-move' : reason
 }
 

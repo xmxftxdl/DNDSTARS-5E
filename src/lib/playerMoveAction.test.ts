@@ -154,6 +154,7 @@ describe('player move action helpers', () => {
   it('maps movement lock failures to the player-facing no-move reason', () => {
     expect(playerMoveRejectReason('movement-locked')).toBe('no-move')
     expect(playerMoveRejectReason('out-of-range')).toBe('out-of-range')
+    expect(playerMoveRejectReason('not-current-turn')).toBe('not-current-turn')
   })
 
   it('plans the next movement step after the headless preview', () => {
