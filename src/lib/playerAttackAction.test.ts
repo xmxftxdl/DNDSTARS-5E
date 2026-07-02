@@ -4,6 +4,7 @@ import type { Character, CombatSkill } from '../types/character'
 import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
+  buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
   planArrowSequenceDisplay,
@@ -183,6 +184,109 @@ describe('player attack action helpers', () => {
       waiveAp: false,
       doubleArrow: false,
       isArrowSequence: false,
+    })
+  })
+
+  it('builds a basic single-target attack packet from provided dice callbacks', async () => {
+    const rollCalls: Array<{ count: number; sides: number; label: string; targetName: string }> = []
+    const result = await buildSingleAttackTargetPacket({
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'basicShot' }),
+      targetToken: makeToken(),
+      doubleArrow: false,
+      liveRound: 1,
+      actorTokenId: 'hero-token',
+      firstInitiativeTokenId: 'hero-token',
+      rollD20: async () => {
+        throw new Error('d20 should not be rolled')
+      },
+      rollValues: async (count, sides, label, targetName) => {
+        rollCalls.push({ count, sides, label, targetName })
+        return [5]
+      },
+      enemyDodgePreview: () => ({ decision: { shouldDodge: false }, attackBonus: 4, targetAc: 12 }),
+      chooseCooldownReductionSkillId: () => undefined,
+      confirmPushTarget: async () => false,
+    })
+
+    expect(result).toMatchObject({
+      skillRank: 0,
+      packetIsCrit: false,
+      attackRollHit: true,
+      shouldRollDamage: true,
+      targetPacket: {
+        targetTokenId: 'target-token',
+        damageDiceCount: 1,
+        diceValues: [5],
+        targetDodgeMode: 'skip',
+      },
+    })
+    expect(rollCalls).toEqual([{ count: 1, sides: 8, label: 'Skill damage', targetName: 'Target' }])
+  })
+
+  it('builds double arrow and hunting mark extra damage groups without duplicating extra dice', async () => {
+    const rollQueue = [[4, 3], [2], [6, 5]]
+    const result = await buildSingleAttackTargetPacket({
+      actor: makeCharacter({
+        traits: [
+          { id: 'doubleArrow', name: '双箭', level: 1, uses: 2, maxUses: 2, description: '', featureKey: 'doubleArrow' },
+          { id: 'huntingMark', name: '狩猎印记', level: 2, uses: 0, maxUses: 0, description: '', featureKey: 'huntingMark' },
+        ],
+      }),
+      skill: makeSkill({ skillTreeId: 'basicShot' }),
+      targetToken: makeToken({ huntingMarkStacks: 1 }),
+      doubleArrow: true,
+      liveRound: 1,
+      actorTokenId: 'hero-token',
+      rollD20: async () => {
+        throw new Error('d20 should not be rolled')
+      },
+      rollValues: async () => rollQueue.shift() ?? [],
+      enemyDodgePreview: () => ({ decision: { shouldDodge: false }, attackBonus: 4, targetAc: 12 }),
+      chooseCooldownReductionSkillId: () => undefined,
+      confirmPushTarget: async () => false,
+    })
+
+    expect(result.targetPacket).toMatchObject({
+      damageDiceCount: 2,
+      diceValues: [4, 3],
+      extraDamageGroups: [
+        { values: [2], sides: 4 },
+        { values: [6, 5], sides: 8 },
+      ],
+      clearDoubleArrowReadyOnUse: true,
+      spendDoubleArrowUseOnHit: true,
+      addHuntingMarkOnDamage: true,
+    })
+    expect(rollQueue).toEqual([])
+  })
+
+  it('builds a dodge packet without rolling damage when the target dodge succeeds', async () => {
+    let damageRolled = false
+    const result = await buildSingleAttackTargetPacket({
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'basicShot' }),
+      targetToken: makeToken(),
+      doubleArrow: false,
+      liveRound: 1,
+      actorTokenId: 'hero-token',
+      rollD20: async () => 1,
+      rollValues: async () => {
+        damageRolled = true
+        return [8]
+      },
+      enemyDodgePreview: () => ({ decision: { shouldDodge: true }, attackBonus: 4, targetAc: 20 }),
+      chooseCooldownReductionSkillId: () => undefined,
+      confirmPushTarget: async () => false,
+    })
+
+    expect(result.shouldRollDamage).toBe(false)
+    expect(damageRolled).toBe(false)
+    expect(result.targetPacket).toMatchObject({
+      targetDodgeD20: 1,
+      targetDodgeMode: 'attempt',
+      diceValues: undefined,
+      extraDamageGroups: undefined,
     })
   })
 

@@ -64,15 +64,10 @@ import {
 import type { Character } from '../types/character'
 import type { ClassFeatureKey, CombatSkill } from '../types/character'
 import {
-  canUseArmorPiercing,
   canUseDoubleArrow,
   isBasicShot,
   findClassTrait,
 } from '../lib/classFeatures'
-import {
-  piercingInsightExtraD4,
-  piercingInsightHpThresholdPercent,
-} from '../lib/traitRegistry'
 import { isCalmMindActive, isOutOfBreath } from '../lib/calmMind'
 import {
   agileLeapMoveFeet,
@@ -85,9 +80,7 @@ import {
 import { TOKEN_STATUS_CLEAR_PATCH, isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import {
   attackDamageDiceCount,
-  doubleArrowExtraDamageSides,
   getEffectiveAbilityMod,
-  resolveRangedAttackRoll,
 } from '../lib/archerCombat'
 import {
   canSubmitPlayerCombatAction,
@@ -95,6 +88,7 @@ import {
   reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
 import {
+  buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
   planArrowSequenceDisplay,
@@ -1988,11 +1982,6 @@ export default function MapsPage() {
     return true
   }
 
-  const eagleStrikeExtraDiceCount = (rank: number) => {
-    if (rank <= 0) return 0
-    return rank === 1 ? 3 : 4
-  }
-
   const windTraceExtraDiceCount = (
     skillTreeId: string | undefined,
     rank: number,
@@ -2011,33 +2000,7 @@ export default function MapsPage() {
   const huntingMarkTraitRank = (caster?: Character) =>
     caster ? (findClassTrait(caster, 'huntingMark')?.level ?? 0) : 0
 
-  const huntingComboTraitRank = (caster?: Character) =>
-    caster ? (findClassTrait(caster, 'huntingCombo')?.level ?? 0) : 0
-
-  const calmSpiritCritThreshold = (caster?: Character) => {
-    const bonus = caster?.combatBuffs?.calmSpiritCritBonusPercent ?? 0
-    return Math.max(1, 20 - Math.floor(bonus / 5))
-  }
-
   const isEnemyTarget = (token: Token): boolean => token.type === 'enemy'
-
-  const isBeastLikeTarget = (token: Token): boolean => {
-    const key = `${token.poolId ?? ''} ${token.label}`.toLowerCase()
-    return [
-      'wolf',
-      'bear',
-      'spider',
-      'slime',
-      'owlbear',
-      'harpy',
-      '兽',
-      '动物',
-      '狼',
-      '熊',
-      '蛛',
-      '史莱姆',
-    ].some((part) => key.includes(part))
-  }
 
   const handleActivateFeature = async (key: ClassFeatureKey) => {
     if (!canControlPlayerTurn || !turnCharacter) return
@@ -4690,328 +4653,30 @@ export default function MapsPage() {
         if (actorToken && isBasicShot(skill)) {
           launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, { x: targetToken.x, y: targetToken.y })
         }
-        const huntingComboRankForAttack = huntingComboTraitRank(actor)
-        const huntingComboIgnoresDodge =
-          huntingComboRankForAttack > 0 && (targetToken.huntingMarkStacks ?? 0) > 0
-        const preciseStrikeReady = !!actor.combatBuffs?.preciseStrikeReady
-        const outOfBreathForAttack = isOutOfBreath(actor)
-        const calmSpiritCritBonus = actor.combatBuffs?.calmSpiritCritBonusPercent ?? 0
-        const needsAttackRoll = outOfBreathForAttack || calmSpiritCritBonus > 0
-        const attackAbility: 'str' | 'dex' = skill.tags?.includes('melee') ? 'str' : 'dex'
-        const targetAcForAttack = huntingComboIgnoresDodge
-          ? 0
-          : targetChar
-            ? getAc(targetChar)
-            : (getTokenTargetAc(targetToken) ?? 12)
-        const attackRollD20 = needsAttackRoll ? await rollDiceBoxD20(`${skill.name} D20`, targetToken.label) : undefined
-        const attackRollPreview =
-          needsAttackRoll && attackRollD20 != null
-            ? resolveRangedAttackRoll(actor, skill, targetAcForAttack, !!doubleArrow, {
-                d20: attackRollD20,
-                damageValues: [],
-                ability: attackAbility,
-                critThreshold: calmSpiritCritThreshold(actor),
-                forceCrit: preciseStrikeReady,
-              })
-            : undefined
-        const attackRollHit = attackRollPreview?.hit ?? true
-        const packetIsCrit =
-          !!attackRollPreview?.isCrit || preciseStrikeReady || !!(action as typeof action & { isCrit?: boolean }).isCrit
-        const attackRollPacket =
-          needsAttackRoll && attackRollD20 != null
-            ? {
-                d20: attackRollD20,
-                ability: attackAbility,
-                targetAc: targetAcForAttack,
-                critThreshold: calmSpiritCritThreshold(actor),
-                forceCrit: preciseStrikeReady || undefined,
-              }
-            : undefined
-        const dodgePreview = attackRollHit && !huntingComboIgnoresDodge ? enemyDodgePreview(targetToken, actor, skill) : null
-        const targetDodgeD20 = dodgePreview?.decision.shouldDodge
-          ? await rollDiceBoxD20('enemy dodge D20', targetToken.label)
-          : undefined
-        const expectedTargetDodged =
-          targetDodgeD20 != null && dodgePreview
-            ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
-            : false
-        const damageDiceCount = doubleArrow ? attackDamageDiceCount(skill, true) : skill.damageCount
-        const shouldRollDamage = attackRollHit && !expectedTargetDodged
-        const diceValues = shouldRollDamage
-          ? await rollDiceBoxValues(damageDiceCount, skill.damageSides, `${skill.name} damage`, targetToken.label)
-          : undefined
-        const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
-        const windKickTreatsTargetAsKnocked =
-          skill.skillTreeId === 'windKickCombo' && actor.combatBuffs?.windKickTreatKnockbackTargetId === targetToken.id
-        const targetKnockedForWindKick =
-          skill.skillTreeId === 'windKickCombo' &&
-          (!!targetToken.knockbackTurns ||
-            !!targetChar?.conditions.includes(KNOCKBACK_STATUS_LABEL) ||
-            windKickTreatsTargetAsKnocked)
-        const targetKnockedForEagleStrike =
-          skill.skillTreeId === 'eagleStrike' && tokenHasKnockbackNow(targetToken, targetChar)
-        const burstKickExtraD6 =
-          shouldRollDamage && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
-        const doubleArrowTrait = doubleArrow ? findClassTrait(actor, 'doubleArrow') : undefined
-        const doubleArrowExtraSides = doubleArrowTrait ? doubleArrowExtraDamageSides(doubleArrowTrait.level) : undefined
-        const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
-        if (shouldRollDamage && doubleArrowExtraSides) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(1, doubleArrowExtraSides, `${skill.name} 双箭额外伤害`, targetToken.label),
-            sides: doubleArrowExtraSides,
-          })
-        }
-        const shadowVeilApplies = actor.combatBuffs?.shadowVeilTargetId === targetToken.id
-        if (shouldRollDamage && shadowVeilApplies) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(1, 6, `${skill.name} 影遁之术额外伤害`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const calmMindTrait = findClassTrait(actor, 'calmMind')
-        if (shouldRollDamage && calmMindTrait && isCalmMindActive(actor) && calmMindTrait.level > 0) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(calmMindTrait.level, 6, `${skill.name} 静心额外伤害`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const huntingMarkRank = huntingMarkTraitRank(actor)
-        if (shouldRollDamage && huntingMarkRank > 0 && (targetToken.huntingMarkStacks ?? 0) > 0) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(huntingMarkRank, 8, `${skill.name} 狩猎印记额外伤害`, targetToken.label),
-            sides: 8,
-          })
-        }
-        const animalMasteryTrait = findClassTrait(actor, 'animalMastery')
-        if (shouldRollDamage && animalMasteryTrait && isBeastLikeTarget(targetToken)) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(animalMasteryTrait.level, 6, `${skill.name} animal mastery extra damage`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const arcaneDevourTrait = findClassTrait(actor, 'arcaneDevour')
-        if (shouldRollDamage && arcaneDevourTrait && isMagicDamageSkill(skill)) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(arcaneDevourTrait.level, 6, `${skill.name} arcane devour extra damage`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const comboFistTrait = actor.combatBuffs?.galeComboReady ? findClassTrait(actor, 'comboFist') : undefined
-        if (shouldRollDamage && comboFistTrait) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(comboFistTrait.level, 6, `${skill.name} combo fist extra damage`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const piercingInsightTrait = findClassTrait(actor, 'piercingInsight')
-        const targetHp = targetChar?.currentHp ?? targetToken.hp ?? targetToken.maxHp ?? 0
-        const targetMaxHp = targetChar?.maxHp ?? targetToken.maxHp ?? targetHp
-        const piercingInsightThreshold =
-          piercingInsightTrait && targetMaxHp > 0 ? piercingInsightHpThresholdPercent(piercingInsightTrait.level) / 100 : 0
-        const piercingInsightApplies =
-          shouldRollDamage &&
-          !!piercingInsightTrait &&
-          targetMaxHp > 0 &&
-          targetHp / targetMaxHp < piercingInsightThreshold
-        if (piercingInsightApplies && piercingInsightTrait) {
-          const diceCount = piercingInsightExtraD4(piercingInsightTrait.level)
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(diceCount, 4, `${skill.name} 看破额外伤害`, targetToken.label),
-            sides: 4,
-          })
-        }
-        const silentDrawTrait = findClassTrait(actor, 'silentDraw')
-        const silentDrawApplies =
-          shouldRollDamage &&
-          !!silentDrawTrait &&
-          !actor.combatBuffs?.silentDrawUsed &&
-          liveRound === 1 &&
-          initiativeOrderRef.current[0]?.tokenId === action.actorTokenId
-        if (silentDrawApplies && silentDrawTrait) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(silentDrawTrait.level, 6, `${skill.name} 无声起弦额外伤害`, targetToken.label),
-            sides: 6,
-          })
-        }
-        if (burstKickExtraD6 > 0) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(burstKickExtraD6, 6, `${skill.name} 捆绑射击额外伤害`, targetToken.label),
-            sides: 6,
-          })
-        }
-        if (shouldRollDamage && targetKnockedForWindKick) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(1, 6, `${skill.name} 击飞目标额外伤害`, targetToken.label),
-            sides: 6,
-          })
-        }
-        if (shouldRollDamage && skill.skillTreeId === 'eagleStrike') {
-          const count = eagleStrikeExtraDiceCount(skillRank)
-          if (count > 0) {
-            extraDamageGroups.push({
-              values: await rollDiceBoxValues(count, 6, `${skill.name} eagle strike knockback damage`, targetToken.label),
-              sides: 6,
-            })
-          }
-        }
-        const targetHasMagicState =
-          !!targetToken.burningTurns ||
-          !!targetToken.igniteTurns ||
-          !!targetToken.poisonTurns ||
-          !!targetToken.stunTurns ||
-          !!targetToken.knockbackTurns ||
-          !!targetToken.restrainedTurns ||
-          !!targetToken.vulnerableTurns ||
-          (targetChar?.conditions.length ?? 0) > 0
-        if (shouldRollDamage && skill.skillTreeId === 'antiMagicArrow' && targetHasMagicState) {
-          extraDamageGroups.push({
-            values: await rollDiceBoxValues(2, 6, `${skill.name} 魔法状态额外伤害`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const postCritDamageGroups: Array<{ values: number[]; sides: number }> = []
-        const explosiveArrowCritDice =
-          shouldRollDamage && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
-            ? skillRank >= 5
-              ? 4
-              : skillRank >= 2
-                ? 3
-                : 2
-            : 0
-        if (explosiveArrowCritDice > 0) {
-          postCritDamageGroups.push({
-            values: await rollDiceBoxValues(explosiveArrowCritDice, 6, `${skill.name} explosive arrow crit fire`, targetToken.label),
-            sides: 6,
-          })
-        }
-        const explosiveArrowTrait = findClassTrait(actor, 'explosiveArrow')
-        if (shouldRollDamage && packetIsCrit && explosiveArrowTrait) {
-          postCritDamageGroups.push({
-            values: await rollDiceBoxValues(explosiveArrowTrait.level, 12, `${skill.name} explosive arrow feature fire`, targetToken.label),
-            sides: 12,
-          })
-        }
-        const explosiveArrowBurnTurns =
-          postCritDamageGroups.length > 0 ? (skill.skillTreeId === 'explosiveArrow' && skillRank >= 4 ? 2 : 1) : undefined
-        const effectAbility: 'str' | 'dex' | 'con' | undefined =
-          shouldRollDamage && skill.skillTreeId === 'burstKick' && skillRank >= 3
-            ? 'con'
-            : shouldRollDamage && (skill.skillTreeId === 'rageShot' && skillRank >= 3)
-              ? 'str'
-              : shouldRollDamage && skill.skillTreeId === 'bindShot'
-                ? 'str'
-                : shouldRollDamage && skill.skillTreeId === 'eagleStrike'
-                  ? 'dex'
-                  : undefined
-        const effectSaveD20 = effectAbility
-          ? await rollDiceBoxD20(`${skill.name} effect save D20`, targetToken.label)
-          : undefined
-        const effectSaveD20Second =
-          shouldRollDamage && skill.skillTreeId === 'eagleStrike' && skillRank >= 5
-            ? await rollDiceBoxD20(`${skill.name} effect save disadvantage D20`, targetToken.label)
-            : undefined
-        const cooldownReductionAmount =
-          shouldRollDamage && skill.skillTreeId === 'refluxMagicArrow' ? 1 : 0
-        const cooldownReductionSkillId =
-          cooldownReductionAmount > 0
-            ? chooseCooldownReductionSkillId(actor, cooldownReductionAmount, `${skill.name} 命中`)
-            : undefined
-        const pushTargetOnHit =
-          shouldRollDamage &&
-          skill.skillTreeId === 'windKickCombo' &&
-          skillRank >= 3 &&
-          (await showCombatDialog({
-            title: '踏风连踢',
-            message: `是否推动 ${targetToken.label} 5 尺？`,
-            confirmText: '推动',
-            cancelText: '不推动',
-            tone: 'sky',
-          }))
-        const targetPacket = {
-          targetTokenId: targetToken.id,
-          damageDiceCount,
-          diceValues,
-          extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
-          postCritDamageGroups: postCritDamageGroups.length > 0 ? postCritDamageGroups : undefined,
-          halveDamageOnRangeFeet:
-            skill.skillTreeId === 'clusterShot'
-              ? { minExclusive: 10, maxInclusive: 20 }
-              : undefined,
-          targetDodgeD20,
-          attackRoll: attackRollPacket,
-          isCrit: packetIsCrit || undefined,
-          targetDodgeMode: dodgePreview?.decision.shouldDodge ? ('attempt' as const) : ('skip' as const),
-          ignoreTargetDodge: huntingComboIgnoresDodge || undefined,
-          additionalCritMultiplier:
-            huntingComboIgnoresDodge && packetIsCrit
-              ? 0.2 + (huntingComboRankForAttack - 1) * 0.05
-              : undefined,
-          effectSave:
-            effectAbility && effectSaveD20 != null
-              ? {
-                  ability: effectAbility,
-                  d20: effectSaveD20,
-                  d20Second: effectSaveD20Second,
-                  disadvantage: skill.skillTreeId === 'eagleStrike' && skillRank >= 5,
-                }
-              : undefined,
-          stunOnFailedEffectSave: skill.skillTreeId === 'burstKick' && skillRank >= 3,
-          knockbackOnFailedEffectSave: skill.skillTreeId === 'eagleStrike',
-          knockbackTurns: skill.skillTreeId === 'eagleStrike' ? KNOCKBACK_DEFAULT_TURNS : undefined,
-          restrainedOnFailedEffectSave:
-            (skill.skillTreeId === 'rageShot' && skillRank >= 3) ||
-            (skill.skillTreeId === 'bindShot' && skillRank >= 4),
-          pullOnFailedEffectSave: skill.skillTreeId === 'bindShot',
-          pullCells: skill.skillTreeId === 'bindShot' ? 2 : undefined,
-          smallOrMediumOnly: skill.skillTreeId === 'bindShot' || skill.skillTreeId === 'rageShot',
-          grantBurstKickExtraD6OnHit: skill.skillTreeId === 'bindShot' ? 1 : undefined,
-          clearBurstKickExtraD6OnUse: skill.skillTreeId === 'burstKick' && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
-          pushTargetOnHit,
-          pushCells: pushTargetOnHit ? 1 : undefined,
-          selfCooldownReductionOnHit:
-            skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5
-              ? 1
-              : targetKnockedForEagleStrike
-                ? skillRank >= 4
-                  ? 3
-                  : 2
-                : undefined,
-          clearWindKickTreatKnockbackOnUse: windKickTreatsTargetAsKnocked,
-          clearActorConditionOnHit: skill.skillTreeId === 'riseKick' ? '倒地' : undefined,
-          grantFreeMoveFeetOnHit:
-            skill.skillTreeId === 'riseKick' && skillRank >= 4
-              ? 10
-              : skill.skillTreeId === 'shadowStepShot'
-              ? skillRank >= 4
-                ? 15
-                : 10
-              : skill.skillTreeId === 'shadowDance'
-                ? 15
-                : undefined,
-          grantDisengageOnHit: skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance',
-          grantWindKickTreatKnockbackOnHit: skill.skillTreeId === 'shadowDance' && skillRank >= 3,
-          burningOnHit: postCritDamageGroups.length > 0,
-          burningTurns: explosiveArrowBurnTurns,
-          igniteOnHit: postCritDamageGroups.length > 0,
-          igniteTurns: explosiveArrowBurnTurns,
-          cooldownReductionSkillId,
-          cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
-          vulnerableOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 3,
-          vulnerableTurns: 1,
-          clearTargetStatusesOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 4,
-          selfCooldownReductionPerClearedStatus: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 5,
-          armorPiercingSplashOnCrit: canUseArmorPiercing(actor, skill, packetIsCrit) || undefined,
-          armorPiercingRangeFeet: 15,
-          spendArmorPiercingUseOnSplash: canUseArmorPiercing(actor, skill, packetIsCrit) || undefined,
-          clearDoubleArrowReadyOnUse: doubleArrow || undefined,
-          spendDoubleArrowUseOnHit: doubleArrow || undefined,
-          clearPreciseStrikeReadyOnHit: preciseStrikeReady || undefined,
-          spendPreciseStrikeUseOnHit: preciseStrikeReady || undefined,
-          clearShadowVeilTargetOnUse: shadowVeilApplies || undefined,
-          clearCalmSpiritCritBonusOnUse: calmSpiritCritBonus > 0 || undefined,
-          addHuntingMarkOnDamage: huntingMarkRank > 0 || undefined,
-          markSilentDrawUsedOnHit: silentDrawApplies || undefined,
-        }
+        const { targetPacket, skillRank } = await buildSingleAttackTargetPacket({
+          actor,
+          skill,
+          targetToken,
+          targetChar,
+          doubleArrow,
+          actionIsCrit: !!(action as typeof action & { isCrit?: boolean }).isCrit,
+          liveRound,
+          actorTokenId: action.actorTokenId,
+          firstInitiativeTokenId: initiativeOrderRef.current[0]?.tokenId,
+          targetHasKnockbackNow: tokenHasKnockbackNow(targetToken, targetChar),
+          rollD20: rollDiceBoxD20,
+          rollValues: rollDiceBoxValues,
+          enemyDodgePreview,
+          chooseCooldownReductionSkillId,
+          confirmPushTarget: (target) =>
+            showCombatDialog({
+              title: '踏风连踢',
+              message: `是否推动 ${target.label} 5 尺？`,
+              confirmText: '推动',
+              cancelText: '不推动',
+              tone: 'sky',
+            }),
+        })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), {
           type: 'attack-token',
           actorTokenId: action.actorTokenId,
