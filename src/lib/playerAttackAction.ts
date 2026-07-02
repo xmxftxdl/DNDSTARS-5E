@@ -20,6 +20,7 @@ import {
 import type {
   HeadlessAoeAttackAction,
   HeadlessAoeTargetPacket,
+  HeadlessCombatResult,
   HeadlessCombatEvent,
   HeadlessPlayerAttackAction,
   HeadlessPlayerAttackPacket,
@@ -1030,6 +1031,109 @@ export function planAoeAttackDisplay(input: {
         .join('；')}`,
       kind: total > 0 ? 'damage' : 'attack',
     },
+  }
+}
+
+export type PlayerAttackSettlementPlan =
+  | {
+      status: 'rejected'
+      reason: string
+    }
+  | {
+      status: 'accepted'
+      roll?: DiceRoll
+      combatLog: {
+        text: string
+        kind: 'attack' | 'damage'
+      }
+      apLog?: {
+        amount: number
+        action: string
+        detail: string
+      }
+      shouldOfferGaleCombo: boolean
+      shouldShowMoveRange: boolean
+    }
+
+export function planArrowSequenceSettlement(input: {
+  result: HeadlessCombatResult
+  actor: Character
+  skill: CombatSkill
+  targets: Token[]
+  targetLabelById?: (tokenId: string) => string
+}): PlayerAttackSettlementPlan {
+  if (!input.result.ok) return { status: 'rejected', reason: input.result.reason }
+  const display = planArrowSequenceDisplay({
+    actor: input.actor,
+    skill: input.skill,
+    targets: input.targets,
+    events: input.result.events,
+    targetLabelById: input.targetLabelById,
+  })
+  return {
+    status: 'accepted',
+    roll: display.roll,
+    combatLog: display.combatLog,
+    shouldOfferGaleCombo: false,
+    shouldShowMoveRange: false,
+  }
+}
+
+export function planSingleAttackSettlement(input: {
+  result: HeadlessCombatResult
+  actor: Character
+  skill: CombatSkill
+  targetToken: Token
+  skillRank: number
+}): PlayerAttackSettlementPlan {
+  if (!input.result.ok) return { status: 'rejected', reason: input.result.reason }
+  const display = planSingleAttackDisplay({
+    actor: input.actor,
+    skill: input.skill,
+    targetToken: input.targetToken,
+    events: input.result.events,
+  })
+  if (!display.ok) return { status: 'rejected', reason: display.reason }
+
+  return {
+    status: 'accepted',
+    roll: display.roll,
+    combatLog: display.combatLog,
+    apLog: display.apLog,
+    shouldOfferGaleCombo: true,
+    shouldShowMoveRange:
+      display.resolved.hit &&
+      (input.skill.skillTreeId === 'shadowStepShot' ||
+        input.skill.skillTreeId === 'shadowDance' ||
+        (input.skill.skillTreeId === 'riseKick' && input.skillRank >= 4)),
+  }
+}
+
+export function planAoeAttackSettlement(input: {
+  result: HeadlessCombatResult
+  actor: Character
+  skill: CombatSkill
+  diceValues: number[]
+  cellCount: number
+  targetCount: number
+  targetLabelById?: (tokenId: string) => string
+}): PlayerAttackSettlementPlan {
+  if (!input.result.ok) return { status: 'rejected', reason: input.result.reason }
+  const display = planAoeAttackDisplay({
+    actor: input.actor,
+    skill: input.skill,
+    diceValues: input.diceValues,
+    cellCount: input.cellCount,
+    targetCount: input.targetCount,
+    events: input.result.events,
+    targetLabelById: input.targetLabelById,
+  })
+  return {
+    status: 'accepted',
+    roll: display.roll,
+    combatLog: display.combatLog,
+    shouldOfferGaleCombo: true,
+    shouldShowMoveRange: false,
   }
 }
 

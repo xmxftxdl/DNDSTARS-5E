@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
-import type { HeadlessCombatEvent } from './headlessDmCombatEngine'
+import type { HeadlessCombatEvent, HeadlessCombatResult } from './headlessDmCombatEngine'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 import {
   buildArrowSequenceTargetPackets,
@@ -11,8 +11,11 @@ import {
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackDisplay,
+  planAoeAttackSettlement,
   planArrowSequenceDisplay,
+  planArrowSequenceSettlement,
   planSingleAttackDisplay,
+  planSingleAttackSettlement,
   preparePlayerAoeAttackAction,
   preparePlayerAttackAction,
 } from './playerAttackAction'
@@ -154,6 +157,26 @@ function makeMap(tokens = [makeToken()]): BattleMap {
     showGrid: true,
     tokens,
   }
+}
+
+function makeHeadlessResult(
+  events: HeadlessCombatEvent[],
+  patch: Partial<HeadlessCombatResult> = {},
+): HeadlessCombatResult {
+  return {
+    ok: true,
+    state: {
+      map: makeMap(),
+      characters: [makeCharacter()],
+      active: true,
+      round: 1,
+      initiativeIndex: 0,
+      initiativeOrder: [],
+      enemyApByToken: {},
+    },
+    events,
+    ...patch,
+  } as HeadlessCombatResult
 }
 
 function makeAction(patch: Partial<SharedPlayerActionState> = {}): SharedPlayerActionState {
@@ -839,4 +862,85 @@ describe('player attack action helpers', () => {
     expect(result.combatLog.text).toContain('Goblin 6 点，敏捷豁免 14+2 vs DC12 成功半伤')
     expect(result.combatLog.text).toContain('Dragon 11 点，敏捷豁免 4+1 vs DC12 失败全伤')
   })
+
+  it('plans single attack settlement with AP log, gale combo follow-up, and post-hit movement flag', () => {
+    const result = planSingleAttackSettlement({
+      result: makeHeadlessResult([makeAttackResolved()]),
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'shadowStepShot' }),
+      targetToken: makeToken(),
+      skillRank: 1,
+    })
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      roll: { values: [4], total: 6 },
+      apLog: { amount: 1 },
+      combatLog: { kind: 'damage' },
+      shouldOfferGaleCombo: true,
+      shouldShowMoveRange: true,
+    })
+  })
+
+  it('rejects attack settlement when headless rejects or no attack event exists', () => {
+    expect(
+      planArrowSequenceSettlement({
+        result: makeHeadlessResult([], { ok: false, reason: 'insufficient-ap' }),
+        actor: makeCharacter(),
+        skill: makeSkill(),
+        targets: [makeToken()],
+      }),
+    ).toEqual({ status: 'rejected', reason: 'insufficient-ap' })
+
+    expect(
+      planSingleAttackSettlement({
+        result: makeHeadlessResult([]),
+        actor: makeCharacter(),
+        skill: makeSkill(),
+        targetToken: makeToken(),
+        skillRank: 0,
+      }),
+    ).toEqual({ status: 'rejected', reason: 'invalid-attack' })
+  })
+
+  it('plans arrow sequence settlement from accepted headless packets', () => {
+    const result = planArrowSequenceSettlement({
+      result: makeHeadlessResult([
+        makeAttackResolved({ targetTokenId: 'goblin-token', damageValues: [3, 2], diceTotal: 5, total: 6 }),
+      ]),
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'multiShot', damageSides: 4 }),
+      targets: [makeToken({ label: 'Goblin' })],
+      targetLabelById: (tokenId) => (tokenId === 'goblin-token' ? 'Goblin' : tokenId),
+    })
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      roll: { values: [3, 2], total: 6 },
+      combatLog: { kind: 'damage' },
+      shouldOfferGaleCombo: false,
+      shouldShowMoveRange: false,
+    })
+  })
+
+  it('plans AOE attack settlement from accepted headless target packets', () => {
+    const result = planAoeAttackSettlement({
+      result: makeHeadlessResult([makeAoeTargetResolved({ targetTokenId: 'goblin-token', total: 6 })]),
+      actor: makeCharacter(),
+      skill: makeSkill({ skillTreeId: 'arrowStorm', damageSides: 6, damageBonus: 2 }),
+      diceValues: [4, 5],
+      cellCount: 7,
+      targetCount: 1,
+      targetLabelById: (tokenId) => (tokenId === 'goblin-token' ? 'Goblin' : tokenId),
+    })
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      roll: { values: [4, 5], total: 6 },
+      combatLog: { kind: 'damage' },
+      shouldOfferGaleCombo: true,
+      shouldShowMoveRange: false,
+    })
+  })
+
 })

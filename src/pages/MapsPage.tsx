@@ -94,9 +94,9 @@ import {
   buildPreparedAttackHeadlessAction,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
-  planAoeAttackDisplay,
-  planArrowSequenceDisplay,
-  planSingleAttackDisplay,
+  planAoeAttackSettlement,
+  planArrowSequenceSettlement,
+  planSingleAttackSettlement,
   preparePlayerAoeAttackAction,
   preparePlayerAttackAction,
 } from '../lib/playerAttackAction'
@@ -4311,24 +4311,24 @@ export default function MapsPage() {
           targetPackets,
         })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
-        if (!headless.ok) {
-          acknowledgePlayerAction(action, 'rejected', headless.reason)
+        const settlement = planArrowSequenceSettlement({
+          result: headless,
+          actor,
+          skill,
+          targets,
+          targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
+        })
+        if (settlement.status === 'rejected') {
+          acknowledgePlayerAction(action, 'rejected', settlement.reason)
           completePlayerActionRequest(action)
           return
         }
         applyHeadlessCombatResult(headless)
-        const display = planArrowSequenceDisplay({
-          actor,
-          skill,
-          targets,
-          events: headless.events,
-          targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
-        })
-        if (display.roll) {
-          setRoll(display.roll)
-          publishSharedDiceRoll(display.roll)
+        if (settlement.roll) {
+          setRoll(settlement.roll)
+          publishSharedDiceRoll(settlement.roll)
         }
-        pushCombatLog(display.combatLog.text, display.combatLog.kind)
+        pushCombatLog(settlement.combatLog.text, settlement.combatLog.kind)
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return
@@ -4374,39 +4374,33 @@ export default function MapsPage() {
           targetPackets: [targetPacket],
         })
         const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
-        if (!headless.ok) {
-          acknowledgePlayerAction(action, 'rejected', headless.reason)
-          completePlayerActionRequest(action)
-          return
-        }
-        const display = planSingleAttackDisplay({
+        const settlement = planSingleAttackSettlement({
+          result: headless,
           actor,
           skill,
           targetToken,
-          events: headless.events,
+          skillRank,
         })
-        if (!display.ok) {
-          acknowledgePlayerAction(action, 'rejected', display.reason)
+        if (settlement.status === 'rejected') {
+          acknowledgePlayerAction(action, 'rejected', settlement.reason)
           completePlayerActionRequest(action)
           return
         }
-        const { resolved } = display
         applyHeadlessCombatResult(headless)
-        await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
-        if (
-          resolved.hit &&
-          (skill.skillTreeId === 'shadowStepShot' ||
-            skill.skillTreeId === 'shadowDance' ||
-            (skill.skillTreeId === 'riseKick' && skillRank >= 4))
-        ) {
+        if (settlement.shouldOfferGaleCombo) {
+          await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
+        }
+        if (settlement.shouldShowMoveRange) {
           setShowMoveRange(true)
         }
-        pushApLog(actor, display.apLog.amount, display.apLog.action, display.apLog.detail)
-        if (display.roll) {
-          setRoll(display.roll)
-          publishSharedDiceRoll(display.roll)
+        if (settlement.apLog) {
+          pushApLog(actor, settlement.apLog.amount, settlement.apLog.action, settlement.apLog.detail)
         }
-        pushCombatLog(display.combatLog.text, display.combatLog.kind)
+        if (settlement.roll) {
+          setRoll(settlement.roll)
+          publishSharedDiceRoll(settlement.roll)
+        }
+        pushCombatLog(settlement.combatLog.text, settlement.combatLog.kind)
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'accepted')
         return
@@ -4476,25 +4470,29 @@ export default function MapsPage() {
         targetPackets,
       })
       const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
-      if (!headless.ok) {
-        acknowledgePlayerAction(action, 'rejected', headless.reason)
-        completePlayerActionRequest(action)
-        return
-      }
-      applyHeadlessCombatResult(headless)
-      await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
-      const display = planAoeAttackDisplay({
+      const settlement = planAoeAttackSettlement({
+        result: headless,
         actor,
         skill,
         diceValues,
         cellCount: cells.length,
         targetCount: targets.length,
-        events: headless.events,
         targetLabelById: (tokenId) => map.tokens.find((token) => token.id === tokenId)?.label ?? tokenId,
       })
-      setRoll(display.roll)
-      publishSharedDiceRoll(display.roll)
-      pushCombatLog(display.combatLog.text, display.combatLog.kind)
+      if (settlement.status === 'rejected') {
+        acknowledgePlayerAction(action, 'rejected', settlement.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      applyHeadlessCombatResult(headless)
+      if (settlement.shouldOfferGaleCombo) {
+        await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
+      }
+      if (settlement.roll) {
+        setRoll(settlement.roll)
+        publishSharedDiceRoll(settlement.roll)
+      }
+      pushCombatLog(settlement.combatLog.text, settlement.combatLog.kind)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
       return
