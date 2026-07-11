@@ -98,10 +98,8 @@ import {
 } from '../lib/playerAttackAction'
 import {
   planPlayerMoveAfterOpportunity,
-  planPlayerMoveAfterPreview,
-  preparePlayerMoveAction,
   playerMoveRejectReason,
-  summarizeHeadlessPlayerMovePreview,
+  resolvePlayerMoveAuthorityPreview,
 } from '../lib/playerMoveAction'
 import {
   buildEnemyMoveAction,
@@ -310,15 +308,14 @@ import {
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
 import {
-  buildPreparedFeatureActivationHeadlessAction,
   illusionDanceTargetLimit,
-  preparePlayerFeatureActivationAction,
+  resolvePlayerFeatureActivationAuthority,
   shouldSendPlayerReadyFeatureToDm,
   uniqueFeatureTargetIds,
 } from '../lib/playerFeatureActivation'
 import {
-  buildSimpleHeadlessPlayerAction,
   isSimpleHeadlessPlayerActionType,
+  resolveSimpleHeadlessPlayerAuthority,
 } from '../lib/simpleHeadlessPlayerAction'
 const runtimeNow = () => Date.now()
 const runtimeRandomSuffix = () => Math.random().toString(36).slice(2)
@@ -4125,42 +4122,32 @@ export default function MapsPage() {
 
     if (authorityPlan.route === 'activate-feature' && action.type === 'activate-feature') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const preparedFeature = preparePlayerFeatureActivationAction({
+      const resolvedFeature = await resolvePlayerFeatureActivationAuthority({
         action,
-        map,
-        characters: useCharacterStore.getState().characters,
+        state: createHeadlessStateSnapshot(map),
+        rollValues: rollDiceBoxValues,
       })
-      if (!preparedFeature.ok) {
-        acknowledgePlayerAction(action, 'rejected', preparedFeature.reason)
+      if (resolvedFeature.status === 'rejected') {
+        acknowledgePlayerAction(action, 'rejected', resolvedFeature.reason)
         completePlayerActionRequest(action)
         return
       }
-
-      const headlessAction = await buildPreparedFeatureActivationHeadlessAction({
-        prepared: preparedFeature,
-        rollValues: rollDiceBoxValues,
-      })
-      const headless = resolveHeadlessDmAuthorityAction(
-        createHeadlessStateSnapshot(preparedFeature.map),
-        headlessAction,
-      )
-      settleHeadlessPlayerAction(action, headless)
+      settleHeadlessPlayerAction(action, resolvedFeature.result)
       return
     }
 
     if (authorityPlan.route === 'simple' && isSimpleHeadlessPlayerActionType(action.type)) {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const prepared = buildSimpleHeadlessPlayerAction({
+      const resolvedSimple = resolveSimpleHeadlessPlayerAuthority({
         action,
-        map,
-        characters: useCharacterStore.getState().characters,
+        state: createHeadlessStateSnapshot(map),
       })
-      if (!prepared.ok) {
-        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+      if (resolvedSimple.status === 'rejected') {
+        acknowledgePlayerAction(action, 'rejected', resolvedSimple.reason)
         completePlayerActionRequest(action)
         return
       }
-      const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), prepared.headlessAction)
+      const { prepared, result: headless } = resolvedSimple
       if (prepared.settlement === 'move' && prepared.token) {
         settleSimpleHeadlessMoveAction(action, prepared.token, headless)
       } else if (prepared.settlement === 'end-turn') {
@@ -4392,31 +4379,16 @@ export default function MapsPage() {
     }
     if (authorityPlan.route === 'move-token' && action.type === 'move-token') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
-      const preparedMove = preparePlayerMoveAction({
+      const resolvedMove = resolvePlayerMoveAuthorityPreview({
         action,
-        map,
-        characters: useCharacterStore.getState().characters,
+        state: createHeadlessStateSnapshot(map),
       })
-      if (!preparedMove.ok) {
-        acknowledgePlayerAction(action, 'rejected', preparedMove.reason)
+      if (resolvedMove.status === 'rejected') {
+        acknowledgePlayerAction(action, 'rejected', resolvedMove.reason)
         completePlayerActionRequest(action)
         return
       }
-      const { actor, token, moveAction } = preparedMove
-      const headlessSnapshot = createHeadlessStateSnapshot(map)
-      const headless = resolveHeadlessDmAuthorityAction(headlessSnapshot, moveAction)
-      const preview = summarizeHeadlessPlayerMovePreview({
-        result: headless,
-        token,
-        requestedPosition: moveAction.targetPosition,
-        map,
-      })
-      const movePlan = planPlayerMoveAfterPreview({ preview, moveAction })
-      if (movePlan.status === 'rejected') {
-        acknowledgePlayerAction(action, 'rejected', movePlan.reason)
-        completePlayerActionRequest(action)
-        return
-      }
+      const { actor, token, moveAction, snapshot: headlessSnapshot, result: headless, plan: movePlan } = resolvedMove
       if (movePlan.status === 'accepted') {
         settleHeadlessPlayerAction(action, headless, { acceptedPosition: movePlan.acceptedPosition })
         return

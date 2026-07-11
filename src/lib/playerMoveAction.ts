@@ -5,8 +5,10 @@ import type {
   HeadlessCommitTokenMoveAction,
   HeadlessCombatFailureReason,
   HeadlessCombatResult,
+  HeadlessDmCombatState,
   HeadlessPlayerMoveAction,
 } from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 
 export type PlayerMovePrepareResult =
@@ -138,6 +140,50 @@ export function planPlayerMoveAfterPreview(input: {
     movedFeet: input.preview.movedFeet,
     opportunityAttackerTokenIds: input.preview.opportunityAttackerTokenIds,
     deferredMoveAction: buildDeferredPlayerMoveAction(input.moveAction),
+  }
+}
+
+export type PlayerMoveAuthorityPreviewResult =
+  | { status: 'rejected'; reason: string }
+  | {
+      status: 'resolved'
+      actor: Character
+      token: Token
+      moveAction: HeadlessPlayerMoveAction
+      snapshot: HeadlessDmCombatState
+      result: Extract<HeadlessCombatResult, { ok: true }>
+      plan: Exclude<PlayerMovePreviewPlan, { status: 'rejected' }>
+    }
+
+export function resolvePlayerMoveAuthorityPreview(input: {
+  action: SharedPlayerActionState
+  state: HeadlessDmCombatState
+}): PlayerMoveAuthorityPreviewResult {
+  const prepared = preparePlayerMoveAction({
+    action: input.action,
+    map: input.state.map,
+    characters: input.state.characters,
+  })
+  if (!prepared.ok) return { status: 'rejected', reason: prepared.reason }
+
+  const result = resolveHeadlessDmAuthorityAction(input.state, prepared.moveAction)
+  const preview = summarizeHeadlessPlayerMovePreview({
+    result,
+    token: prepared.token,
+    requestedPosition: prepared.moveAction.targetPosition,
+    map: input.state.map,
+  })
+  const plan = planPlayerMoveAfterPreview({ preview, moveAction: prepared.moveAction })
+  if (!result.ok) return { status: 'rejected', reason: result.reason }
+  if (plan.status === 'rejected') return { status: 'rejected', reason: plan.reason }
+  return {
+    status: 'resolved',
+    actor: prepared.actor,
+    token: prepared.token,
+    moveAction: prepared.moveAction,
+    snapshot: input.state,
+    result,
+    plan,
   }
 }
 

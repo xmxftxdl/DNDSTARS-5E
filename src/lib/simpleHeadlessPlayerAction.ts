@@ -2,12 +2,15 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type {
   HeadlessCalmSpiritAction,
+  HeadlessCombatResult,
+  HeadlessDmCombatState,
   HeadlessDisengageAction,
   HeadlessEndTurnAction,
   HeadlessPlayerMoveAction,
   HeadlessQiReduceCooldownAction,
   HeadlessUseSkillAction,
 } from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 
 type SimpleHeadlessAction =
@@ -79,6 +82,31 @@ export function buildSimpleHeadlessPlayerAction(input: {
       return buildQiReduceCooldownAction(input)
     default:
       return { ok: false, reason: 'unsupported-action' }
+  }
+}
+
+export type SimpleHeadlessPlayerAuthorityResult =
+  | { status: 'rejected'; reason: string }
+  | {
+      status: 'resolved'
+      prepared: Extract<SimpleHeadlessPlayerActionResult, { ok: true }>
+      result: HeadlessCombatResult
+    }
+
+export function resolveSimpleHeadlessPlayerAuthority(input: {
+  action: SharedPlayerActionState
+  state: HeadlessDmCombatState
+}): SimpleHeadlessPlayerAuthorityResult {
+  const prepared = buildSimpleHeadlessPlayerAction({
+    action: input.action,
+    map: input.state.map,
+    characters: input.state.characters,
+  })
+  if (!prepared.ok) return { status: 'rejected', reason: prepared.reason }
+  return {
+    status: 'resolved',
+    prepared,
+    result: resolveHeadlessDmAuthorityAction(input.state, prepared.headlessAction),
   }
 }
 

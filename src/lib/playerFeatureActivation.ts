@@ -2,7 +2,13 @@ import type { BattleMap, Token } from '../store/maps'
 import type { ClassFeatureKey } from '../types/character'
 import type { Character } from '../types/character'
 import { findClassTrait } from './classFeatures'
-import type { HeadlessActivateFeatureAction, HeadlessFeatureTargetPacket } from './headlessDmCombatEngine'
+import type {
+  HeadlessActivateFeatureAction,
+  HeadlessCombatResult,
+  HeadlessDmCombatState,
+  HeadlessFeatureTargetPacket,
+} from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
 
 const PLAYER_DM_READY_FEATURE_KEYS = new Set<ClassFeatureKey>([
@@ -174,6 +180,32 @@ export async function buildPreparedFeatureActivationHeadlessAction(input: {
     rollValues: input.rollValues,
   })
   return input.prepared.buildHeadlessAction(finaleDamageValues)
+}
+
+export type PlayerFeatureActivationAuthorityResult =
+  | { status: 'rejected'; reason: string }
+  | { status: 'resolved'; result: HeadlessCombatResult }
+
+export async function resolvePlayerFeatureActivationAuthority(input: {
+  action: SharedPlayerActionState
+  state: HeadlessDmCombatState
+  rollValues: RollFeatureValues
+}): Promise<PlayerFeatureActivationAuthorityResult> {
+  const prepared = preparePlayerFeatureActivationAction({
+    action: input.action,
+    map: input.state.map,
+    characters: input.state.characters,
+  })
+  if (!prepared.ok) return { status: 'rejected', reason: prepared.reason }
+
+  const headlessAction = await buildPreparedFeatureActivationHeadlessAction({
+    prepared,
+    rollValues: input.rollValues,
+  })
+  return {
+    status: 'resolved',
+    result: resolveHeadlessDmAuthorityAction(input.state, headlessAction),
+  }
 }
 
 export async function buildFinaleDamageValues(input: {
