@@ -146,14 +146,6 @@ import {
   isMagicDamageSkill,
 } from '../lib/combatStats'
 import {
-  CombatResolutionRunner,
-  createCombatResolutionContext,
-  type CombatMutation,
-  type CombatResolutionSession,
-  type CombatResolutionStage,
-} from '../lib/combatResolutionPipeline'
-import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
-import {
   type HeadlessCombatEvent,
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
@@ -248,7 +240,6 @@ import {
   isTokenAlive,
   isTokenDefeated,
   pruneInitiativeForToken,
-  resolveEnemyAttackTokens,
 } from '../lib/combatTokens'
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import {
@@ -407,7 +398,6 @@ export default function MapsPage() {
   const applyingSharedCombatRef = useRef(false)
   const advancingTurnRef = useRef(false)
   const orderedCombatPublishRef = useRef(false)
-  const combatResolutionRunnerRef = useRef(new CombatResolutionRunner())
   const [diceBoxD20, setDiceBoxD20] = useState<{
     id: number
     label: string
@@ -933,92 +923,6 @@ export default function MapsPage() {
   const selectedToken = activeMap?.tokens.find((t) => t.id === selectedTokenId) ?? null
   const selectedCharacterToken = activeMap?.tokens.find((t) => t.id === selectedCharacterTokenId) ?? null
   const activeChar = characters.find((c) => c.id === activeCharId) ?? null
-
-  const applyCombatMutationsFromHooks = (mutations: CombatMutation[]) => {
-    if (!isDM || !activeMap || mutations.length === 0) return
-    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const beforeCharacters = useCharacterStore.getState().characters
-    const beforeCharactersById = new Map(beforeCharacters.map((character) => [character.id, character]))
-    const beforeTokensById = new Map(latestMap.tokens.map((token) => [token.id, token]))
-    const result = executeCombatMutationsAuthority(
-      {
-        characters: beforeCharacters,
-        enemyApByToken: enemyApByTokenRef.current,
-        map: latestMap,
-      },
-      { role: 'dm', mutations },
-    )
-
-    for (const character of result.state.characters) {
-      const before = beforeCharactersById.get(character.id)
-      if (!before || JSON.stringify(before) !== JSON.stringify(character)) {
-        updateChar(character.id, character)
-      }
-    }
-
-    for (const token of result.state.map.tokens) {
-      const before = beforeTokensById.get(token.id)
-      if (!before || JSON.stringify(before) !== JSON.stringify(token)) {
-        updateToken(result.state.map.id, token.id, token)
-      }
-    }
-
-    if (JSON.stringify(enemyApByTokenRef.current) !== JSON.stringify(result.state.enemyApByToken)) {
-      enemyApByTokenRef.current = result.state.enemyApByToken
-      setEnemyApByToken(result.state.enemyApByToken)
-    }
-
-    for (const entry of result.logs) pushCombatLog(entry.text, entry.kind)
-    for (const failure of result.failures) {
-      pushCombatLog(`结算变更未执行：${failure.mutation.type} (${failure.reason})`, 'system')
-    }
-  }
-
-  const createCombatResolutionSessionForAction = (input: {
-    actorToken?: Token
-    targetToken?: Token
-    actorCharacterId?: string
-    targetCharacterId?: string
-    skill?: CombatSkill
-    tags?: string[]
-  }): CombatResolutionSession | null => {
-    if (!activeMap || !input.actorToken) return null
-    return combatResolutionRunnerRef.current.createSession(
-      createCombatResolutionContext({
-        round: roundRef.current,
-        map: activeMap,
-        characters: useCharacterStore.getState().characters,
-        actor: {
-          tokenId: input.actorToken.id,
-          characterId: input.actorCharacterId ?? input.actorToken.characterId,
-        },
-        primaryTarget: input.targetToken
-          ? {
-              tokenId: input.targetToken.id,
-              characterId: input.targetCharacterId ?? input.targetToken.characterId,
-            }
-          : undefined,
-        skill: input.skill,
-        tags: input.tags,
-      }),
-    )
-  }
-
-  const runCombatResolutionStage = async (
-    session: CombatResolutionSession | null,
-    stage: CombatResolutionStage,
-  ) => {
-    if (!session) return
-    const latestMap = activeMap
-      ? useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-      : session.context.map
-    session.context.round = roundRef.current
-    session.context.map = latestMap
-    session.context.characters = useCharacterStore.getState().characters
-    const mutationStart = session.mutations.length
-    const result = await combatResolutionRunnerRef.current.runStage(session, stage)
-    applyCombatMutationsFromHooks(result.mutations.slice(mutationStart))
-  }
 
   const handleDeleteBoxConfirm = (rect: DeleteSelectionRect) => {
     if (!isDM || !activeMap) return
@@ -2993,7 +2897,6 @@ export default function MapsPage() {
     if (!activeMap || !result.attacked || !result.targetTokenId) return
 
     const liveMapId = activeMap.id
-    const getLiveTokens = () => useMapStore.getState().maps.find((m) => m.id === liveMapId)?.tokens ?? []
     let combatLabel = ''
     let d20Roll:
       | {
@@ -3008,22 +2911,7 @@ export default function MapsPage() {
     let damageRollTotal = result.attack?.total ?? 0
     let damageRollBonus = result.attack?.bonus ?? 0
     const enemyFeatureLabels: string[] = []
-    const { actorToken: enemyActorToken, targetToken: enemyTargetToken } = resolveEnemyAttackTokens(
-      getLiveTokens(),
-      result,
-    )
-    const enemyResolutionSession = createCombatResolutionSessionForAction({
-      actorToken: enemyActorToken,
-      targetToken: enemyTargetToken,
-      actorCharacterId: enemyActorToken?.characterId,
-      targetCharacterId: targetChar?.id ?? result.targetCharacterId ?? enemyTargetToken?.characterId,
-      skill: undefined,
-      tags: ['enemy-action', result.damageType ?? 'physical'],
-    })
-    const runEnemyStage = (stage: CombatResolutionStage) =>
-      runCombatResolutionStage(enemyResolutionSession, stage)
     let enemyAttackApAlreadySpent = actorApAlreadySpent
-    await runEnemyStage('actionDeclared')
 
     const inferEnemyDamageDiceCount = (attack: NonNullable<EnemyTurnResult['attack']>) => {
       if (attack.values.length > 0) return attack.values.length
@@ -3042,38 +2930,6 @@ export default function MapsPage() {
         `${result.attack.label} 伤害`,
         result.attack.targetName,
       )
-    }
-
-    const updateEnemyDamageContext = (amount: number) => {
-      if (!enemyResolutionSession || !result.attack) return
-      const rollTotal = damageRollValues.reduce((sum, value) => sum + value, 0)
-      enemyResolutionSession.context.damageRoll = {
-        values: [...damageRollValues],
-        sides: result.attack.sides,
-        bonus: damageRollBonus,
-        total: amount,
-        label: result.attack.label,
-      }
-      enemyResolutionSession.context.pendingDamage = [
-        {
-          id: `${enemyResolutionSession.context.actionId}:damage:${result.targetTokenId ?? 'target'}`,
-          source: {
-            tokenId: result.attackerTokenId ?? enemyActorToken?.id ?? '',
-            characterId: enemyActorToken?.characterId,
-          },
-          target: {
-            tokenId: result.targetTokenId ?? '',
-            characterId: targetChar?.id ?? result.targetCharacterId ?? enemyTargetToken?.characterId,
-          },
-          amount,
-          damageType: result.damageType ?? 'physical',
-          roll: enemyResolutionSession.context.damageRoll,
-          tags: ['enemy-damage'],
-        },
-      ]
-      if (rollTotal !== amount) {
-        enemyResolutionSession.context.scratch.damageAdjustment = amount - rollTotal
-      }
     }
 
     const hasEnemyDamage = !!result.attack || (result.damage != null && result.damage > 0)
@@ -3239,12 +3095,9 @@ export default function MapsPage() {
       const actionDef = getEnemyStatBlock(attackerToken.poolId)?.actions[result.actionIndex ?? 0]
       if (!actionDef || actionDef.kind !== 'aoe' || !actionDef.save) return false
 
-      await runEnemyStage('beforeDamageRoll')
       const values = await rollEnemyBaseDamageDice()
       const diceTotal = values.reduce((sum, value) => sum + value, 0)
       const fullDamage = Math.max(0, diceTotal + result.attack.bonus)
-      updateEnemyDamageContext(fullDamage)
-      await runEnemyStage('damageRolled')
 
       const saveD20 = await rollDiceBoxD20('豁免判定 D20', targetChar.name)
       const saveMod = getEffectiveAbilityMod(targetChar, actionDef.save.ability)
@@ -3300,24 +3153,6 @@ export default function MapsPage() {
       damageRollValues = resolved.damageValues
       damageRollTotal = resolved.total
       damageRollBonus = resolved.total - resolved.diceTotal
-      if (enemyResolutionSession) {
-        enemyResolutionSession.context.attackRoll = {
-          values: [d20Roll.value],
-          sides: 20,
-          bonus: d20Roll.modifier,
-          total: d20Roll.value + d20Roll.modifier,
-          ac: d20Roll.ac,
-          hit: d20Roll.hit,
-          crit: false,
-          label: 'save',
-        }
-        enemyResolutionSession.context.pendingDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-          ...packet,
-          amount: resolved.total,
-        }))
-      }
-      await runEnemyStage('attackRollResolved')
-      if (resolved.total > 0) await runEnemyStage('beforeDamageApplied')
       applyHeadlessCombatResult(headless)
       const enemyApLog = planEnemyAttackApLog({
         result: headless,
@@ -3332,15 +3167,6 @@ export default function MapsPage() {
       }
       for (const event of headless.events) {
         if (event.type === 'log') pushCombatLog(event.text, 'turn')
-      }
-      if (resolved.total > 0) {
-        if (enemyResolutionSession) {
-          enemyResolutionSession.context.appliedDamage = enemyResolutionSession.context.pendingDamage.map((packet) => ({
-            ...packet,
-            amount: resolved.total,
-          }))
-        }
-        await runEnemyStage('damageApplied')
       }
       const display = planEnemyAttackSettlement({
         result: headless,
@@ -3406,8 +3232,6 @@ export default function MapsPage() {
         damageRollTotal > 0 ? 'damage' : 'attack',
       )
     }
-    await runEnemyStage('afterDamageApplied')
-    await runEnemyStage('actionResolved')
   }
 
   useEffect(() => {
