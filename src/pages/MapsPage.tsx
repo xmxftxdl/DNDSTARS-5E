@@ -77,7 +77,7 @@ import {
   ENEMY_MELEE_ATTACK_BONUS,
   formatDodgePrompt,
 } from '../lib/archerBaseFeatures'
-import { TOKEN_STATUS_CLEAR_PATCH, isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
+import { isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import { getEffectiveAbilityMod } from '../lib/archerCombat'
 import {
   canSubmitPlayerCombatAction,
@@ -1644,12 +1644,6 @@ export default function MapsPage() {
     }, kind === 'focus' ? 980 : 620)
   }
 
-  const clearStatusesOnDeath = (tokenId: string, charId?: string) => {
-    if (!activeMap) return
-    updateToken(activeMap.id, tokenId, TOKEN_STATUS_CLEAR_PATCH)
-    if (charId) updateChar(charId, { conditions: [] })
-  }
-
   const deferDeathHandling = (tokenId: string, charId?: string) => {
     const key = `${tokenId}:${charId ?? ''}`
     if (pendingDeathKeysRef.current.has(key)) return
@@ -1662,7 +1656,6 @@ export default function MapsPage() {
     const resolve = () => {
       if (!pendingDeathKeysRef.current.has(key)) return
       pendingDeathKeysRef.current.delete(key)
-      clearStatusesOnDeath(tokenId, charId)
       tryEndCombatIfNeeded()
     }
     afterRollCallbacksRef.current.push(resolve)

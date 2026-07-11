@@ -3570,7 +3570,20 @@ function findCharacter(state: HeadlessDmCombatState, characterId: string): Chara
 }
 
 function succeed(state: HeadlessDmCombatState, events: HeadlessCombatEvent[]): HeadlessCombatSuccess {
+  clearDefeatedCombatStatuses(state)
   return { ok: true, state, events }
+}
+
+function clearDefeatedCombatStatuses(state: HeadlessDmCombatState): void {
+  for (const token of state.map.tokens) {
+    const character = token.characterId ? findCharacter(state, token.characterId) : undefined
+    const defeated = character ? character.currentHp <= 0 : (token.hp ?? token.maxHp ?? 1) <= 0
+    if (!defeated) continue
+    updateToken(state, token.id, (item) => ({ ...item, ...TOKEN_STATUS_CLEAR_PATCH }))
+    if (character) {
+      updateCharacter(state, character.id, (item) => ({ ...item, conditions: [] }))
+    }
+  }
 }
 
 function fail(

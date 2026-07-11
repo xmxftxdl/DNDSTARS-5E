@@ -1263,7 +1263,7 @@ describe('headless DM combat engine', () => {
     expect(hero.currentAP).toBe(1)
     expect(hero.combatBuffs?.finaleReady).toBeUndefined()
     expect(goblin.huntingMarkStacks).toBe(0)
-    expect(goblin.stunTurns).toBe(1)
+    expect(goblin.stunTurns).toBe(0)
     expect(goblin.hp).toBe(0)
     expect(result.events).toContainEqual(
       expect.objectContaining({
@@ -1776,6 +1776,50 @@ describe('headless DM combat engine', () => {
     })
   })
 
+  it('clears token statuses atomically when damage defeats a target', () => {
+    const combat = state()
+    combat.map.tokens = combat.map.tokens.map((item) =>
+      item.id === 'dragon'
+        ? {
+            ...item,
+            poolId: 'goblin',
+            hp: 1,
+            burningTurns: 2,
+            poisonTurns: 3,
+            stunTurns: 1,
+            huntingMarkStacks: 4,
+          }
+        : item,
+    )
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'attack-token',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      targetTokenId: 'dragon',
+      skillId: 'basic-shot',
+      targetPackets: [
+        {
+          targetTokenId: 'dragon',
+          diceValues: [8],
+          extraDamageValues: [100],
+          extraDamageSides: 100,
+          targetDodgeMode: 'skip',
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.map.tokens.find((item) => item.id === 'dragon')).toMatchObject({
+      hp: 0,
+      burningTurns: 0,
+      poisonTurns: 0,
+      stunTurns: 0,
+      huntingMarkStacks: 0,
+    })
+  })
+
   it('lets an enemy spend AP to dodge a player attack before damage is rolled', () => {
     const combat = state({
       characters: [character({ abilities: { str: 10, dex: 10, con: 25, int: 25, wis: 25, cha: 25 } })],
@@ -2281,7 +2325,7 @@ describe('headless DM combat engine', () => {
       actorTokenId: 'hero-token',
       characterId: 'hero',
       skillId: 'focus-shot',
-      diceValues: [6, 6, 6, 6],
+      diceValues: [1, 1, 1, 1],
       saveMode: 'fail-half',
       stunOnFailedConSave: true,
       targetPackets: [
@@ -2820,8 +2864,8 @@ describe('headless DM combat engine', () => {
       targetPackets: [
         {
           targetTokenId: 'goblin',
-          diceValues: [6, 6, 6, 6, 6],
-          extraDamageValues: [6, 6],
+          diceValues: [1, 1, 1, 1, 1],
+          extraDamageValues: [1, 1],
           extraDamageSides: 6,
           targetDodgeMode: 'skip',
           vulnerableOnHit: true,
@@ -2839,7 +2883,7 @@ describe('headless DM combat engine', () => {
     expect(target?.vulnerableTurns).toBe(1)
     expect(result.state.characters[0].combatSkills.find((item) => item.id === 'anti-magic-arrow')?.remaining).toBe(1)
     const attack = result.events.find((event) => event.type === 'attack-resolved')
-    expect(attack).toMatchObject({ damageValues: [6, 6, 6, 6, 6, 6, 6] })
+    expect(attack).toMatchObject({ damageValues: [1, 1, 1, 1, 1, 1, 1] })
     expect(result.events).toContainEqual({
       type: 'log',
       text: '破魔箭 移除 Goblin 3 个状态。',
