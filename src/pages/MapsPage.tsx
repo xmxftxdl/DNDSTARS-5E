@@ -60,6 +60,7 @@ import {
   publishSharedEvent,
   saveSharedResource,
   subscribeSharedEvent,
+  subscribeSharedResourceInvalidation,
 } from '../lib/sharedApi'
 import type { Character } from '../types/character'
 import type { ClassFeatureKey, CombatSkill } from '../types/character'
@@ -947,17 +948,7 @@ export default function MapsPage() {
 
   useEffect(() => {
     if (!activeMap) return
-    let cancelled = false
-    const load = async () => {
-      if (cancelled) return
-      await useMapStore.getState().loadShared()
-    }
-    void load()
-    const timer = window.setInterval(load, 500)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
+    return subscribeSharedResourceInvalidation('maps', () => useMapStore.getState().loadShared())
   }, [activeMap?.id])
 
   useEffect(() => {
@@ -968,11 +959,10 @@ export default function MapsPage() {
       const state = await loadSharedResource<SharedCombatState>('combat')
       if (!cancelled) applySharedCombatState(state)
     }
-    void load()
-    const timer = window.setInterval(load, 1000)
+    const unsubscribe = subscribeSharedResourceInvalidation('combat', load)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      unsubscribe()
     }
   }, [activeMap?.id, mode, combatActive])
 
@@ -1036,11 +1026,10 @@ export default function MapsPage() {
       const state = await loadSharedResource<SharedDiceState>('dice')
       if (state) applyDiceEvent(state)
     }
-    void load()
-    const timer = window.setInterval(load, 500)
+    const unsubscribe = subscribeSharedResourceInvalidation('dice-events', load)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      unsubscribe()
     }
   }, [activeMap?.id, mode])
 
@@ -1057,11 +1046,10 @@ export default function MapsPage() {
         return mergeSharedCombatLogEntries(current, incoming)
       })
     }
-    void load()
-    const timer = window.setInterval(load, 500)
+    const unsubscribe = subscribeSharedResourceInvalidation('combat-log', load)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      unsubscribe()
     }
   }, [activeMap?.id])
 
@@ -3334,11 +3322,14 @@ export default function MapsPage() {
       setNullablePromptView(setSharedAgileLeapPrompt, views.agileLeap)
       setNullablePromptView(setSharedOpportunityAttackPrompt, views.opportunityAttack)
     }
-    void load()
-    const timer = window.setInterval(load, 500)
+    const unsubscribe = subscribeSharedResourceInvalidation(COMBAT_INTERRUPT_RESOURCE, load, {
+      // Interrupts expire after 15 seconds. Recover quickly enough to present the
+      // prompt when an SSE notification is lost, without returning to polling.
+      recoveryMs: 3_000,
+    })
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      unsubscribe()
     }
   }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
 
@@ -4526,12 +4517,11 @@ export default function MapsPage() {
         await handlePlayerActionRequest(action)
       }
     }
-    void load()
-    const timer = window.setInterval(load, 500)
+    const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
       unsubscribe()
+      unsubscribeQueue()
     }
   }, [isDM, activeMap?.id, combatActive, round, currentInitiativeToken?.id])
 
@@ -4558,12 +4548,11 @@ export default function MapsPage() {
       const ack = await loadSharedResource<SharedPlayerActionAckState>('player-action-ack')
       if (!cancelled) applyAck(ack)
     }
-    void load()
-    const timer = window.setInterval(load, 500)
+    const unsubscribeAck = subscribeSharedResourceInvalidation('player-action-ack', load)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
       unsubscribe()
+      unsubscribeAck()
     }
   }, [mode, activeMap?.id])
 

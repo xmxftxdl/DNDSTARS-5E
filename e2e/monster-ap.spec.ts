@@ -74,6 +74,10 @@ async function clearEvents(request: APIRequestContext) {
   expect(res.ok()).toBeTruthy()
 }
 
+async function waitForCombatReady(page: Page, tokenId: string) {
+  await expect(page.getByTestId(`initiative-token-${tokenId}`)).toBeVisible({ timeout: 20_000 })
+}
+
 async function getState<T>(request: APIRequestContext, name: string): Promise<T> {
   const res = await request.get(`${DM}/api/state/${name}`)
   expect(res.ok()).toBeTruthy()
@@ -162,8 +166,16 @@ async function answerDodge(player: Page, request: APIRequestContext, previousId?
   await expect
     .poll(
       async () => {
-        const state = await getState<{ id?: string; status?: string }>(request, 'dodge')
-        dodgeId = state.status === 'pending' && state.id !== previousId ? String(state.id) : ''
+        const state = await getState<{
+          interrupts?: Array<{ id: string; kind: string; status: string }>
+        }>(request, 'combat-interrupts')
+        const pending = state.interrupts?.find(
+          (interrupt) =>
+            interrupt.kind === 'dodge' &&
+            interrupt.status === 'pending' &&
+            interrupt.id !== previousId,
+        )
+        dodgeId = pending?.id ?? ''
         return dodgeId
       },
       { timeout: 45_000 },
@@ -175,8 +187,11 @@ async function answerDodge(player: Page, request: APIRequestContext, previousId?
   await expect
     .poll(
       async () => {
-        const state = await getState<{ id?: string; status?: string }>(request, 'dodge')
-        return state.id === dodgeId && (state.status === 'answered' || state.status === 'done')
+        const state = await getState<{
+          interrupts?: Array<{ id: string; status: string }>
+        }>(request, 'combat-interrupts')
+        const interrupt = state.interrupts?.find((candidate) => candidate.id === dodgeId)
+        return interrupt?.status === 'answered' || interrupt?.status === 'done'
       },
       { timeout: 30_000 },
     )
@@ -198,6 +213,10 @@ test('monster spends AP for two attacks while player dodges across 3 rounds', as
   await Promise.all([
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    waitForCombatReady(dm, 'enemy-e2e'),
+    waitForCombatReady(player, 'enemy-e2e'),
   ])
 
   let lastDodgeId = ''

@@ -17,6 +17,7 @@ export const EVENT_REPLAY_LIMIT = 100
 // [T-P1-421/AC5] 不同 channel 名总数上限（safeName 允许任意名累积 → 无界）。超过即按
 // Map 插入序淘汰最旧者（确定性 COUNT-CAP，非 TTL）。有活跃订阅者的 channel 受保护不被淘汰。
 export const EVENT_CHANNEL_LIMIT = 256
+export const SHARED_STATE_CHANGED_CHANNEL = 'shared-state-changed'
 
 // ── AC4：图片配额 ───────────────────────────────────────────────────────────
 // 最多保留多少张共享图片（含 meta，不计 .json）。超过时按 mtime 最旧优先 GC。
@@ -376,7 +377,7 @@ function addEventClient(ctx, channel, res) {
   }
 }
 
-function publishEvent(ctx, channel, payload) {
+function publishEventToChannel(ctx, channel, payload) {
   const backlog = pushBacklog(ctx.eventBacklog.get(channel) ?? [], payload)
   // LRU touch：delete+set 把该 channel 移到 Map 末尾，使「活跃 channel」始终最新、最后才被 cap 淘汰。
   ctx.eventBacklog.delete(channel)
@@ -387,6 +388,13 @@ function publishEvent(ctx, channel, payload) {
   if (!clients) return
   const text = `event: message\ndata: ${JSON.stringify(payload)}\n\n`
   for (const client of clients) client.write(text)
+}
+
+function publishEvent(ctx, channel, payload) {
+  publishEventToChannel(ctx, channel, payload)
+  if (channel !== '_all') {
+    publishEventToChannel(ctx, '_all', { channel, payload })
+  }
 }
 
 /**
@@ -457,8 +465,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         await mkdir(ctx.stateRoot, { recursive: true })
         const body = await readBody(req)
-        JSON.parse(body.toString('utf8'))
+        const parsedBody = JSON.parse(body.toString('utf8'))
         await atomicWriteJsonStateFreshLocked(filePath, body)
+        const updatedAt = Number(parsedBody?.updatedAt)
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `${name}:${Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now()}:${Math.random().toString(36).slice(2)}`,
+          name,
+          updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now(),
+        })
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end('{"ok":true}')
         return true
@@ -466,6 +480,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       if (req.method === 'DELETE') {
         await rm(filePath, { force: true })
         await rm(path.join(ctx.legacyStateRoot, `${name}.json`), { force: true })
+        const updatedAt = Date.now()
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `${name}:${updatedAt}:${Math.random().toString(36).slice(2)}`,
+          name,
+          updatedAt,
+          deleted: true,
+        })
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end('{"ok":true}')
         return true

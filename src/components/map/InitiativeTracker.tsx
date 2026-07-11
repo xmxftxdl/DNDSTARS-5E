@@ -84,6 +84,7 @@ export default function InitiativeTracker({
           return (
             <button
               key={entry.tokenId}
+              data-testid={`initiative-token-${entry.tokenId}`}
               type="button"
               onClick={() => onSelect(entry.tokenId)}
               className="group flex flex-col items-center gap-1 outline-none"

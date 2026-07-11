@@ -192,6 +192,10 @@ async function loadPlayer2State<T>(page: Page, name: string): Promise<T> {
   }, name) as Promise<T>
 }
 
+async function waitForCombatReady(page: Page, tokenId: string) {
+  await expect(page.getByTestId(`initiative-token-${tokenId}`)).toBeVisible({ timeout: 20_000 })
+}
+
 test('player2 port 6175 sends skill-id attack request to DM and receives red-dragon result', async ({
   browser,
   request,
@@ -206,6 +210,7 @@ test('player2 port 6175 sends skill-id attack request to DM and receives red-dra
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player2.goto(`${PLAYER2}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player2-token')
 
   await expect
     .poll(
@@ -295,6 +300,7 @@ test('player2 queued movement is DM-authorized, spends AP, and syncs token posit
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player2.goto(`${PLAYER2}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player2-token')
 
   const now = Date.now()
   const targetPosition = center(3, 2)
@@ -367,6 +373,7 @@ test('three clients keep one authoritative transaction across duplicate, stale, 
     player1.goto(`${PLAYER1}/maps`, { waitUntil: 'domcontentloaded' }),
     player2.goto(`${PLAYER2}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player2-token')
 
   const now = Date.now()
   const targetPosition = center(3, 2)

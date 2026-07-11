@@ -81,6 +81,19 @@ export async function loadSharedResource<T>(name: string): Promise<T | null> {
   return requestJson<T>(`/state/${name}`)
 }
 
+export const SHARED_STATE_CHANGED_CHANNEL = 'shared-state-changed'
+export const SHARED_RESOURCE_RECOVERY_MS = 15_000
+
+export interface SharedStateChangedEvent {
+  id: string
+  name: string
+  updatedAt: number
+  deleted?: boolean
+}
+
+const sharedStateChangedListeners = new Set<(event: SharedStateChangedEvent) => void>()
+let stopSharedStateChangedSource: (() => void) | null = null
+
 async function sharedCombatIsActive(): Promise<boolean> {
   const combat = await requestJson<{ active?: boolean }>('/state/combat')
   return !!combat?.active
@@ -154,13 +167,38 @@ export function subscribeSharedEvent<T>(
   channel: string,
   onMessage: (data: T) => void,
 ): () => void {
-  const sources: EventSource[] = []
+  const listeners = sharedEventListeners.get(channel) ?? new Set<(data: unknown) => void>()
+  listeners.add(onMessage as (data: unknown) => void)
+  sharedEventListeners.set(channel, listeners)
+  ensureSharedEventSource()
+  return () => {
+    const current = sharedEventListeners.get(channel)
+    current?.delete(onMessage as (data: unknown) => void)
+    if (current?.size === 0) sharedEventListeners.delete(channel)
+    if (sharedEventListeners.size === 0) closeSharedEventSource()
+  }
+}
+
+interface SharedEventEnvelope {
+  channel: string
+  payload: unknown
+}
+
+const sharedEventListeners = new Map<string, Set<(data: unknown) => void>>()
+let sharedEventSources: EventSource[] = []
+
+function ensureSharedEventSource(): void {
+  if (sharedEventSources.length > 0) return
   for (const api of sharedEventApiCandidates()) {
     try {
-      const source = new EventSource(`${api}/events/${encodeURIComponent(channel)}`)
+      const source = new EventSource(`${api}/events/_all`)
       source.addEventListener('message', (event) => {
         try {
-          onMessage(JSON.parse(event.data) as T)
+          const envelope = JSON.parse(event.data) as SharedEventEnvelope
+          if (!envelope || typeof envelope.channel !== 'string') return
+          for (const listener of [...(sharedEventListeners.get(envelope.channel) ?? [])]) {
+            listener(envelope.payload)
+          }
         } catch {
           // Ignore malformed local event payloads.
         }
@@ -168,13 +206,76 @@ export function subscribeSharedEvent<T>(
       source.onerror = () => {
         if (source.readyState === EventSource.CLOSED) source.close()
       }
-      sources.push(source)
+      sharedEventSources.push(source)
     } catch {
       // Try every local endpoint that is available.
     }
   }
+}
+
+function closeSharedEventSource(): void {
+  for (const source of sharedEventSources) source.close()
+  sharedEventSources = []
+}
+
+function subscribeSharedStateChanged(listener: (event: SharedStateChangedEvent) => void): () => void {
+  sharedStateChangedListeners.add(listener)
+  if (!stopSharedStateChangedSource) {
+    stopSharedStateChangedSource = subscribeSharedEvent<SharedStateChangedEvent>(
+      SHARED_STATE_CHANGED_CHANNEL,
+      (event) => {
+        for (const current of [...sharedStateChangedListeners]) current(event)
+      },
+    )
+  }
   return () => {
-    for (const source of sources) source.close()
+    sharedStateChangedListeners.delete(listener)
+    if (sharedStateChangedListeners.size === 0 && stopSharedStateChangedSource) {
+      stopSharedStateChangedSource()
+      stopSharedStateChangedSource = null
+    }
+  }
+}
+
+export function subscribeSharedResourceInvalidation(
+  name: string,
+  refresh: () => void | Promise<void>,
+  options: { recoveryMs?: number; immediate?: boolean } = {},
+): () => void {
+  let disposed = false
+  let running = false
+  let pending = false
+
+  const run = async () => {
+    if (disposed) return
+    if (running) {
+      pending = true
+      return
+    }
+    running = true
+    try {
+      do {
+        pending = false
+        await refresh()
+      } while (!disposed && pending)
+    } finally {
+      running = false
+    }
+  }
+
+  const unsubscribe = subscribeSharedStateChanged(
+    (event) => {
+      if (event?.name === name) void run()
+    },
+  )
+  if (options.immediate !== false) void run()
+  const recoveryMs = Math.max(1_000, options.recoveryMs ?? SHARED_RESOURCE_RECOVERY_MS)
+  const timer = globalThis.setInterval(() => void run(), recoveryMs)
+
+  return () => {
+    disposed = true
+    globalThis.clearInterval(timer)
+    unsubscribe()
   }
 }
 

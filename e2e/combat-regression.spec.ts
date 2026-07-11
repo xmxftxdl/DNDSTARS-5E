@@ -72,6 +72,10 @@ async function getState<T>(request: APIRequestContext, name: string): Promise<T>
   return (await res.json()) as T
 }
 
+async function waitForCombatReady(page: Page, tokenId: string) {
+  await expect(page.getByTestId(`initiative-token-${tokenId}`)).toBeVisible({ timeout: 20_000 })
+}
+
 async function seedEncounter(
   request: APIRequestContext,
   mapId: string,
@@ -224,16 +228,23 @@ test('goblin-first mixed enemy encounter does not silently skip the goblin turn'
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'goblin-regression')
 
   await expect
     .poll(
       async () => {
-        const dodge = await getState<{
+        const queue = await getState<{
           mapId?: string
-          status?: string
-          result?: { attackerTokenId?: string; targetTokenId?: string }
-        }>(request, 'dodge')
-        return dodge.mapId === mapId && dodge.status === 'pending' ? dodge.result?.attackerTokenId : ''
+          interrupts?: Array<{
+            kind: string
+            status: string
+            payload?: { result?: { attackerTokenId?: string } }
+          }>
+        }>(request, 'combat-interrupts')
+        const dodge = queue.interrupts?.find(
+          (interrupt) => interrupt.kind === 'dodge' && interrupt.status === 'pending',
+        )
+        return queue.mapId === mapId ? dodge?.payload?.result?.attackerTokenId ?? '' : ''
       },
       { timeout: 45_000 },
     )
@@ -262,6 +273,7 @@ test('player precise strike activation is accepted by DM authority', async ({ br
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player-regression')
 
   await expect
     .poll(
@@ -329,6 +341,7 @@ test('player movement is accepted by DM authority and updates authoritative map 
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player-regression')
 
   await expect
     .poll(
@@ -432,6 +445,7 @@ test('player multi-shot rolls once and applies damage through DM authority', asy
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player-regression')
 
   const now = Date.now()
   const action = {
@@ -526,6 +540,7 @@ test('illusion dance resolves selected targets in initiative order and pulls fai
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player-regression')
 
   const now = Date.now()
   const action = {
@@ -676,6 +691,7 @@ test('precise strike forces crit and armor piercing hits aligned targets', async
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'player-regression')
 
   await expect
     .poll(
@@ -774,6 +790,7 @@ test('stable mind is offered after a successful dex save and prevents damage', a
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'red-dragon-regression')
 
   await expect(player.getByTestId('shared-stable-mind-use')).toBeVisible({ timeout: 45_000 })
 
@@ -839,6 +856,7 @@ test('combat stops before extra monster AP after all players are defeated', asyn
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await waitForCombatReady(dm, 'goblin-regression')
 
   await expect(player.getByRole('button', { name: '承受伤害' })).toBeVisible({ timeout: 45_000 })
   await player.getByRole('button', { name: '承受伤害' }).click()
