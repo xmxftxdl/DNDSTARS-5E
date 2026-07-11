@@ -155,12 +155,12 @@ import {
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
   resolveHeadlessGaleComboChoice,
-  resolveHeadlessDmAction,
   startHeadlessCombat,
   type HeadlessCombatEvent,
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from '../lib/headlessDmAuthority'
 import {
   enemyAttackResolvedEvent,
 } from '../lib/headlessCombatEvents'
@@ -2014,7 +2014,7 @@ export default function MapsPage() {
   ) => {
     if (!activeMap) return false
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const headless = resolveHeadlessDmAction(
+    const headless = resolveHeadlessDmAuthorityAction(
       createHeadlessStateSnapshot(latestMap),
       buildEnemyMoveAction({
         enemy,
@@ -2101,7 +2101,7 @@ export default function MapsPage() {
     const hit = shouldRollOpportunityDamage({ d20Value: d20, attackBonus, targetAc })
     const values = hit ? await rollDiceBoxValues(1, 6, '借机攻击 伤害', targetName) : []
 
-    const headless = resolveHeadlessDmAction(
+    const headless = resolveHeadlessDmAuthorityAction(
       {
         ...createHeadlessStateSnapshot(latestMap),
         map: latestMap,
@@ -2978,7 +2978,7 @@ export default function MapsPage() {
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const actorTokenId = targetTokenId ?? latestMap.tokens.find((token) => token.characterId === targetChar.id)?.id
     if (!actorTokenId) return false
-    const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(latestMap), buildAgileLeapReadyAction({
+    const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(latestMap), buildAgileLeapReadyAction({
       actorTokenId,
       characterId: targetChar.id,
       feet,
@@ -3181,11 +3181,11 @@ export default function MapsPage() {
         targetDodgeD20,
         targetDodgeApAlreadySpent: dodgeApAlreadySpent,
       })
-      const preview = resolveHeadlessDmAction(headlessSnapshot, headlessAction)
+      const preview = resolveHeadlessDmAuthorityAction(headlessSnapshot, headlessAction)
       if (!preview.ok) return false
       const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
       const headless = useArcaneSurgeOnLethal
-        ? resolveHeadlessDmAction(headlessSnapshot, {
+        ? resolveHeadlessDmAuthorityAction(headlessSnapshot, {
             ...headlessAction,
             useArcaneSurgeOnLethal: true,
           })
@@ -3322,11 +3322,11 @@ export default function MapsPage() {
         useStableMind,
         actorApAlreadySpent: enemyAttackApAlreadySpent,
       })
-      const preview = resolveHeadlessDmAction(headlessSnapshot, headlessAction)
+      const preview = resolveHeadlessDmAuthorityAction(headlessSnapshot, headlessAction)
       if (!preview.ok) return false
       const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
       const headless = useArcaneSurgeOnLethal
-        ? resolveHeadlessDmAction(headlessSnapshot, {
+        ? resolveHeadlessDmAuthorityAction(headlessSnapshot, {
             ...headlessAction,
             useArcaneSurgeOnLethal: true,
           })
@@ -3866,7 +3866,7 @@ export default function MapsPage() {
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const curToken = latestMap.tokens.find((token) => token.id === current.tokenId)
     const previousRound = roundRef.current
-    const headless = resolveHeadlessDmAction(
+    const headless = resolveHeadlessDmAuthorityAction(
       createHeadlessStateSnapshot(latestMap),
       buildHeadlessEndTurnAction({
         actorTokenId: current.tokenId,
@@ -4143,7 +4143,7 @@ export default function MapsPage() {
         prepared: preparedFeature,
         rollValues: rollDiceBoxValues,
       })
-      const headless = resolveHeadlessDmAction(
+      const headless = resolveHeadlessDmAuthorityAction(
         createHeadlessStateSnapshot(preparedFeature.map),
         headlessAction,
       )
@@ -4163,7 +4163,7 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), prepared.headlessAction)
+      const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), prepared.headlessAction)
       if (prepared.settlement === 'move' && prepared.token) {
         settleSimpleHeadlessMoveAction(action, prepared.token, headless)
       } else if (prepared.settlement === 'end-turn') {
@@ -4206,7 +4206,7 @@ export default function MapsPage() {
           targetTokenId: targets[0].id,
           targetPackets,
         })
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
+        const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), headlessAction)
         const settlement = planArrowSequenceSettlement({
           result: headless,
           actor,
@@ -4269,7 +4269,7 @@ export default function MapsPage() {
           targetTokenId: targetToken.id,
           targetPackets: [targetPacket],
         })
-        const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
+        const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), headlessAction)
         const settlement = planSingleAttackSettlement({
           result: headless,
           actor,
@@ -4365,7 +4365,7 @@ export default function MapsPage() {
         diceValues,
         targetPackets,
       })
-      const headless = resolveHeadlessDmAction(createHeadlessStateSnapshot(map), headlessAction)
+      const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), headlessAction)
       const settlement = planAoeAttackSettlement({
         result: headless,
         actor,
@@ -4407,7 +4407,7 @@ export default function MapsPage() {
       }
       const { actor, token, moveAction } = preparedMove
       const headlessSnapshot = createHeadlessStateSnapshot(map)
-      const headless = resolveHeadlessDmAction(headlessSnapshot, moveAction)
+      const headless = resolveHeadlessDmAuthorityAction(headlessSnapshot, moveAction)
       const preview = summarizeHeadlessPlayerMovePreview({
         result: headless,
         token,
@@ -4425,7 +4425,7 @@ export default function MapsPage() {
         return
       }
 
-      const deferred = resolveHeadlessDmAction(headlessSnapshot, movePlan.deferredMoveAction)
+      const deferred = resolveHeadlessDmAuthorityAction(headlessSnapshot, movePlan.deferredMoveAction)
       if (!deferred.ok) {
         acknowledgePlayerAction(action, 'rejected', playerMoveRejectReason(deferred.reason))
         completePlayerActionRequest(action)
@@ -4456,7 +4456,7 @@ export default function MapsPage() {
         return
       }
       const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
-      const committed = resolveHeadlessDmAction(
+      const committed = resolveHeadlessDmAuthorityAction(
         createHeadlessStateSnapshot(latestMapAfterOpportunity),
         afterOpportunity.commitAction,
       )
