@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const DM = 'http://127.0.0.1:6173'
+const PLAYER1 = 'http://127.0.0.1:6174'
 const PLAYER2 = 'http://127.0.0.1:6175'
 
 function center(col: number, row: number, gridSize = 70) {
@@ -345,6 +346,110 @@ test('player2 queued movement is DM-authorized, spends AP, and syncs token posit
   }>(player2, 'maps')
   const player2Hero = player2Maps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === 'player2-token')
   expect(player2Hero).toMatchObject(targetPosition)
+
+  await context.close()
+})
+
+test('three clients keep one authoritative transaction across duplicate, stale, and reconnect delivery', async ({
+  browser,
+  request,
+}) => {
+  const mapId = `e2e-three-client-authority-${Date.now()}`
+  const combatId = `${mapId}:combat`
+  await seedPlayer2VsRedDragon(request, mapId)
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player1 = await context.newPage()
+  const player2 = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player1.goto(`${PLAYER1}/maps`, { waitUntil: 'domcontentloaded' }),
+    player2.goto(`${PLAYER2}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+
+  const now = Date.now()
+  const targetPosition = center(3, 2)
+  const moveAction = {
+    id: `${mapId}:move:${now}`,
+    mapId,
+    combatId,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'move-token',
+    actorTokenId: 'player2-token',
+    characterId: 'player2-red-dragon-hero',
+    targetPosition,
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await sendPlayer2Action(player2, moveAction)
+
+  await expect
+    .poll(async () => {
+      const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
+      return ack.actionId === moveAction.id ? ack.status : ''
+    })
+    .toBe('accepted')
+  await expect
+    .poll(async () => {
+      const characters = await getState<{ characters: Array<{ id: string; currentAP?: number }> }>(
+        request,
+        'characters',
+      )
+      return characters.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP
+    })
+    .toBe(1)
+
+  await sendPlayer2Action(player2, moveAction)
+  await player2.waitForTimeout(1200)
+  const afterDuplicate = await getState<{ characters: Array<{ id: string; currentAP?: number }> }>(
+    request,
+    'characters',
+  )
+  expect(afterDuplicate.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP).toBe(1)
+
+  const staleAction = {
+    ...moveAction,
+    id: `${mapId}:stale:${now + 1}`,
+    combatId: `${mapId}:old-combat`,
+    seq: 2,
+    updatedAt: now + 1,
+  }
+  await sendPlayer2Action(player2, staleAction)
+  await expect
+    .poll(async () => {
+      const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(
+        request,
+        'player-action-ack',
+      )
+      return ack.actionId === staleAction.id ? `${ack.status}:${ack.reason}` : ''
+    })
+    .toBe('rejected:stale-combat')
+
+  await player2.reload({ waitUntil: 'domcontentloaded' })
+  await expect
+    .poll(async () => {
+      const maps = await loadPlayer2State<{
+        maps: Array<{ id: string; tokens: Array<{ id: string; x: number; y: number }> }>
+      }>(player2, 'maps')
+      return maps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === 'player2-token')
+    })
+    .toMatchObject(targetPosition)
+
+  const observerMaps = await loadPlayer2State<{
+    maps: Array<{ id: string; tokens: Array<{ id: string; x: number; y: number }> }>
+  }>(player1, 'maps')
+  expect(observerMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === 'player2-token')).toMatchObject(
+    targetPosition,
+  )
+
+  const finalCharacters = await loadPlayer2State<{
+    characters: Array<{ id: string; currentAP?: number }>
+  }>(player2, 'characters')
+  expect(finalCharacters.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP).toBe(1)
 
   await context.close()
 })
