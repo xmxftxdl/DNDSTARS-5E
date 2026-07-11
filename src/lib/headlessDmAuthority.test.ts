@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { BattleMap } from '../store/maps'
 import type { Character } from '../types/character'
 import type { HeadlessDmCombatState } from './headlessDmCombatEngine'
-import { createHeadlessDmAuthority } from './headlessDmAuthority'
+import {
+  createHeadlessDmAuthority,
+  endHeadlessDmCombatAuthority,
+  startHeadlessDmCombatAuthority,
+} from './headlessDmAuthority'
 
 function map(): BattleMap {
   return {
@@ -124,5 +128,40 @@ describe('headless DM authority', () => {
 
     expect(preview).toEqual(final)
     expect(snapshot.characters[0].currentAP).toBe(2)
+  })
+
+  it('owns combat lifecycle initialization and shutdown', () => {
+    const battleMap = map()
+    battleMap.tokens.push({
+      id: 'enemy-token',
+      label: 'Enemy',
+      x: 125,
+      y: 25,
+      color: '#ef4444',
+      emoji: 'E',
+      type: 'enemy',
+      size: 1,
+    })
+    const started = startHeadlessDmCombatAuthority({
+      map: battleMap,
+      characters: [{ ...character(), currentAP: 0 }],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: 'Hero', emoji: 'H', color: '#34d399', roll: 20 },
+        { tokenId: 'enemy-token', label: 'Enemy', emoji: 'E', color: '#ef4444', roll: 10 },
+      ],
+    })
+
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+    expect(started.state.active).toBe(true)
+    expect(started.state.characters[0].currentAP).toBe(2)
+    expect(started.state.enemyApByToken['enemy-token']).toEqual({ current: 2, max: 2 })
+
+    const ended = endHeadlessDmCombatAuthority(started.state)
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    expect(ended.state.active).toBe(false)
+    expect(ended.state.initiativeOrder).toEqual([])
+    expect(ended.state.enemyApByToken).toEqual({})
   })
 })

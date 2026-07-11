@@ -154,11 +154,14 @@ import {
 } from '../lib/combatResolutionPipeline'
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
-  startHeadlessCombat,
   type HeadlessCombatEvent,
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
+import {
+  endHeadlessDmCombatAuthority,
+  startHeadlessDmCombatAuthority,
+} from '../lib/headlessDmAuthority'
 import {
   enemyAttackResolvedEvent,
 } from '../lib/headlessCombatEvents'
@@ -2735,45 +2738,15 @@ export default function MapsPage() {
     const order = buildInitiativeOrder(activeMap.tokens, characters)
     const shouldClearStatuses =
       isDM && window.confirm('开始战斗前是否清除当前地图所有参战单位的状态？')
-    const initialEnemyAp: Record<string, { current: number; max: number }> = {}
-    for (const token of activeMap.tokens) {
-      if (token.type === 'enemy') initialEnemyAp[token.id] = { current: 2, max: 2 }
-    }
-    enemyApByTokenRef.current = initialEnemyAp
-    setEnemyApByToken(initialEnemyAp)
-    setCombatActive(true)
-    combatActiveRef.current = true
-    setRound(1)
-    roundRef.current = 1
-    setInitiativeOrder(order)
-    initiativeOrderRef.current = order
-    setInitiativeIndex(0)
-    initiativeIndexRef.current = 0
     setInitiativeScroll(0)
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const started = startHeadlessCombat(
-      {
-        map: latestMap,
-        characters: useCharacterStore.getState().characters,
-        active: true,
-        round: 1,
-        initiativeIndex: 0,
-        initiativeOrder: order,
-        enemyApByToken: initialEnemyAp,
-        disengagedCharacterIds: [],
-      },
-      undefined,
-      { clearStatuses: shouldClearStatuses },
-    )
-    applyHeadlessCombatResult({ ok: true, state: started, events: [] })
-    publishCombatState({
-      combatId: nextCombatId,
-      active: started.active,
-      round: started.round,
-      initiativeIndex: started.initiativeIndex,
-      initiativeOrder: started.initiativeOrder,
-      enemyApByToken: started.enemyApByToken,
+    const started = startHeadlessDmCombatAuthority({
+      map: latestMap,
+      characters: useCharacterStore.getState().characters,
+      initiativeOrder: order,
+      clearStatuses: shouldClearStatuses,
     })
+    applyHeadlessCombatResult(started)
     pushCombatLog(`战斗开始：${order.length} 名单位加入先攻`, 'system', 1)
   }
 
@@ -2781,35 +2754,20 @@ export default function MapsPage() {
     pushCombatLog('战斗结束', 'system')
     if (activeMap) {
       void clearCombatMessageQueues(activeMap.id, { clearCombatLog: false })
+      const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+      applyHeadlessCombatResult(endHeadlessDmCombatAuthority(createHeadlessStateSnapshot(latestMap)))
     }
     clearEnemyTurnTimers()
     clearEnemyAiWarnings() // [T7/AC6] 战斗结束清空回退告警去重集合，防止无界增长。
     setDodgePrompt(null)
     afterRollRef.current = null
     setRoll(null)
-    setCombatActive(false)
-    combatActiveRef.current = false
-    setInitiativeOrder([])
-    initiativeOrderRef.current = []
-    setInitiativeIndex(0)
-    initiativeIndexRef.current = 0
     setInitiativeScroll(0)
     enemyAppliedKeysRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
     multiStrikeHitsRef.current = {}
-    setDisengagedCharIds(new Set())
     clearPlayerCombatUI()
-    enemyApByTokenRef.current = {}
-    setEnemyApByToken({})
-    publishCombatState({
-      combatId: combatIdRef.current,
-      active: false,
-      round,
-      initiativeIndex: 0,
-      initiativeOrder: [],
-      enemyApByToken: {},
-    })
   }
 
   const currentCombatOutcome = () => {
