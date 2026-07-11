@@ -81,9 +81,8 @@ import { TOKEN_STATUS_CLEAR_PATCH, isMovementLocked, isTokenMovementLocked } fro
 import { getEffectiveAbilityMod } from '../lib/archerCombat'
 import {
   canSubmitPlayerCombatAction,
-  preflightPlayerActionAuthority,
-  reservePlayerActionExecution,
 } from '../lib/playerActionAuthorityRouter'
+import { planPlayerActionAuthorityExecution } from '../lib/playerActionAuthorityExecution'
 import {
   buildArrowSequenceTargetPackets,
   buildAoeTargetPackets,
@@ -4094,31 +4093,29 @@ export default function MapsPage() {
     const liveRound = roundRef.current
     const liveIndex = initiativeIndexRef.current
     const current = initiativeOrderRef.current[liveIndex]
-    const preflight = preflightPlayerActionAuthority(action, {
-      isDm: isDM,
-      activeMap,
-      combatId: combatIdRef.current,
-      combatActive: combatActiveRef.current,
-      round: liveRound,
-      initiativeIndex: liveIndex,
-      currentTokenId: current?.tokenId,
-      processedActionIds: processedPlayerActionIdsRef.current,
-      seenActionIds: seenPlayerActionIdsRef.current,
+    const authorityPlan = planPlayerActionAuthorityExecution({
+      action,
+      preflight: {
+        isDm: isDM,
+        activeMap: activeMap ?? undefined,
+        combatId: combatIdRef.current,
+        combatActive: combatActiveRef.current,
+        round: liveRound,
+        initiativeIndex: liveIndex,
+        currentTokenId: current?.tokenId,
+        processedActionIds: processedPlayerActionIdsRef.current,
+        seenActionIds: seenPlayerActionIdsRef.current,
+      },
+      recentActionKeys: recentPlayerActionKeysRef.current,
     })
-    if (preflight.status === 'ignored') return
-    if (preflight.status === 'rejected') {
-      acknowledgePlayerAction(action, 'rejected', preflight.reason)
+    if (authorityPlan.status === 'ignored') return
+    if (authorityPlan.status === 'rejected') {
+      acknowledgePlayerAction(action, 'rejected', authorityPlan.reason)
       completePlayerActionRequest(action)
       return
     }
     if (!activeMap) return
     seenPlayerActionIdsRef.current.add(action.id)
-
-    if (!reservePlayerActionExecution(action, recentPlayerActionKeysRef.current)) {
-      acknowledgePlayerAction(action, 'rejected', 'duplicate-action')
-      completePlayerActionRequest(action)
-      return
-    }
 
     playerActionResultBaselinesRef.current[action.id] = capturePlayerActionResultBaseline({
       characters: useCharacterStore.getState().characters,
@@ -4126,7 +4123,7 @@ export default function MapsPage() {
       enemyApByToken: enemyApByTokenRef.current,
     })
 
-    if (action.type === 'activate-feature') {
+    if (authorityPlan.route === 'activate-feature' && action.type === 'activate-feature') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const preparedFeature = preparePlayerFeatureActivationAction({
         action,
@@ -4151,7 +4148,7 @@ export default function MapsPage() {
       return
     }
 
-    if (isSimpleHeadlessPlayerActionType(action.type)) {
+    if (authorityPlan.route === 'simple' && isSimpleHeadlessPlayerActionType(action.type)) {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const prepared = buildSimpleHeadlessPlayerAction({
         action,
@@ -4177,7 +4174,7 @@ export default function MapsPage() {
       return
     }
 
-    if (action.type === 'attack-token') {
+    if (authorityPlan.route === 'attack-token' && action.type === 'attack-token') {
       const preparedAttack = preparePlayerAttackAction({
         action,
         map: activeMap,
@@ -4308,7 +4305,7 @@ export default function MapsPage() {
       return
     }
 
-    if (action.type === 'aoe-attack') {
+    if (authorityPlan.route === 'aoe-attack' && action.type === 'aoe-attack') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const preparedAoe = preparePlayerAoeAttackAction({
         action,
@@ -4393,7 +4390,7 @@ export default function MapsPage() {
       acknowledgePlayerAction(action, 'accepted')
       return
     }
-    if (action.type === 'move-token') {
+    if (authorityPlan.route === 'move-token' && action.type === 'move-token') {
       const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
       const preparedMove = preparePlayerMoveAction({
         action,
