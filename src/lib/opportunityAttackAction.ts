@@ -1,8 +1,10 @@
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import type {
   HeadlessCombatResult,
+  HeadlessDmCombatState,
   HeadlessOpportunityAttackAction,
 } from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import { opportunityResolvedEvent } from './headlessCombatEvents'
 
 export function buildOpportunityAttackAction(input: {
@@ -18,6 +20,16 @@ export function buildOpportunityAttackAction(input: {
     d20Value: input.d20Value,
     damageValues: input.damageValues,
   }
+}
+
+export function resolveOpportunityAttackAuthority(input: {
+  state: HeadlessDmCombatState
+  attackerTokenId: string
+  targetTokenId: string
+  d20Value: number
+  damageValues?: number[]
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(input.state, buildOpportunityAttackAction(input))
 }
 
 export function shouldRollOpportunityDamage(input: {

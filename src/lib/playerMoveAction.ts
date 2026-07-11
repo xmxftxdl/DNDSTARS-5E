@@ -253,6 +253,13 @@ export function buildDeferredPlayerMoveAction(moveAction: HeadlessPlayerMoveActi
   }
 }
 
+export function resolveDeferredPlayerMoveAuthority(input: {
+  state: HeadlessDmCombatState
+  moveAction: HeadlessPlayerMoveAction
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(input.state, buildDeferredPlayerMoveAction(input.moveAction))
+}
+
 export function buildCommitPlayerMoveAction(input: {
   moveAction: HeadlessPlayerMoveAction
   targetPosition: { x: number; y: number }
@@ -265,6 +272,13 @@ export function buildCommitPlayerMoveAction(input: {
     targetPosition: input.targetPosition,
     feet: input.feet,
   }
+}
+
+export function resolvePlayerMoveCommitAuthority(input: {
+  state: HeadlessDmCombatState
+  commitAction: HeadlessCommitTokenMoveAction
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(input.state, input.commitAction)
 }
 
 export type PlayerMoveCommitAfterOpportunityResult =

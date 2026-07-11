@@ -1,4 +1,9 @@
-import type { HeadlessCombatResult, HeadlessEndTurnAction } from './headlessDmCombatEngine'
+import type {
+  HeadlessCombatResult,
+  HeadlessDmCombatState,
+  HeadlessEndTurnAction,
+} from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 
 export function clearCharacterScopedRecord<T>(
   record: Record<string, T>,
@@ -33,6 +38,14 @@ export function buildHeadlessEndTurnAction(input: {
     actorTokenId: input.actorTokenId,
     characterId: input.characterId,
   }
+}
+
+export function resolveHeadlessEndTurnAuthority(input: {
+  state: HeadlessDmCombatState
+  actorTokenId: string
+  characterId?: string
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(input.state, buildHeadlessEndTurnAction(input))
 }
 
 export type HeadlessEndTurnSettlementPlan =

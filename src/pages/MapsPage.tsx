@@ -99,35 +99,38 @@ import {
 import {
   planPlayerMoveAfterOpportunity,
   playerMoveRejectReason,
+  resolveDeferredPlayerMoveAuthority,
   resolvePlayerMoveAuthorityPreview,
+  resolvePlayerMoveCommitAuthority,
 } from '../lib/playerMoveAction'
 import {
-  buildEnemyMoveAction,
   planEnemyMoveSettlement,
+  resolveEnemyMoveAuthority,
 } from '../lib/enemyMoveAction'
 import {
   buildEnemyAttackHeadlessAction,
   planEnemyAttackApLog,
   planEnemyAttackSettlement,
+  resolveEnemyAttackAuthority,
 } from '../lib/enemyAttackAction'
 import {
-  buildAgileLeapReadyAction,
   planAgileLeapReadySettlement,
+  resolveAgileLeapReadyAuthority,
 } from '../lib/agileLeapAction'
 import {
-  buildGaleComboChoiceParams,
   planGaleComboChoiceSettlement,
+  resolveGaleComboChoiceAuthority,
 } from '../lib/galeComboAction'
 import {
-  buildOpportunityAttackAction,
   planOpportunityAttackSettlement,
+  resolveOpportunityAttackAuthority,
   shouldRollOpportunityDamage,
 } from '../lib/opportunityAttackAction'
 import {
-  buildHeadlessEndTurnAction,
   clearCharacterScopedRecord,
   planHeadlessEndTurnSettlement,
   removeDisengagedCharacterId,
+  resolveHeadlessEndTurnAuthority,
 } from '../lib/playerEndTurnAction'
 import {
   buildPlayerActionAck,
@@ -151,13 +154,11 @@ import {
 } from '../lib/combatResolutionPipeline'
 import { executeCombatMutationsAuthority } from '../lib/combatAuthority'
 import {
-  resolveHeadlessGaleComboChoice,
   startHeadlessCombat,
   type HeadlessCombatEvent,
   type HeadlessCombatResult,
   type HeadlessDmCombatState,
 } from '../lib/headlessDmCombatEngine'
-import { resolveHeadlessDmAuthorityAction } from '../lib/headlessDmAuthority'
 import {
   enemyAttackResolvedEvent,
 } from '../lib/headlessCombatEvents'
@@ -2010,14 +2011,12 @@ export default function MapsPage() {
   ) => {
     if (!activeMap) return false
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const headless = resolveHeadlessDmAuthorityAction(
-      createHeadlessStateSnapshot(latestMap),
-      buildEnemyMoveAction({
-        enemy,
-        targetPosition,
-        apCost,
-      }),
-    )
+    const headless = resolveEnemyMoveAuthority({
+      state: createHeadlessStateSnapshot(latestMap),
+      enemy,
+      targetPosition,
+      apCost,
+    })
     const settlement = planEnemyMoveSettlement({
       result: headless,
       enemy,
@@ -2097,18 +2096,16 @@ export default function MapsPage() {
     const hit = shouldRollOpportunityDamage({ d20Value: d20, attackBonus, targetAc })
     const values = hit ? await rollDiceBoxValues(1, 6, '借机攻击 伤害', targetName) : []
 
-    const headless = resolveHeadlessDmAuthorityAction(
-      {
+    const headless = resolveOpportunityAttackAuthority({
+      state: {
         ...createHeadlessStateSnapshot(latestMap),
         map: latestMap,
       },
-      buildOpportunityAttackAction({
-        attackerTokenId: attackerToken.id,
-        targetTokenId: targetToken.id,
-        d20Value: d20,
-        damageValues: hit ? values : undefined,
-      }),
-    )
+      attackerTokenId: attackerToken.id,
+      targetTokenId: targetToken.id,
+      d20Value: d20,
+      damageValues: hit ? values : undefined,
+    })
     const settlement = planOpportunityAttackSettlement({
       result: headless,
       attackerName,
@@ -2974,11 +2971,12 @@ export default function MapsPage() {
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const actorTokenId = targetTokenId ?? latestMap.tokens.find((token) => token.characterId === targetChar.id)?.id
     if (!actorTokenId) return false
-    const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(latestMap), buildAgileLeapReadyAction({
+    const headless = resolveAgileLeapReadyAuthority({
+      state: createHeadlessStateSnapshot(latestMap),
       actorTokenId,
       characterId: targetChar.id,
       feet,
-    }))
+    })
     const settlement = planAgileLeapReadySettlement(headless)
     if (settlement.status === 'rejected') return false
     applyHeadlessCombatResult(headless)
@@ -3177,11 +3175,11 @@ export default function MapsPage() {
         targetDodgeD20,
         targetDodgeApAlreadySpent: dodgeApAlreadySpent,
       })
-      const preview = resolveHeadlessDmAuthorityAction(headlessSnapshot, headlessAction)
+      const preview = resolveEnemyAttackAuthority(headlessSnapshot, headlessAction)
       if (!preview.ok) return false
       const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
       const headless = useArcaneSurgeOnLethal
-        ? resolveHeadlessDmAuthorityAction(headlessSnapshot, {
+        ? resolveEnemyAttackAuthority(headlessSnapshot, {
             ...headlessAction,
             useArcaneSurgeOnLethal: true,
           })
@@ -3318,11 +3316,11 @@ export default function MapsPage() {
         useStableMind,
         actorApAlreadySpent: enemyAttackApAlreadySpent,
       })
-      const preview = resolveHeadlessDmAuthorityAction(headlessSnapshot, headlessAction)
+      const preview = resolveEnemyAttackAuthority(headlessSnapshot, headlessAction)
       if (!preview.ok) return false
       const useArcaneSurgeOnLethal = await maybeUseArcaneSurgeFromPreview(preview, targetChar)
       const headless = useArcaneSurgeOnLethal
-        ? resolveHeadlessDmAuthorityAction(headlessSnapshot, {
+        ? resolveEnemyAttackAuthority(headlessSnapshot, {
             ...headlessAction,
             useArcaneSurgeOnLethal: true,
           })
@@ -3862,13 +3860,11 @@ export default function MapsPage() {
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const curToken = latestMap.tokens.find((token) => token.id === current.tokenId)
     const previousRound = roundRef.current
-    const headless = resolveHeadlessDmAuthorityAction(
-      createHeadlessStateSnapshot(latestMap),
-      buildHeadlessEndTurnAction({
-        actorTokenId: current.tokenId,
-        characterId: curToken?.characterId,
-      }),
-    )
+    const headless = resolveHeadlessEndTurnAuthority({
+      state: createHeadlessStateSnapshot(latestMap),
+      actorTokenId: current.tokenId,
+      characterId: curToken?.characterId,
+    })
     const settlement = planHeadlessEndTurnSettlement({ result: headless, previousRound })
     if (settlement.status === 'rejected') {
       pushCombatLog(settlement.log.text, settlement.log.kind)
@@ -3992,13 +3988,11 @@ export default function MapsPage() {
       return false
     }
     if (!activeMap) return false
-    const headless = resolveHeadlessGaleComboChoice(
-      createHeadlessStateSnapshot(activeMap),
-      buildGaleComboChoiceParams({
-        characterId: casterId,
-        triggerLabel,
-      }),
-    )
+    const headless = resolveGaleComboChoiceAuthority({
+      state: createHeadlessStateSnapshot(activeMap),
+      characterId: casterId,
+      triggerLabel,
+    })
     const settlement = planGaleComboChoiceSettlement({
       result: headless,
       casterName: latestCaster.name,
@@ -4394,7 +4388,10 @@ export default function MapsPage() {
         return
       }
 
-      const deferred = resolveHeadlessDmAuthorityAction(headlessSnapshot, movePlan.deferredMoveAction)
+      const deferred = resolveDeferredPlayerMoveAuthority({
+        state: headlessSnapshot,
+        moveAction,
+      })
       if (!deferred.ok) {
         acknowledgePlayerAction(action, 'rejected', playerMoveRejectReason(deferred.reason))
         completePlayerActionRequest(action)
@@ -4425,10 +4422,10 @@ export default function MapsPage() {
         return
       }
       const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
-      const committed = resolveHeadlessDmAuthorityAction(
-        createHeadlessStateSnapshot(latestMapAfterOpportunity),
-        afterOpportunity.commitAction,
-      )
+      const committed = resolvePlayerMoveCommitAuthority({
+        state: createHeadlessStateSnapshot(latestMapAfterOpportunity),
+        commitAction: afterOpportunity.commitAction,
+      })
       if (!committed.ok) {
         completePlayerActionRequest(action)
         acknowledgePlayerAction(action, 'rejected', committed.reason)

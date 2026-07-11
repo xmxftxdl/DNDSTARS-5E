@@ -1,7 +1,9 @@
 import type {
   HeadlessAgileLeapReadyAction,
   HeadlessCombatResult,
+  HeadlessDmCombatState,
 } from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 
 export function buildAgileLeapReadyAction(input: {
   actorTokenId: string
@@ -14,6 +16,15 @@ export function buildAgileLeapReadyAction(input: {
     characterId: input.characterId,
     feet: input.feet,
   }
+}
+
+export function resolveAgileLeapReadyAuthority(input: {
+  state: HeadlessDmCombatState
+  actorTokenId: string
+  characterId: string
+  feet: number
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(input.state, buildAgileLeapReadyAction(input))
 }
 
 export type AgileLeapReadySettlementPlan =

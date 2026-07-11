@@ -1,4 +1,8 @@
-import type { HeadlessGaleComboChoiceResult } from './headlessDmCombatEngine'
+import {
+  resolveHeadlessGaleComboChoice,
+  type HeadlessDmCombatState,
+  type HeadlessGaleComboChoiceResult,
+} from './headlessDmCombatEngine'
 
 export function buildGaleComboChoiceParams(input: {
   characterId: string
@@ -9,6 +13,14 @@ export function buildGaleComboChoiceParams(input: {
     accepted: true,
     triggerLabel: input.triggerLabel,
   }
+}
+
+export function resolveGaleComboChoiceAuthority(input: {
+  state: HeadlessDmCombatState
+  characterId: string
+  triggerLabel: string
+}): HeadlessGaleComboChoiceResult {
+  return resolveHeadlessGaleComboChoice(input.state, buildGaleComboChoiceParams(input))
 }
 
 export type GaleComboChoiceSettlementPlan =

@@ -1,6 +1,11 @@
 import type { DiceRoll, D20AttackRoll } from '../components/DiceRollOverlay'
 import type { EnemyAttackRoll } from './enemyAi'
-import type { HeadlessCombatResult, HeadlessEnemyAttackAction } from './headlessDmCombatEngine'
+import type {
+  HeadlessCombatResult,
+  HeadlessDmCombatState,
+  HeadlessEnemyAttackAction,
+} from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import { apSpentEvent, enemyAttackResolvedEvent } from './headlessCombatEvents'
 
 export function buildEnemyAttackHeadlessAction(input: {
@@ -32,6 +37,13 @@ export function buildEnemyAttackHeadlessAction(input: {
     ...(input.targetDodgeApAlreadySpent !== undefined ? { targetDodgeApAlreadySpent: input.targetDodgeApAlreadySpent } : {}),
     ...(input.useArcaneSurgeOnLethal !== undefined ? { useArcaneSurgeOnLethal: input.useArcaneSurgeOnLethal } : {}),
   }
+}
+
+export function resolveEnemyAttackAuthority(
+  state: HeadlessDmCombatState,
+  action: HeadlessEnemyAttackAction,
+): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(state, action)
 }
 
 export type EnemyAttackSettlementPlan =

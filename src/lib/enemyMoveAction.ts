@@ -3,8 +3,10 @@ import type {
   HeadlessCombatEvent,
   HeadlessCombatFailureReason,
   HeadlessCombatResult,
+  HeadlessDmCombatState,
   HeadlessEnemyMoveAction,
 } from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import { apSpentEvent } from './headlessCombatEvents'
 
 export function buildEnemyMoveAction(input: {
@@ -18,6 +20,15 @@ export function buildEnemyMoveAction(input: {
     targetPosition: input.targetPosition,
     apCost: input.apCost,
   }
+}
+
+export function resolveEnemyMoveAuthority(input: {
+  state: HeadlessDmCombatState
+  enemy: Token
+  targetPosition: { x: number; y: number }
+  apCost: number
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(input.state, buildEnemyMoveAction(input))
 }
 
 export type EnemyMoveSettlementPlan =
