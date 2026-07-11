@@ -86,8 +86,6 @@ import { planPlayerActionAuthorityExecution } from '../lib/playerActionAuthority
 import {
   buildArrowSequenceTargetPackets,
   buildAoeTargetPackets,
-  buildPreparedAoeHeadlessAction,
-  buildPreparedAttackHeadlessAction,
   buildSingleAttackTargetPacket,
   canResolveSingleAttackWithHeadless,
   planAoeAttackSettlement,
@@ -95,6 +93,8 @@ import {
   planSingleAttackSettlement,
   preparePlayerAoeAttackAction,
   preparePlayerAttackAction,
+  resolvePreparedAoeAttackAuthority,
+  resolvePreparedAttackAuthority,
 } from '../lib/playerAttackAction'
 import {
   planPlayerMoveAfterOpportunity,
@@ -4184,13 +4184,13 @@ export default function MapsPage() {
           rollValues: rollDiceBoxValues,
           enemyDodgePreview,
         })
-        const headlessAction = buildPreparedAttackHeadlessAction({
+        const headless = resolvePreparedAttackAuthority({
+          state: createHeadlessStateSnapshot(map),
           action,
           prepared: preparedAttack,
           targetTokenId: targets[0].id,
           targetPackets,
         })
-        const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), headlessAction)
         const settlement = planArrowSequenceSettlement({
           result: headless,
           actor,
@@ -4247,13 +4247,13 @@ export default function MapsPage() {
               tone: 'sky',
             }),
         })
-        const headlessAction = buildPreparedAttackHeadlessAction({
+        const headless = resolvePreparedAttackAuthority({
+          state: createHeadlessStateSnapshot(map),
           action,
           prepared: preparedAttack,
           targetTokenId: targetToken.id,
           targetPackets: [targetPacket],
         })
-        const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), headlessAction)
         const settlement = planSingleAttackSettlement({
           result: headless,
           actor,
@@ -4343,13 +4343,13 @@ export default function MapsPage() {
         rollD20: rollDiceBoxD20,
         rollValues: rollDiceBoxValues,
       })
-      const headlessAction = buildPreparedAoeHeadlessAction({
+      const headless = resolvePreparedAoeAttackAuthority({
+        state: createHeadlessStateSnapshot(map),
         action,
         prepared: preparedAoe,
         diceValues,
         targetPackets,
       })
-      const headless = resolveHeadlessDmAuthorityAction(createHeadlessStateSnapshot(map), headlessAction)
       const settlement = planAoeAttackSettlement({
         result: headless,
         actor,

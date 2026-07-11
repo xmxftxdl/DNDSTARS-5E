@@ -22,9 +22,11 @@ import type {
   HeadlessAoeTargetPacket,
   HeadlessCombatResult,
   HeadlessCombatEvent,
+  HeadlessDmCombatState,
   HeadlessPlayerAttackAction,
   HeadlessPlayerAttackPacket,
 } from './headlessDmCombatEngine'
+import { resolveHeadlessDmAuthorityAction } from './headlessDmAuthority'
 import { KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import {
   aoeOrientFromCell,
@@ -245,6 +247,42 @@ export function buildPreparedAttackHeadlessAction(input: {
     skillId: prepared.skill.id,
     targetPackets,
   }
+}
+
+export function resolvePreparedAttackAuthority(input: {
+  state: HeadlessDmCombatState
+  action: SharedPlayerActionState
+  prepared: Extract<PlayerAttackPrepareResult, { ok: true }>
+  targetTokenId: string
+  targetPackets: HeadlessPlayerAttackPacket[]
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(
+    input.state,
+    buildPreparedAttackHeadlessAction({
+      action: input.action,
+      prepared: input.prepared,
+      targetTokenId: input.targetTokenId,
+      targetPackets: input.targetPackets,
+    }),
+  )
+}
+
+export function resolvePreparedAoeAttackAuthority(input: {
+  state: HeadlessDmCombatState
+  action: SharedPlayerActionState
+  prepared: Extract<PlayerAoeAttackPrepareResult, { ok: true }>
+  diceValues: number[]
+  targetPackets: HeadlessAoeTargetPacket[]
+}): HeadlessCombatResult {
+  return resolveHeadlessDmAuthorityAction(
+    input.state,
+    buildPreparedAoeHeadlessAction({
+      action: input.action,
+      prepared: input.prepared,
+      diceValues: input.diceValues,
+      targetPackets: input.targetPackets,
+    }),
+  )
 }
 
 export function canResolveSingleAttackWithHeadless(
