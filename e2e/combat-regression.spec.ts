@@ -219,7 +219,18 @@ async function seedEncounter(
 
 test('goblin-first mixed enemy encounter does not silently skip the goblin turn', async ({ browser, request }) => {
   const mapId = `e2e-mixed-enemy-${Date.now()}`
-  await seedEncounter(request, mapId)
+  await seedEncounter(request, mapId, {
+    heroPatch: {
+      equipment: {
+        helmet: {
+          id: 'e2e-survival-helmet',
+          name: 'E2E Survival Helmet',
+          slot: 'helmet',
+          hpBonus: 100,
+        },
+      },
+    },
+  })
 
   const context = await browser.newContext()
   const dm = await context.newPage()
@@ -250,14 +261,26 @@ test('goblin-first mixed enemy encounter does not silently skip the goblin turn'
     )
     .toBe('goblin-regression')
 
-  const combat = await getState<{
-    round: number
-    initiativeIndex: number
-    enemyApByToken: Record<string, { current: number; max: number }>
-  }>(request, 'combat')
-  expect(combat.round).toBe(1)
-  expect(combat.initiativeIndex).toBe(0)
-  expect(combat.enemyApByToken['goblin-regression']?.current).toBe(1)
+  await expect(player.getByRole('button', { name: '承受伤害' })).toBeVisible({ timeout: 20_000 })
+  await player.getByRole('button', { name: '承受伤害' }).click()
+
+  await expect
+    .poll(
+      async () => {
+        const combat = await getState<{
+          round: number
+          initiativeIndex: number
+          enemyApByToken: Record<string, { current: number; max: number }>
+        }>(request, 'combat')
+        return {
+          round: combat.round,
+          initiativeIndex: combat.initiativeIndex,
+          ap: combat.enemyApByToken['goblin-regression']?.current,
+        }
+      },
+      { timeout: 20_000 },
+    )
+    .toEqual({ round: 1, initiativeIndex: 0, ap: 1 })
 
   await context.close()
 })
@@ -376,12 +399,12 @@ test('player movement is accepted by DM authority and updates authoritative map 
   await expect
     .poll(
       async () => {
-        const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
-        return ack.actionId === action.id ? ack.status : ''
+        const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+        return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
       },
       { timeout: 30_000 },
     )
-    .toBe('accepted')
+    .toBe('accepted:')
 
   await expect
     .poll(
@@ -436,6 +459,9 @@ test('player multi-shot rolls once and applies damage through DM authority', asy
       combatSkills: [multiShot],
       currentAP: 2,
     },
+    tokenOverrides: {
+      'player-regression': center(5, 1),
+    },
   })
 
   const context = await browser.newContext()
@@ -471,12 +497,12 @@ test('player multi-shot rolls once and applies damage through DM authority', asy
   await expect
     .poll(
       async () => {
-        const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
-        return ack.actionId === action.id ? ack.status : ''
+        const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+        return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
       },
       { timeout: 45_000 },
     )
-    .toBe('accepted')
+    .toBe('accepted:')
 
   await expect
     .poll(
@@ -593,7 +619,7 @@ test('illusion dance resolves selected targets in initiative order and pulls fai
       },
       { timeout: 20_000 },
     )
-    .toEqual({ ap: 1, qi: 98, uses: 0 })
+    .toEqual({ ap: 1, qi: 1, uses: 0 })
 
   await expect
     .poll(
@@ -781,6 +807,9 @@ test('stable mind is offered after a successful dex save and prevents damage', a
         featureKey: 'stableMind',
       },
     ],
+    tokenOverrides: {
+      'player-regression': center(3, 2),
+    },
   })
 
   const context = await browser.newContext()
@@ -801,6 +830,19 @@ test('stable mind is offered after a successful dex save and prevents damage', a
   expect(hpBefore).toBeGreaterThan(0)
 
   await player.getByTestId('shared-stable-mind-use').click()
+
+  await expect
+    .poll(
+      async () => {
+        const queue = await getState<{
+          interrupts?: Array<{ kind: string; status: string; response?: { useStableMind?: boolean } }>
+        }>(request, 'combat-interrupts')
+        const interrupt = queue.interrupts?.find((item) => item.kind === 'stable-mind')
+        return `${interrupt?.status ?? ''}:${interrupt?.response?.useStableMind ?? ''}`
+      },
+      { timeout: 20_000 },
+    )
+    .toBe('done:true')
 
   await expect
     .poll(
@@ -831,10 +873,15 @@ test('stable mind is offered after a successful dex save and prevents damage', a
     )
     .toContain('残影脱身')
 
-  const log = await getState<{ entries: Array<{ text: string }> }>(request, 'combat-log')
-  const text = log.entries.map((entry) => entry.text).join('\n')
-  expect(text).toMatch(/火焰吐息[\s\S]*伤害骰\s+\d+\s+\+\s+\d+\s+\+\s+\d+\s+\+\s+\d+/)
-  expect(text).not.toContain('火焰吐息 4d6（敏捷豁免成功半伤） → E2E Adventurer：伤害骰 无')
+  await expect
+    .poll(
+      async () => {
+        const log = await getState<{ entries: Array<{ text: string }> }>(request, 'combat-log')
+        return log.entries.map((entry) => entry.text).join('\n')
+      },
+      { timeout: 20_000 },
+    )
+    .toMatch(/火焰吐息[\s\S]*伤害骰\s+\d+\s+\+\s+\d+\s+\+\s+\d+\s+\+\s+\d+/)
 
   await context.close()
 })

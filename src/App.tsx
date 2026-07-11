@@ -8,6 +8,7 @@ import CharactersPage from './pages/CharactersPage'
 import CombatPage from './pages/CombatPage'
 import AIPage from './pages/AIPage'
 import { modeFromPort } from './lib/appMode'
+import { subscribeSharedResourceInvalidation } from './lib/sharedApi'
 import { useMapStore } from './store/maps'
 import { startCharacterTraitChoiceSync, useCharacterStore } from './store/characters'
 
@@ -18,13 +19,12 @@ export default function App() {
   const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
 
   useEffect(() => {
-    void loadSharedMaps()
-    void loadSharedCharacters()
-    const timer = window.setInterval(() => {
-      void loadSharedMaps()
-      void loadSharedCharacters()
-    }, 500)
-    return () => window.clearInterval(timer)
+    const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
+    const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
+    return () => {
+      stopMaps()
+      stopCharacters()
+    }
   }, [endpointMode, loadSharedCharacters, loadSharedMaps])
 
   useEffect(() => startCharacterTraitChoiceSync(), [endpointMode])

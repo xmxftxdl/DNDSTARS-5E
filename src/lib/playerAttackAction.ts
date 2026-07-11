@@ -939,6 +939,7 @@ export function planSingleAttackDisplay(input: {
         dodgeEvent.dodged ? '成功' : '失败'
       }`
     : ''
+  const critText = resolved.isCrit ? '，重击' : ''
 
   return {
     ok: true,
@@ -951,7 +952,7 @@ export function planSingleAttackDisplay(input: {
       detail: `目标 ${targetToken.label}`,
     },
     combatLog: {
-      text: `${actor.name} 使用 ${skill.name} → ${targetToken.label}${dodgeText}，${
+      text: `${actor.name} 使用 ${skill.name} → ${targetToken.label}${dodgeText}${critText}，${
         resolved.hit ? `伤害 ${formula}` : formula
       }`,
       kind: resolved.hit ? 'damage' : 'attack',

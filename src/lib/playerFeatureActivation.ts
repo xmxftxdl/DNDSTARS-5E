@@ -20,6 +20,7 @@ const PLAYER_DM_READY_FEATURE_KEYS = new Set<ClassFeatureKey>([
   'flexibleBody',
   'showtime',
   'windBlade',
+  'wildernessGuide',
 ])
 
 export type HeadlessActiveFeatureKey = HeadlessActivateFeatureAction['featureKey']
@@ -36,6 +37,7 @@ const HEADLESS_ACTIVE_FEATURE_KEYS = new Set<HeadlessActiveFeatureKey>([
   'flexibleBody',
   'showtime',
   'windBlade',
+  'wildernessGuide',
 ])
 
 export function shouldSendPlayerReadyFeatureToDm(featureKey: ClassFeatureKey): boolean {

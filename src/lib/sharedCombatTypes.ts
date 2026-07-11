@@ -39,6 +39,7 @@ export interface SharedPlayerActionState {
     | 'qi-reduce-cooldown'
     | 'calm-spirit'
     | 'activate-feature'
+    | 'bullet-match-swap'
   actorTokenId: string
   characterId: string
   targetTokenId?: string
@@ -49,6 +50,7 @@ export interface SharedPlayerActionState {
   skillId?: string
   featureKey?: ClassFeatureKey
   calmSpiritEffect?: 'move' | 'crit' | 'cooldown' | 'extraTurn'
+  bulletSwap?: { from: number; to: number; seed: number }
   round: number
   initiativeIndex: number
   seq: number

@@ -103,6 +103,6 @@ describe('player action authority execution plan', () => {
     })
 
     expect(first).toEqual({ status: 'accepted', route: 'attack-token' })
-    expect(second).toEqual({ status: 'rejected', reason: 'duplicate-action' })
+    expect(second).toEqual({ status: 'ignored' })
   })
 })

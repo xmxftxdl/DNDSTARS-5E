@@ -313,6 +313,11 @@ import {
   isSimpleHeadlessPlayerActionType,
   resolveSimpleHeadlessPlayerAuthority,
 } from '../lib/simpleHeadlessPlayerAction'
+import {
+  DM_AUTHORITY_READY_RESOURCE,
+  matchesDmAuthorityReady,
+  type DmAuthorityReadyState,
+} from '../lib/dmAuthorityReady'
 const runtimeNow = () => Date.now()
 const runtimeRandomSuffix = () => Math.random().toString(36).slice(2)
 const runtimeId = (prefix?: string) =>
@@ -345,6 +350,7 @@ export default function MapsPage() {
   })
   const mode = forcedMode ?? selectedMode
   const [combatActive, setCombatActive] = useState(false)
+  const [dmAuthorityReady, setDmAuthorityReady] = useState<DmAuthorityReadyState | null>(null)
   const [playerCombatEndedLocked, setPlayerCombatEndedLocked] = useState(false)
   const [round, setRound] = useState(1)
   const [initiativeOrder, setInitiativeOrder] = useState<InitiativeEntry[]>([])
@@ -643,6 +649,8 @@ export default function MapsPage() {
   const multiStrikeHitsRef = useRef<Record<string, number>>({})
   const combatActiveRef = useRef(false)
   const playerActionResultBaselinesRef = useRef<Record<string, PlayerActionResultBaseline>>({})
+  const playerActionAuthorityQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const playerActionAuthorityCommitRef = useRef<Promise<void>>(Promise.resolve())
   const previousCombatActiveRef = useRef(false)
   const roundRef = useRef(1)
   const initiativeIndexRef = useRef(0)
@@ -965,6 +973,50 @@ export default function MapsPage() {
       unsubscribe()
     }
   }, [activeMap?.id, mode, combatActive])
+
+  useEffect(() => {
+    if (!activeMap || !combatActive || !combatIdRef.current) {
+      setDmAuthorityReady(null)
+      return
+    }
+    let cancelled = false
+    const mapId = activeMap.id
+    const combatId = combatIdRef.current
+
+    if (isDM) {
+      const publishReady = async () => {
+        await Promise.all([
+          useMapStore.getState().loadShared(),
+          useCharacterStore.getState().loadShared(),
+        ])
+        if (cancelled || !combatActiveRef.current || combatIdRef.current !== combatId) return
+        const state: DmAuthorityReadyState = {
+          mapId,
+          combatId,
+          ready: true,
+          updatedAt: runtimeNow(),
+        }
+        setDmAuthorityReady(state)
+        await saveSharedResource(DM_AUTHORITY_READY_RESOURCE, state)
+      }
+      void publishReady()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const load = async () => {
+      const state = await loadSharedResource<DmAuthorityReadyState>(DM_AUTHORITY_READY_RESOURCE)
+      if (!cancelled) setDmAuthorityReady(state)
+    }
+    const unsubscribe = subscribeSharedResourceInvalidation(DM_AUTHORITY_READY_RESOURCE, load, {
+      recoveryMs: 3_000,
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [activeMap?.id, combatActive, isDM])
 
   // T-P2-398 (398-A): subscribe to the result-broadcast channel and self-render
   // the decided @values locally.
@@ -3710,13 +3762,14 @@ export default function MapsPage() {
             updatedAt: appliedAt,
           }
         : undefined
-    void publishPlayerActionAckWithSnapshots({
+    const commit = publishPlayerActionAckWithSnapshots({
       ack,
       snapshots,
       saveSharedResource,
       publishAck: (eventAck) =>
         publishSharedEvent<SharedPlayerActionAckState>('player-action-dm-to-player', eventAck),
     })
+    playerActionAuthorityCommitRef.current = commit
   }
 
   const completePlayerActionRequest = (action: SharedPlayerActionState) => {
@@ -3846,7 +3899,12 @@ export default function MapsPage() {
     })
   }
 
-  const handlePlayerActionRequest = async (action: SharedPlayerActionState) => {
+  const processPlayerActionRequest = async (action: SharedPlayerActionState) => {
+    await Promise.all([
+      useMapStore.getState().loadShared(),
+      useCharacterStore.getState().loadShared(),
+    ])
+    const authorityMap = useMapStore.getState().maps.find((map) => map.id === action.mapId)
     const liveRound = roundRef.current
     const liveIndex = initiativeIndexRef.current
     const current = initiativeOrderRef.current[liveIndex]
@@ -3854,7 +3912,7 @@ export default function MapsPage() {
       action,
       preflight: {
         isDm: isDM,
-        activeMap: activeMap ?? undefined,
+        activeMap: authorityMap,
         combatId: combatIdRef.current,
         combatActive: combatActiveRef.current,
         round: liveRound,
@@ -3871,17 +3929,17 @@ export default function MapsPage() {
       completePlayerActionRequest(action)
       return
     }
-    if (!activeMap) return
+    if (!authorityMap) return
     seenPlayerActionIdsRef.current.add(action.id)
 
     playerActionResultBaselinesRef.current[action.id] = capturePlayerActionResultBaseline({
       characters: useCharacterStore.getState().characters,
-      map: useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap,
+      map: authorityMap,
       enemyApByToken: enemyApByTokenRef.current,
     })
 
     if (authorityPlan.route === 'activate-feature' && action.type === 'activate-feature') {
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const map = authorityMap
       const resolvedFeature = await resolvePlayerFeatureActivationAuthority({
         action,
         state: createHeadlessStateSnapshot(map),
@@ -3897,7 +3955,7 @@ export default function MapsPage() {
     }
 
     if (authorityPlan.route === 'simple' && isSimpleHeadlessPlayerActionType(action.type)) {
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const map = authorityMap
       const resolvedSimple = resolveSimpleHeadlessPlayerAuthority({
         action,
         state: createHeadlessStateSnapshot(map),
@@ -3924,7 +3982,7 @@ export default function MapsPage() {
     if (authorityPlan.route === 'attack-token' && action.type === 'attack-token') {
       const preparedAttack = preparePlayerAttackAction({
         action,
-        map: activeMap,
+        map: authorityMap,
         characters: useCharacterStore.getState().characters,
       })
       if (!preparedAttack.ok) {
@@ -3934,7 +3992,7 @@ export default function MapsPage() {
       }
       const { actor, skill, targets, waiveAp, doubleArrow, isArrowSequence } = preparedAttack
       if (isArrowSequence) {
-        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const map = authorityMap
         const { targetPackets } = await buildArrowSequenceTargetPackets({
           actor,
           skill,
@@ -3974,7 +4032,7 @@ export default function MapsPage() {
         return
       }
       if (canResolveSingleAttackWithHeadless(actor, skill, { doubleArrow, targetCount: targets.length })) {
-        const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+        const map = authorityMap
         const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
         const targetToken = map.tokens.find((token) => token.id === targets[0].id) ?? targets[0]
         const targetChar = targetToken.characterId
@@ -4027,6 +4085,9 @@ export default function MapsPage() {
           return
         }
         applyHeadlessCombatResult(headless)
+        for (const event of headless.events) {
+          if (event.type === 'log') pushCombatLog(event.text, 'turn')
+        }
         if (settlement.shouldOfferGaleCombo) {
           await maybeOfferGaleComboAfterHeadlessDamage(actor, skill, headless.events)
         }
@@ -4053,7 +4114,7 @@ export default function MapsPage() {
     }
 
     if (authorityPlan.route === 'aoe-attack' && action.type === 'aoe-attack') {
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const map = authorityMap
       const preparedAoe = preparePlayerAoeAttackAction({
         action,
         map,
@@ -4138,7 +4199,7 @@ export default function MapsPage() {
       return
     }
     if (authorityPlan.route === 'move-token' && action.type === 'move-token') {
-      const map = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? activeMap
+      const map = authorityMap
       const resolvedMove = resolvePlayerMoveAuthorityPreview({
         action,
         state: createHeadlessStateSnapshot(map),
@@ -4187,7 +4248,7 @@ export default function MapsPage() {
         )
         return
       }
-      const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === activeMap.id) ?? map
+      const latestMapAfterOpportunity = useMapStore.getState().maps.find((item) => item.id === authorityMap.id) ?? map
       const committed = resolvePlayerMoveCommitAuthority({
         state: createHeadlessStateSnapshot(latestMapAfterOpportunity),
         commitAction: afterOpportunity.commitAction,
@@ -4209,7 +4270,28 @@ export default function MapsPage() {
     completePlayerActionRequest(action)
   }
 
+  const handlePlayerActionRequest = (action: SharedPlayerActionState): Promise<void> => {
+    const task = playerActionAuthorityQueueRef.current.then(async () => {
+      await processPlayerActionRequest(action)
+      await playerActionAuthorityCommitRef.current
+    })
+    playerActionAuthorityQueueRef.current = task.catch((error) => {
+      console.error('[dm-authority] player action failed', error)
+    })
+    return task
+  }
+
   const canSendPlayerCombatAction = () => {
+    if (
+      mode === 'player' &&
+      !matchesDmAuthorityReady(dmAuthorityReady, {
+        mapId: activeMap?.id,
+        combatId: combatIdRef.current,
+        combatActive,
+      })
+    ) {
+      return false
+    }
     return canSubmitPlayerCombatAction({
       activeMap,
       mode,
@@ -4480,6 +4562,19 @@ export default function MapsPage() {
     })
     if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 消耗气降低冷却`)
+  }
+
+  const sendBulletMatchSwapRequest = (from: number, to: number, seed: number) => {
+    if (!activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const patch: SharedPlayerActionPatch = {
+      type: 'bullet-match-swap',
+      bulletSwap: { from, to, seed },
+    }
+    if (isDM) return submitDmLocalPlayerAction(createDmLocalPlayerAction(patch))
+    if (!canSendPlayerCombatAction()) return false
+    const action = createPlayerActionRequest(patch)
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 调整弹仓`)
   }
 
   const waitForAuthoritativePlayerActionSync = async (appliedAt?: number) => {
@@ -5944,6 +6039,7 @@ export default function MapsPage() {
                   (isHeavyGunner(activeChar.charClass) ? (
                     <BulletMatchPanel
                       charId={activeChar.id}
+                      onSwap={sendBulletMatchSwapRequest}
                       canAct={
                         canControlPlayerTurn && activeChar.id === turnCharacter?.id
                       }

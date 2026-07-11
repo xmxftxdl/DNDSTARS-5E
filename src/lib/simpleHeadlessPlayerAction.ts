@@ -2,6 +2,7 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type {
   HeadlessCalmSpiritAction,
+  HeadlessBulletMatchSwapAction,
   HeadlessCombatResult,
   HeadlessDmCombatState,
   HeadlessDisengageAction,
@@ -15,6 +16,7 @@ import type { SharedPlayerActionState } from './sharedCombatTypes'
 
 type SimpleHeadlessAction =
   | HeadlessCalmSpiritAction
+  | HeadlessBulletMatchSwapAction
   | HeadlessDisengageAction
   | HeadlessEndTurnAction
   | HeadlessPlayerMoveAction
@@ -30,6 +32,7 @@ const SIMPLE_ACTION_TYPES = new Set<SharedPlayerActionState['type']>([
   'qi-reduce-cooldown',
   'skill-free-move',
   'use-skill',
+  'bullet-match-swap',
 ])
 
 export type SimpleHeadlessPlayerActionResult =
@@ -80,9 +83,24 @@ export function buildSimpleHeadlessPlayerAction(input: {
       return buildMoveAction(input, 'calm-spirit-move', 'invalid-calm-spirit-move')
     case 'qi-reduce-cooldown':
       return buildQiReduceCooldownAction(input)
+    case 'bullet-match-swap':
+      return buildBulletMatchSwapAction(action)
     default:
       return { ok: false, reason: 'unsupported-action' }
   }
+}
+
+function buildBulletMatchSwapAction(action: SharedPlayerActionState): SimpleHeadlessPlayerActionResult {
+  const swap = action.bulletSwap
+  if (!swap) return { ok: false, reason: 'invalid-bullet-swap' }
+  return okStandard({
+    type: 'bullet-match-swap',
+    actorTokenId: action.actorTokenId,
+    characterId: action.characterId,
+    from: swap.from,
+    to: swap.to,
+    seed: swap.seed,
+  })
 }
 
 export type SimpleHeadlessPlayerAuthorityResult =

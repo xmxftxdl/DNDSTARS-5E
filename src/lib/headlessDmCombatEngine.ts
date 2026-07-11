@@ -31,6 +31,7 @@ import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } f
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { resetCombatTraitUses } from './traitRegistry'
+import { BULLET_CELL_COUNT, BULLET_TYPE_COUNT, createSeededBulletRandom, planSwapCascade } from './bulletMatch'
 import { IGNITE_STATUS_LABEL } from './ignite'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
 import {
@@ -370,6 +371,7 @@ export interface HeadlessActivateFeatureAction {
     | 'flexibleBody'
     | 'showtime'
     | 'windBlade'
+    | 'wildernessGuide'
   >
   targetTokenId?: string
   targetTokenIds?: string[]
@@ -395,6 +397,15 @@ export interface HeadlessCalmSpiritAction {
   characterId: string
   effect: 'move' | 'crit' | 'cooldown' | 'extraTurn'
   skillId?: string
+}
+
+export interface HeadlessBulletMatchSwapAction {
+  type: 'bullet-match-swap'
+  actorTokenId: string
+  characterId: string
+  from: number
+  to: number
+  seed: number
 }
 
 export interface HeadlessAoeAttackAction {
@@ -455,6 +466,7 @@ export type HeadlessCombatAction =
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
   | HeadlessCalmSpiritAction
+  | HeadlessBulletMatchSwapAction
   | HeadlessAoeAttackAction
   | HeadlessOpportunityAttackAction
   | HeadlessEndTurnAction
@@ -558,6 +570,9 @@ function cloneCharacter(character: Character): Character {
     })),
     conditions: [...character.conditions],
     combatBuffs: character.combatBuffs ? { ...character.combatBuffs } : undefined,
+    bulletPuzzle: character.bulletPuzzle
+      ? { grid: [...character.bulletPuzzle.grid], ready: [...character.bulletPuzzle.ready] }
+      : undefined,
     skillRanks: character.skillRanks ? { ...character.skillRanks } : undefined,
     equipment: character.equipment ? { ...character.equipment } : undefined,
   }
@@ -650,6 +665,8 @@ export function resolveHeadlessDmAction(
       return resolveQiReduceCooldown(next, action, events)
     case 'calm-spirit':
       return resolveCalmSpirit(next, action, events)
+    case 'bullet-match-swap':
+      return resolveBulletMatchSwap(next, action, events)
     case 'opportunity-attack-token':
       return resolveOpportunityAttack(next, action, dice, events)
     case 'commit-token-move':
@@ -1017,6 +1034,21 @@ function resolveActivateFeature(
       ),
     }))
     events.push({ type: 'log', text: `${actor.name} 激活鹰眼。` })
+    return succeed(state, events)
+  }
+
+  if (action.featureKey === 'wildernessGuide') {
+    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+    updateCharacter(state, actor.id, (item) => ({
+      ...item,
+      combatBuffs: { ...item.combatBuffs, wildernessGuideBoost: true },
+      traits: item.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'wildernessGuide'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }))
+    events.push({ type: 'log', text: `${actor.name} 激活特殊指引：下次生存或察觉检定具有优势。` })
     return succeed(state, events)
   }
 
@@ -1410,6 +1442,47 @@ function resolveQiReduceCooldown(
   return succeed(state, events)
 }
 
+function resolveBulletMatchSwap(
+  state: HeadlessDmCombatState,
+  action: HeadlessBulletMatchSwapAction,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  const actor = findCharacter(state, action.characterId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !actor ||
+    actor.currentHp <= 0 ||
+    actor.charClass !== '重炮手'
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  if (getCurrentTurn(state)?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
+  const puzzle = actor.bulletPuzzle
+  if (puzzle?.grid.length !== BULLET_CELL_COUNT || puzzle.ready.length !== BULLET_TYPE_COUNT) {
+    return fail(state, 'invalid-action', events)
+  }
+  const plan = planSwapCascade(
+    puzzle,
+    action.from,
+    action.to,
+    createSeededBulletRandom(action.seed),
+  )
+  if (!plan) return fail(state, 'invalid-action', events)
+  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
+  updateCharacter(state, actor.id, (item) => ({
+    ...item,
+    bulletPuzzle: { grid: plan.finalGrid, ready: plan.finalReady },
+  }))
+  events.push({
+    type: 'log',
+    text: `${actor.name} 调整弹仓并完成 ${plan.steps.length} 段连锁。`,
+  })
+  return succeed(state, events)
+}
+
 function resolveCalmSpirit(
   state: HeadlessDmCombatState,
   action: HeadlessCalmSpiritAction,
@@ -1743,7 +1816,7 @@ function resolvePlayerAttack(
         if (packet.spendArmorPiercingUseOnSplash) shouldSpendArmorPiercingUse = true
         events.push({
           type: 'log',
-          text: `${actor.name} armor piercing splash hits ${splashTargets.length} target(s) for ${splashDamage}.`,
+          text: `${actor.name} 的穿甲箭溅射命中 ${splashTargets.length} 个目标，每个受到 ${splashDamage} 点伤害。`,
         })
       }
     }
@@ -3426,6 +3499,10 @@ function maybeEndCombat(state: HeadlessDmCombatState, events: HeadlessCombatEven
   const outcome = checkCombatOutcome(state.map.tokens, state.characters)
   if (!outcome.ended) return
   state.active = false
+  state.initiativeIndex = 0
+  state.initiativeOrder = []
+  state.enemyApByToken = {}
+  state.disengagedCharacterIds = []
   events.push({ type: 'combat-ended', winner: outcome.winner, message: outcome.message })
 }
 

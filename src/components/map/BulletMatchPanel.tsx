@@ -8,6 +8,7 @@ import {
   BULLET_TYPE_STYLES,
   BULLET_ANIM_MS,
   computeSwapOffsets,
+  createSeededBulletRandom,
   ensureBulletPuzzle,
   planSwapCascade,
   playCascadeAnimation,
@@ -17,14 +18,14 @@ import BulletIcon from './BulletIcon'
 interface BulletMatchPanelProps {
   charId: string
   canAct?: boolean
+  onSwap?: (from: number, to: number, seed: number) => boolean
 }
 
 const CELL_PX = 30
 
-export default function BulletMatchPanel({ charId, canAct = false }: BulletMatchPanelProps) {
+export default function BulletMatchPanel({ charId, canAct = false, onSwap }: BulletMatchPanelProps) {
   const character = useCharacterStore((s) => s.characters.find((c) => c.id === charId))
   const update = useCharacterStore((s) => s.update)
-  const spendAP = useCharacterStore((s) => s.spendAP)
 
   const [selected, setSelected] = useState<number | null>(null)
   const [display, setDisplay] = useState<BulletPuzzleState | null>(null)
@@ -46,7 +47,7 @@ export default function BulletMatchPanel({ charId, canAct = false }: BulletMatch
   }, [charId, character, character?.bulletPuzzle, update])
 
   const runSwapAnimation = useCallback(
-    async (a: number, b: number) => {
+    async (a: number, b: number, seed: number) => {
       if (!character || !stored) return
       animatingRef.current = true
       setAnimating(true)
@@ -79,18 +80,18 @@ export default function BulletMatchPanel({ charId, canAct = false }: BulletMatch
           setFallOffsets(new Map())
           setDisplay({ grid, ready })
         },
-      })
+      }, createSeededBulletRandom(seed))
 
       animatingRef.current = false
       setAnimating(false)
       if (result) {
-        update(charId, { bulletPuzzle: result })
+        if (!onSwap) update(charId, { bulletPuzzle: result })
         setDisplay(result)
       } else {
         setDisplay(base)
       }
     },
-    [charId, character, update],
+    [charId, character, onSwap, update],
   )
 
   const onCellClick = useCallback(
@@ -117,14 +118,16 @@ export default function BulletMatchPanel({ charId, canAct = false }: BulletMatch
         return
       }
 
-      if (!spendAP(charId, 1)) {
+      const from = selected
+      const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0
+      if (onSwap && !onSwap(from, index, seed)) {
         setSelected(null)
         return
       }
 
-      void runSwapAnimation(selected, index)
+      void runSwapAnimation(from, index, seed)
     },
-    [character, charId, selected, canAct, spendAP, stored, runSwapAnimation],
+    [character, selected, canAct, onSwap, stored, runSwapAnimation],
   )
 
   if (!character || !puzzle) return null

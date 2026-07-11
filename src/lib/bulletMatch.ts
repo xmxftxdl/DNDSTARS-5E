@@ -38,8 +38,19 @@ export function ensureBulletPuzzle(state?: BulletPuzzleState): BulletPuzzleState
   return createBulletPuzzle()
 }
 
-function randomType(): number {
-  return Math.floor(Math.random() * BULLET_TYPE_COUNT)
+export function createSeededBulletRandom(seed: number): () => number {
+  let state = Math.floor(seed) >>> 0
+  return () => {
+    state += 0x6d2b79f5
+    let value = state
+    value = Math.imul(value ^ (value >>> 15), value | 1)
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function randomType(random: () => number = Math.random): number {
+  return Math.floor(random() * BULLET_TYPE_COUNT)
 }
 
 function randomGridNoImmediateMatches(): number[] {
@@ -117,7 +128,7 @@ export function typesCleared(matched: Set<number>, grid: number[]): number[] {
 }
 
 /** 消除 → 下落 → 顶格填充 */
-export function collapseGrid(grid: number[], matched: Set<number>): number[] {
+export function collapseGrid(grid: number[], matched: Set<number>, random: () => number = Math.random): number[] {
   const next = [...grid]
   const n = BULLET_GRID_SIZE
   for (let c = 0; c < n; c++) {
@@ -126,7 +137,7 @@ export function collapseGrid(grid: number[], matched: Set<number>): number[] {
       const i = cellIndex(r, c)
       if (!matched.has(i)) col.push(next[i])
     }
-    while (col.length < n) col.push(randomType())
+    while (col.length < n) col.push(randomType(random))
     for (let r = 0; r < n; r++) {
       next[cellIndex(n - 1 - r, c)] = col[r]
     }
@@ -156,14 +167,14 @@ export function swapCells(grid: number[], a: number, b: number): number[] {
 }
 
 /** 三连及以上自动连锁消除，返回每一步（含下落填充后的盘面） */
-export function buildCascadeSteps(grid: number[]): CascadeStep[] {
+export function buildCascadeSteps(grid: number[], random: () => number = Math.random): CascadeStep[] {
   const steps: CascadeStep[] = []
   let g = [...grid]
   for (let guard = 0; guard < 32; guard++) {
     const matched = findMatchIndices(g)
     if (matched.size === 0) break
     const clearedTypes = typesCleared(matched, g)
-    g = collapseGrid(g, matched)
+    g = collapseGrid(g, matched, random)
     steps.push({ matched: [...matched], clearedTypes, gridAfter: g })
   }
   return steps
@@ -174,10 +185,11 @@ export function planSwapCascade(
   puzzle: BulletPuzzleState,
   a: number,
   b: number,
+  random: () => number = Math.random,
 ): { swappedGrid: number[]; steps: CascadeStep[]; finalGrid: number[]; finalReady: number[] } | null {
   if (!areAdjacent(a, b)) return null
   const swappedGrid = swapCells(puzzle.grid, a, b)
-  const steps = buildCascadeSteps(swappedGrid)
+  const steps = buildCascadeSteps(swappedGrid, random)
   if (steps.length === 0) return null
 
   const ready = [...puzzle.ready]
@@ -266,8 +278,9 @@ export async function playCascadeAnimation(
     onFall: (grid: number[], ready: number[], offsets: Map<number, number>) => void
     onSettle: (grid: number[], ready: number[]) => void
   },
+  random: () => number = Math.random,
 ): Promise<BulletPuzzleState | null> {
-  const plan = planSwapCascade(start, a, b)
+  const plan = planSwapCascade(start, a, b, random)
   if (!plan) return null
 
   let grid = [...start.grid]

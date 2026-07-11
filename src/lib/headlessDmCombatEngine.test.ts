@@ -677,6 +677,38 @@ describe('headless DM combat engine', () => {
     expect(hero.traits.find((trait) => trait.featureKey === 'eagleEye')?.uses).toBe(0)
   })
 
+  it('activates wilderness guide through DM authority', () => {
+    const combat = state({
+      characters: [
+        character({
+          traits: [{
+            id: 'wilderness-guide',
+            name: '特殊指引',
+            level: 1,
+            uses: 1,
+            maxUses: 1,
+            description: '',
+            featureKey: 'wildernessGuide',
+          }],
+        }),
+      ],
+    })
+
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'activate-feature',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      featureKey: 'wildernessGuide',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const hero = result.state.characters[0]
+    expect(hero.currentAP).toBe(1)
+    expect(hero.combatBuffs?.wildernessGuideBoost).toBe(true)
+    expect(hero.traits.find((trait) => trait.featureKey === 'wildernessGuide')?.uses).toBe(0)
+  })
+
   it('resolves stable mind as an interrupt outside the actor turn', () => {
     const combat = state({
       initiativeIndex: 1,
@@ -1859,6 +1891,7 @@ describe('headless DM combat engine', () => {
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
+    expect(result.state.active).toBe(true)
     expect(result.state.enemyApByToken.goblin.current).toBe(1)
     expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.hp).toBe(2)
     expect(result.events.find((event) => event.type === 'target-dodge-resolved')).toMatchObject({
@@ -1912,7 +1945,9 @@ describe('headless DM combat engine', () => {
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.state.enemyApByToken.goblin.current).toBe(1)
+    expect(result.state.active).toBe(false)
+    expect(result.state.initiativeOrder).toEqual([])
+    expect(result.state.enemyApByToken.goblin).toBeUndefined()
     expect(result.state.map.tokens.find((item) => item.id === 'goblin')?.hp).toBeLessThan(2)
     expect(result.events.find((event) => event.type === 'target-dodge-resolved')).toMatchObject({
       targetTokenId: 'goblin',

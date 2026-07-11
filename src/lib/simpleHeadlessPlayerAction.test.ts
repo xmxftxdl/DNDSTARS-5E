@@ -92,8 +92,29 @@ describe('simple headless player action builder', () => {
     expect(isSimpleHeadlessPlayerActionType('use-skill')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('qi-reduce-cooldown')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('end-turn')).toBe(true)
+    expect(isSimpleHeadlessPlayerActionType('bullet-match-swap')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('attack-token')).toBe(false)
     expect(isSimpleHeadlessPlayerActionType('move-token')).toBe(false)
+  })
+
+  it('builds a seeded bullet-match swap for DM validation', () => {
+    expect(
+      buildSimpleHeadlessPlayerAction(
+        baseInput(makeAction({
+          type: 'bullet-match-swap',
+          bulletSwap: { from: 1, to: 9, seed: 42 },
+        })),
+      ),
+    ).toMatchObject({
+      ok: true,
+      settlement: 'standard',
+      headlessAction: {
+        type: 'bullet-match-swap',
+        from: 1,
+        to: 9,
+        seed: 42,
+      },
+    })
   })
 
   it('builds use-skill and calm-spirit actions', () => {

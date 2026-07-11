@@ -91,6 +91,10 @@ export default function FeaturesTab({
   }
 
   const activateWildernessGuide = () => {
+    if (battleMode && onActivateFeature) {
+      void onActivateFeature('wildernessGuide')
+      return
+    }
     const trait = c.traits.find((t) => t.featureKey === 'wildernessGuide')
     if (!trait || trait.uses <= 0) {
       alert('特殊指引次数已用完')

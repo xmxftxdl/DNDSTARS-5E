@@ -39,7 +39,7 @@ export function planPlayerActionAuthorityExecution(input: {
   if (preflight.status !== 'accepted') return preflight
 
   if (!reservePlayerActionExecution(input.action, input.recentActionKeys, { now: input.now })) {
-    return { status: 'rejected', reason: 'duplicate-action' }
+    return { status: 'ignored' }
   }
 
   return { status: 'accepted', route: playerActionAuthorityRoute(input.action) }
