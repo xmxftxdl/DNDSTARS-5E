@@ -1,39 +1,13 @@
 import type { Character } from '../types/character'
 import {
-  canLearnSkill as canLearnArcherSkill,
-  canUpgradeSkillRank as canUpgradeArcherSkillRank,
-  getArcherSkillDef,
-  getSkillRank as getArcherSkillRank,
-  isArcherLineClass,
-} from './archerSkillTree'
-import { syncArcherCombatSkills } from './skillTreeSync'
+  registeredClassDefinitions,
+  type ClassProgressionAdapter,
+} from './classDefinitionRegistry'
 import { syncClassTraitUses, syncQiForCharacter } from './traitRegistry'
 
-export interface ClassProgressionAdapter {
-  id: string
-  hasSkillTree?: boolean
-  matches(character: Character): boolean
-  ownsSkill(skillId: string): boolean
-  syncSkills(character: Character): Character
-  canLearnSkill(character: Character, skillId: string): boolean
-  canUpgradeSkillRank(character: Character, skillId: string): boolean
-  getSkillRank(character: Character, skillId: string): number
-}
+export type { ClassProgressionAdapter } from './classDefinitionRegistry'
 
-const archerProgressionAdapter: ClassProgressionAdapter = {
-  id: 'archer-line',
-  hasSkillTree: true,
-  matches: (character) => isArcherLineClass(character.charClass),
-  ownsSkill: (skillId) => !!getArcherSkillDef(skillId),
-  syncSkills: syncArcherCombatSkills,
-  canLearnSkill: canLearnArcherSkill,
-  canUpgradeSkillRank: canUpgradeArcherSkillRank,
-  getSkillRank: getArcherSkillRank,
-}
-
-const progressionAdapters = new Map<string, ClassProgressionAdapter>([
-  [archerProgressionAdapter.id, archerProgressionAdapter],
-])
+const progressionAdapters = new Map<string, ClassProgressionAdapter>()
 
 export function registerClassProgression(adapter: ClassProgressionAdapter): () => void {
   progressionAdapters.set(adapter.id, adapter)
@@ -43,11 +17,15 @@ export function registerClassProgression(adapter: ClassProgressionAdapter): () =
 }
 
 export function registeredClassProgressions(): readonly ClassProgressionAdapter[] {
-  return [...progressionAdapters.values()]
+  const combined = new Map(
+    registeredClassDefinitions().map((definition) => [definition.progression.id, definition.progression]),
+  )
+  for (const [id, adapter] of progressionAdapters) combined.set(id, adapter)
+  return [...combined.values()]
 }
 
 export function classProgressionForCharacter(character: Character): ClassProgressionAdapter | undefined {
-  return [...progressionAdapters.values()].find((adapter) => adapter.matches(character))
+  return registeredClassProgressions().find((adapter) => adapter.matches(character))
 }
 
 export function hasClassSkillTree(character: Character): boolean {
@@ -59,7 +37,7 @@ export function syncCharacterClassTraits(character: Character): Character {
 }
 
 export function syncCharacterClassSkills(character: Character): Character {
-  return [...progressionAdapters.values()].reduce((current, adapter) => adapter.syncSkills(current), character)
+  return registeredClassProgressions().reduce((current, adapter) => adapter.syncSkills(current), character)
 }
 
 export function syncCharacterClassProgression(character: Character): Character {
@@ -67,7 +45,7 @@ export function syncCharacterClassProgression(character: Character): Character {
 }
 
 function skillAdapter(character: Character, skillId: string): ClassProgressionAdapter | undefined {
-  return [...progressionAdapters.values()].find(
+  return registeredClassProgressions().find(
     (adapter) => adapter.matches(character) && adapter.ownsSkill(skillId),
   )
 }

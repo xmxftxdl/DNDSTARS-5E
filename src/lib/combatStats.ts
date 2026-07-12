@@ -3,14 +3,13 @@ import type { CharacterEquipment, EquipmentItem, EquipmentSlot, LegacyCharacterE
 import { abilityMod, type AbilityKey } from './dnd'
 import { eagleEyeDexBonus, findClassTrait } from './classFeatures'
 import {
-  CRIT_RING,
-  DEFAULT_ARCHER_EQUIPMENT,
   EQUIPMENT_SLOTS,
-  LEATHER_ARMOR,
-  LEATHER_CAP,
-  LONG_BOW,
 } from './equipmentDefaults'
-import { isArcherLineClass } from './archerSkillTree'
+import {
+  DEFAULT_COMBAT_STAT_PROFILE,
+  classDefinitionForClassName,
+  type ClassCombatStatProfile,
+} from './classDefinitionRegistry'
 
 /**
  * [T7/AC5/B8] 敌人 AC 缺省值的唯一真相源。
@@ -22,6 +21,7 @@ export const DEFAULT_ENEMY_AC = 12
 /** 角色 / 敌人共用的战斗数值输入 */
 export interface CombatStatInput {
   abilities: Abilities
+  className?: string
   level?: number
   equipment?: CharacterEquipment
   /** 鹰眼等临时敏捷加成（原始分值，非调整值） */
@@ -57,11 +57,18 @@ export function characterToCombatInput(c: Character): CombatStatInput {
   }
   return {
     abilities: c.abilities,
+    className: c.charClass,
     level: c.level,
     equipment: c.equipment,
     bonusDexScore,
     acFallback: c.ac,
   }
+}
+
+function statProfile(input: CombatStatInput): ClassCombatStatProfile {
+  return input.className
+    ? (classDefinitionForClassName(input.className)?.combatStats ?? DEFAULT_COMBAT_STAT_PROFILE)
+    : DEFAULT_COMBAT_STAT_PROFILE
 }
 
 function effectiveAbilityScore(input: CombatStatInput, key: AbilityKey): number {
@@ -110,40 +117,50 @@ export function computeAc(input: CombatStatInput): number {
 /** 攻击力 = 武器攻击力 + 敏捷 × 2 */
 export function computePhysicalAttack(input: CombatStatInput): number {
   const weapon = sumWeaponBonuses(input.equipment)
-  const dex = effectiveAbilityScore(input, 'dex')
-  return weapon.physicalAttack + dex * 2
+  const formula = statProfile(input).physicalAttack
+  return weapon.physicalAttack + effectiveAbilityScore(input, formula.ability) * formula.multiplier
 }
 
 /** 防御力 = 护甲防御力 + 体质 × 1.5 */
 export function computeDefense(input: CombatStatInput): number {
   const equip = sumEquipmentBonuses(input.equipment)
-  return equip.defense + input.abilities.con * 1.5
+  const formula = statProfile(input).defense
+  return equip.defense + effectiveAbilityScore(input, formula.ability) * formula.multiplier
 }
 
 /** 魔法攻击力 = 魔法武器攻击力 + 智力 × 2 */
 export function computeMagicAttack(input: CombatStatInput): number {
   const weapon = sumWeaponBonuses(input.equipment)
-  return weapon.magicAttack + input.abilities.int * 2
+  const formula = statProfile(input).magicAttack
+  return weapon.magicAttack + effectiveAbilityScore(input, formula.ability) * formula.multiplier
 }
 
 /** 魔法防御力 = 装备魔防 + 感知 × 1.5 */
 export function computeMagicDefense(input: CombatStatInput): number {
   const equip = sumEquipmentBonuses(input.equipment)
-  return equip.magicDefense + input.abilities.wis * 1.5
+  const formula = statProfile(input).magicDefense
+  return equip.magicDefense + effectiveAbilityScore(input, formula.ability) * formula.multiplier
 }
 
 /** 生命值 = 6 + 等级 × 体质调整值 + 装备生命加成 */
 export function computeMaxHp(input: CombatStatInput): number {
   const equip = sumEquipmentBonuses(input.equipment)
   const level = Math.max(1, input.level ?? 1)
-  return Math.max(1, 6 + level * abilityMod(input.abilities.con) + equip.hpBonus)
+  const formula = statProfile(input).maxHp
+  const abilityValue = formula.useModifier
+    ? abilityMod(effectiveAbilityScore(input, formula.ability))
+    : effectiveAbilityScore(input, formula.ability)
+  return Math.max(1, formula.base + level * abilityValue * formula.multiplierPerLevel + equip.hpBonus)
 }
 
 /** 暴击伤害倍率：125% + 装备暴伤加成 + 敏捷 × 1.5% */
 export function computeCritDamageMultiplier(input: CombatStatInput): number {
   const equip = sumEquipmentBonuses(input.equipment)
-  const dex = effectiveAbilityScore(input, 'dex')
-  const percent = 125 + equip.critDamagePercent + dex * 1.5
+  const formula = statProfile(input).critDamage
+  const percent =
+    formula.basePercent +
+    equip.critDamagePercent +
+    effectiveAbilityScore(input, formula.ability) * formula.percentPerPoint
   return percent / 100
 }
 
@@ -323,14 +340,12 @@ export function hasAnyEquipment(equipment?: CharacterEquipment): boolean {
 export function ensureDefaultEquipment(c: Character): Character {
   const equipment = migrateEquipment(c.equipment)
   if (hasAnyEquipment(equipment)) return { ...c, equipment }
-  if (!isArcherLineClass(c.charClass)) return { ...c, equipment }
-  return { ...c, equipment: { ...DEFAULT_ARCHER_EQUIPMENT } }
+  const defaults = classDefinitionForClassName(c.charClass)?.defaultEquipment
+  return defaults ? { ...c, equipment: { ...defaults } } : { ...c, equipment }
 }
 
 export function refreshKnownEquipment(c: Character): Character {
-  if (!isArcherLineClass(c.charClass)) {
-    return { ...c, equipment: migrateEquipment(c.equipment) }
-  }
+  const definition = classDefinitionForClassName(c.charClass)
   let equipment = migrateEquipment(c.equipment)
   const upsert = (slot: EquipmentSlot, item: EquipmentItem) => {
     const current = equipment[slot]
@@ -338,12 +353,11 @@ export function refreshKnownEquipment(c: Character): Character {
       equipment = setEquipmentSlot(equipment, slot, item)
     }
   }
-  upsert('mainWeapon', LONG_BOW)
-  upsert('armor', LEATHER_ARMOR)
-  upsert('helmet', LEATHER_CAP)
-  upsert('ring', CRIT_RING)
-  if (!hasAnyEquipment(equipment)) {
-    equipment = { ...DEFAULT_ARCHER_EQUIPMENT }
+  for (const item of definition?.knownEquipment ?? []) {
+    upsert(item.slot, item)
+  }
+  if (!hasAnyEquipment(equipment) && definition?.defaultEquipment) {
+    equipment = { ...definition.defaultEquipment }
   }
   return { ...c, equipment }
 }

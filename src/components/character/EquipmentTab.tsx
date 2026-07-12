@@ -2,11 +2,12 @@ import type { ComponentType } from 'react'
 import { Shield, Sword, Gem } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import {
-  catalogForSlot,
   EQUIPMENT_SLOT_LABELS,
   EQUIPMENT_SLOTS,
 } from '../../lib/equipmentDefaults'
 import { formatEquipmentStatLine, setEquipmentSlot } from '../../lib/combatStats'
+import { equipmentCatalogForCharacter } from '../../lib/classDefinitionRegistry'
+import type { Character } from '../../types/character'
 import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
 
 const SLOT_ICONS: Partial<Record<EquipmentSlot, ComponentType<{ className?: string }>>> = {
@@ -21,17 +22,19 @@ function SlotCard({
   slot,
   item,
   editable,
+  character,
   onEquip,
   onUnequip,
 }: {
   slot: EquipmentSlot
   item?: EquipmentItem
   editable: boolean
+  character: Character
   onEquip: (item: EquipmentItem) => void
   onUnequip: () => void
 }) {
   const Icon = SLOT_ICONS[slot]
-  const options = catalogForSlot(slot)
+  const options = equipmentCatalogForCharacter(character).filter((option) => option.slot === slot)
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-white/8 bg-void-900/35 p-3">
@@ -103,6 +106,7 @@ export default function EquipmentTab({ charId, editable = true }: { charId: stri
               slot={slot}
               item={equipment[slot]}
               editable={editable}
+              character={c}
               onEquip={(item) => patchSlot(slot, item)}
               onUnequip={() => patchSlot(slot, undefined)}
             />

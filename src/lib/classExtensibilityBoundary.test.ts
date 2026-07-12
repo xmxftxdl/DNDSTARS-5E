@@ -35,4 +35,15 @@ describe('class extensibility boundaries', () => {
     expect(source('../pages/mapsPageHelpers.ts')).toContain("from '../lib/skillRangeRegistry'")
     expect(source('./headlessDmCombatEngine.ts')).toContain("from './skillRangeRegistry'")
   })
+
+  it('keeps the skill-tree UI and combat formulas class-agnostic', () => {
+    const skillTree = source('../components/character/SkillTreeTab.tsx')
+    expect(skillTree).not.toContain('ArcherSkillDef')
+    expect(skillTree).not.toContain('archerSkillTree')
+    expect(skillTree).toContain('ClassSkillTreeNodeView')
+
+    const combatStats = source('./combatStats.ts')
+    expect(combatStats).not.toContain('isArcherLineClass')
+    expect(combatStats).toContain('classDefinitionForClassName')
+  })
 })
