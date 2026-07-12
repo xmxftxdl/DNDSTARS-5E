@@ -58,4 +58,15 @@ describe('class extensibility boundaries', () => {
     expect(source('./headlessDmCombatEngine.ts')).toContain('getClassResourceCurrent')
     expect(source('./headlessDmCombatEngine.ts')).toContain('spendClassResource')
   })
+
+  it('keeps feature presentation and class-specific action routing out of core UI dispatch', () => {
+    const features = source('../components/character/FeaturesTab.tsx')
+    expect(features).not.toMatch(/featureKey\s*===/)
+    expect(features).toContain('buildFeaturePresentation')
+
+    const headless = source('./headlessDmCombatEngine.ts')
+    expect(headless).not.toContain("actor.charClass !== '重炮手'")
+    expect(headless).toContain('headlessClassCombatActionResolver')
+    expect(headless).toContain('headlessFeatureActivationResolver')
+  })
 })

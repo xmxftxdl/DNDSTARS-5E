@@ -34,6 +34,16 @@ import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { resetCombatTraitUses } from './traitRegistry'
 import { getClassResourceCurrent, spendClassResource } from './classResources'
+import { classCombatActionAvailable } from './classDefinitionRegistry'
+import {
+  headlessClassCombatActionResolver,
+  registerHeadlessClassCombatActionResolver,
+} from './classCombatActionRegistry'
+import {
+  featureActivationContract,
+  headlessFeatureActivationResolver,
+  registerHeadlessFeatureActivationResolver,
+} from './featureActivationRegistry'
 import { BULLET_CELL_COUNT, BULLET_TYPE_COUNT, createSeededBulletRandom, planSwapCascade } from './bulletMatch'
 import { IGNITE_STATUS_LABEL } from './ignite'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
@@ -361,21 +371,7 @@ export interface HeadlessActivateFeatureAction {
   type: 'activate-feature'
   actorTokenId: string
   characterId: string
-  featureKey: Extract<
-    ClassFeatureKey,
-    | 'eagleEye'
-    | 'doubleArrow'
-    | 'preciseStrike'
-    | 'stillWater'
-    | 'finale'
-    | 'illusionDance'
-    | 'shadowVeil'
-    | 'trackingArrow'
-    | 'flexibleBody'
-    | 'showtime'
-    | 'windBlade'
-    | 'wildernessGuide'
-  >
+  featureKey: ClassFeatureKey
   targetTokenId?: string
   targetTokenIds?: string[]
   targetPackets?: HeadlessFeatureTargetPacket[]
@@ -391,6 +387,16 @@ export interface HeadlessQiReduceCooldownAction {
   type: 'qi-reduce-cooldown'
   actorTokenId: string
   characterId: string
+  skillId: string
+}
+
+export interface HeadlessClassResourceAction {
+  type: 'class-resource-action'
+  actorTokenId: string
+  characterId: string
+  resourceKey: string
+  amount: number
+  operation: 'reduce-skill-cooldown'
   skillId: string
 }
 
@@ -468,6 +474,7 @@ export type HeadlessCombatAction =
   | HeadlessAgileLeapReadyAction
   | HeadlessActivateFeatureAction
   | HeadlessQiReduceCooldownAction
+  | HeadlessClassResourceAction
   | HeadlessCalmSpiritAction
   | HeadlessBulletMatchSwapAction
   | HeadlessAoeAttackAction
@@ -641,6 +648,9 @@ export function resolveHeadlessDmAction(
     return fail(next, 'stale-turn', events)
   }
 
+  const classActionResolver = headlessClassCombatActionResolver(action.type)
+  if (classActionResolver) return classActionResolver({ state: next, action, dice, events })
+
   switch (action.type) {
     case 'move-token':
       return resolveMove(next, action, events)
@@ -665,11 +675,10 @@ export function resolveHeadlessDmAction(
     case 'activate-feature':
       return resolveActivateFeature(next, action, dice, events)
     case 'qi-reduce-cooldown':
+    case 'class-resource-action':
       return resolveQiReduceCooldown(next, action, events)
     case 'calm-spirit':
       return resolveCalmSpirit(next, action, events)
-    case 'bullet-match-swap':
-      return resolveBulletMatchSwap(next, action, events)
     case 'opportunity-attack-token':
       return resolveOpportunityAttack(next, action, dice, events)
     case 'commit-token-move':
@@ -1014,6 +1023,35 @@ function resolveActivateFeature(
   const actor = findCharacter(state, action.characterId)
   if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
   const trait = actor.traits.find((item) => item.featureKey === action.featureKey)
+  const contract = featureActivationContract(action.featureKey)
+  const resolver = headlessFeatureActivationResolver(action.featureKey)
+  const isToggleOff = contract?.toggleActive?.(actor) ?? false
+  if (!trait || !contract || !resolver || (!isToggleOff && contract.requiresUse && trait.uses <= 0)) {
+    return fail(state, 'invalid-skill', events)
+  }
+  return resolver({ state, action, actorToken, actor, trait, dice, events })
+}
+
+function resolveBuiltinFeatureActivation(
+  state: HeadlessDmCombatState,
+  action: HeadlessActivateFeatureAction,
+  dice: HeadlessDiceRoller,
+  events: HeadlessCombatEvent[],
+): HeadlessCombatResult {
+  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
+  if (
+    !actorToken ||
+    actorToken.type !== 'player' ||
+    actorToken.characterId !== action.characterId ||
+    !isTokenAlive(actorToken, state.characters)
+  ) {
+    return fail(state, 'invalid-actor', events)
+  }
+  const current = getCurrentTurn(state)
+  if (current?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
+  const actor = findCharacter(state, action.characterId)
+  if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
+  const trait = actor.traits.find((item) => item.featureKey === action.featureKey)
   const isToggleOff =
     (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
     (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady) ||
@@ -1243,6 +1281,25 @@ function resolveActivateFeature(
   return succeed(state, events)
 }
 
+for (const featureKey of [
+  'eagleEye',
+  'wildernessGuide',
+  'doubleArrow',
+  'preciseStrike',
+  'stillWater',
+  'finale',
+  'illusionDance',
+  'shadowVeil',
+  'trackingArrow',
+  'flexibleBody',
+  'showtime',
+  'windBlade',
+] as const) {
+  registerHeadlessFeatureActivationResolver(featureKey, ({ state, action, dice, events }) =>
+    resolveBuiltinFeatureActivation(state, action, dice, events),
+  )
+}
+
 function resolveStableMind(
   state: HeadlessDmCombatState,
   action: HeadlessStableMindAction,
@@ -1406,7 +1463,7 @@ function resolveIllusionDanceFeature(
 
 function resolveQiReduceCooldown(
   state: HeadlessDmCombatState,
-  action: HeadlessQiReduceCooldownAction,
+  action: HeadlessQiReduceCooldownAction | HeadlessClassResourceAction,
   events: HeadlessCombatEvent[],
 ): HeadlessCombatResult {
   const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
@@ -1425,10 +1482,13 @@ function resolveQiReduceCooldown(
   if (!actor || actor.currentHp <= 0 || !skill || skill.remaining <= 0) {
     return fail(state, 'invalid-skill', events)
   }
-  if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
+  const resourceKey = action.type === 'qi-reduce-cooldown' ? 'qi' : action.resourceKey
+  const amount = action.type === 'qi-reduce-cooldown' ? 1 : action.amount
+  if (!Number.isFinite(amount) || amount <= 0) return fail(state, 'invalid-action', events)
+  if (getClassResourceCurrent(actor, resourceKey) < amount) return fail(state, 'insufficient-resource', events)
 
   updateCharacter(state, actor.id, (item) => {
-    const spent = spendClassResource(item, 'qi', 1) ?? item
+    const spent = spendClassResource(item, resourceKey, amount) ?? item
     return {
       ...spent,
       combatSkills: spent.combatSkills.map((currentSkill) =>
@@ -1442,7 +1502,7 @@ function resolveQiReduceCooldown(
   const updatedSkill = updated?.combatSkills.find((item) => item.id === action.skillId)
   events.push({
     type: 'log',
-    text: `${actor.name} 消耗 1 点气：${skill.name} 冷却 -1。剩余气 ${updated ? getClassResourceCurrent(updated, 'qi') : 0}，剩余冷却 ${
+    text: `${actor.name} 消耗 ${amount} 点${resourceKey === 'qi' ? '气' : resourceKey}：${skill.name} 冷却 -1。剩余资源 ${updated ? getClassResourceCurrent(updated, resourceKey) : 0}，剩余冷却 ${
       updatedSkill?.remaining ?? 0
     }。`,
   })
@@ -1462,7 +1522,7 @@ function resolveBulletMatchSwap(
     actorToken.characterId !== action.characterId ||
     !actor ||
     actor.currentHp <= 0 ||
-    actor.charClass !== '重炮手'
+    !classCombatActionAvailable(actor, action.type)
   ) {
     return fail(state, 'invalid-actor', events)
   }
@@ -1489,6 +1549,11 @@ function resolveBulletMatchSwap(
   })
   return succeed(state, events)
 }
+
+registerHeadlessClassCombatActionResolver('bullet-match-swap', ({ state, action, events }) => {
+  if (action.type !== 'bullet-match-swap') return fail(state, 'invalid-action', events)
+  return resolveBulletMatchSwap(state, action, events)
+})
 
 function resolveCalmSpirit(
   state: HeadlessDmCombatState,

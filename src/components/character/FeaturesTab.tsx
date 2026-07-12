@@ -1,32 +1,35 @@
-import { useState } from 'react'
 import { ArrowUpCircle, Plus, Trash2, Sparkles } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import {
-  hasDarkvision,
-  rollSkillCheck,
-  wildernessPassiveAdvantage,
-} from '../../lib/archerBaseFeatures'
-import {
-  canArmDoubleArrow,
   canUpgradeClassTrait,
-  eagleEyeDexBonus,
   MAX_FEATURE_LEVEL,
   nextFeatureUpgradeCharacterLevel,
   pendingTraitChoices,
 } from '../../lib/classFeatures'
 import { formatFeatureDescription, getClassFeatureDef, usageLabel } from '../../lib/traitRegistry'
-import { isCalmMindActive, isOutOfBreath } from '../../lib/calmMind'
 import type { ClassFeatureKey } from '../../types/character'
+import { buildFeaturePresentation, type FeatureUiTone } from '../../lib/featureActivationRegistry'
 import TraitChoicePanel from './TraitChoicePanel'
+import FeatureAuxiliaryControls from './FeatureAuxiliaryControls'
 
-const ACTIVE_FEATURES = new Set<ClassFeatureKey>([
-  'trackingArrow',
-  'shadowVeil',
-  'stillWater',
-  'finale',
-  'illusionDance',
-  'flexibleBody',
-])
+const FEATURE_STATUS_COLORS = {
+  amber: 'text-amber-200',
+  sky: 'text-sky-300',
+  rose: 'text-rose-300',
+  cyan: 'text-cyan-300',
+  lime: 'text-lime-300',
+  emerald: 'text-emerald-300',
+  teal: 'text-teal-300',
+  orange: 'text-orange-300',
+  fuchsia: 'text-fuchsia-200',
+} as const
+
+const FEATURE_BUTTON_COLORS: Record<FeatureUiTone, string> = {
+  amber: 'bg-amber-500/25 text-amber-100 hover:bg-amber-500/35',
+  sky: 'bg-sky-500/20 text-sky-100 hover:bg-sky-500/30',
+  rose: 'bg-rose-500/20 text-rose-100 hover:bg-rose-500/30',
+  fuchsia: 'bg-fuchsia-500/20 text-fuchsia-100 hover:bg-fuchsia-500/30',
+}
 
 export default function FeaturesTab({
   charId,
@@ -50,66 +53,12 @@ export default function FeaturesTab({
   const removeTrait = useCharacterStore((s) => s.removeTrait)
   const upgradeClassTrait = useCharacterStore((s) => s.upgradeClassTrait)
   const applyTraitChoice = useCharacterStore((s) => s.applyTraitChoice)
-  const activateClassFeature = useCharacterStore((s) => s.useClassFeature)
-  const spendAP = useCharacterStore((s) => s.spendAP)
-  const updateChar = useCharacterStore((s) => s.update)
-  const [lastCheckLabel, setLastCheckLabel] = useState<string | null>(null)
 
   if (!c) return null
 
   const classTraits = c.traits.filter((t) => t.featureKey)
   const customTraits = c.traits.filter((t) => !t.featureKey)
   const pendingChoices = pendingTraitChoices(c)
-  const eagleTurns = c.combatBuffs?.eagleEyeTurns ?? 0
-  const doubleArrowReady = !!c.combatBuffs?.doubleArrowReady
-  const preciseStrikeReady = !!c.combatBuffs?.preciseStrikeReady
-  const galeComboReady = !!c.combatBuffs?.galeComboReady
-  const agileLeapFeet = c.combatBuffs?.agileLeapMoveFeet ?? 0
-  const wildernessBoost = !!c.combatBuffs?.wildernessGuideBoost
-
-  const runWildernessCheck = (skillKey: 'survival' | 'perception') => {
-    const isDaytime =
-      skillKey === 'survival'
-        ? window.confirm('当前是否为白天？\n确定 = 白天，取消 = 夜晚')
-        : undefined
-    const inWilderness =
-      skillKey === 'perception'
-        ? window.confirm('当前是否处于野外环境？')
-        : undefined
-    const passiveAdv = wildernessPassiveAdvantage(c, skillKey, {
-      isDaytime: skillKey === 'survival' ? isDaytime : undefined,
-      inWilderness: skillKey === 'perception' ? inWilderness : undefined,
-    })
-    const advantage = passiveAdv || wildernessBoost
-    const result = rollSkillCheck(c, skillKey, { advantage })
-    setLastCheckLabel(result.label)
-    if (wildernessBoost) {
-      updateChar(charId, {
-        combatBuffs: { ...c.combatBuffs, wildernessGuideBoost: undefined },
-      })
-    }
-  }
-
-  const activateWildernessGuide = () => {
-    if (battleMode && onActivateFeature) {
-      void onActivateFeature('wildernessGuide')
-      return
-    }
-    const trait = c.traits.find((t) => t.featureKey === 'wildernessGuide')
-    if (!trait || trait.uses <= 0) {
-      alert('特殊指引次数已用完')
-      return
-    }
-    if (!spendAP(charId, 1)) {
-      alert('行动点不足（需要 1 AP）')
-      return
-    }
-    if (!activateClassFeature(charId, 'wildernessGuide')) return
-    updateChar(charId, {
-      combatBuffs: { ...c.combatBuffs, wildernessGuideBoost: true },
-    })
-    alert('特殊指引已激活：下次生存或察觉检定具有优势')
-  }
   const upgradePoints = c.featureUpgradePoints ?? 0
   const nextPointLevel = nextFeatureUpgradeCharacterLevel(c.level)
 
@@ -147,8 +96,8 @@ export default function FeaturesTab({
               const canUpgrade = canUpgradeClassTrait(c, t)
               const def = t.featureKey ? getClassFeatureDef(t.featureKey) : undefined
               const usageSuffix = def ? usageLabel(def.usage) : t.maxUses > 0 ? '次/长休' : ''
-              const eagleCanActivate = t.featureKey === 'eagleEye' ? t.uses > 0 && c.currentAP >= 1 : eagleTurns > 0 || t.uses > 0
               const displayDescription = def ? formatFeatureDescription(def, t.level) : t.description
+              const presentation = buildFeaturePresentation(c, t)
 
               return (
                 <div key={t.id} className="rounded-xl border border-emerald-500/25 bg-void-900/50 p-4">
@@ -185,147 +134,34 @@ export default function FeaturesTab({
                     <p className="mt-1.5 text-xs text-slate-500">该特性已达最高等级</p>
                   )}
 
-                  {t.featureKey === 'doubleArrow' && doubleArrowReady && (
-                    <p className="mt-2 text-xs font-semibold text-amber-200">双箭已就绪，等待单箭射击</p>
-                  )}
-                  {t.featureKey === 'eagleEye' && eagleTurns > 0 && (
-                    <p className="mt-2 text-xs font-semibold text-sky-300">
-                      鹰眼进行中：剩余 {eagleTurns} 回合 · 敏捷 +{eagleEyeDexBonus(t.level)}
+                  {presentation.statuses.map((status) => (
+                    <p key={`${status.tone}:${status.text}`} className={`mt-2 text-xs font-semibold ${FEATURE_STATUS_COLORS[status.tone]}`}>
+                      {status.text}
                     </p>
+                  ))}
+                  {presentation.auxiliary === 'wilderness-checks' && (
+                    <FeatureAuxiliaryControls
+                      type={presentation.auxiliary}
+                      charId={charId}
+                      battleMode={battleMode}
+                      onActivateFeature={onActivateFeature}
+                    />
                   )}
-                  {t.featureKey === 'preciseStrike' && preciseStrikeReady && (
-                    <p className="mt-2 text-xs font-semibold text-rose-300">精准打击已就绪</p>
-                  )}
-                  {t.featureKey === 'galeCombo' && galeComboReady && (
-                    <p className="mt-2 text-xs font-semibold text-cyan-300">
-                      疾风连击已就绪 · 下次技能/基础射击免 AP
-                    </p>
-                  )}
-                  {t.featureKey === 'agileLeap' && agileLeapFeet > 0 && (
-                    <p className="mt-2 text-xs font-semibold text-lime-300">
-                      灵巧跳跃：点击地图移动至多 {agileLeapFeet} 尺
-                    </p>
-                  )}
-                  {t.featureKey === 'wildernessGuide' && wildernessBoost && (
-                    <p className="mt-2 text-xs font-semibold text-emerald-300">特殊指引已激活</p>
-                  )}
-                  {t.featureKey === 'wildernessGuide' && (
-                    <div className="mt-3 space-y-2 rounded-lg border border-emerald-500/20 bg-void-900/40 p-3">
-                      <p className="text-xs text-slate-400">
-                        被动：白天生存检定优势；野外察觉检定优势
-                        {hasDarkvision(c) ? '；夜晚生存检定优势（黑暗视觉）' : ''}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => runWildernessCheck('survival')}
-                          className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/25"
-                        >
-                          生存检定
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => runWildernessCheck('perception')}
-                          className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/25"
-                        >
-                          察觉检定
-                        </button>
-                        {t.maxUses > 0 && (
-                          <button
-                            type="button"
-                            disabled={t.uses <= 0 || c.currentAP < 1}
-                            onClick={activateWildernessGuide}
-                            className="rounded-lg bg-violet-500/15 px-3 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            特殊指引（{t.uses}/{t.maxUses}）
-                          </button>
-                        )}
-                      </div>
-                      {lastCheckLabel && t.featureKey === 'wildernessGuide' && (
-                        <p className="text-xs font-medium text-arcane-200">{lastCheckLabel}</p>
-                      )}
-                    </div>
-                  )}
-                  {t.featureKey === 'calmMind' && isCalmMindActive(c) && (
-                    <p className="mt-2 text-xs font-semibold text-teal-300">静心状态 · 伤害骰 +{t.level}D6</p>
-                  )}
-                  {t.featureKey === 'calmMind' && isOutOfBreath(c) && (
-                    <p className="mt-2 text-xs font-semibold text-orange-300">
-                      气喘状态 · 所有攻击获得劣势
-                      {(c.combatBuffs?.outOfBreathTurns ?? 0) > 0 &&
-                        ` · 剩余 ${c.combatBuffs!.outOfBreathTurns} 回合`}
-                    </p>
-                  )}
-
-                  {battleMode && t.featureKey === 'doubleArrow' && isPlayerTurn && (
+                  {presentation.activation && t.featureKey && battleMode && isPlayerTurn && (
                     <button
                       type="button"
-                      disabled={(!canArmDoubleArrow(c) || c.currentAP < 1) && !doubleArrowReady}
-                      onClick={() => onActivateFeature?.('doubleArrow')}
+                      disabled={presentation.activation.disabled}
+                      onClick={() => {
+                        void onActivateFeature?.(t.featureKey!)
+                      }}
                       className={[
                         'mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
-                        doubleArrowReady
-                          ? 'bg-amber-500/25 text-amber-100 hover:bg-amber-500/35'
-                          : canArmDoubleArrow(c) && c.currentAP >= 1
-                            ? 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30'
-                            : 'cursor-not-allowed bg-white/5 text-slate-600',
+                        presentation.activation.disabled
+                          ? 'cursor-not-allowed bg-white/5 text-slate-600'
+                          : FEATURE_BUTTON_COLORS[presentation.activation.tone],
                       ].join(' ')}
                     >
-                      {doubleArrowReady
-                        ? '双箭已就绪 · 点击取消'
-                        : t.uses > 0
-                          ? `启用双箭（${t.uses}/${t.maxUses}）`
-                          : '本场次数已用完'}
-                    </button>
-                  )}
-
-                  {battleMode && t.featureKey === 'eagleEye' && isPlayerTurn && (
-                    <button
-                      type="button"
-                      disabled={!eagleCanActivate}
-                      onClick={() => onActivateFeature?.('eagleEye')}
-                      className={[
-                        'mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
-                        eagleCanActivate
-                          ? 'bg-sky-500/20 text-sky-100 hover:bg-sky-500/30'
-                          : 'cursor-not-allowed bg-white/5 text-slate-600',
-                      ].join(' ')}
-                    >
-                      {eagleTurns > 0
-                        ? `鹰眼进行中（${eagleTurns} 回合）· 再次激活刷新（${t.uses}/${t.maxUses}）`
-                        : `激活鹰眼（3 回合 · ${t.uses}/${t.maxUses}）`}
-                    </button>
-                  )}
-
-                  {battleMode && t.featureKey === 'preciseStrike' && isPlayerTurn && (
-                    <button
-                      type="button"
-                      disabled={!preciseStrikeReady && (t.uses <= 0 || c.currentAP < 1)}
-                      onClick={() => onActivateFeature?.('preciseStrike')}
-                      className="mt-3 w-full rounded-lg bg-rose-500/20 px-3 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-500/30 disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-slate-600"
-                    >
-                      {preciseStrikeReady
-                        ? '精准打击已就绪 · 点击取消'
-                        : c.currentAP < 1
-                          ? '行动点不足（需要 1 AP）'
-                          : `启用精准打击（1 AP · ${t.uses}/${t.maxUses}）`}
-                    </button>
-                  )}
-
-                  {battleMode && t.featureKey && ACTIVE_FEATURES.has(t.featureKey) && isPlayerTurn && (
-                    <button
-                      type="button"
-                      disabled={
-                        t.featureKey === 'finale' && c.combatBuffs?.finaleReady
-                          ? false
-                          : c.currentAP < (t.featureKey === 'finale' ? 2 : 1) || (t.maxUses > 0 && t.uses <= 0)
-                      }
-                      onClick={() => onActivateFeature?.(t.featureKey!)}
-                      className="mt-3 w-full rounded-lg bg-fuchsia-500/20 px-3 py-2 text-sm font-semibold text-fuchsia-100 hover:bg-fuchsia-500/30 disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-slate-600"
-                    >
-                      {t.featureKey === 'finale' && c.combatBuffs?.finaleReady
-                        ? '曲终待触发 · 点击取消'
-                        : `激活（${t.featureKey === 'finale' ? 2 : 1} AP${t.maxUses > 0 ? ` · ${t.uses}/${t.maxUses}` : ''}）`}
+                      {presentation.activation.label}
                     </button>
                   )}
 

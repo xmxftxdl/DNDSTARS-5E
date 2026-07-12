@@ -1604,6 +1604,31 @@ describe('headless DM combat engine', () => {
     expect(hero.combatSkills.find((item) => item.id === 'cooldown-skill')?.remaining).toBe(1)
   })
 
+  it('spends a generic class resource to reduce cooldown through headless DM authority', () => {
+    const cooldownSkill = skill({ id: 'cooldown-generic', remaining: 2, cooldown: 3 })
+    const combat = state({
+      characters: [character({
+        charClass: '影舞者',
+        classResources: { qi: { current: 3, max: 99 } },
+        qi: 3,
+        combatSkills: [skill(), cooldownSkill],
+      })],
+    })
+    const result = resolveHeadlessDmAction(combat, {
+      type: 'class-resource-action',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      skillId: cooldownSkill.id,
+      resourceKey: 'qi',
+      amount: 1,
+      operation: 'reduce-skill-cooldown',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.characters[0].classResources?.qi.current).toBe(2)
+    expect(result.state.characters[0].combatSkills.find((item) => item.id === cooldownSkill.id)?.remaining).toBe(1)
+  })
+
   it('rejects qi cooldown reduction when qi is unavailable', () => {
     const cooldownSkill = skill({ id: 'cooldown-skill', name: '冷却技能', remaining: 2, cooldown: 3 })
     const combat = state({

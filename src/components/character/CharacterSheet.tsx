@@ -137,8 +137,6 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
       update(id, {
         charClass,
         traits: stripArcherClassTraits(c.traits),
-        archerLv1ChoiceDone: false,
-        archerLv3ChoiceDone: false,
         traitChoicesDone: {},
         combatBuffs: {},
       })
@@ -149,8 +147,6 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
       update(id, {
         charClass,
         traits: stripArcherClassTraits(c.traits),
-        archerLv1ChoiceDone: false,
-        archerLv3ChoiceDone: false,
         traitChoicesDone: {},
         combatBuffs: {},
       })

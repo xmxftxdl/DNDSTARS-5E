@@ -29,6 +29,7 @@ import {
 import { getClassResourceCurrent, restoreClassResources, spendClassResource } from '../lib/classResources'
 import { beginCalmMindTurn, calmBreathState, initCalmMindForCombat, isCalmMindActive, triggerOutOfBreath, tickOutOfBreathOnEndTurn } from '../lib/calmMind'
 import { ensureDefaultEquipment, isMagicDamageSkill, refreshKnownEquipment, syncCombatDerivedStats } from '../lib/combatStats'
+import { migrateLegacyCharacterFields } from '../lib/legacyCharacterMigration'
 
 function skillCooldownRemaining(skill: { cooldown: number; cdReduction: number }): number {
   if (skill.cooldown <= 0) return 0
@@ -302,8 +303,6 @@ function mergePendingLocalTraitChoices(sharedCharacters: Character[], localChara
       ...shared,
       traits: local.traits,
       traitChoicesDone: local.traitChoicesDone,
-      archerLv1ChoiceDone: local.archerLv1ChoiceDone,
-      archerLv3ChoiceDone: local.archerLv3ChoiceDone,
       featureUpgradePoints: local.featureUpgradePoints,
       skillRanks: local.skillRanks,
     })
@@ -373,7 +372,8 @@ function makeSkill(s: Partial<CombatSkill> & { name: string }): CombatSkill {
 }
 
 /** 兜底：把旧的/不完整的角色数据补齐新字段 */
-function normalizeCharacter(c: Partial<Character>): Character {
+function normalizeCharacter(input: Partial<Character>): Character {
+  const c = migrateLegacyCharacterFields(input)
   const d = combatDefaults()
   return {
     ...emptyCharacter(),
@@ -402,8 +402,6 @@ function normalizeCharacter(c: Partial<Character>): Character {
     conditions: c.conditions ?? [],
     experience: c.experience ?? 0,
     reputation: c.reputation ?? 0,
-    archerLv1ChoiceDone: c.archerLv1ChoiceDone ?? false,
-    archerLv3ChoiceDone: c.archerLv3ChoiceDone ?? false,
     combatBuffs: c.combatBuffs ?? {},
     featureUpgradePoints: c.featureUpgradePoints ?? 0,
     skillRanks: c.skillRanks ?? {},
@@ -494,8 +492,6 @@ function applyTraitChoiceToCharacter(
 
   let next = { ...character }
   const choicesDone = { ...(next.traitChoicesDone ?? {}), [groupId]: true }
-  if (groupId === 'archer-lv1') next = { ...next, archerLv1ChoiceDone: true }
-  if (groupId === 'archer-lv3') next = { ...next, archerLv3ChoiceDone: true }
 
   if (group.autoGrant?.length || group.autoGrantFeatures?.length) {
     for (const meta of group.autoGrant ?? []) {
@@ -542,7 +538,7 @@ function mergeMissingSampleSkills(c: Character): Character {
 }
 
 function finalizeCharacter(c: Partial<Character>): Character {
-  return syncCombatDerivedStats(
+  const finalized = syncCombatDerivedStats(
     syncCharacterClassProgression(
       migrateCharacterTraits(
         mergeMissingSampleSkills(
@@ -551,6 +547,7 @@ function finalizeCharacter(c: Partial<Character>): Character {
       ),
     ),
   )
+  return finalized
 }
 
 const SAMPLE: Character[] = [
@@ -787,8 +784,7 @@ const SAMPLE: Character[] = [
     conditions: [],
     notes: '弓手：升级至 2 级时可进行 LV1 特性抉择。',
     dmNotes: '测试：将等级从 1 升到 2 触发抉择弹窗。',
-    archerLv1ChoiceDone: true,
-    archerLv3ChoiceDone: true,
+    traitChoicesDone: { 'archer-lv1': true, 'archer-lv3': true },
     visibleToPlayers: true,
   },
   {
@@ -1466,7 +1462,7 @@ export const useCharacterStore = create<CharacterState>()(
     },
     {
       name: 'stars-characters',
-      version: 19,
+      version: 20,
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<CharacterState>
         let characters = (p.characters ?? []).map((c) => finalizeCharacter(c))
@@ -1595,6 +1591,9 @@ export const useCharacterStore = create<CharacterState>()(
           characters = characters.map((c) => finalizeCharacter(c))
         }
         if (version < 19) {
+          characters = characters.map((c) => finalizeCharacter(c))
+        }
+        if (version < 20) {
           characters = characters.map((c) => finalizeCharacter(c))
         }
         return { ...p, characters } as CharacterState

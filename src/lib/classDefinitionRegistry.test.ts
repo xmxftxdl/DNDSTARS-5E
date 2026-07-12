@@ -4,6 +4,7 @@ import type { EquipmentItem } from '../types/equipment'
 import {
   ARCHER_CLASS_DEFINITION,
   classDefinitionForCharacter,
+  classCombatActionAvailable,
   equipmentCatalogForCharacter,
   registerClassDefinition,
   type ClassDefinition,
@@ -107,5 +108,12 @@ describe('class definition registry', () => {
     } finally {
       dispose()
     }
+  })
+
+  it('declares heavy gunner combat actions through its class definition', () => {
+    const gunner = character({ charClass: '重炮手' })
+    expect(classDefinitionForCharacter(gunner)?.id).toBe('heavy-gunner')
+    expect(classCombatActionAvailable(gunner, 'bullet-match-swap')).toBe(true)
+    expect(classCombatActionAvailable(gunner, 'unknown-action')).toBe(false)
   })
 })

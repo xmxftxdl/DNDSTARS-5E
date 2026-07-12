@@ -60,7 +60,16 @@ export const CLASS_FEATURE_KEYS = [
   'lastingControl',
 ] as const
 
-export type ClassFeatureKey = (typeof CLASS_FEATURE_KEYS)[number]
+export type BuiltinClassFeatureKey = (typeof CLASS_FEATURE_KEYS)[number]
+
+/** 新职业可通过 module augmentation 扩展特性键，无需修改核心联合类型。 */
+export interface ClassFeatureKeyExtensions {
+  readonly __classFeatureKeyExtensionBrand?: never
+}
+
+export type ClassFeatureKey =
+  | BuiltinClassFeatureKey
+  | Exclude<Extract<keyof ClassFeatureKeyExtensions, string>, '__classFeatureKeyExtensionBrand'>
 
 export type TraitUsage = 'perCombat' | 'perDay' | 'perLongRest' | 'passive' | 'unlimited'
 
@@ -546,6 +555,20 @@ export function getClassFeatureDef(key: ClassFeatureKey): ClassFeatureDef | unde
   return FEATURE_MAP.get(key)
 }
 
+export function registeredClassFeatureDefs(): readonly ClassFeatureDef[] {
+  return [...FEATURE_MAP.values()]
+}
+
+export function registerClassFeatureDef(definition: ClassFeatureDef): () => void {
+  const previous = FEATURE_MAP.get(definition.key)
+  FEATURE_MAP.set(definition.key, definition)
+  return () => {
+    if (FEATURE_MAP.get(definition.key) !== definition) return
+    if (previous) FEATURE_MAP.set(definition.key, previous)
+    else FEATURE_MAP.delete(definition.key)
+  }
+}
+
 export function formatFeatureDescription(def: ClassFeatureDef, featureRank: number): string {
   const uses = def.maxUsesAtRank?.(featureRank)
   const range = def.rangeAtRank?.(featureRank)
@@ -847,7 +870,7 @@ export function applyTraitFeatureRank(trait: Trait, featureRank: number): Trait 
 
 export function syncClassTraitUses(c: Character): Character {
   let traits = c.traits
-  for (const def of CLASS_FEATURE_DEFS) {
+  for (const def of registeredClassFeatureDefs()) {
     if (def.deprecated) continue
     const t = traits.find((x) => x.featureKey === def.key)
     if (!t) continue
@@ -918,7 +941,7 @@ export function migrateCharacterTraits(c: Character): Character {
 
 export function resetCombatTraitUses(c: Character): Character {
   let traits = c.traits
-  for (const def of CLASS_FEATURE_DEFS) {
+  for (const def of registeredClassFeatureDefs()) {
     if (def.deprecated || def.usage !== 'perCombat' || !def.maxUsesAtRank) continue
     traits = traits.map((t) => {
       if (t.featureKey !== def.key) return t

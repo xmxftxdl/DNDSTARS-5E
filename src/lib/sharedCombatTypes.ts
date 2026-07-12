@@ -37,6 +37,7 @@ export interface SharedPlayerActionState {
     | 'skill-free-move'
     | 'calm-spirit-move'
     | 'qi-reduce-cooldown'
+    | 'class-resource-action'
     | 'calm-spirit'
     | 'activate-feature'
     | 'bullet-match-swap'
@@ -48,6 +49,11 @@ export interface SharedPlayerActionState {
   targetPosition?: { x: number; y: number }
   aoeRectRotation?: number
   skillId?: string
+  classResource?: {
+    key: string
+    amount: number
+    operation: 'reduce-skill-cooldown'
+  }
   featureKey?: ClassFeatureKey
   calmSpiritEffect?: 'move' | 'crit' | 'cooldown' | 'extraTurn'
   bulletSwap?: { from: number; to: number; seed: number }

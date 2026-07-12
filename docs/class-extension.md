@@ -56,6 +56,12 @@ Store 只调用 `syncCharacterClassProgression`，不应导入具体职业技能
 `pendingTraitChoices` 不再限定弓手系。
 
 新增特性键和描述仍集中在 `traitRegistry.ts`，确保存档、角色面板和战斗状态使用同一个定义。
+新职业模块可以通过 `registerClassFeatureDef` 注册定义，并通过 TypeScript module augmentation
+扩展 `ClassFeatureKeyExtensions`，不需要修改核心特性键联合类型。
+
+主动特性还需通过 `registerFeatureActivationContract` 注册 AP、职业资源、次数、切换状态和
+UI ViewModel，并通过 `registerHeadlessFeatureActivationResolver` 注册 DM 权威效果。
+`FeaturesTab.tsx` 与 Headless 主分发器不得判断具体 `featureKey`。
 
 ## 7. 技能目标与范围
 
@@ -77,7 +83,13 @@ Store 只调用 `syncCharacterClassProgression`，不应导入具体职业技能
 Resolver 只生成标准效果配置。投骰由客户端动画层执行，骰值打包进 `targetPacket`，
 最终 AP、伤害、状态、CD 和死亡全部由 Headless DM 应用。
 
-## 9. 测试要求
+## 9. 职业专用 Action
+
+弹仓、变身牌组等不属于普通技能的职业操作，在 `ClassDefinition.combatActions` 中声明，
+并通过 `registerHeadlessClassCombatActionResolver` 注册。Headless 核心先查询职业 Action
+Registry，再进入通用战斗 action switch；不得直接比较职业名称。
+
+## 10. 测试要求
 
 每个新职业至少覆盖：
 

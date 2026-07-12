@@ -2,6 +2,7 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type {
   HeadlessCalmSpiritAction,
+  HeadlessClassResourceAction,
   HeadlessBulletMatchSwapAction,
   HeadlessCombatResult,
   HeadlessDmCombatState,
@@ -21,6 +22,7 @@ type SimpleHeadlessAction =
   | HeadlessEndTurnAction
   | HeadlessPlayerMoveAction
   | HeadlessQiReduceCooldownAction
+  | HeadlessClassResourceAction
   | HeadlessUseSkillAction
 
 const SIMPLE_ACTION_TYPES = new Set<SharedPlayerActionState['type']>([
@@ -30,6 +32,7 @@ const SIMPLE_ACTION_TYPES = new Set<SharedPlayerActionState['type']>([
   'disengage',
   'end-turn',
   'qi-reduce-cooldown',
+  'class-resource-action',
   'skill-free-move',
   'use-skill',
   'bullet-match-swap',
@@ -83,6 +86,8 @@ export function buildSimpleHeadlessPlayerAction(input: {
       return buildMoveAction(input, 'calm-spirit-move', 'invalid-calm-spirit-move')
     case 'qi-reduce-cooldown':
       return buildQiReduceCooldownAction(input)
+    case 'class-resource-action':
+      return buildClassResourceAction(input)
     case 'bullet-match-swap':
       return buildBulletMatchSwapAction(action)
     default:
@@ -187,6 +192,34 @@ function buildQiReduceCooldownAction(input: {
     actorTokenId: input.action.actorTokenId,
     characterId: input.action.characterId,
     skillId: skill.id,
+  })
+}
+
+function buildClassResourceAction(input: {
+  action: SharedPlayerActionState
+  characters: Character[]
+}): SimpleHeadlessPlayerActionResult {
+  const actor = input.characters.find((character) => character.id === input.action.characterId)
+  const skill = actor?.combatSkills.find((item) => item.id === input.action.skillId)
+  const resource = input.action.classResource
+  if (
+    !actor ||
+    !skill ||
+    !resource ||
+    resource.operation !== 'reduce-skill-cooldown' ||
+    !Number.isFinite(resource.amount) ||
+    resource.amount <= 0
+  ) {
+    return { ok: false, reason: 'invalid-class-resource-action' }
+  }
+  return okStandard({
+    type: 'class-resource-action',
+    actorTokenId: input.action.actorTokenId,
+    characterId: input.action.characterId,
+    skillId: skill.id,
+    resourceKey: resource.key,
+    amount: resource.amount,
+    operation: resource.operation,
   })
 }
 

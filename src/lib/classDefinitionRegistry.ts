@@ -98,6 +98,10 @@ export interface ClassResourceDefinition {
   resetOn: ClassResourceReset
 }
 
+export interface ClassCombatActionDefinition {
+  type: string
+}
+
 export interface ClassDefinition {
   id: string
   classNames: readonly string[]
@@ -108,6 +112,7 @@ export interface ClassDefinition {
   knownEquipment?: EquipmentItem[]
   skillTree?: ClassSkillTreeDefinition
   resources?: readonly ClassResourceDefinition[]
+  combatActions?: readonly ClassCombatActionDefinition[]
 }
 
 export const DEFAULT_COMBAT_STAT_PROFILE: ClassCombatStatProfile = {
@@ -206,8 +211,26 @@ export const ARCHER_CLASS_DEFINITION: ClassDefinition = {
   ],
 }
 
+export const HEAVY_GUNNER_CLASS_DEFINITION: ClassDefinition = {
+  id: 'heavy-gunner',
+  classNames: ['重炮手'],
+  matchesClassName: (className) => className === '重炮手',
+  progression: {
+    id: 'heavy-gunner',
+    matches: (character) => character.charClass === '重炮手',
+    ownsSkill: () => false,
+    syncSkills: (character) => character,
+    canLearnSkill: () => false,
+    canUpgradeSkillRank: () => false,
+    getSkillRank: () => 0,
+  },
+  combatStats: DEFAULT_COMBAT_STAT_PROFILE,
+  combatActions: [{ type: 'bullet-match-swap' }],
+}
+
 const definitions = new Map<string, ClassDefinition>([
   [ARCHER_CLASS_DEFINITION.id, ARCHER_CLASS_DEFINITION],
+  [HEAVY_GUNNER_CLASS_DEFINITION.id, HEAVY_GUNNER_CLASS_DEFINITION],
 ])
 
 export function registerClassDefinition(definition: ClassDefinition): () => void {
@@ -230,6 +253,10 @@ export function classDefinitionForClassName(className: string): ClassDefinition 
 
 export function classDefinitionForCharacter(character: Character): ClassDefinition | undefined {
   return classDefinitionForClassName(character.charClass)
+}
+
+export function classCombatActionAvailable(character: Character, actionType: string): boolean {
+  return classDefinitionForCharacter(character)?.combatActions?.some((action) => action.type === actionType) ?? false
 }
 
 export function equipmentCatalogForCharacter(character: Character): EquipmentItem[] {

@@ -91,6 +91,7 @@ describe('simple headless player action builder', () => {
   it('recognizes action types that can be routed without page-specific dice prompts', () => {
     expect(isSimpleHeadlessPlayerActionType('use-skill')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('qi-reduce-cooldown')).toBe(true)
+    expect(isSimpleHeadlessPlayerActionType('class-resource-action')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('end-turn')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('bullet-match-swap')).toBe(true)
     expect(isSimpleHeadlessPlayerActionType('attack-token')).toBe(false)
@@ -203,5 +204,25 @@ describe('simple headless player action builder', () => {
         characters: [makeCharacter()],
       }),
     ).toEqual({ ok: false, reason: 'invalid-qi-reduce' })
+  })
+
+  it('builds generic class-resource cooldown actions', () => {
+    const result = buildSimpleHeadlessPlayerAction(baseInput(makeAction({
+      type: 'class-resource-action',
+      classResource: { key: 'mana', amount: 2, operation: 'reduce-skill-cooldown' },
+    })))
+    expect(result).toMatchObject({
+      ok: true,
+      headlessAction: {
+        type: 'class-resource-action',
+        resourceKey: 'mana',
+        amount: 2,
+        operation: 'reduce-skill-cooldown',
+      },
+    })
+    expect(buildSimpleHeadlessPlayerAction(baseInput(makeAction({
+      type: 'class-resource-action',
+      classResource: { key: 'mana', amount: 0, operation: 'reduce-skill-cooldown' },
+    })))).toEqual({ ok: false, reason: 'invalid-class-resource-action' })
   })
 })

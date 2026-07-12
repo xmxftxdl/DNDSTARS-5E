@@ -4575,8 +4575,9 @@ export default function MapsPage() {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     if (skill.remaining <= 0 || getClassResourceCurrent(turnCharacter, 'qi') < 1) return false
     const action = createPlayerActionRequest({
-      type: 'qi-reduce-cooldown',
+      type: 'class-resource-action',
       skillId: skill.id,
+      classResource: { key: 'qi', amount: 1, operation: 'reduce-skill-cooldown' },
     })
     if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 消耗气降低冷却`)
