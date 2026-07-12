@@ -3,30 +3,12 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
 import { getEffectiveAbilityMod } from '../lib/archerCombat'
-import { isBasicShot } from '../lib/classFeatures'
+import { singleTargetRangeFeet } from '../lib/skillRangeRegistry'
 import type { Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import type { StatusType } from '../lib/sharedCombatTypes'
 
-const SINGLE_TARGET_RANGE_FEET: Record<string, number> = {
-  basicShot: 90,
-  multiShot: 30,
-  clusterShot: 20,
-  netArrow: 60,
-  explosiveArrow: 60,
-  vineHookShot: 20,
-  magicArrow: 60,
-  arcaneBreak: 90,
-  windStepShot: 60,
-}
-
-export function singleTargetRangeFeet(skill: CombatSkill): number | null {
-  if (!skill.tags?.includes('ranged') && !isBasicShot(skill)) return null
-  if (skill.skillTreeId && SINGLE_TARGET_RANGE_FEET[skill.skillTreeId] != null) {
-    return SINGLE_TARGET_RANGE_FEET[skill.skillTreeId]
-  }
-  return 90
-}
+export { singleTargetRangeFeet }
 
 export function statusDuration(skill: CombatSkill, type: StatusType): number | undefined {
   if (skill.statusOnHit === type) return skill.statusDuration ?? (type === 'burning' ? 3 : 4)

@@ -15,7 +15,6 @@ import {
   getPrerequisiteLabel,
   getSkillClassRequirement,
   getSkillRank,
-  isArcherLineClass,
   isBaseArcherClass,
   isIntraPanelPrerequisite,
   isSkillClassAllowed,
@@ -25,6 +24,7 @@ import {
   visibleSkillTreeDisplaySections,
   visibleSkillsByDisplaySection,
 } from '../../lib/archerSkillTree'
+import { classProgressionForCharacter } from '../../lib/classProgressionRegistry'
 import type { Character } from '../../types/character'
 
 const CELL_W = 88
@@ -321,7 +321,7 @@ export default function SkillTreeTab({ charId }: { charId: string }) {
 
   if (!c) return null
 
-  if (!isArcherLineClass(c.charClass)) {
+  if (classProgressionForCharacter(c)?.id !== 'archer-line') {
     return (
       <div className="glass rounded-2xl p-8 text-center text-sm text-slate-400">
         技能树仅适用于弓手系职业（弓手 / 逐风者 / 影舞者）。

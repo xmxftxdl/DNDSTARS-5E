@@ -27,6 +27,8 @@ import { areOpposedCombatTokens, findOpportunityAttackersForMove } from './oppor
 import { attackDamageDiceCount, getEffectiveAbilityMod } from './archerCombat'
 import { ENEMY_MELEE_ATTACK_BONUS, agileLeapMoveFeet } from './archerBaseFeatures'
 import { proficiencyBonus, type AbilityKey } from './dnd'
+import { missingSkillActorCondition, resolveSingleTargetSkillEffects } from './skillEffectResolverRegistry'
+import { singleTargetRangeFeet } from './skillRangeRegistry'
 import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } from './knockback'
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
@@ -1587,7 +1589,7 @@ function resolvePlayerAttack(
   if (!skill || skill.damageCount < 0 || skill.damageSides < 0 || skill.remaining > 0) {
     return fail(state, 'invalid-skill', events)
   }
-  if (skill.skillTreeId === 'riseKick' && !actor.conditions.includes('倒地')) {
+  if (missingSkillActorCondition(skill.skillTreeId, actor.conditions)) {
     return fail(state, 'invalid-skill', events)
   }
   const packets = action.targetPackets?.length
@@ -2811,7 +2813,7 @@ function applyStatusOnHit(
   events: HeadlessCombatEvent[],
 ) {
   if (!skill.statusOnHit) return
-  if (skill.skillTreeId === 'explosiveArrow') return
+  if (resolveSingleTargetSkillEffects(skill.skillTreeId, 1).suppressBaseStatusOnHit) return
   const condition = skill.statusOnHit === 'burning' ? '燃烧' : '中毒'
   const turns = skill.statusDuration ?? (skill.statusOnHit === 'burning' ? 3 : 4)
   if (targetToken.characterId) {
@@ -3570,36 +3572,6 @@ function resetCombatStartCharacters(
       )
     })
     syncCharacterTokenHp(state, characterId)
-  }
-}
-
-function singleTargetRangeFeet(skill: CombatSkill): number | null {
-  if (skill.skillTreeId === 'burstKick') return 5
-  if (skill.skillTreeId === 'riseKick') return 5
-  if (skill.skillTreeId === 'windKickCombo') return 5
-  if (skill.skillTreeId === 'shadowDance') return 15
-  if (!skill.tags?.includes('ranged') && skill.skillTreeId !== 'basicShot' && skill.name !== '基础射击') return null
-  switch (skill.skillTreeId) {
-    case 'multiShot':
-      return 30
-    case 'clusterShot':
-    case 'vineHookShot':
-    case 'bindShot':
-      return 20
-    case 'basicShot':
-      return 90
-    case 'netArrow':
-    case 'explosiveArrow':
-    case 'magicArrow':
-    case 'rageShot':
-    case 'refluxMagicArrow':
-    case 'windStepShot':
-      return 60
-    case 'arcaneBreak':
-    case 'antiMagicArrow':
-      return 90
-    default:
-      return 90
   }
 }
 

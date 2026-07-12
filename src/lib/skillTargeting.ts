@@ -24,6 +24,7 @@ export interface RectAoeTargeting {
   widthFeet: number
   heightFeet: number
   placeRangeFeet?: number
+  rotatable?: boolean
 }
 
 export interface LineAoeTargeting {
@@ -44,7 +45,7 @@ const CIRCLE_AOE: Record<string, CircleAoeTargeting> = {
 }
 
 const RECT_AOE: Record<string, RectAoeTargeting> = {
-  arrowStorm: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 15, placeRangeFeet: 90 },
+  arrowStorm: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 15, placeRangeFeet: 90, rotatable: true },
 }
 
 const LINE_AOE: Record<string, LineAoeTargeting> = {
@@ -270,13 +271,24 @@ export function cellsForAoe(
   }
 }
 
+export function registerSkillAoeTargeting(
+  skillTreeId: string,
+  targeting: SkillAoeTargeting,
+): () => void {
+  const registry = targeting.shape === 'circle' ? CIRCLE_AOE : targeting.shape === 'rect' ? RECT_AOE : LINE_AOE
+  registry[skillTreeId] = targeting as never
+  return () => {
+    if (registry[skillTreeId] === targeting) delete registry[skillTreeId]
+  }
+}
+
 export function aoeOrientFromCell(
   aoe: SkillAoeTargeting,
   casterCell: GridCell,
   anchorCell: GridCell,
-  opts?: { skillTreeId?: string; rectRotation?: number },
+  opts?: { rectRotation?: number },
 ): GridCell {
-  if (aoe.shape !== 'rect' || opts?.skillTreeId !== 'arrowStorm') return casterCell
+  if (aoe.shape !== 'rect' || !aoe.rotatable) return casterCell
   const rotation = opts?.rectRotation ?? 0
   const dir = [
     { col: 0, row: -1 },

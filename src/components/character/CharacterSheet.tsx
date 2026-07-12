@@ -23,7 +23,7 @@ import {
   pendingTraitChoices,
   stripArcherClassTraits,
 } from '../../lib/classFeatures'
-import { isArcherLineClass } from '../../lib/archerSkillTree'
+import { hasClassSkillTree } from '../../lib/classProgressionRegistry'
 import {
   classesForLevel,
   isClassAllowedAtLevel,
@@ -266,7 +266,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
           <Sparkles className="h-4 w-4" />
           特性
         </button>
-        {isArcherLineClass(c.charClass) && (
+        {hasClassSkillTree(c) && (
           <button
             onClick={() => setTab('skilltree')}
             className={[

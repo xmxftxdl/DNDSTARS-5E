@@ -3,10 +3,13 @@ import { persist } from 'zustand/middleware'
 import { loadSharedResource, publishSharedEvent, saveSharedResource, subscribeSharedEvent } from '../lib/sharedApi'
 import { isPlayerPort, modeFromPort } from '../lib/appMode'
 import {
-  canLearnSkill,
-  canUpgradeSkillRank,
-  getSkillRank,
-} from '../lib/archerSkillTree'
+  canLearnClassSkill,
+  canUpgradeClassSkillRank,
+  getClassSkillRank,
+  syncCharacterClassProgression,
+  syncCharacterClassSkills,
+  syncCharacterClassTraits,
+} from '../lib/classProgressionRegistry'
 import {
   applyTraitFeatureRank,
   availableFeatureUpgradePoints,
@@ -14,20 +17,17 @@ import {
   featureUpgradePointsEarned,
   findClassTrait,
   MAX_FEATURE_LEVEL,
-  syncArcherTraits,
 } from '../lib/classFeatures'
 import {
   migrateCharacterTraits,
   maxQiForLevel,
+  getTraitChoiceGroup,
   resetCombatTraitUses,
-  syncQiForCharacter,
-  TRAIT_CHOICE_GROUPS,
   type ClassFeatureKey,
   type MetaChoiceKey,
   type TraitChoiceOption,
 } from '../lib/traitRegistry'
 import { beginCalmMindTurn, calmBreathState, initCalmMindForCombat, isCalmMindActive, triggerOutOfBreath, tickOutOfBreathOnEndTurn } from '../lib/calmMind'
-import { syncArcherCombatSkills } from '../lib/skillTreeSync'
 import { ensureDefaultEquipment, isMagicDamageSkill, refreshKnownEquipment, syncCombatDerivedStats } from '../lib/combatStats'
 
 function skillCooldownRemaining(skill: { cooldown: number; cdReduction: number }): number {
@@ -487,7 +487,7 @@ function applyTraitChoiceToCharacter(
   groupId: string,
   options: TraitChoiceOption[],
 ): Character {
-  const group = TRAIT_CHOICE_GROUPS.find((g) => g.id === groupId)
+  const group = getTraitChoiceGroup(groupId)
   if (!group) return character
 
   let next = { ...character }
@@ -524,7 +524,7 @@ function applyTraitChoiceToCharacter(
     }
   }
 
-  return syncArcherCombatSkills(syncQiForCharacter(syncArcherTraits({ ...next, traitChoicesDone: choicesDone })))
+  return syncCharacterClassProgression({ ...next, traitChoicesDone: choicesDone })
 }
 
 function mergeMissingSampleSkills(c: Character): Character {
@@ -541,14 +541,10 @@ function mergeMissingSampleSkills(c: Character): Character {
 
 function finalizeCharacter(c: Partial<Character>): Character {
   return syncCombatDerivedStats(
-    syncArcherCombatSkills(
-      syncQiForCharacter(
-        syncArcherTraits(
-          migrateCharacterTraits(
-            mergeMissingSampleSkills(
-              refreshKnownEquipment(ensureDefaultEquipment(normalizeCharacter(c))),
-            ),
-          ),
+    syncCharacterClassProgression(
+      migrateCharacterTraits(
+        mergeMissingSampleSkills(
+          refreshKnownEquipment(ensureDefaultEquipment(normalizeCharacter(c))),
         ),
       ),
     ),
@@ -1072,7 +1068,7 @@ export const useCharacterStore = create<CharacterState>()(
         update: (id, patch) =>
           updateChar(id, (c) =>
             syncCombatDerivedStats(
-              syncArcherCombatSkills(syncArcherTraits(ensureDefaultEquipment({ ...c, ...patch }))),
+              syncCharacterClassProgression(ensureDefaultEquipment({ ...c, ...patch })),
             ),
           ),
         applyAuthorityUpdate: (id, patch) =>
@@ -1080,8 +1076,8 @@ export const useCharacterStore = create<CharacterState>()(
             characters: state.characters.map((character) =>
               character.id === id
                 ? syncCombatDerivedStats(
-                    syncArcherCombatSkills(
-                      syncArcherTraits(ensureDefaultEquipment({ ...character, ...patch })),
+                    syncCharacterClassProgression(
+                      ensureDefaultEquipment({ ...character, ...patch }),
                     ),
                   )
                 : character,
@@ -1104,7 +1100,7 @@ export const useCharacterStore = create<CharacterState>()(
         longRestAll: () => {
           set((s) => ({
             characters: s.characters.map((c) =>
-              syncQiForCharacter({
+              syncCharacterClassTraits({
                 ...c,
                 currentHp: c.maxHp,
                 tempHp: 0,
@@ -1380,8 +1376,8 @@ export const useCharacterStore = create<CharacterState>()(
             const traits = ch.traits.map((t) =>
               t.id === traitId ? applyTraitFeatureRank(t, t.level + 1) : t,
             )
-            const next = syncArcherTraits({ ...ch, traits })
-            return syncArcherCombatSkills({
+            const next = syncCharacterClassTraits({ ...ch, traits })
+            return syncCharacterClassSkills({
               ...next,
               featureUpgradePoints: availableFeatureUpgradePoints(next),
             })
@@ -1391,13 +1387,13 @@ export const useCharacterStore = create<CharacterState>()(
 
         upgradeSkillRank: (charId, skillId) => {
           const c = get().characters.find((x) => x.id === charId)
-          if (!c || !canUpgradeSkillRank(c, skillId)) return false
+          if (!c || !canUpgradeClassSkillRank(c, skillId)) return false
           updateChar(charId, (ch) =>
-            syncArcherCombatSkills({
+            syncCharacterClassSkills({
               ...ch,
               skillRanks: {
                 ...ch.skillRanks,
-                [skillId]: getSkillRank(ch, skillId) + 1,
+                [skillId]: getClassSkillRank(ch, skillId) + 1,
               },
             }),
           )
@@ -1406,9 +1402,9 @@ export const useCharacterStore = create<CharacterState>()(
 
         learnSkill: (charId, skillId) => {
           const c = get().characters.find((x) => x.id === charId)
-          if (!c || !canLearnSkill(c, skillId)) return false
+          if (!c || !canLearnClassSkill(c, skillId)) return false
           updateChar(charId, (ch) =>
-            syncArcherCombatSkills({
+            syncCharacterClassSkills({
               ...ch,
               skillRanks: {
                 ...ch.skillRanks,
@@ -1433,7 +1429,7 @@ export const useCharacterStore = create<CharacterState>()(
 
         applyTraitChoice: (charId, groupId, options, opts) => {
           const c = get().characters.find((x) => x.id === charId)
-          if (!c || !TRAIT_CHOICE_GROUPS.some((g) => g.id === groupId)) return
+          if (!c || !getTraitChoiceGroup(groupId)) return
 
           updateChar(charId, (ch) => applyTraitChoiceToCharacter(ch, groupId, options))
 
@@ -1495,14 +1491,14 @@ export const useCharacterStore = create<CharacterState>()(
           characters = characters.map((c) => {
             if (c.id !== 'sample-adventurer') return c
             if (c.traits.some((t) => t.featureKey === 'doubleArrow')) return c
-            return syncArcherTraits({
+            return syncCharacterClassTraits({
               ...c,
               traits: [...c.traits, createClassTrait('doubleArrow', c.level)],
             })
           })
         }
         if (version < 9) {
-          characters = characters.map((c) => syncArcherTraits(normalizeCharacter(c)))
+          characters = characters.map((c) => syncCharacterClassTraits(normalizeCharacter(c)))
         }
         if (version < 10) {
           characters = characters.map((c) => {
@@ -1516,9 +1512,9 @@ export const useCharacterStore = create<CharacterState>()(
             const stable = n.traits.find((t) => t.featureKey === 'stableMind')
             if (eagle && stable) {
               const traits = n.traits.filter((t) => t.featureKey !== 'stableMind')
-              return syncArcherTraits({ ...n, traits, archerLv3ChoiceDone: true })
+              return syncCharacterClassTraits({ ...n, traits, archerLv3ChoiceDone: true })
             }
-            return syncArcherTraits({ ...n, archerLv3ChoiceDone: true })
+            return syncCharacterClassTraits({ ...n, archerLv3ChoiceDone: true })
           })
         }
         if (version < 11) {
@@ -1529,10 +1525,10 @@ export const useCharacterStore = create<CharacterState>()(
             const armor = n.traits.find((t) => t.featureKey === 'armorPiercingArrow')
             if (double && armor) {
               const traits = n.traits.filter((t) => t.featureKey !== 'armorPiercingArrow')
-              return syncArcherTraits({ ...n, traits, archerLv1ChoiceDone: true })
+              return syncCharacterClassTraits({ ...n, traits, archerLv1ChoiceDone: true })
             }
             if (double || armor) {
-              return syncArcherTraits({ ...n, archerLv1ChoiceDone: true })
+              return syncCharacterClassTraits({ ...n, archerLv1ChoiceDone: true })
             }
             return n
           })
@@ -1549,7 +1545,7 @@ export const useCharacterStore = create<CharacterState>()(
             const traits = n.traits.map((t) =>
               t.featureKey ? applyTraitFeatureRank(t, oldRank) : t,
             )
-            return syncArcherTraits({
+            return syncCharacterClassTraits({
               ...n,
               traits,
               featureUpgradePoints: Math.max(0, earned - spent),
@@ -1557,10 +1553,10 @@ export const useCharacterStore = create<CharacterState>()(
           })
         }
         if (version < 13) {
-          characters = characters.map((c) => syncArcherCombatSkills(normalizeCharacter(c)))
+          characters = characters.map((c) => syncCharacterClassSkills(normalizeCharacter(c)))
         }
         if (version < 14) {
-          characters = characters.map((c) => syncArcherCombatSkills(normalizeCharacter(c)))
+          characters = characters.map((c) => syncCharacterClassSkills(normalizeCharacter(c)))
         }
         if (version < 15) {
           characters = characters.map((c) => {
@@ -1576,17 +1572,17 @@ export const useCharacterStore = create<CharacterState>()(
                 return createClassTrait('steadyDraw', n.level)
               }),
             }
-            return syncArcherCombatSkills(syncQiForCharacter(syncArcherTraits(n)))
+            return syncCharacterClassProgression(n)
           })
         }
         if (version < 16) {
           characters = characters.map((c) =>
-            syncArcherCombatSkills(syncQiForCharacter(migrateCharacterTraits(normalizeCharacter(c)))),
+            syncCharacterClassProgression(migrateCharacterTraits(normalizeCharacter(c))),
           )
         }
         if (version < 17) {
           characters = characters.map((c) => {
-            const n = syncArcherTraits(normalizeCharacter(c))
+            const n = syncCharacterClassTraits(normalizeCharacter(c))
             return {
               ...n,
               featureUpgradePoints: availableFeatureUpgradePoints(n),

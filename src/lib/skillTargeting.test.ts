@@ -54,15 +54,15 @@ describe('AOE token coverage targeting', () => {
     const casterCell = { col: 5, row: 5 }
     const anchorCell = { col: 10, row: 10 }
 
-    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { skillTreeId: 'arrowStorm', rectRotation: 0 })).toEqual({
+    expect(aoeOrientFromCell({ ...aoe, rotatable: true }, casterCell, anchorCell, { rectRotation: 0 })).toEqual({
       col: 10,
       row: 11,
     })
-    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { skillTreeId: 'arrowStorm', rectRotation: 1 })).toEqual({
+    expect(aoeOrientFromCell({ ...aoe, rotatable: true }, casterCell, anchorCell, { rectRotation: 1 })).toEqual({
       col: 9,
       row: 10,
     })
-    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { skillTreeId: 'multiShot', rectRotation: 1 })).toEqual(
+    expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { rectRotation: 1 })).toEqual(
       casterCell,
     )
   })

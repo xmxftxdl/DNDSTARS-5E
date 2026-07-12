@@ -3,7 +3,7 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character, CombatSkill } from '../types/character'
 import { isCalmMindActive, isOutOfBreath } from './calmMind'
 import { attackDamageDiceCount, doubleArrowExtraDamageSides, resolveRangedAttackRoll } from './archerCombat'
-import { getSkillRank, skillGrantsStun } from './archerSkillTree'
+import { getClassSkillRank } from './classProgressionRegistry'
 import { canUseArmorPiercing, canUseDoubleArrow, findClassTrait } from './classFeatures'
 import { isTokenAlive } from './combatTokens'
 import { getAc, isMagicDamageSkill } from './combatStats'
@@ -37,6 +37,8 @@ import {
   type SkillAoeTargeting,
 } from './skillTargeting'
 import type { SharedPlayerActionState } from './sharedCombatTypes'
+import { getSkillTargetSelectionProfile, usesArrowSequencePackets } from './skillTargetSelection'
+import { resolveAoeSkillEffects, resolveSingleTargetSkillEffects } from './skillEffectResolverRegistry'
 import { STUN_DEFAULT_TURNS } from './stun'
 import { piercingInsightExtraD4, piercingInsightHpThresholdPercent } from './traitRegistry'
 
@@ -89,10 +91,7 @@ export function preparePlayerAttackAction(input: {
 
   const doubleArrow = canUseDoubleArrow(actor, skill) && !!actor.combatBuffs?.doubleArrowReady
   const targets = expandRepeatedAttackTargets(skill, initialTargets)
-  const isArrowSequence =
-    skill.skillTreeId === 'multiShot' ||
-    skill.skillTreeId === 'encircle' ||
-    (!!action.targetTokenIds?.length && skill.skillTreeId === 'rageShot')
+  const isArrowSequence = usesArrowSequencePackets(skill, !!action.targetTokenIds?.length)
 
   return {
     ok: true,
@@ -156,7 +155,6 @@ export function preparePlayerAoeAttackAction(input: {
   if (!canPlaceAoe(aoe, casterCell, anchorCell)) return { ok: false, reason: 'out-of-range' }
 
   const orientFrom = aoeOrientFromCell(aoe, casterCell, anchorCell, {
-    skillTreeId: skill.skillTreeId,
     rectRotation: action.aoeRectRotation ?? 0,
   })
   const cells = cellsForAoe(aoe, orientFrom, anchorCell)
@@ -165,7 +163,7 @@ export function preparePlayerAoeAttackAction(input: {
   )
   if (targets.length === 0) return { ok: false, reason: 'invalid-target' }
 
-  const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+  const skillRank = skill.skillTreeId ? getClassSkillRank(actor, skill.skillTreeId) : 0
   const calm = findClassTrait(actor, 'calmMind')
   const calmExtraDiceCount = calm && isCalmMindActive(actor) && calm.level > 0 ? calm.level : 0
   const windExtraDiceCount = windTraceExtraDiceCountForAoe(
@@ -175,17 +173,13 @@ export function preparePlayerAoeAttackAction(input: {
     targets[0],
     targets.length,
   )
-  const saveMode =
-    skill.skillTreeId === 'focusShot'
-      ? 'fail-half'
-      : skill.skillTreeId === 'spiralBlade'
-        ? 'none'
-        : skill.skillTreeId === 'windTraceShot'
-          ? undefined
-          : 'half'
+  const effectProfile = resolveAoeSkillEffects(skill.skillTreeId, skillRank)
+  const saveMode = effectProfile.saveMode
   const selfCooldownReduction =
-    skill.skillTreeId === 'windTraceShot' && skillRank >= 4 && isCalmMindActive(actor) ? 1 : 0
-  const shouldStun = skill.skillTreeId === 'focusShot' && skillGrantsStun(skill.skillTreeId, skillRank)
+    effectProfile.selfCooldownReductionWhileCalm && isCalmMindActive(actor)
+      ? effectProfile.selfCooldownReductionWhileCalm
+      : 0
+  const shouldStun = !!effectProfile.stunOnFailedSave
 
   return {
     ok: true,
@@ -222,7 +216,7 @@ export function buildPreparedAoeHeadlessAction(input: {
     skillId: prepared.skill.id,
     diceValues,
     saveMode: prepared.saveMode,
-    knockbackOnFailedSave: prepared.skill.skillTreeId === 'whirlwindKick',
+    knockbackOnFailedSave: resolveAoeSkillEffects(prepared.skill.skillTreeId, prepared.skillRank).knockbackOnFailedSave,
     knockbackTurns: KNOCKBACK_DEFAULT_TURNS,
     stunOnFailedConSave: prepared.shouldStun,
     stunTurns: STUN_DEFAULT_TURNS,
@@ -295,9 +289,11 @@ export function canResolveSingleAttackWithHeadless(
   if (skill.remaining > 0 || skill.damageCount <= 0 || skill.damageSides <= 0) return false
   if (getSkillAoeTargeting(skill)) return false
   const buffs = actor.combatBuffs
+  const skillRank = skill.skillTreeId ? getClassSkillRank(actor, skill.skillTreeId) : 0
+  const effects = resolveSingleTargetSkillEffects(skill.skillTreeId, skillRank)
   if (
-    (buffs?.burstKickExtraD6 && skill.skillTreeId !== 'burstKick') ||
-    (buffs?.windKickTreatKnockbackTargetId && skill.skillTreeId !== 'windKickCombo')
+    (buffs?.burstKickExtraD6 && !effects.consumesBurstKickStoredDamage) ||
+    (buffs?.windKickTreatKnockbackTargetId && !effects.consumesWindKickKnockbackMarker)
   ) {
     return false
   }
@@ -411,18 +407,22 @@ export async function buildSingleAttackTargetPacket(
   const diceValues = shouldRollDamage
     ? await rollValues(damageDiceCount, skill.damageSides, `${skill.name} damage`, targetToken.label)
     : undefined
-  const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+  const skillRank = skill.skillTreeId ? getClassSkillRank(actor, skill.skillTreeId) : 0
+  const skillEffectProfile = resolveSingleTargetSkillEffects(skill.skillTreeId, skillRank)
   const windKickTreatsTargetAsKnocked =
-    skill.skillTreeId === 'windKickCombo' && actor.combatBuffs?.windKickTreatKnockbackTargetId === targetToken.id
+    !!skillEffectProfile.consumesWindKickKnockbackMarker &&
+    actor.combatBuffs?.windKickTreatKnockbackTargetId === targetToken.id
   const targetKnockedForWindKick =
-    skill.skillTreeId === 'windKickCombo' &&
+    !!skillEffectProfile.bonusDamageWhenTargetKnockedD6 &&
     (!!targetToken.knockbackTurns ||
       !!targetChar?.conditions.includes(KNOCKBACK_STATUS_LABEL) ||
       windKickTreatsTargetAsKnocked)
   const targetKnockedForEagleStrike =
-    skill.skillTreeId === 'eagleStrike' && !!targetHasKnockbackNow
+    !!skillEffectProfile.checksCurrentKnockback && !!targetHasKnockbackNow
   const burstKickExtraD6 =
-    shouldRollDamage && skill.skillTreeId === 'burstKick' ? (actor.combatBuffs?.burstKickExtraD6 ?? 0) : 0
+    shouldRollDamage && skillEffectProfile.consumesBurstKickStoredDamage
+      ? (actor.combatBuffs?.burstKickExtraD6 ?? 0)
+      : 0
   const extraDamageGroups: Array<{ values: number[]; sides: number }> = []
   const pushExtraDamage = async (count: number, sides: number, label: string) => {
     if (count <= 0) return
@@ -498,11 +498,11 @@ export async function buildSingleAttackTargetPacket(
   }
 
   if (shouldRollDamage && targetKnockedForWindKick) {
-    await pushExtraDamage(1, 6, `${skill.name} 击飞目标额外伤害`)
+    await pushExtraDamage(skillEffectProfile.bonusDamageWhenTargetKnockedD6 ?? 0, 6, `${skill.name} 击飞目标额外伤害`)
   }
 
-  if (shouldRollDamage && skill.skillTreeId === 'eagleStrike') {
-    await pushExtraDamage(eagleStrikeExtraDiceCountForPacket(skillRank), 6, `${skill.name} eagle strike knockback damage`)
+  if (shouldRollDamage && skillEffectProfile.extraDamageD6) {
+    await pushExtraDamage(skillEffectProfile.extraDamageD6, 6, `${skill.name} extra damage`)
   }
 
   const targetHasMagicState =
@@ -514,8 +514,9 @@ export async function buildSingleAttackTargetPacket(
     !!targetToken.restrainedTurns ||
     !!targetToken.vulnerableTurns ||
     (targetChar?.conditions.length ?? 0) > 0
-  if (shouldRollDamage && skill.skillTreeId === 'antiMagicArrow' && targetHasMagicState) {
-    await pushExtraDamage(2, 6, `${skill.name} 魔法状态额外伤害`)
+  if (shouldRollDamage && skillEffectProfile.bonusDamageAgainstMagicState && targetHasMagicState) {
+    const bonus = skillEffectProfile.bonusDamageAgainstMagicState
+    await pushExtraDamage(bonus.count, bonus.sides, `${skill.name} 魔法状态额外伤害`)
   }
 
   const postCritDamageGroups: Array<{ values: number[]; sides: number }> = []
@@ -526,44 +527,31 @@ export async function buildSingleAttackTargetPacket(
       sides,
     })
   }
-  const explosiveArrowCritDice =
-    shouldRollDamage && packetIsCrit && skill.skillTreeId === 'explosiveArrow'
-      ? skillRank >= 5
-        ? 4
-        : skillRank >= 2
-          ? 3
-          : 2
-      : 0
-  await pushPostCritDamage(explosiveArrowCritDice, 6, `${skill.name} explosive arrow crit fire`)
+  const critFireDamage = shouldRollDamage && packetIsCrit ? skillEffectProfile.critFireDamage : undefined
+  await pushPostCritDamage(critFireDamage?.count ?? 0, critFireDamage?.sides ?? 6, `${skill.name} crit fire`)
 
   const explosiveArrowTrait = findClassTrait(actor, 'explosiveArrow')
   if (shouldRollDamage && packetIsCrit && explosiveArrowTrait) {
     await pushPostCritDamage(explosiveArrowTrait.level, 12, `${skill.name} explosive arrow feature fire`)
   }
-  const explosiveArrowBurnTurns =
-    postCritDamageGroups.length > 0 ? (skill.skillTreeId === 'explosiveArrow' && skillRank >= 4 ? 2 : 1) : undefined
-  const effectAbility: AbilityKey | undefined =
-    shouldRollDamage && skill.skillTreeId === 'burstKick' && skillRank >= 3
-      ? 'con'
-      : shouldRollDamage && skill.skillTreeId === 'rageShot' && skillRank >= 3
-        ? 'str'
-        : shouldRollDamage && skill.skillTreeId === 'bindShot'
-          ? 'str'
-          : shouldRollDamage && skill.skillTreeId === 'eagleStrike'
-            ? 'dex'
-            : undefined
+  const explosiveArrowBurnTurns = postCritDamageGroups.length > 0
+    ? (critFireDamage?.burnTurns ?? 1)
+    : undefined
+  const effectAbility: AbilityKey | undefined = shouldRollDamage
+    ? skillEffectProfile.effectSaveAbility
+    : undefined
   const effectSaveD20 = effectAbility ? await rollD20(`${skill.name} effect save D20`, targetToken.label) : undefined
   const effectSaveD20Second =
-    shouldRollDamage && skill.skillTreeId === 'eagleStrike' && skillRank >= 5
+    shouldRollDamage && skillEffectProfile.effectSaveDisadvantage
       ? await rollD20(`${skill.name} effect save disadvantage D20`, targetToken.label)
       : undefined
-  const cooldownReductionAmount = shouldRollDamage && skill.skillTreeId === 'refluxMagicArrow' ? 1 : 0
+  const cooldownReductionAmount = shouldRollDamage ? (skillEffectProfile.cooldownReductionAmount ?? 0) : 0
   const cooldownReductionSkillId =
     cooldownReductionAmount > 0
       ? chooseCooldownReductionSkillId(actor, cooldownReductionAmount, `${skill.name} 命中`)
       : undefined
   const pushTargetOnHit =
-    shouldRollDamage && skill.skillTreeId === 'windKickCombo' && skillRank >= 3
+    shouldRollDamage && skillEffectProfile.offerPushTarget
       ? await confirmPushTarget(targetToken)
       : false
   const armorPiercingApplies = canUseArmorPiercing(actor, skill, packetIsCrit)
@@ -576,9 +564,7 @@ export async function buildSingleAttackTargetPacket(
       extraDamageGroups: extraDamageGroups.length > 0 ? extraDamageGroups : undefined,
       postCritDamageGroups: postCritDamageGroups.length > 0 ? postCritDamageGroups : undefined,
       halveDamageOnRangeFeet:
-        skill.skillTreeId === 'clusterShot'
-          ? { minExclusive: 10, maxInclusive: 20 }
-          : undefined,
+        skillEffectProfile.halveDamageOnRangeFeet,
       targetDodgeD20,
       attackRoll: attackRollPacket,
       isCrit: packetIsCrit || undefined,
@@ -594,54 +580,42 @@ export async function buildSingleAttackTargetPacket(
               ability: effectAbility,
               d20: effectSaveD20,
               d20Second: effectSaveD20Second,
-              disadvantage: skill.skillTreeId === 'eagleStrike' && skillRank >= 5,
+              disadvantage: skillEffectProfile.effectSaveDisadvantage,
             }
           : undefined,
-      stunOnFailedEffectSave: skill.skillTreeId === 'burstKick' && skillRank >= 3,
-      knockbackOnFailedEffectSave: skill.skillTreeId === 'eagleStrike',
-      knockbackTurns: skill.skillTreeId === 'eagleStrike' ? KNOCKBACK_DEFAULT_TURNS : undefined,
-      restrainedOnFailedEffectSave:
-        (skill.skillTreeId === 'rageShot' && skillRank >= 3) ||
-        (skill.skillTreeId === 'bindShot' && skillRank >= 4),
-      pullOnFailedEffectSave: skill.skillTreeId === 'bindShot',
-      pullCells: skill.skillTreeId === 'bindShot' ? 2 : undefined,
-      smallOrMediumOnly: skill.skillTreeId === 'bindShot' || skill.skillTreeId === 'rageShot',
-      grantBurstKickExtraD6OnHit: skill.skillTreeId === 'bindShot' ? 1 : undefined,
-      clearBurstKickExtraD6OnUse: skill.skillTreeId === 'burstKick' && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
+      stunOnFailedEffectSave: skillEffectProfile.stunOnFailedEffectSave,
+      knockbackOnFailedEffectSave: skillEffectProfile.knockbackOnFailedEffectSave,
+      knockbackTurns: skillEffectProfile.knockbackOnFailedEffectSave ? KNOCKBACK_DEFAULT_TURNS : undefined,
+      restrainedOnFailedEffectSave: skillEffectProfile.restrainedOnFailedEffectSave,
+      pullOnFailedEffectSave: skillEffectProfile.pullOnFailedEffectSave,
+      pullCells: skillEffectProfile.pullCells,
+      smallOrMediumOnly: skillEffectProfile.smallOrMediumOnly,
+      grantBurstKickExtraD6OnHit: skillEffectProfile.grantBurstKickExtraD6OnHit,
+      clearBurstKickExtraD6OnUse:
+        skillEffectProfile.consumesBurstKickStoredDamage && (actor.combatBuffs?.burstKickExtraD6 ?? 0) > 0,
       pushTargetOnHit,
       pushCells: pushTargetOnHit ? 1 : undefined,
       selfCooldownReductionOnHit:
-        skill.skillTreeId === 'windKickCombo' && targetKnockedForWindKick && skillRank >= 5
-          ? 1
+        targetKnockedForWindKick && skillEffectProfile.selfCooldownReductionWhenTargetKnocked
+          ? skillEffectProfile.selfCooldownReductionWhenTargetKnocked
           : targetKnockedForEagleStrike
-            ? skillRank >= 4
-              ? 3
-              : 2
+            ? skillEffectProfile.selfCooldownReductionWhenTargetKnocked
             : undefined,
       clearWindKickTreatKnockbackOnUse: windKickTreatsTargetAsKnocked,
-      clearActorConditionOnHit: skill.skillTreeId === 'riseKick' ? '倒地' : undefined,
-      grantFreeMoveFeetOnHit:
-        skill.skillTreeId === 'riseKick' && skillRank >= 4
-          ? 10
-          : skill.skillTreeId === 'shadowStepShot'
-            ? skillRank >= 4
-              ? 15
-              : 10
-            : skill.skillTreeId === 'shadowDance'
-              ? 15
-              : undefined,
-      grantDisengageOnHit: skill.skillTreeId === 'shadowStepShot' || skill.skillTreeId === 'shadowDance',
-      grantWindKickTreatKnockbackOnHit: skill.skillTreeId === 'shadowDance' && skillRank >= 3,
+      clearActorConditionOnHit: skillEffectProfile.clearActorConditionOnHit,
+      grantFreeMoveFeetOnHit: skillEffectProfile.grantFreeMoveFeetOnHit,
+      grantDisengageOnHit: skillEffectProfile.grantDisengageOnHit,
+      grantWindKickTreatKnockbackOnHit: skillEffectProfile.grantWindKickTreatKnockbackOnHit,
       burningOnHit: postCritDamageGroups.length > 0,
       burningTurns: explosiveArrowBurnTurns,
       igniteOnHit: postCritDamageGroups.length > 0,
       igniteTurns: explosiveArrowBurnTurns,
       cooldownReductionSkillId,
       cooldownReductionAmount: cooldownReductionSkillId ? cooldownReductionAmount : undefined,
-      vulnerableOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 3,
+      vulnerableOnHit: skillEffectProfile.vulnerableOnHit,
       vulnerableTurns: 1,
-      clearTargetStatusesOnHit: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 4,
-      selfCooldownReductionPerClearedStatus: skill.skillTreeId === 'antiMagicArrow' && skillRank >= 5,
+      clearTargetStatusesOnHit: skillEffectProfile.clearTargetStatusesOnHit,
+      selfCooldownReductionPerClearedStatus: skillEffectProfile.selfCooldownReductionPerClearedStatus,
       armorPiercingSplashOnCrit: armorPiercingApplies || undefined,
       armorPiercingRangeFeet: 15,
       spendArmorPiercingUseOnSplash: armorPiercingApplies || undefined,
@@ -694,7 +668,8 @@ export async function buildArrowSequenceTargetPackets(
     effectSaveD20?: number
   }> = []
   let damagePacketCount = 0
-  const skillRank = skill.skillTreeId ? getSkillRank(actor, skill.skillTreeId) : 0
+  const skillRank = skill.skillTreeId ? getClassSkillRank(actor, skill.skillTreeId) : 0
+  const skillEffectProfile = resolveSingleTargetSkillEffects(skill.skillTreeId, skillRank)
 
   for (const target of targets) {
     const liveTarget = resolveTarget?.(target) ?? target
@@ -706,8 +681,8 @@ export async function buildArrowSequenceTargetPackets(
         ? targetDodgeD20 + dodgePreview.attackBonus < dodgePreview.targetAc
         : false
     const effectSaveD20 =
-      !expectedDodged && skill.skillTreeId === 'rageShot' && skillRank >= 3
-        ? await rollD20('怒气爆射力量豁免 D20', liveTarget.label)
+      !expectedDodged && skillEffectProfile.sequenceEffectSaveAbility
+        ? await rollD20(`${skill.name} 效果豁免 D20`, liveTarget.label)
         : undefined
     if (!expectedDodged) damagePacketCount += 1
     packetPlans.push({
@@ -720,9 +695,10 @@ export async function buildArrowSequenceTargetPackets(
   }
 
   const allPacketsTargetSame = targets.length > 0 && targets.every((target) => target.id === targets[0].id)
+  const sameTargetStun = skillEffectProfile.allPacketsSameTargetStun
   const shouldEncircleStun =
-    skill.skillTreeId === 'encircle' &&
-    skillRank >= 5 &&
+    !!sameTargetStun &&
+    skillRank >= sameTargetStun.minRank &&
     allPacketsTargetSame &&
     targets.length >= Math.max(1, skill.arrowShots ?? 1) &&
     packetPlans.every((plan) => !plan.expectedDodged)
@@ -754,15 +730,15 @@ export async function buildArrowSequenceTargetPackets(
       targetDodgeMode: plan.targetDodgeMode,
       effectSave:
         plan.effectSaveD20 != null
-          ? { ability: 'str' as const, d20: plan.effectSaveD20 }
+          ? { ability: skillEffectProfile.sequenceEffectSaveAbility!, d20: plan.effectSaveD20 }
           : applyEncircleStun
-            ? { ability: 'con' as const, d20: encircleStunSaveD20 }
+            ? { ability: sameTargetStun!.ability, d20: encircleStunSaveD20 }
             : undefined,
       restrainedOnFailedEffectSave: plan.effectSaveD20 != null,
-      smallOrMediumOnly: skill.skillTreeId === 'rageShot',
+      smallOrMediumOnly: skillEffectProfile.smallOrMediumOnly,
       stunOnFailedEffectSave: applyEncircleStun,
-      noMoveOnHit: skill.skillTreeId === 'encircle',
-      noMoveTurns: skill.skillTreeId === 'encircle' ? 1 : undefined,
+      noMoveOnHit: skillEffectProfile.noMoveOnHit,
+      noMoveTurns: skillEffectProfile.noMoveTurns,
     }
   })
 
@@ -797,7 +773,8 @@ export async function buildAoeTargetPackets(input: AoeTargetPacketBuildInput): P
     rollD20,
     rollValues,
   } = input
-  const takeoffTrait = skill.skillTreeId === 'whirlwindKick' ? findClassTrait(actor, 'takeoff') : undefined
+  const aoeEffectProfile = resolveAoeSkillEffects(skill.skillTreeId, skill.skillTreeId ? getClassSkillRank(actor, skill.skillTreeId) : 0)
+  const takeoffTrait = aoeEffectProfile.takeoffBonusEligible ? findClassTrait(actor, 'takeoff') : undefined
   const targetPackets: HeadlessAoeTargetPacket[] = []
 
   for (const target of targets) {
@@ -833,11 +810,6 @@ export async function buildAoeTargetPackets(input: AoeTargetPacketBuildInput): P
   return { targetPackets }
 }
 
-function eagleStrikeExtraDiceCountForPacket(rank: number): number {
-  if (rank <= 0) return 0
-  return rank === 1 ? 3 : 4
-}
-
 function windTraceExtraDiceCountForAoe(
   skillTreeId: string | undefined,
   rank: number,
@@ -845,7 +817,7 @@ function windTraceExtraDiceCountForAoe(
   token: Token,
   aoeTargetCount?: number,
 ): number {
-  if (skillTreeId !== 'windTraceShot') return 0
+  if (!resolveAoeSkillEffects(skillTreeId, rank).windTraceBonusEligible) return 0
   let count = 0
   if ((aoeTargetCount ?? 0) === 1) count += 2
   if (rank >= 2 && isCalmMindActive(caster)) count += 1
@@ -1142,9 +1114,7 @@ export function planSingleAttackSettlement(input: {
     shouldOfferGaleCombo: true,
     shouldShowMoveRange:
       display.resolved.hit &&
-      (input.skill.skillTreeId === 'shadowStepShot' ||
-        input.skill.skillTreeId === 'shadowDance' ||
-        (input.skill.skillTreeId === 'riseKick' && input.skillRank >= 4)),
+      (resolveSingleTargetSkillEffects(input.skill.skillTreeId, input.skillRank).grantFreeMoveFeetOnHit ?? 0) > 0,
   }
 }
 
@@ -1177,8 +1147,9 @@ export function planAoeAttackSettlement(input: {
 }
 
 function expandRepeatedAttackTargets(skill: CombatSkill, targets: Token[]): Token[] {
-  if ((skill.skillTreeId === 'multiShot' || skill.skillTreeId === 'encircle') && targets.length === 1) {
-    const shots = Math.max(1, skill.arrowShots ?? 1)
+  const profile = getSkillTargetSelectionProfile(skill)
+  if (profile.sequence === 'repeat-primary' && targets.length === 1) {
+    const shots = profile.shotCount(skill)
     return Array.from({ length: shots }, () => targets[0])
   }
   return targets

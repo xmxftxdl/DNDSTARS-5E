@@ -249,6 +249,9 @@ import {
   KNOCKBACK_STATUS_LABEL,
 } from '../lib/knockback'
 import { modeFromPort } from '../lib/appMode'
+import { buildSkillTargetTokenIds } from '../lib/skillTargetSelection'
+import { missingSkillActorCondition, resolveAoeSkillEffects } from '../lib/skillEffectResolverRegistry'
+import { getClassSkillRank } from '../lib/classProgressionRegistry'
 import { DmActionTransactionCoordinator } from '../lib/dmActionTransactionCoordinator'
 import { TimerRegistry } from '../lib/timerRegistry'
 import {
@@ -1422,7 +1425,6 @@ export default function MapsPage() {
     if (!targeting?.aoe || !aoePreviewCell || !aoeCasterCell) return undefined
     const valid = canPlaceAoe(targeting.aoe, aoeCasterCell, aoePreviewCell)
     const orientFrom = aoeOrientFromCell(targeting.aoe, aoeCasterCell, aoePreviewCell, {
-      skillTreeId: targeting.skill.skillTreeId,
       rectRotation: aoeRectRotation,
     })
     const cells = cellsForAoe(targeting.aoe, orientFrom, aoePreviewCell)
@@ -1532,7 +1534,7 @@ export default function MapsPage() {
   }, [targeting?.aoe, targeting?.casterId, aoeCasterCell])
 
   useEffect(() => {
-    if (targeting?.aoe?.shape !== 'rect' || targeting.skill.skillTreeId !== 'arrowStorm') return
+    if (targeting?.aoe?.shape !== 'rect' || !targeting.aoe.rotatable) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'q') {
         e.preventDefault()
@@ -2295,8 +2297,9 @@ export default function MapsPage() {
     if (!isDM && (!combatActive || playerCombatLocked || !canControlPlayerTurn || activeChar.id !== turnCharacter?.id)) {
       return
     }
-    if (skill.skillTreeId === 'riseKick' && !activeChar.conditions.includes('倒地')) {
-      void showCombatNotice('起身踢', '只能在倒地时使用。', 'amber')
+    const missingCondition = missingSkillActorCondition(skill.skillTreeId, activeChar.conditions)
+    if (missingCondition) {
+      void showCombatNotice(skill.name, `只能在${missingCondition}状态下使用。`, 'amber')
       return
     }
     const waiveAp = !!activeChar.combatBuffs?.galeComboReady
@@ -2463,32 +2466,29 @@ export default function MapsPage() {
             resolvingSkillTargetRef.current = null
           }
         }
+        const candidates = (activeMap?.tokens ?? []).filter((candidate) => {
+          if (candidate.characterId === targeting.casterId) return false
+          if (!isTokenAlive(candidate, characters)) return false
+          if (!activeMap) return false
+          const targetCell = pixelToCell(candidate.x, candidate.y, activeMap)
+          return new Set(rangedRangeCells.map(cellKey)).has(cellKey(targetCell))
+        })
+        const targetTokenIds = buildSkillTargetTokenIds({
+          skill: targeting.skill,
+          primaryTarget: tok,
+          candidates,
+          chooseTarget: ({ shotIndex, shotCount, primaryTarget, candidates: options }) => {
+            const picked = options.length
+              ? window.prompt(
+                  `${targeting.skill.name}：选择第 ${shotIndex + 1}/${shotCount} 支箭目标，留空则继续射向 ${primaryTarget.label}：\n${options
+                    .map((candidate, index) => `${index + 1}. ${candidate.label}`)
+                    .join('\n')}`,
+                )
+              : null
+            return options[Number(picked) - 1]
+          },
+        })
         if (!isDM) {
-          let targetTokenIds: string[] | undefined
-          if (activeMap && (targeting.skill.skillTreeId === 'multiShot' || targeting.skill.skillTreeId === 'encircle')) {
-            const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
-            targetTokenIds = Array.from({ length: shots }, () => tok.id)
-          } else if (activeMap && targeting.skill.skillTreeId === 'rageShot') {
-            const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
-            const selectedTargets: Token[] = [tok]
-            const candidates = activeMap.tokens.filter((t) => {
-              if (t.characterId === targeting.casterId) return false
-              if (!isTokenAlive(t, characters)) return false
-              const targetCell = pixelToCell(t.x, t.y, activeMap)
-              return new Set(rangedRangeCells.map(cellKey)).has(cellKey(targetCell))
-            })
-            for (let shot = 1; shot < shots; shot++) {
-              const picked = candidates.length
-                ? window.prompt(
-                    `${targeting.skill.name}：选择第 ${shot + 1}/${shots} 支箭目标，留空则继续射向 ${tok.label}：\n${candidates
-                      .map((t, i) => `${i + 1}. ${t.label}`)
-                      .join('\n')}`,
-                  )
-                : null
-              selectedTargets.push(candidates[Number(picked) - 1] ?? tok)
-            }
-            targetTokenIds = selectedTargets.map((target) => target.id)
-          }
           if (sendPlayerAttackTokenRequest(tok, targeting.skill, targetTokenIds)) {
             setTargeting(null)
             setAoePreviewCell(null)
@@ -2498,32 +2498,7 @@ export default function MapsPage() {
           }
           return
         }
-        let dmTargetTokenIds: string[] | undefined
-        if (activeMap && (targeting.skill.skillTreeId === 'multiShot' || targeting.skill.skillTreeId === 'encircle')) {
-          const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
-          dmTargetTokenIds = Array.from({ length: shots }, () => tok.id)
-        } else if (activeMap && targeting.skill.skillTreeId === 'rageShot') {
-          const shots = Math.max(1, targeting.skill.arrowShots ?? 1)
-          const selectedTargets: Token[] = [tok]
-          const candidates = activeMap.tokens.filter((t) => {
-            if (t.characterId === targeting.casterId) return false
-            if (!isTokenAlive(t, characters)) return false
-            const targetCell = pixelToCell(t.x, t.y, activeMap)
-            return new Set(rangedRangeCells.map(cellKey)).has(cellKey(targetCell))
-          })
-          for (let shot = 1; shot < shots; shot++) {
-            const picked = candidates.length
-              ? window.prompt(
-                  `${targeting.skill.name}: choose arrow ${shot + 1}/${shots} target, empty keeps ${tok.label}:\n${candidates
-                    .map((t, i) => `${i + 1}. ${t.label}`)
-                    .join('\n')}`,
-                )
-              : null
-            selectedTargets.push(candidates[Number(picked) - 1] ?? tok)
-          }
-          dmTargetTokenIds = selectedTargets.map((target) => target.id)
-        }
-        if (sendDmLocalAttackTokenRequest(tok, targeting.skill, dmTargetTokenIds)) {
+        if (sendDmLocalAttackTokenRequest(tok, targeting.skill, targetTokenIds)) {
           setTargeting(null)
           setAoePreviewCell(null)
           window.setTimeout(releaseSkillTarget, 1000)
@@ -3860,7 +3835,8 @@ export default function MapsPage() {
     skill: CombatSkill,
     events: HeadlessCombatEvent[],
   ) => {
-    if (skill.skillTreeId !== 'whirlwindKick') return false
+    const skillRank = skill.skillTreeId ? getClassSkillRank(caster, skill.skillTreeId) : 0
+    if (!resolveAoeSkillEffects(skill.skillTreeId, skillRank).triggersGaleCombo) return false
     const causedKnockback = events.some(
       (event) => event.type === 'status-added' && event.condition === KNOCKBACK_STATUS_LABEL,
     )
@@ -4160,14 +4136,16 @@ export default function MapsPage() {
         anchorCell,
         cells,
         targets,
+        skillRank,
         baseDiceCount,
         calmExtraDiceCount,
         windExtraDiceCount,
         saveMode,
         shouldStun,
       } = preparedAoe
-      if (skill.skillTreeId === 'focusShot') {
-        launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, cellToPixel(anchorCell, map), 'focus')
+      const aoeEffects = resolveAoeSkillEffects(skill.skillTreeId, skillRank)
+      if (aoeEffects.projectileKind) {
+        launchArrowProjectile({ x: actorToken.x, y: actorToken.y }, cellToPixel(anchorCell, map), aoeEffects.projectileKind)
       }
       let diceValues = await rollDiceBoxValues(baseDiceCount, skill.damageSides, `${skill.name} 伤害`, targets[0].label)
       if (calmExtraDiceCount > 0) {

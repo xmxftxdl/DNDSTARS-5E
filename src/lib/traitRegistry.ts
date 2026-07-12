@@ -1,6 +1,5 @@
 ﻿import type { Character, Trait } from '../types/character'
 import { isShadowDancer } from './characterClasses'
-import { isArcherLineClass } from './archerSkillTree'
 
 /** 职业特性键（弓手 / 逐风者 / 影舞者） */
 export const CLASS_FEATURE_KEYS = [
@@ -776,6 +775,23 @@ export const TRAIT_CHOICE_GROUPS: TraitChoiceGroup[] = [
   },
 ]
 
+export function getTraitChoiceGroup(groupId: string): TraitChoiceGroup | undefined {
+  return TRAIT_CHOICE_GROUPS.find((group) => group.id === groupId)
+}
+
+export function registerTraitChoiceGroup(group: TraitChoiceGroup): () => void {
+  const previousIndex = TRAIT_CHOICE_GROUPS.findIndex((item) => item.id === group.id)
+  const previous = previousIndex >= 0 ? TRAIT_CHOICE_GROUPS[previousIndex] : undefined
+  if (previousIndex >= 0) TRAIT_CHOICE_GROUPS[previousIndex] = group
+  else TRAIT_CHOICE_GROUPS.push(group)
+  return () => {
+    const currentIndex = TRAIT_CHOICE_GROUPS.findIndex((item) => item.id === group.id)
+    if (currentIndex < 0 || TRAIT_CHOICE_GROUPS[currentIndex] !== group) return
+    if (previous) TRAIT_CHOICE_GROUPS[currentIndex] = previous
+    else TRAIT_CHOICE_GROUPS.splice(currentIndex, 1)
+  }
+}
+
 export function getTraitChoicesDone(c: Character): Record<string, boolean> {
   return c.traitChoicesDone ?? {}
 }
@@ -788,7 +804,6 @@ export function isChoiceGroupDone(c: Character, groupId: string): boolean {
 }
 
 export function pendingTraitChoices(c: Character): TraitChoiceGroup[] {
-  if (!isArcherLineClass(c.charClass)) return []
   return TRAIT_CHOICE_GROUPS.filter(
     (g) => c.level >= g.minLevel && g.applies(c) && !isChoiceGroupDone(c, g.id),
   )
