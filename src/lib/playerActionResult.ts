@@ -14,6 +14,7 @@ export interface PlayerActionCharacterChange {
   tempHp?: { before: number; after: number }
   ap?: { before: number; after: number }
   qi?: { before: number; after: number }
+  classResources?: Record<string, { before: number; after: number; max: number }>
   conditions?: { before: string[]; after: string[] }
   traitUses?: Array<{ featureKey?: string; name: string; before: number; after: number }>
   skillCooldowns?: Array<{ skillId: string; name: string; before: number; after: number }>
@@ -72,6 +73,9 @@ function cloneCharacterForResult(character: Character): Character {
     traits: character.traits.map((trait) => ({ ...trait })),
     combatSkills: character.combatSkills.map((skill) => ({ ...skill })),
     combatBuffs: character.combatBuffs ? { ...character.combatBuffs } : undefined,
+    classResources: character.classResources
+      ? Object.fromEntries(Object.entries(character.classResources).map(([key, resource]) => [key, { ...resource }]))
+      : undefined,
   }
 }
 
@@ -88,6 +92,26 @@ function summarizeCharacterChanges(before: Character[], after: Character[]): Pla
     }
     if (prev.currentAP !== current.currentAP) change.ap = { before: prev.currentAP, after: current.currentAP }
     if ((prev.qi ?? 0) !== (current.qi ?? 0)) change.qi = { before: prev.qi ?? 0, after: current.qi ?? 0 }
+    const resourceKeys = new Set([
+      ...Object.keys(prev.classResources ?? {}),
+      ...Object.keys(current.classResources ?? {}),
+    ])
+    const classResources = Object.fromEntries(
+      [...resourceKeys]
+        .map((key) => {
+          const beforeResource = prev.classResources?.[key]
+          const afterResource = current.classResources?.[key]
+          const beforeValue = beforeResource?.current ?? 0
+          const afterValue = afterResource?.current ?? 0
+          if (beforeValue === afterValue && beforeResource?.max === afterResource?.max) return null
+          return [
+            key,
+            { before: beforeValue, after: afterValue, max: afterResource?.max ?? beforeResource?.max ?? 0 },
+          ] as const
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => !!entry),
+    )
+    if (Object.keys(classResources).length > 0) change.classResources = classResources
     if (JSON.stringify(prev.conditions) !== JSON.stringify(current.conditions)) {
       change.conditions = { before: [...prev.conditions], after: [...current.conditions] }
     }

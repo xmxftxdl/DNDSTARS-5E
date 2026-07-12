@@ -2,6 +2,7 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type { CombatMutation, PendingDamagePacket } from './combatResolutionPipeline'
 import { statusRefreshTokenPatch } from './combatTokens'
+import { getClassResourceCurrent, spendClassResource } from './classResources'
 
 export type CombatAuthorityRole = 'dm' | 'player'
 
@@ -443,7 +444,9 @@ export function executeCombatMutationsAuthority(
         }))
         break
       }
-      case 'spend-qi': {
+      case 'spend-qi':
+      case 'spend-class-resource': {
+        const resourceKey = mutation.type === 'spend-qi' ? 'qi' : mutation.resourceKey
         const character = next.characters.find((item) => item.id === mutation.characterId)
         if (!character) {
           failures.push({ mutation, reason: 'not-found' })
@@ -457,14 +460,15 @@ export function executeCombatMutationsAuthority(
           failures.push({ mutation, reason: 'invalid-amount' })
           break
         }
-        if ((character.qi ?? 0) < mutation.amount) {
+        if (getClassResourceCurrent(character, resourceKey) < mutation.amount) {
           failures.push({ mutation, reason: 'insufficient-ap' })
           break
         }
-        next = updateCharacterInMutationState(next, character.id, (item) => ({
-          ...item,
-          qi: Math.max(0, (item.qi ?? 0) - mutation.amount),
-        }))
+        next = updateCharacterInMutationState(
+          next,
+          character.id,
+          (item) => spendClassResource(item, resourceKey, mutation.amount) ?? item,
+        )
         break
       }
       case 'spend-feature-use': {

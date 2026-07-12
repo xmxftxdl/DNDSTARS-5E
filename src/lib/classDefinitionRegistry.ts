@@ -26,6 +26,7 @@ import {
 } from './archerSkillTree'
 import { CRIT_RING, DEFAULT_ARCHER_EQUIPMENT, EQUIPMENT_CATALOG, LEATHER_ARMOR, LEATHER_CAP, LONG_BOW } from './equipmentDefaults'
 import { syncArcherCombatSkills } from './skillTreeSync'
+import { maxQiForLevel } from './classResourceRules'
 
 export interface ClassProgressionAdapter {
   id: string
@@ -86,6 +87,17 @@ export interface ClassSkillTreeDefinition {
   buildView(character: Character): ClassSkillTreeView
 }
 
+export type ClassResourceReset = 'combat' | 'short-rest' | 'long-rest'
+
+export interface ClassResourceDefinition {
+  key: string
+  label: string
+  shortLabel?: string
+  isAvailable(character: Character): boolean
+  max(character: Character): number
+  resetOn: ClassResourceReset
+}
+
 export interface ClassDefinition {
   id: string
   classNames: readonly string[]
@@ -95,6 +107,7 @@ export interface ClassDefinition {
   defaultEquipment?: CharacterEquipment
   knownEquipment?: EquipmentItem[]
   skillTree?: ClassSkillTreeDefinition
+  resources?: readonly ClassResourceDefinition[]
 }
 
 export const DEFAULT_COMBAT_STAT_PROFILE: ClassCombatStatProfile = {
@@ -182,6 +195,15 @@ export const ARCHER_CLASS_DEFINITION: ClassDefinition = {
   defaultEquipment: DEFAULT_ARCHER_EQUIPMENT,
   knownEquipment: [LONG_BOW, LEATHER_ARMOR, LEATHER_CAP, CRIT_RING],
   skillTree: archerSkillTree,
+  resources: [
+    {
+      key: 'qi',
+      label: '气',
+      isAvailable: (character) => character.charClass === '影舞者',
+      max: (character) => maxQiForLevel(character.level),
+      resetOn: 'long-rest',
+    },
+  ],
 }
 
 const definitions = new Map<string, ClassDefinition>([

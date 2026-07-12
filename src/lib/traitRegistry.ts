@@ -1,5 +1,8 @@
 ﻿import type { Character, Trait } from '../types/character'
 import { isShadowDancer } from './characterClasses'
+import { syncCharacterClassResources } from './classResources'
+
+export { maxQiForLevel } from './classResourceRules'
 
 /** 职业特性键（弓手 / 逐风者 / 影舞者） */
 export const CLASS_FEATURE_KEYS = [
@@ -864,24 +867,9 @@ export function stripArcherLineTraits(traits: Trait[]): Trait[] {
   return traits.filter((t) => !t.featureKey || ACTIVE_FEATURE_KEYS.has(t.featureKey))
 }
 
-/** 影舞者气上限 */
-export function maxQiForLevel(level: number): number {
-  // TEMP: 气系统调试期间固定为 99。原公式先保留在这里，后续平衡时恢复。
-  // if (level >= 50) return 6
-  // if (level >= 40) return 5
-  // if (level >= 30) return 4
-  // if (level >= 20) return 3
-  // if (level >= 15) return 2
-  // return 0
-  void level
-  return 99
-}
-
+/** @deprecated 使用 syncCharacterClassResources。 */
 export function syncQiForCharacter(c: Character): Character {
-  if (!isShadowDancer(c.charClass)) return { ...c, qi: undefined }
-  const max = maxQiForLevel(c.level)
-  const current = Number.isFinite(c.qi) ? (c.qi as number) : max
-  return { ...c, qi: Math.max(0, Math.min(max, current)) }
+  return syncCharacterClassResources(c)
 }
 
 export function metaChoiceLabel(key: MetaChoiceKey): string {

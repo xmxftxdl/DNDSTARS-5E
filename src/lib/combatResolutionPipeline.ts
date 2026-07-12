@@ -89,6 +89,13 @@ export type CombatMutation =
       reason: string
     }
   | {
+      type: 'spend-class-resource'
+      characterId: string
+      resourceKey: string
+      amount: number
+      reason: string
+    }
+  | {
       type: 'spend-feature-use'
       characterId: string
       featureKey: ClassFeatureKey

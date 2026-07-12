@@ -11,6 +11,7 @@
 - 通用技能树 ViewModel 生成器。
 - 物理/魔法攻防、生命和暴击公式。
 - 默认装备与该职业可选装备目录。
+- 职业资源（气、法力、怒气等）的名称、上限、可用条件与恢复时机。
 
 注册定义后，角色 Store、角色面板、装备面板和战斗数值计算会自动发现该职业。
 
@@ -40,14 +41,23 @@ Store 只调用 `syncCharacterClassProgression`，不应导入具体职业技能
 
 `defaultEquipment` 在角色没有装备时应用；`knownEquipment` 决定角色装备页显示的可选目录。
 
-## 5. 特性选择
+## 5. 职业资源
+
+在职业定义的 `resources` 中注册 `ClassResourceDefinition`。角色只保存通用的
+`classResources[key] = { current, max }`，Store、Headless DM、长休和资源栏统一通过
+`classResources.ts` 读写。资源消费在结算管线中生成 `spend-class-resource` mutation，
+由 DM authority 验证余额并扣除。
+
+旧存档中的影舞者 `qi` 字段会自动迁移并暂时双写；新增职业不得增加新的顶层资源字段。
+
+## 6. 特性选择
 
 通过 `registerTraitChoiceGroup` 注册等级节点与抉择。`applies(character)` 决定所属职业，
 `pendingTraitChoices` 不再限定弓手系。
 
 新增特性键和描述仍集中在 `traitRegistry.ts`，确保存档、角色面板和战斗状态使用同一个定义。
 
-## 6. 技能目标与范围
+## 7. 技能目标与范围
 
 - `registerSkillRange`：注册单体技能的权威射程。玩家 UI 与 Headless DM 共用同一个值。
 - `registerSkillAoeTargeting`：注册圆形、矩形或直线 AOE；矩形可声明 `rotatable`。
@@ -55,7 +65,7 @@ Store 只调用 `syncCharacterClassProgression`，不应导入具体职业技能
 
 目标选择只产生目标 ID/格子；是否命中、豁免、伤害和状态仍由 DM 计算。
 
-## 7. 技能效果
+## 8. 技能效果
 
 通过 `registerSkillEffectResolver` 注册按技能阶级生成的效果配置：
 
@@ -67,7 +77,7 @@ Store 只调用 `syncCharacterClassProgression`，不应导入具体职业技能
 Resolver 只生成标准效果配置。投骰由客户端动画层执行，骰值打包进 `targetPacket`，
 最终 AP、伤害、状态、CD 和死亡全部由 Headless DM 应用。
 
-## 8. 测试要求
+## 9. 测试要求
 
 每个新职业至少覆盖：
 

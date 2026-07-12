@@ -33,6 +33,7 @@ import { getTokenAbilityMod, KNOCKBACK_DEFAULT_TURNS, KNOCKBACK_STATUS_LABEL } f
 import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { resetCombatTraitUses } from './traitRegistry'
+import { getClassResourceCurrent, spendClassResource } from './classResources'
 import { BULLET_CELL_COUNT, BULLET_TYPE_COUNT, createSeededBulletRandom, planSwapCascade } from './bulletMatch'
 import { IGNITE_STATUS_LABEL } from './ignite'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
@@ -1185,42 +1186,42 @@ function resolveActivateFeature(
   }
 
   if (action.featureKey === 'flexibleBody') {
-    if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+    if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
     if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
     const bonus = 5 + (Math.max(1, trait.level) - 1) * 2
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      qi: Math.max(0, (item.qi ?? 0) - 1),
-      combatBuffs: { ...item.combatBuffs, flexibleBodyBonus: bonus },
-    }))
+    updateCharacter(state, actor.id, (item) => {
+      const spent = spendClassResource(item, 'qi', 1) ?? item
+      return { ...spent, combatBuffs: { ...spent.combatBuffs, flexibleBodyBonus: bonus } }
+    })
     events.push({ type: 'log', text: `${actor.name} 激活灵活身躯：下次闪避/敏捷豁免 +${bonus}。` })
     return succeed(state, events)
   }
 
   if (action.featureKey === 'showtime') {
-    if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+    if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
     if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      qi: Math.max(0, (item.qi ?? 0) - 1),
-      combatBuffs: { ...item.combatBuffs, showtimeTurns: 2 },
-      traits: item.traits.map((currentTrait) =>
-        currentTrait.featureKey === 'showtime'
-          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-          : currentTrait,
-      ),
-    }))
+    updateCharacter(state, actor.id, (item) => {
+      const spent = spendClassResource(item, 'qi', 1) ?? item
+      return {
+        ...spent,
+        combatBuffs: { ...spent.combatBuffs, showtimeTurns: 2 },
+        traits: spent.traits.map((currentTrait) =>
+          currentTrait.featureKey === 'showtime'
+            ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+            : currentTrait,
+        ),
+      }
+    })
     events.push({ type: 'log', text: `${actor.name} 激活演出时间：持续 2 回合。` })
     return succeed(state, events)
   }
 
   if (action.featureKey === 'windBlade') {
-    if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      qi: Math.max(0, (item.qi ?? 0) - 1),
-      combatBuffs: { ...item.combatBuffs, windBladeFreeDodgeTurns: 1 },
-    }))
+    if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
+    updateCharacter(state, actor.id, (item) => {
+      const spent = spendClassResource(item, 'qi', 1) ?? item
+      return { ...spent, combatBuffs: { ...spent.combatBuffs, windBladeFreeDodgeTurns: 1 } }
+    })
     events.push({ type: 'log', text: `${actor.name} 激活风刃乱舞：下回合开始前，回合外闪避不消耗 AP。` })
     return succeed(state, events)
   }
@@ -1325,7 +1326,7 @@ function resolveIllusionDanceFeature(
   dice: HeadlessDiceRoller,
   events: HeadlessCombatEvent[],
 ): HeadlessCombatResult {
-  if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+  if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
   const limit = Math.min(3, Math.max(1, trait.level))
   const packetByTarget = new Map((action.targetPackets ?? []).map((packet) => [packet.targetTokenId, packet]))
   const requestedIds =
@@ -1354,15 +1355,17 @@ function resolveIllusionDanceFeature(
   }
 
   if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-  updateCharacter(state, actor.id, (item) => ({
-    ...item,
-    qi: Math.max(0, (item.qi ?? 0) - 1),
-    traits: item.traits.map((currentTrait) =>
-      currentTrait.featureKey === 'illusionDance'
-        ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-        : currentTrait,
-    ),
-  }))
+  updateCharacter(state, actor.id, (item) => {
+    const spent = spendClassResource(item, 'qi', 1) ?? item
+    return {
+      ...spent,
+      traits: spent.traits.map((currentTrait) =>
+        currentTrait.featureKey === 'illusionDance'
+          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
+          : currentTrait,
+      ),
+    }
+  })
 
   const labels: string[] = []
   for (const target of targets) {
@@ -1422,22 +1425,24 @@ function resolveQiReduceCooldown(
   if (!actor || actor.currentHp <= 0 || !skill || skill.remaining <= 0) {
     return fail(state, 'invalid-skill', events)
   }
-  if ((actor.qi ?? 0) < 1) return fail(state, 'insufficient-resource', events)
+  if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
 
-  updateCharacter(state, actor.id, (item) => ({
-    ...item,
-    qi: Math.max(0, (item.qi ?? 0) - 1),
-    combatSkills: item.combatSkills.map((currentSkill) =>
-      currentSkill.id === action.skillId
-        ? { ...currentSkill, remaining: Math.max(0, currentSkill.remaining - 1) }
-        : currentSkill,
-    ),
-  }))
+  updateCharacter(state, actor.id, (item) => {
+    const spent = spendClassResource(item, 'qi', 1) ?? item
+    return {
+      ...spent,
+      combatSkills: spent.combatSkills.map((currentSkill) =>
+        currentSkill.id === action.skillId
+          ? { ...currentSkill, remaining: Math.max(0, currentSkill.remaining - 1) }
+          : currentSkill,
+      ),
+    }
+  })
   const updated = findCharacter(state, actor.id)
   const updatedSkill = updated?.combatSkills.find((item) => item.id === action.skillId)
   events.push({
     type: 'log',
-    text: `${actor.name} 消耗 1 点气：${skill.name} 冷却 -1。剩余气 ${updated?.qi ?? 0}，剩余冷却 ${
+    text: `${actor.name} 消耗 1 点气：${skill.name} 冷却 -1。剩余气 ${updated ? getClassResourceCurrent(updated, 'qi') : 0}，剩余冷却 ${
       updatedSkill?.remaining ?? 0
     }。`,
   })

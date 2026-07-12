@@ -39,7 +39,7 @@ import { isHeavyGunner } from '../lib/bulletMatch'
 import FeaturesTab from '../components/character/FeaturesTab'
 import CharacterRailEntry from '../components/map/CharacterRailEntry'
 import { CHAR_PANEL_TITLES, type CharDockPanel } from '../components/map/characterRailConfig'
-import QiIndicator from '../components/map/QiIndicator'
+import ClassResourceIndicators from '../components/map/ClassResourceIndicators'
 import MapInventoryPanel from '../components/map/MapInventoryPanel'
 import MapSpellsPanel from '../components/map/MapSpellsPanel'
 import EnemyPoolPicker from '../components/map/EnemyPoolPicker'
@@ -53,6 +53,7 @@ import DiceBoxRollOverlay from '../components/DiceBoxRollOverlay'
 import { useMapStore } from '../store/maps'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
+import { getClassResourceCurrent } from '../lib/classResources'
 import {
   clearSharedEventBacklog,
   clearSharedResource,
@@ -1867,7 +1868,7 @@ export default function MapsPage() {
       void showCombatNotice('行动点不足', '需要 1 AP。', 'amber')
       return
     }
-    if ((caster.qi ?? 0) < 1) {
+    if (getClassResourceCurrent(caster, 'qi') < 1) {
       void showCombatNotice('气不足', '需要 1 点气。', 'amber')
       return
     }
@@ -4572,7 +4573,7 @@ export default function MapsPage() {
 
   const sendPlayerQiReduceCooldownRequest = (skill: CombatSkill) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
-    if (skill.remaining <= 0 || (turnCharacter.qi ?? 0) < 1) return false
+    if (skill.remaining <= 0 || getClassResourceCurrent(turnCharacter, 'qi') < 1) return false
     const action = createPlayerActionRequest({
       type: 'qi-reduce-cooldown',
       skillId: skill.id,
@@ -6022,7 +6023,7 @@ export default function MapsPage() {
                       </button>
                     </div>
                   )}
-                <QiIndicator charClass={activeChar.charClass} level={activeChar.level} qi={activeChar.qi} compact />
+                <ClassResourceIndicators character={activeChar} compact />
                 <button
                   onClick={handlePlayerEndTurn}
                   data-testid="player-end-turn"

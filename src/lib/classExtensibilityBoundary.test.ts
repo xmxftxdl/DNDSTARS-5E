@@ -46,4 +46,16 @@ describe('class extensibility boundaries', () => {
     expect(combatStats).not.toContain('isArcherLineClass')
     expect(combatStats).toContain('classDefinitionForClassName')
   })
+
+  it('keeps direct class-resource fields out of UI and headless authority', () => {
+    for (const relative of [
+      '../pages/MapsPage.tsx',
+      '../components/character/SkillBar.tsx',
+      './headlessDmCombatEngine.ts',
+    ]) {
+      expect(source(relative), `${relative} must use classResources helpers`).not.toMatch(/\.qi\b/)
+    }
+    expect(source('./headlessDmCombatEngine.ts')).toContain('getClassResourceCurrent')
+    expect(source('./headlessDmCombatEngine.ts')).toContain('spendClassResource')
+  })
 })

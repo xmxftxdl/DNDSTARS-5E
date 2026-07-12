@@ -169,7 +169,9 @@ export interface Character {
   /** 弓手技能树各技能当前阶位（1–5） */
   skillRanks?: Record<string, number>
 
-  /** 影舞者 · 气 */
+  /** 职业资源；key 由职业定义注册，例如影舞者的 qi。 */
+  classResources?: Record<string, CharacterResourceState>
+  /** @deprecated 旧版影舞者气字段，仅用于存档与消息兼容。 */
   qi?: number
   /** 重炮手 · 子弹消消乐（8×8 棋盘 + 就绪栏） */
   bulletPuzzle?: BulletPuzzleState
@@ -180,6 +182,11 @@ export interface Character {
   // —— DM 专属 ——
   dmNotes: string // 仅 DM 可见
   visibleToPlayers: boolean // 是否对玩家公开
+}
+
+export interface CharacterResourceState {
+  current: number
+  max: number
 }
 
 // [T5/C7] Reconciled with the actually-effective set. The first group is engine-backed

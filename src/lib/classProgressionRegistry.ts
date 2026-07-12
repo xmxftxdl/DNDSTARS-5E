@@ -3,7 +3,8 @@ import {
   registeredClassDefinitions,
   type ClassProgressionAdapter,
 } from './classDefinitionRegistry'
-import { syncClassTraitUses, syncQiForCharacter } from './traitRegistry'
+import { syncClassTraitUses } from './traitRegistry'
+import { syncCharacterClassResources } from './classResources'
 
 export type { ClassProgressionAdapter } from './classDefinitionRegistry'
 
@@ -33,7 +34,7 @@ export function hasClassSkillTree(character: Character): boolean {
 }
 
 export function syncCharacterClassTraits(character: Character): Character {
-  return syncQiForCharacter(syncClassTraitUses(character))
+  return syncCharacterClassResources(syncClassTraitUses(character))
 }
 
 export function syncCharacterClassSkills(character: Character): Character {

@@ -20,13 +20,13 @@ import {
 } from '../lib/classFeatures'
 import {
   migrateCharacterTraits,
-  maxQiForLevel,
   getTraitChoiceGroup,
   resetCombatTraitUses,
   type ClassFeatureKey,
   type MetaChoiceKey,
   type TraitChoiceOption,
 } from '../lib/traitRegistry'
+import { getClassResourceCurrent, restoreClassResources, spendClassResource } from '../lib/classResources'
 import { beginCalmMindTurn, calmBreathState, initCalmMindForCombat, isCalmMindActive, triggerOutOfBreath, tickOutOfBreathOnEndTurn } from '../lib/calmMind'
 import { ensureDefaultEquipment, isMagicDamageSkill, refreshKnownEquipment, syncCombatDerivedStats } from '../lib/combatStats'
 
@@ -193,6 +193,7 @@ export function mergePlayerWritableCharacter(local: Character, shared: Character
     actionPoints: shared.actionPoints,
     currentAP: shared.currentAP,
     qi: shared.qi,
+    classResources: shared.classResources,
     combatBuffs: shared.combatBuffs ? { ...shared.combatBuffs } : undefined,
     traits: localTraits.map((trait) => {
       const sharedTrait =
@@ -408,6 +409,7 @@ function normalizeCharacter(c: Partial<Character>): Character {
     skillRanks: c.skillRanks ?? {},
     traitChoicesDone: c.traitChoicesDone ?? {},
     qi: c.qi,
+    classResources: c.classResources,
     equipment: c.equipment,
   } as Character
 }
@@ -1100,12 +1102,11 @@ export const useCharacterStore = create<CharacterState>()(
         longRestAll: () => {
           set((s) => ({
             characters: s.characters.map((c) =>
-              syncCharacterClassTraits({
+              restoreClassResources(syncCharacterClassTraits({
                 ...c,
                 currentHp: c.maxHp,
                 tempHp: 0,
                 currentAP: c.actionPoints,
-                qi: maxQiForLevel(c.level),
                 combatSkills: c.combatSkills.map((skill) => ({
                   ...skill,
                   remaining: 0,
@@ -1114,7 +1115,7 @@ export const useCharacterStore = create<CharacterState>()(
                 traits: c.traits.map((trait) =>
                   trait.maxUses > 0 ? { ...trait, uses: trait.maxUses } : trait,
                 ),
-              }),
+              }), 'long-rest'),
             ),
           }))
           saveCharacters()
@@ -1441,8 +1442,8 @@ export const useCharacterStore = create<CharacterState>()(
 
         spendQi: (charId, amount = 1) => {
           const c = get().characters.find((x) => x.id === charId)
-          if (!c || (c.qi ?? 0) < amount) return false
-          updateChar(charId, (ch) => ({ ...ch, qi: (ch.qi ?? 0) - amount }))
+          if (!c || !spendClassResource(c, 'qi', amount)) return false
+          updateChar(charId, (ch) => spendClassResource(ch, 'qi', amount) ?? ch)
           return true
         },
 
@@ -1450,14 +1451,15 @@ export const useCharacterStore = create<CharacterState>()(
           const c = get().characters.find((x) => x.id === charId)
           const skill = c?.combatSkills.find((s) => s.id === skillId)
           if (!c || !skill || skill.remaining <= 0) return false
-          if ((c.qi ?? 0) < 1) return false
-          updateChar(charId, (ch) => ({
-            ...mapSkill(ch, skillId, (s) => ({
+          if (getClassResourceCurrent(c, 'qi') < 1) return false
+          updateChar(charId, (ch) => {
+            const spent = spendClassResource(ch, 'qi', 1)
+            if (!spent) return ch
+            return mapSkill(spent, skillId, (s) => ({
               ...s,
               remaining: Math.max(0, s.remaining - 1),
-            })),
-            qi: Math.max(0, (ch.qi ?? 0) - 1),
-          }))
+            }))
+          })
           return true
         },
       }

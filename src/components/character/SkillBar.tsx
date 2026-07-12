@@ -2,11 +2,12 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Gauge, Zap, Plus, Trash2, SkipForward, X, Timer, Crosshair, Infinity as InfinityIcon } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
-import QiIndicator from '../map/QiIndicator'
+import ClassResourceIndicators from '../map/ClassResourceIndicators'
 import { isShadowDancer } from '../../lib/characterClasses'
 import type { CombatSkill } from '../../types/character'
 import { MAX_COOLDOWN } from '../../types/character'
 import { KNOCKBACK_ICON } from '../../lib/knockback'
+import { getClassResourceCurrent } from '../../lib/classResources'
 
 const EMOJI_CHOICES = ['✨', '🔥', '❄️', '⚡', '🗡️', '⚔️', '🛡️', '🏹', '💨', '🌀', '☠️', '📢', '🩸', '🌙']
 
@@ -62,7 +63,7 @@ export default function SkillBar({
   if (!character) return null
   const c = character
   const shadowDancer = isShadowDancer(c.charClass)
-  const canSpendQi = shadowDancer && (c.qi ?? 0) > 0
+  const canSpendQi = shadowDancer && getClassResourceCurrent(c, 'qi') > 0
   const editing = c.combatSkills.find((s) => s.id === editingId) ?? null
   const effectiveCd = (s: CombatSkill) =>
     s.cooldown <= 0 ? 0 : Math.max(1, s.cooldown - s.cdReduction)
@@ -97,7 +98,7 @@ export default function SkillBar({
           <span className="text-sm text-slate-300">激励骰</span>
           <span className="font-bold text-amber-200">{c.inspiration}</span>
         </div>
-        <QiIndicator charClass={c.charClass} level={c.level} qi={c.qi} />
+        <ClassResourceIndicators character={c} />
 
         {!hideTurnControls && (
           <>
