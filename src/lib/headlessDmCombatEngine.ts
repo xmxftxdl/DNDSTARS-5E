@@ -34,17 +34,13 @@ import { decideDodge } from './aiPolicy'
 import { findClassTrait } from './classFeatures'
 import { resetCombatTraitUses } from './traitRegistry'
 import { getClassResourceCurrent, spendClassResource } from './classResources'
-import { classCombatActionAvailable } from './classDefinitionRegistry'
-import {
-  headlessClassCombatActionResolver,
-  registerHeadlessClassCombatActionResolver,
-} from './classCombatActionRegistry'
+import { headlessClassCombatActionResolver } from './classCombatActionRegistry'
 import {
   featureActivationContract,
   headlessFeatureActivationResolver,
-  registerHeadlessFeatureActivationResolver,
 } from './featureActivationRegistry'
-import { BULLET_CELL_COUNT, BULLET_TYPE_COUNT, createSeededBulletRandom, planSwapCascade } from './bulletMatch'
+import { registerArcherHeadlessFeatureResolvers } from '../classes/archer/headlessFeatureResolver'
+import { registerHeavyGunnerHeadlessActionResolvers } from '../classes/heavyGunner/headlessActionResolver'
 import { IGNITE_STATUS_LABEL } from './ignite'
 import { STUN_DEFAULT_TURNS, STUN_STATUS_LABEL } from './stun'
 import {
@@ -649,7 +645,23 @@ export function resolveHeadlessDmAction(
   }
 
   const classActionResolver = headlessClassCombatActionResolver(action.type)
-  if (classActionResolver) return classActionResolver({ state: next, action, dice, events })
+  if (classActionResolver) {
+    return classActionResolver({
+      state: next,
+      action,
+      dice,
+      events,
+      services: {
+        fail: (reason) => fail(next, reason, events),
+        succeed: () => succeed(next, events),
+        findCharacter: (characterId) => findCharacter(next, characterId),
+        currentTurnTokenId: () => getCurrentTurn(next)?.tokenId,
+        spendCharacterAp: (characterId, tokenId, amount) =>
+          spendCharacterAp(next, characterId, amount, tokenId, events),
+        updateCharacter: (characterId, update) => updateCharacter(next, characterId, update),
+      },
+    })
+  }
 
   switch (action.type) {
     case 'move-token':
@@ -1029,276 +1041,35 @@ function resolveActivateFeature(
   if (!trait || !contract || !resolver || (!isToggleOff && contract.requiresUse && trait.uses <= 0)) {
     return fail(state, 'invalid-skill', events)
   }
-  return resolver({ state, action, actorToken, actor, trait, dice, events })
+  return resolver({
+    state,
+    action,
+    actorToken,
+    actor,
+    trait,
+    dice,
+    events,
+    services: {
+      fail: (reason) => fail(state, reason, events),
+      succeed: () => succeed(state, events),
+      spendActorAp: (amount) => spendCharacterAp(state, actor.id, amount, actorToken.id, events),
+      updateCharacter: (characterId, update) => updateCharacter(state, characterId, update),
+      updateToken: (tokenId, update) => updateToken(state, tokenId, update),
+      findCharacter: (characterId) => findCharacter(state, characterId),
+      isTokenAlive: (token) => isTokenAlive(token, state.characters),
+      distanceFeet: (left, right) =>
+        tokenFootprintDistanceCells(left, right, state.map) * (state.map.feetPerCell ?? 5),
+      resolveIllusionDance: () =>
+        resolveIllusionDanceFeature(state, action, actorToken, actor, trait, dice, events),
+      resolveFinaleDamageValues: (values, featureRank) =>
+        resolveFinaleDamageValues(values, dice, featureRank),
+      resolveFinaleTrigger: (source, target, values) =>
+        resolveFinaleTrigger(state, source, target, values, events),
+    },
+  })
 }
 
-function resolveBuiltinFeatureActivation(
-  state: HeadlessDmCombatState,
-  action: HeadlessActivateFeatureAction,
-  dice: HeadlessDiceRoller,
-  events: HeadlessCombatEvent[],
-): HeadlessCombatResult {
-  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
-  if (
-    !actorToken ||
-    actorToken.type !== 'player' ||
-    actorToken.characterId !== action.characterId ||
-    !isTokenAlive(actorToken, state.characters)
-  ) {
-    return fail(state, 'invalid-actor', events)
-  }
-  const current = getCurrentTurn(state)
-  if (current?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
-  const actor = findCharacter(state, action.characterId)
-  if (!actor || actor.currentHp <= 0) return fail(state, 'invalid-actor', events)
-  const trait = actor.traits.find((item) => item.featureKey === action.featureKey)
-  const isToggleOff =
-    (action.featureKey === 'doubleArrow' && !!actor.combatBuffs?.doubleArrowReady) ||
-    (action.featureKey === 'preciseStrike' && !!actor.combatBuffs?.preciseStrikeReady) ||
-    (action.featureKey === 'finale' && !!actor.combatBuffs?.finaleReady)
-  const requiresUse =
-    action.featureKey !== 'stillWater' &&
-    action.featureKey !== 'flexibleBody' &&
-    action.featureKey !== 'windBlade'
-  if (!trait || (!isToggleOff && requiresUse && trait.uses <= 0)) return fail(state, 'invalid-skill', events)
-
-  if (action.featureKey === 'eagleEye') {
-    if (trait.uses <= 0) return fail(state, 'invalid-skill', events)
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      combatBuffs: { ...item.combatBuffs, eagleEyeTurns: 3 },
-      traits: item.traits.map((currentTrait) =>
-        currentTrait.featureKey === 'eagleEye'
-          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-          : currentTrait,
-      ),
-    }))
-    events.push({ type: 'log', text: `${actor.name} 激活鹰眼。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'wildernessGuide') {
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      combatBuffs: { ...item.combatBuffs, wildernessGuideBoost: true },
-      traits: item.traits.map((currentTrait) =>
-        currentTrait.featureKey === 'wildernessGuide'
-          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-          : currentTrait,
-      ),
-    }))
-    events.push({ type: 'log', text: `${actor.name} 激活特殊指引：下次生存或察觉检定具有优势。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'doubleArrow') {
-    if (actor.combatBuffs?.doubleArrowReady) {
-      updateCharacter(state, actor.id, (item) => ({
-        ...item,
-        combatBuffs: { ...item.combatBuffs, doubleArrowReady: undefined },
-      }))
-      events.push({ type: 'log', text: `${actor.name} 取消双箭。` })
-      return succeed(state, events)
-    }
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      combatBuffs: { ...item.combatBuffs, doubleArrowReady: true },
-    }))
-    events.push({ type: 'log', text: `${actor.name} 激活双箭。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'stillWater') {
-    if (!isCalmMindActive(actor)) return fail(state, 'invalid-skill', events)
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    const tempHp = Math.max(1, trait.level) * 10
-    let affected = 0
-    for (const allyToken of state.map.tokens) {
-      if (allyToken.type !== 'player' || !allyToken.characterId) continue
-      const ally = findCharacter(state, allyToken.characterId)
-      if (!ally || ally.currentHp <= 0) continue
-      const distanceFeet = tokenFootprintDistanceCells(actorToken, allyToken, state.map) * (state.map.feetPerCell ?? 5)
-      if (distanceFeet > 15) continue
-      affected += 1
-      updateCharacter(state, ally.id, (item) => ({
-        ...item,
-        tempHp: Math.max(item.tempHp ?? 0, tempHp),
-        combatBuffs: {
-          ...item.combatBuffs,
-          stillWaterBreathImmunityTurns: 2,
-          stillWaterTempHpTurns: 10,
-          outOfBreathTurns: undefined,
-          calmMind: findClassTrait(item, 'calmMind') ? true : item.combatBuffs?.calmMind,
-        },
-      }))
-    }
-    events.push({
-      type: 'log',
-      text: `${actor.name} 激活心如止水：15尺内 ${affected} 名友方获得 ${tempHp} 临时生命，2回合免气喘。`,
-    })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'finale') {
-    if (actor.combatBuffs?.finaleReady) {
-      updateCharacter(state, actor.id, (item) => ({
-        ...item,
-        combatBuffs: { ...item.combatBuffs, finaleReady: undefined },
-      }))
-      events.push({ type: 'log', text: `${actor.name} 取消曲终待触发。` })
-      return succeed(state, events)
-    }
-    if (!spendCharacterAp(state, actor.id, 2, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      combatBuffs: { ...item.combatBuffs, finaleReady: true },
-      traits: item.traits.map((currentTrait) =>
-        currentTrait.featureKey === 'finale'
-          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-          : currentTrait,
-      ),
-    }))
-    events.push({ type: 'log', text: `${actor.name} 激活曲终：等待下一名敌对生物狩猎印记叠至 4 层。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'illusionDance') {
-    return resolveIllusionDanceFeature(state, action, actorToken, actor, trait, dice, events)
-  }
-
-  if (action.featureKey === 'shadowVeil') {
-    const targetToken = state.map.tokens.find((item) => item.id === action.targetTokenId)
-    if (!targetToken || targetToken.type !== 'enemy' || !isTokenAlive(targetToken, state.characters)) {
-      return fail(state, 'invalid-target', events)
-    }
-    if ((targetToken.huntingMarkStacks ?? 0) < 2) return fail(state, 'invalid-target', events)
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateToken(state, targetToken.id, (token) => ({
-      ...token,
-      huntingMarkStacks: Math.max(0, (token.huntingMarkStacks ?? 0) - 2),
-    }))
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      combatBuffs: { ...item.combatBuffs, shadowVeilTargetId: targetToken.id },
-      traits: item.traits.map((currentTrait) =>
-        currentTrait.featureKey === 'shadowVeil'
-          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-          : currentTrait,
-      ),
-    }))
-    events.push({ type: 'log', text: `${actor.name} 激活影遁之术：${targetToken.label} 印记 -2，本回合攻击 +1D6。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'trackingArrow') {
-    const targetToken = state.map.tokens.find((item) => item.id === action.targetTokenId)
-    if (!targetToken || targetToken.type !== 'enemy' || !isTokenAlive(targetToken, state.characters)) {
-      return fail(state, 'invalid-target', events)
-    }
-    if ((targetToken.huntingMarkStacks ?? 0) <= 0) return fail(state, 'invalid-target', events)
-    const nextStacks = Math.min(4, (targetToken.huntingMarkStacks ?? 0) + 1)
-    const finaleWillTrigger = nextStacks === 4 && !!actor.combatBuffs?.finaleReady
-    const finaleDamageValues = finaleWillTrigger
-      ? resolveFinaleDamageValues(action.finaleDamageValues, dice, findClassTrait(actor, 'finale')?.level ?? 1)
-      : []
-    if (!finaleDamageValues) return fail(state, 'invalid-dice', events)
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateToken(state, targetToken.id, (token) => ({ ...token, huntingMarkStacks: nextStacks }))
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      traits: item.traits.map((currentTrait) =>
-        currentTrait.featureKey === 'trackingArrow'
-          ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-          : currentTrait,
-      ),
-    }))
-    events.push({ type: 'log', text: `${actor.name} 激活追踪箭：${targetToken.label} 狩猎印记 +1（${nextStacks}/4）。` })
-    if (finaleWillTrigger) {
-      const latestTarget = state.map.tokens.find((token) => token.id === targetToken.id) ?? targetToken
-      resolveFinaleTrigger(state, actor, latestTarget, finaleDamageValues, events)
-    }
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'flexibleBody') {
-    if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    const bonus = 5 + (Math.max(1, trait.level) - 1) * 2
-    updateCharacter(state, actor.id, (item) => {
-      const spent = spendClassResource(item, 'qi', 1) ?? item
-      return { ...spent, combatBuffs: { ...spent.combatBuffs, flexibleBodyBonus: bonus } }
-    })
-    events.push({ type: 'log', text: `${actor.name} 激活灵活身躯：下次闪避/敏捷豁免 +${bonus}。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'showtime') {
-    if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
-    if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-    updateCharacter(state, actor.id, (item) => {
-      const spent = spendClassResource(item, 'qi', 1) ?? item
-      return {
-        ...spent,
-        combatBuffs: { ...spent.combatBuffs, showtimeTurns: 2 },
-        traits: spent.traits.map((currentTrait) =>
-          currentTrait.featureKey === 'showtime'
-            ? { ...currentTrait, uses: Math.max(0, currentTrait.uses - 1) }
-            : currentTrait,
-        ),
-      }
-    })
-    events.push({ type: 'log', text: `${actor.name} 激活演出时间：持续 2 回合。` })
-    return succeed(state, events)
-  }
-
-  if (action.featureKey === 'windBlade') {
-    if (getClassResourceCurrent(actor, 'qi') < 1) return fail(state, 'insufficient-resource', events)
-    updateCharacter(state, actor.id, (item) => {
-      const spent = spendClassResource(item, 'qi', 1) ?? item
-      return { ...spent, combatBuffs: { ...spent.combatBuffs, windBladeFreeDodgeTurns: 1 } }
-    })
-    events.push({ type: 'log', text: `${actor.name} 激活风刃乱舞：下回合开始前，回合外闪避不消耗 AP。` })
-    return succeed(state, events)
-  }
-
-  if (actor.combatBuffs?.preciseStrikeReady) {
-    updateCharacter(state, actor.id, (item) => ({
-      ...item,
-      combatBuffs: { ...item.combatBuffs, preciseStrikeReady: undefined },
-    }))
-    events.push({ type: 'log', text: `${actor.name} 取消精准打击。` })
-    return succeed(state, events)
-  }
-  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-  updateCharacter(state, actor.id, (item) => ({
-    ...item,
-    combatBuffs: { ...item.combatBuffs, preciseStrikeReady: true },
-  }))
-  events.push({ type: 'log', text: `${actor.name} 准备精准打击。` })
-  return succeed(state, events)
-}
-
-for (const featureKey of [
-  'eagleEye',
-  'wildernessGuide',
-  'doubleArrow',
-  'preciseStrike',
-  'stillWater',
-  'finale',
-  'illusionDance',
-  'shadowVeil',
-  'trackingArrow',
-  'flexibleBody',
-  'showtime',
-  'windBlade',
-] as const) {
-  registerHeadlessFeatureActivationResolver(featureKey, ({ state, action, dice, events }) =>
-    resolveBuiltinFeatureActivation(state, action, dice, events),
-  )
-}
+registerArcherHeadlessFeatureResolvers()
 
 function resolveStableMind(
   state: HeadlessDmCombatState,
@@ -1509,52 +1280,7 @@ function resolveQiReduceCooldown(
   return succeed(state, events)
 }
 
-function resolveBulletMatchSwap(
-  state: HeadlessDmCombatState,
-  action: HeadlessBulletMatchSwapAction,
-  events: HeadlessCombatEvent[],
-): HeadlessCombatResult {
-  const actorToken = state.map.tokens.find((item) => item.id === action.actorTokenId)
-  const actor = findCharacter(state, action.characterId)
-  if (
-    !actorToken ||
-    actorToken.type !== 'player' ||
-    actorToken.characterId !== action.characterId ||
-    !actor ||
-    actor.currentHp <= 0 ||
-    !classCombatActionAvailable(actor, action.type)
-  ) {
-    return fail(state, 'invalid-actor', events)
-  }
-  if (getCurrentTurn(state)?.tokenId !== actorToken.id) return fail(state, 'stale-turn', events)
-  const puzzle = actor.bulletPuzzle
-  if (puzzle?.grid.length !== BULLET_CELL_COUNT || puzzle.ready.length !== BULLET_TYPE_COUNT) {
-    return fail(state, 'invalid-action', events)
-  }
-  const plan = planSwapCascade(
-    puzzle,
-    action.from,
-    action.to,
-    createSeededBulletRandom(action.seed),
-  )
-  if (!plan) return fail(state, 'invalid-action', events)
-  if (!spendCharacterAp(state, actor.id, 1, actorToken.id, events)) return fail(state, 'insufficient-ap', events)
-  updateCharacter(state, actor.id, (item) => ({
-    ...item,
-    bulletPuzzle: { grid: plan.finalGrid, ready: plan.finalReady },
-  }))
-  events.push({
-    type: 'log',
-    text: `${actor.name} 调整弹仓并完成 ${plan.steps.length} 段连锁。`,
-  })
-  return succeed(state, events)
-}
-
-registerHeadlessClassCombatActionResolver('bullet-match-swap', ({ state, action, events }) => {
-  if (action.type !== 'bullet-match-swap') return fail(state, 'invalid-action', events)
-  return resolveBulletMatchSwap(state, action, events)
-})
-
+registerHeavyGunnerHeadlessActionResolvers()
 function resolveCalmSpirit(
   state: HeadlessDmCombatState,
   action: HeadlessCalmSpiritAction,

@@ -69,4 +69,24 @@ describe('class extensibility boundaries', () => {
     expect(headless).toContain('headlessClassCombatActionResolver')
     expect(headless).toContain('headlessFeatureActivationResolver')
   })
+
+  it('keeps built-in class implementations inside class modules', () => {
+    const classRegistry = source('./classDefinitionRegistry.ts')
+    expect(classRegistry).not.toContain('archerSkillTree')
+    expect(classRegistry).not.toContain('maxQiForLevel')
+    expect(classRegistry).not.toContain("className === '重炮手'")
+
+    const featureRegistry = source('./featureActivationRegistry.ts')
+    expect(featureRegistry).not.toContain('isCalmMindActive')
+    expect(featureRegistry).not.toContain('eagleEyeDexBonus')
+    expect(featureRegistry).not.toContain("key: 'qi'")
+
+    const headless = source('./headlessDmCombatEngine.ts')
+    expect(headless).not.toContain('resolveBuiltinFeatureActivation')
+    expect(headless).not.toContain('planSwapCascade')
+
+    expect(source('../classes/archer/classDefinition.ts')).toContain('ARCHER_CLASS_DEFINITION')
+    expect(source('../classes/archer/headlessFeatureResolver.ts')).toContain('resolveArcherFeature')
+    expect(source('../classes/heavyGunner/headlessActionResolver.ts')).toContain('resolveBulletMatchSwap')
+  })
 })

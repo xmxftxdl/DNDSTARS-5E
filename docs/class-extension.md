@@ -3,6 +3,17 @@
 新增职业不应直接修改 `MapsPage.tsx`、角色 Store 或 Headless 攻击分发器来识别具体技能 ID。
 职业模块通过下面的 Registry 接入现有 DM 权威战斗流程。
 
+职业实现统一放在 `src/classes/<classId>/`。推荐结构：
+
+- `classDefinition.ts`：职业名称、数值、技能树、资源和专用 Action 声明。
+- `skillTree.ts` / `skillTreeSync.ts`：技能配置与角色技能同步。
+- `featureDefinitions.ts` / `featureActivationContracts.ts`：特性文本、消耗和 UI ViewModel。
+- `headlessFeatureResolver.ts`：主动特性的 DM 权威效果。
+- `headlessActionResolver.ts`：弹仓、牌组等职业专用操作。
+- 职业专属 React 控件直接放在同一职业目录，不得塞回通用组件。
+
+`src/lib` 中保留的旧职业文件只允许作为薄 re-export 兼容入口，不得再添加实现。
+
 ## 1. 统一职业定义
 
 每个职业线通过 `registerClassDefinition` 注册一份 `ClassDefinition`。定义集中提供：
