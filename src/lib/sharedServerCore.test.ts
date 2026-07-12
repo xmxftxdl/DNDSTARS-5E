@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile, readdir, stat } from 'node:fs/promise
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import * as sharedServerCore from '../../scripts/shared-server-core.mjs'
 import {
   EVENT_BACKLOG_LIMIT,
   EVENT_CHANNEL_LIMIT,
@@ -23,6 +24,107 @@ import {
   safeName,
   withWriteLock,
 } from '../../scripts/shared-server-core.mjs'
+
+const securityHelpers = sharedServerCore as unknown as {
+  authorizeAccessToken: (token: string | null) => { ok: boolean; role?: string; status?: number }
+  consumeRateLimit: (
+    buckets: Map<string, { startedAt: number; count: number }>,
+    key: string,
+    now?: number,
+    limit?: number,
+    windowMs?: number,
+  ) => { ok: boolean; remaining?: number; retryAfterMs?: number }
+  normalizeRoomId: (value?: string) => string
+  roomScopedPath: (root: string, roomId: string) => string
+}
+const { authorizeAccessToken, consumeRateLimit, normalizeRoomId, roomScopedPath } = securityHelpers
+
+describe('room isolation and access security', () => {
+  const previousDmToken = process.env.STARS_DM_TOKEN
+  const previousPlayerToken = process.env.STARS_PLAYER_TOKEN
+
+  afterEach(() => {
+    if (previousDmToken == null) delete process.env.STARS_DM_TOKEN
+    else process.env.STARS_DM_TOKEN = previousDmToken
+    if (previousPlayerToken == null) delete process.env.STARS_PLAYER_TOKEN
+    else process.env.STARS_PLAYER_TOKEN = previousPlayerToken
+  })
+
+  it('keeps the default paths compatible and isolates named rooms', () => {
+    expect(normalizeRoomId(undefined)).toBe('default')
+    expect(roomScopedPath('C:/state', 'default')).toBe('C:/state')
+    expect(roomScopedPath('C:/state', normalizeRoomId('table-a'))).toContain(path.join('rooms', 'table-a'))
+    expect(normalizeRoomId('../table-a')).not.toContain('/')
+  })
+
+  it('enables role tokens only when configured', () => {
+    delete process.env.STARS_DM_TOKEN
+    delete process.env.STARS_PLAYER_TOKEN
+    expect(authorizeAccessToken(null)).toMatchObject({ ok: true, role: 'open' })
+    process.env.STARS_DM_TOKEN = 'dm-token'
+    process.env.STARS_PLAYER_TOKEN = 'player-token'
+    expect(authorizeAccessToken('dm-token')).toMatchObject({ ok: true, role: 'dm' })
+    expect(authorizeAccessToken('player-token')).toMatchObject({ ok: true, role: 'player' })
+    expect(authorizeAccessToken(null)).toMatchObject({ ok: false, status: 401 })
+    expect(authorizeAccessToken('wrong')).toMatchObject({ ok: false, status: 403 })
+  })
+
+  it('limits each room and client bucket independently', () => {
+    const buckets = new Map()
+    expect(consumeRateLimit(buckets, 'room-a:client', 100, 2).ok).toBe(true)
+    expect(consumeRateLimit(buckets, 'room-a:client', 101, 2).ok).toBe(true)
+    expect(consumeRateLimit(buckets, 'room-a:client', 102, 2).ok).toBe(false)
+    expect(consumeRateLimit(buckets, 'room-b:client', 102, 2).ok).toBe(true)
+  })
+})
+
+const mutateCombatInterruptQueue = (
+  sharedServerCore as unknown as {
+    mutateCombatInterruptQueue: (queue: unknown, mutation: unknown, now?: number) => {
+      ok: boolean
+      status?: number
+      changed?: boolean
+      next: {
+        revision: number
+        interrupts: Array<{ id: string; status: string }>
+      }
+    }
+  }
+).mutateCombatInterruptQueue
+
+describe('combat interrupt atomic mutation', () => {
+  it('updates different interrupt ids without replacing the queue', () => {
+    const queue = {
+      mapId: 'map-1',
+      revision: 2,
+      updatedAt: 100,
+      interrupts: [
+        { id: 'a', mapId: 'map-1', kind: 'dodge', status: 'pending', payload: {}, createdAt: 1, updatedAt: 1 },
+        { id: 'b', mapId: 'map-1', kind: 'stable-mind', status: 'pending', payload: {}, createdAt: 2, updatedAt: 2 },
+      ],
+    }
+    const answered = mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'a', response: { wantsDodge: true },
+    }, 200)
+    expect(answered.ok).toBe(true)
+    expect(answered.next.revision).toBe(3)
+    expect(answered.next.interrupts.find((item: { id: string }) => item.id === 'a')?.status).toBe('answered')
+    expect(answered.next.interrupts.find((item: { id: string }) => item.id === 'b')?.status).toBe('pending')
+  })
+
+  it('rejects a backwards state transition and keeps repeats idempotent', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{ id: 'a', mapId: 'map-1', kind: 'dodge', status: 'answered', payload: {}, createdAt: 1, updatedAt: 2 }],
+    }
+    expect(mutateCombatInterruptQueue(queue, { operation: 'rolling', mapId: 'map-1', id: 'a' }, 200)).toMatchObject({
+      ok: false, status: 409,
+    })
+    expect(mutateCombatInterruptQueue(queue, { operation: 'answer', mapId: 'map-1', id: 'a' }, 200)).toMatchObject({
+      ok: true, changed: false,
+    })
+  })
+})
 
 describe('safeName — AC5 防碰撞', () => {
   it('纯安全字符原样返回（无回归）', () => {

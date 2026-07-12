@@ -278,3 +278,43 @@ test('monster spends AP for two attacks while player dodges across 3 rounds', as
 
   await context.close()
 })
+
+test('player reconnect restores the pending dodge interrupt', async ({ browser, request }) => {
+  test.setTimeout(120_000)
+  const mapId = `e2e-dodge-reconnect-${Date.now()}`
+  await seedEnemyFirstCombat(request, mapId)
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  let player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    waitForCombatReady(dm, 'enemy-e2e'),
+    waitForCombatReady(player, 'enemy-e2e'),
+  ])
+
+  let interruptId = ''
+  await expect.poll(async () => {
+    const queue = await getState<{ interrupts?: Array<{ id: string; kind: string; status: string }> }>(request, 'combat-interrupts')
+    const interrupt = queue.interrupts?.find((item) => item.kind === 'dodge' && item.status === 'pending')
+    interruptId = interrupt?.id ?? ''
+    return interruptId
+  }, { timeout: 30_000 }).not.toBe('')
+
+  await player.close()
+  player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await waitForCombatReady(player, 'enemy-e2e')
+  const acceptDamage = player.getByRole('button', { name: '承受伤害' })
+  await expect(acceptDamage).toBeVisible({ timeout: 12_000 })
+  await acceptDamage.click()
+
+  await expect.poll(async () => {
+    const queue = await getState<{ interrupts?: Array<{ id: string; status: string }> }>(request, 'combat-interrupts')
+    return queue.interrupts?.find((item) => item.id === interruptId)?.status
+  }, { timeout: 20_000 }).toBe('done')
+  await context.close()
+})

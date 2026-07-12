@@ -13,6 +13,7 @@ import {
   type SharedCombatInterruptLoad,
   type SharedCombatInterruptSave,
 } from './combatInterruptSync'
+import type { SharedCombatInterruptMutation } from './sharedApi'
 
 function makeStore(initial: SharedCombatInterruptQueueState | null = null) {
   let saved: SharedCombatInterruptQueueState | null = null
@@ -30,6 +31,21 @@ function makeStore(initial: SharedCombatInterruptQueueState | null = null) {
 }
 
 describe('combat interrupt sync', () => {
+  it('uses the atomic mutation transport when available', async () => {
+    const mutations: Record<string, unknown>[] = []
+    const interrupt = createCombatInterrupt({
+      id: 'atomic-1', mapId: 'map-1', kind: 'dodge', payload: { targetName: 'hero', result: {} }, now: 100,
+    })
+    await publishSharedCombatInterrupt({
+      ...makeStore(),
+      mutateSharedCombatInterrupt: async <T>(mutation: SharedCombatInterruptMutation) => {
+        mutations.push(mutation)
+        return {} as T
+      },
+      interrupt,
+    })
+    expect(mutations).toEqual([{ operation: 'upsert', mapId: 'map-1', interrupt }])
+  })
   it('publishes an interrupt into the shared queue resource', async () => {
     const store = makeStore(emptyCombatInterruptQueue('map-1', 100))
     const interrupt = createCombatInterrupt({

@@ -57,6 +57,7 @@ import {
   clearSharedEventBacklog,
   clearSharedResource,
   loadSharedResource,
+  mutateSharedCombatInterrupt,
   publishSharedEvent,
   saveSharedResource,
   subscribeSharedEvent,
@@ -248,6 +249,8 @@ import {
   KNOCKBACK_STATUS_LABEL,
 } from '../lib/knockback'
 import { modeFromPort } from '../lib/appMode'
+import { DmActionTransactionCoordinator } from '../lib/dmActionTransactionCoordinator'
+import { TimerRegistry } from '../lib/timerRegistry'
 import {
   currentPlayerSlot,
   getAssignedPlayerCharacterId,
@@ -338,10 +341,12 @@ export default function MapsPage() {
   const addEnemyFromPool = useMapStore((s) => s.addEnemyFromPool)
   const addCharacterToken = useMapStore((s) => s.addCharacterToken)
   const updateToken = useMapStore((s) => s.updateToken)
+  const applyAuthorityTokenUpdate = useMapStore((s) => s.applyAuthorityTokenUpdate)
   const removeToken = useMapStore((s) => s.removeToken)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
+  const applyAuthorityCharacterUpdate = useCharacterStore((s) => s.applyAuthorityUpdate)
 
   const forcedMode = modeFromPort()
   const [selectedMode, setSelectedMode] = useState<Mode | null>(() => {
@@ -350,6 +355,7 @@ export default function MapsPage() {
   })
   const mode = forcedMode ?? selectedMode
   const [combatActive, setCombatActive] = useState(false)
+  const [combatId, setCombatId] = useState('')
   const [dmAuthorityReady, setDmAuthorityReady] = useState<DmAuthorityReadyState | null>(null)
   const [playerCombatEndedLocked, setPlayerCombatEndedLocked] = useState(false)
   const [round, setRound] = useState(1)
@@ -520,17 +526,18 @@ export default function MapsPage() {
   const showCombatNotice = (title: string, message: string, tone: 'sky' | 'violet' | 'amber' | 'rose' = 'sky') =>
     showCombatDialog({ title, message, confirmText: '知道了', tone })
   const publishCombatInterrupt = async (interrupt: SharedCombatInterrupt) => {
-    await persistPublishSharedCombatInterrupt({ loadSharedResource, saveSharedResource, interrupt })
+    await persistPublishSharedCombatInterrupt({ loadSharedResource, saveSharedResource, mutateSharedCombatInterrupt, interrupt })
   }
   const answerSharedCombatInterrupt = async (id: string, response: Record<string, unknown>) => {
     if (!activeMap) return
-    await persistAnswerSharedCombatInterrupt({ loadSharedResource, saveSharedResource, mapId: activeMap.id, id, response })
+    await persistAnswerSharedCombatInterrupt({ loadSharedResource, saveSharedResource, mutateSharedCombatInterrupt, mapId: activeMap.id, id, response })
   }
   const markSharedCombatInterruptRolling = async (id: string, response?: Record<string, unknown>) => {
     if (!activeMap) return
     await persistMarkSharedCombatInterruptRolling({
       loadSharedResource,
       saveSharedResource,
+      mutateSharedCombatInterrupt,
       mapId: activeMap.id,
       id,
       response,
@@ -541,6 +548,7 @@ export default function MapsPage() {
     await persistFinishSharedCombatInterrupt({
       loadSharedResource,
       saveSharedResource,
+      mutateSharedCombatInterrupt,
       mapId: activeMap.id,
       id,
       response,
@@ -571,7 +579,7 @@ export default function MapsPage() {
   const nonActorSkippedKeysRef = useRef(new Set<string>())
   // [T3/C2] dedupe set for stun skips (same anti-stack purpose). Cleared on start/end.
   const stunSkippedKeysRef = useRef(new Set<string>())
-  const enemyTurnTimersRef = useRef<number[]>([])
+  const enemyTurnTimersRef = useRef(new TimerRegistry())
   const pendingSharedDodgeRef = useRef<{
     id: string
     result: EnemyTurnResult
@@ -649,8 +657,9 @@ export default function MapsPage() {
   const multiStrikeHitsRef = useRef<Record<string, number>>({})
   const combatActiveRef = useRef(false)
   const playerActionResultBaselinesRef = useRef<Record<string, PlayerActionResultBaseline>>({})
-  const playerActionAuthorityQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const playerActionCoordinatorRef = useRef(new DmActionTransactionCoordinator())
   const playerActionAuthorityCommitRef = useRef<Promise<void>>(Promise.resolve())
+  const applyingPlayerActionTransactionRef = useRef(false)
   const previousCombatActiveRef = useRef(false)
   const roundRef = useRef(1)
   const initiativeIndexRef = useRef(0)
@@ -856,6 +865,7 @@ export default function MapsPage() {
     lastAppliedCombatUpdatedAtRef.current = decision.incomingUpdatedAt
     applyingSharedCombatRef.current = true
     combatIdRef.current = decision.incomingCombatId
+    setCombatId(decision.incomingCombatId)
     if (decision.shouldResetPlayerActionState) {
       setPendingPlayerActionLocked(null)
       seenPlayerActionAckIdsRef.current.clear()
@@ -1700,7 +1710,7 @@ export default function MapsPage() {
     }
     afterRollCallbacksRef.current.push(resolve)
     const watchdog = window.setTimeout(resolve, DEATH_KEY_WATCHDOG_MS)
-    enemyTurnTimersRef.current.push(watchdog)
+    enemyTurnTimersRef.current.add(watchdog)
   }
 
   const createHeadlessStateSnapshot = (map: BattleMap): HeadlessDmCombatState =>
@@ -1749,10 +1759,18 @@ export default function MapsPage() {
       initiativeOrderRef.current = plan.initiativeOrder
     }
     for (const nextCharacter of plan.charactersToUpdate) {
-      updateChar(nextCharacter.id, nextCharacter)
+      if (applyingPlayerActionTransactionRef.current) {
+        applyAuthorityCharacterUpdate(nextCharacter.id, nextCharacter)
+      } else {
+        updateChar(nextCharacter.id, nextCharacter)
+      }
     }
     for (const nextToken of plan.tokensToUpdate) {
-      updateToken(result.state.map.id, nextToken.id, nextToken)
+      if (applyingPlayerActionTransactionRef.current) {
+        applyAuthorityTokenUpdate(result.state.map.id, nextToken.id, nextToken)
+      } else {
+        updateToken(result.state.map.id, nextToken.id, nextToken)
+      }
     }
     if (plan.enemyApByToken !== undefined) {
       enemyApByTokenRef.current = plan.enemyApByToken
@@ -1762,7 +1780,7 @@ export default function MapsPage() {
       setDisengagedCharIds(new Set(plan.disengagedCharacterIds))
     }
 
-    if (plan.shouldPublishCombatState) {
+    if (plan.shouldPublishCombatState && !applyingPlayerActionTransactionRef.current) {
       publishCombatState({
         active: result.state.active,
         round: result.state.round,
@@ -2601,8 +2619,7 @@ export default function MapsPage() {
   }, [initiativeIndex, initiativeOrder.length])
 
   const clearEnemyTurnTimers = () => {
-    for (const id of enemyTurnTimersRef.current) window.clearTimeout(id)
-    enemyTurnTimersRef.current = []
+    enemyTurnTimersRef.current.clear(window.clearTimeout)
   }
 
   // [T2/A8] Previously enemy-turn timers were only cleared in startCombat/endCombat,
@@ -2661,6 +2678,7 @@ export default function MapsPage() {
     if (!activeMap) return
     const nextCombatId = runtimeId(`${activeMap.id}:combat`)
     combatIdRef.current = nextCombatId
+    setCombatId(nextCombatId)
     clearEnemyTurnTimers()
     setCombatLog([])
     setCombatLogOpen(true)
@@ -3559,7 +3577,7 @@ export default function MapsPage() {
       const id = window.setTimeout(() => {
         if (isStillEnemyTurn()) void scheduleEnemyTurn(enemy)
       }, 100)
-      enemyTurnTimersRef.current.push(id)
+      enemyTurnTimersRef.current.add(id)
       return
     }
     const advanceEnemyIfCurrent = () => {
@@ -3572,7 +3590,7 @@ export default function MapsPage() {
     const startingAp = getEnemyApState(enemy.id).current
     if (startingAp <= 0) {
       const id = window.setTimeout(advanceEnemyIfCurrent, 300)
-      enemyTurnTimersRef.current.push(id)
+      enemyTurnTimersRef.current.add(id)
       return
     }
     const result = planEnemyTurn(activeMap, enemy, useCharacterStore.getState().characters, startingAp, { round })
@@ -3586,19 +3604,19 @@ export default function MapsPage() {
       const latestEnemy = latestMap?.tokens.find((t) => t.id === enemy.id) ?? enemy
       if (!isTokenAlive(latestEnemy, useCharacterStore.getState().characters)) {
         const id = window.setTimeout(advanceEnemyIfCurrent, ADVANCE_DELAY_MS)
-        enemyTurnTimersRef.current.push(id)
+        enemyTurnTimersRef.current.add(id)
         return
       }
       if (!(await resolveEnemyMoveThroughHeadless(latestEnemy, result.newPosition, moveApSpent, '移动'))) {
         const id = window.setTimeout(advanceEnemyIfCurrent, 300)
-        enemyTurnTimersRef.current.push(id)
+        enemyTurnTimersRef.current.add(id)
         return
       }
     }
 
     const pushTimer = (fn: () => void, ms: number) => {
       const id = window.setTimeout(fn, ms)
-      enemyTurnTimersRef.current.push(id)
+      enemyTurnTimersRef.current.add(id)
     }
 
     if (!result.attacked) {
@@ -3760,6 +3778,16 @@ export default function MapsPage() {
             maps: useMapStore.getState().maps,
             mapSelectedId: useMapStore.getState().selectedId,
             updatedAt: appliedAt,
+            combat: {
+              mapId: activeMap.id,
+              combatId: combatIdRef.current,
+              active: combatActiveRef.current,
+              round: roundRef.current,
+              initiativeIndex: initiativeIndexRef.current,
+              initiativeOrder: initiativeOrderRef.current,
+              enemyApByToken: enemyApByTokenRef.current,
+              updatedAt: appliedAt,
+            },
           }
         : undefined
     const commit = publishPlayerActionAckWithSnapshots({
@@ -4271,14 +4299,25 @@ export default function MapsPage() {
   }
 
   const handlePlayerActionRequest = (action: SharedPlayerActionState): Promise<void> => {
-    const task = playerActionAuthorityQueueRef.current.then(async () => {
-      await processPlayerActionRequest(action)
-      await playerActionAuthorityCommitRef.current
-    })
-    playerActionAuthorityQueueRef.current = task.catch((error) => {
-      console.error('[dm-authority] player action failed', error)
-    })
-    return task
+    return playerActionCoordinatorRef.current.enqueue(
+      async () => {
+        applyingPlayerActionTransactionRef.current = true
+        try {
+          await processPlayerActionRequest(action)
+          await playerActionAuthorityCommitRef.current
+        } finally {
+          applyingPlayerActionTransactionRef.current = false
+        }
+      },
+      async (error) => {
+        applyingPlayerActionTransactionRef.current = false
+        console.error('[dm-authority] player action failed', error)
+        await Promise.all([
+          useMapStore.getState().loadShared(),
+          useCharacterStore.getState().loadShared(),
+        ])
+      },
+    )
   }
 
   const canSendPlayerCombatAction = () => {
@@ -4324,7 +4363,7 @@ export default function MapsPage() {
     return createDmLocalPlayerActionEnvelope({
       isDm: isDM,
       mapId: activeMap?.id,
-      combatId: combatIdRef.current,
+      combatId,
       turnCharacter,
       currentInitiativeToken,
       round: roundRef.current,
@@ -4804,6 +4843,14 @@ export default function MapsPage() {
       </button>
     </div>
   )
+  const playerWaitingForDm =
+    mode === 'player' &&
+    combatActive &&
+    !matchesDmAuthorityReady(dmAuthorityReady, {
+      mapId: activeMap?.id,
+      combatId,
+      combatActive,
+    })
 
   if (!mode) {
     return (
@@ -4930,6 +4977,15 @@ export default function MapsPage() {
               }
             />
           </div>
+          {playerWaitingForDm && (
+            <div
+              data-testid="dm-authority-waiting"
+              className="pointer-events-none absolute left-1/2 top-4 z-[58] flex -translate-x-1/2 items-center gap-2 rounded-lg border border-sky-300/30 bg-void-950/92 px-3 py-2 text-xs font-semibold text-sky-100 shadow-xl backdrop-blur-md"
+            >
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              正在等待 DM 同步战斗状态
+            </div>
+          )}
 
           {isDM && gridAdjustMode && (
             <div className="pointer-events-none absolute left-1/2 top-[5.25rem] z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-amber-400/35 bg-void-950/90 px-3 py-1.5 text-xs text-amber-100 shadow-xl backdrop-blur-sm">

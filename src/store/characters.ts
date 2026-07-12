@@ -879,6 +879,7 @@ interface CharacterState {
   add: (name?: string) => string
   importCharacter: (character: Partial<Character>) => string
   update: (id: string, patch: Partial<Character>) => void
+  applyAuthorityUpdate: (id: string, patch: Partial<Character>) => void
   remove: (id: string) => void
   longRestAll: () => void
 
@@ -1074,6 +1075,18 @@ export const useCharacterStore = create<CharacterState>()(
               syncArcherCombatSkills(syncArcherTraits(ensureDefaultEquipment({ ...c, ...patch }))),
             ),
           ),
+        applyAuthorityUpdate: (id, patch) =>
+          set((state) => ({
+            characters: state.characters.map((character) =>
+              character.id === id
+                ? syncCombatDerivedStats(
+                    syncArcherCombatSkills(
+                      syncArcherTraits(ensureDefaultEquipment({ ...character, ...patch })),
+                    ),
+                  )
+                : character,
+            ),
+          })),
         remove: (id) => {
           // [T10/AC2 · E11] 先立墓碑，再同步写出快照（不再 setTimeout(...,0) 异步写）。
           // 异步窗口曾是复活竞态的根源：删除已生效但快照尚未写出时，对端旧全量快照一旦在

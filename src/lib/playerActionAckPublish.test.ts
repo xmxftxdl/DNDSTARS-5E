@@ -36,6 +36,14 @@ describe('publishPlayerActionAckWithSnapshots', () => {
         maps: [map],
         mapSelectedId: map.id,
         updatedAt: 123,
+        combat: {
+          mapId: 'map-1',
+          active: true,
+          round: 1,
+          initiativeIndex: 0,
+          initiativeOrder: [],
+          updatedAt: 123,
+        },
       },
       saveSharedResource,
       publishAck,
@@ -49,6 +57,14 @@ describe('publishPlayerActionAckWithSnapshots', () => {
     expect(saveSharedResource).toHaveBeenCalledWith('maps', {
       maps: [map],
       selectedId: 'map-1',
+      updatedAt: 123,
+    })
+    expect(saveSharedResource).toHaveBeenCalledWith('combat', {
+      mapId: 'map-1',
+      active: true,
+      round: 1,
+      initiativeIndex: 0,
+      initiativeOrder: [],
       updatedAt: 123,
     })
     expect(saveSharedResource).toHaveBeenCalledWith('player-action-ack', makeAck('accepted'))

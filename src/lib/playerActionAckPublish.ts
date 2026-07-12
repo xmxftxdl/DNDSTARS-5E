@@ -1,6 +1,7 @@
 import type { BattleMap } from '../store/maps'
 import type { Character } from '../types/character'
 import type { SharedPlayerActionAckState } from './sharedCombatTypes'
+import type { SharedCombatState } from './sharedCombatTypes'
 
 export interface PlayerActionAuthoritativeSnapshots {
   characters: Character[]
@@ -8,6 +9,7 @@ export interface PlayerActionAuthoritativeSnapshots {
   maps: BattleMap[]
   mapSelectedId?: string | null
   updatedAt: number
+  combat?: SharedCombatState
 }
 
 export type PlayerActionAckResourceWriter = <T>(name: string, data: T) => Promise<void>
@@ -37,6 +39,9 @@ export async function publishPlayerActionAckWithSnapshots({
         selectedId: snapshots.mapSelectedId ?? null,
         updatedAt: snapshots.updatedAt,
       }),
+      ...(snapshots.combat
+        ? [saveSharedResource('combat', snapshots.combat)]
+        : []),
     ])
   }
 

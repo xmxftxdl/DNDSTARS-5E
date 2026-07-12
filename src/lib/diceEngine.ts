@@ -65,6 +65,7 @@ export interface CreateDiceBoxOptions {
 export interface DiceEngineBox {
   // Resolves with the same DiceOutcome that onComplete receives — exactly once.
   roll(notation: string): Promise<DiceOutcome>
+  correctVisibleFaces(values: number[]): boolean
   clear(): void
   destroy(): void
 }
@@ -116,6 +117,19 @@ export async function createDiceBox(
 
   await box.initialize?.()
 
+  type RuntimeDie = {
+    getLastValue?: () => { value?: number; label?: string; reason?: string }
+    setLastValue?: (value: { value: number; label: string; reason: string }) => void
+  }
+  type RuntimeDiceBox = {
+    diceList?: RuntimeDie[]
+    swapDiceFace?: (die: RuntimeDie, value: number) => void
+    renderer?: { render: (scene: unknown, camera: unknown) => void }
+    scene?: unknown
+    camera?: unknown
+  }
+  const runtimeBox = box as unknown as RuntimeDiceBox
+
   return {
     roll(notation: string): Promise<DiceOutcome> {
       if (pending) {
@@ -147,6 +161,24 @@ export async function createDiceBox(
             }
           })
       })
+    },
+    correctVisibleFaces(values: number[]): boolean {
+      const dice = runtimeBox.diceList
+      if (!dice || typeof runtimeBox.swapDiceFace !== 'function') return false
+      let changed = false
+      for (let index = 0; index < values.length; index += 1) {
+        const die = dice[index]
+        const target = Math.round(values[index])
+        const current = die?.getLastValue?.()
+        if (!die || !Number.isFinite(target) || current?.value === target) continue
+        runtimeBox.swapDiceFace(die, target)
+        die.setLastValue?.({ value: target, label: String(target), reason: 'forced' })
+        changed = true
+      }
+      if (changed && runtimeBox.renderer && runtimeBox.scene && runtimeBox.camera) {
+        runtimeBox.renderer.render(runtimeBox.scene, runtimeBox.camera)
+      }
+      return changed
     },
     clear() {
       box.clearDice()

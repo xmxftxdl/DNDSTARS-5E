@@ -220,12 +220,45 @@ const PLAYER_WRITABLE_STATE = new Set([
   'dodge',
   'gale-combo',
   'stable-mind',
+  'agile-leap',
+  'combat-interrupts',
+  'opportunity-attack',
   'player-action',
   'player-action-requests',
   'dice',
   'dice-events',
   'combat-log',
 ])
+
+export function normalizeRoomId(value) {
+  const raw = String(value ?? '').trim()
+  return raw ? safeName(raw).slice(0, 80) : 'default'
+}
+
+export function roomScopedPath(root, roomId) {
+  return roomId === 'default' ? root : path.join(root, 'rooms', roomId)
+}
+
+export function authorizeAccessToken(providedToken) {
+  const dmToken = process.env.STARS_DM_TOKEN || null
+  const playerToken = process.env.STARS_PLAYER_TOKEN || null
+  if (!dmToken && !playerToken) return { ok: true, role: 'open' }
+  if (dmToken && providedToken === dmToken) return { ok: true, role: 'dm' }
+  if (playerToken && providedToken === playerToken) return { ok: true, role: 'player' }
+  return { ok: false, status: providedToken ? 403 : 401 }
+}
+
+export function consumeRateLimit(buckets, key, now = Date.now(), limit = 1200, windowMs = 10_000) {
+  const current = buckets.get(key)
+  if (!current || now - current.startedAt >= windowMs) {
+    buckets.set(key, { startedAt: now, count: 1 })
+    return { ok: true, remaining: Math.max(0, limit - 1) }
+  }
+  current.count += 1
+  return current.count <= limit
+    ? { ok: true, remaining: Math.max(0, limit - current.count) }
+    : { ok: false, retryAfterMs: Math.max(1, windowMs - (now - current.startedAt)) }
+}
 
 function sharedSecret() {
   const value = process.env.STARS_SHARED_SECRET
@@ -329,8 +362,112 @@ export function extractSecret(req) {
 // ctx = { stateRoot, imageRoot, legacyStateRoot, legacyImageRoot, eventClients, eventBacklog }
 function applyCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token')
+}
+
+function extractAccessToken(req, parsed) {
+  const header = req?.headers?.['x-stars-token']
+  if (typeof header === 'string' && header.length > 0) return header
+  return parsed.searchParams.get('token')
+}
+
+function scopedContext(ctx, roomId) {
+  if (roomId === 'default') return { ...ctx, roomId }
+  return {
+    ...ctx,
+    roomId,
+    stateRoot: roomScopedPath(ctx.stateRoot, roomId),
+    imageRoot: roomScopedPath(ctx.imageRoot, roomId),
+    legacyStateRoot: roomScopedPath(ctx.legacyStateRoot, roomId),
+    legacyImageRoot: roomScopedPath(ctx.legacyImageRoot, roomId),
+  }
+}
+
+function eventStorageKey(ctx, channel) {
+  return `${ctx.roomId ?? 'default'}::${channel}`
+}
+
+export async function atomicMutateJsonStateLocked(filePath, updater) {
+  return withWriteLock(filePath, async () => {
+    let current = null
+    try {
+      current = JSON.parse(await readFile(filePath, 'utf8'))
+    } catch {
+      current = null
+    }
+    const result = await updater(current)
+    if (!result?.changed) return result
+    const body = JSON.stringify(result.next)
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
+    await writeFile(tmpPath, body)
+    await rename(tmpPath, filePath)
+    return result
+  })
+}
+
+export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
+  const operation = mutation?.operation
+  const mapId = String(mutation?.mapId ?? '')
+  if (!mapId) return { ok: false, status: 400, error: 'invalid-map' }
+  const base = queue && queue.mapId === mapId
+    ? queue
+    : { mapId, interrupts: [], updatedAt: now, revision: 0 }
+
+  if (operation === 'upsert') {
+    const interrupt = mutation?.interrupt
+    if (!interrupt || interrupt.mapId !== mapId || !interrupt.id) {
+      return { ok: false, status: 400, error: 'invalid-interrupt' }
+    }
+    const existing = base.interrupts.find((item) => item.id === interrupt.id)
+    if (existing && existing.status !== 'pending') {
+      return { ok: true, changed: false, next: base }
+    }
+    const interrupts = [
+      ...base.interrupts.filter((item) => item.id !== interrupt.id),
+      interrupt,
+    ].sort((a, b) => Number(a.updatedAt ?? 0) - Number(b.updatedAt ?? 0)).slice(-32)
+    return {
+      ok: true,
+      changed: true,
+      next: { mapId, interrupts, updatedAt: now, revision: Number(base.revision ?? 0) + 1 },
+    }
+  }
+
+  if (!['answer', 'rolling', 'finish'].includes(operation)) {
+    return { ok: false, status: 400, error: 'invalid-operation' }
+  }
+  const id = String(mutation?.id ?? '')
+  const index = base.interrupts.findIndex((item) => item.id === id)
+  if (index < 0) return { ok: false, status: 404, error: 'interrupt-not-found' }
+  const current = base.interrupts[index]
+  const allowed =
+    (operation === 'answer' && (current.status === 'pending' || current.status === 'rolling')) ||
+    (operation === 'rolling' && current.status === 'pending') ||
+    (operation === 'finish' && current.status !== 'done')
+  if (!allowed) {
+    const idempotent =
+      (operation === 'answer' && current.status === 'answered') ||
+      (operation === 'rolling' && current.status === 'rolling') ||
+      (operation === 'finish' && current.status === 'done')
+    return idempotent
+      ? { ok: true, changed: false, next: base }
+      : { ok: false, status: 409, error: 'invalid-transition' }
+  }
+  const status = operation === 'answer' ? 'answered' : operation === 'rolling' ? 'rolling' : 'done'
+  const nextInterrupt = {
+    ...current,
+    status,
+    response: mutation?.response ?? current.response,
+    updatedAt: now,
+  }
+  const interrupts = [...base.interrupts]
+  interrupts[index] = nextInterrupt
+  return {
+    ok: true,
+    changed: true,
+    next: { ...base, interrupts, updatedAt: now, revision: Number(base.revision ?? 0) + 1 },
+  }
 }
 
 // 限制请求体大小，超过 maxBytes 即抛 413 标记错误。超限后继续 drain 剩余分块再抛，
@@ -356,9 +493,10 @@ async function readBody(req, maxBytes = STATE_MAX_BYTES) {
 }
 
 function addEventClient(ctx, channel, res) {
-  const clients = ctx.eventClients.get(channel) ?? new Set()
+  const storageKey = eventStorageKey(ctx, channel)
+  const clients = ctx.eventClients.get(storageKey) ?? new Set()
   clients.add(res)
-  ctx.eventClients.set(channel, clients)
+  ctx.eventClients.set(storageKey, clients)
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -367,24 +505,25 @@ function addEventClient(ctx, channel, res) {
   })
   res.write(`event: ready\ndata: {"channel":"${channel}"}\n\n`)
   // 只回放最近 EVENT_REPLAY_LIMIT 条，而非整 backlog。
-  const backlog = replaySlice(ctx.eventBacklog.get(channel) ?? [])
+  const backlog = replaySlice(ctx.eventBacklog.get(storageKey) ?? [])
   for (const payload of backlog) {
     res.write(`event: message\ndata: ${JSON.stringify(payload)}\n\n`)
   }
   return () => {
     clients.delete(res)
-    if (clients.size === 0) ctx.eventClients.delete(channel)
+    if (clients.size === 0) ctx.eventClients.delete(storageKey)
   }
 }
 
 function publishEventToChannel(ctx, channel, payload) {
-  const backlog = pushBacklog(ctx.eventBacklog.get(channel) ?? [], payload)
+  const storageKey = eventStorageKey(ctx, channel)
+  const backlog = pushBacklog(ctx.eventBacklog.get(storageKey) ?? [], payload)
   // LRU touch：delete+set 把该 channel 移到 Map 末尾，使「活跃 channel」始终最新、最后才被 cap 淘汰。
-  ctx.eventBacklog.delete(channel)
-  ctx.eventBacklog.set(channel, backlog)
+  ctx.eventBacklog.delete(storageKey)
+  ctx.eventBacklog.set(storageKey, backlog)
   // [T-P1-421/AC5] channel 总数封顶；有活跃订阅者的 channel 受保护。
   capEventChannels(ctx.eventBacklog, EVENT_CHANNEL_LIMIT, new Set(ctx.eventClients.keys()))
-  const clients = ctx.eventClients.get(channel)
+  const clients = ctx.eventClients.get(storageKey)
   if (!clients) return
   const text = `event: message\ndata: ${JSON.stringify(payload)}\n\n`
   for (const client of clients) client.write(text)
@@ -410,13 +549,54 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 
+  const roomId = normalizeRoomId(parsed.searchParams.get('room'))
+  if (!ctx.rateLimits) ctx.rateLimits = new Map()
+  ctx = scopedContext(ctx, roomId)
+  const access = authorizeAccessToken(extractAccessToken(req, parsed))
+  if (!access.ok) {
+    res.writeHead(access.status, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ error: 'unauthorized' }))
+    return true
+  }
+  if (access.role === 'player') {
+    const stateName = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)?.[1]
+    const playerMayWriteState = stateName && PLAYER_WRITABLE_STATE.has(safeName(stateName))
+    const forbidden =
+      req.method === 'DELETE' ||
+      (req.method === 'PUT' && parsed.pathname.startsWith('/api/images/')) ||
+      (req.method === 'PUT' && stateName && !playerMayWriteState)
+    if (forbidden) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: 'forbidden' }))
+      return true
+    }
+  }
+  if (req.method !== 'GET') {
+    const buckets = ctx.rateLimits
+    const ip = req.socket?.remoteAddress ?? 'local'
+    const limit = Math.max(10, Number(process.env.STARS_RATE_LIMIT) || 1200)
+    const rate = consumeRateLimit(buckets, `${roomId}:${ip}`, Date.now(), limit)
+    if (!rate.ok) {
+      res.writeHead(429, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Retry-After': String(Math.ceil(rate.retryAfterMs / 1000)),
+      })
+      res.end(JSON.stringify({ error: 'rate-limit' }))
+      return true
+    }
+  }
+
   try {
     const eventMatch = parsed.pathname.match(/^\/api\/events\/([a-zA-Z0-9_-]+)$/)
     if (eventMatch) {
       const channel = safeName(eventMatch[1])
       if (req.method === 'DELETE') {
-        if (channel === '_all') ctx.eventBacklog.clear()
-        else ctx.eventBacklog.delete(channel)
+        if (channel === '_all') {
+          const prefix = `${roomId}::`
+          for (const key of [...ctx.eventBacklog.keys()]) {
+            if (key.startsWith(prefix)) ctx.eventBacklog.delete(key)
+          }
+        } else ctx.eventBacklog.delete(eventStorageKey(ctx, channel))
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end('{"ok":true}')
         return true
@@ -434,6 +614,38 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         res.end('{"ok":true}')
         return true
       }
+    }
+
+    if (parsed.pathname === '/api/state/combat-interrupts/interrupt' && req.method === 'PATCH') {
+      const auth = authorizeStateWrite('combat-interrupts', extractSecret(req))
+      if (!auth.ok) {
+        res.writeHead(auth.status, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'unauthorized' }))
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      const body = await readBody(req)
+      const mutation = JSON.parse(body.toString('utf8'))
+      const filePath = path.join(ctx.stateRoot, 'combat-interrupts.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (queue) =>
+        mutateCombatInterruptQueue(queue, mutation, Date.now()),
+      )
+      if (!result?.ok) {
+        res.writeHead(result?.status ?? 400, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: result?.error ?? 'mutation-failed' }))
+        return true
+      }
+      if (result.changed) {
+        const updatedAt = result.next.updatedAt
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `combat-interrupts:${updatedAt}:${Math.random().toString(36).slice(2)}`,
+          name: 'combat-interrupts',
+          updatedAt,
+        })
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(result.next))
+      return true
     }
 
     const stateMatch = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)

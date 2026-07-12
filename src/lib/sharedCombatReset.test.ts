@@ -9,7 +9,7 @@ describe('shared combat reset', () => {
       updatedAt: 123,
     })
 
-    expect(reset.interruptQueue).toEqual({ mapId: 'map-1', interrupts: [], updatedAt: 123 })
+    expect(reset.interruptQueue).toEqual({ mapId: 'map-1', interrupts: [], updatedAt: 123, revision: 0 })
     expect(reset.diceEvents).toEqual({ mapId: 'map-1', events: [], updatedAt: 123 })
     expect(reset.playerAction).toMatchObject({
       id: 'map-1:combat-start:player-action:123',

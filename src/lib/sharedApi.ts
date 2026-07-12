@@ -7,6 +7,21 @@ function sharedSecretHeader(): Record<string, string> {
   return secret ? { 'X-Stars-Secret': secret } : {}
 }
 
+function sharedAccessHeaders(): Record<string, string> {
+  const token = import.meta.env.VITE_STARS_ACCESS_TOKEN as string | undefined
+  return token ? { 'X-Stars-Token': token } : {}
+}
+
+function sharedSessionUrl(url: string, includeToken = false): string {
+  const room = (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim()
+  const token = import.meta.env.VITE_STARS_ACCESS_TOKEN as string | undefined
+  if (!room && (!includeToken || !token)) return url
+  const parsed = new URL(url)
+  if (room) parsed.searchParams.set('room', room)
+  if (includeToken && token) parsed.searchParams.set('token', token)
+  return parsed.toString()
+}
+
 // [T-P1-422/AC4] exported for the client-sync-layer unit test (dedup/trim/empty-filter of the
 // configured base list — the routing core of read/double-send-write/single-canonical-event).
 export function configuredApiBases(): string[] | null {
@@ -61,11 +76,12 @@ export function sharedEventApiCandidates(): string[] {
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T | null> {
   for (const api of sharedApiCandidates()) {
     try {
-      const res = await fetch(`${api}${path}`, {
+      const res = await fetch(sharedSessionUrl(`${api}${path}`), {
         ...init,
         headers: {
           ...(init?.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }),
           ...(init?.headers ?? {}),
+          ...sharedAccessHeaders(),
         },
       })
       if (!res.ok) continue
@@ -119,9 +135,9 @@ export async function saveSharedResource<T>(name: string, data: T): Promise<void
   }
   await Promise.allSettled(
     sharedWriteApiCandidates().map((api) =>
-      fetch(`${api}/state/${name}`, {
+      fetch(sharedSessionUrl(`${api}/state/${name}`), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader() },
+        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders() },
         body: JSON.stringify(data),
       }),
     ),
@@ -131,9 +147,9 @@ export async function saveSharedResource<T>(name: string, data: T): Promise<void
 export async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
   await Promise.allSettled(
     sharedEventApiCandidates().map((api) =>
-      fetch(`${api}/events/${encodeURIComponent(channel)}`, {
+      fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders() },
         body: JSON.stringify(data),
       }),
     ),
@@ -145,8 +161,9 @@ export async function clearSharedEventBacklog(channels?: string[]): Promise<void
   await Promise.allSettled(
     sharedEventApiCandidates().flatMap((api) =>
       targets.map((channel) =>
-        fetch(`${api}/events/${encodeURIComponent(channel)}`, {
+        fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
           method: 'DELETE',
+          headers: sharedAccessHeaders(),
         }),
       ),
     ),
@@ -156,11 +173,36 @@ export async function clearSharedEventBacklog(channels?: string[]): Promise<void
 export async function clearSharedResource(name: string): Promise<void> {
   await Promise.allSettled(
     sharedWriteApiCandidates().map((api) =>
-      fetch(`${api}/state/${encodeURIComponent(name)}`, {
+      fetch(sharedSessionUrl(`${api}/state/${encodeURIComponent(name)}`), {
         method: 'DELETE',
+        headers: sharedAccessHeaders(),
       }),
     ),
   )
+}
+
+export type SharedCombatInterruptMutation =
+  | { operation: 'upsert'; mapId: string; interrupt: object }
+  | { operation: 'answer' | 'rolling' | 'finish'; mapId: string; id: string; response?: Record<string, unknown> }
+
+export async function mutateSharedCombatInterrupt<T>(mutation: SharedCombatInterruptMutation): Promise<T | null> {
+  const api = sharedEventApiCandidates()[0]
+  if (!api) return null
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const res = await fetch(sharedSessionUrl(`${api}/state/combat-interrupts/interrupt`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders() },
+        body: JSON.stringify(mutation),
+      })
+      if (res.ok) return (await res.json()) as T
+      if (res.status >= 400 && res.status < 500 && res.status !== 409) return null
+    } catch {
+      // A short retry covers a server restart or a transient local connection loss.
+    }
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 80 * 2 ** attempt))
+  }
+  return null
 }
 
 export function subscribeSharedEvent<T>(
@@ -191,7 +233,7 @@ function ensureSharedEventSource(): void {
   if (sharedEventSources.length > 0) return
   for (const api of sharedEventApiCandidates()) {
     try {
-      const source = new EventSource(`${api}/events/_all`)
+      const source = new EventSource(sharedSessionUrl(`${api}/events/_all`, true))
       source.addEventListener('message', (event) => {
         try {
           const envelope = JSON.parse(event.data) as SharedEventEnvelope
@@ -283,9 +325,9 @@ export async function putSharedImage(id: string, blob: Blob): Promise<boolean> {
   if (!canWriteSharedState()) return false
   for (const api of sharedApiCandidates()) {
     try {
-      const res = await fetch(`${api}/images/${encodeURIComponent(id)}`, {
+      const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...sharedAccessHeaders() },
         body: blob,
       })
       if (res.ok) return true
@@ -299,7 +341,9 @@ export async function putSharedImage(id: string, blob: Blob): Promise<boolean> {
 export async function getSharedImage(id: string): Promise<Blob | undefined> {
   for (const api of sharedApiCandidates()) {
     try {
-      const res = await fetch(`${api}/images/${encodeURIComponent(id)}`)
+      const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
+        headers: sharedAccessHeaders(),
+      })
       if (!res.ok) continue
       return await res.blob()
     } catch {
@@ -313,7 +357,10 @@ export async function deleteSharedImage(id: string): Promise<void> {
   if (!canWriteSharedState()) return
   await Promise.allSettled(
     sharedWriteApiCandidates().map((api) =>
-      fetch(`${api}/images/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
+        method: 'DELETE',
+        headers: sharedAccessHeaders(),
+      }),
     ),
   )
 }

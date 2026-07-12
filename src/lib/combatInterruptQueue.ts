@@ -25,10 +25,11 @@ export interface SharedCombatInterruptQueueState {
   mapId: string
   interrupts: SharedCombatInterrupt[]
   updatedAt: number
+  revision?: number
 }
 
 export function emptyCombatInterruptQueue(mapId: string, now = Date.now()): SharedCombatInterruptQueueState {
-  return { mapId, interrupts: [], updatedAt: now }
+  return { mapId, interrupts: [], updatedAt: now, revision: 0 }
 }
 
 export function createCombatInterrupt<
@@ -74,7 +75,7 @@ export function upsertCombatInterrupt(
   ]
     .sort((a, b) => a.updatedAt - b.updatedAt)
     .slice(-COMBAT_INTERRUPT_QUEUE_LIMIT)
-  return { mapId: interrupt.mapId, interrupts: next, updatedAt: now }
+  return { mapId: interrupt.mapId, interrupts: next, updatedAt: now, revision: (base.revision ?? 0) + 1 }
 }
 
 export function updateCombatInterrupt(
@@ -91,7 +92,7 @@ export function updateCombatInterrupt(
     return updater(interrupt)
   })
   if (!changed) return queue
-  return { ...queue, interrupts, updatedAt: now }
+  return { ...queue, interrupts, updatedAt: now, revision: (queue.revision ?? 0) + 1 }
 }
 
 export function answerCombatInterrupt(

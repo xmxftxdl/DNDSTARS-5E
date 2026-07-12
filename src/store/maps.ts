@@ -272,6 +272,7 @@ interface MapState {
     payload: { characterId: string; name: string; emoji: string; type?: Token['type'] },
   ) => void
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
+  applyAuthorityTokenUpdate: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   removeToken: (mapId: string, tokenId: string) => void
 }
 
@@ -479,6 +480,21 @@ export const useMapStore = create<MapState>()(
           ),
         }))
         publishMapsState(get())
+      },
+
+      applyAuthorityTokenUpdate: (mapId, tokenId, patch) => {
+        set((state) => ({
+          maps: state.maps.map((map) =>
+            map.id === mapId
+              ? {
+                  ...map,
+                  tokens: map.tokens.map((token) =>
+                    token.id === tokenId ? { ...token, ...patch } : token,
+                  ),
+                }
+              : map,
+          ),
+        }))
       },
 
       removeToken: (mapId, tokenId) => {

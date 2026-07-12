@@ -533,6 +533,74 @@ test('player multi-shot rolls once and applies damage through DM authority', asy
   await context.close()
 })
 
+test('heavy gunner bullet swap is seeded and committed by DM authority', async ({ browser, request }) => {
+  const mapId = `e2e-bullet-swap-${Date.now()}`
+  const grid = Array.from({ length: 64 }, (_, index) => {
+    const row = Math.floor(index / 8)
+    const col = index % 8
+    return (row * 3 + col * 2) % 7
+  })
+  grid[0] = 1
+  grid[1] = 0
+  grid[2] = 1
+  grid[9] = 1
+  await seedEncounter(request, mapId, {
+    playerFirst: true,
+    heroPatch: {
+      charClass: '重炮手',
+      currentAP: 2,
+      bulletPuzzle: { grid, ready: Array(7).fill(0) },
+    },
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    waitForCombatReady(dm, 'player-regression'),
+    waitForCombatReady(player, 'player-regression'),
+  ])
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:player-action:${now}:bullet-swap`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'bullet-match-swap',
+    actorTokenId: 'player-regression',
+    characterId: 'hero-regression',
+    bulletSwap: { from: 1, to: 9, seed: 42 },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await putState(request, 'player-action', action)
+  await postEvent(request, 'player-action-player-to-dm', action)
+
+  await expect
+    .poll(async () => {
+      const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
+      return ack.actionId === action.id ? ack.status : ''
+    }, { timeout: 30_000 })
+    .toBe('accepted')
+  await expect
+    .poll(async () => {
+      const state = await getState<{ characters: Array<{ id: string; currentAP: number; bulletPuzzle?: { grid: number[] } }> }>(request, 'characters')
+      const hero = state.characters.find((character) => character.id === 'hero-regression')
+      return { ap: hero?.currentAP, changed: JSON.stringify(hero?.bulletPuzzle?.grid) !== JSON.stringify(grid) }
+    }, { timeout: 20_000 })
+    .toEqual({ ap: 1, changed: true })
+  await expect(player.getByTestId('initiative-token-player-regression')).toContainText('1/2', { timeout: 20_000 })
+  await context.close()
+})
+
 test('illusion dance resolves selected targets in initiative order and pulls failed saves closer', async ({ browser, request }) => {
   const mapId = `e2e-illusion-dance-${Date.now()}`
   await seedEncounter(request, mapId, {

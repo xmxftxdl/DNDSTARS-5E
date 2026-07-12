@@ -223,16 +223,18 @@
               ? outcome.values
               : fallbackValues(qty, sides)
           if (forced.length > 0 && !sameMultiset(vals, forced)) {
-            // Some dice-box-threejs rolls render the forced @ face correctly but
-            // still report the pre-relabel raw value in the Promise payload. Do
-            // not physically reroll here: that creates a second visible dice
-            // animation for one authoritative result, most noticeably on D4
-            // extra-damage rolls such as 双箭.
-            console.warn('[dice-box-frame] forced faces mismatch; reporting forced values without reroll', {
+            // The engine simulates once, swaps face materials, then replays the
+            // same launch. Multi-die collisions can diverge slightly on replay,
+            // leaving a different material face uppermost. Correct only the
+            // settled material mapping; position/quaternion remain untouched.
+            const corrected = box.correctVisibleFaces(forced)
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+            console.info('[dice-box-frame] corrected settled forced faces', {
               requestId,
               notation,
               expected: forced,
               actual: vals,
+              corrected,
             })
             vals = forced
           }
