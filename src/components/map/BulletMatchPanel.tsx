@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Gauge, Crosshair } from 'lucide-react'
+import { Crosshair } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import type { BulletPuzzleState } from '../../types/character'
 import {
@@ -108,7 +108,7 @@ export default function BulletMatchPanel({ charId, canAct = false, onSwap }: Bul
         return
       }
 
-      if (!canAct || character.currentAP < 1) {
+      if (!canAct) {
         setSelected(null)
         return
       }
@@ -137,16 +137,8 @@ export default function BulletMatchPanel({ charId, canAct = false, onSwap }: Bul
   return (
     <div className="space-y-2">
       <div className="glass flex shrink-0 flex-wrap items-center gap-3 rounded-xl p-2">
-        <div className="flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-2.5 py-1">
-          <Gauge className="h-3.5 w-3.5 text-sky-300" />
-          <span className="text-xs text-slate-300">行动点</span>
-          <span className="text-sm font-bold text-sky-200">
-            {character.currentAP}
-            <span className="text-slate-500">/{character.actionPoints}</span>
-          </span>
-        </div>
         <p className="text-[11px] text-slate-400">
-          8×8 · 三连自动消除并连锁 · 交换相邻两格（1 AP）
+          8×8 · 三连自动消除并连锁 · 交换相邻两格（Action）
         </p>
       </div>
 

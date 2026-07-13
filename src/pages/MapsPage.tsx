@@ -5961,11 +5961,6 @@ export default function MapsPage() {
                     ? '子弹消消乐'
                     : CHAR_PANEL_TITLES[charPanel]}
                 </span>
-                {canControlPlayerTurn && activeChar.id === turnCharacter?.id && (
-                  <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200">
-                    行动点 {activeChar.currentAP}/{activeChar.actionPoints}
-                  </span>
-                )}
                 {canControlPlayerTurn &&
                   activeChar.id === turnCharacter?.id &&
                   findClassTrait(activeChar, 'calmSpirit') && (
@@ -6013,7 +6008,7 @@ export default function MapsPage() {
                   data-testid="player-end-turn"
                   disabled={!!pendingPlayerAction || !combatActive || !canControlPlayerTurn}
                   className="ml-auto flex items-center gap-1 rounded-lg bg-arcane-500/20 px-2 py-1 text-xs font-medium text-arcane-100 hover:bg-arcane-500/30"
-                  title="结束回合：冷却 -1、行动点回满"
+                  title="结束当前回合"
                 >
                   <SkipForward className="h-3.5 w-3.5" />
                   结束回合
@@ -6076,10 +6071,10 @@ export default function MapsPage() {
                                 id: 'disengage',
                                 name: '撤离',
                                 icon: <Footprints className="h-4 w-4" />,
-                                detail: '2 AP · 本回合移动不触发借机攻击',
-                                disabled: activeChar.currentAP < 2,
+                                detail: 'Action · 本回合移动不触发借机攻击',
+                                disabled: false,
                                 used: disengagedCharIds.has(activeChar.id),
-                                disabledLabel: '行动点不足',
+                                disabledLabel: '动作不可用',
                                 usedLabel: '已撤离',
                                 onUse: handleDisengage,
                               },

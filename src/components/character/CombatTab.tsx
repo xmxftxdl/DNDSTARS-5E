@@ -98,7 +98,6 @@ export default function CombatTab({ charId }: { charId: string }) {
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
           <StatField label="当前生命值" value={c.currentHp} onChange={(v) => update(charId, { currentHp: v })} />
           <StatField label="豁免 DC" value={c.saveDC} onChange={(v) => update(charId, { saveDC: v })} />
-          <StatField label="行动点上限" value={c.actionPoints} onChange={(v) => update(charId, { actionPoints: v })} />
           <StatField label="被动感知" value={c.passivePerception} onChange={(v) => update(charId, { passivePerception: v })} />
           <StatField label="激励骰" value={c.inspiration} onChange={(v) => update(charId, { inspiration: v })} />
         </div>

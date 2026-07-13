@@ -1,4 +1,4 @@
-import { X, Shield, Footprints, HeartPulse, Swords, Sparkles } from 'lucide-react'
+import { X, Shield, Footprints, HeartPulse, Sparkles } from 'lucide-react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
@@ -126,15 +126,6 @@ export default function CharacterDetailPanel({
             <div>
               <p className="text-[10px] text-slate-500">速度</p>
               <p className="text-sm font-semibold text-slate-100">{character.speed} 尺</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
-            <Swords className="h-4 w-4 text-rose-400" />
-            <div>
-              <p className="text-[10px] text-slate-500">AP</p>
-              <p className="text-sm font-semibold text-slate-100">
-                {character.currentAP}/{character.actionPoints}
-              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">

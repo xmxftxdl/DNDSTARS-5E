@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Gauge, Zap, Plus, Trash2, SkipForward, X, Timer, Crosshair, Infinity as InfinityIcon } from 'lucide-react'
+import { Zap, Plus, Trash2, SkipForward, X, Timer, Crosshair, Infinity as InfinityIcon } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import ClassResourceIndicators from '../map/ClassResourceIndicators'
 import { isShadowDancer } from '../../lib/characterClasses'
@@ -71,8 +71,6 @@ export default function SkillBar({
     s.skillTreeId === 'basicShot' || s.name === '基础射击' || s.cooldown <= 0
   const columns = Array.from({ length: MAX_COOLDOWN + 1 }, (_, i) => i)
   const infiniteSkills = c.combatSkills.filter(isInfiniteSkill)
-  const galeComboWaivesAp = !!c.combatBuffs?.galeComboReady
-  const canPayForSkill = (skill: CombatSkill) => galeComboWaivesAp || c.currentAP >= skill.apCost
 
   const handleDeleteSkill = (skill: CombatSkill) => {
     if (skill.skillTreeId) return
@@ -85,14 +83,6 @@ export default function SkillBar({
     <div className={fillHeight ? 'flex h-full flex-col gap-3' : 'space-y-3'}>
       {/* 控制栏 */}
       <div className="glass flex shrink-0 flex-wrap items-center gap-3 rounded-2xl p-2.5">
-        <div className="flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-3 py-1.5">
-          <Gauge className="h-4 w-4 text-sky-300" />
-          <span className="text-sm text-slate-300">行动点</span>
-          <span className="font-bold text-sky-200">
-            {c.currentAP}
-            <span className="text-slate-500">/{c.actionPoints}</span>
-          </span>
-        </div>
         <div className="flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-3 py-1.5">
           <Zap className="h-4 w-4 text-amber-300" />
           <span className="text-sm text-slate-300">激励骰</span>
@@ -170,8 +160,8 @@ export default function SkillBar({
                 <ReadySkill
                   key={s.id}
                   skill={s}
-                  canUse={canAct && !s.usedThisTurn && canPayForSkill(s)}
-                  notEnoughAP={!galeComboWaivesAp && c.currentAP < s.apCost}
+                  canUse={canAct && !s.usedThisTurn}
+                  actionUnavailable={!canAct}
                   disabledLabel={!canAct ? '未到回合' : undefined}
                   effectiveCd={effectiveCd(s)}
                   onEdit={() => setEditingId(s.id)}
@@ -209,8 +199,8 @@ export default function SkillBar({
                       <ReadySkill
                         key={s.id}
                         skill={s}
-                        canUse={canAct && !s.usedThisTurn && canPayForSkill(s)}
-                        notEnoughAP={!galeComboWaivesAp && c.currentAP < s.apCost}
+                        canUse={canAct && !s.usedThisTurn}
+                        actionUnavailable={!canAct}
                         disabledLabel={!canAct ? '未到回合' : undefined}
                         effectiveCd={effectiveCd(s)}
                         onEdit={() => setEditingId(s.id)}
@@ -282,12 +272,7 @@ export default function SkillBar({
             </div>
 
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                <NumberField
-                  label="行动点消耗"
-                  value={editing.apCost}
-                  onChange={(v) => updateSkill(charId, editing.id, { apCost: v })}
-                />
+              <div className="grid grid-cols-2 gap-3">
                 <NumberField
                   label="冷却回合"
                   value={editing.cooldown}
@@ -356,7 +341,7 @@ export default function SkillBar({
 function ReadySkill({
   skill,
   canUse,
-  notEnoughAP,
+  actionUnavailable,
   disabledLabel,
   effectiveCd,
   onEdit,
@@ -365,7 +350,7 @@ function ReadySkill({
 }: {
   skill: CombatSkill
   canUse: boolean
-  notEnoughAP: boolean
+  actionUnavailable: boolean
   disabledLabel?: string
   effectiveCd: number
   onEdit: () => void
@@ -386,7 +371,7 @@ function ReadySkill({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-semibold text-slate-100">{skill.name}</span>
           <span className="flex flex-wrap items-center gap-x-1.5 text-[10px] text-slate-400">
-            <span className="text-sky-300">行{skill.apCost}</span>
+            <span className="text-sky-300">Action</span>
             <span className="flex items-center gap-0.5">
               <Timer className="h-2.5 w-2.5" />
               {skill.cooldown <= 0 ? '—' : effectiveCd}
@@ -412,7 +397,7 @@ function ReadySkill({
           canUse ? 'bg-emerald-500/25 text-emerald-200 hover:bg-emerald-500/40' : 'cursor-not-allowed bg-white/5 text-slate-600',
         ].join(' ')}
       >
-        {skill.usedThisTurn ? '已用' : disabledLabel ?? (notEnoughAP ? '行动点不足' : (
+        {skill.usedThisTurn ? '已用' : disabledLabel ?? (actionUnavailable ? '动作不可用' : (
           <>
             {dmg && <Crosshair className="h-3 w-3" />}
             {dmg ? '释放' : '使用'}
