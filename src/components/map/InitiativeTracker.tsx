@@ -19,7 +19,6 @@ interface InitiativeTrackerProps {
   scrollOffset: number
   round?: number
   hpByToken?: Record<string, { hp: number; max: number; temp?: number }>
-  apByToken?: Record<string, { current: number; max: number }>
   defeatedTokenIds?: string[]
   onScroll: (offset: number) => void
   onSelect: (tokenId: string) => void
@@ -31,7 +30,6 @@ export default function InitiativeTracker({
   scrollOffset,
   round,
   hpByToken,
-  apByToken,
   defeatedTokenIds = [],
   onScroll,
   onSelect,
@@ -71,7 +69,6 @@ export default function InitiativeTracker({
           const isActive = globalIndex === activeIndex
           const defeated = defeatedTokenIds.includes(entry.tokenId)
           const hp = hpByToken?.[entry.tokenId]
-          const ap = apByToken?.[entry.tokenId]
           const tempHp = Math.max(0, hp?.temp ?? 0)
           const hpDenominator = hp ? Math.max(1, hp.max + tempHp) : 1
           const hpPct = hp ? Math.max(0, Math.min(1, hp.hp / hpDenominator)) : 0
@@ -88,7 +85,7 @@ export default function InitiativeTracker({
               type="button"
               onClick={() => onSelect(entry.tokenId)}
               className="group flex flex-col items-center gap-1 outline-none"
-              title={`${entry.label} · 先攻 ${entry.roll}${ap ? ` · AP ${ap.current}/${ap.max}` : ''}${hp ? ` · HP ${hp.hp}/${hp.max}` : ''}${defeated ? ' · 已阵亡' : ''}${isActive && !defeated ? ' · 当前回合' : ''}`}
+              title={`${entry.label} · 先攻 ${entry.roll}${hp ? ` · HP ${hp.hp}/${hp.max}` : ''}${defeated ? ' · 已阵亡' : ''}${isActive && !defeated ? ' · 当前回合' : ''}`}
             >
               <div
                 className={[
@@ -109,16 +106,6 @@ export default function InitiativeTracker({
                 >
                   {entry.emoji}
                 </span>
-                {ap && !defeated && (
-                  <span
-                    className={[
-                      'absolute -right-1.5 -top-1.5 rounded-full border border-sky-100/80 bg-sky-500/95 px-1.5 py-0.5 text-[10px] font-black leading-none tabular-nums shadow-lg',
-                      ap.current > 0 ? 'text-white' : 'text-slate-200 opacity-75',
-                    ].join(' ')}
-                  >
-                    {ap.current}/{ap.max}
-                  </span>
-                )}
               </div>
               <span
                 className={[

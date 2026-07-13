@@ -1375,21 +1375,6 @@ export default function MapsPage() {
     const h = tokenHp(t)
     if (h) hpByToken[t.id] = h
   }
-  const apByToken: Record<string, { current: number; max: number }> = {}
-  for (const t of activeMap?.tokens ?? []) {
-    if (t.type === 'enemy') {
-      apByToken[t.id] = enemyApByToken[t.id] ?? { current: 2, max: 2 }
-      continue
-    }
-    if (t.characterId) {
-      const ch = characters.find((c) => c.id === t.characterId)
-      if (ch) {
-        apByToken[t.id] = { current: ch.currentAP, max: ch.actionPoints }
-        continue
-      }
-    }
-  }
-
   const characterHpKey = characters.map((c) => `${c.id}:${c.currentHp}:${c.tempHp ?? 0}`).join('|')
   const tokenHpKey = (activeMap?.tokens ?? []).map((t) => `${t.id}:${t.hp ?? ''}`).join('|')
 
@@ -5494,7 +5479,6 @@ export default function MapsPage() {
                 scrollOffset={initiativeScroll}
                 round={round}
                 hpByToken={hpByToken}
-                apByToken={apByToken}
                 defeatedTokenIds={defeatedTokenIds}
                 onScroll={setInitiativeScroll}
                 onSelect={(tokenId) => handleSelectToken(tokenId)}
@@ -5869,7 +5853,6 @@ export default function MapsPage() {
                 scrollOffset={initiativeScroll}
                 round={round}
                 hpByToken={hpByToken}
-                apByToken={apByToken}
                 defeatedTokenIds={defeatedTokenIds}
                 onScroll={setInitiativeScroll}
                 onSelect={(tokenId) => handleSelectToken(tokenId)}
