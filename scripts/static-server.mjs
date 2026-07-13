@@ -16,7 +16,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 }
 
 const host = String(args.get('host') ?? '127.0.0.1')
-const port = Number(args.get('port') ?? 5174)
+const port = Number(args.get('port') ?? 5274)
 const root = path.resolve(process.cwd(), String(args.get('root') ?? 'dist'))
 const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`
 const sharedRoot = process.env.STARS_SHARED_ROOT

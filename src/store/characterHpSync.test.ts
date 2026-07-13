@@ -13,7 +13,7 @@ beforeAll(() => {
   if (!hadWindow) {
     const mem = new Map<string, string>()
     ;(globalThis as unknown as { window: unknown }).window = {
-      location: { port: '5173', protocol: 'http:', hostname: 'localhost', origin: 'http://localhost:5173' },
+      location: { port: '5273', protocol: 'http:', hostname: 'localhost', origin: 'http://localhost:5273' },
       setTimeout: (fn: () => void) => setTimeout(fn, 0),
       localStorage: {
         getItem: (k: string) => mem.get(k) ?? null,

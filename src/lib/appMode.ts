@@ -1,11 +1,11 @@
 export type AppMode = 'dm' | 'player'
 export type PlayerSlot = 'player1' | 'player2' | 'player3'
 
-const DM_PORTS = new Set(['5173', '6173'])
+const DM_PORTS = new Set(['5273'])
 const PLAYER_PORT_TO_SLOT: Record<string, PlayerSlot> = {
-  '5174': 'player1',
-  '5175': 'player2',
-  '5176': 'player3',
+  '5274': 'player1',
+  '5275': 'player2',
+  '5276': 'player3',
   '6174': 'player1',
   '6175': 'player2',
   '6176': 'player3',

@@ -14,7 +14,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 }
 
 const host = String(args.get('host') ?? '127.0.0.1')
-const port = Number(args.get('port') ?? 5173)
+const port = Number(args.get('port') ?? 5273)
 const strictPort = args.has('strictPort') || args.get('strict-port') === true
 const sharedRoot = process.env.STARS_SHARED_ROOT
   ? path.resolve(process.env.STARS_SHARED_ROOT)

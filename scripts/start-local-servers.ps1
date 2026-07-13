@@ -19,7 +19,7 @@ if (-not (Test-Path -LiteralPath $node)) {
   $node = $nodeCmd.Source
 }
 
-$ports = @(5173, 5174)
+$ports = @(5273, 5274)
 foreach ($port in $ports) {
   $ids = netstat -ano |
     Select-String (':' + $port + '\s') |
@@ -35,8 +35,8 @@ Start-Sleep -Milliseconds 500
 
 $serverScript = Join-Path $root 'scripts\static-server.mjs'
 $distRoot = Join-Path $root 'dist'
-$dmCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5173 --root `"$distRoot`""
-$playerCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5174 --root `"$distRoot`""
+$dmCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5273 --root `"$distRoot`""
+$playerCommand = "`"$node`" `"$serverScript`" --host 127.0.0.1 --port 5274 --root `"$distRoot`""
 
 $dm = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine = $dmCommand

@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
 
 const servers = [
-  { name: 'DM', port: 5173, env: { VITE_APP_MODE: 'dm' } },
-  { name: '玩家1', port: 5174, env: { VITE_APP_MODE: 'player', VITE_PLAYER_SLOT: 'player1' } },
-  { name: '玩家2', port: 5175, env: { VITE_APP_MODE: 'player', VITE_PLAYER_SLOT: 'player2' } },
-  { name: '玩家3', port: 5176, env: { VITE_APP_MODE: 'player', VITE_PLAYER_SLOT: 'player3' } },
+  { name: 'DM', port: 5273, env: { VITE_APP_MODE: 'dm' } },
+  { name: '玩家1', port: 5274, env: { VITE_APP_MODE: 'player', VITE_PLAYER_SLOT: 'player1' } },
+  { name: '玩家2', port: 5275, env: { VITE_APP_MODE: 'player', VITE_PLAYER_SLOT: 'player2' } },
+  { name: '玩家3', port: 5276, env: { VITE_APP_MODE: 'player', VITE_PLAYER_SLOT: 'player3' } },
 ]
 
 const children = servers.map((server) => {

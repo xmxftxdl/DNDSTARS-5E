@@ -37,13 +37,13 @@ export function configuredApiBases(): string[] | null {
 }
 
 function defaultDmApiBase(): string {
-  if (typeof window === 'undefined') return 'http://127.0.0.1:5173/api'
-  const port = window.location.port.startsWith('617') ? '6173' : '5173'
+  if (typeof window === 'undefined') return 'http://127.0.0.1:5273/api'
+  const port = '5273'
   return `${window.location.protocol}//${window.location.hostname}:${port}/api`
 }
 
 function sameOriginApiBase(): string {
-  if (typeof window === 'undefined') return 'http://127.0.0.1:5173/api'
+  if (typeof window === 'undefined') return 'http://127.0.0.1:5273/api'
   const sameOrigin = `${window.location.origin}/api`
   return sameOrigin
 }
