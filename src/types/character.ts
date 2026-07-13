@@ -112,6 +112,7 @@ export interface BulletPuzzleState {
 }
 
 export interface Character {
+  rulesetId?: 'dnd5e-srd-5.2.1'
   id: string
   name: string
   player: string
@@ -134,6 +135,14 @@ export interface Character {
   currentHp: number
   tempHp: number
   hitDice: string
+  /** SRD 5.2.1 Hit Point Dice pools. Legacy hitDice is retained only for save migration. */
+  hitPointDice?: Array<{ sides: number; current: number; max: number }>
+  deathSaveSuccesses?: number
+  deathSaveFailures?: number
+  deathSaveStable?: boolean
+  concentrating?: boolean
+  heroicInspiration?: boolean
+  exhaustionLevel?: number
 
   ac: number
   speed: number

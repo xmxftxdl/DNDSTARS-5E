@@ -1,467 +1,170 @@
-import { useState } from 'react'
-import { Shield, Zap, Footprints, Award, Dices, User, Swords, Sparkles, GitBranch, Backpack } from 'lucide-react'
+import { useEffect, useMemo } from 'react'
+import { Award, Dices, Footprints, HeartPulse, Shield, Sparkles, Swords } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
-import {
-  ABILITIES,
-  SKILLS,
-  abilityMod,
-  proficiencyBonus,
-  formatMod,
-  clampAbilityScore,
-  MAX_ABILITY_SCORE,
-} from '../../lib/dnd'
-import type { AbilityKey } from '../../lib/dnd'
+import { ABILITIES, SKILLS, formatMod, type AbilityKey } from '../../lib/dnd'
+import { dnd5eSrd521Adapter as rules } from '../../rulesets/dnd5e'
+import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
-import CombatTab from './CombatTab'
-import EquipmentTab from './EquipmentTab'
-import { getAc } from '../../lib/combatStats'
-import FeaturesTab from './FeaturesTab'
-import SkillTreeTab from './SkillTreeTab'
-import {
-  availableFeatureUpgradePoints,
-  isArcherClass,
-  pendingTraitChoices,
-  stripArcherClassTraits,
-} from '../../lib/classFeatures'
-import { hasClassSkillTree } from '../../lib/classProgressionRegistry'
-import {
-  classesForLevel,
-  isClassAllowedAtLevel,
-  MAX_CHARACTER_LEVEL,
-} from '../../lib/characterClasses'
-import ClassSelect from './ClassSelect'
 
 interface CharacterSheetProps {
   id: string
-  /** DM 版可以编辑全部并看到 DM 专属字段 */
   isDM: boolean
 }
 
-function LabeledInput({
-  label,
-  value,
-  editable,
-  onChange,
-  type = 'text',
-}: {
-  label: string
-  value: string | number
-  editable: boolean
-  onChange: (v: string) => void
-  type?: string
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span>
-      {editable ? (
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none focus:border-arcane-500"
-        />
-      ) : (
-        <span className="rounded-lg border border-transparent px-3 py-1.5 text-sm text-slate-200">{value}</span>
-      )}
-    </label>
-  )
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, Math.floor(value)))
 }
-
-function StatChip({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: string
-}) {
-  return (
-    <div className="glass flex flex-col items-center rounded-xl px-2 py-3">
-      <Icon className="h-4 w-4 text-arcane-300" />
-      <span className="mt-1 text-xl font-bold text-slate-100">{value}</span>
-      <span className="text-[11px] text-slate-500">{label}</span>
-    </div>
-  )
-}
-
-type Tab = 'profile' | 'combat' | 'equipment' | 'features' | 'skilltree'
 
 export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
-  const [tab, setTab] = useState<Tab>('profile')
-  const character = useCharacterStore((s) => s.characters.find((c) => c.id === id))
-  const update = useCharacterStore((s) => s.update)
+  const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
+  const update = useCharacterStore((state) => state.update)
+  const hitPointDice = useMemo(() => {
+    if (!character) return []
+    if (character.hitPointDice?.length) return character.hitPointDice
+    const sides = Number(character.hitDice.match(/d(\d+)/i)?.[1] ?? 8)
+    return [{ sides, current: character.level, max: character.level }]
+  }, [character])
 
-  if (!character) {
-    return <p className="text-slate-400">未找到角色。</p>
-  }
+  useEffect(() => {
+    if (!character || character.rulesetId === 'dnd5e-srd-5.2.1') return
+    const sides = Number(character.hitDice.match(/d(\d+)/i)?.[1] ?? 8)
+    update(character.id, {
+      rulesetId: 'dnd5e-srd-5.2.1',
+      level: clamp(character.level, 1, 20),
+      abilities: normalizeLegacyAbilities(character.abilities),
+      hitPointDice: [{ sides, current: clamp(character.level, 1, 20), max: clamp(character.level, 1, 20) }],
+      deathSaveSuccesses: 0,
+      deathSaveFailures: 0,
+      deathSaveStable: false,
+      concentrating: false,
+      heroicInspiration: character.inspiration > 0,
+      exhaustionLevel: 0,
+    })
+  }, [character, update])
 
-  const editable = true
+  if (!character) return <p className="text-slate-400">未找到角色。</p>
   const c = character
-  const prof = proficiencyBonus(c.level)
-  const dexMod = abilityMod(c.abilities.dex)
-  const initiative = dexMod + c.initiativeBonus
+  const proficiency = rules.proficiencyBonus(clamp(c.level, 1, 20))
+  const initiative = rules.abilityModifier(clamp(c.abilities.dex, 1, 30)) + c.initiativeBonus
 
+  const toggleSavingThrow = (key: AbilityKey) => {
+    update(id, { savingThrows: c.savingThrows.includes(key) ? c.savingThrows.filter((item) => item !== key) : [...c.savingThrows, key] })
+  }
   const toggleSkill = (key: string) => {
-    update(id, {
-      skills: c.skills.includes(key) ? c.skills.filter((s) => s !== key) : [...c.skills, key],
-    })
-  }
-  const toggleSave = (key: AbilityKey) => {
-    update(id, {
-      savingThrows: c.savingThrows.includes(key)
-        ? c.savingThrows.filter((s) => s !== key)
-        : [...c.savingThrows, key],
-    })
-  }
-
-  const handleLevelChange = (value: string) => {
-    const newLevel = Math.min(MAX_CHARACTER_LEVEL, Math.max(1, Number(value) || 1))
-    const patch: { level: number; charClass?: string; featureUpgradePoints?: number } = {
-      level: newLevel,
-      featureUpgradePoints: availableFeatureUpgradePoints(c, newLevel),
-    }
-    if (!isClassAllowedAtLevel(c.charClass, newLevel, isDM)) {
-      const fallback = classesForLevel(newLevel, isDM)[0]?.name
-      if (fallback) patch.charClass = fallback
-    }
-    update(id, patch)
-  }
-
-  const handleClassChange = (charClass: string) => {
-    if (!isClassAllowedAtLevel(charClass, c.level, isDM)) return
-    const wasArcher = isArcherClass(c.charClass)
-    const nowArcher = isArcherClass(charClass)
-
-    if (wasArcher && !nowArcher) {
-      update(id, {
-        charClass,
-        traits: stripArcherClassTraits(c.traits),
-        traitChoicesDone: {},
-        combatBuffs: {},
-      })
-      return
-    }
-
-    if (!wasArcher && nowArcher) {
-      update(id, {
-        charClass,
-        traits: stripArcherClassTraits(c.traits),
-        traitChoicesDone: {},
-        combatBuffs: {},
-      })
-      return
-    }
-
-    update(id, { charClass })
+    update(id, { skills: c.skills.includes(key) ? c.skills.filter((item) => item !== key) : [...c.skills, key] })
   }
 
   return (
     <div className="space-y-5">
-      {/* 头部 */}
-      <div className="glass rounded-2xl p-5">
-        <div className="flex items-start gap-4">
-          <div
-            className={`glow-arcane flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-3xl ${c.accent}`}
-          >
+      <section className="glass rounded-2xl p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-3xl ${c.accent}`}>
             {c.avatar}
           </div>
-          <div className="min-w-0 flex-1">
-            <input
-              value={c.name}
-              onChange={(e) => update(id, { name: e.target.value })}
-              className="w-full bg-transparent text-2xl font-bold text-slate-100 outline-none focus:ring-0"
-            />
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">种族</span>
-                <input
-                  value={c.race}
-                  onChange={(e) => update(id, { race: e.target.value })}
-                  className="rounded-lg border border-white/10 bg-void-900/60 px-2 py-1.5 text-sm text-slate-200 outline-none focus:border-arcane-500"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">职业</span>
-                <ClassSelect
-                  value={c.charClass}
-                  level={c.level}
-                  isDM={isDM}
-                  onChange={handleClassChange}
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">等级</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={MAX_CHARACTER_LEVEL}
-                  value={c.level}
-                  onChange={(e) => handleLevelChange(e.target.value)}
-                  className="rounded-lg border border-white/10 bg-void-900/60 px-2 py-1.5 text-sm font-semibold text-arcane-200 outline-none focus:border-arcane-500"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">玩家</span>
-                <input
-                  value={c.player}
-                  onChange={(e) => update(id, { player: e.target.value })}
-                  placeholder="—"
-                  className="rounded-lg border border-white/10 bg-void-900/60 px-2 py-1.5 text-sm text-slate-400 outline-none focus:border-arcane-500"
-                />
-              </label>
-            </div>
-            {pendingTraitChoices(c).length > 0 && (
-              <p className="mt-2 text-xs text-amber-200/90">
-                请前往「特性」页完成 {pendingTraitChoices(c)[0]?.title} 抉择
-              </p>
-            )}
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
+            <Field label="角色名称" value={c.name} onChange={(value) => update(id, { name: value })} className="col-span-2" />
+            <Field label="职业" value={c.charClass} onChange={(value) => update(id, { charClass: value })} />
+            <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => update(id, { level: value })} />
+            <Field label="物种" value={c.race} onChange={(value) => update(id, { race: value })} />
+            <Field label="背景" value={c.background} onChange={(value) => update(id, { background: value })} />
+            <Field label="玩家" value={c.player} onChange={(value) => update(id, { player: value })} />
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Heroic Inspiration</span>
+              <button type="button" onClick={() => update(id, { heroicInspiration: !c.heroicInspiration })} className={`rounded-lg border px-3 py-1.5 text-sm ${c.heroicInspiration ? 'border-amber-400/50 bg-amber-500/20 text-amber-100' : 'border-white/10 bg-void-900/60 text-slate-400'}`}>
+                {c.heroicInspiration ? '已拥有' : '未拥有'}
+              </button>
+            </label>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* 标签页切换 */}
-      <div className="glass flex w-fit items-center rounded-xl p-1">
-        <button
-          onClick={() => setTab('profile')}
-          className={[
-            'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-            tab === 'profile' ? 'bg-arcane-500/25 text-arcane-100' : 'text-slate-400 hover:text-slate-200',
-          ].join(' ')}
-        >
-          <User className="h-4 w-4" />
-          角色
-        </button>
-        <button
-          onClick={() => setTab('combat')}
-          className={[
-            'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-            tab === 'combat' ? 'bg-rose-500/25 text-rose-200' : 'text-slate-400 hover:text-slate-200',
-          ].join(' ')}
-        >
-          <Swords className="h-4 w-4" />
-          战斗
-        </button>
-        <button
-          onClick={() => setTab('equipment')}
-          className={[
-            'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-            tab === 'equipment' ? 'bg-amber-500/25 text-amber-200' : 'text-slate-400 hover:text-slate-200',
-          ].join(' ')}
-        >
-          <Backpack className="h-4 w-4" />
-          装备
-        </button>
-        <button
-          onClick={() => setTab('features')}
-          className={[
-            'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-            tab === 'features' ? 'bg-emerald-500/25 text-emerald-200' : 'text-slate-400 hover:text-slate-200',
-          ].join(' ')}
-        >
-          <Sparkles className="h-4 w-4" />
-          特性
-        </button>
-        {hasClassSkillTree(c) && (
-          <button
-            onClick={() => setTab('skilltree')}
-            className={[
-              'flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-              tab === 'skilltree' ? 'bg-sky-500/25 text-sky-200' : 'text-slate-400 hover:text-slate-200',
-            ].join(' ')}
-          >
-            <GitBranch className="h-4 w-4" />
-            技能树
-          </button>
-        )}
-      </div>
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <Stat icon={Shield} label="Armor Class" value={`${c.ac}`} />
+        <Stat icon={Footprints} label="Speed" value={`${c.speed} ft.`} />
+        <Stat icon={Swords} label="Initiative" value={formatMod(initiative)} />
+        <Stat icon={Award} label="Proficiency" value={formatMod(proficiency)} />
+        <Stat icon={Sparkles} label="Passive Perception" value={`${10 + rules.abilityModifier(clamp(c.abilities.wis, 1, 30)) + (c.skills.includes('perception') ? proficiency : 0)}`} />
+        <Stat icon={Dices} label="Ruleset" value="5.2.1" />
+      </section>
 
-      {tab === 'combat' && <CombatTab charId={id} />}
-      {tab === 'equipment' && <EquipmentTab charId={id} editable={editable} />}
-      {tab === 'features' && <FeaturesTab charId={id} isDM={isDM} />}
-      {tab === 'skilltree' && <SkillTreeTab charId={id} />}
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-5">
+          <section className="glass rounded-2xl p-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Abilities & Saving Throws</h3>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {ABILITIES.map((ability) => {
+                const score = clamp(c.abilities[ability.key], 1, 30)
+                const modifier = rules.abilityModifier(score)
+                const saveProficient = c.savingThrows.includes(ability.key)
+                return (
+                  <div key={ability.key} className="rounded-xl border border-white/8 bg-void-900/40 p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 text-sm font-semibold text-slate-200">{ability.label}</span>
+                      <input type="number" min={1} max={30} value={score} onChange={(event) => update(id, { abilities: { ...c.abilities, [ability.key]: clamp(Number(event.target.value) || 1, 1, 30) } })} className="w-14 rounded-md border border-white/10 bg-void-950/70 px-1 py-1 text-center text-sm text-slate-100" />
+                      <span className="w-9 text-right text-lg font-bold text-arcane-200">{formatMod(modifier)}</span>
+                    </div>
+                    <button type="button" onClick={() => toggleSavingThrow(ability.key)} className="mt-2 flex w-full items-center gap-2 rounded-md px-1 py-1 text-xs text-slate-400 hover:bg-white/5">
+                      <Dot active={saveProficient} /> Saving Throw {formatMod(modifier + (saveProficient ? proficiency : 0))}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
 
-      {tab === 'profile' && (
-        <>
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_280px]">
-            {/* 左栏：HP + 基础属性（含技能） */}
-            <div className="space-y-5">
-              <HpPanel
-                current={c.currentHp}
-                max={c.maxHp}
-                temp={c.tempHp}
-                editable={editable}
-                onChange={(patch) => update(id, patch)}
-              />
+          <section className="glass rounded-2xl p-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Skill Proficiencies</h3>
+            <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+              {SKILLS.map((skill) => {
+                const proficient = c.skills.includes(skill.key)
+                const bonus = rules.abilityModifier(clamp(c.abilities[skill.ability], 1, 30)) + (proficient ? proficiency : 0)
+                return <button key={skill.key} type="button" onClick={() => toggleSkill(skill.key)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5"><Dot active={proficient} /><span className="min-w-0 flex-1 text-slate-300">{skill.label}</span><span className="font-semibold text-arcane-200">{formatMod(bonus)}</span></button>
+              })}
+            </div>
+          </section>
+        </div>
 
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-                <StatChip icon={Shield} label="护甲 AC" value={String(getAc(c))} />
-                <StatChip icon={Zap} label="先攻" value={formatMod(initiative)} />
-                <StatChip icon={Footprints} label="速度" value={`${c.speed}`} />
-                <StatChip icon={Award} label="熟练加值" value={formatMod(prof)} />
-                <StatChip icon={Dices} label="生命骰" value={c.hitDice} />
-              </div>
+        <div className="space-y-5">
+          <HpPanel current={c.currentHp} max={c.maxHp} temp={c.tempHp} editable onChange={(patch) => update(id, patch)} />
 
-              {editable && (
-                <div className="glass grid grid-cols-2 gap-3 rounded-2xl p-4 sm:grid-cols-3">
-                  <LabeledInput label="速度" type="number" value={c.speed} editable onChange={(v) => update(id, { speed: Number(v) || 0 })} />
-                  <LabeledInput label="生命骰" value={c.hitDice} editable onChange={(v) => update(id, { hitDice: v })} />
-                </div>
-              )}
-
-              {/* 基础属性 + 按属性分组的技能（参考桌面工具排版） */}
-              <div className="glass rounded-2xl p-4">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">基础属性</p>
-                <div className="space-y-0 divide-y divide-white/5">
-                  {ABILITIES.map((a) => {
-                    const score = c.abilities[a.key]
-                    const mod = abilityMod(score)
-                    const saveProf = c.savingThrows.includes(a.key)
-                    const saveBonus = mod + (saveProf ? prof : 0)
-                    const abilitySkills = SKILLS.filter((s) => s.ability === a.key)
-                    return (
-                      <div key={a.key} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start">
-                        {/* 属性行：名称 / 数值 / 调整 / 豁免熟练 */}
-                        <div className="flex shrink-0 items-center gap-2 sm:w-44">
-                          <span className="w-8 text-sm font-semibold text-slate-200">{a.label}</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={MAX_ABILITY_SCORE}
-                            value={score}
-                            onChange={(e) =>
-                              update(id, {
-                                abilities: { ...c.abilities, [a.key]: clampAbilityScore(Number(e.target.value) || 1) },
-                              })
-                            }
-                            className="w-12 rounded-md border border-white/10 bg-void-900/60 px-1 py-1 text-center text-sm font-semibold text-slate-200 outline-none focus:border-arcane-500"
-                          />
-                          <span className="w-8 text-center text-sm font-bold text-arcane-200">{formatMod(mod)}</span>
-                          <button
-                            type="button"
-                            onClick={() => toggleSave(a.key)}
-                            title="豁免熟练"
-                            className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-white/5"
-                          >
-                            <span
-                              className={[
-                                'h-3 w-3 shrink-0 rounded-full border',
-                                saveProf ? 'border-arcane-400 bg-arcane-500' : 'border-slate-600',
-                              ].join(' ')}
-                            />
-                            豁免{formatMod(saveBonus)}
-                          </button>
-                        </div>
-                        {/* 该属性下的技能（2 列网格） */}
-                        {abilitySkills.length > 0 && (
-                          <div className="grid flex-1 grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-4">
-                            {abilitySkills.map((skill) => {
-                              const proficient = c.skills.includes(skill.key)
-                              const bonus = abilityMod(c.abilities[skill.ability]) + (proficient ? prof : 0)
-                              return (
-                                <button
-                                  key={skill.key}
-                                  type="button"
-                                  onClick={() => toggleSkill(skill.key)}
-                                  className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm transition-colors hover:bg-white/5"
-                                >
-                                  <span
-                                    className={[
-                                      'h-2.5 w-2.5 shrink-0 rounded-full border',
-                                      proficient ? 'border-arcane-400 bg-arcane-500' : 'border-slate-600',
-                                    ].join(' ')}
-                                  />
-                                  <span className="min-w-0 flex-1 truncate text-slate-300">{skill.label}</span>
-                                  <span className="shrink-0 font-semibold text-arcane-200">{formatMod(bonus)}</span>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <p className="mt-3 text-[11px] text-slate-500">属性上限 50 · 25 = +0 · 每低 5 点 -1 · 点击圆点切换技能熟练</p>
+          <section className="glass rounded-2xl p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500"><HeartPulse className="h-4 w-4 text-rose-300" />Death Saves & Concentration</h3>
+            <div className="space-y-3">
+              <Counter label="Successes" value={c.deathSaveSuccesses ?? 0} max={3} tone="emerald" onChange={(value) => update(id, { deathSaveSuccesses: value, deathSaveStable: value >= 3 })} />
+              <Counter label="Failures" value={c.deathSaveFailures ?? 0} max={3} tone="rose" onChange={(value) => update(id, { deathSaveFailures: value })} />
+              <div className="grid grid-cols-2 gap-2">
+                <Toggle label="Stable" active={!!c.deathSaveStable} onClick={() => update(id, { deathSaveStable: !c.deathSaveStable })} />
+                <Toggle label="Concentrating" active={!!c.concentrating} onClick={() => update(id, { concentrating: !c.concentrating })} />
               </div>
             </div>
+          </section>
 
-            {/* 右栏：角色属性 */}
-            <div className="space-y-5">
-              <div className="glass space-y-3 rounded-2xl p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">角色属性</p>
-                <LabeledInput label="角色名称" value={c.name} editable={editable} onChange={(v) => update(id, { name: v })} />
-                <LabeledInput label="种族" value={c.race} editable={editable} onChange={(v) => update(id, { race: v })} />
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">职业</span>
-                  {editable ? (
-                    <ClassSelect
-                      value={c.charClass}
-                      level={c.level}
-                      isDM={isDM}
-                      onChange={handleClassChange}
-                      className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200 outline-none focus:border-arcane-500"
-                    />
-                  ) : (
-                    <span className="rounded-lg border border-transparent px-3 py-1.5 text-sm text-slate-200">
-                      {c.charClass}
-                    </span>
-                  )}
-                </label>
-                <LabeledInput
-                  label="等级"
-                  type="number"
-                  value={c.level}
-                  editable={editable}
-                  onChange={handleLevelChange}
-                />
-                <LabeledInput
-                  label="经验值"
-                  type="number"
-                  value={c.experience}
-                  editable={editable}
-                  onChange={(v) => update(id, { experience: Math.max(0, Number(v) || 0) })}
-                />
-                <LabeledInput
-                  label="声望"
-                  type="number"
-                  value={c.reputation}
-                  editable={editable}
-                  onChange={(v) => update(id, { reputation: Number(v) || 0 })}
-                />
-                <LabeledInput label="背景" value={c.background} editable={editable} onChange={(v) => update(id, { background: v })} />
-                <LabeledInput label="玩家" value={c.player} editable={editable} onChange={(v) => update(id, { player: v })} />
-              </div>
-
-              <div className="glass rounded-2xl p-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">角色背景</p>
-                <textarea
-                  value={c.notes}
-                  onChange={(e) => update(id, { notes: e.target.value })}
-                  rows={6}
-                  placeholder="背景故事、装备、目标……"
-                  className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200 outline-none focus:border-arcane-500"
-                />
-              </div>
-
-              {isDM && (
-                <div className="glass rounded-2xl border-amber-500/20 p-4">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-400">
-                    DM 专属笔记（玩家不可见）
-                  </p>
-                  <textarea
-                    value={c.dmNotes}
-                    onChange={(e) => update(id, { dmNotes: e.target.value })}
-                    rows={4}
-                    placeholder="剧情钩子、隐藏信息、秘密……"
-                    className="w-full resize-none rounded-lg border border-amber-500/20 bg-void-900/60 p-3 text-sm text-amber-100/90 outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
+          <section className="glass rounded-2xl p-4">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Hit Point Dice</h3>
+            <div className="space-y-2">
+              {hitPointDice.map((pool, index) => <div key={`${pool.sides}-${index}`} className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2"><span className="font-bold text-arcane-200">d{pool.sides}</span><input type="number" min={0} max={pool.max} value={pool.current} onChange={(event) => { const next = hitPointDice.map((item, itemIndex) => itemIndex === index ? { ...item, current: clamp(Number(event.target.value) || 0, 0, item.max) } : item); update(id, { hitPointDice: next }) }} className="w-14 rounded border border-white/10 bg-void-950/70 px-1 py-1 text-center text-sm" /><span className="text-sm text-slate-500">/ {pool.max}</span></div>)}
             </div>
-          </div>
-        </>
-      )}
+          </section>
+
+          <section className="glass rounded-2xl p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Conditions</h3>
+            <input value={c.conditions.join(', ')} onChange={(event) => update(id, { conditions: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} placeholder="例如：Prone, Grappled" className="w-full rounded-lg border border-white/10 bg-void-900/60 px-3 py-2 text-sm text-slate-200" />
+          </section>
+
+          <section className="glass rounded-2xl p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Notes</h3>
+            <textarea value={c.notes} onChange={(event) => update(id, { notes: event.target.value })} rows={5} className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200" />
+            {isDM && <textarea value={c.dmNotes} onChange={(event) => update(id, { dmNotes: event.target.value })} rows={3} placeholder="DM-only notes" className="mt-3 w-full resize-none rounded-lg border border-amber-500/20 bg-void-900/60 p-3 text-sm text-amber-100" />}
+          </section>
+        </div>
+      </div>
     </div>
   )
 }
+
+function Dot({ active }: { active: boolean }) { return <span className={`h-3 w-3 shrink-0 rounded-full border ${active ? 'border-arcane-300 bg-arcane-500' : 'border-slate-600'}`} /> }
+function Stat({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) { return <div className="glass flex flex-col items-center rounded-xl px-2 py-3"><Icon className="h-4 w-4 text-arcane-300" /><strong className="mt-1 text-xl text-slate-100">{value}</strong><span className="text-center text-[11px] text-slate-500">{label}</span></div> }
+function Field({ label, value, onChange, className = '' }: { label: string; value: string; onChange: (value: string) => void; className?: string }) { return <label className={`flex flex-col gap-1 ${className}`}><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200" /></label> }
+function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) { return <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span><input type="number" value={value} min={min} max={max} onChange={(event) => onChange(clamp(Number(event.target.value) || min, min, max))} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200" /></label> }
+function Toggle({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) { return <button type="button" onClick={onClick} className={`rounded-lg border px-3 py-2 text-sm ${active ? 'border-arcane-400/50 bg-arcane-500/20 text-arcane-100' : 'border-white/10 bg-white/5 text-slate-400'}`}>{label}: {active ? 'Yes' : 'No'}</button> }
+function Counter({ label, value, max, tone, onChange }: { label: string; value: number; max: number; tone: 'emerald' | 'rose'; onChange: (value: number) => void }) { return <div className="flex items-center justify-between"><span className="text-sm text-slate-300">{label}</span><div className="flex gap-2">{Array.from({ length: max }, (_, index) => <button key={index} type="button" aria-label={`${label} ${index + 1}`} onClick={() => onChange(value === index + 1 ? index : index + 1)} className={`h-5 w-5 rounded-full border ${index < value ? tone === 'emerald' ? 'border-emerald-300 bg-emerald-500' : 'border-rose-300 bg-rose-500' : 'border-slate-600'}`} />)}</div></div> }

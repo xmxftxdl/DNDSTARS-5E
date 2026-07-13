@@ -4,7 +4,6 @@ import PageHeader from '../components/PageHeader'
 import EmptyState from '../components/EmptyState'
 import CharacterSheet from '../components/character/CharacterSheet'
 import DMRoster from '../components/character/DMRoster'
-import ClassCatalog from '../components/character/ClassCatalog'
 import { useCharacterStore } from '../store/characters'
 import { modeFromPort, playerSlotLabel } from '../lib/appMode'
 import {
@@ -213,7 +212,6 @@ export default function CharactersPage() {
 
       {isDM && (
         <div className="mb-5 space-y-4">
-          <ClassCatalog />
           <DMRoster />
         </div>
       )}

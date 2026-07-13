@@ -32,6 +32,23 @@ export interface Dnd5eCharacter {
   conditions: readonly string[]
 }
 
+export function normalizeLegacyAbilityScore(score: number): number {
+  if (score <= 20) return Math.min(30, Math.max(1, Math.floor(score)))
+  const legacyModifier = Math.floor((score - 25) / 5)
+  return Math.min(30, Math.max(1, 10 + legacyModifier * 2))
+}
+
+export function normalizeLegacyAbilities(abilities: Record<AbilityKey, number>): Record<AbilityKey, number> {
+  return {
+    str: normalizeLegacyAbilityScore(abilities.str),
+    dex: normalizeLegacyAbilityScore(abilities.dex),
+    con: normalizeLegacyAbilityScore(abilities.con),
+    int: normalizeLegacyAbilityScore(abilities.int),
+    wis: normalizeLegacyAbilityScore(abilities.wis),
+    cha: normalizeLegacyAbilityScore(abilities.cha),
+  }
+}
+
 function parseHitPointDie(value: string): number {
   const match = value.trim().match(/^\d*d(\d+)$/i)
   return match ? Math.max(2, Number(match[1])) : 8
@@ -49,7 +66,7 @@ export function migrateCharacterToDnd5e(character: Character): Dnd5eCharacter {
     name: character.name,
     player: character.player,
     level,
-    abilities: { ...character.abilities },
+    abilities: character.rulesetId === 'dnd5e-srd-5.2.1' ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
     savingThrowProficiencies: [...character.savingThrows],
     skillProficiencies: [...character.skills],
     armorClass: Math.max(0, Math.floor(character.ac)),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
-import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
+import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e, normalizeLegacyAbilityScore } from './character'
 
 function legacyCharacter(): Character {
   return {
@@ -11,6 +11,11 @@ function legacyCharacter(): Character {
 }
 
 describe('D&D 5e character boundary', () => {
+  it('converts the inherited 25-baseline ability scale', () => {
+    expect(normalizeLegacyAbilityScore(25)).toBe(10)
+    expect(normalizeLegacyAbilityScore(30)).toBe(12)
+    expect(normalizeLegacyAbilityScore(50)).toBe(20)
+  })
   it('drops legacy AP and custom combat fields from the SRD model', () => {
     const migrated = migrateCharacterToDnd5e(legacyCharacter())
     expect(migrated).toMatchObject({ level: 5, armorClass: 17, hitPointDice: [{ sides: 10, current: 5, max: 5 }], heroicInspiration: true })
