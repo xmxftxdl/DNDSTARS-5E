@@ -6,3 +6,4 @@ registerRulesetAdapter(dnd5eSrd521Adapter)
 export { dnd5eSrd521Adapter }
 export * from './headlessCombatEngine'
 export * from './sharedCombat'
+export * from './character'
