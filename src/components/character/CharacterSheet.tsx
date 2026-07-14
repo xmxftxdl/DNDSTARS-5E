@@ -11,6 +11,7 @@ import {
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
+import FighterProgressionPanel from './FighterProgressionPanel'
 
 interface CharacterSheetProps {
   id: string
@@ -197,6 +198,8 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
           </section>
         </div>
       </div>
+
+      {c.charClass === '战士' && <FighterProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
     </div>
   )
 }

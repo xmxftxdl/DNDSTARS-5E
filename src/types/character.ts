@@ -145,6 +145,12 @@ export interface Character {
   /** @deprecated 2024 存档兼容字段；2014 规则使用 inspiration。 */
   heroicInspiration?: boolean
   exhaustionLevel?: number
+  dnd5eClassChoices?: {
+    fighter?: {
+      subclass?: 'champion' | 'battle-master' | 'eldritch-knight'
+      fightingStyles?: Array<'archery' | 'defense' | 'dueling' | 'great-weapon-fighting' | 'protection' | 'two-weapon-fighting'>
+    }
+  }
 
   ac: number
   speed: number
