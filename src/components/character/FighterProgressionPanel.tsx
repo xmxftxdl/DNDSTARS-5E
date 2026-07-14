@@ -1,16 +1,24 @@
-import { Shield, Sparkles, Swords, Wind } from 'lucide-react'
+import { Check, Shield, Sparkles, Swords, Wind } from 'lucide-react'
 import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
+  FIGHTER_MANEUVER_OPTIONS,
   FIGHTER_SUBCLASS_OPTIONS,
   fighterActionSurgeUses,
   fighterAttacksPerAttackAction,
   fighterFightingStyleName,
+  fighterFightingStyleSelectionLimit,
   fighterIndomitableUses,
+  fighterManeuverSaveDc,
+  fighterManeuversKnown,
   fighterProgression,
+  fighterSelectedFightingStyles,
+  fighterSelectedManeuvers,
   fighterSubclassName,
+  fighterSuperiorityDieSides,
   dnd5eArmorClass,
   dnd5eWeaponAttackProfile,
   type FighterFightingStyleId,
+  type FighterManeuverId,
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
@@ -23,7 +31,10 @@ interface FighterProgressionPanelProps {
 export default function FighterProgressionPanel({ character, onChange }: FighterProgressionPanelProps) {
   const fighter = character.dnd5eClassChoices?.fighter ?? {}
   const subclass = fighter.subclass
-  const fightingStyles = fighter.fightingStyles ?? []
+  const fightingStyles = fighterSelectedFightingStyles(character)
+  const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
+  const maneuvers = fighterSelectedManeuvers(character)
+  const maneuverLimit = fighterManeuversKnown(character.level)
   const progression = fighterProgression(subclass)
   const weapon = dnd5eWeaponAttackProfile(character)
   const setFighterChoices = (patch: NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>) => {
@@ -35,17 +46,21 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     })
   }
   const setSubclass = (next: FighterSubclassId | undefined) => {
+    const nextStyleLimit = next === 'champion' && character.level >= 10 ? 2 : 1
     setFighterChoices({
       subclass: next,
-      fightingStyles: next === 'champion' ? fightingStyles : fightingStyles.slice(0, 1),
+      fightingStyles: fightingStyles.slice(0, nextStyleLimit),
     })
   }
-  const setPrimaryStyle = (next: FighterFightingStyleId | undefined) => {
-    const secondary = fightingStyles[1]
-    setFighterChoices({ fightingStyles: [next, secondary === next ? undefined : secondary].filter(Boolean) as FighterFightingStyleId[] })
+  const toggleFightingStyle = (style: FighterFightingStyleId) => {
+    const selected = fightingStyles.includes(style)
+    if (!selected && fightingStyles.length >= fightingStyleLimit) return
+    setFighterChoices({ fightingStyles: selected ? fightingStyles.filter((item) => item !== style) : [...fightingStyles, style] })
   }
-  const setSecondaryStyle = (next: FighterFightingStyleId | undefined) => {
-    setFighterChoices({ fightingStyles: [fightingStyles[0], next].filter(Boolean) as FighterFightingStyleId[] })
+  const toggleManeuver = (maneuver: FighterManeuverId) => {
+    const selected = maneuvers.includes(maneuver)
+    if (!selected && maneuvers.length >= maneuverLimit) return
+    setFighterChoices({ maneuvers: selected ? maneuvers.filter((item) => item !== maneuver) : [...maneuvers, maneuver] })
   }
 
   return (
@@ -59,14 +74,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
           <p className="mt-1 text-sm text-slate-500">D&D 5e 2014 · 战士 {character.level} 级 · {fighterSubclassName(subclass)}</p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:w-[520px]">
-          <ChoiceSelect
-            label="战斗风格（1级）"
-            value={fightingStyles[0] ?? ''}
-            placeholder="选择战斗风格"
-            options={FIGHTER_FIGHTING_STYLE_OPTIONS}
-            onChange={(value) => setPrimaryStyle(value as FighterFightingStyleId || undefined)}
-          />
+        <div className="xl:w-[260px]">
           <ChoiceSelect
             label="武术范型（3级）"
             value={subclass ?? ''}
@@ -75,15 +83,28 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
             disabled={character.level < 3}
             onChange={(value) => setSubclass(value as FighterSubclassId || undefined)}
           />
-          {subclass === 'champion' && character.level >= 10 && (
-            <ChoiceSelect
-              label="额外战斗风格（10级）"
-              value={fightingStyles[1] ?? ''}
-              placeholder="选择第二种风格"
-              options={FIGHTER_FIGHTING_STYLE_OPTIONS.filter((option) => option.id !== fightingStyles[0])}
-              onChange={(value) => setSecondaryStyle(value as FighterFightingStyleId || undefined)}
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-white/10 bg-void-900/40 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">战斗风格</h4>
+            <p className="mt-0.5 text-xs text-slate-500">普通战士选择 1 种；10级勇士可选择第 2 种，不能重复。</p>
+          </div>
+          <span className="rounded-full bg-arcane-500/10 px-2.5 py-1 text-xs font-semibold text-arcane-200">已选 {fightingStyles.length}/{fightingStyleLimit}</span>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {FIGHTER_FIGHTING_STYLE_OPTIONS.map((option) => (
+            <SelectionCard
+              key={option.id}
+              name={option.name}
+              summary={option.summary}
+              selected={fightingStyles.includes(option.id)}
+              disabled={!fightingStyles.includes(option.id) && fightingStyles.length >= fightingStyleLimit}
+              onClick={() => toggleFightingStyle(option.id)}
             />
-          )}
+          ))}
         </div>
       </div>
 
@@ -91,8 +112,43 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         <Summary icon={Swords} label="每次攻击动作" value={`${fighterAttacksPerAttackAction(character.level)} 次攻击`} />
         <Summary icon={Wind} label="动作如潮" value={`${fighterActionSurgeUses(character.level)} 次／休息`} />
         <Summary icon={Shield} label="不屈" value={`${fighterIndomitableUses(character.level)} 次／长休`} />
-        <Summary icon={Sparkles} label="战斗风格" value={fighterFightingStyleName(fightingStyles[0])} />
+        <Summary icon={Sparkles} label="战斗风格" value={fightingStyles.map(fighterFightingStyleName).join('、') || '尚未选择'} />
       </div>
+
+      {subclass === 'battle-master' && character.level >= 3 && (
+        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h4 className="text-sm font-semibold text-amber-100">战斗大师战技</h4>
+              <p className="mt-1 text-xs text-slate-500">3/7/10/15级分别掌握 3/5/7/9 项战技；已选 {maneuvers.length}/{maneuverLimit}。</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:min-w-[420px]">
+              <EquipmentLine label="优势骰" value={`d${fighterSuperiorityDieSides(character.level)}`} detail={`${character.classResources?.fighterSuperiorityDice?.current ?? 0}/${character.classResources?.fighterSuperiorityDice?.max ?? 0} 枚`} />
+              <EquipmentLine label="战技豁免 DC" value={`${fighterManeuverSaveDc(character)}`} detail="8＋熟练＋所选属性" />
+              <ChoiceSelect
+                label="战技属性"
+                value={fighter.maneuverAbility ?? 'str'}
+                placeholder="选择属性"
+                options={[{ id: 'str', name: '力量' }, { id: 'dex', name: '敏捷' }]}
+                onChange={(value) => setFighterChoices({ maneuverAbility: value === 'dex' ? 'dex' : 'str' })}
+              />
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {FIGHTER_MANEUVER_OPTIONS.map((option) => (
+              <SelectionCard
+                key={option.id}
+                name={option.name}
+                summary={option.summary}
+                selected={maneuvers.includes(option.id)}
+                disabled={!maneuvers.includes(option.id) && maneuvers.length >= maneuverLimit}
+                onClick={() => toggleManeuver(option.id)}
+              />
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-amber-200/70">当前阶段保存战技选择与资源；战技在地图中的目标、反应与伤害结算仍需逐项接入 5e Headless。</p>
+        </div>
+      )}
 
       <div className="mt-4 rounded-xl border border-white/10 bg-void-900/40 p-4">
         <h4 className="text-sm font-semibold text-slate-200">基础装备</h4>
@@ -139,6 +195,30 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         </div>
       </div>
     </section>
+  )
+}
+
+function SelectionCard({ name, summary, selected, disabled, onClick }: {
+  name: string
+  summary: string
+  selected: boolean
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`rounded-xl border p-3 text-left transition-colors ${selected ? 'border-arcane-400/50 bg-arcane-500/15' : 'border-white/8 bg-white/[0.03] hover:bg-white/[0.06]'} disabled:cursor-not-allowed disabled:opacity-40`}
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-slate-200">{name}</span>
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-arcane-300 bg-arcane-500 text-white' : 'border-slate-600'}`}>{selected && <Check className="h-3.5 w-3.5" />}</span>
+      </span>
+      <span className="mt-1 block text-xs leading-5 text-slate-500">{summary}</span>
+    </button>
   )
 }
 

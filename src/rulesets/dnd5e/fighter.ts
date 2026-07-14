@@ -10,6 +10,24 @@ export type FighterFightingStyleId =
   | 'protection'
   | 'two-weapon-fighting'
 
+export type FighterManeuverId =
+  | 'commanders-strike'
+  | 'disarming-attack'
+  | 'distracting-strike'
+  | 'evasive-footwork'
+  | 'feinting-attack'
+  | 'goading-attack'
+  | 'lunging-attack'
+  | 'maneuvering-attack'
+  | 'menacing-attack'
+  | 'parry'
+  | 'precision-attack'
+  | 'pushing-attack'
+  | 'rally'
+  | 'riposte'
+  | 'sweeping-attack'
+  | 'trip-attack'
+
 export interface FighterFeatureDefinition {
   id: string
   level: number
@@ -46,6 +64,25 @@ export const FIGHTER_FIGHTING_STYLE_OPTIONS: readonly { id: FighterFightingStyle
   { id: 'great-weapon-fighting', name: '巨武器战斗', summary: '双手近战武器伤害骰出现 1 或 2 时可重骰一次。' },
   { id: 'protection', name: '保护', summary: '持盾时可用反应干扰对相邻盟友的攻击。' },
   { id: 'two-weapon-fighting', name: '双武器战斗', summary: '双持时可将属性调整值加入副手攻击伤害。' },
+]
+
+export const FIGHTER_MANEUVER_OPTIONS: readonly { id: FighterManeuverId; name: string; summary: string }[] = [
+  { id: 'commanders-strike', name: '指挥官打击', summary: '放弃一次攻击并使用附赠动作，让盟友以反应进行一次武器攻击。' },
+  { id: 'disarming-attack', name: '缴械攻击', summary: '命中时追加优势骰伤害，并迫使目标进行力量豁免以免掉落物品。' },
+  { id: 'distracting-strike', name: '扰乱攻击', summary: '命中时追加优势骰伤害，使下一名盟友对该目标的攻击获得优势。' },
+  { id: 'evasive-footwork', name: '灵巧步法', summary: '移动时将优势骰加入护甲等级，效果持续到停止移动。' },
+  { id: 'feinting-attack', name: '佯攻', summary: '以附赠动作选择邻近目标，使本回合下一次攻击获得优势并追加伤害。' },
+  { id: 'goading-attack', name: '挑衅攻击', summary: '命中时追加伤害；目标豁免失败后，攻击其他生物时具有劣势。' },
+  { id: 'lunging-attack', name: '突刺攻击', summary: '近战攻击时增加触及距离，并在命中后追加优势骰伤害。' },
+  { id: 'maneuvering-attack', name: '机动攻击', summary: '命中时追加伤害，并让盟友用反应移动且不触发目标的借机攻击。' },
+  { id: 'menacing-attack', name: '威吓攻击', summary: '命中时追加伤害；目标豁免失败后对你陷入恐慌。' },
+  { id: 'parry', name: '招架', summary: '被近战攻击伤害时使用反应，减少优势骰加敏捷调整值的伤害。' },
+  { id: 'precision-attack', name: '精准攻击', summary: '武器攻击检定时把优势骰加入命中结果。' },
+  { id: 'pushing-attack', name: '推击', summary: '命中时追加伤害；目标豁免失败后被推离。' },
+  { id: 'rally', name: '激励', summary: '使用附赠动作，让盟友获得优势骰加魅力调整值的临时生命值。' },
+  { id: 'riposte', name: '还击', summary: '敌人近战攻击未命中时使用反应进行一次反击，命中后追加伤害。' },
+  { id: 'sweeping-attack', name: '横扫攻击', summary: '近战命中时把优势骰伤害施加给相邻的第二个目标。' },
+  { id: 'trip-attack', name: '绊摔攻击', summary: '命中时追加伤害；目标豁免失败后倒地。' },
 ]
 
 const baseFeatures: readonly FighterFeatureDefinition[] = [
@@ -129,6 +166,50 @@ export function fighterSuperiorityDiceMax(level: number): number {
   if (current >= 15) return 6
   if (current >= 7) return 5
   return current >= 3 ? 4 : 0
+}
+
+export function fighterFightingStyleSelectionLimit(character: Pick<Character, 'level' | 'dnd5eClassChoices'>): number {
+  return character.level >= 10 && character.dnd5eClassChoices?.fighter?.subclass === 'champion' ? 2 : 1
+}
+
+export function fighterSelectedFightingStyles(
+  character: Pick<Character, 'level' | 'dnd5eClassChoices'>,
+): FighterFightingStyleId[] {
+  const allowed = new Set(FIGHTER_FIGHTING_STYLE_OPTIONS.map((option) => option.id))
+  const unique = [...new Set(character.dnd5eClassChoices?.fighter?.fightingStyles ?? [])]
+    .filter((style): style is FighterFightingStyleId => allowed.has(style))
+  return unique.slice(0, fighterFightingStyleSelectionLimit(character))
+}
+
+export function fighterManeuversKnown(level: number): number {
+  const current = clampLevel(level)
+  if (current >= 15) return 9
+  if (current >= 10) return 7
+  if (current >= 7) return 5
+  return current >= 3 ? 3 : 0
+}
+
+export function fighterSuperiorityDieSides(level: number): number {
+  const current = clampLevel(level)
+  if (current >= 18) return 12
+  if (current >= 10) return 10
+  return 8
+}
+
+export function fighterSelectedManeuvers(
+  character: Pick<Character, 'level' | 'dnd5eClassChoices'>,
+): FighterManeuverId[] {
+  if (character.dnd5eClassChoices?.fighter?.subclass !== 'battle-master') return []
+  const allowed = new Set(FIGHTER_MANEUVER_OPTIONS.map((option) => option.id))
+  const unique = [...new Set(character.dnd5eClassChoices?.fighter?.maneuvers ?? [])]
+    .filter((maneuver): maneuver is FighterManeuverId => allowed.has(maneuver))
+  return unique.slice(0, fighterManeuversKnown(character.level))
+}
+
+export function fighterManeuverSaveDc(character: Pick<Character, 'level' | 'abilities' | 'dnd5eClassChoices'>): number {
+  const ability = character.dnd5eClassChoices?.fighter?.maneuverAbility ?? 'str'
+  const score = ability === 'dex' ? character.abilities.dex : character.abilities.str
+  return 8 + 2 + Math.floor((Math.min(20, Math.max(1, character.level)) - 1) / 4) + Math.floor((score - 10) / 2)
 }
 
 export function fighterResourceMax(character: Pick<Character, 'level' | 'dnd5eClassChoices'>, key: FighterResourceKey): number {

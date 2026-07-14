@@ -2,7 +2,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import type { Character } from '../../types/character'
 import type { CharacterEquipment, EquipmentItem } from '../../types/equipment'
-import { fighterCriticalThreshold } from './fighter'
+import { fighterCriticalThreshold, fighterSelectedFightingStyles } from './fighter'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -70,7 +70,7 @@ export function defaultEquipmentForDnd5eCharacter(character: Pick<Character, 'ch
     : undefined
 }
 
-export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipment' | 'ac' | 'dnd5eClassChoices'>): number {
+export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipment' | 'ac' | 'level' | 'dnd5eClassChoices'>): number {
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
   const armor = character.equipment?.armor?.dnd5e
   let armorClass = 10 + dexterityModifier
@@ -88,7 +88,7 @@ export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipm
   }
   const shield = character.equipment?.offHand?.dnd5e
   if (shield?.kind === 'shield') armorClass += shield.armorClassBonus
-  const styles = character.dnd5eClassChoices?.fighter?.fightingStyles ?? []
+  const styles = fighterSelectedFightingStyles(character)
   if (armor?.kind === 'armor' && styles.includes('defense')) armorClass += 1
   return Math.max(0, Math.floor(armorClass))
 }
@@ -104,7 +104,7 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     : data.attackAbility
   const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
   const proficiency = rules.proficiencyBonus(Math.min(20, Math.max(1, character.level)))
-  const styles = character.dnd5eClassChoices?.fighter?.fightingStyles ?? []
+  const styles = fighterSelectedFightingStyles(character)
   const attackStyleBonus = data.mode === 'ranged' && styles.includes('archery') ? 2 : 0
   const duelingBonus = data.mode === 'melee' && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
   return {

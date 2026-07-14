@@ -149,6 +149,25 @@ export interface Character {
     fighter?: {
       subclass?: 'champion' | 'battle-master' | 'eldritch-knight'
       fightingStyles?: Array<'archery' | 'defense' | 'dueling' | 'great-weapon-fighting' | 'protection' | 'two-weapon-fighting'>
+      maneuvers?: Array<
+        | 'commanders-strike'
+        | 'disarming-attack'
+        | 'distracting-strike'
+        | 'evasive-footwork'
+        | 'feinting-attack'
+        | 'goading-attack'
+        | 'lunging-attack'
+        | 'maneuvering-attack'
+        | 'menacing-attack'
+        | 'parry'
+        | 'precision-attack'
+        | 'pushing-attack'
+        | 'rally'
+        | 'riposte'
+        | 'sweeping-attack'
+        | 'trip-attack'
+      >
+      maneuverAbility?: 'str' | 'dex'
     }
   }
 

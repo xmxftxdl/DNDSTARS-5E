@@ -8,6 +8,7 @@ import {
   syncCharacterClassResources,
 } from './classResources'
 import { executeCombatMutationsAuthority } from './combatAuthority'
+import { FIGHTER_RESOURCE_KEYS } from '../rulesets/dnd5e'
 
 function character(patch: Partial<Character> = {}): Character {
   return {
@@ -108,5 +109,17 @@ describe('class resources', () => {
     } finally {
       dispose()
     }
+  })
+
+  it('initializes Battle Master superiority dice when the subclass is selected', () => {
+    const battleMaster = syncCharacterClassResources(character({
+      charClass: '战士',
+      level: 7,
+      qi: undefined,
+      dnd5eClassChoices: { fighter: { subclass: 'battle-master', maneuvers: ['trip-attack'] } },
+    }))
+    expect(battleMaster.classResources?.[FIGHTER_RESOURCE_KEYS.secondWind]).toEqual({ current: 1, max: 1 })
+    expect(battleMaster.classResources?.[FIGHTER_RESOURCE_KEYS.actionSurge]).toEqual({ current: 1, max: 1 })
+    expect(battleMaster.classResources?.[FIGHTER_RESOURCE_KEYS.superiorityDice]).toEqual({ current: 5, max: 5 })
   })
 })

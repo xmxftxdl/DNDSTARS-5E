@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Award, Dices, Footprints, HeartPulse, Shield, Sparkles, Swords } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '../../lib/dnd'
@@ -24,6 +24,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
+  const [selectedTab, setSelectedTab] = useState<'sheet' | 'fighter'>('sheet')
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
   const hitDice = useMemo(() => {
@@ -56,6 +57,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
 
   if (!character) return <p className="text-slate-400">未找到角色。</p>
   const c = character
+  const activeTab = c.charClass === '战士' ? selectedTab : 'sheet'
   const proficiency = rules.proficiencyBonus(clamp(c.level, 1, 20))
   const initiative = rules.abilityModifier(clamp(c.abilities.dex, 1, 30)) + c.initiativeBonus
   const perceptionProficient = c.skills.includes('perception')
@@ -97,6 +99,14 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
         </div>
       </section>
 
+      {c.charClass === '战士' && (
+        <nav className="glass flex gap-1 rounded-2xl p-1.5" aria-label="角色页面分页">
+          <CharacterTab active={activeTab === 'sheet'} onClick={() => setSelectedTab('sheet')}>人物卡</CharacterTab>
+          <CharacterTab active={activeTab === 'fighter'} onClick={() => setSelectedTab('fighter')}>战士</CharacterTab>
+        </nav>
+      )}
+
+      {activeTab === 'sheet' && <>
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
         <Stat icon={Shield} label="护甲等级" value={`${dnd5eArmorClass(c)}`} />
         <Stat icon={Footprints} label="速度" value={`${c.speed} 尺`} />
@@ -199,9 +209,22 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
           </section>
         </div>
       </div>
+      </>}
 
-      {c.charClass === '战士' && <FighterProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
+      {activeTab === 'fighter' && <FighterProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
     </div>
+  )
+}
+
+function CharacterTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl px-5 py-2 text-sm font-semibold transition-colors ${active ? 'bg-arcane-500/20 text-arcane-100 shadow-sm' : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'}`}
+    >
+      {children}
+    </button>
   )
 }
 

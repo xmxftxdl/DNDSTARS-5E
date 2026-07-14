@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import type { Character } from '../../types/character'
 import {
   fighterActionSurgeUses,
   fighterAttacksPerAttackAction,
   fighterFeaturesAtLevel,
+  fighterFightingStyleSelectionLimit,
   fighterIndomitableUses,
+  fighterManeuverSaveDc,
+  fighterManeuversKnown,
   fighterProgression,
+  fighterSelectedFightingStyles,
+  fighterSelectedManeuvers,
+  fighterSuperiorityDieSides,
 } from './fighter'
 
 describe('D&D 5e 2014 fighter progression', () => {
@@ -34,5 +41,32 @@ describe('D&D 5e 2014 fighter progression', () => {
   it('keeps generic archetype milestones until a subclass is selected', () => {
     expect(fighterFeaturesAtLevel(7).map((feature) => feature.name)).toEqual(['武术范型特性'])
     expect(fighterFeaturesAtLevel(10).map((feature) => feature.name)).toEqual(['武术范型特性'])
+  })
+
+  it('allows one fighting style except for a level 10+ Champion, who may select two', () => {
+    const ordinary: Pick<Character, 'level' | 'dnd5eClassChoices'> = { level: 20, dnd5eClassChoices: { fighter: { subclass: 'battle-master', fightingStyles: ['defense', 'dueling'] } } }
+    const champion: Pick<Character, 'level' | 'dnd5eClassChoices'> = { level: 10, dnd5eClassChoices: { fighter: { subclass: 'champion', fightingStyles: ['defense', 'dueling', 'archery'] } } }
+    expect(fighterFightingStyleSelectionLimit(ordinary)).toBe(1)
+    expect(fighterSelectedFightingStyles(ordinary)).toEqual(['defense'])
+    expect(fighterFightingStyleSelectionLimit(champion)).toBe(2)
+    expect(fighterSelectedFightingStyles(champion)).toEqual(['defense', 'dueling'])
+  })
+
+  it('scales Battle Master maneuver choices and superiority dice at 2014 levels', () => {
+    expect([3, 7, 10, 15].map(fighterManeuversKnown)).toEqual([3, 5, 7, 9])
+    expect([3, 10, 18].map(fighterSuperiorityDieSides)).toEqual([8, 10, 12])
+    const battleMaster: Pick<Character, 'level' | 'abilities' | 'dnd5eClassChoices'> = {
+      level: 7,
+      abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+      dnd5eClassChoices: {
+        fighter: {
+          subclass: 'battle-master',
+          maneuverAbility: 'str',
+          maneuvers: ['trip-attack', 'riposte', 'parry', 'precision-attack', 'rally', 'pushing-attack'],
+        },
+      },
+    }
+    expect(fighterSelectedManeuvers(battleMaster)).toEqual(['trip-attack', 'riposte', 'parry', 'precision-attack', 'rally'])
+    expect(fighterManeuverSaveDc(battleMaster)).toBe(14)
   })
 })
