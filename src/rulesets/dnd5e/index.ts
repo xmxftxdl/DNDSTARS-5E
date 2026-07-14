@@ -7,4 +7,5 @@ export { dnd5e2014Adapter }
 export * from './headlessCombatEngine'
 export * from './sharedCombat'
 export * from './character'
+export * from './characterOptions'
 export * from './mapBridge'

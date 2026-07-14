@@ -2,7 +2,11 @@ import { useEffect, useMemo } from 'react'
 import { Award, Dices, Footprints, HeartPulse, Shield, Sparkles, Swords } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '../../lib/dnd'
-import { dnd5e2014Adapter as rules } from '../../rulesets/dnd5e'
+import {
+  DND5E_2014_BACKGROUND_OPTIONS,
+  DND5E_2014_CLASS_OPTIONS,
+  dnd5e2014Adapter as rules,
+} from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
 
@@ -77,21 +81,12 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
           </div>
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="角色名称" value={c.name} onChange={(value) => update(id, { name: value })} className="col-span-2" />
-            <Field label="职业" value={c.charClass} onChange={(value) => update(id, { charClass: value })} />
+            <SelectField label="职业" value={c.charClass} options={DND5E_2014_CLASS_OPTIONS} onChange={(value) => update(id, { charClass: value })} />
             <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => update(id, { level: value })} />
             <Field label="种族" value={c.race} onChange={(value) => update(id, { race: value })} />
-            <Field label="背景" value={c.background} onChange={(value) => update(id, { background: value })} />
+            <SelectField label="背景" value={c.background} options={DND5E_2014_BACKGROUND_OPTIONS} onChange={(value) => update(id, { background: value })} />
             <Field label="玩家" value={c.player} onChange={(value) => update(id, { player: value })} />
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold tracking-wider text-slate-500">激励</span>
-              <button
-                type="button"
-                onClick={() => update(id, { inspiration: c.inspiration > 0 ? 0 : 1 })}
-                className={`rounded-lg border px-3 py-1.5 text-sm ${c.inspiration > 0 ? 'border-amber-400/50 bg-amber-500/20 text-amber-100' : 'border-white/10 bg-void-900/60 text-slate-400'}`}
-              >
-                {c.inspiration > 0 ? '已有激励' : '没有激励'}
-              </button>
-            </label>
+            <NumberField label="激励骰数量" value={c.inspiration} min={0} max={99} onChange={(value) => update(id, { inspiration: value })} />
           </div>
         </div>
       </section>
@@ -252,10 +247,9 @@ function AbilitySection({
             <span className="min-w-0 flex-1 text-slate-300">{label}豁免</span>
             <span className="font-semibold text-arcane-200">{formatMod(saveBonus)}</span>
           </button>
-          <div className="mt-1 border-t border-white/8 pt-1">
-            {skills.length === 0 ? (
-              <p className="px-2 py-1.5 text-xs text-slate-500">体质没有默认关联技能</p>
-            ) : skills.map((skill) => {
+          {skills.length > 0 && (
+            <div className="mt-1 border-t border-white/8 pt-1">
+              {skills.map((skill) => {
               const proficient = skillProficiencies.includes(skill.key)
               const bonus = modifier + (proficient ? proficiency : 0)
               return (
@@ -265,8 +259,9 @@ function AbilitySection({
                   <span className="font-semibold text-arcane-200">{formatMod(bonus)}</span>
                 </button>
               )
-            })}
-          </div>
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -283,6 +278,20 @@ function Stat({ icon: Icon, label, value }: { icon: React.ComponentType<{ classN
 
 function Field({ label, value, onChange, className = '' }: { label: string; value: string; onChange: (value: string) => void; className?: string }) {
   return <label className={`flex flex-col gap-1 ${className}`}><span className="text-xs font-semibold tracking-wider text-slate-500">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200" /></label>
+}
+
+function SelectField({ label, value, options, onChange }: { label: string; value: string; options: readonly string[]; onChange: (value: string) => void }) {
+  const legacyValue = value && !options.some((option) => option === value)
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs font-semibold tracking-wider text-slate-500">{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200">
+        <option value="">未选择</option>
+        {legacyValue && <option value={value}>{value}（旧数据）</option>}
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  )
 }
 
 function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
