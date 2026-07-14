@@ -5,6 +5,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 export interface Dnd5eCombatant {
   id: string
   name: string
+  level: number
   controller: 'dm' | 'player'
   initiative: number
   abilities: Record<AbilityKey, number>
@@ -19,6 +20,7 @@ export interface Dnd5eCombatant {
   dodging: boolean
   disengaged: boolean
   concentrating: boolean
+  classResources: Record<string, { current: number; max: number }>
   deathSaves: { successes: number; failures: number; stable: boolean; dead: boolean }
 }
 
@@ -33,13 +35,15 @@ export interface Dnd5eHeadlessCombatState {
 }
 
 export type Dnd5eAction =
-  | { type: 'attack'; actorId: string; targetId: string; attackModifier: number; d20: number; d20Second?: number; mode?: D20RollMode; damage: { count: number; sides: number; bonus: number; rolls: readonly number[] } }
+  | { type: 'attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; mode?: D20RollMode; damage: { count: number; sides: number; bonus: number; rolls: readonly number[] } }
   | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number }
   | { type: 'dash'; actorId: string }
   | { type: 'disengage'; actorId: string }
   | { type: 'dodge'; actorId: string }
   | { type: 'death-save'; actorId: string; d20: number }
   | { type: 'concentration-save'; actorId: string; d20: number; dc: number; modifier: number }
+  | { type: 'fighter-second-wind'; actorId: string; resourceKey: string; d10: number }
+  | { type: 'fighter-action-surge'; actorId: string; resourceKey: string; alreadyUsedThisTurn: boolean }
   | { type: 'end-turn'; actorId: string }
   | { type: 'opportunity-attack'; actorId: string; targetId: string; attackModifier: number; d20: number; damage: { count: number; sides: number; bonus: number; rolls: readonly number[] } }
 
@@ -48,6 +52,9 @@ export type Dnd5eCombatEvent =
   | { type: 'turn-resource-spent'; actorId: string; resource: TurnResource; amount?: number }
   | { type: 'moved'; actorId: string; from: { x: number; y: number }; to: { x: number; y: number }; distance: number }
   | { type: 'attack-resolved'; actorId: string; targetId: string; d20: number; total: number; armorClass: number; hit: boolean; critical: boolean }
+  | { type: 'healing-applied'; targetId: string; amount: number; hpBefore: number; hpAfter: number }
+  | { type: 'class-resource-spent'; actorId: string; resourceKey: string; current: number; max: number }
+  | { type: 'action-surge-granted'; actorId: string }
   | { type: 'damage-applied'; targetId: string; amount: number; hpBefore: number; hpAfter: number; temporaryHpBefore: number; temporaryHpAfter: number }
   | { type: 'concentration-check-required'; targetId: string; dc: number }
   | { type: 'death-save-failure'; targetId: string; failures: number }
@@ -62,6 +69,9 @@ export type Dnd5eActionFailure =
   | 'invalid-target'
   | 'action-unavailable'
   | 'reaction-unavailable'
+  | 'bonus-action-unavailable'
+  | 'class-resource-unavailable'
+  | 'feature-already-used'
   | 'insufficient-movement'
   | 'invalid-dice'
 
@@ -76,6 +86,7 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
     combatants: Object.fromEntries(Object.entries(state.combatants).map(([id, combatant]) => [id, {
       ...combatant,
       abilities: { ...combatant.abilities },
+      classResources: Object.fromEntries(Object.entries(combatant.classResources).map(([key, resource]) => [key, { ...resource }])),
       position: { ...combatant.position },
       turn: { ...combatant.turn },
       deathSaves: { ...combatant.deathSaves },
@@ -83,9 +94,14 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
   }
 }
 
-export function createDnd5eCombatant(input: Omit<Dnd5eCombatant, 'turn' | 'dodging' | 'disengaged' | 'deathSaves'>): Dnd5eCombatant {
+export function createDnd5eCombatant(
+  input: Omit<Dnd5eCombatant, 'turn' | 'dodging' | 'disengaged' | 'deathSaves' | 'level' | 'classResources'> &
+    Partial<Pick<Dnd5eCombatant, 'level' | 'classResources'>>,
+): Dnd5eCombatant {
   return {
     ...input,
+    level: Math.min(20, Math.max(1, Math.floor(input.level ?? 1))),
+    classResources: Object.fromEntries(Object.entries(input.classResources ?? {}).map(([key, resource]) => [key, { ...resource }])),
     turn: rules.createTurn(input.speed),
     dodging: false,
     disengaged: false,
@@ -122,6 +138,14 @@ function spend(combatant: Dnd5eCombatant, resource: TurnResource, amount = 1): b
   return true
 }
 
+function spendClassResource(combatant: Dnd5eCombatant, resourceKey: string, events: Dnd5eCombatEvent[]): boolean {
+  const resource = combatant.classResources[resourceKey]
+  if (!resource || resource.current < 1) return false
+  resource.current -= 1
+  events.push({ type: 'class-resource-spent', actorId: combatant.id, resourceKey, current: resource.current, max: resource.max })
+  return true
+}
+
 function applyDamage(target: Dnd5eCombatant, amount: number, critical: boolean, events: Dnd5eCombatEvent[]): void {
   const hpBefore = target.currentHp
   const temporaryHpBefore = target.temporaryHp
@@ -154,11 +178,14 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   } catch {
     return fail(state, events, 'invalid-dice')
   }
-  events.push({ type: 'attack-resolved', actorId: actor.id, targetId: target.id, d20: attack.roll.d20, total: attack.roll.total, armorClass: target.armorClass, hit: attack.hit, critical: attack.critical })
-  if (attack.hit) {
+  const criticalThreshold = action.type === 'attack' ? Math.min(20, Math.max(18, action.criticalThreshold ?? 20)) : 20
+  const critical = attack.roll.d20 >= criticalThreshold
+  const hit = attack.hit || critical
+  events.push({ type: 'attack-resolved', actorId: actor.id, targetId: target.id, d20: attack.roll.d20, total: attack.roll.total, armorClass: target.armorClass, hit, critical })
+  if (hit) {
     try {
-      const damage = rules.resolveDamage({ ...action.damage, critical: attack.critical })
-      applyDamage(target, damage.total, attack.critical, events)
+      const damage = rules.resolveDamage({ ...action.damage, critical })
+      applyDamage(target, damage.total, critical, events)
     } catch {
       return fail(state, events, 'invalid-dice')
     }
@@ -199,6 +226,23 @@ export function resolveDnd5eHeadlessAction(source: Dnd5eHeadlessCombatState, act
     }
     if (!resolved.success) actor.concentrating = false
     events.push({ type: 'concentration-resolved', actorId: actor.id, d20: resolved.roll.d20, total: resolved.roll.total, dc: action.dc, success: resolved.success })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'fighter-second-wind') {
+    if (!Number.isInteger(action.d10) || action.d10 < 1 || action.d10 > 10) return fail(state, events, 'invalid-dice')
+    if (!spend(actor, 'bonusAction')) return fail(state, events, 'bonus-action-unavailable')
+    if (!spendClassResource(actor, action.resourceKey, events)) return fail(state, events, 'class-resource-unavailable')
+    events.unshift({ type: 'turn-resource-spent', actorId: actor.id, resource: 'bonusAction' })
+    const hpBefore = actor.currentHp
+    actor.currentHp = Math.min(actor.maxHp, actor.currentHp + action.d10 + actor.level)
+    events.push({ type: 'healing-applied', targetId: actor.id, amount: actor.currentHp - hpBefore, hpBefore, hpAfter: actor.currentHp })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'fighter-action-surge') {
+    if (action.alreadyUsedThisTurn) return fail(state, events, 'feature-already-used')
+    if (!spendClassResource(actor, action.resourceKey, events)) return fail(state, events, 'class-resource-unavailable')
+    actor.turn = { ...actor.turn, actionAvailable: true }
+    events.push({ type: 'action-surge-granted', actorId: actor.id })
     return { ok: true, state, events }
   }
   if (action.type === 'move') {

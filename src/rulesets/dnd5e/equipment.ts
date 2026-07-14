@@ -2,6 +2,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import type { Character } from '../../types/character'
 import type { CharacterEquipment, EquipmentItem } from '../../types/equipment'
+import { fighterCriticalThreshold } from './fighter'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -53,6 +54,7 @@ export interface Dnd5eWeaponAttackProfile {
   mode: 'melee' | 'ranged'
   attackAbility: AbilityKey
   attackModifier: number
+  criticalThreshold: number
   damage: { count: number; sides: number; bonus: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
   reachFeet?: number
   rangeFeet?: { normal: number; long: number }
@@ -68,7 +70,7 @@ export function defaultEquipmentForDnd5eCharacter(character: Pick<Character, 'ch
     : undefined
 }
 
-export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipment' | 'ac'>): number {
+export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipment' | 'ac' | 'dnd5eClassChoices'>): number {
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
   const armor = character.equipment?.armor?.dnd5e
   let armorClass = 10 + dexterityModifier
@@ -86,6 +88,8 @@ export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipm
   }
   const shield = character.equipment?.offHand?.dnd5e
   if (shield?.kind === 'shield') armorClass += shield.armorClassBonus
+  const styles = character.dnd5eClassChoices?.fighter?.fightingStyles ?? []
+  if (armor?.kind === 'armor' && styles.includes('defense')) armorClass += 1
   return Math.max(0, Math.floor(armorClass))
 }
 
@@ -109,6 +113,7 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     mode: data.mode,
     attackAbility: ability,
     attackModifier: abilityModifier + proficiency + attackStyleBonus,
+    criticalThreshold: fighterCriticalThreshold(character),
     damage: { ...data.damage, bonus: abilityModifier + duelingBonus },
     reachFeet: data.reachFeet,
     rangeFeet: data.rangeFeet,

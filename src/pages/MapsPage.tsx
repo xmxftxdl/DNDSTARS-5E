@@ -207,9 +207,12 @@ import {
 import { enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
+  type Dnd5eFighterFeatureId,
   prepareDnd5eEquipmentAttack,
+  prepareDnd5eFighterFeature,
   previewDnd5eEquipmentAttack,
   resolvePreparedDnd5eEquipmentAttack,
+  resolvePreparedDnd5eFighterFeature,
 } from '../rulesets/dnd5e'
 import {
   clampGridSize,
@@ -627,6 +630,7 @@ export default function MapsPage() {
   const processedPlayerActionIdsRef = useRef(new Set<string>())
   const recentPlayerActionKeysRef = useRef(new Map<string, number>())
   const dnd5eAttackUsageRef = useRef(new Map<string, number>())
+  const dnd5eActionSurgeTurnKeysRef = useRef(new Set<string>())
   const seenPlayerActionAckIdsRef = useRef(new Set<string>())
   const seenSharedDiceIdsRef = useRef(new Set<string>())
   // T-P2-398 (398-A): dedup roll-request by requestId (AC3) — same requestId
@@ -2666,6 +2670,7 @@ export default function MapsPage() {
     await clearCombatMessageQueues(activeMap.id, { clearCombatLog: true, combatId: nextCombatId })
     enemyAppliedKeysRef.current.clear()
     dnd5eAttackUsageRef.current.clear()
+    dnd5eActionSurgeTurnKeysRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
     multiStrikeHitsRef.current = {}
@@ -2701,6 +2706,7 @@ export default function MapsPage() {
     setInitiativeScroll(0)
     enemyAppliedKeysRef.current.clear()
     dnd5eAttackUsageRef.current.clear()
+    dnd5eActionSurgeTurnKeysRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
     multiStrikeHitsRef.current = {}
@@ -3990,6 +3996,47 @@ export default function MapsPage() {
       return
     }
 
+    if (authorityPlan.route === 'dnd5e-fighter-feature' && action.type === 'dnd5e-fighter-feature') {
+      const turnKey = `${action.combatId ?? combatIdRef.current}:${liveRound}:${action.actorTokenId}`
+      const prepared = prepareDnd5eFighterFeature({
+        action,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+        actionSurgeAlreadyUsed: dnd5eActionSurgeTurnKeysRef.current.has(turnKey),
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const feature = prepared.prepared
+      const d10 = feature.feature === 'second-wind'
+        ? (await rollDiceBoxValues(1, 10, '回气恢复', feature.actor.name))[0]
+        : undefined
+      const resolved = resolvePreparedDnd5eFighterFeature({ prepared: feature, d10 })
+      if (!resolved.result.ok || !resolved.application) {
+        acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'missing-application' : resolved.result.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      for (const characterId of resolved.application.changedCharacterIds) {
+        const next = resolved.application.characters.find((character) => character.id === characterId)
+        if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      if (feature.feature === 'action-surge') dnd5eActionSurgeTurnKeysRef.current.add(turnKey)
+      const healing = resolved.result.events.find((event) => event.type === 'healing-applied')
+      pushCombatLog(
+        feature.feature === 'second-wind'
+          ? `${feature.actor.name} 使用回气，恢复 ${healing?.type === 'healing-applied' ? healing.amount : 0} 点生命值（1d10=${d10}＋战士等级 ${feature.actor.level}）`
+          : `${feature.actor.name} 使用动作如潮，本回合获得第二个动作`,
+        feature.feature === 'second-wind' ? 'damage' : 'system',
+      )
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (authorityPlan.route === 'dnd5e-weapon-attack' && action.type === 'dnd5e-weapon-attack') {
       const usageKey = `${action.combatId ?? combatIdRef.current}:${liveRound}:${action.actorTokenId}`
       const attacksUsed = dnd5eAttackUsageRef.current.get(usageKey) ?? 0
@@ -3999,6 +4046,7 @@ export default function MapsPage() {
         characters: useCharacterStore.getState().characters,
         initiativeOrder: initiativeOrderRef.current,
         attacksUsed,
+        attackActionsAvailable: dnd5eActionSurgeTurnKeysRef.current.has(usageKey) ? 2 : 1,
       })
       if (!prepared.ok) {
         acknowledgePlayerAction(action, 'rejected', prepared.reason)
@@ -4440,6 +4488,14 @@ export default function MapsPage() {
       }),
     )
 
+  const sendDmLocalDnd5eFighterFeatureRequest = (feature: Dnd5eFighterFeatureId) =>
+    submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'dnd5e-fighter-feature',
+        dnd5eFighterFeature: feature,
+      }),
+    )
+
   const sendDmLocalAoeAttackRequest = (targetCell: GridCell) => {
     if (!targeting?.aoe) return false
     return submitDmLocalPlayerAction(
@@ -4563,6 +4619,16 @@ export default function MapsPage() {
     })
     if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 5e 武器攻击`)
+  }
+
+  const sendPlayerDnd5eFighterFeatureRequest = (feature: Dnd5eFighterFeatureId) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const action = createPlayerActionRequest({
+      type: 'dnd5e-fighter-feature',
+      dnd5eFighterFeature: feature,
+    })
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 使用${feature === 'second-wind' ? '回气' : '动作如潮'}`)
   }
 
   const sendPlayerAoeAttackRequest = (targetCell: GridCell) => {
@@ -6152,6 +6218,11 @@ export default function MapsPage() {
                       onAttack={() => {
                         setTargeting(null)
                         setDnd5eWeaponTargeting((current) => current === activeChar.id ? null : activeChar.id)
+                      }}
+                      onFeature={(feature) => {
+                        setDnd5eWeaponTargeting(null)
+                        if (isDM) sendDmLocalDnd5eFighterFeatureRequest(feature)
+                        else sendPlayerDnd5eFighterFeatureRequest(feature)
                       }}
                     />
                   ) : isHeavyGunner(activeChar.charClass) ? (

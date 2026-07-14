@@ -1,3 +1,5 @@
+import type { Character } from '../../types/character'
+
 export type FighterSubclassId = 'champion' | 'battle-master' | 'eldritch-knight'
 
 export type FighterFightingStyleId =
@@ -21,6 +23,15 @@ export interface FighterProgressionLevel {
   proficiencyBonus: number
   features: readonly FighterFeatureDefinition[]
 }
+
+export const FIGHTER_RESOURCE_KEYS = {
+  secondWind: 'fighterSecondWind',
+  actionSurge: 'fighterActionSurge',
+  indomitable: 'fighterIndomitable',
+  superiorityDice: 'fighterSuperiorityDice',
+} as const
+
+export type FighterResourceKey = typeof FIGHTER_RESOURCE_KEYS[keyof typeof FIGHTER_RESOURCE_KEYS]
 
 export const FIGHTER_SUBCLASS_OPTIONS: readonly { id: FighterSubclassId; name: string; summary: string }[] = [
   { id: 'champion', name: '勇士', summary: '强化重击、体能与持续作战能力。' },
@@ -111,6 +122,39 @@ export function fighterIndomitableUses(level: number): number {
   if (current >= 17) return 3
   if (current >= 13) return 2
   return current >= 9 ? 1 : 0
+}
+
+export function fighterSuperiorityDiceMax(level: number): number {
+  const current = clampLevel(level)
+  if (current >= 15) return 6
+  if (current >= 7) return 5
+  return current >= 3 ? 4 : 0
+}
+
+export function fighterResourceMax(character: Pick<Character, 'level' | 'dnd5eClassChoices'>, key: FighterResourceKey): number {
+  if (key === FIGHTER_RESOURCE_KEYS.secondWind) return 1
+  if (key === FIGHTER_RESOURCE_KEYS.actionSurge) return fighterActionSurgeUses(character.level)
+  if (key === FIGHTER_RESOURCE_KEYS.indomitable) return fighterIndomitableUses(character.level)
+  return character.dnd5eClassChoices?.fighter?.subclass === 'battle-master'
+    ? fighterSuperiorityDiceMax(character.level)
+    : 0
+}
+
+export function fighterResourceState(
+  character: Pick<Character, 'level' | 'dnd5eClassChoices' | 'classResources'>,
+  key: FighterResourceKey,
+): { current: number; max: number } {
+  const max = fighterResourceMax(character, key)
+  const stored = character.classResources?.[key]
+  return {
+    current: Math.min(max, Math.max(0, stored?.current ?? max)),
+    max,
+  }
+}
+
+export function fighterCriticalThreshold(character: Pick<Character, 'level' | 'dnd5eClassChoices'>): number {
+  if (character.dnd5eClassChoices?.fighter?.subclass !== 'champion') return 20
+  return clampLevel(character.level) >= 15 ? 18 : clampLevel(character.level) >= 3 ? 19 : 20
 }
 
 export function fighterFeaturesAtLevel(level: number, subclass?: FighterSubclassId): readonly FighterFeatureDefinition[] {

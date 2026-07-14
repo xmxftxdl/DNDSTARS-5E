@@ -1,15 +1,25 @@
-import { Crosshair, Shield, Sword } from 'lucide-react'
-import { dnd5eArmorClass, dnd5eWeaponAttackProfile, fighterAttacksPerAttackAction } from '../../rulesets/dnd5e'
+import { Crosshair, HeartPulse, Shield, Sword, Zap } from 'lucide-react'
+import {
+  FIGHTER_RESOURCE_KEYS,
+  dnd5eArmorClass,
+  dnd5eWeaponAttackProfile,
+  fighterAttacksPerAttackAction,
+  fighterResourceState,
+} from '../../rulesets/dnd5e'
+import type { Dnd5eFighterFeatureId } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 
-export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, onAttack }: {
+export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, onAttack, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
   pending: boolean
   onAttack: () => void
+  onFeature: (feature: Dnd5eFighterFeatureId) => void
 }) {
   const profile = dnd5eWeaponAttackProfile(character)
+  const secondWind = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.secondWind)
+  const actionSurge = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.actionSurge)
   return (
     <div className="grid gap-3 md:grid-cols-[1fr_220px]">
       <div className="rounded-xl border border-white/10 bg-void-900/45 p-4">
@@ -26,6 +36,7 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
             <Stat label="命中加值" value={`${profile.attackModifier >= 0 ? '+' : ''}${profile.attackModifier}`} />
             <Stat label="伤害" value={`${profile.damage.count}d${profile.damage.sides}${profile.damage.bonus >= 0 ? '+' : ''}${profile.damage.bonus}`} />
             <Stat label="攻击次数" value={`${fighterAttacksPerAttackAction(character.level)} 次／动作`} />
+            {profile.criticalThreshold < 20 && <Stat label="重击范围" value={`${profile.criticalThreshold}–20`} />}
           </div>
         ) : (
           <p className="mt-4 text-sm text-rose-300">没有装备可用的 5e 武器。</p>
@@ -49,7 +60,42 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
           <Equipment label="主武器" value={character.equipment?.mainWeapon?.name ?? '未装备'} />
         </dl>
       </div>
+      <div className="rounded-xl border border-white/10 bg-void-900/45 p-4 md:col-span-2">
+        <div className="text-sm font-semibold text-slate-200">战士特性</div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <FeatureButton
+            icon={HeartPulse}
+            name="回气"
+            detail={`附赠动作 · 恢复 1d10＋${character.level} HP · ${secondWind.current}/${secondWind.max}`}
+            disabled={!canAct || pending || character.currentHp <= 0 || character.currentHp >= character.maxHp || secondWind.current < 1}
+            onClick={() => onFeature('second-wind')}
+          />
+          <FeatureButton
+            icon={Zap}
+            name="动作如潮"
+            detail={character.level < 2 ? '2级解锁' : `本回合额外获得一个动作 · ${actionSurge.current}/${actionSurge.max}`}
+            disabled={!canAct || pending || character.level < 2 || actionSurge.current < 1}
+            onClick={() => onFeature('action-surge')}
+          />
+        </div>
+        {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈资源已记录；将在 5e 豁免请求链接入后开放重骰按钮。</p>}
+      </div>
     </div>
+  )
+}
+
+function FeatureButton({ icon: Icon, name, detail, disabled, onClick }: {
+  icon: React.ComponentType<{ className?: string }>
+  name: string
+  detail: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+      <Icon className="h-5 w-5 shrink-0 text-arcane-300" />
+      <span><span className="block text-sm font-bold text-slate-200">{name}</span><span className="mt-0.5 block text-xs text-slate-500">{detail}</span></span>
+    </button>
   )
 }
 

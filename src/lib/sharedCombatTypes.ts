@@ -30,6 +30,7 @@ export interface SharedPlayerActionState {
     | 'end-turn'
     | 'attack-token'
     | 'dnd5e-weapon-attack'
+    | 'dnd5e-fighter-feature'
     | 'aoe-attack'
     | 'move-token'
     | 'disengage'
@@ -56,6 +57,7 @@ export interface SharedPlayerActionState {
     operation: 'reduce-skill-cooldown'
   }
   featureKey?: ClassFeatureKey
+  dnd5eFighterFeature?: 'second-wind' | 'action-surge'
   calmSpiritEffect?: 'move' | 'crit' | 'cooldown' | 'extraTurn'
   bulletSwap?: { from: number; to: number; seed: number }
   round: number

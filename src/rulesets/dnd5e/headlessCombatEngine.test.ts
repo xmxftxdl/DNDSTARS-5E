@@ -29,6 +29,15 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.state.combatants.b.currentHp).toBe(7)
   })
 
+  it('allows the Champion critical threshold to turn a natural 19 into a critical hit', () => {
+    const state = startDnd5eHeadlessCombat('combat', [fighter('a', 20), fighter('b', 10, { armorClass: 30 })])
+    const result = resolveDnd5eHeadlessAction(state, { type: 'attack', actorId: 'a', targetId: 'b', attackModifier: 0, criticalThreshold: 19, d20: 19, damage: { count: 1, sides: 8, bonus: 0, rolls: [4, 5] } })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', hit: true, critical: true }))
+    expect(result.state.combatants.b.currentHp).toBe(11)
+  })
+
   it('Dodge imposes disadvantage and opportunity attacks spend reactions', () => {
     const state = startDnd5eHeadlessCombat('combat', [fighter('b', 20), fighter('a', 10)])
     const dodged = resolveDnd5eHeadlessAction(state, { type: 'dodge', actorId: 'b' })

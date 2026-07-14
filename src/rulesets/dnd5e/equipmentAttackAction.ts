@@ -41,6 +41,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
   attacksUsed: number
+  attackActionsAvailable?: number
 }): { ok: true; prepared: PreparedDnd5eEquipmentAttack } | { ok: false; reason: Dnd5eEquipmentAttackRejectReason } {
   const { action } = input
   if (action.type !== 'dnd5e-weapon-attack' || !action.targetTokenId) return { ok: false, reason: 'invalid-action' }
@@ -56,7 +57,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const targetCell = tokenAnchorCellFromPixel(targetToken.x, targetToken.y, targetToken, input.map)
   const distanceFeet = cellDistance(actorCell, targetCell) * DND_FEET_PER_CELL
   if (distanceFeet > dnd5eWeaponRangeFeet(profile)) return { ok: false, reason: 'target-out-of-range' }
-  const attacksAllowed = fighterAttacksPerAttackAction(actor.level)
+  const attacksAllowed = fighterAttacksPerAttackAction(actor.level) * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
   if (input.attacksUsed >= attacksAllowed) return { ok: false, reason: 'attack-action-spent' }
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: action.combatId ?? `map-${input.map.id}`,
@@ -88,7 +89,9 @@ export function prepareDnd5eEquipmentAttack(input: {
 }
 
 export function previewDnd5eEquipmentAttack(prepared: PreparedDnd5eEquipmentAttack, d20: number) {
-  return rules.resolveAttack({ rolls: [d20], modifier: prepared.profile.attackModifier, targetAc: prepared.targetArmorClass })
+  const resolved = rules.resolveAttack({ rolls: [d20], modifier: prepared.profile.attackModifier, targetAc: prepared.targetArmorClass })
+  const critical = resolved.roll.d20 >= prepared.profile.criticalThreshold
+  return { ...resolved, hit: resolved.hit || critical, critical }
 }
 
 export function resolvePreparedDnd5eEquipmentAttack(input: {
@@ -102,6 +105,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     actorId: prepared.actorToken.id,
     targetId: prepared.targetToken.id,
     attackModifier: prepared.profile.attackModifier,
+    criticalThreshold: prepared.profile.criticalThreshold,
     d20: input.d20,
     damage: {
       count: prepared.profile.damage.count,

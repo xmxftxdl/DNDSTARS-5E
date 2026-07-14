@@ -4,6 +4,7 @@ import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eArmorClass } from './equipment'
+import { FIGHTER_RESOURCE_KEYS, fighterResourceState } from './fighter'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -31,6 +32,17 @@ export interface Dnd5eCharacter {
   concentrating: boolean
   inspiration: boolean
   conditions: readonly string[]
+  classResources: Record<string, { current: number; max: number }>
+}
+
+function dnd5eClassResources(character: Character): Record<string, { current: number; max: number }> {
+  const resources = Object.fromEntries(Object.entries(character.classResources ?? {}).map(([key, value]) => [key, { ...value }]))
+  if (character.charClass !== '战士') return resources
+  for (const key of Object.values(FIGHTER_RESOURCE_KEYS)) {
+    const resource = fighterResourceState(character, key)
+    if (resource.max > 0) resources[key] = resource
+  }
+  return resources
 }
 
 export function normalizeLegacyAbilityScore(score: number): number {
@@ -81,6 +93,7 @@ export function migrateCharacterToDnd5e(character: Character): Dnd5eCharacter {
     concentrating: false,
     inspiration: character.inspiration > 0 || character.heroicInspiration === true,
     conditions: [...character.conditions],
+    classResources: dnd5eClassResources(character),
   }
 }
 
@@ -99,6 +112,7 @@ export function createCombatantFromDnd5eCharacter(input: {
   const combatant = createDnd5eCombatant({
     id: character.id,
     name: character.name,
+    level: character.level,
     controller: input.controller,
     initiative,
     abilities: { ...character.abilities },
@@ -110,6 +124,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     speed: character.speed,
     position: { ...input.position },
     concentrating: character.concentrating,
+    classResources: character.classResources,
   })
   return { ...combatant, deathSaves: { ...character.deathSaves } }
 }

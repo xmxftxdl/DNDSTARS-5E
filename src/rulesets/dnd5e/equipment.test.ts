@@ -39,4 +39,13 @@ describe('D&D 5e 2014 fighter equipment', () => {
     const character = fighter({ dnd5eClassChoices: { fighter: { fightingStyles: ['dueling'] } } })
     expect(dnd5eWeaponAttackProfile(character)?.damage.bonus).toBe(5)
   })
+
+  it('applies Defense AC and Champion expanded critical ranges', () => {
+    const defended = fighter({ dnd5eClassChoices: { fighter: { fightingStyles: ['defense'] } } })
+    expect(dnd5eArmorClass(defended)).toBe(19)
+    const improved = fighter({ level: 3, dnd5eClassChoices: { fighter: { subclass: 'champion', fightingStyles: [] } } })
+    const superior = fighter({ level: 15, dnd5eClassChoices: { fighter: { subclass: 'champion', fightingStyles: [] } } })
+    expect(dnd5eWeaponAttackProfile(improved)?.criticalThreshold).toBe(19)
+    expect(dnd5eWeaponAttackProfile(superior)?.criticalThreshold).toBe(18)
+  })
 })

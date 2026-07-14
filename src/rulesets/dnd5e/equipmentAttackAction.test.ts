@@ -51,4 +51,12 @@ describe('D&D 5e equipment attack authority', () => {
     const adjacent = fixture()
     expect(prepareDnd5eEquipmentAttack({ ...adjacent, characters: [adjacent.actor], attacksUsed: 2 })).toEqual({ ok: false, reason: 'attack-action-spent' })
   })
+
+  it('grants a second full Attack action after Action Surge', () => {
+    const input = fixture()
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 2, attackActionsAvailable: 2 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ attackNumber: 3, attacksAllowed: 4 })
+  })
 })

@@ -88,9 +88,13 @@ export function planDnd5eMapResultApplication(input: {
     const combatantId = Object.keys(input.characterIdByCombatantId).find((id) => input.characterIdByCombatantId[id] === character.id)
     const combatant = combatantId ? input.state.combatants[combatantId] : undefined
     if (!combatant) return character
-    if (character.currentHp === combatant.currentHp && character.tempHp === combatant.temporaryHp) return character
+    const nextClassResources = Object.keys(combatant.classResources).length > 0
+      ? Object.fromEntries(Object.entries(combatant.classResources).map(([key, resource]) => [key, { ...resource }]))
+      : undefined
+    const resourcesUnchanged = JSON.stringify(character.classResources ?? {}) === JSON.stringify(nextClassResources ?? {})
+    if (character.currentHp === combatant.currentHp && character.tempHp === combatant.temporaryHp && resourcesUnchanged) return character
     changedCharacterIds.push(character.id)
-    return { ...character, currentHp: combatant.currentHp, tempHp: combatant.temporaryHp }
+    return { ...character, currentHp: combatant.currentHp, tempHp: combatant.temporaryHp, classResources: nextClassResources }
   })
   for (const tokenId of Object.keys(input.state.combatants)) {
     if (!tokenById.has(tokenId)) throw new Error(`Headless combatant has no map token: ${tokenId}`)

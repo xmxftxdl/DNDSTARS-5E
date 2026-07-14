@@ -135,6 +135,8 @@ describe('player action authority router', () => {
     expect(reservePlayerActionExecution(makeAction({ type: 'attack-token' }), recent, { now: 1003 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: '5e-attack', type: 'dnd5e-weapon-attack' }), recent, { now: 1004 })).toBe(true)
     expect(reservePlayerActionExecution(makeAction({ id: '5e-attack', type: 'dnd5e-weapon-attack' }), recent, { now: 1005 })).toBe(false)
+    expect(reservePlayerActionExecution(makeAction({ id: 'fighter-feature', type: 'dnd5e-fighter-feature' }), recent, { now: 1006 })).toBe(true)
+    expect(reservePlayerActionExecution(makeAction({ id: 'fighter-feature', type: 'dnd5e-fighter-feature' }), recent, { now: 1007 })).toBe(false)
     expect(
       reservePlayerActionExecution(makeAction({ type: 'attack-token' }), recent, {
         now: 1002 + 8001,

@@ -2,15 +2,17 @@ import type { Character } from '../types/character'
 import type { EquipmentItem } from '../types/equipment'
 import { ARCHER_CLASS_DEFINITION } from '../classes/archer/classDefinition'
 import { HEAVY_GUNNER_CLASS_DEFINITION } from '../classes/heavyGunner/classDefinition'
+import { FIGHTER_CLASS_DEFINITION } from '../classes/fighter/classDefinition'
 import { EQUIPMENT_CATALOG } from './equipmentDefaults'
 import type { ClassDefinition } from './classDefinitionTypes'
 
 export * from './classDefinitionTypes'
-export { ARCHER_CLASS_DEFINITION, HEAVY_GUNNER_CLASS_DEFINITION }
+export { ARCHER_CLASS_DEFINITION, FIGHTER_CLASS_DEFINITION, HEAVY_GUNNER_CLASS_DEFINITION }
 
 const definitions = new Map<string, ClassDefinition>([
   [ARCHER_CLASS_DEFINITION.id, ARCHER_CLASS_DEFINITION],
   [HEAVY_GUNNER_CLASS_DEFINITION.id, HEAVY_GUNNER_CLASS_DEFINITION],
+  [FIGHTER_CLASS_DEFINITION.id, FIGHTER_CLASS_DEFINITION],
 ])
 
 export function registerClassDefinition(definition: ClassDefinition): () => void {
