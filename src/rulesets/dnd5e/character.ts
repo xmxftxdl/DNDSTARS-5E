@@ -3,6 +3,7 @@ import type { Character } from '../../types/character'
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
+import { dnd5eArmorClass } from './equipment'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -69,7 +70,7 @@ export function migrateCharacterToDnd5e(character: Character): Dnd5eCharacter {
     abilities: character.rulesetId ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
     savingThrowProficiencies: [...character.savingThrows],
     skillProficiencies: [...character.skills],
-    armorClass: Math.max(0, Math.floor(character.ac)),
+    armorClass: dnd5eArmorClass(character),
     currentHp: Math.max(0, Math.min(character.maxHp, character.currentHp)),
     maxHp: Math.max(1, Math.floor(character.maxHp)),
     temporaryHp: Math.max(0, Math.floor(character.tempHp)),

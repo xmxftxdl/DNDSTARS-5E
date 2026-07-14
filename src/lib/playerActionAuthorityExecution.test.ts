@@ -70,6 +70,7 @@ describe('player action authority execution plan', () => {
     expect(playerActionAuthorityRoute(action('activate-feature'))).toBe('activate-feature')
     expect(playerActionAuthorityRoute(action('end-turn'))).toBe('simple')
     expect(playerActionAuthorityRoute(action('attack-token'))).toBe('attack-token')
+    expect(playerActionAuthorityRoute(action('dnd5e-weapon-attack'))).toBe('dnd5e-weapon-attack')
     expect(playerActionAuthorityRoute(action('aoe-attack'))).toBe('aoe-attack')
     expect(playerActionAuthorityRoute(action('move-token'))).toBe('move-token')
   })

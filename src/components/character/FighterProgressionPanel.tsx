@@ -8,6 +8,8 @@ import {
   fighterIndomitableUses,
   fighterProgression,
   fighterSubclassName,
+  dnd5eArmorClass,
+  dnd5eWeaponAttackProfile,
   type FighterFightingStyleId,
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
@@ -23,6 +25,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
   const subclass = fighter.subclass
   const fightingStyles = fighter.fightingStyles ?? []
   const progression = fighterProgression(subclass)
+  const weapon = dnd5eWeaponAttackProfile(character)
   const setFighterChoices = (patch: NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>) => {
     onChange({
       dnd5eClassChoices: {
@@ -89,6 +92,15 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         <Summary icon={Wind} label="动作如潮" value={`${fighterActionSurgeUses(character.level)} 次／休息`} />
         <Summary icon={Shield} label="不屈" value={`${fighterIndomitableUses(character.level)} 次／长休`} />
         <Summary icon={Sparkles} label="战斗风格" value={fighterFightingStyleName(fightingStyles[0])} />
+      </div>
+
+      <div className="mt-4 rounded-xl border border-white/10 bg-void-900/40 p-4">
+        <h4 className="text-sm font-semibold text-slate-200">基础装备</h4>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <EquipmentLine label="主武器" value={character.equipment?.mainWeapon?.name ?? '未装备'} detail={weapon ? `命中 +${weapon.attackModifier} · ${weapon.damage.count}d${weapon.damage.sides}${weapon.damage.bonus >= 0 ? '+' : ''}${weapon.damage.bonus}` : '无法攻击'} />
+          <EquipmentLine label="副手" value={character.equipment?.offHand?.name ?? '未装备'} detail="盾牌提供 +2 护甲等级" />
+          <EquipmentLine label="护甲" value={character.equipment?.armor?.name ?? '未装备'} detail={`当前护甲等级 ${dnd5eArmorClass(character)}`} />
+        </div>
       </div>
 
       {subclass && (
@@ -159,6 +171,16 @@ function Summary({ icon: Icon, label, value }: { icon: React.ComponentType<{ cla
     <div className="rounded-xl border border-white/8 bg-void-900/40 p-3">
       <div className="flex items-center gap-2 text-xs text-slate-500"><Icon className="h-4 w-4 text-arcane-300" />{label}</div>
       <div className="mt-1 text-sm font-bold text-slate-200">{value}</div>
+    </div>
+  )
+}
+
+function EquipmentLine({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg bg-white/[0.04] px-3 py-2">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-0.5 text-sm font-semibold text-slate-200">{value}</div>
+      <div className="mt-1 text-xs text-slate-500">{detail}</div>
     </div>
   )
 }

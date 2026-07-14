@@ -102,7 +102,7 @@ export function canSubmitPlayerCombatAction(input: {
 }
 
 export function playerActionNeedsExecutionDedupe(action: Pick<PlayerActionAuthorityAction, 'type'>): boolean {
-  return action.type === 'attack-token' || action.type === 'aoe-attack'
+  return action.type === 'attack-token' || action.type === 'dnd5e-weapon-attack' || action.type === 'aoe-attack'
 }
 
 export function getPlayerActionExecutionKey(action: Pick<PlayerActionAuthorityAction, 'id'>): string {

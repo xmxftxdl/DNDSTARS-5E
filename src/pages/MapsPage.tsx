@@ -46,6 +46,7 @@ import EnemyPoolPicker from '../components/map/EnemyPoolPicker'
 import EnemyDetailPanel from '../components/map/EnemyDetailPanel'
 import { canShowEnemyDetail } from '../components/map/enemyDetailPanelUtils'
 import CharacterDetailPanel from '../components/map/CharacterDetailPanel'
+import Dnd5eFighterCombatPanel from '../components/map/Dnd5eFighterCombatPanel'
 import DiceRollOverlay from '../components/DiceRollOverlay'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
@@ -205,6 +206,11 @@ import {
 } from '../lib/combatInterruptPrompts'
 import { enemyCombatInput, getTokenTargetAc } from '../lib/enemyCombatStats'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
+import {
+  prepareDnd5eEquipmentAttack,
+  previewDnd5eEquipmentAttack,
+  resolvePreparedDnd5eEquipmentAttack,
+} from '../rulesets/dnd5e'
 import {
   clampGridSize,
   cellKey,
@@ -399,6 +405,7 @@ export default function MapsPage() {
     /** 疾风连击：本次释放免 AP */
     waiveAp?: boolean
   } | null>(null)
+  const [dnd5eWeaponTargeting, setDnd5eWeaponTargeting] = useState<string | null>(null)
   const [featureTargeting, setFeatureTargeting] = useState<{
     featureKey: 'illusionDance'
     casterId: string
@@ -619,6 +626,7 @@ export default function MapsPage() {
   const seenPlayerActionIdsRef = useRef(new Set<string>())
   const processedPlayerActionIdsRef = useRef(new Set<string>())
   const recentPlayerActionKeysRef = useRef(new Map<string, number>())
+  const dnd5eAttackUsageRef = useRef(new Map<string, number>())
   const seenPlayerActionAckIdsRef = useRef(new Set<string>())
   const seenSharedDiceIdsRef = useRef(new Set<string>())
   // T-P2-398 (398-A): dedup roll-request by requestId (AC3) — same requestId
@@ -2421,6 +2429,17 @@ export default function MapsPage() {
       return
     }
 
+    if (dnd5eWeaponTargeting && activeMap) {
+      const targetToken = activeMap.tokens.find((token) => token.id === tokenId)
+      const actorToken = activeMap.tokens.find((token) => token.characterId === dnd5eWeaponTargeting)
+      if (!targetToken || !actorToken || targetToken.id === actorToken.id) return
+      const sent = isDM
+        ? sendDmLocalDnd5eWeaponAttackRequest(targetToken)
+        : sendPlayerDnd5eWeaponAttackRequest(targetToken)
+      if (sent) setDnd5eWeaponTargeting(null)
+      return
+    }
+
     if (canControlPlayerTurn && tokenId === myPlayerToken?.id) {
       if (isDM) setActiveCharId(turnCharacter!.id)
       setShowMoveRange((v) => !v)
@@ -2646,6 +2665,7 @@ export default function MapsPage() {
     setPlayerCombatEndedLocked(false)
     await clearCombatMessageQueues(activeMap.id, { clearCombatLog: true, combatId: nextCombatId })
     enemyAppliedKeysRef.current.clear()
+    dnd5eAttackUsageRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
     multiStrikeHitsRef.current = {}
@@ -2680,6 +2700,7 @@ export default function MapsPage() {
     setRoll(null)
     setInitiativeScroll(0)
     enemyAppliedKeysRef.current.clear()
+    dnd5eAttackUsageRef.current.clear()
     nonActorSkippedKeysRef.current.clear()
     stunSkippedKeysRef.current.clear()
     multiStrikeHitsRef.current = {}
@@ -3969,6 +3990,59 @@ export default function MapsPage() {
       return
     }
 
+    if (authorityPlan.route === 'dnd5e-weapon-attack' && action.type === 'dnd5e-weapon-attack') {
+      const usageKey = `${action.combatId ?? combatIdRef.current}:${liveRound}:${action.actorTokenId}`
+      const attacksUsed = dnd5eAttackUsageRef.current.get(usageKey) ?? 0
+      const prepared = prepareDnd5eEquipmentAttack({
+        action,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+        attacksUsed,
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const attack = prepared.prepared
+      const d20 = await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定`, attack.targetToken.label)
+      const preview = previewDnd5eEquipmentAttack(attack, d20)
+      const damageRolls = preview.hit
+        ? await rollDiceBoxValues(
+            attack.profile.damage.count * (preview.critical ? 2 : 1),
+            attack.profile.damage.sides,
+            `${attack.profile.weaponName} 伤害`,
+            attack.targetToken.label,
+          )
+        : []
+      const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: attack, d20, damageRolls })
+      if (!resolved.result.ok || !resolved.application) {
+        acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'missing-application' : resolved.result.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      for (const characterId of resolved.application.changedCharacterIds) {
+        const next = resolved.application.characters.find((character) => character.id === characterId)
+        if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      for (const tokenId of resolved.application.changedTokenIds) {
+        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
+        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+      }
+      dnd5eAttackUsageRef.current.set(usageKey, attack.attackNumber)
+      const damage = resolved.result.events.find((event) => event.type === 'damage-applied')
+      pushCombatLog(
+        preview.hit
+          ? `${attack.actor.name} 使用${attack.profile.weaponName}命中 ${attack.targetToken.label}：${d20}${attack.profile.attackModifier >= 0 ? '+' : ''}${attack.profile.attackModifier}=${preview.roll.total}，造成 ${damage?.type === 'damage-applied' ? damage.amount : 0} 点伤害（第 ${attack.attackNumber}/${attack.attacksAllowed} 次攻击）`
+          : `${attack.actor.name} 使用${attack.profile.weaponName}攻击 ${attack.targetToken.label} 未命中：${d20}${attack.profile.attackModifier >= 0 ? '+' : ''}${attack.profile.attackModifier}=${preview.roll.total} vs AC ${attack.targetArmorClass}`,
+        preview.hit ? 'damage' : 'attack',
+      )
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (authorityPlan.route === 'attack-token' && action.type === 'attack-token') {
       const preparedAttack = preparePlayerAttackAction({
         action,
@@ -4358,6 +4432,14 @@ export default function MapsPage() {
     )
   }
 
+  const sendDmLocalDnd5eWeaponAttackRequest = (targetToken: Token) =>
+    submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'dnd5e-weapon-attack',
+        targetTokenId: targetToken.id,
+      }),
+    )
+
   const sendDmLocalAoeAttackRequest = (targetCell: GridCell) => {
     if (!targeting?.aoe) return false
     return submitDmLocalPlayerAction(
@@ -4471,6 +4553,16 @@ export default function MapsPage() {
     })
     if (!action) return false
     return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 ${skill.name}`)
+  }
+
+  const sendPlayerDnd5eWeaponAttackRequest = (targetToken: Token) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const action = createPlayerActionRequest({
+      type: 'dnd5e-weapon-attack',
+      targetTokenId: targetToken.id,
+    })
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 使用 5e 武器攻击`)
   }
 
   const sendPlayerAoeAttackRequest = (targetCell: GridCell) => {
@@ -4915,6 +5007,7 @@ export default function MapsPage() {
               onDeleteCancel={() => setDeleteSelectMode(false)}
               onBlankContextMenu={() => {
                 setFeatureTargeting(null)
+                setDnd5eWeaponTargeting(null)
                 setSelectedTokenId(null)
                 setSelectedCharacterTokenId(null)
                 setEnemyDetailOpen(false)
@@ -6050,7 +6143,18 @@ export default function MapsPage() {
                   />
                 )}
                 {charPanel === 'skills' &&
-                  (isHeavyGunner(activeChar.charClass) ? (
+                  (activeChar.charClass === '战士' ? (
+                    <Dnd5eFighterCombatPanel
+                      character={activeChar}
+                      canAct={canControlPlayerTurn && activeChar.id === turnCharacter?.id}
+                      targeting={dnd5eWeaponTargeting === activeChar.id}
+                      pending={!!pendingPlayerAction}
+                      onAttack={() => {
+                        setTargeting(null)
+                        setDnd5eWeaponTargeting((current) => current === activeChar.id ? null : activeChar.id)
+                      }}
+                    />
+                  ) : isHeavyGunner(activeChar.charClass) ? (
                     <BulletMatchPanel
                       charId={activeChar.id}
                       onSwap={sendBulletMatchSwapRequest}

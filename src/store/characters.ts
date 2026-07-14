@@ -30,6 +30,7 @@ import { getClassResourceCurrent, restoreClassResources, spendClassResource } fr
 import { beginCalmMindTurn, calmBreathState, initCalmMindForCombat, isCalmMindActive, triggerOutOfBreath, tickOutOfBreathOnEndTurn } from '../lib/calmMind'
 import { ensureDefaultEquipment, isMagicDamageSkill, refreshKnownEquipment, syncCombatDerivedStats } from '../lib/combatStats'
 import { migrateLegacyCharacterFields } from '../lib/legacyCharacterMigration'
+import { defaultEquipmentForDnd5eCharacter } from '../rulesets/dnd5e/equipment'
 
 function skillCooldownRemaining(skill: { cooldown: number; cdReduction: number }): number {
   if (skill.cooldown <= 0) return 0
@@ -408,7 +409,7 @@ function normalizeCharacter(input: Partial<Character>): Character {
     traitChoicesDone: c.traitChoicesDone ?? {},
     qi: c.qi,
     classResources: c.classResources,
-    equipment: c.equipment,
+    equipment: c.equipment ?? defaultEquipmentForDnd5eCharacter({ charClass: c.charClass ?? '战士' }),
   } as Character
 }
 

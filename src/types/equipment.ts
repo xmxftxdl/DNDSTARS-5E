@@ -25,6 +25,30 @@ export interface EquipmentItem {
   hpBonus?: number
   /** 暴击伤害加成（百分点，如 2 表示 +2%） */
   critDamagePercent?: number
+  /** D&D 5e 2014 规则数据；旧数值字段仅用于旧项目兼容。 */
+  dnd5e?:
+    | {
+        kind: 'weapon'
+        category: 'simple' | 'martial'
+        mode: 'melee' | 'ranged'
+        damage: { count: number; sides: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
+        attackAbility: 'str' | 'dex' | 'finesse'
+        reachFeet?: number
+        rangeFeet?: { normal: number; long: number }
+        properties?: readonly string[]
+      }
+    | {
+        kind: 'armor'
+        category: 'light' | 'medium' | 'heavy'
+        baseArmorClass: number
+        dexterityBonus: 'full' | 'max-2' | 'none'
+        strengthRequirement?: number
+        stealthDisadvantage?: boolean
+      }
+    | {
+        kind: 'shield'
+        armorClassBonus: number
+      }
 }
 
 export interface CharacterEquipment {

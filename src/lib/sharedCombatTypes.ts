@@ -29,6 +29,7 @@ export interface SharedPlayerActionState {
   type:
     | 'end-turn'
     | 'attack-token'
+    | 'dnd5e-weapon-attack'
     | 'aoe-attack'
     | 'move-token'
     | 'disengage'

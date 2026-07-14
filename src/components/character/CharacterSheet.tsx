@@ -8,6 +8,7 @@ import {
   DND5E_2014_CLASS_OPTIONS,
   DND5E_2014_RACE_OPTIONS,
   dnd5e2014Adapter as rules,
+  dnd5eArmorClass,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
@@ -97,7 +98,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
       </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-        <Stat icon={Shield} label="护甲等级" value={`${c.ac}`} />
+        <Stat icon={Shield} label="护甲等级" value={`${dnd5eArmorClass(c)}`} />
         <Stat icon={Footprints} label="速度" value={`${c.speed} 尺`} />
         <Stat icon={Swords} label="先攻" value={formatMod(initiative)} />
         <Stat icon={Award} label="熟练加值" value={formatMod(proficiency)} />
