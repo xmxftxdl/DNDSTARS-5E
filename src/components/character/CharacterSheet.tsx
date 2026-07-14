@@ -3,8 +3,10 @@ import { Award, Dices, Footprints, HeartPulse, Shield, Sparkles, Swords } from '
 import { useCharacterStore } from '../../store/characters'
 import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '../../lib/dnd'
 import {
+  DND5E_2014_ALIGNMENT_OPTIONS,
   DND5E_2014_BACKGROUND_OPTIONS,
   DND5E_2014_CLASS_OPTIONS,
+  DND5E_2014_RACE_OPTIONS,
   dnd5e2014Adapter as rules,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
@@ -83,8 +85,10 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
             <Field label="角色名称" value={c.name} onChange={(value) => update(id, { name: value })} className="col-span-2" />
             <SelectField label="职业" value={c.charClass} options={DND5E_2014_CLASS_OPTIONS} onChange={(value) => update(id, { charClass: value })} />
             <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => update(id, { level: value })} />
-            <Field label="种族" value={c.race} onChange={(value) => update(id, { race: value })} />
+            <SelectField label="种族" value={c.race} options={DND5E_2014_RACE_OPTIONS} onChange={(value) => update(id, { race: value })} />
             <SelectField label="背景" value={c.background} options={DND5E_2014_BACKGROUND_OPTIONS} onChange={(value) => update(id, { background: value })} />
+            <SelectField label="阵营" value={c.alignment ?? ''} options={DND5E_2014_ALIGNMENT_OPTIONS} onChange={(value) => update(id, { alignment: value })} />
+            <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => update(id, { experience: value })} />
             <Field label="玩家" value={c.player} onChange={(value) => update(id, { player: value })} />
             <NumberField label="激励骰数量" value={c.inspiration} min={0} max={99} onChange={(value) => update(id, { inspiration: value })} />
           </div>

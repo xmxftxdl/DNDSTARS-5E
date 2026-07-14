@@ -124,7 +124,7 @@ export interface Character {
   charClass: string
   level: number
   background: string
-  alignment?: string // 已弃用，保留兼容旧数据
+  alignment?: string // D&D 5e 2014 九大阵营
   experience: number // 经验值
   reputation: number // 声望
 
