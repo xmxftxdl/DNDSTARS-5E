@@ -32,7 +32,7 @@ D&D 5e 规则必须实现为独立 `RulesetAdapter`，不得重新硬编码进�
 ## 尚待用户确认
 
 - 使用 2014 规则：SRD 5.1；或
-- 使用 2024 规则：SRD 5.2.1（推荐）。
+- 使用 D&D 5e 2014 规则（SRD 5.1）。
 
 确定版本前不要录入具体职业、法术或怪物数值。
 
@@ -46,7 +46,7 @@ D&D Beyond Basic Rules、专有世界观、图片或其他未授权内容。中�
 打开本仓库后，对 Codex 发送：
 
 > 请先阅读 `HANDOFF.md`、`docs/class-extension.md` 和 `docs/combat-flow.md`，检查当前 Git 状态与测试，
-> 然后继续建立 D&D 5e RulesetAdapter。使用【2014 SRD 5.1 / 2024 SRD 5.2.1】规则；保留 DM 权威、多端同步、
+> 然后继续建立 D&D 5e RulesetAdapter。使用 D&D 5e 2014（SRD 5.1）规则；保留 DM 权威、多端同步、
 > 骰子与地图框架，不要沿用旧项目的 AP 和攻防差值伤害规则。先给出迁移顺序，再实现第一阶段。
 
 将方括号内容替换为最终选择的规则版本。

@@ -1,6 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { D20RollMode, TurnEconomy, TurnResource } from '../contracts'
-import { dnd5eSrd521Adapter as rules } from './srd521Adapter'
+import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 
 export interface Dnd5eCombatant {
   id: string

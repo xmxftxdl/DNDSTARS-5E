@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { dnd5eSrd521Adapter as rules } from './srd521Adapter'
+import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 
-describe('D&D 5e SRD 5.2.1 ruleset adapter', () => {
+describe('D&D 5e 2014 ruleset adapter', () => {
   it('uses standard ability modifiers and proficiency progression', () => {
     expect([1, 8, 10, 11, 20].map((score) => rules.abilityModifier(score))).toEqual([-5, -1, 0, 0, 5])
     expect([1, 5, 9, 13, 17, 20].map((level) => rules.proficiencyBonus(level))).toEqual([2, 3, 4, 5, 6, 6])
@@ -43,17 +43,28 @@ describe('D&D 5e SRD 5.2.1 ruleset adapter', () => {
     expect(rules.concentrationCheckDc(22)).toBe(11)
   })
 
-  it('spends Hit Point Dice on a short rest and restores them on a long rest', () => {
+  it('spends Hit Dice on a short rest and restores half the maximum on a 2014 long rest', () => {
     const creature = {
       currentHp: 5,
       maxHp: 20,
+      temporaryHp: 4,
       constitutionModifier: 2,
       hitDice: [{ sides: 8, current: 2, max: 3 }],
     }
     const rested = rules.takeShortRest(creature, [{ sides: 8, rolls: [6, 1] }])
     expect(rested.currentHp).toBe(16)
     expect(rested.hitDice[0].current).toBe(0)
-    expect(rules.takeLongRest(rested)).toMatchObject({ currentHp: 20, hitDice: [{ sides: 8, current: 3, max: 3 }] })
+    expect(rules.takeLongRest(rested)).toMatchObject({ currentHp: 20, temporaryHp: 0, hitDice: [{ sides: 8, current: 1, max: 3 }] })
+  })
+
+  it('recovers half of total Hit Dice across multiclass pools', () => {
+    const rested = rules.takeLongRest({
+      currentHp: 1,
+      maxHp: 20,
+      constitutionModifier: 2,
+      hitDice: [{ sides: 10, current: 0, max: 3 }, { sides: 8, current: 0, max: 3 }],
+    })
+    expect(rested.hitDice.reduce((total, pool) => total + pool.current, 0)).toBe(3)
   })
 
   it('tracks death save natural 1, natural 20, stability, and damage failures', () => {

@@ -7,7 +7,7 @@ function fighter(id: string, initiative: number, patch = {}) {
   return createDnd5eCombatant({ id, name: id, controller: 'player', initiative, abilities, proficiencyBonus: 2, armorClass: 16, currentHp: 20, maxHp: 20, temporaryHp: 0, speed: 30, position: { x: 0, y: 0 }, concentrating: false, ...patch })
 }
 
-describe('SRD 5.2.1 headless combat engine', () => {
+describe('D&D 5e 2014 headless combat engine', () => {
   it('spends movement independently from the action and supports Dash', () => {
     const state = startDnd5eHeadlessCombat('combat', [fighter('a', 20), fighter('b', 10)])
     const moved = resolveDnd5eHeadlessAction(state, { type: 'move', actorId: 'a', to: { x: 20, y: 0 }, distance: 20 })

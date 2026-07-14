@@ -112,7 +112,8 @@ export interface BulletPuzzleState {
 }
 
 export interface Character {
-  rulesetId?: 'dnd5e-srd-5.2.1'
+  /** 5.2.1 仅用于识别并迁移旧存档；新数据统一写入 2014 / SRD 5.1。 */
+  rulesetId?: 'dnd5e-2014-srd-5.1' | 'dnd5e-srd-5.2.1'
   id: string
   name: string
   player: string
@@ -135,12 +136,13 @@ export interface Character {
   currentHp: number
   tempHp: number
   hitDice: string
-  /** SRD 5.2.1 Hit Point Dice pools. Legacy hitDice is retained only for save migration. */
+  /** D&D 5e 2014 Hit Dice pools. Legacy hitDice is retained only for save migration. */
   hitPointDice?: Array<{ sides: number; current: number; max: number }>
   deathSaveSuccesses?: number
   deathSaveFailures?: number
   deathSaveStable?: boolean
   concentrating?: boolean
+  /** @deprecated 2024 存档兼容字段；2014 规则使用 inspiration。 */
   heroicInspiration?: boolean
   exhaustionLevel?: number
 

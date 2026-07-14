@@ -20,7 +20,7 @@ export interface SharedDnd5eCombatantState {
 }
 
 export interface SharedDnd5eCombatState {
-  rulesetId: 'dnd5e-srd-5.2.1'
+  rulesetId: 'dnd5e-2014-srd-5.1'
   mapId: string
   combatId: string
   active: boolean
@@ -72,7 +72,7 @@ export function shouldApplySharedDnd5eCombatState(input: {
   currentSnapshot?: SharedDnd5eCombatState
 }): SharedDnd5eApplyDecision {
   const { incoming } = input
-  if (incoming.rulesetId !== 'dnd5e-srd-5.2.1') return { status: 'ignored', reason: 'wrong-ruleset' }
+  if (incoming.rulesetId !== 'dnd5e-2014-srd-5.1') return { status: 'ignored', reason: 'wrong-ruleset' }
   if (incoming.mapId !== input.mapId) return { status: 'ignored', reason: 'wrong-map' }
   if (incoming.combatId !== input.combatId) return { status: 'ignored', reason: 'wrong-combat' }
   if (incoming.revision < input.currentRevision) return { status: 'ignored', reason: 'stale' }

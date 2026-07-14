@@ -1,4 +1,4 @@
-export type RulesetId = 'dnd5e-srd-5.2.1'
+export type RulesetId = 'dnd5e-2014-srd-5.1'
 
 export type D20RollMode = 'normal' | 'advantage' | 'disadvantage'
 

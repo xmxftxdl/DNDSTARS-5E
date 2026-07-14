@@ -2,7 +2,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant } from './headlessCombatEngine'
-import { dnd5eSrd521Adapter as rules } from './srd521Adapter'
+import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -28,7 +28,7 @@ export interface Dnd5eCharacter {
   hitPointDice: readonly { sides: number; current: number; max: number }[]
   deathSaves: Dnd5eDeathSaves
   concentrating: boolean
-  heroicInspiration: boolean
+  inspiration: boolean
   conditions: readonly string[]
 }
 
@@ -66,7 +66,7 @@ export function migrateCharacterToDnd5e(character: Character): Dnd5eCharacter {
     name: character.name,
     player: character.player,
     level,
-    abilities: character.rulesetId === 'dnd5e-srd-5.2.1' ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
+    abilities: character.rulesetId ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
     savingThrowProficiencies: [...character.savingThrows],
     skillProficiencies: [...character.skills],
     armorClass: Math.max(0, Math.floor(character.ac)),
@@ -78,7 +78,7 @@ export function migrateCharacterToDnd5e(character: Character): Dnd5eCharacter {
     hitPointDice: [{ sides: hitDieSides, current: level, max: level }],
     deathSaves: { successes: 0, failures: 0, stable: false, dead: false },
     concentrating: false,
-    heroicInspiration: character.inspiration > 0,
+    inspiration: character.inspiration > 0 || character.heroicInspiration === true,
     conditions: [...character.conditions],
   }
 }

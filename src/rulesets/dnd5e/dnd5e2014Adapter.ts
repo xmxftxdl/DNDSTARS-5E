@@ -52,10 +52,10 @@ function normalizeDeathSaveState(state: DeathSaveState): DeathSaveState {
   }
 }
 
-export const dnd5eSrd521Adapter: RulesetAdapter = {
-  id: 'dnd5e-srd-5.2.1',
-  name: 'D&D 5e 2024 SRD',
-  version: '5.2.1',
+export const dnd5e2014Adapter: RulesetAdapter = {
+  id: 'dnd5e-2014-srd-5.1',
+  name: 'D&D 5e 2014',
+  version: '2014 / SRD 5.1',
 
   abilityModifier(score) {
     integerInRange(score, 1, 30, 'ability score')
@@ -157,10 +157,17 @@ export const dnd5eSrd521Adapter: RulesetAdapter = {
   },
 
   takeLongRest(creature: RestingCreature) {
+    let diceToRecover = Math.max(1, Math.floor(creature.hitDice.reduce((total, pool) => total + pool.max, 0) / 2))
+    const hitDice = creature.hitDice.map((pool) => {
+      const recovered = Math.min(pool.max - pool.current, diceToRecover)
+      diceToRecover -= recovered
+      return { ...pool, current: pool.current + recovered }
+    })
     return {
       ...creature,
       currentHp: creature.maxHp,
-      hitDice: creature.hitDice.map((pool) => ({ ...pool, current: pool.max })),
+      temporaryHp: 0,
+      hitDice,
       deathSaveSuccesses: 0,
       deathSaveFailures: 0,
     }
