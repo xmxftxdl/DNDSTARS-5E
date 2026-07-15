@@ -50,6 +50,49 @@ let lastAppliedCharactersUpdatedAt = 0
 let characterSaveSeq = 0
 const LOCAL_CHARACTER_CREATE_TTL_MS = 60000
 const pendingLocalCharacterCreations = new Map<string, number>()
+const LOCAL_CHARACTER_LEVEL_EDIT_TTL_MS = 30000
+const pendingLocalCharacterLevelEdits = new Map<string, { level: number; updatedAt: number }>()
+
+function gcPendingLocalCharacterLevelEdits(now: number = Date.now()): void {
+  for (const [id, pending] of pendingLocalCharacterLevelEdits) {
+    if (now - pending.updatedAt > LOCAL_CHARACTER_LEVEL_EDIT_TTL_MS) {
+      pendingLocalCharacterLevelEdits.delete(id)
+    }
+  }
+}
+
+export function markPendingLocalCharacterLevelEdit(id: string, level: number, now: number = Date.now()): void {
+  pendingLocalCharacterLevelEdits.set(id, {
+    level: Math.min(20, Math.max(1, Math.floor(level))),
+    updatedAt: now,
+  })
+}
+
+export function clearPendingLocalCharacterLevelEditsForTest(): void {
+  pendingLocalCharacterLevelEdits.clear()
+}
+
+/**
+ * 本地等级编辑写入共享状态前，SSE/轮询仍可能读到旧快照。
+ * 在服务端回显相同等级（确认写入）或保护窗口过期之前，旧快照不得把等级覆盖回去。
+ */
+export function mergePendingLocalCharacterLevelEdits(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingLocalCharacterLevelEdits(now)
+  if (pendingLocalCharacterLevelEdits.size === 0) return sharedCharacters
+
+  return sharedCharacters.map((character) => {
+    const pending = pendingLocalCharacterLevelEdits.get(character.id)
+    if (!pending) return character
+    if (character.level === pending.level) {
+      pendingLocalCharacterLevelEdits.delete(character.id)
+      return character
+    }
+    return { ...character, level: pending.level }
+  })
+}
 
 /**
  * [T10/AC2 · E11] 删除墓碑：id ⇒ 删除时间戳。
@@ -1014,7 +1057,9 @@ export const useCharacterStore = create<CharacterState>()(
           lastSharedCharactersSnapshot = snapshot
           // [T10/AC2 · E11] 先剔除仍被墓碑标记的角色：对端一份仍含已删角色的全量快照
           // 不得复活它。墓碑过期后（GC）该过滤自动失效，被删 id 可被复用。
-          const sharedCharacters = filterTombstonedCharacters(shared.characters).map(finalizeCharacter)
+          const sharedCharacters = mergePendingLocalCharacterLevelEdits(
+            filterTombstonedCharacters(shared.characters),
+          ).map(finalizeCharacter)
           const localCharacters = get().characters
           const mergedSharedCharacters = mergePendingLocalCharacterCreationsForLoad(sharedCharacters, localCharacters)
           const sharedSelectedId =
@@ -1064,12 +1109,14 @@ export const useCharacterStore = create<CharacterState>()(
           saveCharacters()
           return id
         },
-        update: (id, patch) =>
+        update: (id, patch) => {
+          if (patch.level != null) markPendingLocalCharacterLevelEdit(id, patch.level)
           updateChar(id, (c) =>
             syncCombatDerivedStats(
               syncCharacterClassProgression(ensureDefaultEquipment({ ...c, ...patch })),
             ),
-          ),
+          )
+        },
         applyAuthorityUpdate: (id, patch) =>
           set((state) => ({
             characters: state.characters.map((character) =>

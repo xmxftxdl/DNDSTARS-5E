@@ -1,8 +1,11 @@
 ﻿import { describe, expect, it } from 'vitest'
 import {
+  clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
   mergeCharactersForSharedSave,
+  mergePendingLocalCharacterLevelEdits,
   mergePlayerWritableCharacter,
+  markPendingLocalCharacterLevelEdit,
 } from './characters'
 import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
 import type { Character } from '../types/character'
@@ -177,6 +180,31 @@ describe('character shared-save merge preserves cross-end creations', () => {
     const merged = mergeCharactersForSharedSave(playerLocal, shared, { playerPort: true })
     expect(merged.map((item) => item.id)).toEqual(['shared-hero'])
     expect(merged[0].name).toBe('Edited locally')
+  })
+})
+
+describe('pending local character level edits', () => {
+  it('preserves an edited level until the shared snapshot acknowledges it', () => {
+    clearPendingLocalCharacterLevelEditsForTest()
+    const id = 'hero'
+    markPendingLocalCharacterLevelEdit(id, 12, 1_000)
+
+    const staleShared = [char({ id, level: 1 })]
+    expect(mergePendingLocalCharacterLevelEdits(staleShared, 1_001)[0].level).toBe(12)
+
+    const acknowledgedShared = [char({ id, level: 12 })]
+    expect(mergePendingLocalCharacterLevelEdits(acknowledgedShared, 1_002)[0].level).toBe(12)
+
+    const laterShared = [char({ id, level: 8 })]
+    expect(mergePendingLocalCharacterLevelEdits(laterShared, 1_003)[0].level).toBe(8)
+
+    clearPendingLocalCharacterLevelEditsForTest()
+  })
+
+  it('releases an unacknowledged edit after the protection window', () => {
+    clearPendingLocalCharacterLevelEditsForTest()
+    markPendingLocalCharacterLevelEdit('hero', 12, 1_000)
+    expect(mergePendingLocalCharacterLevelEdits([char({ level: 1 })], 31_001)[0].level).toBe(1)
   })
 })
 

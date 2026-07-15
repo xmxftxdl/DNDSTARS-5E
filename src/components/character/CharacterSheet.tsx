@@ -13,6 +13,7 @@ import {
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
 import FighterProgressionPanel from './FighterProgressionPanel'
+import { resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
   id: string
@@ -326,7 +327,33 @@ function SelectField({ label, value, options, onChange }: { label: string; value
 }
 
 function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
-  return <label className="flex flex-col gap-1"><span className="text-xs font-semibold tracking-wider text-slate-500">{label}</span><input type="number" value={value} min={min} max={max} onChange={(event) => onChange(clamp(Number(event.target.value) || min, min, max))} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200" /></label>
+  const [draft, setDraft] = useState<string | null>(null)
+  const displayedValue = draft ?? String(value)
+
+  const commit = () => {
+    const next = resolveBoundedNumberDraft(displayedValue, value, min, max)
+    setDraft(null)
+    if (next !== value) onChange(next)
+  }
+
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs font-semibold tracking-wider text-slate-500">{label}</span>
+      <input
+        type="number"
+        value={displayedValue}
+        min={min}
+        max={max}
+        onFocus={() => setDraft(String(value))}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+        className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200"
+      />
+    </label>
+  )
 }
 
 function Toggle({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
