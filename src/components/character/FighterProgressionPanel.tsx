@@ -33,6 +33,7 @@ interface FighterProgressionPanelProps {
 export default function FighterProgressionPanel({ character, onChange }: FighterProgressionPanelProps) {
   const fighter = character.dnd5eClassChoices?.fighter ?? {}
   const subclass = fighter.subclass
+  const subclassOption = FIGHTER_SUBCLASS_OPTIONS.find((option) => option.id === subclass)
   const fightingStyles = fighterSelectedFightingStyles(character)
   const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
   const maneuvers = fighterSelectedManeuvers(character)
@@ -74,7 +75,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
             <Swords className="h-5 w-5 text-arcane-300" />
             <h3 className="text-lg font-bold text-slate-100">战士职业特性</h3>
           </div>
-          <p className="mt-1 text-sm text-slate-500">D&D 5e 2014《玩家手册》规则摘要 · 战士 {character.level} 级 · {fighterSubclassName(subclass)}</p>
+          <p className="mt-1 text-sm text-slate-500">D&D 5e 2014／SRD 5.1 中文翻译 · 战士 {character.level} 级 · {fighterSubclassName(subclass)}</p>
         </div>
 
         <div className="xl:w-[260px]">
@@ -149,7 +150,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
               />
             ))}
           </div>
-          <p className="mt-3 text-xs text-amber-200/70">规则文字与资源进度已按 2014 版校正；战技在地图中的目标、反应、豁免与伤害结算仍需逐项接入 5e Headless。</p>
+          <p className="mt-3 text-xs text-amber-200/70">战斗大师不属于 SRD 5.1；这里是 2014 版机制摘要，不是 SRD 译文。战技在地图中的目标、反应、豁免与伤害结算仍需逐项接入 5e Headless。</p>
         </div>
       )}
 
@@ -164,8 +165,13 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
 
       {subclass && (
         <div className="mt-4 rounded-xl border border-arcane-500/20 bg-arcane-500/5 px-4 py-3">
-          <span className="text-xs font-semibold text-arcane-300">{fighterSubclassName(subclass)}</span>
-          <p className="mt-1 text-sm text-slate-400">{FIGHTER_SUBCLASS_OPTIONS.find((option) => option.id === subclass)?.summary}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-arcane-300">{fighterSubclassName(subclass)}</span>
+            <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-slate-500">
+              {subclassOption?.rulesTextSource === 'srd-5.1-translation' ? 'SRD 5.1 中文翻译' : '非 SRD 5.1 · 机制摘要'}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-slate-400">{subclassOption?.summary}</p>
         </div>
       )}
 

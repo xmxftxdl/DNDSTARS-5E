@@ -11,4 +11,4 @@
 - `docs/class-extension.md`
 - `docs/combat-flow.md`
 
-规则版本已确定为 2024 SRD 5.2.1。第一阶段规则适配器位于 `src/rulesets/dnd5e/`；授权署名见 `ATTRIBUTION.md`。
+规则版本已确定为 D&D 5e 2014／SRD 5.1（CC BY 4.0）。第一阶段规则适配器位于 `src/rulesets/dnd5e/`；授权署名见 `ATTRIBUTION.md`。`dnd5e-srd-5.2.1` 仅作为旧存档迁移标识保留，不得引入 2024 修订规则。

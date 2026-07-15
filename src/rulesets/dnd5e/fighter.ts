@@ -1,6 +1,7 @@
 import type { Character } from '../../types/character'
 
 export type FighterSubclassId = 'champion' | 'battle-master' | 'eldritch-knight'
+export type FighterRulesTextSource = 'srd-5.1-translation' | 'non-srd-summary'
 
 export type FighterFightingStyleId =
   | 'archery'
@@ -51,10 +52,30 @@ export const FIGHTER_RESOURCE_KEYS = {
 
 export type FighterResourceKey = typeof FIGHTER_RESOURCE_KEYS[keyof typeof FIGHTER_RESOURCE_KEYS]
 
-export const FIGHTER_SUBCLASS_OPTIONS: readonly { id: FighterSubclassId; name: string; summary: string }[] = [
-  { id: 'champion', name: '勇士', summary: '强化重击、体能与持续作战能力。' },
-  { id: 'battle-master', name: '战斗大师', summary: '使用卓越骰与战技控制战局。' },
-  { id: 'eldritch-knight', name: '奥法骑士', summary: '将武器训练与法师法术结合。' },
+export const FIGHTER_SUBCLASS_OPTIONS: readonly {
+  id: FighterSubclassId
+  name: string
+  summary: string
+  rulesTextSource: FighterRulesTextSource
+}[] = [
+  {
+    id: 'champion',
+    name: '勇士',
+    summary: '典型的勇士专注于发展经致命磨炼的纯粹肉体力量。效仿此范型者将严格训练与卓越体能结合，打出毁灭性的攻击。',
+    rulesTextSource: 'srd-5.1-translation',
+  },
+  {
+    id: 'battle-master',
+    name: '战斗大师',
+    summary: '使用卓越骰与战技控制战局。此处仅保留 2014 版机制摘要。',
+    rulesTextSource: 'non-srd-summary',
+  },
+  {
+    id: 'eldritch-knight',
+    name: '奥法骑士',
+    summary: '将武器训练与法师法术结合。此处仅保留 2014 版机制摘要。',
+    rulesTextSource: 'non-srd-summary',
+  },
 ]
 
 export const FIGHTER_FIGHTING_STYLE_OPTIONS: readonly { id: FighterFightingStyleId; name: string; summary: string }[] = [
@@ -86,16 +107,16 @@ export const FIGHTER_MANEUVER_OPTIONS: readonly { id: FighterManeuverId; name: s
 ]
 
 const baseFeatures: readonly FighterFeatureDefinition[] = [
-  { id: 'fighting-style', level: 1, name: '战斗风格', description: '选择一种战斗风格；即使以后再次获得选择机会，也不能重复选择同一种风格。', source: 'fighter' },
-  { id: 'second-wind', level: 1, name: '回气', description: '用附赠动作恢复 1d10＋战士等级的生命值；完成短休或长休后恢复使用。', source: 'fighter' },
-  { id: 'action-surge-1', level: 2, name: '动作如潮（1次）', description: '在自己回合除常规动作和可能的附赠动作外，额外执行一个动作；完成短休或长休后恢复使用。', source: 'fighter' },
-  { id: 'martial-archetype', level: 3, name: '武术范型', description: '选择勇士、战斗大师或奥法骑士；所选范型在 3、7、10、15、18 级提供特性。', source: 'fighter' },
-  { id: 'asi-4', level: 4, name: '属性值提升', description: '一项属性值提高 2，或两项属性值各提高 1；不能以此将属性值提高至 20 以上。若启用专长可选规则，可改为选择一项专长。', source: 'fighter' },
+  { id: 'fighting-style', level: 1, name: '战斗风格', description: '你将一种特定战斗方式作为专长。从战斗风格选项中选择一项；即使以后再次获得选择机会，也不能重复选择同一种战斗风格。', source: 'fighter' },
+  { id: 'second-wind', level: 1, name: '回气', description: '你拥有一份有限的体力储备，可用来保护自己免受伤害。在你的回合，你可以使用一个附赠动作，恢复等于 1d10＋战士等级的生命值。使用后必须完成一次短休或长休才能再次使用。', source: 'fighter' },
+  { id: 'action-surge-1', level: 2, name: '动作如潮（1次）', description: '你可以暂时突破自身极限。在你的回合，你可以在自己的常规动作和可能的附赠动作之外，额外执行一个动作。使用后必须完成一次短休或长休才能再次使用。', source: 'fighter' },
+  { id: 'martial-archetype', level: 3, name: '武术范型', description: '你选择一种希望在战斗风格与技法上效仿的范型。所选范型会在 3 级赋予你特性，并在 7、10、15 和 18 级赋予更多特性。', source: 'fighter' },
+  { id: 'asi-4', level: 4, name: '属性值提升', description: '你可以使一项自选属性值提高 2，或使两项自选属性值各提高 1。你不能以此将一项属性值提高到 20 以上。', source: 'fighter' },
   { id: 'extra-attack-2', level: 5, name: '额外攻击', description: '在自己回合执行攻击动作时，可攻击两次而非一次。', source: 'fighter' },
   { id: 'asi-6', level: 6, name: '属性值提升', description: '再次获得属性值提升。', source: 'fighter' },
   { id: 'archetype-7', level: 7, name: '武术范型特性', description: '获得所选子职的 7 级特性。', source: 'fighter' },
   { id: 'asi-8', level: 8, name: '属性值提升', description: '再次获得属性值提升。', source: 'fighter' },
-  { id: 'indomitable-1', level: 9, name: '不屈（1次）', description: '重骰一次失败的豁免并采用新结果；长休后恢复使用。', source: 'fighter' },
+  { id: 'indomitable-1', level: 9, name: '不屈（1次）', description: '你可以重掷一次失败的豁免检定；若如此做，必须采用新的结果。使用后必须完成一次长休才能再次使用。', source: 'fighter' },
   { id: 'archetype-10', level: 10, name: '武术范型特性', description: '获得所选子职的 10 级特性。', source: 'fighter' },
   { id: 'extra-attack-3', level: 11, name: '额外攻击（2）', description: '在自己回合执行攻击动作时，可总共攻击三次。', source: 'fighter' },
   { id: 'asi-12', level: 12, name: '属性值提升', description: '再次获得属性值提升。', source: 'fighter' },

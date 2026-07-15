@@ -3,6 +3,7 @@ import type { Character } from '../../types/character'
 import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
   FIGHTER_MANEUVER_OPTIONS,
+  FIGHTER_SUBCLASS_OPTIONS,
   fighterActionSurgeUses,
   fighterAttacksPerAttackAction,
   fighterFeaturesAtLevel,
@@ -44,6 +45,13 @@ describe('D&D 5e 2014 fighter progression', () => {
   it('keeps generic archetype milestones until a subclass is selected', () => {
     expect(fighterFeaturesAtLevel(7).map((feature) => feature.name)).toEqual(['武术范型特性'])
     expect(fighterFeaturesAtLevel(10).map((feature) => feature.name)).toEqual(['武术范型特性'])
+  })
+
+  it('marks SRD 5.1 translations separately from non-SRD subclass summaries', () => {
+    const source = (id: string) => FIGHTER_SUBCLASS_OPTIONS.find((option) => option.id === id)?.rulesTextSource
+    expect(source('champion')).toBe('srd-5.1-translation')
+    expect(source('battle-master')).toBe('non-srd-summary')
+    expect(source('eldritch-knight')).toBe('non-srd-summary')
   })
 
   it('allows one fighting style except for a level 10+ Champion, who may select two', () => {
