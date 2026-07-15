@@ -2,6 +2,7 @@ import { Check, Shield, Sparkles, Swords, Wind } from 'lucide-react'
 import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
   FIGHTER_MANEUVER_OPTIONS,
+  FIGHTER_RESOURCE_KEYS,
   FIGHTER_SUBCLASS_OPTIONS,
   fighterActionSurgeUses,
   fighterAttacksPerAttackAction,
@@ -11,6 +12,7 @@ import {
   fighterManeuverSaveDc,
   fighterManeuversKnown,
   fighterProgression,
+  fighterResourceState,
   fighterSelectedFightingStyles,
   fighterSelectedManeuvers,
   fighterSubclassName,
@@ -35,6 +37,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
   const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
   const maneuvers = fighterSelectedManeuvers(character)
   const maneuverLimit = fighterManeuversKnown(character.level)
+  const superiorityDice = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.superiorityDice)
   const progression = fighterProgression(subclass)
   const weapon = dnd5eWeaponAttackProfile(character)
   const setFighterChoices = (patch: NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>) => {
@@ -71,7 +74,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
             <Swords className="h-5 w-5 text-arcane-300" />
             <h3 className="text-lg font-bold text-slate-100">战士职业特性</h3>
           </div>
-          <p className="mt-1 text-sm text-slate-500">D&D 5e 2014 · 战士 {character.level} 级 · {fighterSubclassName(subclass)}</p>
+          <p className="mt-1 text-sm text-slate-500">D&D 5e 2014《玩家手册》规则摘要 · 战士 {character.level} 级 · {fighterSubclassName(subclass)}</p>
         </div>
 
         <div className="xl:w-[260px]">
@@ -110,7 +113,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
 
       <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Summary icon={Swords} label="每次攻击动作" value={`${fighterAttacksPerAttackAction(character.level)} 次攻击`} />
-        <Summary icon={Wind} label="动作如潮" value={`${fighterActionSurgeUses(character.level)} 次／休息`} />
+        <Summary icon={Wind} label="动作如潮" value={`${fighterActionSurgeUses(character.level)} 次／短休或长休`} />
         <Summary icon={Shield} label="不屈" value={`${fighterIndomitableUses(character.level)} 次／长休`} />
         <Summary icon={Sparkles} label="战斗风格" value={fightingStyles.map(fighterFightingStyleName).join('、') || '尚未选择'} />
       </div>
@@ -120,13 +123,13 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h4 className="text-sm font-semibold text-amber-100">战斗大师战技</h4>
-              <p className="mt-1 text-xs text-slate-500">3/7/10/15级分别掌握 3/5/7/9 项战技；已选 {maneuvers.length}/{maneuverLimit}。</p>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">3/7/10/15 级分别掌握 3/5/7/9 项战技；在 7、10、15 级学会新战技时可替换 1 项已知战技。每次攻击只能应用 1 项战技。已选 {maneuvers.length}/{maneuverLimit}。</p>
             </div>
             <div className="grid grid-cols-3 gap-2 sm:min-w-[420px]">
-              <EquipmentLine label="优势骰" value={`d${fighterSuperiorityDieSides(character.level)}`} detail={`${character.classResources?.fighterSuperiorityDice?.current ?? 0}/${character.classResources?.fighterSuperiorityDice?.max ?? 0} 枚`} />
+              <EquipmentLine label="卓越骰" value={`d${fighterSuperiorityDieSides(character.level)}`} detail={`${superiorityDice.current}/${superiorityDice.max} 枚 · 短休或长休恢复`} />
               <EquipmentLine label="战技豁免 DC" value={`${fighterManeuverSaveDc(character)}`} detail="8＋熟练＋所选属性" />
               <ChoiceSelect
-                label="战技属性"
+                label="豁免计算属性"
                 value={fighter.maneuverAbility ?? 'str'}
                 placeholder="选择属性"
                 options={[{ id: 'str', name: '力量' }, { id: 'dex', name: '敏捷' }]}
@@ -146,7 +149,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
               />
             ))}
           </div>
-          <p className="mt-3 text-xs text-amber-200/70">当前阶段保存战技选择与资源；战技在地图中的目标、反应与伤害结算仍需逐项接入 5e Headless。</p>
+          <p className="mt-3 text-xs text-amber-200/70">规则文字与资源进度已按 2014 版校正；战技在地图中的目标、反应、豁免与伤害结算仍需逐项接入 5e Headless。</p>
         </div>
       )}
 

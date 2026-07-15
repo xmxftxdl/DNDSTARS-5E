@@ -55,8 +55,8 @@ export const FIGHTER_CLASS_DEFINITION: ClassDefinition = {
     },
     {
       key: FIGHTER_RESOURCE_KEYS.superiorityDice,
-      label: '优势骰',
-      shortLabel: '优势骰',
+      label: '卓越骰',
+      shortLabel: '卓越骰',
       isAvailable: (character) => character.level >= 3 && character.dnd5eClassChoices?.fighter?.subclass === 'battle-master',
       max: (character) => fighterSuperiorityDiceMax(character.level),
       resetOn: 'short-rest',
