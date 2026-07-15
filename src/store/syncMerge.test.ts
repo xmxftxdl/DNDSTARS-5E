@@ -1,11 +1,15 @@
 ﻿import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  clearPendingLocalFighterChoicesForTest,
   clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
   mergeCharactersForSharedSave,
+  mergePendingLocalFighterChoices,
   mergePendingLocalCharacterLevelEdits,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
+  markPendingLocalFighterChoices,
+  resetPendingLocalFighterChoicesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
 } from './characters'
 import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
@@ -230,6 +234,51 @@ describe('pending local character level edits', () => {
     expect(values.size).toBe(1)
 
     expect(mergePendingLocalCharacterLevelEdits([char({ id: 'hero', level: 12 })], 1_002)[0].level).toBe(12)
+    expect(values.size).toBe(0)
+  })
+})
+
+describe('pending local fighter choices', () => {
+  afterEach(() => {
+    clearPendingLocalFighterChoicesForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('survives a reload and rejects stale maneuver choices until shared state acknowledges them', () => {
+    const values = new Map<string, string>()
+    const localStorage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    }
+    vi.stubGlobal('window', { localStorage })
+    clearPendingLocalFighterChoicesForTest()
+
+    const choices = {
+      subclass: 'battle-master' as const,
+      maneuverAbility: 'str' as const,
+      maneuvers: ['disarming-attack', 'precision-attack', 'trip-attack'] as const,
+    }
+    markPendingLocalFighterChoices('hero', {
+      ...choices,
+      maneuvers: [...choices.maneuvers],
+    }, 1_000)
+    resetPendingLocalFighterChoicesMemoryForTest()
+
+    const stale = [char({
+      id: 'hero',
+      dnd5eClassChoices: { fighter: { subclass: 'battle-master', maneuvers: [] } },
+    })]
+    expect(mergePendingLocalFighterChoices(stale, 1_001)[0].dnd5eClassChoices?.fighter?.maneuvers)
+      .toEqual(choices.maneuvers)
+    expect(values.size).toBe(1)
+
+    const acknowledged = [char({
+      id: 'hero',
+      dnd5eClassChoices: { fighter: { ...choices, maneuvers: [...choices.maneuvers] } },
+    })]
+    expect(mergePendingLocalFighterChoices(acknowledged, 1_002)[0].dnd5eClassChoices?.fighter?.maneuvers)
+      .toEqual(choices.maneuvers)
     expect(values.size).toBe(0)
   })
 })

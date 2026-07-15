@@ -50,7 +50,7 @@ describe('D&D 5e 2014 fighter progression', () => {
   it('marks SRD 5.1 translations separately from non-SRD subclass summaries', () => {
     const source = (id: string) => FIGHTER_SUBCLASS_OPTIONS.find((option) => option.id === id)?.rulesTextSource
     expect(source('champion')).toBe('srd-5.1-translation')
-    expect(source('battle-master')).toBe('non-srd-summary')
+    expect(source('battle-master')).toBe('phb-2014-translation')
     expect(source('eldritch-knight')).toBe('non-srd-summary')
   })
 
@@ -95,14 +95,15 @@ describe('D&D 5e 2014 fighter progression', () => {
   it('includes all sixteen 2014 Battle Master maneuvers with their decisive limits', () => {
     const maneuver = (id: string) => FIGHTER_MANEUVER_OPTIONS.find((option) => option.id === id)?.summary ?? ''
     expect(FIGHTER_MANEUVER_OPTIONS).toHaveLength(16)
-    expect(maneuver('commanders-strike')).toContain('放弃其中一次攻击')
+    expect(maneuver('commanders-strike')).toContain('放弃一次攻击')
     expect(maneuver('commanders-strike')).toContain('附赠动作')
     expect(maneuver('commanders-strike')).toContain('反应')
-    expect(maneuver('precision-attack')).toContain('效果生效前')
+    expect(maneuver('precision-attack')).toContain('效果生效之前')
     expect(maneuver('pushing-attack')).toContain('大型或更小')
     expect(maneuver('pushing-attack')).toContain('15 尺')
-    expect(maneuver('sweeping-attack')).toContain('原攻击检定也能命中')
+    expect(maneuver('sweeping-attack')).toContain('原本的攻击检定足以命中')
     expect(maneuver('trip-attack')).toContain('大型或更小')
+    expect(FIGHTER_MANEUVER_OPTIONS.find((option) => option.id === 'rally')?.name).toBe('鼓舞')
   })
 
   it('does not mix Battle Master resource growth into other subclass feature effects', () => {

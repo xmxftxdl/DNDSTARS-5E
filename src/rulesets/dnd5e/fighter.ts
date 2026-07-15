@@ -1,7 +1,7 @@
 import type { Character } from '../../types/character'
 
 export type FighterSubclassId = 'champion' | 'battle-master' | 'eldritch-knight'
-export type FighterRulesTextSource = 'srd-5.1-translation' | 'non-srd-summary'
+export type FighterRulesTextSource = 'srd-5.1-translation' | 'phb-2014-translation' | 'non-srd-summary'
 
 export type FighterFightingStyleId =
   | 'archery'
@@ -67,8 +67,8 @@ export const FIGHTER_SUBCLASS_OPTIONS: readonly {
   {
     id: 'battle-master',
     name: '战斗大师',
-    summary: '使用卓越骰与战技控制战局。此处仅保留 2014 版机制摘要。',
-    rulesTextSource: 'non-srd-summary',
+    summary: '战斗大师选择磨炼历代先辈传承下来的战斗技巧。他们将战斗视为一门学问，而其内容不止包含战斗本身，还包括铸造武器和书法等等。并非每个战士都能适应战斗大师范型对学习历史、理论和艺术的要求，但能做到的人都是技艺精熟、知识丰富的多面手。',
+    rulesTextSource: 'phb-2014-translation',
   },
   {
     id: 'eldritch-knight',
@@ -88,22 +88,22 @@ export const FIGHTER_FIGHTING_STYLE_OPTIONS: readonly { id: FighterFightingStyle
 ]
 
 export const FIGHTER_MANEUVER_OPTIONS: readonly { id: FighterManeuverId; name: string; summary: string }[] = [
-  { id: 'commanders-strike', name: '指挥官奇袭', summary: '在自己回合执行攻击动作时，放弃其中一次攻击、使用附赠动作并消耗 1 枚卓越骰；选择能看见或听见你的友方生物，使其立即用反应进行一次武器攻击，命中时将卓越骰加入伤害。' },
-  { id: 'disarming-attack', name: '缴械攻击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；目标进行力量豁免，失败则掉落一件由你指定的持握物品，物品落在其脚边。' },
-  { id: 'distracting-strike', name: '扰乱打击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；在你下回合开始前，除你以外的攻击者对该目标进行的下一次攻击检定具有优势。' },
-  { id: 'evasive-footwork', name: '灵巧步法', summary: '移动时消耗并掷 1 枚卓越骰，将结果加入护甲等级，直至你停止此次移动。' },
-  { id: 'feinting-attack', name: '诡诈攻击', summary: '在自己回合以附赠动作消耗 1 枚卓越骰，选择距你 5 尺内的生物；本回合对其进行的下一次攻击检定具有优势，若命中则将卓越骰加入伤害。' },
-  { id: 'goading-attack', name: '挑衅攻击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；目标感知豁免失败，则在你下回合结束前，对除你以外目标的攻击检定具有劣势。' },
-  { id: 'lunging-attack', name: '突刺攻击', summary: '在自己回合进行近战武器攻击时消耗 1 枚卓越骰，使该次攻击的触及范围增加 5 尺；若命中，将卓越骰加入伤害。' },
-  { id: 'maneuvering-attack', name: '灵动攻击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；选择能看见或听见你的友方生物，使其立即用反应移动至多其速度一半，且不会引发本次受击目标的借机攻击。' },
-  { id: 'menacing-attack', name: '恐吓攻击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；目标感知豁免失败，则对你陷入恐慌，直至你下回合结束。' },
-  { id: 'parry', name: '格挡', summary: '其他生物以近战攻击对你造成伤害时，可用反应消耗并掷 1 枚卓越骰，使伤害减少“骰值＋你的敏捷调整值”。' },
-  { id: 'precision-attack', name: '精准攻击', summary: '进行武器攻击检定时消耗 1 枚卓越骰并将结果加入攻击检定；可在掷骰前或后决定，但必须在该次攻击的效果生效前。' },
-  { id: 'pushing-attack', name: '推撞攻击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；若目标体型为大型或更小，力量豁免失败则被向远离你的方向推动至多 15 尺。' },
-  { id: 'rally', name: '重整旗鼓', summary: '在自己回合以附赠动作消耗 1 枚卓越骰，选择能看见或听见你的友方生物；其获得“卓越骰结果＋你的魅力调整值”的临时生命值。' },
-  { id: 'riposte', name: '反击', summary: '生物以近战攻击对你未命中时，可用反应消耗 1 枚卓越骰并对其进行一次近战武器攻击；若命中，将卓越骰加入伤害。' },
-  { id: 'sweeping-attack', name: '横扫攻击', summary: '近战武器攻击命中时消耗 1 枚卓越骰，选择距原目标 5 尺内且处于你触及范围内的另一生物；若原攻击检定也能命中它，则其受到等于卓越骰结果、且与原攻击同类型的伤害。' },
-  { id: 'trip-attack', name: '摔绊攻击', summary: '武器攻击命中时消耗 1 枚卓越骰并将其加入伤害；若目标体型为大型或更小，力量豁免失败则倒地。' },
+  { id: 'commanders-strike', name: '指挥官奇袭', summary: '你在自己回合内执行攻击动作时，可以放弃一次攻击并使用附赠动作指挥一名盟友发动奇袭。使用此战技时，你消耗一枚卓越骰，并指定一名能看见你或能听到你声音的盟友。所选盟友可以立即使用反应发动一次武器攻击，并将消耗的卓越骰加在此次攻击的伤害掷骰中。' },
+  { id: 'disarming-attack', name: '缴械攻击', summary: '你以武器攻击命中敌人时，可消耗一枚卓越骰以尝试缴械目标，使其丢弃手中持握的一件物品。你将消耗的卓越骰加在此次攻击的伤害掷骰中，并迫使目标进行一次力量豁免。豁免失败则其丢弃手中持握的一件物品（由你选择），被丢弃的物品掉落在该生物脚下。' },
+  { id: 'distracting-strike', name: '扰乱打击', summary: '你以武器攻击命中敌人时，可以消耗一枚卓越骰以扰乱该目标，让你的盟友有机可乘。你将消耗的卓越骰加在此次攻击的伤害掷骰中。此后直至你下一回合开始，下一次由除你之外的生物对目标发动的攻击检定具有优势。' },
+  { id: 'evasive-footwork', name: '灵巧步法', summary: '你在移动时，可以消耗一枚卓越骰，并将其结果加入你的护甲等级，直至你完成移动。' },
+  { id: 'feinting-attack', name: '诡诈攻击', summary: '你可以在自己回合内消耗一枚卓越骰，指定你身边 5 尺范围内一个生物为目标，并使用附赠动作对其虚晃一招。你在本回合内对该生物发动的下一次攻击检定具有优势。如果该攻击命中，则将消耗的卓越骰加在此次攻击的伤害掷骰中。' },
+  { id: 'goading-attack', name: '挑衅攻击', summary: '你以武器攻击命中敌人时，可以消耗一枚卓越骰以尝试挑衅该目标。你将消耗的卓越骰加在此次攻击的伤害掷骰中，并迫使目标进行一次感知豁免。豁免失败者攻击除你之外的生物时，其攻击检定具有劣势，直至你的下一回合结束。' },
+  { id: 'lunging-attack', name: '突刺攻击', summary: '你在自己回合内发动近战武器攻击时，可以消耗一枚卓越骰，使该攻击的触及范围增加 5 尺。如果该攻击命中，则将消耗的卓越骰加在此次攻击的伤害掷骰中。' },
+  { id: 'maneuvering-attack', name: '灵动攻击', summary: '你以武器攻击命中敌人时，可以消耗一枚卓越骰以让盟友移动到更有利的位置。你将消耗的卓越骰加在此次攻击的伤害掷骰中，并指定一个能看见你或听到你声音的盟友。该盟友可以立即用其反应移动至多等于其速度一半的距离。本次移动不会引发本次所攻击目标的借机攻击。' },
+  { id: 'menacing-attack', name: '恐吓攻击', summary: '你以武器攻击命中敌人时，可消耗一枚卓越骰以尝试恐吓该目标。你将消耗的卓越骰加在此次攻击的伤害掷骰中，并迫使目标进行一次感知豁免。豁免失败者将陷入对你恐慌的状态，直至你下一回合结束。' },
+  { id: 'parry', name: '格挡', summary: '其他生物的近战攻击对你造成伤害时，你可以使用反应并消耗一枚卓越骰以减少伤害。减少的数值为卓越骰骰值＋你的敏捷调整值。' },
+  { id: 'precision-attack', name: '精准攻击', summary: '你进行武器攻击时，可以消耗一枚卓越骰，将其结果加在本次攻击的攻击检定中。你可以在进行攻击检定之前或之后使用此战技，不过必须在相应攻击效果生效之前作决定。' },
+  { id: 'pushing-attack', name: '推撞攻击', summary: '你以武器攻击命中敌人时，可以消耗一枚卓越骰以尝试将该目标推开。你将消耗的卓越骰加在此次攻击的伤害掷骰中。如果目标为大型或更小体型，则其必须进行一次力量豁免。豁免失败者将被往远离你的方向推动至多 15 尺。' },
+  { id: 'rally', name: '鼓舞', summary: '你在自己回合内可以使用一个附赠动作并消耗一枚卓越骰，以鼓舞一名盟友的士气。选择一名能看见你或听到你声音的盟友，并使其获得数量等于卓越骰结果＋你的魅力调整值的临时生命值。' },
+  { id: 'riposte', name: '反击', summary: '当某生物对你发动近战攻击而未命中时，你可以使用反应并消耗一枚卓越骰，对其发动一次近战武器攻击。如果该攻击命中，则将卓越骰加在此次攻击的伤害掷骰中。' },
+  { id: 'sweeping-attack', name: '横扫攻击', summary: '你以近战武器攻击命中敌人时，可以消耗一枚卓越骰以尝试连带攻击附近的另一个生物。指定你触及范围内一个距离初始目标不超过 5 尺的生物。如果你原本的攻击检定足以命中第二个目标，则它受到等同于卓越骰结果的伤害。此伤害与你原本攻击的伤害类型相同。' },
+  { id: 'trip-attack', name: '摔绊攻击', summary: '你以武器攻击命中敌人时，可以消耗一枚卓越骰以尝试击倒该目标。你将消耗的卓越骰加在此次攻击的伤害掷骰中。如果目标为大型或更小体型，则其必须进行一次力量豁免。豁免失败则被击倒地。' },
 ]
 
 const baseFeatures: readonly FighterFeatureDefinition[] = [
@@ -140,11 +140,11 @@ const subclassFeatures: Record<FighterSubclassId, readonly FighterFeatureDefinit
     { id: 'champion-survivor', level: 18, name: '生存者', description: '回合开始时，若生命值不高于上限一半且不为 0，恢复 5＋体质调整值生命值。', source: 'champion' },
   ],
   'battle-master': [
-    { id: 'battle-master-superiority', level: 3, name: '卓越战技', description: '学会 3 项战技并获得 4 枚 d8 卓越骰；每次攻击只能应用一项战技，消耗的卓越骰在完成短休或长休后全部恢复。战技豁免 DC＝8＋熟练加值＋自选的力量或敏捷调整值。7、10、15 级各学会 2 项新战技，并可在每次学会新战技时替换 1 项已知战技；卓越骰在 7、15 级各增加 1 枚。', source: 'battle-master' },
-    { id: 'battle-master-student-of-war', level: 3, name: '战争学徒', description: '获得一种自选工匠工具的熟练。', source: 'battle-master' },
-    { id: 'battle-master-know-your-enemy', level: 7, name: '知己知彼', description: '在战斗外观察一个生物或与其互动至少 1 分钟后，从力量、敏捷、体质、护甲等级、当前生命值、总职业等级和战士等级中选择两项；DM 告知你在所选项目上强于、弱于或相当于该生物。', source: 'battle-master' },
+    { id: 'battle-master-superiority', level: 3, name: '卓越战技', description: '在你选择此范型的第 3 级时，你习得战技并获得驱动战技的卓越骰。你习得三种自选战技，而每次攻击只能应用一种战技。你在第 7、第 10 和第 15 级时均习得两种新战技；习得新战技时，还可以额外替换一个已经习得的战技。你拥有四枚 d8 卓越骰，卓越骰一经使用即消耗，完成短休或长休后恢复；卓越骰在第 7 和第 15 级时各增加一枚。某些战技要求目标进行豁免，战技豁免 DC＝8＋你的熟练加值＋你的力量或敏捷调整值（自选）。', source: 'battle-master' },
+    { id: 'battle-master-student-of-war', level: 3, name: '战争学徒', description: '第 3 级时，你选择一种工匠工具并获得其熟练项。', source: 'battle-master' },
+    { id: 'battle-master-know-your-enemy', level: 7, name: '知己知彼', description: '第 7 级起，你在战斗外观察某生物或与之交互至少 1 分钟后，可以获知有关其能力的一些情报。从力量值、敏捷值、体质值、护甲等级、当前生命值、总职业等级（如果有）和战士职业等级（如果有）中选择两项，DM 将告诉你在这两项上你是强于该生物、弱于该生物，或与之相仿。', source: 'battle-master' },
     { id: 'battle-master-improved-superiority-10', level: 10, name: '精通卓越战技（d10）', description: '你的卓越骰变为 d10。', source: 'battle-master' },
-    { id: 'battle-master-relentless', level: 15, name: '坚韧', description: '投掷先攻时若没有可用的卓越骰，则获得 1 枚卓越骰。', source: 'battle-master' },
+    { id: 'battle-master-relentless', level: 15, name: '坚韧', description: '第 15 级起，你掷先攻时若没有可用的卓越骰，则获得 1 枚卓越骰。', source: 'battle-master' },
     { id: 'battle-master-improved-superiority-18', level: 18, name: '精通卓越战技（d12）', description: '你的卓越骰变为 d12。', source: 'battle-master' },
   ],
   'eldritch-knight': [

@@ -55,7 +55,7 @@ const PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY = 'stars-character-level-e
 const pendingLocalCharacterLevelEdits = new Map<string, { level: number; updatedAt: number }>()
 let pendingLocalCharacterLevelEditsHydrated = false
 
-function pendingLocalCharacterLevelEditStorage(): Storage | null {
+function pendingLocalCharacterEditStorage(): Storage | null {
   if (typeof window === 'undefined') return null
   try {
     return window.localStorage
@@ -65,7 +65,7 @@ function pendingLocalCharacterLevelEditStorage(): Storage | null {
 }
 
 function persistPendingLocalCharacterLevelEdits(): void {
-  const storage = pendingLocalCharacterLevelEditStorage()
+  const storage = pendingLocalCharacterEditStorage()
   if (!storage) return
   try {
     if (pendingLocalCharacterLevelEdits.size === 0) {
@@ -84,7 +84,7 @@ function persistPendingLocalCharacterLevelEdits(): void {
 function hydratePendingLocalCharacterLevelEdits(): void {
   if (pendingLocalCharacterLevelEditsHydrated) return
   pendingLocalCharacterLevelEditsHydrated = true
-  const storage = pendingLocalCharacterLevelEditStorage()
+  const storage = pendingLocalCharacterEditStorage()
   if (!storage) return
   try {
     const raw = storage.getItem(PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY)
@@ -160,6 +160,131 @@ export function mergePendingLocalCharacterLevelEdits(
       return character
     }
     return { ...character, level: pending.level }
+  })
+}
+
+type FighterChoices = NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>
+
+const PENDING_LOCAL_FIGHTER_CHOICES_TTL_MS = 30000
+const PENDING_LOCAL_FIGHTER_CHOICES_STORAGE_KEY = 'stars-character-fighter-choices-v1'
+const pendingLocalFighterChoices = new Map<string, { choices: FighterChoices; updatedAt: number }>()
+let pendingLocalFighterChoicesHydrated = false
+
+function cloneFighterChoices(choices: FighterChoices): FighterChoices {
+  return {
+    ...choices,
+    fightingStyles: choices.fightingStyles ? [...choices.fightingStyles] : undefined,
+    maneuvers: choices.maneuvers ? [...choices.maneuvers] : undefined,
+  }
+}
+
+function fighterChoicesSnapshot(choices: FighterChoices | undefined): string {
+  return JSON.stringify({
+    subclass: choices?.subclass ?? null,
+    fightingStyles: choices?.fightingStyles ?? [],
+    maneuvers: choices?.maneuvers ?? [],
+    maneuverAbility: choices?.maneuverAbility ?? null,
+  })
+}
+
+function persistPendingLocalFighterChoices(): void {
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalFighterChoices.size === 0) {
+      storage.removeItem(PENDING_LOCAL_FIGHTER_CHOICES_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_FIGHTER_CHOICES_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalFighterChoices)),
+    )
+  } catch {
+    // The in-memory guard remains useful when localStorage is unavailable.
+  }
+}
+
+function hydratePendingLocalFighterChoices(): void {
+  if (pendingLocalFighterChoicesHydrated) return
+  pendingLocalFighterChoicesHydrated = true
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_FIGHTER_CHOICES_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, { choices?: FighterChoices; updatedAt?: unknown }>
+    for (const [id, pending] of Object.entries(parsed)) {
+      const updatedAt = Number(pending?.updatedAt)
+      if (!id || !pending?.choices || !Number.isFinite(updatedAt)) continue
+      pendingLocalFighterChoices.set(id, {
+        choices: cloneFighterChoices(pending.choices),
+        updatedAt,
+      })
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_FIGHTER_CHOICES_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject both reads and writes.
+    }
+  }
+}
+
+function gcPendingLocalFighterChoices(now: number = Date.now()): void {
+  hydratePendingLocalFighterChoices()
+  let changed = false
+  for (const [id, pending] of pendingLocalFighterChoices) {
+    if (now - pending.updatedAt > PENDING_LOCAL_FIGHTER_CHOICES_TTL_MS) {
+      pendingLocalFighterChoices.delete(id)
+      changed = true
+    }
+  }
+  if (changed) persistPendingLocalFighterChoices()
+}
+
+export function markPendingLocalFighterChoices(
+  id: string,
+  choices: FighterChoices,
+  now: number = Date.now(),
+): void {
+  hydratePendingLocalFighterChoices()
+  pendingLocalFighterChoices.set(id, { choices: cloneFighterChoices(choices), updatedAt: now })
+  persistPendingLocalFighterChoices()
+}
+
+export function clearPendingLocalFighterChoicesForTest(): void {
+  pendingLocalFighterChoices.clear()
+  pendingLocalFighterChoicesHydrated = true
+  persistPendingLocalFighterChoices()
+}
+
+export function resetPendingLocalFighterChoicesMemoryForTest(): void {
+  pendingLocalFighterChoices.clear()
+  pendingLocalFighterChoicesHydrated = false
+}
+
+export function mergePendingLocalFighterChoices(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingLocalFighterChoices(now)
+  if (pendingLocalFighterChoices.size === 0) return sharedCharacters
+
+  return sharedCharacters.map((character) => {
+    const pending = pendingLocalFighterChoices.get(character.id)
+    if (!pending) return character
+    if (fighterChoicesSnapshot(character.dnd5eClassChoices?.fighter) === fighterChoicesSnapshot(pending.choices)) {
+      pendingLocalFighterChoices.delete(character.id)
+      persistPendingLocalFighterChoices()
+      return character
+    }
+    return {
+      ...character,
+      dnd5eClassChoices: {
+        ...character.dnd5eClassChoices,
+        fighter: cloneFighterChoices(pending.choices),
+      },
+    }
   })
 }
 
@@ -1123,12 +1248,21 @@ export const useCharacterStore = create<CharacterState>()(
           const sharedCharactersWithPendingLevels = mergePendingLocalCharacterLevelEdits(
             filteredSharedCharacters,
           )
+          const sharedCharactersWithPendingChoices = mergePendingLocalFighterChoices(
+            sharedCharactersWithPendingLevels,
+          )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
             (character, index) => character.level !== filteredSharedCharacters[index]?.level,
           )
+          const pendingFighterChoicesMustBeRepublished = sharedCharactersWithPendingChoices.some(
+            (character, index) => fighterChoicesSnapshot(character.dnd5eClassChoices?.fighter) !==
+              fighterChoicesSnapshot(sharedCharactersWithPendingLevels[index]?.dnd5eClassChoices?.fighter),
+          )
+          const pendingCharacterEditMustBeRepublished =
+            pendingLevelMustBeRepublished || pendingFighterChoicesMustBeRepublished
           const snapshot = JSON.stringify(shared)
-          // 普通重复快照可短路；若它仍落后于持久化的本地等级，则必须重新应用并重试保存。
-          if (snapshot === lastSharedCharactersSnapshot && !pendingLevelMustBeRepublished) {
+          // 普通重复快照可短路；若它仍落后于持久化的本地编辑，则必须重新应用并重试保存。
+          if (snapshot === lastSharedCharactersSnapshot && !pendingCharacterEditMustBeRepublished) {
             // saveCharacters 会在 PUT 前记录本地 snapshot；服务端回显该 snapshot 时仍须推进
             // 单调水位，否则玩家端随后可能接受夹在旧水位与本次 ACK 之间的乱序快照。
             lastAppliedCharactersUpdatedAt = incomingUpdatedAt
@@ -1138,7 +1272,7 @@ export const useCharacterStore = create<CharacterState>()(
           lastSharedCharactersSnapshot = snapshot
           // [T10/AC2 · E11] 先剔除仍被墓碑标记的角色：对端一份仍含已删角色的全量快照
           // 不得复活它。墓碑过期后（GC）该过滤自动失效，被删 id 可被复用。
-          const sharedCharacters = sharedCharactersWithPendingLevels.map(finalizeCharacter)
+          const sharedCharacters = sharedCharactersWithPendingChoices.map(finalizeCharacter)
           const localCharacters = get().characters
           const mergedSharedCharacters = mergePendingLocalCharacterCreationsForLoad(sharedCharacters, localCharacters)
           const sharedSelectedId =
@@ -1156,9 +1290,9 @@ export const useCharacterStore = create<CharacterState>()(
                   : nextSelectedId,
           })
           if (shared.updatedAt != null) lastLocalCharactersWriteAt = shared.updatedAt
-          // 页面可能在原 PUT 完成前刷新。此时持久化等级已重新覆盖旧快照，主动重试写入，
-          // 直到服务端回显相同等级并清除待确认记录。
-          if (pendingLevelMustBeRepublished) saveCharacters()
+          // 页面可能在原 PUT 完成前刷新，另一端也可能发布更新较晚但内容较旧的全量数组。
+          // 持久化的等级／战士选择覆盖旧快照并主动重试，直到服务端回显后清除待确认记录。
+          if (pendingCharacterEditMustBeRepublished) saveCharacters()
         },
         saveSharedNow: publishCharactersSnapshot,
         select: (id) => set({ selectedId: id }),
@@ -1193,6 +1327,9 @@ export const useCharacterStore = create<CharacterState>()(
         },
         update: (id, patch) => {
           if (patch.level != null) markPendingLocalCharacterLevelEdit(id, patch.level)
+          if (patch.dnd5eClassChoices?.fighter) {
+            markPendingLocalFighterChoices(id, patch.dnd5eClassChoices.fighter)
+          }
           updateChar(id, (c) =>
             syncCombatDerivedStats(
               syncCharacterClassProgression(ensureDefaultEquipment({ ...c, ...patch })),
