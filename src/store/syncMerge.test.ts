@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+﻿import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
@@ -6,6 +6,7 @@ import {
   mergePendingLocalCharacterLevelEdits,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
+  resetPendingLocalCharacterLevelEditMemoryForTest,
 } from './characters'
 import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
 import type { Character } from '../types/character'
@@ -184,6 +185,11 @@ describe('character shared-save merge preserves cross-end creations', () => {
 })
 
 describe('pending local character level edits', () => {
+  afterEach(() => {
+    clearPendingLocalCharacterLevelEditsForTest()
+    vi.unstubAllGlobals()
+  })
+
   it('preserves an edited level until the shared snapshot acknowledges it', () => {
     clearPendingLocalCharacterLevelEditsForTest()
     const id = 'hero'
@@ -205,6 +211,26 @@ describe('pending local character level edits', () => {
     clearPendingLocalCharacterLevelEditsForTest()
     markPendingLocalCharacterLevelEdit('hero', 12, 1_000)
     expect(mergePendingLocalCharacterLevelEdits([char({ level: 1 })], 31_001)[0].level).toBe(1)
+  })
+
+  it('rehydrates an unacknowledged level after a page-reload-style memory reset', () => {
+    const values = new Map<string, string>()
+    const localStorage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    }
+    vi.stubGlobal('window', { localStorage })
+    clearPendingLocalCharacterLevelEditsForTest()
+
+    markPendingLocalCharacterLevelEdit('hero', 12, 1_000)
+    resetPendingLocalCharacterLevelEditMemoryForTest()
+
+    expect(mergePendingLocalCharacterLevelEdits([char({ id: 'hero', level: 1 })], 1_001)[0].level).toBe(12)
+    expect(values.size).toBe(1)
+
+    expect(mergePendingLocalCharacterLevelEdits([char({ id: 'hero', level: 12 })], 1_002)[0].level).toBe(12)
+    expect(values.size).toBe(0)
   })
 })
 

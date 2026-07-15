@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('character level accepts replacement input and survives shared synchronization', async ({ page, request }) => {
+test('character level auto-saves while editing and survives an immediate refresh', async ({ page, request }) => {
   const name = `等级回归-${Date.now()}`
   await page.goto('http://127.0.0.1:6173/characters', { waitUntil: 'domcontentloaded' })
 
@@ -15,8 +15,12 @@ test('character level accepts replacement input and survives shared synchronizat
   await expect(level).toHaveValue('')
 
   await level.fill('12')
-  await level.press('Enter')
   await expect(level).toHaveValue('12')
+
+  // Refresh without Enter or blur. A valid numeric edit must already be in the
+  // local durable queue, even if the async shared-state PUT has not completed.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(page.getByLabel('等级')).toHaveValue('12')
 
   await expect.poll(async () => {
     const response = await request.get('http://127.0.0.1:6173/api/state/characters')

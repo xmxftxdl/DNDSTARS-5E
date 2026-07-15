@@ -51,25 +51,93 @@ let characterSaveSeq = 0
 const LOCAL_CHARACTER_CREATE_TTL_MS = 60000
 const pendingLocalCharacterCreations = new Map<string, number>()
 const LOCAL_CHARACTER_LEVEL_EDIT_TTL_MS = 30000
+const PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY = 'stars-character-level-edits-v1'
 const pendingLocalCharacterLevelEdits = new Map<string, { level: number; updatedAt: number }>()
+let pendingLocalCharacterLevelEditsHydrated = false
 
-function gcPendingLocalCharacterLevelEdits(now: number = Date.now()): void {
-  for (const [id, pending] of pendingLocalCharacterLevelEdits) {
-    if (now - pending.updatedAt > LOCAL_CHARACTER_LEVEL_EDIT_TTL_MS) {
-      pendingLocalCharacterLevelEdits.delete(id)
+function pendingLocalCharacterLevelEditStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function persistPendingLocalCharacterLevelEdits(): void {
+  const storage = pendingLocalCharacterLevelEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalCharacterLevelEdits.size === 0) {
+      storage.removeItem(PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalCharacterLevelEdits)),
+    )
+  } catch {
+    // localStorage may be unavailable or full. The in-memory guard still applies.
+  }
+}
+
+function hydratePendingLocalCharacterLevelEdits(): void {
+  if (pendingLocalCharacterLevelEditsHydrated) return
+  pendingLocalCharacterLevelEditsHydrated = true
+  const storage = pendingLocalCharacterLevelEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, { level?: unknown; updatedAt?: unknown }>
+    for (const [id, pending] of Object.entries(parsed)) {
+      const level = Number(pending?.level)
+      const updatedAt = Number(pending?.updatedAt)
+      if (!id || !Number.isFinite(level) || !Number.isFinite(updatedAt)) continue
+      pendingLocalCharacterLevelEdits.set(id, {
+        level: Math.min(20, Math.max(1, Math.floor(level))),
+        updatedAt,
+      })
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject both reads and writes.
     }
   }
 }
 
+function gcPendingLocalCharacterLevelEdits(now: number = Date.now()): void {
+  hydratePendingLocalCharacterLevelEdits()
+  let changed = false
+  for (const [id, pending] of pendingLocalCharacterLevelEdits) {
+    if (now - pending.updatedAt > LOCAL_CHARACTER_LEVEL_EDIT_TTL_MS) {
+      pendingLocalCharacterLevelEdits.delete(id)
+      changed = true
+    }
+  }
+  if (changed) persistPendingLocalCharacterLevelEdits()
+}
+
 export function markPendingLocalCharacterLevelEdit(id: string, level: number, now: number = Date.now()): void {
+  hydratePendingLocalCharacterLevelEdits()
   pendingLocalCharacterLevelEdits.set(id, {
     level: Math.min(20, Math.max(1, Math.floor(level))),
     updatedAt: now,
   })
+  persistPendingLocalCharacterLevelEdits()
 }
 
 export function clearPendingLocalCharacterLevelEditsForTest(): void {
   pendingLocalCharacterLevelEdits.clear()
+  pendingLocalCharacterLevelEditsHydrated = true
+  persistPendingLocalCharacterLevelEdits()
+}
+
+export function resetPendingLocalCharacterLevelEditMemoryForTest(): void {
+  pendingLocalCharacterLevelEdits.clear()
+  pendingLocalCharacterLevelEditsHydrated = false
 }
 
 /**
@@ -88,6 +156,7 @@ export function mergePendingLocalCharacterLevelEdits(
     if (!pending) return character
     if (character.level === pending.level) {
       pendingLocalCharacterLevelEdits.delete(character.id)
+      persistPendingLocalCharacterLevelEdits()
       return character
     }
     return { ...character, level: pending.level }
@@ -1050,16 +1119,26 @@ export const useCharacterStore = create<CharacterState>()(
           // [T11/AC6 · E6] 单调 guard：严格更旧的乱序快照丢弃（DM 与玩家两端都生效）。
           const incomingUpdatedAt = shared.updatedAt ?? 0
           if (incomingUpdatedAt < lastAppliedCharactersUpdatedAt) return
+          const filteredSharedCharacters = filterTombstonedCharacters(shared.characters)
+          const sharedCharactersWithPendingLevels = mergePendingLocalCharacterLevelEdits(
+            filteredSharedCharacters,
+          )
+          const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
+            (character, index) => character.level !== filteredSharedCharacters[index]?.level,
+          )
           const snapshot = JSON.stringify(shared)
-          // equality 短路只在内容真正未变时触发，不压制更新的 apply。
-          if (snapshot === lastSharedCharactersSnapshot) return
+          // 普通重复快照可短路；若它仍落后于持久化的本地等级，则必须重新应用并重试保存。
+          if (snapshot === lastSharedCharactersSnapshot && !pendingLevelMustBeRepublished) {
+            // saveCharacters 会在 PUT 前记录本地 snapshot；服务端回显该 snapshot 时仍须推进
+            // 单调水位，否则玩家端随后可能接受夹在旧水位与本次 ACK 之间的乱序快照。
+            lastAppliedCharactersUpdatedAt = incomingUpdatedAt
+            return
+          }
           lastAppliedCharactersUpdatedAt = incomingUpdatedAt
           lastSharedCharactersSnapshot = snapshot
           // [T10/AC2 · E11] 先剔除仍被墓碑标记的角色：对端一份仍含已删角色的全量快照
           // 不得复活它。墓碑过期后（GC）该过滤自动失效，被删 id 可被复用。
-          const sharedCharacters = mergePendingLocalCharacterLevelEdits(
-            filterTombstonedCharacters(shared.characters),
-          ).map(finalizeCharacter)
+          const sharedCharacters = sharedCharactersWithPendingLevels.map(finalizeCharacter)
           const localCharacters = get().characters
           const mergedSharedCharacters = mergePendingLocalCharacterCreationsForLoad(sharedCharacters, localCharacters)
           const sharedSelectedId =
@@ -1077,6 +1156,9 @@ export const useCharacterStore = create<CharacterState>()(
                   : nextSelectedId,
           })
           if (shared.updatedAt != null) lastLocalCharactersWriteAt = shared.updatedAt
+          // 页面可能在原 PUT 完成前刷新。此时持久化等级已重新覆盖旧快照，主动重试写入，
+          // 直到服务端回显相同等级并清除待确认记录。
+          if (pendingLevelMustBeRepublished) saveCharacters()
         },
         saveSharedNow: publishCharactersSnapshot,
         select: (id) => set({ selectedId: id }),

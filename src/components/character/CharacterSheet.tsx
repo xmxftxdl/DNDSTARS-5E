@@ -13,7 +13,7 @@ import {
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
 import FighterProgressionPanel from './FighterProgressionPanel'
-import { resolveBoundedNumberDraft } from './numberInput'
+import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
   id: string
@@ -345,7 +345,12 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
         min={min}
         max={max}
         onFocus={() => setDraft(String(value))}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          const nextDraft = event.target.value
+          setDraft(nextDraft)
+          const next = parseBoundedNumberDraft(nextDraft, min, max)
+          if (next != null && next !== value) onChange(next)
+        }}
         onBlur={commit}
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
