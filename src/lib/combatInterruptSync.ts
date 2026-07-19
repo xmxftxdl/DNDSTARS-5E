@@ -4,7 +4,9 @@ import {
   emptyCombatInterruptQueue,
   finishCombatInterrupt,
   markCombatInterruptRolling,
+  rollbackCombatInterrupt,
   upsertCombatInterrupt,
+  waitCombatInterruptForDm,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
 } from './combatInterruptQueue'
@@ -89,5 +91,37 @@ export async function finishSharedCombatInterrupt(
   }
   const queue = await loadQueueForMap(input)
   const next = finishCombatInterrupt(queue, input.id, input.response)
+  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+}
+
+export async function waitSharedCombatInterruptForDm(
+  input: SharedCombatInterruptStore & { mapId: string; id: string },
+): Promise<void> {
+  if (input.mutateSharedCombatInterrupt) {
+    await input.mutateSharedCombatInterrupt({ operation: 'wait', mapId: input.mapId, id: input.id })
+    return
+  }
+  const queue = await loadQueueForMap(input)
+  const next = waitCombatInterruptForDm(queue, input.id)
+  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+}
+
+export async function rollbackSharedCombatInterrupt(
+  input: SharedCombatInterruptStore & {
+    mapId: string
+    id: string
+    response?: Record<string, unknown>
+    reason: 'timeout' | 'dm-disconnected' | 'cancelled' | 'stale-transaction'
+  },
+): Promise<void> {
+  if (input.mutateSharedCombatInterrupt) {
+    await input.mutateSharedCombatInterrupt({
+      operation: 'rollback', mapId: input.mapId, id: input.id,
+      response: input.response, rollbackReason: input.reason,
+    })
+    return
+  }
+  const queue = await loadQueueForMap(input)
+  const next = rollbackCombatInterrupt(queue, input.id, input.response, input.reason)
   if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
 }

@@ -27,6 +27,7 @@ export interface CombatInterruptPromptSelection {
   'opportunity-attack'?: CombatInterruptPrompt<'opportunity-attack'>
   protection?: CombatInterruptPrompt<'protection'>
   'shield-spell'?: CombatInterruptPrompt<'shield-spell'>
+  counterspell?: CombatInterruptPrompt<'counterspell'>
   'uncanny-dodge'?: CombatInterruptPrompt<'uncanny-dodge'>
   'deflect-missiles'?: CombatInterruptPrompt<'deflect-missiles'>
   'saving-throw-reroll'?: CombatInterruptPrompt<'saving-throw-reroll'>
@@ -119,6 +120,17 @@ export interface SharedShieldSpellPromptView {
   expiresAt?: number
 }
 
+export interface SharedCounterspellPromptView {
+  id: string
+  reactorChar: Character
+  casterName: string
+  spellName: string
+  spellLevel: number
+  counterspellSlotLevel: number
+  abilityCheckDc?: number
+  expiresAt?: number
+}
+
 export interface SharedSavingThrowRerollPromptView {
   id: string
   targetChar: Character
@@ -198,6 +210,7 @@ export interface CombatInterruptPromptViews {
   opportunityAttack?: SharedOpportunityAttackPromptView
   protection?: SharedProtectionPromptView
   shieldSpell?: SharedShieldSpellPromptView
+  counterspell?: SharedCounterspellPromptView
   uncannyDodge?: SharedUncannyDodgePromptView
   deflectMissiles?: SharedDeflectMissilesPromptView
   savingThrowReroll?: SharedSavingThrowRerollPromptView
@@ -280,6 +293,12 @@ export function resolveCombatInterruptPromptSelection(input: {
       input.suppressed['shield-spell'],
       input.answerContext,
     ),
+    counterspell: findAnswerableInterrupt(
+      pendingInterrupts,
+      'counterspell',
+      input.suppressed.counterspell,
+      input.answerContext,
+    ),
     'uncanny-dodge': findAnswerableInterrupt(
       pendingInterrupts,
       'uncanny-dodge',
@@ -347,6 +366,7 @@ export function buildCombatInterruptPromptViews(
   const opportunityAttack = selection['opportunity-attack']
   const protection = selection.protection
   const shieldSpell = selection['shield-spell']
+  const counterspell = selection.counterspell
   const uncannyDodge = selection['uncanny-dodge']
   const deflectMissiles = selection['deflect-missiles']
   const savingThrowReroll = selection['saving-throw-reroll']
@@ -426,6 +446,18 @@ export function buildCombatInterruptPromptViews(
           armorClass: shieldSpell.interrupt.payload.armorClass,
           magicMissile: shieldSpell.interrupt.payload.magicMissile,
           expiresAt: shieldSpell.interrupt.expiresAt,
+        }
+      : undefined,
+    counterspell: counterspell
+      ? {
+          id: counterspell.interrupt.id,
+          reactorChar: counterspell.character,
+          casterName: counterspell.interrupt.payload.casterName,
+          spellName: counterspell.interrupt.payload.spellName,
+          spellLevel: counterspell.interrupt.payload.spellLevel,
+          counterspellSlotLevel: counterspell.interrupt.payload.counterspellSlotLevel,
+          abilityCheckDc: counterspell.interrupt.payload.abilityCheckDc,
+          expiresAt: counterspell.interrupt.expiresAt,
         }
       : undefined,
     uncannyDodge: uncannyDodge

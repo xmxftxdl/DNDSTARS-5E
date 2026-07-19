@@ -10,6 +10,7 @@ import { dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
 import {
   dnd5eConditionsFromActiveEffects,
+  removeDnd5eActiveEffectsByStandardCondition,
   type Dnd5eActiveEffectInstance,
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
@@ -78,9 +79,10 @@ export function prepareDnd5ePlayerEndTurn(input: {
   ) {
     actorCombatant.classState.intimidatingPresenceSourceId = undefined
     actorCombatant.classState.intimidatingPresenceRoundsRemaining = undefined
-    actorCombatant.classState.activeEffects = actorCombatant.classState.activeEffects?.filter(
-      (effect) => effect.standardCondition !== 'frightened',
-    )
+    actorCombatant.classState.activeEffects = removeDnd5eActiveEffectsByStandardCondition({
+      effects: actorCombatant.classState.activeEffects,
+      condition: 'frightened',
+    }).effects
     actorCombatant.conditions = dnd5eConditionsFromActiveEffects(actorCombatant.classState.activeEffects)
   }
   const activeEffectSavingThrows = (actorCombatant.classState.activeEffects ?? []).flatMap((effect) => {

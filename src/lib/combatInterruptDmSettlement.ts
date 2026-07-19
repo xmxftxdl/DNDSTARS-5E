@@ -13,6 +13,7 @@ import {
   type OpportunityAttackInterruptResponse,
   type ProtectionInterruptResponse,
   type ShieldSpellInterruptResponse,
+  type CounterspellInterruptResponse,
   type StableMindInterruptResponse,
   type UncannyDodgeInterruptResponse,
   type DeflectMissilesInterruptResponse,
@@ -34,6 +35,7 @@ export interface DmCombatInterruptPendingIds {
   opportunityAttack?: string
   protection?: string
   shieldSpell?: string
+  counterspell?: string
   uncannyDodge?: string
   deflectMissiles?: string
   savingThrowReroll?: string
@@ -110,6 +112,13 @@ export type DmCombatInterruptSettlement =
       reason: 'expired' | 'answered'
       finishResponse?: ShieldSpellInterruptResponse
       useShieldSpell: boolean
+    }
+  | {
+      kind: 'counterspell'
+      id: string
+      reason: 'expired' | 'answered'
+      finishResponse?: CounterspellInterruptResponse
+      useCounterspell: boolean
     }
   | {
       kind: 'saving-throw-reroll'
@@ -375,6 +384,25 @@ export function resolveDmCombatInterruptSettlements(input: {
         settlements.push({
           kind: 'shield-spell', id: interrupt.id, reason: 'answered',
           finishResponse: response, useShieldSpell: !!response?.useShieldSpell,
+        })
+      }
+    }
+  }
+
+  if (input.pending.counterspell) {
+    const interrupt = findCombatInterrupt(queue, input.pending.counterspell)
+    if (interrupt && isCombatInterruptKind(interrupt, 'counterspell')) {
+      if (isCombatInterruptExpired(interrupt, input.now)) {
+        const response = defaultCombatInterruptResponse('counterspell')
+        settlements.push({
+          kind: 'counterspell', id: interrupt.id, reason: 'expired',
+          finishResponse: response, useCounterspell: false,
+        })
+      } else if (interrupt.status === 'answered') {
+        const response = interrupt.response as CounterspellInterruptResponse | undefined
+        settlements.push({
+          kind: 'counterspell', id: interrupt.id, reason: 'answered',
+          finishResponse: response, useCounterspell: !!response?.useCounterspell,
         })
       }
     }

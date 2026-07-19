@@ -19,7 +19,8 @@ import {
   startDnd5eHeadlessCombat,
   type Dnd5eCombatEvent,
 } from './headlessCombatEngine'
-import { dnd5eConditionsFromActiveEffects, migrateLegacyDnd5eConditions } from './activeEffects'
+import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 const abilities = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
 

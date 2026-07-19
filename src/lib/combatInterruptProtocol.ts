@@ -66,6 +66,19 @@ export type ShieldSpellInterruptPayload = Record<string, unknown> & {
 }
 export type ShieldSpellInterruptResponse = Record<string, unknown> & { useShieldSpell: boolean }
 
+export type CounterspellInterruptPayload = Record<string, unknown> & {
+  reactorName: string
+  casterName: string
+  spellName: string
+  spellLevel: number
+  counterspellSlotLevel: number
+  abilityCheckDc?: number
+}
+export type CounterspellInterruptResponse = Record<string, unknown> & {
+  useCounterspell: boolean
+  abilityCheckTotal?: number
+}
+
 export type UncannyDodgeInterruptPayload = Record<string, unknown> & {
   attackerName: string
   targetName: string
@@ -89,6 +102,15 @@ export type SavingThrowRerollInterruptPayload = Record<string, unknown> & {
   dc: number
 }
 export type SavingThrowRerollInterruptResponse = Record<string, unknown> & { useSavingThrowReroll: boolean }
+
+export type LegendaryResistanceInterruptPayload = Record<string, unknown> & {
+  targetName: string
+  effectName: string
+  total: number
+  dc: number
+  remainingUses: number
+}
+export type LegendaryResistanceInterruptResponse = Record<string, unknown> & { useLegendaryResistance: boolean }
 
 export type BardicInspirationRollType = '攻击检定' | '豁免' | '属性检定'
 export type BardicInspirationInterruptPayload = Record<string, unknown> & {
@@ -178,13 +200,27 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   description: string
   concentration: boolean
   suggestedConcentrationRounds?: number
+  proposedHit?: boolean
+  proposedDamage?: number
+  proposedSaveSuccess?: boolean
+  proposedConditionIds?: string[]
 }
+
+export type DmDamageAdjustment =
+  | { mode: 'set'; value: number }
+  | { mode: 'add'; value: number }
+  | { mode: 'multiply'; value: number }
 
 export type DmAdjudicationInterruptResponse = Record<string, unknown> & {
   decision: 'approved' | 'cancelled'
   effects: DmAdjudicationEffect[]
   note?: string
   concentrationRounds?: number
+  hitOverride?: boolean
+  damageAdjustment?: DmDamageAdjustment
+  saveSuccessOverride?: boolean
+  blockedConditionIds?: string[]
+  useLegendaryResistance?: boolean
 }
 
 export interface CombatInterruptPayloadMap {
@@ -195,9 +231,11 @@ export interface CombatInterruptPayloadMap {
   'opportunity-attack': OpportunityAttackInterruptPayload
   protection: ProtectionInterruptPayload
   'shield-spell': ShieldSpellInterruptPayload
+  counterspell: CounterspellInterruptPayload
   'uncanny-dodge': UncannyDodgeInterruptPayload
   'deflect-missiles': DeflectMissilesInterruptPayload
   'saving-throw-reroll': SavingThrowRerollInterruptPayload
+  'legendary-resistance': LegendaryResistanceInterruptPayload
   'bardic-inspiration': BardicInspirationInterruptPayload
   'cutting-words': CuttingWordsInterruptPayload
   'dark-ones-own-luck': DarkOnesOwnLuckInterruptPayload
@@ -215,9 +253,11 @@ export interface CombatInterruptResponseMap {
   'opportunity-attack': OpportunityAttackInterruptResponse
   protection: ProtectionInterruptResponse
   'shield-spell': ShieldSpellInterruptResponse
+  counterspell: CounterspellInterruptResponse
   'uncanny-dodge': UncannyDodgeInterruptResponse
   'deflect-missiles': DeflectMissilesInterruptResponse
   'saving-throw-reroll': SavingThrowRerollInterruptResponse
+  'legendary-resistance': LegendaryResistanceInterruptResponse
   'bardic-inspiration': BardicInspirationInterruptResponse
   'cutting-words': CuttingWordsInterruptResponse
   'dark-ones-own-luck': DarkOnesOwnLuckInterruptResponse
@@ -265,12 +305,16 @@ export function defaultCombatInterruptResponse<K extends CombatInterruptKind>(
       return { useProtection: false } as CombatInterruptResponseMap[K]
     case 'shield-spell':
       return { useShieldSpell: false } as CombatInterruptResponseMap[K]
+    case 'counterspell':
+      return { useCounterspell: false } as CombatInterruptResponseMap[K]
     case 'uncanny-dodge':
       return { useUncannyDodge: false } as CombatInterruptResponseMap[K]
     case 'deflect-missiles':
       return { accept: false } as CombatInterruptResponseMap[K]
     case 'saving-throw-reroll':
       return { useSavingThrowReroll: false } as CombatInterruptResponseMap[K]
+    case 'legendary-resistance':
+      return { useLegendaryResistance: false } as CombatInterruptResponseMap[K]
     case 'bardic-inspiration':
       return { useBardicInspiration: false } as CombatInterruptResponseMap[K]
     case 'cutting-words':
@@ -300,7 +344,7 @@ export function resolveCombatInterruptCharacter(
   characters: Character[],
 ): Character | undefined {
   const characterId =
-    interrupt.kind === 'gale-combo' || interrupt.kind === 'opportunity-attack' || interrupt.kind === 'protection' || interrupt.kind === 'cutting-words' || interrupt.kind === 'stroke-of-luck' || interrupt.kind === 'empowered-spell' || interrupt.kind === 'dm-adjudication'
+    interrupt.kind === 'gale-combo' || interrupt.kind === 'opportunity-attack' || interrupt.kind === 'protection' || interrupt.kind === 'counterspell' || interrupt.kind === 'cutting-words' || interrupt.kind === 'stroke-of-luck' || interrupt.kind === 'empowered-spell' || interrupt.kind === 'dm-adjudication'
       ? interrupt.actorCharId
       : interrupt.targetCharId
   return characterId ? characters.find((character) => character.id === characterId) : undefined
@@ -313,7 +357,7 @@ export function resolveCombatInterruptAnswerCandidate(
   const character = resolveCombatInterruptCharacter(interrupt, context.characters)
   // dm-adjudication is deliberately invisible to player prompt selection. Only
   // the DM-side authority loop may answer it.
-  if (interrupt.kind === 'dm-adjudication') return { character, canAnswer: false }
+  if (interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance') return { character, canAnswer: false }
   if (!character || (character.currentHp <= 0 && interrupt.kind !== 'bardic-inspiration')) {
     return { character, canAnswer: false }
   }

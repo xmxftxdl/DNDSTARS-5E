@@ -94,4 +94,32 @@ describe('shared resource runtime validation', () => {
       }],
     }).status).toBe('invalid')
   })
+
+  it('migrates legacy interrupts and rejects duplicate active transaction locks', () => {
+    const legacy = {
+      mapId: 'map', updatedAt: 2,
+      interrupts: [{
+        id: 'shield', mapId: 'map', kind: 'shield-spell', status: 'pending', payload: {},
+        createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const migrated = validateAndMigrateSharedResource('combat-interrupts', legacy)
+    expect(migrated.status).toBe('migrated')
+    if (migrated.status !== 'migrated') return
+    expect((migrated.value.interrupts as Array<Record<string, unknown>>)[0]).toMatchObject({
+      transactionId: 'shield', phase: 'before-hit', timeoutPolicy: 'rollback',
+    })
+    const duplicate = {
+      ...migrated.value,
+      interrupts: [
+        ...(migrated.value.interrupts as unknown[]),
+        {
+          id: 'second', transactionId: 'shield', mapId: 'map', kind: 'uncanny-dodge',
+          status: 'pending', phase: 'before-damage', timeoutPolicy: 'rollback', payload: {},
+          createdAt: 2, updatedAt: 2,
+        },
+      ],
+    }
+    expect(validateAndMigrateSharedResource('combat-interrupts', duplicate).status).toBe('invalid')
+  })
 })

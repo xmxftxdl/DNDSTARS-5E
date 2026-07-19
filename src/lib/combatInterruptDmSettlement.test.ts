@@ -53,7 +53,7 @@ describe('DM combat interrupt settlement', () => {
     })])
   })
 
-  it('cancels an expired DM adjudication so no resource transaction can commit', () => {
+  it('keeps an expired DM adjudication waiting so a disconnect cannot consume resources', () => {
     const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload>({
       id: 'dm-adjudication:cast-2', mapId: 'map-1', kind: 'dm-adjudication', actorCharId: 'wizard',
       payload: {
@@ -64,10 +64,7 @@ describe('DM combat interrupt settlement', () => {
     expect(resolveDmCombatInterruptSettlements({
       queue: queue([interrupt]), mapId: 'map-1', now: 600,
       pending: { dmAdjudication: interrupt.id },
-    })).toEqual([expect.objectContaining({
-      kind: 'dm-adjudication', reason: 'expired',
-      response: { decision: 'cancelled', effects: [] },
-    })])
+    })).toEqual([])
   })
 
   it("settles an answered Dark One's Own Luck choice", () => {

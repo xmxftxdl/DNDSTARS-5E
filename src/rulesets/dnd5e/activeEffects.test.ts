@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
-  activeEffectFromDnd5eTimedEffect,
   applyDnd5eActiveEffect,
   createDnd5eConditionEffect,
   dnd5eActiveEffectsPreventReactions,
   dnd5eActiveSpeedPenalty,
   dnd5eConditionsFromActiveEffects,
-  migrateDnd5eCombatStateEffects,
-  migrateDnd5eTimedEffects,
-  migrateLegacyDnd5eConditions,
   normalizeDnd5eActiveEffects,
   removeDnd5eActiveEffectsForEvent,
   validateDnd5eActiveEffectsStrict,
 } from './activeEffects'
+import {
+  activeEffectFromDnd5eTimedEffect,
+  migrateDnd5eCombatStateEffects,
+  migrateDnd5eTimedEffects,
+  migrateLegacyDnd5eConditions,
+} from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
   it('deterministically migrates legacy standard and plugin condition strings', () => {

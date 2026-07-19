@@ -88,6 +88,7 @@ export interface Dnd5eMonsterStatBlock {
   passivePerception: number
   languages: readonly string[]
   challenge: { rating: string; xp: number }
+  legendaryResistanceUses?: number
   traits: readonly Dnd5eMonsterTrait[]
   actions: readonly Dnd5eMonsterAction[]
   description: string

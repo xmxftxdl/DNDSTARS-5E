@@ -2,9 +2,15 @@ import { getRoomSession } from './roomSession'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eConditionsFromActiveEffects,
-  migrateDnd5eCombatStateEffects,
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
+import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
+import {
+  defaultCombatInterruptPhase,
+  type CombatInterruptKind,
+  type CombatInterruptPhase,
+  type CombatInterruptStatus,
+} from './combatInterruptQueue'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -49,6 +55,66 @@ function validEntityArray(value: unknown, resource: string): boolean {
 function sameStringArray(left: unknown, right: readonly string[]): boolean {
   return Array.isArray(left) && left.length === right.length &&
     left.every((entry, index) => typeof entry === 'string' && entry === right[index])
+}
+
+const COMBAT_INTERRUPT_KINDS = new Set<CombatInterruptKind>([
+  'dodge', 'stable-mind', 'gale-combo', 'agile-leap', 'opportunity-attack', 'protection',
+  'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
+  'legendary-resistance', 'bardic-inspiration', 'cutting-words', 'dark-ones-own-luck',
+  'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'dm-adjudication',
+])
+const COMBAT_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>([
+  'pending', 'waiting-for-dm', 'rolling', 'answered', 'done', 'rolled-back',
+])
+const COMBAT_INTERRUPT_PHASES = new Set<CombatInterruptPhase>([
+  'before-action', 'before-hit', 'before-damage', 'after-save', 'before-condition',
+])
+
+function migrateCombatInterruptEnvelope(input: Record<string, unknown>): {
+  value: Record<string, unknown>
+  issues: string[]
+  migrations: string[]
+} {
+  if (!Array.isArray(input.interrupts)) return { value: input, issues: [], migrations: [] }
+  const issues: string[] = []
+  const migrations: string[] = []
+  const ids = new Set<string>()
+  const interrupts = input.interrupts.map((raw, index) => {
+    const path = `interrupts[${index}]`
+    if (!isPlainObject(raw)) {
+      issues.push(`${path} 必须是对象`)
+      return raw
+    }
+    const kind = raw.kind as CombatInterruptKind
+    if (typeof raw.id !== 'string' || !raw.id || ids.has(raw.id)) issues.push(`${path}.id 无效或重复`)
+    else ids.add(raw.id)
+    if (typeof raw.mapId !== 'string' || !raw.mapId) issues.push(`${path}.mapId 无效`)
+    if (!COMBAT_INTERRUPT_KINDS.has(kind)) issues.push(`${path}.kind 无效`)
+    if (!COMBAT_INTERRUPT_STATUSES.has(raw.status as CombatInterruptStatus)) issues.push(`${path}.status 无效`)
+    if (!isPlainObject(raw.payload)) issues.push(`${path}.payload 必须是对象`)
+    if (!Number.isFinite(raw.createdAt) || !Number.isFinite(raw.updatedAt)) issues.push(`${path} 时间戳无效`)
+    if (raw.expiresAt != null && !Number.isFinite(raw.expiresAt)) issues.push(`${path}.expiresAt 无效`)
+    const transactionId = typeof raw.transactionId === 'string' && raw.transactionId ? raw.transactionId : raw.id
+    const phase = COMBAT_INTERRUPT_PHASES.has(raw.phase as CombatInterruptPhase)
+      ? raw.phase as CombatInterruptPhase
+      : COMBAT_INTERRUPT_KINDS.has(kind) ? defaultCombatInterruptPhase(kind) : undefined
+    const timeoutPolicy = raw.timeoutPolicy === 'wait-for-dm' ? 'wait-for-dm' : 'rollback'
+    if (!transactionId || !phase) return raw
+    if (raw.transactionId !== transactionId || raw.phase !== phase || raw.timeoutPolicy !== timeoutPolicy) {
+      migrations.push(`${path} 已补齐 P1 事务元数据`)
+      return { ...raw, transactionId, phase, timeoutPolicy }
+    }
+    return raw
+  })
+  const activeLocks = new Map<string, string>()
+  for (const [index, raw] of interrupts.entries()) {
+    if (!isPlainObject(raw) || raw.status === 'done' || raw.status === 'rolled-back') continue
+    const transactionId = String(raw.transactionId ?? '')
+    const previous = activeLocks.get(transactionId)
+    if (previous) issues.push(`interrupts[${index}] 与 ${previous} 重复锁定事务 ${transactionId}`)
+    else activeLocks.set(transactionId, `interrupts[${index}]`)
+  }
+  return { value: { ...input, interrupts }, issues, migrations }
 }
 
 function migrateDnd5eStateEnvelope(
@@ -165,6 +231,14 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
     ) reasons.push('_sync 版本元数据损坏')
   }
   if (reasons.length > 0) return { status: 'invalid', reasons }
+
+  if (name === 'combat-interrupts') {
+    const interrupts = migrateCombatInterruptEnvelope(input)
+    if (interrupts.issues.length > 0) return { status: 'invalid', reasons: interrupts.issues }
+    return interrupts.migrations.length > 0
+      ? { status: 'migrated', value: interrupts.value, reasons: interrupts.migrations }
+      : { status: 'valid', value: interrupts.value }
+  }
 
   const dnd5e = migrateDnd5eStateEnvelope(name, input)
   if (dnd5e.issues.length > 0) return { status: 'invalid', reasons: dnd5e.issues }

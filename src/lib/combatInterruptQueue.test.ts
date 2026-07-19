@@ -5,9 +5,12 @@ import {
   emptyCombatInterruptQueue,
   finishCombatInterrupt,
   findCombatInterrupt,
+  findCombatTransactionLock,
   isCombatInterruptExpired,
   markCombatInterruptRolling,
   upsertCombatInterrupt,
+  rollbackCombatInterrupt,
+  waitCombatInterruptForDm,
 } from './combatInterruptQueue'
 
 describe('combatInterruptQueue', () => {
@@ -77,5 +80,28 @@ describe('combatInterruptQueue', () => {
     expect(findCombatInterrupt(rolling, 'i4')?.status).toBe('rolling')
     expect(findCombatInterrupt(rolling, 'i4')?.response?.wantsDodge).toBe(true)
     expect(isCombatInterruptExpired(findCombatInterrupt(rolling, 'i4')!, 151)).toBe(false)
+  })
+
+  it('locks a transaction until it is committed or rolled back', () => {
+    const first = createCombatInterrupt({
+      id: 'first', transactionId: 'action-1', mapId: 'm1', kind: 'shield-spell', payload: {}, now: 100,
+    })
+    const duplicate = createCombatInterrupt({
+      id: 'duplicate', transactionId: 'action-1', mapId: 'm1', kind: 'uncanny-dodge', payload: {}, now: 101,
+    })
+    const queue = upsertCombatInterrupt(null, first, 100)
+    expect(upsertCombatInterrupt(queue, duplicate, 101).interrupts.map((entry) => entry.id)).toEqual(['first'])
+    expect(findCombatTransactionLock(queue, 'action-1')?.id).toBe('first')
+    const rolledBack = rollbackCombatInterrupt(queue, first.id, {}, 'timeout', 200)!
+    expect(findCombatTransactionLock(rolledBack, 'action-1')).toBeUndefined()
+    expect(upsertCombatInterrupt(rolledBack, duplicate, 201).interrupts.map((entry) => entry.id)).toContain('duplicate')
+  })
+
+  it('moves DM adjudication into an explicit non-expiring wait state', () => {
+    const interrupt = createCombatInterrupt({
+      id: 'dm', mapId: 'm1', kind: 'dm-adjudication', payload: {}, expiresAt: 150, now: 100,
+    })
+    const waiting = waitCombatInterruptForDm(upsertCombatInterrupt(null, interrupt), interrupt.id, 151)!
+    expect(findCombatInterrupt(waiting, interrupt.id)).toMatchObject({ status: 'waiting-for-dm', expiresAt: undefined })
   })
 })

@@ -21,6 +21,7 @@ import {
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCuttingWordsUse,
+  type Dnd5eCounterspellReaction,
   type Dnd5eEmpoweredSpellReroll,
   type Dnd5eSpellForcedMovement,
   type Dnd5eHeadlessCombatState,
@@ -593,7 +594,9 @@ export function resolvePreparedDnd5eSpellCast(input: {
   overchannelSelfDamageRolls?: readonly number[]
   protectionReactionActorId?: string
   shieldSpellReaction?: boolean
+  counterspellReaction?: Dnd5eCounterspellReaction
   shieldSpellReactionTargetIds?: readonly string[]
+  legendaryResistanceTargetIds?: readonly string[]
   tranquilitySave?: Dnd5eTranquilitySaveRoll
   uncannyDodge?: boolean
   effectRolls: readonly number[]
@@ -611,6 +614,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     empoweredRerolls: input.empoweredRerolls,
     draconicResistance: prepared.draconicResistance,
     repellingBlast: prepared.repellingBlast,
+    counterspellReaction: input.counterspellReaction,
     spellId: prepared.spell.id,
     slotLevel: prepared.slotLevel,
     d20: input.d20,
@@ -627,6 +631,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     protectionReactionActorId: input.protectionReactionActorId,
     shieldSpellReaction: input.shieldSpellReaction,
     shieldSpellReactionTargetIds: input.shieldSpellReactionTargetIds,
+    legendaryResistanceTargetIds: input.legendaryResistanceTargetIds,
     tranquilitySave: input.tranquilitySave,
     targetTranquilitySaves: input.targetTranquilitySaves,
     savingThrowD20: input.savingThrowD20,

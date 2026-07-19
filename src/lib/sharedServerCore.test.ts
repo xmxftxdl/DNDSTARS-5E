@@ -349,6 +349,7 @@ const mutateCombatInterruptQueue = (
     mutateCombatInterruptQueue: (queue: unknown, mutation: unknown, now?: number) => {
       ok: boolean
       status?: number
+      error?: string
       changed?: boolean
       next: {
         revision: number
@@ -389,6 +390,22 @@ describe('combat interrupt atomic mutation', () => {
     expect(mutateCombatInterruptQueue(queue, { operation: 'answer', mapId: 'map-1', id: 'a' }, 200)).toMatchObject({
       ok: true, changed: false,
     })
+  })
+
+  it('atomically rejects a second active interrupt for the same Headless transaction', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'shield', transactionId: 'action-1', mapId: 'map-1', kind: 'shield-spell',
+        status: 'pending', phase: 'before-hit', timeoutPolicy: 'rollback', payload: {}, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'upsert', mapId: 'map-1', interrupt: {
+        id: 'uncanny', transactionId: 'action-1', mapId: 'map-1', kind: 'uncanny-dodge',
+        status: 'pending', phase: 'before-damage', timeoutPolicy: 'rollback', payload: {}, createdAt: 2, updatedAt: 2,
+      },
+    }, 200)).toMatchObject({ ok: false, status: 409, error: 'transaction-locked' })
   })
 })
 

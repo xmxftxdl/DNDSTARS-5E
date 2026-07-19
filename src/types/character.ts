@@ -177,6 +177,7 @@ export interface Character {
     viciousMockeryAttackDisadvantage?: boolean
     /** 护盾术：直到自身下回合开始 AC +5，并免疫魔法飞弹。 */
     shieldSpellActive?: boolean
+    legendaryResistanceUses?: number
     /** 塑能学派“超限导能”自上次长休后的使用次数；长休时清除。 */
     overchannelUsesSinceLongRest?: number
     /** 龙族血脉“元素亲和”当前获得的先祖元素抗性。 */

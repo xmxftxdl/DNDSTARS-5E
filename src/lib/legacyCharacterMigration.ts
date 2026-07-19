@@ -1,6 +1,6 @@
 import type { Character } from '../types/character'
 import type { LegacyCharacterSave } from '../types/legacyCharacter'
-import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/activeEffects'
+import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 
 const RETIRED_CHARACTER_KEYS = [
   'actionPoints',

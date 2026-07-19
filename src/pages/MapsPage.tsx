@@ -89,6 +89,8 @@ import { publishPlayerActionAckWithSnapshots } from '../lib/playerActionAckPubli
 import {
   COMBAT_INTERRUPT_RESOURCE,
   createCombatInterrupt,
+  isCombatInterruptExpired,
+  shouldCombatInterruptWaitForDm,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
 } from '../lib/combatInterruptQueue'
@@ -97,6 +99,8 @@ import {
   answerSharedCombatInterrupt as persistAnswerSharedCombatInterrupt,
   finishSharedCombatInterrupt as persistFinishSharedCombatInterrupt,
   publishSharedCombatInterrupt as persistPublishSharedCombatInterrupt,
+  rollbackSharedCombatInterrupt as persistRollbackSharedCombatInterrupt,
+  waitSharedCombatInterruptForDm as persistWaitSharedCombatInterruptForDm,
 } from '../lib/combatInterruptSync'
 import {
   type OpportunityAttackInterruptPayload,
@@ -105,12 +109,16 @@ import {
   type ProtectionInterruptResponse,
   type ShieldSpellInterruptPayload,
   type ShieldSpellInterruptResponse,
+  type CounterspellInterruptPayload,
+  type CounterspellInterruptResponse,
   type UncannyDodgeInterruptPayload,
   type UncannyDodgeInterruptResponse,
   type DeflectMissilesInterruptPayload,
   type DeflectMissilesInterruptResponse,
   type SavingThrowRerollInterruptPayload,
   type SavingThrowRerollInterruptResponse,
+  type LegendaryResistanceInterruptPayload,
+  type LegendaryResistanceInterruptResponse,
   type BardicInspirationInterruptPayload,
   type BardicInspirationInterruptResponse,
   type BardicInspirationRollType,
@@ -127,6 +135,7 @@ import {
   type DmAdjudicationEffect,
   type DmAdjudicationInterruptPayload,
   type DmAdjudicationInterruptResponse,
+  defaultCombatInterruptResponse,
   isCombatInterruptKind,
 } from '../lib/combatInterruptProtocol'
 import {
@@ -135,6 +144,7 @@ import {
   type SharedOpportunityAttackPromptView,
   type SharedProtectionPromptView,
   type SharedShieldSpellPromptView,
+  type SharedCounterspellPromptView,
   type SharedUncannyDodgePromptView,
   type SharedDeflectMissilesPromptView,
   type SharedSavingThrowRerollPromptView,
@@ -161,6 +171,7 @@ import {
   type Dnd5eSpellTargetAttackRoll,
   type Dnd5eEmpoweredSpellReroll,
   type Dnd5eStandAgainstTideUse,
+  type Dnd5eCounterspellReaction,
   type Dnd5eWeaponClassDamageContext,
   type Dnd5eDamageType,
   type Dnd5eStandardConditionId,
@@ -171,7 +182,7 @@ import {
   type Dnd5eActiveEffectInstance,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eConditionsFromActiveEffects,
-  migrateLegacyDnd5eConditions,
+  normalizeDnd5eActiveEffects,
   type PreparedDnd5eAdjudicatedSpell,
   applyDnd5eInitiativeResourceFeatures,
   createDnd5eTurnEconomyCounts,
@@ -183,6 +194,8 @@ import {
   dnd5eCanUseDeflectMissiles,
   dnd5eMonkMartialArtsDie,
   dnd5eCanCastShieldSpell,
+  dnd5eCounterspellSlotLevels,
+  dnd5eCombatantPairKey,
   dnd5eSavingThrowRerollFeature,
   dnd5eSavingThrowMode,
   dnd5eHeldBardicInspirationDie,
@@ -930,6 +943,8 @@ export default function MapsPage() {
     useState<SharedProtectionPromptView | null>(null)
   const [sharedShieldSpellPrompt, setSharedShieldSpellPrompt] =
     useState<SharedShieldSpellPromptView | null>(null)
+  const [sharedCounterspellPrompt, setSharedCounterspellPrompt] =
+    useState<SharedCounterspellPromptView | null>(null)
   const [sharedUncannyDodgePrompt, setSharedUncannyDodgePrompt] =
     useState<SharedUncannyDodgePromptView | null>(null)
   const [sharedDeflectMissilesPrompt, setSharedDeflectMissilesPrompt] =
@@ -1011,6 +1026,36 @@ export default function MapsPage() {
       response,
     })
   }
+  const waitSharedCombatInterruptForDm = async (id: string) => {
+    if (!activeMap) return
+    await persistWaitSharedCombatInterruptForDm({
+      loadSharedResource,
+      saveSharedResource,
+      mutateSharedCombatInterrupt,
+      mapId: activeMap.id,
+      id,
+    })
+  }
+  const settleSharedCombatInterrupt = async (
+    id: string,
+    response: Record<string, unknown> | undefined,
+    reason: 'expired' | 'answered',
+  ) => {
+    if (!activeMap) return
+    if (reason === 'answered') {
+      await finishSharedCombatInterrupt(id, response)
+      return
+    }
+    await persistRollbackSharedCombatInterrupt({
+      loadSharedResource,
+      saveSharedResource,
+      mutateSharedCombatInterrupt,
+      mapId: activeMap.id,
+      id,
+      response,
+      reason: 'timeout',
+    })
+  }
   const [sharedDodgeNow, setSharedDodgeNow] = useState(runtimeNow)
   const [pendingPlayerAction, setPendingPlayerAction] = useState<{
     id: string
@@ -1052,6 +1097,11 @@ export default function MapsPage() {
     id: string
     targetCharId: string
     resolve: (useShieldSpell: boolean) => void
+  } | null>(null)
+  const pendingSharedCounterspellRef = useRef<{
+    id: string
+    actorCharId: string
+    resolve: (useCounterspell: boolean) => void
   } | null>(null)
   const pendingSharedUncannyDodgeRef = useRef<{
     id: string
@@ -1106,6 +1156,7 @@ export default function MapsPage() {
   const suppressedOpportunityAttackPromptIdsRef = useRef(new Set<string>())
   const suppressedProtectionPromptIdsRef = useRef(new Set<string>())
   const suppressedShieldSpellPromptIdsRef = useRef(new Set<string>())
+  const suppressedCounterspellPromptIdsRef = useRef(new Set<string>())
   const suppressedUncannyDodgePromptIdsRef = useRef(new Set<string>())
   const suppressedDeflectMissilesPromptIdsRef = useRef(new Set<string>())
   const suppressedSavingThrowRerollPromptIdsRef = useRef(new Set<string>())
@@ -1140,6 +1191,7 @@ export default function MapsPage() {
     if (
       !sharedOpportunityAttackPrompt?.expiresAt &&
       !sharedShieldSpellPrompt?.expiresAt &&
+      !sharedCounterspellPrompt?.expiresAt &&
       !sharedUncannyDodgePrompt?.expiresAt &&
       !sharedDeflectMissilesPrompt?.expiresAt &&
       !sharedSavingThrowRerollPrompt?.expiresAt &&
@@ -1157,6 +1209,8 @@ export default function MapsPage() {
     sharedOpportunityAttackPrompt?.expiresAt,
     sharedShieldSpellPrompt?.id,
     sharedShieldSpellPrompt?.expiresAt,
+    sharedCounterspellPrompt?.id,
+    sharedCounterspellPrompt?.expiresAt,
     sharedUncannyDodgePrompt?.id,
     sharedUncannyDodgePrompt?.expiresAt,
     sharedDeflectMissilesPrompt?.id,
@@ -1184,6 +1238,7 @@ export default function MapsPage() {
   const combatActiveRef = useRef(false)
   const playerActionResultBaselinesRef = useRef<Record<string, PlayerActionResultBaseline>>({})
   const playerActionCoordinatorRef = useRef(new DmActionTransactionCoordinator())
+  const activeInterruptTransactionIdRef = useRef<string | null>(null)
   const playerActionAuthorityCommitRef = useRef<Promise<void>>(Promise.resolve())
   const applyingPlayerActionTransactionRef = useRef(false)
   const previousCombatActiveRef = useRef(false)
@@ -1513,11 +1568,9 @@ export default function MapsPage() {
     ? characters.find((character) => character.id === effectDetailToken.characterId)
     : undefined
   const effectDetailEffects = effectDetailToken
-    ? migrateLegacyDnd5eConditions({
-        targetId: effectDetailToken.id,
-        conditions: effectDetailCharacter?.conditions ?? effectDetailToken.dnd5eCombatState?.conditions,
-        activeEffects: effectDetailCharacter?.dnd5eCombatState?.activeEffects ?? effectDetailToken.dnd5eCombatState?.activeEffects,
-      })
+    ? normalizeDnd5eActiveEffects(
+        effectDetailCharacter?.dnd5eCombatState?.activeEffects ?? effectDetailToken.dnd5eCombatState?.activeEffects,
+      )
     : []
   const canDmManageConditions = isDM && combatActive && settlementMode !== 'automatic'
   const dnd5eConditionsByToken = (() => {
@@ -1526,7 +1579,9 @@ export default function MapsPage() {
       const linked = token.characterId
         ? characters.find((character) => character.id === token.characterId)
         : undefined
-      const conditions = linked?.conditions ?? token.dnd5eCombatState?.conditions ?? []
+      const conditions = dnd5eConditionsFromActiveEffects(
+        linked?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects,
+      )
       const active = dnd5eActiveStandardConditions({ conditions })
       if (active.length > 0) result[token.id] = active
     }
@@ -1934,6 +1989,7 @@ export default function MapsPage() {
     setSharedOpportunityAttackPrompt(null)
     setSharedProtectionPrompt(null)
     setSharedShieldSpellPrompt(null)
+    setSharedCounterspellPrompt(null)
     setSharedUncannyDodgePrompt(null)
     setSharedDeflectMissilesPrompt(null)
     setSharedSavingThrowRerollPrompt(null)
@@ -1950,6 +2006,7 @@ export default function MapsPage() {
     suppressedOpportunityAttackPromptIdsRef.current.clear()
     suppressedProtectionPromptIdsRef.current.clear()
     suppressedShieldSpellPromptIdsRef.current.clear()
+    suppressedCounterspellPromptIdsRef.current.clear()
     suppressedUncannyDodgePromptIdsRef.current.clear()
     suppressedDeflectMissilesPromptIdsRef.current.clear()
     suppressedSavingThrowRerollPromptIdsRef.current.clear()
@@ -1962,6 +2019,7 @@ export default function MapsPage() {
     pendingSharedOpportunityAttackRef.current = null
     pendingSharedProtectionRef.current = null
     pendingSharedShieldSpellRef.current = null
+    pendingSharedCounterspellRef.current = null
     pendingSharedUncannyDodgeRef.current = null
     pendingSharedDeflectMissilesRef.current = null
     pendingSharedSavingThrowRerollRef.current = null
@@ -3643,6 +3701,7 @@ export default function MapsPage() {
       if (existing && isCombatInterruptKind(existing, 'dm-adjudication') && existing.status === 'pending') return
       const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? prepared.action.id,
         mapId: activeMap.id,
         kind: 'dm-adjudication',
         actorCharId: prepared.actor.id,
@@ -3694,6 +3753,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<OpportunityAttackInterruptPayload, OpportunityAttackInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'opportunity-attack',
         actorCharId: attacker.id,
@@ -3822,6 +3882,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<ProtectionInterruptPayload, ProtectionInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'protection',
         actorCharId: protector.id,
@@ -3865,6 +3926,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<ShieldSpellInterruptPayload, ShieldSpellInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'shield-spell',
         targetCharId: target.id,
@@ -3881,6 +3943,88 @@ export default function MapsPage() {
       pendingSharedShieldSpellRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
       void publishCombatInterrupt(interrupt)
     })
+  }
+
+  const requestSharedCounterspellChoice = (
+    reactor: Character,
+    params: {
+      casterName: string
+      spellName: string
+      spellLevel: number
+      counterspellSlotLevel: number
+      abilityCheckDc?: number
+    },
+  ): Promise<boolean> => {
+    const message = `${params.casterName} 正在施放${params.spellName}（${params.spellLevel} 环）。\n${reactor.name} 是否消耗反应和 ${params.counterspellSlotLevel} 环法术位施放法术反制？` +
+      (params.abilityCheckDc ? `\n需要进行 DC ${params.abilityCheckDc} 的施法属性检定。` : '\n该法术会被自动反制。')
+    if (!activeMap || !isDM) {
+      return showCombatDialog({
+        title: '法术反制', message, confirmText: '施放法术反制', cancelText: '保留反应', tone: 'violet',
+      })
+    }
+    const id = runtimeId()
+    const expiresAt = runtimeNow() + 15000
+    return new Promise((resolve) => {
+      const interrupt = createCombatInterrupt<CounterspellInterruptPayload, CounterspellInterruptResponse>({
+        id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
+        mapId: activeMap.id,
+        kind: 'counterspell',
+        phase: 'before-action',
+        actorCharId: reactor.id,
+        payload: {
+          reactorName: reactor.name,
+          casterName: params.casterName,
+          spellName: params.spellName,
+          spellLevel: params.spellLevel,
+          counterspellSlotLevel: params.counterspellSlotLevel,
+          abilityCheckDc: params.abilityCheckDc,
+        },
+        expiresAt,
+      })
+      pendingSharedCounterspellRef.current = { id, actorCharId: reactor.id, resolve }
+      void publishCombatInterrupt(interrupt)
+    })
+  }
+
+  const requestSharedLegendaryResistanceChoice = async (params: {
+    targetTokenId: string
+    targetName: string
+    effectName: string
+    total: number
+    dc: number
+    remainingUses: number
+  }): Promise<boolean> => {
+    if (!activeMap || !isDM || params.remainingUses < 1) return false
+    const id = runtimeId()
+    const interrupt = createCombatInterrupt<LegendaryResistanceInterruptPayload, LegendaryResistanceInterruptResponse>({
+      id,
+      transactionId: activeInterruptTransactionIdRef.current ?? id,
+      mapId: activeMap.id,
+      kind: 'legendary-resistance',
+      phase: 'after-save',
+      targetCharId: params.targetTokenId,
+      payload: {
+        targetName: params.targetName,
+        effectName: params.effectName,
+        total: params.total,
+        dc: params.dc,
+        remainingUses: params.remainingUses,
+      },
+      expiresAt: runtimeNow() + 60_000,
+    })
+    await publishCombatInterrupt(interrupt)
+    const useLegendaryResistance = await showCombatDialog({
+      title: '传奇抗性',
+      message: `${params.targetName} 对${params.effectName}的豁免失败（${params.total} vs DC ${params.dc}）。\n是否消耗 1 次传奇抗性，将本次豁免改为成功？\n剩余 ${params.remainingUses} 次。`,
+      confirmText: '使用传奇抗性',
+      cancelText: '保留次数',
+      tone: 'amber',
+    })
+    const response = { useLegendaryResistance }
+    await answerSharedCombatInterrupt(id, response)
+    await finishSharedCombatInterrupt(id, response)
+    return useLegendaryResistance
   }
 
   const requestSharedUncannyDodgeChoice = (
@@ -3901,6 +4045,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<UncannyDodgeInterruptPayload, UncannyDodgeInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'uncanny-dodge',
         targetCharId: target.id,
@@ -3942,6 +4087,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<DeflectMissilesInterruptPayload, DeflectMissilesInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'deflect-missiles',
         targetCharId: target.id,
@@ -3977,6 +4123,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<SavingThrowRerollInterruptPayload, SavingThrowRerollInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'saving-throw-reroll',
         targetCharId: target.id,
@@ -4040,6 +4187,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<BardicInspirationInterruptPayload, BardicInspirationInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'bardic-inspiration',
         targetCharId: target.id,
@@ -4130,6 +4278,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<CuttingWordsInterruptPayload, CuttingWordsInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'cutting-words',
         actorCharId: bard.id,
@@ -4188,6 +4337,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<DarkOnesOwnLuckInterruptPayload, DarkOnesOwnLuckInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'dark-ones-own-luck',
         targetCharId: target.id,
@@ -4334,6 +4484,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<StrokeOfLuckInterruptPayload, StrokeOfLuckInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'stroke-of-luck',
         actorCharId: actor.id,
@@ -4361,6 +4512,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<EmpoweredSpellInterruptPayload, EmpoweredSpellInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'empowered-spell',
         actorCharId: actor.id,
@@ -4391,6 +4543,7 @@ export default function MapsPage() {
     return new Promise((resolve) => {
       const interrupt = createCombatInterrupt<StandAgainstTideInterruptPayload, StandAgainstTideInterruptResponse>({
         id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
         kind: 'stand-against-tide',
         targetCharId: hunter.id,
@@ -5123,13 +5276,27 @@ export default function MapsPage() {
       const now = runtimeNow()
 
       if (isDM) {
+        for (const interrupt of queue.interrupts) {
+          if (!isCombatInterruptExpired(interrupt, now)) continue
+          await persistRollbackSharedCombatInterrupt({
+            loadSharedResource,
+            saveSharedResource,
+            mutateSharedCombatInterrupt,
+            mapId: activeMap.id,
+            id: interrupt.id,
+            response: defaultCombatInterruptResponse(interrupt.kind) as Record<string, unknown>,
+            reason: 'timeout',
+          })
+        }
         const dmAdjudicationInterrupt = queue.interrupts.find((interrupt) =>
           isCombatInterruptKind(interrupt, 'dm-adjudication') &&
-          interrupt.status === 'pending' &&
-          (interrupt.expiresAt == null || interrupt.expiresAt > now) &&
+          (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm') &&
           !suppressedDmAdjudicationPromptIdsRef.current.has(interrupt.id),
         )
         if (dmAdjudicationInterrupt && isCombatInterruptKind(dmAdjudicationInterrupt, 'dm-adjudication')) {
+          if (shouldCombatInterruptWaitForDm(dmAdjudicationInterrupt, now)) {
+            await waitSharedCombatInterruptForDm(dmAdjudicationInterrupt.id)
+          }
           if (sharedDmAdjudicationPromptIdRef.current !== dmAdjudicationInterrupt.id) {
             sharedDmAdjudicationPromptIdRef.current = dmAdjudicationInterrupt.id
             setSharedDmAdjudicationPrompt({
@@ -5156,6 +5323,7 @@ export default function MapsPage() {
             opportunityAttack: pendingSharedOpportunityAttackRef.current?.id,
             protection: pendingSharedProtectionRef.current?.id,
             shieldSpell: pendingSharedShieldSpellRef.current?.id,
+            counterspell: pendingSharedCounterspellRef.current?.id,
             uncannyDodge: pendingSharedUncannyDodgeRef.current?.id,
             deflectMissiles: pendingSharedDeflectMissilesRef.current?.id,
             savingThrowReroll: pendingSharedSavingThrowRerollRef.current?.id,
@@ -5174,7 +5342,7 @@ export default function MapsPage() {
               const pending = pendingSharedOpportunityAttackRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedOpportunityAttackRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useOpportunityAttack)
               break
             }
@@ -5182,7 +5350,7 @@ export default function MapsPage() {
               const pending = pendingSharedUncannyDodgeRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedUncannyDodgeRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useUncannyDodge)
               break
             }
@@ -5190,7 +5358,7 @@ export default function MapsPage() {
               const pending = pendingSharedDeflectMissilesRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedDeflectMissilesRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.accept)
               break
             }
@@ -5198,7 +5366,7 @@ export default function MapsPage() {
               const pending = pendingSharedProtectionRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedProtectionRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useProtection)
               break
             }
@@ -5206,15 +5374,23 @@ export default function MapsPage() {
               const pending = pendingSharedShieldSpellRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedShieldSpellRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useShieldSpell)
+              break
+            }
+            case 'counterspell': {
+              const pending = pendingSharedCounterspellRef.current
+              if (!pending || pending.id !== settlement.id) break
+              pendingSharedCounterspellRef.current = null
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              pending.resolve(settlement.useCounterspell)
               break
             }
             case 'saving-throw-reroll': {
               const pending = pendingSharedSavingThrowRerollRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedSavingThrowRerollRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useSavingThrowReroll)
               break
             }
@@ -5222,7 +5398,7 @@ export default function MapsPage() {
               const pending = pendingSharedBardicInspirationRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedBardicInspirationRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useBardicInspiration)
               break
             }
@@ -5230,7 +5406,7 @@ export default function MapsPage() {
               const pending = pendingSharedCuttingWordsRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedCuttingWordsRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useCuttingWords)
               break
             }
@@ -5238,7 +5414,7 @@ export default function MapsPage() {
               const pending = pendingSharedDarkOnesOwnLuckRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedDarkOnesOwnLuckRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useDarkOnesOwnLuck)
               break
             }
@@ -5246,7 +5422,7 @@ export default function MapsPage() {
               const pending = pendingSharedStrokeOfLuckRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedStrokeOfLuckRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useStrokeOfLuck)
               break
             }
@@ -5254,7 +5430,7 @@ export default function MapsPage() {
               const pending = pendingSharedEmpoweredSpellRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedEmpoweredSpellRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.rerollKeys)
               break
             }
@@ -5262,7 +5438,7 @@ export default function MapsPage() {
               const pending = pendingSharedStandAgainstTideRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedStandAgainstTideRef.current = null
-              await finishSharedCombatInterrupt(settlement.id, settlement.finishResponse)
+              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.targetTokenId)
               break
             }
@@ -5296,6 +5472,7 @@ export default function MapsPage() {
           'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
           protection: suppressedProtectionPromptIdsRef.current,
           'shield-spell': suppressedShieldSpellPromptIdsRef.current,
+          counterspell: suppressedCounterspellPromptIdsRef.current,
           'uncanny-dodge': suppressedUncannyDodgePromptIdsRef.current,
           'deflect-missiles': suppressedDeflectMissilesPromptIdsRef.current,
           'saving-throw-reroll': suppressedSavingThrowRerollPromptIdsRef.current,
@@ -5312,6 +5489,7 @@ export default function MapsPage() {
       setNullablePromptView(setSharedOpportunityAttackPrompt, views.opportunityAttack)
       setNullablePromptView(setSharedProtectionPrompt, views.protection)
       setNullablePromptView(setSharedShieldSpellPrompt, views.shieldSpell)
+      setNullablePromptView(setSharedCounterspellPrompt, views.counterspell)
       setNullablePromptView(setSharedUncannyDodgePrompt, views.uncannyDodge)
       setNullablePromptView(setSharedDeflectMissilesPrompt, views.deflectMissiles)
       setNullablePromptView(setSharedSavingThrowRerollPrompt, views.savingThrowReroll)
@@ -5389,6 +5567,14 @@ export default function MapsPage() {
     suppressedShieldSpellPromptIdsRef.current.add(prompt.id)
     setSharedShieldSpellPrompt(null)
     await answerSharedCombatInterrupt(prompt.id, { useShieldSpell })
+  }
+
+  const handleSharedCounterspellChoice = async (useCounterspell: boolean) => {
+    if (!sharedCounterspellPrompt || !activeMap) return
+    const prompt = sharedCounterspellPrompt
+    suppressedCounterspellPromptIdsRef.current.add(prompt.id)
+    setSharedCounterspellPrompt(null)
+    await answerSharedCombatInterrupt(prompt.id, { useCounterspell })
   }
 
   const handleSharedUncannyDodgeChoice = async (useUncannyDodge: boolean) => {
@@ -6480,7 +6666,9 @@ export default function MapsPage() {
       let protectionCandidate: { character: Character; token: Token } | undefined
       let useProtection = false
       let shieldSpellReaction = false
+      let counterspellReaction: Dnd5eCounterspellReaction | undefined
       const shieldSpellReactionTargetIds: string[] = []
+      const legendaryResistanceTargetIds: string[] = []
       const cuttingWordsReactionTokenIds = new Set<string>()
       const tranquilityPreventedTargetIds = new Set<string>()
       let effectRolls: number[]
@@ -6489,6 +6677,47 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'rejected', 'combatant-missing')
         completePlayerActionRequest(action)
         return
+      }
+      const counterspellCandidate = Object.values(spellCast.state.combatants).flatMap((combatant) => {
+        if (combatant.controller === spellActorCombatant.controller || combatant.currentHp <= 0) return []
+        const distance = spellCast.state.distanceFeetByCombatantPair?.[
+          dnd5eCombatantPairKey(combatant.id, spellActorCombatant.id)
+        ] ?? Number.POSITIVE_INFINITY
+        if (distance > 60) return []
+        const slotLevels = dnd5eCounterspellSlotLevels(combatant)
+        if (slotLevels.length === 0) return []
+        const characterId = spellCast.characterIdByCombatantId[combatant.id]
+        const character = characterId
+          ? spellCast.characters.find((candidate) => candidate.id === characterId)
+          : undefined
+        if (!character) return []
+        const automaticSlot = slotLevels.find((level) => level >= spellCast.slotLevel)
+        return [{ combatant, character, slotLevel: automaticSlot ?? slotLevels[0] }]
+      })[0]
+      if (counterspellCandidate) {
+        const abilityCheckDc = counterspellCandidate.slotLevel < spellCast.slotLevel
+          ? 10 + spellCast.slotLevel
+          : undefined
+        const accepted = await requestSharedCounterspellChoice(counterspellCandidate.character, {
+          casterName: spellCast.actor.name,
+          spellName: spellCast.spell.name,
+          spellLevel: spellCast.slotLevel,
+          counterspellSlotLevel: counterspellCandidate.slotLevel,
+          abilityCheckDc,
+        })
+        if (accepted) {
+          const ability = counterspellCandidate.combatant.classId === 'wizard' ? 'int' : 'cha'
+          const d20 = abilityCheckDc == null
+            ? undefined
+            : await rollDiceBoxD20('法术反制·施法属性检定', counterspellCandidate.character.name)
+          counterspellReaction = {
+            actorId: counterspellCandidate.combatant.id,
+            slotLevel: counterspellCandidate.slotLevel,
+            abilityCheckTotal: d20 == null
+              ? undefined
+              : d20 + Math.floor((counterspellCandidate.combatant.abilities[ability] - 10) / 2),
+          }
+        }
       }
       const tranquility = await rollDnd5eTranquilityWard({
         ward: spellCast.tranquilityWard,
@@ -6910,7 +7139,7 @@ export default function MapsPage() {
             })
             rerollD20 = reroll?.d20
             rerollD20Second = reroll?.d20Second
-            if (rerollD20 != null) {
+          if (rerollD20 != null) {
               preview = previewDnd5eSpellTargetSavingThrow(
                 spellCast,
                 targetIndex,
@@ -6920,6 +7149,21 @@ export default function MapsPage() {
                 baneRoll,
               )
             }
+          }
+          const legendaryResistance = !preview.success && targetCombatant &&
+            (targetCombatant.classState.legendaryResistanceUses ?? 0) > 0
+            ? await requestSharedLegendaryResistanceChoice({
+                targetTokenId: targetSave.targetToken.id,
+                targetName: targetSave.targetToken.label,
+                effectName: spellCast.spell.name,
+                total: preview.roll.total,
+                dc: targetSave.dc,
+                remainingUses: targetCombatant.classState.legendaryResistanceUses!,
+              })
+            : false
+          if (legendaryResistance) {
+            preview = { ...preview, success: true }
+            legendaryResistanceTargetIds.push(targetSave.targetToken.id)
           }
           targetSavingThrows.push({
             targetId: targetSave.targetToken.id,
@@ -6931,6 +7175,7 @@ export default function MapsPage() {
             rerollD20Second,
             bardicInspirationRoll: targetBardicInspirationRoll,
             darkOnesOwnLuckRoll: targetDarkOnesOwnLuckRoll,
+            legendaryResistance,
           })
           if (!preview.success && spellCast.spell.id === 'thunderwave') {
             const push = dnd5eRepellingBlastPushDestination(
@@ -7053,6 +7298,21 @@ export default function MapsPage() {
             savingThrowBlessRoll,
             savingThrowBaneRoll,
           )
+        }
+        const legendaryResistance = !preview.success && targetCombatant &&
+          (targetCombatant.classState.legendaryResistanceUses ?? 0) > 0
+          ? await requestSharedLegendaryResistanceChoice({
+              targetTokenId: spellCast.targetToken.id,
+              targetName: spellCast.targetToken.label,
+              effectName: spellCast.spell.name,
+              total: preview.roll.total,
+              dc: spellCast.savingThrow!.dc,
+              remainingUses: targetCombatant.classState.legendaryResistanceUses!,
+            })
+          : false
+        if (legendaryResistance) {
+          preview = { ...preview, success: true }
+          legendaryResistanceTargetIds.push(spellCast.targetToken.id)
         }
         if (!preview.success && spellCast.spell.id === 'thunderwave') {
           const push = dnd5eRepellingBlastPushDestination(
@@ -7287,6 +7547,8 @@ export default function MapsPage() {
         hurlThroughHellDamageRolls,
         overchannelSelfDamageRolls,
         protectionReactionActorId: useProtection ? protectionCandidate?.token.id : undefined,
+        counterspellReaction,
+        legendaryResistanceTargetIds,
         shieldSpellReaction,
         shieldSpellReactionTargetIds,
         tranquilitySave: tranquility.roll,
@@ -9890,18 +10152,22 @@ export default function MapsPage() {
       completePlayerActionRequest(action)
       return Promise.resolve()
     }
-    return playerActionCoordinatorRef.current.enqueue(
+    return playerActionCoordinatorRef.current.enqueueTransaction(
+      action.id,
       async () => {
         applyingPlayerActionTransactionRef.current = true
+        activeInterruptTransactionIdRef.current = action.id
         try {
           await processPlayerActionRequest(action)
           await playerActionAuthorityCommitRef.current
         } finally {
           applyingPlayerActionTransactionRef.current = false
+          activeInterruptTransactionIdRef.current = null
         }
       },
       async (error) => {
         applyingPlayerActionTransactionRef.current = false
+        activeInterruptTransactionIdRef.current = null
         console.error('[dm-authority] player action failed', error)
         await Promise.all([
           useMapStore.getState().loadShared(),
@@ -11414,6 +11680,30 @@ export default function MapsPage() {
                   >
                     施放护盾术
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {sharedCounterspellPrompt && (
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+              <div
+                role="dialog"
+                aria-labelledby="shared-counterspell-prompt-title"
+                className="relative mx-4 w-full max-w-md rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl"
+              >
+                {sharedCounterspellPrompt.expiresAt != null && (
+                  <div className="absolute right-5 top-5 rounded-full border border-violet-300/40 bg-violet-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-violet-100">
+                    {Math.max(0, Math.ceil((sharedCounterspellPrompt.expiresAt - sharedDodgeNow) / 1000))}s
+                  </div>
+                )}
+                <h3 id="shared-counterspell-prompt-title" className="text-lg font-semibold text-violet-100">法术反制</h3>
+                <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
+                  {`${sharedCounterspellPrompt.casterName} 正在施放${sharedCounterspellPrompt.spellName}（${sharedCounterspellPrompt.spellLevel} 环）。\n\n${sharedCounterspellPrompt.reactorChar.name} 是否消耗反应和 ${sharedCounterspellPrompt.counterspellSlotLevel} 环法术位进行反制？${sharedCounterspellPrompt.abilityCheckDc ? `\n需要进行 DC ${sharedCounterspellPrompt.abilityCheckDc} 的施法属性检定。` : ''}`}
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button type="button" onClick={() => handleSharedCounterspellChoice(false)} className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80">保留反应</button>
+                  <button type="button" data-testid="shared-counterspell-use" onClick={() => handleSharedCounterspellChoice(true)} className="rounded-lg bg-violet-500/25 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/35">施放法术反制</button>
                 </div>
               </div>
             </div>

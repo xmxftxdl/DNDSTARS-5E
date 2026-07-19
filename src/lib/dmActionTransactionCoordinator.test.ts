@@ -27,4 +27,24 @@ describe('DmActionTransactionCoordinator', () => {
     expect(recover).toHaveBeenCalledOnce()
     await expect(coordinator.enqueue(async () => undefined, recover)).resolves.toBeUndefined()
   })
+
+  it('coalesces duplicate transaction ids while an interrupt keeps the action open', async () => {
+    const coordinator = new DmActionTransactionCoordinator()
+    let release!: () => void
+    const barrier = new Promise<void>((resolve) => { release = resolve })
+    let executions = 0
+    const first = coordinator.enqueueTransaction('action-1', async () => {
+      executions += 1
+      await barrier
+    }, async () => undefined)
+    const duplicate = coordinator.enqueueTransaction('action-1', async () => {
+      executions += 1
+    }, async () => undefined)
+    expect(duplicate).toBe(first)
+    expect(coordinator.isLocked('action-1')).toBe(true)
+    release()
+    await first
+    expect(executions).toBe(1)
+    expect(coordinator.isLocked('action-1')).toBe(false)
+  })
 })

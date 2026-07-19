@@ -13,7 +13,9 @@ import {
   createDnd5eConditionEffect,
   dnd5eActiveEffectRemainingLabel,
   dnd5eConditionsFromActiveEffects,
-  migrateLegacyDnd5eConditions,
+  normalizeDnd5eActiveEffects,
+  removeDnd5eActiveEffectById,
+  removeDnd5eActiveEffectsByStandardCondition,
   type Dnd5eActiveEffectBreakTrigger,
   type Dnd5eActiveEffectDuration,
   type Dnd5eActiveEffectInstance,
@@ -86,7 +88,6 @@ export interface Dnd5eConditionSourceOption {
 }
 
 export default function Dnd5eConditionEditor({
-  conditions,
   activeEffects,
   targetId = 'unknown-target',
   sourceOptions = [],
@@ -100,7 +101,7 @@ export default function Dnd5eConditionEditor({
   conditionImmunities?: readonly string[]
   onChange: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
 }) {
-  const effects = useMemo(() => migrateLegacyDnd5eConditions({ targetId, conditions, activeEffects }), [activeEffects, conditions, targetId])
+  const effects = useMemo(() => normalizeDnd5eActiveEffects(activeEffects), [activeEffects])
   const active = new Set(dnd5eActiveStandardConditions({ conditions: dnd5eConditionsFromActiveEffects(effects) }))
   const immunities = new Set(conditionImmunities.flatMap((value) => {
     const condition = dnd5eStandardConditionId(value)
@@ -132,7 +133,7 @@ export default function Dnd5eConditionEditor({
     return { type: 'permanent' }
   }
 
-  const removeEffect = (effectId: string) => commit(effects.filter((effect) => effect.id !== effectId))
+  const removeEffect = (effectId: string) => commit(removeDnd5eActiveEffectById({ effects, id: effectId }).effects)
 
   return (
     <section className="rounded-xl border border-violet-300/15 bg-violet-500/[0.06] p-3" data-testid="dnd5e-condition-editor">
@@ -161,7 +162,7 @@ export default function Dnd5eConditionEditor({
               title={disabled ? `${label}：目标免疫` : selected ? `移除全部${label}来源` : `按下方配置附加${label}`}
               onClick={() => {
                 if (selected) {
-                  commit(effects.filter((effect) => effect.standardCondition !== condition))
+                  commit(removeDnd5eActiveEffectsByStandardCondition({ effects, condition }).effects)
                   return
                 }
                 const incoming = createDnd5eConditionEffect({

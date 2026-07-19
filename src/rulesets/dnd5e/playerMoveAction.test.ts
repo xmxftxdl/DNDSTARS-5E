@@ -4,7 +4,8 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { prepareDnd5ePlayerMove, resolvePreparedDnd5ePlayerMove } from './playerMoveAction'
-import { dnd5eConditionsFromActiveEffects, migrateLegacyDnd5eConditions } from './activeEffects'
+import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 function character(): Character {
   return {

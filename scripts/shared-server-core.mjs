@@ -758,9 +758,24 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
     if (existing && existing.status !== 'pending') {
       return { ok: true, changed: false, next: base }
     }
+    const transactionId = String(interrupt.transactionId ?? interrupt.id)
+    const conflictingLock = base.interrupts.find((item) =>
+      String(item.transactionId ?? item.id) === transactionId &&
+      item.id !== interrupt.id &&
+      !['done', 'rolled-back'].includes(item.status),
+    )
+    if (conflictingLock) return { ok: false, status: 409, error: 'transaction-locked' }
+    const normalizedInterrupt = {
+      ...interrupt,
+      transactionId,
+      phase: ['before-action', 'before-hit', 'before-damage', 'after-save', 'before-condition'].includes(interrupt.phase)
+        ? interrupt.phase
+        : 'before-action',
+      timeoutPolicy: interrupt.timeoutPolicy === 'wait-for-dm' ? 'wait-for-dm' : 'rollback',
+    }
     const interrupts = [
       ...base.interrupts.filter((item) => item.id !== interrupt.id),
-      interrupt,
+      normalizedInterrupt,
     ].sort((a, b) => Number(a.updatedAt ?? 0) - Number(b.updatedAt ?? 0)).slice(-32)
     return {
       ok: true,
@@ -769,7 +784,7 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
     }
   }
 
-  if (!['answer', 'rolling', 'finish'].includes(operation)) {
+  if (!['answer', 'rolling', 'finish', 'wait', 'rollback'].includes(operation)) {
     return { ok: false, status: 400, error: 'invalid-operation' }
   }
   const id = String(mutation?.id ?? '')
@@ -779,21 +794,36 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
   const allowed =
     (operation === 'answer' && (current.status === 'pending' || current.status === 'rolling')) ||
     (operation === 'rolling' && current.status === 'pending') ||
-    (operation === 'finish' && current.status !== 'done')
+    (operation === 'finish' && !['done', 'rolled-back'].includes(current.status)) ||
+    (operation === 'wait' && current.status === 'pending' && current.timeoutPolicy === 'wait-for-dm') ||
+    (operation === 'rollback' && !['done', 'rolled-back'].includes(current.status))
   if (!allowed) {
     const idempotent =
       (operation === 'answer' && current.status === 'answered') ||
       (operation === 'rolling' && current.status === 'rolling') ||
-      (operation === 'finish' && current.status === 'done')
+      (operation === 'finish' && current.status === 'done') ||
+      (operation === 'wait' && current.status === 'waiting-for-dm') ||
+      (operation === 'rollback' && current.status === 'rolled-back')
+    const sameResponse = mutation?.response == null || JSON.stringify(mutation.response) === JSON.stringify(current.response)
     return idempotent
-      ? { ok: true, changed: false, next: base }
+      ? sameResponse ? { ok: true, changed: false, next: base } : { ok: false, status: 409, error: 'settlement-conflict' }
       : { ok: false, status: 409, error: 'invalid-transition' }
   }
-  const status = operation === 'answer' ? 'answered' : operation === 'rolling' ? 'rolling' : 'done'
+  const status = operation === 'answer'
+    ? 'answered'
+    : operation === 'rolling'
+      ? 'rolling'
+      : operation === 'wait'
+        ? 'waiting-for-dm'
+        : operation === 'rollback'
+          ? 'rolled-back'
+          : 'done'
   const nextInterrupt = {
     ...current,
     status,
     response: mutation?.response ?? current.response,
+    ...(operation === 'wait' ? { waitingSince: now, expiresAt: undefined } : {}),
+    ...(operation === 'rollback' ? { rollbackReason: mutation?.rollbackReason ?? 'cancelled' } : {}),
     updatedAt: now,
   }
   const interrupts = [...base.interrupts]
@@ -933,6 +963,38 @@ function validateDnd5eResourceStates(name, value) {
   return null
 }
 
+const COMBAT_INTERRUPT_KINDS = new Set([
+  'dodge', 'stable-mind', 'gale-combo', 'agile-leap', 'opportunity-attack', 'protection',
+  'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
+  'legendary-resistance', 'bardic-inspiration', 'cutting-words', 'dark-ones-own-luck',
+  'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'dm-adjudication',
+])
+const COMBAT_INTERRUPT_STATUSES = new Set(['pending', 'waiting-for-dm', 'rolling', 'answered', 'done', 'rolled-back'])
+const COMBAT_INTERRUPT_PHASES = new Set(['before-action', 'before-hit', 'before-damage', 'after-save', 'before-condition'])
+
+function validateCombatInterruptState(value) {
+  const ids = new Set()
+  const activeTransactions = new Set()
+  for (const interrupt of value.interrupts ?? []) {
+    if (!plainObject(interrupt) || typeof interrupt.id !== 'string' || !interrupt.id || ids.has(interrupt.id)) return 'invalid-combat-interrupt'
+    ids.add(interrupt.id)
+    if (
+      typeof interrupt.mapId !== 'string' || !COMBAT_INTERRUPT_KINDS.has(interrupt.kind) ||
+      !COMBAT_INTERRUPT_STATUSES.has(interrupt.status) || !plainObject(interrupt.payload) ||
+      !Number.isFinite(interrupt.createdAt) || !Number.isFinite(interrupt.updatedAt)
+    ) return 'invalid-combat-interrupt'
+    if (interrupt.transactionId != null && (typeof interrupt.transactionId !== 'string' || !interrupt.transactionId)) return 'invalid-interrupt-transaction'
+    if (interrupt.phase != null && !COMBAT_INTERRUPT_PHASES.has(interrupt.phase)) return 'invalid-interrupt-phase'
+    if (interrupt.timeoutPolicy != null && !['rollback', 'wait-for-dm'].includes(interrupt.timeoutPolicy)) return 'invalid-interrupt-timeout-policy'
+    if (!['done', 'rolled-back'].includes(interrupt.status)) {
+      const transactionId = interrupt.transactionId ?? interrupt.id
+      if (activeTransactions.has(transactionId)) return 'duplicate-interrupt-transaction-lock'
+      activeTransactions.add(transactionId)
+    }
+  }
+  return null
+}
+
 /**
  * Persistence-boundary validation. The browser performs more detailed
  * migrations, while this deliberately conservative shape check prevents a
@@ -977,6 +1039,10 @@ export function validateSharedStateShape(name, value) {
   }
   const dnd5eStateReason = validateDnd5eResourceStates(name, value)
   if (dnd5eStateReason) return { ok: false, reason: dnd5eStateReason }
+  if (name === 'combat-interrupts') {
+    const interruptReason = validateCombatInterruptState(value)
+    if (interruptReason) return { ok: false, reason: interruptReason }
+  }
   return { ok: true }
 }
 

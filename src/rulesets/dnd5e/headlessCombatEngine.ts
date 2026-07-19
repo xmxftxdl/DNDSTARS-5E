@@ -49,7 +49,6 @@ import {
   applyDnd5eActiveEffect,
   createDnd5eMechanicalEffect,
   createDnd5eConditionEffect,
-  DND5E_ACTIVE_EFFECT_SCHEMA_VERSION,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eActiveEffectId,
   dnd5eActiveSpeedPenalty,
@@ -172,6 +171,7 @@ export interface Dnd5eCombatant {
     concentrationEffectsBySource?: Record<string, string>
     viciousMockeryAttackDisadvantage?: boolean
     shieldSpellActive?: boolean
+    legendaryResistanceUses?: number
     overchannelUsesSinceLongRest?: number
     draconicResistanceType?: Extract<Dnd5eDamageType, 'acid' | 'cold' | 'fire' | 'lightning' | 'poison'>
     draconicResistanceRoundsRemaining?: number
@@ -326,6 +326,13 @@ export interface Dnd5eStandAgainstTideUse {
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
 }
 
+export interface Dnd5eCounterspellReaction {
+  actorId: string
+  slotLevel: number
+  /** 反制高于所用法术位环级的法术时，传入已经包含施法属性调整值的检定总值。 */
+  abilityCheckTotal?: number
+}
+
 export interface Dnd5eHunterMultiattackRoll {
   targetId: string
   d20: number
@@ -382,6 +389,7 @@ export interface Dnd5eSpellTargetSavingThrowRoll {
   rerollD20Second?: number
   bardicInspirationRoll?: number
   darkOnesOwnLuckRoll?: number
+  legendaryResistance?: boolean
 }
 
 export interface Dnd5eSpellForcedMovement {
@@ -466,7 +474,7 @@ export type Dnd5eAction =
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; actorId: string; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; spellId: string; slotLevel: number; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[] }
+  | { type: 'cast-spell'; actorId: string; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[] }
   | { type: 'adjudicated-spell'; actorId: string; spellId: string; spellName: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action'; effects: readonly Dnd5eAdjudicatedSpellEffect[]; concentrationRounds?: number }
   | { type: 'paladin-sacred-weapon'; actorId: string }
   | { type: 'paladin-divine-sense'; actorId: string; targetIds: readonly string[] }
@@ -538,6 +546,7 @@ export type Dnd5eCombatEvent =
   | { type: 'monster-on-hit-save-required'; targetId: string; sourceId: string; actionId: string; ability: AbilityKey; dc: number; condition: Dnd5eStandardConditionId }
   | { type: 'exhaustion-gained'; actorId: string; level: number }
   | { type: 'saving-throw-resolved'; targetId: string; ability: AbilityKey; d20: number; modifier: number; total: number; dc: number; success: boolean }
+  | { type: 'legendary-resistance-used'; targetId: string; remainingUses: number }
   | { type: 'condition-applied'; actorId: string; targetId: string; condition: string }
   | { type: 'condition-ended'; targetId: string; condition: string }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
@@ -546,6 +555,7 @@ export type Dnd5eCombatEvent =
   | { type: 'active-effect-save-required'; targetId: string; effectId: string; ability: AbilityKey; dc: number; timing: 'target-turn-start' | 'target-turn-end' }
   | { type: 'active-effect-save-resolved'; targetId: string; effectId: string; ability: AbilityKey; dc: number; total: number; success: boolean }
   | { type: 'spell-cast'; actorId: string; targetId: string; spellId: string; slotLevel: number }
+  | { type: 'counterspell-resolved'; actorId: string; casterId: string; spellId: string; spellLevel: number; slotLevel: number; dc?: number; abilityCheckTotal?: number; success: boolean }
   | { type: 'adjudicated-spell-resolved'; actorId: string; spellId: string; spellName: string; slotLevel: number; effectCount: number }
   | { type: 'spell-sculpted'; actorId: string; targetId: string; spellId: string }
   | { type: 'metamagic-applied'; actorId: string; spellId: string; kind: string; targetId?: string }
@@ -1331,6 +1341,71 @@ export function dnd5eCanCastShieldSpell(
   return dnd5eShieldSpellSlotLevel(combatant) != null
 }
 
+function dnd5eCounterspellCastingSource(
+  combatant: Pick<Dnd5eCombatant, 'classId' | 'classSelections' | 'classResources' | 'currentHp' | 'turn' | 'conditions' | 'level' | 'exhaustionLevel' | 'subclassId' | 'classState'>,
+  requestedSlotLevel: number,
+): { level: number; resourceKey: string } | undefined {
+  if (!Number.isInteger(requestedSlotLevel) || requestedSlotLevel < 3 || requestedSlotLevel > 9) return undefined
+  const selected = combatant.classId === 'sorcerer' || combatant.classId === 'warlock'
+    ? combatant.classSelections['spell-known']?.includes('counterspell')
+    : combatant.classId === 'wizard'
+      ? combatant.classSelections['spell-prepared']?.includes('counterspell')
+      : false
+  if (
+    !selected || combatant.currentHp <= 0 || !combatant.turn.reactionAvailable ||
+    dnd5eIsIncapacitated(combatant) || dnd5eReactionsPrevented(combatant)
+  ) return undefined
+  if (combatant.classId === 'warlock') {
+    const pactLevel = dnd5ePactSlotLevel(combatant.level)
+    const resource = combatant.classResources['dnd5e-pact-slot']
+    return requestedSlotLevel === pactLevel && (resource?.current ?? 0) > 0
+      ? { level: pactLevel, resourceKey: 'dnd5e-pact-slot' }
+      : undefined
+  }
+  const resourceKey = `dnd5e-spell-slot-${requestedSlotLevel}`
+  return (combatant.classResources[resourceKey]?.current ?? 0) > 0
+    ? { level: requestedSlotLevel, resourceKey }
+    : undefined
+}
+
+export function dnd5eCounterspellSlotLevels(
+  combatant: Parameters<typeof dnd5eCounterspellCastingSource>[0],
+): number[] {
+  const levels: number[] = []
+  for (let level = 3; level <= 9; level += 1) {
+    if (dnd5eCounterspellCastingSource(combatant, level)) levels.push(level)
+  }
+  return levels
+}
+
+function applyCounterspellReaction(input: {
+  state: Dnd5eHeadlessCombatState
+  caster: Dnd5eCombatant
+  spellId: string
+  spellLevel: number
+  reaction?: Dnd5eCounterspellReaction
+  events: Dnd5eCombatEvent[]
+}): { requested: boolean; success: boolean } | undefined {
+  if (!input.reaction) return { requested: false, success: false }
+  const reactor = input.state.combatants[input.reaction.actorId]
+  const source = reactor ? dnd5eCounterspellCastingSource(reactor, input.reaction.slotLevel) : undefined
+  const distance = reactor ? dnd5eAttackDistanceFeet(input.state, reactor.id, input.caster.id) : Number.POSITIVE_INFINITY
+  if (!reactor || reactor.controller === input.caster.controller || distance > 60 || !source) return undefined
+  const requiresCheck = source.level < input.spellLevel
+  if (requiresCheck && !Number.isInteger(input.reaction.abilityCheckTotal)) return undefined
+  if (!requiresCheck && input.reaction.abilityCheckTotal != null) return undefined
+  if (!spendReaction(reactor, input.events) || !spendClassResource(reactor, source.resourceKey, input.events)) return undefined
+  input.events.push({ type: 'turn-resource-spent', actorId: reactor.id, resource: 'reaction' })
+  const dc = requiresCheck ? 10 + input.spellLevel : undefined
+  const success = !requiresCheck || input.reaction.abilityCheckTotal! >= dc!
+  input.events.push({
+    type: 'counterspell-resolved', actorId: reactor.id, casterId: input.caster.id,
+    spellId: input.spellId, spellLevel: input.spellLevel, slotLevel: source.level,
+    dc, abilityCheckTotal: input.reaction.abilityCheckTotal, success,
+  })
+  return { requested: true, success }
+}
+
 function applyShieldSpellReaction(
   target: Dnd5eCombatant,
   requested: boolean | undefined,
@@ -1520,7 +1595,16 @@ function resolveSavingThrowWithClassReroll(input: {
   modifier: number
   dc: number
   events: Dnd5eCombatEvent[]
+  legendaryResistance?: boolean
 }) {
+  const finalize = (resolution: SavingThrowResolution): SavingThrowResolution => {
+    if (!input.legendaryResistance) return resolution
+    const uses = Math.max(0, Math.floor(input.combatant.classState.legendaryResistanceUses ?? 0))
+    if (resolution.success || uses < 1) throw new RangeError('legendary resistance is unavailable')
+    input.combatant.classState.legendaryResistanceUses = uses - 1
+    input.events.push({ type: 'legendary-resistance-used', targetId: input.combatant.id, remainingUses: uses - 1 })
+    return { ...resolution, success: true }
+  }
   const automaticFailure = input.ability != null &&
     dnd5eConditionSavingThrowAutomaticallyFails(input.combatant, input.ability)
   const initial = applyBardicInspirationToSavingThrow(
@@ -1535,10 +1619,10 @@ function resolveSavingThrowWithClassReroll(input: {
     if (input.rerollD20 != null || input.rerollD20Second != null) {
       throw new RangeError('an automatic failed saving throw cannot be rerolled')
     }
-    return { ...initial, success: false }
+    return finalize({ ...initial, success: false })
   }
   const rerollRequested = input.rerollD20 != null || input.rerollD20Second != null
-  if (!rerollRequested) return initial
+  if (!rerollRequested) return finalize(initial)
   if (initial.success || input.rerollD20 == null) throw new RangeError('saving throw reroll is not available')
   const feature = dnd5eSavingThrowRerollFeature(input.combatant)
   if (!feature || !spendClassResource(input.combatant, feature.resourceKey, input.events)) {
@@ -1555,7 +1639,7 @@ function resolveSavingThrowWithClassReroll(input: {
     stateKey: feature.resourceKey === 'fighterIndomitable' ? 'indomitable-reroll' : 'diamond-soul-reroll',
     active: true,
   })
-  return resolved
+  return finalize(resolved)
 }
 
 const DND5E_ABILITY_KEYS: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
@@ -3184,6 +3268,7 @@ function resolveSpellCast(
   const spell = getDnd5eSrdCombatSpell(action.spellId)
   const metamagic = action.metamagic
   const requestedTargetIds = [...new Set(action.targetIds?.length ? action.targetIds : [action.targetId])]
+  const legendaryResistanceTargetIds = [...new Set(action.legendaryResistanceTargetIds ?? [])]
   const targets = requestedTargetIds.map((targetId) => state.combatants[targetId])
   const target = targets[0]
   const classDefinition = actor?.classId ? dnd5eClassDefinition(actor.classId) : undefined
@@ -3198,6 +3283,11 @@ function resolveSpellCast(
   ) {
     return fail(state, events, 'invalid-class-feature')
   }
+  if (
+    legendaryResistanceTargetIds.length !== (action.legendaryResistanceTargetIds?.length ?? 0) ||
+    legendaryResistanceTargetIds.some((targetId) => !requestedTargetIds.includes(targetId))
+  ) return fail(state, events, 'invalid-class-feature')
+  const legendaryResistanceTargetIdSet = new Set(legendaryResistanceTargetIds)
   const projectileTargetIds = action.projectileTargetIds ?? []
   const shieldSpellReactionTargetIds = action.shieldSpellReactionTargetIds ?? []
   if (dnd5eSpellAllowsRepeatedTargets(spell)) {
@@ -3447,6 +3537,16 @@ function resolveSpellCast(
     }
     return { ok: true, state, events }
   }
+  const counterspell = applyCounterspellReaction({
+    state,
+    caster: actor,
+    spellId: spell.id,
+    spellLevel: action.slotLevel,
+    reaction: action.counterspellReaction,
+    events,
+  })
+  if (!counterspell) return fail(state, events, 'invalid-class-feature')
+  if (counterspell.success) return { ok: true, state, events }
   const attackingFromHidden = spell.effect === 'spell-attack' && actor.classState.hiddenCheckTotal != null
   if (attackingFromHidden) {
     actor.classState.hiddenCheckTotal = undefined
@@ -3603,6 +3703,7 @@ function resolveSpellCast(
           modifier: saveModifier,
           dc,
           events,
+          legendaryResistance: legendaryResistanceTargetIdSet.has(affectedTarget!.id),
         })
         events.push({
           type: 'saving-throw-resolved', targetId: affectedTarget!.id, ability: spell.saveAbility,
@@ -3952,6 +4053,7 @@ function resolveSpellCast(
             modifier: saveModifier,
             dc,
             events,
+            legendaryResistance: legendaryResistanceTargetIdSet.has(affectedTarget!.id),
           })
           events.push({
             type: 'saving-throw-resolved', targetId: affectedTarget!.id, ability: spell.saveAbility!,
@@ -4022,6 +4124,7 @@ function resolveSpellCast(
         modifier: saveModifier,
         dc,
         events,
+        legendaryResistance: legendaryResistanceTargetIdSet.has(target.id),
       })
       events.push({
         type: 'saving-throw-resolved', targetId: target.id, ability: spell.saveAbility!, d20: save.roll.d20,
@@ -5085,13 +5188,13 @@ function resolveAdjudicatedSpell(
             appliedRound: state.round,
             appliedTurnKey: turnKey,
           }), legacyCondition: addCondition }
-        : {
-            schemaVersion: DND5E_ACTIVE_EFFECT_SCHEMA_VERSION,
+        : createDnd5eMechanicalEffect({
             id: `adjudicated:${action.spellId}:${actor.id}:${target.id}:${encodeURIComponent(addCondition)}`,
             definitionId: `adjudicated:${action.spellId}:${addCondition}`,
             label: addCondition,
             kind: 'custom',
             legacyCondition: addCondition,
+            targetId: target.id,
             source: { kind: 'spell', actorId: actor.id, actorName: actor.name, rulesId: action.spellId, label: action.spellName },
             appliedAt: 0,
             appliedRound: state.round,
@@ -5100,7 +5203,7 @@ function resolveAdjudicatedSpell(
             stackingKey: `adjudicated:${action.spellId}:${addCondition}`,
             stackingPolicy: 'refresh-duration',
             visibility: 'public',
-          }
+          })
       const mutation = applyDnd5eActiveEffect({
         effects: reconciledDnd5eActiveEffects(target),
         incoming,

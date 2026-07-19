@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from './headlessCombatEngine'
-import { dnd5eConditionsFromActiveEffects, migrateLegacyDnd5eConditions } from './activeEffects'
+import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -16,6 +17,57 @@ function fighter(id: string, initiative: number, patch = {}) {
 }
 
 describe('D&D 5e 2014 headless combat engine', () => {
+  it('resolves Counterspell inside the Headless spell transaction and spends only declared resources', () => {
+    const caster = fighter('caster', 20, {
+      classId: 'wizard', level: 5, controller: 'player',
+      abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'] },
+    })
+    const reactor = fighter('reactor', 10, {
+      classId: 'wizard', level: 5, controller: 'dm',
+      abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-prepared': ['counterspell'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const state = startDnd5eHeadlessCombat('counterspell', [caster, reactor])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('caster', 'reactor')]: 30 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'caster', targetId: 'reactor', spellId: 'fire-bolt', slotLevel: 0,
+      d20: 20, effectRolls: [6, 6], counterspellReaction: { actorId: 'reactor', slotLevel: 3 },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.reactor.currentHp).toBe(20)
+    expect(result.state.combatants.caster.turn.actionAvailable).toBe(false)
+    expect(result.state.combatants.reactor.turn.reactionAvailable).toBe(false)
+    expect(result.state.combatants.reactor.classResources['dnd5e-spell-slot-3'].current).toBe(0)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'counterspell-resolved', actorId: 'reactor', casterId: 'caster', success: true,
+    }))
+  })
+
+  it('lets a failed spell save consume Legendary Resistance before damage and conditions', () => {
+    const caster = fighter('cleric', 20, {
+      classId: 'cleric', level: 5, controller: 'player',
+      abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-cantrips': ['sacred-flame'] },
+    })
+    const legendary = fighter('legendary', 10, {
+      controller: 'dm', abilities: { ...abilities, dex: 8 },
+      classState: { legendaryResistanceUses: 1 },
+    })
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('legendary-resistance', [caster, legendary]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'legendary', spellId: 'sacred-flame', slotLevel: 0,
+      savingThrowD20: 1, effectRolls: [], legendaryResistanceTargetIds: ['legendary'],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.legendary.currentHp).toBe(20)
+    expect(result.state.combatants.legendary.classState.legendaryResistanceUses).toBe(0)
+    expect(result.events).toContainEqual({ type: 'legendary-resistance-used', targetId: 'legendary', remainingUses: 0 })
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'saving-throw-resolved', success: true }))
+  })
+
   it('spends movement independently from the action and supports Dash', () => {
     const state = startDnd5eHeadlessCombat('combat', [fighter('a', 20), fighter('b', 10)])
     const moved = resolveDnd5eHeadlessAction(state, { type: 'move', actorId: 'a', to: { x: 20, y: 0 }, distance: 20 })

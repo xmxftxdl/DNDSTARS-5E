@@ -14,9 +14,10 @@ import { applyDnd5eShortRestResourceFeatures } from '../rulesets/dnd5e/classes'
 import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from '../rulesets/dnd5e/items'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
-  migrateDnd5eCombatStateEffects,
+  projectDnd5eActiveEffectState,
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
+import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
 
 import type { Character } from '../types/character'
@@ -577,23 +578,19 @@ interface SharedCharactersState {
 }
 
 export function mergePlayerWritableCharacter(local: Character, shared: Character): Character {
-  const migratedEffects = migrateDnd5eCombatStateEffects({
-    targetId: shared.id,
-    state: shared.dnd5eCombatState,
-    conditions: shared.conditions,
-  })
+  const projectedEffects = projectDnd5eActiveEffectState(shared.dnd5eCombatState?.activeEffects)
   return {
     ...local,
     currentHp: shared.currentHp,
     maxHp: shared.maxHp,
     tempHp: shared.tempHp,
-    conditions: migratedEffects.conditions,
+    conditions: projectedEffects.conditions,
     classResources: shared.classResources,
     dnd5eCombatState: shared.dnd5eCombatState
       ? {
           ...shared.dnd5eCombatState,
-          schemaVersion: migratedEffects.schemaVersion,
-          activeEffects: migratedEffects.activeEffects?.map((effect) => ({
+          schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+          activeEffects: projectedEffects.activeEffects?.map((effect) => ({
             ...effect,
             source: { ...effect.source },
             duration: { ...effect.duration },

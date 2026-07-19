@@ -4,7 +4,8 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { prepareDnd5eClassFeature, previewDnd5eMonkBonusAttack, resolvePreparedDnd5eClassFeature } from './classFeatureAction'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { dnd5eConditionsFromActiveEffects, migrateLegacyDnd5eConditions } from './activeEffects'
+import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   const result: Character = {

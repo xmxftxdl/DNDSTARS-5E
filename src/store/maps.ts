@@ -11,9 +11,9 @@ import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
-  migrateDnd5eCombatStateEffects,
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
+import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
   creatureSizeToTokenSize,
   normalizeCreatureSize,
@@ -153,6 +153,7 @@ export interface Token {
     concentrationEffectsBySource?: Record<string, string>
     viciousMockeryAttackDisadvantage?: boolean
     shieldSpellActive?: boolean
+    legendaryResistanceUses?: number
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number
     hurlThroughHellAppliedTurnKey?: string

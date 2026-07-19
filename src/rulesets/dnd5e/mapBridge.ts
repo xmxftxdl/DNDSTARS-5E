@@ -203,7 +203,10 @@ export function createDnd5eMapCombatSnapshot(input: {
       speed: monster ? dnd5eMonsterMapSpeed(monster) : 30,
       position: { x: token.x, y: token.y },
       concentrating: !!tokenClassState.concentrationSpellId,
-      classState: tokenClassState,
+      classState: {
+        ...tokenClassState,
+        legendaryResistanceUses: tokenClassState.legendaryResistanceUses ?? monster?.legendaryResistanceUses,
+      },
       wearingArmor: !!monster?.armorClass.note && !monster.armorClass.note.includes('天生护甲'),
       wearingMetalArmor: !!monster?.armorClass.note && [
         '链甲', '鳞甲', '胸甲', '半身板甲', '环甲', '板条甲', '板甲',
