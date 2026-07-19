@@ -52,6 +52,7 @@ import Dnd5eAbilityCheckPanel from '../components/map/Dnd5eAbilityCheckPanel'
 import Dnd5ePluginCombatPanel from '../components/map/Dnd5ePluginCombatPanel'
 import Dnd5eActiveEffectDetailsDialog from '../components/map/Dnd5eActiveEffectDetailsDialog'
 import CombatSettlementPanel, { type ManualSettlementTarget } from '../components/map/CombatSettlementPanel'
+import CombatStatisticsPanel from '../components/map/CombatStatisticsPanel'
 import DiceRollOverlay from '../components/DiceRollOverlay'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
@@ -60,6 +61,7 @@ import { characterHpTokenPatch, useMapStore } from '../store/maps'
 import { useFogStore } from '../store/fog'
 import { useMapGeometryStore } from '../store/mapGeometry'
 import { useMapExplorationStore } from '../store/mapExploration'
+import { useCombatStatisticsStore } from '../store/combatStatistics'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
 import { useSpellbookStore } from '../store/spellbook'
@@ -298,6 +300,7 @@ import {
   resolvePreparedDnd5eAdjudicatedSpell,
   resolveDnd5eMonsterMapMove,
   resolveDnd5eHeadlessAction,
+  setDnd5eHeadlessResolutionObserver,
   planDnd5eMapResultApplication,
   spendDnd5eMovement,
   spendDnd5eTurnResource,
@@ -803,6 +806,9 @@ export default function MapsPage() {
   const updateGeometryEntity = useMapGeometryStore((s) => s.updateEntity)
   const explorationMaps = useMapExplorationStore((s) => s.maps)
   const recordMapExploration = useMapExplorationStore((s) => s.record)
+  const combatStatisticsSessions = useCombatStatisticsStore((s) => s.sessions)
+  const startCombatStatistics = useCombatStatisticsStore((s) => s.startCombat)
+  const recordCombatStatistics = useCombatStatisticsStore((s) => s.record)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
@@ -856,6 +862,7 @@ export default function MapsPage() {
   const dnd5eTurnEconomyByTokenRef = useRef<Dnd5eTurnEconomyByToken>({})
   const [combatLog, setCombatLog] = useState<CombatLogEntry[]>([])
   const [combatLogOpen, setCombatLogOpen] = useState(false)
+  const [combatStatisticsOpen, setCombatStatisticsOpen] = useState(false)
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
   const [selectedCharacterTokenId, setSelectedCharacterTokenId] = useState<string | null>(null)
   const [effectDetailTokenId, setEffectDetailTokenId] = useState<string | null>(null)
@@ -1637,6 +1644,22 @@ export default function MapsPage() {
   const playerSlot = currentPlayerSlot()
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
+  const activeMapId = activeMap?.id
+  const combatStatisticsSession = combatStatisticsSessions.find((session) => session.combatId === combatId) ??
+    [...combatStatisticsSessions].reverse().find((session) => session.mapId === activeMapId)
+
+  useEffect(() => {
+    if (!isDM || !activeMapId) return
+    return setDnd5eHeadlessResolutionObserver((observation) => {
+      if (!combatActiveRef.current) return
+      const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMapId)
+      const sideByCombatantId = Object.fromEntries((latestMap?.tokens ?? []).map((token) => [
+        token.id,
+        token.type === 'player' ? 'player' : token.type === 'enemy' ? 'enemy' : 'npc',
+      ] as const))
+      recordCombatStatistics(activeMapId, observation, sideByCombatantId)
+    })
+  }, [activeMapId, isDM, recordCombatStatistics])
   const activeFog = activeMap
     ? fogMaps.find((fog) => fog.mapId === activeMap.id) ?? createEmptyMapFog(activeMap.id, 0)
     : undefined
@@ -3831,6 +3854,7 @@ export default function MapsPage() {
     const nextCombatId = runtimeId(`${activeMap.id}:combat`)
     combatIdRef.current = nextCombatId
     setCombatId(nextCombatId)
+    startCombatStatistics(nextCombatId, activeMap.id)
     clearEnemyTurnTimers()
     setCombatLog([])
     setCombatLogOpen(true)
@@ -12917,6 +12941,17 @@ export default function MapsPage() {
               currentTurnTokenId={currentInitiativeToken?.id}
               onRoll={handleManualDiceRoll}
               onSettle={isDM ? handleManualSettlement : undefined}
+            />
+          )}
+
+          {isDM && (combatActive || !!combatStatisticsSession) && (
+            <CombatStatisticsPanel
+              session={combatStatisticsSession}
+              open={combatStatisticsOpen}
+              onOpenChange={setCombatStatisticsOpen}
+              onReset={combatId && activeMap
+                ? () => startCombatStatistics(combatId, activeMap.id)
+                : undefined}
             />
           )}
 

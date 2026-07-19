@@ -607,6 +607,26 @@ export type Dnd5eActionResult =
   | { ok: true; state: Dnd5eHeadlessCombatState; events: readonly Dnd5eCombatEvent[] }
   | { ok: false; state: Dnd5eHeadlessCombatState; events: readonly Dnd5eCombatEvent[]; reason: Dnd5eActionFailure }
 
+export interface Dnd5eHeadlessResolutionObservation {
+  source: Dnd5eHeadlessCombatState
+  action: Dnd5eAction
+  result: Dnd5eActionResult
+}
+
+type Dnd5eHeadlessResolutionObserver = (observation: Dnd5eHeadlessResolutionObservation) => void
+
+let headlessResolutionObserver: Dnd5eHeadlessResolutionObserver | undefined
+let headlessResolutionDepth = 0
+
+export function setDnd5eHeadlessResolutionObserver(
+  observer: Dnd5eHeadlessResolutionObserver | undefined,
+): () => void {
+  headlessResolutionObserver = observer
+  return () => {
+    if (headlessResolutionObserver === observer) headlessResolutionObserver = undefined
+  }
+}
+
 function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
   return {
     ...state,
@@ -7284,13 +7304,30 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
  * 该检查位于事务边界，因此法术、职业、怪物、DM 与插件状态写入都无法绕过。
  */
 export function resolveDnd5eHeadlessAction(source: Dnd5eHeadlessCombatState, action: Dnd5eAction): Dnd5eActionResult {
-  const result = resolveDnd5eHeadlessActionInternal(source, action)
-  if (!result.ok) return result
-  const events = [...result.events]
-  for (const combatant of Object.values(result.state.combatants)) {
-    if ((combatant.concentrating || combatant.classState.concentrationSpellId) && dnd5eIsIncapacitated(combatant)) {
-      endDnd5eConcentration(result.state, combatant, events)
+  const isRootResolution = headlessResolutionDepth === 0
+  headlessResolutionDepth += 1
+  let finalResult: Dnd5eActionResult
+  try {
+    const result = resolveDnd5eHeadlessActionInternal(source, action)
+    if (!result.ok) finalResult = result
+    else {
+      const events = [...result.events]
+      for (const combatant of Object.values(result.state.combatants)) {
+        if ((combatant.concentrating || combatant.classState.concentrationSpellId) && dnd5eIsIncapacitated(combatant)) {
+          endDnd5eConcentration(result.state, combatant, events)
+        }
+      }
+      finalResult = { ...result, events }
+    }
+  } finally {
+    headlessResolutionDepth -= 1
+  }
+  if (isRootResolution && headlessResolutionObserver) {
+    try {
+      headlessResolutionObserver({ source, action, result: finalResult! })
+    } catch {
+      // Telemetry is observational and must never alter authoritative settlement.
     }
   }
-  return { ...result, events }
+  return finalResult!
 }

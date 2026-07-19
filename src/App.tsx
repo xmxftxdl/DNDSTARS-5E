@@ -22,6 +22,7 @@ import { useMapStore } from './store/maps'
 import { useFogStore } from './store/fog'
 import { useMapGeometryStore } from './store/mapGeometry'
 import { useMapExplorationStore } from './store/mapExploration'
+import { useCombatStatisticsStore } from './store/combatStatistics'
 import { useCharacterStore } from './store/characters'
 import { SHARED_SPELLBOOK_RESOURCE, useSpellbookStore } from './store/spellbook'
 import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e'
@@ -30,6 +31,7 @@ import { getAssignedPlayerCharacterId } from './lib/playerView'
 import { MAP_FOG_RESOURCE } from './lib/fogOfWar'
 import { MAP_GEOMETRY_RESOURCE } from './lib/mapGeometry'
 import { MAP_EXPLORATION_RESOURCE } from './lib/mapExploration'
+import { COMBAT_STATISTICS_RESOURCE } from './lib/combatStatistics'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 
 export default function App() {
@@ -44,6 +46,7 @@ export default function App() {
   const loadSharedFog = useFogStore((s) => s.loadShared)
   const loadSharedMapGeometry = useMapGeometryStore((s) => s.loadShared)
   const loadSharedMapExploration = useMapExplorationStore((s) => s.loadShared)
+  const loadSharedCombatStatistics = useCombatStatisticsStore((s) => s.loadShared)
   const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
   const loadSharedSpellbook = useSpellbookStore((s) => s.loadShared)
 
@@ -116,7 +119,7 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
@@ -128,6 +131,7 @@ export default function App() {
       await loadSharedMaps()
     })
     const stopMapExploration = subscribeSharedResourceInvalidation(MAP_EXPLORATION_RESOURCE, loadSharedMapExploration)
+    const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics)
     return () => {
       stopMaps()
       stopCharacters()
@@ -135,8 +139,9 @@ export default function App() {
       stopFog()
       stopMapGeometry()
       stopMapExploration()
+      stopCombatStatistics()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return

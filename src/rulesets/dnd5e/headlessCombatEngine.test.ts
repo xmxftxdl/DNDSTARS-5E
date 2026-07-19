@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 
@@ -78,6 +78,25 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dashed.ok).toBe(true)
     if (!dashed.ok) return
     expect(dashed.state.combatants.a.turn).toMatchObject({ actionAvailable: false, movementRemaining: 40 })
+  })
+
+  it('emits one observational result for each root Headless transaction', () => {
+    const observations: unknown[] = []
+    const stop = setDnd5eHeadlessResolutionObserver((observation) => observations.push(observation))
+    try {
+      const state = startDnd5eHeadlessCombat('observed', [fighter('a', 20), fighter('b', 10)])
+      const result = resolveDnd5eHeadlessAction(state, {
+        type: 'move', actorId: 'a', to: { x: 5, y: 0 }, distance: 5,
+      })
+      expect(result.ok).toBe(true)
+    } finally {
+      stop()
+    }
+    expect(observations).toHaveLength(1)
+    expect(observations[0]).toMatchObject({
+      action: { type: 'move', actorId: 'a' },
+      result: { ok: true, events: expect.arrayContaining([expect.objectContaining({ type: 'moved' })]) },
+    })
   })
 
   it('resolves Lore Bard Peerless Skill as an authoritative ability-check resource spend', () => {

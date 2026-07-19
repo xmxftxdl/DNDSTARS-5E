@@ -1071,6 +1071,39 @@ function validateMapExplorationState(value) {
   return null
 }
 
+const COMBAT_STATISTIC_NUMBER_FIELDS = [
+  'damageDealt', 'damageTaken', 'healingDone', 'healingReceived', 'temporaryHpGranted', 'damagePrevented',
+  'hostileConditionsApplied', 'attacks', 'hits', 'criticalHits', 'knockouts', 'kills', 'alliesRescued',
+  'successfulSaves', 'failedSaves', 'concentrationChecks', 'concentrationMaintained', 'actionsSpent',
+  'bonusActionsSpent', 'reactionsSpent', 'movementSpentFeet', 'classResourcesSpent', 'spellSlotsSpent',
+]
+
+function validateCombatStatisticsState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.sessions) || value.sessions.length > 24 ||
+    !Number.isFinite(value.updatedAt) || value.updatedAt < 0) return 'invalid-combat-statistics'
+  const combatIds = new Set()
+  for (const session of value.sessions) {
+    if (!plainObject(session) || typeof session.combatId !== 'string' || !session.combatId ||
+      combatIds.has(session.combatId) || typeof session.mapId !== 'string' || !session.mapId ||
+      !Number.isFinite(session.startedAt) || session.startedAt < 0 ||
+      !Number.isFinite(session.updatedAt) || session.updatedAt < 0 ||
+      !Number.isFinite(session.lastRound) || session.lastRound < 0 || !plainObject(session.combatants) ||
+      Object.keys(session.combatants).length > 512 || !Array.isArray(session.receipts) || session.receipts.length > 4_096 ||
+      session.receipts.some((receipt) => typeof receipt !== 'string' || !receipt || receipt.length > 160)) {
+      return 'invalid-combat-statistics'
+    }
+    combatIds.add(session.combatId)
+    for (const [combatantId, stats] of Object.entries(session.combatants)) {
+      if (!combatantId || combatantId.length > 160 || !plainObject(stats) || stats.combatantId !== combatantId ||
+        typeof stats.name !== 'string' || stats.name.length > 240 || !['player', 'enemy', 'npc'].includes(stats.side) ||
+        COMBAT_STATISTIC_NUMBER_FIELDS.some((field) => !Number.isFinite(stats[field]) || stats[field] < 0)) {
+        return 'invalid-combat-statistics'
+      }
+    }
+  }
+  return null
+}
+
 function geometrySegments(geometry) {
   if (!geometry) return []
   const segments = []
@@ -1254,6 +1287,7 @@ export function validateSharedStateShape(name, value) {
     'map-fog': 'maps',
     'map-geometry': 'maps',
     'map-exploration': 'maps',
+    'combat-statistics': 'sessions',
   }
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
@@ -1292,6 +1326,10 @@ export function validateSharedStateShape(name, value) {
   if (name === 'map-exploration') {
     const explorationReason = validateMapExplorationState(value)
     if (explorationReason) return { ok: false, reason: explorationReason }
+  }
+  if (name === 'combat-statistics') {
+    const statisticsReason = validateCombatStatisticsState(value)
+    if (statisticsReason) return { ok: false, reason: statisticsReason }
   }
   return { ok: true }
 }

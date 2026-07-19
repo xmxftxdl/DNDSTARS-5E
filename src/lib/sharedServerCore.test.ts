@@ -319,6 +319,31 @@ describe('P0 shared state boundary', () => {
     expect(validateSharedStateShape('plugin-owned-state', { payload: {} })).toMatchObject({ ok: true })
   })
 
+  it('fails closed for damaged combat statistics', () => {
+    const combatant = {
+      combatantId: 'fighter', name: '战士', side: 'player',
+      damageDealt: 10, damageTaken: 2, healingDone: 0, healingReceived: 0,
+      temporaryHpGranted: 0, damagePrevented: 0, hostileConditionsApplied: 0,
+      attacks: 1, hits: 1, criticalHits: 0, knockouts: 0, kills: 0, alliesRescued: 0,
+      successfulSaves: 0, failedSaves: 0, concentrationChecks: 0, concentrationMaintained: 0,
+      actionsSpent: 1, bonusActionsSpent: 0, reactionsSpent: 0, movementSpentFeet: 10,
+      classResourcesSpent: 0, spellSlotsSpent: 0,
+    }
+    const state = {
+      schemaVersion: 1,
+      sessions: [{
+        combatId: 'combat', mapId: 'map', startedAt: 1, updatedAt: 2, lastRound: 1,
+        combatants: { fighter: combatant }, receipts: ['receipt'],
+      }],
+      updatedAt: 2,
+    }
+    expect(validateSharedStateShape('combat-statistics', state)).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat-statistics', {
+      ...state,
+      sessions: [{ ...state.sessions[0], combatants: { fighter: { ...combatant, damageDealt: -1 } } }],
+    })).toMatchObject({ ok: false, reason: 'invalid-combat-statistics' })
+  })
+
   it('rejects malformed or forged ActiveEffect schema v2 payloads at the server boundary', () => {
     const effect = {
       schemaVersion: 1,
