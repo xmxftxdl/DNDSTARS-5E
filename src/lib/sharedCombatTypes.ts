@@ -207,6 +207,8 @@ export interface SharedPlayerActionState {
   targetTokenId?: string
   targetTokenIds?: string[]
   targetCell?: GridCell
+  /** 可旋转范围模板的四向朝向；仅作为请求，DM 会重新验证。 */
+  targetOrientation?: 0 | 1 | 2 | 3
   targetPosition?: { x: number; y: number }
   /** 穿过滚珠或铁蒺藜时声明半速谨慎移动；DM 按双倍移动消耗复核。 */
   dnd5eCarefulMovement?: boolean

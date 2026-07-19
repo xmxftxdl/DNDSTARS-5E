@@ -16,6 +16,7 @@ interface SandboxMessageEvent {
     action?: Record<string, unknown>
     actor?: Record<string, unknown>
     target?: Record<string, unknown>
+    targets?: Record<string, unknown>[]
     fromVersion?: number
     state?: unknown
   }
@@ -33,6 +34,7 @@ const NativeFunction = Function
 const headlessActions = new Map<string, {
   id: string
   allowOffTurn?: boolean
+  rolls?: readonly Record<string, unknown>[]
   resolve(context: Record<string, unknown>): unknown
 }>()
 const stateMigrations = new Map<number, {
@@ -182,7 +184,7 @@ function assertId(value: unknown, label: string): asserts value is string {
 function initializePlugin(source: string): {
   manifest: Record<string, unknown>
   features: readonly Record<string, unknown>[]
-  actions: readonly { id: string; allowOffTurn?: boolean }[]
+  actions: readonly { id: string; allowOffTurn?: boolean; rolls?: readonly Record<string, unknown>[] }[]
   races: readonly Record<string, unknown>[]
   abilityGenerationMethods: readonly Record<string, unknown>[]
   spells: readonly Record<string, unknown>[]
@@ -243,16 +245,19 @@ function initializePlugin(source: string): {
     },
     registerHeadlessAction(definition: unknown) {
       if (!definition || typeof definition !== 'object') throw new Error('Invalid Headless action definition')
-      const action = definition as { id?: unknown; allowOffTurn?: unknown; resolve?: unknown }
+      const action = definition as { id?: unknown; allowOffTurn?: unknown; rolls?: unknown; resolve?: unknown }
       assertId(action.id, 'Headless action id')
       if (typeof action.resolve !== 'function') throw new Error(`Headless action ${action.id} requires resolve()`)
       if (action.allowOffTurn != null && typeof action.allowOffTurn !== 'boolean') {
         throw new Error(`Invalid allowOffTurn value for ${action.id}`)
       }
       if (headlessActions.has(action.id)) throw new Error(`Duplicate Headless action: ${action.id}`)
+      const rolls = action.rolls == null ? undefined : clonePlain(action.rolls, `Headless action ${action.id} rolls`)
+      if (rolls != null && !Array.isArray(rolls)) throw new Error(`Invalid Headless action rolls: ${action.id}`)
       headlessActions.set(action.id, {
         id: action.id,
         ...(action.allowOffTurn === true ? { allowOffTurn: true } : {}),
+        ...(rolls ? { rolls: rolls as readonly Record<string, unknown>[] } : {}),
         resolve: action.resolve as (context: Record<string, unknown>) => unknown,
       })
       return `${manifest.id}:${action.id}`
@@ -281,7 +286,7 @@ function initializePlugin(source: string): {
   return {
     manifest,
     features,
-    actions: [...headlessActions.values()].map(({ id, allowOffTurn }) => ({ id, allowOffTurn })),
+    actions: [...headlessActions.values()].map(({ id, allowOffTurn, rolls }) => ({ id, allowOffTurn, rolls })),
     races,
     abilityGenerationMethods,
     spells,
@@ -364,6 +369,8 @@ async function resolveAction(message: SandboxMessageEvent['data']): Promise<void
       action: clonePlain(message.action ?? {}, 'action'),
       actor: clonePlain(message.actor ?? {}, 'actor'),
       target: message.target ? clonePlain(message.target, 'target') : undefined,
+      targets: clonePlain(message.targets ?? [], 'targets'),
+      rolls: clonePlain(message.action?.rolls ?? {}, 'rolls'),
       grantTemporaryHitPoints: (targetId: unknown, amount: unknown) =>
         recordOperation('grant-temporary-hit-points', targetId, amount),
       heal: (targetId: unknown, amount: unknown) => recordOperation('heal', targetId, amount),

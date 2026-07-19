@@ -61,7 +61,7 @@ const COMBAT_INTERRUPT_KINDS = new Set<CombatInterruptKind>([
   'dodge', 'stable-mind', 'gale-combo', 'agile-leap', 'opportunity-attack', 'protection',
   'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
   'legendary-resistance', 'bardic-inspiration', 'cutting-words', 'dark-ones-own-luck',
-  'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'dm-adjudication',
+  'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'plugin-choice', 'dm-adjudication',
 ])
 const COMBAT_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>([
   'pending', 'waiting-for-dm', 'rolling', 'answered', 'done', 'rolled-back',

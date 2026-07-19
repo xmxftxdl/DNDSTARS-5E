@@ -9,6 +9,7 @@ import {
   type Dnd5ePluginAction,
 } from './pluginApi'
 import type { Dnd5eSandboxCapabilityOperation } from './pluginSandbox'
+import { validateDnd5ePluginDiceRolls } from './pluginDice'
 import {
   getDnd5eSrdMonster,
   type Dnd5eDamageType,
@@ -5254,6 +5255,14 @@ export function resolveDnd5eSandboxedPluginCapabilities(
     action.featureId &&
     (!pluginFeature || pluginFeature.ownerPluginId !== action.pluginId || pluginFeature.action?.id !== action.actionId)
   ) return fail(state, events, 'invalid-plugin-action')
+  if (!validateDnd5ePluginDiceRolls(pluginAction, action.rolls)) {
+    return fail(state, events, 'invalid-dice')
+  }
+  const interrupt = pluginFeature?.action?.interrupt
+  if (
+    (interrupt && !interrupt.options.some((option) => option.id === action.interruptChoiceId)) ||
+    (!interrupt && action.interruptChoiceId != null)
+  ) return fail(state, events, 'invalid-plugin-action')
   if (pluginAction.allowOffTurn !== true && currentActorId(state) !== action.actorId) {
     return fail(state, events, 'stale-turn')
   }
@@ -5265,16 +5274,16 @@ export function resolveDnd5eSandboxedPluginCapabilities(
     return fail(state, events, 'invalid-plugin-action')
   }
 
-  let pluginTarget: Dnd5eCombatant | undefined
+  let pluginTargets: Dnd5eCombatant[]
   let pluginEconomy: 'action' | 'bonusAction' | 'reaction' | 'none' = 'none'
   if (pluginFeature?.action) {
     const { targeting, economy } = pluginFeature.action
     pluginEconomy = economy
     if (targeting.kind === 'self') {
       if (action.targetId && action.targetId !== actor.id) return fail(state, events, 'invalid-target')
-      pluginTarget = actor
-    } else {
-      pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
+      pluginTargets = [actor]
+    } else if (targeting.kind === 'single-creature') {
+      const pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
       if (!pluginTarget || pluginTarget.currentHp <= 0) return fail(state, events, 'invalid-target')
       if (pluginTarget.id === actor.id && targeting.includeSelf !== true) return fail(state, events, 'invalid-target')
       const allied = pluginTarget.controller === actor.controller
@@ -5285,12 +5294,33 @@ export function resolveDnd5eSandboxedPluginCapabilities(
         (!Number.isFinite(action.distanceFeet) || (action.distanceFeet ?? -1) < 0 ||
           (action.distanceFeet ?? Number.POSITIVE_INFINITY) > targeting.rangeFeet)
       ) return fail(state, events, 'invalid-target')
+      pluginTargets = [pluginTarget]
+    } else {
+      const uniqueIds = [...new Set(action.targetIds ?? [])]
+      if (
+        uniqueIds.length < 1 || uniqueIds.length > (targeting.maximumTargets ?? 64) ||
+        !action.targetCell || !Number.isInteger(action.targetCell.col) || !Number.isInteger(action.targetCell.row) ||
+        (action.targetOrientation != null && (
+          !Number.isInteger(action.targetOrientation) || action.targetOrientation < 0 || action.targetOrientation > 3
+        ))
+      ) return fail(state, events, 'invalid-target')
+      pluginTargets = uniqueIds.flatMap((targetId) => state.combatants[targetId] ? [state.combatants[targetId]] : [])
+      if (pluginTargets.length !== uniqueIds.length || pluginTargets.some((target) => target.currentHp <= 0)) {
+        return fail(state, events, 'invalid-target')
+      }
+      for (const target of pluginTargets) {
+        if (target.id === actor.id && targeting.includeSelf !== true) return fail(state, events, 'invalid-target')
+        const allied = target.controller === actor.controller
+        if (targeting.relation === 'ally' && !allied) return fail(state, events, 'invalid-target')
+        if (targeting.relation === 'enemy' && allied) return fail(state, events, 'invalid-target')
+      }
     }
   } else {
-    pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
+    const pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
+    pluginTargets = pluginTarget ? [pluginTarget] : []
   }
 
-  const allowedTargetIds = new Set([actor.id, ...(pluginTarget ? [pluginTarget.id] : [])])
+  const allowedTargetIds = new Set([actor.id, ...pluginTargets.map((target) => target.id)])
   for (const operation of operations) {
     if (!allowedTargetIds.has(operation.targetId)) return fail(state, events, 'invalid-plugin-action')
     if (
@@ -5430,16 +5460,26 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
     if (pluginAction.execution === 'worker' || typeof pluginAction.resolve !== 'function') {
       return fail(state, events, 'invalid-plugin-action')
     }
+    if (!validateDnd5ePluginDiceRolls(pluginAction, action.rolls)) {
+      return fail(state, events, 'invalid-dice')
+    }
+    const interrupt = pluginFeature?.action?.interrupt
+    if (
+      (interrupt && !interrupt.options.some((option) => option.id === action.interruptChoiceId)) ||
+      (!interrupt && action.interruptChoiceId != null)
+    ) return fail(state, events, 'invalid-plugin-action')
     if (action.featureId && !actor.pluginFeatureIds.includes(action.featureId)) {
       return fail(state, events, 'invalid-plugin-action')
     }
     let pluginTarget: Dnd5eCombatant | undefined
+    let pluginTargets: Dnd5eCombatant[]
     if (pluginFeature?.action) {
       const { targeting, economy } = pluginFeature.action
       if (targeting.kind === 'self') {
         if (action.targetId && action.targetId !== actor.id) return fail(state, events, 'invalid-target')
         pluginTarget = actor
-      } else {
+        pluginTargets = [actor]
+      } else if (targeting.kind === 'single-creature') {
         pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
         if (!pluginTarget || pluginTarget.currentHp <= 0) return fail(state, events, 'invalid-target')
         if (pluginTarget.id === actor.id && targeting.includeSelf !== true) return fail(state, events, 'invalid-target')
@@ -5454,6 +5494,27 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
             (action.distanceFeet ?? Number.POSITIVE_INFINITY) > targeting.rangeFeet
           )
         ) return fail(state, events, 'invalid-target')
+        pluginTargets = [pluginTarget]
+      } else {
+        const uniqueIds = [...new Set(action.targetIds ?? [])]
+        if (
+          uniqueIds.length < 1 || uniqueIds.length > (targeting.maximumTargets ?? 64) ||
+          !action.targetCell || !Number.isInteger(action.targetCell.col) || !Number.isInteger(action.targetCell.row) ||
+          (action.targetOrientation != null && (
+            !Number.isInteger(action.targetOrientation) || action.targetOrientation < 0 || action.targetOrientation > 3
+          ))
+        ) return fail(state, events, 'invalid-target')
+        pluginTargets = uniqueIds.flatMap((targetId) => state.combatants[targetId] ? [state.combatants[targetId]] : [])
+        if (pluginTargets.length !== uniqueIds.length || pluginTargets.some((target) => target.currentHp <= 0)) {
+          return fail(state, events, 'invalid-target')
+        }
+        for (const target of pluginTargets) {
+          if (target.id === actor.id && targeting.includeSelf !== true) return fail(state, events, 'invalid-target')
+          const allied = target.controller === actor.controller
+          if (targeting.relation === 'ally' && !allied) return fail(state, events, 'invalid-target')
+          if (targeting.relation === 'enemy' && allied) return fail(state, events, 'invalid-target')
+        }
+        pluginTarget = pluginTargets[0]
       }
       if (economy !== 'none') {
         if (economy === 'reaction' && dnd5eReactionsPrevented(actor)) {
@@ -5474,6 +5535,7 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
       }
     } else {
       pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
+      pluginTargets = pluginTarget ? [pluginTarget] : []
     }
     try {
       const result = pluginAction.resolve({
@@ -5483,6 +5545,8 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
         rules,
         actor,
         target: pluginTarget,
+        targets: pluginTargets,
+        rolls: action.rolls ?? {},
         grantTemporaryHitPoints(targetId, amount) {
           const target = state.combatants[targetId]
           if (!target || !Number.isFinite(amount)) return 0

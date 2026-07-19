@@ -1,6 +1,7 @@
 import type {
   Dnd5ePluginAbilityGenerationDefinition,
   Dnd5ePluginAction,
+  Dnd5ePluginDiceRollDeclaration,
   Dnd5ePluginFeatureDefinition,
   Dnd5ePluginRaceDefinition,
   Dnd5ePluginSpellDefinition,
@@ -33,6 +34,7 @@ export type Dnd5eSandboxCapabilityOperation =
 interface SandboxActionDeclaration {
   id: string
   allowOffTurn?: boolean
+  rolls?: readonly Dnd5ePluginDiceRollDeclaration[]
 }
 
 export interface Dnd5ePluginStateMigrationDeclaration {
@@ -102,6 +104,7 @@ export interface Dnd5ePluginSandboxSession {
     action: Dnd5ePluginAction
     actor: Dnd5eCombatant
     target?: Dnd5eCombatant
+    targets?: readonly Dnd5eCombatant[]
   }): Promise<Dnd5eSandboxResolution>
   terminate(): void
 }
@@ -304,7 +307,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
         worker.postMessage({ type: 'migrate', requestId: id, fromVersion, state })
       })
     },
-    resolve({ action, actor, target }) {
+    resolve({ action, actor, target, targets }) {
       if (terminated) return Promise.reject(new Error('规则包 Worker 已终止'))
       const id = requestId()
       return new Promise<Dnd5eSandboxResolution>((resolve, reject) => {
@@ -324,11 +327,17 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
             featureId: action.featureId,
             actorId: action.actorId,
             targetId: action.targetId,
+            targetIds: action.targetIds,
+            targetCell: action.targetCell,
+            targetOrientation: action.targetOrientation,
             distanceFeet: action.distanceFeet,
+            rolls: action.rolls,
+            interruptChoiceId: action.interruptChoiceId,
             payload: action.payload,
           },
           actor: cloneCombatantForSandbox(actor),
           target: target ? cloneCombatantForSandbox(target) : undefined,
+          targets: (targets ?? (target ? [target] : [])).map(cloneCombatantForSandbox),
         })
       })
     },
@@ -367,6 +376,7 @@ export async function resolveDnd5eSandboxedPluginAction(input: {
   action: Dnd5ePluginAction
   actor: Dnd5eCombatant
   target?: Dnd5eCombatant
+  targets?: readonly Dnd5eCombatant[]
 }): Promise<Dnd5eSandboxResolution> {
   const session = activeSessions.get(input.action.pluginId)
   if (!session) throw new Error(`规则包 ${input.action.pluginId} 的 Worker 未激活`)

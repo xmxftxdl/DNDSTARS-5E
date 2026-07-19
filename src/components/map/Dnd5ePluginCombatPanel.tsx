@@ -12,6 +12,7 @@ import {
   dnd5eRulesPluginRegistrySnapshot,
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e'
+import type { Dnd5ePluginTargeting } from '../../rulesets/dnd5e'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
@@ -36,6 +37,7 @@ export default function Dnd5ePluginCombatPanel({
   pending,
   turnEconomy,
   onAction,
+  onBeginAreaTargeting,
 }: {
   character: Character
   map: BattleMap
@@ -46,6 +48,11 @@ export default function Dnd5ePluginCombatPanel({
   onAction: (request: {
     targetTokenId?: string
     payload: Dnd5ePluginActionPayload
+  }) => void
+  onBeginAreaTargeting: (request: {
+    featureId: string
+    featureName: string
+    targeting: Extract<Dnd5ePluginTargeting, { kind: 'area' }>
   }) => void
 }) {
   const pluginRevision = useSyncExternalStore(
@@ -88,7 +95,9 @@ export default function Dnd5ePluginCombatPanel({
           const targeting = featureAction.targeting
           const targetOptions = targeting.kind === 'self'
             ? [actorToken]
-            : map.tokens.filter((token) => {
+            : targeting.kind === 'area'
+              ? []
+              : map.tokens.filter((token) => {
                 if (token.type === 'obstacle') return false
                 if (token.id === actorToken.id && targeting.includeSelf !== true) return false
                 const opposed = areOpposedCombatTokens(actorToken, token)
@@ -100,7 +109,9 @@ export default function Dnd5ePluginCombatPanel({
               })
           const selectedTargetId = targeting.kind === 'self'
             ? actorToken.id
-            : targetsByFeature[feature.id] ?? targetOptions[0]?.id ?? ''
+            : targeting.kind === 'area'
+              ? '__area__'
+              : targetsByFeature[feature.id] ?? targetOptions[0]?.id ?? ''
           const allowedForRoom = roomAllowsPlugin(feature.ownerPluginId, roomRules)
           const roomReady = roomRules?.member.ready ?? true
           const disabled = pending || !canAct || !roomReady || !allowedForRoom ||
@@ -152,10 +163,16 @@ export default function Dnd5ePluginCombatPanel({
                 data-testid={`dnd5e-plugin-action-${feature.id}`}
                 type="button"
                 disabled={disabled}
-                onClick={() => onAction({
-                  targetTokenId: selectedTargetId,
-                  payload: { featureId: feature.id },
-                })}
+                onClick={() => {
+                  if (targeting.kind === 'area') {
+                    onBeginAreaTargeting({ featureId: feature.id, featureName: feature.name, targeting })
+                    return
+                  }
+                  onAction({
+                    targetTokenId: selectedTargetId,
+                    payload: { featureId: feature.id },
+                  })
+                }}
                 className="mt-3 w-full rounded-lg bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-35"
               >
                 {featureAction.label}

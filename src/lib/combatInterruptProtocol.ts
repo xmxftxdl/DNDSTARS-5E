@@ -178,6 +178,23 @@ export type StandAgainstTideInterruptPayload = Record<string, unknown> & {
 }
 export type StandAgainstTideInterruptResponse = Record<string, unknown> & { targetTokenId?: string }
 
+export interface PluginChoiceInterruptOption extends Record<string, unknown> {
+  id: string
+  label: string
+  description?: string
+}
+
+export type PluginChoiceInterruptPayload = Record<string, unknown> & {
+  pluginId: string
+  featureId: string
+  featureName: string
+  prompt: string
+  audience: 'actor' | 'target' | 'dm'
+  options: PluginChoiceInterruptOption[]
+  defaultOptionId: string
+}
+export type PluginChoiceInterruptResponse = Record<string, unknown> & { optionId: string }
+
 export type DmAdjudicationOperation = 'damage' | 'healing' | 'temporary-hit-points'
 
 export interface DmAdjudicationEffect extends Record<string, unknown> {
@@ -242,6 +259,7 @@ export interface CombatInterruptPayloadMap {
   'stroke-of-luck': StrokeOfLuckInterruptPayload
   'empowered-spell': EmpoweredSpellInterruptPayload
   'stand-against-tide': StandAgainstTideInterruptPayload
+  'plugin-choice': PluginChoiceInterruptPayload
   'dm-adjudication': DmAdjudicationInterruptPayload
 }
 
@@ -264,6 +282,7 @@ export interface CombatInterruptResponseMap {
   'stroke-of-luck': StrokeOfLuckInterruptResponse
   'empowered-spell': EmpoweredSpellInterruptResponse
   'stand-against-tide': StandAgainstTideInterruptResponse
+  'plugin-choice': PluginChoiceInterruptResponse
   'dm-adjudication': DmAdjudicationInterruptResponse
 }
 
@@ -327,6 +346,8 @@ export function defaultCombatInterruptResponse<K extends CombatInterruptKind>(
       return { rerollKeys: [] } as unknown as CombatInterruptResponseMap[K]
     case 'stand-against-tide':
       return {} as CombatInterruptResponseMap[K]
+    case 'plugin-choice':
+      return { optionId: '' } as CombatInterruptResponseMap[K]
     case 'dm-adjudication':
       return { decision: 'cancelled', effects: [] } as unknown as CombatInterruptResponseMap[K]
   }
@@ -340,13 +361,19 @@ export function isCombatInterruptKind<K extends CombatInterruptKind>(
 }
 
 export function resolveCombatInterruptCharacter(
-  interrupt: Pick<SharedCombatInterrupt, 'kind' | 'actorCharId' | 'targetCharId'>,
+  interrupt: Pick<SharedCombatInterrupt, 'kind' | 'actorCharId' | 'targetCharId' | 'payload'>,
   characters: Character[],
 ): Character | undefined {
-  const characterId =
-    interrupt.kind === 'gale-combo' || interrupt.kind === 'opportunity-attack' || interrupt.kind === 'protection' || interrupt.kind === 'counterspell' || interrupt.kind === 'cutting-words' || interrupt.kind === 'stroke-of-luck' || interrupt.kind === 'empowered-spell' || interrupt.kind === 'dm-adjudication'
+  const pluginAudience = interrupt.kind === 'plugin-choice'
+    ? (interrupt.payload as Partial<PluginChoiceInterruptPayload>).audience
+    : undefined
+  const characterId = pluginAudience === 'target'
+    ? interrupt.targetCharId
+    : pluginAudience === 'actor' || pluginAudience === 'dm'
       ? interrupt.actorCharId
-      : interrupt.targetCharId
+      : interrupt.kind === 'gale-combo' || interrupt.kind === 'opportunity-attack' || interrupt.kind === 'protection' || interrupt.kind === 'counterspell' || interrupt.kind === 'cutting-words' || interrupt.kind === 'stroke-of-luck' || interrupt.kind === 'empowered-spell' || interrupt.kind === 'dm-adjudication'
+        ? interrupt.actorCharId
+        : interrupt.targetCharId
   return characterId ? characters.find((character) => character.id === characterId) : undefined
 }
 
@@ -357,7 +384,10 @@ export function resolveCombatInterruptAnswerCandidate(
   const character = resolveCombatInterruptCharacter(interrupt, context.characters)
   // dm-adjudication is deliberately invisible to player prompt selection. Only
   // the DM-side authority loop may answer it.
-  if (interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance') return { character, canAnswer: false }
+  if (
+    interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance' ||
+    (interrupt.kind === 'plugin-choice' && interrupt.payload.audience === 'dm')
+  ) return { character, canAnswer: false }
   if (!character || (character.currentHp <= 0 && interrupt.kind !== 'bardic-inspiration')) {
     return { character, canAnswer: false }
   }

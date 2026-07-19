@@ -18,6 +18,7 @@ import type {
 import { DND5E_2014_RACE_OPTIONS } from './characterOptions'
 import type { Dnd5eStandardConditionId } from './conditions'
 import type { Dnd5eDamageType } from './monsters'
+import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
@@ -87,9 +88,48 @@ export interface Dnd5ePluginAction {
   featureId?: string
   actorId: string
   targetId?: string
+  /** 由 DM 地图权威层根据范围模板重建；玩家提交值不能直接采用。 */
+  targetIds?: string[]
+  /** 地图模板锚点，仅由 DM preflight 写入 Worker 快照。 */
+  targetCell?: { col: number; row: number }
+  /** 可旋转模板的四向朝向，由 DM preflight 校验后写入。 */
+  targetOrientation?: 0 | 1 | 2 | 3
   /** 由 DM 地图权威层按 Token 占格重新计算，插件不得采用玩家提交的距离。 */
   distanceFeet?: number
+  /** Host 按 action 的声明式骰子配方生成并校验，插件只能读取结果。 */
+  rolls?: Record<string, Dnd5ePluginDiceRollResult>
+  /** 主动 Interrupt 的受控选项；Host 会校验其属于 action 声明。 */
+  interruptChoiceId?: string
   payload?: JsonValue
+}
+
+export interface Dnd5ePluginDiceRollDeclaration {
+  id: string
+  label: string
+  count: number
+  sides: number
+  modifier?: number
+  visibility?: 'public' | 'dm'
+}
+
+export interface Dnd5ePluginDiceRollResult {
+  values: number[]
+  modifier: number
+  total: number
+}
+
+export interface Dnd5ePluginInterruptOption {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface Dnd5ePluginInterruptDeclaration {
+  prompt: string
+  audience: 'actor' | 'target' | 'dm'
+  options: readonly Dnd5ePluginInterruptOption[]
+  defaultOptionId: string
+  timeoutMs?: number
 }
 
 /** 插件声明持续时间的 capability 输入；Host 会转换为 ActiveEffectInstance。 */
@@ -108,6 +148,10 @@ export interface Dnd5ePluginHeadlessActionContext {
   rules: RulesetAdapter
   actor: Dnd5eCombatant
   target?: Dnd5eCombatant
+  /** 范围模板覆盖的全部目标；单目标行动也会包含该目标。 */
+  targets: readonly Dnd5eCombatant[]
+  /** 由 Host 骰子盒公开生成且已按声明校验的结果。 */
+  rolls: Readonly<Record<string, Dnd5ePluginDiceRollResult>>
   /** 赋予临时生命值；同一效果不叠加，保留较高值。返回本次实际增加量。 */
   grantTemporaryHitPoints(targetId: string, amount: number): number
   /** 恢复生命值但不超过生命上限。返回本次实际恢复量。 */
@@ -133,6 +177,8 @@ export interface Dnd5ePluginHeadlessActionDefinition {
    * built-in/test registrations created by the host itself.
    */
   execution?: 'trusted' | 'worker'
+  /** Worker 不得自行生成随机数；所有骰子必须在这里预先声明。 */
+  rolls?: readonly Dnd5ePluginDiceRollDeclaration[]
   resolve?(context: Dnd5ePluginHeadlessActionContext): Dnd5eActionResult
 }
 
@@ -148,6 +194,13 @@ export type Dnd5ePluginTargeting =
       rangeFeet?: number
       includeSelf?: boolean
     }
+  | {
+      kind: 'area'
+      relation?: Dnd5ePluginTargetRelation
+      includeSelf?: boolean
+      maximumTargets?: number
+      template: SkillAoeTargeting
+    }
 
 export interface Dnd5ePluginFeatureAction {
   /** 与 registerHeadlessAction 的本地 ID 对应，由 Host 自动绑定到当前插件命名空间。 */
@@ -156,6 +209,8 @@ export interface Dnd5ePluginFeatureAction {
   description?: string
   economy: Dnd5ePluginActionEconomy
   targeting: Dnd5ePluginTargeting
+  /** 在 action 真正进入 Worker resolver 前，由共享 Interrupt Queue 主动询问。 */
+  interrupt?: Dnd5ePluginInterruptDeclaration
 }
 
 export interface Dnd5ePluginFeatureDefinition {
@@ -283,6 +338,104 @@ const ABILITY_KEYS: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
+}
+
+function clonePluginRolls(
+  rolls: readonly Dnd5ePluginDiceRollDeclaration[] | undefined,
+  actionId: string,
+): Dnd5ePluginDiceRollDeclaration[] | undefined {
+  if (rolls == null) return undefined
+  if (!Array.isArray(rolls) || rolls.length > 16) throw new Error(`Invalid plugin dice declarations: ${actionId}`)
+  const seen = new Set<string>()
+  return rolls.map((roll) => {
+    if (
+      !validId(roll.id) || seen.has(roll.id) || typeof roll.label !== 'string' || !roll.label.trim() ||
+      !finiteInteger(roll.count, 1, 12) || !finiteInteger(roll.sides, 2, 100) ||
+      !finiteInteger(roll.modifier ?? 0, -1_000_000, 1_000_000) ||
+      (roll.visibility != null && roll.visibility !== 'public' && roll.visibility !== 'dm')
+    ) throw new Error(`Invalid plugin dice declaration: ${actionId}:${roll.id}`)
+    seen.add(roll.id)
+    return {
+      id: roll.id,
+      label: roll.label.trim(),
+      count: roll.count,
+      sides: roll.sides,
+      modifier: roll.modifier ?? 0,
+      visibility: roll.visibility ?? 'public',
+    }
+  })
+}
+
+function clonePluginTargeting(targeting: Dnd5ePluginTargeting, featureId: string): Dnd5ePluginTargeting {
+  if (!targeting || !['self', 'single-creature', 'area'].includes(targeting.kind)) {
+    throw new Error(`Invalid plugin feature targeting: ${featureId}`)
+  }
+  if (targeting.kind === 'self') return { kind: 'self' }
+  if (targeting.relation != null && !['any', 'ally', 'enemy'].includes(targeting.relation)) {
+    throw new Error(`Invalid plugin feature target relation: ${featureId}`)
+  }
+  if (targeting.kind === 'single-creature') {
+    if (targeting.rangeFeet != null && (!Number.isFinite(targeting.rangeFeet) || targeting.rangeFeet < 0 || targeting.rangeFeet > 10_000)) {
+      throw new Error(`Invalid plugin feature range: ${featureId}`)
+    }
+    return { ...targeting }
+  }
+  const template = targeting.template
+  if (!template || !['circle', 'rect', 'line', 'cone'].includes(template.shape)) {
+    throw new Error(`Invalid plugin area template: ${featureId}`)
+  }
+  const dimensions = template.shape === 'circle'
+    ? [template.radiusFeet, template.placeRangeFeet]
+    : template.shape === 'rect'
+      ? [template.widthFeet, template.heightFeet, template.placeRangeFeet]
+      : template.shape === 'line'
+        ? [template.widthFeet, template.lengthFeet, template.aimRangeFeet]
+        : [template.lengthFeet, template.aimRangeFeet]
+  if (dimensions.some((value) => value != null && (!Number.isFinite(value) || value < 0 || value > 10_000))) {
+    throw new Error(`Invalid plugin area dimensions: ${featureId}`)
+  }
+  if (!finiteInteger(targeting.maximumTargets ?? 64, 1, 256)) {
+    throw new Error(`Invalid plugin area target limit: ${featureId}`)
+  }
+  return { ...targeting, maximumTargets: targeting.maximumTargets ?? 64, template: { ...template } }
+}
+
+function clonePluginInterrupt(
+  interrupt: Dnd5ePluginInterruptDeclaration | undefined,
+  featureId: string,
+): Dnd5ePluginInterruptDeclaration | undefined {
+  if (interrupt == null) return undefined
+  if (
+    typeof interrupt.prompt !== 'string' || !interrupt.prompt.trim() || interrupt.prompt.length > 2_000 ||
+    !['actor', 'target', 'dm'].includes(interrupt.audience) || !Array.isArray(interrupt.options) ||
+    interrupt.options.length < 2 || interrupt.options.length > 12 ||
+    !finiteInteger(interrupt.timeoutMs ?? 30_000, 5_000, 300_000)
+  ) throw new Error(`Invalid plugin interrupt declaration: ${featureId}`)
+  const seen = new Set<string>()
+  const options = interrupt.options.map((option) => {
+    if (
+      !validId(option.id) || seen.has(option.id) || typeof option.label !== 'string' || !option.label.trim() ||
+      (option.description != null && (typeof option.description !== 'string' || option.description.length > 500))
+    ) throw new Error(`Invalid plugin interrupt option: ${featureId}`)
+    seen.add(option.id)
+    return { ...option, label: option.label.trim() }
+  })
+  if (!seen.has(interrupt.defaultOptionId)) throw new Error(`Invalid plugin interrupt default: ${featureId}`)
+  return { ...interrupt, prompt: interrupt.prompt.trim(), timeoutMs: interrupt.timeoutMs ?? 30_000, options }
+}
+
+function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined): Dnd5ePluginFeatureAction | undefined {
+  if (!action) return undefined
+  return {
+    ...action,
+    targeting: action.targeting.kind === 'area'
+      ? { ...action.targeting, template: { ...action.targeting.template } }
+      : { ...action.targeting },
+    interrupt: action.interrupt ? {
+      ...action.interrupt,
+      options: action.interrupt.options.map((option) => ({ ...option })),
+    } : undefined,
+  }
 }
 
 function cloneAbilityBonuses(value: Dnd5ePluginRaceDefinition['abilityBonuses']): Partial<Record<AbilityKey, number>> {
@@ -436,30 +589,17 @@ export function registerDnd5eRulesPlugin(
         if (!['action', 'bonusAction', 'reaction', 'none'].includes(definition.action.economy)) {
           throw new Error(`Invalid plugin feature action economy: ${featureId}`)
         }
-        if (!['self', 'single-creature'].includes(definition.action.targeting?.kind)) {
-          throw new Error(`Invalid plugin feature targeting: ${featureId}`)
-        }
-        if (
-          definition.action.targeting.kind === 'single-creature' &&
-          definition.action.targeting.relation != null &&
-          !['any', 'ally', 'enemy'].includes(definition.action.targeting.relation)
-        ) throw new Error(`Invalid plugin feature target relation: ${featureId}`)
-        if (
-          definition.action.targeting.kind === 'single-creature' &&
-          definition.action.targeting.rangeFeet != null &&
-          (!Number.isFinite(definition.action.targeting.rangeFeet) || definition.action.targeting.rangeFeet < 0)
-        ) {
-          throw new Error(`Invalid plugin feature range: ${featureId}`)
-        }
       }
+      const action = definition.action ? {
+        ...definition.action,
+        targeting: clonePluginTargeting(definition.action.targeting, featureId),
+        interrupt: clonePluginInterrupt(definition.action.interrupt, featureId),
+      } : undefined
       const registered: RegisteredDnd5ePluginFeature = {
         ...definition,
         id: featureId,
         minimumLevel,
-        action: definition.action ? {
-          ...definition.action,
-          targeting: { ...definition.action.targeting },
-        } : undefined,
+        action,
         ownerPluginId: id,
         ownerPluginName: plugin.manifest.name,
         ownerPluginLicense: plugin.manifest.license,
@@ -483,7 +623,10 @@ export function registerDnd5eRulesPlugin(
       if (definition.execution !== 'worker' && typeof definition.resolve !== 'function') {
         throw new Error(`Trusted plugin Headless action is missing its resolver: ${actionId}`)
       }
-      const owned = { pluginId: id, definition }
+      const owned = {
+        pluginId: id,
+        definition: { ...definition, rolls: clonePluginRolls(definition.rolls, actionId) },
+      }
       headlessActions.set(actionId, owned)
       disposers.push(() => {
         if (headlessActions.get(actionId) === owned) headlessActions.delete(actionId)
@@ -729,17 +872,18 @@ export function dnd5ePluginHeadlessActionDefinition(
   pluginId: string,
   actionId: string,
 ): Dnd5ePluginHeadlessActionDefinition | undefined {
-  return headlessActions.get(`${pluginId}:${actionId}`)?.definition
+  const definition = headlessActions.get(`${pluginId}:${actionId}`)?.definition
+  return definition ? {
+    ...definition,
+    rolls: definition.rolls?.map((roll) => ({ ...roll })),
+  } : undefined
 }
 
 export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginFeature[] {
   return [...pluginFeatures.values()]
     .map((feature) => ({
       ...feature,
-      action: feature.action ? {
-        ...feature.action,
-        targeting: { ...feature.action.targeting },
-      } : undefined,
+      action: clonePluginFeatureAction(feature.action),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
@@ -812,10 +956,7 @@ export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5e
   const feature = pluginFeatures.get(featureId)
   return feature ? {
     ...feature,
-    action: feature.action ? {
-      ...feature.action,
-      targeting: { ...feature.action.targeting },
-    } : undefined,
+    action: clonePluginFeatureAction(feature.action),
   } : undefined
 }
 

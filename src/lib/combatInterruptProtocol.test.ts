@@ -58,6 +58,31 @@ describe('combatInterruptProtocol', () => {
     expect(defaultCombatInterruptResponse('stroke-of-luck')).toEqual({ useStrokeOfLuck: false })
     expect(defaultCombatInterruptResponse('shield-spell')).toEqual({ useShieldSpell: false })
     expect(defaultCombatInterruptResponse('stand-against-tide')).toEqual({})
+    expect(defaultCombatInterruptResponse('plugin-choice')).toEqual({ optionId: '' })
+  })
+
+  it('routes plugin choices to the declared actor or DM audience', () => {
+    const hero = baseCharacter({ id: 'hero', dmNotes: 'private' })
+    const payload = {
+      pluginId: 'com.example.choice', featureId: 'com.example.choice:stance', featureName: '架势',
+      prompt: '选择架势', audience: 'actor' as const,
+      options: [{ id: 'guard', label: '守势' }, { id: 'assault', label: '攻势' }],
+      defaultOptionId: 'guard',
+    }
+    const actorChoice = createCombatInterrupt({
+      id: 'plugin-choice-actor', mapId: 'map', kind: 'plugin-choice', actorCharId: hero.id, payload, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(actorChoice, {
+      characters: [hero], visibleCharacters: [], playerCharId: hero.id,
+    })).toEqual({ character: hero, canAnswer: true })
+
+    const dmChoice = createCombatInterrupt({
+      id: 'plugin-choice-dm', mapId: 'map', kind: 'plugin-choice', actorCharId: hero.id,
+      payload: { ...payload, audience: 'dm' as const }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(dmChoice, {
+      characters: [hero], visibleCharacters: [], playerCharId: hero.id,
+    })).toEqual({ character: hero, canAnswer: false })
   })
 
   it('type-narrows interrupts by kind', () => {

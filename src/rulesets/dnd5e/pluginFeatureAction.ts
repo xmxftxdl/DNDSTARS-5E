@@ -1,6 +1,12 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import {
+  DND_FEET_PER_CELL,
+  pixelToCell,
+  tokenFootprintDistanceCells,
+  type GridCell,
+} from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import type {
   Dnd5eTurnEconomyCounts,
   SharedPlayerActionState,
@@ -53,6 +59,8 @@ export interface PreparedDnd5ePluginFeatureAction {
   actor: Character
   actorToken: Token
   targetToken: Token
+  targetTokens: Token[]
+  targetCell?: GridCell
   feature: RegisteredDnd5ePluginFeature
   distanceFeet: number
   headlessAction: Dnd5ePluginAction
@@ -116,13 +124,16 @@ export function prepareDnd5ePluginFeatureAction(input: {
   if (economyFailure) return { ok: false, reason: economyFailure }
 
   let targetToken: Token | undefined
+  let targetTokens: Token[]
+  let targetCell: GridCell | undefined
   let distanceFeet = 0
   if (feature.action.targeting.kind === 'self') {
     if (action.targetTokenId && action.targetTokenId !== actorToken.id) {
       return { ok: false, reason: 'invalid-target' }
     }
     targetToken = actorToken
-  } else {
+    targetTokens = [actorToken]
+  } else if (feature.action.targeting.kind === 'single-creature') {
     targetToken = input.map.tokens.find((token) => token.id === action.targetTokenId)
     if (!targetToken || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
     if (targetToken.id === actorToken.id && feature.action.targeting.includeSelf !== true) {
@@ -143,6 +154,37 @@ export function prepareDnd5ePluginFeatureAction(input: {
     ) {
       return { ok: false, reason: 'target-out-of-range' }
     }
+    targetTokens = [targetToken]
+  } else {
+    const targeting = feature.action.targeting
+    const casterCell = pixelToCell(actorToken.x, actorToken.y, input.map)
+    targetCell = action.targetCell ?? (targeting.template.shape === 'circle' && targeting.template.origin === 'self'
+      ? casterCell
+      : undefined)
+    if (!targetCell || !canPlaceAoe(targeting.template, casterCell, targetCell)) {
+      return { ok: false, reason: 'target-out-of-range' }
+    }
+    const targetOrientation = action.targetOrientation
+    if (
+      targetOrientation != null &&
+      (!Number.isInteger(targetOrientation) || targetOrientation < 0 || targetOrientation > 3)
+    ) return { ok: false, reason: 'invalid-target' }
+    const orientFrom = aoeOrientFromCell(targeting.template, casterCell, targetCell, {
+      rectRotation: targetOrientation,
+    })
+    const cells = cellsForAoe(targeting.template, orientFrom, targetCell)
+    targetTokens = tokensInCells(input.map, input.map.tokens, cells)
+      .filter((token) => {
+        if (token.type === 'obstacle') return false
+        if (token.id === actorToken.id && targeting.includeSelf !== true) return false
+        const opposed = areOpposedCombatTokens(actorToken, token)
+        if (targeting.relation === 'ally' && opposed) return false
+        if (targeting.relation === 'enemy' && !opposed) return false
+        return true
+      })
+      .slice(0, targeting.maximumTargets ?? 64)
+    targetToken = targetTokens[0]
+    if (!targetToken) return { ok: false, reason: 'invalid-target' }
   }
 
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -155,11 +197,11 @@ export function prepareDnd5ePluginFeatureAction(input: {
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actorCombatant = snapshot.state.combatants[actorToken.id]
-  const targetCombatant = snapshot.state.combatants[targetToken.id]
-  if (actorIndex < 0 || !actorCombatant || !targetCombatant) {
+  const targetCombatants = targetTokens.map((token) => snapshot.state.combatants[token.id])
+  if (actorIndex < 0 || !actorCombatant || targetCombatants.some((target) => !target)) {
     return { ok: false, reason: 'combatant-missing' }
   }
-  if (targetCombatant.currentHp <= 0) return { ok: false, reason: 'invalid-target' }
+  if (targetCombatants.some((target) => target && target.currentHp <= 0)) return { ok: false, reason: 'invalid-target' }
   if (input.turnEconomy) {
     actorCombatant.turn = {
       ...actorCombatant.turn,
@@ -179,6 +221,8 @@ export function prepareDnd5ePluginFeatureAction(input: {
       actor,
       actorToken,
       targetToken,
+      targetTokens,
+      targetCell,
       feature,
       distanceFeet,
       headlessAction: {
@@ -188,6 +232,9 @@ export function prepareDnd5ePluginFeatureAction(input: {
         featureId: feature.id,
         actorId: actorToken.id,
         targetId: targetToken.id,
+        targetIds: targetTokens.map((token) => token.id),
+        targetCell,
+        targetOrientation: action.targetOrientation,
         distanceFeet,
         payload: payload.payload,
       },
@@ -220,30 +267,40 @@ function pluginFailure(reason: string): Dnd5eActionFailure {
 
 export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   prepared: PreparedDnd5ePluginFeatureAction
+  rolls?: Dnd5ePluginAction['rolls']
+  interruptChoiceId?: string
 }): Promise<{ result: Dnd5eActionResult; application?: Dnd5eMapResultPlan }> {
   const definition = dnd5ePluginHeadlessActionDefinition(
     input.prepared.headlessAction.pluginId,
     input.prepared.headlessAction.actionId,
   )
+  const headlessAction: Dnd5ePluginAction = {
+    ...input.prepared.headlessAction,
+    rolls: input.rolls,
+    interruptChoiceId: input.interruptChoiceId,
+  }
   let result: Dnd5eActionResult
   if (definition?.execution === 'worker') {
-    const actor = input.prepared.state.combatants[input.prepared.headlessAction.actorId]
-    const target = input.prepared.headlessAction.targetId
-      ? input.prepared.state.combatants[input.prepared.headlessAction.targetId]
+    const actor = input.prepared.state.combatants[headlessAction.actorId]
+    const target = headlessAction.targetId
+      ? input.prepared.state.combatants[headlessAction.targetId]
       : undefined
+    const targets = (headlessAction.targetIds ?? (target ? [target.id] : []))
+      .flatMap((targetId) => input.prepared.state.combatants[targetId] ? [input.prepared.state.combatants[targetId]] : [])
     if (!actor) {
       result = { ok: false, state: input.prepared.state, events: [], reason: 'invalid-actor' }
     } else {
       try {
         const sandbox = await resolveDnd5eSandboxedPluginAction({
-          action: input.prepared.headlessAction,
+          action: headlessAction,
           actor,
           target,
+          targets,
         })
         result = sandbox.ok
           ? resolveDnd5eSandboxedPluginCapabilities(
               input.prepared.state,
-              input.prepared.headlessAction,
+              headlessAction,
               sandbox.operations,
             )
           : {
@@ -257,7 +314,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
       }
     }
   } else {
-    result = resolveDnd5eHeadlessAction(input.prepared.state, input.prepared.headlessAction)
+    result = resolveDnd5eHeadlessAction(input.prepared.state, headlessAction)
   }
   if (!result.ok) return { result }
   return {

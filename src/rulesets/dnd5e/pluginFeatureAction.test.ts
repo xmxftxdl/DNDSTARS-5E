@@ -86,6 +86,66 @@ function action(featureId: string): SharedPlayerActionState {
 }
 
 describe('D&D 5e plugin feature authority action', () => {
+  it('rebuilds area targets from the DM map instead of trusting submitted target ids', () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.area', name: 'Area', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'ward', resolve: ({ succeed }) => succeed() })
+        featureId = api.registerFeature({
+          id: 'ward', name: '守护区域', summary: '测试范围。', description: '测试范围。', automation: 'full',
+          action: {
+            id: 'ward', label: '放置', economy: 'action',
+            targeting: {
+              kind: 'area', relation: 'ally', maximumTargets: 4,
+              template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 30 },
+            },
+          },
+        })
+      },
+    })
+    try {
+      const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
+      const ally = character('ally')
+      const enemy = character('enemy')
+      const map: BattleMap = {
+        id: 'map-1', name: 'Area map', width: 500, height: 500,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [
+          token('hero-token', hero.id, 25),
+          token('ally-token', ally.id, 125),
+          token('enemy-token', enemy.id, 125, 'enemy'),
+        ],
+      }
+      const initiativeOrder: InitiativeEntry[] = [
+        { slotId: 'hero-token:normal', tokenId: 'hero-token', label: 'hero', emoji: '●', color: '#fff', roll: 20 },
+        { slotId: 'ally-token:normal', tokenId: 'ally-token', label: 'ally', emoji: '●', color: '#fff', roll: 15 },
+        { slotId: 'enemy-token:normal', tokenId: 'enemy-token', label: 'enemy', emoji: '●', color: '#fff', roll: 10 },
+      ]
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: {
+          ...action(featureId),
+          targetTokenId: undefined,
+          targetTokenIds: ['enemy-token'],
+          targetCell: { col: 2, row: 0 },
+        },
+        map,
+        characters: [hero, ally, enemy],
+        initiativeOrder,
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual(['ally-token'])
+      expect(prepared.prepared.headlessAction.targetIds).toEqual(['ally-token'])
+      expect(prepared.prepared.headlessAction.targetCell).toEqual({ col: 2, row: 0 })
+    } finally {
+      dispose()
+    }
+  })
+
   it('validates character ownership, spends the action, and applies Headless state', async () => {
     let featureId = ''
     const dispose = registerDnd5eRulesPlugin({

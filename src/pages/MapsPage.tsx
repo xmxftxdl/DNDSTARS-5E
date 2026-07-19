@@ -132,6 +132,8 @@ import {
   type EmpoweredSpellInterruptResponse,
   type StandAgainstTideInterruptPayload,
   type StandAgainstTideInterruptResponse,
+  type PluginChoiceInterruptPayload,
+  type PluginChoiceInterruptResponse,
   type DmAdjudicationEffect,
   type DmAdjudicationInterruptPayload,
   type DmAdjudicationInterruptResponse,
@@ -154,6 +156,7 @@ import {
   type SharedStrokeOfLuckPromptView,
   type SharedEmpoweredSpellPromptView,
   type SharedStandAgainstTidePromptView,
+  type SharedPluginChoicePromptView,
 } from '../lib/combatInterruptPrompts'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
@@ -180,10 +183,13 @@ import {
   type Dnd5eTargetTranquilitySaveRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
   type Dnd5eActiveEffectInstance,
+  type Dnd5ePluginDiceRollResult,
+  type Dnd5ePluginTargeting,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
   type PreparedDnd5eAdjudicatedSpell,
+  type PreparedDnd5ePluginFeatureAction,
   applyDnd5eInitiativeResourceFeatures,
   createDnd5eTurnEconomyCounts,
   createDnd5eMapCombatSnapshot,
@@ -220,6 +226,8 @@ import {
   dnd5eHunterMultiattackClassDamageDefinitions,
   prepareDnd5eClassFeature,
   prepareDnd5ePluginFeatureAction,
+  dnd5ePluginHeadlessActionDefinition,
+  executeDnd5ePluginDiceRolls,
   prepareDnd5eAbilityCheck,
   prepareDnd5eEquipmentAttack,
   prepareDnd5eFighterFeature,
@@ -858,6 +866,12 @@ export default function MapsPage() {
     itemName: string
     targeting: Extract<Dnd5eInventoryTargeting, { kind: 'map-area' }>
   } | null>(null)
+  const [dnd5ePluginAreaTargeting, setDnd5ePluginAreaTargeting] = useState<{
+    characterId: string
+    featureId: string
+    featureName: string
+    targeting: Extract<Dnd5ePluginTargeting, { kind: 'area' }>
+  } | null>(null)
   const [dnd5eItemCreatureTargeting, setDnd5eItemCreatureTargeting] = useState<{
     characterId: string
     instanceId: string
@@ -964,6 +978,8 @@ export default function MapsPage() {
   const [sharedEmpoweredSpellSelection, setSharedEmpoweredSpellSelection] = useState<string[]>([])
   const [sharedStandAgainstTidePrompt, setSharedStandAgainstTidePrompt] =
     useState<SharedStandAgainstTidePromptView | null>(null)
+  const [sharedPluginChoicePrompt, setSharedPluginChoicePrompt] =
+    useState<SharedPluginChoicePromptView | null>(null)
   const [sharedDmAdjudicationPrompt, setSharedDmAdjudicationPrompt] =
     useState<SharedDmAdjudicationPromptView | null>(null)
   const [dmAdjudicationEffects, setDmAdjudicationEffects] = useState<DmAdjudicationEffectDraft[]>([])
@@ -1076,6 +1092,7 @@ export default function MapsPage() {
     setDnd5eCarefulMovement(false)
     setDnd5eItemAreaTargeting(null)
     setDnd5eItemCreatureTargeting(null)
+    setDnd5ePluginAreaTargeting(null)
     setAoePreviewCell(null)
   }
   const [disengagedCharIds, setDisengagedCharIds] = useState<Set<string>>(() => new Set())
@@ -1148,6 +1165,11 @@ export default function MapsPage() {
     hunterCharId: string
     resolve: (targetTokenId: string | undefined) => void
   } | null>(null)
+  const pendingSharedPluginChoiceRef = useRef<{
+    id: string
+    actionId: string
+    resolve: (optionId: string) => void
+  } | null>(null)
   const pendingSharedDmAdjudicationRef = useRef<{
     id: string
     actionId: string
@@ -1166,6 +1188,7 @@ export default function MapsPage() {
   const suppressedStrokeOfLuckPromptIdsRef = useRef(new Set<string>())
   const suppressedEmpoweredSpellPromptIdsRef = useRef(new Set<string>())
   const suppressedStandAgainstTidePromptIdsRef = useRef(new Set<string>())
+  const suppressedPluginChoicePromptIdsRef = useRef(new Set<string>())
   const suppressedDmAdjudicationPromptIdsRef = useRef(new Set<string>())
   const sharedDmAdjudicationPromptIdRef = useRef<string | null>(null)
   const playerActionSeqRef = useRef(0)
@@ -1201,6 +1224,7 @@ export default function MapsPage() {
       && !sharedStrokeOfLuckPrompt?.expiresAt
       && !sharedEmpoweredSpellPrompt?.expiresAt
       && !sharedStandAgainstTidePrompt?.expiresAt
+      && !sharedPluginChoicePrompt?.expiresAt
     ) return
     const timer = window.setInterval(() => setSharedDodgeNow(runtimeNow()), 250)
     return () => window.clearInterval(timer)
@@ -1229,6 +1253,8 @@ export default function MapsPage() {
     sharedEmpoweredSpellPrompt?.expiresAt,
     sharedStandAgainstTidePrompt?.id,
     sharedStandAgainstTidePrompt?.expiresAt,
+    sharedPluginChoicePrompt?.id,
+    sharedPluginChoicePrompt?.expiresAt,
   ])
 
   useEffect(() => {
@@ -2000,6 +2026,7 @@ export default function MapsPage() {
     setSharedEmpoweredSpellPrompt(null)
     setSharedEmpoweredSpellSelection([])
     setSharedStandAgainstTidePrompt(null)
+    setSharedPluginChoicePrompt(null)
   }
 
   const clearSharedInterruptLocalState = () => {
@@ -2016,6 +2043,7 @@ export default function MapsPage() {
     suppressedStrokeOfLuckPromptIdsRef.current.clear()
     suppressedEmpoweredSpellPromptIdsRef.current.clear()
     suppressedStandAgainstTidePromptIdsRef.current.clear()
+    suppressedPluginChoicePromptIdsRef.current.clear()
     pendingSharedOpportunityAttackRef.current = null
     pendingSharedProtectionRef.current = null
     pendingSharedShieldSpellRef.current = null
@@ -2029,6 +2057,7 @@ export default function MapsPage() {
     pendingSharedStrokeOfLuckRef.current = null
     pendingSharedEmpoweredSpellRef.current = null
     pendingSharedStandAgainstTideRef.current = null
+    pendingSharedPluginChoiceRef.current = null
     clearSharedInterruptPrompts()
   }
 
@@ -2333,8 +2362,10 @@ export default function MapsPage() {
     }
   }, [selectedTokenId, activeMap?.tokens])
 
-  const activeAoeTargeting = dnd5eSpellTargeting?.area
-  const activeAoeCasterId = dnd5eItemAreaTargeting
+  const activeAoeTargeting = dnd5ePluginAreaTargeting?.targeting.template ?? dnd5eSpellTargeting?.area
+  const activeAoeCasterId = dnd5ePluginAreaTargeting
+    ? dnd5ePluginAreaTargeting.characterId
+    : dnd5eItemAreaTargeting
     ? dnd5eItemAreaTargeting.characterId
     : dnd5eSpellTargeting?.area
       ? dnd5eSpellTargeting.characterId
@@ -3164,6 +3195,42 @@ export default function MapsPage() {
       }
       return
     }
+    if (dnd5ePluginAreaTargeting && activeMap && aoeCasterCell) {
+      const template = dnd5ePluginAreaTargeting.targeting.template
+      if (!canPlaceAoe(template, aoeCasterCell, cell)) return
+      const orientFrom = aoeOrientFromCell(template, aoeCasterCell, cell, { rectRotation: aoeRectRotation })
+      const cells = cellsForAoe(template, orientFrom, cell)
+      const actorToken = activeMap.tokens.find((token) => token.characterId === dnd5ePluginAreaTargeting.characterId)
+      if (!actorToken) return
+      const targetTokenIds = tokensInCells(activeMap, activeMap.tokens, cells)
+        .filter((token) => {
+          if (token.type === 'obstacle') return false
+          if (token.id === actorToken.id && dnd5ePluginAreaTargeting.targeting.includeSelf !== true) return false
+          const opposed = areOpposedCombatTokens(actorToken, token)
+          if (dnd5ePluginAreaTargeting.targeting.relation === 'ally' && opposed) return false
+          if (dnd5ePluginAreaTargeting.targeting.relation === 'enemy' && !opposed) return false
+          return true
+        })
+        .map((token) => token.id)
+        .slice(0, dnd5ePluginAreaTargeting.targeting.maximumTargets ?? 64)
+      if (targetTokenIds.length < 1) {
+        void showCombatNotice('范围内没有目标', '请重新放置扩展规则的范围模板。', 'amber')
+        return
+      }
+      const target = {
+        targetTokenIds,
+        targetCell: cell,
+        targetOrientation: aoeRectRotation as 0 | 1 | 2 | 3,
+      }
+      const submitted = isDM
+        ? sendDmLocalDnd5ePluginActionRequest({ featureId: dnd5ePluginAreaTargeting.featureId }, undefined, target)
+        : sendPlayerDnd5ePluginActionRequest({ featureId: dnd5ePluginAreaTargeting.featureId }, undefined, target)
+      if (submitted) {
+        setDnd5ePluginAreaTargeting(null)
+        setAoePreviewCell(null)
+      }
+      return
+    }
     if (!activeAoeTargeting || !aoeCasterCell) return
     if (dnd5eSpellTargeting?.area) {
       selectDnd5eSpellArea(cell)
@@ -3719,6 +3786,53 @@ export default function MapsPage() {
         },
         // 裁定允许 DM 阅读规则并掷骰；超时只取消，不消费任何资源。
         expiresAt: runtimeNow() + 10 * 60 * 1000,
+      })
+      void publishCombatInterrupt(interrupt)
+    })
+  }
+
+  const requestSharedPluginChoice = async (
+    prepared: PreparedDnd5ePluginFeatureAction,
+  ): Promise<string | undefined> => {
+    if (!activeMap || !isDM) return undefined
+    const declaration = prepared.feature.action?.interrupt
+    if (!declaration) return undefined
+    const id = `plugin-choice:${prepared.action.id}`
+    const validOptionIds = new Set(declaration.options.map((option) => option.id))
+    const readChoice = (response: PluginChoiceInterruptResponse | undefined) =>
+      response?.optionId && validOptionIds.has(response.optionId)
+        ? response.optionId
+        : declaration.defaultOptionId
+    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    const existing = existingQueue?.mapId === activeMap.id
+      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
+      : undefined
+    if (existing && isCombatInterruptKind(existing, 'plugin-choice')) {
+      if (existing.status === 'answered' || existing.status === 'done') {
+        return readChoice(existing.response)
+      }
+      if (existing.status === 'rolled-back') return declaration.defaultOptionId
+    }
+    return new Promise((resolve) => {
+      pendingSharedPluginChoiceRef.current = { id, actionId: prepared.action.id, resolve }
+      if (existing && isCombatInterruptKind(existing, 'plugin-choice') && existing.status === 'pending') return
+      const interrupt = createCombatInterrupt<PluginChoiceInterruptPayload, PluginChoiceInterruptResponse>({
+        id,
+        transactionId: prepared.action.id,
+        mapId: activeMap.id,
+        kind: 'plugin-choice',
+        actorCharId: prepared.actor.id,
+        targetCharId: prepared.targetToken.characterId,
+        payload: {
+          pluginId: prepared.feature.ownerPluginId,
+          featureId: prepared.feature.id,
+          featureName: prepared.feature.name,
+          prompt: declaration.prompt,
+          audience: declaration.audience,
+          options: declaration.options.map((option) => ({ ...option })),
+          defaultOptionId: declaration.defaultOptionId,
+        },
+        expiresAt: runtimeNow() + (declaration.timeoutMs ?? 30_000),
       })
       void publishCombatInterrupt(interrupt)
     })
@@ -5288,6 +5402,45 @@ export default function MapsPage() {
             reason: 'timeout',
           })
         }
+        const pendingPluginChoice = pendingSharedPluginChoiceRef.current
+        if (pendingPluginChoice) {
+          const interrupt = queue.interrupts.find((candidate) =>
+            candidate.id === pendingPluginChoice.id && isCombatInterruptKind(candidate, 'plugin-choice'),
+          )
+          if (
+            interrupt && isCombatInterruptKind(interrupt, 'plugin-choice') &&
+            (interrupt.status === 'answered' || interrupt.status === 'done' || interrupt.status === 'rolled-back')
+          ) {
+            const requested = interrupt.response?.optionId
+            const optionId = requested && interrupt.payload.options.some((option) => option.id === requested)
+              ? requested
+              : interrupt.payload.defaultOptionId
+            pendingSharedPluginChoiceRef.current = null
+            setSharedPluginChoicePrompt(null)
+            if (interrupt.status === 'answered') {
+              await finishSharedCombatInterrupt(interrupt.id, { optionId })
+            }
+            pendingPluginChoice.resolve(optionId)
+          }
+        }
+        const dmPluginChoiceInterrupt = queue.interrupts.find((interrupt) =>
+          isCombatInterruptKind(interrupt, 'plugin-choice') &&
+          interrupt.payload.audience === 'dm' &&
+          interrupt.status === 'pending' &&
+          !suppressedPluginChoicePromptIdsRef.current.has(interrupt.id) &&
+          !isCombatInterruptExpired(interrupt, now),
+        )
+        if (dmPluginChoiceInterrupt && isCombatInterruptKind(dmPluginChoiceInterrupt, 'plugin-choice')) {
+          const characterId = dmPluginChoiceInterrupt.actorCharId
+          setSharedPluginChoicePrompt({
+            id: dmPluginChoiceInterrupt.id,
+            character: characters.find((character) => character.id === characterId),
+            payload: dmPluginChoiceInterrupt.payload,
+            expiresAt: dmPluginChoiceInterrupt.expiresAt,
+          })
+        } else if (!pendingPluginChoice) {
+          setNullablePromptView(setSharedPluginChoicePrompt, undefined)
+        }
         const dmAdjudicationInterrupt = queue.interrupts.find((interrupt) =>
           isCombatInterruptKind(interrupt, 'dm-adjudication') &&
           (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm') &&
@@ -5482,6 +5635,7 @@ export default function MapsPage() {
           'stroke-of-luck': suppressedStrokeOfLuckPromptIdsRef.current,
           'empowered-spell': suppressedEmpoweredSpellPromptIdsRef.current,
           'stand-against-tide': suppressedStandAgainstTidePromptIdsRef.current,
+          'plugin-choice': suppressedPluginChoicePromptIdsRef.current,
         },
       })
       const views = buildCombatInterruptPromptViews(selection)
@@ -5499,6 +5653,7 @@ export default function MapsPage() {
       setNullablePromptView(setSharedStrokeOfLuckPrompt, views.strokeOfLuck)
       setNullablePromptView(setSharedEmpoweredSpellPrompt, views.empoweredSpell)
       setNullablePromptView(setSharedStandAgainstTidePrompt, views.standAgainstTide)
+      setNullablePromptView(setSharedPluginChoicePrompt, views.pluginChoice)
       if (views.empoweredSpell?.id !== sharedEmpoweredSpellPrompt?.id) setSharedEmpoweredSpellSelection([])
     }
     const unsubscribe = subscribeSharedResourceInvalidation(COMBAT_INTERRUPT_RESOURCE, load, {
@@ -5657,6 +5812,17 @@ export default function MapsPage() {
     suppressedStandAgainstTidePromptIdsRef.current.add(prompt.id)
     setSharedStandAgainstTidePrompt(null)
     await answerSharedCombatInterrupt(prompt.id, validTargetId ? { targetTokenId: validTargetId } : {})
+  }
+
+  const handleSharedPluginChoice = async (optionId: string) => {
+    if (!sharedPluginChoicePrompt || !activeMap) return
+    const prompt = sharedPluginChoicePrompt
+    const validOptionId = prompt.payload.options.some((option) => option.id === optionId)
+      ? optionId
+      : prompt.payload.defaultOptionId
+    suppressedPluginChoicePromptIdsRef.current.add(prompt.id)
+    setSharedPluginChoicePrompt(null)
+    await answerSharedCombatInterrupt(prompt.id, { optionId: validOptionId })
   }
 
   const handleSharedDmAdjudicationChoice = async (approved: boolean) => {
@@ -7709,7 +7875,39 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })
+      const pluginActionDefinition = dnd5ePluginHeadlessActionDefinition(
+        prepared.prepared.headlessAction.pluginId,
+        prepared.prepared.headlessAction.actionId,
+      )
+      const pluginChoiceId = prepared.prepared.feature.action?.interrupt
+        ? await requestSharedPluginChoice(prepared.prepared)
+        : undefined
+      if (prepared.prepared.feature.action?.interrupt && !pluginChoiceId) {
+        acknowledgePlayerAction(action, 'rejected', 'interrupt-cancelled')
+        completePlayerActionRequest(action)
+        return
+      }
+      let pluginRolls: Record<string, Dnd5ePluginDiceRollResult>
+      try {
+        pluginRolls = await executeDnd5ePluginDiceRolls(pluginActionDefinition ?? {}, async (declaration) =>
+          rollDiceBoxValues(
+            declaration.count,
+            declaration.sides,
+            `${prepared.prepared.feature.name}·${declaration.label}`,
+            prepared.prepared.targetToken.label,
+            { broadcast: declaration.visibility !== 'dm' },
+          ),
+        )
+      } catch {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-dice')
+        completePlayerActionRequest(action)
+        return
+      }
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+        rolls: pluginRolls,
+        interruptChoiceId: pluginChoiceId,
+      })
       if (!resolved.result.ok || !resolved.application) {
         acknowledgePlayerAction(
           action,
@@ -10267,11 +10465,15 @@ export default function MapsPage() {
   const sendDmLocalDnd5ePluginActionRequest = (
     payload: Dnd5ePluginActionPayload,
     targetTokenId?: string,
+    area?: { targetTokenIds: string[]; targetCell: GridCell; targetOrientation?: 0 | 1 | 2 | 3 },
   ) =>
     submitDmLocalPlayerAction(
       createDmLocalPlayerAction({
         type: 'dnd5e-plugin-action',
         targetTokenId,
+        targetTokenIds: area?.targetTokenIds,
+        targetCell: area?.targetCell,
+        targetOrientation: area?.targetOrientation,
         dnd5ePluginAction: payload,
       }),
     )
@@ -10371,11 +10573,15 @@ export default function MapsPage() {
   const sendPlayerDnd5ePluginActionRequest = (
     payload: Dnd5ePluginActionPayload,
     targetTokenId?: string,
+    area?: { targetTokenIds: string[]; targetCell: GridCell; targetOrientation?: 0 | 1 | 2 | 3 },
   ) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const action = createPlayerActionRequest({
       type: 'dnd5e-plugin-action',
       targetTokenId,
+      targetTokenIds: area?.targetTokenIds,
+      targetCell: area?.targetCell,
+      targetOrientation: area?.targetOrientation,
       dnd5ePluginAction: payload,
     })
     if (!action) return false
@@ -10869,6 +11075,7 @@ export default function MapsPage() {
               onAoeCancel={() => {
                 setDnd5eSpellTargeting(null)
                 setDnd5eItemAreaTargeting(null)
+                setDnd5ePluginAreaTargeting(null)
                 setAoePreviewCell(null)
               }}
               deleteSelectMode={isDM && deleteSelectMode && !showMoveRange && !gridAdjustMode && !measureMode}
@@ -10879,6 +11086,7 @@ export default function MapsPage() {
                 setDnd5eSpellTargeting(null)
                 setDnd5eItemAreaTargeting(null)
                 setDnd5eItemCreatureTargeting(null)
+                setDnd5ePluginAreaTargeting(null)
                 setSelectedTokenId(null)
                 setSelectedCharacterTokenId(null)
                 setEnemyDetailOpen(false)
@@ -11092,6 +11300,56 @@ export default function MapsPage() {
                     {combatDialog.confirmText}
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {sharedPluginChoicePrompt && (
+            <div className="absolute inset-0 z-[62] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div
+                role="dialog"
+                aria-labelledby="shared-plugin-choice-title"
+                className="relative mx-4 w-full max-w-lg rounded-2xl border border-violet-400/35 bg-void-950/95 p-5 shadow-2xl"
+              >
+                {sharedPluginChoicePrompt.expiresAt != null && (
+                  <div className="absolute right-5 top-5 rounded-full border border-violet-300/40 bg-violet-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-violet-100">
+                    {Math.max(0, Math.ceil((sharedPluginChoicePrompt.expiresAt - sharedDodgeNow) / 1000))}s
+                  </div>
+                )}
+                <div className="pr-16">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-300/70">
+                    扩展规则 · Headless Interrupt
+                  </p>
+                  <h3 id="shared-plugin-choice-title" className="mt-1 text-lg font-semibold text-violet-100">
+                    {sharedPluginChoicePrompt.payload.featureName}
+                  </h3>
+                </div>
+                <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-slate-300">
+                  {sharedPluginChoicePrompt.payload.prompt}
+                </p>
+                <div className="mt-5 grid gap-2">
+                  {sharedPluginChoicePrompt.payload.options.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      data-testid={`shared-plugin-choice-${option.id}`}
+                      onClick={() => void handleSharedPluginChoice(option.id)}
+                      className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left transition hover:border-violet-400/35 hover:bg-violet-500/10"
+                    >
+                      <span className="block text-sm font-semibold text-slate-100">{option.label}</span>
+                      {option.description && (
+                        <span className="mt-1 block text-xs leading-5 text-slate-400">{option.description}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-4 text-[11px] text-slate-500">
+                  超时将采用“{
+                    sharedPluginChoicePrompt.payload.options.find((option) =>
+                      option.id === sharedPluginChoicePrompt.payload.defaultOptionId
+                    )?.label ?? sharedPluginChoicePrompt.payload.defaultOptionId
+                  }”，事务锁定期间不会重复结算。
+                </p>
               </div>
             </div>
           )}
@@ -12709,6 +12967,20 @@ export default function MapsPage() {
                         setDnd5eWeaponAttackOptions(undefined)
                         if (isDM) sendDmLocalDnd5ePluginActionRequest(payload, targetTokenId)
                         else sendPlayerDnd5ePluginActionRequest(payload, targetTokenId)
+                      }}
+                      onBeginAreaTargeting={({ featureId, featureName, targeting }) => {
+                        setDnd5eWeaponTargeting(null)
+                        setDnd5eWeaponAttackOptions(undefined)
+                        setDnd5eSpellTargeting(null)
+                        setDnd5eItemAreaTargeting(null)
+                        setDnd5eItemCreatureTargeting(null)
+                        setDnd5ePluginAreaTargeting({
+                          characterId: activeChar.id,
+                          featureId,
+                          featureName,
+                          targeting,
+                        })
+                        setAoePreviewCell(null)
                       }}
                     />
                   )}

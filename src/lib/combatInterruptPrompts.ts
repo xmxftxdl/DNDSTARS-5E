@@ -37,6 +37,7 @@ export interface CombatInterruptPromptSelection {
   'stroke-of-luck'?: CombatInterruptPrompt<'stroke-of-luck'>
   'empowered-spell'?: CombatInterruptPrompt<'empowered-spell'>
   'stand-against-tide'?: CombatInterruptPrompt<'stand-against-tide'>
+  'plugin-choice'?: CombatInterruptPrompt<'plugin-choice'>
 }
 
 export interface SharedDodgePromptView {
@@ -202,6 +203,13 @@ export interface SharedStandAgainstTidePromptView {
   expiresAt?: number
 }
 
+export interface SharedPluginChoicePromptView {
+  id: string
+  character?: Character
+  payload: CombatInterruptByKind<'plugin-choice'>['payload']
+  expiresAt?: number
+}
+
 export interface CombatInterruptPromptViews {
   dodge?: SharedDodgePromptView
   stableMind?: SharedStableMindPromptView
@@ -220,6 +228,7 @@ export interface CombatInterruptPromptViews {
   strokeOfLuck?: SharedStrokeOfLuckPromptView
   empoweredSpell?: SharedEmpoweredSpellPromptView
   standAgainstTide?: SharedStandAgainstTidePromptView
+  pluginChoice?: SharedPluginChoicePromptView
 }
 
 function findAnswerableInterrupt<K extends CombatInterruptKind>(
@@ -353,6 +362,12 @@ export function resolveCombatInterruptPromptSelection(input: {
       input.suppressed['stand-against-tide'],
       input.answerContext,
     ),
+    'plugin-choice': findAnswerableInterrupt(
+      pendingInterrupts,
+      'plugin-choice',
+      input.suppressed['plugin-choice'],
+      input.answerContext,
+    ),
   }
 }
 
@@ -376,6 +391,7 @@ export function buildCombatInterruptPromptViews(
   const strokeOfLuck = selection['stroke-of-luck']
   const empoweredSpell = selection['empowered-spell']
   const standAgainstTide = selection['stand-against-tide']
+  const pluginChoice = selection['plugin-choice']
 
   return {
     dodge: dodge
@@ -556,6 +572,14 @@ export function buildCombatInterruptPromptViews(
           attackName: standAgainstTide.interrupt.payload.attackName,
           candidates: standAgainstTide.interrupt.payload.candidates,
           expiresAt: standAgainstTide.interrupt.expiresAt,
+        }
+      : undefined,
+    pluginChoice: pluginChoice
+      ? {
+          id: pluginChoice.interrupt.id,
+          character: pluginChoice.character,
+          payload: pluginChoice.interrupt.payload,
+          expiresAt: pluginChoice.interrupt.expiresAt,
         }
       : undefined,
   }

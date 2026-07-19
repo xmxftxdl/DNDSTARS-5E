@@ -1,7 +1,7 @@
 export const COMBAT_INTERRUPT_RESOURCE = 'combat-interrupts'
 export const COMBAT_INTERRUPT_QUEUE_LIMIT = 32
 
-export type CombatInterruptKind = 'dodge' | 'stable-mind' | 'gale-combo' | 'agile-leap' | 'opportunity-attack' | 'protection' | 'shield-spell' | 'counterspell' | 'uncanny-dodge' | 'deflect-missiles' | 'saving-throw-reroll' | 'legendary-resistance' | 'bardic-inspiration' | 'cutting-words' | 'dark-ones-own-luck' | 'stroke-of-luck' | 'empowered-spell' | 'stand-against-tide' | 'dm-adjudication'
+export type CombatInterruptKind = 'dodge' | 'stable-mind' | 'gale-combo' | 'agile-leap' | 'opportunity-attack' | 'protection' | 'shield-spell' | 'counterspell' | 'uncanny-dodge' | 'deflect-missiles' | 'saving-throw-reroll' | 'legendary-resistance' | 'bardic-inspiration' | 'cutting-words' | 'dark-ones-own-luck' | 'stroke-of-luck' | 'empowered-spell' | 'stand-against-tide' | 'plugin-choice' | 'dm-adjudication'
 export type CombatInterruptStatus = 'pending' | 'waiting-for-dm' | 'rolling' | 'answered' | 'done' | 'rolled-back'
 export type CombatInterruptPhase = 'before-action' | 'before-hit' | 'before-damage' | 'after-save' | 'before-condition'
 export type CombatInterruptTimeoutPolicy = 'rollback' | 'wait-for-dm'
@@ -9,7 +9,7 @@ export type CombatInterruptTimeoutPolicy = 'rollback' | 'wait-for-dm'
 const TERMINAL_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>(['done', 'rolled-back'])
 
 export function defaultCombatInterruptPhase(kind: CombatInterruptKind): CombatInterruptPhase {
-  if (kind === 'counterspell' || kind === 'dm-adjudication') return 'before-action'
+  if (kind === 'counterspell' || kind === 'plugin-choice' || kind === 'dm-adjudication') return 'before-action'
   if (kind === 'uncanny-dodge' || kind === 'deflect-missiles' || kind === 'empowered-spell') return 'before-damage'
   if (kind === 'saving-throw-reroll' || kind === 'legendary-resistance' || kind === 'bardic-inspiration' || kind === 'dark-ones-own-luck' || kind === 'stable-mind') return 'after-save'
   if (kind === 'agile-leap') return 'before-condition'
