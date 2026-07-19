@@ -241,6 +241,69 @@ describe('map geometry player projection', () => {
       .toEqual(['shown-area'])
   })
 
+  it('uses passive Perception to omit hidden tokens from the serialized player response', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'unnoticed', type: 'enemy', label: '刺客', poolId: 'assassin', x: 30, y: 20, dnd5eCombatState: { hiddenCheckTotal: 18 } },
+          { id: 'noticed', type: 'enemy', label: '地精', poolId: 'goblin', x: 35, y: 20, dnd5eCombatState: { hiddenCheckTotal: 14 } },
+        ],
+      }],
+    }, geometry, 'character-1', {
+      characters: [{ id: 'character-1', passivePerception: 15 }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'noticed'])
+    expect(JSON.stringify(projected)).not.toContain('assassin')
+  })
+
+  it('recomputes passive Perception from current abilities and proficiency instead of stale cache data', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'hidden', type: 'enemy', label: '潜伏者', x: 30, y: 20, dnd5eCombatState: { hiddenCheckTotal: 16 } },
+        ],
+      }],
+    }, geometry, 'character-1', {
+      characters: [{
+        id: 'character-1', level: 5, charClass: '游侠', abilities: { wis: 18 },
+        skills: ['perception'], passivePerception: 10,
+      }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'hidden'])
+  })
+
+  it('serializes a detected but unseen creature as an anonymous position marker', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          {
+            id: 'invisible-enemy', type: 'enemy', label: '隐形法师', poolId: 'mage', hp: 40, maxHp: 40,
+            x: 30, y: 20, dnd5eCombatState: { conditions: ['invisible'] },
+          },
+        ],
+      }],
+    }, geometry, 'character-1', {
+      characters: [{ id: 'character-1', passivePerception: 10 }],
+    })
+    expect(projected.maps[0].tokens[1]).toMatchObject({
+      id: 'invisible-enemy', label: '未见生物', emoji: '◇', perceptionVisibility: 'detected-unseen',
+      showHpOnToken: false, showDetailOnToken: false,
+    })
+    const serialized = JSON.stringify(projected.maps[0].tokens[1])
+    expect(serialized).not.toContain('隐形法师')
+    expect(serialized).not.toContain('mage')
+    expect(serialized).not.toContain('40')
+    expect(serialized).not.toContain('dnd5eCombatState')
+  })
+
   it('redacts closed secret doors as anonymous walls', () => {
     const projected = sharedServerCore.projectMapGeometryForPlayer(geometry)
     expect(projected.maps[0].doors).toEqual([])

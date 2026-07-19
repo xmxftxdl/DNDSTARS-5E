@@ -1049,11 +1049,27 @@ function emitDnd5eAttackResolved(
   events.push(event)
   const attacker = state.combatants[event.actorId]
   const target = state.combatants[event.targetId]
-  if (attacker) triggerDnd5eActiveEffectBreak(attacker, 'makes-attack', events)
+  if (attacker) {
+    triggerDnd5eActiveEffectBreak(attacker, 'makes-attack', events)
+    if (attacker.classState.hiddenCheckTotal != null) {
+      attacker.classState.hiddenCheckTotal = undefined
+      events.push({ type: 'class-state-changed', actorId: attacker.id, stateKey: 'hidden', active: false })
+    }
+  }
   if (target) {
     triggerDnd5eActiveEffectBreak(target, 'targeted-by-attack', events)
     if (event.hit) triggerDnd5eActiveEffectBreak(target, 'hit-by-attack', events)
   }
+}
+
+function emitDnd5eSpellCast(
+  state: Dnd5eHeadlessCombatState,
+  event: Extract<Dnd5eCombatEvent, { type: 'spell-cast' }>,
+  events: Dnd5eCombatEvent[],
+): void {
+  events.push(event)
+  const caster = state.combatants[event.actorId]
+  if (caster) triggerDnd5eActiveEffectBreak(caster, 'casts-spell', events)
 }
 
 function advanceDnd5eActiveEffectsAtBoundary(input: {
@@ -3560,7 +3576,8 @@ function resolveSpellCast(
   }
   if (effectiveCastingTime === 'bonus-action') actor.classState.bonusActionSpellTurnKey = turnKey
   if (spell.level > 0) actor.classState.leveledSpellTurnKey = turnKey
-  events.push({ type: 'spell-cast', actorId: actor.id, targetId: target.id, spellId: spell.id, slotLevel: action.slotLevel })
+  const castingWhileUnseen = dnd5eAttackerIsUnseen(actor)
+  emitDnd5eSpellCast(state, { type: 'spell-cast', actorId: actor.id, targetId: target.id, spellId: spell.id, slotLevel: action.slotLevel }, events)
   const suppliedDamageCuttingWordsCount = (action.cuttingWordsDamage ? 1 : 0) +
     (action.targetAttacks?.filter((attack) => attack.cuttingWordsDamage).length ?? 0)
   let consumedDamageCuttingWordsCount = 0
@@ -4244,7 +4261,7 @@ function resolveSpellCast(
         const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(affectedTarget) &&
           (dnd5eTargetGrantsAttackAdvantage(affectedTarget) || (spell.id === 'shocking-grasp' && affectedTarget.wearingMetalArmor) || requestedMode === 'advantage' || (attackIndex === 0 && attackingFromHidden) ||
             !!affectedTarget.classState.recklessAttackTurnKey || !!affectedTarget.classState.stunnedByActorId ||
-            dnd5eAttackerIsUnseen(actor))
+            (attackIndex === 0 && castingWhileUnseen) || dnd5eAttackerIsUnseen(actor))
         const actorHasDisadvantage = requestedMode === 'disadvantage' ||
           (attackIndex === 0 && viciousMockeryDisadvantage) || actor.exhaustionLevel >= 3 ||
           dnd5eIsIntimidated(actor) || dnd5eUnseenTargetImposesDisadvantage(actor, affectedTarget)
@@ -4370,7 +4387,7 @@ function resolveSpellCast(
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
     const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
       (dnd5eTargetGrantsAttackAdvantage(target) || (spell.id === 'shocking-grasp' && target.wearingMetalArmor) || requestedMode === 'advantage' || attackingFromHidden || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-        dnd5eAttackerIsUnseen(actor))
+        castingWhileUnseen || dnd5eAttackerIsUnseen(actor))
     const actorHasDisadvantage = requestedMode === 'disadvantage' || viciousMockeryDisadvantage || actor.exhaustionLevel >= 3 ||
       dnd5eIsIntimidated(actor) || dnd5eUnseenTargetImposesDisadvantage(actor, target)
     const mode: D20RollMode = targetGrantsAdvantage === actorHasDisadvantage
@@ -5196,6 +5213,12 @@ function resolveAdjudicatedSpell(
   }
   if (action.castingTime === 'bonus-action') actor.classState.bonusActionSpellTurnKey = turnKey
   if (action.spellLevel > 0) actor.classState.leveledSpellTurnKey = turnKey
+  const affectedTargetIds = [...new Set(action.effects.map((effect) => effect.targetId))]
+  emitDnd5eSpellCast(state, {
+    type: 'spell-cast', actorId: actor.id,
+    targetId: affectedTargetIds[0] ?? actor.id,
+    spellId: action.spellId, slotLevel: action.slotLevel,
+  }, events)
 
   for (const effect of action.effects) {
     const target = state.combatants[effect.targetId]!
@@ -5271,15 +5294,9 @@ function resolveAdjudicatedSpell(
     }
   }
 
-  const affectedTargetIds = [...new Set(action.effects.map((effect) => effect.targetId))]
   if (concentrationRounds != null) {
     beginDnd5eConcentration(state, actor, action.spellId, affectedTargetIds, concentrationRounds, events)
   }
-  events.push({
-    type: 'spell-cast', actorId: actor.id,
-    targetId: affectedTargetIds[0] ?? actor.id,
-    spellId: action.spellId, slotLevel: action.slotLevel,
-  })
   events.push({
     type: 'adjudicated-spell-resolved', actorId: actor.id,
     spellId: action.spellId, spellName: action.spellName,

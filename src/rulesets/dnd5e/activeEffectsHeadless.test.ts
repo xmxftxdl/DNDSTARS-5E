@@ -119,6 +119,34 @@ describe('ActiveEffectInstance Headless 生命周期', () => {
       .toEqual(expect.arrayContaining(['makes-attack', 'targeted-by-attack', 'hit-by-attack', 'takes-damage']))
   })
 
+  it('removes a casting-sensitive invisibility effect while preserving advantage for the first spell attack', () => {
+    const invisibility = createDnd5eConditionEffect({
+      condition: 'invisible', targetId: 'caster', source: { kind: 'spell', rulesId: 'invisibility' },
+      breakOn: ['makes-attack', 'casts-spell'],
+    })
+    const state = startDnd5eHeadlessCombat('spell-break', [
+      combatant('caster', 20, {
+        classId: 'wizard', level: 1,
+        classSelections: { 'spell-cantrips': ['fire-bolt'] },
+        classState: { activeEffects: [invisibility] },
+      }),
+      combatant('target', 10, { controller: 'dm', position: { x: 30, y: 0 } }),
+    ])
+    const cast = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'caster', targetId: 'target', spellId: 'fire-bolt', slotLevel: 0,
+      d20: 2, d20Second: 18, effectRolls: [4],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.caster.classState.activeEffects).toBeUndefined()
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'caster', reason: 'casts-spell',
+    }))
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: 'caster', d20: 18,
+    }))
+  })
+
   it('ends concentration-linked effects when the source loses concentration', () => {
     const linked = createDnd5eConditionEffect({
       condition: 'restrained', targetId: 'target', source: { kind: 'spell', actorId: 'caster', rulesId: 'web' },

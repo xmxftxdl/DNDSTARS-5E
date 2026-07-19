@@ -31,6 +31,7 @@ export type Dnd5eActiveEffectBreakTrigger =
   | 'targeted-by-attack'
   | 'hit-by-attack'
   | 'makes-attack'
+  | 'casts-spell'
   | 'moves'
 
 export type Dnd5eActiveEffectTurnBoundary =
@@ -230,7 +231,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const ACTIVE_EFFECT_KINDS = new Set<Dnd5eActiveEffectKind>(['condition', 'mark', 'buff', 'debuff', 'custom'])
 const SOURCE_KINDS = new Set<Dnd5eActiveEffectSourceKind>(['dm', 'spell', 'feature', 'item', 'monster', 'plugin', 'system', 'legacy'])
 const STACKING_POLICIES = new Set<Dnd5eActiveEffectStackingPolicy>(['reject', 'refresh-duration', 'replace', 'keep-strongest', 'stack'])
-const BREAK_TRIGGERS = new Set<Dnd5eActiveEffectBreakTrigger>(['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'moves'])
+const BREAK_TRIGGERS = new Set<Dnd5eActiveEffectBreakTrigger>(['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'casts-spell', 'moves'])
 const TURN_BOUNDARIES = new Set<Dnd5eActiveEffectTurnBoundary>(['source-turn-start', 'source-turn-end', 'target-turn-start', 'target-turn-end'])
 const ABILITIES = new Set<AbilityKey>(['str', 'dex', 'con', 'int', 'wis', 'cha'])
 

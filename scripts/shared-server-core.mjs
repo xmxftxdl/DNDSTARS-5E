@@ -899,7 +899,7 @@ function validActiveEffectInstance(effect) {
     !['target-turn-start', 'target-turn-end'].includes(effect.repeatSave.timing) || effect.repeatSave.onSuccess !== 'remove'
   )) return false
   if (effect.breakOn != null && (!Array.isArray(effect.breakOn) || effect.breakOn.some((trigger) =>
-    !['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'moves'].includes(trigger)
+    !['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'casts-spell', 'moves'].includes(trigger)
   ))) return false
   if (effect.modifiers != null && (
     !plainObject(effect.modifiers) ||
@@ -1202,9 +1202,78 @@ function playerCanSeeToken(map, geometry, viewer, target) {
   return true
 }
 
-export function projectMapsForPlayer(value, geometryState, activeCharacterId = null) {
+function tokenHiddenCheckTotal(token) {
+  const total = token?.dnd5eCombatState?.hiddenCheckTotal
+  return Number.isFinite(total) ? Math.max(0, Math.floor(total)) : null
+}
+
+function tokenIsInvisible(token) {
+  const state = token?.dnd5eCombatState
+  return state?.conditions?.includes('invisible') === true ||
+    state?.activeEffects?.some((effect) => effect?.standardCondition === 'invisible') === true
+}
+
+function passivePerceptionForViewer(viewer, characterById) {
+  const character = typeof viewer?.characterId === 'string' ? characterById.get(viewer.characterId) : null
+  if (
+    Number.isFinite(character?.abilities?.wis) && Number.isFinite(character?.level) &&
+    Array.isArray(character?.skills)
+  ) {
+    const level = Math.max(1, Math.min(20, Math.floor(character.level)))
+    const proficiencyBonus = 2 + Math.floor((level - 1) / 4)
+    const classId = character.charClass === '吟游诗人' ? 'bard'
+      : character.charClass === '游荡者' ? 'rogue'
+        : character.charClass === '邪术师' ? 'warlock'
+          : null
+    const selections = classId ? character.dnd5eClassChoices?.classes?.[classId]?.selections ?? {} : {}
+    const loreProficiency = character.charClass === '吟游诗人' &&
+      Array.isArray(selections['lore-bonus-skills']) && selections['lore-bonus-skills'].includes('perception')
+    const proficient = character.skills.includes('perception') || loreProficiency
+    const expertise = proficient && Array.isArray(selections.expertise) && selections.expertise.includes('perception')
+    const unproficientBonus = !proficient && character.charClass === '吟游诗人' && level >= 2
+      ? Math.floor(proficiencyBonus / 2)
+      : 0
+    const skillBonus = Math.floor((Math.max(1, Math.min(30, character.abilities.wis)) - 10) / 2) +
+      (expertise ? proficiencyBonus * 2 : proficient ? proficiencyBonus : unproficientBonus)
+    const passiveDisadvantage = (character.exhaustionLevel ?? 0) >= 1 ||
+      (Array.isArray(character.conditions) && character.conditions.includes('poisoned')) ||
+      (Array.isArray(character.dnd5eCombatState?.conditions) && character.dnd5eCombatState.conditions.includes('poisoned'))
+    return Math.max(0, 10 + skillBonus - (passiveDisadvantage ? 5 : 0))
+  }
+  return Number.isFinite(character?.passivePerception)
+    ? Math.max(0, Math.floor(character.passivePerception))
+    : 10
+}
+
+function redactUnseenToken(token) {
+  const {
+    characterId: _characterId,
+    creatureTypes: _creatureTypes,
+    creatureSize: _creatureSize,
+    hp: _hp,
+    maxHp: _maxHp,
+    poolId: _poolId,
+    dnd5eCombatState: _dnd5eCombatState,
+    obstacleKind: _obstacleKind,
+    ...position
+  } = token
+  return {
+    ...position,
+    label: '未见生物',
+    emoji: '◇',
+    color: '#64748b',
+    showHpOnToken: false,
+    showDetailOnToken: false,
+    perceptionVisibility: 'detected-unseen',
+  }
+}
+
+export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
   const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
+  const characterById = new Map((characterState?.characters ?? [])
+    .filter((character) => plainObject(character) && typeof character.id === 'string')
+    .map((character) => [character.id, character]))
   return {
     ...value,
     maps: value.maps.map((map) => {
@@ -1214,13 +1283,20 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const viewers = geometry?.vision?.sharePartyVision === false
         ? players.filter((token) => token.characterId === activeCharacterId)
         : players
-      const tokens = map.tokens.filter((token) => {
-        if (!plainObject(token)) return false
-        if (token.type === 'player') return true
-        if (token.visibilityMode === 'always') return true
-        if (token.visibilityMode === 'dm-only') return false
-        if (!geometry?.vision?.enabled) return true
-        return viewers.some((viewer) => playerCanSeeToken(map, geometry, viewer, token))
+      const tokens = map.tokens.flatMap((token) => {
+        if (!plainObject(token)) return []
+        if (token.type === 'player' || token.visibilityMode === 'always') return [token]
+        if (token.visibilityMode === 'dm-only') return []
+        const observingViewers = viewers.filter((viewer) =>
+          !geometry?.vision?.enabled || playerCanSeeToken(map, geometry, viewer, token),
+        )
+        if (observingViewers.length === 0) return []
+        const hiddenCheckTotal = tokenHiddenCheckTotal(token)
+        if (
+          hiddenCheckTotal != null &&
+          !observingViewers.some((viewer) => passivePerceptionForViewer(viewer, characterById) >= hiddenCheckTotal)
+        ) return []
+        return [tokenIsInvisible(token) ? redactUnseenToken(token) : token]
       })
       const visibleIds = new Set(tokens.map((token) => token.id))
       return {
@@ -1425,6 +1501,19 @@ async function readMapGeometryForProjection(ctx) {
   try {
     const value = JSON.parse(await readFile(filePath, 'utf8'))
     const validation = validateSharedStateShape('map-geometry', value)
+    return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
+  } catch (error) {
+    return error?.code === 'ENOENT'
+      ? { value: null, corrupted: false }
+      : { value: null, corrupted: true }
+  }
+}
+
+async function readCharactersForProjection(ctx) {
+  const filePath = path.join(ctx.stateRoot, 'characters.json')
+  try {
+    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const validation = validateSharedStateShape('characters', value)
     return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
   } catch (error) {
     return error?.code === 'ENOENT'
@@ -3283,7 +3372,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
-          if (geometry.corrupted) {
+          const characters = await readCharactersForProjection(ctx)
+          if (geometry.corrupted || characters.corrupted) {
             value = {
               ...value,
               maps: (value.maps ?? []).map((map) => ({
@@ -3292,7 +3382,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               })),
             }
           } else {
-            value = projectMapsForPlayer(value, geometry.value, roomMember?.activeCharacterId ?? null)
+            value = projectMapsForPlayer(value, geometry.value, roomMember?.activeCharacterId ?? null, characters.value)
           }
         }
         try {

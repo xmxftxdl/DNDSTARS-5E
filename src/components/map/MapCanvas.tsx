@@ -2200,6 +2200,7 @@ function TokenNode({
     ? Math.min(radius * 9, Math.max(radius * 2.4, hoverLabel.length * hoverFontSize * 0.92))
     : radius * 2.4
   const isDragonEmoji = token.emoji === '\u{1f409}' || token.emoji === '\u{1f432}'
+  const isDetectedUnseen = token.perceptionVisibility === 'detected-unseen'
   const emojiFontScale = isDragonEmoji ? 0.94 : 1
   const emojiOffsetY = isDragonEmoji ? radius * 0.07 : 0
 
@@ -2453,6 +2454,16 @@ function TokenNode({
           dash={tokenDash(radius, [5, 4])}
           shadowBlur={8 * scale}
           shadowColor="rgba(250,204,21,0.85)"
+          listening={false}
+        />
+      )}
+      {isDetectedUnseen && (
+        <Circle
+          radius={radius + selectedGap * 0.65}
+          stroke="#94a3b8"
+          strokeWidth={Math.max(1.5, baseStrokeW * 0.75)}
+          dash={tokenDash(radius, [3, 5])}
+          opacity={0.75}
           listening={false}
         />
       )}

@@ -28,7 +28,7 @@ export function validateSharedStateShape(
   name: string,
   value: unknown,
 ): { ok: true } | { ok: false; reason: string }
-export function projectMapsForPlayer<T>(value: T, geometryState: unknown, activeCharacterId?: string | null): T
+export function projectMapsForPlayer<T>(value: T, geometryState: unknown, activeCharacterId?: string | null, characterState?: unknown): T
 export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null): T
 export function projectMapExplorationForPlayer<T>(value: T, memberId?: string | null): T
 

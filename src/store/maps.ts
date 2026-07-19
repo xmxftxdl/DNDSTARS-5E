@@ -185,6 +185,8 @@ export interface Token {
   }
   /** 玩家端可见性：动态视野、始终显示，或仅 DM 可见。 */
   visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
+  /** 服务端安全投影：知道其位置，但尚未真正看见该生物。 */
+  perceptionVisibility?: 'detected-unseen'
   /** DM 权威路径；各端只按路径做本地插值，最终坐标仍以 x/y 为准。 */
   movementAnimation?: TokenMovementAnimation
 }
@@ -343,6 +345,7 @@ function normalizeToken(raw: unknown): Token {
     visibilityMode: t.visibilityMode === 'always' || t.visibilityMode === 'dm-only' || t.visibilityMode === 'line-of-sight'
       ? t.visibilityMode
       : undefined,
+    perceptionVisibility: t.perceptionVisibility === 'detected-unseen' ? t.perceptionVisibility : undefined,
     movementAnimation: normalizeTokenMovementAnimation(t.movementAnimation),
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {

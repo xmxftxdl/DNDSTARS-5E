@@ -37,6 +37,7 @@ const BREAK_OPTIONS: readonly { value: Dnd5eActiveEffectBreakTrigger; label: str
   { value: 'targeted-by-attack', label: '成为攻击目标' },
   { value: 'hit-by-attack', label: '被攻击命中' },
   { value: 'makes-attack', label: '发动攻击' },
+  { value: 'casts-spell', label: '施放法术' },
   { value: 'moves', label: '发生移动' },
 ]
 

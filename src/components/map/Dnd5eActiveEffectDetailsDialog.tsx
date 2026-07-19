@@ -9,6 +9,7 @@ const BREAK_LABELS = {
   'targeted-by-attack': '成为攻击目标后解除',
   'hit-by-attack': '被攻击命中后解除',
   'makes-attack': '发动攻击后解除',
+  'casts-spell': '施放法术后解除',
   moves: '移动后解除',
 } as const
 
