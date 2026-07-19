@@ -363,6 +363,16 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     expect(p1.hp).toBe(15)
   })
 
+  it('always takes the authoritative movement path metadata for multi-client animation', () => {
+    const localMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 10, y: 10 })] })
+    const movementAnimation = {
+      id: 'move', points: [{ x: 10, y: 10 }, { x: 20, y: 10 }], durationMs: 500, issuedAt: 1,
+    }
+    const sharedMap = map({ tokens: [token({ id: 'p1', type: 'player', x: 20, y: 10, movementAnimation })] })
+    const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
+    expect(result.tokens[0].movementAnimation).toEqual(movementAnimation)
+  })
+
   it('a token absent from the shared snapshot is left untouched (no spurious overwrite)', () => {
     const localMap = map({ tokens: [token({ id: 'only-local', type: 'enemy', x: 50, y: 60, hp: 9, maxHp: 9 })] })
     const sharedMap = map({ tokens: [] })

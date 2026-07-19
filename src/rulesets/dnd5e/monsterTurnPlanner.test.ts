@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { resolveDnd5eMonsterMapMove } from './monsterMoveAction'
 import { planDnd5eMonsterTurn } from './monsterTurnPlanner'
 
@@ -17,6 +19,7 @@ function character(): Character {
 }
 
 describe('SRD monster 5e turn planner', () => {
+  afterEach(() => setMapGeometryRuntime([]))
   it('uses a ranged stat-block action without AP movement when the target is in range', () => {
     const goblin = token({ id: 'goblin', label: '哥布林', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7 })
     const hero = token({ id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero', x: 50, hp: 20, maxHp: 20 })
@@ -128,5 +131,54 @@ describe('SRD monster 5e turn planner', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.distanceFeet).toBe(55)
     expect(resolved.application?.map.tokens.find((entry) => entry.id === skeleton.id)?.x).toBe(160)
+  })
+
+  it('spends the monster object interaction for one door and rejects a second door in the same route', () => {
+    const goblin = token({ id: 'goblin', poolId: 'srd-5.1:goblin', x: 5, y: 5, hp: 7, maxHp: 7 })
+    const hero = character()
+    const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 45, y: 5 })
+    const battleMap = { ...map([goblin, heroToken]), width: 60, height: 10 }
+    const geometry = createEmptyMapGeometry(battleMap.id, 1)
+    geometry.doors.push(
+      {
+        id: 'door-1', kind: 'door', label: '门一', points: [{ x: 10, y: 0 }, { x: 10, y: 10 }],
+        state: 'closed', secret: false, blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      },
+      {
+        id: 'door-2', kind: 'door', label: '门二', points: [{ x: 30, y: 0 }, { x: 30, y: 10 }],
+        state: 'closed', secret: false, blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      },
+    )
+    setMapGeometryRuntime([geometry])
+    const initiativeOrder = [
+      { tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+      { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+    ]
+    expect(resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map: battleMap, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 35, y: 5 },
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })).toEqual({ ok: false, reason: 'movement-blocked' })
+
+    geometry.doors.pop()
+    setMapGeometryRuntime([geometry])
+    const throughOneDoor = resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map: battleMap, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 25, y: 5 },
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(throughOneDoor.ok).toBe(true)
+    if (throughOneDoor.ok && throughOneDoor.result.ok) {
+      expect(throughOneDoor.doorsToOpen).toEqual(['door-1'])
+      expect(throughOneDoor.result.state.combatants[goblin.id].turn.objectInteractionAvailable).toBe(false)
+    }
+    const noInteraction = createDnd5eTurnEconomyCounts('turn', 30)
+    noInteraction.objectInteraction!.current = 0
+    expect(resolveDnd5eMonsterMapMove({
+      combatId: 'combat', map: battleMap, characters: [hero], initiativeOrder,
+      actorTokenId: goblin.id, to: { x: 25, y: 5 }, turnEconomy: noInteraction,
+    })).toEqual({ ok: false, reason: 'object-interaction-unavailable' })
   })
 })

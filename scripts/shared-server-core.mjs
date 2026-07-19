@@ -941,6 +941,15 @@ function validateActiveEffectState(state, projectedConditions) {
   return null
 }
 
+function validTokenMovementAnimation(animation) {
+  return plainObject(animation) && typeof animation.id === 'string' && !!animation.id && animation.id.length <= 200 &&
+    Array.isArray(animation.points) && animation.points.length >= 2 && animation.points.length <= 128 &&
+    animation.points.every((point) => plainObject(point) && Number.isFinite(point.x) && Number.isFinite(point.y) &&
+      Math.abs(point.x) <= 1_000_000 && Math.abs(point.y) <= 1_000_000) &&
+    Number.isFinite(animation.durationMs) && animation.durationMs >= 240 && animation.durationMs <= 3_000 &&
+    Number.isFinite(animation.issuedAt) && animation.issuedAt >= 0
+}
+
 function validateDnd5eResourceStates(name, value) {
   if (name === 'characters') {
     for (const character of value.characters ?? []) {
@@ -954,6 +963,9 @@ function validateDnd5eResourceStates(name, value) {
       if (!plainObject(map) || !Array.isArray(map.tokens)) continue
       for (const token of map.tokens) {
         if (!plainObject(token)) continue
+        if (token.movementAnimation != null && !validTokenMovementAnimation(token.movementAnimation)) {
+          return 'invalid-token-movement-animation'
+        }
         const reason = validateActiveEffectState(token.dnd5eCombatState, token.dnd5eCombatState?.conditions ?? [])
         if (reason) return reason
       }

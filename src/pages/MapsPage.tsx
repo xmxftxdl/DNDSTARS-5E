@@ -387,6 +387,7 @@ import {
   type PreparedDnd5eMapInteraction,
 } from '../rulesets/dnd5e/mapInteraction'
 import { dnd5eAbilityCheckModifier, dnd5eSkillCheckModifier } from '../rulesets/dnd5e/checks'
+import { createTokenMovementAnimation, truncateTokenMovementPath } from '../lib/tokenMovementAnimation'
 import {
   TOKEN_MOVE_MS,
   ADVANCE_DELAY_MS,
@@ -2975,6 +2976,7 @@ export default function MapsPage() {
       actorTokenId: enemy.id,
       to: targetPosition,
       dash: options.dash,
+      turnEconomy: currentDnd5eTurnEconomy(enemy.id, roundRef.current),
     })
     if (!resolved.ok) {
       pushCombatLog(`${enemy.label} 的移动未执行：${resolved.reason}。`, 'system')
@@ -2994,6 +2996,20 @@ export default function MapsPage() {
       path: resolved.path,
     })
     for (const doorId of resolved.doorsToOpen) setGeometryDoorState(latestMap.id, doorId, 'open')
+    const resolvedTurn = resolved.result.state.combatants[enemy.id]?.turn
+    if (resolvedTurn) {
+      updateDnd5eTurnEconomy(enemy.id, (economy) => ({
+        ...economy,
+        action: { ...economy.action, current: resolvedTurn.actionAvailable ? economy.action.current : 0 },
+        bonusAction: { ...economy.bonusAction, current: resolvedTurn.bonusActionAvailable ? economy.bonusAction.current : 0 },
+        reaction: { ...economy.reaction, current: resolvedTurn.reactionAvailable ? economy.reaction.current : 0 },
+        objectInteraction: {
+          current: resolvedTurn.objectInteractionAvailable === false ? 0 : (economy.objectInteraction?.current ?? 1),
+          max: economy.objectInteraction?.max ?? 1,
+        },
+        movement: { ...economy.movement, current: resolvedTurn.movementRemaining },
+      }), roundRef.current)
+    }
     if (JSON.stringify(hazards.map.dnd5eItemAreas ?? []) !== JSON.stringify(latestMap.dnd5eItemAreas ?? [])) {
       updateMap(latestMap.id, { dnd5eItemAreas: hazards.map.dnd5eItemAreas })
     }
@@ -3005,7 +3021,20 @@ export default function MapsPage() {
       // This monster action is not wrapped in the player-action snapshot transaction.
       // Publish the authoritative Headless result so player clients see it and a later
       // shared-state refresh cannot snap the DM token back to its previous position.
-      if (next) updateToken(latestMap.id, tokenId, next)
+      if (next) {
+        const movementAnimation = tokenId === enemy.id
+          ? createTokenMovementAnimation({
+              id: `monster-move:${combatIdRef.current}:${roundRef.current}:${enemy.id}:${runtimeNow()}`,
+              path: truncateTokenMovementPath(resolved.path, hazards.finalPosition),
+              finalPosition: hazards.finalPosition,
+              issuedAt: runtimeNow() + 100,
+            })
+          : undefined
+        updateToken(latestMap.id, tokenId, {
+          ...next,
+          ...(movementAnimation ? { movementAnimation } : {}),
+        })
+      }
     }
     for (const log of hazards.logs) pushCombatLog(log, 'system')
     pushCombatLog(`${enemy.label} 移动 ${resolved.distanceFeet ?? 0} 尺。`, 'turn')
@@ -11036,7 +11065,20 @@ export default function MapsPage() {
       }
       for (const tokenId of hazards.application.changedTokenIds) {
         const next = hazards.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(latestMap.id, tokenId, next)
+        if (next) {
+          const movementAnimation = tokenId === finalMove.actorToken.id
+            ? createTokenMovementAnimation({
+                id: `player-move:${action.id}`,
+                path: truncateTokenMovementPath(finalMove.path, hazards.finalPosition),
+                finalPosition: hazards.finalPosition,
+                issuedAt: runtimeNow() + 100,
+              })
+            : undefined
+          applyAuthorityTokenUpdate(latestMap.id, tokenId, {
+            ...next,
+            ...(movementAnimation ? { movementAnimation } : {}),
+          })
+        }
       }
       const fromAnchor = tokenAnchorCellFromPixel(
         finalMove.actorToken.x, finalMove.actorToken.y, finalMove.actorToken, latestMap,

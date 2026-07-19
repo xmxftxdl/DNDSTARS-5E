@@ -84,4 +84,26 @@ describe('T10/AC3 — maps store version + migrate', () => {
       expect.objectContaining({ id: 'good', kind: 'caltrops', cells: [{ col: 1, row: 1 }], armed: true }),
     ])
   })
+
+  it('keeps bounded movement paths and drops malformed animation metadata', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 100, height: 100,
+        tokens: [
+          {
+            id: 'valid', movementAnimation: {
+              id: 'move', points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], durationMs: 500, issuedAt: 1,
+            },
+          },
+          {
+            id: 'invalid', movementAnimation: {
+              id: 'bad', points: [{ x: 0, y: 0 }], durationMs: 50_000, issuedAt: 1,
+            },
+          },
+        ],
+      }],
+    })
+    expect(result.maps[0].tokens[0].movementAnimation?.id).toBe('move')
+    expect(result.maps[0].tokens[1].movementAnimation).toBeUndefined()
+  })
 })

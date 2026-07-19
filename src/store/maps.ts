@@ -27,6 +27,10 @@ import {
   type CreatureSize,
   type CreatureType,
 } from '../lib/monsterTypes'
+import {
+  normalizeTokenMovementAnimation,
+  type TokenMovementAnimation,
+} from '../lib/tokenMovementAnimation'
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -73,6 +77,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           creatureSize: sharedToken.creatureSize,
           size: sharedToken.size,
           dnd5eCombatState: sharedToken.dnd5eCombatState,
+          movementAnimation: sharedToken.movementAnimation,
         }
       }),
     }
@@ -180,6 +185,8 @@ export interface Token {
   }
   /** 玩家端可见性：动态视野、始终显示，或仅 DM 可见。 */
   visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
+  /** DM 权威路径；各端只按路径做本地插值，最终坐标仍以 x/y 为准。 */
+  movementAnimation?: TokenMovementAnimation
 }
 
 type LegacyTokenSave = Omit<Partial<Token>, 'dnd5eCombatState'> & {
@@ -259,8 +266,8 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V6：Token 可声明高度、视野半径与服务端可见性策略。 */
-export const MAPS_PERSIST_VERSION = 6
+/** 地图存档 V7：Token 可携带短期、权威的分段移动路径。 */
+export const MAPS_PERSIST_VERSION = 7
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -336,6 +343,7 @@ function normalizeToken(raw: unknown): Token {
     visibilityMode: t.visibilityMode === 'always' || t.visibilityMode === 'dm-only' || t.visibilityMode === 'line-of-sight'
       ? t.visibilityMode
       : undefined,
+    movementAnimation: normalizeTokenMovementAnimation(t.movementAnimation),
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {
           ...nativeCombatState,

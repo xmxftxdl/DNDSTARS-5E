@@ -21,6 +21,7 @@ import {
   TOKEN_MOVE_DURATION_S,
   type GridCell,
 } from '../../lib/gridCombat'
+import { tokenMovementAnimationPosition } from '../../lib/tokenMovementAnimation'
 
 const TOKEN_MOVE_DURATION = TOKEN_MOVE_DURATION_S
 // Treat tiny drags as click jitter; do not submit movement or broadcast.
@@ -791,6 +792,7 @@ export default function MapCanvas({
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const [hoveredTokenId, setHoveredTokenId] = useState<string | null>(null)
   const [dragPreviewPositions, setDragPreviewPositions] = useState<Record<string, Point>>({})
+  const [movementNow, setMovementNow] = useState(() => Date.now())
   const [deleteDrag, setDeleteDrag] = useState<{ start: Point; current: Point } | null>(null)
   const fogDragStartRef = useRef<Point | null>(null)
   const [fogDraft, setFogDraft] = useState<FogShape | null>(null)
@@ -806,9 +808,40 @@ export default function MapCanvas({
 
   const updateToken = useMapStore((s) => s.updateToken)
 
+  const movementSignature = map.tokens
+    .map((token) => token.movementAnimation?.id ?? '')
+    .join('|')
+
+  useEffect(() => {
+    let frame = 0
+    let lastFrame = 0
+    const tick = (time: number) => {
+      const current = Date.now()
+      if (time - lastFrame >= 1000 / 30) {
+        lastFrame = time
+        setMovementNow(current)
+      }
+      const active = map.tokens.some((token) => {
+        const animation = token.movementAnimation
+        return !!animation && current < animation.issuedAt + animation.durationMs
+      })
+      if (active) frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
+  }, [map.tokens, movementSignature])
+
+  const movementPosition = (token: Token): Point | undefined => {
+    const animation = token.movementAnimation
+    if (!animation) return undefined
+    return tokenMovementAnimationPosition(animation, movementNow - animation.issuedAt)
+  }
+
   const displayToken = (token: Token): Token => {
     const preview = dragPreviewPositions[token.id]
-    return preview ? { ...token, x: preview.x, y: preview.y } : token
+    if (preview) return { ...token, x: preview.x, y: preview.y }
+    const animated = movementPosition(token)
+    return animated ? { ...token, ...animated } : token
   }
 
   const canDragToken = (token: Token): boolean =>
@@ -1637,6 +1670,22 @@ export default function MapCanvas({
               variant="range"
             />
           )}
+          {map.tokens.flatMap((token) => {
+            const animation = token.movementAnimation
+            if (!animation || !movementPosition(token)) return []
+            return [(
+              <Line
+                key={`movement-path-${token.id}-${animation.id}`}
+                points={animation.points.flatMap((point) => [point.x, point.y])}
+                stroke="rgba(125,211,252,0.68)"
+                strokeWidth={3 / Math.max(view.scale, 0.01)}
+                lineCap="round"
+                lineJoin="round"
+                dash={[8 / Math.max(view.scale, 0.01), 6 / Math.max(view.scale, 0.01)]}
+                listening={false}
+              />
+            )]
+          })}
           {moveSelectMode && moveCircle && (
             <Circle
               x={moveCircle.centerX}
@@ -1687,7 +1736,7 @@ export default function MapCanvas({
                 }
                 onSelectToken(t.id)
               }}
-              instantPosition={!!dragPreviewPositions[t.id]}
+              instantPosition={!!dragPreviewPositions[t.id] || !!movementPosition(t)}
               onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
               onDragMove={(x, y) => previewTokenDrag(t, x, y)}
               onDragCancel={() => {
@@ -1727,7 +1776,7 @@ export default function MapCanvas({
                   if (deleteSelectMode) return
                   onSelectToken(t.id)
                 }}
-                instantPosition={!!dragPreviewPositions[t.id]}
+                instantPosition={!!dragPreviewPositions[t.id] || !!movementPosition(t)}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
                 onDragMove={(x, y) => previewTokenDrag(t, x, y)}
                 onDragCancel={() => clearTokenDragPreview(t.id)}
@@ -1762,7 +1811,7 @@ export default function MapCanvas({
                   if (deleteSelectMode) return
                   onSelectToken(t.id)
                 }}
-                instantPosition={!!dragPreviewPositions[t.id]}
+                instantPosition={!!dragPreviewPositions[t.id] || !!movementPosition(t)}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
                 onDragMove={(x, y) => previewTokenDrag(t, x, y)}
                 onDragCancel={() => clearTokenDragPreview(t.id)}

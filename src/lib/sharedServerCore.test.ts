@@ -316,6 +316,16 @@ describe('P0 shared state boundary', () => {
     expect(validateSharedStateShape('spellbook', { spells: 'broken' })).toMatchObject({ ok: false })
     expect(validateSharedStateShape('characters', { characters: 'broken' })).toMatchObject({ ok: false })
     expect(validateSharedStateShape('maps', [])).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'hero', movementAnimation: {
+        id: 'bad', points: [{ x: 0, y: 0 }], durationMs: 50_000, issuedAt: 1,
+      } }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-token-movement-animation' })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'hero', movementAnimation: {
+        id: 'move', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }], durationMs: 500, issuedAt: 1,
+      } }] }],
+    })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('plugin-owned-state', { payload: {} })).toMatchObject({ ok: true })
   })
 

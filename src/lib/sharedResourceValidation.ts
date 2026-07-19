@@ -10,6 +10,7 @@ import { MAP_FOG_RESOURCE, normalizeSharedMapFog } from './fogOfWar'
 import { MAP_GEOMETRY_RESOURCE, normalizeSharedMapGeometry } from './mapGeometry'
 import { MAP_EXPLORATION_RESOURCE, normalizeSharedMapExploration } from './mapExploration'
 import { COMBAT_STATISTICS_RESOURCE, normalizeSharedCombatStatistics } from './combatStatistics'
+import { normalizeTokenMovementAnimation } from './tokenMovementAnimation'
 import {
   defaultCombatInterruptPhase,
   type CombatInterruptKind,
@@ -270,11 +271,18 @@ function migrateDnd5eStateEnvelope(
     if (!Array.isArray(entry.tokens)) return entry
     return {
       ...entry,
-      tokens: entry.tokens.map((token, tokenIndex) =>
-        isPlainObject(token)
-          ? migrateEntity(token, `maps[${mapIndex}].tokens[${tokenIndex}]`, false)
-          : token,
-      ),
+      tokens: entry.tokens.map((token, tokenIndex) => {
+        if (!isPlainObject(token)) return token
+        const path = `maps[${mapIndex}].tokens[${tokenIndex}]`
+        const migrated = migrateEntity(token, path, false)
+        if (token.movementAnimation == null) return migrated
+        const movementAnimation = normalizeTokenMovementAnimation(token.movementAnimation)
+        if (!movementAnimation) {
+          issues.push(`${path}.movementAnimation 不是有效的权威移动路径`)
+          return migrated
+        }
+        return { ...migrated, movementAnimation }
+      }),
     }
   })
   return { value: { ...input, maps }, issues, migrations }

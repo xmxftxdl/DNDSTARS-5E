@@ -119,6 +119,29 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
   })
 
+  it('fails closed for malformed token movement paths at the shared map boundary', () => {
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{
+          id: 'hero',
+          movementAnimation: { id: 'bad', points: [{ x: 1, y: 2 }], durationMs: 50_000, issuedAt: 1 },
+        }],
+      }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{
+        id: 'map',
+        tokens: [{
+          id: 'hero',
+          movementAnimation: {
+            id: 'move', points: [{ x: 1, y: 2 }, { x: 3, y: 4 }], durationMs: 500, issuedAt: 1,
+          },
+        }],
+      }],
+    }).status).toBe('valid')
+  })
+
   it('migrates legacy interrupts and rejects duplicate active transaction locks', () => {
     const legacy = {
       mapId: 'map', updatedAt: 2,
