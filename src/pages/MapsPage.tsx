@@ -1045,6 +1045,7 @@ export default function MapsPage() {
   const [dmAdjudicationDc, setDmAdjudicationDc] = useState('')
   const [dmAdjudicationMapOverride, setDmAdjudicationMapOverride] = useState<'roll' | 'success' | 'failure'>('roll')
   const [selectedDoorInteractionId, setSelectedDoorInteractionId] = useState<string | null>(null)
+  const [dnd5eSecretSearchMethod, setDnd5eSecretSearchMethod] = useState<'perception' | 'investigation' | null>(null)
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -4117,7 +4118,7 @@ export default function MapsPage() {
       pendingSharedDmAdjudicationRef.current = { id, actionId: action.id, resolve }
       if (existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
         (existing.status === 'pending' || existing.status === 'waiting-for-dm')) return
-      const operationLabels = { open: '开门', close: '关门', unlock: '开锁', break: '破门', inspect: '检查暗门' } as const
+      const operationLabels = { open: '开门', close: '关门', unlock: '开锁', break: '破门', inspect: '检查暗门', search: '搜索暗门' } as const
       const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
         id,
         transactionId: action.id,
@@ -4128,8 +4129,8 @@ export default function MapsPage() {
           contextKind: 'map-interaction',
           actionId: action.id,
           casterName: actorName,
-          spellId: `map-interaction:${prepared.door.id}`,
-          spellName: `${operationLabels[prepared.operation]} · ${prepared.door.label}`,
+          spellId: `map-interaction:${prepared.interactionId}`,
+          spellName: `${operationLabels[prepared.operation]} · ${prepared.label}`,
           spellLevel: 0,
           slotLevel: 0,
           castingTime: 'action',
@@ -4137,8 +4138,8 @@ export default function MapsPage() {
             ? '该交互无需检定。DM 可批准、拒绝，或在备注中记录特殊裁定。'
             : `该交互将由 DM Host 投掷 d20，并使用角色当前的 ${prepared.checkSkill ?? prepared.checkAbility} 调整值。玩家不能提交骰值、DC 或结果。`,
           concentration: false,
-          proposedDc: prepared.dc,
-          doorId: prepared.door.id,
+          ...(!prepared.blindSearch && prepared.dc != null ? { proposedDc: prepared.dc } : {}),
+          ...(!prepared.blindSearch && prepared.door ? { doorId: prepared.door.id } : {}),
           mapInteractionOperation: prepared.operation,
         },
         expiresAt: runtimeNow() + 10 * 60 * 1000,
@@ -6756,12 +6757,16 @@ export default function MapsPage() {
     if (action.type === 'dnd5e-map-interaction' && dnd5eActionActorToken && dnd5eActionActor) {
       const payload = action.dnd5eMapInteraction
       const geometry = useMapGeometryStore.getState().maps.find((entry) => entry.mapId === authorityMap.id)
-      if (!payload || typeof payload.doorId !== 'string') {
+      if (!payload || (payload.operation === 'search'
+        ? !payload.point || !Number.isFinite(payload.point.x) || !Number.isFinite(payload.point.y)
+        : typeof payload.doorId !== 'string')) {
         acknowledgePlayerAction(action, 'rejected', 'invalid-map-interaction')
         completePlayerActionRequest(action)
         return
       }
-      const door = geometry?.doors.find((entry) => entry.id === payload.doorId)
+      const door = payload.operation === 'search'
+        ? undefined
+        : geometry?.doors.find((entry) => entry.id === payload.doorId)
       const inventory = dnd5eActionActor.dnd5eInventory?.entries ?? []
       const hasThievesTools = inventory.some((entry) =>
         entry.quantity > 0 && (entry.templateId.endsWith(':thieves-tools') || entry.item.name === '盗贼工具'),
@@ -6824,7 +6829,7 @@ export default function MapsPage() {
           : 0
       const d20 = prepared.prepared.automaticSuccess
         ? undefined
-        : await rollDiceBoxD20(`${prepared.prepared.door.label}·地图交互检定`, dnd5eActionActor.name)
+        : await rollDiceBoxD20(`${prepared.prepared.label}·地图交互检定`, dnd5eActionActor.name)
       const resolved = resolveDnd5eMapInteraction({
         prepared: prepared.prepared,
         d20,
@@ -6864,7 +6869,7 @@ export default function MapsPage() {
           { ...snapshot.state, initiativeIndex: actorIndex },
           {
             type: 'interact-object', actorId: action.actorTokenId,
-            interactionId: `${prepared.prepared.operation}:${prepared.prepared.door.id}`,
+            interactionId: prepared.prepared.interactionId,
             useAction: prepared.prepared.turnCost === 'action' || mapInteractionTurnResource === 'action',
           },
         )
@@ -6897,8 +6902,10 @@ export default function MapsPage() {
           liveRound,
         )
       }
-      if (resolved.nextDoorState) setGeometryDoorState(authorityMap.id, prepared.prepared.door.id, resolved.nextDoorState)
-      if (resolved.revealSecret && dnd5eActionActor.roomMemberId) {
+      if (resolved.nextDoorState && prepared.prepared.door) {
+        setGeometryDoorState(authorityMap.id, prepared.prepared.door.id, resolved.nextDoorState)
+      }
+      if (resolved.revealSecret && prepared.prepared.door && dnd5eActionActor.roomMemberId) {
         updateGeometryEntity(authorityMap.id, prepared.prepared.door.id, {
           revealedToMemberIds: [...new Set([
             ...(prepared.prepared.door.revealedToMemberIds ?? []),
@@ -6906,9 +6913,14 @@ export default function MapsPage() {
           ])],
         })
       }
-      const checkText = resolved.total == null ? '' : `（${resolved.total} 对 DC ${resolved.dc}）`
+      const checkText = prepared.prepared.blindSearch || resolved.total == null
+        ? ''
+        : `（${resolved.total} 对 DC ${resolved.dc}）`
+      const interactionOutcome = prepared.prepared.blindSearch
+        ? resolved.revealSecret ? '发现了一处暗门' : '没有发现异常'
+        : `${resolved.success ? '成功' : '失败'}`
       pushCombatLog(
-        `${dnd5eActionActor.name} 尝试${prepared.prepared.door.label}的地图交互${checkText}：${resolved.success ? '成功' : '失败'}。`,
+        `${dnd5eActionActor.name} 尝试${prepared.prepared.label}的地图交互${checkText}：${interactionOutcome}。`,
         'turn',
       )
       await finishSharedCombatInterrupt(interruptId, adjudication)
@@ -11841,6 +11853,15 @@ export default function MapsPage() {
               }}
               onGeometryEntitySelect={selectGeometryEntity}
               onGeometryDoorInteract={!isDM ? setSelectedDoorInteractionId : undefined}
+              geometrySearchMode={!isDM && !!dnd5eSecretSearchMethod}
+              onGeometrySearch={!isDM && dnd5eSecretSearchMethod ? (point) => {
+                sendPlayerDnd5eMapInteractionRequest({
+                  operation: 'search',
+                  point,
+                  method: dnd5eSecretSearchMethod,
+                })
+                setDnd5eSecretSearchMethod(null)
+              } : undefined}
               onGeometryEditCancel={() => {
                 setGeometryEditMode(false)
                 setGeometryPreviewAsPlayer(false)
@@ -11887,6 +11908,40 @@ export default function MapsPage() {
             >
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               正在等待 DM 同步战斗状态
+            </div>
+          )}
+          {!isDM && (
+            <div className="absolute bottom-24 left-1/2 z-[58] -translate-x-1/2 rounded-xl border border-violet-300/25 bg-void-950/92 p-2 shadow-xl backdrop-blur-md">
+              {dnd5eSecretSearchMethod ? (
+                <div className="flex items-center gap-2">
+                  <span className="px-2 text-xs font-semibold text-violet-100">
+                    点击附近地图搜索暗门 · {dnd5eSecretSearchMethod === 'perception' ? '感知' : '调查'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDnd5eSecretSearchMethod(
+                      dnd5eSecretSearchMethod === 'perception' ? 'investigation' : 'perception',
+                    )}
+                    className="rounded-lg border border-violet-300/20 px-2.5 py-1.5 text-xs text-violet-100 hover:bg-violet-500/15"
+                  >
+                    切换为{dnd5eSecretSearchMethod === 'perception' ? '调查' : '感知'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDnd5eSecretSearchMethod(null)}
+                    className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/5"
+                  >取消</button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDnd5eSecretSearchMethod('perception')}
+                  className="flex items-center gap-2 rounded-lg bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/25"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  搜索暗门
+                </button>
+              )}
             </div>
           )}
 

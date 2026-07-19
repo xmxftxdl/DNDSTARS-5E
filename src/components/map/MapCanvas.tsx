@@ -204,6 +204,8 @@ interface MapCanvasProps {
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
   onGeometryEntitySelect?: (entityId: string | null) => void
   onGeometryDoorInteract?: (doorId: string) => void
+  geometrySearchMode?: boolean
+  onGeometrySearch?: (point: { x: number; y: number }) => void
   onGeometryEditCancel?: () => void
   onTokenMoveBlocked?: (entityId?: string) => void
   /** DM 视角：始终显示敌人血量条；玩家视角受 token.showHpOnToken 控制 */
@@ -771,6 +773,8 @@ export default function MapCanvas({
   onGeometryEntityCommit,
   onGeometryEntitySelect,
   onGeometryDoorInteract,
+  geometrySearchMode = false,
+  onGeometrySearch,
   onGeometryEditCancel,
   onTokenMoveBlocked,
   isDM = false,
@@ -1398,6 +1402,8 @@ export default function MapCanvas({
             ? 'cursor-crosshair'
           : measureMode
             ? 'cursor-crosshair'
+            : geometrySearchMode
+              ? 'cursor-crosshair'
             : aoeSelectMode
               ? 'cursor-crosshair'
               : deleteSelectMode
@@ -1414,7 +1420,7 @@ export default function MapCanvas({
         scaleY={view.scale}
         x={view.x}
         y={view.y}
-        draggable={!measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
+        draggable={!measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !geometrySearchMode}
         onWheel={handleWheel}
         onDragEnd={(e) => {
           // Only update viewport when dragging the stage itself.
@@ -1456,6 +1462,12 @@ export default function MapCanvas({
         }}
         onMouseDown={(e) => {
           const stage = e.target.getStage()
+          if (geometrySearchMode && e.evt.button === 0 && !isMapTokenNode(e.target)) {
+            e.cancelBubble = true
+            const point = relativePoint(stage)
+            if (point) onGeometrySearch?.(point)
+            return
+          }
           if (geometryEditMode && e.evt.button === 0) {
             if (!isMapTokenNode(e.target)) {
               e.cancelBubble = true
@@ -1824,10 +1836,10 @@ export default function MapCanvas({
             geometry={geometry}
             draft={geometryDraft}
             editMode={geometryEditMode}
-            doorInteractionMode={!isDM}
+            doorInteractionMode={!isDM && !geometrySearchMode}
             selectedEntityId={selectedGeometryEntityId}
             inv={inv}
-            onSelect={isDM ? onGeometryEntitySelect : (entityId) => {
+            onSelect={isDM ? onGeometryEntitySelect : geometrySearchMode ? undefined : (entityId) => {
               if (entityId) onGeometryDoorInteract?.(entityId)
             }}
           />

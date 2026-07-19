@@ -59,4 +59,39 @@ describe('D&D 5e map interaction transaction', () => {
     expect(resolveDnd5eMapInteraction({ prepared: prepared.prepared, d20: 9, modifier: 4 }).revealSecret).toBe(false)
     expect(resolveDnd5eMapInteraction({ prepared: prepared.prepared, d20: 10, modifier: 4 }).revealSecret).toBe(true)
   })
+
+  it('resolves a blind area search on the authority geometry without a player supplied door id', () => {
+    const prepared = prepareDnd5eMapInteraction({
+      map, geometry, actor,
+      payload: { operation: 'search', point: { x: 100, y: 50 }, method: 'perception' },
+    })
+    expect(prepared).toMatchObject({
+      ok: true,
+      prepared: {
+        door: { id: 'door' },
+        blindSearch: true,
+        operation: 'search',
+        checkSkill: 'perception',
+        turnCost: 'action',
+      },
+    })
+  })
+
+  it('returns an indistinguishable check when a blind search contains no secret door', () => {
+    const prepared = prepareDnd5eMapInteraction({
+      map, geometry, actor,
+      payload: { operation: 'search', point: { x: 50, y: 100 }, method: 'investigation' },
+    })
+    if (!prepared.ok) throw new Error(prepared.reason)
+    expect(prepared.prepared.door).toBeUndefined()
+    expect(prepared.prepared.dc).toBe(15)
+    expect(resolveDnd5eMapInteraction({ prepared: prepared.prepared, d20: 20, modifier: 5 }).revealSecret).toBe(false)
+  })
+
+  it('rejects blind search coordinates outside the actor search reach', () => {
+    expect(prepareDnd5eMapInteraction({
+      map, geometry, actor,
+      payload: { operation: 'search', point: { x: 450, y: 450 }, method: 'perception' },
+    })).toEqual({ ok: false, reason: 'search-area-out-of-reach' })
+  })
 })
