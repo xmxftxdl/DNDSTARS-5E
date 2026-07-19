@@ -11,7 +11,16 @@ import type {
   DodgeInterruptPayload,
   GaleComboInterruptPayload,
   OpportunityAttackInterruptPayload,
+  ProtectionInterruptPayload,
+  ShieldSpellInterruptPayload,
   StableMindInterruptPayload,
+  UncannyDodgeInterruptPayload,
+  SavingThrowRerollInterruptPayload,
+  BardicInspirationInterruptPayload,
+  DarkOnesOwnLuckInterruptPayload,
+  StrokeOfLuckInterruptPayload,
+  EmpoweredSpellInterruptPayload,
+  StandAgainstTideInterruptPayload,
 } from './combatInterruptProtocol'
 import {
   buildCombatInterruptPromptViews,
@@ -208,6 +217,178 @@ describe('combat interrupt prompt selection', () => {
     expect(selection['agile-leap']?.character.id).toBe(hero.id)
   })
 
+  it('selects and builds an Uncanny Dodge prompt for the target player', () => {
+    const hero = character('hero')
+    const interrupt = createCombatInterrupt<UncannyDodgeInterruptPayload>({
+      id: 'uncanny-1', mapId: 'map-1', kind: 'uncanny-dodge', targetCharId: hero.id,
+      payload: { attackerName: 'Owlbear', targetName: hero.name, attackName: 'Claws' },
+      expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [hero], visibleCharacters: [hero], playerCharId: hero.id },
+      suppressed: {},
+    })
+    expect(selection['uncanny-dodge']?.character.id).toBe(hero.id)
+    expect(buildCombatInterruptPromptViews(selection).uncannyDodge).toMatchObject({
+      id: 'uncanny-1', targetChar: hero, attackerName: 'Owlbear', attackName: 'Claws',
+    })
+  })
+
+  it('selects and builds a Protection prompt for the reacting shield bearer', () => {
+    const protector = character('protector')
+    const interrupt = createCombatInterrupt<ProtectionInterruptPayload>({
+      id: 'protection-1', mapId: 'map-1', kind: 'protection', actorCharId: protector.id,
+      payload: { protectorName: protector.name, attackerName: 'Owlbear', targetName: 'hero', attackName: 'Claws' },
+      expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [protector], visibleCharacters: [protector], playerCharId: protector.id },
+      suppressed: {},
+    })
+    expect(selection.protection?.character.id).toBe(protector.id)
+    expect(buildCombatInterruptPromptViews(selection).protection).toMatchObject({
+      id: 'protection-1', protectorChar: protector, attackerName: 'Owlbear', targetName: 'hero', attackName: 'Claws',
+    })
+  })
+
+  it('selects and builds a Shield spell prompt for the defending caster', () => {
+    const wizard = character('wizard')
+    const interrupt = createCombatInterrupt<ShieldSpellInterruptPayload>({
+      id: 'shield-1', mapId: 'map-1', kind: 'shield-spell', targetCharId: wizard.id,
+      payload: {
+        attackerName: '枭熊', targetName: wizard.name, attackName: '利爪',
+        attackTotal: 16, armorClass: 13,
+      },
+      expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [wizard], visibleCharacters: [wizard], playerCharId: wizard.id },
+      suppressed: {},
+    })
+    expect(selection['shield-spell']?.character.id).toBe(wizard.id)
+    expect(buildCombatInterruptPromptViews(selection).shieldSpell).toMatchObject({
+      id: 'shield-1', targetChar: wizard, attackerName: '枭熊', attackName: '利爪', attackTotal: 16, armorClass: 13,
+    })
+  })
+
+  it('selects and builds a saving throw reroll prompt for the target player', () => {
+    const hero = character('hero')
+    const interrupt = createCombatInterrupt<SavingThrowRerollInterruptPayload>({
+      id: 'save-reroll-1', mapId: 'map-1', kind: 'saving-throw-reroll', targetCharId: hero.id,
+      payload: { targetName: hero.name, featureName: '不屈', total: 9, dc: 14 },
+      expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [hero], visibleCharacters: [hero], playerCharId: hero.id },
+      suppressed: {},
+    })
+    expect(selection['saving-throw-reroll']?.character.id).toBe(hero.id)
+    expect(buildCombatInterruptPromptViews(selection).savingThrowReroll).toMatchObject({
+      id: 'save-reroll-1', targetChar: hero, featureName: '不屈', total: 9, dc: 14,
+    })
+  })
+
+  it('selects and builds a Bardic Inspiration prompt for the die holder', () => {
+    const hero = character('hero')
+    const interrupt = createCombatInterrupt<BardicInspirationInterruptPayload>({
+      id: 'bardic-1', mapId: 'map-1', kind: 'bardic-inspiration', targetCharId: hero.id,
+      payload: { targetName: hero.name, dieSides: 10, rollType: '攻击检定', total: 12, targetNumber: 15 },
+      expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [hero], visibleCharacters: [hero], playerCharId: hero.id },
+      suppressed: {},
+    })
+    expect(selection['bardic-inspiration']?.character.id).toBe(hero.id)
+    expect(buildCombatInterruptPromptViews(selection).bardicInspiration).toMatchObject({
+      id: 'bardic-1', targetChar: hero, dieSides: 10, rollType: '攻击检定', total: 12, targetNumber: 15,
+    })
+  })
+
+  it("selects and builds a Dark One's Own Luck prompt for the rolling warlock", () => {
+    const warlock = character('warlock')
+    const interrupt = createCombatInterrupt<DarkOnesOwnLuckInterruptPayload>({
+      id: 'dark-luck-1', mapId: 'map-1', kind: 'dark-ones-own-luck', targetCharId: warlock.id,
+      payload: { targetName: warlock.name, rollType: '豁免', total: 9, targetNumber: 14 },
+      expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [warlock], visibleCharacters: [warlock], playerCharId: warlock.id },
+      suppressed: {},
+    })
+    expect(selection['dark-ones-own-luck']?.character.id).toBe(warlock.id)
+    expect(buildCombatInterruptPromptViews(selection).darkOnesOwnLuck).toMatchObject({
+      id: 'dark-luck-1', targetChar: warlock, rollType: '豁免', total: 9, targetNumber: 14,
+    })
+  })
+
+  it('selects and builds a Stroke of Luck prompt for the attacking Rogue', () => {
+    const rogue = character('rogue')
+    const interrupt = createCombatInterrupt<StrokeOfLuckInterruptPayload>({
+      id: 'stroke-1', mapId: 'map-1', kind: 'stroke-of-luck', actorCharId: rogue.id,
+      payload: { targetName: '敌人', attackName: '短剑', total: 11, armorClass: 15 }, expiresAt: 2000, now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [rogue], visibleCharacters: [rogue], playerCharId: rogue.id }, suppressed: {},
+    })
+    expect(buildCombatInterruptPromptViews(selection).strokeOfLuck).toMatchObject({
+      id: 'stroke-1', actorChar: rogue, targetName: '敌人', attackName: '短剑', total: 11, armorClass: 15,
+    })
+  })
+
+  it('selects and builds an Empowered Spell prompt for the casting Sorcerer', () => {
+    const sorcerer = character('sorcerer')
+    const interrupt = createCombatInterrupt<EmpoweredSpellInterruptPayload>({
+      id: 'empowered-1', mapId: 'map-1', kind: 'empowered-spell', actorCharId: sorcerer.id,
+      payload: {
+        casterName: sorcerer.name,
+        spellName: '火球术',
+        maximumDice: 3,
+        groups: [{ key: 'effect', label: '火球术伤害', sides: 6, rolls: [1, 2, 3, 4, 5, 6, 1, 2] }],
+      },
+      expiresAt: 2000,
+      now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [sorcerer], visibleCharacters: [sorcerer], playerCharId: sorcerer.id },
+      suppressed: {},
+    })
+    expect(buildCombatInterruptPromptViews(selection).empoweredSpell).toMatchObject({
+      id: 'empowered-1', casterChar: sorcerer, spellName: '火球术', maximumDice: 3,
+    })
+  })
+
+  it('selects and builds a Stand Against the Tide target prompt for the Hunter', () => {
+    const hunter = character('hunter')
+    const interrupt = createCombatInterrupt<StandAgainstTideInterruptPayload>({
+      id: 'stand-1', mapId: 'map-1', kind: 'stand-against-tide', targetCharId: hunter.id,
+      payload: {
+        hunterName: hunter.name, attackerName: 'Owlbear', attackName: 'Claws',
+        candidates: [{ tokenId: 'ally-token', label: 'Ally' }],
+      },
+      expiresAt: 2000,
+      now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [hunter], visibleCharacters: [hunter], playerCharId: hunter.id },
+      suppressed: {},
+    })
+    expect(selection['stand-against-tide']?.character.id).toBe(hunter.id)
+    expect(buildCombatInterruptPromptViews(selection).standAgainstTide).toMatchObject({
+      id: 'stand-1', hunterChar: hunter, attackerName: 'Owlbear', attackName: 'Claws',
+      candidates: [{ tokenId: 'ally-token', label: 'Ally' }], expiresAt: 2000,
+    })
+  })
+
   it('builds UI prompt views from the selected interrupts', () => {
     const hero = character('hero')
     const ally = character('ally')
@@ -282,6 +463,26 @@ describe('combat interrupt prompt selection', () => {
       id: 'opp-1',
       attackerChar: ally,
       targetName: hero.name,
+    })
+  })
+
+  it('preserves the Berserker Retaliation trigger in the shared reaction prompt', () => {
+    const berserker = character('berserker')
+    const interrupt = createCombatInterrupt<OpportunityAttackInterruptPayload>({
+      id: 'retaliation-1', mapId: 'map-1', kind: 'opportunity-attack', actorCharId: berserker.id,
+      payload: {
+        attackerName: berserker.name, targetName: 'enemy', attackerTokenId: 'berserker-token',
+        targetTokenId: 'enemy-token', trigger: 'berserker-retaliation',
+      },
+      now: 100,
+    })
+    const selection = resolveCombatInterruptPromptSelection({
+      queue: queue([interrupt]), mapId: 'map-1', now: 1000,
+      answerContext: { characters: [berserker], visibleCharacters: [berserker], playerCharId: berserker.id },
+      suppressed: {},
+    })
+    expect(buildCombatInterruptPromptViews(selection).opportunityAttack).toMatchObject({
+      id: 'retaliation-1', trigger: 'berserker-retaliation', targetName: 'enemy',
     })
   })
 })

@@ -14,9 +14,9 @@ describe('D&D 5e 2014 character options', () => {
     ])
   })
 
-  it('provides the six Basic Rules backgrounds in Chinese', () => {
+  it('provides only the SRD 5.1 sample background plus the SRD custom-background path', () => {
     expect(DND5E_2014_BACKGROUND_OPTIONS).toEqual([
-      '侍僧', '罪犯／间谍', '平民英雄', '贵族', '贤者', '士兵',
+      '侍僧', '自定义背景',
     ])
   })
 

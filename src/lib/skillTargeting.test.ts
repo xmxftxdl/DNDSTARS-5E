@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import { cellToPixel, tokenCenterForAnchorCell } from './gridCombat'
-import { aoeOrientFromCell, tokensInCells } from './skillTargeting'
+import { aoeOrientFromCell, cellsForAoe, tokensInCells } from './skillTargeting'
 
 function map(tokens: Token[]): BattleMap {
   return {
@@ -65,5 +65,19 @@ describe('AOE token coverage targeting', () => {
     expect(aoeOrientFromCell(aoe, casterCell, anchorCell, { rectRotation: 1 })).toEqual(
       casterCell,
     )
+  })
+
+  it('builds a directional 2014 cone instead of treating it as a circle', () => {
+    const cells = cellsForAoe(
+      { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
+      { col: 5, row: 5 },
+      { col: 8, row: 5 },
+    )
+    const keys = new Set(cells.map((cell) => `${cell.col},${cell.row}`))
+
+    expect(keys.has('8,5')).toBe(true)
+    expect(keys.has('7,4')).toBe(true)
+    expect(keys.has('7,6')).toBe(true)
+    expect(keys.has('5,8')).toBe(false)
   })
 })

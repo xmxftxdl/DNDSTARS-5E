@@ -5,7 +5,7 @@ import {
   sharedWriteApiCandidates,
 } from './sharedApi'
 
-// [T-P1-422/AC4] Pin the previously-untested client sync-layer routing core (src/lib/sharedApi.ts
+// Pin the previously-untested client sync-layer routing core (src/lib/sharedApi.ts
 // had ZERO .test.ts references). The base-list parse de-DUPLICATES + trims + drops empties, and the
 // two write/event topologies diverge on purpose: state/image WRITES double-send to all configured
 // bases (file-backed, idempotent), while EVENTS go to a single canonical base (one SSE backlog).

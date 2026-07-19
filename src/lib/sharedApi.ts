@@ -1,6 +1,24 @@
 import { canWriteSharedState } from './appMode'
+import { getRoomClientId, getRoomSession } from './roomSession'
+import {
+  reportSharedIntegrityIssue,
+  validateAndMigrateSharedResource,
+} from './sharedResourceValidation'
+import {
+  recordDuplicateSharedEvent,
+  recordSharedConflict,
+  recordSharedEvent,
+  recordSharedEventGap,
+  recordSharedRevision,
+  recordSharedWrite,
+  settleSharedRecovery,
+} from './sharedSyncHealth'
 
-// [T11/AC2] DM 写共享态时附带的鉴权 secret。永远从环境读取，绝不硬编码/提交。
+const SHARED_CLIENT_PROTOCOL_VERSION = 3
+const sharedResourceRevisions = new Map<string, number>()
+const sharedResourceWriteChains = new Map<string, Promise<void>>()
+
+// DM 写共享态时附带的鉴权 secret。永远从环境读取，绝不硬编码/提交。
 // 服务端 STARS_SHARED_SECRET 未设时此 header 被忽略（鉴权关闭，零回归）。
 function sharedSecretHeader(): Record<string, string> {
   const secret = import.meta.env.VITE_STARS_SHARED_SECRET as string | undefined
@@ -13,7 +31,7 @@ function sharedAccessHeaders(): Record<string, string> {
 }
 
 function sharedSessionUrl(url: string, includeToken = false): string {
-  const room = (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim()
+  const room = getRoomSession()?.roomId ?? (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim()
   const token = import.meta.env.VITE_STARS_ACCESS_TOKEN as string | undefined
   if (!room && (!includeToken || !token)) return url
   const parsed = new URL(url)
@@ -22,7 +40,7 @@ function sharedSessionUrl(url: string, includeToken = false): string {
   return parsed.toString()
 }
 
-// [T-P1-422/AC4] exported for the client-sync-layer unit test (dedup/trim/empty-filter of the
+// exported for the client-sync-layer unit test (dedup/trim/empty-filter of the
 // configured base list — the routing core of read/double-send-write/single-canonical-event).
 export function configuredApiBases(): string[] | null {
   const configured = import.meta.env.VITE_SHARED_API_BASES as string | undefined
@@ -54,7 +72,34 @@ function sharedApiCandidates(): string[] {
   return [defaultDmApiBase(), sameOriginApiBase()].filter((value, index, all) => all.indexOf(value) === index)
 }
 
-// [T-P1-422/AC4] state/image WRITES double-send to ALL configured bases (file-backed, idempotent —
+function sharedProtocolHeaders(): Record<string, string> {
+  const session = getRoomSession()
+  const writerId = session
+    ? `${session.role}:${session.memberId}:${session.clientId}`
+    : `client:${getRoomClientId()}`
+  return {
+    'X-Stars-Protocol': String(SHARED_CLIENT_PROTOCOL_VERSION),
+    'X-Stars-Writer': writerId,
+  }
+}
+
+function rememberSharedResourceRevision(name: string, value: unknown, response?: Response): void {
+  const headerRevision = Number(response?.headers.get('X-Stars-State-Revision'))
+  const bodyRevision = value && typeof value === 'object'
+    ? Number((value as { _sync?: { revision?: unknown } })._sync?.revision)
+    : Number.NaN
+  const revision = Number.isInteger(headerRevision) && headerRevision >= 0 ? headerRevision : bodyRevision
+  if (!Number.isInteger(revision) || revision < 0) return
+  sharedResourceRevisions.set(name, revision)
+  recordSharedRevision(name, revision)
+}
+
+/** 大厅在尚无房间会话时也要访问共享服务，因此公开与普通读取相同的容错端点列表。 */
+export function sharedLobbyApiCandidates(): string[] {
+  return sharedApiCandidates()
+}
+
+// state/image WRITES double-send to ALL configured bases (file-backed, idempotent —
 // each process writes the same shared file root). Contrast sharedEventApiCandidates (single canonical).
 export function sharedWriteApiCandidates(): string[] {
   const configured = configuredApiBases()
@@ -62,7 +107,7 @@ export function sharedWriteApiCandidates(): string[] {
   return [defaultDmApiBase()]
 }
 
-// [T-P1-421/AC3·AC6 · Option A] 事件（SSE 订阅 + POST + DELETE）只走单一 canonical 端口（DM），
+// 事件（SSE 订阅 + POST + DELETE）只走单一 canonical 端口（DM），
 // 与 state/image 的「双发到所有端口」相反。生产 serve 模式下两个独立 static-server 各有一份进程内
 // eventBacklog；若事件分发到多个端口，重连/迟到的一端会回放到另一份/空 backlog（C2 分歧 bug）。
 // 路由到单一 canonical（已配置时取第一个=DM，否则 defaultDmApiBase）后，全端共享同一份 backlog。
@@ -73,10 +118,12 @@ export function sharedEventApiCandidates(): string[] {
   return [defaultDmApiBase()]
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function requestJson<T>(path: string, init?: RequestInit, resourceName?: string): Promise<T | null> {
+  let notFound = false
   for (const api of sharedApiCandidates()) {
     try {
       const res = await fetch(sharedSessionUrl(`${api}${path}`), {
+        cache: 'no-store',
         ...init,
         headers: {
           ...(init?.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }),
@@ -84,17 +131,54 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
           ...sharedAccessHeaders(),
         },
       })
-      if (!res.ok) continue
-      return (await res.json()) as T
+      if (!res.ok) {
+        if (res.status === 404) {
+          notFound = true
+          const tombstoneRevision = Number(res.headers.get('X-Stars-State-Revision'))
+          if (resourceName && Number.isInteger(tombstoneRevision) && tombstoneRevision >= 0) {
+            sharedResourceRevisions.set(resourceName, tombstoneRevision)
+            recordSharedRevision(resourceName, tombstoneRevision)
+            return null
+          }
+        }
+        if (res.status === 422 && resourceName) {
+          const body = await res.json().catch(() => ({})) as { reason?: string; quarantineId?: string }
+          reportSharedIntegrityIssue({
+            resource: resourceName,
+            reason: body.reason ?? '共享服务已隔离损坏状态',
+            source: 'server',
+            quarantineId: body.quarantineId,
+          })
+          return null
+        }
+        continue
+      }
+      const value = (await res.json()) as T
+      if (resourceName) rememberSharedResourceRevision(resourceName, value, res)
+      return value
     } catch {
       // Try the next local endpoint. DM and player ports may be started independently.
     }
+  }
+  if (resourceName && notFound) {
+    sharedResourceRevisions.set(resourceName, 0)
+    recordSharedRevision(resourceName, 0)
   }
   return null
 }
 
 export async function loadSharedResource<T>(name: string): Promise<T | null> {
-  return requestJson<T>(`/state/${name}`)
+  const value = await requestJson<unknown>(`/state/${name}`, undefined, name)
+  if (value == null) return null
+  const validation = validateAndMigrateSharedResource(name, value)
+  if (validation.status === 'invalid') {
+    reportSharedIntegrityIssue({ resource: name, reason: validation.reasons.join('；'), value })
+    return null
+  }
+  if (validation.status === 'migrated') {
+    console.warn(`[共享状态迁移:${name}] ${validation.reasons.join('；')}`)
+  }
+  return validation.value as T
 }
 
 export const SHARED_STATE_CHANGED_CHANNEL = 'shared-state-changed'
@@ -111,11 +195,11 @@ const sharedStateChangedListeners = new Set<(event: SharedStateChangedEvent) => 
 let stopSharedStateChangedSource: (() => void) | null = null
 
 async function sharedCombatIsActive(): Promise<boolean> {
-  const combat = await requestJson<{ active?: boolean }>('/state/combat')
+  const combat = await requestJson<{ active?: boolean }>('/state/combat', undefined, 'combat')
   return !!combat?.active
 }
 
-export async function saveSharedResource<T>(name: string, data: T): Promise<void> {
+async function performSharedResourceSave<T>(name: string, data: T): Promise<void> {
   if (!canWriteSharedState()) {
     if (
       name !== 'characters' &&
@@ -133,15 +217,69 @@ export async function saveSharedResource<T>(name: string, data: T): Promise<void
     ) return
     if ((name === 'characters' || name === 'maps') && (await sharedCombatIsActive())) return
   }
-  await Promise.allSettled(
-    sharedWriteApiCandidates().map((api) =>
-      fetch(sharedSessionUrl(`${api}/state/${name}`), {
+  const validation = validateAndMigrateSharedResource(name, data)
+  if (validation.status === 'invalid') {
+    reportSharedIntegrityIssue({ resource: name, reason: `已阻止写入：${validation.reasons.join('；')}`, value: data })
+    return
+  }
+  if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
+  const expectedRevision = sharedResourceRevisions.get(name) ?? 0
+  for (const api of sharedWriteApiCandidates()) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/state/${name}`), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders() },
-        body: JSON.stringify(data),
-      }),
-    ),
-  )
+        headers: {
+          'Content-Type': 'application/json',
+          ...sharedSecretHeader(),
+          ...sharedAccessHeaders(),
+          ...sharedProtocolHeaders(),
+          'X-Stars-Expected-Revision': String(expectedRevision),
+        },
+        body: JSON.stringify(validation.value),
+      })
+      const currentRevision = Number(response.headers.get('X-Stars-State-Revision'))
+      if (response.status === 409) {
+        const body = await response.json().catch(() => ({})) as { currentRevision?: number }
+        const resolvedCurrent = Number.isInteger(body.currentRevision) ? Number(body.currentRevision) : currentRevision
+        const revision = Number.isInteger(resolvedCurrent) && resolvedCurrent >= 0 ? resolvedCurrent : expectedRevision
+        sharedResourceRevisions.set(name, revision)
+        recordSharedConflict(name, expectedRevision, revision)
+        const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
+        for (const listener of [...sharedStateChangedListeners]) listener(event)
+        return
+      }
+      if (!response.ok) continue
+      const body = await response.json().catch(() => ({})) as { revision?: number }
+      const revision = Number.isInteger(body.revision) ? Number(body.revision) : currentRevision
+      if (Number.isInteger(revision) && revision >= 0) {
+        sharedResourceRevisions.set(name, revision)
+        recordSharedWrite(name, revision)
+      }
+      return
+    } catch {
+      // Try the next configured endpoint only when the canonical endpoint is unavailable.
+    }
+  }
+}
+
+/**
+ * Keep writes from one browser ordered per resource. Without this queue two
+ * rapid local saves would legitimately share the same expected revision and
+ * turn the second local edit into an avoidable CAS conflict.
+ */
+function enqueueSharedResourceWrite(name: string, operation: () => Promise<void>): Promise<void> {
+  const previous = sharedResourceWriteChains.get(name) ?? Promise.resolve()
+  const current = previous
+    .catch(() => {})
+    .then(operation)
+  sharedResourceWriteChains.set(name, current)
+  return current.finally(() => {
+    if (sharedResourceWriteChains.get(name) === current) sharedResourceWriteChains.delete(name)
+  })
+}
+
+export function saveSharedResource<T>(name: string, data: T): Promise<void> {
+  return enqueueSharedResourceWrite(name, () => performSharedResourceSave(name, data))
 }
 
 export async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
@@ -149,7 +287,7 @@ export async function publishSharedEvent<T>(channel: string, data: T): Promise<v
     sharedEventApiCandidates().map((api) =>
       fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders() },
+        headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(data),
       }),
     ),
@@ -163,22 +301,53 @@ export async function clearSharedEventBacklog(channels?: string[]): Promise<void
       targets.map((channel) =>
         fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
           method: 'DELETE',
-          headers: sharedAccessHeaders(),
+          headers: { ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
         }),
       ),
     ),
   )
 }
 
-export async function clearSharedResource(name: string): Promise<void> {
-  await Promise.allSettled(
-    sharedWriteApiCandidates().map((api) =>
-      fetch(sharedSessionUrl(`${api}/state/${encodeURIComponent(name)}`), {
+async function performClearSharedResource(name: string): Promise<void> {
+  if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
+  const expectedRevision = sharedResourceRevisions.get(name) ?? 0
+  for (const api of sharedWriteApiCandidates()) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/state/${encodeURIComponent(name)}`), {
         method: 'DELETE',
-        headers: sharedAccessHeaders(),
-      }),
-    ),
-  )
+        headers: {
+          ...sharedAccessHeaders(),
+          ...sharedProtocolHeaders(),
+          'X-Stars-Expected-Revision': String(expectedRevision),
+        },
+      })
+      const currentRevision = Number(response.headers.get('X-Stars-State-Revision'))
+      if (response.status === 409) {
+        const body = await response.json().catch(() => ({})) as { currentRevision?: number }
+        const resolvedCurrent = Number.isInteger(body.currentRevision) ? Number(body.currentRevision) : currentRevision
+        const revision = Number.isInteger(resolvedCurrent) && resolvedCurrent >= 0 ? resolvedCurrent : expectedRevision
+        sharedResourceRevisions.set(name, revision)
+        recordSharedConflict(name, expectedRevision, revision)
+        const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
+        for (const listener of [...sharedStateChangedListeners]) listener(event)
+        return
+      }
+      if (!response.ok) continue
+      const body = await response.json().catch(() => ({})) as { revision?: number }
+      const revision = Number.isInteger(body.revision) ? Number(body.revision) : currentRevision
+      if (Number.isInteger(revision) && revision >= 0) {
+        sharedResourceRevisions.set(name, revision)
+        recordSharedWrite(name, revision)
+      }
+      return
+    } catch {
+      // Try the next configured endpoint only when the canonical endpoint is unavailable.
+    }
+  }
+}
+
+export function clearSharedResource(name: string): Promise<void> {
+  return enqueueSharedResourceWrite(name, () => performClearSharedResource(name))
 }
 
 export type SharedCombatInterruptMutation =
@@ -192,10 +361,14 @@ export async function mutateSharedCombatInterrupt<T>(mutation: SharedCombatInter
     try {
       const res = await fetch(sharedSessionUrl(`${api}/state/combat-interrupts/interrupt`), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders() },
+        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(mutation),
       })
-      if (res.ok) return (await res.json()) as T
+      if (res.ok) {
+        const value = (await res.json()) as T
+        rememberSharedResourceRevision('combat-interrupts', value, res)
+        return value
+      }
       if (res.status >= 400 && res.status < 500 && res.status !== 409) return null
     } catch {
       // A short retry covers a server restart or a transient local connection loss.
@@ -224,10 +397,24 @@ export function subscribeSharedEvent<T>(
 interface SharedEventEnvelope {
   channel: string
   payload: unknown
+  sequence?: number
+  streamId?: string
+  emittedAt?: number
 }
 
 const sharedEventListeners = new Map<string, Set<(data: unknown) => void>>()
 let sharedEventSources: EventSource[] = []
+let sharedEventStreamId: string | null = null
+let lastSharedEventSequence = 0
+
+function requestFullSharedRecovery(): void {
+  const event: SharedStateChangedEvent = {
+    id: `event-gap:${Date.now()}`,
+    name: '*',
+    updatedAt: Date.now(),
+  }
+  for (const listener of [...sharedStateChangedListeners]) listener(event)
+}
 
 function ensureSharedEventSource(): void {
   if (sharedEventSources.length > 0) return
@@ -238,6 +425,25 @@ function ensureSharedEventSource(): void {
         try {
           const envelope = JSON.parse(event.data) as SharedEventEnvelope
           if (!envelope || typeof envelope.channel !== 'string') return
+          if (typeof envelope.streamId === 'string' && Number.isInteger(envelope.sequence)) {
+            const sequence = Number(envelope.sequence)
+            if (sharedEventStreamId && envelope.streamId !== sharedEventStreamId) {
+              recordSharedEventGap(lastSharedEventSequence, sequence, true)
+              lastSharedEventSequence = 0
+              requestFullSharedRecovery()
+            }
+            sharedEventStreamId = envelope.streamId
+            if (sequence <= lastSharedEventSequence) {
+              recordDuplicateSharedEvent()
+              return
+            }
+            if (lastSharedEventSequence > 0 && sequence > lastSharedEventSequence + 1) {
+              recordSharedEventGap(lastSharedEventSequence, sequence)
+              requestFullSharedRecovery()
+            }
+            lastSharedEventSequence = sequence
+            recordSharedEvent(sequence)
+          }
           for (const listener of [...(sharedEventListeners.get(envelope.channel) ?? [])]) {
             listener(envelope.payload)
           }
@@ -258,6 +464,8 @@ function ensureSharedEventSource(): void {
 function closeSharedEventSource(): void {
   for (const source of sharedEventSources) source.close()
   sharedEventSources = []
+  sharedEventStreamId = null
+  lastSharedEventSequence = 0
 }
 
 function subscribeSharedStateChanged(listener: (event: SharedStateChangedEvent) => void): () => void {
@@ -302,12 +510,13 @@ export function subscribeSharedResourceInvalidation(
       } while (!disposed && pending)
     } finally {
       running = false
+      settleSharedRecovery()
     }
   }
 
   const unsubscribe = subscribeSharedStateChanged(
     (event) => {
-      if (event?.name === name) void run()
+      if (event?.name === name || event?.name === '*') void run()
     },
   )
   if (options.immediate !== false) void run()
@@ -327,7 +536,7 @@ export async function putSharedImage(id: string, blob: Blob): Promise<boolean> {
     try {
       const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...sharedAccessHeaders() },
+        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
         body: blob,
       })
       if (res.ok) return true
@@ -342,7 +551,7 @@ export async function getSharedImage(id: string): Promise<Blob | undefined> {
   for (const api of sharedApiCandidates()) {
     try {
       const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
-        headers: sharedAccessHeaders(),
+        headers: { ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
       })
       if (!res.ok) continue
       return await res.blob()
@@ -359,7 +568,7 @@ export async function deleteSharedImage(id: string): Promise<void> {
     sharedWriteApiCandidates().map((api) =>
       fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
         method: 'DELETE',
-        headers: sharedAccessHeaders(),
+        headers: { ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
       }),
     ),
   )

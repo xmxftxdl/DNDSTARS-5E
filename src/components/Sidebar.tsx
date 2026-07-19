@@ -1,18 +1,51 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, Swords, Bot, Sparkles, Settings, PanelLeftClose } from 'lucide-react'
+import {
+  BookOpen,
+  Check,
+  Copy,
+  Crown,
+  LayoutDashboard,
+  LogOut,
+  PanelLeftClose,
+  Settings,
+  Sparkles,
+  Swords,
+  Users,
+} from 'lucide-react'
 import type { AppMode } from '../lib/appMode'
+import type { RoomSession } from '../lib/roomSession'
 
 const navItems = [
   { to: '/', label: '战役总览', icon: LayoutDashboard, end: true },
   { to: '/maps', label: '战斗地图', icon: Swords },
   { to: '/characters', label: '角色', icon: Users },
-  { to: '/ai', label: 'AI 敌人', icon: Bot },
+  { to: '/spellbook', label: '法术书', icon: BookOpen },
 ]
 
-const playerNavItems = navItems.filter((item) => item.to === '/maps' || item.to === '/characters')
+const playerNavItems = navItems.filter((item) => item.to === '/maps' || item.to === '/characters' || item.to === '/spellbook')
 
-export default function Sidebar({ onCollapse, mode }: { onCollapse?: () => void; mode?: AppMode }) {
+export default function Sidebar({
+  onCollapse,
+  mode,
+  roomSession,
+  connection = 'online',
+  onLeaveRoom,
+}: {
+  onCollapse?: () => void
+  mode?: AppMode
+  roomSession?: RoomSession
+  connection?: 'online' | 'reconnecting'
+  onLeaveRoom?: () => void
+}) {
+  const [copied, setCopied] = useState(false)
   const items = mode === 'player' ? playerNavItems : navItems
+  const copyRoomCode = async () => {
+    if (!roomSession) return
+    await navigator.clipboard?.writeText(roomSession.roomId)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
   return (
     <aside className="glass flex w-64 shrink-0 flex-col border-r border-white/10">
       {/* Logo */}
@@ -39,7 +72,7 @@ export default function Sidebar({ onCollapse, mode }: { onCollapse?: () => void;
       <nav className="flex-1 space-y-1 px-3 py-2">
         {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink
-            key={to}
+            key={`${label}:${to}`}
             to={to}
             end={end}
             className={({ isActive }) =>
@@ -66,12 +99,55 @@ export default function Sidebar({ onCollapse, mode }: { onCollapse?: () => void;
         ))}
       </nav>
 
+      {roomSession && (
+        <div className="mx-3 mb-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-slate-300">{roomSession.roomName}</p>
+              <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                <span className={`h-1.5 w-1.5 rounded-full ${connection === 'online' ? 'bg-emerald-400' : 'animate-pulse bg-amber-400'}`} />
+                {connection === 'online' ? '房间已连接' : '正在重新连接'}
+              </p>
+            </div>
+            <span className="flex shrink-0 items-center gap-1 rounded-lg bg-arcane-500/10 px-2 py-1 text-[10px] font-semibold text-arcane-200">
+              {roomSession.role === 'dm' ? <Crown className="h-3 w-3" /> : null}
+              {roomSession.role === 'dm' ? 'DM' : `玩家 ${roomSession.slot?.slice(-1) ?? '1'}`}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void copyRoomCode()}
+            title="复制房间码"
+            className="mt-3 flex w-full items-center justify-between rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2 transition hover:border-arcane-400/25 hover:bg-arcane-500/[0.06]"
+          >
+            <span className="font-mono text-base font-bold tracking-[0.18em] text-slate-100">{roomSession.roomId}</span>
+            {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4 text-slate-500" />}
+          </button>
+        </div>
+      )}
+
       {/* Footer */}
-      <div className="border-t border-white/10 p-3">
-        <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition-all hover:bg-white/5 hover:text-slate-100">
+      <div className="space-y-1 border-t border-white/10 p-3">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => [
+            'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
+            isActive ? 'bg-arcane-500/15 text-arcane-200' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
+          ].join(' ')}
+        >
           <Settings className="h-5 w-5 text-slate-500" />
-          设置
-        </button>
+          规则插件
+        </NavLink>
+        {onLeaveRoom && (
+          <button
+            type="button"
+            onClick={onLeaveRoom}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-all hover:bg-red-500/10 hover:text-red-200"
+          >
+            <LogOut className="h-5 w-5" />
+            {roomSession?.role === 'dm' ? '关闭并离开房间' : '离开房间'}
+          </button>
+        )}
       </div>
     </aside>
   )

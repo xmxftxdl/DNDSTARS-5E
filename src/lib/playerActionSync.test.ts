@@ -204,18 +204,18 @@ describe('player action sync barrier', () => {
     expect(
       createPlayerActionEnvelope({
         mapId: 'map-1',
-        actorOverride: { tokenId: 'leap-token', characterId: 'leaper' },
+        actorOverride: { tokenId: 'hero-token', characterId: 'hero' },
         round: 2,
         initiativeIndex: 1,
         nextSeq,
         now: () => 2001,
-        patch: { type: 'agile-leap-move', targetPosition: { x: 30, y: 40 } },
+        patch: { type: 'move-token', targetPosition: { x: 30, y: 40 } },
       }),
     ).toMatchObject({
       id: 'map-1:player-action:2001:2',
-      actorTokenId: 'leap-token',
-      characterId: 'leaper',
-      type: 'agile-leap-move',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      type: 'move-token',
     })
   })
 

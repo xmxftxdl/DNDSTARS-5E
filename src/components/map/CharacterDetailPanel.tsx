@@ -3,6 +3,8 @@ import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
 import { getAc } from '../../lib/combatStats'
+import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
+import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 
 interface CharacterDetailPanelProps {
   token: Token
@@ -11,6 +13,9 @@ interface CharacterDetailPanelProps {
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   updateChar: (charId: string, patch: Partial<Character>) => void
   isDM?: boolean
+  canManageConditions?: boolean
+  onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
+  conditionSourceOptions?: readonly { id: string; label: string }[]
   onClose: () => void
 }
 
@@ -21,16 +26,25 @@ export default function CharacterDetailPanel({
   updateToken,
   updateChar,
   isDM = false,
+  canManageConditions = false,
+  onConditionsChange,
+  conditionSourceOptions,
   onClose,
 }: CharacterDetailPanelProps) {
   const hpPct =
     character.maxHp > 0 ? Math.max(0, Math.min(100, (character.currentHp / character.maxHp) * 100)) : 0
   const tempHp = character.tempHp ?? 0
 
-  const setHp = (hp: number, maxHp = character.maxHp) => {
+  const setHp = (hp: number, maxHp = character.maxHp, manuallySetMaximum = false) => {
     if (!isDM) return
     const nextHp = Math.max(0, Math.min(maxHp, hp))
-    updateChar(character.id, { currentHp: nextHp, maxHp })
+    updateChar(character.id, {
+      currentHp: nextHp,
+      maxHp,
+      ...(manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
+        ? { hitPointMaximumMode: 'manual' as const }
+        : {}),
+    })
     updateToken(mapId, token.id, { hp: nextHp, maxHp })
   }
 
@@ -90,7 +104,7 @@ export default function CharacterDetailPanel({
                   type="number"
                   min={1}
                   value={character.maxHp}
-                  onChange={(e) => setHp(character.currentHp, Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => setHp(character.currentHp, Math.max(1, Number(e.target.value) || 1), true)}
                   className="w-20 rounded border border-white/10 bg-void-950/70 px-1 py-0.5 text-center text-xs text-slate-100 outline-none focus:border-arcane-500"
                 />
               </>
@@ -150,18 +164,22 @@ export default function CharacterDetailPanel({
           </div>
         </section>
 
-        {character.conditions.length > 0 && (
+        {canManageConditions && onConditionsChange ? (
+          <div className="mt-4">
+            <Dnd5eConditionEditor
+              conditions={character.conditions}
+              activeEffects={character.dnd5eCombatState?.activeEffects}
+              targetId={token.id}
+              sourceOptions={conditionSourceOptions}
+              onChange={onConditionsChange}
+            />
+          </div>
+        ) : character.conditions.length > 0 ? (
           <section className="mt-4">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">状态</h3>
-            <div className="flex flex-wrap gap-1">
-              {character.conditions.map((condition) => (
-                <span key={condition} className="rounded bg-white/8 px-2 py-1 text-xs text-slate-300">
-                  {condition}
-                </span>
-              ))}
-            </div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">D&D 5e 状态</h3>
+            <Dnd5eConditionTags conditions={character.conditions} />
           </section>
-        )}
+        ) : null}
       </div>
     </div>
   )

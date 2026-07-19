@@ -1,26 +1,47 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
-import type { SharedCombatState } from './sharedCombatTypes'
+import type { Dnd5eTurnEconomyByToken, SharedCombatState } from './sharedCombatTypes'
+import { normalizeCombatSettlementMode, type CombatSettlementMode } from './combatSettlementMode'
 
-export type EnemyApByToken = Record<string, { current: number; max: number }>
+export interface SharedCombatStateMigration {
+  state: SharedCombatState
+  removedLegacyAp: boolean
+}
 
 /**
- * Reconcile enemy AP from a shared combat snapshot.
- *
- * If the incoming field is missing, keep the local spent-AP state. If the field
- * is present, treat it as the authoritative full snapshot.
+ * Old shared snapshots may still contain the pre-5e enemy AP ledger. Do not
+ * merely ignore it: remove it before applying or republishing the snapshot so
+ * every connected client converges on the AP-free 5e protocol.
  */
-export function reconcileEnemyAp(
-  incoming: EnemyApByToken | undefined,
-  existing: EnemyApByToken,
-  validTokenIds: Set<string>,
-): EnemyApByToken {
-  if (incoming === undefined && Object.keys(existing).length > 0) {
-    return Object.fromEntries(
-      Object.entries(existing).filter(([tokenId]) => validTokenIds.has(tokenId)),
-    )
+export function migrateLegacyApSharedCombatState(state: SharedCombatState): SharedCombatStateMigration {
+  const legacy = state as SharedCombatState & { enemyApByToken?: unknown }
+  if (!Object.prototype.hasOwnProperty.call(legacy, 'enemyApByToken')) {
+    return { state, removedLegacyAp: false }
   }
+  const migrated = { ...legacy }
+  delete migrated.enemyApByToken
+  return { state: migrated, removedLegacyAp: true }
+}
+
+export function reconcileDnd5eTurnEconomy(
+  incoming: Dnd5eTurnEconomyByToken | undefined,
+  existing: Dnd5eTurnEconomyByToken,
+  validTokenIds: Set<string>,
+): Dnd5eTurnEconomyByToken {
+  const source = incoming === undefined ? existing : incoming
   return Object.fromEntries(
-    Object.entries(incoming ?? {}).filter(([tokenId]) => validTokenIds.has(tokenId)),
+    Object.entries(source).filter(([tokenId]) => validTokenIds.has(tokenId)).map(([tokenId, economy]) => [
+      tokenId,
+      {
+        turnKey: economy.turnKey,
+        attacksUsed: Math.max(0, Math.floor(economy.attacksUsed ?? 0)),
+        action: { ...economy.action },
+        bonusAction: { ...economy.bonusAction },
+        reaction: { ...economy.reaction },
+        movement: economy.movement
+          ? { ...economy.movement }
+          : { current: 30, max: 30 },
+      },
+    ]),
   )
 }
 
@@ -32,7 +53,8 @@ export type SharedCombatStateApplyDecision =
       round: number
       initiativeOrder: InitiativeEntry[]
       initiativeIndex: number
-      enemyApByToken: EnemyApByToken
+      dnd5eTurnEconomyByToken: Dnd5eTurnEconomyByToken
+      settlementMode: CombatSettlementMode
       incomingCombatId: string
       incomingUpdatedAt: number
       snapshot: string
@@ -46,7 +68,7 @@ export function resolveSharedCombatStateApply(input: {
   mapId: string
   validTokenIds: Iterable<string>
   currentCombatId: string
-  currentEnemyApByToken: EnemyApByToken
+  currentDnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   lastAppliedCombatId: string
   lastAppliedUpdatedAt: number
   lastSnapshot: string
@@ -67,9 +89,9 @@ export function resolveSharedCombatStateApply(input: {
       ? Math.min(Math.max(0, state.initiativeIndex ?? 0), initiativeOrder.length - 1)
       : 0
   const active = Boolean(state.active && initiativeOrder.length > 0)
-  const enemyApByToken = reconcileEnemyAp(
-    state.enemyApByToken,
-    input.currentEnemyApByToken,
+  const dnd5eTurnEconomyByToken = reconcileDnd5eTurnEconomy(
+    state.dnd5eTurnEconomyByToken,
+    input.currentDnd5eTurnEconomyByToken ?? {},
     validTokenIds,
   )
   const incomingCombatId = state.combatId ?? ''
@@ -92,7 +114,8 @@ export function resolveSharedCombatStateApply(input: {
     round: state.round,
     initiativeOrder,
     initiativeIndex,
-    enemyApByToken,
+    dnd5eTurnEconomyByToken,
+    settlementMode: normalizeCombatSettlementMode(state.settlementMode),
     incomingCombatId,
     incomingUpdatedAt,
     snapshot,

@@ -1,28 +1,57 @@
-// [T15/G3] MapsPage 纯 helper 抽取。从 MapsPage.tsx 原样搬出——不改名、不改逻辑。
-// 这些是 god-object 中无闭包依赖的模块级纯函数，搬到独立边界后 MapsPage 直接 import 回去。
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
-import { getEffectiveAbilityMod } from '../lib/archerCombat'
-import { singleTargetRangeFeet } from '../lib/skillRangeRegistry'
+import { dnd5eAbilityCheckMode, resolveDnd5eInitiative } from '../rulesets/dnd5e/checks'
+import { dnd5eThiefReflexesInitiative } from '../rulesets/dnd5e/classes'
 import type { Token } from '../store/maps'
-import type { Character, CombatSkill } from '../types/character'
-import type { StatusType } from '../lib/sharedCombatTypes'
+import type { Character } from '../types/character'
+import type { RoomSession } from '../lib/roomSession'
 
-export { singleTargetRangeFeet }
-
-export function statusDuration(skill: CombatSkill, type: StatusType): number | undefined {
-  if (skill.statusOnHit === type) return skill.statusDuration ?? (type === 'burning' ? 3 : 4)
-  if (type === 'burning' && skill.name === '火球术') return skill.statusDuration ?? 3
-  if (type === 'poison' && skill.name === '毒云术') return skill.statusDuration ?? 4
-  return undefined
+export function placeableRoomCharacters(
+  characters: readonly Character[],
+  session: RoomSession | null,
+  roomPlayerMemberIds?: ReadonlySet<string>,
+): Character[] {
+  if (!session) return [...characters]
+  const inRoom = characters.filter((character) => character.roomId === session.roomId)
+  if (session.role === 'player') {
+    return inRoom.filter((character) => character.roomMemberId === session.memberId)
+  }
+  if (!roomPlayerMemberIds) return inRoom
+  return inRoom.filter((character) =>
+    !!character.roomMemberId && roomPlayerMemberIds.has(character.roomMemberId))
 }
 
 export function rollInitiative(_token: Token, character?: Character): number {
-  const d20 = 1 + Math.floor(Math.random() * 20)
   if (character) {
-    return d20 + getEffectiveAbilityMod(character, 'dex') + character.initiativeBonus
+    const mode = dnd5eAbilityCheckMode(character, { initiative: true })
+    const rollCount = mode === 'normal' ? 1 : 2
+    const rolls = Array.from({ length: rollCount }, () => 1 + Math.floor(Math.random() * 20))
+    return resolveDnd5eInitiative({ character, rolls }).roll.total
   }
+  const d20 = 1 + Math.floor(Math.random() * 20)
   return d20 + Math.floor(Math.random() * 5)
+}
+
+/**
+ * Shared combat logs survive hot reloads and can therefore still contain text
+ * written by the retired AP route. Preserve the useful action description while
+ * removing AP expenditure/balance claims that are not part of D&D 5e.
+ */
+export function migrateLegacyApCombatLogText(text: string): string {
+  return text
+    .replace(/(?:花费|消耗)\s*\d+\s*(?:点\s*)?AP\s*(?:[：:]\s*)?/giu, '')
+    .replace(/(?:未|不|无需)消耗\s*AP\s*(?:[：:]\s*)?/giu, '')
+    .replace(/\s*[；;,，]?\s*(?:本回合)?剩余\s*AP\s*\d+\s*\/\s*\d+/giu, '')
+    .replace(/\s*[；;,，]?\s*AP\s*\d+\s*\/\s*\d+/giu, '')
+    .replace(/AP\s*回满为\s*\d+\s*\/\s*\d+/giu, '')
+    .replace(/保留\s*AP\s*(?:[：:]\s*)?/giu, '')
+    .replace(/AP\s*不足/giu, '行动资源不足')
+    // 清理未知旧格式中残留的 AP 字样。
+    .replace(/\bAP\b/giu, '')
+    .replace(/\s+([，。；：,.;:])/gu, '$1')
+    .replace(/([，,]){2,}/gu, '$1')
+    .replace(/\s{2,}/gu, ' ')
+    .trim()
 }
 
 export function buildInitiativeOrder(tokens: Token[], characters: Character[]): InitiativeEntry[] {
@@ -30,15 +59,30 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
     .filter((token) => token.type !== 'obstacle')
     .map((token) => {
       const ch = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
-      return {
+      const roll = rollInitiative(token, ch)
+      const normal: InitiativeEntry = {
+        slotId: `${token.id}:normal`,
         tokenId: token.id,
         label: token.label,
         emoji: token.emoji,
         color: token.color,
         accent: ch?.accent,
-        roll: rollInitiative(token, ch),
+        roll,
       }
+      const surprised = ch?.conditions.some((condition) =>
+        ['surprised', '受突袭', '惊讶'].includes(condition.trim().toLowerCase()),
+      ) === true
+      const reflexesInitiative = ch ? dnd5eThiefReflexesInitiative(ch, roll, surprised) : undefined
+      return reflexesInitiative == null
+        ? [normal]
+        : [normal, {
+            ...normal,
+            slotId: `${token.id}:thief-reflexes`,
+            turnKind: 'thief-reflexes' as const,
+            roll: reflexesInitiative,
+          }]
     })
+    .flat()
     .sort((a, b) => b.roll - a.roll)
 }
 
@@ -52,8 +96,6 @@ export function tokenIntersectsDeleteRect(token: Token, rect: DeleteSelectionRec
   return right >= rect.x && left <= rect.x + rect.width && bottom >= rect.y && top <= rect.y + rect.height
 }
 
-// [T15/G3] 骰子种子 RNG。纯函数对，从 MapsPage 组件内闭包原样搬出（无 state/ref 捕获）。
-// hashDiceSeed 仅供 seededDieValue 内部使用；后者用于 d20 超时兜底面值与 fly 索引派生。
 function hashDiceSeed(text: string): number {
   let hash = 2166136261
   for (let i = 0; i < text.length; i += 1) {

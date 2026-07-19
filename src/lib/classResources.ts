@@ -4,7 +4,6 @@ import {
   type ClassResourceDefinition,
   type ClassResourceReset,
 } from './classDefinitionRegistry'
-import { maxQiForLevel } from './classResourceRules'
 
 function finiteNonNegative(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
@@ -19,7 +18,9 @@ function clampResource(current: unknown, max: number): CharacterResourceState {
 }
 
 export function classResourceDefinitions(character: Character): readonly ClassResourceDefinition[] {
-  return (classDefinitionForCharacter(character)?.resources ?? []).filter((resource) => resource.isAvailable(character))
+  const registered = classDefinitionForCharacter(character)?.resources
+  const definitions = typeof registered === 'function' ? registered(character) : (registered ?? [])
+  return definitions.filter((resource) => resource.isAvailable(character))
 }
 
 export function classResourceDefinition(character: Character, key: string): ClassResourceDefinition | undefined {
@@ -28,43 +29,37 @@ export function classResourceDefinition(character: Character, key: string): Clas
 
 export function getClassResource(character: Character, key: string): CharacterResourceState | undefined {
   const definition = classResourceDefinition(character, key)
-  if (!definition) {
-    if (key === 'qi' && typeof character.qi === 'number' && Number.isFinite(character.qi)) {
-      return clampResource(character.qi, maxQiForLevel(character.level))
-    }
-    return undefined
-  }
+  if (!definition) return undefined
   const structured = character.classResources?.[key]
-  const legacyCurrent = key === 'qi' ? character.qi : undefined
-  return clampResource(structured?.current ?? legacyCurrent, definition.max(character))
+  return clampResource(structured?.current, definition.max(character))
 }
 
 export function getClassResourceCurrent(character: Character, key: string): number {
   return getClassResource(character, key)?.current ?? 0
 }
 
-function withLegacyResourceMirror(character: Character, resources: Record<string, CharacterResourceState>): Character {
+function withClassResources(character: Character, resources: Record<string, CharacterResourceState>): Character {
   return {
     ...character,
     classResources: Object.keys(resources).length > 0 ? resources : undefined,
-    qi: resources.qi?.current,
   }
 }
 
 export function syncCharacterClassResources(character: Character): Character {
   const available = classResourceDefinitions(character)
+  const registered = classDefinitionForCharacter(character)?.resources
+  const registeredDefinitions = typeof registered === 'function' ? registered(character) : (registered ?? [])
   const registeredKeys = new Set(
-    classDefinitionForCharacter(character)?.resources?.map((resource) => resource.key) ?? [],
+    registeredDefinitions.map((resource) => resource.key),
   )
   const resources = Object.fromEntries(
     Object.entries(character.classResources ?? {}).filter(([key]) => !registeredKeys.has(key)),
   )
   for (const definition of available) {
     const existing = character.classResources?.[definition.key]
-    const legacyCurrent = definition.key === 'qi' ? character.qi : undefined
-    resources[definition.key] = clampResource(existing?.current ?? legacyCurrent, definition.max(character))
+    resources[definition.key] = clampResource(existing?.current, definition.max(character))
   }
-  return withLegacyResourceMirror(character, resources)
+  return withClassResources(character, resources)
 }
 
 export function updateClassResource(
@@ -76,7 +71,7 @@ export function updateClassResource(
   if (!current) return null
   const resources = { ...(character.classResources ?? {}) }
   resources[key] = clampResource(update(current), current.max)
-  return withLegacyResourceMirror(character, resources)
+  return withClassResources(character, resources)
 }
 
 export function spendClassResource(character: Character, key: string, amount = 1): Character | null {

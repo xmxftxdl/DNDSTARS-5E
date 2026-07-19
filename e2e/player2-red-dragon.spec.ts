@@ -14,12 +14,14 @@ function center(col: number, row: number, gridSize = 70) {
 function player2Character() {
   return {
     id: 'player2-red-dragon-hero',
+    rulesetId: 'dnd5e-2014-srd-5.1',
     name: 'E2E 玩家2弓手',
     player: '玩家2',
     avatar: '🧝',
     accent: 'from-emerald-500 to-cyan-500',
     race: 'Human',
-    charClass: '弓手',
+    charClass: '战士',
+    dnd5eClassId: 'fighter',
     level: 5,
     background: '',
     experience: 0,
@@ -35,19 +37,35 @@ function player2Character() {
     speed: 30,
     initiativeBonus: 0,
     saveDC: 12,
-    actionPoints: 2,
-    currentAP: 2,
     passivePerception: 10,
     inspiration: 0,
-    mana: 0,
-    maxMana: 0,
-    traits: [],
-    combatSkills: [],
+    equipment: {
+      mainWeapon: {
+        id: 'dnd5e-longbow',
+        name: '长弓',
+        slot: 'mainWeapon',
+        dnd5e: {
+          kind: 'weapon',
+          category: 'martial',
+          mode: 'ranged',
+          damage: { count: 1, sides: 8, type: 'piercing' },
+          attackAbility: 'dex',
+          rangeFeet: { normal: 150, long: 600 },
+          properties: ['弹药', '重型', '双手'],
+        },
+      },
+      armor: {
+        id: 'dnd5e-leather-armor',
+        name: '皮甲',
+        slot: 'armor',
+        ac: 11,
+        dnd5e: { kind: 'armor', category: 'light', baseArmorClass: 11, dexterityBonus: 'full' },
+      },
+    },
     conditions: [],
     notes: '',
     dmNotes: '',
     visibleToPlayers: true,
-    combatBuffs: {},
   }
 }
 
@@ -150,23 +168,28 @@ async function seedPlayer2VsRedDragon(request: APIRequestContext, mapId: string)
       { tokenId: 'player2-token', label: 'E2E 玩家2弓手', emoji: '🧝', color: '#34d399', roll: 20 },
       { tokenId: 'red-dragon-token', label: '红龙雏龙', emoji: '🐉', color: '#ef4444', roll: 10 },
     ],
-    enemyApByToken: {
-      'red-dragon-token': { current: 0, max: 2 },
-    },
     updatedAt: now,
   })
 }
 
 async function sendPlayer2Action(page: Page, action: Record<string, unknown>) {
   await page.evaluate(async (payload) => {
-    const headers = { 'Content-Type': 'application/json' }
+    const protocolHeaders = {
+      'X-Stars-Protocol': '3',
+      'X-Stars-Writer': 'e2e-player2-direct-client',
+    }
     const queueRes = await fetch('http://127.0.0.1:6173/api/state/player-action-requests')
     const queue = queueRes.ok
-      ? ((await queueRes.json()) as { requests?: Record<string, unknown>[] })
+      ? ((await queueRes.json()) as { requests?: Record<string, unknown>[]; _sync?: { revision?: number } })
       : { requests: [] }
+    const revision = Number(queueRes.headers.get('X-Stars-State-Revision') ?? queue._sync?.revision ?? 0)
     const put = await fetch('http://127.0.0.1:6173/api/state/player-action-requests', {
       method: 'PUT',
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        ...protocolHeaders,
+        'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0),
+      },
       body: JSON.stringify({
         mapId: payload.mapId,
         combatId: payload.combatId,
@@ -177,7 +200,7 @@ async function sendPlayer2Action(page: Page, action: Record<string, unknown>) {
     if (!put.ok) throw new Error(`player-action request queue PUT failed: ${put.status}`)
     const post = await fetch('http://127.0.0.1:6173/api/events/player-action-player-to-dm', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json', ...protocolHeaders },
       body: JSON.stringify(payload),
     })
     if (!post.ok) throw new Error(`player-action event failed: ${post.status}`)
@@ -196,7 +219,7 @@ async function waitForCombatReady(page: Page, tokenId: string) {
   await expect(page.getByTestId(`initiative-token-${tokenId}`)).toBeVisible({ timeout: 20_000 })
 }
 
-test('player2 port 6175 sends skill-id attack request to DM and receives red-dragon result', async ({
+test('player2 port 6175 sends a 5e weapon attack to DM and receives the red-dragon result', async ({
   browser,
   request,
 }) => {
@@ -229,11 +252,10 @@ test('player2 port 6175 sends skill-id attack request to DM and receives red-dra
     combatId: `${mapId}:combat`,
     sourceMode: 'player',
     status: 'pending',
-    type: 'attack-token',
+    type: 'dnd5e-weapon-attack',
     actorTokenId: 'player2-token',
     characterId: 'player2-red-dragon-hero',
     targetTokenId: 'red-dragon-token',
-    skillId: 'tree-basicShot',
     round: 1,
     initiativeIndex: 0,
     seq: 1,
@@ -283,13 +305,13 @@ test('player2 port 6175 sends skill-id attack request to DM and receives red-dra
 
   const log = await getState<{ entries: Array<{ text: string }> }>(request, 'combat-log')
   const text = log.entries.map((entry) => entry.text).join('\n')
-  expect(text).toContain('基础射击')
+  expect(text).toContain('长弓')
   expect(text).toContain('红龙雏龙')
 
   await context.close()
 })
 
-test('player2 queued movement is DM-authorized, spends AP, and syncs token position', async ({ browser, request }) => {
+test('player2 queued movement is DM-authorized, spends 5e movement, and syncs token position', async ({ browser, request }) => {
   const mapId = `e2e-player2-red-dragon-move-${Date.now()}`
   await seedPlayer2VsRedDragon(request, mapId)
 
@@ -334,18 +356,12 @@ test('player2 queued movement is DM-authorized, spends AP, and syncs token posit
     )
     .toMatchObject(targetPosition)
 
-  await expect
-    .poll(
-      async () => {
-        const characters = await getState<{ characters: Array<{ id: string; currentAP?: number }> }>(
-          request,
-          'characters',
-        )
-        return characters.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(1)
+  await expect.poll(async () => {
+    const combat = await getState<{
+      dnd5eTurnEconomyByToken?: Record<string, { movement?: { current: number } }>
+    }>(request, 'combat')
+    return combat.dnd5eTurnEconomyByToken?.['player2-token']?.movement?.current
+  }, { timeout: 30_000 }).toBe(25)
 
   const player2Maps = await loadPlayer2State<{
     maps: Array<{ id: string; tokens: Array<{ id: string; x: number; y: number }> }>
@@ -400,23 +416,21 @@ test('three clients keep one authoritative transaction across duplicate, stale, 
       return ack.actionId === moveAction.id ? ack.status : ''
     })
     .toBe('accepted')
-  await expect
-    .poll(async () => {
-      const characters = await getState<{ characters: Array<{ id: string; currentAP?: number }> }>(
-        request,
-        'characters',
-      )
-      return characters.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP
-    })
-    .toBe(1)
+  await expect.poll(async () => {
+    const combat = await getState<{
+      dnd5eTurnEconomyByToken?: Record<string, { movement?: { current: number } }>
+    }>(request, 'combat')
+    return combat.dnd5eTurnEconomyByToken?.['player2-token']?.movement?.current
+  }).toBe(25)
 
   await sendPlayer2Action(player2, moveAction)
   await player2.waitForTimeout(1200)
-  const afterDuplicate = await getState<{ characters: Array<{ id: string; currentAP?: number }> }>(
-    request,
-    'characters',
-  )
-  expect(afterDuplicate.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP).toBe(1)
+  const afterDuplicate = await getState<{
+    dnd5eTurnEconomyByToken?: Record<string, { movement?: { current: number } }>
+  }>(request, 'combat')
+  expect(afterDuplicate.dnd5eTurnEconomyByToken?.['player2-token']?.movement?.current).toBe(25)
+  const processed = await getState<{ actionIds: string[] }>(request, 'player-action-processed')
+  expect(processed.actionIds.filter((id) => id === moveAction.id)).toHaveLength(1)
 
   const staleAction = {
     ...moveAction,
@@ -452,11 +466,6 @@ test('three clients keep one authoritative transaction across duplicate, stale, 
   expect(observerMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === 'player2-token')).toMatchObject(
     targetPosition,
   )
-
-  const finalCharacters = await loadPlayer2State<{
-    characters: Array<{ id: string; currentAP?: number }>
-  }>(player2, 'characters')
-  expect(finalCharacters.characters.find((character) => character.id === 'player2-red-dragon-hero')?.currentAP).toBe(1)
 
   await context.close()
 })

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Award, Dices, Footprints, HeartPulse, Shield, Sparkles, Swords } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import { ABILITIES, SKILLS, formatMod, type AbilityKey, type SkillDef } from '../../lib/dnd'
@@ -7,12 +7,34 @@ import {
   DND5E_2014_BACKGROUND_OPTIONS,
   DND5E_2014_CLASS_OPTIONS,
   DND5E_2014_RACE_OPTIONS,
+  dnd5eClassHitPointRule,
+  dnd5eFixedMaxHp,
   dnd5e2014Adapter as rules,
   dnd5eArmorClass,
+  dnd5eClassDefinition,
+  dnd5eClassDefinitionForCharacter,
+  dnd5eWalkingSpeed,
+  defaultEquipmentForDnd5eCharacter,
+  dnd5eEffectiveSavingThrowProficiencies,
+  dnd5eStoredCharacterInitiativeModifier,
+  dnd5eBardSongOfRestDie,
+  dnd5eSelfSavingThrowAuraBonus,
+  dnd5eSkillCheckModifier,
+  dnd5eSkillCheckProficiencyRank,
+  resolveDnd5eShortRestHitDice,
+  dnd5eRulesPluginRegistrySnapshot,
+  registeredDnd5ePluginFeatures,
+  registeredDnd5ePluginRaces,
+  dnd5eRaceSpeed,
+  subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
 import FighterProgressionPanel from './FighterProgressionPanel'
+import Dnd5eClassProgressionPanel from './Dnd5eClassProgressionPanel'
+import Dnd5ePluginFeaturesPanel from './Dnd5ePluginFeaturesPanel'
+import Dnd5eSpellbookPanel from './Dnd5eSpellbookPanel'
+import EquipmentTab from './EquipmentTab'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
@@ -25,9 +47,18 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
-  const [selectedTab, setSelectedTab] = useState<'sheet' | 'fighter'>('sheet')
+  const [selectedTab, setSelectedTab] = useState<'sheet' | 'class' | 'inventory' | 'spellbook' | 'plugins'>('sheet')
+  const [shortRestHitDice, setShortRestHitDice] = useState<Record<number, number>>({})
+  const [useSongOfRest, setUseSongOfRest] = useState(false)
+  const [shortRestResult, setShortRestResult] = useState('')
+  const characters = useCharacterStore((state) => state.characters)
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
+  useSyncExternalStore(
+    subscribeDnd5eRulesPluginRegistry,
+    dnd5eRulesPluginRegistrySnapshot,
+    dnd5eRulesPluginRegistrySnapshot,
+  )
   const hitDice = useMemo(() => {
     if (!character) return []
     if (character.hitPointDice?.length) return character.hitPointDice
@@ -50,19 +81,74 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
       deathSaveFailures: character.deathSaveFailures ?? 0,
       deathSaveStable: character.deathSaveStable ?? false,
       concentrating: character.concentrating ?? false,
-      inspiration: character.inspiration > 0 || character.heroicInspiration ? 1 : 0,
-      heroicInspiration: false,
+      inspiration: character.inspiration > 0 ? 1 : 0,
       exhaustionLevel: character.exhaustionLevel ?? 0,
     })
   }, [character, update])
 
   if (!character) return <p className="text-slate-400">未找到角色。</p>
   const c = character
-  const activeTab = c.charClass === '战士' ? selectedTab : 'sheet'
+  const pluginRaces = registeredDnd5ePluginRaces()
+  const raceOptions = [...DND5E_2014_RACE_OPTIONS, ...pluginRaces.map((race) => race.name)]
+  const classDefinition = dnd5eClassDefinitionForCharacter(c)
+  const hasSpellbookTab = !!classDefinition?.spellcasting
+  const hasPluginTab = registeredDnd5ePluginFeatures().length > 0 || (c.dnd5ePluginFeatureIds?.length ?? 0) > 0
+  const activeTab = selectedTab === 'class' && !classDefinition
+    ? 'sheet'
+    : selectedTab === 'spellbook' && !hasSpellbookTab
+      ? 'sheet'
+    : selectedTab === 'plugins' && !hasPluginTab
+      ? 'sheet'
+      : selectedTab
+  const effectiveSavingThrows = dnd5eEffectiveSavingThrowProficiencies(c)
+  const savingThrowAuraBonus = dnd5eSelfSavingThrowAuraBonus(c)
   const proficiency = rules.proficiencyBonus(clamp(c.level, 1, 20))
-  const initiative = rules.abilityModifier(clamp(c.abilities.dex, 1, 30)) + c.initiativeBonus
-  const perceptionProficient = c.skills.includes('perception')
-  const passivePerception = 10 + rules.abilityModifier(clamp(c.abilities.wis, 1, 30)) + (perceptionProficient ? proficiency : 0)
+  const initiative = dnd5eStoredCharacterInitiativeModifier(c)
+  const passivePerception = 10 + dnd5eSkillCheckModifier(c, 'perception')
+  const hitPointRule = dnd5eClassHitPointRule(c)
+  const fixedMaxHp = dnd5eFixedMaxHp(c)
+  const hitPointMaximumMode = c.hitPointMaximumMode ?? 'fixed'
+  const songOfRestBard = characters
+    .filter((candidate) => candidate.rulesetId === 'dnd5e-2014-srd-5.1' && candidate.charClass === '吟游诗人' && candidate.level >= 2)
+    .map((candidate) => ({ character: candidate, dieSides: dnd5eBardSongOfRestDie(candidate.level) }))
+    .filter((entry) => entry.dieSides > 0)
+    .sort((left, right) => right.dieSides - left.dieSides)[0]
+  const selectedHitDiceCount = hitDice.reduce((total, pool, index) =>
+    total + Math.min(pool.current, Math.max(0, Math.floor(shortRestHitDice[index] ?? 0))), 0)
+
+  const rollDie = (sides: number): number => {
+    if (globalThis.crypto?.getRandomValues) {
+      const value = new Uint32Array(1)
+      globalThis.crypto.getRandomValues(value)
+      return value[0] % sides + 1
+    }
+    return Math.floor(Math.random() * sides) + 1
+  }
+
+  const settleShortRestHitDice = () => {
+    const spends = hitDice.flatMap((pool, poolIndex) => {
+      const count = Math.min(pool.current, Math.max(0, Math.floor(shortRestHitDice[poolIndex] ?? 0)))
+      return count > 0 ? [{ poolIndex, rolls: Array.from({ length: count }, () => rollDie(pool.sides)) }] : []
+    })
+    if (spends.length === 0) return
+    const songOfRest = useSongOfRest && songOfRestBard
+      ? {
+          dieSides: songOfRestBard.dieSides as 6 | 8 | 10 | 12,
+          roll: rollDie(songOfRestBard.dieSides),
+        }
+      : undefined
+    const resolved = resolveDnd5eShortRestHitDice({ character: c, spends, songOfRest })
+    update(id, {
+      currentHp: resolved.character.currentHp,
+      hitPointDice: resolved.character.hitPointDice,
+    })
+    setShortRestHitDice({})
+    setShortRestResult(
+      `花费 ${resolved.hitDiceSpent} 枚生命骰，生命骰恢复 ${resolved.hitDiceHealing} 点` +
+      (resolved.songOfRestHealing > 0 ? `，休憩曲额外恢复 ${resolved.songOfRestHealing} 点` : '') +
+      `；实际恢复 ${resolved.healingApplied} 点。`,
+    )
+  }
 
   const toggleSavingThrow = (key: AbilityKey) => {
     update(id, {
@@ -88,9 +174,34 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
           </div>
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="角色名称" value={c.name} onChange={(value) => update(id, { name: value })} className="col-span-2" />
-            <SelectField label="职业" value={c.charClass} options={DND5E_2014_CLASS_OPTIONS} onChange={(value) => update(id, { charClass: value })} />
+            <SelectField
+              label="职业"
+              value={c.charClass}
+              options={DND5E_2014_CLASS_OPTIONS}
+              onChange={(value) => {
+                const nextClass = dnd5eClassDefinition(value)
+                setSelectedTab('sheet')
+                update(id, {
+                  charClass: value,
+                  savingThrows: nextClass ? [...nextClass.savingThrows] : c.savingThrows,
+                  equipment: defaultEquipmentForDnd5eCharacter({ charClass: value }),
+                })
+              }}
+            />
             <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => update(id, { level: value })} />
-            <SelectField label="种族" value={c.race} options={DND5E_2014_RACE_OPTIONS} onChange={(value) => update(id, { race: value })} />
+            <SelectField
+              label="种族"
+              value={c.race}
+              options={raceOptions}
+              onChange={(value) => {
+                const pluginRace = pluginRaces.find((race) => race.name === value)
+                update(id, {
+                  race: value,
+                  dnd5eRaceId: pluginRace?.id,
+                  speed: dnd5eRaceSpeed(pluginRace?.id ?? value),
+                })
+              }}
+            />
             <SelectField label="背景" value={c.background} options={DND5E_2014_BACKGROUND_OPTIONS} onChange={(value) => update(id, { background: value })} />
             <SelectField label="阵营" value={c.alignment ?? ''} options={DND5E_2014_ALIGNMENT_OPTIONS} onChange={(value) => update(id, { alignment: value })} />
             <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => update(id, { experience: value })} />
@@ -100,17 +211,18 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
         </div>
       </section>
 
-      {c.charClass === '战士' && (
-        <nav className="glass flex gap-1 rounded-2xl p-1.5" aria-label="角色页面分页">
+      <nav className="glass flex gap-1 rounded-2xl p-1.5" aria-label="角色页面分页">
           <CharacterTab active={activeTab === 'sheet'} onClick={() => setSelectedTab('sheet')}>人物卡</CharacterTab>
-          <CharacterTab active={activeTab === 'fighter'} onClick={() => setSelectedTab('fighter')}>战士</CharacterTab>
-        </nav>
-      )}
+          {classDefinition && <CharacterTab active={activeTab === 'class'} onClick={() => setSelectedTab('class')}>{c.charClass}</CharacterTab>}
+          <CharacterTab active={activeTab === 'inventory'} onClick={() => setSelectedTab('inventory')}>物品栏</CharacterTab>
+          {hasSpellbookTab && <CharacterTab active={activeTab === 'spellbook'} onClick={() => setSelectedTab('spellbook')}>法术书</CharacterTab>}
+          {hasPluginTab && <CharacterTab active={activeTab === 'plugins'} onClick={() => setSelectedTab('plugins')}>扩展规则</CharacterTab>}
+      </nav>
 
       {activeTab === 'sheet' && <>
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
         <Stat icon={Shield} label="护甲等级" value={`${dnd5eArmorClass(c)}`} />
-        <Stat icon={Footprints} label="速度" value={`${c.speed} 尺`} />
+        <Stat icon={Footprints} label="速度" value={`${dnd5eWalkingSpeed(c)} 尺`} />
         <Stat icon={Swords} label="先攻" value={formatMod(initiative)} />
         <Stat icon={Award} label="熟练加值" value={formatMod(proficiency)} />
         <Stat icon={Sparkles} label="被动察觉" value={`${passivePerception}`} />
@@ -132,8 +244,10 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                 score={clamp(c.abilities[ability.key], 1, 30)}
                 skills={SKILLS.filter((skill) => skill.ability === ability.key)}
                 proficiency={proficiency}
-                savingThrowProficient={c.savingThrows.includes(ability.key)}
-                skillProficiencies={c.skills}
+                savingThrowProficient={effectiveSavingThrows.includes(ability.key)}
+                savingThrowAdditionalBonus={savingThrowAuraBonus}
+                skillProficiencyRank={(skillKey) => dnd5eSkillCheckProficiencyRank(c, skillKey)}
+                skillCheckModifier={(skillKey) => dnd5eSkillCheckModifier(c, skillKey)}
                 onScoreChange={(score) => update(id, { abilities: { ...c.abilities, [ability.key]: score } })}
                 onToggleSavingThrow={() => toggleSavingThrow(ability.key)}
                 onToggleSkill={toggleSkill}
@@ -143,7 +257,33 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
         </section>
 
         <div className="space-y-5">
-          <HpPanel current={c.currentHp} max={c.maxHp} temp={c.tempHp} editable onChange={(patch) => update(id, patch)} />
+          <div className="space-y-2">
+            <HpPanel
+              current={c.currentHp}
+              max={c.maxHp}
+              temp={c.tempHp}
+              editable
+              maxEditable={hitPointMaximumMode === 'manual'}
+              onChange={(patch) => update(id, patch)}
+            />
+            <div className="glass rounded-xl px-4 py-3 text-xs text-slate-400">
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor={`hp-mode-${id}`} className="font-medium text-slate-300">生命值方案</label>
+                <select
+                  id={`hp-mode-${id}`}
+                  value={hitPointMaximumMode}
+                  onChange={(event) => update(id, { hitPointMaximumMode: event.target.value as 'fixed' | 'manual' })}
+                  className="rounded-lg border border-white/10 bg-void-900/80 px-2 py-1 text-slate-200 outline-none focus:border-arcane-500"
+                >
+                  <option value="fixed">固定值（自动）</option>
+                  <option value="manual">掷骰总值（手动）</option>
+                </select>
+              </div>
+              <p className="mt-2">
+                d{hitPointRule.hitDieSides}：1 级取满；之后每级固定 {hitPointRule.fixedHitPointsPerLevel}＋体质调整值，每级至少增加 1。当前固定上限为 {fixedMaxHp}。
+              </p>
+            </div>
+          </div>
 
           <section className="glass rounded-2xl p-4">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-200">
@@ -163,7 +303,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
             <h3 className="mb-3 text-sm font-semibold text-slate-200">生命骰</h3>
             <div className="space-y-2">
               {hitDice.map((pool, index) => (
-                <div key={`${pool.sides}-${index}`} className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2">
+                <div key={`${pool.sides}-${index}`} className="grid grid-cols-[auto_auto_1fr] items-center gap-3 rounded-lg bg-white/5 px-3 py-2">
                   <span className="font-bold text-arcane-200">d{pool.sides}</span>
                   <input
                     type="number"
@@ -180,24 +320,54 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                     className="w-14 rounded border border-white/10 bg-void-950/70 px-1 py-1 text-center text-sm"
                   />
                   <span className="text-sm text-slate-500">/ {pool.max} 枚</span>
+                  <label className="col-span-3 grid grid-cols-[1fr_70px] items-center gap-2 text-xs text-slate-400">
+                    本次短休花费
+                    <input
+                      type="number"
+                      min={0}
+                      max={pool.current}
+                      value={shortRestHitDice[index] ?? 0}
+                      onChange={(event) => setShortRestHitDice((current) => ({
+                        ...current,
+                        [index]: clamp(Number(event.target.value) || 0, 0, pool.current),
+                      }))}
+                      className="rounded border border-white/10 bg-void-950/70 px-2 py-1 text-center text-sm text-slate-200"
+                    />
+                  </label>
                 </div>
               ))}
+              {songOfRestBard ? <label className="flex items-start gap-2 rounded-lg border border-violet-400/15 bg-violet-500/[0.06] px-3 py-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={useSongOfRest}
+                  onChange={(event) => setUseSongOfRest(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span><strong className="text-violet-200">使用休憩曲 d{songOfRestBard.dieSides}</strong><span className="mt-0.5 block text-slate-500">由 {songOfRestBard.character.name} 演奏；本次短休只额外掷一次。</span></span>
+              </label> : null}
+              <button
+                type="button"
+                onClick={settleShortRestHitDice}
+                disabled={selectedHitDiceCount < 1 || c.currentHp >= c.maxHp}
+                className="w-full rounded-lg bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                结算短休生命骰{selectedHitDiceCount > 0 ? `（${selectedHitDiceCount} 枚）` : ''}
+              </button>
+              {shortRestResult ? <p className="text-xs leading-5 text-emerald-300">{shortRestResult}</p> : null}
             </div>
           </section>
 
           <section className="glass rounded-2xl p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-200">状态</h3>
-            <input
-              value={c.conditions.join('、')}
-              onChange={(event) => update(id, { conditions: event.target.value.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) })}
-              placeholder="例如：倒地、擒抱、中毒"
-              className="w-full rounded-lg border border-white/10 bg-void-900/60 px-3 py-2 text-sm text-slate-200"
-            />
+            <div className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-2 text-sm text-slate-300">
+              {c.conditions.length > 0 ? c.conditions.join('、') : '当前没有状态效果'}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">此处为 ActiveEffect 的只读投影；状态由 DM 战斗面板、法术、特性或规则插件修改。</p>
           </section>
 
           <section className="glass rounded-2xl p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-200">角色笔记</h3>
-            <textarea value={c.notes} onChange={(event) => update(id, { notes: event.target.value })} rows={5} className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200" />
+            <textarea aria-label="角色笔记" value={c.notes} onChange={(event) => update(id, { notes: event.target.value })} rows={5} className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200" />
             {isDM && (
               <textarea
                 value={c.dmNotes}
@@ -212,7 +382,11 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
       </div>
       </>}
 
-      {activeTab === 'fighter' && <FighterProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
+      {activeTab === 'class' && c.charClass === '战士' && <FighterProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
+      {activeTab === 'class' && c.charClass !== '战士' && <Dnd5eClassProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
+      {activeTab === 'inventory' && <EquipmentTab charId={c.id} />}
+      {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} onChange={(patch) => update(id, patch)} />}
+      {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={(patch) => update(id, patch)} />}
     </div>
   )
 }
@@ -236,7 +410,9 @@ function AbilitySection({
   skills,
   proficiency,
   savingThrowProficient,
-  skillProficiencies,
+  savingThrowAdditionalBonus,
+  skillProficiencyRank,
+  skillCheckModifier,
   onScoreChange,
   onToggleSavingThrow,
   onToggleSkill,
@@ -247,13 +423,15 @@ function AbilitySection({
   skills: SkillDef[]
   proficiency: number
   savingThrowProficient: boolean
-  skillProficiencies: string[]
+  savingThrowAdditionalBonus: number
+  skillProficiencyRank: (skillKey: string) => 0 | 1 | 2
+  skillCheckModifier: (skillKey: string) => number
   onScoreChange: (score: number) => void
   onToggleSavingThrow: () => void
   onToggleSkill: (key: string) => void
 }) {
   const modifier = rules.abilityModifier(score)
-  const saveBonus = modifier + (savingThrowProficient ? proficiency : 0)
+  const saveBonus = modifier + (savingThrowProficient ? proficiency : 0) + savingThrowAdditionalBonus
   return (
     <div className="overflow-hidden rounded-xl border border-white/10 bg-void-900/40">
       <div className="grid gap-3 p-3 sm:grid-cols-[180px_1fr]">
@@ -282,12 +460,14 @@ function AbilitySection({
           {skills.length > 0 && (
             <div className="mt-1 border-t border-white/8 pt-1">
               {skills.map((skill) => {
-              const proficient = skillProficiencies.includes(skill.key)
-              const bonus = modifier + (proficient ? proficiency : 0)
+              const proficiencyRank = skillProficiencyRank(skill.key)
+              const proficient = proficiencyRank > 0
+              const expertise = proficiencyRank === 2
+              const bonus = skillCheckModifier(skill.key)
               return (
                 <button key={skill.key} type="button" onClick={() => onToggleSkill(skill.key)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5">
                   <Dot active={proficient} />
-                  <span className="min-w-0 flex-1 text-slate-300">{skill.label}</span>
+                  <span className="min-w-0 flex-1 text-slate-300">{skill.label}{expertise && <span className="ml-1.5 text-[10px] text-amber-300">专精</span>}</span>
                   <span className="font-semibold text-arcane-200">{formatMod(bonus)}</span>
                 </button>
               )

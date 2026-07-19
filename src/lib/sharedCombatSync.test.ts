@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SharedCombatState } from './sharedCombatTypes'
 import {
-  reconcileEnemyAp,
+  migrateLegacyApSharedCombatState,
+  reconcileDnd5eTurnEconomy,
   resolveSharedCombatStateApply,
 } from './sharedCombatSync'
 
@@ -16,34 +17,42 @@ function makeState(patch: Partial<SharedCombatState> = {}): SharedCombatState {
       { tokenId: 'hero-token', label: '英雄', emoji: 'H', color: '#34d399', roll: 15 },
       { tokenId: 'enemy-token', label: '敌人', emoji: 'E', color: '#ef4444', roll: 10 },
     ],
-    enemyApByToken: { 'enemy-token': { current: 1, max: 2 } },
     updatedAt: 1000,
     ...patch,
   }
 }
 
 describe('shared combat sync', () => {
-  it('keeps local enemy AP on torn reads and filters invalid tokens', () => {
-    expect(
-      reconcileEnemyAp(
-        undefined,
-        {
-          'enemy-token': { current: 0, max: 2 },
-          removed: { current: 2, max: 2 },
-        },
-        new Set(['enemy-token']),
-      ),
-    ).toEqual({ 'enemy-token': { current: 0, max: 2 } })
+  it('physically removes the retired enemy AP ledger from a persisted snapshot', () => {
+    const legacy = {
+      ...makeState(),
+      enemyApByToken: { 'enemy-token': { current: 1, max: 2 } },
+    } as SharedCombatState
+
+    const migrated = migrateLegacyApSharedCombatState(legacy)
+
+    expect(migrated.removedLegacyAp).toBe(true)
+    expect(JSON.stringify(migrated.state)).not.toContain('enemyApByToken')
+    expect(migrateLegacyApSharedCombatState(migrated.state)).toEqual({
+      state: migrated.state,
+      removedLegacyAp: false,
+    })
   })
 
-  it('treats present enemy AP as authoritative even when empty', () => {
-    expect(
-      reconcileEnemyAp(
-        {},
-        { 'enemy-token': { current: 0, max: 2 } },
-        new Set(['enemy-token']),
-      ),
-    ).toEqual({})
+  it('shares D&D turn economy and filters removed tokens', () => {
+    const economy = {
+      turnKey: 'combat-1:2:hero-token',
+      attacksUsed: 1,
+      action: { current: 0, max: 1 },
+      bonusAction: { current: 1, max: 1 },
+      reaction: { current: 1, max: 1 },
+      movement: { current: 20, max: 30 },
+    }
+    expect(reconcileDnd5eTurnEconomy(
+      { 'hero-token': economy, removed: economy },
+      {},
+      new Set(['hero-token']),
+    )).toEqual({ 'hero-token': economy })
   })
 
   it('normalizes a shared combat snapshot for the local map', () => {
@@ -52,7 +61,6 @@ describe('shared combat sync', () => {
       mapId: 'map-1',
       validTokenIds: ['hero-token'],
       currentCombatId: 'combat-old',
-      currentEnemyApByToken: {},
       lastAppliedCombatId: 'combat-old',
       lastAppliedUpdatedAt: 0,
       lastSnapshot: '',
@@ -64,10 +72,10 @@ describe('shared combat sync', () => {
       expect(decision.active).toBe(true)
       expect(decision.initiativeOrder.map((entry) => entry.tokenId)).toEqual(['hero-token'])
       expect(decision.initiativeIndex).toBe(0)
-      expect(decision.enemyApByToken).toEqual({})
       expect(decision.combatChanged).toBe(true)
       expect(decision.shouldResetPlayerActionState).toBe(true)
       expect(decision.playerCombatEndedLocked).toBe(false)
+      expect(decision.settlementMode).toBe('automatic')
     }
   })
 
@@ -79,7 +87,6 @@ describe('shared combat sync', () => {
         mapId: 'map-1',
         validTokenIds: ['hero-token'],
         currentCombatId: 'combat-1',
-        currentEnemyApByToken: {},
         lastAppliedCombatId: '',
         lastAppliedUpdatedAt: 0,
         lastSnapshot: '',
@@ -93,7 +100,6 @@ describe('shared combat sync', () => {
         mapId: 'map-1',
         validTokenIds: [],
         currentCombatId: 'combat-1',
-        currentEnemyApByToken: {},
         lastAppliedCombatId: '',
         lastAppliedUpdatedAt: 0,
         lastSnapshot: '',
@@ -107,7 +113,6 @@ describe('shared combat sync', () => {
         mapId: 'map-1',
         validTokenIds: ['hero-token', 'enemy-token'],
         currentCombatId: 'combat-1',
-        currentEnemyApByToken: {},
         lastAppliedCombatId: 'combat-1',
         lastAppliedUpdatedAt: 100,
         lastSnapshot: '',
@@ -122,7 +127,6 @@ describe('shared combat sync', () => {
         mapId: 'map-1',
         validTokenIds: ['hero-token', 'enemy-token'],
         currentCombatId: 'combat-1',
-        currentEnemyApByToken: {},
         lastAppliedCombatId: 'combat-1',
         lastAppliedUpdatedAt: 1000,
         lastSnapshot: snapshot,
@@ -137,7 +141,6 @@ describe('shared combat sync', () => {
       mapId: 'map-1',
       validTokenIds: ['hero-token'],
       currentCombatId: 'combat-1',
-      currentEnemyApByToken: {},
       lastAppliedCombatId: '',
       lastAppliedUpdatedAt: 0,
       lastSnapshot: '',

@@ -1,26 +1,25 @@
+import { useSyncExternalStore } from 'react'
 import { Check, Shield, Sparkles, Swords, Wind } from 'lucide-react'
 import {
   FIGHTER_FIGHTING_STYLE_OPTIONS,
-  FIGHTER_MANEUVER_OPTIONS,
-  FIGHTER_RESOURCE_KEYS,
-  FIGHTER_SUBCLASS_OPTIONS,
   fighterActionSurgeUses,
   fighterAttacksPerAttackAction,
   fighterFightingStyleName,
   fighterFightingStyleSelectionLimit,
   fighterIndomitableUses,
-  fighterManeuverSaveDc,
-  fighterManeuversKnown,
   fighterProgression,
-  fighterResourceState,
   fighterSelectedFightingStyles,
-  fighterSelectedManeuvers,
+  fighterSelectedSubclassChoices,
+  fighterSubclassChoiceKey,
+  fighterSubclassChoiceLimit,
+  fighterSubclassDefinition,
+  fighterSubclassRegistrySnapshot,
   fighterSubclassName,
-  fighterSuperiorityDieSides,
+  registeredFighterSubclasses,
+  subscribeFighterSubclassRegistry,
   dnd5eArmorClass,
   dnd5eWeaponAttackProfile,
   type FighterFightingStyleId,
-  type FighterManeuverId,
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
@@ -31,14 +30,13 @@ interface FighterProgressionPanelProps {
 }
 
 export default function FighterProgressionPanel({ character, onChange }: FighterProgressionPanelProps) {
+  useSyncExternalStore(subscribeFighterSubclassRegistry, fighterSubclassRegistrySnapshot, fighterSubclassRegistrySnapshot)
   const fighter = character.dnd5eClassChoices?.fighter ?? {}
   const subclass = fighter.subclass
-  const subclassOption = FIGHTER_SUBCLASS_OPTIONS.find((option) => option.id === subclass)
+  const subclassOptions = registeredFighterSubclasses()
+  const subclassOption = fighterSubclassDefinition(subclass)
   const fightingStyles = fighterSelectedFightingStyles(character)
   const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
-  const maneuvers = fighterSelectedManeuvers(character)
-  const maneuverLimit = fighterManeuversKnown(character.level)
-  const superiorityDice = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.superiorityDice)
   const progression = fighterProgression(subclass)
   const weapon = dnd5eWeaponAttackProfile(character)
   const setFighterChoices = (patch: NonNullable<NonNullable<Character['dnd5eClassChoices']>['fighter']>) => {
@@ -50,7 +48,14 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     })
   }
   const setSubclass = (next: FighterSubclassId | undefined) => {
-    const nextStyleLimit = next === 'champion' && character.level >= 10 ? 2 : 1
+    const nextCharacter: Character = {
+      ...character,
+      dnd5eClassChoices: {
+        ...character.dnd5eClassChoices,
+        fighter: { ...fighter, subclass: next },
+      },
+    }
+    const nextStyleLimit = fighterFightingStyleSelectionLimit(nextCharacter)
     setFighterChoices({
       subclass: next,
       fightingStyles: fightingStyles.slice(0, nextStyleLimit),
@@ -61,10 +66,21 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
     if (!selected && fightingStyles.length >= fightingStyleLimit) return
     setFighterChoices({ fightingStyles: selected ? fightingStyles.filter((item) => item !== style) : [...fightingStyles, style] })
   }
-  const toggleManeuver = (maneuver: FighterManeuverId) => {
-    const selected = maneuvers.includes(maneuver)
-    if (!selected && maneuvers.length >= maneuverLimit) return
-    setFighterChoices({ maneuvers: selected ? maneuvers.filter((item) => item !== maneuver) : [...maneuvers, maneuver] })
+  const toggleSubclassChoice = (groupId: string, optionId: string) => {
+    if (!subclassOption) return
+    const group = subclassOption.choiceGroups?.find((candidate) => candidate.id === groupId)
+    if (!group) return
+    const selected = fighterSelectedSubclassChoices(character, subclassOption.id, group)
+    const isSelected = selected.includes(optionId)
+    const limit = fighterSubclassChoiceLimit(group, character)
+    if (!isSelected && selected.length >= limit) return
+    const key = fighterSubclassChoiceKey(subclassOption.id, group.id)
+    setFighterChoices({
+      extensionChoices: {
+        ...fighter.extensionChoices,
+        [key]: isSelected ? selected.filter((item) => item !== optionId) : [...selected, optionId],
+      },
+    })
   }
 
   return (
@@ -83,7 +99,7 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
             label="武术范型（3级）"
             value={subclass ?? ''}
             placeholder={character.level >= 3 ? '选择子职' : '3级解锁'}
-            options={FIGHTER_SUBCLASS_OPTIONS}
+            options={subclassOptions}
             disabled={character.level < 3}
             onChange={(value) => setSubclass(value as FighterSubclassId || undefined)}
           />
@@ -119,40 +135,33 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         <Summary icon={Sparkles} label="战斗风格" value={fightingStyles.map(fighterFightingStyleName).join('、') || '尚未选择'} />
       </div>
 
-      {subclass === 'battle-master' && character.level >= 3 && (
-        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h4 className="text-sm font-semibold text-amber-100">战斗大师战技</h4>
-              <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">3/7/10/15 级分别掌握 3/5/7/9 项战技；在 7、10、15 级学会新战技时可替换 1 项已知战技。每次攻击只能应用 1 项战技。已选 {maneuvers.length}/{maneuverLimit}。</p>
+      {subclassOption?.choiceGroups?.filter((group) => character.level >= (group.minLevel ?? 1)).map((group) => {
+        const selected = fighterSelectedSubclassChoices(character, subclassOption.id, group)
+        const limit = fighterSubclassChoiceLimit(group, character)
+        return (
+          <div key={group.id} className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h4 className="text-sm font-semibold text-amber-100">{group.name}</h4>
+                {group.description && <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">{group.description}</p>}
+              </div>
+              <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-100">已选 {selected.length}/{limit}</span>
             </div>
-            <div className="grid grid-cols-3 gap-2 sm:min-w-[420px]">
-              <EquipmentLine label="卓越骰" value={`d${fighterSuperiorityDieSides(character.level)}`} detail={`${superiorityDice.current}/${superiorityDice.max} 枚 · 短休或长休恢复`} />
-              <EquipmentLine label="战技豁免 DC" value={`${fighterManeuverSaveDc(character)}`} detail="8＋熟练＋所选属性" />
-              <ChoiceSelect
-                label="豁免计算属性"
-                value={fighter.maneuverAbility ?? 'str'}
-                placeholder="选择属性"
-                options={[{ id: 'str', name: '力量' }, { id: 'dex', name: '敏捷' }]}
-                onChange={(value) => setFighterChoices({ maneuverAbility: value === 'dex' ? 'dex' : 'str' })}
-              />
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {group.options.map((option) => (
+                <SelectionCard
+                  key={option.id}
+                  name={option.name}
+                  summary={option.summary}
+                  selected={selected.includes(option.id)}
+                  disabled={!selected.includes(option.id) && selected.length >= limit}
+                  onClick={() => toggleSubclassChoice(group.id, option.id)}
+                />
+              ))}
             </div>
           </div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {FIGHTER_MANEUVER_OPTIONS.map((option) => (
-              <SelectionCard
-                key={option.id}
-                name={option.name}
-                summary={option.summary}
-                selected={maneuvers.includes(option.id)}
-                disabled={!maneuvers.includes(option.id) && maneuvers.length >= maneuverLimit}
-                onClick={() => toggleManeuver(option.id)}
-              />
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-amber-200/70">战斗大师与战技文字采用用户提供的 2014《玩家手册》中译 v1.72（PDF 第 73–74 页）。该子职不在 SRD 5.1 中；战技在地图中的目标、反应、豁免与伤害结算仍需逐项接入 5e Headless。</p>
-        </div>
-      )}
+        )
+      })}
 
       <div className="mt-4 rounded-xl border border-white/10 bg-void-900/40 p-4">
         <h4 className="text-sm font-semibold text-slate-200">基础装备</h4>
@@ -163,19 +172,31 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         </div>
       </div>
 
-      {subclass && (
+      {subclass && subclassOption && (
         <div className="mt-4 rounded-xl border border-arcane-500/20 bg-arcane-500/5 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-arcane-300">{fighterSubclassName(subclass)}</span>
             <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-slate-500">
-              {subclassOption?.rulesTextSource === 'srd-5.1-translation'
-                ? 'SRD 5.1 中文翻译'
-                : subclassOption?.rulesTextSource === 'phb-2014-translation'
-                  ? '2014 PHB 中译 v1.72 · 非 SRD'
-                  : '非 SRD 5.1 · 机制摘要'}
+              {subclassOption.sourceLabel}
             </span>
           </div>
-          <p className="mt-1 text-sm text-slate-400">{subclassOption?.summary}</p>
+          <p className="mt-1 text-sm text-slate-400">{subclassOption.summary}</p>
+          {subclassOption.ownerPluginId && <p className="mt-2 text-xs text-amber-200/70">该内容由本机插件 {subclassOption.ownerPluginId} 提供；平台核心包不包含其规则数据。</p>}
+          {subclassOption.resources && subclassOption.resources.length > 0 && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {subclassOption.resources.filter((resource) => resource.isAvailable(character)).map((resource) => {
+                const max = Math.max(0, resource.max(character))
+                const current = Math.min(max, Math.max(0, character.classResources?.[resource.key]?.current ?? max))
+                return <EquipmentLine key={resource.key} label={resource.label} value={`${current}/${max}`} detail={resource.resetOn === 'short-rest' ? '短休或长休恢复' : resource.resetOn === 'long-rest' ? '长休恢复' : '战斗重置'} />
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {subclass && !subclassOption && (
+        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-100">
+          此角色引用的第三方子职插件尚未安装。存档中的插件 ID 与选择数据已保留，但不会载入名称、规则或 Headless 效果。
         </div>
       )}
 

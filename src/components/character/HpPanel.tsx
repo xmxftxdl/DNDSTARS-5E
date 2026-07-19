@@ -6,10 +6,11 @@ interface HpPanelProps {
   max: number
   temp: number
   editable: boolean
+  maxEditable?: boolean
   onChange: (patch: { currentHp?: number; maxHp?: number; tempHp?: number }) => void
 }
 
-export default function HpPanel({ current, max, temp, editable, onChange }: HpPanelProps) {
+export default function HpPanel({ current, max, temp, editable, maxEditable = editable, onChange }: HpPanelProps) {
   const [amount, setAmount] = useState(1)
   const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
   const barColor =
@@ -71,7 +72,7 @@ export default function HpPanel({ current, max, temp, editable, onChange }: HpPa
           <Plus className="h-4 w-4" />
         </button>
 
-        {editable && (
+        {maxEditable && (
           <div className="ml-auto flex items-center gap-1 text-xs text-slate-400">
             <span>生命上限</span>
             <input

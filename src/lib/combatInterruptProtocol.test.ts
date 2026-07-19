@@ -26,26 +26,19 @@ const baseCharacter = (patch: Partial<Character> & { id: string; name?: string }
     maxHp: 10,
     tempHp: 0,
     hitDice: '1d10',
-    actionPoints: 2,
-    currentAP: 2,
     ac: 10,
     speed: 30,
     initiativeBonus: 0,
     saveDC: 12,
     passivePerception: 10,
     inspiration: 0,
-    mana: 0,
-    maxMana: 0,
     abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     savingThrows: [],
     skills: [],
-    traits: [],
-    combatSkills: [],
     equipment: {},
     conditions: [],
     notes: '',
     dmNotes: '',
-    combatBuffs: {},
     visibleToPlayers: true,
     ...rest,
   }
@@ -58,6 +51,13 @@ describe('combatInterruptProtocol', () => {
     expect(defaultCombatInterruptResponse('gale-combo')).toEqual({ useGaleCombo: false })
     expect(defaultCombatInterruptResponse('agile-leap')).toEqual({ useAgileLeap: false })
     expect(defaultCombatInterruptResponse('opportunity-attack')).toEqual({ useOpportunityAttack: false })
+    expect(defaultCombatInterruptResponse('uncanny-dodge')).toEqual({ useUncannyDodge: false })
+    expect(defaultCombatInterruptResponse('saving-throw-reroll')).toEqual({ useSavingThrowReroll: false })
+    expect(defaultCombatInterruptResponse('bardic-inspiration')).toEqual({ useBardicInspiration: false })
+    expect(defaultCombatInterruptResponse('dark-ones-own-luck')).toEqual({ useDarkOnesOwnLuck: false })
+    expect(defaultCombatInterruptResponse('stroke-of-luck')).toEqual({ useStrokeOfLuck: false })
+    expect(defaultCombatInterruptResponse('shield-spell')).toEqual({ useShieldSpell: false })
+    expect(defaultCombatInterruptResponse('stand-against-tide')).toEqual({})
   })
 
   it('type-narrows interrupts by kind', () => {
@@ -180,6 +180,99 @@ describe('combatInterruptProtocol', () => {
         assignedCharacterId: target.id,
       }).canAnswer,
     ).toBe(false)
+  })
+
+  it('routes Uncanny Dodge answers to the target character', () => {
+    const attacker = baseCharacter({ id: 'attacker', dmNotes: 'private' })
+    const target = baseCharacter({ id: 'target', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'uncanny-1', mapId: 'map', kind: 'uncanny-dodge', targetCharId: target.id,
+      payload: { attackerName: attacker.name, targetName: target.name, attackName: 'claw' }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [attacker, target], visibleCharacters: [], assignedCharacterId: target.id,
+    }).canAnswer).toBe(true)
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [attacker, target], visibleCharacters: [], assignedCharacterId: attacker.id,
+    }).canAnswer).toBe(false)
+  })
+
+  it('routes Shield spell answers to the target character', () => {
+    const attacker = baseCharacter({ id: 'attacker' })
+    const target = baseCharacter({ id: 'wizard', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'shield-1', mapId: 'map', kind: 'shield-spell', targetCharId: target.id,
+      payload: { attackerName: attacker.name, targetName: target.name, attackName: '利爪', attackTotal: 16, armorClass: 13 }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [attacker, target], visibleCharacters: [], assignedCharacterId: target.id,
+    }).canAnswer).toBe(true)
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [attacker, target], visibleCharacters: [], assignedCharacterId: attacker.id,
+    }).canAnswer).toBe(false)
+  })
+
+  it('routes class saving throw rerolls to the saving character', () => {
+    const target = baseCharacter({ id: 'target', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'save-reroll-1', mapId: 'map', kind: 'saving-throw-reroll', targetCharId: target.id,
+      payload: { targetName: target.name, featureName: '不屈', total: 11, dc: 15 }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [target], visibleCharacters: [], assignedCharacterId: target.id,
+    }).canAnswer).toBe(true)
+  })
+
+  it('routes Bardic Inspiration use to the creature holding the die', () => {
+    const target = baseCharacter({ id: 'target', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'bardic-1', mapId: 'map', kind: 'bardic-inspiration', targetCharId: target.id,
+      payload: { targetName: target.name, dieSides: 8, rollType: '豁免' as const, total: 11, targetNumber: 14 }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [target], visibleCharacters: [], assignedCharacterId: target.id,
+    }).canAnswer).toBe(true)
+  })
+
+  it("routes Dark One's Own Luck to the Fiend warlock making the roll", () => {
+    const target = baseCharacter({ id: 'warlock', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'dark-luck-1', mapId: 'map', kind: 'dark-ones-own-luck', targetCharId: target.id,
+      payload: { targetName: target.name, rollType: '豁免' as const, total: 9, targetNumber: 14 }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [target], visibleCharacters: [], assignedCharacterId: target.id,
+    })).toEqual({ character: target, canAnswer: true })
+  })
+
+  it('routes Stroke of Luck to the attacking Rogue', () => {
+    const rogue = baseCharacter({ id: 'rogue', dmNotes: 'private' })
+    const interrupt = createCombatInterrupt({
+      id: 'stroke-1', mapId: 'map', kind: 'stroke-of-luck', actorCharId: rogue.id,
+      payload: { targetName: '敌人', attackName: '短剑', total: 12, armorClass: 15 }, now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [rogue], visibleCharacters: [], assignedCharacterId: rogue.id,
+    }).canAnswer).toBe(true)
+  })
+
+  it('routes Stand Against the Tide target selection to the defending Hunter', () => {
+    const hunter = baseCharacter({ id: 'hunter', dmNotes: 'private' })
+    const attacker = baseCharacter({ id: 'attacker' })
+    const interrupt = createCombatInterrupt({
+      id: 'stand-1', mapId: 'map', kind: 'stand-against-tide', targetCharId: hunter.id,
+      payload: {
+        hunterName: hunter.name, attackerName: attacker.name, attackName: 'claw',
+        candidates: [{ tokenId: 'other-target', label: 'Other Target' }],
+      },
+      now: 100,
+    })
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [hunter, attacker], visibleCharacters: [], assignedCharacterId: hunter.id,
+    }).canAnswer).toBe(true)
+    expect(resolveCombatInterruptAnswerCandidate(interrupt, {
+      characters: [hunter, attacker], visibleCharacters: [], assignedCharacterId: attacker.id,
+    }).canAnswer).toBe(false)
   })
 
   it('rejects dead characters for any interrupt answer', () => {

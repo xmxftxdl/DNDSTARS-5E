@@ -56,6 +56,9 @@ describe('shared dice sync', () => {
       resolveSharedDiceEventApply({ ...base, now: 1200, state: state({ status: 'rolling' }) }),
     ).toEqual({ status: 'ignored', reason: 'rolling' })
     expect(
+      resolveSharedDiceEventApply({ ...base, now: 1200, state: state({ visibility: 'dm' }) }),
+    ).toEqual({ status: 'ignored', reason: 'private-roll' })
+    expect(
       resolveSharedDiceEventApply({
         ...base,
         now: 1200,

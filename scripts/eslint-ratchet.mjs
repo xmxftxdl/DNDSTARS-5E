@@ -1,4 +1,4 @@
-// [T-P1-422/AC2] eslint error RATCHET: run eslint, sum errorCount, fail iff it EXCEEDS the
+// eslint error RATCHET: run eslint, sum errorCount, fail iff it EXCEEDS the
 // checked-in baseline (.eslint-ratchet.json maxErrors). No-new-errors gate, not a clean bar —
 // the repo carries a known error backlog (mostly the 7000-line MapsPage god object) that is being
 // burned down task by task; this prevents NEW errors while allowing the backlog to shrink.

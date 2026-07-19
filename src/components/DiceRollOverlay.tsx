@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-// [T12/F2] HUD 自关闭时间纳入共享时序契约（结算窗口的一部分）。
+// HUD 自关闭时间纳入共享时序契约（结算窗口的一部分）。
 import { DICE_TIMING } from '../lib/diceOverlayShared'
 
 export interface D20AttackRoll {

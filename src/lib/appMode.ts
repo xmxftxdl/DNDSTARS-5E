@@ -1,5 +1,7 @@
+import { getRoomSession, isRoomPlayerSlot, type RoomPlayerSlot } from './roomSession'
+
 export type AppMode = 'dm' | 'player'
-export type PlayerSlot = 'player1' | 'player2' | 'player3'
+export type PlayerSlot = RoomPlayerSlot
 
 const DM_PORTS = new Set(['5273'])
 const PLAYER_PORT_TO_SLOT: Record<string, PlayerSlot> = {
@@ -18,10 +20,12 @@ function modeFromEnv(): AppMode | null {
 
 function playerSlotFromEnv(): PlayerSlot | null {
   const slot = import.meta.env.VITE_PLAYER_SLOT
-  return slot === 'player1' || slot === 'player2' || slot === 'player3' ? slot : null
+  return isRoomPlayerSlot(slot) ? slot : null
 }
 
 export function modeFromPort(): AppMode | null {
+  const sessionMode = getRoomSession()?.role
+  if (sessionMode === 'dm' || sessionMode === 'player') return sessionMode
   const envMode = modeFromEnv()
   if (envMode) return envMode
   const port = typeof window !== 'undefined' ? window.location.port : ''
@@ -31,14 +35,14 @@ export function modeFromPort(): AppMode | null {
 }
 
 export function playerSlotFromPort(port?: string): PlayerSlot | null {
+  const sessionSlot = getRoomSession()?.slot
+  if (isRoomPlayerSlot(sessionSlot)) return sessionSlot
   const resolvedPort = port ?? (typeof window !== 'undefined' ? window.location.port : '')
   return playerSlotFromEnv() ?? PLAYER_PORT_TO_SLOT[resolvedPort] ?? null
 }
 
 export function playerSlotLabel(slot: PlayerSlot | null | undefined): string {
-  if (slot === 'player2') return '玩家2'
-  if (slot === 'player3') return '玩家3'
-  return '玩家1'
+  return `玩家${slot?.replace('player', '') || '1'}`
 }
 
 export function isPlayerPort(): boolean {

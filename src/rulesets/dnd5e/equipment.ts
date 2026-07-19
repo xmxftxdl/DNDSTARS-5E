@@ -3,6 +3,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import type { Character } from '../../types/character'
 import type { CharacterEquipment, EquipmentItem } from '../../types/equipment'
 import { fighterCriticalThreshold, fighterSelectedFightingStyles } from './fighter'
+import { dnd5eBarbarianRageDamage, dnd5eClassDefinitionForCharacter, dnd5eMonkMartialArtsDie } from './classes'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -37,6 +38,7 @@ export const DND5E_CHAIN_MAIL: EquipmentItem = {
     category: 'heavy',
     baseArmorClass: 16,
     dexterityBonus: 'none',
+    material: 'metal',
     strengthRequirement: 13,
     stealthDisadvantage: true,
   },
@@ -48,29 +50,167 @@ export const DND5E_FIGHTER_STARTING_EQUIPMENT: CharacterEquipment = {
   armor: DND5E_CHAIN_MAIL,
 }
 
+export const DND5E_GREATAXE: EquipmentItem = weapon('dnd5e-greataxe', '巨斧', 'martial', 'melee', 1, 12, 'slashing', 'str', { reachFeet: 5, properties: ['双手', '重型'] })
+export const DND5E_RAPIER: EquipmentItem = weapon('dnd5e-rapier', '刺剑', 'martial', 'melee', 1, 8, 'piercing', 'finesse', { reachFeet: 5, properties: ['灵巧'] })
+export const DND5E_MACE: EquipmentItem = weapon('dnd5e-mace', '硬头锤', 'simple', 'melee', 1, 6, 'bludgeoning', 'str', { reachFeet: 5 })
+export const DND5E_SCIMITAR: EquipmentItem = weapon('dnd5e-scimitar', '弯刀', 'martial', 'melee', 1, 6, 'slashing', 'finesse', { reachFeet: 5, properties: ['灵巧', '轻型'] })
+export const DND5E_SHORTSWORD: EquipmentItem = weapon('dnd5e-shortsword', '短剑', 'martial', 'melee', 1, 6, 'piercing', 'finesse', { reachFeet: 5, properties: ['灵巧', '轻型'] })
+export const DND5E_QUARTERSTAFF: EquipmentItem = weapon('dnd5e-quarterstaff', '长棍', 'simple', 'melee', 1, 6, 'bludgeoning', 'str', { reachFeet: 5, properties: ['多才多艺（1d8）'] })
+export const DND5E_LIGHT_CROSSBOW: EquipmentItem = weapon('dnd5e-light-crossbow', '轻弩', 'simple', 'ranged', 1, 8, 'piercing', 'dex', { rangeFeet: { normal: 80, long: 320 }, properties: ['装填', '双手'] })
+export const DND5E_LONGBOW: EquipmentItem = weapon('dnd5e-longbow', '长弓', 'martial', 'ranged', 1, 8, 'piercing', 'dex', { rangeFeet: { normal: 150, long: 600 }, properties: ['弹药', '重型', '双手'] })
+export const DND5E_OFFHAND_SCIMITAR: EquipmentItem = { ...DND5E_SCIMITAR, id: 'dnd5e-scimitar-offhand', slot: 'offHand' }
+export const DND5E_OFFHAND_SHORTSWORD: EquipmentItem = { ...DND5E_SHORTSWORD, id: 'dnd5e-shortsword-offhand', slot: 'offHand' }
+
+export const DND5E_LEATHER_ARMOR: EquipmentItem = {
+  id: 'dnd5e-leather-armor', name: '皮甲', slot: 'armor', ac: 11,
+  dnd5e: { kind: 'armor', category: 'light', baseArmorClass: 11, dexterityBonus: 'full', material: 'nonmetal' },
+}
+
+export const DND5E_SCALE_MAIL: EquipmentItem = {
+  id: 'dnd5e-scale-mail', name: '鳞甲', slot: 'armor', ac: 14,
+  dnd5e: { kind: 'armor', category: 'medium', baseArmorClass: 14, dexterityBonus: 'max-2', material: 'metal', stealthDisadvantage: true },
+}
+
+/** SRD 核心客户端当前能够进行 5e 自动战斗结算的装备目录。 */
+export const DND5E_SRD_EQUIPMENT_CATALOG: readonly EquipmentItem[] = [
+  DND5E_LONGSWORD,
+  DND5E_GREATAXE,
+  DND5E_RAPIER,
+  DND5E_MACE,
+  DND5E_SCIMITAR,
+  DND5E_SHORTSWORD,
+  DND5E_QUARTERSTAFF,
+  DND5E_LIGHT_CROSSBOW,
+  DND5E_LONGBOW,
+  DND5E_OFFHAND_SCIMITAR,
+  DND5E_OFFHAND_SHORTSWORD,
+  DND5E_SHIELD,
+  DND5E_CHAIN_MAIL,
+  DND5E_SCALE_MAIL,
+  DND5E_LEATHER_ARMOR,
+]
+
+function weapon(
+  id: string,
+  name: string,
+  category: 'simple' | 'martial',
+  mode: 'melee' | 'ranged',
+  count: number,
+  sides: number,
+  type: 'slashing' | 'piercing' | 'bludgeoning',
+  attackAbility: 'str' | 'dex' | 'finesse',
+  extra: { reachFeet?: number; rangeFeet?: { normal: number; long: number }; properties?: readonly string[] },
+): EquipmentItem {
+  return { id, name, slot: 'mainWeapon', dnd5e: { kind: 'weapon', category, mode, damage: { count, sides, type }, attackAbility, ...extra } }
+}
+
+const DND5E_STARTING_EQUIPMENT: Readonly<Record<string, CharacterEquipment>> = {
+  野蛮人: { mainWeapon: DND5E_GREATAXE },
+  吟游诗人: { mainWeapon: DND5E_RAPIER, armor: DND5E_LEATHER_ARMOR },
+  牧师: { mainWeapon: DND5E_MACE, offHand: DND5E_SHIELD, armor: DND5E_SCALE_MAIL },
+  德鲁伊: { mainWeapon: DND5E_SCIMITAR, offHand: DND5E_SHIELD, armor: DND5E_LEATHER_ARMOR },
+  战士: DND5E_FIGHTER_STARTING_EQUIPMENT,
+  武僧: { mainWeapon: DND5E_SHORTSWORD },
+  圣武士: { mainWeapon: DND5E_LONGSWORD, offHand: DND5E_SHIELD, armor: DND5E_CHAIN_MAIL },
+  游侠: { mainWeapon: DND5E_LONGBOW, armor: DND5E_SCALE_MAIL },
+  游荡者: { mainWeapon: DND5E_RAPIER, armor: DND5E_LEATHER_ARMOR },
+  术士: { mainWeapon: DND5E_LIGHT_CROSSBOW },
+  邪术师: { mainWeapon: DND5E_LIGHT_CROSSBOW, armor: DND5E_LEATHER_ARMOR },
+  法师: { mainWeapon: DND5E_QUARTERSTAFF },
+}
+
 export interface Dnd5eWeaponAttackProfile {
   weaponId: string
   weaponName: string
   mode: 'melee' | 'ranged'
   attackAbility: AbilityKey
+  finesse: boolean
   attackModifier: number
   criticalThreshold: number
+  greatWeaponFighting: boolean
   damage: { count: number; sides: number; bonus: number; type: 'slashing' | 'piercing' | 'bludgeoning' }
   reachFeet?: number
   rangeFeet?: { normal: number; long: number }
 }
 
-export function defaultEquipmentForDnd5eCharacter(character: Pick<Character, 'charClass'>): CharacterEquipment | undefined {
-  return character.charClass === '战士'
-    ? {
-        mainWeapon: { ...DND5E_LONGSWORD },
-        offHand: { ...DND5E_SHIELD },
-        armor: { ...DND5E_CHAIN_MAIL },
-      }
-    : undefined
+export interface Dnd5eUnarmedStrikeProfile {
+  attackAbility: 'str' | 'dex'
+  attackModifier: number
+  damage: { count: number; sides: number; bonus: number; type: 'bludgeoning' }
+  martialArts: boolean
 }
 
-export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipment' | 'ac' | 'level' | 'dnd5eClassChoices'>): number {
+export function dnd5eMonkMartialArtsEligible(character: Character): boolean {
+  if (character.charClass !== '武僧') return false
+  if (character.equipment?.armor || character.equipment?.offHand?.dnd5e?.kind === 'shield') return false
+  const weapon = character.equipment?.mainWeapon
+  const data = weapon?.dnd5e
+  if (!weapon || !data || data.kind !== 'weapon') return true
+  const disallowed = data.properties?.some((property) => property.includes('双手') || property.includes('重型')) ?? false
+  return data.mode === 'melee' && !disallowed && (weapon.id === DND5E_SHORTSWORD.id || data.category === 'simple')
+}
+
+export function dnd5eMonkUnarmedStrikeProfile(character: Character): Dnd5eUnarmedStrikeProfile | undefined {
+  if (character.charClass !== '武僧') return undefined
+  const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
+  const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
+  const martialArts = dnd5eMonkMartialArtsEligible(character)
+  const attackAbility: 'str' | 'dex' = martialArts && dexterityModifier > strengthModifier ? 'dex' : 'str'
+  const abilityModifier = attackAbility === 'dex' ? dexterityModifier : strengthModifier
+  return {
+    attackAbility,
+    attackModifier: abilityModifier + rules.proficiencyBonus(Math.min(20, Math.max(1, character.level))),
+    damage: martialArts
+      ? { count: 1, sides: dnd5eMonkMartialArtsDie(character.level), bonus: abilityModifier, type: 'bludgeoning' }
+      : { count: 0, sides: 2, bonus: 1 + strengthModifier, type: 'bludgeoning' },
+    martialArts,
+  }
+}
+
+export function defaultEquipmentForDnd5eCharacter(character: Pick<Character, 'charClass'>): CharacterEquipment | undefined {
+  const equipment = DND5E_STARTING_EQUIPMENT[character.charClass]
+  return equipment ? Object.fromEntries(Object.entries(equipment).map(([slot, item]) => [slot, item ? { ...item } : item])) : undefined
+}
+
+/** 丢弃旧项目的攻防数值装备，只保留带有 D&D 5e 规则数据的物品。 */
+export function normalizeDnd5eCharacterEquipment(
+  character: Pick<Character, 'charClass' | 'equipment'>,
+): CharacterEquipment | undefined {
+  const defaults = defaultEquipmentForDnd5eCharacter(character)
+  const result: CharacterEquipment = {}
+  const slots: Array<keyof CharacterEquipment> = [
+    'mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace',
+  ]
+  for (const slot of slots) {
+    const item = character.equipment?.[slot]
+    const selected = item?.dnd5e ? item : defaults?.[slot]
+    if (!selected) continue
+    result[slot] = {
+      id: selected.id,
+      name: selected.name,
+      slot: selected.slot,
+      ac: selected.ac,
+      dnd5e: structuredClone(selected.dnd5e),
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
+export function dnd5eKnownEquipmentForClass(character: Pick<Character, 'charClass'>): EquipmentItem[] {
+  const starting = Object.values(DND5E_STARTING_EQUIPMENT[character.charClass] ?? {}).filter((item): item is EquipmentItem => !!item)
+  const martialChoices = character.charClass === '战士'
+    ? [
+        DND5E_LONGSWORD, DND5E_GREATAXE, DND5E_RAPIER, DND5E_SCIMITAR, DND5E_SHORTSWORD,
+        DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SCIMITAR, DND5E_OFFHAND_SHORTSWORD,
+        DND5E_SHIELD, DND5E_CHAIN_MAIL, DND5E_SCALE_MAIL, DND5E_LEATHER_ARMOR,
+      ]
+    : character.charClass === '游侠'
+      ? [DND5E_LONGBOW, DND5E_SCIMITAR, DND5E_SHORTSWORD, DND5E_OFFHAND_SCIMITAR, DND5E_OFFHAND_SHORTSWORD, DND5E_SCALE_MAIL]
+      : []
+  return [...new Map([...starting, ...martialChoices].map((item) => [item.id, item])).values()]
+}
+
+export function dnd5eArmorClass(character: Character): number {
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
   const armor = character.equipment?.armor?.dnd5e
   let armorClass = 10 + dexterityModifier
@@ -83,12 +223,22 @@ export function dnd5eArmorClass(character: Pick<Character, 'abilities' | 'equipm
     armorClass = armor.baseArmorClass + dexterityBonus
   } else if (character.equipment?.armor?.ac != null) {
     armorClass = character.equipment.armor.ac
-  } else if (character.ac > 0) {
-    armorClass = character.ac
+  } else {
+    // 保留无法由当前装备目录表达的临时/自定义 AC 基准，再与职业公式取较高值。
+    armorClass = Math.max(armorClass, Math.max(0, Math.floor(character.ac)))
+    const constitutionModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.con)))
+    const wisdomModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.wis)))
+    const hasShield = character.equipment?.offHand?.dnd5e?.kind === 'shield'
+    if (character.charClass === '野蛮人') armorClass = Math.max(armorClass, 10 + dexterityModifier + constitutionModifier)
+    if (character.charClass === '武僧' && !hasShield) armorClass = Math.max(armorClass, 10 + dexterityModifier + wisdomModifier)
+    if (
+      character.charClass === '术士' &&
+      character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
+    ) armorClass = Math.max(armorClass, 13 + dexterityModifier)
   }
   const shield = character.equipment?.offHand?.dnd5e
   if (shield?.kind === 'shield') armorClass += shield.armorClassBonus
-  const styles = fighterSelectedFightingStyles(character)
+  const styles = dnd5eSelectedFightingStyles(character)
   if (armor?.kind === 'armor' && styles.includes('defense')) armorClass += 1
   return Math.max(0, Math.floor(armorClass))
 }
@@ -104,20 +254,98 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     : data.attackAbility
   const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
   const proficiency = rules.proficiencyBonus(Math.min(20, Math.max(1, character.level)))
-  const styles = fighterSelectedFightingStyles(character)
+  const styles = dnd5eSelectedFightingStyles(character)
+  const properties = data.properties ?? []
+  const versatileProperty = properties.find((property) => property.includes('多才多艺'))
+  const versatileSides = Number(versatileProperty?.match(/1d(\d+)/i)?.[1] ?? 0)
+  const usesTwoHands = properties.some((property) => property.includes('双手')) ||
+    (!!versatileProperty && !character.equipment?.offHand)
   const attackStyleBonus = data.mode === 'ranged' && styles.includes('archery') ? 2 : 0
   const duelingBonus = data.mode === 'melee' && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
+  const armor = character.equipment?.armor?.dnd5e
+  const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
+  const rageBonus = character.charClass === '野蛮人' &&
+    character.dnd5eCombatState?.raging === true &&
+    !wearingHeavyArmor &&
+    data.mode === 'melee' &&
+    ability === 'str'
+    ? dnd5eBarbarianRageDamage(character.level)
+    : 0
+  const sacredWeaponBonus = character.charClass === '圣武士' &&
+    (character.dnd5eCombatState?.sacredWeaponTurnsRemaining ?? 0) > 0
+    ? Math.max(1, rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.cha))))
+    : 0
   return {
     weaponId: weapon.id,
     weaponName: weapon.name,
     mode: data.mode,
     attackAbility: ability,
-    attackModifier: abilityModifier + proficiency + attackStyleBonus,
+    finesse: data.attackAbility === 'finesse',
+    attackModifier: abilityModifier + proficiency + attackStyleBonus + sacredWeaponBonus,
     criticalThreshold: fighterCriticalThreshold(character),
-    damage: { ...data.damage, bonus: abilityModifier + duelingBonus },
+    greatWeaponFighting: data.mode === 'melee' && usesTwoHands && styles.includes('great-weapon-fighting'),
+    damage: {
+      ...data.damage,
+      sides: versatileSides > 0 && usesTwoHands ? versatileSides : data.damage.sides,
+      bonus: abilityModifier + duelingBonus + rageBonus,
+    },
     reachFeet: data.reachFeet,
     rangeFeet: data.rangeFeet,
   }
+}
+
+export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeaponAttackProfile | undefined {
+  const mainData = character.equipment?.mainWeapon?.dnd5e
+  const weapon = character.equipment?.offHand
+  const data = weapon?.dnd5e
+  if (
+    !weapon || !data || data.kind !== 'weapon' || data.mode !== 'melee' ||
+    !mainData || mainData.kind !== 'weapon' || mainData.mode !== 'melee' ||
+    !mainData.properties?.some((property) => property.includes('轻型')) ||
+    !data.properties?.some((property) => property.includes('轻型'))
+  ) return undefined
+  const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
+  const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
+  const ability: AbilityKey = data.attackAbility === 'finesse'
+    ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
+    : data.attackAbility
+  const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
+  const proficiency = rules.proficiencyBonus(Math.min(20, Math.max(1, character.level)))
+  const styles = dnd5eSelectedFightingStyles(character)
+  const armor = character.equipment?.armor?.dnd5e
+  const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
+  const rageBonus = character.charClass === '野蛮人' && character.dnd5eCombatState?.raging === true &&
+    !wearingHeavyArmor && ability === 'str'
+    ? dnd5eBarbarianRageDamage(character.level)
+    : 0
+  return {
+    weaponId: weapon.id,
+    weaponName: weapon.name,
+    mode: 'melee',
+    attackAbility: ability,
+    finesse: data.attackAbility === 'finesse',
+    attackModifier: abilityModifier + proficiency,
+    criticalThreshold: fighterCriticalThreshold(character),
+    greatWeaponFighting: false,
+    damage: {
+      ...data.damage,
+      bonus: (styles.includes('two-weapon-fighting') ? abilityModifier : 0) + rageBonus,
+    },
+    reachFeet: data.reachFeet ?? 5,
+  }
+}
+
+export function dnd5eSelectedFightingStyles(character: Character): readonly string[] {
+  if (character.charClass === '战士') return fighterSelectedFightingStyles(character)
+  const definition = dnd5eClassDefinitionForCharacter(character)
+  if (!definition) return []
+  const allowed = new Set(
+    definition.choiceGroups
+      ?.find((group) => group.id === 'fighting-style')
+      ?.options.map((option) => option.id) ?? [],
+  )
+  return [...new Set(character.dnd5eClassChoices?.classes?.[definition.id]?.selections?.['fighting-style'] ?? [])]
+    .filter((style) => allowed.has(style))
 }
 
 export function dnd5eWeaponRangeFeet(profile: Dnd5eWeaponAttackProfile): number {

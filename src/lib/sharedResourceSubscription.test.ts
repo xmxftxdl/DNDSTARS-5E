@@ -3,6 +3,7 @@ import {
   SHARED_STATE_CHANGED_CHANNEL,
   subscribeSharedResourceInvalidation,
 } from './sharedApi'
+import { getSharedSyncHealth, resetSharedSyncHealthForTests } from './sharedSyncHealth'
 
 class FakeEventSource {
   static readonly CLOSED = 2
@@ -44,6 +45,7 @@ describe('shared resource invalidation', () => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
     FakeEventSource.instances = []
+    resetSharedSyncHealthForTests()
   })
 
   it('refreshes immediately, on matching SSE events, and on the recovery interval', async () => {
@@ -100,6 +102,43 @@ describe('shared resource invalidation', () => {
     expect(FakeEventSource.instances[0].closed).toBe(false)
     stopCharacters()
     expect(FakeEventSource.instances[0].closed).toBe(true)
+  })
+
+  it('ignores replay duplicates and reloads authority state when an event sequence has a gap', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const refresh = vi.fn(async () => undefined)
+    const stop = subscribeSharedResourceInvalidation('maps', refresh)
+    await flushAsync()
+
+    FakeEventSource.instances[0].emit({
+      channel: SHARED_STATE_CHANGED_CHANNEL,
+      payload: { id: 'maps:1', name: 'maps', updatedAt: 1 },
+      streamId: 'stream-a',
+      sequence: 1,
+    })
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(2)
+
+    FakeEventSource.instances[0].emit({
+      channel: SHARED_STATE_CHANGED_CHANNEL,
+      payload: { id: 'maps:1', name: 'maps', updatedAt: 1 },
+      streamId: 'stream-a',
+      sequence: 1,
+    })
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(2)
+
+    FakeEventSource.instances[0].emit({
+      channel: SHARED_STATE_CHANGED_CHANNEL,
+      payload: { id: 'characters:3', name: 'characters', updatedAt: 3 },
+      streamId: 'stream-a',
+      sequence: 3,
+    })
+    await flushAsync()
+    expect(refresh).toHaveBeenCalledTimes(3)
+    expect(getSharedSyncHealth()).toMatchObject({ duplicateEventsIgnored: 1, eventGapsRecovered: 1 })
+    stop()
   })
 
 })

@@ -1,34 +1,22 @@
-import { DEFAULT_COMBAT_STAT_PROFILE, type ClassDefinition, type ClassProgressionAdapter } from '../../lib/classDefinitionTypes'
+import type { ClassDefinition } from '../../lib/classDefinitionTypes'
 import {
-  DND5E_CHAIN_MAIL,
   DND5E_FIGHTER_STARTING_EQUIPMENT,
-  DND5E_LONGSWORD,
-  DND5E_SHIELD,
+  dnd5eKnownEquipmentForClass,
+} from '../../rulesets/dnd5e/equipment'
+import {
   FIGHTER_RESOURCE_KEYS,
   fighterActionSurgeUses,
   fighterIndomitableUses,
-  fighterSuperiorityDiceMax,
-} from '../../rulesets/dnd5e'
-
-const progression: ClassProgressionAdapter = {
-  id: 'dnd5e-fighter',
-  matches: (character) => character.charClass === '战士',
-  ownsSkill: () => false,
-  syncSkills: (character) => character,
-  canLearnSkill: () => false,
-  canUpgradeSkillRank: () => false,
-  getSkillRank: () => 0,
-}
+  fighterSubclassResourceDefinitions,
+} from '../../rulesets/dnd5e/fighter'
 
 export const FIGHTER_CLASS_DEFINITION: ClassDefinition = {
   id: 'dnd5e-fighter',
   classNames: ['战士'],
   matchesClassName: (className) => className === '战士',
-  progression,
-  combatStats: DEFAULT_COMBAT_STAT_PROFILE,
   defaultEquipment: DND5E_FIGHTER_STARTING_EQUIPMENT,
-  knownEquipment: [DND5E_LONGSWORD, DND5E_SHIELD, DND5E_CHAIN_MAIL],
-  resources: [
+  knownEquipment: dnd5eKnownEquipmentForClass({ charClass: '战士' }),
+  resources: (character) => [
     {
       key: FIGHTER_RESOURCE_KEYS.secondWind,
       label: '回气',
@@ -53,14 +41,7 @@ export const FIGHTER_CLASS_DEFINITION: ClassDefinition = {
       max: (character) => fighterIndomitableUses(character.level),
       resetOn: 'long-rest',
     },
-    {
-      key: FIGHTER_RESOURCE_KEYS.superiorityDice,
-      label: '卓越骰',
-      shortLabel: '卓越骰',
-      isAvailable: (character) => character.level >= 3 && character.dnd5eClassChoices?.fighter?.subclass === 'battle-master',
-      max: (character) => fighterSuperiorityDiceMax(character.level),
-      resetOn: 'short-rest',
-    },
+    ...fighterSubclassResourceDefinitions(character),
   ],
   combatActions: [{ type: 'dnd5e-fighter-feature' }],
 }

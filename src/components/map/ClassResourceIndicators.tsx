@@ -20,7 +20,7 @@ export default function ClassResourceIndicators({
   return (
     <>
       {resources.map(({ definition, value }) => {
-        const Icon = definition.key === 'qi' ? Wind : CircleGauge
+        const Icon = definition.key === 'dnd5e-ki' ? Wind : CircleGauge
         return (
           <div
             key={definition.key}
@@ -32,8 +32,8 @@ export default function ClassResourceIndicators({
             <Icon className={compact ? 'h-3 w-3 text-violet-300' : 'h-4 w-4 text-violet-300'} />
             <span className="text-slate-300">{definition.shortLabel ?? definition.label}</span>
             <span className="font-bold tabular-nums text-violet-100">
-              {value!.current}
-              <span className="text-slate-500">/{value!.max}</span>
+              {definition.unlimited?.(character) ? '∞' : value!.current}
+              <span className="text-slate-500">/{definition.unlimited?.(character) ? '∞' : value!.max}</span>
             </span>
           </div>
         )

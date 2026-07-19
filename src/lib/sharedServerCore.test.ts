@@ -1,5 +1,5 @@
 /// <reference types="node" />
-// [T11] 服务端硬化核心的纯函数单测。直接 import scripts/shared-server-core.mjs。
+// 服务端硬化核心的纯函数单测。直接 import scripts/shared-server-core.mjs。
 import { mkdtemp, readFile, rm, writeFile, readdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -11,19 +11,285 @@ import {
   EVENT_REPLAY_LIMIT,
   IMAGE_COUNT_LIMIT,
   LockTimeoutError,
+  ROOM_HOST_TTL_MS,
+  ROOM_PLAYER_TTL_MS,
+  assignRoomPlayer,
   capEventChannels,
   STATE_MAX_BYTES,
+  SHARED_PROTOCOL_VERSION,
+  atomicDeleteJsonStateCasLocked,
   atomicWriteImageLocked,
+  atomicWriteJsonStateCasLocked,
   atomicWriteJsonStateFreshLocked,
   atomicWriteLocked,
   authorizeStateWrite,
   enforceImageQuota,
   extractSecret,
+  migrateLegacyApCombatLogText,
+  normalizeDedicatedDnd5eSharedState,
+  normalizeLobbyRoomCode,
+  normalizeAccountRecoveryCode,
+  normalizeRoomPluginRequirements,
   pushBacklog,
   replaySlice,
   safeName,
+  roomPluginReadiness,
+  roomPlayerPresence,
   withWriteLock,
+  validateSharedStateShape,
 } from '../../scripts/shared-server-core.mjs'
+
+describe('room lobby allocation', () => {
+  const now = 1_000_000
+  const baseRoom = () => ({
+    id: 'ABC234',
+    name: '测试战役',
+    rulesetId: 'dnd5e-2014-srd-5.1',
+    createdAt: now,
+    host: { memberId: 'dm-member', clientId: 'dm-client', displayName: 'DM', lastSeenAt: now },
+    players: [],
+  })
+
+  it('allows enough presence grace for background-tab timer throttling', () => {
+    expect(ROOM_HOST_TTL_MS).toBeGreaterThanOrEqual(120_000)
+    expect(ROOM_PLAYER_TTL_MS).toBeGreaterThanOrEqual(ROOM_HOST_TTL_MS * 2)
+  })
+
+  it('normalizes shareable six-character room codes', () => {
+    expect(normalizeLobbyRoomCode(' ab-i0c234 ')).toBe('ABC234')
+    expect(normalizeLobbyRoomCode('abc234')).toBe('ABC234')
+  })
+
+  it('pins room plugins by unique ID, version and SHA-256', () => {
+    const requirement = {
+      id: 'com.example.rules',
+      version: '1.0.0',
+      integrity: 'sha256-YWJjZA==',
+      stateSchemaVersion: 1,
+    }
+    expect(normalizeRoomPluginRequirements([requirement])).toEqual([requirement])
+    expect(normalizeRoomPluginRequirements([{ ...requirement }, { ...requirement }])).toBeNull()
+    expect(normalizeRoomPluginRequirements([{ ...requirement, integrity: 'latest' }])).toBeNull()
+    expect(roomPluginReadiness([requirement], [])).toMatchObject({ ready: false, missing: [requirement] })
+    expect(roomPluginReadiness([requirement], [requirement])).toEqual({ ready: true, missing: [], mismatched: [] })
+    expect(roomPluginReadiness([requirement], [{ ...requirement, version: '2.0.0' }]))
+      .toMatchObject({ ready: false, mismatched: [requirement] })
+  })
+
+  it('assigns the first free player slot and resumes the same browser', () => {
+    const first = assignRoomPlayer(baseRoom(), {
+      memberId: 'member-1',
+      clientId: 'client-1',
+      displayName: '玩家甲',
+    }, now)
+    expect(first).toMatchObject({ ok: true, member: { slot: 'player1' } })
+    if (!first.ok) throw new Error('expected first allocation')
+    const resumed = assignRoomPlayer(first.next, {
+      memberId: 'should-not-replace',
+      clientId: 'client-1',
+      displayName: '玩家甲（重连）',
+    }, now + 1_000)
+    expect(resumed).toMatchObject({
+      ok: true,
+      member: { memberId: 'member-1', slot: 'player1', displayName: '玩家甲（重连）' },
+    })
+  })
+
+  it('resumes the same account from a different browser without changing member ownership', () => {
+    const first = assignRoomPlayer(baseRoom(), {
+      memberId: 'account-member', accountId: 'ABC234DEF567',
+      clientId: 'device-one', displayName: '账号玩家',
+    }, now)
+    if (!first.ok) throw new Error('expected account allocation')
+    const resumed = assignRoomPlayer(first.next, {
+      memberId: 'new-random-member', accountId: 'ABC234DEF567',
+      clientId: 'device-two', displayName: '账号玩家',
+    }, now + 1_000)
+    expect(resumed).toMatchObject({
+      ok: true,
+      member: { memberId: 'account-member', accountId: 'ABC234DEF567', clientId: 'device-two' },
+    })
+  })
+
+  it('distinguishes temporary disconnection, explicit leave and removal', () => {
+    const player = { lastSeenAt: now }
+    expect(roomPlayerPresence(player, now)).toBe('online')
+    expect(roomPlayerPresence(player, now + 30_000)).toBe('temporarily-offline')
+    expect(roomPlayerPresence({ ...player, leftAt: now + 1 }, now + 2)).toBe('left')
+    expect(roomPlayerPresence({ ...player, removedAt: now + 1 }, now + 2)).toBe('removed')
+  })
+
+  it('normalizes readable account recovery codes without exposing ambiguity characters', () => {
+    expect(normalizeAccountRecoveryCode('DS5E-ABC234DEF567-ABCDE-FGHJK-LMNPQ-RSTUV')).toMatchObject({
+      accountId: 'ABC234DEF567', secret: 'ABCDEFGHJKLMNPQRSTUV',
+    })
+    expect(normalizeAccountRecoveryCode('not-a-code')).toBeNull()
+  })
+
+  it('rejects joining when the creator heartbeat has expired', () => {
+    const room = baseRoom()
+    room.host.lastSeenAt = now - ROOM_HOST_TTL_MS - 1
+    expect(assignRoomPlayer(room, {
+      memberId: 'member-1',
+      clientId: 'client-1',
+      displayName: '玩家甲',
+    }, now)).toMatchObject({ ok: false, error: 'room-offline' })
+  })
+
+  it('keeps a background-throttled creator joinable during the heartbeat grace window', () => {
+    const room = baseRoom()
+    room.host.lastSeenAt = now - ROOM_HOST_TTL_MS + 1
+    expect(assignRoomPlayer(room, {
+      memberId: 'member-1',
+      clientId: 'client-1',
+      displayName: '玩家甲',
+    }, now)).toMatchObject({ ok: true, member: { slot: 'player1' } })
+  })
+
+  it('reclaims a stale player slot before allocation', () => {
+    const room = {
+      ...baseRoom(),
+      players: [{
+        memberId: 'stale-member',
+        clientId: 'stale-client',
+        displayName: '离线玩家',
+        slot: 'player1',
+        joinedAt: now - ROOM_PLAYER_TTL_MS - 10,
+        lastSeenAt: now - ROOM_PLAYER_TTL_MS - 1,
+      }],
+    }
+    const allocated = assignRoomPlayer(room, {
+      memberId: 'new-member',
+      clientId: 'new-client',
+      displayName: '新玩家',
+    }, now)
+    expect(allocated).toMatchObject({ ok: true, member: { memberId: 'new-member', slot: 'player1' } })
+    if (!allocated.ok) throw new Error('expected reclaimed slot allocation')
+    expect((allocated.next.players as Array<{ memberId: string }>).map((player) => player.memberId))
+      .toEqual(['stale-member', 'new-member'])
+
+    const resumed = assignRoomPlayer(allocated.next, {
+      memberId: 'stale-member',
+      clientId: 'stale-client',
+      displayName: '离线玩家（重连）',
+    }, now + 1)
+    expect(resumed).toMatchObject({
+      ok: true,
+      member: { memberId: 'stale-member', slot: 'player2', displayName: '离线玩家（重连）' },
+    })
+  })
+
+  it('lets an explicitly locked room restore a known browser without opening a new seat', () => {
+    const room = {
+      ...baseRoom(),
+      locked: true,
+      players: [{
+        memberId: 'known-member', clientId: 'known-client', displayName: '原玩家',
+        slot: 'player1', joinedAt: now - 1_000, lastSeenAt: now - 1_000,
+      }],
+    }
+    expect(assignRoomPlayer(room, {
+      memberId: 'known-member', clientId: 'known-client', displayName: '原玩家',
+    }, now)).toMatchObject({ ok: true, member: { memberId: 'known-member', slot: 'player1' } })
+    expect(assignRoomPlayer(room, {
+      memberId: 'new-member', clientId: 'new-client', displayName: '陌生玩家',
+    }, now)).toMatchObject({ ok: false, error: 'room-locked' })
+  })
+})
+
+describe('dedicated 5e shared-state migration', () => {
+  it('removes AP wording from persisted combat logs at the server boundary', () => {
+    expect(migrateLegacyApCombatLogText('新冒险者 花费 1 AP：移动（10 尺）。剩余 AP 1/2'))
+      .toBe('新冒险者 移动（10 尺）。')
+    expect(normalizeDedicatedDnd5eSharedState('combat-log', {
+      mapId: 'map',
+      entries: [{ id: 1, text: '战士 移动 10 尺，AP 1/2' }],
+    })).toMatchObject({ entries: [{ text: '战士 移动 10 尺' }] })
+  })
+
+  it('removes the retired enemy AP ledger from shared combat snapshots', () => {
+    expect(normalizeDedicatedDnd5eSharedState('combat', {
+      active: true,
+      enemyApByToken: { goblin: { current: 1, max: 2 } },
+      dnd5eTurnEconomyByToken: {},
+    })).toEqual({ active: true, dnd5eTurnEconomyByToken: {} })
+  })
+})
+
+describe('P0 shared state boundary', () => {
+  it('publishes a positive protocol version', () => {
+    expect(SHARED_PROTOCOL_VERSION).toBeGreaterThanOrEqual(2)
+  })
+
+  it('rejects damaged known envelopes and accepts object plugin state', () => {
+    expect(validateSharedStateShape('characters', { characters: [] })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('spellbook', { spells: [] })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('spellbook', { spells: 'broken' })).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('characters', { characters: 'broken' })).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('maps', [])).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('plugin-owned-state', { payload: {} })).toMatchObject({ ok: true })
+  })
+
+  it('rejects malformed or forged ActiveEffect schema v2 payloads at the server boundary', () => {
+    const effect = {
+      schemaVersion: 1,
+      id: 'blind',
+      definitionId: 'condition:blinded',
+      label: '目盲',
+      kind: 'condition',
+      standardCondition: 'blinded',
+      source: { kind: 'dm' },
+      appliedAt: 1,
+      duration: { type: 'permanent' },
+      stackingKey: 'condition:blinded',
+      stackingPolicy: 'refresh-duration',
+    }
+    expect(validateSharedStateShape('characters', {
+      characters: [{ id: 'hero', conditions: ['blinded'], dnd5eCombatState: { schemaVersion: 2, activeEffects: [effect] } }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('characters', {
+      characters: [{ id: 'hero', conditions: [], dnd5eCombatState: { schemaVersion: 2, activeEffects: [effect] } }],
+    })).toMatchObject({ ok: false, reason: 'condition-projection-mismatch' })
+    expect(validateSharedStateShape('characters', {
+      characters: [{ id: 'hero', conditions: ['blinded'], dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [{ ...effect, duration: { type: 'rounds', remainingRounds: 0, tickOn: 'target-turn-end' } }],
+      } }],
+    })).toMatchObject({ ok: false, reason: 'invalid-active-effect' })
+  })
+})
+
+describe('P1 shared resource compare-and-swap', () => {
+  it('allows exactly one writer for an expected revision and records generic sync metadata', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'stars-cas-'))
+    const file = path.join(dir, 'maps.json')
+    try {
+      const initial = await atomicWriteJsonStateCasLocked(file, { maps: [], updatedAt: 1 }, {
+        expectedRevision: 0,
+        writerId: 'dm-a',
+      })
+      expect(initial).toMatchObject({ ok: true, revision: 1 })
+      const writes = await Promise.all([
+        atomicWriteJsonStateCasLocked(file, { maps: [{ id: 'a' }], updatedAt: 2 }, { expectedRevision: 1, writerId: 'dm-a' }),
+        atomicWriteJsonStateCasLocked(file, { maps: [{ id: 'b' }], updatedAt: 3 }, { expectedRevision: 1, writerId: 'player-b' }),
+      ])
+      expect(writes.filter((result) => result.ok)).toHaveLength(1)
+      expect(writes.filter((result) => !result.ok)).toEqual([
+        expect.objectContaining({ conflict: true, currentRevision: 2 }),
+      ])
+      const stored = JSON.parse(await readFile(file, 'utf8'))
+      expect(stored._sync).toMatchObject({ schemaVersion: 1, revision: 2 })
+      const deleted = await atomicDeleteJsonStateCasLocked(file, { expectedRevision: 2, writerId: 'dm-a' })
+      expect(deleted).toMatchObject({ ok: true, revision: 3, value: { _deleted: true } })
+      expect(await atomicWriteJsonStateCasLocked(file, { maps: [], updatedAt: 4 }, {
+        expectedRevision: 2,
+        writerId: 'stale-client',
+      })).toMatchObject({ ok: false, conflict: true, currentRevision: 3 })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
 
 const securityHelpers = sharedServerCore as unknown as {
   authorizeAccessToken: (token: string | null) => { ok: boolean; role?: string; status?: number }
@@ -315,7 +581,7 @@ describe('withWriteLock / atomicWriteLocked — AC1 锁', () => {
     expect(JSON.parse(await readFile(file, 'utf8')).value).toBe('new')
   })
 
-  // [T-P1-419/AC1] 抢锁超时 ⇒ fail-closed：抛 LockTimeoutError(503)，fn 绝不无锁运行。
+  // 抢锁超时 ⇒ fail-closed：抛 LockTimeoutError(503)，fn 绝不无锁运行。
   it('AC1 — lock-acquire timeout fails CLOSED (throws, fn never runs)', async () => {
     const file = path.join(dir, 'busy.json')
     // 手动占住一把「非陈旧」的锁（刚创建，mtime 新鲜）。
@@ -338,7 +604,7 @@ describe('withWriteLock / atomicWriteLocked — AC1 锁', () => {
     }
   })
 
-  // [T-P1-419/AC2] 持锁期间心跳刷新 lockfile mtime ⇒ 合法慢写不会因 mtime 老化被判陈旧而被抢占。
+  // 持锁期间心跳刷新 lockfile mtime ⇒ 合法慢写不会因 mtime 老化被判陈旧而被抢占。
   it('AC2 — the held lock mtime is heartbeated while a slow write runs', async () => {
     process.env.STARS_LOCK_HEARTBEAT_MS = '40'
     process.env.STARS_LOCK_STALE_MS = '120'
@@ -360,7 +626,7 @@ describe('withWriteLock / atomicWriteLocked — AC1 锁', () => {
     }
   })
 
-  // [T-P1-419/AC3] 图片写：blob+meta 在同一把锁内各自 temp+rename 原子落盘。
+  // 图片写：blob+meta 在同一把锁内各自 temp+rename 原子落盘。
   it('AC3 — atomicWriteImageLocked writes blob + meta atomically and releases the lock', async () => {
     const imgPath = path.join(dir, 'img-xyz')
     const metaPath = `${imgPath}.json`

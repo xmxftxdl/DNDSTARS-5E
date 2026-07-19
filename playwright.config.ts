@@ -28,6 +28,7 @@ export default defineConfig({
       env: {
         STARS_SHARED_ROOT: sharedRoot,
         VITE_APP_MODE: 'dm',
+        VITE_BYPASS_ROOM_LOBBY: '1',
         VITE_SHARED_API_BASES: sharedApiBases,
       },
     },
@@ -39,6 +40,7 @@ export default defineConfig({
       env: {
         STARS_SHARED_ROOT: sharedRoot,
         VITE_APP_MODE: 'player',
+        VITE_BYPASS_ROOM_LOBBY: '1',
         VITE_SHARED_API_BASES: sharedApiBases,
       },
     },
@@ -50,6 +52,7 @@ export default defineConfig({
       env: {
         STARS_SHARED_ROOT: sharedRoot,
         VITE_APP_MODE: 'player',
+        VITE_BYPASS_ROOM_LOBBY: '1',
         VITE_PLAYER_SLOT: 'player2',
         VITE_SHARED_API_BASES: sharedApiBases,
       },

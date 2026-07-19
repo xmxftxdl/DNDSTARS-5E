@@ -1,4 +1,4 @@
-// [T11/AC6 · E6] 共享快照单调 guard 单测。
+// 共享快照单调 guard 单测。
 import { describe, expect, it } from 'vitest'
 import { decideApply, type MonotonicState } from './monotonicGuard'
 

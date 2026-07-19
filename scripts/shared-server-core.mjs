@@ -1,8 +1,9 @@
-// [T11] 共享服务端硬化核心：原子写锁 / 鉴权 / size cap / backlog cap / 图片配额 /
+// 共享服务端硬化核心：原子写锁 / 鉴权 / size cap / backlog cap / 图片配额 /
 // safeName 防碰撞 / API-404。两个服务端（vite-server.mjs + static-server.mjs）都从这里
 // import 同一份纯逻辑，避免双份漂移；纯函数集中在此以便 src/ 下的 vitest 直接 import .mjs。
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
@@ -14,10 +15,72 @@ export const IMAGE_MAX_BYTES = 24 * 1024 * 1024
 export const EVENT_BACKLOG_LIMIT = 1200
 // 新订阅者只回放最近 N 条，而不是把整 1200 条全量灌给它（AC3）。
 export const EVENT_REPLAY_LIMIT = 100
-// [T-P1-421/AC5] 不同 channel 名总数上限（safeName 允许任意名累积 → 无界）。超过即按
+// 不同 channel 名总数上限（safeName 允许任意名累积 → 无界）。超过即按
 // Map 插入序淘汰最旧者（确定性 COUNT-CAP，非 TTL）。有活跃订阅者的 channel 受保护不被淘汰。
 export const EVENT_CHANNEL_LIMIT = 256
 export const SHARED_STATE_CHANGED_CHANNEL = 'shared-state-changed'
+// Browser background tabs can throttle a 5-second interval to roughly one
+// minute. Presence therefore needs enough grace to distinguish throttling or a
+// brief network hand-off from a genuinely abandoned room. Explicit DM leave
+// still closes the room immediately.
+export const ROOM_HOST_TTL_MS = Math.max(30_000, Number(process.env.STARS_ROOM_HOST_TTL_MS) || 120_000)
+export const ROOM_PLAYER_TTL_MS = Math.max(60_000, Number(process.env.STARS_ROOM_PLAYER_TTL_MS) || 300_000)
+export const ROOM_PRESENCE_ONLINE_MS = Math.max(10_000, Number(process.env.STARS_ROOM_PRESENCE_ONLINE_MS) || 20_000)
+export const ROOM_PLAYER_SLOTS = Object.freeze(['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8'])
+export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
+export const SHARED_PROTOCOL_VERSION = 3
+export const SHARED_MIN_CLIENT_PROTOCOL = 3
+export const SHARED_STATE_SCHEMA_VERSION = 1
+export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
+export const ACCOUNT_SESSION_LIMIT = 12
+export const ACCOUNT_CHARACTER_LIMIT = 100
+export const CAMPAIGN_BUNDLE_FORMAT = 'dndstars5e-campaign'
+export const CAMPAIGN_BUNDLE_SCHEMA_VERSION = 1
+export const CAMPAIGN_SNAPSHOT_LIMIT = 10
+export const CAMPAIGN_IMPORT_MAX_BYTES = 128 * 1024 * 1024
+export const CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS = 2 * 60 * 1000
+
+const PROCESS_STARTED_AT = Date.now()
+const lastAutoSnapshotAt = new Map()
+
+/**
+ * Dedicated SRD 5.1 servers must not relay retired AP balances even when an
+ * older client reconnects and writes a pre-migration snapshot. Keeping this at
+ * the HTTP persistence boundary prevents stale tabs from reintroducing AP into
+ * otherwise migrated DM/player sessions.
+ */
+export function migrateLegacyApCombatLogText(text) {
+  return String(text ?? '')
+    .replace(/(?:花费|消耗)\s*\d+\s*(?:点\s*)?AP\s*(?:[：:]\s*)?/giu, '')
+    .replace(/(?:未|不|无需)消耗\s*AP\s*(?:[：:]\s*)?/giu, '')
+    .replace(/\s*[；;,，]?\s*(?:本回合)?剩余\s*AP\s*\d+\s*\/\s*\d+/giu, '')
+    .replace(/\s*[；;,，]?\s*AP\s*\d+\s*\/\s*\d+/giu, '')
+    .replace(/AP\s*回满为\s*\d+\s*\/\s*\d+/giu, '')
+    .replace(/保留\s*AP\s*(?:[：:]\s*)?/giu, '')
+    .replace(/AP\s*不足/giu, '行动资源不足')
+    .replace(/\bAP\b/giu, '')
+    .replace(/\s+([，。；：,.;:])/gu, '$1')
+    .replace(/([，,]){2,}/gu, '$1')
+    .replace(/\s{2,}/gu, ' ')
+    .trim()
+}
+
+export function normalizeDedicatedDnd5eSharedState(name, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (name === 'combat') {
+    if (!Object.prototype.hasOwnProperty.call(value, 'enemyApByToken')) return value
+    const normalized = { ...value }
+    delete normalized.enemyApByToken
+    return normalized
+  }
+  if (name !== 'combat-log' || !Array.isArray(value.entries)) return value
+  return {
+    ...value,
+    entries: value.entries.map((entry) => entry && typeof entry === 'object'
+      ? { ...entry, text: migrateLegacyApCombatLogText(entry.text) }
+      : entry),
+  }
+}
 
 // ── AC4：图片配额 ───────────────────────────────────────────────────────────
 // 最多保留多少张共享图片（含 meta，不计 .json）。超过时按 mtime 最旧优先 GC。
@@ -36,7 +99,7 @@ function lockTimings() {
   }
 }
 
-// [T-P1-419/AC1] 抢锁超时的哨兵错误：withWriteLock 抛它 ⇒ 写 fail-closed，调用方映射 503/重试，
+// 抢锁超时的哨兵错误：withWriteLock 抛它 ⇒ 写 fail-closed，调用方映射 503/重试，
 // 绝不在未持锁的情况下继续执行 fn()（旧实现超时即 return，放任两个进程同时进入 read-compare-rename）。
 export class LockTimeoutError extends Error {
   constructor(lockPath) {
@@ -78,7 +141,7 @@ async function acquireCrossProcessLock(lockPath, pid) {
         continue
       }
       if (Date.now() > deadline) {
-        // [T-P1-419/AC1] 等待超时 ⇒ fail-closed：抛哨兵错误，绝不放行 fn() 无锁运行。
+        // 等待超时 ⇒ fail-closed：抛哨兵错误，绝不放行 fn() 无锁运行。
         throw new LockTimeoutError(lockPath)
       }
       await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS))
@@ -86,7 +149,7 @@ async function acquireCrossProcessLock(lockPath, pid) {
   }
 }
 
-// [T-P1-419/AC2] 持锁期间周期性 touch lockfile 的 mtime，使「合法持锁的慢写」不会因 mtime 老化
+// 持锁期间周期性 touch lockfile 的 mtime，使「合法持锁的慢写」不会因 mtime 老化
 // 被第二个进程当作陈旧锁抢占；进程崩溃后心跳停止，staleMs 后才被回收（保留崩溃兜底）。
 function startLockHeartbeat(lockPath) {
   const { heartbeatMs } = lockTimings()
@@ -173,7 +236,7 @@ export async function atomicWriteJsonStateFreshLocked(filePath, body) {
   })
 }
 
-// [T-P1-419/AC3·AC4] 图片 PUT 走与 state 同一把锁 + temp+rename：blob 与 meta 在同一把锁内各自
+// 图片 PUT 走与 state 同一把锁 + temp+rename：blob 与 meta 在同一把锁内各自
 // 原子落盘，使 GET 永远看不到半写的 blob 或 blob/meta 不匹配；两个并发 PUT 在 imagePath 锁上串行，
 // 胜者的 blob 与 meta 必来自同一次 PUT（不交叉配对）。图片按 id 寻址，无 freshness 比较。
 async function atomicRename(filePath, body) {
@@ -237,6 +300,253 @@ export function normalizeRoomId(value) {
 
 export function roomScopedPath(root, roomId) {
   return roomId === 'default' ? root : path.join(root, 'rooms', roomId)
+}
+
+function sharedStateRevision(value) {
+  const revision = Number(value?._sync?.revision)
+  return Number.isInteger(revision) && revision >= 0 ? revision : 0
+}
+
+/**
+ * P1 state transaction: freshness remains the fallback for CLI/legacy HTTP
+ * clients, while protocol-aware browser clients use an exact expected
+ * revision. The generic metadata lives under _sync so domain resources such as
+ * combat-interrupts can keep their own top-level revision semantics.
+ */
+export async function atomicWriteJsonStateCasLocked(filePath, incoming, options = {}) {
+  return withWriteLock(filePath, async () => {
+    let current = null
+    try {
+      current = JSON.parse(await readFile(filePath, 'utf8'))
+    } catch {
+      // Missing state starts at revision zero.
+    }
+    const currentRevision = sharedStateRevision(current)
+    const expectedRevision = Number.isInteger(options.expectedRevision) ? options.expectedRevision : null
+    if (expectedRevision != null && expectedRevision !== currentRevision) {
+      return { ok: false, conflict: true, currentRevision, current }
+    }
+    if (expectedRevision == null && current) {
+      const incomingUpdatedAt = Number(incoming?.updatedAt)
+      const existingUpdatedAt = Number(current?.updatedAt)
+      if (Number.isFinite(incomingUpdatedAt) && Number.isFinite(existingUpdatedAt) && incomingUpdatedAt < existingUpdatedAt) {
+        return { ok: false, stale: true, currentRevision, current }
+      }
+    }
+    const writtenAt = Date.now()
+    const next = {
+      ...incoming,
+      _sync: {
+        schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+        revision: currentRevision + 1,
+        writerId: normalizedLabel(options.writerId, 120) || 'legacy-http-client',
+        writtenAt,
+      },
+    }
+    await atomicRename(filePath, JSON.stringify(next))
+    return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
+  })
+}
+
+/**
+ * A delete is persisted as a revisioned tombstone instead of removing the
+ * file. This prevents the ABA case where a stale client with revision zero
+ * could recreate a resource after a newer client deleted it.
+ */
+export async function atomicDeleteJsonStateCasLocked(filePath, options = {}) {
+  return withWriteLock(filePath, async () => {
+    let current = null
+    try {
+      current = JSON.parse(await readFile(filePath, 'utf8'))
+    } catch {
+      // Missing state starts at revision zero.
+    }
+    const currentRevision = sharedStateRevision(current)
+    const expectedRevision = Number.isInteger(options.expectedRevision) ? options.expectedRevision : null
+    if (expectedRevision != null && expectedRevision !== currentRevision) {
+      return { ok: false, conflict: true, currentRevision, current }
+    }
+    const writtenAt = Date.now()
+    const next = {
+      _deleted: true,
+      updatedAt: writtenAt,
+      _sync: {
+        schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+        revision: currentRevision + 1,
+        writerId: normalizedLabel(options.writerId, 120) || 'legacy-http-client',
+        writtenAt,
+      },
+    }
+    await atomicRename(filePath, JSON.stringify(next))
+    return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
+  })
+}
+
+const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+export function normalizeLobbyRoomCode(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6)
+}
+
+export function roomHostIsOnline(room, now = Date.now()) {
+  return !room?.closedAt && Number.isFinite(room?.host?.lastSeenAt) && now - room.host.lastSeenAt <= ROOM_HOST_TTL_MS
+}
+
+export function normalizeRoomPluginRequirements(value) {
+  if (!Array.isArray(value) || value.length > 32) return null
+  const seen = new Set()
+  const normalized = []
+  for (const candidate of value) {
+    const id = typeof candidate?.id === 'string' ? candidate.id.trim() : ''
+    const version = typeof candidate?.version === 'string' ? candidate.version.trim() : ''
+    const integrity = typeof candidate?.integrity === 'string' ? candidate.integrity.trim() : ''
+    const stateSchemaVersion = candidate?.stateSchemaVersion == null ? 1 : Number(candidate.stateSchemaVersion)
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(id) ||
+      version.length < 1 || version.length > 64 ||
+      !/^sha256-[A-Za-z0-9+/]+={0,2}$/.test(integrity) ||
+      !Number.isInteger(stateSchemaVersion) || stateSchemaVersion < 1 || stateSchemaVersion > 1_000 ||
+      seen.has(id)
+    ) return null
+    seen.add(id)
+    normalized.push({ id, version, integrity, stateSchemaVersion })
+  }
+  return normalized.sort((left, right) => left.id.localeCompare(right.id))
+}
+
+export function roomPluginReadiness(required, active) {
+  const activeById = new Map((Array.isArray(active) ? active : []).map((plugin) => [plugin.id, plugin]))
+  const missing = []
+  const mismatched = []
+  for (const requirement of Array.isArray(required) ? required : []) {
+    const installed = activeById.get(requirement.id)
+    if (!installed) missing.push(requirement)
+    else if (
+      installed.version !== requirement.version || installed.integrity !== requirement.integrity ||
+      (installed.stateSchemaVersion ?? 1) !== (requirement.stateSchemaVersion ?? 1)
+    ) {
+      mismatched.push(requirement)
+    }
+  }
+  return { ready: missing.length === 0 && mismatched.length === 0, missing, mismatched }
+}
+
+function activeRoomPlayers(room, now) {
+  return Array.isArray(room?.players)
+    ? room.players.filter((player) =>
+      !player?.leftAt && !player?.removedAt && Number.isFinite(player?.lastSeenAt) &&
+      now - player.lastSeenAt <= ROOM_PLAYER_TTL_MS)
+    : []
+}
+
+export function roomPlayerPresence(player, now = Date.now()) {
+  if (Number.isFinite(player?.removedAt) && player.removedAt > 0) return 'removed'
+  if (Number.isFinite(player?.leftAt) && player.leftAt > 0) return 'left'
+  if (Number.isFinite(player?.lastSeenAt) && now - player.lastSeenAt <= ROOM_PRESENCE_ONLINE_MS) return 'online'
+  return 'temporarily-offline'
+}
+
+export function roomHostPresence(room, now = Date.now()) {
+  if (room?.closedAt) return 'closed'
+  if (!Number.isFinite(room?.host?.lastSeenAt)) return 'offline'
+  const age = now - room.host.lastSeenAt
+  if (age <= ROOM_PRESENCE_ONLINE_MS) return 'online'
+  if (age <= ROOM_HOST_TTL_MS) return 'grace'
+  return 'offline'
+}
+
+function roomMemberAccountAuthorized(member, account) {
+  if (!member?.accountId) return true
+  return !!account && member.accountId === account.accountId
+}
+
+/**
+ * 在房间文件写锁内调用的纯席位分配器。同一个浏览器 clientId／恢复成员 ID
+ * 会保留原成员身份；离线历史不占席位，但不会被删除，确保角色归属可在重连后恢复。
+ */
+export function assignRoomPlayer(room, input, now = Date.now()) {
+  if (room?.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+  if (!roomHostIsOnline(room, now)) return { ok: false, status: 409, error: 'room-offline' }
+  const players = Array.isArray(room?.players) ? room.players : []
+  const activePlayers = activeRoomPlayers(room, now)
+  const resumedByAccount = input.accountId
+    ? players
+      .filter((player) => player.accountId === input.accountId)
+      .sort((left, right) => Number(right.lastSeenAt ?? 0) - Number(left.lastSeenAt ?? 0))[0]
+    : undefined
+  const resumedByClient = players
+    .filter((player) => player.clientId === input.clientId && (!input.accountId || !player.accountId || player.accountId === input.accountId))
+    .sort((left, right) => Number(right.lastSeenAt ?? 0) - Number(left.lastSeenAt ?? 0))[0]
+  const resumedByMember = players.find((player) => player.memberId === input.memberId)
+  if (!resumedByAccount && !resumedByClient && resumedByMember && resumedByMember.clientId !== input.clientId) {
+    return { ok: false, status: 409, error: 'invalid-resume-member' }
+  }
+  const resumed = resumedByAccount ?? resumedByClient ?? resumedByMember
+  const maxPlayers = Number.isInteger(room?.maxPlayers)
+    ? Math.max(1, Math.min(ROOM_PLAYER_SLOTS.length, room.maxPlayers))
+    : 3
+  const allowedSlots = ROOM_PLAYER_SLOTS.slice(0, maxPlayers)
+  if (resumed) {
+    if (roomPlayerPresence(resumed, now) === 'removed') {
+      return { ok: false, status: 403, error: 'member-removed' }
+    }
+    const usedSlots = new Set(activePlayers
+      .filter((player) => player.memberId !== resumed.memberId && player.clientId !== resumed.clientId)
+      .map((player) => player.slot))
+    const slot = allowedSlots.includes(resumed.slot) && !usedSlots.has(resumed.slot)
+      ? resumed.slot
+      : allowedSlots.find((candidate) => !usedSlots.has(candidate))
+    if (!slot) return { ok: false, status: 409, error: 'room-full' }
+    const member = {
+      ...resumed,
+      ...(input.accountId ? { accountId: input.accountId } : {}),
+      clientId: input.clientId,
+      displayName: input.displayName,
+      slot,
+      activePlugins: input.activePlugins ?? resumed.activePlugins ?? [],
+      lastSeenAt: now,
+    }
+    delete member.leftAt
+    delete member.removedAt
+    return {
+      ok: true,
+      member,
+      next: {
+        ...room,
+        players: [
+          ...players.filter((player) =>
+            player.memberId !== member.memberId && player.clientId !== member.clientId),
+          member,
+        ],
+        updatedAt: now,
+      },
+    }
+  }
+  if (room?.locked) return { ok: false, status: 409, error: 'room-locked' }
+  if (
+    room?.host?.memberId === input.memberId || players.some((player) => player.memberId === input.memberId) ||
+    (input.accountId && (room?.host?.accountId === input.accountId || players.some((player) => player.accountId === input.accountId)))
+  ) {
+    return { ok: false, status: 409, error: 'invalid-resume-member' }
+  }
+  const usedSlots = new Set(activePlayers.map((player) => player.slot))
+  const slot = allowedSlots.find((candidate) => !usedSlots.has(candidate))
+  if (!slot) return { ok: false, status: 409, error: 'room-full' }
+  const member = {
+    memberId: input.memberId,
+    ...(input.accountId ? { accountId: input.accountId } : {}),
+    clientId: input.clientId,
+    displayName: input.displayName,
+    slot,
+    activePlugins: input.activePlugins ?? [],
+    joinedAt: now,
+    lastSeenAt: now,
+  }
+  return {
+    ok: true,
+    member,
+    next: { ...room, players: [...players, member], updatedAt: now },
+  }
 }
 
 export function authorizeAccessToken(providedToken) {
@@ -333,7 +643,7 @@ export function pushBacklog(backlog, payload) {
 }
 
 /**
- * [T-P1-421/AC5] 限制 channel 总数：Map 保留插入序，从头删即淘汰最旧 channel。
+ * 限制 channel 总数：Map 保留插入序，从头删即淘汰最旧 channel。
  * protectedChannels（如当前有活跃 SSE 订阅者的 channel）永不淘汰，避免会话中途清掉活跃 channel。
  * 返回被淘汰的 channel 名数组（确定性，便于单测）。
  */
@@ -363,7 +673,8 @@ export function extractSecret(req) {
 function applyCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
+  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
 }
 
 function extractAccessToken(req, parsed) {
@@ -381,11 +692,26 @@ function scopedContext(ctx, roomId) {
     imageRoot: roomScopedPath(ctx.imageRoot, roomId),
     legacyStateRoot: roomScopedPath(ctx.legacyStateRoot, roomId),
     legacyImageRoot: roomScopedPath(ctx.legacyImageRoot, roomId),
+    quarantineRoot: roomScopedPath(ctx.quarantineRoot, roomId),
+    snapshotRoot: roomScopedPath(ctx.snapshotRoot, roomId),
   }
+}
+
+function browserProtocolIsCurrent(req) {
+  if (typeof req?.headers?.origin !== 'string') return true
+  return Number(req?.headers?.['x-stars-protocol']) === SHARED_PROTOCOL_VERSION
 }
 
 function eventStorageKey(ctx, channel) {
   return `${ctx.roomId ?? 'default'}::${channel}`
+}
+
+function nextRoomEventSequence(ctx) {
+  if (!ctx.eventSequences) ctx.eventSequences = new Map()
+  const roomId = ctx.roomId ?? 'default'
+  const sequence = (ctx.eventSequences.get(roomId) ?? 0) + 1
+  ctx.eventSequences.set(roomId, sequence)
+  return sequence
 }
 
 export async function atomicMutateJsonStateLocked(filePath, updater) {
@@ -398,11 +724,20 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
     }
     const result = await updater(current)
     if (!result?.changed) return result
-    const body = JSON.stringify(result.next)
+    const next = {
+      ...result.next,
+      _sync: {
+        schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+        revision: sharedStateRevision(current) + 1,
+        writerId: 'atomic-server-mutation',
+        writtenAt: Date.now(),
+      },
+    }
+    const body = JSON.stringify(next)
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
     await writeFile(tmpPath, body)
     await rename(tmpPath, filePath)
-    return result
+    return { ...result, next }
   })
 }
 
@@ -492,6 +827,1730 @@ async function readBody(req, maxBytes = STATE_MAX_BYTES) {
   return Buffer.concat(chunks)
 }
 
+class RoomProtocolError extends Error {
+  constructor(statusCode, code) {
+    super(code)
+    this.name = 'RoomProtocolError'
+    this.statusCode = statusCode
+    this.code = code
+  }
+}
+
+function lobbyRoot(ctx) {
+  return ctx.lobbyRoot ?? path.join(path.dirname(ctx.stateRoot), 'lobby')
+}
+
+function quarantineRoot(ctx) {
+  return ctx.quarantineRoot ?? path.join(path.dirname(ctx.stateRoot), 'quarantine')
+}
+
+function snapshotRoot(ctx) {
+  return ctx.snapshotRoot ?? path.join(path.dirname(ctx.stateRoot), 'snapshots')
+}
+
+function plainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validActiveEffectInstance(effect) {
+  if (!plainObject(effect) || effect.schemaVersion !== 1) return false
+  if (typeof effect.id !== 'string' || !effect.id || typeof effect.definitionId !== 'string') return false
+  if (typeof effect.label !== 'string' || typeof effect.stackingKey !== 'string') return false
+  if (!['condition', 'mark', 'buff', 'debuff', 'custom'].includes(effect.kind)) return false
+  if (!['reject', 'refresh-duration', 'replace', 'keep-strongest', 'stack'].includes(effect.stackingPolicy)) return false
+  if (!plainObject(effect.source) || !['dm', 'spell', 'feature', 'item', 'monster', 'plugin', 'system', 'legacy'].includes(effect.source.kind)) return false
+  if (!plainObject(effect.duration)) return false
+  if (effect.duration.type === 'rounds' && (!Number.isInteger(effect.duration.remainingRounds) || effect.duration.remainingRounds <= 0)) return false
+  if (effect.duration.type === 'until-turn-boundary' && !['source-turn-start', 'source-turn-end', 'target-turn-start', 'target-turn-end'].includes(effect.duration.boundary)) return false
+  if (effect.duration.type === 'concentration' && typeof effect.duration.sourceActorId !== 'string') return false
+  if (!['permanent', 'rounds', 'until-turn-boundary', 'concentration'].includes(effect.duration.type)) return false
+  if (effect.repeatSave != null && (
+    !plainObject(effect.repeatSave) || !['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(effect.repeatSave.ability) ||
+    !Number.isInteger(effect.repeatSave.dc) || effect.repeatSave.dc <= 0 ||
+    !['target-turn-start', 'target-turn-end'].includes(effect.repeatSave.timing) || effect.repeatSave.onSuccess !== 'remove'
+  )) return false
+  if (effect.breakOn != null && (!Array.isArray(effect.breakOn) || effect.breakOn.some((trigger) =>
+    !['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'moves'].includes(trigger)
+  ))) return false
+  if (effect.modifiers != null && (
+    !plainObject(effect.modifiers) ||
+    (effect.modifiers.speedPenaltyFeet != null && (!Number.isFinite(effect.modifiers.speedPenaltyFeet) || effect.modifiers.speedPenaltyFeet < 0)) ||
+    (effect.modifiers.preventReactions != null && typeof effect.modifiers.preventReactions !== 'boolean')
+  )) return false
+  return true
+}
+
+function validateActiveEffectState(state, projectedConditions) {
+  if (!plainObject(state)) return null
+  if (state.activeEffects != null) {
+    if (!Array.isArray(state.activeEffects)) return 'active-effects-not-array'
+    const ids = new Set()
+    for (const effect of state.activeEffects) {
+      if (!validActiveEffectInstance(effect) || ids.has(effect.id)) return 'invalid-active-effect'
+      ids.add(effect.id)
+    }
+  }
+  if (state.schemaVersion !== 2) return null
+  if (state.timedEffects != null) return 'legacy-timed-effects-in-v2'
+  const projection = []
+  const conditionKeys = new Set()
+  for (const effect of state.activeEffects ?? []) {
+    const condition = typeof effect.legacyCondition === 'string'
+      ? effect.legacyCondition
+      : typeof effect.standardCondition === 'string' ? effect.standardCondition : undefined
+    if (!condition) continue
+    const key = typeof effect.standardCondition === 'string'
+      ? `standard:${effect.standardCondition}`
+      : `extension:${condition}`
+    if (conditionKeys.has(key)) continue
+    conditionKeys.add(key)
+    projection.push(condition)
+  }
+  if (!Array.isArray(projectedConditions) || JSON.stringify(projectedConditions) !== JSON.stringify(projection)) {
+    return 'condition-projection-mismatch'
+  }
+  return null
+}
+
+function validateDnd5eResourceStates(name, value) {
+  if (name === 'characters') {
+    for (const character of value.characters ?? []) {
+      if (!plainObject(character)) continue
+      const reason = validateActiveEffectState(character.dnd5eCombatState, character.conditions ?? [])
+      if (reason) return reason
+    }
+  }
+  if (name === 'maps') {
+    for (const map of value.maps ?? []) {
+      if (!plainObject(map) || !Array.isArray(map.tokens)) continue
+      for (const token of map.tokens) {
+        if (!plainObject(token)) continue
+        const reason = validateActiveEffectState(token.dnd5eCombatState, token.dnd5eCombatState?.conditions ?? [])
+        if (reason) return reason
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Persistence-boundary validation. The browser performs more detailed
+ * migrations, while this deliberately conservative shape check prevents a
+ * scalar, truncated array, or wrong resource envelope from replacing a good
+ * room state.
+ */
+export function validateSharedStateShape(name, value) {
+  if (!plainObject(value)) return { ok: false, reason: 'state-must-be-object' }
+  const requiredArrays = {
+    characters: 'characters',
+    maps: 'maps',
+    spellbook: 'spells',
+    'combat-log': 'entries',
+    'dice-events': 'events',
+    'combat-interrupts': 'interrupts',
+    'player-action-requests': 'requests',
+    'player-action-processed': 'actionIds',
+  }
+  const arrayField = requiredArrays[name]
+  if (arrayField && !Array.isArray(value[arrayField])) {
+    return { ok: false, reason: `missing-array:${arrayField}` }
+  }
+  if (value.updatedAt != null && (!Number.isFinite(value.updatedAt) || value.updatedAt < 0)) {
+    return { ok: false, reason: 'invalid-updated-at' }
+  }
+  if (name === 'combat' && value.active != null && typeof value.active !== 'boolean') {
+    return { ok: false, reason: 'invalid-combat-active' }
+  }
+  if (name === 'dm-authority-ready' && typeof value.ready !== 'boolean') {
+    return { ok: false, reason: 'invalid-ready-state' }
+  }
+  if (value._sync != null) {
+    const sync = value._sync
+    if (
+      !plainObject(sync) ||
+      sync.schemaVersion !== SHARED_STATE_SCHEMA_VERSION ||
+      !Number.isInteger(sync.revision) ||
+      sync.revision < 0 ||
+      typeof sync.writerId !== 'string' ||
+      !Number.isFinite(sync.writtenAt)
+    ) return { ok: false, reason: 'invalid-sync-metadata' }
+  }
+  const dnd5eStateReason = validateDnd5eResourceStates(name, value)
+  if (dnd5eStateReason) return { ok: false, reason: dnd5eStateReason }
+  return { ok: true }
+}
+
+async function rotateJsonDirectory(root, limit) {
+  let entries = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return
+  }
+  const files = []
+  for (const name of entries.filter((entry) => entry.endsWith('.json'))) {
+    try {
+      const info = await stat(path.join(root, name))
+      files.push({ name, mtimeMs: info.mtimeMs })
+    } catch {
+      // Concurrent cleanup; the next pass will settle the directory.
+    }
+  }
+  files.sort((left, right) => left.mtimeMs - right.mtimeMs)
+  for (const entry of files.slice(0, Math.max(0, files.length - limit))) {
+    await rm(path.join(root, entry.name), { force: true }).catch(() => {})
+  }
+}
+
+async function quarantineSharedState(ctx, name, payload, reason) {
+  const root = quarantineRoot(ctx)
+  await mkdir(root, { recursive: true })
+  const detectedAt = Date.now()
+  const id = `${detectedAt}-${safeName(name)}-${randomUUID()}`
+  await atomicWriteLocked(path.join(root, `${id}.json`), JSON.stringify({
+    format: 'dndstars5e-quarantine',
+    id,
+    roomId: ctx.roomId ?? 'default',
+    name,
+    reason,
+    detectedAt,
+    payload,
+  }))
+  await rotateJsonDirectory(root, 20)
+  return id
+}
+
+async function readValidStateDirectory(ctx) {
+  const states = {}
+  const invalid = []
+  let entries = []
+  try {
+    entries = await readdir(ctx.stateRoot)
+  } catch {
+    return { states, invalid }
+  }
+  for (const fileName of entries.filter((entry) => entry.endsWith('.json')).sort()) {
+    const name = fileName.slice(0, -5)
+    try {
+      const value = normalizeDedicatedDnd5eSharedState(name, JSON.parse(await readFile(path.join(ctx.stateRoot, fileName), 'utf8')))
+      if (value?._deleted === true) continue
+      const validation = validateSharedStateShape(name, value)
+      if (!validation.ok) invalid.push({ name, reason: validation.reason })
+      else states[name] = value
+    } catch {
+      invalid.push({ name, reason: 'invalid-json' })
+    }
+  }
+  return { states, invalid }
+}
+
+async function readRoomForCampaign(ctx) {
+  if ((ctx.roomId ?? 'default') === 'default') return null
+  try {
+    return JSON.parse(await readFile(roomLobbyFile(ctx, ctx.roomId), 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'room-not-found')
+    throw error
+  }
+}
+
+async function requireCampaignDm(ctx, req) {
+  const room = await readRoomForCampaign(ctx)
+  if (!room) {
+    if (ctx.accessRole === 'player') throw new RoomProtocolError(403, 'forbidden')
+    return null
+  }
+  if (room.host?.memberId !== req?.headers?.['x-stars-member']) {
+    throw new RoomProtocolError(403, 'forbidden')
+  }
+  return room
+}
+
+function campaignRoomManifest(room) {
+  if (!room) return {
+    id: 'default',
+    name: '本地战役',
+    rulesetId: DND5E_2014_RULESET_ID,
+    requiredPlugins: [],
+    pluginFiles: {},
+    pluginRuntimeState: {},
+  }
+  return {
+    id: room.id,
+    name: room.name,
+    rulesetId: room.rulesetId,
+    requiredPlugins: Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [],
+    pluginFiles: plainObject(room.pluginFiles) ? room.pluginFiles : {},
+    pluginRuntimeState: plainObject(room.pluginRuntimeState) ? room.pluginRuntimeState : {},
+  }
+}
+
+async function collectCampaignImages(ctx) {
+  const images = []
+  let entries = []
+  try {
+    entries = await readdir(ctx.imageRoot)
+  } catch {
+    return images
+  }
+  for (const id of entries.filter((entry) => !entry.endsWith('.json') && !entry.endsWith('.lock')).sort()) {
+    const meta = JSON.parse(await readFile(path.join(ctx.imageRoot, `${id}.json`), 'utf8'))
+    const bytes = await readFile(path.join(ctx.imageRoot, id))
+    images.push({ id, type: meta.type || 'application/octet-stream', data: bytes.toString('base64') })
+  }
+  return images
+}
+
+async function collectCampaignPlugins(ctx, room) {
+  if (!room) return []
+  const plugins = []
+  for (const requirement of Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []) {
+    const hosted = room.pluginFiles?.[requirement.id]
+    if (!hosted) continue
+    const bytes = await readFile(roomHostedPluginFile(ctx, room.id, requirement.id, hosted))
+    plugins.push({ ...hosted, ...requirement, data: bytes.toString('base64') })
+  }
+  return plugins
+}
+
+async function buildCampaignBundle(ctx, options = {}) {
+  const { states, invalid } = await readValidStateDirectory(ctx)
+  if (invalid.length > 0) {
+    const error = new RoomProtocolError(409, 'campaign-state-corrupted')
+    error.invalid = invalid
+    throw error
+  }
+  const room = await readRoomForCampaign(ctx)
+  const includeAssets = options.includeAssets === true
+  return {
+    format: CAMPAIGN_BUNDLE_FORMAT,
+    schemaVersion: CAMPAIGN_BUNDLE_SCHEMA_VERSION,
+    protocolVersion: SHARED_PROTOCOL_VERSION,
+    exportedAt: Date.now(),
+    snapshotKind: options.kind ?? 'export',
+    room: campaignRoomManifest(room),
+    states,
+    images: includeAssets ? await collectCampaignImages(ctx) : [],
+    plugins: includeAssets ? await collectCampaignPlugins(ctx, room) : [],
+  }
+}
+
+function snapshotId(bundle) {
+  return `${bundle.exportedAt}-${bundle.snapshotKind}-${randomUUID()}`
+}
+
+async function writeCampaignSnapshot(ctx, kind = 'manual') {
+  const bundle = await buildCampaignBundle(ctx, { kind, includeAssets: false })
+  const id = snapshotId(bundle)
+  const root = snapshotRoot(ctx)
+  await mkdir(root, { recursive: true })
+  await atomicWriteLocked(path.join(root, `${id}.json`), JSON.stringify({ ...bundle, snapshotId: id }))
+  await rotateJsonDirectory(root, CAMPAIGN_SNAPSHOT_LIMIT)
+  return { id, createdAt: bundle.exportedAt, kind, stateCount: Object.keys(bundle.states).length }
+}
+
+async function maybeWriteAutoCampaignSnapshot(ctx) {
+  const key = `${ctx.roomId ?? 'default'}:${snapshotRoot(ctx)}`
+  const now = Date.now()
+  if (now - (lastAutoSnapshotAt.get(key) ?? 0) < CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS) return
+  lastAutoSnapshotAt.set(key, now)
+  try {
+    await writeCampaignSnapshot(ctx, 'auto')
+  } catch {
+    // A damaged current state is quarantined/reported elsewhere. Never make a
+    // normal state write fail only because its precautionary snapshot failed.
+  }
+}
+
+function validateCampaignBundle(value) {
+  const errors = []
+  if (!plainObject(value) || value.format !== CAMPAIGN_BUNDLE_FORMAT) errors.push('invalid-format')
+  if (value?.schemaVersion !== CAMPAIGN_BUNDLE_SCHEMA_VERSION) errors.push('unsupported-schema')
+  if (value?.room?.rulesetId !== DND5E_2014_RULESET_ID) errors.push('unsupported-ruleset')
+  if (!plainObject(value?.states)) errors.push('invalid-states')
+  if (!Array.isArray(value?.images)) errors.push('invalid-images')
+  if (!Array.isArray(value?.plugins)) errors.push('invalid-plugins')
+  if (value?.room?.pluginRuntimeState != null && !plainObject(value.room.pluginRuntimeState)) {
+    errors.push('invalid-plugin-runtime-state')
+  }
+  if (plainObject(value?.states) && Object.keys(value.states).length > 128) errors.push('too-many-states')
+  if (Array.isArray(value?.images) && value.images.length > IMAGE_COUNT_LIMIT) errors.push('too-many-images')
+  if (Array.isArray(value?.plugins) && value.plugins.length > 64) errors.push('too-many-plugins')
+  if (plainObject(value?.states)) {
+    for (const [name, state] of Object.entries(value.states)) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) errors.push(`invalid-state-name:${name}`)
+      const validation = validateSharedStateShape(name, state)
+      if (!validation.ok) errors.push(`${name}:${validation.reason}`)
+    }
+  }
+  if (Array.isArray(value?.images)) {
+    for (const image of value.images) {
+      if (!plainObject(image) || !/^[a-zA-Z0-9_-]+$/.test(image.id ?? '') || typeof image.data !== 'string') {
+        errors.push('invalid-image')
+      }
+    }
+  }
+  if (Array.isArray(value?.plugins)) {
+    for (const plugin of value.plugins) {
+      if (!plainObject(plugin) || !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(plugin.id ?? '') || typeof plugin.data !== 'string') {
+        errors.push('invalid-plugin')
+        continue
+      }
+      const bytes = Buffer.from(plugin.data, 'base64')
+      const actual = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+      if (actual !== plugin.integrity) errors.push(`plugin-integrity:${plugin.id}`)
+    }
+  }
+  if (plainObject(value?.room?.pluginRuntimeState)) {
+    for (const [pluginId, runtime] of Object.entries(value.room.pluginRuntimeState)) {
+      if (
+        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId) || !plainObject(runtime) ||
+        !Number.isInteger(runtime.stateSchemaVersion) || runtime.stateSchemaVersion < 1 ||
+        runtime.stateSchemaVersion > 1_000
+      ) {
+        errors.push(`invalid-plugin-runtime-state:${pluginId}`)
+        continue
+      }
+      try {
+        normalizedPluginState(runtime.data)
+      } catch {
+        errors.push(`invalid-plugin-runtime-state:${pluginId}`)
+      }
+    }
+  }
+  if (value?.snapshotKind === 'export' && Array.isArray(value?.room?.requiredPlugins) && Array.isArray(value?.plugins)) {
+    for (const requirement of value.room.requiredPlugins) {
+      const plugin = value.plugins.find((candidate) => candidate?.id === requirement?.id)
+      if (!plugin || plugin.version !== requirement.version || plugin.integrity !== requirement.integrity) {
+        errors.push(`missing-required-plugin:${requirement?.id ?? 'unknown'}`)
+      }
+    }
+  }
+  return { ok: errors.length === 0, errors }
+}
+
+async function restoreCampaignBundle(ctx, bundle, options = {}) {
+  const validation = validateCampaignBundle(bundle)
+  if (!validation.ok) {
+    const error = new RoomProtocolError(422, 'campaign-preflight-failed')
+    error.details = validation.errors
+    throw error
+  }
+  if (options.createSafetySnapshot !== false) await writeCampaignSnapshot(ctx, 'pre-restore')
+  const restoredAt = Date.now()
+  await mkdir(ctx.stateRoot, { recursive: true })
+  const restoredStateNames = new Set(Object.keys(bundle.states).map((name) => `${safeName(name)}.json`))
+  let existingStateFiles = []
+  try {
+    existingStateFiles = await readdir(ctx.stateRoot)
+  } catch {
+    // The directory was created above; a concurrent cleanup is harmless.
+  }
+  for (const fileName of existingStateFiles.filter((name) => name.endsWith('.json') && !restoredStateNames.has(name))) {
+    await atomicDeleteJsonStateCasLocked(path.join(ctx.stateRoot, fileName), { writerId: 'campaign-restore' })
+  }
+  for (const [name, value] of Object.entries(bundle.states)) {
+    const normalized = normalizeDedicatedDnd5eSharedState(name, { ...value, updatedAt: restoredAt })
+    await atomicWriteJsonStateCasLocked(path.join(ctx.stateRoot, `${safeName(name)}.json`), normalized, {
+      writerId: 'campaign-restore',
+    })
+  }
+  await mkdir(ctx.imageRoot, { recursive: true })
+  for (const image of bundle.images) {
+    const bytes = Buffer.from(image.data, 'base64')
+    if (bytes.length > IMAGE_MAX_BYTES) throw new RoomProtocolError(413, 'campaign-image-too-large')
+    const id = safeName(image.id)
+    await atomicWriteImageLocked(
+      path.join(ctx.imageRoot, id),
+      path.join(ctx.imageRoot, `${id}.json`),
+      bytes,
+      JSON.stringify({ type: String(image.type || 'application/octet-stream') }),
+    )
+  }
+  await enforceImageQuota(ctx.imageRoot)
+
+  if ((ctx.roomId ?? 'default') !== 'default' && bundle.plugins.length > 0) {
+    for (const plugin of bundle.plugins) {
+      const bytes = Buffer.from(plugin.data, 'base64')
+      if (bytes.length > STATE_MAX_BYTES) throw new RoomProtocolError(413, 'campaign-plugin-too-large')
+      await mkdir(roomPluginDirectory(ctx, ctx.roomId), { recursive: true })
+      const hosted = bundle.room.pluginFiles?.[plugin.id] ?? plugin
+      await atomicWriteLocked(roomHostedPluginFile(ctx, ctx.roomId, plugin.id, hosted), bytes)
+    }
+    await mutateLobbyRoom(ctx, ctx.roomId, (room) => ({
+      ok: true,
+      next: {
+        ...room,
+        requiredPlugins: bundle.room.requiredPlugins,
+        pluginFiles: bundle.room.pluginFiles,
+        pluginRuntimeState: bundle.room.pluginRuntimeState ?? {},
+        rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
+        rulesUpdatedAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    }))
+  }
+  const updatedAt = restoredAt
+  publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+    id: `campaign-restore:${updatedAt}:${randomUUID()}`,
+    name: '*',
+    updatedAt,
+  })
+  return {
+    ok: true,
+    stateCount: Object.keys(bundle.states).length,
+    imageCount: bundle.images.length,
+    pluginCount: bundle.plugins.length,
+    restoredAt: updatedAt,
+  }
+}
+
+function roomLobbyFile(ctx, roomId) {
+  return path.join(lobbyRoot(ctx), `${roomId}.json`)
+}
+
+function accountDirectory(ctx) {
+  return path.join(lobbyRoot(ctx), 'accounts')
+}
+
+function accountFile(ctx, accountId) {
+  return path.join(accountDirectory(ctx), `${accountId}.json`)
+}
+
+function randomLobbyCode(length) {
+  const bytes = randomBytes(length)
+  return [...bytes].map((value) => ROOM_CODE_ALPHABET[value & 31]).join('')
+}
+
+function normalizeAccountId(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 12)
+}
+
+export function normalizeAccountRecoveryCode(value) {
+  const normalized = String(value ?? '').trim().toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '')
+  if (!normalized.startsWith('DS5E') || normalized.length !== 36) return null
+  const accountId = normalized.slice(4, 16)
+  const secret = normalized.slice(16)
+  if (!/^[A-HJ-NP-Z2-9]{12}$/.test(accountId) || !/^[A-HJ-NP-Z2-9]{20}$/.test(secret)) return null
+  return { accountId, secret, formatted: `DS5E-${accountId}-${secret.slice(0, 5)}-${secret.slice(5, 10)}-${secret.slice(10, 15)}-${secret.slice(15)}` }
+}
+
+function secretRecord(secret) {
+  const salt = randomBytes(16).toString('base64')
+  const hash = scryptSync(secret, salt, 32).toString('base64')
+  return { salt, hash }
+}
+
+function secretMatches(record, secret) {
+  if (!plainObject(record) || typeof record.salt !== 'string' || typeof record.hash !== 'string') return false
+  try {
+    const actual = scryptSync(secret, record.salt, 32)
+    const expected = Buffer.from(record.hash, 'base64')
+    return actual.length === expected.length && timingSafeEqual(actual, expected)
+  } catch {
+    return false
+  }
+}
+
+function accountSessionToken(accountId) {
+  return `${accountId}.${randomBytes(32).toString('base64url')}`
+}
+
+function tokenHash(token) {
+  return createHash('sha256').update(String(token)).digest('hex')
+}
+
+function accountPublicProfile(account) {
+  return {
+    accountId: account.accountId,
+    displayName: account.displayName,
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+  }
+}
+
+function accountSessionResponse(account, token) {
+  return {
+    accountId: account.accountId,
+    displayName: account.displayName,
+    sessionToken: token,
+    createdAt: account.createdAt,
+  }
+}
+
+async function readAccount(ctx, accountId) {
+  const normalized = normalizeAccountId(accountId)
+  if (normalized !== accountId || normalized.length !== 12) throw new RoomProtocolError(401, 'invalid-account-session')
+  try {
+    const account = JSON.parse(await readFile(accountFile(ctx, normalized), 'utf8'))
+    if (!plainObject(account) || account.accountId !== normalized) throw new Error('invalid account record')
+    return account
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new RoomProtocolError(401, 'invalid-account-session')
+    throw error
+  }
+}
+
+async function authenticateAccount(req, ctx, optional = false) {
+  const token = req?.headers?.['x-stars-account-token']
+  if (typeof token !== 'string' || token.length < 32) {
+    if (optional) return null
+    throw new RoomProtocolError(401, 'invalid-account-session')
+  }
+  const separator = token.indexOf('.')
+  const accountId = separator > 0 ? token.slice(0, separator) : ''
+  const account = await readAccount(ctx, accountId)
+  const hash = tokenHash(token)
+  const valid = (Array.isArray(account.sessions) ? account.sessions : []).some((session) =>
+    typeof session?.tokenHash === 'string' && session.tokenHash.length === hash.length &&
+    timingSafeEqual(Buffer.from(session.tokenHash), Buffer.from(hash)))
+  if (!valid) throw new RoomProtocolError(401, 'invalid-account-session')
+  return account
+}
+
+async function mutateAccount(ctx, accountId, updater) {
+  const filePath = accountFile(ctx, accountId)
+  return withWriteLock(filePath, async () => {
+    let account
+    try {
+      account = JSON.parse(await readFile(filePath, 'utf8'))
+    } catch (error) {
+      if (error?.code === 'ENOENT') throw new RoomProtocolError(401, 'invalid-account-session')
+      throw error
+    }
+    const next = await updater(account)
+    if (!plainObject(next) || next.accountId !== accountId) throw new RoomProtocolError(400, 'account-operation-failed')
+    await atomicRename(filePath, JSON.stringify(next))
+    return next
+  })
+}
+
+async function createAccountRecord(ctx, payload, now = Date.now()) {
+  const displayName = normalizedLabel(payload?.displayName, 24)
+  const clientId = payload?.clientId
+  if (!displayName) throw new RoomProtocolError(400, 'invalid-account-name')
+  if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
+  await mkdir(accountDirectory(ctx), { recursive: true })
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const accountId = randomLobbyCode(12)
+    const recoverySecret = randomLobbyCode(20)
+    const recoveryCode = `DS5E-${accountId}-${recoverySecret.slice(0, 5)}-${recoverySecret.slice(5, 10)}-${recoverySecret.slice(10, 15)}-${recoverySecret.slice(15)}`
+    const token = accountSessionToken(accountId)
+    const account = {
+      version: 1,
+      accountId,
+      displayName,
+      recovery: secretRecord(recoverySecret),
+      sessions: [{ tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now }],
+      characters: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    try {
+      await writeFile(accountFile(ctx, accountId), JSON.stringify(account), { flag: 'wx' })
+      return { account, token, recoveryCode }
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+    }
+  }
+  throw new RoomProtocolError(503, 'account-id-exhausted')
+}
+
+function normalizedAccountCharacterRecord(value, accountId, expectedId, now = Date.now()) {
+  if (!plainObject(value) || !plainObject(value.character) || !plainObject(value.compatibility)) {
+    throw new RoomProtocolError(400, 'invalid-account-character')
+  }
+  const id = normalizedLabel(value.id, 128)
+  if (!id || id !== expectedId || value.character.id !== id) throw new RoomProtocolError(400, 'invalid-account-character')
+  const compatibility = value.compatibility
+  const requiredPlugins = normalizeRoomPluginRequirements(compatibility.requiredPlugins ?? [])
+  if (
+    compatibility.rulesetId !== DND5E_2014_RULESET_ID || !requiredPlugins ||
+    !Number.isInteger(compatibility.characterSchemaVersion) || compatibility.characterSchemaVersion < 1 ||
+    !Number.isInteger(compatibility.minimumGameProtocolVersion) || compatibility.minimumGameProtocolVersion < 1 ||
+    !Number.isInteger(compatibility.lastSavedGameProtocolVersion) || compatibility.lastSavedGameProtocolVersion < 1
+  ) throw new RoomProtocolError(400, 'invalid-account-character')
+  const character = { ...value.character, ownerAccountId: accountId }
+  delete character.roomId
+  delete character.roomMemberId
+  const name = normalizedLabel(character.name, 80)
+  if (!name) throw new RoomProtocolError(400, 'invalid-account-character')
+  return {
+    id,
+    name,
+    updatedAt: now,
+    character: { ...character, name },
+    compatibility: {
+      rulesetId: DND5E_2014_RULESET_ID,
+      characterSchemaVersion: compatibility.characterSchemaVersion,
+      minimumGameProtocolVersion: compatibility.minimumGameProtocolVersion,
+      lastSavedGameProtocolVersion: compatibility.lastSavedGameProtocolVersion,
+      requiredPlugins,
+    },
+  }
+}
+
+function roomPluginDirectory(ctx, roomId) {
+  return path.join(lobbyRoot(ctx), 'plugins', roomId)
+}
+
+function roomPluginFile(ctx, roomId, pluginId) {
+  return path.join(roomPluginDirectory(ctx, roomId), `${safeName(pluginId)}.dndstars5e`)
+}
+
+function roomPluginVersionFile(ctx, roomId, pluginId, integrity) {
+  const pin = createHash('sha256').update(String(integrity)).digest('hex').slice(0, 32)
+  return path.join(roomPluginDirectory(ctx, roomId), `${safeName(pluginId)}-${pin}.dndstars5e`)
+}
+
+function roomHostedPluginFile(ctx, roomId, pluginId, hosted) {
+  const storageFile = typeof hosted?.storageFile === 'string' ? hosted.storageFile : ''
+  if (/^[a-zA-Z0-9._-]{1,180}\.dndstars5e$/.test(storageFile)) {
+    return path.join(roomPluginDirectory(ctx, roomId), storageFile)
+  }
+  return roomPluginFile(ctx, roomId, pluginId)
+}
+
+function lobbyRoomMember(room, memberId) {
+  if (room?.host?.memberId === memberId) return room.host
+  return (Array.isArray(room?.players) ? room.players : []).find((player) => player.memberId === memberId)
+}
+
+function generatedRoomCode() {
+  const bytes = randomBytes(6)
+  return [...bytes].map((value) => ROOM_CODE_ALPHABET[value & 31]).join('')
+}
+
+function normalizedLabel(value, maxLength) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, maxLength)
+}
+
+function validClientId(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9_-]{8,100}$/.test(value)
+}
+
+function normalizedRoomPassword(value) {
+  if (value == null || value === '') return ''
+  return String(value).trim()
+}
+
+function roomPasswordRecord(password) {
+  if (!password) return null
+  const salt = randomBytes(16).toString('base64')
+  const hash = scryptSync(password, salt, 32).toString('base64')
+  return { salt, hash }
+}
+
+function roomPasswordMatches(room, password) {
+  if (!plainObject(room?.joinSecret)) return true
+  const supplied = normalizedRoomPassword(password)
+  if (!supplied) return false
+  try {
+    const actual = scryptSync(supplied, room.joinSecret.salt, 32)
+    const expected = Buffer.from(room.joinSecret.hash, 'base64')
+    return actual.length === expected.length && timingSafeEqual(actual, expected)
+  } catch {
+    return false
+  }
+}
+
+async function readJsonRequest(req, maxBytes = 64 * 1024) {
+  const body = await readBody(req, maxBytes)
+  try {
+    return JSON.parse(body.toString('utf8'))
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-json')
+  }
+}
+
+function roomRulesResponse(room, member) {
+  const requiredPlugins = Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []
+  return {
+    roomId: room.id,
+    rulesetId: room.rulesetId,
+    revision: Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1,
+    updatedAt: room.rulesUpdatedAt ?? room.updatedAt ?? room.createdAt,
+    requiredPlugins,
+    plugins: requiredPlugins.map((requirement) => {
+      const hosted = room.pluginFiles?.[requirement.id] ?? {}
+      return {
+        ...requirement,
+        name: normalizedLabel(hosted.name, 100) || requirement.id,
+        publisher: normalizedLabel(hosted.publisher, 100) || '未知发布者',
+        license: normalizedLabel(hosted.license, 120) || '未声明',
+      }
+    }),
+    member: roomPluginReadiness(requiredPlugins, member?.activePlugins),
+  }
+}
+
+function decodedPluginHeader(req, headerName, maxLength) {
+  const value = req?.headers?.[headerName]
+  if (typeof value !== 'string') return ''
+  try {
+    return normalizedLabel(decodeURIComponent(value), maxLength)
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+  }
+}
+
+function normalizedPluginState(value, depth = 0) {
+  if (depth > 64) throw new RoomProtocolError(400, 'invalid-plugin-state')
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new RoomProtocolError(400, 'invalid-plugin-state')
+    return value
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 10_000) throw new RoomProtocolError(400, 'invalid-plugin-state')
+    return value.map((item) => normalizedPluginState(item, depth + 1))
+  }
+  if (!plainObject(value) || Object.keys(value).length > 1_000) {
+    throw new RoomProtocolError(400, 'invalid-plugin-state')
+  }
+  const result = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+      throw new RoomProtocolError(400, 'invalid-plugin-state')
+    }
+    result[key] = normalizedPluginState(item, depth + 1)
+  }
+  return result
+}
+
+function samePluginRequirement(left, right) {
+  if (!left || !right) return left == null && right == null
+  return left.id === right.id && left.version === right.version && left.integrity === right.integrity &&
+    (left.stateSchemaVersion ?? 1) === (right.stateSchemaVersion ?? 1)
+}
+
+function roomMemberResponse(room, member, role) {
+  return {
+    roomId: room.id,
+    roomName: room.name,
+    rulesetId: room.rulesetId,
+    createdAt: room.createdAt,
+    hostOnline: roomHostIsOnline(room),
+    locked: room.locked === true,
+    passwordRequired: plainObject(room.joinSecret),
+    maxPlayers: Number.isInteger(room.maxPlayers) ? room.maxPlayers : 3,
+    rules: roomRulesResponse(room, member),
+    member: {
+      memberId: member.memberId,
+      ...(member.accountId ? { accountId: member.accountId } : {}),
+      clientId: member.clientId,
+      role,
+      ...(member.slot ? { slot: member.slot } : {}),
+      displayName: member.displayName,
+    },
+  }
+}
+
+async function createLobbyRoom(ctx, payload, account = null, now = Date.now()) {
+  const rulesetId = String(payload?.rulesetId ?? '')
+  const roomName = normalizedLabel(payload?.roomName, 40)
+  const displayName = normalizedLabel(payload?.displayName, 24)
+  const clientId = payload?.clientId
+  const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
+  const password = normalizedRoomPassword(payload?.password)
+  const maxPlayers = payload?.maxPlayers == null ? 3 : Number(payload.maxPlayers)
+  if (rulesetId !== DND5E_2014_RULESET_ID) throw new RoomProtocolError(400, 'invalid-ruleset')
+  if (!roomName) throw new RoomProtocolError(400, 'invalid-room-name')
+  if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
+  if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
+  if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+  if (password.length > 64) throw new RoomProtocolError(400, 'invalid-room-password')
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > ROOM_PLAYER_SLOTS.length) {
+    throw new RoomProtocolError(400, 'invalid-room-capacity')
+  }
+
+  await mkdir(lobbyRoot(ctx), { recursive: true })
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const roomId = generatedRoomCode()
+    const member = {
+      memberId: randomUUID(),
+      ...(account ? { accountId: account.accountId } : {}),
+      clientId,
+      displayName,
+      activePlugins,
+      joinedAt: now,
+      lastSeenAt: now,
+    }
+    const room = {
+      version: 1,
+      id: roomId,
+      name: roomName,
+      rulesetId,
+      requiredPlugins: [],
+      rulesRevision: 1,
+      rulesUpdatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      locked: false,
+      maxPlayers,
+      joinSecret: roomPasswordRecord(password),
+      host: member,
+      players: [],
+    }
+    try {
+      await writeFile(roomLobbyFile(ctx, roomId), JSON.stringify(room), { flag: 'wx' })
+      return { room, member }
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+    }
+  }
+  throw new RoomProtocolError(503, 'room-code-exhausted')
+}
+
+async function mutateLobbyRoom(ctx, roomId, updater) {
+  const filePath = roomLobbyFile(ctx, roomId)
+  return withWriteLock(filePath, async () => {
+    let room
+    try {
+      room = JSON.parse(await readFile(filePath, 'utf8'))
+    } catch (error) {
+      if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'room-not-found')
+      throw error
+    }
+    const result = await updater(room)
+    if (!result?.ok) throw new RoomProtocolError(result?.status ?? 400, result?.error ?? 'room-operation-failed')
+    if (result.next) await atomicRename(filePath, JSON.stringify(result.next))
+    return { ...result, room: result.next ?? room }
+  })
+}
+
+function writeJson(res, status, value) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(value))
+}
+
+function applyLobbyRateLimit(req, res, ctx) {
+  if (req.method === 'GET') return true
+  if (!ctx.rateLimits) ctx.rateLimits = new Map()
+  const ip = req.socket?.remoteAddress ?? 'local'
+  const limit = Math.max(10, Number(process.env.STARS_RATE_LIMIT) || 1200)
+  const rate = consumeRateLimit(ctx.rateLimits, `lobby:${ip}`, Date.now(), limit)
+  if (rate.ok) return true
+  res.writeHead(429, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Retry-After': String(Math.ceil(rate.retryAfterMs / 1000)),
+  })
+  res.end('{"error":"rate-limit"}')
+  return false
+}
+
+async function handleAccountApi(req, res, parsed, ctx) {
+  if (!parsed.pathname.startsWith('/api/accounts')) return false
+  if (!applyLobbyRateLimit(req, res, ctx)) return true
+
+  if (parsed.pathname === '/api/accounts' && req.method === 'POST') {
+    const payload = await readJsonRequest(req)
+    const { account, token, recoveryCode } = await createAccountRecord(ctx, payload)
+    writeJson(res, 201, { session: accountSessionResponse(account, token), recoveryCode })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/recover' && req.method === 'POST') {
+    const payload = await readJsonRequest(req)
+    const recovery = normalizeAccountRecoveryCode(payload?.recoveryCode)
+    const clientId = payload?.clientId
+    if (!recovery || !validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-recovery-code')
+    const account = await readAccount(ctx, recovery.accountId).catch(() => null)
+    if (!account || !secretMatches(account.recovery, recovery.secret)) {
+      throw new RoomProtocolError(401, 'invalid-recovery-code')
+    }
+    const token = accountSessionToken(account.accountId)
+    const now = Date.now()
+    const next = await mutateAccount(ctx, account.accountId, (current) => ({
+      ...current,
+      sessions: [
+        ...(Array.isArray(current.sessions) ? current.sessions : []),
+        { tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now },
+      ].slice(-ACCOUNT_SESSION_LIMIT),
+      updatedAt: now,
+    }))
+    writeJson(res, 200, { session: accountSessionResponse(next, token) })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    writeJson(res, 200, accountPublicProfile(account))
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/characters' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    writeJson(res, 200, { characters: Array.isArray(account.characters) ? account.characters : [] })
+    return true
+  }
+
+  const characterMatch = parsed.pathname.match(/^\/api\/accounts\/me\/characters\/([^/]+)$/)
+  if (characterMatch) {
+    const account = await authenticateAccount(req, ctx)
+    const characterId = decodeURIComponent(characterMatch[1] ?? '')
+    if (!characterId || characterId.length > 128) throw new RoomProtocolError(400, 'invalid-account-character')
+    if (req.method === 'PUT') {
+      const payload = await readJsonRequest(req, 2 * 1024 * 1024)
+      const now = Date.now()
+      const record = normalizedAccountCharacterRecord(payload, account.accountId, characterId, now)
+      await mutateAccount(ctx, account.accountId, (current) => {
+        const characters = Array.isArray(current.characters) ? current.characters : []
+        const exists = characters.some((candidate) => candidate?.id === characterId)
+        if (!exists && characters.length >= ACCOUNT_CHARACTER_LIMIT) {
+          throw new RoomProtocolError(409, 'account-character-limit')
+        }
+        return {
+          ...current,
+          characters: [...characters.filter((candidate) => candidate?.id !== characterId), record]
+            .sort((left, right) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0)),
+          updatedAt: now,
+        }
+      })
+      writeJson(res, 200, record)
+      return true
+    }
+    if (req.method === 'DELETE') {
+      const currentCharacters = Array.isArray(account.characters) ? account.characters : []
+      if (!currentCharacters.some((candidate) => candidate?.id === characterId)) {
+        throw new RoomProtocolError(404, 'account-character-not-found')
+      }
+      const now = Date.now()
+      await mutateAccount(ctx, account.accountId, (current) => ({
+        ...current,
+        characters: (Array.isArray(current.characters) ? current.characters : [])
+          .filter((candidate) => candidate?.id !== characterId),
+        updatedAt: now,
+      }))
+      writeJson(res, 200, { ok: true })
+      return true
+    }
+    throw new RoomProtocolError(405, 'method-not-allowed')
+  }
+
+  throw new RoomProtocolError(404, 'account-not-found')
+}
+
+async function handleRoomLobbyApi(req, res, parsed, ctx) {
+  if (!parsed.pathname.startsWith('/api/rooms')) return false
+  if (!applyLobbyRateLimit(req, res, ctx)) return true
+
+  if (parsed.pathname === '/api/rooms' && req.method === 'POST') {
+    const payload = await readJsonRequest(req)
+    const account = await authenticateAccount(req, ctx, true)
+    if (payload?.accountId != null && account?.accountId !== payload.accountId) {
+      throw new RoomProtocolError(401, 'invalid-account-session')
+    }
+    const { room, member } = await createLobbyRoom(ctx, payload, account)
+    writeJson(res, 201, roomMemberResponse(room, member, 'dm'))
+    return true
+  }
+
+  const previewMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/preview$/)
+  if (previewMatch) {
+    if (req.method !== 'GET') throw new RoomProtocolError(405, 'method-not-allowed')
+    const rawRoomId = String(previewMatch[1] ?? '').toUpperCase()
+    const roomId = normalizeLobbyRoomCode(rawRoomId)
+    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+      return { ok: true }
+    })
+    const rules = roomRulesResponse(result.room)
+    writeJson(res, 200, {
+      roomId: result.room.id,
+      roomName: result.room.name,
+      rulesetId: result.room.rulesetId,
+      dmDisplayName: result.room.host?.displayName ?? 'DM',
+      hostOnline: roomHostIsOnline(result.room),
+      hostStatus: roomHostPresence(result.room),
+      hostLastSeenAt: Number(result.room.host?.lastSeenAt ?? 0),
+      hostGraceExpiresAt: Number(result.room.host?.lastSeenAt ?? 0) + ROOM_HOST_TTL_MS,
+      gameProtocolVersion: SHARED_PROTOCOL_VERSION,
+      locked: result.room.locked === true,
+      passwordRequired: plainObject(result.room.joinSecret),
+      playerCount: activeRoomPlayers(result.room).length,
+      maxPlayers: Number.isInteger(result.room.maxPlayers) ? result.room.maxPlayers : 3,
+      plugins: rules.plugins,
+    })
+    return true
+  }
+
+  const stagedPluginMatch = parsed.pathname.match(
+    /^\/api\/rooms\/([^/]+)\/plugins\/([^/]+)\/(stage|migration-state|activate)$/,
+  )
+  if (stagedPluginMatch) {
+    const rawRoomId = String(stagedPluginMatch[1] ?? '').toUpperCase()
+    const roomId = normalizeLobbyRoomCode(rawRoomId)
+    const pluginId = decodeURIComponent(stagedPluginMatch[2] ?? '')
+    const operation = stagedPluginMatch[3]
+    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
+    if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId)) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+
+    if (operation === 'migration-state') {
+      if (req.method !== 'GET') throw new RoomProtocolError(405, 'method-not-allowed')
+      const memberId = req?.headers?.['x-stars-member']
+      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        const active = (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
+          .find((plugin) => plugin.id === pluginId)
+        const stored = room.pluginRuntimeState?.[pluginId]
+        const stateSchemaVersion = Number.isInteger(stored?.stateSchemaVersion)
+          ? stored.stateSchemaVersion
+          : (active?.stateSchemaVersion ?? 1)
+        return {
+          ok: true,
+          active,
+          hasState: !!stored || !!active,
+          runtime: {
+            stateSchemaVersion,
+            data: stored?.data == null ? {} : normalizedPluginState(stored.data),
+          },
+        }
+      })
+      writeJson(res, 200, {
+        installed: !!result.active,
+        hasState: result.hasState,
+        rulesRevision: Number.isFinite(result.room.rulesRevision) ? result.room.rulesRevision : 1,
+        ...(result.active ? { active: result.active } : {}),
+        stateSchemaVersion: result.runtime.stateSchemaVersion,
+        data: result.runtime.data,
+      })
+      return true
+    }
+
+    if (operation === 'stage') {
+      if (req.method !== 'PUT') throw new RoomProtocolError(405, 'method-not-allowed')
+      const memberId = req?.headers?.['x-stars-member']
+      const version = typeof req?.headers?.['x-stars-plugin-version'] === 'string'
+        ? req.headers['x-stars-plugin-version'].trim()
+        : ''
+      const expectedIntegrity = typeof req?.headers?.['x-stars-plugin-integrity'] === 'string'
+        ? req.headers['x-stars-plugin-integrity'].trim()
+        : ''
+      const stateSchemaVersion = Number(req?.headers?.['x-stars-plugin-state-schema'])
+      const encodedFileName = typeof req?.headers?.['x-stars-plugin-filename'] === 'string'
+        ? req.headers['x-stars-plugin-filename']
+        : ''
+      const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
+      const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
+      const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+      if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+      let fileName = `${pluginId}.dndstars5e`
+      try {
+        const decoded = decodeURIComponent(encodedFileName)
+        if (decoded && decoded.length <= 180 && !/[\\/\0]/.test(decoded)) fileName = decoded
+      } catch {
+        throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+      }
+      const requirement = normalizeRoomPluginRequirements([{
+        id: pluginId,
+        version,
+        integrity: expectedIntegrity,
+        stateSchemaVersion,
+      }])?.[0]
+      if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+      await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        return { ok: true }
+      })
+      const bytes = await readBody(req, STATE_MAX_BYTES)
+      if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
+      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+      if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
+      const storagePath = roomPluginVersionFile(ctx, roomId, pluginId, requirement.integrity)
+      await withWriteLock(storagePath, () => atomicRename(storagePath, bytes))
+      const now = Date.now()
+      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        return {
+          ok: true,
+          member: room.host,
+          next: {
+            ...room,
+            stagedPluginFiles: {
+              ...(room.stagedPluginFiles ?? {}),
+              [pluginId]: {
+                ...requirement,
+                name: pluginName,
+                publisher,
+                license,
+                fileName,
+                storageFile: path.basename(storagePath),
+                size: bytes.length,
+                uploadedAt: now,
+              },
+            },
+            updatedAt: now,
+          },
+        }
+      })
+      writeJson(res, 200, roomRulesResponse(result.room, result.member))
+      return true
+    }
+
+    if (operation === 'activate') {
+      if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+      const payload = await readJsonRequest(req)
+      const memberId = payload?.memberId
+      const expectedRulesRevision = Number(payload?.expectedRulesRevision)
+      const stateSchemaVersion = Number(payload?.stateSchemaVersion)
+      const stagedVersion = typeof payload?.stagedVersion === 'string' ? payload.stagedVersion : ''
+      const stagedIntegrity = typeof payload?.stagedIntegrity === 'string' ? payload.stagedIntegrity : ''
+      const expectedActive = payload?.expectedActive == null
+        ? null
+        : normalizeRoomPluginRequirements([payload.expectedActive])?.[0]
+      if (
+        !Number.isInteger(expectedRulesRevision) || !Number.isInteger(stateSchemaVersion) ||
+        payload?.expectedActive != null && !expectedActive
+      ) throw new RoomProtocolError(400, 'invalid-plugin-activation')
+      const data = normalizedPluginState(payload?.data)
+      await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
+      const now = Date.now()
+      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        const currentRevision = Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1
+        if (currentRevision !== expectedRulesRevision) {
+          return { ok: false, status: 409, error: 'rules-revision-conflict' }
+        }
+        const current = (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
+          .find((plugin) => plugin.id === pluginId) ?? null
+        if (!samePluginRequirement(current, expectedActive)) {
+          return { ok: false, status: 409, error: 'plugin-version-conflict' }
+        }
+        const staged = room.stagedPluginFiles?.[pluginId]
+        if (!staged || staged.version !== stagedVersion || staged.integrity !== stagedIntegrity) {
+          return { ok: false, status: 409, error: 'staged-plugin-conflict' }
+        }
+        if ((staged.stateSchemaVersion ?? 1) !== stateSchemaVersion) {
+          return { ok: false, status: 409, error: 'plugin-state-schema-mismatch' }
+        }
+        const previousState = room.pluginRuntimeState?.[pluginId]
+        const previousSchema = Number.isInteger(previousState?.stateSchemaVersion)
+          ? previousState.stateSchemaVersion
+          : (current?.stateSchemaVersion ?? 1)
+        if (stateSchemaVersion < previousSchema) {
+          return { ok: false, status: 409, error: 'plugin-state-downgrade' }
+        }
+        const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
+        delete stagedPluginFiles[pluginId]
+        const requiredPlugins = [
+          ...(Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []).filter((plugin) => plugin.id !== pluginId),
+          {
+            id: staged.id,
+            version: staged.version,
+            integrity: staged.integrity,
+            stateSchemaVersion: staged.stateSchemaVersion ?? 1,
+          },
+        ].sort((left, right) => left.id.localeCompare(right.id))
+        return {
+          ok: true,
+          member: room.host,
+          next: {
+            ...room,
+            requiredPlugins,
+            pluginFiles: { ...(room.pluginFiles ?? {}), [pluginId]: staged },
+            stagedPluginFiles,
+            pluginRuntimeState: {
+              ...(room.pluginRuntimeState ?? {}),
+              [pluginId]: {
+                pluginVersion: staged.version,
+                stateSchemaVersion,
+                data,
+                updatedAt: now,
+              },
+            },
+            rulesRevision: currentRevision + 1,
+            rulesUpdatedAt: now,
+            updatedAt: now,
+          },
+        }
+      })
+      writeJson(res, 200, roomRulesResponse(result.room, result.member))
+      return true
+    }
+  }
+
+  const pluginMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/plugins\/([^/]+)$/)
+  if (pluginMatch) {
+    const rawRoomId = String(pluginMatch[1] ?? '').toUpperCase()
+    const roomId = normalizeLobbyRoomCode(rawRoomId)
+    const pluginId = decodeURIComponent(pluginMatch[2] ?? '')
+    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
+    if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId)) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+
+    if (req.method === 'GET') {
+      const memberId = req?.headers?.['x-stars-member']
+      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        const member = lobbyRoomMember(room, memberId)
+        if (!member) return { ok: false, status: 403, error: 'forbidden' }
+        if (member !== room.host && !roomHostIsOnline(room)) {
+          return { ok: false, status: 409, error: 'room-offline' }
+        }
+        const requirement = (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
+          .find((plugin) => plugin.id === pluginId)
+        const hosted = room.pluginFiles?.[pluginId]
+        if (!requirement || !hosted || hosted.integrity !== requirement.integrity || hosted.version !== requirement.version) {
+          return { ok: false, status: 404, error: 'plugin-file-not-found' }
+        }
+        return { ok: true, member, requirement, hosted }
+      })
+      let bytes
+      try {
+        bytes = await readFile(roomHostedPluginFile(ctx, roomId, pluginId, result.hosted))
+      } catch (error) {
+        if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'plugin-file-not-found')
+        throw error
+      }
+      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+      if (actualIntegrity !== result.requirement.integrity) {
+        throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/javascript; charset=utf-8',
+        'Content-Length': String(bytes.length),
+        'Cache-Control': 'private, no-store',
+        'X-Stars-Plugin-Version': result.requirement.version,
+        'X-Stars-Plugin-Integrity': result.requirement.integrity,
+        'X-Stars-Plugin-State-Schema': String(result.requirement.stateSchemaVersion ?? 1),
+        'X-Stars-Plugin-Filename': encodeURIComponent(result.hosted.fileName ?? `${pluginId}.dndstars5e`),
+        'X-Stars-Plugin-Name': encodeURIComponent(result.hosted.name ?? pluginId),
+        'X-Stars-Plugin-Publisher': encodeURIComponent(result.hosted.publisher ?? '未知发布者'),
+        'X-Stars-Plugin-License': encodeURIComponent(result.hosted.license ?? '未声明'),
+      })
+      res.end(bytes)
+      return true
+    }
+
+    if (req.method === 'PUT') {
+      const memberId = req?.headers?.['x-stars-member']
+      const version = typeof req?.headers?.['x-stars-plugin-version'] === 'string'
+        ? req.headers['x-stars-plugin-version'].trim()
+        : ''
+      const expectedIntegrity = typeof req?.headers?.['x-stars-plugin-integrity'] === 'string'
+        ? req.headers['x-stars-plugin-integrity'].trim()
+        : ''
+      const encodedFileName = typeof req?.headers?.['x-stars-plugin-filename'] === 'string'
+        ? req.headers['x-stars-plugin-filename']
+        : ''
+      const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
+      const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
+      const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+      if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+      let fileName = `${pluginId}.dndstars5e`
+      try {
+        const decoded = decodeURIComponent(encodedFileName)
+        if (decoded && decoded.length <= 180 && !/[\\/\0]/.test(decoded)) fileName = decoded
+      } catch {
+        throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+      }
+      const requirement = normalizeRoomPluginRequirements([{
+        id: pluginId,
+        version,
+        integrity: expectedIntegrity,
+        stateSchemaVersion: Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1),
+      }])?.[0]
+      if (!requirement) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+      await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        return { ok: true, member: room.host }
+      })
+      const bytes = await readBody(req, STATE_MAX_BYTES)
+      if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
+      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+      if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
+      await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
+      await mkdir(roomPluginDirectory(ctx, roomId), { recursive: true })
+      await withWriteLock(roomPluginFile(ctx, roomId, pluginId), () =>
+        atomicRename(roomPluginFile(ctx, roomId, pluginId), bytes))
+      const now = Date.now()
+      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        const requiredPlugins = [
+          ...(Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []).filter((plugin) => plugin.id !== pluginId),
+          requirement,
+        ].sort((left, right) => left.id.localeCompare(right.id))
+        return {
+          ok: true,
+          member: room.host,
+          next: {
+            ...room,
+            requiredPlugins,
+            pluginFiles: {
+              ...(room.pluginFiles ?? {}),
+              [pluginId]: {
+                ...requirement,
+                name: pluginName,
+                publisher,
+                license,
+                fileName,
+                size: bytes.length,
+                uploadedAt: now,
+              },
+            },
+            rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
+            rulesUpdatedAt: now,
+            updatedAt: now,
+          },
+        }
+      })
+      writeJson(res, 200, roomRulesResponse(result.room, result.member))
+      return true
+    }
+
+    if (req.method === 'DELETE') {
+      const memberId = req?.headers?.['x-stars-member']
+      await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        return { ok: true }
+      })
+      await writeCampaignSnapshot(scopedContext(ctx, roomId), 'pre-plugin-change')
+      const now = Date.now()
+      const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        const pluginFiles = { ...(room.pluginFiles ?? {}) }
+        delete pluginFiles[pluginId]
+        const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
+        delete stagedPluginFiles[pluginId]
+        return {
+          ok: true,
+          member: room.host,
+          next: {
+            ...room,
+            requiredPlugins: (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
+              .filter((plugin) => plugin.id !== pluginId),
+            pluginFiles,
+            stagedPluginFiles,
+            rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
+            rulesUpdatedAt: now,
+            updatedAt: now,
+          },
+        }
+      })
+      writeJson(res, 200, roomRulesResponse(result.room, result.member))
+      return true
+    }
+    throw new RoomProtocolError(405, 'method-not-allowed')
+  }
+
+  const adminMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/admin$/)
+  if (adminMatch) {
+    if (req.method !== 'PATCH') throw new RoomProtocolError(405, 'method-not-allowed')
+    const rawRoomId = String(adminMatch[1] ?? '').toUpperCase()
+    const roomId = normalizeLobbyRoomCode(rawRoomId)
+    if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
+    const payload = await readJsonRequest(req)
+    const memberId = payload?.memberId
+    const operation = payload?.operation
+    const account = await authenticateAccount(req, ctx, true)
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+      if (room.host?.memberId !== memberId || !roomMemberAccountAuthorized(room.host, account)) {
+        return { ok: false, status: 403, error: 'forbidden' }
+      }
+      const now = Date.now()
+      const players = Array.isArray(room.players) ? room.players : []
+      const activePlayers = activeRoomPlayers(room, now)
+      if (operation === 'set-lock') {
+        return { ok: true, member: room.host, role: 'dm', next: { ...room, locked: payload.locked === true, updatedAt: now } }
+      }
+      if (operation === 'set-capacity') {
+        const maxPlayers = Number(payload.maxPlayers)
+        if (!Number.isInteger(maxPlayers) || maxPlayers < activePlayers.length || maxPlayers > ROOM_PLAYER_SLOTS.length) {
+          return { ok: false, status: 400, error: 'invalid-room-capacity' }
+        }
+        return { ok: true, member: room.host, role: 'dm', next: { ...room, maxPlayers, updatedAt: now } }
+      }
+      if (operation === 'set-password') {
+        const password = normalizedRoomPassword(payload.password)
+        if (password.length > 64) return { ok: false, status: 400, error: 'invalid-room-password' }
+        return {
+          ok: true,
+          member: room.host,
+          role: 'dm',
+          next: { ...room, joinSecret: roomPasswordRecord(password), updatedAt: now },
+        }
+      }
+      if (operation === 'kick') {
+        const target = players.find((player) => player.memberId === payload.targetMemberId && !player.removedAt)
+        if (!target) return { ok: false, status: 404, error: 'member-not-found' }
+        return {
+          ok: true,
+          member: room.host,
+          role: 'dm',
+          next: {
+            ...room,
+            players: players.map((player) => player.memberId === target.memberId
+              ? { ...player, lastSeenAt: 0, removedAt: now }
+              : player),
+            updatedAt: now,
+          },
+        }
+      }
+      if (operation === 'restore-member') {
+        const target = players.find((player) => player.memberId === payload.targetMemberId && player.removedAt)
+        if (!target) return { ok: false, status: 404, error: 'member-not-found' }
+        const restored = { ...target, lastSeenAt: 0, leftAt: now }
+        delete restored.removedAt
+        return {
+          ok: true,
+          member: room.host,
+          role: 'dm',
+          next: {
+            ...room,
+            players: players.map((player) => player.memberId === target.memberId ? restored : player),
+            updatedAt: now,
+          },
+        }
+      }
+      if (operation === 'transfer-dm') {
+        const target = activePlayers.find((player) => player.memberId === payload.targetMemberId)
+        if (!target) return { ok: false, status: 404, error: 'member-not-found' }
+        if (!roomPluginReadiness(room.requiredPlugins, target.activePlugins).ready) {
+          return { ok: false, status: 409, error: 'target-plugins-not-ready' }
+        }
+        const nextHost = { ...target, lastSeenAt: now }
+        delete nextHost.slot
+        const previousHostAsPlayer = {
+          ...room.host,
+          slot: target.slot,
+          joinedAt: room.host.joinedAt ?? room.createdAt,
+          lastSeenAt: now,
+        }
+        return {
+          ok: true,
+          member: previousHostAsPlayer,
+          role: 'player',
+          next: {
+            ...room,
+            host: nextHost,
+            players: [...players.filter((player) => player.memberId !== target.memberId), previousHostAsPlayer],
+            authorityRevision: Number(room.authorityRevision ?? 1) + 1,
+            updatedAt: now,
+          },
+        }
+      }
+      return { ok: false, status: 400, error: 'invalid-room-operation' }
+    })
+    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role))
+    return true
+  }
+
+  const match = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(join|heartbeat|leave|roster|rules)$/)
+  if (!match) throw new RoomProtocolError(404, 'room-not-found')
+  const rawRoomId = String(match[1] ?? '').toUpperCase()
+  const roomId = normalizeLobbyRoomCode(rawRoomId)
+  if (roomId !== rawRoomId || roomId.length !== 6) throw new RoomProtocolError(400, 'invalid-room-code')
+  if (match[2] === 'rules') {
+    if (req.method !== 'GET' && req.method !== 'PUT') throw new RoomProtocolError(405, 'method-not-allowed')
+    const payload = req.method === 'PUT' ? await readJsonRequest(req) : null
+    const memberId = req.method === 'GET' ? req?.headers?.['x-stars-member'] : payload?.memberId
+    const account = await authenticateAccount(req, ctx, true)
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+      const member = lobbyRoomMember(room, memberId)
+      if (!member || !roomMemberAccountAuthorized(member, account)) return { ok: false, status: 403, error: 'forbidden' }
+      if (req.method === 'GET') return { ok: true, member }
+      if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+      const requiredPlugins = normalizeRoomPluginRequirements(payload?.requiredPlugins)
+      if (!requiredPlugins) return { ok: false, status: 400, error: 'invalid-plugin-manifest' }
+      const hosted = room.pluginFiles ?? {}
+      if (requiredPlugins.some((plugin) =>
+        hosted[plugin.id]?.version !== plugin.version || hosted[plugin.id]?.integrity !== plugin.integrity)) {
+        return { ok: false, status: 409, error: 'plugin-file-missing' }
+      }
+      const now = Date.now()
+      const host = { ...room.host, activePlugins: requiredPlugins, lastSeenAt: now }
+      return {
+        ok: true,
+        member: host,
+        next: {
+          ...room,
+          host,
+          requiredPlugins,
+          rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
+          rulesUpdatedAt: now,
+          updatedAt: now,
+        },
+      }
+    })
+    writeJson(res, 200, roomRulesResponse(result.room, result.member))
+    return true
+  }
+  if (match[2] === 'roster') {
+    if (req.method !== 'GET') throw new RoomProtocolError(405, 'method-not-allowed')
+    const memberId = req?.headers?.['x-stars-member']
+    const account = await authenticateAccount(req, ctx, true)
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+      if (
+        typeof memberId !== 'string' || room.host?.memberId !== memberId ||
+        !roomMemberAccountAuthorized(room.host, account)
+      ) {
+        return { ok: false, status: 403, error: 'forbidden' }
+      }
+      return { ok: true }
+    })
+    const now = Date.now()
+    writeJson(res, 200, {
+      roomId: result.room.id,
+      locked: result.room.locked === true,
+      passwordRequired: plainObject(result.room.joinSecret),
+      maxPlayers: Number.isInteger(result.room.maxPlayers) ? result.room.maxPlayers : 3,
+      players: (Array.isArray(result.room.players) ? result.room.players : []).map((player) => ({
+        memberId: player.memberId,
+        accountId: player.accountId,
+        displayName: player.displayName,
+        slot: player.slot,
+        joinedAt: player.joinedAt,
+        lastSeenAt: player.lastSeenAt,
+        status: roomPlayerPresence(player, now),
+        online: roomPlayerPresence(player, now) === 'online',
+        activeCharacterId: normalizedLabel(player.activeCharacterId, 128) || null,
+        activeCharacterName: normalizedLabel(player.activeCharacterName, 80) || null,
+        ...roomPluginReadiness(result.room.requiredPlugins, player.activePlugins),
+      })),
+    })
+    return true
+  }
+
+  if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+  const payload = await readJsonRequest(req)
+
+  if (match[2] === 'join') {
+    const displayName = normalizedLabel(payload?.displayName, 24)
+    const clientId = payload?.clientId
+    const resumeMemberId = payload?.resumeMemberId
+    const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
+    const account = await authenticateAccount(req, ctx, true)
+    if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
+    if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
+    if (resumeMemberId != null && (typeof resumeMemberId !== 'string' || resumeMemberId.length < 8 || resumeMemberId.length > 128)) {
+      throw new RoomProtocolError(400, 'invalid-resume-member')
+    }
+    if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (account && room.host?.accountId === account.accountId) {
+        if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+        const now = Date.now()
+        const member = {
+          ...room.host,
+          clientId,
+          displayName,
+          activePlugins,
+          lastSeenAt: now,
+        }
+        return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
+      }
+      if (!roomPasswordMatches(room, payload?.password)) return { ok: false, status: 403, error: 'invalid-room-password' }
+      return assignRoomPlayer(room, {
+        clientId,
+        displayName,
+        memberId: resumeMemberId ?? randomUUID(),
+        accountId: account?.accountId,
+        activePlugins,
+      })
+    })
+    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role ?? 'player'))
+    return true
+  }
+
+  const memberId = payload?.memberId
+  if (typeof memberId !== 'string' || memberId.length < 8) throw new RoomProtocolError(400, 'member-not-found')
+  const account = await authenticateAccount(req, ctx, true)
+
+  if (match[2] === 'heartbeat') {
+    const now = Date.now()
+    const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
+    if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+      if (room.host?.memberId === memberId) {
+        if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
+        const member = {
+          ...room.host,
+          activePlugins,
+          lastSeenAt: now,
+          activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
+          activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+        }
+        return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
+      }
+      if (!roomHostIsOnline(room, now)) return { ok: false, status: 409, error: 'room-offline' }
+      const players = Array.isArray(room.players) ? room.players : []
+      const member = players.find((player) => player.memberId === memberId)
+      if (!member) return { ok: false, status: 404, error: 'member-not-found' }
+      if (!roomMemberAccountAuthorized(member, account)) return { ok: false, status: 403, error: 'forbidden' }
+      if (roomPlayerPresence(member, now) === 'removed') return { ok: false, status: 403, error: 'member-removed' }
+      const resumed = assignRoomPlayer(room, {
+        memberId: member.memberId,
+        accountId: member.accountId,
+        clientId: member.clientId,
+        displayName: member.displayName,
+        activePlugins,
+      }, now)
+      if (!resumed.ok) return resumed
+      const refreshed = {
+        ...resumed.member,
+        activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
+        activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+      }
+      return {
+        ok: true,
+        member: refreshed,
+        role: 'player',
+        next: {
+          ...resumed.next,
+          players: resumed.next.players.map((player) => player.memberId === refreshed.memberId ? refreshed : player),
+        },
+      }
+    })
+    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role))
+    return true
+  }
+
+  await mutateLobbyRoom(ctx, roomId, (room) => {
+    const now = Date.now()
+    if (room.host?.memberId === memberId) {
+      if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
+      return {
+        ok: true,
+        next: { ...room, closedAt: now, updatedAt: now, host: { ...room.host, lastSeenAt: 0 } },
+      }
+    }
+    const players = Array.isArray(room.players) ? room.players : []
+    if (!players.some((player) => player.memberId === memberId)) {
+      return { ok: false, status: 404, error: 'member-not-found' }
+    }
+    const leaving = players.find((player) => player.memberId === memberId)
+    if (!roomMemberAccountAuthorized(leaving, account)) return { ok: false, status: 403, error: 'forbidden' }
+    return {
+      ok: true,
+      // 离开只结束当前在线状态，保留房间成员身份供同一浏览器恢复角色归属。
+      // DM“踢出”仍会彻底删除成员记录，因此不会绕过锁房或踢人操作。
+      next: {
+        ...room,
+        players: players.map((player) => player.memberId === memberId
+          ? { ...player, lastSeenAt: 0, leftAt: now }
+          : player),
+        updatedAt: now,
+      },
+    }
+  })
+  writeJson(res, 200, { ok: true })
+  return true
+}
+
 function addEventClient(ctx, channel, res) {
   const storageKey = eventStorageKey(ctx, channel)
   const clients = ctx.eventClients.get(storageKey) ?? new Set()
@@ -503,7 +2562,11 @@ function addEventClient(ctx, channel, res) {
     Connection: 'keep-alive',
     'Access-Control-Allow-Origin': '*',
   })
-  res.write(`event: ready\ndata: {"channel":"${channel}"}\n\n`)
+  res.write(`event: ready\ndata: ${JSON.stringify({
+    channel,
+    streamId: ctx.serverInstanceId ?? 'legacy-stream',
+    sequence: ctx.eventSequences?.get(ctx.roomId ?? 'default') ?? 0,
+  })}\n\n`)
   // 只回放最近 EVENT_REPLAY_LIMIT 条，而非整 backlog。
   const backlog = replaySlice(ctx.eventBacklog.get(storageKey) ?? [])
   for (const payload of backlog) {
@@ -521,7 +2584,7 @@ function publishEventToChannel(ctx, channel, payload) {
   // LRU touch：delete+set 把该 channel 移到 Map 末尾，使「活跃 channel」始终最新、最后才被 cap 淘汰。
   ctx.eventBacklog.delete(storageKey)
   ctx.eventBacklog.set(storageKey, backlog)
-  // [T-P1-421/AC5] channel 总数封顶；有活跃订阅者的 channel 受保护。
+  // channel 总数封顶；有活跃订阅者的 channel 受保护。
   capEventChannels(ctx.eventBacklog, EVENT_CHANNEL_LIMIT, new Set(ctx.eventClients.keys()))
   const clients = ctx.eventClients.get(storageKey)
   if (!clients) return
@@ -532,13 +2595,94 @@ function publishEventToChannel(ctx, channel, payload) {
 function publishEvent(ctx, channel, payload) {
   publishEventToChannel(ctx, channel, payload)
   if (channel !== '_all') {
-    publishEventToChannel(ctx, '_all', { channel, payload })
+    publishEventToChannel(ctx, '_all', {
+      channel,
+      payload,
+      sequence: nextRoomEventSequence(ctx),
+      streamId: ctx.serverInstanceId ?? 'legacy-stream',
+      emittedAt: Date.now(),
+    })
   }
+}
+
+async function handleCampaignApi(req, res, parsed, ctx) {
+  if (!parsed.pathname.startsWith('/api/campaign/')) return false
+  await requireCampaignDm(ctx, req)
+
+  if (parsed.pathname === '/api/campaign/export' && req.method === 'GET') {
+    const bundle = await buildCampaignBundle(ctx, { kind: 'export', includeAssets: true })
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="dndstars5e-${ctx.roomId ?? 'campaign'}-${bundle.exportedAt}.json"`,
+      'Cache-Control': 'no-store',
+    })
+    res.end(JSON.stringify(bundle))
+    return true
+  }
+
+  if (parsed.pathname === '/api/campaign/import' && req.method === 'PUT') {
+    const bytes = await readBody(req, CAMPAIGN_IMPORT_MAX_BYTES)
+    let bundle
+    try {
+      bundle = JSON.parse(bytes.toString('utf8'))
+    } catch {
+      throw new RoomProtocolError(400, 'invalid-json')
+    }
+    writeJson(res, 200, await restoreCampaignBundle(ctx, bundle))
+    return true
+  }
+
+  if (parsed.pathname === '/api/campaign/snapshots' && req.method === 'GET') {
+    let entries = []
+    try {
+      entries = await readdir(snapshotRoot(ctx))
+    } catch {
+      writeJson(res, 200, { snapshots: [], limit: CAMPAIGN_SNAPSHOT_LIMIT })
+      return true
+    }
+    const snapshots = []
+    for (const fileName of entries.filter((entry) => entry.endsWith('.json'))) {
+      try {
+        const bundle = JSON.parse(await readFile(path.join(snapshotRoot(ctx), fileName), 'utf8'))
+        snapshots.push({
+          id: bundle.snapshotId ?? fileName.slice(0, -5),
+          createdAt: bundle.exportedAt,
+          kind: bundle.snapshotKind ?? 'manual',
+          stateCount: Object.keys(bundle.states ?? {}).length,
+        })
+      } catch {
+        // A broken snapshot must not hide other recovery points.
+      }
+    }
+    snapshots.sort((left, right) => right.createdAt - left.createdAt)
+    writeJson(res, 200, { snapshots, limit: CAMPAIGN_SNAPSHOT_LIMIT })
+    return true
+  }
+
+  if (parsed.pathname === '/api/campaign/snapshots' && req.method === 'POST') {
+    writeJson(res, 201, await writeCampaignSnapshot(ctx, 'manual'))
+    return true
+  }
+
+  const restoreMatch = parsed.pathname.match(/^\/api\/campaign\/snapshots\/([a-zA-Z0-9_-]+)\/restore$/)
+  if (restoreMatch && req.method === 'POST') {
+    const id = safeName(restoreMatch[1])
+    let bundle
+    try {
+      bundle = JSON.parse(await readFile(path.join(snapshotRoot(ctx), `${id}.json`), 'utf8'))
+    } catch {
+      throw new RoomProtocolError(404, 'snapshot-not-found')
+    }
+    writeJson(res, 200, await restoreCampaignBundle(ctx, bundle))
+    return true
+  }
+
+  throw new RoomProtocolError(405, 'method-not-allowed')
 }
 
 /**
  * 处理 /api/* 请求。返回 true 表示已处理（含错误响应），false 表示非 /api（调用方走静态回退）。
- * [T-P1-419/AC1] 任何写锁超时（LockTimeoutError，statusCode=503）由内层 try/catch 映射为 503 fail-closed。
+ * 任何写锁超时（LockTimeoutError，statusCode=503）由内层 try/catch 映射为 503 fail-closed。
  */
 export async function handleSharedApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/')) return false
@@ -546,6 +2690,27 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
     res.end()
+    return true
+  }
+
+  if (parsed.pathname === '/api/meta' && req.method === 'GET') {
+    writeJson(res, 200, {
+      service: 'dndstars-5e-shared',
+      rulesetId: DND5E_2014_RULESET_ID,
+      protocolVersion: SHARED_PROTOCOL_VERSION,
+      minimumClientProtocol: SHARED_MIN_CLIENT_PROTOCOL,
+      buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
+      startedAt: ctx.serverStartedAt ?? PROCESS_STARTED_AT,
+    })
+    return true
+  }
+
+  try {
+    if (await handleAccountApi(req, res, parsed, ctx)) return true
+    if (await handleRoomLobbyApi(req, res, parsed, ctx)) return true
+  } catch (error) {
+    const status = Number(error?.statusCode) || 500
+    writeJson(res, status, { error: error?.code ?? String(error?.message ?? error) })
     return true
   }
 
@@ -558,6 +2723,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     res.end(JSON.stringify({ error: 'unauthorized' }))
     return true
   }
+  ctx = { ...ctx, accessRole: access.role }
   if (access.role === 'player') {
     const stateName = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)?.[1]
     const playerMayWriteState = stateName && PLAYER_WRITABLE_STATE.has(safeName(stateName))
@@ -570,6 +2736,17 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       res.end(JSON.stringify({ error: 'forbidden' }))
       return true
     }
+  }
+  if (
+    req.method !== 'GET' &&
+    (parsed.pathname.startsWith('/api/state/') || parsed.pathname.startsWith('/api/events/') || parsed.pathname.startsWith('/api/images/')) &&
+    !browserProtocolIsCurrent(req)
+  ) {
+    writeJson(res, 426, {
+      error: 'client-protocol-outdated',
+      protocolVersion: SHARED_PROTOCOL_VERSION,
+    })
+    return true
   }
   if (req.method !== 'GET') {
     const buckets = ctx.rateLimits
@@ -587,6 +2764,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   }
 
   try {
+    if (await handleCampaignApi(req, res, parsed, ctx)) return true
+
     const eventMatch = parsed.pathname.match(/^\/api\/events\/([a-zA-Z0-9_-]+)$/)
     if (eventMatch) {
       const channel = safeName(eventMatch[1])
@@ -624,6 +2803,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       await mkdir(ctx.stateRoot, { recursive: true })
+      await maybeWriteAutoCampaignSnapshot(ctx)
       const body = await readBody(req)
       const mutation = JSON.parse(body.toString('utf8'))
       const filePath = path.join(ctx.stateRoot, 'combat-interrupts.json')
@@ -643,7 +2823,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           updatedAt,
         })
       }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
       res.end(JSON.stringify(result.next))
       return true
     }
@@ -653,18 +2836,66 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const name = safeName(stateMatch[1])
       const filePath = path.join(ctx.stateRoot, `${name}.json`)
       if (req.method === 'GET') {
+        let sourcePath = filePath
+        let data
         try {
-          let data
           try {
             data = await readFile(filePath, 'utf8')
           } catch {
-            data = await readFile(path.join(ctx.legacyStateRoot, `${name}.json`), 'utf8')
+            sourcePath = path.join(ctx.legacyStateRoot, `${name}.json`)
+            data = await readFile(sourcePath, 'utf8')
           }
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-          res.end(data)
         } catch {
           res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end('null')
+          return true
+        }
+        let value
+        try {
+          value = normalizeDedicatedDnd5eSharedState(name, JSON.parse(data))
+        } catch {
+          const quarantineId = await quarantineSharedState(ctx, name, data, 'invalid-json')
+          await rm(sourcePath, { force: true }).catch(() => {})
+          writeJson(res, 422, { error: 'state-corrupted', name, quarantineId })
+          return true
+        }
+        if (value?._deleted === true) {
+          const revision = sharedStateRevision(value)
+          res.writeHead(404, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Stars-State-Revision': String(revision),
+          })
+          res.end('null')
+          return true
+        }
+        const validation = validateSharedStateShape(name, value)
+        if (!validation.ok) {
+          const quarantineId = await quarantineSharedState(ctx, name, value, validation.reason)
+          await rm(sourcePath, { force: true }).catch(() => {})
+          writeJson(res, 422, { error: 'state-corrupted', name, reason: validation.reason, quarantineId })
+          return true
+        }
+        try {
+          const revision = sharedStateRevision(value)
+          if (!plainObject(value._sync)) {
+            value = {
+              ...value,
+              _sync: {
+                schemaVersion: SHARED_STATE_SCHEMA_VERSION,
+                revision,
+                writerId: 'legacy-state',
+                writtenAt: Number(value.updatedAt) || 0,
+              },
+            }
+          }
+          data = JSON.stringify(value)
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Stars-State-Revision': String(revision),
+          })
+          res.end(data)
+        } catch {
+          writeJson(res, 500, { error: 'state-serialization-failed', name })
         }
         return true
       }
@@ -677,30 +2908,103 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         await mkdir(ctx.stateRoot, { recursive: true })
         const body = await readBody(req)
-        const parsedBody = JSON.parse(body.toString('utf8'))
-        await atomicWriteJsonStateFreshLocked(filePath, body)
+        let parsedBody
+        try {
+          parsedBody = normalizeDedicatedDnd5eSharedState(name, JSON.parse(body.toString('utf8')))
+        } catch {
+          const quarantineId = await quarantineSharedState(ctx, name, body.toString('utf8'), 'invalid-json-upload')
+          writeJson(res, 400, { error: 'invalid-json', name, quarantineId })
+          return true
+        }
+        if (parsedBody?._deleted === true) {
+          writeJson(res, 422, { error: 'reserved-state-marker', name })
+          return true
+        }
+        const validation = validateSharedStateShape(name, parsedBody)
+        if (!validation.ok) {
+          const quarantineId = await quarantineSharedState(ctx, name, parsedBody, validation.reason)
+          writeJson(res, 422, { error: 'invalid-state', name, reason: validation.reason, quarantineId })
+          return true
+        }
+        await maybeWriteAutoCampaignSnapshot(ctx)
+        const expectedHeader = req?.headers?.['x-stars-expected-revision']
+        const expectedRevision = expectedHeader == null || expectedHeader === '' ? null : Number(expectedHeader)
+        if (expectedRevision != null && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
+          writeJson(res, 400, { error: 'invalid-expected-revision', name })
+          return true
+        }
+        const writeResult = await atomicWriteJsonStateCasLocked(filePath, parsedBody, {
+          expectedRevision,
+          writerId: req?.headers?.['x-stars-writer'],
+        })
+        if (writeResult.conflict) {
+          res.writeHead(409, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Stars-State-Revision': String(writeResult.currentRevision),
+          })
+          res.end(JSON.stringify({
+            error: 'state-revision-conflict',
+            name,
+            expectedRevision,
+            currentRevision: writeResult.currentRevision,
+          }))
+          return true
+        }
+        if (writeResult.stale) {
+          writeJson(res, 200, { ok: true, applied: false, reason: 'stale', revision: writeResult.currentRevision })
+          return true
+        }
         const updatedAt = Number(parsedBody?.updatedAt)
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `${name}:${Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now()}:${Math.random().toString(36).slice(2)}`,
           name,
           updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : Date.now(),
         })
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-        res.end('{"ok":true}')
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-Stars-State-Revision': String(writeResult.revision),
+        })
+        res.end(JSON.stringify({ ok: true, applied: true, revision: writeResult.revision }))
         return true
       }
       if (req.method === 'DELETE') {
-        await rm(filePath, { force: true })
+        await maybeWriteAutoCampaignSnapshot(ctx)
+        const expectedHeader = req?.headers?.['x-stars-expected-revision']
+        const expectedRevision = expectedHeader == null || expectedHeader === '' ? null : Number(expectedHeader)
+        if (expectedRevision != null && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
+          writeJson(res, 400, { error: 'invalid-expected-revision', name })
+          return true
+        }
+        const deleteResult = await atomicDeleteJsonStateCasLocked(filePath, {
+          expectedRevision,
+          writerId: req?.headers?.['x-stars-writer'],
+        })
+        if (deleteResult.conflict) {
+          res.writeHead(409, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Stars-State-Revision': String(deleteResult.currentRevision),
+          })
+          res.end(JSON.stringify({
+            error: 'state-revision-conflict',
+            name,
+            expectedRevision,
+            currentRevision: deleteResult.currentRevision,
+          }))
+          return true
+        }
         await rm(path.join(ctx.legacyStateRoot, `${name}.json`), { force: true })
-        const updatedAt = Date.now()
+        const updatedAt = deleteResult.writtenAt
         publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
           id: `${name}:${updatedAt}:${Math.random().toString(36).slice(2)}`,
           name,
           updatedAt,
           deleted: true,
         })
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-        res.end('{"ok":true}')
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-Stars-State-Revision': String(deleteResult.revision),
+        })
+        res.end(JSON.stringify({ ok: true, revision: deleteResult.revision }))
         return true
       }
     }
@@ -731,9 +3035,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
       if (req.method === 'PUT') {
         await mkdir(ctx.imageRoot, { recursive: true })
+        await maybeWriteAutoCampaignSnapshot(ctx)
         const body = await readBody(req, IMAGE_MAX_BYTES)
         const metaBody = JSON.stringify({ type: req.headers['content-type'] || 'application/octet-stream' })
-        // [T-P1-419/AC3·AC4] blob+meta 在同一把锁内原子落盘。
+        // blob+meta 在同一把锁内原子落盘。
         await atomicWriteImageLocked(filePath, metaPath, body, metaBody)
         // 写后即触发配额 GC（write-trigger，按 mtime 最旧优先淘汰）。
         await enforceImageQuota(ctx.imageRoot)
@@ -742,6 +3047,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (req.method === 'DELETE') {
+        await maybeWriteAutoCampaignSnapshot(ctx)
         await rm(filePath, { force: true })
         await rm(metaPath, { force: true })
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })

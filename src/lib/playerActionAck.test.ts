@@ -76,19 +76,13 @@ function makeCharacter(patch: Partial<Character> = {}): Character {
     ac: 10,
     initiativeBonus: 0,
     speed: 30,
-    actionPoints: 2,
-    currentAP: 2,
     passivePerception: 10,
     inspiration: 0,
-    mana: 0,
-    maxMana: 0,
     saveDC: 12,
     abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     savingThrows: [],
     skills: [],
     conditions: [],
-    traits: [],
-    combatSkills: [],
     equipment: {},
     notes: '',
     dmNotes: '',
@@ -104,7 +98,6 @@ function makeBaseline(
   return {
     characters: [character],
     map,
-    enemyApByToken: {},
   }
 }
 
@@ -112,7 +105,7 @@ describe('player action ack helpers', () => {
   it('builds an accepted ack with appliedAt and action result summary', () => {
     const before = makeBaseline()
     const after = makeBaseline(
-      makeCharacter({ currentAP: 1 }),
+      makeCharacter({ currentHp: 9 }),
       makeMap([makeToken({ x: 150, y: 100 })]),
     )
 
@@ -132,7 +125,7 @@ describe('player action ack helpers', () => {
     expect(ack.id).toBe('action-1:ack:2000')
     expect(ack.appliedAt).toBe(2000)
     expect(ack.acceptedPosition).toEqual({ x: 150, y: 100 })
-    expect(ack.result?.changedCharacters[0]?.ap).toEqual({ before: 2, after: 1 })
+    expect(ack.result?.changedCharacters[0]?.hp).toEqual({ before: 10, after: 9 })
     expect(ack.result?.changedTokens[0]?.position).toEqual({
       before: { x: 100, y: 100 },
       after: { x: 150, y: 100 },
@@ -150,7 +143,7 @@ describe('player action ack helpers', () => {
       initiativeIndex: 0,
       appliedAt: 2000,
       before: makeBaseline(),
-      after: makeBaseline(makeCharacter({ currentAP: 1 })),
+      after: makeBaseline(makeCharacter({ currentHp: 9 })),
     })
 
     expect(ack.status).toBe('rejected')

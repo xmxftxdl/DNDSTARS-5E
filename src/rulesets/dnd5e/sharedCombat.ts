@@ -1,4 +1,9 @@
 import type { Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import {
+  activeDnd5eRulesPluginRequirements,
+  missingDnd5eRulesPluginRequirements,
+  type Dnd5eRulesPluginRequirement,
+} from './pluginApi'
 
 export interface SharedDnd5eTurnEconomy {
   actionAvailable: boolean
@@ -28,6 +33,7 @@ export interface SharedDnd5eCombatState {
   initiativeIndex: number
   initiativeOrder: readonly string[]
   combatants: Record<string, SharedDnd5eCombatantState>
+  requiredPlugins: readonly Dnd5eRulesPluginRequirement[]
   revision: number
   updatedAt: number
 }
@@ -55,13 +61,14 @@ export function publishDnd5eCombatState(
       concentrating: combatant.concentrating,
       deathSaves: { ...combatant.deathSaves },
     }])),
+    requiredPlugins: activeDnd5eRulesPluginRequirements(),
     revision: input.revision,
     updatedAt: input.updatedAt ?? Date.now(),
   }
 }
 
 export type SharedDnd5eApplyDecision =
-  | { status: 'ignored'; reason: 'wrong-ruleset' | 'wrong-map' | 'wrong-combat' | 'stale' | 'unchanged' }
+  | { status: 'ignored'; reason: 'wrong-ruleset' | 'wrong-map' | 'wrong-combat' | 'plugin-mismatch' | 'stale' | 'unchanged' }
   | { status: 'apply'; state: SharedDnd5eCombatState }
 
 export function shouldApplySharedDnd5eCombatState(input: {
@@ -75,6 +82,7 @@ export function shouldApplySharedDnd5eCombatState(input: {
   if (incoming.rulesetId !== 'dnd5e-2014-srd-5.1') return { status: 'ignored', reason: 'wrong-ruleset' }
   if (incoming.mapId !== input.mapId) return { status: 'ignored', reason: 'wrong-map' }
   if (incoming.combatId !== input.combatId) return { status: 'ignored', reason: 'wrong-combat' }
+  if (missingDnd5eRulesPluginRequirements(incoming.requiredPlugins).length > 0) return { status: 'ignored', reason: 'plugin-mismatch' }
   if (incoming.revision < input.currentRevision) return { status: 'ignored', reason: 'stale' }
   if (input.currentSnapshot && JSON.stringify(incoming) === JSON.stringify(input.currentSnapshot)) {
     return { status: 'ignored', reason: 'unchanged' }

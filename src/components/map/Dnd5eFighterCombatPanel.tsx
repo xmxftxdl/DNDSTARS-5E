@@ -1,27 +1,52 @@
-import { Crosshair, HeartPulse, Shield, Sword, Zap } from 'lucide-react'
+import { Clock3, Crosshair, Footprints, HeartPulse, RotateCcw, Shield, Sparkles, Sword, Zap } from 'lucide-react'
 import {
   FIGHTER_RESOURCE_KEYS,
   dnd5eArmorClass,
+  dnd5eOffHandWeaponAttackProfile,
   dnd5eWeaponAttackProfile,
   fighterAttacksPerAttackAction,
   fighterResourceState,
 } from '../../rulesets/dnd5e'
 import type { Dnd5eFighterFeatureId } from '../../rulesets/dnd5e'
+import type { Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 
-export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, onAttack, onFeature }: {
+export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, turnEconomy, onAttack, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
   pending: boolean
-  onAttack: () => void
+  turnEconomy: Dnd5eTurnEconomyCounts
+  onAttack: (options?: Dnd5eWeaponAttackOptions) => void
   onFeature: (feature: Dnd5eFighterFeatureId) => void
 }) {
   const profile = dnd5eWeaponAttackProfile(character)
+  const offHandProfile = dnd5eOffHandWeaponAttackProfile(character)
+  const attacksPerAction = fighterAttacksPerAttackAction(character.level)
+  const attackLimit = attacksPerAction * Math.max(1, turnEconomy.action.max)
+  const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
+  const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (turnEconomy.action.current > 0 || canContinueAttackAction)
+  const offHandAttackAvailable = !!offHandProfile && turnEconomy.attacksUsed > 0 && turnEconomy.bonusAction.current > 0
   const secondWind = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.secondWind)
   const actionSurge = fighterResourceState(character, FIGHTER_RESOURCE_KEYS.actionSurge)
   return (
     <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+      <section className="rounded-xl border border-white/10 bg-void-900/45 p-3 md:col-span-2" aria-label="本回合行动经济">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+            <Clock3 className="h-4 w-4 text-arcane-300" />本回合可用行动
+          </div>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${canAct ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-500'}`}>
+            {canAct ? '你的回合' : '回合外'}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <EconomyCard icon={Sword} label="主动动作" pool={turnEconomy.action} detail="攻击等" />
+          <EconomyCard icon={Sparkles} label="附赠动作" pool={turnEconomy.bonusAction} detail="回气等" />
+          <EconomyCard icon={RotateCcw} label="反应" pool={turnEconomy.reaction} detail="借机攻击等" />
+          <EconomyCard icon={Footprints} label="移动" pool={turnEconomy.movement} detail="独立于动作" suffix="尺" />
+        </div>
+      </section>
       <div className="rounded-xl border border-white/10 bg-void-900/45 p-4">
         <div className="flex items-center gap-2">
           <Sword className="h-5 w-5 text-arcane-300" />
@@ -43,13 +68,21 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         )}
         <button
           type="button"
-          onClick={onAttack}
-          disabled={!canAct || !profile || pending}
+          onClick={() => onAttack()}
+          disabled={!canAct || !profile || pending || !weaponAttackAvailable}
           className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition-colors ${targeting ? 'bg-amber-500 text-void-950' : 'bg-arcane-500/25 text-arcane-100 hover:bg-arcane-500/40'} disabled:cursor-not-allowed disabled:opacity-40`}
         >
           <Crosshair className="h-4 w-4" />
           {pending ? '等待 DM 结算…' : targeting ? '请点击地图上的目标' : '选择目标并攻击'}
         </button>
+        {offHandProfile ? <button
+          type="button"
+          onClick={() => onAttack({ offHandAttack: true })}
+          disabled={!canAct || pending || !offHandAttackAvailable}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-200 hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Sword className="h-4 w-4" />副手附赠攻击（{offHandProfile.damage.count}d{offHandProfile.damage.sides}{offHandProfile.damage.bonus >= 0 ? '+' : ''}{offHandProfile.damage.bonus}）
+        </button> : null}
       </div>
       <div className="rounded-xl border border-white/10 bg-void-900/45 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><Shield className="h-4 w-4 text-sky-300" />防护与装备</div>
@@ -67,7 +100,7 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
             icon={HeartPulse}
             name="回气"
             detail={`附赠动作 · 恢复 1d10＋${character.level} HP · ${secondWind.current}/${secondWind.max}`}
-            disabled={!canAct || pending || character.currentHp <= 0 || character.currentHp >= character.maxHp || secondWind.current < 1}
+            disabled={!canAct || pending || turnEconomy.bonusAction.current < 1 || character.currentHp <= 0 || character.currentHp >= character.maxHp || secondWind.current < 1}
             onClick={() => onFeature('second-wind')}
           />
           <FeatureButton
@@ -78,8 +111,30 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
             onClick={() => onFeature('action-surge')}
           />
         </div>
-        {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈资源已记录；将在 5e 豁免请求链接入后开放重骰按钮。</p>}
+        {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
+    </div>
+  )
+}
+
+function EconomyCard({ icon: Icon, label, pool, detail, suffix }: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  pool: { current: number; max: number }
+  detail: string
+  suffix?: string
+}) {
+  const available = pool.current > 0
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${available ? 'border-emerald-500/20 bg-emerald-500/[0.07]' : 'border-white/10 bg-white/[0.025]'}`}>
+      <div className="flex items-center gap-1.5">
+        <Icon className={`h-3.5 w-3.5 ${available ? 'text-emerald-300' : 'text-slate-600'}`} />
+        <span className="text-xs font-semibold text-slate-300">{label}</span>
+      </div>
+      <div className={`mt-1 text-lg font-black tabular-nums ${available ? 'text-emerald-200' : 'text-slate-600'}`}>
+        {pool.current}/{pool.max}{suffix ? ` ${suffix}` : ''}
+      </div>
+      <div className="text-[10px] text-slate-500">{available ? detail : '已使用'}</div>
     </div>
   )
 }

@@ -19,7 +19,7 @@ const MELEE_RANGE_CELLS = 1
 /** 无结构化攻击数据时的回退骰（理论上 post-T6 不应触发） */
 const FALLBACK_ATTACK_DICE = { count: 1, sides: 6 }
 
-/** [T7/AC1] 解析 'XdY+Z' / 'XdY' 形式的伤害骰；解析失败回退到 1d6。 */
+/** 解析 'XdY+Z' / 'XdY' 形式的伤害骰；解析失败回退到 1d6。 */
 function parseDamageDice(dice: string | undefined): { count: number; sides: number; bonus: number } {
   const match = dice?.match(/^(\d+)d(\d+)([+-]\d+)?$/i)
   if (!match) return { count: FALLBACK_ATTACK_DICE.count, sides: FALLBACK_ATTACK_DICE.sides, bonus: 0 }
@@ -31,12 +31,12 @@ function parseDamageDice(dice: string | undefined): { count: number; sides: numb
 }
 
 /**
- * [T7/AC6] stale/unknown poolId 回退到固定 dexBonus 时，按 token id 去重告警一次。
+ * stale/unknown poolId 回退到固定 dexBonus 时，按 token id 去重告警一次。
  * 战斗结束时由 clearEnemyAiWarnings() 清空，避免长时间运行无界增长。
  */
 const warnedFallbackTokenIds = new Set<string>()
 
-/** [T7/AC6] 战斗结束生命周期钩子：清空回退告警去重集合。 */
+/** 战斗结束生命周期钩子：清空回退告警去重集合。 */
 export function clearEnemyAiWarnings(): void {
   warnedFallbackTokenIds.clear()
 }
@@ -74,7 +74,7 @@ function enemyMeleeDexBonus(enemy: Token): number {
     const stats = getEnemyStatBlock(enemy.poolId)
     if (stats) return abilityMod(stats.abilities.dex)
   }
-  // [T7/AC6] 缺失/陈旧 poolId → 固定回退 dexBonus=2，按 token id 去重告警一次。
+  // 缺失/陈旧 poolId → 固定回退 dexBonus=2，按 token id 去重告警一次。
   if (!warnedFallbackTokenIds.has(enemy.id)) {
     warnedFallbackTokenIds.add(enemy.id)
     console.warn(
@@ -148,7 +148,7 @@ function enemyRangedRangeCells(enemy: Token, map: BattleMap): number | null {
 }
 
 /**
- * [T7/AC1] 选取本次攻击使用的结构化动作：
+ * 选取本次攻击使用的结构化动作：
  * 远程优先含 damageDice 的远程动作；近战走主攻击（getPrimaryAttackAction）。
  * 缺失时回退到主攻击。多重攻击的怪物只取主攻击（一次），见 Edge Cases。
  */
@@ -176,7 +176,7 @@ function buildEnemyAttack(
 ): EnemyTurnResult {
   const values: number[] = []
 
-  // [T7/AC1] 标签/骰面/命中加值来自怪物的结构化主攻击（damageDice/damageType/toHit），
+  // 标签/骰面/命中加值来自怪物的结构化主攻击（damageDice/damageType/toHit），
   // 不再硬编码全局 1d6。inferEnemyDamageDiceCount 会从 label 解析 \d+d\d+。
   const block = enemy.poolId ? getEnemyStatBlock(enemy.poolId) : undefined
   const selectedAction = selectAttackAction(block, kind)
@@ -201,7 +201,7 @@ function buildEnemyAttack(
     diceCount = FALLBACK_ATTACK_DICE.count
   }
 
-  // [T-P2-423/AC5] 估算伤害（满额 = count*sides + bonus）；MapsPage 会按 label 重新投骰，
+  // 估算伤害（满额 = count*sides + bonus）；MapsPage 会按 label 重新投骰，
   // total 仅作占位与守卫阈值（resolveEnemyDamageDice 要求 damage>0 才重投）。与 buildBreathAttack
   // 一致，消除此前硬编码的 total=1（战斗日志曾恒显 1 点伤害）。
   const total = Math.max(1, diceCount * sides + attackBonus)
@@ -237,7 +237,7 @@ function buildEnemyAttack(
 }
 
 /**
- * [T7/AC3] 数据驱动的吐息分支：任何怪物只要其 stat block 含一个
+ * 数据驱动的吐息分支：任何怪物只要其 stat block 含一个
  * `kind:'aoe'` 且带 `save` 的结构化动作，就在第一回合默认使用该吐息，
  * 不再针对 'wyrmling-red' 做字符串特判。红/绿龙皆由数据驱动。
  */
@@ -272,7 +272,7 @@ function buildBreathAttack(
   }
 }
 
-/** [T7/AC3] 取怪物的吐息动作（kind:'aoe' 且带 save）。 */
+/** 取怪物的吐息动作（kind:'aoe' 且带 save）。 */
 function findBreathAction(enemy: Token): MonsterAction | undefined {
   if (!enemy.poolId) return undefined
   const block = getEnemyStatBlock(enemy.poolId)
@@ -286,7 +286,7 @@ export function planEnemyTurn(
   availableAp = 2,
   context?: { round?: number },
 ): EnemyTurnResult {
-  // [T7/AC2] 目标集合 = 玩家 + npc/友方（敌对于敌人），排除 enemy-vs-enemy 与障碍。
+  // 目标集合 = 玩家 + npc/友方（敌对于敌人），排除 enemy-vs-enemy 与障碍。
   const targets = map.tokens.filter(isHostileToEnemy)
   if (targets.length === 0) {
     return { moved: false, attacked: false, message: `${enemy.label} 找不到可攻击目标。` }
@@ -295,7 +295,7 @@ export function planEnemyTurn(
   const startCell = tokenAnchorCellFromPixel(enemy.x, enemy.y, enemy, map)
   const nearest = findNearestPlayer(enemy, targets, map)!
   const rangedRangeCells = enemyRangedRangeCells(enemy, map)
-  // [T7/AC3] 数据驱动吐息：第一回合默认优先使用（红/绿龙等）。
+  // 数据驱动吐息：第一回合默认优先使用（红/绿龙等）。
   const breath = findBreathAction(enemy)
   if (breath && (context?.round ?? 1) === 1 && availableAp >= 1) {
     return buildBreathAttack(enemy, nearest.token, breath)

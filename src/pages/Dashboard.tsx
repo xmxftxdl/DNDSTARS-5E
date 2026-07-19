@@ -10,6 +10,10 @@ import {
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
+import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
+import { SharedSyncDiagnosticsPanel } from '../components/SharedSyncStatus'
+import RoomManagementPanel from '../components/RoomManagementPanel'
+import Dnd5eEffectDiagnosticsPanel from '../components/Dnd5eEffectDiagnosticsPanel'
 
 const stats = [
   { label: '已上传地图', value: '0', icon: MapIcon, color: 'text-sky-300' },
@@ -21,8 +25,7 @@ const stats = [
 const quickActions = [
   { to: '/maps', label: '上传地图', desc: '导入战斗地图并设置网格', icon: MapIcon },
   { to: '/characters', label: '创建角色', desc: '录入冒险者的属性与技能', icon: Users },
-  { to: '/combat', label: '开始战斗', desc: '排列先攻顺序，开打', icon: Swords },
-  { to: '/ai', label: '配置 AI 敌人', desc: '连接本地模型驱动敌人', icon: Bot },
+  { to: '/maps', label: '开始战斗', desc: '在地图中启动 D&D 5e Headless 战斗', icon: Swords },
 ]
 
 export default function Dashboard() {
@@ -60,7 +63,7 @@ export default function Dashboard() {
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {quickActions.map(({ to, label, desc, icon: Icon }) => (
-          <Link key={to} to={to}>
+          <Link key={`${label}:${to}`} to={to}>
             <Card className="group flex items-center gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-arcane-500/15 text-arcane-300 transition-colors group-hover:bg-arcane-500/25">
                 <Icon className="h-6 w-6" />
@@ -86,6 +89,10 @@ export default function Dashboard() {
           <p className="text-sm text-slate-500">创建你的第一个战役，开启冒险吧。</p>
         </div>
       </Card>
+      <CampaignSafetyPanel />
+      <RoomManagementPanel />
+      <SharedSyncDiagnosticsPanel />
+      <Dnd5eEffectDiagnosticsPanel />
     </div>
   )
 }

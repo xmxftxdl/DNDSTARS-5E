@@ -1,126 +1,31 @@
 import type { AbilityKey } from '../lib/dnd'
-import type { ClassFeatureKey } from '../lib/traitRegistry'
+import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { DND5E_COMBAT_STATE_SCHEMA_VERSION } from '../rulesets/dnd5e/activeEffects'
 import type { CharacterEquipment } from './equipment'
-
-export type { ClassFeatureKey } from '../lib/traitRegistry'
+import type { Dnd5eInventory } from './inventory'
 
 export type Abilities = Record<AbilityKey, number>
 
-/** 战斗中临时增益 */
-export interface CombatBuffs {
-  /** 鹰眼剩余回合（己方回合开始时 -1） */
-  eagleEyeTurns?: number
-  /** 双箭已就绪，下次单箭射击生效 */
-  doubleArrowReady?: boolean
-  /** 精准打击已就绪 */
-  preciseStrikeReady?: boolean
-  /** 本回合已触发稳弦 */
-  steadyDrawUsedThisTurn?: boolean
-  /** 本场战斗已触发静默开弓 */
-  silentDrawUsed?: boolean
-  /** 安定心神：静心标记（上限 4） */
-  calmSpiritStacks?: number
-  /** 安定心神：下次攻击额外暴击率百分点 */
-  calmSpiritCritBonusPercent?: number
-  /** 安定心神：剩余可免费移动尺数，不触发气喘 */
-  calmSpiritMoveFeet?: number
-  /** 本回合移动尺数（静心判定） */
-  movedFeetThisTurn?: number
-  /** 本回合是否受到伤害（静心判定） */
-  tookDamageThisTurn?: boolean
-  /** Current combat initiative slot that has already run beginTurn. */
-  turnStartKey?: string
-  /** 静心状态（有静心特性且未气喘） */
-  calmMind?: boolean
-  calmMindFirstTurnPending?: boolean
-  finaleReady?: boolean
-  /** 气喘剩余回合（己方回合结束时 -1，>0 时为气喘） */
-  outOfBreathTurns?: number
-  /** Still Water: remaining own end turns immune to gaining out-of-breath. */
-  stillWaterBreathImmunityTurns?: number
-  /** Still Water: remaining own end turns before granted temporary HP expires. */
-  stillWaterTempHpTurns?: number
-  /** 演出时间剩余回合 */
-  showtimeTurns?: number
-  /** Wind Blade: off-turn dodge does not spend AP until next own turn starts. */
-  windBladeFreeDodgeTurns?: number
-  /** 疾风连击已就绪：下一次技能/基础射击免 AP */
-  galeComboReady?: boolean
-  /** 灵巧跳跃：剩余可免费移动尺数（闪避成功后） */
-  agileLeapMoveFeet?: number
-  /** 起身踢/安定心神等授予的临时免费移动尺数 */
-  freeMoveFeet?: number
-  /** 捆绑射击：本回合爆裂踢额外伤害骰数量 */
-  burstKickExtraD6?: number
-  /** 影遁舞步：本回合踏风连踢视为目标已击飞 */
-  windKickTreatKnockbackTargetId?: string
-  /** Shadow Veil: target blinded/veiled against this character for the current turn. */
-  shadowVeilTargetId?: string
-  /** Flexible Body: bonus applied to the next dodge or Dex save. */
-  flexibleBodyBonus?: number
-  /** 荒野指引者 · 特殊指引：下次生存/察觉检定具有优势 */
-  wildernessGuideBoost?: boolean
-}
-/** 特性：有名称、等级、剩余次数、描述 */
-export interface Trait {
-  id: string
-  name: string
-  level: number
-  uses: number // 当前剩余次数
-  maxUses: number // 最大次数（0 表示无限/被动）
-  description: string
-  /** 职业预置特性（如弓手双箭） */
-  featureKey?: ClassFeatureKey
-}
-
-/** 主动技能（带冷却系统） */
-export interface CombatSkill {
-  id: string
-  name: string
-  emoji: string
-  description: string
-  apCost: number // 行动点消耗
-  cooldown: number // 基础冷却回合（1-7）
-  cdReduction: number // 装备等带来的冷却减免
-  remaining: number // 剩余冷却回合，0 = 待命可用
-  usedThisTurn: boolean // 本回合是否已使用
-  // 伤害（damageCount = 0 表示无伤害，纯辅助）
-  damageCount: number // 骰子个数（如 3 个 1d4）
-  damageSides: number // 骰子面数（如 d4）
-  damageBonus: number // 固定加值
-  /** 命中后施加的状态效果 */
-  statusOnHit?: 'burning' | 'poison'
-  statusDuration?: number // 状态持续回合数
-  /** 命中后目标敏捷豁免对抗施法者 saveDC，失败则击飞 */
-  knockbackOnHit?: boolean
-  /** 击飞敏捷豁免劣势（如鹰击长空 5 阶） */
-  knockbackSaveDisadvantage?: boolean
-  /** 箭矢数量（1 = 单箭，可触发双箭等弓手特性） */
-  arrowShots?: number
-  tags?: ('ranged' | 'melee')[]
-  /** 关联弓手技能树节点 id */
-  skillTreeId?: string
-}
-
-export const MAX_COOLDOWN = 7
-
-export interface BulletPuzzleState {
-  /** 64 格，每格 0–6 表示子弹类型 */
-  grid: number[]
-  /** 7 种子弹在「准备就绪」栏中的数量 */
-  ready: number[]
-}
-
 export interface Character {
   /** 5.2.1 仅用于识别并迁移旧存档；新数据统一写入 2014 / SRD 5.1。 */
-  rulesetId?: 'dnd5e-2014-srd-5.1' | 'dnd5e-srd-5.2.1'
+  rulesetId?: 'dnd5e-2014-srd-5.1'
+  /** 野蛮人20级“原始斗士”已将力量与体质各提高4；用于防止刷新或等级同步时重复叠加。 */
+  dnd5ePrimalChampionApplied?: boolean
   id: string
   name: string
+  /** 创建该角色的房间；用于大厅成员名册，不参与 D&D 规则结算。 */
+  roomId?: string
+  /** 创建该角色的房间成员 ID；DM 只读名册据此关联玩家与角色。 */
+  roomMemberId?: string
+  /** Stable account owner. Unlike roomMemberId this survives rooms, browsers and devices. */
+  ownerAccountId?: string
   player: string
   avatar: string // emoji
   accent: string // tailwind 渐变色起点（用于头像底色）
 
   race: string
+  /** 可选的完整插件命名空间种族 ID；race 保留可读名称。 */
+  dnd5eRaceId?: string
   charClass: string
   level: number
   background: string
@@ -129,6 +34,32 @@ export interface Character {
   reputation: number // 声望
 
   abilities: Abilities
+  /** 创建向导记录的种族调整前基础值与生成方式；实际结算始终使用 abilities。 */
+  dnd5eAbilityGeneration?: {
+    method: 'beginner-recommended' | 'standard-array' | 'point-buy' | 'roll-4d6' | `${string}:${string}`
+    baseScores: Abilities
+    racialBonuses: Abilities
+    halfElfChoices?: AbilityKey[]
+    racialBonusChoices?: AbilityKey[]
+    rolls?: Array<{
+      dice: number[]
+      discardedIndex?: number
+      discardedIndices?: number[]
+      total: number
+      ability: AbilityKey
+    }>
+  }
+  /** 角色创建向导的可解释推荐记录；仅用于回顾构筑思路，不参与规则结算。 */
+  dnd5eCreationRecommendation?: {
+    source: 'beginner-questionnaire' | 'build-analysis'
+    recommendedClass: string
+    selectedClass: string
+    classMatchPercent?: number
+    primaryAbilities: AbilityKey[]
+    selectedRace: string
+    recommendedRaces: string[]
+    reasons: string[]
+  }
   savingThrows: AbilityKey[] // 熟练的豁免
   skills: string[] // 熟练的技能 key
 
@@ -136,84 +67,165 @@ export interface Character {
   currentHp: number
   tempHp: number
   hitDice: string
+  /** 固定值会随职业、等级和体质自动重算；manual 用于逐级掷骰后手动填写总值。 */
+  hitPointMaximumMode?: 'fixed' | 'manual'
   /** D&D 5e 2014 Hit Dice pools. Legacy hitDice is retained only for save migration. */
   hitPointDice?: Array<{ sides: number; current: number; max: number }>
   deathSaveSuccesses?: number
   deathSaveFailures?: number
   deathSaveStable?: boolean
   concentrating?: boolean
-  /** @deprecated 2024 存档兼容字段；2014 规则使用 inspiration。 */
-  heroicInspiration?: boolean
   exhaustionLevel?: number
   dnd5eClassChoices?: {
     fighter?: {
-      subclass?: 'champion' | 'battle-master' | 'eldritch-knight'
+      /** Core uses "champion"; third-party values are namespaced by the rules plugin host. */
+      subclass?: string
       fightingStyles?: Array<'archery' | 'defense' | 'dueling' | 'great-weapon-fighting' | 'protection' | 'two-weapon-fighting'>
-      maneuvers?: Array<
-        | 'commanders-strike'
-        | 'disarming-attack'
-        | 'distracting-strike'
-        | 'evasive-footwork'
-        | 'feinting-attack'
-        | 'goading-attack'
-        | 'lunging-attack'
-        | 'maneuvering-attack'
-        | 'menacing-attack'
-        | 'parry'
-        | 'precision-attack'
-        | 'pushing-attack'
-        | 'rally'
-        | 'riposte'
-        | 'sweeping-attack'
-        | 'trip-attack'
-      >
-      maneuverAbility?: 'str' | 'dex'
+      /** Declarative, namespaced choices supplied by an installed rules plugin. */
+      extensionChoices?: Record<string, string[]>
     }
+    /** 其余 SRD 职业的声明式选择；键为稳定职业 ID。 */
+    classes?: Record<string, {
+      subclass?: string
+      selections?: Record<string, string[]>
+    }>
+  }
+  /**
+   * 用户主动安装的 Rules Plugin 所提供、并由该角色选择的特性 ID。
+   * ID 必须保留完整插件命名空间；插件未安装时仍原样保存，不回退为核心规则内容。
+   */
+  dnd5ePluginFeatureIds?: string[]
+  /** 仅由 5e Headless 权威事务写入的战斗中职业状态。 */
+  dnd5eCombatState?: {
+    schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
+    /** 权威状态实例；旧 conditions 字符串仅作为兼容投影。 */
+    activeEffects?: Dnd5eActiveEffectInstance[]
+    /** 铁蒺藜伤势造成的速度减值；恢复至少 1 点生命值时由 Headless 清除。 */
+    caltropsSpeedPenaltyFeet?: number
+    raging?: boolean
+    frenzying?: boolean
+    frenzyStartedTurnKey?: string
+    rageTurnsRemaining?: number
+    rageSustainedThisTurn?: boolean
+    relentlessRageDc?: number
+    relentlessRagePendingDc?: number
+    undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
+    monsterOnHitSavePending?: {
+      sourceId: string
+      actionId: string
+      ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+      dc: number
+      condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+    }
+    intimidatingPresenceSourceId?: string
+    intimidatingPresenceRoundsRemaining?: number
+    intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
+    /** 大地结社“自然庇护”：攻击者对各德鲁伊目标的24小时成功豁免免疫。 */
+    natureSanctuaryImmunityRoundsByTarget?: Record<string, number>
+    /** 驱散亡灵：效果来源牧师的地图 Token ID。 */
+    turnedByClericId?: string
+    /** 驱散亡灵剩余自身回合数；受到任意伤害时提前结束。 */
+    turnedRoundsRemaining?: number
+    bardicInspirationDie?: number
+    bardicInspirationSourceId?: string
+    bardicInspirationRoundsRemaining?: number
+    /** 反魅惑演奏持续至吟游诗人下一回合结束；2 表示发动回合与下个回合。 */
+    countercharmRoundsRemaining?: number
+    sneakAttackTurnKey?: string
+    colossusSlayerTurnKey?: string
+    divineStrikeTurnKey?: string
+    foeSlayerTurnKey?: string
+    recklessAttackTurnKey?: string
+    weaponAttackActionTurnKey?: string
+    dodgingTurnKey?: string
+    sacredWeaponTurnsRemaining?: number
+    /** 奉献之誓20级“神圣光轮”剩余自身回合数。 */
+    holyNimbusRoundsRemaining?: number
+    /** 神圣干预成功后的冷却天数；一次长休按经过一天递减。 */
+    divineInterventionCooldownDays?: number
+    monkAttackActionTurnKey?: string
+    monkMartialArtsTurnKey?: string
+    /** 拨挡飞弹减伤至 0 后，仅在触发该反应的当前战斗时点可掷回。 */
+    deflectMissilesCatchSourceId?: string
+    deflectMissilesCatchTurnKey?: string
+    deflectMissilesCatchDamageType?: 'acid' | 'bludgeoning' | 'cold' | 'fire' | 'force' | 'lightning' | 'necrotic' | 'piercing' | 'poison' | 'psychic' | 'radiant' | 'slashing' | 'thunder'
+    emptyBodyRoundsRemaining?: number
+    hordeBreakerOpportunityTurnKey?: string
+    hordeBreakerSourceTargetId?: string
+    hordeBreakerUsedTurnKey?: string
+    multiattackDefenseAttackerId?: string
+    multiattackDefenseTurnKey?: string
+    stunnedByActorId?: string
+    stunnedAppliedTurnKey?: string
+    /** 散打技法“不能进行反应”；值记录各来源施加时的回合键，至来源下一回合结束清除。 */
+    openHandNoReactionsAppliedTurnKeysBySource?: Record<string, string>
+    /** 散打宗 17 级“渗透劲”当前唯一目标的地图 Token ID。 */
+    quiveringPalmTargetId?: string
+    /** 散打宗 11 级：长休后获得的庇护术效果，攻击或对敌施法后结束。 */
+    tranquilityActive?: boolean
+    /** 成功躲藏后的检定结果；进行攻击时由 Headless 清除。 */
+    hiddenCheckTotal?: number
+    /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */
+    hideInPlainSightPrepared?: boolean
+    bonusActionSpellTurnKey?: string
+    leveledSpellTurnKey?: string
+    concentrationSpellId?: string
+    concentrationTargetIds?: string[]
+    concentrationRoundsRemaining?: number
+    concentrationEffectsBySource?: Record<string, string>
+    /** 恶言相加：下回合结束前的下一次攻击检定具有劣势。 */
+    viciousMockeryAttackDisadvantage?: boolean
+    /** 护盾术：直到自身下回合开始 AC +5，并免疫魔法飞弹。 */
+    shieldSpellActive?: boolean
+    /** 塑能学派“超限导能”自上次长休后的使用次数；长休时清除。 */
+    overchannelUsesSinceLongRest?: number
+    /** 龙族血脉“元素亲和”当前获得的先祖元素抗性。 */
+    draconicResistanceType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'poison'
+    /** 元素亲和抗性的剩余回合；600回合等于1小时。 */
+    draconicResistanceRoundsRemaining?: number
+    draconicWingsActive?: boolean
+    /** 龙威豁免成功后，对各术士来源的24小时免疫。 */
+    draconicPresenceImmunityRoundsBySource?: Record<string, number>
+    hurlThroughHellReady?: boolean
+    hurlThroughHellSourceId?: string
+    hurlThroughHellDamage?: number
+    hurlThroughHellAppliedTurnKey?: string
+    huntersMarkTargetId?: string
+    wildShapeFormId?: string
+    wildShapeCurrentHp?: number
+    wildShapeRoundsRemaining?: number
+    wildShapeOriginalCurrentHp?: number
+    wildShapeOriginalMaxHp?: number
+    wildShapeOriginalArmorClass?: number
+    wildShapeOriginalSpeed?: number
+    wildShapeOriginalAbilities?: Abilities
+    wildShapeOriginalSavingThrowBonuses?: Partial<Record<AbilityKey, number>>
+    wildShapeOriginalStatBlockId?: string
+    wildShapeOriginalCreatureType?: string
+    wildShapeOriginalDamageVulnerabilities?: string[]
+    wildShapeOriginalDamageResistances?: string[]
+    wildShapeOriginalDamageImmunities?: string[]
+    wildShapeOriginalConditionImmunities?: string[]
   }
 
   ac: number
   speed: number
   initiativeBonus: number // 额外先攻加值（不含敏捷）
 
-  // —— 自定义规则：战斗属性 ——
   saveDC: number // 豁免 DC
-  actionPoints: number // 每回合行动点上限（默认 2）
-  currentAP: number // 当前剩余行动点
   passivePerception: number // 被动感知
   inspiration: number // 激励骰数量
-  mana: number // （已弃用，保留以兼容旧数据）
-  maxMana: number
-
-  traits: Trait[] // 特性
-  combatSkills: CombatSkill[] // 主动技能（冷却系统）
 
   conditions: string[] // 状态效果
   notes: string // 玩家可见笔记
 
-  /** 弓手 LV1 抉择是否已完成（兼容旧数据） */
-  archerLv1ChoiceDone?: boolean
-  /** 弓手 LV3 抉择是否已完成（兼容旧数据） */
-  archerLv3ChoiceDone?: boolean
-  /** 各等级特性抉择完成标记 */
-  traitChoicesDone?: Record<string, boolean>
-  /** 战斗中的临时增益（鹰眼等） */
-  combatBuffs?: CombatBuffs
-
-  /** 未消耗的职业特性升级点（5/10/15… 级各 +1） */
-  featureUpgradePoints?: number
-
-  /** 弓手技能树各技能当前阶位（1–5） */
-  skillRanks?: Record<string, number>
-
-  /** 职业资源；key 由职业定义注册，例如影舞者的 qi。 */
+  /** D&D 5e 职业资源与法术位。 */
   classResources?: Record<string, CharacterResourceState>
-  /** @deprecated 旧版影舞者气字段，仅用于存档与消息兼容。 */
-  qi?: number
-  /** 重炮手 · 子弹消消乐（8×8 棋盘 + 就绪栏） */
-  bulletPuzzle?: BulletPuzzleState
 
   /** 已装备物品（武器 / 护甲 / 戒指） */
   equipment?: CharacterEquipment
+  /** SRD 5.1 物品实例、数量与穿戴状态；所有跨端变更均由 DM 权威事务写入。 */
+  dnd5eInventory?: Dnd5eInventory
 
   // —— DM 专属 ——
   dmNotes: string // 仅 DM 可见
@@ -224,34 +236,3 @@ export interface CharacterResourceState {
   current: number
   max: number
 }
-
-// [T5/C7] Reconciled with the actually-effective set. The first group is engine-backed
-// (DOT damage, turn-skip, movement-lock, damage multiplier); 脆弱 and 无法移动 were missing
-// and are now added. The second group is cosmetic-only (no engine consequence yet) and is
-// kept — removing labels would orphan them on existing saved characters — but explicitly
-// flagged so it's clear which conditions do something mechanically.
-export const ENGINE_BACKED_CONDITIONS = [
-  '燃烧', // burning DOT
-  '点燃', // ignite DOT
-  '中毒', // poison DOT
-  '眩晕', // stun -> skips turn
-  '束缚', // restrained -> movement lock
-  '无法移动', // no-move -> movement lock
-  '脆弱', // vulnerable -> +25% damage taken
-] as const
-
-/** Cosmetic-only — display label, no engine effect (yet). */
-export const COSMETIC_CONDITIONS = [
-  '恐慌',
-  '魅惑',
-  '目盲',
-  '耳聋',
-  '惊惧',
-  '倒地',
-  '麻痹',
-  '震慑',
-  '昏迷',
-  '隐形',
-] as const
-
-export const CONDITION_OPTIONS = [...ENGINE_BACKED_CONDITIONS, ...COSMETIC_CONDITIONS]

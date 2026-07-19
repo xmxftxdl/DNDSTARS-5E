@@ -1,125 +1,50 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../types/character'
-import { DEFAULT_COMBAT_STAT_PROFILE, registerClassDefinition, type ClassDefinition } from './classDefinitionRegistry'
-import {
-  getClassResource,
-  restoreClassResources,
-  spendClassResource,
-  syncCharacterClassResources,
-} from './classResources'
-import { executeCombatMutationsAuthority } from './combatAuthority'
-import { FIGHTER_RESOURCE_KEYS } from '../rulesets/dnd5e'
+import { registerClassDefinition, type ClassDefinition } from './classDefinitionRegistry'
+import { getClassResource, restoreClassResources, spendClassResource, syncCharacterClassResources } from './classResources'
 
 function character(patch: Partial<Character> = {}): Character {
   return {
-    id: 'hero',
-    name: 'Hero',
-    charClass: '影舞者',
-    level: 30,
-    traits: [],
-    combatSkills: [],
-    conditions: [],
-    actionPoints: 2,
-    currentAP: 2,
-    currentHp: 10,
-    maxHp: 10,
+    rulesetId: 'dnd5e-2014-srd-5.1', id: 'hero', name: '英雄', player: '', avatar: '', accent: '',
+    race: '人类', charClass: '战士', level: 2, background: '士兵', experience: 0, reputation: 0,
+    abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: ['str', 'con'], skills: [],
+    maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '2d10', ac: 16, speed: 30, initiativeBonus: 0,
+    saveDC: 12, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true,
     ...patch,
-  } as Character
-}
-
-function manaDefinition(): ClassDefinition {
-  return {
-    id: 'test-mage-resource',
-    classNames: ['测试法师'],
-    matchesClassName: (name) => name === '测试法师',
-    progression: {
-      id: 'test-mage-resource',
-      matches: (candidate) => candidate.charClass === '测试法师',
-      ownsSkill: () => false,
-      syncSkills: (candidate) => candidate,
-      canLearnSkill: () => false,
-      canUpgradeSkillRank: () => false,
-      getSkillRank: () => 0,
-    },
-    combatStats: DEFAULT_COMBAT_STAT_PROFILE,
-    resources: [
-      {
-        key: 'mana',
-        label: '法力',
-        isAvailable: () => true,
-        max: (candidate) => candidate.level * 3,
-        resetOn: 'long-rest',
-      },
-    ],
   }
 }
 
-describe('class resources', () => {
-  it('migrates and mirrors the legacy shadow dancer qi field', () => {
-    const synced = syncCharacterClassResources(character({ qi: 7 }))
-    expect(synced.classResources?.qi).toEqual({ current: 7, max: 99 })
-    expect(synced.qi).toBe(7)
-
-    const spent = spendClassResource(synced, 'qi', 2)
-    expect(spent?.classResources?.qi.current).toBe(5)
-    expect(spent?.qi).toBe(5)
+describe('D&D 5e class resources', () => {
+  it('creates, spends and restores fighter short-rest resources', () => {
+    const synced = syncCharacterClassResources(character())
+    expect(getClassResource(synced, 'fighterSecondWind')).toEqual({ current: 1, max: 1 })
+    expect(getClassResource(synced, 'fighterActionSurge')).toEqual({ current: 1, max: 1 })
+    const spent = spendClassResource(synced, 'fighterActionSurge', 1)
+    expect(spent?.classResources?.fighterActionSurge.current).toBe(0)
+    expect(restoreClassResources(spent!, 'short-rest').classResources?.fighterActionSurge.current).toBe(1)
   })
 
-  it('clamps invalid values, restores on long rest, and removes unavailable qi', () => {
-    const clamped = syncCharacterClassResources(character({ qi: 120 }))
-    expect(getClassResource(clamped, 'qi')).toEqual({ current: 99, max: 99 })
-    expect(
-      restoreClassResources({ ...clamped, qi: 3, classResources: { qi: { current: 3, max: 99 } } }, 'long-rest').qi,
-    ).toBe(99)
-
-    const archer = syncCharacterClassResources({ ...clamped, charClass: '弓手' })
-    expect(archer.qi).toBeUndefined()
-    expect(archer.classResources).toBeUndefined()
+  it('restores full-caster spell slots on a long rest', () => {
+    const wizard = syncCharacterClassResources(character({ charClass: '法师', level: 5, hitDice: '5d6' }))
+    const spent = spendClassResource(wizard, 'dnd5e-spell-slot-3', 1)
+    expect(spent?.classResources?.['dnd5e-spell-slot-3'].current).toBe(1)
+    expect(restoreClassResources(spent!, 'long-rest').classResources?.['dnd5e-spell-slot-3'].current).toBe(2)
   })
 
-  it('registers and spends a new class resource without changing authority code', () => {
-    const dispose = registerClassDefinition(manaDefinition())
-    try {
-      const mage = syncCharacterClassResources(character({ charClass: '测试法师', level: 4, qi: undefined }))
-      expect(getClassResource(mage, 'mana')).toEqual({ current: 12, max: 12 })
-
-      const result = executeCombatMutationsAuthority(
-        {
-          characters: [mage],
-          enemyApByToken: {},
-          map: { id: 'map', name: 'Map', width: 100, height: 100, gridSize: 50, tokens: [] } as never,
-        },
-        {
-          role: 'dm',
-          mutations: [
-            {
-              type: 'spend-class-resource',
-              characterId: mage.id,
-              resourceKey: 'mana',
-              amount: 5,
-              reason: 'test-spell',
-            },
-          ],
-        },
-      )
-
-      expect(result.failures).toEqual([])
-      expect(getClassResource(result.state.characters[0], 'mana')?.current).toBe(7)
-      expect(restoreClassResources(result.state.characters[0], 'long-rest').classResources?.mana.current).toBe(12)
-    } finally {
-      dispose()
+  it('supports namespaced plugin resources without legacy mirror fields', () => {
+    const definition: ClassDefinition = {
+      id: 'test-class', classNames: ['测试职业'], matchesClassName: (name) => name === '测试职业',
+      resources: [{
+        key: 'com.example:test-charge', label: '测试充能', isAvailable: () => true,
+        max: (candidate) => candidate.level, resetOn: 'long-rest',
+      }],
     }
-  })
-
-  it('initializes Battle Master superiority dice when the subclass is selected', () => {
-    const battleMaster = syncCharacterClassResources(character({
-      charClass: '战士',
-      level: 7,
-      qi: undefined,
-      dnd5eClassChoices: { fighter: { subclass: 'battle-master', maneuvers: ['trip-attack'] } },
-    }))
-    expect(battleMaster.classResources?.[FIGHTER_RESOURCE_KEYS.secondWind]).toEqual({ current: 1, max: 1 })
-    expect(battleMaster.classResources?.[FIGHTER_RESOURCE_KEYS.actionSurge]).toEqual({ current: 1, max: 1 })
-    expect(battleMaster.classResources?.[FIGHTER_RESOURCE_KEYS.superiorityDice]).toEqual({ current: 5, max: 5 })
+    const unregister = registerClassDefinition(definition)
+    try {
+      const synced = syncCharacterClassResources(character({ charClass: '测试职业', level: 3 }))
+      expect(synced.classResources?.['com.example:test-charge']).toEqual({ current: 3, max: 3 })
+    } finally {
+      unregister()
+    }
   })
 })

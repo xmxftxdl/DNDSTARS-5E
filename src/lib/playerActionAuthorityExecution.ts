@@ -5,15 +5,18 @@ import {
   type PlayerActionAuthorityPreflightContext,
   type PlayerActionAuthorityRejectReason,
 } from './playerActionAuthorityRouter'
-import { isSimpleHeadlessPlayerActionType } from './simpleHeadlessPlayerAction'
 
 export type PlayerActionAuthorityRoute =
-  | 'activate-feature'
-  | 'simple'
-  | 'attack-token'
+  | 'end-turn'
+  | 'disengage'
   | 'dnd5e-weapon-attack'
   | 'dnd5e-fighter-feature'
-  | 'aoe-attack'
+  | 'dnd5e-class-feature'
+  | 'dnd5e-plugin-action'
+  | 'dnd5e-item-use'
+  | 'dnd5e-ability-check'
+  | 'dnd5e-spell-cast'
+  | 'dnd5e-adjudicated-spell'
   | 'move-token'
   | 'unsupported'
 
@@ -23,12 +26,16 @@ export type PlayerActionAuthorityExecutionPlan =
   | { status: 'accepted'; route: PlayerActionAuthorityRoute }
 
 export function playerActionAuthorityRoute(action: Pick<SharedPlayerActionState, 'type'>): PlayerActionAuthorityRoute {
-  if (action.type === 'activate-feature') return 'activate-feature'
-  if (isSimpleHeadlessPlayerActionType(action.type)) return 'simple'
-  if (action.type === 'attack-token') return 'attack-token'
+  if (action.type === 'end-turn') return 'end-turn'
+  if (action.type === 'disengage') return 'disengage'
   if (action.type === 'dnd5e-weapon-attack') return 'dnd5e-weapon-attack'
   if (action.type === 'dnd5e-fighter-feature') return 'dnd5e-fighter-feature'
-  if (action.type === 'aoe-attack') return 'aoe-attack'
+  if (action.type === 'dnd5e-class-feature') return 'dnd5e-class-feature'
+  if (action.type === 'dnd5e-plugin-action') return 'dnd5e-plugin-action'
+  if (action.type === 'dnd5e-item-use') return 'dnd5e-item-use'
+  if (action.type === 'dnd5e-ability-check') return 'dnd5e-ability-check'
+  if (action.type === 'dnd5e-spell-cast') return 'dnd5e-spell-cast'
+  if (action.type === 'dnd5e-adjudicated-spell') return 'dnd5e-adjudicated-spell'
   if (action.type === 'move-token') return 'move-token'
   return 'unsupported'
 }

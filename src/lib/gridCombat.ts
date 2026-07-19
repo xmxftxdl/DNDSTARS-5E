@@ -190,7 +190,7 @@ export function snapTokenToGridCenter(
   return tokenCenterForAnchorCell(tokenAnchorCellFromPixel(x, y, token, map), token, map)
 }
 
-function mapCellExtent(map: BattleMap): { cols: number; rows: number } {
+export function mapCellExtent(map: BattleMap): { cols: number; rows: number } {
   const g = Math.max(1, map.gridSize)
   return {
     cols: Math.max(1, Math.floor((map.width - map.gridOffsetX) / g)),
@@ -346,7 +346,7 @@ export function occupiedCells(tokens: Token[], map: BattleMap, excludeTokenId: s
 }
 
 /**
- * [T8/AC3 · D3] 解析放置目标格：若落点格已被其它 token 占用，则向外按环形搜索最近的空格。
+ * 解析放置目标格：若落点格已被其它 token 占用，则向外按环形搜索最近的空格。
  * 允许 token 停留在自己原本的格子（movingTokenId 排除自身）。找不到空格则回退到原始 snap 坐标。
  * 两个 token 不能共享同一格心。
  */
@@ -391,7 +391,7 @@ export function isPlayerToken(t: Token): boolean {
 }
 
 /**
- * [T7/AC2] 敌人 AI 的「敌对目标」集合：玩家 + npc/友方。
+ * 敌人 AI 的「敌对目标」集合：玩家 + npc/友方。
  * 排除 enemy（不打自己人）与 obstacle（障碍物）。仅有 npc 友方的遭遇不再 no-op。
  */
 export function isHostileToEnemy(t: Token): boolean {

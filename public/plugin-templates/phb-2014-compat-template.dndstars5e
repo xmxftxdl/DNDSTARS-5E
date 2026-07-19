@@ -1,0 +1,125 @@
+/*
+ * DNDSTARS 5E · PHB 2014 compatibility template
+ *
+ * This file deliberately contains no Player's Handbook rules text, names, tables,
+ * artwork, or other non-SRD content. Replace the demo content only with material
+ * you are authorized to use. Keep the bundle self-contained: do not load external modules.
+ */
+
+const plugin = {
+  manifest: {
+    id: 'local.example.phb-2014-template',
+    name: 'PHB 2014 兼容模板（演示）',
+    version: '0.1.0',
+    apiVersion: 2,
+    rulesetId: 'dnd5e-2014-srd-5.1',
+    stateSchemaVersion: 1,
+    publisher: '本地用户',
+    license: 'CC0-1.0（仅模板与原创演示内容）',
+    description: '不含 PHB 原文的 Rules Plugin API V2 纵向切片模板。',
+  },
+
+  setup(api) {
+    if (
+      typeof document !== 'undefined' ||
+      typeof window !== 'undefined' ||
+      typeof localStorage !== 'undefined' ||
+      typeof indexedDB !== 'undefined' ||
+      typeof fetch !== 'undefined' ||
+      typeof WebSocket !== 'undefined' ||
+      typeof postMessage !== 'undefined'
+    ) {
+      throw new Error('该规则包必须在 DNDSTARS Worker 沙箱中运行')
+    }
+    api.registerHeadlessAction({
+      id: 'guardian-spark',
+      resolve({ target, grantTemporaryHitPoints, succeed, fail }) {
+        if (!target) return fail('invalid-target')
+        grantTemporaryHitPoints(target.id, 3)
+        return succeed()
+      },
+    })
+
+    api.registerFeature({
+      id: 'guardian-spark',
+      name: '演示特性：守护火花',
+      summary: '原创的接口演示特性，不属于 D&D 官方规则内容。',
+      description: '以一个动作选择30尺内的自己或一名友方生物；目标获得3点临时生命值。',
+      sourceLabel: 'Rules Plugin API V2 演示',
+      minimumLevel: 1,
+      automation: 'full',
+      action: {
+        id: 'guardian-spark',
+        label: '使用守护火花',
+        description: '由玩家提交目标，DM 重新计算阵营、距离与行动经济，再交给 Headless resolver。',
+        economy: 'action',
+        targeting: {
+          kind: 'single-creature',
+          relation: 'ally',
+          rangeFeet: 30,
+          includeSelf: true,
+        },
+      },
+    })
+
+    api.registerHeadlessAction({
+      id: 'ember-lance',
+      resolve({ action, target, dealDamage, applyStandardCondition, succeed, fail }) {
+        if (!target) return fail('invalid-target')
+        const payload = action.payload || {}
+        const damage = Number(payload.damage)
+        const failedSave = payload.failedSave === true
+        if (!Number.isInteger(damage) || damage < 0) return fail('invalid-dice')
+        dealDamage(target.id, damage, 'fire')
+        if (failedSave) {
+          applyStandardCondition(target.id, 'blinded', {
+            expiresAt: 'target-next-turn-start',
+          })
+        }
+        return succeed()
+      },
+    })
+
+    api.registerSpell({
+      id: 'ember-lance',
+      name: '余烬长枪（原创演示）',
+      englishName: 'Ember Lance',
+      level: 1,
+      school: 'evocation',
+      ritual: false,
+      castingTime: { value: 1, unit: 'action' },
+      range: { type: 'distance', feet: 60 },
+      components: {
+        verbal: true,
+        somatic: true,
+        material: true,
+        materialText: '一小块燧石',
+        materialCostGp: 0,
+        materialConsumed: false,
+      },
+      duration: { type: 'instantaneous', concentration: false },
+      classes: ['sorcerer', 'wizard'],
+      description: '原创的法术模板示例；失败的敏捷豁免会受到火焰伤害并短暂目盲。',
+      higherLevels: '每使用高于1环的法术位一环，伤害增加1d6。',
+      tags: ['伤害', '火焰', '状态'],
+      mechanics: {
+        kind: 'damage',
+        resolution: 'saving-throw',
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { dice: { count: 2, sides: 6, bonus: 0 }, type: 'fire' },
+        conditions: [{
+          condition: 'blinded',
+          trigger: 'on-failed-save',
+          duration: { kind: 'target-next-turn-start' },
+        }],
+        upcast: {
+          fromSlotLevel: 2,
+          effects: [{ kind: 'damage-dice', diceCountPerSlot: 1 }],
+        },
+      },
+      automation: { mode: 'headless-action', actionId: 'ember-lance' },
+    })
+  },
+}
+
+export default plugin

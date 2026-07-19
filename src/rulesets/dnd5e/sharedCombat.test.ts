@@ -22,4 +22,14 @@ describe('shared D&D 5e combat state', () => {
     expect(shouldApplySharedDnd5eCombatState({ incoming, mapId: 'map-1', combatId: 'combat-1', currentRevision: 3 })).toEqual({ status: 'ignored', reason: 'stale' })
     expect(shouldApplySharedDnd5eCombatState({ incoming, mapId: 'map-1', combatId: 'combat-2', currentRevision: 0 })).toEqual({ status: 'ignored', reason: 'wrong-combat' })
   })
+
+  it('publishes plugin requirements and rejects a snapshot when the required plugin is missing', () => {
+    const headless = startDnd5eHeadlessCombat('combat-1', [combatant('a', 20), combatant('b', 10)])
+    const incoming = {
+      ...publishDnd5eCombatState(headless, { mapId: 'map-1', revision: 1, updatedAt: 100 }),
+      requiredPlugins: [{ id: 'com.example.required', version: '1.0.0', integrity: 'sha256-example' }],
+    }
+    expect(shouldApplySharedDnd5eCombatState({ incoming, mapId: 'map-1', combatId: 'combat-1', currentRevision: 0 }))
+      .toEqual({ status: 'ignored', reason: 'plugin-mismatch' })
+  })
 })

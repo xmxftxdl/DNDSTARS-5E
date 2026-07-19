@@ -5,12 +5,13 @@ import type { Character } from '../../types/character'
 import { DND5E_FIGHTER_STARTING_EQUIPMENT } from './equipment'
 import { FIGHTER_RESOURCE_KEYS } from './fighter'
 import { prepareDnd5eFighterFeature, resolvePreparedDnd5eFighterFeature } from './fighterFeatureAction'
+import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 
 function fighter(): Character {
   return {
     id: 'fighter', name: '战士', player: '', avatar: '', accent: '', race: '人类', charClass: '战士', level: 5, background: '士兵', experience: 6500, reputation: 0,
     abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: ['str', 'con'], skills: ['athletics'], maxHp: 44, currentHp: 20, tempHp: 0, hitDice: '5d10', ac: 18, speed: 30, initiativeBonus: 0,
-    saveDC: 10, actionPoints: 2, currentAP: 2, passivePerception: 10, inspiration: 0, mana: 0, maxMana: 0, traits: [], combatSkills: [], conditions: [], notes: '', dmNotes: '', visibleToPlayers: true,
+    saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true,
     equipment: DND5E_FIGHTER_STARTING_EQUIPMENT,
     classResources: {
       [FIGHTER_RESOURCE_KEYS.secondWind]: { current: 1, max: 1 },
@@ -41,7 +42,7 @@ describe('D&D 5e fighter feature authority', () => {
     const resolved = resolvePreparedDnd5eFighterFeature({ prepared: prepared.prepared, d10: 7 })
     expect(resolved.result.ok).toBe(true)
     const actor = resolved.application?.characters.find((character) => character.id === input.actor.id)
-    expect(actor).toMatchObject({ currentHp: 32, currentAP: 2 })
+    expect(actor).toMatchObject({ currentHp: 32 })
     expect(actor?.classResources?.[FIGHTER_RESOURCE_KEYS.secondWind]).toEqual({ current: 0, max: 1 })
   })
 
@@ -54,5 +55,16 @@ describe('D&D 5e fighter feature authority', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.characters[0].classResources?.[FIGHTER_RESOURCE_KEYS.actionSurge]).toEqual({ current: 0, max: 1 })
     expect(prepareDnd5eFighterFeature({ ...input, characters: [input.actor], actionSurgeAlreadyUsed: true })).toEqual({ ok: false, reason: 'feature-already-used' })
+  })
+
+  it('rejects Second Wind after the bonus action is spent', () => {
+    const input = fixture('second-wind')
+    const economy = spendDnd5eTurnResource(createDnd5eTurnEconomyCounts('turn'), 'bonusAction').economy
+    expect(prepareDnd5eFighterFeature({
+      ...input,
+      characters: [input.actor],
+      actionSurgeAlreadyUsed: false,
+      turnEconomy: economy,
+    })).toEqual({ ok: false, reason: 'bonus-action-unavailable' })
   })
 })

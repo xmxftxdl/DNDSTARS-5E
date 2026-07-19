@@ -1,23 +1,32 @@
 ﻿import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearPendingLocalFighterChoicesForTest,
+  clearPendingLocalClassChoicesForTest,
+  clearPendingLocalPluginFeaturesForTest,
   clearPendingLocalCharacterLevelEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
+  filterLegacySampleCharacters,
   mergeCharactersForSharedSave,
   mergePendingLocalFighterChoices,
+  mergePendingLocalClassChoices,
+  mergePendingLocalPluginFeatures,
   mergePendingLocalCharacterLevelEdits,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
   markPendingLocalFighterChoices,
+  markPendingLocalClassChoices,
+  markPendingLocalPluginFeatures,
   resetPendingLocalFighterChoicesMemoryForTest,
+  resetPendingLocalClassChoicesMemoryForTest,
+  resetPendingLocalPluginFeaturesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
 } from './characters'
 import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
 import type { Character } from '../types/character'
+import { dnd5eInventoryItemTemplate } from '../rulesets/dnd5e/items'
+import { createDnd5eConditionEffect } from '../rulesets/dnd5e/activeEffects'
 
-// [T13/AC6] 同步合并回归：玩家端在合并对端（DM 权威）快照时，
-// 必须保留 DM 的血量/AP/token 位置，且不要覆盖非白名单字段。
-// 这里测试真实合并函数，确保玩家不能越权写战斗权威状态。
+// 玩家端合并 DM 权威快照时，只接受公开的 D&D 战斗字段。
 
 function char(patch: Partial<Character>): Character {
   return {
@@ -27,8 +36,6 @@ function char(patch: Partial<Character>): Character {
     maxHp: 40,
     tempHp: 0,
     conditions: [],
-    actionPoints: 2,
-    currentAP: 2,
     ...patch,
   } as Character
 }
@@ -63,92 +70,34 @@ function map(patch: Partial<BattleMap>): BattleMap {
 }
 
 describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', () => {
-  it('keeps DM HP/AP from the shared snapshot during combat (player local value discarded)', () => {
-    // 玩家本地把自己治满血、AP 拉满（越权），DM 权威快照说他被打到 12 血、AP 已花光。
-    const local = char({ currentHp: 40, maxHp: 40, actionPoints: 2, currentAP: 2 })
-    const shared = char({ currentHp: 12, maxHp: 40, actionPoints: 0, currentAP: 0 })
+  it('restores authoritative active effects after a player reconnects with stale local combat state', () => {
+    const effect = createDnd5eConditionEffect({
+      condition: 'blinded', targetId: 'hero-token', source: { kind: 'dm', label: 'DM 裁定' },
+      duration: { type: 'rounds', remainingRounds: 2, tickOn: 'target-turn-end' },
+    })
+    const local = char({ conditions: [], dnd5eCombatState: undefined })
+    const shared = char({ conditions: ['blinded'], dnd5eCombatState: { activeEffects: [effect] } })
     const merged = mergePlayerWritableCharacter(local, shared)
-    // DM 权威血量/AP 胜出（不被玩家本地覆盖）。
-    expect(merged.currentHp).toBe(12)
-    expect(merged.actionPoints).toBe(0)
-    expect(merged.currentAP).toBe(0)
-    expect(merged.tempHp).toBe(shared.tempHp)
-    expect(merged.conditions).toBe(shared.conditions)
+    expect(merged.conditions).toEqual(['blinded'])
+    expect(merged.dnd5eCombatState?.activeEffects).toEqual([effect])
+    expect(merged.dnd5eCombatState?.activeEffects).not.toBe(shared.dnd5eCombatState?.activeEffects)
   })
 
-  it('keeps DM combat buffs, qi, cooldowns and feature uses from the shared snapshot', () => {
-    const local = char({
-      qi: 0,
-      combatBuffs: {},
-      traits: [
-        {
-          id: 'gale-local',
-          name: 'Gale Combo',
-          level: 1,
-          uses: 1,
-          maxUses: 1,
-          description: '',
-          featureKey: 'galeCombo',
-        },
-      ],
-      combatSkills: [
-        {
-          id: 'basic-shot',
-          name: 'Basic Shot',
-          emoji: 'bow',
-          description: '',
-          apCost: 1,
-          cooldown: 0,
-          cdReduction: 0,
-          remaining: 0,
-          usedThisTurn: false,
-          damageCount: 1,
-          damageSides: 8,
-          damageBonus: 0,
-          skillTreeId: 'basicShot',
-        },
-      ],
-    })
-    const shared = char({
-      qi: 7,
-      combatBuffs: { galeComboReady: true },
-      traits: [
-        {
-          id: 'gale-shared',
-          name: 'Gale Combo',
-          level: 1,
-          uses: 0,
-          maxUses: 1,
-          description: '',
-          featureKey: 'galeCombo',
-        },
-      ],
-      combatSkills: [
-        {
-          id: 'basic-shot',
-          name: 'Basic Shot',
-          emoji: 'bow',
-          description: '',
-          apCost: 1,
-          cooldown: 0,
-          cdReduction: 0,
-          remaining: 2,
-          usedThisTurn: true,
-          damageCount: 1,
-          damageSides: 8,
-          damageBonus: 0,
-          skillTreeId: 'basicShot',
-        },
-      ],
-    })
+  it('keeps DM HP and temporary HP from the shared snapshot', () => {
+    const local = char({ currentHp: 40, maxHp: 40, tempHp: 20 })
+    const shared = char({ currentHp: 12, maxHp: 40, tempHp: 3 })
+    const merged = mergePlayerWritableCharacter(local, shared)
+    expect(merged.currentHp).toBe(12)
+    expect(merged.tempHp).toBe(3)
+    expect(merged.conditions).toEqual(shared.conditions)
+  })
+
+  it('keeps DM class resources from the shared snapshot', () => {
+    const local = char({ classResources: { fighterSecondWind: { current: 1, max: 1 } } })
+    const shared = char({ classResources: { fighterSecondWind: { current: 0, max: 1 } } })
 
     const merged = mergePlayerWritableCharacter(local, shared)
-
-    expect(merged.qi).toBe(7)
-    expect(merged.combatBuffs?.galeComboReady).toBe(true)
-    expect(merged.traits[0].uses).toBe(0)
-    expect(merged.traits[0].maxUses).toBe(1)
-    expect(merged.combatSkills[0]).toMatchObject({ remaining: 2, usedThisTurn: true })
+    expect(merged.classResources?.fighterSecondWind).toEqual({ current: 0, max: 1 })
   })
 
   it('does NOT clobber non-whitelisted local fields (only the whitelist comes from shared)', () => {
@@ -163,6 +112,31 @@ describe('T13/AC6 mergePlayerWritableCharacter keeps DM-authoritative fields', (
 
 
 describe('character shared-save merge preserves cross-end creations', () => {
+  it('removes retired showcase records without removing real characters with the same display name', () => {
+    const legacy = char({ id: 'sample-adventurer', name: '新冒险者' })
+    const real = char({ id: 'real-adventurer', name: '新冒险者' })
+    expect(filterLegacySampleCharacters([legacy, real])).toEqual([real])
+    expect(mergeCharactersForSharedSave(
+      [legacy, real],
+      [legacy, real],
+      { playerPort: false },
+    ).map((character) => character.id)).toEqual(['real-adventurer'])
+  })
+
+  it('keeps the DM inventory snapshot when a player local copy has a forged quantity', () => {
+    const potion = dnd5eInventoryItemTemplate('srd-5.1:item:potion-of-healing')!
+    const entry = {
+      instanceId: 'potion-1',
+      templateId: potion.id,
+      item: potion,
+      acquiredAt: 1,
+    }
+    const local = char({ dnd5eInventory: { schemaVersion: 1, entries: [{ ...entry, quantity: 99 }] } })
+    const shared = char({ dnd5eInventory: { schemaVersion: 1, entries: [{ ...entry, quantity: 1 }] } })
+    const merged = mergePlayerWritableCharacter(local, shared)
+    expect(merged.dnd5eInventory?.entries[0].quantity).toBe(1)
+  })
+
   it('keeps shared-only characters when a stale DM snapshot writes later', () => {
     const dmLocal = [char({ id: 'dm-known', name: 'DM already loaded' })]
     const shared = [
@@ -244,7 +218,7 @@ describe('pending local fighter choices', () => {
     vi.unstubAllGlobals()
   })
 
-  it('survives a reload and rejects stale maneuver choices until shared state acknowledges them', () => {
+  it('survives a reload and rejects stale plugin choices until shared state acknowledges them', () => {
     const values = new Map<string, string>()
     const localStorage = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -255,39 +229,117 @@ describe('pending local fighter choices', () => {
     clearPendingLocalFighterChoicesForTest()
 
     const choices = {
-      subclass: 'battle-master' as const,
-      maneuverAbility: 'str' as const,
-      maneuvers: ['disarming-attack', 'precision-attack', 'trip-attack'] as const,
+      subclass: 'example.rules:tactician',
+      extensionChoices: {
+        'example.rules:tactician/techniques': ['disarm', 'precision', 'trip'],
+      },
     }
-    markPendingLocalFighterChoices('hero', {
-      ...choices,
-      maneuvers: [...choices.maneuvers],
-    }, 1_000)
+    markPendingLocalFighterChoices('hero', choices, 1_000)
     resetPendingLocalFighterChoicesMemoryForTest()
 
     const stale = [char({
       id: 'hero',
-      dnd5eClassChoices: { fighter: { subclass: 'battle-master', maneuvers: [] } },
+      dnd5eClassChoices: { fighter: { subclass: choices.subclass, extensionChoices: {} } },
     })]
-    expect(mergePendingLocalFighterChoices(stale, 1_001)[0].dnd5eClassChoices?.fighter?.maneuvers)
-      .toEqual(choices.maneuvers)
+    expect(mergePendingLocalFighterChoices(stale, 1_001)[0].dnd5eClassChoices?.fighter?.extensionChoices)
+      .toEqual(choices.extensionChoices)
     expect(values.size).toBe(1)
 
     const acknowledged = [char({
       id: 'hero',
-      dnd5eClassChoices: { fighter: { ...choices, maneuvers: [...choices.maneuvers] } },
+      dnd5eClassChoices: { fighter: choices },
     })]
-    expect(mergePendingLocalFighterChoices(acknowledged, 1_002)[0].dnd5eClassChoices?.fighter?.maneuvers)
-      .toEqual(choices.maneuvers)
+    expect(mergePendingLocalFighterChoices(acknowledged, 1_002)[0].dnd5eClassChoices?.fighter?.extensionChoices)
+      .toEqual(choices.extensionChoices)
+    expect(values.size).toBe(0)
+  })
+})
+
+describe('pending local SRD class choices', () => {
+  afterEach(() => {
+    clearPendingLocalClassChoicesForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('survives a reload and rejects a stale subclass/feature-choice snapshot', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('window', { localStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } })
+    clearPendingLocalClassChoicesForTest()
+
+    const choices = { ranger: { subclass: 'hunter', selections: { 'hunters-prey': ['colossus-slayer'] } } }
+    markPendingLocalClassChoices('hero', choices, 1_000)
+    resetPendingLocalClassChoicesMemoryForTest()
+
+    const stale = [char({ id: 'hero', dnd5eClassChoices: { classes: { ranger: { subclass: 'hunter', selections: {} } } } })]
+    expect(mergePendingLocalClassChoices(stale, 1_001)[0].dnd5eClassChoices?.classes?.ranger.selections)
+      .toEqual(choices.ranger.selections)
+    expect(values.size).toBe(1)
+
+    const acknowledged = [char({ id: 'hero', dnd5eClassChoices: { classes: choices } })]
+    expect(mergePendingLocalClassChoices(acknowledged, 1_002)[0].dnd5eClassChoices?.classes?.ranger.selections)
+      .toEqual(choices.ranger.selections)
+    expect(values.size).toBe(0)
+  })
+})
+
+describe('pending local plugin feature choices', () => {
+  afterEach(() => {
+    clearPendingLocalPluginFeaturesForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('survives a reload until the shared character acknowledges the namespaced IDs', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('window', { localStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } })
+    clearPendingLocalPluginFeaturesForTest()
+
+    const featureIds = ['com.example.rules:guardian-spark']
+    markPendingLocalPluginFeatures('hero', featureIds, 1_000)
+    resetPendingLocalPluginFeaturesMemoryForTest()
+
+    expect(mergePendingLocalPluginFeatures([
+      char({ id: 'hero', dnd5ePluginFeatureIds: [] }),
+    ], 1_001)[0].dnd5ePluginFeatureIds).toEqual(featureIds)
+    expect(values.size).toBe(1)
+
+    expect(mergePendingLocalPluginFeatures([
+      char({ id: 'hero', dnd5ePluginFeatureIds: featureIds }),
+    ], 1_002)[0].dnd5ePluginFeatureIds).toEqual(featureIds)
     expect(values.size).toBe(0)
   })
 })
 
 describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', () => {
+  it('keeps DM-authored item areas when a player publishes an unrelated map write', () => {
+    const localMap = map({ dnd5eItemAreas: [] })
+    const sharedArea = {
+      id: 'area', kind: 'caltrops' as const, sourceCharacterId: 'hero', sourceTokenId: 'tok',
+      sourceItemTemplateId: 'srd-5.1:item:caltrops-bag', sourceItemName: '铁蒺藜',
+      cells: [{ col: 2, row: 2 }], createdAt: 1, armed: true,
+    }
+    const sharedMap = map({ dnd5eItemAreas: [sharedArea] })
+    const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
+    expect(result.dnd5eItemAreas).toEqual([sharedArea])
+  })
+
   it('a non-player (enemy) token takes DM x/y from shared (player cannot move it)', () => {
     const localMap = map({ tokens: [token({ id: 'e1', type: 'enemy', x: 100, y: 100, hp: 5, maxHp: 10 })] })
+    const blinded = createDnd5eConditionEffect({
+      condition: 'blinded', targetId: 'e1', source: { kind: 'dm', label: 'DM 裁定' }, appliedAt: 1,
+    })
     const sharedMap = map({
-      tokens: [token({ id: 'e1', type: 'enemy', x: 500, y: 700, hp: 3, maxHp: 10, illusionDanceTurns: 1 })],
+      tokens: [token({
+        id: 'e1', type: 'enemy', x: 500, y: 700, hp: 3, maxHp: 10,
+        dnd5eCombatState: { schemaVersion: 2, conditions: ['blinded'], activeEffects: [blinded] },
+      })],
     })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
     const e1 = result.tokens.find((t) => t.id === 'e1')!
@@ -296,7 +348,7 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     expect(e1.y).toBe(700)
     // 战斗字段同样取 DM 权威值。
     expect(e1.hp).toBe(3)
-    expect(e1.illusionDanceTurns).toBe(1)
+    expect(e1.dnd5eCombatState?.activeEffects).toEqual([blinded])
   })
 
   it("a player-type token keeps its OWN local x/y (DM does not move the player's own token)", () => {

@@ -7,6 +7,13 @@ import { putImage, deleteImage, pruneOrphanImages } from '../lib/imageStore'
 import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
 import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
+import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
+import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import {
+  DND5E_COMBAT_STATE_SCHEMA_VERSION,
+  migrateDnd5eCombatStateEffects,
+  validateDnd5eActiveEffectsStrict,
+} from '../rulesets/dnd5e/activeEffects'
 import {
   creatureSizeToTokenSize,
   normalizeCreatureSize,
@@ -38,6 +45,9 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
     const sharedTokenById = new Map(sharedMap.tokens.map((token) => [token.id, token]))
     return {
       ...map,
+      // Item areas are DM-authoritative combat entities. A player-side map write
+      // must never resurrect a cleared trap or erase a newly placed hazard.
+      dnd5eItemAreas: sharedMap.dnd5eItemAreas,
       tokens: map.tokens.map((token) => {
         const sharedToken = sharedTokenById.get(token.id)
         if (!sharedToken) return token
@@ -53,19 +63,10 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           ...dmControlledPosition,
           hp: sharedToken.hp,
           maxHp: sharedToken.maxHp,
-          burningTurns: sharedToken.burningTurns,
-          igniteTurns: sharedToken.igniteTurns,
-          poisonTurns: sharedToken.poisonTurns,
-          knockbackTurns: sharedToken.knockbackTurns,
-          stunTurns: sharedToken.stunTurns,
-          restrainedTurns: sharedToken.restrainedTurns,
-          vulnerableTurns: sharedToken.vulnerableTurns,
-          noMoveTurns: sharedToken.noMoveTurns,
-          illusionDanceTurns: sharedToken.illusionDanceTurns,
-          huntingMarkStacks: sharedToken.huntingMarkStacks,
           creatureTypes: sharedToken.creatureTypes,
           creatureSize: sharedToken.creatureSize,
           size: sharedToken.size,
+          dnd5eCombatState: sharedToken.dnd5eCombatState,
         }
       }),
     }
@@ -109,29 +110,70 @@ export interface Token {
   showHpOnToken?: boolean
   /** 玩家端点击时是否显示怪物详情（DM 始终显示；默认对玩家可见） */
   showDetailOnToken?: boolean
-  /** 燃烧剩余回合，0 或未设置 = 未燃烧 */
-  burningTurns?: number
-  /** 点燃剩余回合，0 或未设置 = 未点燃 */
-  igniteTurns?: number
-  /** 中毒剩余回合，0 或未设置 = 未中毒 */
-  poisonTurns?: number
-  /** 击飞剩余回合，0 或未设置 = 未被击飞 */
-  knockbackTurns?: number
-  /** 眩晕剩余回合，0 或未设置 = 未眩晕 */
-  stunTurns?: number
-  /** 束缚剩余回合，0 或未设置 = 未束缚 */
-  restrainedTurns?: number
-  /** 脆弱剩余回合，0 或未设置 = 未脆弱 */
-  vulnerableTurns?: number
-  /** 禁止移动剩余回合，0 或未设置 = 可移动 */
-  noMoveTurns?: number
-  /** 迷幻舞步剩余回合，0 或未设置 = 未迷幻 */
-  illusionDanceTurns?: number
-  /** 逐风者 · 狩猎印记层数（0–4） */
-  huntingMarkStacks?: number
   /** 来自怪物池的模板 id */
   poolId?: string
+  /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
+  dnd5eCombatState?: {
+    schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
+    /** 权威状态实例；由 DM/Headless 写入并通过房间资源同步。 */
+    activeEffects?: Dnd5eActiveEffectInstance[]
+    caltropsSpeedPenaltyFeet?: number
+    temporaryHp?: number
+    undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
+    monsterOnHitSavePending?: {
+      sourceId: string
+      actionId: string
+      ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+      dc: number
+      condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+    }
+    bardicInspirationDie?: number
+    bardicInspirationSourceId?: string
+    bardicInspirationRoundsRemaining?: number
+    countercharmRoundsRemaining?: number
+    intimidatingPresenceSourceId?: string
+    intimidatingPresenceRoundsRemaining?: number
+    intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
+    natureSanctuaryImmunityRoundsByTarget?: Record<string, number>
+    turnedByClericId?: string
+    turnedRoundsRemaining?: number
+    holyNimbusRoundsRemaining?: number
+    draconicPresenceImmunityRoundsBySource?: Record<string, number>
+    conditions?: string[]
+    stunnedByActorId?: string
+    stunnedAppliedTurnKey?: string
+    openHandNoReactionsAppliedTurnKeysBySource?: Record<string, string>
+    quiveringPalmTargetId?: string
+    tranquilityActive?: boolean
+    hiddenCheckTotal?: number
+    hideInPlainSightPrepared?: boolean
+    concentrationSpellId?: string
+    concentrationTargetIds?: string[]
+    concentrationRoundsRemaining?: number
+    concentrationEffectsBySource?: Record<string, string>
+    viciousMockeryAttackDisadvantage?: boolean
+    shieldSpellActive?: boolean
+    hurlThroughHellSourceId?: string
+    hurlThroughHellDamage?: number
+    hurlThroughHellAppliedTurnKey?: string
+  }
   obstacleKind?: string
+}
+
+type LegacyTokenSave = Omit<Partial<Token>, 'dnd5eCombatState'> & {
+  burningTurns?: number
+  igniteTurns?: number
+  poisonTurns?: number
+  knockbackTurns?: number
+  stunTurns?: number
+  restrainedTurns?: number
+  vulnerableTurns?: number
+  noMoveTurns?: number
+  illusionDanceTurns?: number
+  huntingMarkStacks?: number
+  dnd5eCombatState?: NonNullable<Token['dnd5eCombatState']> & {
+    timedEffects?: Dnd5eTimedEffect[]
+  }
 }
 
 export interface BattleMap {
@@ -154,28 +196,76 @@ export interface BattleMap {
   showCoordinates?: boolean
   /** 勾选后敌人/NPC 拖放时吸附到格心 */
   snapMonstersToGrid?: boolean
+  /** 由 D&D 5e Headless 物品事务创建的持久地图区域。 */
+  dnd5eItemAreas?: Dnd5eItemArea[]
   tokens: Token[]
 }
 
-/**
- * [T10/AC3 · E10] maps 持久化版本号。characters store 早已带 version+migrate（version 19），
- * 而 maps store 此前裸跑 `{ name:'stars-maps' }`，没有版本/迁移：任何旧 localStorage 形状
- * 一旦缺字段（如早期 token 没有 type、map 没有 tokens 数组）就可能在渲染期炸掉。
- * 这里补齐 version + migrate，把任意旧/残缺形状规整为当前 BattleMap 形状。
- */
-export const MAPS_PERSIST_VERSION = 1
+export type Dnd5eItemAreaKind = 'ball-bearings' | 'caltrops' | 'hunting-trap'
+
+export interface Dnd5eItemArea {
+  id: string
+  kind: Dnd5eItemAreaKind
+  sourceCharacterId: string
+  sourceTokenId: string
+  sourceItemTemplateId: string
+  sourceItemName: string
+  cells: Array<{ col: number; row: number }>
+  createdAt: number
+  /** 捕猎陷阱触发后解除武装，并记录当前被困 token。 */
+  armed: boolean
+  triggeredTokenId?: string
+}
+
+/** 地图存档 V4：旧 token 状态只在 normalizeToken 的迁移边界出现。 */
+export const MAPS_PERSIST_VERSION = 4
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
-/** 把任意（可能是旧版本、可能残缺）的 token 形状规整为当前 Token 形状。 */
+/** 将旧或残缺 token 规整为当前 D&D 5e Token。 */
 function normalizeToken(raw: unknown): Token {
-  const t = (raw ?? {}) as Partial<Token>
+  const legacy = (raw ?? {}) as LegacyTokenSave
+  const {
+    burningTurns: _burningTurns,
+    igniteTurns: _igniteTurns,
+    poisonTurns: _poisonTurns,
+    knockbackTurns: _knockbackTurns,
+    stunTurns: _stunTurns,
+    restrainedTurns: _restrainedTurns,
+    vulnerableTurns: _vulnerableTurns,
+    noMoveTurns: _noMoveTurns,
+    illusionDanceTurns: _illusionDanceTurns,
+    huntingMarkStacks: _huntingMarkStacks,
+    dnd5eCombatState: legacyCombatState,
+    ...t
+  } = legacy
   const type = TOKEN_TYPES.includes(t.type as Token['type']) ? (t.type as Token['type']) : 'enemy'
   const preset = TOKEN_PRESETS[type]
   const rawSize = Number.isFinite(t.size) && (t.size as number) > 0 ? (t.size as number) : 1
   const creatureSize =
     normalizeCreatureSize(t.creatureSize) ?? (type === 'enemy' || type === 'npc' ? sizeFromTokenSize(rawSize) : undefined)
   const creatureTypes = normalizeCreatureTypes(t.creatureTypes)
+  const invalidCurrentEffects = legacyCombatState?.schemaVersion === DND5E_COMBAT_STATE_SCHEMA_VERSION &&
+    !validateDnd5eActiveEffectsStrict(legacyCombatState.activeEffects).ok
+  const migratedEffects = legacyCombatState && !invalidCurrentEffects
+    ? migrateDnd5eCombatStateEffects({
+        targetId: typeof t.id === 'string' && t.id ? t.id : 'legacy-token',
+        state: legacyCombatState,
+        conditions: legacyCombatState.conditions,
+      })
+    : undefined
+  const { timedEffects: _legacyTimedEffects, ...nativeCombatState } = legacyCombatState ?? {}
+  void _burningTurns
+  void _igniteTurns
+  void _poisonTurns
+  void _knockbackTurns
+  void _stunTurns
+  void _restrainedTurns
+  void _vulnerableTurns
+  void _noMoveTurns
+  void _illusionDanceTurns
+  void _huntingMarkStacks
+  void _legacyTimedEffects
   return {
     ...t,
     id: typeof t.id === 'string' && t.id ? t.id : uid(),
@@ -188,6 +278,16 @@ function normalizeToken(raw: unknown): Token {
     type,
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
+    dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
+      ? {
+          ...nativeCombatState,
+          schemaVersion: migratedEffects!.schemaVersion,
+          activeEffects: migratedEffects!.activeEffects,
+          conditions: migratedEffects!.conditions.length > 0 ? migratedEffects!.conditions : undefined,
+      }
+      : invalidCurrentEffects
+        ? { ...nativeCombatState, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: undefined, conditions: undefined }
+        : undefined,
   }
 }
 
@@ -195,6 +295,33 @@ function normalizeToken(raw: unknown): Token {
 function normalizeMap(raw: unknown): BattleMap {
   const m = (raw ?? {}) as Partial<BattleMap>
   const tokens = Array.isArray(m.tokens) ? m.tokens.map(normalizeToken) : []
+  const dnd5eItemAreas = Array.isArray(m.dnd5eItemAreas)
+    ? m.dnd5eItemAreas.flatMap((rawArea) => {
+        const area = (rawArea ?? {}) as Partial<Dnd5eItemArea>
+        if (
+          typeof area.id !== 'string' || !area.id ||
+          !['ball-bearings', 'caltrops', 'hunting-trap'].includes(area.kind ?? '')
+        ) return []
+        const cells = Array.isArray(area.cells)
+          ? area.cells.flatMap((cell) => Number.isInteger(cell?.col) && Number.isInteger(cell?.row)
+              ? [{ col: cell!.col, row: cell!.row }]
+              : [])
+          : []
+        if (cells.length < 1) return []
+        return [{
+          id: area.id,
+          kind: area.kind as Dnd5eItemAreaKind,
+          sourceCharacterId: typeof area.sourceCharacterId === 'string' ? area.sourceCharacterId : '',
+          sourceTokenId: typeof area.sourceTokenId === 'string' ? area.sourceTokenId : '',
+          sourceItemTemplateId: typeof area.sourceItemTemplateId === 'string' ? area.sourceItemTemplateId : '',
+          sourceItemName: typeof area.sourceItemName === 'string' ? area.sourceItemName : '物品区域',
+          cells,
+          createdAt: Number.isFinite(area.createdAt) ? area.createdAt! : 0,
+          armed: area.armed !== false,
+          triggeredTokenId: typeof area.triggeredTokenId === 'string' ? area.triggeredTokenId : undefined,
+        } satisfies Dnd5eItemArea]
+      })
+    : []
   return {
     ...m,
     id: typeof m.id === 'string' && m.id ? m.id : uid(),
@@ -205,6 +332,7 @@ function normalizeMap(raw: unknown): BattleMap {
     gridOffsetX: Number.isFinite(m.gridOffsetX) ? (m.gridOffsetX as number) : 0,
     gridOffsetY: Number.isFinite(m.gridOffsetY) ? (m.gridOffsetY as number) : 0,
     showGrid: typeof m.showGrid === 'boolean' ? m.showGrid : true,
+    dnd5eItemAreas,
     tokens,
   }
 }
@@ -215,7 +343,7 @@ interface PersistedMapState {
 }
 
 /**
- * [T10/AC3] 纯函数：把任意持久化快照（含 version 0 = 无版本的旧形状）迁移到当前形状。
+ * 纯函数：把任意持久化快照（含 version 0 = 无版本的旧形状）迁移到当前形状。
  * 单独导出以便 T13 在不挂载组件、不碰 localStorage 的前提下单测。
  * 任何旧 `stars-maps` blob 都应被这里规整为可直接渲染、不崩溃的当前 MapState。
  */
@@ -230,7 +358,7 @@ export function migrateMapsState(persisted: unknown): Pick<MapState, 'maps' | 's
 }
 
 /**
- * [T10/AC1 · E4] 角色 → token.hp 单向镜像的唯一真相源。
+ * 角色 → token.hp 单向镜像的唯一真相源。
  * `Character.currentHp` 是关联 token 血量的权威；token.hp 只是它的镜像（玩家端合并/阵亡判定用）。
  * 所有改血路径（普通伤害 / DOT 每回合 / 静水回血 / 魔法浪涌）改完 character 后，
  * 都用本 helper 算出要写回 token 的 patch，保证 `token.hp === character.currentHp`、不被任何路径绕过。
@@ -273,6 +401,7 @@ interface MapState {
   ) => void
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   applyAuthorityTokenUpdate: (mapId: string, tokenId: string, patch: Partial<Token>) => void
+  applyAuthorityMapUpdate: (mapId: string, patch: Partial<BattleMap>) => void
   removeToken: (mapId: string, tokenId: string) => void
 }
 
@@ -287,7 +416,7 @@ export const useMapStore = create<MapState>()(
           if (canWriteSharedState()) publishMapsState(get())
           return
         }
-        // [T11/AC6 · E6] 单调 guard：丢弃 updatedAt 严格更旧的乱序/陈旧快照。
+        // 单调 guard：丢弃 updatedAt 严格更旧的乱序/陈旧快照。
         // 旧实现仅在 !isPlayerPort() 时做此检查 —— 玩家端裸接受任意顺序的快照，乱序写会回退状态。
         // 现在 DM 与玩家两端都走同一纯 guard（decideApply），相等时落内容 equality 短路。
         const prevGuard: MonotonicState = {
@@ -299,7 +428,7 @@ export const useMapStore = create<MapState>()(
         lastSharedMapsUpdatedAt = decision.next.lastUpdatedAt
         lastSharedMapsSnapshot = decision.next.lastSnapshot
         set({ maps: shared.maps, selectedId: shared.selectedId ?? shared.maps[0]?.id ?? null })
-        // [T11/AC4 · E9] 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
+        // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
         if (isPlayerPort()) void pruneOrphanImages(shared.maps.map((m) => m.id))
       },
       select: (id) => set({ selectedId: id }),
@@ -323,6 +452,7 @@ export const useMapStore = create<MapState>()(
           gridOpacity: 0.28,
           showCoordinates: true,
           snapMonstersToGrid: true,
+          dnd5eItemAreas: [],
           tokens: [],
         }
         set((s) => ({ maps: [...s.maps, map], selectedId: id }))
@@ -497,6 +627,12 @@ export const useMapStore = create<MapState>()(
         }))
       },
 
+      applyAuthorityMapUpdate: (mapId, patch) => {
+        set((state) => ({
+          maps: state.maps.map((map) => map.id === mapId ? { ...map, ...patch } : map),
+        }))
+      },
+
       removeToken: (mapId, tokenId) => {
         set((s) => ({
           maps: s.maps.map((m) =>
@@ -509,7 +645,7 @@ export const useMapStore = create<MapState>()(
     {
       name: 'stars-maps',
       version: MAPS_PERSIST_VERSION,
-      // [T10/AC3 · E10] 旧形状（version 0 = 此前无版本）经此迁移到当前形状，避免渲染期崩溃。
+      // 旧形状（version 0 = 此前无版本）经此迁移到当前形状，避免渲染期崩溃。
       migrate: (persisted) => migrateMapsState(persisted) as MapState,
     },
   ),

@@ -8,7 +8,7 @@ import {
 } from './characters'
 import type { Character } from '../types/character'
 
-// [T10/AC2 · E11] 删除墓碑防复活：删除一个角色后，对端一份仍含该角色的「全量数组」快照
+// 删除墓碑防复活：删除一个角色后，对端一份仍含该角色的「全量数组」快照
 // 不得在 loadShared 里把它复活；墓碑过期 GC 后被删 id 可复用。
 // 这里直接单测 loadShared 所依赖的纯过滤 helper 与墓碑 GC 语义。
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Search, Skull, X } from 'lucide-react'
 import {
-  ENEMY_POOL,
+  DND5E_SRD_ENEMY_POOL,
   searchEnemyPool,
   type EnemyTemplate,
 } from '../../lib/enemyPool'
@@ -21,7 +21,7 @@ export default function EnemyPoolPicker({
 }) {
   const [query, setQuery] = useState('')
 
-  const results = useMemo(() => searchEnemyPool(query, ENEMY_POOL), [query])
+  const results = useMemo(() => searchEnemyPool(query, DND5E_SRD_ENEMY_POOL), [query])
 
   if (!open) return null
 
@@ -61,7 +61,7 @@ export default function EnemyPoolPicker({
             />
           </div>
           <p className="mt-2 text-xs text-slate-500">
-            共 {ENEMY_POOL.length} 种怪物 · 显示 {results.length} 项
+            SRD 5.1 · 共 {DND5E_SRD_ENEMY_POOL.length} 种怪物 · 显示 {results.length} 项
           </p>
         </div>
 
@@ -93,6 +93,16 @@ export default function EnemyPoolPicker({
                         <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-rose-200">
                           HP {m.maxHp}
                         </span>
+                        {m.armorClass != null && (
+                          <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-sky-200">
+                            AC {m.armorClass}
+                          </span>
+                        )}
+                        {m.challengeRating && (
+                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-amber-200">
+                            CR {m.challengeRating}
+                          </span>
+                        )}
                         {m.size != null && m.size !== 1 && (
                           <span className="text-[10px] text-slate-500">{m.size}× 体型</span>
                         )}

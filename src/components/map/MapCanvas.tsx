@@ -4,20 +4,6 @@ import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arr
 import Konva from 'konva'
 import { getImage } from '../../lib/imageStore'
 import {
-  loadCalmMindIcon,
-  loadDoubleArrowIcon,
-  loadEagleEyeIcon,
-  loadGaleComboIcon,
-  loadHuntingMarkIcon,
-  loadIgniteIcon,
-  loadIllusionDanceIcon,
-  loadKnockbackIcon,
-  loadOutOfBreathIcon,
-  loadPoisonIcon,
-  loadPreciseStrikeIcon,
-  loadSilentDrawIcon,
-} from '../../lib/imageAlpha'
-import {
   clampGridSize,
   cellKey,
   cellTopLeft,
@@ -105,6 +91,8 @@ function useStatusAnimation(
 
 import { useMapStore } from '../../store/maps'
 import type { BattleMap, Token } from '../../store/maps'
+import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
+import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
 
 export interface MoveCircle {
   centerX: number
@@ -161,22 +149,9 @@ interface MapCanvasProps {
   onAoePreviewCell?: (cell: GridCell | null) => void
   onAoeConfirm?: (cell: GridCell) => void
   onAoeCancel?: () => void
-  /** tokenId to token status badges. */
-  tokenBadges?: Record<
-    string,
-    {
-      doubleArrow?: boolean
-      eagleEye?: boolean
-      galeCombo?: boolean
-      silentDraw?: boolean
-      preciseStrike?: boolean
-      calmMind?: boolean
-      calmSpiritStacks?: number
-      outOfBreath?: boolean
-      huntingMarkStacks?: number
-      illusionDance?: boolean
-    }
-  >
+  /** 由 5e Headless 快照得出的标准状态，显示在 Token 右上角。 */
+  dnd5eConditionsByToken?: Record<string, readonly Dnd5eStandardConditionId[]>
+  onDnd5eConditionClick?: (tokenId: string, condition?: Dnd5eStandardConditionId) => void
   tokenHoverLabels?: Record<string, string>
   projectiles?: MapProjectile[]
   /** Defeated tokens are dimmed. */
@@ -277,107 +252,6 @@ function rightBadgeGridPos(radius: number, size: number, gridIndex: number): { x
   }
 }
 
-function DoubleArrowBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-  const size = rightBadgeSize(radius)
-  const r = size / 2
-  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
-  const fallbackStrokeW = tokenLineWidth(radius, 1.5)
-
-  useEffect(() => {
-    let cancelled = false
-    loadDoubleArrowIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return (
-    <Group x={x} y={y} listening={false}>
-      {iconCanvas ? (
-        <KonvaImage
-          image={iconCanvas}
-          width={size}
-          height={size}
-          offsetX={r}
-          offsetY={r}
-          x={0}
-          y={0}
-          shadowBlur={4 * tokenScale(radius)}
-          shadowColor="rgba(34,197,94,0.55)"
-        />
-      ) : (
-        <>
-          <Circle
-            radius={r}
-            fill="rgba(5,46,22,0.18)"
-            stroke="#22c55e"
-            strokeWidth={fallbackStrokeW}
-          />
-          <Text
-            text={'\u00d72'}
-            fontSize={Math.max(9, r * 0.95)}
-            fill="#bbf7d0"
-            fontStyle="bold"
-            align="center"
-            verticalAlign="middle"
-            width={size}
-            height={size}
-            offsetX={r}
-            offsetY={r}
-          />
-        </>
-      )}
-    </Group>
-  )
-}
-
-function GaleComboBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-  const size = rightBadgeSize(radius)
-  const r = size / 2
-  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
-
-  useEffect(() => {
-    let cancelled = false
-    loadGaleComboIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return (
-    <Group x={x} y={y} listening={false}>
-      {iconCanvas ? (
-        <KonvaImage
-          image={iconCanvas}
-          width={size}
-          height={size}
-          offsetX={r}
-          offsetY={r}
-          x={0}
-          y={0}
-          shadowBlur={5 * tokenScale(radius)}
-          shadowColor="rgba(103,232,249,0.72)"
-        />
-      ) : (
-        <Circle
-          radius={r}
-          fill="rgba(8,47,73,0.7)"
-          stroke="#67e8f9"
-          strokeWidth={tokenLineWidth(radius, 1.45)}
-          shadowBlur={5 * tokenScale(radius)}
-          shadowColor="rgba(103,232,249,0.72)"
-        />
-      )}
-    </Group>
-  )
-}
-
 function AoeCellHighlights({
   map,
   cells,
@@ -428,367 +302,99 @@ function AoeCellHighlights({
   )
 }
 
-const IGNITE_RING_COLOR = '#dc2626'
-const KNOCKBACK_RING_COLOR = '#2563eb'
-const POISON_RING_COLOR = '#22c55e'
-const EAGLE_EYE_RING_COLOR = '#0ea5e9'
-const CALM_MIND_RING_COLOR = '#14b8a6'
-const OUT_OF_BREATH_RING_COLOR = '#f97316'
-const HUNTING_MARK_RING_COLOR = '#f59e0b'
-const ILLUSION_DANCE_RING_COLOR = '#d946ef'
-
-/** Status icon badge with a thick ring and clipped PNG halo. */
-function RingedStatusIconBadge({
+function Dnd5eStandardConditionBadge({
   radius,
-  gridIndex = 0,
-  iconCanvas,
-  ringColor,
-  backgroundFill = '#ffffff',
+  gridIndex,
+  condition,
+  overflowCount,
+  onClick,
 }: {
   radius: number
-  gridIndex?: number
-  iconCanvas: HTMLCanvasElement
-  ringColor: string
-  backgroundFill?: string
+  gridIndex: number
+  condition?: Dnd5eStandardConditionId
+  overflowCount?: number
+  onClick?: () => void
 }) {
   const size = rightBadgeSize(radius)
   const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
-  const r = size / 2
-  const strokeW = tokenLineWidth(radius, 1.5)
-  const innerR = Math.max(1, r - strokeW / 2 - 0.5)
-
+  const style = condition ? DND5E_CONDITION_MARKERS[condition] : undefined
   return (
-    <Group x={x} y={y} listening={false}>
-      <Group
-        clipFunc={(ctx) => {
-          ctx.beginPath()
-          ctx.arc(0, 0, innerR, 0, Math.PI * 2)
-          ctx.closePath()
-        }}
-        listening={false}
-      >
-        <Circle radius={innerR} fill={backgroundFill} listening={false} />
-        <KonvaImage
-          image={iconCanvas}
-          width={size}
-          height={size}
-          offsetX={size / 2}
-          offsetY={size / 2}
-          imageSmoothingEnabled={false}
-          listening={false}
-        />
-      </Group>
+    <Group
+      x={x}
+      y={y}
+      listening={!!onClick}
+      onClick={(event) => { event.cancelBubble = true; onClick?.() }}
+      onTap={(event) => { event.cancelBubble = true; onClick?.() }}
+    >
       <Circle
-        radius={r - strokeW / 2}
-        stroke={ringColor}
-        strokeWidth={strokeW}
-        fillEnabled={false}
-        perfectDrawEnabled={false}
-        shadowForStrokeEnabled={false}
-        listening={false}
+        radius={size / 2}
+        fill={style?.fill ?? '#312e81'}
+        stroke={style?.stroke ?? '#c4b5fd'}
+        strokeWidth={tokenLineWidth(radius, 1.5)}
+        shadowBlur={4 * tokenScale(radius)}
+        shadowColor={style?.stroke ?? '#a78bfa'}
+        listening={!!onClick}
       />
-    </Group>
-  )
-}
-
-/** Ignite badge shared by burning/ignite. */
-function IgniteBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadIgniteIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={IGNITE_RING_COLOR}
-    />
-  )
-}
-
-/** Eagle eye badge. */
-function EagleEyeBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadEagleEyeIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={EAGLE_EYE_RING_COLOR}
-    />
-  )
-}
-
-/** 中毒角标 */
-function PoisonBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadPoisonIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={POISON_RING_COLOR}
-    />
-  )
-}
-
-/** 击飞角标 */
-function KnockbackBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadKnockbackIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={KNOCKBACK_RING_COLOR}
-    />
-  )
-}
-
-function HuntingMarkBadge({
-  radius,
-  gridIndex = 0,
-}: {
-  radius: number
-  gridIndex?: number
-}) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadHuntingMarkIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={HUNTING_MARK_RING_COLOR}
-    />
-  )
-}
-
-function IllusionDanceBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadIllusionDanceIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={ILLUSION_DANCE_RING_COLOR}
-      backgroundFill="#1e1b4b"
-    />
-  )
-}
-
-function BadgeCornerNumber({
-  radius,
-  gridIndex = 0,
-  text,
-  stroke,
-}: {
-  radius: number
-  gridIndex?: number
-  text: string
-  stroke: string
-}) {
-  const size = rightBadgeSize(radius)
-  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
-  const r = size / 2
-  const nr = Math.max(6, r * 0.42)
-  return (
-    <Group x={x + r * 0.55} y={y + r * 0.55} listening={false}>
       <Text
-        text={text}
-        width={nr * 2}
-        height={nr * 2}
-        offsetX={nr}
-        offsetY={nr}
-        fontSize={Math.max(8, nr * 1.25)}
+        text={overflowCount ? `+${overflowCount}` : style?.glyph ?? '•'}
+        width={size}
+        height={size}
+        offsetX={size / 2}
+        offsetY={size / 2}
+        fontSize={Math.max(7, size * (overflowCount ? 0.34 : 0.52))}
         fontStyle="bold"
-        fill="#ef4444"
-        stroke={stroke}
-        strokeWidth={Math.max(0.35, tokenLineWidth(radius, 0.38))}
-        shadowBlur={3 * tokenScale(radius)}
-        shadowColor="rgba(0,0,0,0.85)"
+        fill={style?.text ?? '#f5f3ff'}
         align="center"
         verticalAlign="middle"
+        listening={!!onClick}
       />
     </Group>
   )
 }
 
-function SilentDrawBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadSilentDrawIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
+function Dnd5eItemAreaOverlays({ map }: { map: BattleMap }) {
+  const grid = Math.max(1, map.gridSize)
+  const meta = {
+    'ball-bearings': { icon: '●', fill: 'rgba(148, 163, 184, 0.24)', stroke: 'rgba(203, 213, 225, 0.72)' },
+    caltrops: { icon: '▲', fill: 'rgba(245, 158, 11, 0.22)', stroke: 'rgba(251, 191, 36, 0.78)' },
+    'hunting-trap': { icon: '⌁', fill: 'rgba(239, 68, 68, 0.22)', stroke: 'rgba(248, 113, 113, 0.82)' },
+  } as const
   return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor="#a78bfa"
-    />
-  )
-}
-
-function PreciseStrikeBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadPreciseStrikeIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor="#fb7185"
-      backgroundFill="#2a0508"
-    />
-  )
-}
-
-/** 静心角标 */
-function CalmMindBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadCalmMindIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={CALM_MIND_RING_COLOR}
-    />
-  )
-}
-
-/** 气喘角标 */
-function OutOfBreathBadge({ radius, gridIndex = 0 }: { radius: number; gridIndex?: number }) {
-  const [iconCanvas, setIconCanvas] = useState<HTMLCanvasElement | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadOutOfBreathIcon().then((c) => {
-      if (!cancelled) setIconCanvas(c)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (!iconCanvas) return null
-
-  return (
-    <RingedStatusIconBadge
-      radius={radius}
-      gridIndex={gridIndex}
-      iconCanvas={iconCanvas}
-      ringColor={OUT_OF_BREATH_RING_COLOR}
-    />
+    <>
+      {(map.dnd5eItemAreas ?? []).flatMap((area) => {
+        const style = meta[area.kind]
+        return area.cells.map((cell, index) => {
+          const { x, y } = cellTopLeft(cell, map)
+          return (
+            <Group key={`${area.id}:${cellKey(cell)}`} listening={false} opacity={area.armed ? 1 : 0.48}>
+              <Rect
+                x={x}
+                y={y}
+                width={grid}
+                height={grid}
+                fill={style.fill}
+                stroke={style.stroke}
+                strokeWidth={2}
+                dash={area.armed ? [7, 5] : [3, 6]}
+              />
+              {index === 0 && (
+                <Text
+                  x={x}
+                  y={y + grid * 0.18}
+                  width={grid}
+                  text={style.icon}
+                  align="center"
+                  fontSize={Math.max(12, grid * 0.42)}
+                  fill={style.stroke}
+                  shadowBlur={4}
+                  shadowColor="rgba(0,0,0,0.8)"
+                />
+              )}
+            </Group>
+          )
+        })
+      })}
+    </>
   )
 }
 
@@ -808,7 +414,8 @@ export default function MapCanvas({
   onAoePreviewCell,
   onAoeConfirm,
   onAoeCancel,
-  tokenBadges = {},
+  dnd5eConditionsByToken = {},
+  onDnd5eConditionClick,
   tokenHoverLabels = {},
   projectiles = [],
   defeatedTokenIds = [],
@@ -1331,6 +938,7 @@ export default function MapCanvas({
           {image && <KonvaImage image={image} width={map.width} height={map.height} />}
           {gridLines}
           {coordinateLabels}
+          <Dnd5eItemAreaOverlays map={map} />
           {aoeSelectMode && aoeHighlight?.areaCircle && (
             <Circle
               x={aoeHighlight.areaCircle.centerX}
@@ -1415,16 +1023,6 @@ export default function MapCanvas({
                 !!hpByToken?.[t.id] &&
                 (isDM || !!t.characterId || t.showHpOnToken !== false)
               }
-              doubleArrowBadge={tokenBadges[t.id]?.doubleArrow}
-              eagleEyeBadge={tokenBadges[t.id]?.eagleEye}
-              galeComboBadge={tokenBadges[t.id]?.galeCombo}
-              silentDrawBadge={tokenBadges[t.id]?.silentDraw}
-              preciseStrikeBadge={tokenBadges[t.id]?.preciseStrike}
-              calmMindBadge={tokenBadges[t.id]?.calmMind}
-              calmSpiritStacks={tokenBadges[t.id]?.calmSpiritStacks}
-              outOfBreathBadge={tokenBadges[t.id]?.outOfBreath}
-              huntingMarkStacks={tokenBadges[t.id]?.huntingMarkStacks}
-              illusionDanceBadge={tokenBadges[t.id]?.illusionDance}
               hoverLabel={hoveredTokenId === t.id ? tokenHoverLabels[t.id] : undefined}
               onHoverChange={(hovered) =>
                 // Use functional updates to avoid hover flicker races.
@@ -1472,19 +1070,12 @@ export default function MapCanvas({
                   !!hpByToken?.[t.id] &&
                   (isDM || !!t.characterId || t.showHpOnToken !== false)
                 }
-                doubleArrowBadge={tokenBadges[t.id]?.doubleArrow}
-                eagleEyeBadge={tokenBadges[t.id]?.eagleEye}
-                galeComboBadge={tokenBadges[t.id]?.galeCombo}
-                silentDrawBadge={tokenBadges[t.id]?.silentDraw}
-                preciseStrikeBadge={tokenBadges[t.id]?.preciseStrike}
-                calmMindBadge={tokenBadges[t.id]?.calmMind}
-                calmSpiritStacks={tokenBadges[t.id]?.calmSpiritStacks}
-                outOfBreathBadge={tokenBadges[t.id]?.outOfBreath}
-                huntingMarkStacks={tokenBadges[t.id]?.huntingMarkStacks}
-                illusionDanceBadge={tokenBadges[t.id]?.illusionDance}
                 hoverLabel={hoveredTokenId === t.id ? tokenHoverLabels[t.id] : undefined}
                 onHoverChange={() => undefined}
-                onSelect={() => undefined}
+                onSelect={() => {
+                  if (deleteSelectMode) return
+                  onSelectToken(t.id)
+                }}
                 instantPosition={!!dragPreviewPositions[t.id]}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
                 onDragMove={(x, y) => previewTokenDrag(t, x, y)}
@@ -1512,19 +1103,14 @@ export default function MapCanvas({
                   !!hpByToken?.[t.id] &&
                   (isDM || !!t.characterId || t.showHpOnToken !== false)
                 }
-                doubleArrowBadge={tokenBadges[t.id]?.doubleArrow}
-                eagleEyeBadge={tokenBadges[t.id]?.eagleEye}
-                galeComboBadge={tokenBadges[t.id]?.galeCombo}
-                silentDrawBadge={tokenBadges[t.id]?.silentDraw}
-                preciseStrikeBadge={tokenBadges[t.id]?.preciseStrike}
-                calmMindBadge={tokenBadges[t.id]?.calmMind}
-                calmSpiritStacks={tokenBadges[t.id]?.calmSpiritStacks}
-                outOfBreathBadge={tokenBadges[t.id]?.outOfBreath}
-                huntingMarkStacks={tokenBadges[t.id]?.huntingMarkStacks}
-                illusionDanceBadge={tokenBadges[t.id]?.illusionDance}
+                standardConditions={dnd5eConditionsByToken[t.id]}
+                onStandardConditionClick={(condition) => onDnd5eConditionClick?.(t.id, condition)}
                 hoverLabel={hoveredTokenId === t.id ? tokenHoverLabels[t.id] : undefined}
                 onHoverChange={() => undefined}
-                onSelect={() => undefined}
+                onSelect={() => {
+                  if (deleteSelectMode) return
+                  onSelectToken(t.id)
+                }}
                 instantPosition={!!dragPreviewPositions[t.id]}
                 onDragEnd={(x, y) => commitTokenDrag(t, x, y)}
                 onDragMove={(x, y) => previewTokenDrag(t, x, y)}
@@ -1797,16 +1383,8 @@ function TokenNode({
   draggable = true,
   hp,
   showHpBar = true,
-  doubleArrowBadge = false,
-  eagleEyeBadge = false,
-  galeComboBadge = false,
-  silentDrawBadge = false,
-  preciseStrikeBadge = false,
-  calmMindBadge = false,
-  calmSpiritStacks = 0,
-  outOfBreathBadge = false,
-  huntingMarkStacks = 0,
-  illusionDanceBadge = false,
+  standardConditions = [],
+  onStandardConditionClick,
   hoverLabel,
   onHoverChange,
   onSelect,
@@ -1825,16 +1403,8 @@ function TokenNode({
   draggable?: boolean
   hp?: { hp: number; max: number; temp?: number }
   showHpBar?: boolean
-  doubleArrowBadge?: boolean
-  eagleEyeBadge?: boolean
-  galeComboBadge?: boolean
-  silentDrawBadge?: boolean
-  preciseStrikeBadge?: boolean
-  calmMindBadge?: boolean
-  calmSpiritStacks?: number
-  outOfBreathBadge?: boolean
-  huntingMarkStacks?: number
-  illusionDanceBadge?: boolean
+  standardConditions?: readonly Dnd5eStandardConditionId[]
+  onStandardConditionClick?: (condition?: Dnd5eStandardConditionId) => void
   hoverLabel?: string
   onHoverChange?: (hovered: boolean) => void
   onSelect: () => void
@@ -1848,9 +1418,9 @@ function TokenNode({
   const draggingRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
   const prevGridSizeRef = useRef(gridSize)
-  // [T8/AC5 · D5] 拖拽起点（用于判断是否超过移动阈值）
+  // 拖拽起点（用于判断是否超过移动阈值）
   const dragStartRef = useRef<{ x: number; y: number } | null>(null)
-  // [T8/AC8 · D10] 当前在途的位置补间，启动新补间前先销毁它
+  // 当前在途的位置补间，启动新补间前先销毁它
   const reconcileTweenRef = useRef<Konva.Tween | null>(null)
   const radius = tokenDisplayRadius(gridSize, token.size, builtinGrid)
   const labelSize = Math.max(9, radius * 0.42)
@@ -1860,7 +1430,6 @@ function TokenNode({
   const selectedGap = 5 * scale
   const statusStrokeW = tokenLineWidth(radius, 4)
   const baseStrokeW = tokenLineWidth(radius, 3)
-  const secondaryStrokeW = tokenLineWidth(radius, 2.5)
   const tempHp = Math.max(0, hp?.temp ?? 0)
   const hpDenominator = hp ? Math.max(1, hp.max + tempHp) : 1
   const hpPct = hp ? Math.max(0, Math.min(1, hp.hp / hpDenominator)) : null
@@ -1875,26 +1444,14 @@ function TokenNode({
         : realHpPct > 0.25
           ? '#fbbf24'
           : '#f87171'
-  const strokeColor = defeated
-    ? '#94a3b8'
-    : (token.stunTurns ?? 0) > 0
-      ? '#facc15'
-      : (token.knockbackTurns ?? 0) > 0
-        ? '#38bdf8'
-        : (token.burningTurns ?? 0) > 0
-          ? '#fb923c'
-          : (token.igniteTurns ?? 0) > 0
-            ? '#ef4444'
-            : (token.poisonTurns ?? 0) > 0
-              ? '#4ade80'
-              : outOfBreathBadge
-                ? OUT_OF_BREATH_RING_COLOR
-                : illusionDanceBadge
-                  ? ILLUSION_DANCE_RING_COLOR
-                  : calmMindBadge
-                    ? CALM_MIND_RING_COLOR
-                    : token.color
+  const isStunned = standardConditions.includes('stunned')
+  const isPoisoned = standardConditions.includes('poisoned')
+  const strokeColor = defeated ? '#94a3b8' : isStunned ? '#facc15' : isPoisoned ? '#4ade80' : token.color
   const barW = radius * 2
+  const hoverFontSize = Math.max(8, radius * 0.32)
+  const hoverLabelWidth = hoverLabel
+    ? Math.min(radius * 9, Math.max(radius * 2.4, hoverLabel.length * hoverFontSize * 0.92))
+    : radius * 2.4
   const isDragonEmoji = token.emoji === '\u{1f409}' || token.emoji === '\u{1f432}'
   const emojiFontScale = isDragonEmoji ? 0.94 : 1
   const emojiOffsetY = isDragonEmoji ? radius * 0.07 : 0
@@ -2019,78 +1576,24 @@ function TokenNode({
         let grid = 0
         return (
           <>
-            {doubleArrowBadge && (
-              <DoubleArrowBadge radius={radius} gridIndex={grid++} />
-            )}
-            {eagleEyeBadge && (
-              <EagleEyeBadge radius={radius} gridIndex={grid++} />
-            )}
-            {galeComboBadge && (
-              <GaleComboBadge radius={radius} gridIndex={grid++} />
-            )}
-            {silentDrawBadge && (
-              <SilentDrawBadge radius={radius} gridIndex={grid++} />
-            )}
-            {preciseStrikeBadge && (
-              <PreciseStrikeBadge radius={radius} gridIndex={grid++} />
-            )}
-            {((token.burningTurns ?? 0) > 0 || (token.igniteTurns ?? 0) > 0) && (
-              <IgniteBadge radius={radius} gridIndex={grid++} />
-            )}
-            {(token.knockbackTurns ?? 0) > 0 && (
-              <KnockbackBadge radius={radius} gridIndex={grid++} />
-            )}
-            {(token.stunTurns ?? 0) > 0 && (
-              <StatusTurnBadge
+            {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
+              .map((condition) => (
+                <Dnd5eStandardConditionBadge
+                  key={`dnd5e-condition:${condition}`}
+                  radius={radius}
+                  gridIndex={grid++}
+                  condition={condition}
+                  onClick={() => onStandardConditionClick?.(condition)}
+                />
+              ))}
+            {standardConditions.length > 4 && (
+              <Dnd5eStandardConditionBadge
                 radius={radius}
                 gridIndex={grid++}
-                emoji={'\u2726'}
-                turns={token.stunTurns!}
-                stroke="#facc15"
-                fill="#fef9c3"
+                overflowCount={standardConditions.length - 3}
+                onClick={() => onStandardConditionClick?.()}
               />
             )}
-            {(token.poisonTurns ?? 0) > 0 && (
-              <PoisonBadge radius={radius} gridIndex={grid++} />
-            )}
-            {calmMindBadge &&
-              (() => {
-                const calmGrid = grid++
-                return (
-                  <>
-                    <CalmMindBadge radius={radius} gridIndex={calmGrid} />
-                    {calmSpiritStacks > 0 && (
-                      <BadgeCornerNumber
-                        radius={radius}
-                        gridIndex={calmGrid}
-                        text={String(calmSpiritStacks)}
-                        stroke="#ffffff"
-                      />
-                    )}
-                  </>
-                )
-              })()}
-            {outOfBreathBadge && (
-              <OutOfBreathBadge radius={radius} gridIndex={grid++} />
-            )}
-            {illusionDanceBadge && (
-              <IllusionDanceBadge radius={radius} gridIndex={grid++} />
-            )}
-            {huntingMarkStacks > 0 &&
-              (() => {
-                const markGrid = grid++
-                return (
-                  <>
-                    <HuntingMarkBadge radius={radius} gridIndex={markGrid} />
-                    <BadgeCornerNumber
-                      radius={radius}
-                      gridIndex={markGrid}
-                      text={String(huntingMarkStacks)}
-                      stroke="#ffffff"
-                    />
-                  </>
-                )
-              })()}
           </>
         )
       })()}
@@ -2098,9 +1601,9 @@ function TokenNode({
       {renderMode !== 'body' && hoverLabel && (
         <Group y={-radius - 34 * scale} listening={false}>
           <Rect
-            x={-radius * 1.2}
+            x={-hoverLabelWidth / 2}
             y={-10 * scale}
-            width={radius * 2.4}
+            width={hoverLabelWidth}
             height={20 * scale}
             cornerRadius={5 * scale}
             fill="rgba(10,11,22,0.92)"
@@ -2111,11 +1614,11 @@ function TokenNode({
           />
           <Text
             text={hoverLabel}
-            x={-radius * 1.2}
+            x={-hoverLabelWidth / 2}
             y={-8 * scale}
-            width={radius * 2.4}
+            width={hoverLabelWidth}
             height={16 * scale}
-            fontSize={Math.max(8, radius * 0.32)}
+            fontSize={hoverFontSize}
             fontStyle="bold"
             fill="#bae6fd"
             align="center"
@@ -2206,26 +1709,14 @@ function TokenNode({
           listening={false}
         />
       )}
-      {(token.stunTurns ?? 0) > 0 && <StunGlow radius={radius} />}
-      {(token.knockbackTurns ?? 0) > 0 && <KnockbackLiftGlow radius={radius} />}
-      {calmMindBadge && <CalmMindAura radius={radius} />}
-      {outOfBreathBadge && <OutOfBreathHeat radius={radius} />}
-      {((token.burningTurns ?? 0) > 0 || (token.igniteTurns ?? 0) > 0) && (
-        <BurningGlow radius={radius} />
-      )}
-      {(token.poisonTurns ?? 0) > 0 && <PoisonCloudGlow radius={radius} />}
+      {isStunned && <StunGlow radius={radius} />}
+      {isPoisoned && <PoisonCloudGlow radius={radius} />}
       <Circle
         radius={radius}
         fill={defeated ? 'rgba(30,32,45,0.92)' : 'rgba(10,11,22,0.85)'}
         stroke={strokeColor}
         strokeWidth={
-          (token.stunTurns ?? 0) > 0 ||
-          (token.knockbackTurns ?? 0) > 0 ||
-          (token.burningTurns ?? 0) > 0 ||
-          (token.igniteTurns ?? 0) > 0 ||
-          (token.poisonTurns ?? 0) > 0 ||
-          calmMindBadge ||
-          outOfBreathBadge
+          isStunned || isPoisoned
             ? statusStrokeW
             : baseStrokeW
         }
@@ -2237,23 +1728,13 @@ function TokenNode({
           listening={false}
         />
       )}
-      {(token.poisonTurns ?? 0) > 0 && (token.burningTurns ?? 0) > 0 && (
-        <Circle
-          radius={radius + 3 * scale}
-          stroke="#86efac"
-          strokeWidth={secondaryStrokeW}
-          opacity={0.7}
-          dash={tokenDash(radius, [4, 6])}
-          listening={false}
-        />
-      )}
 
       {renderMode !== 'body' && hoverLabel && (
         <Group y={-radius - 34 * scale} listening={false}>
           <Rect
-            x={-radius * 1.2}
+            x={-hoverLabelWidth / 2}
             y={-10 * scale}
-            width={radius * 2.4}
+            width={hoverLabelWidth}
             height={20 * scale}
             cornerRadius={5 * scale}
             fill="rgba(10,11,22,0.92)"
@@ -2264,11 +1745,11 @@ function TokenNode({
           />
           <Text
             text={hoverLabel}
-            x={-radius * 1.2}
+            x={-hoverLabelWidth / 2}
             y={-8 * scale}
-            width={radius * 2.4}
+            width={hoverLabelWidth}
             height={16 * scale}
-            fontSize={Math.max(8, radius * 0.32)}
+            fontSize={hoverFontSize}
             fontStyle="bold"
             fill="#bae6fd"
             align="center"
@@ -2336,87 +1817,30 @@ function TokenNode({
         verticalAlign="middle"
         opacity={defeated ? 0.65 : 1}
       />
-      {((token.burningTurns ?? 0) > 0 || (token.igniteTurns ?? 0) > 0) && (
-        <BurningFlames radius={radius} />
-      )}
-      {(token.poisonTurns ?? 0) > 0 && <PoisonCloud radius={radius} />}
-      {(token.stunTurns ?? 0) > 0 && <StunOrbitStars radius={radius} />}
+      {isPoisoned && <PoisonCloud radius={radius} />}
+      {isStunned && <StunOrbitStars radius={radius} />}
       {renderMode !== 'body' && (() => {
         let grid = 0
         return (
           <>
-            {doubleArrowBadge && (
-              <DoubleArrowBadge radius={radius} gridIndex={grid++} />
-            )}
-            {eagleEyeBadge && (
-              <EagleEyeBadge radius={radius} gridIndex={grid++} />
-            )}
-            {galeComboBadge && (
-              <GaleComboBadge radius={radius} gridIndex={grid++} />
-            )}
-            {silentDrawBadge && (
-              <SilentDrawBadge radius={radius} gridIndex={grid++} />
-            )}
-            {preciseStrikeBadge && (
-              <PreciseStrikeBadge radius={radius} gridIndex={grid++} />
-            )}
-            {((token.burningTurns ?? 0) > 0 || (token.igniteTurns ?? 0) > 0) && (
-              <IgniteBadge radius={radius} gridIndex={grid++} />
-            )}
-            {(token.knockbackTurns ?? 0) > 0 && (
-              <KnockbackBadge radius={radius} gridIndex={grid++} />
-            )}
-            {(token.stunTurns ?? 0) > 0 && (
-              <StatusTurnBadge
+            {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)
+              .map((condition) => (
+                <Dnd5eStandardConditionBadge
+                  key={`dnd5e-condition:${condition}`}
+                  radius={radius}
+                  gridIndex={grid++}
+                  condition={condition}
+                  onClick={() => onStandardConditionClick?.(condition)}
+                />
+              ))}
+            {standardConditions.length > 4 && (
+              <Dnd5eStandardConditionBadge
                 radius={radius}
                 gridIndex={grid++}
-                emoji={'\u2726'}
-                turns={token.stunTurns!}
-                stroke="#facc15"
-                fill="#fef9c3"
+                overflowCount={standardConditions.length - 3}
+                onClick={() => onStandardConditionClick?.()}
               />
             )}
-            {(token.poisonTurns ?? 0) > 0 && (
-              <PoisonBadge radius={radius} gridIndex={grid++} />
-            )}
-            {calmMindBadge &&
-              (() => {
-                const calmGrid = grid++
-                return (
-                  <>
-                    <CalmMindBadge radius={radius} gridIndex={calmGrid} />
-                    {calmSpiritStacks > 0 && (
-                      <BadgeCornerNumber
-                        radius={radius}
-                        gridIndex={calmGrid}
-                        text={String(calmSpiritStacks)}
-                        stroke="#ffffff"
-                      />
-                    )}
-                  </>
-                )
-              })()}
-            {outOfBreathBadge && (
-              <OutOfBreathBadge radius={radius} gridIndex={grid++} />
-            )}
-            {illusionDanceBadge && (
-              <IllusionDanceBadge radius={radius} gridIndex={grid++} />
-            )}
-            {huntingMarkStacks > 0 &&
-              (() => {
-                const markGrid = grid++
-                return (
-                  <>
-                    <HuntingMarkBadge radius={radius} gridIndex={markGrid} />
-                    <BadgeCornerNumber
-                      radius={radius}
-                      gridIndex={markGrid}
-                      text={String(huntingMarkStacks)}
-                      stroke="#ffffff"
-                    />
-                  </>
-                )
-              })()}
           </>
         )
       })()}
@@ -2446,91 +1870,9 @@ function TokenNode({
   )
 }
 
-const FLAME_PARTICLE_COUNT = 20
-const FLAME_COLORS = ['#ef4444', '#dc2626', '#f97316', '#ea580c', '#fb923c', '#c2410c']
-
-/** 燃烧光晕（在 token 底层，向外扩散） */
-function BurningGlow({ radius }: { radius: number }) {
-  const glowRef = useRef<Konva.Circle>(null)
-  const ringRef = useRef<Konva.Circle>(null)
-
-  useStatusAnimation(
-    () => glowRef.current?.getLayer() ?? null,
-    (frame) => {
-      const t = (frame?.time ?? 0) / 1000
-      if (glowRef.current) {
-        glowRef.current.radius(radius * (1.12 + Math.sin(t * 5.5) * 0.1))
-        glowRef.current.opacity(0.22 + Math.sin(t * 7) * 0.1)
-      }
-      if (ringRef.current) {
-        ringRef.current.radius(radius * (1.08 + Math.sin(t * 4) * 0.06))
-        ringRef.current.opacity(0.5 + Math.sin(t * 8) * 0.2)
-      }
-    },
-    [radius],
-  )
-
-  return (
-    <Group listening={false}>
-      <Circle ref={glowRef} radius={radius * 1.15} fill="#f97316" opacity={0.28} listening={false} />
-      <Circle
-        ref={ringRef}
-        radius={radius * 1.08}
-        stroke="#fb923c"
-        strokeWidth={tokenLineWidth(radius, 2)}
-        opacity={0.55}
-        dash={tokenDash(radius, [5, 7])}
-        listening={false}
-      />
-    </Group>
-  )
-}
-
-/** 燃烧火焰粒子（在 emoji 上层，环绕飘动） */
-function BurningFlames({ radius }: { radius: number }) {
-  const groupRef = useRef<Konva.Group>(null)
-  const particleRefs = useRef<(Konva.Circle | null)[]>([])
-
-  useStatusAnimation(
-    () => groupRef.current?.getLayer() ?? null,
-    (frame) => {
-      const t = (frame?.time ?? 0) / 1000
-      particleRefs.current.forEach((p, i) => {
-        if (!p) return
-        const angle = t * 3 + i * ((Math.PI * 2) / FLAME_PARTICLE_COUNT)
-        const rise = Math.abs(Math.sin(t * 4 + i * 0.9))
-        const orbit = 0.48 + (i % 4) * 0.06
-        p.x(Math.cos(angle) * radius * orbit)
-        p.y(-radius * 0.3 - rise * radius * 0.58)
-        p.opacity(0.5 + Math.sin(t * 9 + i * 2) * 0.4)
-        p.radius(radius * (0.07 + (i % 3) * 0.012 + Math.sin(t * 6 + i) * 0.022))
-      })
-    },
-    [radius],
-  )
-
-  return (
-    <Group ref={groupRef} listening={false}>
-      {Array.from({ length: FLAME_PARTICLE_COUNT }, (_, i) => (
-        <Circle
-          key={i}
-          ref={(el) => {
-            particleRefs.current[i] = el
-          }}
-          radius={radius * 0.1}
-          fill={FLAME_COLORS[i % FLAME_COLORS.length]}
-          shadowBlur={8}
-          shadowColor="#ea580c"
-          listening={false}
-        />
-      ))}
-    </Group>
-  )
-}
-
 const STUN_STAR_COUNT = 4
 
-/** Stun stars orbiting above the token. */
+/** 燃烧光晕（在 token 底层，向外扩散） */
 function StunOrbitStars({ radius }: { radius: number }) {
   const groupRef = useRef<Konva.Group>(null)
   const starRefs = useRef<(Konva.Text | null)[]>([])
@@ -2607,192 +1949,6 @@ function StunGlow({ radius }: { radius: number }) {
   )
 }
 
-function KnockbackLiftGlow({ radius }: { radius: number }) {
-  const ringRef = useRef<Konva.Circle>(null)
-
-  useStatusAnimation(
-    () => ringRef.current?.getLayer() ?? null,
-    (frame) => {
-      const ring = ringRef.current
-      if (!ring || !frame) return
-      const t = frame.time / 700
-      ring.opacity(0.22 + Math.sin(t) * 0.12)
-      ring.radius(radius + 4 + Math.sin(t * 1.4) * 2)
-    },
-    [radius],
-  )
-
-  return (
-    <Circle
-      ref={ringRef}
-      radius={radius + 4 * tokenScale(radius)}
-      stroke="#38bdf8"
-      strokeWidth={tokenLineWidth(radius, 2)}
-      dash={tokenDash(radius, [6, 5])}
-      opacity={0.28}
-      listening={false}
-    />
-  )
-}
-
-function CalmMindAura({ radius }: { radius: number }) {
-  const ringRef = useRef<Konva.Circle>(null)
-  const glowRef = useRef<Konva.Circle>(null)
-
-  useStatusAnimation(
-    () => ringRef.current?.getLayer() ?? glowRef.current?.getLayer() ?? null,
-    (frame) => {
-      const ring = ringRef.current
-      const glow = glowRef.current
-      if (!ring || !glow) return
-      const t = (frame?.time ?? 0) / 1000
-      const pulse = 0.5 + Math.sin(t * 1.7) * 0.5
-      ring.radius(radius + 4 + pulse * 3)
-      ring.opacity(0.28 + pulse * 0.18)
-      ring.rotation((t * 28) % 360)
-      glow.radius(radius * (1.12 + pulse * 0.08))
-      glow.opacity(0.14 + pulse * 0.1)
-    },
-    [radius],
-  )
-
-  return (
-    <Group listening={false}>
-      <Circle
-        ref={glowRef}
-        radius={radius * 1.16}
-        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-        fillRadialGradientStartRadius={radius * 0.18}
-        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={radius * 1.2}
-        fillRadialGradientColorStops={[
-          0,
-          'rgba(45,212,191,0.28)',
-          0.62,
-          'rgba(20,184,166,0.16)',
-          1,
-          'rgba(20,184,166,0)',
-        ]}
-        opacity={0.18}
-        listening={false}
-      />
-      <Circle
-        ref={ringRef}
-        radius={radius + 5 * tokenScale(radius)}
-        stroke={CALM_MIND_RING_COLOR}
-        strokeWidth={tokenLineWidth(radius, 2)}
-        dash={tokenDash(radius, [3, 8])}
-        opacity={0.34}
-        listening={false}
-      />
-    </Group>
-  )
-}
-
-const BREATH_PARTICLE_COUNT = 7
-
-function OutOfBreathHeat({ radius }: { radius: number }) {
-  const ringRef = useRef<Konva.Circle>(null)
-  const particleRefs = useRef<(Konva.Circle | null)[]>([])
-
-  useStatusAnimation(
-    () => ringRef.current?.getLayer() ?? null,
-    (frame) => {
-      const ring = ringRef.current
-      if (!ring) return
-      const t = (frame?.time ?? 0) / 1000
-      const pulse = 0.5 + Math.sin(t * 3.1) * 0.5
-      ring.radius(radius + 3 + pulse * 4)
-      ring.opacity(0.24 + pulse * 0.16)
-      ring.rotation((t * -46) % 360)
-      particleRefs.current.forEach((p, i) => {
-        if (!p) return
-        const phase = i * 0.78
-        const rise = ((t * 0.75 + i * 0.13) % 1)
-        const side = i % 2 === 0 ? -1 : 1
-        p.x(side * radius * (0.22 + (i % 3) * 0.08) + Math.sin(t * 2.1 + phase) * radius * 0.08)
-        p.y(radius * 0.45 - rise * radius * 1.45)
-        p.radius(radius * (0.045 + (i % 3) * 0.01))
-        p.opacity((1 - rise) * (0.28 + pulse * 0.18))
-      })
-    },
-    [radius],
-  )
-
-  return (
-    <Group listening={false}>
-      <Circle
-        ref={ringRef}
-        radius={radius + 4 * tokenScale(radius)}
-        stroke={OUT_OF_BREATH_RING_COLOR}
-        strokeWidth={tokenLineWidth(radius, 2)}
-        dash={tokenDash(radius, [8, 5])}
-        opacity={0.28}
-        listening={false}
-      />
-      {Array.from({ length: BREATH_PARTICLE_COUNT }, (_, i) => (
-        <Circle
-          key={i}
-          ref={(el) => {
-            particleRefs.current[i] = el
-          }}
-          radius={radius * 0.05}
-          fill={i % 2 === 0 ? '#fed7aa' : '#fdba74'}
-          shadowBlur={5}
-          shadowColor="#fb923c"
-          opacity={0.18}
-          listening={false}
-        />
-      ))}
-    </Group>
-  )
-}
-
-/** Turn-count badge for stun/poison/etc., part of right badge grid. */
-function StatusTurnBadge({
-  radius,
-  gridIndex,
-  emoji,
-  turns,
-  stroke,
-  fill,
-}: {
-  radius: number
-  gridIndex: number
-  emoji: string
-  turns: number
-  stroke: string
-  fill: string
-}) {
-  const size = rightBadgeSize(radius)
-  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
-  const badgeFont = Math.max(8, size * 0.36)
-
-  return (
-    <Group x={x} y={y} listening={false}>
-      <Circle
-        radius={size / 2}
-        fill="#ffffff"
-        stroke={stroke}
-        strokeWidth={tokenLineWidth(radius, 1.5)}
-        listening={false}
-      />
-      <Text
-        text={`${emoji}${turns}`}
-        width={size}
-        height={size}
-        offsetX={size / 2}
-        offsetY={size / 2}
-        fontSize={badgeFont}
-        fill={fill}
-        align="center"
-        verticalAlign="middle"
-        listening={false}
-      />
-    </Group>
-  )
-}
-
 interface FogLayerSlot {
   ox: number
   oy: number
@@ -2813,7 +1969,6 @@ const POISON_MIST_GRADIENT: (number | string)[] = [
   'rgba(30,120,30,0)',
 ]
 
-/** Procedurally generated overlapping fog puffs with slow independent drift. */
 function buildPoisonFogLayer(
   count: number,
   veilCount: number,

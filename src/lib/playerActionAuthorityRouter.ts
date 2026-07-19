@@ -2,7 +2,6 @@ import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { isTokenAlive } from './combatTokens'
 import type { PendingPlayerActionLock } from './playerActionSync'
-import type { ClassFeatureKey } from './traitRegistry'
 
 export const PLAYER_ACTION_DEDUPE_WINDOW_MS = 8000
 
@@ -22,7 +21,6 @@ export interface PlayerActionAuthorityAction {
   characterId: string
   round: number
   initiativeIndex: number
-  featureKey?: ClassFeatureKey
 }
 
 export interface PlayerActionAuthorityPreflightContext {
@@ -102,7 +100,7 @@ export function canSubmitPlayerCombatAction(input: {
 }
 
 export function playerActionNeedsExecutionDedupe(action: Pick<PlayerActionAuthorityAction, 'type'>): boolean {
-  return action.type === 'attack-token' || action.type === 'dnd5e-weapon-attack' || action.type === 'dnd5e-fighter-feature' || action.type === 'aoe-attack'
+  return action.type.startsWith('dnd5e-')
 }
 
 export function getPlayerActionExecutionKey(action: Pick<PlayerActionAuthorityAction, 'id'>): string {

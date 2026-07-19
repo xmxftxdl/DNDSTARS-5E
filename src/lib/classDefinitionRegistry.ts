@@ -1,18 +1,16 @@
 import type { Character } from '../types/character'
 import type { EquipmentItem } from '../types/equipment'
-import { ARCHER_CLASS_DEFINITION } from '../classes/archer/classDefinition'
-import { HEAVY_GUNNER_CLASS_DEFINITION } from '../classes/heavyGunner/classDefinition'
 import { FIGHTER_CLASS_DEFINITION } from '../classes/fighter/classDefinition'
-import { EQUIPMENT_CATALOG } from './equipmentDefaults'
+import { DND5E_GENERIC_CLASS_DEFINITIONS } from '../classes/dnd5e/classDefinitions'
+import { DND5E_SRD_EQUIPMENT_CATALOG } from '../rulesets/dnd5e/equipment'
 import type { ClassDefinition } from './classDefinitionTypes'
 
 export * from './classDefinitionTypes'
-export { ARCHER_CLASS_DEFINITION, FIGHTER_CLASS_DEFINITION, HEAVY_GUNNER_CLASS_DEFINITION }
+export { DND5E_GENERIC_CLASS_DEFINITIONS, FIGHTER_CLASS_DEFINITION }
 
 const definitions = new Map<string, ClassDefinition>([
-  [ARCHER_CLASS_DEFINITION.id, ARCHER_CLASS_DEFINITION],
-  [HEAVY_GUNNER_CLASS_DEFINITION.id, HEAVY_GUNNER_CLASS_DEFINITION],
   [FIGHTER_CLASS_DEFINITION.id, FIGHTER_CLASS_DEFINITION],
+  ...DND5E_GENERIC_CLASS_DEFINITIONS.map((definition) => [definition.id, definition] as const),
 ])
 
 export function registerClassDefinition(definition: ClassDefinition): () => void {
@@ -42,5 +40,5 @@ export function classCombatActionAvailable(character: Character, actionType: str
 }
 
 export function equipmentCatalogForCharacter(character: Character): EquipmentItem[] {
-  return classDefinitionForCharacter(character)?.knownEquipment ?? EQUIPMENT_CATALOG
+  return classDefinitionForCharacter(character)?.knownEquipment ?? [...DND5E_SRD_EQUIPMENT_CATALOG]
 }

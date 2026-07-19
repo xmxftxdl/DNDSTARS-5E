@@ -3,6 +3,7 @@ import { stat } from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { handleSharedApi } from './shared-server-core.mjs'
 
 const args = new Map()
@@ -26,14 +27,21 @@ const sharedRoot = process.env.STARS_SHARED_ROOT
       'StarsApp',
       'shared',
     )
-// [T-P1-419/AC5] /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只保留静态回退。
+// /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只保留静态回退。
 const apiCtx = {
+  lobbyRoot: path.join(sharedRoot, 'lobby'),
   stateRoot: path.join(sharedRoot, 'state'),
   imageRoot: path.join(sharedRoot, 'images'),
+  quarantineRoot: path.join(sharedRoot, 'quarantine'),
+  snapshotRoot: path.join(sharedRoot, 'snapshots'),
   legacyStateRoot: path.join(path.resolve(process.cwd(), '.stars-shared'), 'state'),
   legacyImageRoot: path.join(path.resolve(process.cwd(), '.stars-shared'), 'images'),
   eventClients: new Map(),
   eventBacklog: new Map(),
+  eventSequences: new Map(),
+  serverInstanceId: randomUUID(),
+  serverStartedAt: Date.now(),
+  serverBuildId: process.env.STARS_BUILD_ID ?? 'static-development',
 }
 
 const mimeTypes = new Map([

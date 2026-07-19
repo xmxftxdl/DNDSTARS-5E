@@ -1,5 +1,5 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
+import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
@@ -18,6 +18,7 @@ export type Dnd5eFighterFeatureRejectReason =
   | 'feature-locked'
   | 'feature-unavailable'
   | 'feature-already-used'
+  | 'bonus-action-unavailable'
   | 'combatant-missing'
 
 export interface PreparedDnd5eFighterFeature {
@@ -30,6 +31,7 @@ export interface PreparedDnd5eFighterFeature {
   actorToken: Token
   feature: Dnd5eFighterFeatureId
   actionSurgeAlreadyUsed: boolean
+  turnEconomy?: Dnd5eTurnEconomyCounts
 }
 
 export function prepareDnd5eFighterFeature(input: {
@@ -38,6 +40,7 @@ export function prepareDnd5eFighterFeature(input: {
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
   actionSurgeAlreadyUsed: boolean
+  turnEconomy?: Dnd5eTurnEconomyCounts
 }): { ok: true; prepared: PreparedDnd5eFighterFeature } | { ok: false; reason: Dnd5eFighterFeatureRejectReason } {
   const { action } = input
   const feature = action.dnd5eFighterFeature
@@ -52,14 +55,28 @@ export function prepareDnd5eFighterFeature(input: {
   const resourceKey = feature === 'second-wind' ? FIGHTER_RESOURCE_KEYS.secondWind : FIGHTER_RESOURCE_KEYS.actionSurge
   if (fighterResourceState(actor, resourceKey).current < 1) return { ok: false, reason: 'feature-unavailable' }
   if (feature === 'action-surge' && input.actionSurgeAlreadyUsed) return { ok: false, reason: 'feature-already-used' }
+  if (feature === 'second-wind' && input.turnEconomy && input.turnEconomy.bonusAction.current < 1) {
+    return { ok: false, reason: 'bonus-action-unavailable' }
+  }
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: action.combatId ?? `map-${input.map.id}`,
+    round: action.round,
+    turnSlotId: input.initiativeOrder[action.initiativeIndex]?.slotId,
     map: input.map,
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id]) return { ok: false, reason: 'combatant-missing' }
+  const actorCombatant = snapshot.state.combatants[actorToken.id]
+  if (input.turnEconomy) {
+    actorCombatant.turn = {
+      ...actorCombatant.turn,
+      actionAvailable: input.turnEconomy.action.current > 0,
+      bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
+      reactionAvailable: input.turnEconomy.reaction.current > 0,
+    }
+  }
   return {
     ok: true,
     prepared: {
@@ -72,6 +89,7 @@ export function prepareDnd5eFighterFeature(input: {
       actorToken,
       feature,
       actionSurgeAlreadyUsed: input.actionSurgeAlreadyUsed,
+      turnEconomy: input.turnEconomy,
     },
   }
 }

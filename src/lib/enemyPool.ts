@@ -6,6 +6,7 @@ import {
   type CreatureSize,
   type CreatureType,
 } from './monsterTypes'
+import { DND5E_SRD_MONSTERS } from '../rulesets/dnd5e/monsters'
 
 /** 怪物池模板（用于 DM 快速放置敌人 token） */
 export interface EnemyTemplate {
@@ -21,7 +22,50 @@ export interface EnemyTemplate {
   creatureSize?: CreatureSize
   tags: string[]
   description?: string
+  armorClass?: number
+  challengeRating?: string
+  hitDice?: string
+  source?: string
 }
+
+const SRD_MONSTER_PRESENTATION: Record<string, { emoji: string; color: string }> = {
+  bandit: { emoji: '🗡️', color: '#78716c' },
+  kobold: { emoji: '🐲', color: '#f59e0b' },
+  goblin: { emoji: '👺', color: '#4ade80' },
+  skeleton: { emoji: '💀', color: '#e2e8f0' },
+  zombie: { emoji: '🧟', color: '#84cc16' },
+  wolf: { emoji: '🐺', color: '#94a3b8' },
+  orc: { emoji: '👹', color: '#ef4444' },
+  'dire-wolf': { emoji: '🐺', color: '#64748b' },
+  ogre: { emoji: '🧌', color: '#ea580c' },
+  owlbear: { emoji: '🦉', color: '#78350f' },
+}
+
+function srdCreatureTypes(type: string): CreatureType[] {
+  if (type === '野兽') return ['动物']
+  if (type === '类人生物' || type === '巨人') return ['人类']
+  return ['魔物']
+}
+
+/** D&D 5e 2014 地图使用的 SRD 5.1 怪物池；旧自定义模板不会混入此目录。 */
+export const DND5E_SRD_ENEMY_POOL: EnemyTemplate[] = DND5E_SRD_MONSTERS.map((monster) => {
+  const presentation = SRD_MONSTER_PRESENTATION[monster.slug] ?? { emoji: '👾', color: '#f87171' }
+  return {
+    id: monster.id,
+    name: monster.name,
+    emoji: presentation.emoji,
+    color: presentation.color,
+    maxHp: monster.hitPoints.average,
+    creatureTypes: srdCreatureTypes(monster.creatureType),
+    creatureSize: monster.size,
+    tags: [monster.source, `CR ${monster.challenge.rating}`, monster.creatureType, monster.size, ...monster.subtypes ?? []],
+    description: `${monster.englishName} · ${monster.description}`,
+    armorClass: monster.armorClass.value,
+    challengeRating: monster.challenge.rating,
+    hitDice: monster.hitPoints.dice,
+    source: monster.source,
+  }
+})
 
 export const ENEMY_POOL: EnemyTemplate[] = [
   {

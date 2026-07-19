@@ -1,5 +1,3 @@
-import ProcessedIcon from '../ProcessedIcon'
-import TokenStatusEditor from './TokenStatusEditor'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
@@ -19,6 +17,8 @@ import {
   type CreatureType,
 } from '../../lib/monsterTypes'
 import { X, Shield, Footprints, Sparkles, Swords, Backpack } from 'lucide-react'
+import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
+import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 
 function resolveEnemyDetail(token: Token): {
   template: EnemyTemplate | undefined
@@ -38,6 +38,9 @@ export default function EnemyDetailPanel({
   updateToken,
   updateChar,
   removeToken,
+  canManageConditions = false,
+  onConditionsChange,
+  conditionSourceOptions = [],
 }: {
   token: Token
   onClose: () => void
@@ -48,9 +51,13 @@ export default function EnemyDetailPanel({
   updateToken?: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   updateChar?: (charId: string, patch: Partial<Character>) => void
   removeToken?: (mapId: string, tokenId: string) => void
+  canManageConditions?: boolean
+  onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
+  conditionSourceOptions?: readonly { id: string; label: string }[]
 }) {
   const { template, stats } = resolveEnemyDetail(token)
   const derived = token.poolId ? getEnemyDerivedCombatStats(token.poolId) : undefined
+  const isSrd5eMonster = stats?.source === 'SRD 5.1'
   const maxHp = token.maxHp ?? derived?.maxHp ?? template?.maxHp ?? 20
   const curHp = token.hp ?? maxHp
   const hpPct = maxHp > 0 ? Math.max(0, Math.min(100, (curHp / maxHp) * 100)) : 0
@@ -71,6 +78,7 @@ export default function EnemyDetailPanel({
   const description = template?.description
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
   const canEdit = isDM && !!mapId && !!updateToken
+  const standardConditions = linked?.conditions ?? token.dnd5eCombatState?.conditions ?? []
 
   return (
     <div className="glass absolute bottom-3 right-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
@@ -190,7 +198,13 @@ export default function EnemyDetailPanel({
                   onChange={(e) => {
                     const nextMax = Math.max(1, Number(e.target.value) || 1)
                     if (linked && updateChar) {
-                      updateChar(linked.id, { maxHp: nextMax, currentHp: Math.min(linked.currentHp, nextMax) })
+                      updateChar(linked.id, {
+                        maxHp: nextMax,
+                        currentHp: Math.min(linked.currentHp, nextMax),
+                        ...(linked.rulesetId === 'dnd5e-2014-srd-5.1'
+                          ? { hitPointMaximumMode: 'manual' as const }
+                          : {}),
+                      })
                       updateToken!(mapId!, token.id, { hp: Math.min(linked.currentHp, nextMax), maxHp: nextMax })
                     } else {
                       updateToken!(mapId!, token.id, { maxHp: nextMax, hp: Math.min(curHp, nextMax) })
@@ -219,7 +233,6 @@ export default function EnemyDetailPanel({
                 />
                 玩家可见详情
               </label>
-              <TokenStatusEditor mapId={mapId!} token={token} updateToken={updateToken!} />
               {removeToken && (
                 <button
                   type="button"
@@ -235,6 +248,23 @@ export default function EnemyDetailPanel({
             </div>
           </section>
         )}
+        {canManageConditions && onConditionsChange ? (
+          <div className="mb-4">
+            <Dnd5eConditionEditor
+              conditions={standardConditions}
+              activeEffects={linked?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects}
+              targetId={token.id}
+              sourceOptions={conditionSourceOptions}
+              conditionImmunities={stats?.conditionImmunities}
+              onChange={onConditionsChange}
+            />
+          </div>
+        ) : standardConditions.length > 0 ? (
+          <section className="mb-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">D&D 5e 状态</h3>
+            <Dnd5eConditionTags conditions={standardConditions} />
+          </section>
+        ) : null}
         {/* 生命值 */}
         <div className="mb-4">
           <div className="mb-1 flex items-center justify-between text-xs">
@@ -268,7 +298,7 @@ export default function EnemyDetailPanel({
                 <Shield className="h-4 w-4 text-sky-400" />
                 <div>
                   <p className="text-[10px] text-slate-500">AC</p>
-                  <p className="text-sm font-semibold text-slate-100">{derived?.ac ?? stats.ac}</p>
+                  <p className="text-sm font-semibold text-slate-100">{isSrd5eMonster ? stats.ac : derived?.ac ?? stats.ac}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
@@ -280,28 +310,19 @@ export default function EnemyDetailPanel({
               </div>
             </div>
 
-            {derived && (
-              <section className="mb-4">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">战斗属性</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { label: '攻击力', value: derived.physicalAttack },
-                    { label: '防御力', value: derived.defense },
-                    { label: '魔法攻击', value: derived.magicAttack },
-                    { label: '魔法防御', value: derived.magicDefense },
-                    { label: '生命上限', value: derived.maxHp },
-                    { label: '暴击伤害', value: derived.critDamagePercent },
-                  ].map((row) => (
-                    <div key={row.label} className="rounded-xl bg-arcane-500/10 px-3 py-2">
-                      <p className="text-[10px] text-slate-500">{row.label}</p>
-                      <p className="text-sm font-semibold text-arcane-200">{row.value}</p>
-                    </div>
-                  ))}
-                </div>
+            {isSrd5eMonster && (
+              <section className="mb-4 space-y-1.5 rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-3 py-2 text-xs text-slate-300">
+                {stats.hitDice && <p><span className="text-slate-500">生命骰 · </span>{stats.hitDice}</p>}
+                {stats.alignment && <p><span className="text-slate-500">阵营 · </span>{stats.alignment}</p>}
+                <p><span className="text-slate-500">来源 · </span>{stats.source}{stats.sourcePage ? `，第 ${stats.sourcePage} 页` : ''}</p>
+                {stats.damageVulnerabilities?.length ? <p><span className="text-slate-500">伤害易伤 · </span>{stats.damageVulnerabilities.join('、')}</p> : null}
+                {stats.damageResistances?.length ? <p><span className="text-slate-500">伤害抗性 · </span>{stats.damageResistances.join('、')}</p> : null}
+                {stats.damageImmunities?.length ? <p><span className="text-slate-500">伤害免疫 · </span>{stats.damageImmunities.join('、')}</p> : null}
+                {stats.conditionImmunities?.length ? <p><span className="text-slate-500">状态免疫 · </span>{stats.conditionImmunities.join('、')}</p> : null}
               </section>
             )}
 
-            {/* [T6/B1] 主攻击命中 + 伤害：对所有怪物渲染（含 ogre/owlbear 等无装备怪）。 */}
+            {/* 主攻击命中 + 伤害：对所有怪物渲染（含 ogre/owlbear 等无装备怪）。 */}
             {derived?.damageDice && (
               <section className="mb-4">
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -427,66 +448,6 @@ export default function EnemyDetailPanel({
           </>
         )}
 
-        {(token.knockbackTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-sky-500/15 px-2 py-1 text-xs text-sky-200">
-            <ProcessedIcon
-              knockback
-              src="/icons/knockback.png"
-              className="mr-1 inline h-3.5 w-3.5 align-[-2px] object-contain"
-              fallback="⬆"
-            />
-            击飞 {token.knockbackTurns} 回合
-          </p>
-        )}
-        {(token.burningTurns ?? 0) > 0 && (
-          <p className="mt-3 rounded-lg bg-orange-500/15 px-2 py-1 text-xs text-orange-300">
-            🔥 燃烧 {token.burningTurns} 回合
-          </p>
-        )}
-        {(token.igniteTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-red-500/15 px-2 py-1 text-xs text-red-300">
-            <ProcessedIcon
-              ignite
-              src="/icons/ignite.png"
-              className="mr-1 inline h-3.5 w-3.5 align-[-2px] object-contain"
-              fallback="🔥"
-            />
-            点燃 {token.igniteTurns} 回合
-          </p>
-        )}
-        {(token.poisonTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-lime-500/15 px-2 py-1 text-xs text-lime-300">
-            <ProcessedIcon
-              poison
-              src="/icons/poison.png"
-              className="mr-1 inline h-3.5 w-3.5 align-[-2px] object-contain"
-              fallback="☠️"
-            />
-            中毒 {token.poisonTurns} 回合
-          </p>
-        )}
-        {(token.stunTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-yellow-500/15 px-2 py-1 text-xs text-yellow-200">
-            ★ 眩晕 {token.stunTurns} 回合
-          </p>
-        )}
-        {/* [T4/C5] restrained/vulnerable/no-move were authoritative on the token but never
-            shown in the enemy panel — display them from the same *Turns source (no drift). */}
-        {(token.restrainedTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-orange-500/15 px-2 py-1 text-xs text-orange-200">
-            🕸 束缚 {token.restrainedTurns} 回合
-          </p>
-        )}
-        {(token.vulnerableTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-rose-500/15 px-2 py-1 text-xs text-rose-200">
-            💔 脆弱 {token.vulnerableTurns} 回合
-          </p>
-        )}
-        {(token.noMoveTurns ?? 0) > 0 && (
-          <p className="mt-2 rounded-lg bg-slate-500/15 px-2 py-1 text-xs text-slate-200">
-            ⛓ 无法移动 {token.noMoveTurns} 回合
-          </p>
-        )}
       </div>
     </div>
   )

@@ -1,6 +1,11 @@
 import type { AbilityKey } from './dnd'
-import { GOBLIN_EQUIPMENT, HOBGOBLIN_EQUIPMENT } from './equipmentDefaults'
 import type { CharacterEquipment } from '../types/equipment'
+import {
+  dnd5eMonsterDamageDice,
+  dnd5eMonsterSpeedText,
+  getDnd5eSrdMonster,
+  type Dnd5eMonsterStatBlock,
+} from '../rulesets/dnd5e/monsters'
 
 export interface MonsterTrait {
   name: string
@@ -10,17 +15,17 @@ export interface MonsterTrait {
 export interface MonsterAction {
   name: string
   description: string
-  /** [T6/B2] 机读攻击命中加值（如 弯刀 +4） */
+  /** 机读攻击命中加值（如 弯刀 +4） */
   toHit?: number
-  /** [T6/B2] 机读伤害骰（如 '1d6+2'、'2d8'） */
+  /** 机读伤害骰（如 '1d6+2'、'2d8'） */
   damageDice?: string
-  /** [T6/B2] 伤害类型（如 'slashing'、'piercing'、'poison'） */
+  /** 伤害类型（如 'slashing'、'piercing'、'poison'） */
   damageType?: string
-  /** [T6/B2] 触及/射程（尺） */
+  /** 触及/射程（尺） */
   range?: number
-  /** [T6/B2] 攻击形态：近战 / 远程 / 范围（吐息等） */
+  /** 攻击形态：近战 / 远程 / 范围（吐息等） */
   kind?: 'melee' | 'ranged' | 'aoe'
-  /** [T6/B2] 范围攻击的豁免（吐息），T7 消费 */
+  /** 范围攻击的豁免（吐息），T7 消费 */
   save?: { ability: AbilityKey; dc: number }
 }
 
@@ -32,7 +37,7 @@ export interface MonsterSkillNote {
 export interface EnemyStatBlock {
   cr: string
   ac: number
-  /** [T6/B9/B10] HP 真相源：与 ENEMY_POOL 模板一致（parity 测试守护）。 */
+  /** HP 真相源：与 ENEMY_POOL 模板一致（parity 测试守护）。 */
   maxHp: number
   speed: string
   abilities: Record<AbilityKey, number>
@@ -43,6 +48,14 @@ export interface EnemyStatBlock {
   languages?: string
   traits: MonsterTrait[]
   actions: MonsterAction[]
+  source?: string
+  sourcePage?: number
+  alignment?: string
+  hitDice?: string
+  damageVulnerabilities?: string[]
+  damageResistances?: string[]
+  damageImmunities?: string[]
+  conditionImmunities?: string[]
 }
 
 /** 据 DND 标准属性（8到20）映射为本应用属性分值（25到79，调整 ±0） */
@@ -60,7 +73,6 @@ export const ENEMY_STAT_BLOCKS: Record<string, EnemyStatBlock> = {
     maxHp: 12,
     speed: '30 尺',
     abilities: { str: A(8), dex: A(14), con: A(10), int: A(10), wis: A(8), cha: A(8) },
-    equipment: { ...GOBLIN_EQUIPMENT },
     skills: [{ name: '隐匿', bonus: '+6' }],
     senses: '黑暗视觉 60 尺',
     languages: '通用语、哥布林语',
@@ -97,7 +109,6 @@ export const ENEMY_STAT_BLOCKS: Record<string, EnemyStatBlock> = {
     maxHp: 22,
     speed: '30 尺',
     abilities: { str: A(13), dex: A(12), con: A(12), int: A(10), wis: A(10), cha: A(9) },
-    equipment: { ...HOBGOBLIN_EQUIPMENT },
     senses: '黑暗视觉 60 尺',
     languages: '通用语、哥布林语',
     traits: [
@@ -879,12 +890,67 @@ export const ENEMY_STAT_BLOCKS: Record<string, EnemyStatBlock> = {
   },
 }
 
+const DAMAGE_TYPE_LABELS: Record<string, string> = {
+  acid: '强酸',
+  bludgeoning: '钝击',
+  cold: '寒冷',
+  fire: '火焰',
+  force: '力场',
+  lightning: '闪电',
+  necrotic: '黯蚀',
+  piercing: '穿刺',
+  poison: '毒素',
+  psychic: '心灵',
+  radiant: '光耀',
+  slashing: '挥砍',
+  thunder: '雷鸣',
+}
+
+function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBlock {
+  return {
+    cr: monster.challenge.rating,
+    ac: monster.armorClass.value,
+    maxHp: monster.hitPoints.average,
+    speed: dnd5eMonsterSpeedText(monster),
+    abilities: { ...monster.abilities },
+    skills: monster.skills?.map((skill) => ({ name: skill.name, bonus: skill.bonus >= 0 ? `+${skill.bonus}` : String(skill.bonus) })),
+    senses: [
+      ...monster.senses.map((sense) => `${sense.name}${sense.distanceFeet != null ? ` ${sense.distanceFeet} 尺` : ''}`),
+      `被动察觉 ${monster.passivePerception}`,
+    ].join('，'),
+    languages: monster.languages.length > 0 ? monster.languages.join('、') : '—',
+    traits: monster.traits.map((trait) => ({ ...trait })),
+    actions: monster.actions.map((action) => {
+      const attack = action.attack
+      const primaryDamage = attack?.damage[0]
+      return {
+        name: action.name,
+        description: action.description,
+        toHit: attack?.toHit,
+        damageDice: primaryDamage ? dnd5eMonsterDamageDice(primaryDamage) : undefined,
+        damageType: primaryDamage?.type,
+        range: attack?.rangeFeet?.normal ?? attack?.reachFeet,
+        kind: attack ? (attack.mode === 'ranged' ? 'ranged' : 'melee') : undefined,
+      }
+    }),
+    source: monster.source,
+    sourcePage: monster.sourcePage,
+    alignment: monster.alignment,
+    hitDice: monster.hitPoints.dice,
+    damageVulnerabilities: monster.damageVulnerabilities?.map((type) => DAMAGE_TYPE_LABELS[type] ?? type),
+    damageResistances: monster.damageResistances?.map((type) => DAMAGE_TYPE_LABELS[type] ?? type),
+    damageImmunities: monster.damageImmunities?.map((type) => DAMAGE_TYPE_LABELS[type] ?? type),
+    conditionImmunities: monster.conditionImmunities ? [...monster.conditionImmunities] : undefined,
+  }
+}
+
 export function getEnemyStatBlock(id: string): EnemyStatBlock | undefined {
-  return ENEMY_STAT_BLOCKS[id]
+  const srdMonster = getDnd5eSrdMonster(id)
+  return srdMonster ? srdMonsterToEnemyStatBlock(srdMonster) : ENEMY_STAT_BLOCKS[id]
 }
 
 /**
- * [T6/B1/B2] 主攻击动作：用于派生战斗数值与（T7 起）AI 攻击。
+ * 主攻击动作：用于派生战斗数值与（T7 起）AI 攻击。
  * 选取规则：优先含 damageDice 的近战动作；无近战则取首个含 damageDice 的非范围动作；
  * 都没有时回退到首个带 damageDice 的动作（理论上不应发生）。
  * 范围吐息（kind:'aoe'）不作为「主攻击」（由 T7 的专门分支驱动）。

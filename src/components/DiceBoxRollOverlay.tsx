@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
-// [T12/F3] FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
+// FLY_OFFSETS / stableIndex / 握手 / 时序常量收口到共享模块。
 import { DICE_TIMING, parseDiceBoxMessage, resolveFlyOffset } from '../lib/diceOverlayShared'
 
 const MIN_VISIBLE_ROLL_MS = DICE_TIMING.ROLL_MIN_VISIBLE_MS

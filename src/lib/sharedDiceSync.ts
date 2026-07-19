@@ -12,6 +12,7 @@ export type SharedDiceEventApplyDecision =
         | 'rolling'
         | 'seen'
         | 'missing-roll'
+        | 'private-roll'
     }
   | {
       status: 'apply'
@@ -31,6 +32,7 @@ export function resolveSharedDiceEventApply(input: {
   if (!state) return { status: 'ignored', reason: 'missing-state' }
   if (state.mapId !== input.mapId) return { status: 'ignored', reason: 'wrong-map' }
   if (state.sourceMode === input.mode) return { status: 'ignored', reason: 'same-source' }
+  if (state.visibility === 'dm' && input.mode !== 'dm') return { status: 'ignored', reason: 'private-roll' }
   if (input.now - state.updatedAt > (input.maxAgeMs ?? 60000)) {
     return { status: 'ignored', reason: 'stale' }
   }

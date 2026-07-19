@@ -70,7 +70,7 @@ Store 只调用 `syncCharacterClassProgression`，不应导入具体职业技能
 新职业模块可以通过 `registerClassFeatureDef` 注册定义，并通过 TypeScript module augmentation
 扩展 `ClassFeatureKeyExtensions`，不需要修改核心特性键联合类型。
 
-主动特性还需通过 `registerFeatureActivationContract` 注册 AP、职业资源、次数、切换状态和
+主动特性还需通过 `registerFeatureActivationContract` 注册动作／附赠动作／反应、职业资源、次数、切换状态和
 UI ViewModel，并通过 `registerHeadlessFeatureActivationResolver` 注册 DM 权威效果。
 `FeaturesTab.tsx` 与 Headless 主分发器不得判断具体 `featureKey`。
 
@@ -92,7 +92,7 @@ UI ViewModel，并通过 `registerHeadlessFeatureActivationResolver` 注册 DM �
 - 条件额外伤害、重击附伤、CD 减少和技能前置状态。
 
 Resolver 只生成标准效果配置。投骰由客户端动画层执行，骰值打包进 `targetPacket`，
-最终 AP、伤害、状态、CD 和死亡全部由 Headless DM 应用。
+最终行动经济、伤害、状态、职业资源和死亡全部由 Headless DM 应用。
 
 ## 9. 职业专用 Action
 
@@ -105,7 +105,7 @@ Registry，再进入通用战斗 action switch；不得直接比较职业名称�
 每个新职业至少覆盖：
 
 1. 等级同步、技能学习与升级。
-2. AP、CD、每日/长休次数。
+2. 动作、附赠动作、反应、移动与短休／长休资源次数。
 3. 单体与 AOE 射程边界。
 4. 每一种豁免成功和失败结果。
 5. 多目标或多段攻击只扣一次应扣资源。

@@ -1,0 +1,532 @@
+import { useEffect, useState, type FormEvent } from 'react'
+import {
+  ArrowRight,
+  Check,
+  Crown,
+  DoorOpen,
+  Dices,
+  LoaderCircle,
+  Copy,
+  KeyRound,
+  Network,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from 'lucide-react'
+import { accountApiErrorMessage, createAccount, recoverAccount } from '../lib/accountApi'
+import {
+  clearAccountSession,
+  getAccountSession,
+  saveAccountSession,
+  subscribeAccountSession,
+} from '../lib/accountSession'
+import {
+  createRoom,
+  joinRoom,
+  loadRoomPreview,
+  roomApiErrorMessage,
+  type RoomPreview,
+} from '../lib/roomApi'
+import {
+  DND5E_2014_RULESET_ID,
+  DND5E_2014_RULESET_LABEL,
+  getRecentRoomPlayerResumeIdentity,
+  getRoomClientId,
+  getRoomPlayerResumeIdentity,
+  saveRoomSession,
+} from '../lib/roomSession'
+import { setRoomRulesSnapshot } from '../lib/roomRulesState'
+import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e'
+
+type LobbyMode = 'create' | 'join'
+
+export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
+  const recentResume = typeof window === 'undefined' ? null : getRecentRoomPlayerResumeIdentity()
+  const invitedRoomCode = typeof window === 'undefined'
+    ? ''
+    : (new URLSearchParams(window.location.search).get('join') ?? '').toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6)
+  const initialRoomCode = invitedRoomCode || recentResume?.roomId || ''
+  const [mode, setMode] = useState<LobbyMode>(initialRoomCode.length === 6 ? 'join' : 'create')
+  const [roomName, setRoomName] = useState('我的 D&D 5e 战役')
+  const [dmName, setDmName] = useState('地下城主')
+  const [roomCode, setRoomCode] = useState(initialRoomCode)
+  const [playerName, setPlayerName] = useState(
+    recentResume?.roomId === initialRoomCode ? recentResume.displayName : '',
+  )
+  const [roomPassword, setRoomPassword] = useState('')
+  const [maxPlayers, setMaxPlayers] = useState(4)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [preview, setPreview] = useState<RoomPreview | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [account, setAccount] = useState(() => getAccountSession())
+  const [accountBusy, setAccountBusy] = useState(false)
+  const [recoveryInput, setRecoveryInput] = useState('')
+  const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState<string | null>(null)
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(true)
+  const resumeIdentity = mode === 'join' ? getRoomPlayerResumeIdentity(roomCode) : null
+
+  useEffect(() => subscribeAccountSession(setAccount), [])
+
+  useEffect(() => {
+    if (mode !== 'join' || roomCode.length !== 6) return
+    let disposed = false
+    const timer = window.setTimeout(() => {
+      setPreviewLoading(true)
+      setPreviewError(null)
+      void loadRoomPreview(roomCode)
+        .then((next) => {
+          if (!disposed) setPreview(next)
+        })
+        .catch((cause) => {
+          if (!disposed) {
+            setPreview(null)
+            setPreviewError(roomApiErrorMessage(cause))
+          }
+        })
+        .finally(() => {
+          if (!disposed) setPreviewLoading(false)
+        })
+    }, 250)
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+    }
+  }, [mode, roomCode])
+
+  const selectMode = (next: LobbyMode) => {
+    setMode(next)
+    setError(null)
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+  }
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      if (!account) {
+        const identityName = (mode === 'create' ? dmName : playerName).trim()
+        const receipt = await createAccount(identityName, getRoomClientId())
+        saveAccountSession(receipt.session)
+        setGeneratedRecoveryCode(receipt.recoveryCode)
+        setRecoveryAcknowledged(false)
+        setBusy(false)
+        return
+      }
+      if (!recoveryAcknowledged) {
+        setError('请先保存账号恢复码，再继续创建或加入房间。')
+        setBusy(false)
+        return
+      }
+      const activePlugins = activeDnd5eRulesPluginRequirements()
+      const connection = mode === 'create'
+        ? await createRoom({ roomName, displayName: dmName, password: roomPassword, maxPlayers, activePlugins })
+        : await joinRoom({ roomId: roomCode, displayName: playerName, password: roomPassword, activePlugins })
+      saveRoomSession(connection.session)
+      setRoomRulesSnapshot(connection.rules)
+      window.location.assign(
+        connection.session.role === 'dm'
+          ? '/'
+          : connection.rules.member.ready ? '/maps' : '/settings',
+      )
+    } catch (cause) {
+      setError(roomApiErrorMessage(cause))
+      setBusy(false)
+    }
+  }
+
+  const restoreAccount = async () => {
+    if (accountBusy || !recoveryInput.trim()) return
+    setAccountBusy(true)
+    setError(null)
+    try {
+      const session = await recoverAccount(recoveryInput, getRoomClientId())
+      saveAccountSession(session)
+      setRecoveryInput('')
+      setGeneratedRecoveryCode(null)
+      setRecoveryAcknowledged(true)
+      if (mode === 'join' && !playerName.trim()) setPlayerName(session.displayName)
+      if (mode === 'create' && !dmName.trim()) setDmName(session.displayName)
+    } catch (cause) {
+      setError(accountApiErrorMessage(cause))
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  return (
+    <main className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-8 lg:px-12">
+      <div className="pointer-events-none absolute left-[-12rem] top-[-14rem] h-[34rem] w-[34rem] rounded-full bg-arcane-600/20 blur-[120px]" />
+      <div className="pointer-events-none absolute bottom-[-16rem] right-[-10rem] h-[36rem] w-[36rem] rounded-full bg-ember-500/10 blur-[130px]" />
+
+      <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col">
+        <header className="flex items-center gap-3">
+          <div className="glow-arcane flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600">
+            <Sparkles className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gradient">星界</h1>
+            <p className="text-xs text-slate-500">D&D 5e 跑团助手</p>
+          </div>
+        </header>
+
+        <section className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1.02fr_0.98fr] lg:gap-16">
+          <div className="max-w-xl">
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-arcane-400/20 bg-arcane-500/10 px-3 py-1.5 text-xs font-medium text-arcane-200">
+              <Dices className="h-3.5 w-3.5" />
+              D&D 5e 2014 · SRD 5.1
+            </div>
+            <h2 className="font-display text-4xl font-bold leading-tight text-slate-50 sm:text-5xl">
+              建立你的冒险房间，
+              <span className="text-gradient">让队伍立即入场</span>
+            </h2>
+            <p className="mt-5 max-w-lg text-base leading-7 text-slate-400">
+              创建者自动成为 DM；其他玩家凭房间码加入后，由服务端分配空闲玩家席位。地图、角色、骰子与战斗仍通过现有 Headless 权威链路同步。
+            </p>
+
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              {[
+                [Crown, 'DM 权威', '创建者主持房间'],
+                [Network, '实时同步', '共享同一战役状态'],
+                [ShieldCheck, '在线校验', '房主在线才可加入'],
+              ].map(([Icon, title, description]) => {
+                const FeatureIcon = Icon as typeof Crown
+                return (
+                  <div key={String(title)} className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+                    <FeatureIcon className="mb-3 h-5 w-5 text-arcane-300" />
+                    <p className="text-sm font-semibold text-slate-200">{String(title)}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{String(description)}</p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="glass overflow-hidden rounded-3xl border border-white/10 shadow-2xl shadow-black/25">
+            <div className="grid grid-cols-2 border-b border-white/10 p-2">
+              <button
+                type="button"
+                onClick={() => selectMode('create')}
+                className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition-all ${
+                  mode === 'create'
+                    ? 'bg-arcane-500/20 text-arcane-100 shadow-[inset_0_0_0_1px_rgba(167,139,250,0.25)]'
+                    : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
+                }`}
+              >
+                <Crown className="h-4 w-4" />
+                创建房间
+              </button>
+              <button
+                type="button"
+                onClick={() => selectMode('join')}
+                className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition-all ${
+                  mode === 'join'
+                    ? 'bg-arcane-500/20 text-arcane-100 shadow-[inset_0_0_0_1px_rgba(167,139,250,0.25)]'
+                    : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
+                }`}
+              >
+                <Users className="h-4 w-4" />
+                加入房间
+              </button>
+            </div>
+
+            <form onSubmit={submit} className="p-6 sm:p-8">
+              <div className="mb-7">
+                <p className="text-lg font-bold text-slate-100">
+                  {mode === 'create' ? '开启一场新战役' : '加入冒险队伍'}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {mode === 'create'
+                    ? '创建成功后，你将以 DM 身份进入管理端。'
+                    : '房间创建者必须在线，系统会自动分配玩家端。'}
+                </p>
+              </div>
+
+              <div className="mb-6 rounded-2xl border border-arcane-400/15 bg-arcane-500/[0.055] p-4" data-testid="account-identity-panel">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-arcane-500/15 p-2.5 text-arcane-300"><KeyRound className="h-5 w-5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-100">账号身份与角色库</p>
+                    {account ? (
+                      <>
+                        <p className="mt-1 text-xs text-emerald-300">已连接：{account.displayName}</p>
+                        <p className="mt-1 font-mono text-[11px] text-slate-500">账号 ID：{account.accountId}</p>
+                        <button
+                          type="button"
+                          className="mt-2 text-xs text-slate-500 underline decoration-slate-700 underline-offset-2 hover:text-slate-300"
+                          onClick={() => {
+                            if (!window.confirm('切换账号不会删除云端角色，但当前浏览器需要恢复码才能再次登录。确定继续吗？')) return
+                            clearAccountSession()
+                            setGeneratedRecoveryCode(null)
+                            setRecoveryAcknowledged(true)
+                          }}
+                        >
+                          使用其他恢复码
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          首次继续时会创建独立账号并生成恢复码。角色归属于账号，不再依赖浏览器、房间码或玩家同名匹配。
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                          <input
+                            value={recoveryInput}
+                            onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())}
+                            placeholder="已有恢复码：DS5E-…"
+                            autoComplete="off"
+                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-xs text-slate-200 outline-none focus:border-arcane-400/50"
+                          />
+                          <button
+                            type="button"
+                            disabled={accountBusy || !recoveryInput.trim()}
+                            onClick={() => void restoreAccount()}
+                            className="rounded-lg border border-arcane-400/25 px-3 py-2 text-xs font-semibold text-arcane-200 hover:bg-arcane-500/10 disabled:opacity-40"
+                          >
+                            {accountBusy ? '恢复中…' : '恢复账号'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {generatedRecoveryCode && (
+                  <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3" data-testid="generated-recovery-code">
+                    <p className="text-xs font-semibold text-amber-200">恢复码只在创建账号时显示，请立即保存</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <code className="min-w-0 flex-1 break-all rounded-lg bg-black/25 px-3 py-2 text-xs text-amber-100">{generatedRecoveryCode}</code>
+                      <button
+                        type="button"
+                        onClick={() => void navigator.clipboard?.writeText(generatedRecoveryCode)}
+                        className="flex items-center gap-1.5 rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-100 hover:bg-amber-400/10"
+                      >
+                        <Copy className="h-3.5 w-3.5" />复制
+                      </button>
+                    </div>
+                    {!recoveryAcknowledged ? (
+                      <button
+                        type="button"
+                        onClick={() => setRecoveryAcknowledged(true)}
+                        className="mt-3 w-full rounded-lg bg-amber-400/15 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-400/20"
+                      >
+                        我已保存恢复码，允许继续
+                      </button>
+                    ) : <p className="mt-2 text-[11px] text-emerald-300">恢复码已确认保存。</p>}
+                  </div>
+                )}
+              </div>
+
+              {mode === 'create' ? (
+                <div className="space-y-5">
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">房间名称</span>
+                    <input
+                      value={roomName}
+                      onChange={(event) => setRoomName(event.target.value)}
+                      maxLength={40}
+                      required
+                      className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-arcane-400/50 focus:ring-2 focus:ring-arcane-500/10"
+                      placeholder="例如：失落矿坑"
+                    />
+                  </label>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">玩家人数</span>
+                      <select
+                        value={maxPlayers}
+                        onChange={(event) => setMaxPlayers(Number(event.target.value))}
+                        className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200 outline-none focus:border-arcane-400/50"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count}>{count} 名玩家</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">加入密码（可选）</span>
+                      <input
+                        type="password"
+                        value={roomPassword}
+                        onChange={(event) => setRoomPassword(event.target.value)}
+                        maxLength={64}
+                        autoComplete="new-password"
+                        className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
+                        placeholder="留空则无需密码"
+                      />
+                    </label>
+                  </div>
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">DM 称呼</span>
+                    <input
+                      value={dmName}
+                      onChange={(event) => setDmName(event.target.value)}
+                      maxLength={24}
+                      required
+                      className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-arcane-400/50 focus:ring-2 focus:ring-arcane-500/10"
+                      placeholder="地下城主"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">游戏规则</span>
+                    <div className="relative">
+                      <select
+                        value={DND5E_2014_RULESET_ID}
+                        disabled
+                        className="w-full appearance-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300 opacity-100"
+                      >
+                        <option value={DND5E_2014_RULESET_ID}>{DND5E_2014_RULESET_LABEL}</option>
+                      </select>
+                      <Check className="pointer-events-none absolute right-4 top-3.5 h-4 w-4 text-emerald-400" />
+                    </div>
+                  </label>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">六位房间码</span>
+                    <input
+                      value={roomCode}
+                      onChange={(event) => {
+                        setRoomCode(event.target.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6))
+                        setPreview(null)
+                        setPreviewError(null)
+                        setPreviewLoading(false)
+                      }}
+                      minLength={6}
+                      maxLength={6}
+                      required
+                      autoComplete="off"
+                      className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-center font-mono text-2xl font-bold tracking-[0.35em] text-slate-50 outline-none transition placeholder:text-slate-700 focus:border-arcane-400/50 focus:ring-2 focus:ring-arcane-500/10"
+                      placeholder="ABC234"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">玩家称呼</span>
+                    <input
+                      value={playerName}
+                      onChange={(event) => setPlayerName(event.target.value)}
+                      maxLength={24}
+                      required
+                      className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-arcane-400/50 focus:ring-2 focus:ring-arcane-500/10"
+                      placeholder="输入你的称呼"
+                    />
+                  </label>
+                  {preview?.passwordRequired && (
+                    <label className="block">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">房间密码</span>
+                      <input
+                        type="password"
+                        value={roomPassword}
+                        onChange={(event) => setRoomPassword(event.target.value)}
+                        maxLength={64}
+                        required
+                        autoComplete="current-password"
+                        className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none focus:border-arcane-400/50"
+                        placeholder="请输入 DM 设置的密码"
+                      />
+                    </label>
+                  )}
+                  {(previewLoading || preview || previewError) && (
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                      {previewLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-slate-400">
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                          正在读取房间规则…
+                        </div>
+                      ) : preview ? (
+                        <div className="space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-100">{preview.roomName}</p>
+                              <p className="mt-1 text-xs text-slate-400">DM：{preview.dmDisplayName}</p>
+                              <p className="mt-1 text-xs text-slate-500">玩家：{preview.playerCount}/{preview.maxPlayers} · {preview.passwordRequired ? '需要密码' : '无需密码'} · 游戏协议 v{preview.gameProtocolVersion}</p>
+                              {preview.hostStatus === 'grace' && (
+                                <p className="mt-1 text-[11px] text-amber-300">DM 暂时断线，房间正处于重连宽限期。</p>
+                              )}
+                              {preview.hostStatus === 'offline' && preview.hostLastSeenAt > 0 && (
+                                <p className="mt-1 text-[11px] text-red-300">DM 已离线；原 DM 可用账号恢复身份，其他玩家需等待 DM 恢复在线。</p>
+                              )}
+                            </div>
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                              preview.hostStatus === 'online'
+                                ? 'bg-emerald-500/10 text-emerald-300'
+                                : preview.hostStatus === 'grace'
+                                  ? 'bg-amber-500/10 text-amber-300'
+                                  : 'bg-red-500/10 text-red-300'
+                            }`}>
+                              {preview.locked ? '房间已锁定' : preview.hostStatus === 'online' ? 'DM 在线' : preview.hostStatus === 'grace' ? 'DM 重连中' : 'DM 离线'}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">房间规则包</p>
+                            {preview.plugins.length === 0 ? (
+                              <p className="mt-2 text-xs text-slate-400">仅使用 {DND5E_2014_RULESET_LABEL}，无附加规则包。</p>
+                            ) : (
+                              <div className="mt-2 space-y-2">
+                                {preview.plugins.map((plugin) => (
+                                  <div key={plugin.id} className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2.5">
+                                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                      <span className="text-xs font-semibold text-slate-200">{plugin.name}</span>
+                                      <span className="font-mono text-[11px] text-arcane-300">v{plugin.version}</span>
+                                    </div>
+                                    <p className="mt-1 text-[11px] text-slate-500">发布者：{plugin.publisher} · 许可证：{plugin.license}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-red-300">{previewError}</p>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex gap-3 rounded-xl border border-arcane-400/15 bg-arcane-500/[0.06] p-3 text-xs leading-5 text-slate-400">
+                    <DoorOpen className="mt-0.5 h-4 w-4 shrink-0 text-arcane-300" />
+                    <span>
+                      {resumeIdentity
+                        ? `检测到「${resumeIdentity.displayName}」在该房间的旧席位；重新加入后会恢复原角色归属。`
+                        : '加入后会自动获得空闲席位；若缺少房间规则包，会先进入规则包页面完成校验。'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {(notice || error) && (
+                <div className={`mt-5 rounded-xl border px-4 py-3 text-sm ${
+                  error
+                    ? 'border-red-400/20 bg-red-500/10 text-red-200'
+                    : 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+                }`}>
+                  {error ?? notice}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || accountBusy || !recoveryAcknowledged || (mode === 'join' && preview?.locked === true)}
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-arcane-600 to-arcane-500 px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-arcane-900/30 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
+              >
+                {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                {busy
+                  ? '正在连接…'
+                  : !account
+                    ? '创建账号并生成恢复码'
+                    : mode === 'create' ? '创建并以 DM 身份进入' : '加入并进入玩家端'}
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <footer className="flex items-center justify-between gap-4 border-t border-white/5 pt-5 text-xs text-slate-600">
+          <span>SRD 5.1 · D&D 5e 2014 RulesetAdapter</span>
+          <span>Headless DM Authority</span>
+        </footer>
+      </div>
+    </main>
+  )
+}

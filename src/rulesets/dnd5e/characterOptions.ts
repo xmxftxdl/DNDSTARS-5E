@@ -15,11 +15,7 @@ export const DND5E_2014_CLASS_OPTIONS = [
 
 export const DND5E_2014_BACKGROUND_OPTIONS = [
   '侍僧',
-  '罪犯／间谍',
-  '平民英雄',
-  '贵族',
-  '贤者',
-  '士兵',
+  '自定义背景',
 ] as const
 
 export const DND5E_2014_RACE_OPTIONS = [

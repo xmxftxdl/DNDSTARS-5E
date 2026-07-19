@@ -1,11 +1,11 @@
 /**
- * [T12/F3] 骰子 overlay 共享模块。
+ * 骰子 overlay 共享模块。
  *
  * `DiceBoxRollOverlay` 与 `DiceBoxD20Overlay` 原先各自复制了一份 `FLY_OFFSETS`、
  * FNV `stableIndex` 与 iframe 握手逻辑（飞行偏移解析 + 同源消息匹配）。这里收口为
  * 单一定义，两个 overlay 都从此导入，避免再次出现「改一处忘改另一处」的漂移。
  *
- * [T12/F2] 同时承载跨组件的时序契约常量（见下方 DICE_TIMING）。结算（overlay 可见
+ * 同时承载跨组件的时序契约常量（见下方 DICE_TIMING）。结算（overlay 可见
  * 窗口 + HUD 结果卡）必须先于回合推进发生；推进延迟由 advanceDelayMs() 派生为
  * ≥ max(overlay 可见窗口, HUD) + ε，而非各处魔数巧合相等。
  */
@@ -73,7 +73,7 @@ export function parseDiceBoxMessage(event: MessageEvent): DiceBoxMessage | null 
 }
 
 /**
- * [T12/F2] 时序契约（毫秒）——所有骰子相关延迟的单一真相源。
+ * 时序契约（毫秒）——所有骰子相关延迟的单一真相源。
  *
  * 不变式（ORDERING INVARIANT）：结算必须先于推进。
  *   RESOLUTION_MS = max(overlay 可见窗口, HUD 自关闭) —— 结果对玩家「定格」完成的时刻。

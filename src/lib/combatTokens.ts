@@ -1,6 +1,8 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
+import { dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
+import { dnd5eConditionsFromActiveEffects } from '../rulesets/dnd5e/activeEffects'
 
 /** 是否视为阵亡（优先用当前 HP 快照，与血条显示一致） */
 export function isTokenDefeated(
@@ -38,45 +40,6 @@ export function resolveEnemyAttackTokens(
   }
 }
 
-export function resolveDodgeOutcome(
-  d20: number,
-  attackBonus: number,
-  targetAc: number,
-  damage = 0,
-): { total: number; dodged: boolean; damageApplied: number } {
-  const total = d20 + attackBonus
-  const dodged = total < targetAc
-  return { total, dodged, damageApplied: dodged ? 0 : damage }
-}
-
-const CONDITION_STATUS_FIELD: Record<
-  string,
-  'burningTurns' | 'igniteTurns' | 'poisonTurns' | 'stunTurns' | 'restrainedTurns' | 'vulnerableTurns' | 'noMoveTurns'
-> = {
-  燃烧: 'burningTurns',
-  点燃: 'igniteTurns',
-  中毒: 'poisonTurns',
-  眩晕: 'stunTurns',
-  束缚: 'restrainedTurns',
-  脆弱: 'vulnerableTurns',
-  无法移动: 'noMoveTurns',
-}
-
-export function statusRefreshTokenPatch(token: Token, condition: string, turns?: number): Partial<Token> {
-  const field = CONDITION_STATUS_FIELD[condition]
-  if (!field) return {}
-  const incoming = turns && turns > 0 ? turns : 0
-  if (incoming <= 0) return {}
-  const current = (token[field] as number | undefined) ?? 0
-  const patch: Partial<Token> = {}
-  patch[field] = Math.max(current, incoming)
-  return patch
-}
-
-export function shouldApplyDotTick(token: Token, characters: Character[], dot: number): boolean {
-  return dot > 0 && isTokenAlive(token, characters)
-}
-
 export function getTokenCombatSide(token: Token): 'ally' | 'enemy' | 'neutral' {
   if (token.type === 'obstacle') return 'neutral'
   return token.type === 'enemy' ? 'enemy' : 'ally'
@@ -105,23 +68,6 @@ export function checkCombatOutcome(
   return { ended: false }
 }
 
-/** @deprecated 战败 token 不再从地图移除，仅保留灰显 */
-export function shouldRemoveTokenOnDefeat(_token: Token): boolean {
-  void _token
-  return false
-}
-
-export function tokenHpAfterDamage(token: Token, amount: number, characters: Character[]): number {
-  if (token.characterId) {
-    const ch = characters.find((c) => c.id === token.characterId)
-    if (ch) return Math.max(0, ch.currentHp - amount)
-  }
-  if (token.maxHp != null) {
-    return Math.max(0, (token.hp ?? token.maxHp) - amount)
-  }
-  return 0
-}
-
 /** 从先攻列表移除 token，并返回新的先攻索引 */
 export function pruneInitiativeForToken(
   order: InitiativeEntry[],
@@ -139,7 +85,7 @@ export function pruneInitiativeForToken(
 }
 
 /**
- * [T1/A1/A2/BUG③ · T3/C2] 回合驱动器对当前先攻槽 token 的纯决策：把 MapsPage 回合驱动
+ * 回合驱动器对当前先攻槽 token 的纯决策：把 MapsPage 回合驱动
  * effect 里内联的「prune / 死亡跳过 / 眩晕跳过 / 非行动者跳过 / 敌人 / 玩家」分支抽成
  * 一个无副作用函数，便于 T13 在不挂载组件的前提下单测 npc 自动跳过与全 npc 队列不死循环。
  *
@@ -161,13 +107,22 @@ export function decideTurnAction(
 ): TurnAction {
   if (!token) return 'prune'
   if (!isTokenAlive(token, characters)) return 'skip'
-  if ((token.stunTurns ?? 0) > 0) return 'skip'
+  const character = token.characterId
+    ? characters.find((candidate) => candidate.id === token.characterId)
+    : undefined
+  const conditions = character?.conditions ?? token.dnd5eCombatState?.conditions ??
+    dnd5eConditionsFromActiveEffects(token.dnd5eCombatState?.activeEffects)
+  const cannotAct = conditions.some((condition) => {
+    const id = dnd5eStandardConditionId(condition)
+    return id === 'incapacitated' || id === 'paralyzed' || id === 'petrified' || id === 'stunned' || id === 'unconscious'
+  })
+  if (cannotAct) return 'skip'
   if (token.type !== 'player' && token.type !== 'enemy') return 'skip'
   return token.type === 'enemy' ? 'enemy' : 'player'
 }
 
 /**
- * [T1/AC4] 给定一整条先攻列表，判断是否存在「可行动者」（存活的 player 或 enemy）。effect 用它
+ * 给定一整条先攻列表，判断是否存在「可行动者」（存活的 player 或 enemy）。effect 用它
  * 在全 npc/obstacle 队列时停手（parked），避免无限自旋。把它抽成纯函数同样便于 T13 直接验证
  * 全 npc 队列不会被无休止推进。
  */
@@ -184,7 +139,7 @@ export function hasActionableActor(
 }
 
 /**
- * [T2/A11] prune-to-0 恢复决策：当某 token 被剔除后索引落到 0，而 index 0 指向的 token 本回合
+ * prune-to-0 恢复决策：当某 token 被剔除后索引落到 0，而 index 0 指向的 token 本回合
  * 已经行动过（其去重 key 在 actedKeys 里），回合驱动器必须强制推过它而不是卡在 index 0 死锁。
  * 这里把「prune 后该不该继续推进」抽成纯函数：
  * - 列表已空（length 0）→ 不再有可推进对象，返回 advance=false（由调用方走 endCombat 判定）。

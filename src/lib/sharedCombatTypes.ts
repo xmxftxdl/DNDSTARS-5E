@@ -1,13 +1,175 @@
 import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DiceRoll } from '../components/DiceRollOverlay'
-import type { ClassFeatureKey } from '../types/character'
+import type { AbilityKey } from './dnd'
 import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
+import type { CombatSettlementMode } from './combatSettlementMode'
 
 // Shared DM/player state contracts transported through sharedApi.
 // Keep these runtime-free so UI, sync helpers, and headless services can depend
 // on the same protocol types without importing page modules.
 export type Mode = 'dm' | 'player'
+export type SharedJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | SharedJsonValue[]
+  | { [key: string]: SharedJsonValue }
+
+export interface Dnd5eTurnEconomyCounts {
+  turnKey: string
+  /** 本回合已结算的单次武器攻击数，用于在刷新后继续额外攻击。 */
+  attacksUsed: number
+  action: { current: number; max: number }
+  bonusAction: { current: number; max: number }
+  reaction: { current: number; max: number }
+  /** 5e 移动不是动作，也不消耗 AP；这里记录本回合尚可移动的尺数。 */
+  movement: { current: number; max: number }
+}
+
+export type Dnd5eTurnEconomyByToken = Record<string, Dnd5eTurnEconomyCounts>
+
+export type Dnd5eClassFeaturePayload =
+  | { feature: 'barbarian-rage'; frenzy?: boolean; end?: boolean }
+  | { feature: 'barbarian-intimidating-presence'; targetTokenId: string }
+  | { feature: 'rogue-cunning-action'; option: 'dash' | 'disengage' | 'hide' }
+  | { feature: 'rogue-fast-hands'; option: 'sleight-of-hand' | 'thieves-tools' | 'use-object' }
+  | { feature: 'bardic-inspiration'; targetTokenId: string }
+  | { feature: 'bard-countercharm' }
+  | { feature: 'paladin-lay-on-hands'; targetTokenId: string; amount: number }
+  | { feature: 'paladin-lay-on-hands'; targetTokenId: string; cure: 'disease' | 'poisoned' }
+  | { feature: 'paladin-cleansing-touch'; targetTokenId: string; sourceTokenId: string; spellId: string }
+  | { feature: 'monk-wholeness-of-body' }
+  | { feature: 'monk-step-of-the-wind'; option: 'dash' | 'disengage' }
+  | { feature: 'monk-patient-defense' }
+  | {
+      feature: 'monk-unarmed-bonus'
+      mode: 'martial-arts' | 'flurry'
+      targetTokenIds: string[]
+      stunningStrike?: boolean
+      /** 散打宗 3 级：按疾风连击的两次攻击分别声明命中后效果。 */
+      openHandTechniques?: Array<'prone' | 'push' | 'no-reactions' | undefined>
+      /** 散打宗 17 级：指定一次徒手攻击，命中后消耗 3 点气植入渗透劲。 */
+      quiveringPalmAttackIndex?: number
+    }
+  | { feature: 'monk-quivering-palm-release'; targetTokenId: string }
+  | { feature: 'monk-quivering-palm-end' }
+  | { feature: 'paladin-sacred-weapon' }
+  | { feature: 'paladin-divine-sense' }
+  | { feature: 'paladin-turn-the-unholy' }
+  | { feature: 'paladin-holy-nimbus' }
+  | { feature: 'cleric-turn-undead' }
+  | { feature: 'cleric-preserve-life'; allocations: Array<{ targetTokenId: string; amount: number }> }
+  | { feature: 'cleric-divine-intervention' }
+  | { feature: 'sorcerer-create-spell-slot'; slotLevel: 1 | 2 | 3 | 4 | 5 }
+  | { feature: 'sorcerer-convert-spell-slot'; slotLevel: number }
+  | { feature: 'sorcerer-draconic-wings'; active: boolean }
+  | { feature: 'sorcerer-draconic-presence'; mode: 'awe' | 'fear' }
+  | { feature: 'ranger-move-hunters-mark'; targetTokenId: string }
+  | { feature: 'ranger-primeval-awareness'; slotLevel: 1 | 2 | 3 | 4 | 5 }
+  | { feature: 'ranger-hide-in-plain-sight' }
+  | { feature: 'ranger-vanish' }
+  | { feature: 'monk-stillness-of-mind'; condition: 'charmed' | 'frightened' }
+  | { feature: 'monk-empty-body' }
+  | { feature: 'druid-wild-shape'; formId: string }
+  | { feature: 'druid-end-wild-shape' }
+  | { feature: 'warlock-hurl-through-hell-ready'; active: boolean }
+
+export interface Dnd5eAbilityCheckPayload {
+  ability: AbilityKey
+  skill?: string
+  mode?: 'normal' | 'advantage' | 'disadvantage'
+  dc: number
+  /** 部分检定由 DM 判定为一个动作；关闭时只进行检定，不消耗行动经济。 */
+  spendAction?: boolean
+}
+
+export interface Dnd5ePluginActionPayload {
+  /** 完整的插件命名空间特性 ID，例如 com.example.rules:guardian-spark。 */
+  featureId: string
+  /** 插件自定义的纯 JSON 参数；DM 仍会重建目标、距离与行动经济。 */
+  payload?: SharedJsonValue
+}
+
+export interface Dnd5eItemUsePayload {
+  /** 名称、数量、骰值与效果由 DM 端当前角色快照重建。 */
+  instanceId: string
+  /** 地图落点仅是玩家请求；合法范围与实际占格由 DM/Headless 重建。 */
+  targetCell?: GridCell
+  /** 生物目标仅是玩家请求；关系、距离、命中与效果由 DM/Headless 重建。 */
+  targetTokenId?: string
+}
+
+export interface Dnd5eWeaponAttackOptions {
+  /** 荒野变形后使用当前野兽数据块中的动作序号；由 Headless 重新验证。 */
+  wildShapeActionIndex?: number
+  /** 仅表示玩家请求；是否可用、法术位与伤害骰均由 DM/Headless 重算。 */
+  divineSmiteSlotLevel?: number
+  /** 野蛮人只能在本回合第一次力量近战攻击前请求；后续优势由 Headless 状态自动延续。 */
+  recklessAttack?: boolean
+  /** 狂战士狂乱期间，自狂暴后的下一回合起可请求一次附赠动作近战攻击。 */
+  frenzyAttack?: boolean
+  /** 2014 双武器战斗：完成轻型近战武器的攻击动作后，以附赠动作用另一把轻型近战武器攻击。 */
+  offHandAttack?: boolean
+  /** 猎人“灭群者”在同回合对原目标 5 尺内另一生物进行的免费攻击。 */
+  hordeBreakerAttack?: boolean
+  /** 猎人 11 级多重攻击；点击的 Token 作为万箭齐发中心或旋风攻击的目标确认点。 */
+  hunterMultiattack?: 'volley' | 'whirlwind-attack'
+  /** 武僧 5 级震慑拳；仅命中时消耗 1 点气并由 DM 掷目标体质豁免。 */
+  stunningStrike?: boolean
+  /** 游侠 20 级屠灭众敌；对所选宿敌每回合一次，将感知调整值加入命中或伤害。 */
+  foeSlayer?: 'attack' | 'damage'
+}
+
+export type Dnd5eMetamagicId =
+  | 'careful'
+  | 'distant'
+  | 'empowered'
+  | 'extended'
+  | 'heightened'
+  | 'quickened'
+  | 'subtle'
+  | 'twinned'
+
+export interface Dnd5eSpellMetamagicPayload {
+  kind: Dnd5eMetamagicId
+  /** 谨慎法术：本次受影响生物中被指定为自动通过豁免的其他生物。 */
+  carefulTargetIds?: string[]
+  /** 升阶法术：本次受影响目标中，第一次对该法术进行豁免时具有劣势的一个目标。 */
+  heightenedTargetId?: string
+}
+
+export interface Dnd5eSpellCastPayload {
+  spellId: string
+  slotLevel: number
+  targetTokenId: string
+  targetTokenIds?: string[]
+  /** Ordered per-projectile targets; duplicates allocate multiple projectiles to one creature. */
+  projectileTargetIds?: string[]
+  /** 塑能学派14级“超限导能”：由DM端重新验证资格并掷后续反噬伤害。 */
+  overchannel?: boolean
+  /** 塑能学派2级“法术塑形”：必须是本次区域法术所影响、且不含施法者的生物。 */
+  sculptedTargetIds?: string[]
+  /** 术士超魔法；种类、已知选项、术法点与附加参数都由DM端重新验证。 */
+  metamagic?: Dnd5eSpellMetamagicPayload
+  /** 强化法术在伤害骰掷出后另行选择重掷；可与另一种超魔法同时使用。 */
+  empowered?: boolean
+  /** 龙族血脉6级“元素亲和”：消耗1术法点，获得先祖关联伤害抗性1小时。 */
+  draconicResistance?: boolean
+  /** 斥力魔爆：本次魔能爆每道命中的射线都请求将目标推开至多10尺。 */
+  repellingBlast?: boolean
+}
+
+/**
+ * 玩家只能声明要施放哪个尚未机械化的法术以及使用的环位。
+ * 目标、伤害、治疗与状态效果必须由 DM 通过 dm-adjudication Interrupt 回填，
+ * 不能从这个玩家可写的请求载荷进入 Headless。
+ */
+export interface Dnd5eAdjudicatedSpellPayload {
+  spellId: string
+  slotLevel: number
+}
 
 export interface SharedCombatState {
   mapId: string
@@ -16,7 +178,9 @@ export interface SharedCombatState {
   round: number
   initiativeIndex: number
   initiativeOrder: InitiativeEntry[]
-  enemyApByToken?: Record<string, { current: number; max: number }>
+  /** DM 权威的结算策略；旧快照缺失时按 automatic 处理。 */
+  settlementMode?: CombatSettlementMode
+  dnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
   updatedAt: number
 }
 
@@ -28,38 +192,32 @@ export interface SharedPlayerActionState {
   status: 'pending' | 'done'
   type:
     | 'end-turn'
-    | 'attack-token'
     | 'dnd5e-weapon-attack'
     | 'dnd5e-fighter-feature'
-    | 'aoe-attack'
+    | 'dnd5e-class-feature'
+    | 'dnd5e-plugin-action'
+    | 'dnd5e-item-use'
+    | 'dnd5e-ability-check'
+    | 'dnd5e-spell-cast'
+    | 'dnd5e-adjudicated-spell'
     | 'move-token'
     | 'disengage'
-    | 'use-skill'
-    | 'agile-leap-move'
-    | 'skill-free-move'
-    | 'calm-spirit-move'
-    | 'qi-reduce-cooldown'
-    | 'class-resource-action'
-    | 'calm-spirit'
-    | 'activate-feature'
-    | 'bullet-match-swap'
   actorTokenId: string
   characterId: string
   targetTokenId?: string
   targetTokenIds?: string[]
   targetCell?: GridCell
   targetPosition?: { x: number; y: number }
-  aoeRectRotation?: number
-  skillId?: string
-  classResource?: {
-    key: string
-    amount: number
-    operation: 'reduce-skill-cooldown'
-  }
-  featureKey?: ClassFeatureKey
+  /** 穿过滚珠或铁蒺藜时声明半速谨慎移动；DM 按双倍移动消耗复核。 */
+  dnd5eCarefulMovement?: boolean
   dnd5eFighterFeature?: 'second-wind' | 'action-surge'
-  calmSpiritEffect?: 'move' | 'crit' | 'cooldown' | 'extraTurn'
-  bulletSwap?: { from: number; to: number; seed: number }
+  dnd5eClassFeature?: Dnd5eClassFeaturePayload
+  dnd5ePluginAction?: Dnd5ePluginActionPayload
+  dnd5eItemUse?: Dnd5eItemUsePayload
+  dnd5eAbilityCheck?: Dnd5eAbilityCheckPayload
+  dnd5eWeaponAttackOptions?: Dnd5eWeaponAttackOptions
+  dnd5eSpellCast?: Dnd5eSpellCastPayload
+  dnd5eAdjudicatedSpell?: Dnd5eAdjudicatedSpellPayload
   round: number
   initiativeIndex: number
   seq: number
@@ -99,6 +257,8 @@ export interface SharedDiceState {
   id: string
   mapId: string
   sourceMode: Mode
+  visibility?: 'public' | 'dm'
+  rollerName?: string
   status?: 'rolling' | 'result'
   kind?: 'd20' | 'dice'
   count?: number
@@ -144,7 +304,6 @@ export interface SharedCombatLogState {
   updatedAt: number
 }
 
-export type StatusType = 'burning' | 'poison'
 
 export interface CombatLogEntry {
   id: number

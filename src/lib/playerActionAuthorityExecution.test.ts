@@ -66,20 +66,23 @@ function preflight() {
 }
 
 describe('player action authority execution plan', () => {
-  it('classifies every supported authority route', () => {
-    expect(playerActionAuthorityRoute(action('activate-feature'))).toBe('activate-feature')
-    expect(playerActionAuthorityRoute(action('end-turn'))).toBe('simple')
-    expect(playerActionAuthorityRoute(action('attack-token'))).toBe('attack-token')
+  it('only classifies SRD 5.1 authority routes as supported', () => {
+    expect(playerActionAuthorityRoute(action('end-turn'))).toBe('end-turn')
+    expect(playerActionAuthorityRoute(action('disengage'))).toBe('disengage')
     expect(playerActionAuthorityRoute(action('dnd5e-weapon-attack'))).toBe('dnd5e-weapon-attack')
     expect(playerActionAuthorityRoute(action('dnd5e-fighter-feature'))).toBe('dnd5e-fighter-feature')
-    expect(playerActionAuthorityRoute(action('aoe-attack'))).toBe('aoe-attack')
+    expect(playerActionAuthorityRoute(action('dnd5e-class-feature'))).toBe('dnd5e-class-feature')
+    expect(playerActionAuthorityRoute(action('dnd5e-plugin-action'))).toBe('dnd5e-plugin-action')
+    expect(playerActionAuthorityRoute(action('dnd5e-item-use'))).toBe('dnd5e-item-use')
+    expect(playerActionAuthorityRoute(action('dnd5e-ability-check'))).toBe('dnd5e-ability-check')
+    expect(playerActionAuthorityRoute(action('dnd5e-spell-cast'))).toBe('dnd5e-spell-cast')
     expect(playerActionAuthorityRoute(action('move-token'))).toBe('move-token')
   })
 
   it('runs preflight before reserving execution', () => {
     const recent = new Map<string, number>()
     const result = planPlayerActionAuthorityExecution({
-      action: { ...action('attack-token'), round: 2 },
+      action: { ...action('dnd5e-weapon-attack'), round: 2 },
       preflight: preflight(),
       recentActionKeys: recent,
       now: 1000,
@@ -89,22 +92,22 @@ describe('player action authority execution plan', () => {
     expect(recent.size).toBe(0)
   })
 
-  it('reserves an accepted attack exactly once', () => {
+  it('reserves each supported action only once', () => {
     const recent = new Map<string, number>()
     const first = planPlayerActionAuthorityExecution({
-      action: action('attack-token'),
+      action: action('dnd5e-weapon-attack'),
       preflight: preflight(),
       recentActionKeys: recent,
       now: 1000,
     })
     const second = planPlayerActionAuthorityExecution({
-      action: action('attack-token'),
+      action: action('dnd5e-weapon-attack'),
       preflight: preflight(),
       recentActionKeys: recent,
       now: 1001,
     })
 
-    expect(first).toEqual({ status: 'accepted', route: 'attack-token' })
+    expect(first).toEqual({ status: 'accepted', route: 'dnd5e-weapon-attack' })
     expect(second).toEqual({ status: 'ignored' })
   })
 })

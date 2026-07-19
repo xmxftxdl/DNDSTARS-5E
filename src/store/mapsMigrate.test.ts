@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { migrateMapsState, MAPS_PERSIST_VERSION } from './maps'
 
-// [T10/AC3 · E10] maps store 此前裸跑 `{ name:'stars-maps' }`（无 version/migrate）。
+// maps store 此前裸跑 `{ name:'stars-maps' }`（无 version/migrate）。
 // 任何旧 localStorage 形状缺字段都可能在渲染期崩。这里验证 v0（无版本）旧 blob 经 migrate
 // 被规整为可直接渲染的当前 BattleMap 形状，且 version 已落定。
 
@@ -68,5 +68,20 @@ describe('T10/AC3 — maps store version + migrate', () => {
   it('drops a dangling selectedId that no longer points at an existing map', () => {
     const result = migrateMapsState({ maps: [{ id: 'a', name: 'A' }], selectedId: 'gone' })
     expect(result.selectedId).toBe('a')
+  })
+
+  it('normalizes valid persistent item areas and drops malformed entries', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 100, height: 100,
+        dnd5eItemAreas: [
+          { id: 'good', kind: 'caltrops', cells: [{ col: 1, row: 1 }], armed: true },
+          { id: 'bad', kind: 'unknown', cells: [] },
+        ],
+      }],
+    })
+    expect(result.maps[0].dnd5eItemAreas).toEqual([
+      expect.objectContaining({ id: 'good', kind: 'caltrops', cells: [{ col: 1, row: 1 }], armed: true }),
+    ])
   })
 })

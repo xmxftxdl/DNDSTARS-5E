@@ -1,7 +1,7 @@
 export const COMBAT_INTERRUPT_RESOURCE = 'combat-interrupts'
 export const COMBAT_INTERRUPT_QUEUE_LIMIT = 32
 
-export type CombatInterruptKind = 'dodge' | 'stable-mind' | 'gale-combo' | 'agile-leap' | 'opportunity-attack'
+export type CombatInterruptKind = 'dodge' | 'stable-mind' | 'gale-combo' | 'agile-leap' | 'opportunity-attack' | 'protection' | 'shield-spell' | 'uncanny-dodge' | 'deflect-missiles' | 'saving-throw-reroll' | 'bardic-inspiration' | 'cutting-words' | 'dark-ones-own-luck' | 'stroke-of-luck' | 'empowered-spell' | 'stand-against-tide' | 'dm-adjudication'
 export type CombatInterruptStatus = 'pending' | 'rolling' | 'answered' | 'done'
 
 export interface SharedCombatInterrupt<

@@ -54,7 +54,7 @@ describe('[T7/AC1] buildEnemyAttack 按怪物真实结构化攻击数据投骰',
     expect(dice).toContain('1d6')
   })
 
-  // [T-P2-423/AC5] total/damage 不再是硬编码占位 1，而是按结构化骰估算（count*sides+bonus），
+  // total/damage 不再是硬编码占位 1，而是按结构化骰估算（count*sides+bonus），
   // 与 attack.label/sides/bonus 自洽。
   it('近战 total/damage 反映真实估算伤害（非占位 1）', () => {
     const enemy = token({ id: 'e', type: 'enemy', poolId: 'ogre', x: 25, y: 25 })

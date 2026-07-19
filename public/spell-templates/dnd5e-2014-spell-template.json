@@ -1,0 +1,88 @@
+{
+  "format": "dndstars5e-spells",
+  "schemaVersion": 2,
+  "spells": [
+    {
+      "id": "my-rules:ember-lance",
+      "name": "余烬长枪",
+      "englishName": "Ember Lance",
+      "level": 1,
+      "school": "evocation",
+      "ritual": false,
+      "castingTime": {
+        "value": 1,
+        "unit": "action"
+      },
+      "range": {
+        "type": "distance",
+        "feet": 60
+      },
+      "components": {
+        "verbal": true,
+        "somatic": true,
+        "material": true,
+        "materialText": "一小块燧石",
+        "materialCostGp": 0,
+        "materialConsumed": false
+      },
+      "duration": {
+        "type": "instantaneous",
+        "concentration": false
+      },
+      "classes": [
+        "sorcerer",
+        "wizard"
+      ],
+      "description": "你向射程内一个生物投射一支炽热长枪。这里填写完整的法术规则正文，包括攻击检定、豁免、伤害和其他效果。",
+      "higherLevels": "使用 2 环或更高法术位施放时，在这里填写每高一环产生的效果。",
+      "tags": [
+        "伤害",
+        "火焰"
+      ],
+      "mechanics": {
+        "kind": "damage",
+        "resolution": "saving-throw",
+        "savingThrow": {
+          "ability": "dex",
+          "onSuccess": "half"
+        },
+        "damage": {
+          "dice": {
+            "count": 2,
+            "sides": 6,
+            "bonus": 0
+          },
+          "type": "fire",
+          "addSpellcastingModifier": false,
+          "cantripScaling": false
+        },
+        "conditions": [
+          {
+            "condition": "blinded",
+            "trigger": "on-failed-save",
+            "duration": {
+              "kind": "target-next-turn-start"
+            }
+          }
+        ],
+        "upcast": {
+          "fromSlotLevel": 2,
+          "effects": [
+            {
+              "kind": "damage-dice",
+              "diceCountPerSlot": 1
+            }
+          ]
+        }
+      },
+      "source": {
+        "title": "我的房间规则",
+        "publisher": "DM 名称",
+        "license": "仅限本房间使用"
+      },
+      "automation": {
+        "mode": "reference-only"
+      }
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 export interface InitiativeEntry {
+  /** Stable identity for one turn slot. A creature can own more than one slot. */
+  slotId?: string
+  turnKind?: 'thief-reflexes'
   tokenId: string
   label: string
   emoji: string
@@ -80,12 +83,12 @@ export default function InitiativeTracker({
 
           return (
             <button
-              key={entry.tokenId}
-              data-testid={`initiative-token-${entry.tokenId}`}
+              key={entry.slotId ?? entry.tokenId}
+              data-testid={`initiative-token-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
               type="button"
               onClick={() => onSelect(entry.tokenId)}
               className="group flex flex-col items-center gap-1 outline-none"
-              title={`${entry.label} · 先攻 ${entry.roll}${hp ? ` · HP ${hp.hp}/${hp.max}` : ''}${defeated ? ' · 已阵亡' : ''}${isActive && !defeated ? ' · 当前回合' : ''}`}
+              title={`${entry.label} · 先攻 ${entry.roll}${entry.turnKind === 'thief-reflexes' ? ' · 盗贼反射额外回合' : ''}${hp ? ` · HP ${hp.hp}/${hp.max}` : ''}${defeated ? ' · 已阵亡' : ''}${isActive && !defeated ? ' · 当前回合' : ''}`}
             >
               <div
                 className={[

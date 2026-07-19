@@ -1,5 +1,4 @@
 import type { BattleMap, Token } from '../store/maps'
-import type { CombatSkill } from '../types/character'
 import {
   cellDistance,
   cellKey,
@@ -36,38 +35,15 @@ export interface LineAoeTargeting {
   aimRangeFeet?: number
 }
 
-export type SkillAoeTargeting = CircleAoeTargeting | RectAoeTargeting | LineAoeTargeting
-
-const CIRCLE_AOE: Record<string, CircleAoeTargeting> = {
-  whirlwindKick: { shape: 'circle', origin: 'self', radiusFeet: 5 },
-  aerialCombo: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 20 },
-  spiralBlade: { shape: 'circle', origin: 'self', radiusFeet: 5 },
+export interface ConeAoeTargeting {
+  shape: 'cone'
+  origin: 'self'
+  lengthFeet: number
+  /** 瞄准点相对施法者的最远距离（尺）；不设则不限制 */
+  aimRangeFeet?: number
 }
 
-const RECT_AOE: Record<string, RectAoeTargeting> = {
-  arrowStorm: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 15, placeRangeFeet: 90, rotatable: true },
-}
-
-const LINE_AOE: Record<string, LineAoeTargeting> = {
-  focusShot: { shape: 'line', origin: 'self', widthFeet: 5, lengthFeet: 30 },
-  windTraceShot: { shape: 'line', origin: 'self', widthFeet: 5, lengthFeet: 60 },
-}
-
-export function getSkillAoeTargeting(skill: CombatSkill): SkillAoeTargeting | null {
-  if (!skill.skillTreeId) return null
-  return (
-    CIRCLE_AOE[skill.skillTreeId] ??
-    RECT_AOE[skill.skillTreeId] ??
-    LINE_AOE[skill.skillTreeId] ??
-    null
-  )
-}
-
-/** @deprecated 使用 getSkillAoeTargeting */
-export function getCircleAoeTargeting(skill: CombatSkill): CircleAoeTargeting | null {
-  const aoe = getSkillAoeTargeting(skill)
-  return aoe?.shape === 'circle' ? aoe : null
-}
+export type SkillAoeTargeting = CircleAoeTargeting | RectAoeTargeting | LineAoeTargeting | ConeAoeTargeting
 
 export function feetToRadiusCells(feet: number): number {
   return feetToMovementCells(feet)
@@ -144,6 +120,16 @@ function orientedRectCorners(
 
 function polygonsTouch(a: { x: number; y: number }[], b: { x: number; y: number }[], axes: { x: number; y: number }[]): boolean {
   return axes.every((axis) => intervalsOverlap(project(a, axis), project(b, axis)))
+}
+
+function polygonAxes(points: { x: number; y: number }[]): { x: number; y: number }[] {
+  return points.map((point, index) => {
+    const next = points[(index + 1) % points.length]
+    const dx = next.x - point.x
+    const dy = next.y - point.y
+    const length = Math.hypot(dx, dy) || 1
+    return { x: -dy / length, y: dx / length }
+  })
 }
 
 function cellTouchesCircle(cell: GridCell, center: GridCell, radiusCells: number): boolean {
@@ -230,6 +216,36 @@ export function cellsInLine(
 }
 
 /**
+ * 2014 版锥状模板：尖端位于施法者格中心，末端宽度等于锥长。
+ * 以多边形相交而非只测格心，保证大型 Token 与边缘方格也能正确进入范围。
+ */
+export function cellsInCone(
+  origin: GridCell,
+  aim: GridCell,
+  lengthFeet: number,
+): GridCell[] {
+  const dir = aimVector(origin, aim)
+  const perp = { x: -dir.y, y: dir.x }
+  const lengthCells = lengthFeet / DND_FEET_PER_CELL
+  const halfWidth = lengthCells / 2
+  const end = { x: origin.col + dir.x * lengthCells, y: origin.row + dir.y * lengthCells }
+  const cone = [
+    { x: origin.col, y: origin.row },
+    { x: end.x + perp.x * halfWidth, y: end.y + perp.y * halfWidth },
+    { x: end.x - perp.x * halfWidth, y: end.y - perp.y * halfWidth },
+  ]
+  const scan = Math.ceil(lengthCells + 1)
+  const axes = [...polygonAxes(cone), { x: 1, y: 0 }, { x: 0, y: 1 }]
+  const cells: GridCell[] = []
+  for (let row = origin.row - scan; row <= origin.row + scan; row++) {
+    for (let col = origin.col - scan; col <= origin.col + scan; col++) {
+      if (polygonsTouch(cone, cellCorners({ col, row }), axes)) cells.push({ col, row })
+    }
+  }
+  return uniqueCells(cells)
+}
+
+/**
  * 矩形区域：以 anchor 为中心，长边沿 caster→anchor 方向，覆盖 widthFeet × heightFeet 内所有方格。
  */
 export function cellsInRect(
@@ -266,19 +282,10 @@ export function cellsForAoe(
     }
     case 'line':
       return cellsInLine(casterCell, anchorCell, aoe.widthFeet, aoe.lengthFeet)
+    case 'cone':
+      return cellsInCone(casterCell, anchorCell, aoe.lengthFeet)
     case 'rect':
       return cellsInRect(anchorCell, casterCell, aoe.widthFeet, aoe.heightFeet)
-  }
-}
-
-export function registerSkillAoeTargeting(
-  skillTreeId: string,
-  targeting: SkillAoeTargeting,
-): () => void {
-  const registry = targeting.shape === 'circle' ? CIRCLE_AOE : targeting.shape === 'rect' ? RECT_AOE : LINE_AOE
-  registry[skillTreeId] = targeting as never
-  return () => {
-    if (registry[skillTreeId] === targeting) delete registry[skillTreeId]
   }
 }
 
@@ -312,6 +319,9 @@ export function canPlaceAoe(
     case 'line':
       if (aoe.aimRangeFeet == null) return true
       return cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.aimRangeFeet)
+    case 'cone':
+      if (aoe.aimRangeFeet == null) return true
+      return cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.aimRangeFeet)
     case 'rect':
       if (aoe.placeRangeFeet == null) return true
       return cellDistance(casterCell, anchorCell) <= feetToRadiusCells(aoe.placeRangeFeet)
@@ -334,7 +344,7 @@ export function tokensInCells(map: BattleMap, tokens: Token[], cells: GridCell[]
   )
 }
 
-export function formatAoeHint(_skill: CombatSkill, aoe: SkillAoeTargeting): string {
+export function formatAoeHint(aoe: SkillAoeTargeting): string {
   switch (aoe.shape) {
     case 'circle': {
       const r = `${aoe.radiusFeet} \u5c3a`
@@ -344,6 +354,8 @@ export function formatAoeHint(_skill: CombatSkill, aoe: SkillAoeTargeting): stri
     }
     case 'line':
       return `\u4ece\u89d2\u8272\u6cbf\u7784\u51c6\u65b9\u5411\uff0c${aoe.widthFeet}\u00d7${aoe.lengthFeet} \u5c3a\u76f4\u7ebf\u8def\u5f84`
+    case 'cone':
+      return `\u4ee5\u81ea\u8eab\u4e3a\u9876\u70b9\uff0c${aoe.lengthFeet} \u5c3a\u9525\u72b6\u8303\u56f4`
     case 'rect': {
       const place = aoe.placeRangeFeet != null ? `\u5728 ${aoe.placeRangeFeet} \u5c3a\u5185` : '\u5728\u5730\u56fe\u4e0a'
       return `${place}\u9009\u62e9\u77e9\u5f62\u4e2d\u5fc3\uff0c${aoe.widthFeet}\u00d7${aoe.heightFeet} \u5c3a\u533a\u57df`
@@ -356,7 +368,7 @@ export function isSelfOriginCircleAoe(aoe: SkillAoeTargeting): boolean {
 }
 
 export function aoeUsesMouseAim(aoe: SkillAoeTargeting): boolean {
-  if (aoe.shape === 'line') return true
+  if (aoe.shape === 'line' || aoe.shape === 'cone') return true
   if (aoe.shape === 'circle' && aoe.origin === 'point') return true
   if (aoe.shape === 'rect') return true
   return false
@@ -365,7 +377,7 @@ export function aoeUsesMouseAim(aoe: SkillAoeTargeting): boolean {
 export function aoeConfirmHint(aoe: SkillAoeTargeting, valid: boolean): string {
   if (isSelfOriginCircleAoe(aoe)) return ' \u00b7 \u70b9\u51fb\u81ea\u8eab\u786e\u8ba4\u91ca\u653e'
   if (!valid) {
-    if (aoe.shape === 'line') return ' \u00b7 \u7784\u51c6\u70b9\u8d85\u51fa\u8ddd\u79bb'
+    if (aoe.shape === 'line' || aoe.shape === 'cone') return ' \u00b7 \u7784\u51c6\u70b9\u8d85\u51fa\u8ddd\u79bb'
     if (aoe.shape === 'rect') return ' \u00b7 \u77e9\u5f62\u4e2d\u5fc3\u8d85\u51fa\u8ddd\u79bb'
     return ' \u00b7 \u5706\u5fc3\u8d85\u51fa\u8ddd\u79bb'
   }
