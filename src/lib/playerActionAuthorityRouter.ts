@@ -49,6 +49,21 @@ export function preflightPlayerActionAuthority(
     return { status: 'ignored' }
   }
 
+  if (action.type === 'dnd5e-map-interaction') {
+    if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
+      return { status: 'ignored' }
+    }
+    const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
+    if (
+      !actorToken || actorToken.type !== 'player' || !actorToken.characterId ||
+      actorToken.characterId !== action.characterId
+    ) return { status: 'rejected', reason: 'stale-turn' }
+    if (context.combatActive && actorToken.id !== context.currentTokenId) {
+      return { status: 'rejected', reason: 'stale-turn' }
+    }
+    return { status: 'accepted', currentToken: actorToken }
+  }
+
   if (!action.combatId || action.combatId !== context.combatId) {
     return { status: 'rejected', reason: 'stale-combat' }
   }

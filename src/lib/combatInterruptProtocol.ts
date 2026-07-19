@@ -207,7 +207,7 @@ export interface DmAdjudicationEffect extends Record<string, unknown> {
 }
 
 export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
-  contextKind?: 'spell' | 'persistent-area-trigger'
+  contextKind?: 'spell' | 'persistent-area-trigger' | 'map-interaction'
   actionId: string
   casterName: string
   spellId: string
@@ -224,6 +224,9 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   proposedConditionIds?: string[]
   targetTokenId?: string
   triggerTiming?: 'on-create' | 'on-enter' | 'turn-start' | 'turn-end'
+  proposedDc?: number
+  doorId?: string
+  mapInteractionOperation?: string
 }
 
 export type DmDamageAdjustment =
@@ -241,6 +244,8 @@ export type DmAdjudicationInterruptResponse = Record<string, unknown> & {
   saveSuccessOverride?: boolean
   blockedConditionIds?: string[]
   useLegendaryResistance?: boolean
+  adjustedDc?: number
+  mapInteractionOverride?: 'roll' | 'success' | 'failure'
 }
 
 export interface CombatInterruptPayloadMap {

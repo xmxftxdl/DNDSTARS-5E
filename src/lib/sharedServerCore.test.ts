@@ -248,6 +248,16 @@ describe('map geometry player projection', () => {
     expect(JSON.stringify(projected)).not.toContain('secret-door')
   })
 
+  it('projects a discovered secret door only to the authorized room member', () => {
+    const discovered = structuredClone(geometry)
+    Object.assign(discovered.maps[0].doors[0], { revealedToMemberIds: ['member-a'] })
+    const visible = sharedServerCore.projectMapGeometryForPlayer(discovered, 'member-a')
+    const hidden = sharedServerCore.projectMapGeometryForPlayer(discovered, 'member-b')
+    expect(visible.maps[0].doors.map((door) => door.id)).toEqual(['secret-door'])
+    expect(hidden.maps[0].doors).toEqual([])
+    expect(JSON.stringify(hidden)).not.toContain('secret-door')
+  })
+
   it('fails closed on malformed geometry resources', () => {
     expect(validateSharedStateShape('map-geometry', geometry)).toEqual({ ok: true })
     expect(validateSharedStateShape('map-geometry', {

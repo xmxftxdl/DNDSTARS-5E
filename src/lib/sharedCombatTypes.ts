@@ -4,6 +4,7 @@ import type { AbilityKey } from './dnd'
 import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 import type { CombatSettlementMode } from './combatSettlementMode'
+import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
 
 // Shared DM/player state contracts transported through sharedApi.
 // Keep these runtime-free so UI, sync helpers, and headless services can depend
@@ -202,6 +203,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-ability-check'
     | 'dnd5e-spell-cast'
     | 'dnd5e-adjudicated-spell'
+    | 'dnd5e-map-interaction'
     | 'move-token'
     | 'disengage'
   actorTokenId: string
@@ -222,6 +224,7 @@ export interface SharedPlayerActionState {
   dnd5eWeaponAttackOptions?: Dnd5eWeaponAttackOptions
   dnd5eSpellCast?: Dnd5eSpellCastPayload
   dnd5eAdjudicatedSpell?: Dnd5eAdjudicatedSpellPayload
+  dnd5eMapInteraction?: Dnd5eMapInteractionPayload
   round: number
   initiativeIndex: number
   seq: number

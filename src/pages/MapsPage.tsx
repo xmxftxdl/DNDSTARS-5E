@@ -377,6 +377,13 @@ import type {
   CombatLogEntry,
 } from '../lib/sharedCombatTypes'
 import {
+  prepareDnd5eMapInteraction,
+  resolveDnd5eMapInteraction,
+  type Dnd5eMapInteractionPayload,
+  type PreparedDnd5eMapInteraction,
+} from '../rulesets/dnd5e/mapInteraction'
+import { dnd5eAbilityCheckModifier, dnd5eSkillCheckModifier } from '../rulesets/dnd5e/checks'
+import {
   TOKEN_MOVE_MS,
   ADVANCE_DELAY_MS,
   ADVANCE_GUARD_MS,
@@ -791,6 +798,8 @@ export default function MapsPage() {
   const selectedGeometryEntityId = useMapGeometryStore((s) => s.selectedEntityId)
   const selectGeometryEntity = useMapGeometryStore((s) => s.selectEntity)
   const addGeometryEntity = useMapGeometryStore((s) => s.addEntity)
+  const setGeometryDoorState = useMapGeometryStore((s) => s.setDoorState)
+  const updateGeometryEntity = useMapGeometryStore((s) => s.updateEntity)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
@@ -1023,6 +1032,9 @@ export default function MapsPage() {
   const [dmAdjudicationNote, setDmAdjudicationNote] = useState('')
   const [dmAdjudicationConcentrationRounds, setDmAdjudicationConcentrationRounds] = useState('')
   const [dmAdjudicationSaveOverride, setDmAdjudicationSaveOverride] = useState<'unchanged' | 'success' | 'failure'>('unchanged')
+  const [dmAdjudicationDc, setDmAdjudicationDc] = useState('')
+  const [dmAdjudicationMapOverride, setDmAdjudicationMapOverride] = useState<'roll' | 'success' | 'failure'>('roll')
+  const [selectedDoorInteractionId, setSelectedDoorInteractionId] = useState<string | null>(null)
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -1632,6 +1644,7 @@ export default function MapsPage() {
     ? [...activeGeometry.walls, ...activeGeometry.doors, ...activeGeometry.obstacles]
         .find((entity) => entity.id === selectedGeometryEntityId)
     : undefined
+  const selectedDoorInteraction = activeGeometry?.doors.find((door) => door.id === selectedDoorInteractionId)
   const selectedToken = activeMap?.tokens.find((t) => t.id === selectedTokenId) ?? null
   const selectedCharacterToken = activeMap?.tokens.find((t) => t.id === selectedCharacterTokenId) ?? null
   const selectedCharacter = selectedCharacterToken?.characterId
@@ -4022,6 +4035,60 @@ export default function MapsPage() {
     })
   }
 
+  const requestSharedMapInteractionAdjudication = async (
+    action: SharedPlayerActionState,
+    actorName: string,
+    prepared: PreparedDnd5eMapInteraction,
+  ): Promise<DmAdjudicationInterruptResponse> => {
+    if (!activeMap || !isDM) return { decision: 'cancelled', effects: [] }
+    const id = `dm-adjudication:${action.id}`
+    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    const existing = existingQueue?.mapId === activeMap.id
+      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
+      : undefined
+    if (existing && isCombatInterruptKind(existing, 'dm-adjudication')) {
+      if (existing.status === 'answered' || existing.status === 'done') {
+        const response = existing.response as DmAdjudicationInterruptResponse | undefined
+        return response?.decision === 'approved'
+          ? { ...response, effects: [] }
+          : { decision: 'cancelled', effects: [] }
+      }
+      if (existing.status === 'rolled-back') return { decision: 'cancelled', effects: [] }
+    }
+    return new Promise((resolve) => {
+      pendingSharedDmAdjudicationRef.current = { id, actionId: action.id, resolve }
+      if (existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
+        (existing.status === 'pending' || existing.status === 'waiting-for-dm')) return
+      const operationLabels = { open: '开门', close: '关门', unlock: '开锁', break: '破门', inspect: '检查暗门' } as const
+      const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
+        id,
+        transactionId: action.id,
+        mapId: activeMap.id,
+        kind: 'dm-adjudication',
+        actorCharId: action.characterId,
+        payload: {
+          contextKind: 'map-interaction',
+          actionId: action.id,
+          casterName: actorName,
+          spellId: `map-interaction:${prepared.door.id}`,
+          spellName: `${operationLabels[prepared.operation]} · ${prepared.door.label}`,
+          spellLevel: 0,
+          slotLevel: 0,
+          castingTime: 'action',
+          description: prepared.automaticSuccess
+            ? '该交互无需检定。DM 可批准、拒绝，或在备注中记录特殊裁定。'
+            : `该交互将由 DM Host 投掷 d20，并使用角色当前的 ${prepared.checkSkill ?? prepared.checkAbility} 调整值。玩家不能提交骰值、DC 或结果。`,
+          concentration: false,
+          proposedDc: prepared.dc,
+          doorId: prepared.door.id,
+          mapInteractionOperation: prepared.operation,
+        },
+        expiresAt: runtimeNow() + 10 * 60 * 1000,
+      })
+      void publishCombatInterrupt(interrupt)
+    })
+  }
+
   async function requestSharedPersistentAreaAdjudication(input: {
     prepared: PreparedDnd5ePersistentAreaTrigger
     proposedDamage: number
@@ -5828,6 +5895,8 @@ export default function MapsPage() {
             )
             setDmAdjudicationNote('')
             setDmAdjudicationSaveOverride('unchanged')
+            setDmAdjudicationDc(dmAdjudicationInterrupt.payload.proposedDc?.toString() ?? '')
+            setDmAdjudicationMapOverride('roll')
             setDmAdjudicationConcentrationRounds(
               dmAdjudicationInterrupt.payload.suggestedConcentrationRounds?.toString() ?? '',
             )
@@ -6220,6 +6289,10 @@ export default function MapsPage() {
       concentrationRounds != null &&
       (!Number.isInteger(concentrationRounds) || concentrationRounds < 1 || concentrationRounds > 14_400)
     ) return
+    const adjustedDc = approved && prompt.payload.contextKind === 'map-interaction' && dmAdjudicationDc
+      ? Number(dmAdjudicationDc)
+      : undefined
+    if (adjustedDc != null && (!Number.isInteger(adjustedDc) || adjustedDc < 0 || adjustedDc > 100)) return
     suppressedDmAdjudicationPromptIdsRef.current.add(prompt.id)
     sharedDmAdjudicationPromptIdRef.current = null
     setSharedDmAdjudicationPrompt(null)
@@ -6231,6 +6304,10 @@ export default function MapsPage() {
           ...(concentrationRounds != null ? { concentrationRounds } : {}),
           ...(dmAdjudicationSaveOverride !== 'unchanged'
             ? { saveSuccessOverride: dmAdjudicationSaveOverride === 'success' }
+            : {}),
+          ...(adjustedDc != null ? { adjustedDc } : {}),
+          ...(prompt.payload.contextKind === 'map-interaction'
+            ? { mapInteractionOverride: dmAdjudicationMapOverride }
             : {}),
         } satisfies DmAdjudicationInterruptResponse
       : {
@@ -6575,6 +6652,7 @@ export default function MapsPage() {
     await Promise.all([
       useMapStore.getState().loadShared(),
       useCharacterStore.getState().loadShared(),
+      useMapGeometryStore.getState().loadShared(),
     ])
     const authorityMap = useMapStore.getState().maps.find((map) => map.id === action.mapId)
     const liveRound = roundRef.current
@@ -6617,6 +6695,105 @@ export default function MapsPage() {
     const dnd5eActionActor = useCharacterStore.getState().characters.find(
       (character) => character.id === actionActorCharacterId,
     )
+    if (action.type === 'dnd5e-map-interaction' && dnd5eActionActorToken && dnd5eActionActor) {
+      const payload = action.dnd5eMapInteraction
+      const geometry = useMapGeometryStore.getState().maps.find((entry) => entry.mapId === authorityMap.id)
+      if (!payload || typeof payload.doorId !== 'string') {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-map-interaction')
+        completePlayerActionRequest(action)
+        return
+      }
+      const door = geometry?.doors.find((entry) => entry.id === payload.doorId)
+      const inventory = dnd5eActionActor.dnd5eInventory?.entries ?? []
+      const hasThievesTools = inventory.some((entry) =>
+        entry.quantity > 0 && (entry.templateId.endsWith(':thieves-tools') || entry.item.name === '盗贼工具'),
+      )
+      const hasMatchingKey = !!door?.interaction?.keyItemId && inventory.some((entry) =>
+        entry.quantity > 0 && (entry.templateId === door.interaction?.keyItemId || entry.instanceId === door.interaction?.keyItemId),
+      )
+      const prepared = prepareDnd5eMapInteraction({
+        map: authorityMap,
+        geometry,
+        actor: dnd5eActionActorToken,
+        payload,
+        hasThievesTools,
+        hasMatchingKey,
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      if (combatActiveRef.current && prepared.prepared.spendAction) {
+        const economy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
+        if (economy.action.current < 1) {
+          acknowledgePlayerAction(action, 'rejected', 'action-unavailable')
+          completePlayerActionRequest(action)
+          return
+        }
+      }
+      const adjudication = await requestSharedMapInteractionAdjudication(
+        action,
+        dnd5eActionActor.name,
+        prepared.prepared,
+      )
+      const interruptId = `dm-adjudication:${action.id}`
+      if (adjudication.decision !== 'approved') {
+        await finishSharedCombatInterrupt(interruptId, adjudication)
+        acknowledgePlayerAction(action, 'rejected', 'map-interaction-cancelled')
+        completePlayerActionRequest(action)
+        return
+      }
+      const skill = prepared.prepared.checkSkill
+      const modifier = skill === 'sleightOfHand' && prepared.prepared.method === 'thieves-tools'
+        ? dnd5eAbilityCheckModifier(
+            dnd5eActionActor,
+            'dex',
+            dnd5eActionActor.skills.includes('thievesTools') ? 1 : 0,
+          )
+        : skill
+          ? dnd5eSkillCheckModifier(dnd5eActionActor, skill)
+          : 0
+      const d20 = prepared.prepared.automaticSuccess
+        ? undefined
+        : await rollDiceBoxD20(`${prepared.prepared.door.label}·地图交互检定`, dnd5eActionActor.name)
+      const resolved = resolveDnd5eMapInteraction({
+        prepared: prepared.prepared,
+        d20,
+        modifier,
+        adjustedDc: adjudication.adjustedDc,
+        dmOverride: adjudication.mapInteractionOverride === 'success'
+          ? 'success'
+          : adjudication.mapInteractionOverride === 'failure'
+            ? 'failure'
+            : undefined,
+      })
+      if (combatActiveRef.current && prepared.prepared.spendAction) {
+        updateDnd5eTurnEconomy(
+          action.actorTokenId,
+          (economy) => spendDnd5eTurnResource(economy, 'action').economy,
+          liveRound,
+        )
+      }
+      if (resolved.nextDoorState) setGeometryDoorState(authorityMap.id, prepared.prepared.door.id, resolved.nextDoorState)
+      if (resolved.revealSecret && dnd5eActionActor.roomMemberId) {
+        updateGeometryEntity(authorityMap.id, prepared.prepared.door.id, {
+          revealedToMemberIds: [...new Set([
+            ...(prepared.prepared.door.revealedToMemberIds ?? []),
+            dnd5eActionActor.roomMemberId,
+          ])],
+        })
+      }
+      const checkText = resolved.total == null ? '' : `（${resolved.total} 对 DC ${resolved.dc}）`
+      pushCombatLog(
+        `${dnd5eActionActor.name} 尝试${prepared.prepared.door.label}的地图交互${checkText}：${resolved.success ? '成功' : '失败'}。`,
+        'turn',
+      )
+      await finishSharedCombatInterrupt(interruptId, adjudication)
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
     if (action.type === 'disengage' && dnd5eActionActor) {
       const turnEconomy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
       const resolved = resolveDnd5ePlayerDisengage({
@@ -11050,6 +11227,21 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${turnCharacter.name} 请求进行属性检定`)
   }
 
+  const sendPlayerDnd5eMapInteractionRequest = (payload: Dnd5eMapInteractionPayload) => {
+    if (isDM || !activeMap || !playerChar || pendingPlayerActionRef.current) return false
+    const actorToken = activeMap.tokens.find((token) =>
+      token.type === 'player' && token.characterId === playerChar.id,
+    )
+    if (!actorToken) return false
+    if (combatActive && currentInitiativeToken?.id !== actorToken.id) return false
+    const action = createPlayerActionRequest(
+      { type: 'dnd5e-map-interaction', dnd5eMapInteraction: payload },
+      { tokenId: actorToken.id, characterId: playerChar.id },
+    )
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${playerChar.name} 请求地图交互`)
+  }
+
   const sendPlayerDnd5eSpellCastRequest = (payload: Dnd5eSpellCastPayload) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const action = createPlayerActionRequest({
@@ -11515,6 +11707,7 @@ export default function MapsPage() {
                 if (isDM) addGeometryEntity(activeMap.id, entity)
               }}
               onGeometryEntitySelect={selectGeometryEntity}
+              onGeometryDoorInteract={!isDM ? setSelectedDoorInteractionId : undefined}
               onGeometryEditCancel={() => {
                 setGeometryEditMode(false)
                 setGeometryPreviewAsPlayer(false)
@@ -12074,6 +12267,75 @@ export default function MapsPage() {
             </div>
           )}
 
+          {!isDM && selectedDoorInteraction && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
+              <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl border border-violet-400/30 bg-void-950 p-5 shadow-2xl">
+                <h3 className="text-lg font-semibold text-violet-100">地图交互 · {selectedDoorInteraction.label}</h3>
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  请求只包含你的意图。距离、门状态、钥匙、工具、DC、骰值和行动消耗都会由 DM Host 重新验证。
+                </p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {selectedDoorInteraction.state === 'open' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sendPlayerDnd5eMapInteractionRequest({ doorId: selectedDoorInteraction.id, operation: 'close' })
+                        setSelectedDoorInteractionId(null)
+                      }}
+                      className="rounded-lg bg-violet-500/20 px-3 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/30"
+                    >关门</button>
+                  ) : (
+                    <>
+                      {selectedDoorInteraction.state === 'closed' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sendPlayerDnd5eMapInteractionRequest({ doorId: selectedDoorInteraction.id, operation: 'open' })
+                            setSelectedDoorInteractionId(null)
+                          }}
+                          className="rounded-lg bg-violet-500/20 px-3 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/30"
+                        >开门</button>
+                      )}
+                      {selectedDoorInteraction.state === 'locked' && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              sendPlayerDnd5eMapInteractionRequest({ doorId: selectedDoorInteraction.id, operation: 'unlock', method: 'key' })
+                              setSelectedDoorInteractionId(null)
+                            }}
+                            className="rounded-lg bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-500/25"
+                          >使用钥匙</button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              sendPlayerDnd5eMapInteractionRequest({ doorId: selectedDoorInteraction.id, operation: 'unlock', method: 'thieves-tools' })
+                              setSelectedDoorInteractionId(null)
+                            }}
+                            className="rounded-lg bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/25"
+                          >盗贼工具开锁</button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sendPlayerDnd5eMapInteractionRequest({ doorId: selectedDoorInteraction.id, operation: 'break', method: 'force' })
+                          setSelectedDoorInteractionId(null)
+                        }}
+                        className="rounded-lg bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-500/25"
+                      >力量破门</button>
+                    </>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDoorInteractionId(null)}
+                  className="mt-4 w-full rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5"
+                >取消</button>
+              </div>
+            </div>
+          )}
+
           {isDM && sharedDmAdjudicationPrompt && (
             <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
               <div
@@ -12087,11 +12349,17 @@ export default function MapsPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 id="shared-dm-adjudication-title" className="text-lg font-semibold text-amber-100">
-                        {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger' ? '区域触发中断' : 'DM 裁定'} · {sharedDmAdjudicationPrompt.payload.spellName}
+                        {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
+                          ? '区域触发中断'
+                          : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
+                            ? '地图交互中断'
+                            : 'DM 裁定'} · {sharedDmAdjudicationPrompt.payload.spellName}
                       </h3>
                       <p className="mt-1 text-xs text-slate-400">
                         {sharedDmAdjudicationPrompt.payload.casterName} · {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
                           ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
+                          : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
+                            ? 'DM 权威地图事务'
                           : <>{
                           sharedDmAdjudicationPrompt.payload.spellLevel === 0
                             ? '戏法'
@@ -12114,8 +12382,39 @@ export default function MapsPage() {
                     </section>
                     <section className="space-y-3">
                       <div className="rounded-xl border border-sky-400/15 bg-sky-500/[0.04] p-3 text-xs leading-5 text-sky-100/75">
-                        数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。
+                        {sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
+                          ? '批准后由 DM Host 使用当前角色与地图快照掷骰和结算。可调整 DC 或直接指定成功／失败；事务完成前玩家无法重复提交。'
+                          : '数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。'}
                       </div>
+                      {sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction' && (
+                        <div className="grid gap-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 sm:grid-cols-2">
+                          <label className="text-xs text-violet-100">
+                            裁定 DC
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={dmAdjudicationDc}
+                              onChange={(event) => setDmAdjudicationDc(event.target.value)}
+                              disabled={sharedDmAdjudicationPrompt.payload.proposedDc == null}
+                              className="mt-2 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-xs text-slate-200 disabled:opacity-40"
+                            />
+                          </label>
+                          <label className="text-xs text-violet-100">
+                            结果处理
+                            <select
+                              value={dmAdjudicationMapOverride}
+                              onChange={(event) => setDmAdjudicationMapOverride(event.target.value as typeof dmAdjudicationMapOverride)}
+                              className="mt-2 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-xs text-slate-200"
+                            >
+                              <option value="roll">按 Headless 骰值结算</option>
+                              <option value="success">直接判定成功</option>
+                              <option value="failure">直接判定失败</option>
+                            </select>
+                          </label>
+                        </div>
+                      )}
                       {sharedDmAdjudicationPrompt.payload.proposedSaveSuccess != null && (
                         <label className="block rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 text-xs text-violet-100">
                           豁免结果调整
@@ -12130,7 +12429,7 @@ export default function MapsPage() {
                           </select>
                         </label>
                       )}
-                      {dmAdjudicationEffects.map((effect, index) => (
+                      {sharedDmAdjudicationPrompt.payload.contextKind !== 'map-interaction' && dmAdjudicationEffects.map((effect, index) => (
                         <div key={effect.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
                           <div className="flex items-center justify-between gap-2">
                             <h4 className="text-xs font-semibold text-slate-300">效果 {index + 1}</h4>
@@ -12217,13 +12516,13 @@ export default function MapsPage() {
                           </div>
                         </div>
                       ))}
-                      <button
+                      {sharedDmAdjudicationPrompt.payload.contextKind !== 'map-interaction' && <button
                         type="button"
                         onClick={() => setDmAdjudicationEffects((current) => [...current, newDmAdjudicationEffectDraft()])}
                         className="w-full rounded-lg border border-dashed border-amber-400/25 bg-amber-500/[0.04] px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/10"
                       >
                         ＋ 添加目标效果
-                      </button>
+                      </button>}
                       {sharedDmAdjudicationPrompt.payload.concentration && (
                         <label className="block rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 text-xs text-violet-100">
                           专注持续轮数
@@ -12259,7 +12558,11 @@ export default function MapsPage() {
                     onClick={() => void handleSharedDmAdjudicationChoice(false)}
                     className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80"
                   >
-                    {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger' ? '跳过本次触发' : '取消施法（不消费）'}
+                    {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
+                      ? '跳过本次触发'
+                      : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
+                        ? '拒绝交互'
+                        : '取消施法（不消费）'}
                   </button>
                   <button
                     type="button"

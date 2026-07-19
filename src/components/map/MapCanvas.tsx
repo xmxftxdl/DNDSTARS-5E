@@ -199,6 +199,7 @@ interface MapCanvasProps {
   visionSourceTokenIds?: string[]
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
   onGeometryEntitySelect?: (entityId: string | null) => void
+  onGeometryDoorInteract?: (doorId: string) => void
   onGeometryEditCancel?: () => void
   onTokenMoveBlocked?: (entityId?: string) => void
   /** DM 视角：始终显示敌人血量条；玩家视角受 token.showHpOnToken 控制 */
@@ -334,6 +335,7 @@ function MapGeometryLayer({
   geometry,
   draft,
   editMode,
+  doorInteractionMode,
   selectedEntityId,
   inv,
   onSelect,
@@ -341,19 +343,23 @@ function MapGeometryLayer({
   geometry?: MapGeometryState
   draft: MapGeometryEntity | null
   editMode: boolean
+  doorInteractionMode?: boolean
   selectedEntityId: string | null
   inv: number
   onSelect?: (entityId: string | null) => void
 }) {
   if (!geometry && !draft) return null
-  const entities: MapGeometryEntity[] = [
+  const allEntities: MapGeometryEntity[] = [
     ...(geometry?.walls ?? []),
     ...(geometry?.doors ?? []),
     ...(geometry?.obstacles ?? []),
     ...(draft ? [draft] : []),
   ]
+  const entities = doorInteractionMode && !editMode
+    ? allEntities.filter((entity) => entity.kind === 'door')
+    : allEntities
   return (
-    <Layer listening={editMode}>
+    <Layer listening={editMode || doorInteractionMode}>
       {entities.map((entity) => {
         const selected = entity.id === selectedEntityId
         const isDraft = entity === draft
@@ -374,7 +380,7 @@ function MapGeometryLayer({
           dash: entity.kind === 'door' && entity.secret ? [7 * inv, 5 * inv] : undefined,
           opacity: isDraft ? 0.68 : 0.92,
           hitStrokeWidth: 14 * inv,
-          listening: editMode && !isDraft,
+          listening: (editMode || doorInteractionMode) && !isDraft,
           onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => {
             event.cancelBubble = true
             onSelect?.(entity.id)
@@ -684,6 +690,7 @@ export default function MapCanvas({
   visionSourceTokenIds = [],
   onGeometryEntityCommit,
   onGeometryEntitySelect,
+  onGeometryDoorInteract,
   onGeometryEditCancel,
   onTokenMoveBlocked,
   isDM = false,
@@ -1693,14 +1700,17 @@ export default function MapCanvas({
             sourceTokenIds={visionSourceTokenIds}
           />
         )}
-        {isDM && geometryEditMode && (
+        {((isDM && geometryEditMode) || (!isDM && onGeometryDoorInteract)) && (
           <MapGeometryLayer
             geometry={geometry}
             draft={geometryDraft}
             editMode={geometryEditMode}
+            doorInteractionMode={!isDM}
             selectedEntityId={selectedGeometryEntityId}
             inv={inv}
-            onSelect={onGeometryEntitySelect}
+            onSelect={isDM ? onGeometryEntitySelect : (entityId) => {
+              if (entityId) onGeometryDoorInteract?.(entityId)
+            }}
           />
         )}
         <FogOfWarLayer

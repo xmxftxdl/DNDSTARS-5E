@@ -17,6 +17,7 @@ export type PlayerActionAuthorityRoute =
   | 'dnd5e-ability-check'
   | 'dnd5e-spell-cast'
   | 'dnd5e-adjudicated-spell'
+  | 'dnd5e-map-interaction'
   | 'move-token'
   | 'unsupported'
 
@@ -36,6 +37,7 @@ export function playerActionAuthorityRoute(action: Pick<SharedPlayerActionState,
   if (action.type === 'dnd5e-ability-check') return 'dnd5e-ability-check'
   if (action.type === 'dnd5e-spell-cast') return 'dnd5e-spell-cast'
   if (action.type === 'dnd5e-adjudicated-spell') return 'dnd5e-adjudicated-spell'
+  if (action.type === 'dnd5e-map-interaction') return 'dnd5e-map-interaction'
   if (action.type === 'move-token') return 'move-token'
   return 'unsupported'
 }

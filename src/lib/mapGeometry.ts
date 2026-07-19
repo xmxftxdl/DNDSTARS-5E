@@ -30,6 +30,14 @@ export interface MapGeometryWall extends MapGeometryHeight, MapGeometryBlocking 
 
 export type MapGeometryDoorState = 'open' | 'closed' | 'locked'
 
+export interface MapGeometryDoorInteraction {
+  lockPickDc: number
+  breakDc: number
+  secretDc: number
+  keyItemId?: string
+  requiresThievesTools: boolean
+}
+
 export interface MapGeometryDoor extends MapGeometryHeight, MapGeometryBlocking {
   id: string
   kind: 'door'
@@ -37,6 +45,9 @@ export interface MapGeometryDoor extends MapGeometryHeight, MapGeometryBlocking 
   points: [MapGeometryPoint, MapGeometryPoint]
   state: MapGeometryDoorState
   secret: boolean
+  interaction?: MapGeometryDoorInteraction
+  /** Room member ids that may receive this secret door in their geometry projection. */
+  revealedToMemberIds?: string[]
   createdAt: number
 }
 
@@ -58,6 +69,8 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   points?: MapGeometryPoint[]
   state?: MapGeometryDoorState
   secret?: boolean
+  interaction?: MapGeometryDoorInteraction
+  revealedToMemberIds?: string[]
   cover?: MapGeometryCover
 }
 
@@ -157,12 +170,39 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
   if (raw.kind === 'door') {
     const points = normalizePoints(raw.points, 2, 2)
     if (!points || !['open', 'closed', 'locked'].includes(String(raw.state)) || typeof raw.secret !== 'boolean') return undefined
+    const interactionRaw = raw.interaction
+    let interaction: MapGeometryDoorInteraction | undefined
+    if (interactionRaw != null) {
+      if (!interactionRaw || typeof interactionRaw !== 'object' || Array.isArray(interactionRaw)) return undefined
+      const config = interactionRaw as Record<string, unknown>
+      if (
+        !finite(config.lockPickDc, 0, 100) || !finite(config.breakDc, 0, 100) ||
+        !finite(config.secretDc, 0, 100) || typeof config.requiresThievesTools !== 'boolean' ||
+        (config.keyItemId != null && (typeof config.keyItemId !== 'string' || config.keyItemId.length > 160))
+      ) return undefined
+      interaction = {
+        lockPickDc: config.lockPickDc,
+        breakDc: config.breakDc,
+        secretDc: config.secretDc,
+        requiresThievesTools: config.requiresThievesTools,
+        ...(config.keyItemId ? { keyItemId: config.keyItemId } : {}),
+      }
+    }
+    if (
+      raw.revealedToMemberIds != null &&
+      (!Array.isArray(raw.revealedToMemberIds) || raw.revealedToMemberIds.length > 64 ||
+        raw.revealedToMemberIds.some((id) => typeof id !== 'string' || !id || id.length > 160))
+    ) return undefined
     return {
       ...common,
       kind: 'door',
       points: [points[0], points[1]],
       state: raw.state as MapGeometryDoorState,
       secret: raw.secret,
+      ...(interaction ? { interaction } : {}),
+      ...(Array.isArray(raw.revealedToMemberIds)
+        ? { revealedToMemberIds: [...new Set(raw.revealedToMemberIds as string[])] }
+        : {}),
     }
   }
   if (raw.kind === 'obstacle') {

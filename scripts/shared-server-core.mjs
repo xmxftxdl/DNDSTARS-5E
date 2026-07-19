@@ -1010,7 +1010,18 @@ function validGeometryEntity(entity, kind) {
   ) return false
   if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048
   if (kind === 'door') {
-    return entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean'
+    if (!(entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean')) return false
+    if (entity.revealedToMemberIds != null && (
+      !Array.isArray(entity.revealedToMemberIds) || entity.revealedToMemberIds.length > 64 ||
+      entity.revealedToMemberIds.some((id) => typeof id !== 'string' || !id || id.length > 160)
+    )) return false
+    if (entity.interaction != null && (
+      !plainObject(entity.interaction) || !Number.isFinite(entity.interaction.lockPickDc) ||
+      !Number.isFinite(entity.interaction.breakDc) || !Number.isFinite(entity.interaction.secretDc) ||
+      typeof entity.interaction.requiresThievesTools !== 'boolean' ||
+      (entity.interaction.keyItemId != null && typeof entity.interaction.keyItemId !== 'string')
+    )) return false
+    return true
   }
   return entity.points.length >= 3 && entity.points.length <= 2_048 &&
     ['none', 'half', 'three-quarters', 'total'].includes(entity.cover)
@@ -1134,13 +1145,16 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
   }
 }
 
-export function projectMapGeometryForPlayer(value) {
+export function projectMapGeometryForPlayer(value, memberId = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
   return {
     ...value,
     maps: value.maps.map((map) => {
       if (!plainObject(map) || !Array.isArray(map.doors) || !Array.isArray(map.walls)) return map
-      const secretWalls = map.doors.flatMap((door) => door?.secret === true && door.state !== 'open'
+      const maySeeSecretDoor = (door) => door?.secret !== true || (
+        typeof memberId === 'string' && Array.isArray(door.revealedToMemberIds) && door.revealedToMemberIds.includes(memberId)
+      )
+      const secretWalls = map.doors.flatMap((door) => !maySeeSecretDoor(door) && door.state !== 'open'
         ? [{
             id: `wall:${createHash('sha256').update(JSON.stringify([door.points, door.createdAt])).digest('hex').slice(0, 20)}`,
             kind: 'wall',
@@ -1158,7 +1172,7 @@ export function projectMapGeometryForPlayer(value) {
       return {
         ...map,
         walls: [...map.walls, ...secretWalls],
-        doors: map.doors.filter((door) => door?.secret !== true),
+        doors: map.doors.filter(maySeeSecretDoor),
       }
     }),
   }
@@ -3154,7 +3168,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           if (roomMember && roomMember !== room.host) playerRead = true
           if (roomMember === room.host) playerRead = false
         }
-        if (playerRead && name === 'map-geometry') value = projectMapGeometryForPlayer(value)
+        if (playerRead && name === 'map-geometry') value = projectMapGeometryForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
           if (geometry.corrupted) {

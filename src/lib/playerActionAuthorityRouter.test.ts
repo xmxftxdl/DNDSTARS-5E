@@ -102,6 +102,18 @@ describe('player action authority router', () => {
     ).toBe('rejected')
   })
 
+  it('allows an owned map interaction outside combat but still enforces the live actor during combat', () => {
+    const exploration = preflightPlayerActionAuthority(
+      makeAction({ type: 'dnd5e-map-interaction', combatId: undefined }),
+      makeContext({ combatActive: false, combatId: undefined, currentTokenId: undefined }),
+    )
+    expect(exploration.status).toBe('accepted')
+    expect(preflightPlayerActionAuthority(
+      makeAction({ type: 'dnd5e-map-interaction', actorTokenId: 'other' }),
+      makeContext(),
+    )).toEqual({ status: 'rejected', reason: 'stale-turn' })
+  })
+
   it('rejects actions that do not match the current initiative actor', () => {
     const result = preflightPlayerActionAuthority(
       makeAction({ round: 2 }),

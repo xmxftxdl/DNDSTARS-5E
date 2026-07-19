@@ -275,6 +275,64 @@ export default function MapGeometryToolbar({
                 暗门
               </label>
               {selectedEntity.state === 'locked' && <LockKeyhole className="h-3.5 w-3.5 text-rose-300" />}
+              <NumberField
+                label="开锁 DC"
+                min={0}
+                value={selectedEntity.interaction?.lockPickDc ?? 15}
+                onChange={(lockPickDc) => updateEntity(mapId, selectedEntity.id, {
+                  interaction: {
+                    lockPickDc,
+                    breakDc: selectedEntity.interaction?.breakDc ?? 15,
+                    secretDc: selectedEntity.interaction?.secretDc ?? 15,
+                    requiresThievesTools: selectedEntity.interaction?.requiresThievesTools ?? true,
+                    ...(selectedEntity.interaction?.keyItemId ? { keyItemId: selectedEntity.interaction.keyItemId } : {}),
+                  },
+                })}
+              />
+              <NumberField
+                label="破门 DC"
+                min={0}
+                value={selectedEntity.interaction?.breakDc ?? 15}
+                onChange={(breakDc) => updateEntity(mapId, selectedEntity.id, {
+                  interaction: {
+                    lockPickDc: selectedEntity.interaction?.lockPickDc ?? 15,
+                    breakDc,
+                    secretDc: selectedEntity.interaction?.secretDc ?? 15,
+                    requiresThievesTools: selectedEntity.interaction?.requiresThievesTools ?? true,
+                    ...(selectedEntity.interaction?.keyItemId ? { keyItemId: selectedEntity.interaction.keyItemId } : {}),
+                  },
+                })}
+              />
+              <NumberField
+                label="暗门 DC"
+                min={0}
+                value={selectedEntity.interaction?.secretDc ?? 15}
+                onChange={(secretDc) => updateEntity(mapId, selectedEntity.id, {
+                  interaction: {
+                    lockPickDc: selectedEntity.interaction?.lockPickDc ?? 15,
+                    breakDc: selectedEntity.interaction?.breakDc ?? 15,
+                    secretDc,
+                    requiresThievesTools: selectedEntity.interaction?.requiresThievesTools ?? true,
+                    ...(selectedEntity.interaction?.keyItemId ? { keyItemId: selectedEntity.interaction.keyItemId } : {}),
+                  },
+                })}
+              />
+              <label className="flex items-center gap-0.5 text-[10px] text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={selectedEntity.interaction?.requiresThievesTools ?? true}
+                  onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                    interaction: {
+                      lockPickDc: selectedEntity.interaction?.lockPickDc ?? 15,
+                      breakDc: selectedEntity.interaction?.breakDc ?? 15,
+                      secretDc: selectedEntity.interaction?.secretDc ?? 15,
+                      requiresThievesTools: event.target.checked,
+                      ...(selectedEntity.interaction?.keyItemId ? { keyItemId: selectedEntity.interaction.keyItemId } : {}),
+                    },
+                  })}
+                />
+                需盗贼工具
+              </label>
             </>
           )}
           {selectedEntity.kind === 'obstacle' && (
