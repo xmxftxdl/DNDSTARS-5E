@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import {
-  BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, LockKeyhole,
+  BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, Lightbulb, LockKeyhole,
   MousePointer2, Package, Redo2, Trash2, Undo2, Upload,
 } from 'lucide-react'
 import { normalizeMapGeometry, type MapGeometryEntity, type MapGeometryState, type MapGeometryTool } from '../../lib/mapGeometry'
@@ -27,6 +27,7 @@ const TOOL_LABELS: Record<MapGeometryTool, string> = {
   wall: '墙',
   door: '门',
   obstacle: '障碍物',
+  light: '光源',
 }
 
 function NumberField({
@@ -81,7 +82,7 @@ export default function MapGeometryToolbar({
   const canUndo = useMapGeometryStore((state) => (state.historyByMapId[mapId]?.length ?? 0) > 0)
   const canRedo = useMapGeometryStore((state) => (state.futureByMapId[mapId]?.length ?? 0) > 0)
   const updateToken = useMapStore((state) => state.updateToken)
-  const count = geometry.walls.length + geometry.doors.length + geometry.obstacles.length
+  const count = geometry.walls.length + geometry.doors.length + geometry.obstacles.length + (geometry.lights?.length ?? 0)
 
   return (
     <div className="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-violet-400/15 bg-violet-500/[0.05] px-1 py-0.5">
@@ -110,6 +111,7 @@ export default function MapGeometryToolbar({
           {tool === 'select' && <MousePointer2 className="h-3.5 w-3.5 text-violet-200" />}
           {tool === 'door' && <DoorClosed className="h-3.5 w-3.5 text-amber-200" />}
           {tool === 'obstacle' && <Package className="h-3.5 w-3.5 text-orange-200" />}
+          {tool === 'light' && <Lightbulb className="h-3.5 w-3.5 text-amber-200" />}
 
           <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用动态视野和服务端 Token 可见性过滤">
             <input
@@ -226,7 +228,7 @@ export default function MapGeometryToolbar({
             type="button"
             disabled={count === 0}
             onClick={() => {
-              if (confirm('清除当前地图的全部墙、门和障碍物吗？')) clearMap(mapId)
+              if (confirm('清除当前地图的全部墙、门、障碍物和场景光源吗？')) clearMap(mapId)
             }}
             className="rounded-md p-1 text-rose-300 hover:bg-rose-500/15 disabled:opacity-30"
             title="清空地图几何"
@@ -244,7 +246,7 @@ export default function MapGeometryToolbar({
             className="w-20 rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200 outline-none"
             aria-label="几何名称"
           />
-          {(['blocksVision', 'blocksMovement', 'blocksLineOfEffect'] as const).map((field, index) => (
+          {selectedEntity.kind !== 'light' && (['blocksVision', 'blocksMovement', 'blocksLineOfEffect'] as const).map((field, index) => (
             <label key={field} className="flex items-center gap-0.5 text-[10px] text-slate-300">
               <input
                 type="checkbox"
@@ -254,17 +256,17 @@ export default function MapGeometryToolbar({
               {['视线', '移动', '效果线'][index]}
             </label>
           ))}
-          <NumberField
+          {selectedEntity.kind !== 'light' && <NumberField
             label="底高"
             value={selectedEntity.baseHeightFeet}
             onChange={(baseHeightFeet) => updateEntity(mapId, selectedEntity.id, { baseHeightFeet })}
-          />
-          <NumberField
+          />}
+          {selectedEntity.kind !== 'light' && <NumberField
             label="高度"
             min={0}
             value={selectedEntity.heightFeet}
             onChange={(heightFeet) => updateEntity(mapId, selectedEntity.id, { heightFeet })}
-          />
+          />}
           {selectedEntity.kind === 'door' && (
             <>
               <select
@@ -378,6 +380,28 @@ export default function MapGeometryToolbar({
                 <option value="climb">攀爬</option>
                 <option value="swim">游泳</option>
               </select>
+            </>
+          )}
+          {selectedEntity.kind === 'light' && (
+            <>
+              <label className="flex items-center gap-0.5 text-[10px] text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={selectedEntity.enabled}
+                  onChange={(event) => updateEntity(mapId, selectedEntity.id, { enabled: event.target.checked })}
+                />
+                开启
+              </label>
+              <NumberField label="明亮" min={0} value={selectedEntity.brightRadiusFeet} onChange={(brightRadiusFeet) => updateEntity(mapId, selectedEntity.id, { brightRadiusFeet })} />
+              <NumberField label="微光" min={0} value={selectedEntity.dimRadiusFeet} onChange={(dimRadiusFeet) => updateEntity(mapId, selectedEntity.id, { dimRadiusFeet })} />
+              <NumberField label="高度" value={selectedEntity.elevationFeet} onChange={(elevationFeet) => updateEntity(mapId, selectedEntity.id, { elevationFeet })} />
+              <input
+                type="color"
+                value={selectedEntity.color}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, { color: event.target.value })}
+                className="h-5 w-6 rounded border border-white/10 bg-transparent"
+                title="场景光源颜色"
+              />
             </>
           )}
           <button

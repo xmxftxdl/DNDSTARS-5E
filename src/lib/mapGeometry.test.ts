@@ -102,4 +102,22 @@ describe('map geometry', () => {
     expect(mapGeometryIlluminationAtPoint({ geometry: g, map: litMap, point: target })).toBe('bright')
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(true)
   })
+
+  it('supports independent scene lights with wall shadows and legacy geometry migration', () => {
+    const g = geometry()
+    g.vision.ambientLight = 'darkness'
+    g.lights = [{
+      id: 'sconce', kind: 'light', label: '壁灯', points: [{ x: 50, y: 50 }], enabled: true,
+      brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fbbf24', elevationFeet: 5, createdAt: 1,
+    }]
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map, point: { x: 75, y: 50 } })).toBe('bright')
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map, point: { x: 150, y: 50 } })).toBe('darkness')
+
+    const normalized = normalizeSharedMapGeometry({
+      schemaVersion: 1,
+      maps: [{ ...g, lights: undefined }],
+      updatedAt: 1,
+    })
+    expect(normalized?.maps[0].lights).toEqual([])
+  })
 })

@@ -102,6 +102,7 @@ import {
 } from '../../lib/fogOfWar'
 import {
   mapGeometryMovementBlocked,
+  mapGeometryLightPolygon,
   mapGeometryVisibilityPolygon,
   type MapGeometryEntity,
   type MapGeometryState,
@@ -345,20 +346,39 @@ function DynamicVisionLayer({
 
 function LightingLayer({ map, geometry }: { map: BattleMap; geometry?: MapGeometryState }) {
   if (!geometry?.vision.enabled || geometry.vision.ambientLight === 'bright') return null
-  const gridSize = Math.max(1, map.gridSize)
-  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
   const opacity = geometry.vision.ambientLight === 'darkness' ? 0.72 : 0.3
-  const sources = map.tokens.filter((token) => token.lightSource?.enabled)
+  const sources = [
+    ...map.tokens.filter((token) => token.lightSource?.enabled).map((token) => ({
+      id: `token:${token.id}`,
+      point: { x: token.x, y: token.y },
+      elevationFeet: token.elevationFeet ?? 0,
+      brightRadiusFeet: token.lightSource!.brightRadiusFeet,
+      dimRadiusFeet: token.lightSource!.dimRadiusFeet,
+    })),
+    ...(geometry.lights ?? []).filter((light) => light.enabled).map((light) => ({
+      id: `scene:${light.id}`,
+      point: light.points[0],
+      elevationFeet: light.elevationFeet,
+      brightRadiusFeet: light.brightRadiusFeet,
+      dimRadiusFeet: light.dimRadiusFeet,
+    })),
+  ]
   return (
     <Layer listening={false}>
       <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" opacity={opacity} listening={false} />
       {sources.flatMap((source) => {
-        const light = source.lightSource!
-        const bright = light.brightRadiusFeet / feetPerCell * gridSize
-        const dim = (light.brightRadiusFeet + light.dimRadiusFeet) / feetPerCell * gridSize
+        const brightPolygon = mapGeometryLightPolygon({
+          geometry, map, source: source.point, radiusFeet: source.brightRadiusFeet,
+          elevationFeet: source.elevationFeet,
+        })
+        const dimPolygon = mapGeometryLightPolygon({
+          geometry, map, source: source.point,
+          radiusFeet: source.brightRadiusFeet + source.dimRadiusFeet,
+          elevationFeet: source.elevationFeet,
+        })
         return [
-          <Circle key={`light-dim:${source.id}`} x={source.x} y={source.y} radius={dim} fill="#000" opacity={0.52} globalCompositeOperation="destination-out" listening={false} />,
-          <Circle key={`light-bright:${source.id}`} x={source.x} y={source.y} radius={bright} fill="#000" globalCompositeOperation="destination-out" listening={false} />,
+          dimPolygon.length >= 3 ? <Line key={`light-dim:${source.id}`} points={dimPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" opacity={0.52} globalCompositeOperation="destination-out" listening={false} /> : null,
+          brightPolygon.length >= 3 ? <Line key={`light-bright:${source.id}`} points={brightPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" globalCompositeOperation="destination-out" listening={false} /> : null,
         ]
       })}
     </Layer>
@@ -370,6 +390,7 @@ function geometryEntityPoints(entity: MapGeometryEntity): number[] {
 }
 
 function MapGeometryLayer({
+  map,
   geometry,
   draft,
   editMode,
@@ -378,6 +399,7 @@ function MapGeometryLayer({
   inv,
   onSelect,
 }: {
+  map: BattleMap
   geometry?: MapGeometryState
   draft: MapGeometryEntity | null
   editMode: boolean
@@ -409,7 +431,26 @@ function MapGeometryLayer({
               : '#fbbf24'
           : entity.kind === 'obstacle'
             ? '#fb923c'
-            : '#a78bfa'
+            : entity.kind === 'light'
+              ? entity.color
+              : '#a78bfa'
+        if (entity.kind === 'light') {
+          const point = entity.points[0]
+          const outerRadius = (entity.brightRadiusFeet + entity.dimRadiusFeet) /
+            Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)
+          const brightRadius = entity.brightRadiusFeet /
+            Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)
+          return (
+            <Group key={entity.id} listening={editMode && !isDraft} onMouseDown={(event) => {
+              event.cancelBubble = true
+              onSelect?.(entity.id)
+            }}>
+              <Circle x={point.x} y={point.y} radius={Math.max(outerRadius, 8 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.45 : 0.3} dash={[6 * inv, 4 * inv]} />
+              <Circle x={point.x} y={point.y} radius={Math.max(brightRadius, 5 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.6 : 0.5} />
+              <Circle x={point.x} y={point.y} radius={6 * inv} fill={entity.enabled ? color : '#64748b'} stroke={selected ? '#fff' : '#111827'} strokeWidth={2 * inv} />
+            </Group>
+          )
+        }
         const common = {
           key: entity.id,
           points: geometryEntityPoints(entity),
@@ -1037,7 +1078,7 @@ export default function MapCanvas({
     if (!drag || geometryTool === 'select') return null
     const common = {
       id: drag.id,
-      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : '障碍物',
+      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'light' ? '场景光源' : '障碍物',
       createdAt: drag.createdAt,
       baseHeightFeet: 0,
       heightFeet: geometryTool === 'obstacle' ? 5 : 10,
@@ -1048,6 +1089,16 @@ export default function MapCanvas({
     if (geometryTool === 'wall') return { ...common, kind: 'wall', points: [start, current] }
     if (geometryTool === 'door') {
       return { ...common, kind: 'door', points: [start, current], state: 'closed', secret: false }
+    }
+    if (geometryTool === 'light') {
+      const radiusFeet = Math.max(5, Math.round(
+        Math.hypot(current.x - start.x, current.y - start.y) / Math.max(1, map.gridSize) * Math.max(1, map.feetPerCell ?? 5),
+      ))
+      return {
+        id: drag.id, kind: 'light', label: '场景光源', points: [start], enabled: true,
+        brightRadiusFeet: radiusFeet, dimRadiusFeet: radiusFeet,
+        color: '#fbbf24', elevationFeet: 5, createdAt: drag.createdAt,
+      }
     }
     const rect = rectFromPoints(start, current)
     return {
@@ -1108,10 +1159,9 @@ export default function MapCanvas({
     const draft = geometryDraft
     setGeometryDraft(null)
     if (!draft) return true
-    const points = draft.points
-    const valid = draft.kind === 'obstacle'
-      ? Math.abs(points[1].x - points[0].x) >= 4 && Math.abs(points[2].y - points[1].y) >= 4
-      : Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) >= 4
+    const valid = draft.kind === 'light' || (draft.kind === 'obstacle'
+      ? Math.abs(draft.points[1].x - draft.points[0].x) >= 4 && Math.abs(draft.points[2].y - draft.points[1].y) >= 4
+      : Math.hypot(draft.points[1].x - draft.points[0].x, draft.points[1].y - draft.points[0].y) >= 4)
     if (valid) onGeometryEntityCommit?.(draft)
     return true
   }
@@ -1770,6 +1820,7 @@ export default function MapCanvas({
         )}
         {((isDM && geometryEditMode) || (!isDM && onGeometryDoorInteract)) && (
           <MapGeometryLayer
+            map={map}
             geometry={geometry}
             draft={geometryDraft}
             editMode={geometryEditMode}

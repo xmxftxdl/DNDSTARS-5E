@@ -64,8 +64,21 @@ export interface MapGeometryObstacle extends MapGeometryHeight, MapGeometryBlock
   createdAt: number
 }
 
-export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryObstacle
-export type MapGeometryTool = 'select' | 'wall' | 'door' | 'obstacle'
+export interface MapGeometryLight {
+  id: string
+  kind: 'light'
+  label: string
+  points: [MapGeometryPoint]
+  enabled: boolean
+  brightRadiusFeet: number
+  dimRadiusFeet: number
+  color: string
+  elevationFeet: number
+  createdAt: number
+}
+
+export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryObstacle | MapGeometryLight
+export type MapGeometryTool = 'select' | 'wall' | 'door' | 'obstacle' | 'light'
 export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBlocking> & {
   label?: string
   points?: MapGeometryPoint[]
@@ -76,6 +89,11 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   cover?: MapGeometryCover
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
+  enabled?: boolean
+  brightRadiusFeet?: number
+  dimRadiusFeet?: number
+  color?: string
+  elevationFeet?: number
 }
 
 export interface MapGeometryVisionSettings {
@@ -90,6 +108,7 @@ export interface MapGeometryState {
   walls: MapGeometryWall[]
   doors: MapGeometryDoor[]
   obstacles: MapGeometryObstacle[]
+  lights?: MapGeometryLight[]
   vision: MapGeometryVisionSettings
   updatedAt: number
 }
@@ -122,7 +141,7 @@ const DEFAULT_VISION: MapGeometryVisionSettings = {
 }
 
 export function createEmptyMapGeometry(mapId: string, now = Date.now()): MapGeometryState {
-  return { mapId, walls: [], doors: [], obstacles: [], vision: { ...DEFAULT_VISION }, updatedAt: now }
+  return { mapId, walls: [], doors: [], obstacles: [], lights: [], vision: { ...DEFAULT_VISION }, updatedAt: now }
 }
 
 function finite(value: unknown, min: number, max: number): value is number {
@@ -167,6 +186,21 @@ function normalizeCommon(raw: Record<string, unknown>) {
 export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
+  if (raw.kind === 'light') {
+    const points = normalizePoints(raw.points, 1, 1)
+    if (
+      !points || typeof raw.id !== 'string' || !raw.id || raw.id.length > 160 ||
+      typeof raw.label !== 'string' || raw.label.length > 120 || typeof raw.enabled !== 'boolean' ||
+      !finite(raw.brightRadiusFeet, 0, 10_000) || !finite(raw.dimRadiusFeet, 0, 10_000) ||
+      typeof raw.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(raw.color) ||
+      !finite(raw.elevationFeet, -1_000, 10_000) || !finite(raw.createdAt, 0, Number.MAX_SAFE_INTEGER)
+    ) return undefined
+    return {
+      id: raw.id, kind: 'light', label: raw.label, points: [points[0]], enabled: raw.enabled,
+      brightRadiusFeet: raw.brightRadiusFeet, dimRadiusFeet: raw.dimRadiusFeet,
+      color: raw.color.toLowerCase(), elevationFeet: raw.elevationFeet, createdAt: raw.createdAt,
+    }
+  }
   const common = normalizeCommon(raw)
   if (!common) return undefined
   if (raw.kind === 'wall') {
@@ -231,7 +265,8 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
   if (
     typeof raw.mapId !== 'string' || !raw.mapId || raw.mapId.length > 160 ||
     !Array.isArray(raw.walls) || !Array.isArray(raw.doors) || !Array.isArray(raw.obstacles) ||
-    raw.walls.length + raw.doors.length + raw.obstacles.length > MAP_GEOMETRY_MAX_ENTITIES ||
+    (raw.lights != null && !Array.isArray(raw.lights)) ||
+    raw.walls.length + raw.doors.length + raw.obstacles.length + (Array.isArray(raw.lights) ? raw.lights.length : 0) > MAP_GEOMETRY_MAX_ENTITIES ||
     !raw.vision || typeof raw.vision !== 'object' || Array.isArray(raw.vision) ||
     !finite(raw.updatedAt, 0, Number.MAX_SAFE_INTEGER)
   ) return undefined
@@ -244,17 +279,19 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
   const walls = raw.walls.map(normalizeMapGeometryEntity)
   const doors = raw.doors.map(normalizeMapGeometryEntity)
   const obstacles = raw.obstacles.map(normalizeMapGeometryEntity)
+  const lights = (Array.isArray(raw.lights) ? raw.lights : []).map(normalizeMapGeometryEntity)
   if (
     walls.some((entity) => entity?.kind !== 'wall') || doors.some((entity) => entity?.kind !== 'door') ||
-    obstacles.some((entity) => entity?.kind !== 'obstacle')
+    obstacles.some((entity) => entity?.kind !== 'obstacle') || lights.some((entity) => entity?.kind !== 'light')
   ) return undefined
-  const entities = [...walls, ...doors, ...obstacles] as MapGeometryEntity[]
+  const entities = [...walls, ...doors, ...obstacles, ...lights] as MapGeometryEntity[]
   if (new Set(entities.map((entity) => entity.id)).size !== entities.length) return undefined
   return {
     mapId: raw.mapId,
     walls: walls as MapGeometryWall[],
     doors: doors as MapGeometryDoor[],
     obstacles: obstacles as MapGeometryObstacle[],
+    lights: lights as MapGeometryLight[],
     vision: {
       enabled: vision.enabled,
       defaultRangeFeet: vision.defaultRangeFeet,
@@ -577,6 +614,23 @@ export function mapGeometryIlluminationAtPoint(input: {
     if (distanceFeet <= brightRadius) return 'bright'
     result = 'dim'
   }
+  for (const source of input.geometry?.lights ?? []) {
+    if (!source.enabled) continue
+    const point = source.points[0]
+    const distanceFeet = Math.hypot(input.point.x - point.x, input.point.y - point.y) / gridSize * feetPerCell
+    const dimRadius = source.brightRadiusFeet + source.dimRadiusFeet
+    if (distanceFeet > dimRadius) continue
+    if (rayBlocked({
+      geometry: input.geometry,
+      from: point,
+      to: input.point,
+      fromElevationFeet: source.elevationFeet,
+      toElevationFeet: 0,
+      purpose: 'vision',
+    })) continue
+    if (distanceFeet <= source.brightRadiusFeet) return 'bright'
+    result = 'dim'
+  }
   return result
 }
 
@@ -594,6 +648,40 @@ function nearestRayPoint(
     if (t != null && t > 1e-5 && t < nearestT) nearestT = t
   }
   return { x: origin.x + (far.x - origin.x) * nearestT, y: origin.y + (far.y - origin.y) * nearestT }
+}
+
+export function mapGeometryLightPolygon(input: {
+  geometry?: MapGeometryState
+  map: Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'feetPerCell'>
+  source: MapGeometryPoint
+  radiusFeet: number
+  elevationFeet?: number
+}): MapGeometryPoint[] {
+  const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
+  const radius = Math.max(0, input.radiusFeet) / feetPerCell * Math.max(1, input.map.gridSize)
+  if (radius <= 0) return []
+  const elevation = input.elevationFeet ?? 0
+  const blockers = mapGeometrySegments(input.geometry).filter((segment) =>
+    segment.blocksVision && elevation >= segment.baseHeightFeet && elevation < segment.baseHeightFeet + segment.heightFeet,
+  )
+  const angles = new Set<number>()
+  for (let index = 0; index < 96; index += 1) angles.add(index / 96 * Math.PI * 2)
+  for (const segment of blockers) {
+    for (const point of [segment.a, segment.b]) {
+      if (Math.hypot(point.x - input.source.x, point.y - input.source.y) > radius + 1) continue
+      const angle = Math.atan2(point.y - input.source.y, point.x - input.source.x)
+      angles.add(angle - 1e-5)
+      angles.add(angle)
+      angles.add(angle + 1e-5)
+    }
+  }
+  return [...angles]
+    .sort((left, right) => left - right)
+    .map((angle) => nearestRayPoint(input.source, angle, radius, blockers))
+    .map((point) => ({
+      x: Math.max(0, Math.min(input.map.width, point.x)),
+      y: Math.max(0, Math.min(input.map.height, point.y)),
+    }))
 }
 
 export function mapGeometryVisibilityPolygon(input: {
@@ -614,8 +702,7 @@ export function mapGeometryVisibilityPolygon(input: {
   const lightRangeFeet = input.viewer.lightSource?.enabled
     ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
     : 0
-  const ambientVisionRangeFeet = geometry.vision.ambientLight === 'darkness' ? 0 : normalRangeFeet
-  const rangeFeet = Math.max(ambientVisionRangeFeet, darkvisionRangeFeet, lightRangeFeet)
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, lightRangeFeet)
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = tokenElevation(input.viewer)
   const blockers = mapGeometrySegments(geometry).filter((segment) =>

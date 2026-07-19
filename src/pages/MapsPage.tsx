@@ -1667,7 +1667,7 @@ export default function MapsPage() {
     ? geometryMaps.find((geometry) => geometry.mapId === activeMap.id) ?? createEmptyMapGeometry(activeMap.id, 0)
     : undefined
   const selectedGeometryEntity = activeGeometry
-    ? [...activeGeometry.walls, ...activeGeometry.doors, ...activeGeometry.obstacles]
+    ? [...activeGeometry.walls, ...activeGeometry.doors, ...activeGeometry.obstacles, ...(activeGeometry.lights ?? [])]
         .find((entity) => entity.id === selectedGeometryEntityId)
     : undefined
   const selectedDoorInteraction = activeGeometry?.doors.find((door) => door.id === selectedDoorInteractionId)
