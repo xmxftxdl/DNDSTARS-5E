@@ -4,6 +4,7 @@ import { DND_FEET_PER_CELL, cellDistance, snapTokenToGridCenter, tokenAnchorCell
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 
@@ -11,6 +12,7 @@ export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'movement-locked'
+  | 'movement-blocked'
   | 'insufficient-movement'
   | 'combatant-missing'
 
@@ -47,6 +49,9 @@ export function prepareDnd5ePlayerMove(input: {
   if (isMovementLocked(actor.conditions)) return { ok: false, reason: 'movement-locked' }
 
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
+  if (mapGeometryMovementBlocked({
+    geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
+  }).blocked) return { ok: false, reason: 'movement-blocked' }
   const fromCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
   const toCell = tokenAnchorCellFromPixel(to.x, to.y, actorToken, input.map)
   const distanceFeet = cellDistance(fromCell, toCell) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)

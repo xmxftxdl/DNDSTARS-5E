@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { resolveDnd5eHeadlessAction } from './headlessCombatEngine'
+import { dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication } from './mapBridge'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -25,6 +26,55 @@ function characterWithConditions(base: Character, conditions: string[]): Charact
 }
 
 describe('D&D 5e map bridge', () => {
+  afterEach(() => setMapGeometryRuntime([]))
+
+  it('compiles obstacle cover and blocked effect lines into Headless attack resolution', () => {
+    const hero = character()
+    const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 10, y: 50, hp: 20, maxHp: 20 })
+    const enemy = token({ id: 'enemy-token', x: 90, y: 50, hp: 10, maxHp: 10 })
+    const map: BattleMap = {
+      id: 'geometry-map', name: 'Geometry', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [heroToken, enemy],
+    }
+    const initiativeOrder = [heroToken, enemy].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const baseGeometry: MapGeometryState = {
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      obstacles: [{
+        id: 'crate', kind: 'obstacle', label: '木箱',
+        points: [{ x: 45, y: 40 }, { x: 55, y: 40 }, { x: 55, y: 60 }, { x: 45, y: 60 }],
+        cover: 'half', blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
+        baseHeightFeet: 0, heightFeet: 5, createdAt: 1,
+      }],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true },
+      updatedAt: 1,
+    }
+    setMapGeometryRuntime([baseGeometry])
+    const covered = createDnd5eMapCombatSnapshot({ combatId: 'combat', map, characters: [hero], initiativeOrder })
+    expect(dnd5eTargetArmorClassForAttack(covered.state, heroToken.id, enemy.id))
+      .toBe(covered.state.combatants[enemy.id].armorClass + 2)
+
+    setMapGeometryRuntime([{
+      ...baseGeometry,
+      obstacles: [],
+      walls: [{
+        id: 'stone-wall', kind: 'wall', label: '石墙',
+        points: [{ x: 50, y: 0 }, { x: 50, y: 100 }],
+        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+      }],
+    }])
+    const blocked = createDnd5eMapCombatSnapshot({ combatId: 'combat', map, characters: [hero], initiativeOrder })
+    const naturalTwenty = resolveDnd5eHeadlessAction(blocked.state, {
+      type: 'attack', actorId: heroToken.id, targetId: enemy.id,
+      attackModifier: 99, d20: 20, damage: { count: 1, sides: 8, bonus: 3, rolls: [8] },
+    })
+    expect(naturalTwenty).toMatchObject({ ok: true, state: { combatants: { [enemy.id]: { currentHp: 10 } } } })
+  })
+
   it('preserves native effect instances across reconnect snapshots', () => {
     const hero = characterWithConditions(character(), ['poisoned'])
     const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, hp: 20, maxHp: 20 })

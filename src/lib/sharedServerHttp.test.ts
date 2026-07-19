@@ -92,9 +92,89 @@ describe('AC7 — 玩家 PUT 在两种 flag 状态都成功', () => {
     expect(res.status).toBe(200)
   })
 
-  it('flag ON：玩家写 maps（无 secret）⇒ 200', async () => {
+  it('flag ON：玩家不能直接写 DM 权威 maps', async () => {
     const res = await putState(onServer.base, 'maps', { maps: [], updatedAt: Date.now() })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(401)
+  })
+})
+
+describe('地图几何的房间权限与安全投影', () => {
+  it('只允许 DM 写地图，并在 HTTP 响应前移除玩家不可见 Token 和暗门元数据', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '几何安全测试', displayName: '地图 DM', rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'geometry-dm-client', activePlugins: [],
+      }),
+    })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as { roomId: string; member: { memberId: string } }
+    const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: '侦察者', clientId: 'geometry-player-client', activePlugins: [] }),
+    })
+    expect(joinedResponse.status).toBe(200)
+    const joined = await joinedResponse.json() as { member: { memberId: string } }
+    const stateUrl = (name: string) => `${offServer.base}/api/state/${name}?room=${created.roomId}`
+    const common = {
+      label: '石制结构', blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }
+    const geometry = {
+      schemaVersion: 1, updatedAt: 1,
+      maps: [{
+        mapId: 'secure-map',
+        walls: [{ ...common, id: 'wall', kind: 'wall', points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] }],
+        doors: [{
+          ...common, id: 'secret-door', kind: 'door',
+          points: [{ x: 10, y: 70 }, { x: 30, y: 70 }], state: 'locked', secret: true,
+        }],
+        obstacles: [],
+        vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+      }],
+    }
+    const maps = {
+      selectedId: 'secure-map', updatedAt: 1,
+      maps: [{
+        id: 'secure-map', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'hero-character', x: 10, y: 20 },
+          { id: 'seen', type: 'enemy', x: 30, y: 20 },
+          { id: 'hidden', type: 'enemy', x: 90, y: 20 },
+        ],
+      }],
+    }
+    const dmHeaders = { 'Content-Type': 'application/json', 'X-Stars-Member': created.member.memberId }
+    expect((await fetch(stateUrl('map-geometry'), {
+      method: 'PUT', headers: dmHeaders, body: JSON.stringify(geometry),
+    })).status).toBe(200)
+    expect((await fetch(stateUrl('maps'), {
+      method: 'PUT', headers: dmHeaders, body: JSON.stringify(maps),
+    })).status).toBe(200)
+    expect((await fetch(stateUrl('maps'))).status).toBe(403)
+
+    const playerHeaders = { 'X-Stars-Member': joined.member.memberId }
+    expect((await fetch(stateUrl('maps'), {
+      method: 'PUT', headers: { ...playerHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(maps),
+    })).status).toBe(403)
+    const playerMapsResponse = await fetch(stateUrl('maps'), { headers: playerHeaders })
+    expect(playerMapsResponse.status).toBe(200)
+    const playerMaps = await playerMapsResponse.json() as { maps: Array<{ tokens: Array<{ id: string }> }> }
+    expect(playerMaps.maps[0].tokens.map((token) => token.id)).toEqual(['hero', 'seen'])
+
+    const playerGeometryResponse = await fetch(stateUrl('map-geometry'), { headers: playerHeaders })
+    expect(playerGeometryResponse.status).toBe(200)
+    const playerGeometryText = await playerGeometryResponse.text()
+    expect(playerGeometryText).not.toContain('"kind":"door"')
+    expect(playerGeometryText).not.toContain('secret-door')
+    expect(playerGeometryText).toContain('"kind":"wall"')
+
+    const dmMaps = await (await fetch(stateUrl('maps'), {
+      headers: { 'X-Stars-Member': created.member.memberId },
+    })).json() as { maps: Array<{ tokens: Array<{ id: string }> }> }
+    expect(dmMaps.maps[0].tokens.map((token) => token.id)).toEqual(['hero', 'seen', 'hidden'])
   })
 })
 
@@ -669,7 +749,7 @@ describe('P0 战役快照、完整导出与还原', () => {
 
     expect((await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
       body: JSON.stringify({ characters: [{ id: 'hero', name: '原始角色' }], updatedAt: 100 }),
     })).status).toBe(200)
     expect((await fetch(`${offServer.base}/api/campaign/snapshots${query}`, { method: 'POST' })).status).toBe(403)
@@ -691,7 +771,7 @@ describe('P0 战役快照、完整导出与还原', () => {
 
     await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...memberHeaders },
       body: JSON.stringify({ characters: [{ id: 'hero', name: '被覆盖角色' }], updatedAt: 200 }),
     })
     const restored = await fetch(
@@ -699,7 +779,7 @@ describe('P0 战役快照、完整导出与还原', () => {
       { method: 'POST', headers: memberHeaders },
     )
     expect(restored.status).toBe(200)
-    const state = await (await fetch(`${offServer.base}/api/state/characters${query}`)).json()
+    const state = await (await fetch(`${offServer.base}/api/state/characters${query}`, { headers: memberHeaders })).json()
     expect(state.characters[0].name).toBe('原始角色')
   })
 

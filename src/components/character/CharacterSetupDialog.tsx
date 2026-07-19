@@ -2,6 +2,7 @@ import { useMemo, useState, useSyncExternalStore } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
+  Backpack,
   BookOpen,
   Check,
   Dices,
@@ -41,6 +42,17 @@ import {
   type Dnd5eBeginnerPreferences,
 } from '../../rulesets/dnd5e/characterSetup'
 import {
+  defaultDnd5eStartingEquipmentSelection,
+  dnd5eStartingEquipmentPickerItems,
+  dnd5eStartingEquipmentPickerKey,
+  dnd5eStartingEquipmentPlan,
+  dnd5eStartingEquipmentSummary,
+  normalizeDnd5eStartingEquipmentSelection,
+  type Dnd5eStartingEquipmentPlan,
+  type Dnd5eStartingEquipmentSelection,
+} from '../../rulesets/dnd5e/startingEquipment'
+import { dnd5eInventoryItemTemplate } from '../../rulesets/dnd5e/items'
+import {
   dnd5ePluginAbilityGenerationMethod,
   dnd5ePluginRaceDefinition,
   dnd5eRulesPluginRegistrySnapshot,
@@ -50,7 +62,7 @@ import {
 } from '../../rulesets/dnd5e/pluginApi'
 import type { Abilities } from '../../types/character'
 
-type SetupStage = 'experience' | 'beginner-preferences' | 'identity' | 'ability-method' | 'abilities' | 'review'
+type SetupStage = 'experience' | 'beginner-preferences' | 'identity' | 'ability-method' | 'abilities' | 'equipment' | 'review'
 
 interface SetupIdentity {
   charClass: string
@@ -67,6 +79,7 @@ export interface CharacterSetupResult extends SetupIdentity {
   abilities: Abilities
   dnd5eRaceId?: string
   racialBonusChoices: AbilityKey[]
+  startingEquipment: Dnd5eStartingEquipmentSelection
   recommendation?: {
     source: 'beginner-questionnaire' | 'build-analysis'
     recommendedClass: string
@@ -279,6 +292,83 @@ function IdentityFields({
   )
 }
 
+function StartingEquipmentFields({
+  plan,
+  selection,
+  onChange,
+}: {
+  plan: Dnd5eStartingEquipmentPlan
+  selection: Dnd5eStartingEquipmentSelection
+  onChange(selection: Dnd5eStartingEquipmentSelection): void
+}) {
+  const normalized = normalizeDnd5eStartingEquipmentSelection(plan, selection)
+  const fixed = plan.fixedGrants.map((entry) => ({
+    ...entry,
+    item: dnd5eInventoryItemTemplate(entry.templateId),
+  })).filter((entry) => !!entry.item)
+  return <div className="space-y-5">
+    <div className="rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-4">
+      <div className="flex items-start gap-3">
+        <Backpack className="mt-0.5 h-5 w-5 shrink-0 text-arcane-300" />
+        <div>
+          <h3 className="text-sm font-semibold text-arcane-100">{plan.charClass}起始装备</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500">逐组选择 SRD 5.1 职业装备。标为已装备的武器、护甲和盾牌会立即参与 AC 与 Headless 攻击结算，其余物品进入库存。</p>
+        </div>
+      </div>
+    </div>
+
+    {plan.groups.map((group) => {
+      const selectedId = normalized.optionIds[group.id]
+      const selected = group.options.find((option) => option.id === selectedId)
+      return <section key={group.id} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="text-sm font-semibold text-slate-200">{group.label}</h4>
+          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${group.source === 'background' ? 'bg-amber-500/10 text-amber-200' : 'bg-violet-500/10 text-violet-200'}`}>
+            {group.source === 'background' ? `${plan.background}背景` : `${plan.charClass}职业`}
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {group.options.map((option) => <button
+            key={option.id}
+            type="button"
+            aria-pressed={selectedId === option.id}
+            onClick={() => onChange({ ...normalized, optionIds: { ...normalized.optionIds, [group.id]: option.id } })}
+            className={`rounded-xl border px-3 py-3 text-left text-xs transition ${selectedId === option.id ? 'border-arcane-300/40 bg-arcane-500/10 text-arcane-100' : 'border-white/8 bg-white/[0.02] text-slate-400 hover:border-white/15'}`}
+          >
+            <span className="font-semibold">{option.label}</span>
+            {option.description ? <span className="mt-1 block text-[10px] leading-4 text-slate-500">{option.description}</span> : null}
+          </button>)}
+        </div>
+        {(selected?.pickers ?? []).map((choice) => {
+          const key = dnd5eStartingEquipmentPickerKey(group.id, choice.id)
+          return <label key={choice.id} className="mt-3 block">
+            <span className="mb-1.5 block text-[11px] font-semibold text-slate-500">{choice.label}</span>
+            <select
+              aria-label={`${group.label}-${choice.label}`}
+              value={normalized.equipmentIds[key] ?? choice.defaultEquipmentId}
+              onChange={(event) => onChange({ ...normalized, equipmentIds: { ...normalized.equipmentIds, [key]: event.target.value } })}
+              className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100"
+            >
+              {dnd5eStartingEquipmentPickerItems(choice).map((equipment) => <option key={equipment.id} value={equipment.id}>{equipment.name}</option>)}
+            </select>
+          </label>
+        })}
+      </section>
+    })}
+
+    <section className="rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.04] p-4">
+      <h4 className="text-sm font-semibold text-emerald-100">固定获得</h4>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {fixed.map((entry, index) => <span key={`${entry.templateId}:${index}`} className="rounded-lg border border-white/8 bg-black/15 px-2.5 py-1.5 text-xs text-slate-300">
+          {entry.item!.name}{entry.quantity > 1 ? ` ×${entry.quantity}` : ''}{entry.equipSlot ? ' · 已装备' : ''}
+        </span>)}
+        {fixed.length === 0 ? <span className="text-xs text-slate-500">没有额外固定物品，全部由上方选择决定。</span> : null}
+      </div>
+      {plan.background !== '侍僧' ? <p className="mt-3 text-[11px] leading-5 text-slate-500">“自定义背景”的装备依照玩家与 DM 约定，创建后可由 DM 分发或从物品栏补充；核心包不会擅自生成未选定的背景物品。</p> : null}
+    </section>
+  </div>
+}
+
 export default function CharacterSetupDialog({ onCancel, onComplete }: CharacterSetupDialogProps) {
   useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
@@ -308,6 +398,13 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const [identity, setIdentity] = useState<SetupIdentity>({
     charClass: '战士', race: '人类', alignment: '中立善良', background: '自定义背景',
   })
+  const equipmentPlan = useMemo(
+    () => dnd5eStartingEquipmentPlan(identity.charClass, identity.background),
+    [identity.background, identity.charClass],
+  )
+  const [startingEquipment, setStartingEquipment] = useState<Dnd5eStartingEquipmentSelection>(() =>
+    defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan('战士', '自定义背景')),
+  )
   const [method, setMethod] = useState<Dnd5eAbilityGenerationMethod>('standard-array')
   const [baseAbilities, setBaseAbilities] = useState<Abilities>(recommendedDnd5eBaseAbilities('战士'))
   const [racialBonusChoices, setRacialBonusChoices] = useState<AbilityKey[]>([])
@@ -378,6 +475,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     if (patch.race || patch.charClass) {
       setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(next.race, next.charClass, nextBaseAbilities))
     }
+    if (patch.charClass || patch.background) {
+      setStartingEquipment(defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan(next.charClass, next.background)))
+      if (stage === 'review') setStage('equipment')
+    }
   }
 
   const beginBeginner = () => {
@@ -401,7 +502,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     const recommendedBase = recommendedDnd5eBaseAbilities(nextIdentity.charClass)
     setBaseAbilities(recommendedBase)
     setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(nextIdentity.race, nextIdentity.charClass, recommendedBase))
-    setStage('review')
+    setStartingEquipment(defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan(nextIdentity.charClass, nextIdentity.background)))
+    setStage('equipment')
   }
 
   const startAbilityMethod = () => {
@@ -453,7 +555,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     if (stage === 'beginner-preferences' || stage === 'identity') setStage('experience')
     else if (stage === 'ability-method') setStage('identity')
     else if (stage === 'abilities') setStage('ability-method')
-    else if (stage === 'review') setStage(experience === 'beginner' ? 'beginner-preferences' : 'abilities')
+    else if (stage === 'equipment') setStage(experience === 'beginner' ? 'beginner-preferences' : 'abilities')
+    else if (stage === 'review') setStage('equipment')
   }
 
   const complete = () => {
@@ -469,6 +572,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       racialBonuses,
       abilities: finalAbilities,
       racialBonusChoices,
+      startingEquipment: normalizeDnd5eStartingEquipmentSelection(equipmentPlan, startingEquipment),
       recommendation: {
         source: experience === 'beginner' ? 'beginner-questionnaire' : 'build-analysis',
         recommendedClass: experience === 'beginner' ? liveRecommendation.charClass : identity.charClass,
@@ -494,9 +598,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
             <h2 className="mt-1 text-xl font-bold text-slate-50">
               {stage === 'experience' ? '你是哪一种冒险者？' :
                 stage === 'beginner-preferences' ? '先聊聊你喜欢怎样的角色' :
-                  stage === 'identity' ? '选择角色框架' :
+                    stage === 'identity' ? '选择角色框架' :
                     stage === 'ability-method' ? '选择属性生成方式' :
-                      stage === 'abilities' ? '分配六项属性' : '确认角色与种族调整'}
+                      stage === 'abilities' ? '分配六项属性' :
+                        stage === 'equipment' ? '选择起始装备' : '确认角色与种族调整'}
             </h2>
           </div>
           <button type="button" onClick={onCancel} aria-label="关闭角色创建" className="rounded-xl p-2 text-slate-500 hover:bg-white/5 hover:text-slate-200">
@@ -664,6 +769,14 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
             </div>
           )}
 
+          {stage === 'equipment' && (
+            <StartingEquipmentFields
+              plan={equipmentPlan}
+              selection={startingEquipment}
+              onChange={setStartingEquipment}
+            />
+          )}
+
           {stage === 'review' && (
             <div className="space-y-5">
               <div data-testid="build-recommendation-review" className="grid gap-4 lg:grid-cols-2">
@@ -707,6 +820,12 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                       ? `当前选择的${raceLabel(identity.race)}就是首选建议。${currentRaceCandidate?.reasons[0] ?? ''}`
                       : `当前选择为${raceLabel(identity.race)}；若优先优化主属性，建议考虑${raceLabel(topRaceCandidate?.race ?? identity.race)}。${topRaceCandidate?.reasons[0] ?? ''}`}
                   </p>
+                </div>
+              </div>
+              <div data-testid="starting-equipment-review" className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.04] p-4">
+                <div className="flex items-center gap-2"><Backpack className="h-4 w-4 text-violet-300" /><h3 className="text-sm font-semibold text-violet-100">起始装备确认</h3></div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {dnd5eStartingEquipmentSummary(equipmentPlan, startingEquipment).map((line) => <p key={line} className="rounded-xl border border-white/8 bg-black/10 px-3 py-2 text-xs text-slate-400">{line}</p>)}
                 </div>
               </div>
               <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
@@ -761,7 +880,8 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
             {stage === 'beginner-preferences' && <button type="button" onClick={finishRecommendation} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white">生成推荐 <Sparkles className="h-4 w-4" /></button>}
             {stage === 'identity' && <button type="button" onClick={() => setStage('ability-method')} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white">选择属性方式 <ArrowRight className="h-4 w-4" /></button>}
             {stage === 'ability-method' && <button type="button" onClick={startAbilityMethod} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white">开始分配 <ArrowRight className="h-4 w-4" /></button>}
-            {stage === 'abilities' && <button type="button" disabled={!abilityAllocationComplete} onClick={() => { setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(identity.race, identity.charClass, baseAbilities)); setStage('review') }} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">加入种族调整 <ArrowRight className="h-4 w-4" /></button>}
+            {stage === 'abilities' && <button type="button" disabled={!abilityAllocationComplete} onClick={() => { setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(identity.race, identity.charClass, baseAbilities)); setStage('equipment') }} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">加入种族调整并选择装备 <ArrowRight className="h-4 w-4" /></button>}
+            {stage === 'equipment' && <button type="button" onClick={() => setStage('review')} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white">确认起始装备 <ArrowRight className="h-4 w-4" /></button>}
             {stage === 'review' && <button type="button" disabled={!name.trim() || !racialBonusChoicesComplete} onClick={complete} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-arcane-600 to-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" /> 创建角色</button>}
           </footer>
         )}

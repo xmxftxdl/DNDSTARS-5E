@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DependencyList } from 'react'
 import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow } from 'react-konva'
 import Konva from 'konva'
@@ -93,6 +93,20 @@ import { useMapStore } from '../../store/maps'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
 import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
+import {
+  fogOperationForTool,
+  fogShapeKindForTool,
+  type FogShape,
+  type FogTool,
+  type MapFogState,
+} from '../../lib/fogOfWar'
+import {
+  mapGeometryMovementBlocked,
+  mapGeometryVisibilityPolygon,
+  type MapGeometryEntity,
+  type MapGeometryState,
+  type MapGeometryTool,
+} from '../../lib/mapGeometry'
 
 export interface MoveCircle {
   centerX: number
@@ -170,6 +184,22 @@ interface MapCanvasProps {
   deleteSelectMode?: boolean
   onDeleteBoxConfirm?: (rect: DeleteSelectionRect) => void
   onDeleteCancel?: () => void
+  fog?: MapFogState
+  fogEditMode?: boolean
+  fogTool?: FogTool
+  fogPreviewAsPlayer?: boolean
+  onFogShapeCommit?: (shape: FogShape) => void
+  onFogEditCancel?: () => void
+  geometry?: MapGeometryState
+  geometryEditMode?: boolean
+  geometryTool?: MapGeometryTool
+  selectedGeometryEntityId?: string | null
+  geometryPreviewAsPlayer?: boolean
+  visionSourceTokenIds?: string[]
+  onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
+  onGeometryEntitySelect?: (entityId: string | null) => void
+  onGeometryEditCancel?: () => void
+  onTokenMoveBlocked?: (entityId?: string) => void
   /** DM 视角：始终显示敌人血量条；玩家视角受 token.showHpOnToken 控制 */
   isDM?: boolean
 }
@@ -192,6 +222,176 @@ function rectFromPoints(a: Point, b: Point): DeleteSelectionRect {
 
 function measurePointsEqual(a: Point, b: Point): boolean {
   return Math.hypot(b.x - a.x, b.y - a.y) < 1.5
+}
+
+function fogShapeNode(shape: FogShape, color: string, opacity: number, key = shape.id) {
+  const common = {
+    key,
+    opacity: shape.operation === 'reveal' ? 1 : opacity,
+    globalCompositeOperation: shape.operation === 'reveal' ? 'destination-out' : 'source-over',
+    listening: false,
+  } as const
+  if (shape.kind === 'rect') {
+    return <Rect {...common} x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill={color} />
+  }
+  if (shape.kind === 'circle') {
+    return <Circle {...common} x={shape.x} y={shape.y} radius={shape.radius} fill={color} />
+  }
+  if (shape.kind === 'polygon') {
+    return <Line {...common} points={shape.points} closed fill={color} />
+  }
+  return (
+    <Line
+      {...common}
+      points={shape.points}
+      stroke={color}
+      strokeWidth={shape.width}
+      lineCap="round"
+      lineJoin="round"
+    />
+  )
+}
+
+function FogOfWarLayer({
+  map,
+  fog,
+  isDM,
+  previewAsPlayer,
+  draft,
+  polygonPoints,
+  inv,
+}: {
+  map: BattleMap
+  fog?: MapFogState
+  isDM: boolean
+  previewAsPlayer: boolean
+  draft: FogShape | null
+  polygonPoints: number[]
+  inv: number
+}) {
+  if (!fog || (!fog.filled && fog.shapes.length === 0 && !draft && polygonPoints.length === 0)) return null
+  const opacity = isDM && !previewAsPlayer ? Math.min(0.52, fog.opacity) : fog.opacity
+  return (
+    <Layer listening={false}>
+      {fog.filled && (
+        <Rect x={0} y={0} width={map.width} height={map.height} fill={fog.color} opacity={opacity} listening={false} />
+      )}
+      {fog.shapes.map((shape) => fogShapeNode(shape, fog.color, opacity))}
+      {draft && fogShapeNode(draft, draft.operation === 'reveal' ? '#67e8f9' : '#f59e0b', 0.5, 'fog-draft')}
+      {polygonPoints.length >= 2 && (
+        <Line
+          points={polygonPoints}
+          stroke="#fbbf24"
+          strokeWidth={2 * inv}
+          dash={[8 * inv, 5 * inv]}
+          fill="rgba(251,191,36,0.12)"
+          closed={polygonPoints.length >= 6}
+          listening={false}
+        />
+      )}
+    </Layer>
+  )
+}
+
+function DynamicVisionLayer({
+  map,
+  geometry,
+  sourceTokenIds,
+}: {
+  map: BattleMap
+  geometry?: MapGeometryState
+  sourceTokenIds: readonly string[]
+}) {
+  if (!geometry?.vision.enabled) return null
+  const sourceIds = new Set(sourceTokenIds)
+  const viewers = map.tokens.filter((token) => sourceIds.has(token.id))
+  return (
+    <Layer listening={false}>
+      <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" listening={false} />
+      {viewers.map((viewer) => {
+        const polygon = mapGeometryVisibilityPolygon({ geometry, map, viewer })
+        return polygon.length >= 3 ? (
+          <Line
+            key={`vision:${viewer.id}`}
+            points={polygon.flatMap((point) => [point.x, point.y])}
+            closed
+            fill="#000"
+            globalCompositeOperation="destination-out"
+            listening={false}
+          />
+        ) : null
+      })}
+    </Layer>
+  )
+}
+
+function geometryEntityPoints(entity: MapGeometryEntity): number[] {
+  return entity.points.flatMap((point) => [point.x, point.y])
+}
+
+function MapGeometryLayer({
+  geometry,
+  draft,
+  editMode,
+  selectedEntityId,
+  inv,
+  onSelect,
+}: {
+  geometry?: MapGeometryState
+  draft: MapGeometryEntity | null
+  editMode: boolean
+  selectedEntityId: string | null
+  inv: number
+  onSelect?: (entityId: string | null) => void
+}) {
+  if (!geometry && !draft) return null
+  const entities: MapGeometryEntity[] = [
+    ...(geometry?.walls ?? []),
+    ...(geometry?.doors ?? []),
+    ...(geometry?.obstacles ?? []),
+    ...(draft ? [draft] : []),
+  ]
+  return (
+    <Layer listening={editMode}>
+      {entities.map((entity) => {
+        const selected = entity.id === selectedEntityId
+        const isDraft = entity === draft
+        const color = entity.kind === 'door'
+          ? entity.state === 'open'
+            ? '#34d399'
+            : entity.state === 'locked'
+              ? '#f87171'
+              : '#fbbf24'
+          : entity.kind === 'obstacle'
+            ? '#fb923c'
+            : '#a78bfa'
+        const common = {
+          key: entity.id,
+          points: geometryEntityPoints(entity),
+          stroke: selected ? '#fff' : color,
+          strokeWidth: (selected ? 5 : 3) * inv,
+          dash: entity.kind === 'door' && entity.secret ? [7 * inv, 5 * inv] : undefined,
+          opacity: isDraft ? 0.68 : 0.92,
+          hitStrokeWidth: 14 * inv,
+          listening: editMode && !isDraft,
+          onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => {
+            event.cancelBubble = true
+            onSelect?.(entity.id)
+          },
+        }
+        if (entity.kind === 'obstacle') {
+          return (
+            <Line
+              {...common}
+              closed
+              fill={selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
+            />
+          )
+        }
+        return <Line {...common} lineCap="round" lineJoin="round" />
+      })}
+    </Layer>
+  )
 }
 
 function isMapTokenNode(node: Konva.Node | null): boolean {
@@ -468,6 +668,22 @@ export default function MapCanvas({
   deleteSelectMode = false,
   onDeleteBoxConfirm,
   onDeleteCancel,
+  fog,
+  fogEditMode = false,
+  fogTool = 'reveal-rect',
+  fogPreviewAsPlayer = false,
+  onFogShapeCommit,
+  onFogEditCancel,
+  geometry,
+  geometryEditMode = false,
+  geometryTool = 'select',
+  selectedGeometryEntityId = null,
+  geometryPreviewAsPlayer = false,
+  visionSourceTokenIds = [],
+  onGeometryEntityCommit,
+  onGeometryEntitySelect,
+  onGeometryEditCancel,
+  onTokenMoveBlocked,
   isDM = false,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -483,6 +699,11 @@ export default function MapCanvas({
   const [hoveredTokenId, setHoveredTokenId] = useState<string | null>(null)
   const [dragPreviewPositions, setDragPreviewPositions] = useState<Record<string, Point>>({})
   const [deleteDrag, setDeleteDrag] = useState<{ start: Point; current: Point } | null>(null)
+  const fogDragStartRef = useRef<Point | null>(null)
+  const [fogDraft, setFogDraft] = useState<FogShape | null>(null)
+  const [fogPolygonPoints, setFogPolygonPoints] = useState<number[]>([])
+  const geometryDragStartRef = useRef<{ point: Point; id: string; createdAt: number } | null>(null)
+  const [geometryDraft, setGeometryDraft] = useState<MapGeometryEntity | null>(null)
   const fittedRef = useRef(false)
 
   // Measurement state in image coordinates: fixed segments plus pending/cursor points.
@@ -502,6 +723,8 @@ export default function MapCanvas({
     !measureMode &&
     !deleteSelectMode &&
     !gridAdjustMode &&
+    !fogEditMode &&
+    !geometryEditMode &&
     !lockDragTokenIds.includes(token.id)
 
   const previewTokenDrag = (token: Token, x: number, y: number) => {
@@ -525,6 +748,12 @@ export default function MapCanvas({
     const pos = shouldSnapTokenOnDrop(token, map)
       ? resolveFreeDropCell(snapped.x, snapped.y, token.id, map)
       : snapped
+    const blocker = mapGeometryMovementBlocked({ geometry, map, token, to: pos })
+    if (blocker.blocked) {
+      clearTokenDragPreview(token.id)
+      onTokenMoveBlocked?.(blocker.entityId)
+      return
+    }
     previewTokenDrag(token, pos.x, pos.y)
     updateToken(map.id, token.id, pos)
     window.requestAnimationFrame(() => clearTokenDragPreview(token.id))
@@ -546,6 +775,16 @@ export default function MapCanvas({
     const timer = window.setTimeout(() => setDeleteDrag(null), 0)
     return () => window.clearTimeout(timer)
   }, [deleteSelectMode])
+
+  useEffect(() => {
+    if (fogEditMode) return
+    const timer = window.setTimeout(() => {
+      fogDragStartRef.current = null
+      setFogDraft(null)
+      setFogPolygonPoints([])
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [fogEditMode])
 
   // 网格对齐：方向键微调
   useEffect(() => {
@@ -625,6 +864,201 @@ export default function MapCanvas({
     col: (p.x - map.gridOffsetX) / map.gridSize - 0.5,
     row: (p.y - map.gridOffsetY) / map.gridSize - 0.5,
   })
+
+  const newFogShapeBase = () => ({
+    id: `fog:${Date.now()}:${Math.random().toString(36).slice(2, 9)}`,
+    operation: fogOperationForTool(fogTool),
+    createdAt: Date.now(),
+  })
+
+  const commitFogPolygon = useCallback(() => {
+    if (fogPolygonPoints.length < 6) return
+    onFogShapeCommit?.({
+      id: `fog:${Date.now()}:${Math.random().toString(36).slice(2, 9)}`,
+      operation: fogOperationForTool(fogTool),
+      createdAt: Date.now(),
+      kind: 'polygon',
+      points: [...fogPolygonPoints],
+    })
+    setFogPolygonPoints([])
+  }, [fogPolygonPoints, fogTool, onFogShapeCommit])
+
+  const handleFogMouseDown = (stage: Konva.Stage | null): boolean => {
+    if (!fogEditMode) return false
+    const point = relativePoint(stage)
+    if (!point) return true
+    const kind = fogShapeKindForTool(fogTool)
+    if (kind === 'polygon') {
+      if (
+        fogPolygonPoints.length >= 6 &&
+        Math.hypot(point.x - fogPolygonPoints[0], point.y - fogPolygonPoints[1]) <= 12 / Math.max(view.scale, 0.01)
+      ) {
+        commitFogPolygon()
+      } else {
+        setFogPolygonPoints((points) => [...points, point.x, point.y])
+      }
+      return true
+    }
+    fogDragStartRef.current = point
+    if (kind === 'brush') {
+      setFogDraft({
+        ...newFogShapeBase(), kind: 'brush', points: [point.x, point.y, point.x, point.y],
+        width: Math.max(10, map.gridSize * 1.25),
+      })
+    }
+    return true
+  }
+
+  const handleFogMouseMove = (stage: Konva.Stage | null): boolean => {
+    if (!fogEditMode || !fogDragStartRef.current) return false
+    const point = relativePoint(stage)
+    if (!point) return true
+    const start = fogDragStartRef.current
+    const kind = fogShapeKindForTool(fogTool)
+    if (kind === 'rect') {
+      const rect = rectFromPoints(start, point)
+      setFogDraft({ ...newFogShapeBase(), kind: 'rect', ...rect })
+    } else if (kind === 'circle') {
+      setFogDraft({
+        ...newFogShapeBase(), kind: 'circle', x: start.x, y: start.y,
+        radius: Math.max(1, Math.hypot(point.x - start.x, point.y - start.y)),
+      })
+    } else if (kind === 'brush') {
+      setFogDraft((draft) => draft?.kind === 'brush'
+        ? {
+            ...draft,
+            points: draft.points.length < 16_384
+              ? [...draft.points, point.x, point.y]
+              : draft.points,
+          }
+        : draft)
+    }
+    return true
+  }
+
+  const handleFogMouseUp = (): boolean => {
+    if (!fogEditMode || !fogDragStartRef.current) return false
+    fogDragStartRef.current = null
+    const draft = fogDraft
+    setFogDraft(null)
+    if (!draft) return true
+    const valid = draft.kind === 'rect'
+      ? draft.width >= 4 && draft.height >= 4
+      : draft.kind === 'circle'
+        ? draft.radius >= 4
+        : draft.kind === 'brush'
+          ? draft.points.length >= 4
+          : false
+    if (valid) onFogShapeCommit?.(draft)
+    return true
+  }
+
+  useEffect(() => {
+    if (!fogEditMode) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        fogDragStartRef.current = null
+        setFogDraft(null)
+        setFogPolygonPoints([])
+        onFogEditCancel?.()
+      } else if (event.key === 'Enter' && fogPolygonPoints.length >= 6) {
+        event.preventDefault()
+        commitFogPolygon()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [commitFogPolygon, fogEditMode, fogPolygonPoints, onFogEditCancel])
+
+  useEffect(() => {
+    if (geometryEditMode) return
+    geometryDragStartRef.current = null
+    const timer = window.setTimeout(() => setGeometryDraft(null), 0)
+    return () => window.clearTimeout(timer)
+  }, [geometryEditMode])
+
+  const geometryEntityFromDrag = (start: Point, current: Point): MapGeometryEntity | null => {
+    const drag = geometryDragStartRef.current
+    if (!drag || geometryTool === 'select') return null
+    const common = {
+      id: drag.id,
+      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : '障碍物',
+      createdAt: drag.createdAt,
+      baseHeightFeet: 0,
+      heightFeet: geometryTool === 'obstacle' ? 5 : 10,
+      blocksVision: geometryTool !== 'obstacle',
+      blocksMovement: true,
+      blocksLineOfEffect: geometryTool !== 'obstacle',
+    }
+    if (geometryTool === 'wall') return { ...common, kind: 'wall', points: [start, current] }
+    if (geometryTool === 'door') {
+      return { ...common, kind: 'door', points: [start, current], state: 'closed', secret: false }
+    }
+    const rect = rectFromPoints(start, current)
+    return {
+      ...common,
+      kind: 'obstacle',
+      cover: 'half',
+      points: [
+        { x: rect.x, y: rect.y },
+        { x: rect.x + rect.width, y: rect.y },
+        { x: rect.x + rect.width, y: rect.y + rect.height },
+        { x: rect.x, y: rect.y + rect.height },
+      ],
+    }
+  }
+
+  const handleGeometryMouseDown = (stage: Konva.Stage | null): boolean => {
+    if (!geometryEditMode) return false
+    if (geometryTool === 'select') {
+      onGeometryEntitySelect?.(null)
+      return true
+    }
+    const point = relativePoint(stage)
+    if (!point) return true
+    geometryDragStartRef.current = {
+      point,
+      id: `geometry:${Date.now()}:${Math.random().toString(36).slice(2, 9)}`,
+      createdAt: Date.now(),
+    }
+    setGeometryDraft(geometryEntityFromDrag(point, point))
+    return true
+  }
+
+  const handleGeometryMouseMove = (stage: Konva.Stage | null): boolean => {
+    const drag = geometryDragStartRef.current
+    if (!geometryEditMode || !drag) return false
+    const point = relativePoint(stage)
+    if (point) setGeometryDraft(geometryEntityFromDrag(drag.point, point))
+    return true
+  }
+
+  const handleGeometryMouseUp = (): boolean => {
+    const drag = geometryDragStartRef.current
+    if (!geometryEditMode || !drag) return false
+    geometryDragStartRef.current = null
+    const draft = geometryDraft
+    setGeometryDraft(null)
+    if (!draft) return true
+    const points = draft.points
+    const valid = draft.kind === 'obstacle'
+      ? Math.abs(points[1].x - points[0].x) >= 4 && Math.abs(points[2].y - points[1].y) >= 4
+      : Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) >= 4
+    if (valid) onGeometryEntityCommit?.(draft)
+    return true
+  }
+
+  useEffect(() => {
+    if (!geometryEditMode) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      geometryDragStartRef.current = null
+      setGeometryDraft(null)
+      onGeometryEditCancel?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [geometryEditMode, onGeometryEditCancel])
 
   const snapMeasure = measureSnapsToGrid(map)
   const segmentCells = (a: Point, b: Point): number =>
@@ -840,6 +1274,10 @@ export default function MapCanvas({
       className={`h-full w-full overflow-hidden rounded-2xl bg-void-900/60 ${
         gridAdjustMode
           ? 'cursor-move'
+          : geometryEditMode
+            ? geometryTool === 'select' ? 'cursor-default' : 'cursor-crosshair'
+          : fogEditMode
+            ? 'cursor-crosshair'
           : measureMode
             ? 'cursor-crosshair'
             : aoeSelectMode
@@ -858,7 +1296,7 @@ export default function MapCanvas({
         scaleY={view.scale}
         x={view.x}
         y={view.y}
-        draggable={!measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode}
+        draggable={!measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
         onWheel={handleWheel}
         onDragEnd={(e) => {
           // Only update viewport when dragging the stage itself.
@@ -869,6 +1307,17 @@ export default function MapCanvas({
         onContextMenu={(e) => {
           // 屏蔽浏览器右键菜单；测距时右键取消正在放置的起点
           e.evt.preventDefault()
+          if (geometryEditMode) {
+            geometryDragStartRef.current = null
+            setGeometryDraft(null)
+            return
+          }
+          if (fogEditMode) {
+            fogDragStartRef.current = null
+            setFogDraft(null)
+            setFogPolygonPoints([])
+            return
+          }
           if (deleteSelectMode) {
             setDeleteDrag(null)
             onDeleteCancel?.()
@@ -889,6 +1338,18 @@ export default function MapCanvas({
         }}
         onMouseDown={(e) => {
           const stage = e.target.getStage()
+          if (geometryEditMode && e.evt.button === 0) {
+            if (!isMapTokenNode(e.target)) {
+              e.cancelBubble = true
+              handleGeometryMouseDown(stage)
+            }
+            return
+          }
+          if (fogEditMode && e.evt.button === 0) {
+            e.cancelBubble = true
+            handleFogMouseDown(stage)
+            return
+          }
           if (deleteSelectMode && e.evt.button === 0) {
             e.cancelBubble = true
             const p = relativePoint(stage)
@@ -939,6 +1400,8 @@ export default function MapCanvas({
           if (!isMapTokenNode(e.target)) onSelectToken(null)
         }}
         onMouseMove={(e) => {
+          if (geometryEditMode && handleGeometryMouseMove(e.target.getStage())) return
+          if (fogEditMode && handleFogMouseMove(e.target.getStage())) return
           if (deleteSelectMode && deleteDrag) {
             const p = relativePoint(e.target.getStage())
             if (p) setDeleteDrag((drag) => (drag ? { ...drag, current: p } : drag))
@@ -965,12 +1428,25 @@ export default function MapCanvas({
           }
         }}
         onMouseUp={(e) => {
+          if (geometryEditMode && handleGeometryMouseUp()) {
+            e.cancelBubble = true
+            return
+          }
+          if (fogEditMode && handleFogMouseUp()) {
+            e.cancelBubble = true
+            return
+          }
           if (!deleteSelectMode || !deleteDrag) return
           e.cancelBubble = true
           const p = relativePoint(e.target.getStage()) ?? deleteDrag.current
           const rect = rectFromPoints(deleteDrag.start, p)
           setDeleteDrag(null)
           if (rect.width >= 4 && rect.height >= 4) onDeleteBoxConfirm?.(rect)
+        }}
+        onDblClick={(e) => {
+          if (!fogEditMode || fogShapeKindForTool(fogTool) !== 'polygon') return
+          e.cancelBubble = true
+          commitFogPolygon()
         }}
       >
         <Layer>
@@ -1195,6 +1671,32 @@ export default function MapCanvas({
             />
           )}
         </Layer>
+        {(!isDM || geometryPreviewAsPlayer) && (
+          <DynamicVisionLayer
+            map={map}
+            geometry={geometry}
+            sourceTokenIds={visionSourceTokenIds}
+          />
+        )}
+        {isDM && geometryEditMode && (
+          <MapGeometryLayer
+            geometry={geometry}
+            draft={geometryDraft}
+            editMode={geometryEditMode}
+            selectedEntityId={selectedGeometryEntityId}
+            inv={inv}
+            onSelect={onGeometryEntitySelect}
+          />
+        )}
+        <FogOfWarLayer
+          map={map}
+          fog={fog}
+          isDM={isDM}
+          previewAsPlayer={fogPreviewAsPlayer}
+          draft={fogDraft}
+          polygonPoints={fogPolygonPoints}
+          inv={inv}
+        />
       </Stage>
     </div>
   )

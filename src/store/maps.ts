@@ -15,6 +15,11 @@ import {
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
+  normalizeDnd5ePersistentAreaTriggerSnapshot,
+  type Dnd5ePersistentAreaTriggerReceipt,
+  type Dnd5ePersistentAreaTriggerSnapshot,
+} from '../rulesets/dnd5e/persistentAreaTypes'
+import {
   creatureSizeToTokenSize,
   normalizeCreatureSize,
   normalizeCreatureTypes,
@@ -160,6 +165,12 @@ export interface Token {
     hurlThroughHellAppliedTurnKey?: string
   }
   obstacleKind?: string
+  /** Token 底部相对地图地面的高度；用于墙体跨越、视线和效果线。 */
+  elevationFeet?: number
+  /** 覆盖地图几何中的默认视野半径。 */
+  visionRangeFeet?: number
+  /** 玩家端可见性：动态视野、始终显示，或仅 DM 可见。 */
+  visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
 }
 
 type LegacyTokenSave = Omit<Partial<Token>, 'dnd5eCombatState'> & {
@@ -233,10 +244,14 @@ export interface Dnd5ePluginArea {
   createdRound: number
   expiresAfterRound: number
   concentrationId?: string
+  relation?: 'any' | 'ally' | 'enemy'
+  includeSelf?: boolean
+  triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
+  triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V4：旧 token 状态只在 normalizeToken 的迁移边界出现。 */
-export const MAPS_PERSIST_VERSION = 4
+/** 地图存档 V6：Token 可声明高度、视野半径与服务端可见性策略。 */
+export const MAPS_PERSIST_VERSION = 6
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -296,6 +311,11 @@ function normalizeToken(raw: unknown): Token {
     type,
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
+    elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
+    visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
+    visibilityMode: t.visibilityMode === 'always' || t.visibilityMode === 'dm-only' || t.visibilityMode === 'line-of-sight'
+      ? t.visibilityMode
+      : undefined,
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {
           ...nativeCombatState,
@@ -342,7 +362,7 @@ function normalizeMap(raw: unknown): BattleMap {
     : []
   const dnd5ePluginAreas = Array.isArray(m.dnd5ePluginAreas)
     ? m.dnd5ePluginAreas.flatMap((rawArea) => {
-        const area = (rawArea ?? {}) as Partial<Dnd5ePluginArea>
+      const area = (rawArea ?? {}) as Partial<Dnd5ePluginArea>
         const cells = Array.isArray(area.cells)
           ? area.cells.flatMap((cell) => Number.isInteger(cell?.col) && Number.isInteger(cell?.row)
               ? [{ col: cell!.col, row: cell!.row }]
@@ -353,6 +373,27 @@ function normalizeMap(raw: unknown): BattleMap {
           typeof area.featureId !== 'string' || !area.featureId || cells.length < 1 ||
           !Number.isInteger(area.createdRound) || !Number.isInteger(area.expiresAfterRound)
         ) return []
+        const triggers = Array.isArray(area.triggers)
+          ? area.triggers.flatMap((trigger) => {
+              const normalized = normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)
+              return normalized ? [normalized] : []
+            })
+          : []
+        const triggerIds = new Set(triggers.map((trigger) => trigger.id))
+        const triggerReceipts = Array.isArray(area.triggerReceipts)
+          ? area.triggerReceipts.flatMap((receipt) =>
+              receipt && triggerIds.has(receipt.triggerId) && typeof receipt.targetTokenId === 'string' &&
+              receipt.targetTokenId && Number.isInteger(receipt.round) && receipt.round >= 0 &&
+              typeof receipt.transactionId === 'string' && receipt.transactionId
+                ? [{
+                    triggerId: receipt.triggerId,
+                    targetTokenId: receipt.targetTokenId,
+                    round: receipt.round,
+                    transactionId: receipt.transactionId,
+                  }]
+                : [],
+            ).slice(-2_048)
+          : []
         return [{
           id: area.id,
           pluginId: area.pluginId,
@@ -365,6 +406,10 @@ function normalizeMap(raw: unknown): BattleMap {
           createdRound: area.createdRound!,
           expiresAfterRound: area.expiresAfterRound!,
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
+          relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
+          includeSelf: area.includeSelf === true,
+          triggers: triggers.length > 0 ? triggers : undefined,
+          triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
         } satisfies Dnd5ePluginArea]
       })
     : []

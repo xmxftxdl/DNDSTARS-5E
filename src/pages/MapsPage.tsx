@@ -23,10 +23,15 @@ import {
   RefreshCw,
   Move,
   Magnet,
+  CloudFog,
+  Eye,
+  Undo2,
+  Redo2,
 } from 'lucide-react'
 import EmptyState from '../components/EmptyState'
 import MapCanvas from '../components/map/MapCanvas'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
+import MapGeometryToolbar from '../components/map/MapGeometryToolbar'
 import InitiativeTracker, {
   INITIATIVE_VISIBLE_MAX,
   type InitiativeEntry,
@@ -52,6 +57,8 @@ import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
 import DiceBoxRollOverlay from '../components/DiceBoxRollOverlay'
 import { characterHpTokenPatch, useMapStore } from '../store/maps'
+import { useFogStore } from '../store/fog'
+import { useMapGeometryStore } from '../store/mapGeometry'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
 import { useSpellbookStore } from '../store/spellbook'
@@ -70,6 +77,8 @@ import {
 } from '../lib/sharedApi'
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryTargeting } from '../types/inventory'
+import { createEmptyMapFog, type FogTool } from '../lib/fogOfWar'
+import { createEmptyMapGeometry, mapGeometryLineOfEffectBlocked, type MapGeometryTool } from '../lib/mapGeometry'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import {
@@ -185,6 +194,9 @@ import {
   type Dnd5eActiveEffectInstance,
   type Dnd5ePluginDiceRollResult,
   type Dnd5ePluginTargeting,
+  type Dnd5ePersistentAreaDmAdjustment,
+  type Dnd5ePersistentAreaTriggerCandidate,
+  type PreparedDnd5ePersistentAreaTrigger,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
@@ -230,6 +242,9 @@ import {
   dnd5ePluginHeadlessActionDefinition,
   executeDnd5ePluginDiceRolls,
   reconcileDnd5ePluginAreas,
+  collectDnd5ePersistentAreaTriggers,
+  prepareDnd5ePersistentAreaTrigger,
+  resolvePreparedDnd5ePersistentAreaTrigger,
   prepareDnd5eAbilityCheck,
   prepareDnd5eEquipmentAttack,
   prepareDnd5eFighterFeature,
@@ -764,6 +779,18 @@ export default function MapsPage() {
   const applyAuthorityTokenUpdate = useMapStore((s) => s.applyAuthorityTokenUpdate)
   const applyAuthorityMapUpdate = useMapStore((s) => s.applyAuthorityMapUpdate)
   const removeToken = useMapStore((s) => s.removeToken)
+  const fogMaps = useFogStore((s) => s.maps)
+  const fogRedoByMap = useFogStore((s) => s.redoByMap)
+  const fillFog = useFogStore((s) => s.fill)
+  const clearFog = useFogStore((s) => s.clear)
+  const addFogShape = useFogStore((s) => s.addShape)
+  const undoFog = useFogStore((s) => s.undo)
+  const redoFog = useFogStore((s) => s.redo)
+  const setFogStyle = useFogStore((s) => s.setStyle)
+  const geometryMaps = useMapGeometryStore((s) => s.maps)
+  const selectedGeometryEntityId = useMapGeometryStore((s) => s.selectedEntityId)
+  const selectGeometryEntity = useMapGeometryStore((s) => s.selectEntity)
+  const addGeometryEntity = useMapGeometryStore((s) => s.addEntity)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
@@ -829,6 +856,12 @@ export default function MapsPage() {
   const [gridDetecting, setGridDetecting] = useState(false)
   const [gridAdjustMode, setGridAdjustMode] = useState(false)
   const [gridSizePreview, setGridSizePreview] = useState(false)
+  const [fogEditMode, setFogEditMode] = useState(false)
+  const [fogTool, setFogTool] = useState<FogTool>('reveal-rect')
+  const [fogPreviewAsPlayer, setFogPreviewAsPlayer] = useState(false)
+  const [geometryEditMode, setGeometryEditMode] = useState(false)
+  const [geometryTool, setGeometryTool] = useState<MapGeometryTool>('select')
+  const [geometryPreviewAsPlayer, setGeometryPreviewAsPlayer] = useState(false)
   const [panelWidth, setPanelWidth] = useState(720)
   const [panelHeight, setPanelHeight] = useState(300)
   const [panelFull, setPanelFull] = useState(false)
@@ -888,6 +921,7 @@ export default function MapsPage() {
   const applyingSharedCombatRef = useRef(false)
   const advancingTurnRef = useRef(false)
   const dnd5eMonsterEndTurnSettlingRef = useRef(false)
+  const persistentAreaTurnBoundaryRef = useRef<{ mapId: string; round: number; tokenId: string } | null>(null)
   const orderedCombatPublishRef = useRef(false)
   const [diceBoxD20, setDiceBoxD20] = useState<{
     id: number
@@ -987,6 +1021,7 @@ export default function MapsPage() {
   const [dmAdjudicationEffects, setDmAdjudicationEffects] = useState<DmAdjudicationEffectDraft[]>([])
   const [dmAdjudicationNote, setDmAdjudicationNote] = useState('')
   const [dmAdjudicationConcentrationRounds, setDmAdjudicationConcentrationRounds] = useState('')
+  const [dmAdjudicationSaveOverride, setDmAdjudicationSaveOverride] = useState<'unchanged' | 'success' | 'failure'>('unchanged')
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -1586,6 +1621,16 @@ export default function MapsPage() {
   const playerSlot = currentPlayerSlot()
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
+  const activeFog = activeMap
+    ? fogMaps.find((fog) => fog.mapId === activeMap.id) ?? createEmptyMapFog(activeMap.id, 0)
+    : undefined
+  const activeGeometry = activeMap
+    ? geometryMaps.find((geometry) => geometry.mapId === activeMap.id) ?? createEmptyMapGeometry(activeMap.id, 0)
+    : undefined
+  const selectedGeometryEntity = activeGeometry
+    ? [...activeGeometry.walls, ...activeGeometry.doors, ...activeGeometry.obstacles]
+        .find((entity) => entity.id === selectedGeometryEntityId)
+    : undefined
   const selectedToken = activeMap?.tokens.find((t) => t.id === selectedTokenId) ?? null
   const selectedCharacterToken = activeMap?.tokens.find((t) => t.id === selectedCharacterTokenId) ?? null
   const selectedCharacter = selectedCharacterToken?.characterId
@@ -2277,6 +2322,12 @@ export default function MapsPage() {
     activeMap && turnCharacter
       ? activeMap.tokens.find((t) => t.type === 'player' && t.characterId === turnCharacter.id)
       : undefined
+  const controlledVisionToken = activeMap?.tokens.find((token) =>
+    token.type === 'player' && token.characterId === (assignedCharacterId ?? turnCharacter?.id),
+  )
+  const visionSourceTokenIds = activeMap && activeGeometry?.vision.sharePartyVision !== false
+    ? activeMap.tokens.filter((token) => token.type === 'player').map((token) => token.id)
+    : controlledVisionToken ? [controlledVisionToken.id] : []
 
   const moveCircle = (() => {
     if (!showMoveRange || !activeMap || !myPlayerToken || !turnCharacter) return undefined
@@ -2620,6 +2671,118 @@ export default function MapsPage() {
     next?.()
   }
 
+  const settleDnd5ePersistentAreaCandidates = async (input: {
+    candidates: readonly Dnd5ePersistentAreaTriggerCandidate[]
+    map: BattleMap
+    characters: readonly Character[]
+    round: number
+  }): Promise<{ map: BattleMap; characters: Character[]; logs: string[] }> => {
+    let map = input.map
+    let characters = [...input.characters]
+    const logs: string[] = []
+    for (const candidate of input.candidates) {
+      const currentArea = map.dnd5ePluginAreas?.find((area) => area.id === candidate.area.id)
+      if (!currentArea) continue
+      const currentCandidate = { ...candidate, area: currentArea }
+      const prepared = prepareDnd5ePersistentAreaTrigger({
+        combatId: combatIdRef.current || `map-${map.id}`,
+        round: input.round,
+        map,
+        characters,
+        initiativeOrder: initiativeOrderRef.current,
+        candidate: currentCandidate,
+      })
+      if (!prepared.ok) {
+        logs.push(`${candidate.area.label} 的触发事务准备失败：${prepared.reason}。`)
+        continue
+      }
+      const save = prepared.prepared.save
+      const saveAbilityLabel = save ? ABILITIES.find((ability) => ability.key === save.ability)?.label ?? save.ability : ''
+      const d20 = save ? await rollDiceBoxD20(`${candidate.trigger.label}·${saveAbilityLabel}豁免`, prepared.prepared.targetName) : undefined
+      const d20Second = save && save.mode !== 'normal'
+        ? await rollDiceBoxD20(
+            `${candidate.trigger.label}·${saveAbilityLabel}豁免（${save.mode === 'advantage' ? '优势' : '劣势'}）`,
+            prepared.prepared.targetName,
+          )
+        : undefined
+      const blessRoll = save?.blessed
+        ? (await rollDiceBoxValues(1, 4, '祝福术·区域豁免加值', prepared.prepared.targetName))[0]
+        : undefined
+      const baneRoll = save?.baned
+        ? (await rollDiceBoxValues(1, 4, '灾祸术·区域豁免减值', prepared.prepared.targetName))[0]
+        : undefined
+      const damageRolls = candidate.trigger.damage
+        ? await rollDiceBoxValues(
+            candidate.trigger.damage.count,
+            candidate.trigger.damage.sides,
+            `${candidate.area.label}·${candidate.trigger.label}`,
+            prepared.prepared.targetName,
+          )
+        : undefined
+      const rollInput = { d20, d20Second, blessRoll, baneRoll, damageRolls }
+      let resolved = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: prepared.prepared, ...rollInput })
+      if (!resolved.result.ok || !resolved.application) {
+        logs.push(`${candidate.area.label} 的触发事务被 Headless 拒绝：${resolved.result.ok ? 'missing-application' : resolved.result.reason}。`)
+        continue
+      }
+      if (candidate.trigger.dmAdjustable) {
+        const triggerEvent = resolved.result.events.find((event) => event.type === 'persistent-area-triggered')
+        if (triggerEvent?.type !== 'persistent-area-triggered') continue
+        const response = await requestSharedPersistentAreaAdjudication({
+          prepared: prepared.prepared,
+          proposedDamage: triggerEvent.damage,
+          proposedSaveSuccess: triggerEvent.saveSuccess,
+          proposedConditionIds: triggerEvent.conditionApplied ? [triggerEvent.conditionApplied] : [],
+        })
+        if (response.decision !== 'approved') {
+          logs.push(`DM 跳过了 ${candidate.area.label} 对 ${prepared.prepared.targetName} 的本次触发。`)
+          continue
+        }
+        const effect = response.effects.find((entry) => entry.targetTokenId === candidate.targetToken.id)
+        const dmAdjustment: Dnd5ePersistentAreaDmAdjustment = {
+          ...(candidate.trigger.damage
+            ? { damage: { mode: 'set', value: effect?.operation === 'damage' ? Math.max(0, Math.floor(effect.amount ?? 0)) : 0 } as const }
+            : {}),
+          ...(response.saveSuccessOverride != null ? { saveSuccessOverride: response.saveSuccessOverride } : {}),
+          ...(candidate.trigger.condition && effect?.addCondition !== candidate.trigger.condition.condition
+            ? { blockedConditionIds: [candidate.trigger.condition.condition] }
+            : {}),
+        }
+        resolved = resolvePreparedDnd5ePersistentAreaTrigger({
+          prepared: prepared.prepared,
+          ...rollInput,
+          dmAdjustment,
+        })
+        if (!resolved.result.ok || !resolved.application) {
+          logs.push(`${candidate.area.label} 的 DM 调整未通过 Headless 校验。`)
+          continue
+        }
+      }
+      const settled = await settleDnd5eConcentrationChecks({
+        result: resolved.result,
+        map: resolved.application.map,
+        characters: resolved.application.characters,
+        characterIdByCombatantId: prepared.prepared.characterIdByCombatantId,
+        rollD20: rollDiceBoxD20,
+        rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
+        requestSavingThrowReroll: requestDnd5eSavingThrowRerollDice,
+        requestBardicInspiration: requestDnd5eBardicInspirationRoll,
+        requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
+      })
+      map = settled.application.map
+      characters = settled.application.characters
+      const triggerEvent = settled.result.events.find((event) => event.type === 'persistent-area-triggered')
+      const saveEvent = settled.result.events.find((event) => event.type === 'saving-throw-resolved')
+      const saveText = saveEvent?.type === 'saving-throw-resolved'
+        ? `，豁免 ${saveEvent.total} vs DC ${saveEvent.dc} ${saveEvent.success ? '成功' : '失败'}`
+        : ''
+      logs.push(
+        `${candidate.area.label} 在${({ 'on-create': '首次创建', 'on-enter': '进入区域', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[candidate.trigger.timing]}触发 ${prepared.prepared.targetName}${saveText}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.damage > 0 ? `，造成 ${triggerEvent.damage} 点伤害` : ''}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.conditionApplied ? `，施加 ${dnd5eConditionLabel(triggerEvent.conditionApplied)}` : ''}。`,
+      )
+    }
+    return { map, characters, logs }
+  }
+
   const settleDnd5eItemAreasForMove = async (input: {
     state: Dnd5eHeadlessCombatState
     map: BattleMap
@@ -2685,17 +2848,44 @@ export default function MapsPage() {
       }
       break
     }
-    return {
+    const baseApplication = planDnd5eMapResultApplication({
       state,
       map,
+      characters: input.characters,
+      characterIdByCombatantId: input.characterIdByCombatantId,
+    })
+    const pluginCandidates = collectDnd5ePersistentAreaTriggers({
+      map: baseApplication.map,
+      timing: 'on-enter',
+      round: roundRef.current,
+      movement: { token: input.token, to: finalPosition },
+    })
+    const pluginAreas = await settleDnd5ePersistentAreaCandidates({
+      candidates: pluginCandidates,
+      map: baseApplication.map,
+      characters: baseApplication.characters,
+      round: roundRef.current,
+    })
+    logs.push(...pluginAreas.logs)
+    const changedCharacterIds = pluginAreas.characters.flatMap((character) => {
+      const before = input.characters.find((candidate) => candidate.id === character.id)
+      return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+    })
+    const changedTokenIds = pluginAreas.map.tokens.flatMap((token) => {
+      const before = input.map.tokens.find((candidate) => candidate.id === token.id)
+      return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+    })
+    return {
+      state,
+      map: pluginAreas.map,
       finalPosition,
       logs,
-      application: planDnd5eMapResultApplication({
-        state,
-        map,
-        characters: input.characters,
-        characterIdByCombatantId: input.characterIdByCombatantId,
-      }),
+      application: {
+        map: pluginAreas.map,
+        characters: pluginAreas.characters,
+        changedCharacterIds,
+        changedTokenIds,
+      },
     }
   }
 
@@ -2734,6 +2924,9 @@ export default function MapsPage() {
     })
     if (JSON.stringify(hazards.map.dnd5eItemAreas ?? []) !== JSON.stringify(latestMap.dnd5eItemAreas ?? [])) {
       updateMap(latestMap.id, { dnd5eItemAreas: hazards.map.dnd5eItemAreas })
+    }
+    if (JSON.stringify(hazards.map.dnd5ePluginAreas ?? []) !== JSON.stringify(latestMap.dnd5ePluginAreas ?? [])) {
+      updateMap(latestMap.id, { dnd5ePluginAreas: hazards.map.dnd5ePluginAreas })
     }
     for (const tokenId of hazards.application.changedTokenIds) {
       const next = hazards.application.map.tokens.find((token) => token.id === tokenId)
@@ -3171,8 +3364,25 @@ export default function MapsPage() {
     })
     const cells = cellsForAoe(dnd5eSpellTargeting.area, orientFrom, cell)
     const actorToken = activeMap.tokens.find((token) => token.characterId === dnd5eSpellTargeting.characterId)
+    const spell = getDnd5eSrdCombatSpell(dnd5eSpellTargeting.spellId)
+    const effectOrigin = spell?.area?.origin === 'point'
+      ? {
+          x: activeMap.gridOffsetX + (cell.col + 0.5) * activeMap.gridSize,
+          y: activeMap.gridOffsetY + (cell.row + 0.5) * activeMap.gridSize,
+        }
+      : actorToken
+    const effectOriginElevation = spell?.area?.origin === 'point' ? 0 : actorToken?.elevationFeet ?? 0
     const affectedTokenIds = tokensInCells(activeMap, activeMap.tokens, cells)
-      .filter((token) => token.type !== 'obstacle' && token.id !== actorToken?.id)
+      .filter((token) =>
+        token.type !== 'obstacle' && token.id !== actorToken?.id && !!effectOrigin &&
+        !mapGeometryLineOfEffectBlocked({
+          geometry: activeGeometry,
+          from: effectOrigin,
+          to: token,
+          fromElevationFeet: effectOriginElevation,
+          toElevationFeet: token.elevationFeet ?? 0,
+        }),
+      )
       .map((token) => token.id)
       .slice(0, dnd5eSpellTargeting.maximumTargets)
     setDnd5eSpellTargeting((current) => current?.area
@@ -3782,7 +3992,10 @@ export default function MapsPage() {
     }
     return new Promise((resolve) => {
       pendingSharedDmAdjudicationRef.current = { id, actionId: prepared.action.id, resolve }
-      if (existing && isCombatInterruptKind(existing, 'dm-adjudication') && existing.status === 'pending') return
+      if (
+        existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
+        (existing.status === 'pending' || existing.status === 'waiting-for-dm')
+      ) return
       const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? prepared.action.id,
@@ -3802,6 +4015,69 @@ export default function MapsPage() {
           suggestedConcentrationRounds: prepared.suggestedConcentrationRounds,
         },
         // 裁定允许 DM 阅读规则并掷骰；超时只取消，不消费任何资源。
+        expiresAt: runtimeNow() + 10 * 60 * 1000,
+      })
+      void publishCombatInterrupt(interrupt)
+    })
+  }
+
+  async function requestSharedPersistentAreaAdjudication(input: {
+    prepared: PreparedDnd5ePersistentAreaTrigger
+    proposedDamage: number
+    proposedSaveSuccess?: boolean
+    proposedConditionIds: string[]
+  }): Promise<DmAdjudicationInterruptResponse> {
+    if (!activeMap || !isDM) return { decision: 'cancelled', effects: [] }
+    const { prepared } = input
+    const id = `dm-adjudication:${prepared.candidate.transactionId}`
+    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    const existing = existingQueue?.mapId === activeMap.id
+      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
+      : undefined
+    if (existing && isCombatInterruptKind(existing, 'dm-adjudication')) {
+      if (existing.status === 'answered' || existing.status === 'done') {
+        const response = existing.response as DmAdjudicationInterruptResponse | undefined
+        return response?.decision === 'approved'
+          ? { ...response, effects: Array.isArray(response.effects) ? response.effects : [] }
+          : { decision: 'cancelled', effects: [] }
+      }
+      if (existing.status === 'rolled-back') return { decision: 'cancelled', effects: [] }
+    }
+    return new Promise((resolve) => {
+      pendingSharedDmAdjudicationRef.current = {
+        id,
+        actionId: prepared.candidate.transactionId,
+        resolve,
+      }
+      if (
+        existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
+        (existing.status === 'pending' || existing.status === 'waiting-for-dm')
+      ) return
+      const sourceName = prepared.state.combatants[prepared.candidate.area.sourceTokenId]?.name ?? '区域来源'
+      const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
+        id,
+        transactionId: prepared.candidate.transactionId,
+        mapId: activeMap.id,
+        kind: 'dm-adjudication',
+        actorCharId: prepared.candidate.area.sourceCharacterId,
+        targetCharId: prepared.candidate.targetToken.characterId,
+        payload: {
+          contextKind: 'persistent-area-trigger',
+          actionId: prepared.candidate.transactionId,
+          casterName: `${sourceName} → ${prepared.targetName}`,
+          spellId: prepared.candidate.area.featureId,
+          spellName: `${prepared.candidate.area.label}·${prepared.candidate.trigger.label}`,
+          spellLevel: 0,
+          slotLevel: 0,
+          castingTime: 'action',
+          description: `持续区域在“${prepared.candidate.trigger.label}”触发点生成了一项 Headless 结算。DM 可以修改最终伤害、覆盖豁免结果，或删除拟施加的状态。`,
+          concentration: false,
+          proposedDamage: input.proposedDamage,
+          proposedSaveSuccess: input.proposedSaveSuccess,
+          proposedConditionIds: input.proposedConditionIds,
+          targetTokenId: prepared.candidate.targetToken.id,
+          triggerTiming: prepared.candidate.trigger.timing,
+        },
         expiresAt: runtimeNow() + 10 * 60 * 1000,
       })
       void publishCombatInterrupt(interrupt)
@@ -4271,14 +4547,14 @@ export default function MapsPage() {
     })
   }
 
-  const requestDnd5eSavingThrowRerollDice = async (input: {
+  async function requestDnd5eSavingThrowRerollDice(input: {
     target: Character
     targetName: string
     featureName: string
     total: number
     dc: number
     mode: 'normal' | 'advantage' | 'disadvantage'
-  }): Promise<{ d20: number; d20Second?: number } | undefined> => {
+  }): Promise<{ d20: number; d20Second?: number } | undefined> {
     const accepted = await requestSharedSavingThrowRerollChoice(input.target, {
       featureName: input.featureName,
       total: input.total,
@@ -4337,14 +4613,14 @@ export default function MapsPage() {
     })
   }
 
-  const requestDnd5eBardicInspirationRoll = async (input: {
+  async function requestDnd5eBardicInspirationRoll(input: {
     target?: Character
     targetName: string
     dieSides: number
     rollType: BardicInspirationRollType
     total: number
     targetNumber: number
-  }): Promise<number | undefined> => {
+  }): Promise<number | undefined> {
     const accepted = input.target
       ? await requestSharedBardicInspirationChoice(input.target, input)
       : await showCombatDialog({
@@ -4485,13 +4761,13 @@ export default function MapsPage() {
     })
   }
 
-  const requestDnd5eDarkOnesOwnLuckRoll = async (input: {
+  async function requestDnd5eDarkOnesOwnLuckRoll(input: {
     target?: Character
     targetName: string
     rollType: '豁免' | '属性检定'
     total: number
     targetNumber?: number
-  }): Promise<number | undefined> => {
+  }): Promise<number | undefined> {
     const accepted = input.target
       ? await requestSharedDarkOnesOwnLuckChoice(input.target, input)
       : await showCombatDialog({
@@ -4504,6 +4780,65 @@ export default function MapsPage() {
     if (!accepted) return undefined
     return (await rollDiceBoxValues(1, 10, '黑暗之主的幸运', input.targetName))[0]
   }
+
+  useEffect(() => {
+    if (!isDM || !combatActive || !activeMap || !currentInitiativeToken) {
+      persistentAreaTurnBoundaryRef.current = null
+      return
+    }
+    const current = { mapId: activeMap.id, round, tokenId: currentInitiativeToken.id }
+    const previous = persistentAreaTurnBoundaryRef.current
+    if (
+      previous?.mapId === current.mapId && previous.round === current.round &&
+      previous.tokenId === current.tokenId
+    ) return
+    persistentAreaTurnBoundaryRef.current = current
+    void (async () => {
+      let workingMap = useMapStore.getState().maps.find((map) => map.id === current.mapId)
+      let workingCharacters = useCharacterStore.getState().characters
+      if (!workingMap) return
+      const boundaries: Array<{ timing: 'turn-start' | 'turn-end'; round: number; tokenId: string }> = []
+      if (previous?.mapId === current.mapId) {
+        boundaries.push({ timing: 'turn-end', round: previous.round, tokenId: previous.tokenId })
+      }
+      boundaries.push({ timing: 'turn-start', round: current.round, tokenId: current.tokenId })
+      const logs: string[] = []
+      for (const boundary of boundaries) {
+        const candidates = collectDnd5ePersistentAreaTriggers({
+          map: workingMap,
+          timing: boundary.timing,
+          round: boundary.round,
+          targetTokenId: boundary.tokenId,
+        })
+        const settled = await settleDnd5ePersistentAreaCandidates({
+          candidates,
+          map: workingMap,
+          characters: workingCharacters,
+          round: boundary.round,
+        })
+        workingMap = settled.map
+        workingCharacters = settled.characters
+        logs.push(...settled.logs)
+      }
+      const beforeMap = useMapStore.getState().maps.find((map) => map.id === current.mapId)
+      const beforeCharacters = useCharacterStore.getState().characters
+      if (!beforeMap) return
+      for (const character of workingCharacters) {
+        const before = beforeCharacters.find((candidate) => candidate.id === character.id)
+        if (before && JSON.stringify(before) !== JSON.stringify(character)) updateChar(character.id, character)
+      }
+      for (const token of workingMap.tokens) {
+        const before = beforeMap.tokens.find((candidate) => candidate.id === token.id)
+        if (before && JSON.stringify(before) !== JSON.stringify(token)) updateToken(workingMap.id, token.id, token)
+      }
+      if (JSON.stringify(beforeMap.dnd5ePluginAreas ?? []) !== JSON.stringify(workingMap.dnd5ePluginAreas ?? [])) {
+        updateMap(workingMap.id, { dnd5ePluginAreas: workingMap.dnd5ePluginAreas ?? [] })
+      }
+      for (const log of logs) pushCombatLog(log, 'system')
+    })()
+  // Boundary identity is intentionally primitive; the ref prevents replay after unrelated map/store renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDM, combatActive, activeMap?.id, currentInitiativeToken?.id, round, initiativeIndex])
 
   const rollDnd5eTranquilityWard = async (input: {
     ward?: Dnd5eTranquilityWardCheck
@@ -5475,8 +5810,23 @@ export default function MapsPage() {
               payload: dmAdjudicationInterrupt.payload,
               expiresAt: dmAdjudicationInterrupt.expiresAt,
             })
-            setDmAdjudicationEffects([])
+            const proposedTargetId = dmAdjudicationInterrupt.payload.targetTokenId
+            const proposedDamage = dmAdjudicationInterrupt.payload.proposedDamage
+            const proposedCondition = dmAdjudicationInterrupt.payload.proposedConditionIds?.[0]
+            setDmAdjudicationEffects(
+              dmAdjudicationInterrupt.payload.contextKind === 'persistent-area-trigger' && proposedTargetId
+                ? [{
+                    id: runtimeId('adjudication-effect'),
+                    targetTokenId: proposedTargetId,
+                    operation: proposedDamage != null ? 'damage' : '',
+                    amount: proposedDamage != null ? String(proposedDamage) : '',
+                    addCondition: proposedCondition ?? '',
+                    removeCondition: '',
+                  }]
+                : [],
+            )
             setDmAdjudicationNote('')
+            setDmAdjudicationSaveOverride('unchanged')
             setDmAdjudicationConcentrationRounds(
               dmAdjudicationInterrupt.payload.suggestedConcentrationRounds?.toString() ?? '',
             )
@@ -5878,6 +6228,9 @@ export default function MapsPage() {
           effects,
           ...(dmAdjudicationNote.trim() ? { note: dmAdjudicationNote.trim().slice(0, 2_000) } : {}),
           ...(concentrationRounds != null ? { concentrationRounds } : {}),
+          ...(dmAdjudicationSaveOverride !== 'unchanged'
+            ? { saveSuccessOverride: dmAdjudicationSaveOverride === 'success' }
+            : {}),
         } satisfies DmAdjudicationInterruptResponse
       : {
           decision: 'cancelled',
@@ -7934,19 +8287,48 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
+      let pluginApplication = resolved.application
+      const createdAreaId = `plugin-area:${action.id}`
+      if (pluginApplication.map.dnd5ePluginAreas?.some((area) => area.id === createdAreaId)) {
+        const createdCandidates = collectDnd5ePersistentAreaTriggers({
+          map: pluginApplication.map,
+          timing: 'on-create',
+          round: liveRound,
+          areaId: createdAreaId,
+        })
+        const createdSettled = await settleDnd5ePersistentAreaCandidates({
+          candidates: createdCandidates,
+          map: pluginApplication.map,
+          characters: pluginApplication.characters,
+          round: liveRound,
+        })
+        for (const log of createdSettled.logs) pushCombatLog(log, 'system')
+        pluginApplication = {
+          map: createdSettled.map,
+          characters: createdSettled.characters,
+          changedCharacterIds: createdSettled.characters.flatMap((character) => {
+            const before = useCharacterStore.getState().characters.find((candidate) => candidate.id === character.id)
+            return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+          }),
+          changedTokenIds: createdSettled.map.tokens.flatMap((token) => {
+            const before = authorityMap.tokens.find((candidate) => candidate.id === token.id)
+            return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+          }),
+        }
+      }
+      for (const characterId of pluginApplication.changedCharacterIds) {
+        const next = pluginApplication.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
+      for (const tokenId of pluginApplication.changedTokenIds) {
+        const next = pluginApplication.map.tokens.find((token) => token.id === tokenId)
         if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
       }
       if (
-        JSON.stringify(resolved.application.map.dnd5ePluginAreas ?? []) !==
+        JSON.stringify(pluginApplication.map.dnd5ePluginAreas ?? []) !==
         JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
       ) {
-        updateMap(authorityMap.id, { dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [] })
+        updateMap(authorityMap.id, { dnd5ePluginAreas: pluginApplication.map.dnd5ePluginAreas ?? [] })
       }
       const spentTurnResource = resolved.result.events.find((event) =>
         event.type === 'turn-resource-spent' &&
@@ -10331,6 +10713,9 @@ export default function MapsPage() {
       if (JSON.stringify(hazards.map.dnd5eItemAreas ?? []) !== JSON.stringify(latestMap.dnd5eItemAreas ?? [])) {
         applyAuthorityMapUpdate(latestMap.id, { dnd5eItemAreas: hazards.map.dnd5eItemAreas })
       }
+      if (JSON.stringify(hazards.map.dnd5ePluginAreas ?? []) !== JSON.stringify(latestMap.dnd5ePluginAreas ?? [])) {
+        applyAuthorityMapUpdate(latestMap.id, { dnd5ePluginAreas: hazards.map.dnd5ePluginAreas })
+      }
       for (const characterId of hazards.application.changedCharacterIds) {
         const next = hazards.application.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
@@ -10523,6 +10908,7 @@ export default function MapsPage() {
         type: 'dnd5e-spell-cast',
         targetTokenId: payload.targetTokenId,
         targetTokenIds: payload.targetTokenIds,
+        targetCell: payload.areaTargetCell,
         dnd5eSpellCast: payload,
       }),
     )
@@ -10669,6 +11055,7 @@ export default function MapsPage() {
       type: 'dnd5e-spell-cast',
       targetTokenId: payload.targetTokenId,
       targetTokenIds: payload.targetTokenIds,
+      targetCell: payload.areaTargetCell,
       dnd5eSpellCast: payload,
     })
     if (!action) return false
@@ -10700,6 +11087,7 @@ export default function MapsPage() {
       slotLevel: dnd5eSpellTargeting.slotLevel,
       targetTokenId: dnd5eSpellTargeting.targetTokenIds[0],
       targetTokenIds: [...new Set(dnd5eSpellTargeting.targetTokenIds)],
+      areaTargetCell: aoePreviewCell ?? undefined,
       projectileTargetIds: dnd5eSpellTargeting.allowDuplicateTargets
         ? [...dnd5eSpellTargeting.targetTokenIds]
         : undefined,
@@ -11078,7 +11466,7 @@ export default function MapsPage() {
               onSelectToken={handleSelectToken}
               targetSelectTokenIds={[]}
               isDM={isDM}
-              measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode}
+              measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
               hpByToken={hpByToken}
               dnd5eConditionsByToken={dnd5eConditionsByToken}
               onDnd5eConditionClick={(tokenId) => {
@@ -11101,9 +11489,38 @@ export default function MapsPage() {
                 setDnd5ePluginAreaTargeting(null)
                 setAoePreviewCell(null)
               }}
-              deleteSelectMode={isDM && deleteSelectMode && !showMoveRange && !gridAdjustMode && !measureMode}
+              deleteSelectMode={isDM && deleteSelectMode && !showMoveRange && !gridAdjustMode && !measureMode && !fogEditMode && !geometryEditMode}
               onDeleteBoxConfirm={handleDeleteBoxConfirm}
               onDeleteCancel={() => setDeleteSelectMode(false)}
+              fog={activeFog}
+              fogEditMode={isDM && fogEditMode}
+              fogTool={fogTool}
+              fogPreviewAsPlayer={fogPreviewAsPlayer}
+              onFogShapeCommit={(shape) => {
+                if (isDM) addFogShape(activeMap.id, shape)
+              }}
+              onFogEditCancel={() => {
+                setFogEditMode(false)
+                setFogPreviewAsPlayer(false)
+              }}
+              geometry={activeGeometry}
+              geometryEditMode={isDM && geometryEditMode}
+              geometryTool={geometryTool}
+              selectedGeometryEntityId={selectedGeometryEntityId}
+              geometryPreviewAsPlayer={geometryPreviewAsPlayer}
+              visionSourceTokenIds={visionSourceTokenIds}
+              onGeometryEntityCommit={(entity) => {
+                if (isDM) addGeometryEntity(activeMap.id, entity)
+              }}
+              onGeometryEntitySelect={selectGeometryEntity}
+              onGeometryEditCancel={() => {
+                setGeometryEditMode(false)
+                setGeometryPreviewAsPlayer(false)
+                selectGeometryEntity(null)
+              }}
+              onTokenMoveBlocked={() => {
+                pushCombatLog('移动被地图墙体、关闭的门或障碍物阻挡。', 'system')
+              }}
               onBlankContextMenu={() => {
                 setDnd5eWeaponTargeting(null)
                 setDnd5eSpellTargeting(null)
@@ -11125,7 +11542,7 @@ export default function MapsPage() {
                       ? [myPlayerToken.id]
                       : []
               }
-              gridAdjustMode={isDM && gridAdjustMode}
+              gridAdjustMode={isDM && gridAdjustMode && !fogEditMode && !geometryEditMode}
               onGridOffsetChange={(offsetX, offsetY) =>
                 updateMap(activeMap.id, { gridOffsetX: offsetX, gridOffsetY: offsetY })
               }
@@ -11668,14 +12085,16 @@ export default function MapsPage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h3 id="shared-dm-adjudication-title" className="text-lg font-semibold text-amber-100">
-                        DM 裁定 · {sharedDmAdjudicationPrompt.payload.spellName}
+                        {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger' ? '区域触发中断' : 'DM 裁定'} · {sharedDmAdjudicationPrompt.payload.spellName}
                       </h3>
                       <p className="mt-1 text-xs text-slate-400">
-                        {sharedDmAdjudicationPrompt.payload.casterName} · {
+                        {sharedDmAdjudicationPrompt.payload.casterName} · {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
+                          ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
+                          : <>{
                           sharedDmAdjudicationPrompt.payload.spellLevel === 0
                             ? '戏法'
                             : `${sharedDmAdjudicationPrompt.payload.spellLevel}环，以${sharedDmAdjudicationPrompt.payload.slotLevel}环位施放`
-                        } · {sharedDmAdjudicationPrompt.payload.castingTime === 'bonus-action' ? '附赠动作' : '动作'}
+                        } · {sharedDmAdjudicationPrompt.payload.castingTime === 'bonus-action' ? '附赠动作' : '动作'}</>}
                       </p>
                     </div>
                     <span className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
@@ -11695,6 +12114,20 @@ export default function MapsPage() {
                       <div className="rounded-xl border border-sky-400/15 bg-sky-500/[0.04] p-3 text-xs leading-5 text-sky-100/75">
                         数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。
                       </div>
+                      {sharedDmAdjudicationPrompt.payload.proposedSaveSuccess != null && (
+                        <label className="block rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 text-xs text-violet-100">
+                          豁免结果调整
+                          <select
+                            value={dmAdjudicationSaveOverride}
+                            onChange={(event) => setDmAdjudicationSaveOverride(event.target.value as typeof dmAdjudicationSaveOverride)}
+                            className="mt-2 w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-xs text-slate-200"
+                          >
+                            <option value="unchanged">保持自动结果（{sharedDmAdjudicationPrompt.payload.proposedSaveSuccess ? '成功' : '失败'}）</option>
+                            <option value="success">改为成功</option>
+                            <option value="failure">改为失败</option>
+                          </select>
+                        </label>
+                      )}
                       {dmAdjudicationEffects.map((effect, index) => (
                         <div key={effect.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
                           <div className="flex items-center justify-between gap-2">
@@ -11824,7 +12257,7 @@ export default function MapsPage() {
                     onClick={() => void handleSharedDmAdjudicationChoice(false)}
                     className="rounded-lg border border-slate-600/60 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/80"
                   >
-                    取消施法（不消费）
+                    {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger' ? '跳过本次触发' : '取消施法（不消费）'}
                   </button>
                   <button
                     type="button"
@@ -12459,6 +12892,7 @@ export default function MapsPage() {
                         if (next) {
                           setMeasureMode(false)
                           setDeleteSelectMode(false)
+                          setFogEditMode(false)
                         }
                         return next
                       })
@@ -12555,6 +12989,145 @@ export default function MapsPage() {
                       title="网格透明度"
                     />
                   </div>
+                  {activeGeometry && (
+                    <MapGeometryToolbar
+                      mapId={activeMap.id}
+                      geometry={activeGeometry}
+                      selectedEntity={selectedGeometryEntity}
+                      selectedToken={selectedToken}
+                      editMode={geometryEditMode}
+                      tool={geometryTool}
+                      previewAsPlayer={geometryPreviewAsPlayer}
+                      onEditModeChange={(enabled) => {
+                        setGeometryEditMode(enabled)
+                        if (enabled) {
+                          setMeasureMode(false)
+                          setDeleteSelectMode(false)
+                          setGridAdjustMode(false)
+                          setFogEditMode(false)
+                          setFogPreviewAsPlayer(false)
+                          setShowMoveRange(false)
+                        } else {
+                          setGeometryPreviewAsPlayer(false)
+                          selectGeometryEntity(null)
+                        }
+                      }}
+                      onToolChange={(nextTool) => {
+                        setGeometryTool(nextTool)
+                        selectGeometryEntity(null)
+                      }}
+                      onPreviewChange={setGeometryPreviewAsPlayer}
+                    />
+                  )}
+                  <div className="flex items-center gap-1 rounded-lg border border-sky-400/15 bg-sky-500/[0.05] px-1 py-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFogEditMode((current) => {
+                          const next = !current
+                          if (next) {
+                            setMeasureMode(false)
+                            setDeleteSelectMode(false)
+                            setGridAdjustMode(false)
+                            setShowMoveRange(false)
+                            setGeometryEditMode(false)
+                            setGeometryPreviewAsPlayer(false)
+                            selectGeometryEntity(null)
+                          } else {
+                            setFogPreviewAsPlayer(false)
+                          }
+                          return next
+                        })
+                      }}
+                      className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${fogEditMode ? 'bg-sky-500/25 text-sky-100' : 'text-slate-400 hover:bg-white/5'}`}
+                      title="编辑静态战争迷雾"
+                    >
+                      <CloudFog className="h-3.5 w-3.5" />
+                      迷雾
+                    </button>
+                    {fogEditMode && (
+                      <>
+                        <select
+                          value={fogTool}
+                          onChange={(event) => setFogTool(event.target.value as FogTool)}
+                          className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+                          title="迷雾绘制工具；多边形双击或按 Enter 完成"
+                        >
+                          <option value="reveal-rect">矩形揭示</option>
+                          <option value="cover-rect">矩形遮盖</option>
+                          <option value="reveal-circle">圆形揭示</option>
+                          <option value="cover-circle">圆形遮盖</option>
+                          <option value="reveal-polygon">多边形揭示</option>
+                          <option value="cover-polygon">多边形遮盖</option>
+                          <option value="reveal-brush">画笔揭示</option>
+                          <option value="cover-brush">画笔遮盖</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if ((activeFog?.shapes.length ?? 0) === 0 || confirm('填满整张地图会清除现有迷雾笔画，继续吗？')) fillFog(activeMap.id)
+                          }}
+                          className="rounded-md px-1.5 py-1 text-[11px] text-amber-200 hover:bg-amber-500/15"
+                          title="填满全图并清除现有笔画"
+                        >
+                          全遮
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if ((!activeFog?.filled && (activeFog?.shapes.length ?? 0) === 0) || confirm('清空这张地图的全部战争迷雾吗？')) clearFog(activeMap.id)
+                          }}
+                          className="rounded-md px-1.5 py-1 text-[11px] text-emerald-200 hover:bg-emerald-500/15"
+                          title="清空全图迷雾"
+                        >
+                          全显
+                        </button>
+                        <button
+                          type="button"
+                          disabled={(activeFog?.shapes.length ?? 0) === 0}
+                          onClick={() => undoFog(activeMap.id)}
+                          className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                          title="撤销最后一笔"
+                        >
+                          <Undo2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={(fogRedoByMap[activeMap.id]?.length ?? 0) === 0}
+                          onClick={() => redoFog(activeMap.id)}
+                          className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                          title="重做"
+                        >
+                          <Redo2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFogPreviewAsPlayer((value) => !value)}
+                          className={`rounded-md p-1 ${fogPreviewAsPlayer ? 'bg-violet-500/25 text-violet-100' : 'text-slate-300 hover:bg-white/10'}`}
+                          title="预览玩家看到的不透明迷雾"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                        <input
+                          type="color"
+                          value={activeFog?.color ?? '#05070f'}
+                          onChange={(event) => setFogStyle(activeMap.id, { color: event.target.value })}
+                          className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
+                          title="迷雾颜色"
+                        />
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={1}
+                          step={0.02}
+                          value={activeFog?.opacity ?? 0.98}
+                          onChange={(event) => setFogStyle(activeMap.id, { opacity: Number(event.target.value) })}
+                          className="w-10 accent-sky-400"
+                          title="玩家端迷雾不透明度"
+                        />
+                      </>
+                    )}
+                  </div>
                   <button
                     onClick={() =>
                       setMeasureMode((v) => {
@@ -12562,6 +13135,9 @@ export default function MapsPage() {
                         if (next) {
                           setGridAdjustMode(false)
                           setDeleteSelectMode(false)
+                          setFogEditMode(false)
+                          setGeometryEditMode(false)
+                          setGeometryPreviewAsPlayer(false)
                         }
                         return next
                       })
@@ -12581,6 +13157,7 @@ export default function MapsPage() {
                         if (next) {
                           setMeasureMode(false)
                           setGridAdjustMode(false)
+                          setFogEditMode(false)
                           setAoePreviewCell(null)
                           setShowMoveRange(false)
                         }

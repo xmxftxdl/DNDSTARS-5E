@@ -58,8 +58,38 @@ export const DND5E_SHORTSWORD: EquipmentItem = weapon('dnd5e-shortsword', '短�
 export const DND5E_QUARTERSTAFF: EquipmentItem = weapon('dnd5e-quarterstaff', '长棍', 'simple', 'melee', 1, 6, 'bludgeoning', 'str', { reachFeet: 5, properties: ['多才多艺（1d8）'] })
 export const DND5E_LIGHT_CROSSBOW: EquipmentItem = weapon('dnd5e-light-crossbow', '轻弩', 'simple', 'ranged', 1, 8, 'piercing', 'dex', { rangeFeet: { normal: 80, long: 320 }, properties: ['装填', '双手'] })
 export const DND5E_LONGBOW: EquipmentItem = weapon('dnd5e-longbow', '长弓', 'martial', 'ranged', 1, 8, 'piercing', 'dex', { rangeFeet: { normal: 150, long: 600 }, properties: ['弹药', '重型', '双手'] })
+export const DND5E_DAGGER: EquipmentItem = weapon('dnd5e-dagger', '匕首', 'simple', 'melee', 1, 4, 'piercing', 'finesse', { reachFeet: 5, rangeFeet: { normal: 20, long: 60 }, properties: ['灵巧', '轻型', '投掷（20/60）'] })
+export const DND5E_CLUB: EquipmentItem = weapon('dnd5e-club', '短棒', 'simple', 'melee', 1, 4, 'bludgeoning', 'str', { reachFeet: 5, properties: ['轻型'] })
+export const DND5E_GREATCLUB: EquipmentItem = weapon('dnd5e-greatclub', '大棒', 'simple', 'melee', 1, 8, 'bludgeoning', 'str', { reachFeet: 5, properties: ['双手'] })
+export const DND5E_HANDAXE: EquipmentItem = weapon('dnd5e-handaxe', '手斧', 'simple', 'melee', 1, 6, 'slashing', 'str', { reachFeet: 5, rangeFeet: { normal: 20, long: 60 }, properties: ['轻型', '投掷（20/60）'] })
+export const DND5E_JAVELIN: EquipmentItem = weapon('dnd5e-javelin', '标枪', 'simple', 'melee', 1, 6, 'piercing', 'str', { reachFeet: 5, rangeFeet: { normal: 30, long: 120 }, properties: ['投掷（30/120）'] })
+export const DND5E_LIGHT_HAMMER: EquipmentItem = weapon('dnd5e-light-hammer', '轻锤', 'simple', 'melee', 1, 4, 'bludgeoning', 'str', { reachFeet: 5, rangeFeet: { normal: 20, long: 60 }, properties: ['轻型', '投掷（20/60）'] })
+export const DND5E_SICKLE: EquipmentItem = weapon('dnd5e-sickle', '镰刀', 'simple', 'melee', 1, 4, 'slashing', 'str', { reachFeet: 5, properties: ['轻型'] })
+export const DND5E_SPEAR: EquipmentItem = weapon('dnd5e-spear', '矛', 'simple', 'melee', 1, 6, 'piercing', 'str', { reachFeet: 5, rangeFeet: { normal: 20, long: 60 }, properties: ['投掷（20/60）', '多才多艺（1d8）'] })
+export const DND5E_DART: EquipmentItem = weapon('dnd5e-dart', '飞镖', 'simple', 'ranged', 1, 4, 'piercing', 'dex', { rangeFeet: { normal: 20, long: 60 }, properties: ['灵巧', '投掷'] })
+export const DND5E_SHORTBOW: EquipmentItem = weapon('dnd5e-shortbow', '短弓', 'simple', 'ranged', 1, 6, 'piercing', 'dex', { rangeFeet: { normal: 80, long: 320 }, properties: ['弹药', '双手'] })
+export const DND5E_SLING: EquipmentItem = weapon('dnd5e-sling', '投石索', 'simple', 'ranged', 1, 4, 'bludgeoning', 'dex', { rangeFeet: { normal: 30, long: 120 }, properties: ['弹药'] })
+export const DND5E_WARHAMMER: EquipmentItem = weapon('dnd5e-warhammer', '战锤', 'martial', 'melee', 1, 8, 'bludgeoning', 'str', { reachFeet: 5, properties: ['多才多艺（1d10）'] })
+export const DND5E_GREATSWORD: EquipmentItem = weapon('dnd5e-greatsword', '巨剑', 'martial', 'melee', 2, 6, 'slashing', 'str', { reachFeet: 5, properties: ['双手', '重型'] })
+export const DND5E_BATTLEAXE: EquipmentItem = weapon('dnd5e-battleaxe', '战斧', 'martial', 'melee', 1, 8, 'slashing', 'str', { reachFeet: 5, properties: ['多才多艺（1d10）'] })
+export const DND5E_FLAIL: EquipmentItem = weapon('dnd5e-flail', '连枷', 'martial', 'melee', 1, 8, 'bludgeoning', 'str', { reachFeet: 5 })
+export const DND5E_GLAIVE: EquipmentItem = weapon('dnd5e-glaive', '长柄刀', 'martial', 'melee', 1, 10, 'slashing', 'str', { reachFeet: 10, properties: ['重型', '触及', '双手'] })
+export const DND5E_HALBERD: EquipmentItem = weapon('dnd5e-halberd', '戟', 'martial', 'melee', 1, 10, 'slashing', 'str', { reachFeet: 10, properties: ['重型', '触及', '双手'] })
+export const DND5E_LANCE: EquipmentItem = weapon('dnd5e-lance', '骑枪', 'martial', 'melee', 1, 12, 'piercing', 'str', { reachFeet: 10, properties: ['触及', '特殊'] })
+export const DND5E_MAUL: EquipmentItem = weapon('dnd5e-maul', '巨锤', 'martial', 'melee', 2, 6, 'bludgeoning', 'str', { reachFeet: 5, properties: ['重型', '双手'] })
+export const DND5E_MORNINGSTAR: EquipmentItem = weapon('dnd5e-morningstar', '钉头锤', 'martial', 'melee', 1, 8, 'piercing', 'str', { reachFeet: 5 })
+export const DND5E_PIKE: EquipmentItem = weapon('dnd5e-pike', '长枪', 'martial', 'melee', 1, 10, 'piercing', 'str', { reachFeet: 10, properties: ['重型', '触及', '双手'] })
+export const DND5E_TRIDENT: EquipmentItem = weapon('dnd5e-trident', '三叉戟', 'martial', 'melee', 1, 6, 'piercing', 'str', { reachFeet: 5, rangeFeet: { normal: 20, long: 60 }, properties: ['投掷（20/60）', '多才多艺（1d8）'] })
+export const DND5E_WAR_PICK: EquipmentItem = weapon('dnd5e-war-pick', '战镐', 'martial', 'melee', 1, 8, 'piercing', 'str', { reachFeet: 5 })
+export const DND5E_WHIP: EquipmentItem = weapon('dnd5e-whip', '长鞭', 'martial', 'melee', 1, 4, 'slashing', 'finesse', { reachFeet: 10, properties: ['灵巧', '触及'] })
+export const DND5E_BLOWGUN: EquipmentItem = weapon('dnd5e-blowgun', '吹箭筒', 'martial', 'ranged', 1, 1, 'piercing', 'dex', { rangeFeet: { normal: 25, long: 100 }, properties: ['弹药', '装填'] })
+export const DND5E_HAND_CROSSBOW: EquipmentItem = weapon('dnd5e-hand-crossbow', '手弩', 'martial', 'ranged', 1, 6, 'piercing', 'dex', { rangeFeet: { normal: 30, long: 120 }, properties: ['弹药', '轻型', '装填'] })
+export const DND5E_HEAVY_CROSSBOW: EquipmentItem = weapon('dnd5e-heavy-crossbow', '重弩', 'martial', 'ranged', 1, 10, 'piercing', 'dex', { rangeFeet: { normal: 100, long: 400 }, properties: ['弹药', '重型', '装填', '双手'] })
+export const DND5E_NET: EquipmentItem = weapon('dnd5e-net', '捕网', 'martial', 'ranged', 0, 1, 'bludgeoning', 'dex', { rangeFeet: { normal: 5, long: 15 }, properties: ['特殊', '投掷'] })
 export const DND5E_OFFHAND_SCIMITAR: EquipmentItem = { ...DND5E_SCIMITAR, id: 'dnd5e-scimitar-offhand', slot: 'offHand' }
 export const DND5E_OFFHAND_SHORTSWORD: EquipmentItem = { ...DND5E_SHORTSWORD, id: 'dnd5e-shortsword-offhand', slot: 'offHand' }
+export const DND5E_OFFHAND_DAGGER: EquipmentItem = { ...DND5E_DAGGER, id: 'dnd5e-dagger-offhand', slot: 'offHand' }
+export const DND5E_OFFHAND_HANDAXE: EquipmentItem = { ...DND5E_HANDAXE, id: 'dnd5e-handaxe-offhand', slot: 'offHand' }
 
 export const DND5E_LEATHER_ARMOR: EquipmentItem = {
   id: 'dnd5e-leather-armor', name: '皮甲', slot: 'armor', ac: 11,
@@ -82,8 +112,38 @@ export const DND5E_SRD_EQUIPMENT_CATALOG: readonly EquipmentItem[] = [
   DND5E_QUARTERSTAFF,
   DND5E_LIGHT_CROSSBOW,
   DND5E_LONGBOW,
+  DND5E_DAGGER,
+  DND5E_CLUB,
+  DND5E_GREATCLUB,
+  DND5E_HANDAXE,
+  DND5E_JAVELIN,
+  DND5E_LIGHT_HAMMER,
+  DND5E_SICKLE,
+  DND5E_SPEAR,
+  DND5E_DART,
+  DND5E_SHORTBOW,
+  DND5E_SLING,
+  DND5E_WARHAMMER,
+  DND5E_GREATSWORD,
+  DND5E_BATTLEAXE,
+  DND5E_FLAIL,
+  DND5E_GLAIVE,
+  DND5E_HALBERD,
+  DND5E_LANCE,
+  DND5E_MAUL,
+  DND5E_MORNINGSTAR,
+  DND5E_PIKE,
+  DND5E_TRIDENT,
+  DND5E_WAR_PICK,
+  DND5E_WHIP,
+  DND5E_BLOWGUN,
+  DND5E_HAND_CROSSBOW,
+  DND5E_HEAVY_CROSSBOW,
+  DND5E_NET,
   DND5E_OFFHAND_SCIMITAR,
   DND5E_OFFHAND_SHORTSWORD,
+  DND5E_OFFHAND_DAGGER,
+  DND5E_OFFHAND_HANDAXE,
   DND5E_SHIELD,
   DND5E_CHAIN_MAIL,
   DND5E_SCALE_MAIL,
@@ -177,13 +237,14 @@ export function normalizeDnd5eCharacterEquipment(
   character: Pick<Character, 'charClass' | 'equipment'>,
 ): CharacterEquipment | undefined {
   const defaults = defaultEquipmentForDnd5eCharacter(character)
+  const useLegacyDefaults = character.equipment == null
   const result: CharacterEquipment = {}
   const slots: Array<keyof CharacterEquipment> = [
     'mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace',
   ]
   for (const slot of slots) {
     const item = character.equipment?.[slot]
-    const selected = item?.dnd5e ? item : defaults?.[slot]
+    const selected = item?.dnd5e ? item : useLegacyDefaults ? defaults?.[slot] : undefined
     if (!selected) continue
     result[slot] = {
       id: selected.id,

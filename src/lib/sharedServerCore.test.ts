@@ -197,6 +197,66 @@ describe('room lobby allocation', () => {
   })
 })
 
+describe('map geometry player projection', () => {
+  const common = {
+    label: '阻挡物', blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+    baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+  }
+  const geometry = {
+    schemaVersion: 1,
+    updatedAt: 1,
+    maps: [{
+      mapId: 'map-1',
+      walls: [{ ...common, id: 'wall-1', kind: 'wall', points: [{ x: 50, y: 0 }, { x: 50, y: 100 }] }],
+      doors: [{
+        ...common, id: 'secret-door', kind: 'door',
+        points: [{ x: 20, y: 60 }, { x: 30, y: 60 }], state: 'locked', secret: true,
+      }],
+      obstacles: [],
+      vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: false },
+      updatedAt: 1,
+    }],
+  }
+
+  it('removes hidden and DM-only tokens before serializing a player response', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'near', type: 'enemy', x: 30, y: 20 },
+          { id: 'hidden', type: 'enemy', x: 90, y: 20 },
+          { id: 'dm-only', type: 'enemy', visibilityMode: 'dm-only', x: 30, y: 30 },
+          { id: 'always', type: 'npc', visibilityMode: 'always', x: 90, y: 30 },
+        ],
+        dnd5ePluginAreas: [
+          { id: 'shown-area', sourceTokenId: 'near' },
+          { id: 'hidden-area', sourceTokenId: 'hidden' },
+        ],
+      }],
+    }, geometry, 'character-1')
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'near', 'always'])
+    expect(projected.maps[0].dnd5ePluginAreas.map((area: { id: string }) => area.id))
+      .toEqual(['shown-area'])
+  })
+
+  it('redacts closed secret doors as anonymous walls', () => {
+    const projected = sharedServerCore.projectMapGeometryForPlayer(geometry)
+    expect(projected.maps[0].doors).toEqual([])
+    expect(projected.maps[0].walls).toContainEqual(expect.objectContaining({ kind: 'wall' }))
+    expect(JSON.stringify(projected)).not.toContain('secret-door')
+  })
+
+  it('fails closed on malformed geometry resources', () => {
+    expect(validateSharedStateShape('map-geometry', geometry)).toEqual({ ok: true })
+    expect(validateSharedStateShape('map-geometry', {
+      ...geometry,
+      maps: [{ ...geometry.maps[0], vision: { enabled: true } }],
+    })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
+  })
+})
+
 describe('dedicated 5e shared-state migration', () => {
   it('removes AP wording from persisted combat logs at the server boundary', () => {
     expect(migrateLegacyApCombatLogText('新冒险者 花费 1 AP：移动（10 尺）。剩余 AP 1/2'))
@@ -463,7 +523,6 @@ describe('authorizeStateWrite — AC2 鉴权', () => {
     process.env.STARS_SHARED_SECRET = 's3cr3t'
     for (const name of [
       'characters',
-      'maps',
       'dodge',
       'gale-combo',
       'stable-mind',
@@ -475,6 +534,7 @@ describe('authorizeStateWrite — AC2 鉴权', () => {
     ]) {
       expect(authorizeStateWrite(name, null).ok).toBe(true)
     }
+    expect(authorizeStateWrite('maps', null)).toEqual({ ok: false, status: 401 })
   })
 
   it('extractSecret 从 x-stars-secret 头读取', () => {

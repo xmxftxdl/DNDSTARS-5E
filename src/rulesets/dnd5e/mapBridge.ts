@@ -4,8 +4,9 @@ import type { Character } from '../../types/character'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { mapGeometryCoverBetween, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster } from './monsters'
 import { dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
@@ -230,12 +231,23 @@ export function createDnd5eMapCombatSnapshot(input: {
   const combatantTokens = input.map.tokens.filter((token) => state.combatants[token.id])
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   state.distanceFeetByCombatantPair = {}
+  state.coverBonusByCombatantPair = {}
+  state.lineOfEffectBlockedByCombatantPair = {}
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
       const left = combatantTokens[leftIndex]
       const right = combatantTokens[rightIndex]
       state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] =
         tokenFootprintDistanceCells(left, right, input.map) * feetPerCell
+      for (const [attacker, target] of [[left, right], [right, left]] as const) {
+        const cover = mapGeometryCoverBetween(geometry, attacker, target)
+        const directedKey = dnd5eDirectedCombatantPairKey(attacker.id, target.id)
+        if (cover.blocksLineOfEffect) state.lineOfEffectBlockedByCombatantPair[directedKey] = true
+        else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
+          state.coverBonusByCombatantPair[directedKey] = cover.armorClassBonus
+        }
+      }
     }
   }
   state.round = Math.max(1, Math.floor(input.round ?? 1))

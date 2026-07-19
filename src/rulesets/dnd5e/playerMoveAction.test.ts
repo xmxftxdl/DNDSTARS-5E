@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -6,6 +6,7 @@ import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { prepareDnd5ePlayerMove, resolvePreparedDnd5ePlayerMove } from './playerMoveAction'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 
 function character(): Character {
   return {
@@ -34,6 +35,26 @@ const action: SharedPlayerActionState = {
 }
 
 describe('D&D 5e player map movement', () => {
+  afterEach(() => setMapGeometryRuntime([]))
+
+  it('rejects movement that crosses a DM-authored movement blocker', () => {
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [{
+        id: 'wall', kind: 'wall', label: '墙', points: [{ x: 15, y: 0 }, { x: 15, y: 20 }],
+        blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+      doors: [], obstacles: [],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+    }])
+    expect(prepareDnd5ePlayerMove({
+      action, map, characters: [character()],
+      initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })).toEqual({ ok: false, reason: 'movement-blocked' })
+  })
+
   it('spends movement feet through the 5e Headless engine and never changes AP', () => {
     const hero = character()
     const prepared = prepareDnd5ePlayerMove({

@@ -31,12 +31,14 @@ function sharedAccessHeaders(): Record<string, string> {
 }
 
 function sharedSessionUrl(url: string, includeToken = false): string {
-  const room = getRoomSession()?.roomId ?? (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim()
+  const session = getRoomSession()
+  const room = session?.roomId ?? (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim()
   const token = import.meta.env.VITE_STARS_ACCESS_TOKEN as string | undefined
-  if (!room && (!includeToken || !token)) return url
+  if (!room && (!includeToken || (!token && !session?.memberId))) return url
   const parsed = new URL(url)
   if (room) parsed.searchParams.set('room', room)
   if (includeToken && token) parsed.searchParams.set('token', token)
+  if (includeToken && session?.memberId) parsed.searchParams.set('member', session.memberId)
   return parsed.toString()
 }
 
@@ -70,6 +72,11 @@ function sharedApiCandidates(): string[] {
   const configured = configuredApiBases()
   if (configured) return configured
   return [defaultDmApiBase(), sameOriginApiBase()].filter((value, index, all) => all.indexOf(value) === index)
+}
+
+function sharedMemberHeaders(): Record<string, string> {
+  const memberId = getRoomSession()?.memberId
+  return memberId ? { 'X-Stars-Member': memberId } : {}
 }
 
 function sharedProtocolHeaders(): Record<string, string> {
@@ -129,6 +136,7 @@ async function requestJson<T>(path: string, init?: RequestInit, resourceName?: s
           ...(init?.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }),
           ...(init?.headers ?? {}),
           ...sharedAccessHeaders(),
+          ...sharedMemberHeaders(),
         },
       })
       if (!res.ok) {
@@ -203,7 +211,6 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
   if (!canWriteSharedState()) {
     if (
       name !== 'characters' &&
-      name !== 'maps' &&
       name !== 'dodge' &&
       name !== 'gale-combo' &&
       name !== 'stable-mind' &&
@@ -215,7 +222,7 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
       name !== 'dice-events' &&
       name !== 'combat-log'
     ) return
-    if ((name === 'characters' || name === 'maps') && (await sharedCombatIsActive())) return
+    if (name === 'characters' && (await sharedCombatIsActive())) return
   }
   const validation = validateAndMigrateSharedResource(name, data)
   if (validation.status === 'invalid') {
@@ -232,6 +239,7 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
           'Content-Type': 'application/json',
           ...sharedSecretHeader(),
           ...sharedAccessHeaders(),
+          ...sharedMemberHeaders(),
           ...sharedProtocolHeaders(),
           'X-Stars-Expected-Revision': String(expectedRevision),
         },
@@ -287,7 +295,7 @@ export async function publishSharedEvent<T>(channel: string, data: T): Promise<v
     sharedEventApiCandidates().map((api) =>
       fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
+        headers: { 'Content-Type': 'application/json', ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(data),
       }),
     ),
@@ -301,7 +309,7 @@ export async function clearSharedEventBacklog(channels?: string[]): Promise<void
       targets.map((channel) =>
         fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
           method: 'DELETE',
-          headers: { ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
+          headers: { ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         }),
       ),
     ),
@@ -317,6 +325,7 @@ async function performClearSharedResource(name: string): Promise<void> {
         method: 'DELETE',
         headers: {
           ...sharedAccessHeaders(),
+          ...sharedMemberHeaders(),
           ...sharedProtocolHeaders(),
           'X-Stars-Expected-Revision': String(expectedRevision),
         },
@@ -362,7 +371,7 @@ export async function mutateSharedCombatInterrupt<T>(mutation: SharedCombatInter
     try {
       const res = await fetch(sharedSessionUrl(`${api}/state/combat-interrupts/interrupt`), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
+        headers: { 'Content-Type': 'application/json', ...sharedSecretHeader(), ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         body: JSON.stringify(mutation),
       })
       if (res.ok) {
@@ -537,7 +546,7 @@ export async function putSharedImage(id: string, blob: Blob): Promise<boolean> {
     try {
       const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
+        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
         body: blob,
       })
       if (res.ok) return true
@@ -552,7 +561,7 @@ export async function getSharedImage(id: string): Promise<Blob | undefined> {
   for (const api of sharedApiCandidates()) {
     try {
       const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
-        headers: { ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
+        headers: { ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
       })
       if (!res.ok) continue
       return await res.blob()
@@ -569,7 +578,7 @@ export async function deleteSharedImage(id: string): Promise<void> {
     sharedWriteApiCandidates().map((api) =>
       fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
         method: 'DELETE',
-        headers: { ...sharedAccessHeaders(), ...sharedProtocolHeaders() },
+        headers: { ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
       }),
     ),
   )

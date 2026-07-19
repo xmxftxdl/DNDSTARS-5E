@@ -145,6 +145,8 @@ export interface Dnd5eSpellCastPayload {
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
+  /** 点起源范围法术的权威落点；DM 会据此重新计算效果线。 */
+  areaTargetCell?: GridCell
   /** Ordered per-projectile targets; duplicates allocate multiple projectiles to one creature. */
   projectileTargetIds?: string[]
   /** 塑能学派14级“超限导能”：由DM端重新验证资格并掷后续反噬伤害。 */

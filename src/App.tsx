@@ -19,11 +19,15 @@ import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesSta
 import { synchronizeRoomPlugins } from './lib/roomPluginSync'
 import { subscribeSharedResourceInvalidation } from './lib/sharedApi'
 import { useMapStore } from './store/maps'
+import { useFogStore } from './store/fog'
+import { useMapGeometryStore } from './store/mapGeometry'
 import { useCharacterStore } from './store/characters'
 import { SHARED_SPELLBOOK_RESOURCE, useSpellbookStore } from './store/spellbook'
 import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e'
 import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId } from './lib/playerView'
+import { MAP_FOG_RESOURCE } from './lib/fogOfWar'
+import { MAP_GEOMETRY_RESOURCE } from './lib/mapGeometry'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 
 export default function App() {
@@ -35,6 +39,8 @@ export default function App() {
   const endpointMode = roomSession?.role ?? modeFromPort()
   const roomReady = !!roomSession || bypassRoomLobby
   const loadSharedMaps = useMapStore((s) => s.loadShared)
+  const loadSharedFog = useFogStore((s) => s.loadShared)
+  const loadSharedMapGeometry = useMapGeometryStore((s) => s.loadShared)
   const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
   const loadSharedSpellbook = useSpellbookStore((s) => s.loadShared)
 
@@ -107,16 +113,25 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedFog(), loadSharedMapGeometry()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
+    const stopFog = subscribeSharedResourceInvalidation(MAP_FOG_RESOURCE, loadSharedFog)
+    const stopMapGeometry = subscribeSharedResourceInvalidation(MAP_GEOMETRY_RESOURCE, async () => {
+      await loadSharedMapGeometry()
+      // Geometry changes can make tokens newly visible or hidden without changing the map resource.
+      // Re-fetch the server-side player projection immediately instead of waiting for recovery polling.
+      await loadSharedMaps()
+    })
     return () => {
       stopMaps()
       stopCharacters()
       stopSpellbook()
+      stopFog()
+      stopMapGeometry()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCharacters, loadSharedFog, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return

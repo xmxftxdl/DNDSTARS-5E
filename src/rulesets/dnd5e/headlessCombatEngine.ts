@@ -2,7 +2,7 @@ import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
 import type { AttackResolution, D20RollMode, SavingThrowResolution, TurnEconomy, TurnResource } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { resolveDnd5eAttackOutcome } from './attackResolution'
+import { DND5E_TOTAL_COVER_ARMOR_CLASS, resolveDnd5eAttackOutcome } from './attackResolution'
 import {
   dnd5ePluginFeatureDefinition,
   dnd5ePluginHeadlessActionDefinition,
@@ -10,6 +10,7 @@ import {
   type Dnd5ePluginAction,
 } from './pluginApi'
 import type { Dnd5eSandboxCapabilityOperation } from './pluginSandbox'
+import type { Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
 import { validateDnd5ePluginDiceRolls } from './pluginDice'
 import {
   getDnd5eSrdMonster,
@@ -221,6 +222,10 @@ export interface Dnd5eHeadlessCombatState {
   initiativeOrder: readonly string[]
   /** 由 DM 地图快照按 Token 占位与地图比例计算；键使用 dnd5eCombatantPairKey。 */
   distanceFeetByCombatantPair?: Record<string, number>
+  /** Host 编译的有向掩护加值；键为 attackerId\0targetId。 */
+  coverBonusByCombatantPair?: Record<string, 2 | 5>
+  /** Host 编译的全掩护／效果线阻断。 */
+  lineOfEffectBlockedByCombatantPair?: Record<string, true>
   /** Optional map-scheduler slot identity for creatures with multiple turns. */
   turnSlotId?: string
   combatants: Record<string, Dnd5eCombatant>
@@ -228,6 +233,10 @@ export interface Dnd5eHeadlessCombatState {
 
 export function dnd5eCombatantPairKey(leftId: string, rightId: string): string {
   return leftId < rightId ? `${leftId}\u0000${rightId}` : `${rightId}\u0000${leftId}`
+}
+
+export function dnd5eDirectedCombatantPairKey(actorId: string, targetId: string): string {
+  return `${actorId}\u0000${targetId}`
 }
 
 function dnd5eAttackDistanceFeet(
@@ -526,6 +535,7 @@ export type Dnd5eCombatEvent =
   | { type: 'turn-resource-spent'; actorId: string; resource: TurnResource; amount?: number }
   | { type: 'moved'; actorId: string; from: { x: number; y: number }; to: { x: number; y: number }; distance: number }
   | { type: 'item-area-triggered'; actorId: string; areaId: string; areaKind: 'ball-bearings' | 'caltrops' | 'hunting-trap'; success: boolean }
+  | { type: 'persistent-area-triggered'; actorId: string; targetId: string; areaId: string; triggerId: string; timing: Dnd5ePersistentAreaTriggerSnapshot['timing']; saveSuccess?: boolean; damage: number; conditionApplied?: Dnd5eStandardConditionId }
   | { type: 'attack-resolved'; actorId: string; targetId: string; d20: number; total: number; armorClass: number; hit: boolean; critical: boolean }
   | { type: 'healing-applied'; targetId: string; amount: number; hpBefore: number; hpAfter: number }
   | { type: 'temporary-hit-points-gained'; actorId: string; amount: number; current: number }
@@ -603,6 +613,10 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
     initiativeOrder: [...state.initiativeOrder],
     distanceFeetByCombatantPair: state.distanceFeetByCombatantPair
       ? { ...state.distanceFeetByCombatantPair }
+      : undefined,
+    coverBonusByCombatantPair: state.coverBonusByCombatantPair ? { ...state.coverBonusByCombatantPair } : undefined,
+    lineOfEffectBlockedByCombatantPair: state.lineOfEffectBlockedByCombatantPair
+      ? { ...state.lineOfEffectBlockedByCombatantPair }
       : undefined,
     combatants: Object.fromEntries(Object.entries(state.combatants).map(([id, combatant]) => [id, {
       ...combatant,
@@ -2592,8 +2606,11 @@ export function dnd5eTargetArmorClassForAttack(
     return spellId === 'shield-of-faith' && source?.concentrating === true &&
       source.classState.concentrationSpellId === spellId && source.classState.concentrationTargetIds?.includes(target.id)
   })
+  const pairKey = dnd5eDirectedCombatantPairKey(actorId, targetId)
+  if (state.lineOfEffectBlockedByCombatantPair?.[pairKey]) return DND5E_TOTAL_COVER_ARMOR_CLASS
+  const coverBonus = state.coverBonusByCombatantPair?.[pairKey] ?? 0
   return target.armorClass + (multiattackDefense ? 4 : 0) + (shieldOfFaith ? 2 : 0) +
-    (target.classState.shieldSpellActive ? 5 : 0)
+    (target.classState.shieldSpellActive ? 5 : 0) + coverBonus
 }
 
 export function dnd5eRepeatedMeleeAttackMode(
@@ -5434,6 +5451,145 @@ export function resolveDnd5eSandboxedPluginCapabilities(
       return fail(state, events, 'invalid-plugin-action')
     }
   }
+  return { ok: true, state, events }
+}
+
+export interface Dnd5ePersistentAreaDmAdjustment {
+  damage?: { mode: 'set' | 'add' | 'multiply'; value: number }
+  saveSuccessOverride?: boolean
+  blockedConditionIds?: readonly Dnd5eStandardConditionId[]
+}
+
+function adjustedPersistentAreaDamage(
+  amount: number,
+  adjustment: Dnd5ePersistentAreaDmAdjustment['damage'],
+): number {
+  if (!adjustment || !Number.isFinite(adjustment.value)) return amount
+  const adjusted = adjustment.mode === 'set'
+    ? adjustment.value
+    : adjustment.mode === 'add'
+      ? amount + adjustment.value
+      : amount * adjustment.value
+  return Math.max(0, Math.min(1_000_000, Math.floor(adjusted)))
+}
+
+/**
+ * Authoritative, off-turn transaction for persistent areas. Declarations are
+ * snapshotted on the map; all random values and DM adjustments are explicit inputs.
+ */
+export function resolveDnd5ePersistentAreaTrigger(
+  source: Dnd5eHeadlessCombatState,
+  input: {
+    areaId: string
+    sourceId: string
+    targetId: string
+    trigger: Dnd5ePersistentAreaTriggerSnapshot
+    d20?: number
+    d20Second?: number
+    blessRoll?: number
+    baneRoll?: number
+    damageRolls?: readonly number[]
+    dmAdjustment?: Dnd5ePersistentAreaDmAdjustment
+  },
+): Dnd5eActionResult {
+  const state = clone(source)
+  const events: Dnd5eCombatEvent[] = []
+  if (!state.active) return fail(state, events, 'combat-ended')
+  const actor = state.combatants[input.sourceId]
+  const target = state.combatants[input.targetId]
+  if (!actor || !target || target.currentHp <= 0) return fail(state, events, 'invalid-target')
+  if (!input.areaId || !input.trigger.id) return fail(state, events, 'invalid-plugin-action')
+
+  let saveSuccess: boolean | undefined
+  if (input.trigger.savingThrow) {
+    if (!Number.isInteger(input.d20) || input.d20! < 1 || input.d20! > 20) {
+      return fail(state, events, 'invalid-dice')
+    }
+    const { ability, dc } = input.trigger.savingThrow
+    const mode = dnd5eSavingThrowMode(target, ability, { effectVisible: true })
+    const rolls = mode === 'normal' ? [input.d20!] : [input.d20!, input.d20Second ?? 0]
+    if (mode !== 'normal' && (!Number.isInteger(input.d20Second) || input.d20Second! < 1 || input.d20Second! > 20)) {
+      return fail(state, events, 'invalid-dice')
+    }
+    let modifier: number
+    try {
+      modifier = (target.savingThrowBonuses[ability] ?? rules.abilityModifier(target.abilities[ability])) +
+        resolveDnd5eBlessRoll(state, target, input.blessRoll) -
+        resolveDnd5eBaneRoll(state, target, input.baneRoll)
+    } catch {
+      return fail(state, events, 'invalid-dice')
+    }
+    const save = rules.resolveSavingThrow({ rolls, mode, modifier, dc })
+    saveSuccess = dnd5eConditionSavingThrowAutomaticallyFails(target, ability) ? false : save.success
+    if (input.dmAdjustment?.saveSuccessOverride != null) {
+      saveSuccess = input.dmAdjustment.saveSuccessOverride
+    }
+    events.push({
+      type: 'saving-throw-resolved', targetId: target.id, ability,
+      d20: save.roll.d20, modifier, total: save.roll.total, dc, success: saveSuccess,
+    })
+  } else if (input.d20 != null || input.d20Second != null || input.blessRoll != null || input.baneRoll != null) {
+    return fail(state, events, 'invalid-dice')
+  }
+
+  let appliedDamage = 0
+  if (input.trigger.damage) {
+    const damage = input.trigger.damage
+    const rolls = input.damageRolls ?? []
+    if (
+      rolls.length !== damage.count ||
+      rolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > damage.sides)
+    ) return fail(state, events, 'invalid-dice')
+    let amount = rules.resolveDamage({
+      count: damage.count,
+      sides: damage.sides,
+      bonus: damage.modifier ?? 0,
+      rolls,
+    }).total
+    if (saveSuccess) {
+      amount = input.trigger.savingThrow?.onSuccess === 'half' ? Math.floor(amount / 2) : 0
+    }
+    appliedDamage = adjustDamageForTarget(target, amount, damage.type)
+    appliedDamage = adjustedPersistentAreaDamage(appliedDamage, input.dmAdjustment?.damage)
+    applyDamage(target, appliedDamage, false, events, actor, state, [damage.type])
+  } else if ((input.damageRolls?.length ?? 0) > 0 || input.dmAdjustment?.damage) {
+    return fail(state, events, 'invalid-dice')
+  }
+
+  let conditionApplied: Dnd5eStandardConditionId | undefined
+  const condition = input.trigger.condition
+  if (
+    condition && !saveSuccess &&
+    !input.dmAdjustment?.blockedConditionIds?.includes(condition.condition)
+  ) {
+    const applied = applyDnd5eStandardConditionEffect(target, actor, {
+      id: dnd5eActiveEffectId(
+        `plugin-area:${input.areaId}:${input.trigger.id}`,
+        actor.id,
+        target.id,
+        condition.condition,
+      ),
+      rulesId: `plugin-area:${input.areaId}:${input.trigger.id}`,
+      appliedTurnKey: classFeatureTurnKey(state, target.id),
+      condition: condition.condition,
+      duration: dnd5eCapabilityDuration(condition.duration),
+      repeatSave: condition.duration.expiresAt === 'target-turn-end-save' && condition.duration.saveAbility && condition.duration.saveDc
+        ? {
+            ability: condition.duration.saveAbility,
+            dc: condition.duration.saveDc,
+            timing: 'target-turn-end',
+            onSuccess: 'remove',
+          }
+        : undefined,
+      sourceKind: 'plugin',
+    }, events)
+    if (applied) conditionApplied = condition.condition
+  }
+  events.push({
+    type: 'persistent-area-triggered', actorId: actor.id, targetId: target.id,
+    areaId: input.areaId, triggerId: input.trigger.id, timing: input.trigger.timing,
+    saveSuccess, damage: appliedDamage, conditionApplied,
+  })
   return { ok: true, state, events }
 }
 

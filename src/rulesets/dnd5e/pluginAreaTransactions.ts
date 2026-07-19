@@ -1,0 +1,116 @@
+import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
+import type { BattleMap } from '../../store/maps'
+import type { Character } from '../../types/character'
+import { dnd5eSavingThrowMode } from './passiveDefenses'
+import {
+  dnd5eCombatantHasConcentrationEffect,
+  resolveDnd5ePersistentAreaTrigger,
+  type Dnd5eActionResult,
+  type Dnd5eHeadlessCombatState,
+  type Dnd5ePersistentAreaDmAdjustment,
+} from './headlessCombatEngine'
+import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import {
+  recordDnd5ePersistentAreaTrigger,
+  type Dnd5ePersistentAreaTriggerCandidate,
+} from './pluginAreas'
+
+export interface PreparedDnd5ePersistentAreaTrigger {
+  candidate: Dnd5ePersistentAreaTriggerCandidate
+  state: Dnd5eHeadlessCombatState
+  map: BattleMap
+  characters: readonly Character[]
+  characterIdByCombatantId: Record<string, string>
+  targetName: string
+  save?: {
+    ability: NonNullable<Dnd5ePersistentAreaTriggerCandidate['trigger']['savingThrow']>['ability']
+    dc: number
+    mode: 'normal' | 'advantage' | 'disadvantage'
+    blessed: boolean
+    baned: boolean
+  }
+}
+
+export function prepareDnd5ePersistentAreaTrigger(input: {
+  combatId: string
+  round: number
+  map: BattleMap
+  characters: readonly Character[]
+  initiativeOrder: readonly InitiativeEntry[]
+  candidate: Dnd5ePersistentAreaTriggerCandidate
+}): { ok: true; prepared: PreparedDnd5ePersistentAreaTrigger } | { ok: false; reason: string } {
+  const snapshot = createDnd5eMapCombatSnapshot({
+    combatId: input.combatId,
+    round: input.round,
+    turnSlotId: input.initiativeOrder.find((entry) => entry.tokenId === input.candidate.targetToken.id)?.slotId,
+    map: input.map,
+    characters: input.characters,
+    initiativeOrder: input.initiativeOrder,
+  })
+  const source = snapshot.state.combatants[input.candidate.area.sourceTokenId]
+  const target = snapshot.state.combatants[input.candidate.targetToken.id]
+  if (!source || !target || target.currentHp <= 0) return { ok: false, reason: 'combatant-missing' }
+  const save = input.candidate.trigger.savingThrow
+    ? {
+        ability: input.candidate.trigger.savingThrow.ability,
+        dc: input.candidate.trigger.savingThrow.dc,
+        mode: dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, { effectVisible: true }),
+        blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bless'),
+        baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bane'),
+      }
+    : undefined
+  return {
+    ok: true,
+    prepared: {
+      candidate: input.candidate,
+      state: snapshot.state,
+      map: input.map,
+      characters: input.characters,
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+      targetName: target.name,
+      save,
+    },
+  }
+}
+
+export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
+  prepared: PreparedDnd5ePersistentAreaTrigger
+  d20?: number
+  d20Second?: number
+  blessRoll?: number
+  baneRoll?: number
+  damageRolls?: readonly number[]
+  dmAdjustment?: Dnd5ePersistentAreaDmAdjustment
+}): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
+  const { prepared } = input
+  const result = resolveDnd5ePersistentAreaTrigger(prepared.state, {
+    areaId: prepared.candidate.area.id,
+    sourceId: prepared.candidate.area.sourceTokenId,
+    targetId: prepared.candidate.targetToken.id,
+    trigger: prepared.candidate.trigger,
+    d20: input.d20,
+    d20Second: input.d20Second,
+    blessRoll: input.blessRoll,
+    baneRoll: input.baneRoll,
+    damageRolls: input.damageRolls,
+    dmAdjustment: input.dmAdjustment,
+  })
+  if (!result.ok) return { result }
+  const map = {
+    ...prepared.map,
+    dnd5ePluginAreas: recordDnd5ePersistentAreaTrigger(
+      prepared.map.dnd5ePluginAreas,
+      prepared.candidate,
+      result.state.round,
+    ),
+  }
+  return {
+    result,
+    application: planDnd5eMapResultApplication({
+      state: result.state,
+      map,
+      characters: prepared.characters,
+      characterIdByCombatantId: prepared.characterIdByCombatantId,
+    }),
+  }
+}

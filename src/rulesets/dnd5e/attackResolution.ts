@@ -8,6 +8,9 @@ export interface Dnd5eAttackOutcomeInput {
   forceHit?: boolean
 }
 
+/** Headless sentinel: total cover cannot be bypassed by a natural 20 or a forced hit. */
+export const DND5E_TOTAL_COVER_ARMOR_CLASS = 1_000_000
+
 /**
  * D&D 5e 2014 的最终命中/重击判定。
  *
@@ -18,7 +21,8 @@ export function resolveDnd5eAttackOutcome(input: Dnd5eAttackOutcomeInput): Attac
   const targetAc = input.targetArmorClass ?? input.attack.targetAc
   const threshold = Math.min(20, Math.max(2, Math.floor(input.criticalThreshold ?? 20)))
   const roll = input.attack.roll
-  const hit = roll.naturalTwenty || input.forceHit === true || (!roll.naturalOne && roll.total >= targetAc)
+  const totalCover = targetAc >= DND5E_TOTAL_COVER_ARMOR_CLASS
+  const hit = !totalCover && (roll.naturalTwenty || input.forceHit === true || (!roll.naturalOne && roll.total >= targetAc))
   const critical = hit && (roll.d20 >= threshold || input.automaticCritical === true)
   return { ...input.attack, targetAc, hit, critical }
 }

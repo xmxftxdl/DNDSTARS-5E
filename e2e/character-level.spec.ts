@@ -39,7 +39,8 @@ test('character level auto-saves while editing and survives an immediate refresh
   await page.getByRole('button', { name: '选择属性方式' }).click()
   await page.getByRole('button', { name: /标准数组/ }).click()
   await page.getByRole('button', { name: '开始分配' }).click()
-  await page.getByRole('button', { name: '加入种族调整' }).click()
+  await page.getByRole('button', { name: '加入种族调整并选择装备' }).click()
+  await page.getByRole('button', { name: '确认起始装备' }).click()
   await page.getByRole('textbox', { name: '角色名称' }).fill(name)
   await page.getByRole('button', { name: '创建角色' }).click()
 

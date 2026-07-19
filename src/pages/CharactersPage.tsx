@@ -17,8 +17,8 @@ import {
 } from '../lib/playerView'
 import { characterExportFileName, makeCharacterExport, parseCharacterExport } from '../lib/characterTransfer'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
-import { defaultEquipmentForDnd5eCharacter } from '../rulesets/dnd5e/equipment'
 import { dnd5eRaceSpeed } from '../rulesets/dnd5e/characterSetup'
+import { dnd5eStartingEquipmentPlan, resolveDnd5eStartingEquipment } from '../rulesets/dnd5e/startingEquipment'
 
 type Mode = 'player' | 'dm'
 
@@ -61,6 +61,11 @@ export default function CharactersPage() {
         ? { classes: { [definition.id]: { subclass: definition.subclass.id, selections: {} } } }
         : undefined
     const id = add(setup.name)
+    const startingEquipment = resolveDnd5eStartingEquipment(
+      id,
+      dnd5eStartingEquipmentPlan(setup.charClass, setup.background),
+      setup.startingEquipment,
+    )
     update(id, {
       charClass: setup.charClass,
       race: setup.race,
@@ -71,7 +76,8 @@ export default function CharactersPage() {
       savingThrows: definition ? [...definition.savingThrows] : [],
       speed: dnd5eRaceSpeed(setup.dnd5eRaceId ?? setup.race),
       hitPointMaximumMode: 'fixed',
-      equipment: defaultEquipmentForDnd5eCharacter({ charClass: setup.charClass }),
+      equipment: startingEquipment.equipment,
+      dnd5eInventory: startingEquipment.inventory,
       dnd5eClassChoices,
       ...(setup.recommendation ? {
         dnd5eCreationRecommendation: setup.recommendation,

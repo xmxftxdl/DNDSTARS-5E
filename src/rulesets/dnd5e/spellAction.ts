@@ -35,12 +35,19 @@ import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5e
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDiceCount, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
+import {
+  mapGeometryCoverFromPoint,
+  mapGeometryLineOfEffectBlocked,
+  mapGeometryMovementBlocked,
+  mapGeometryRuntimeForMap,
+} from '../../lib/mapGeometry'
 
 export type Dnd5eSpellCastRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'invalid-target'
   | 'target-out-of-range'
+  | 'effect-line-blocked'
   | 'spell-unavailable'
   | 'slot-unavailable'
   | 'combatant-missing'
@@ -115,6 +122,7 @@ export function dnd5eRepellingBlastPushDestination(
   const rows = Math.max(1, Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)))
   let destination = { x: target.x, y: target.y }
   let steps = 0
+  const geometry = mapGeometryRuntimeForMap(map.id)
   for (let step = 1; step <= maximumSteps; step += 1) {
     const anchor = { col: targetAnchor.col + dc * step, row: targetAnchor.row + dr * step }
     const position = tokenCenterForAnchorCell(anchor, target, map)
@@ -122,6 +130,9 @@ export function dnd5eRepellingBlastPushDestination(
     if (footprint.some((cell) =>
       cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows || blocked.has(cellKey(cell)),
     )) break
+    if (mapGeometryMovementBlocked({
+      geometry, map, token: { ...target, ...destination }, to: position,
+    }).blocked) break
     destination = position
     steps = step
   }
@@ -328,6 +339,38 @@ export function prepareDnd5eSpellCast(input: {
     actorIndex < 0 || !actorCombatant || !targetCombatant ||
     validTargetTokens.some((target) => !snapshot.state.combatants[target.id])
   ) return { ok: false, reason: 'combatant-missing' }
+  const areaCell = payload.areaTargetCell
+  const effectOrigin = spell.area?.origin === 'point' && areaCell
+    ? {
+        x: input.map.gridOffsetX + (areaCell.col + 0.5) * input.map.gridSize,
+        y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
+      }
+    : actorToken
+  const effectOriginElevation = spell.area?.origin === 'point' && areaCell ? 0 : actorToken.elevationFeet ?? 0
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  if (validTargetTokens.some((currentTarget) => mapGeometryLineOfEffectBlocked({
+    geometry,
+    from: effectOrigin,
+    to: currentTarget,
+    fromElevationFeet: effectOriginElevation,
+    toElevationFeet: currentTarget.elevationFeet ?? 0,
+  }))) return { ok: false, reason: 'effect-line-blocked' }
+  if (spell.saveAbility === 'dex') {
+    for (const currentTarget of validTargetTokens) {
+      const combatant = snapshot.state.combatants[currentTarget.id]
+      const cover = mapGeometryCoverFromPoint({
+        geometry,
+        from: effectOrigin,
+        to: currentTarget,
+        fromElevationFeet: effectOriginElevation,
+        toElevationFeet: currentTarget.elevationFeet ?? 0,
+      })
+      if (cover.armorClassBonus > 0) {
+        combatant.savingThrowBonuses.dex =
+          (combatant.savingThrowBonuses.dex ?? rules.abilityModifier(combatant.abilities.dex)) + cover.armorClassBonus
+      }
+    }
+  }
   for (const [tokenId, economy] of Object.entries(input.turnEconomyByToken ?? {})) {
     const combatant = snapshot.state.combatants[tokenId]
     if (!combatant) continue

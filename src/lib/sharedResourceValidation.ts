@@ -5,6 +5,9 @@ import {
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
+import { normalizeDnd5ePersistentAreaTriggerSnapshot } from '../rulesets/dnd5e/persistentAreaTypes'
+import { MAP_FOG_RESOURCE, normalizeSharedMapFog } from './fogOfWar'
+import { MAP_GEOMETRY_RESOURCE, normalizeSharedMapGeometry } from './mapGeometry'
 import {
   defaultCombatInterruptPhase,
   type CombatInterruptKind,
@@ -40,6 +43,8 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   'combat-interrupts': 'interrupts',
   'player-action-requests': 'requests',
   'player-action-processed': 'actionIds',
+  [MAP_FOG_RESOURCE]: 'maps',
+  [MAP_GEOMETRY_RESOURCE]: 'maps',
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -80,6 +85,43 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     ) issues.push(`${areaPath} 轮数无效`)
     if (raw.concentrationId != null && (typeof raw.concentrationId !== 'string' || !raw.concentrationId)) {
       issues.push(`${areaPath}.concentrationId 无效`)
+    }
+    if (raw.relation != null && !['any', 'ally', 'enemy'].includes(String(raw.relation))) {
+      issues.push(`${areaPath}.relation 无效`)
+    }
+    if (raw.includeSelf != null && typeof raw.includeSelf !== 'boolean') {
+      issues.push(`${areaPath}.includeSelf 无效`)
+    }
+    const triggerIds = new Set<string>()
+    if (raw.triggers != null) {
+      if (!Array.isArray(raw.triggers) || raw.triggers.length > 16) {
+        issues.push(`${areaPath}.triggers 无效`)
+      } else {
+        raw.triggers.forEach((trigger, triggerIndex) => {
+          const normalized = normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)
+          if (!normalized || triggerIds.has(normalized.id)) {
+            issues.push(`${areaPath}.triggers[${triggerIndex}] 无效或重复`)
+          } else triggerIds.add(normalized.id)
+        })
+      }
+    }
+    if (raw.triggerReceipts != null) {
+      if (!Array.isArray(raw.triggerReceipts) || raw.triggerReceipts.length > 2_048) {
+        issues.push(`${areaPath}.triggerReceipts 无效`)
+      } else {
+        const transactionIds = new Set<string>()
+        raw.triggerReceipts.forEach((receipt, receiptIndex) => {
+          const receiptPath = `${areaPath}.triggerReceipts[${receiptIndex}]`
+          if (
+            !isPlainObject(receipt) || !triggerIds.has(String(receipt.triggerId)) ||
+            typeof receipt.targetTokenId !== 'string' || !receipt.targetTokenId ||
+            !Number.isInteger(receipt.round) || Number(receipt.round) < 0 ||
+            typeof receipt.transactionId !== 'string' || !receipt.transactionId ||
+            transactionIds.has(receipt.transactionId)
+          ) issues.push(`${receiptPath} 无效或重复`)
+          else transactionIds.add(receipt.transactionId)
+        })
+      }
     }
     if (!Array.isArray(raw.cells) || raw.cells.length < 1 || raw.cells.length > 4_096) {
       issues.push(`${areaPath}.cells 无效`)
@@ -242,6 +284,12 @@ function migrateDnd5eStateEnvelope(
 export function validateAndMigrateSharedResource(name: string, input: unknown): SharedResourceValidation {
   if (!isPlainObject(input)) return { status: 'invalid', reasons: ['共享状态必须是对象'] }
   const reasons: string[] = []
+  if (name === MAP_FOG_RESOURCE && !normalizeSharedMapFog(input)) {
+    reasons.push('战争迷雾资源结构损坏')
+  }
+  if (name === MAP_GEOMETRY_RESOURCE && !normalizeSharedMapGeometry(input)) {
+    reasons.push('地图几何资源结构损坏')
+  }
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {
     reasons.push(`缺少或损坏数组字段 ${requiredArray}`)

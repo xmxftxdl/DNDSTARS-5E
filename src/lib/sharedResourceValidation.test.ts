@@ -14,6 +14,7 @@ describe('shared resource runtime validation', () => {
       'combat-interrupts': { interrupts: [], updatedAt: 1 },
       'player-action-requests': { requests: [], updatedAt: 1 },
       'player-action-processed': { actionIds: [], updatedAt: 1 },
+      'map-fog': { schemaVersion: 1, maps: [], updatedAt: 1 },
       'dm-authority-ready': { ready: false, updatedAt: 1 },
       'player-action': { id: 'action', updatedAt: 1 },
       'player-action-ack': { id: 'ack', updatedAt: 1 },
@@ -31,6 +32,11 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('maps', { maps: [{ id: '' }] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('spellbook', { spells: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('map-fog', {
+      schemaVersion: 1,
+      updatedAt: 1,
+      maps: [{ mapId: 'map', filled: true, color: '#000000', opacity: 0.98, shapes: [{ kind: 'rect' }] }],
+    }).status).toBe('invalid')
   })
 
   it('physically migrates the retired enemy AP ledger', () => {

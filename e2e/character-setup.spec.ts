@@ -49,6 +49,11 @@ test('角色 Setup 支持新手推荐和老手逐次 4d6 分配', async ({ page,
   await page.getByRole('button', { name: '愿意帮助与牺牲' }).click()
   await page.getByRole('button', { name: '生成推荐' }).click()
 
+  await expect(page.getByRole('heading', { name: '牧师起始装备' })).toBeVisible()
+  await page.getByRole('button', { name: '皮甲', exact: true }).click()
+  await page.getByRole('button', { name: '探索者套组', exact: true }).click()
+  await page.getByRole('button', { name: '确认起始装备' }).click()
+
   await expect(page.getByRole('combobox', { name: '职业' })).toHaveValue('牧师')
   await expect(page.getByRole('combobox', { name: '种族' })).toHaveValue('矮人')
   await expect(page.getByRole('combobox', { name: '阵营' })).toHaveValue('守序善良')
@@ -73,7 +78,8 @@ test('角色 Setup 支持新手推荐和老手逐次 4d6 分配', async ({ page,
     await page.getByRole('button', { name: /投掷 4d6/ }).click()
     await page.getByRole('button', { name: new RegExp(`^${ability}填入`) }).click()
   }
-  await page.getByRole('button', { name: '加入种族调整' }).click()
+  await page.getByRole('button', { name: '加入种族调整并选择装备' }).click()
+  await page.getByRole('button', { name: '确认起始装备' }).click()
   await page.getByRole('dialog', { name: '创建角色 Setup' }).getByRole('textbox', { name: '角色名称' }).fill('投骰战士')
   await page.getByRole('button', { name: '创建角色' }).click()
 

@@ -1,14 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
-import { prepareDnd5eSpellCast, previewDnd5eSpellAttack, previewDnd5eSpellSavingThrow, resolvePreparedDnd5eSpellCast } from './spellAction'
+import { dnd5eRepellingBlastPushDestination, prepareDnd5eSpellCast, previewDnd5eSpellAttack, previewDnd5eSpellSavingThrow, resolvePreparedDnd5eSpellCast } from './spellAction'
 import {
   dnd5eBardMagicalSecretSpellIds,
   dnd5eCombatSpellSelectionLimits,
   dnd5eMetamagicCost,
 } from './spells'
+import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -44,6 +45,73 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 }
 
 describe('SRD 5.1 Headless spell authority bridge', () => {
+  afterEach(() => setMapGeometryRuntime([]))
+
+  it('rejects a targeted spell when DM geometry blocks its effect line', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } } } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const input = fixture(wizard, 'fire-bolt', 0, enemy)
+    setMapGeometryRuntime([{
+      mapId: input.map.id,
+      walls: [{
+        id: 'wall', kind: 'wall', label: '法术阻挡墙',
+        points: [{ x: 300, y: 0 }, { x: 300, y: 100 }],
+        blocksVision: false, blocksMovement: false, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+      doors: [], obstacles: [],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+    }])
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'effect-line-blocked' })
+  })
+
+  it('adds half and three-quarters cover to Dexterity saves from the area point of origin', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['fireball'] } } } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const input = fixture(wizard, 'fireball', 3, enemy)
+    input.action.dnd5eSpellCast!.areaTargetCell = { col: 5, row: 0 }
+    setMapGeometryRuntime([{
+      mapId: input.map.id, walls: [], doors: [],
+      obstacles: [{
+        id: 'crate', kind: 'obstacle', label: '木箱', cover: 'half',
+        points: [{ x: 400, y: 10 }, { x: 450, y: 10 }, { x: 450, y: 40 }, { x: 400, y: 40 }],
+        blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
+        baseHeightFeet: 0, heightFeet: 5, createdAt: 1,
+      }],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+    }])
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.savingThrow?.modifier).toBe(2)
+  })
+
+  it('stops forced spell movement at a movement-blocking wall', () => {
+    const actor = token('actor', 'player', 25, 'wizard')
+    const target = token('target', 'enemy', 75)
+    const map: BattleMap = {
+      id: 'push-map', name: 'Push', width: 500, height: 200, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actor, target],
+    }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [{
+        id: 'wall', kind: 'wall', label: '墙', points: [{ x: 100, y: 0 }, { x: 100, y: 100 }],
+        blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+      doors: [], obstacles: [],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+    }])
+    expect(dnd5eRepellingBlastPushDestination(map, actor, target))
+      .toEqual({ to: { x: target.x, y: target.y }, distanceFeet: 0 })
+  })
+
   it('charges Twinned Spell by the current spell level and one point for a cantrip', () => {
     expect(dnd5eMetamagicCost('twinned', 0)).toBe(1)
     expect(dnd5eMetamagicCost('twinned', 3)).toBe(3)

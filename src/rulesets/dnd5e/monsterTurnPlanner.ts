@@ -8,6 +8,7 @@ import {
   type GridCell,
 } from '../../lib/gridCombat'
 import { dnd5eMonsterMapSpeed, getDnd5eSrdMonster, type Dnd5eMonsterAction } from './monsters'
+import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 
 export interface Dnd5eMonsterTurnPlan {
   moved: boolean
@@ -77,6 +78,10 @@ function moveToward(
       const position = tokenCenterForAnchorCell(next, enemy, map)
       const candidate = { ...enemy, ...position }
       if (tokenOccupiedCellsAt(candidate, map, candidate).some((cell) => blocked.has(`${cell.col},${cell.row}`))) continue
+      const currentPosition = tokenCenterForAnchorCell(current.cell, enemy, map)
+      if (mapGeometryMovementBlocked({
+        geometry: mapGeometryRuntimeForMap(map.id), map, token: { ...enemy, ...currentPosition }, to: position,
+      }).blocked) continue
       const steps = current.steps + 1
       queue.push({ cell: next, steps })
       const distance = tokenFootprintDistanceCells(candidate, target, map)
@@ -112,7 +117,11 @@ function moveAway(
         if (candidate.col < 0 || candidate.row < 0 || candidate.col >= columns || candidate.row >= rows) return false
         const position = tokenCenterForAnchorCell(candidate, enemy, map)
         const placed = { ...enemy, ...position }
-        return !tokenOccupiedCellsAt(placed, map, placed).some((cell) => blocked.has(`${cell.col},${cell.row}`))
+        if (tokenOccupiedCellsAt(placed, map, placed).some((cell) => blocked.has(`${cell.col},${cell.row}`))) return false
+        const currentPosition = tokenCenterForAnchorCell(current, enemy, map)
+        return !mapGeometryMovementBlocked({
+          geometry: mapGeometryRuntimeForMap(map.id), map, token: { ...enemy, ...currentPosition }, to: position,
+        }).blocked
       })
       .sort((left, right) =>
         ((right.col - source.col) ** 2 + (right.row - source.row) ** 2) -

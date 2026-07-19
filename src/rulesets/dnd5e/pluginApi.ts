@@ -16,9 +16,13 @@ import type {
   Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
 import { DND5E_2014_RACE_OPTIONS } from './characterOptions'
-import type { Dnd5eStandardConditionId } from './conditions'
-import type { Dnd5eDamageType } from './monsters'
+import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
+import type {
+  Dnd5ePersistentAreaTriggerDeclaration,
+  Dnd5ePluginEffectDuration,
+} from './persistentAreaTypes'
 import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
@@ -136,12 +140,7 @@ export interface Dnd5ePluginInterruptDeclaration {
 }
 
 /** 插件声明持续时间的 capability 输入；Host 会转换为 ActiveEffectInstance。 */
-export interface Dnd5ePluginEffectDuration {
-  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
-  remainingRounds?: number
-  saveAbility?: AbilityKey
-  saveDc?: number
-}
+export type { Dnd5ePluginEffectDuration } from './persistentAreaTypes'
 
 export interface Dnd5ePluginHeadlessActionContext {
   /** A private clone of the authoritative state; the resolver may mutate and return it. */
@@ -224,6 +223,7 @@ export interface Dnd5ePluginFeatureAction {
     color?: string
     durationRounds: number
     concentration?: boolean
+    triggers?: readonly Dnd5ePersistentAreaTriggerDeclaration[]
   }
 }
 
@@ -505,6 +505,59 @@ function clonePluginInterrupt(
   return { ...interrupt, prompt: interrupt.prompt.trim(), timeoutMs: interrupt.timeoutMs ?? 30_000, options }
 }
 
+function clonePersistentAreaTriggers(
+  triggers: readonly Dnd5ePersistentAreaTriggerDeclaration[] | undefined,
+  featureId: string,
+): Dnd5ePersistentAreaTriggerDeclaration[] | undefined {
+  if (triggers == null) return undefined
+  if (!Array.isArray(triggers) || triggers.length < 1 || triggers.length > 16) {
+    throw new Error(`Invalid plugin persistent area triggers: ${featureId}`)
+  }
+  const seen = new Set<string>()
+  return triggers.map((trigger) => {
+    if (
+      !validId(trigger.id) || seen.has(trigger.id) ||
+      typeof trigger.label !== 'string' || !trigger.label.trim() || trigger.label.length > 120 ||
+      !['on-create', 'on-enter', 'turn-start', 'turn-end'].includes(trigger.timing) ||
+      (!trigger.damage && !trigger.condition)
+    ) throw new Error(`Invalid plugin persistent area trigger: ${featureId}`)
+    seen.add(trigger.id)
+    const damage = trigger.damage
+    if (damage && (
+      !finiteInteger(damage.count, 1, 40) || !finiteInteger(damage.sides, 2, 100) ||
+      !finiteInteger(damage.modifier ?? 0, -1_000, 1_000) ||
+      !(DND5E_DAMAGE_TYPES as readonly string[]).includes(damage.type)
+    )) throw new Error(`Invalid plugin persistent area damage: ${featureId}:${trigger.id}`)
+    const savingThrow = trigger.savingThrow
+    if (savingThrow && (
+      !ABILITY_KEYS.includes(savingThrow.ability) ||
+      !(savingThrow.dc === 'source-save-dc' || finiteInteger(savingThrow.dc, 1, 40)) ||
+      !['none', 'half'].includes(savingThrow.onSuccess)
+    )) throw new Error(`Invalid plugin persistent area save: ${featureId}:${trigger.id}`)
+    const condition = trigger.condition
+    if (condition) {
+      const duration = condition.duration
+      if (
+        !(DND5E_STANDARD_CONDITION_IDS as readonly string[]).includes(condition.condition) ||
+        !['source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save'].includes(duration.expiresAt) ||
+        (duration.remainingRounds != null && !finiteInteger(duration.remainingRounds, 1, 14_400)) ||
+        (duration.saveAbility != null && !ABILITY_KEYS.includes(duration.saveAbility)) ||
+        (duration.saveDc != null && !finiteInteger(duration.saveDc, 1, 40)) ||
+        (duration.expiresAt === 'target-turn-end-save' && (!duration.saveAbility || !duration.saveDc))
+      ) throw new Error(`Invalid plugin persistent area condition: ${featureId}:${trigger.id}`)
+    }
+    return {
+      ...trigger,
+      label: trigger.label.trim(),
+      oncePerRound: trigger.oncePerRound !== false,
+      damage: damage ? { ...damage, modifier: damage.modifier ?? 0 } : undefined,
+      savingThrow: savingThrow ? { ...savingThrow } : undefined,
+      condition: condition ? { ...condition, duration: { ...condition.duration } } : undefined,
+      dmAdjustable: trigger.dmAdjustable === true,
+    }
+  })
+}
+
 function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined): Dnd5ePluginFeatureAction | undefined {
   if (!action) return undefined
   return {
@@ -516,7 +569,17 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
       ...action.interrupt,
       options: action.interrupt.options.map((option) => ({ ...option })),
     } : undefined,
-    persistentArea: action.persistentArea ? { ...action.persistentArea } : undefined,
+    persistentArea: action.persistentArea ? {
+      ...action.persistentArea,
+      triggers: action.persistentArea.triggers?.map((trigger) => ({
+        ...trigger,
+        damage: trigger.damage ? { ...trigger.damage } : undefined,
+        savingThrow: trigger.savingThrow ? { ...trigger.savingThrow } : undefined,
+        condition: trigger.condition
+          ? { ...trigger.condition, duration: { ...trigger.condition.duration } }
+          : undefined,
+      })),
+    } : undefined,
   }
 }
 
@@ -691,7 +754,11 @@ export function registerDnd5eRulesPlugin(
         targeting: clonePluginTargeting(definition.action.targeting, featureId),
         interrupt: clonePluginInterrupt(definition.action.interrupt, featureId),
         persistentArea: definition.action.persistentArea
-          ? { ...definition.action.persistentArea, label: definition.action.persistentArea.label.trim() }
+          ? {
+              ...definition.action.persistentArea,
+              label: definition.action.persistentArea.label.trim(),
+              triggers: clonePersistentAreaTriggers(definition.action.persistentArea.triggers, featureId),
+            }
           : undefined,
       } : undefined
       const registered: RegisteredDnd5ePluginFeature = {

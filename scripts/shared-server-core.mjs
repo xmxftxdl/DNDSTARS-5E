@@ -279,7 +279,6 @@ function fnv1a(str) {
 // 主要是 combat / player-action-ack）才要求 secret；白名单资源玩家照常可写。
 const PLAYER_WRITABLE_STATE = new Set([
   'characters',
-  'maps',
   'dodge',
   'gale-combo',
   'stable-mind',
@@ -578,7 +577,7 @@ function sharedSecret() {
 /**
  * 写鉴权判定。返回 { ok:true } 或 { ok:false, status }.
  * - flag 未设（secret==null）⇒ 永远放行（与今日行为字节等价，零回归）。
- * - flag 设了 + 资源在玩家白名单 ⇒ 放行（玩家照常写 characters/maps/...）。
+ * - flag 设了 + 资源在玩家白名单 ⇒ 放行（例如角色和玩家行动请求）。
  * - flag 设了 + DM 权威资源 + secret 正确 ⇒ 放行。
  * - flag 设了 + DM 权威资源 + secret 缺失/错误 ⇒ 401/403。
  */
@@ -995,6 +994,176 @@ function validateCombatInterruptState(value) {
   return null
 }
 
+function validGeometryPoint(point) {
+  return plainObject(point) && Number.isFinite(point.x) && Number.isFinite(point.y) &&
+    Math.abs(point.x) <= 1_000_000 && Math.abs(point.y) <= 1_000_000
+}
+
+function validGeometryEntity(entity, kind) {
+  if (
+    !plainObject(entity) || entity.kind !== kind || typeof entity.id !== 'string' || !entity.id ||
+    typeof entity.label !== 'string' || !Array.isArray(entity.points) ||
+    !entity.points.every(validGeometryPoint) || typeof entity.blocksVision !== 'boolean' ||
+    typeof entity.blocksMovement !== 'boolean' || typeof entity.blocksLineOfEffect !== 'boolean' ||
+    !Number.isFinite(entity.baseHeightFeet) || !Number.isFinite(entity.heightFeet) || entity.heightFeet < 0 ||
+    !Number.isFinite(entity.createdAt)
+  ) return false
+  if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048
+  if (kind === 'door') {
+    return entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean'
+  }
+  return entity.points.length >= 3 && entity.points.length <= 2_048 &&
+    ['none', 'half', 'three-quarters', 'total'].includes(entity.cover)
+}
+
+function validateMapGeometryState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.maps) || value.maps.length > 4_096) return 'invalid-map-geometry'
+  const mapIds = new Set()
+  for (const map of value.maps) {
+    if (
+      !plainObject(map) || typeof map.mapId !== 'string' || !map.mapId || mapIds.has(map.mapId) ||
+      !Array.isArray(map.walls) || !Array.isArray(map.doors) || !Array.isArray(map.obstacles) ||
+      map.walls.length + map.doors.length + map.obstacles.length > 4_096 ||
+      !plainObject(map.vision) || typeof map.vision.enabled !== 'boolean' ||
+      typeof map.vision.sharePartyVision !== 'boolean' || !Number.isFinite(map.vision.defaultRangeFeet) ||
+      map.vision.defaultRangeFeet < 0 || !Number.isFinite(map.updatedAt)
+    ) return 'invalid-map-geometry'
+    mapIds.add(map.mapId)
+    if (
+      !map.walls.every((entity) => validGeometryEntity(entity, 'wall')) ||
+      !map.doors.every((entity) => validGeometryEntity(entity, 'door')) ||
+      !map.obstacles.every((entity) => validGeometryEntity(entity, 'obstacle'))
+    ) return 'invalid-map-geometry'
+    const entityIds = [...map.walls, ...map.doors, ...map.obstacles].map((entity) => entity.id)
+    if (new Set(entityIds).size !== entityIds.length) return 'duplicate-map-geometry-entity'
+  }
+  return null
+}
+
+function geometrySegments(geometry) {
+  if (!geometry) return []
+  const segments = []
+  const add = (entity, closed) => {
+    const count = closed ? entity.points.length : entity.points.length - 1
+    for (let index = 0; index < count; index += 1) {
+      segments.push({
+        entityId: entity.id,
+        a: entity.points[index],
+        b: entity.points[(index + 1) % entity.points.length],
+        blocksVision: entity.blocksVision,
+        baseHeightFeet: entity.baseHeightFeet,
+        heightFeet: entity.heightFeet,
+      })
+    }
+  }
+  for (const wall of geometry.walls ?? []) add(wall, false)
+  for (const door of geometry.doors ?? []) {
+    if (door.state !== 'open') add(door, false)
+  }
+  for (const obstacle of geometry.obstacles ?? []) add(obstacle, true)
+  return segments
+}
+
+function cross2d(a, b) {
+  return a.x * b.y - a.y * b.x
+}
+
+function segmentIntersectionParameter(from, to, a, b) {
+  const r = { x: to.x - from.x, y: to.y - from.y }
+  const s = { x: b.x - a.x, y: b.y - a.y }
+  const denominator = cross2d(r, s)
+  if (Math.abs(denominator) < 1e-8) return null
+  const delta = { x: a.x - from.x, y: a.y - from.y }
+  const t = cross2d(delta, s) / denominator
+  const u = cross2d(delta, r) / denominator
+  return t > 1e-5 && t <= 1 + 1e-7 && u >= -1e-7 && u <= 1 + 1e-7 ? t : null
+}
+
+function tokenElevationFeet(token) {
+  return Number.isFinite(token?.elevationFeet) ? token.elevationFeet : 0
+}
+
+function playerCanSeeToken(map, geometry, viewer, target) {
+  const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
+  const gridSize = Math.max(1, Number(map.gridSize) || 1)
+  const rangeFeet = Number.isFinite(viewer.visionRangeFeet)
+    ? Math.max(0, viewer.visionRangeFeet)
+    : Math.max(0, geometry.vision.defaultRangeFeet)
+  const rangePx = rangeFeet / feetPerCell * gridSize
+  if (Math.hypot(target.x - viewer.x, target.y - viewer.y) > rangePx) return false
+  const fromElevation = tokenElevationFeet(viewer)
+  const toElevation = tokenElevationFeet(target)
+  return !geometrySegments(geometry).some((segment) => {
+    if (!segment.blocksVision) return false
+    const t = segmentIntersectionParameter(viewer, target, segment.a, segment.b)
+    if (t == null) return false
+    const rayHeight = fromElevation + 2.5 + (toElevation - fromElevation) * t
+    return rayHeight >= segment.baseHeightFeet && rayHeight < segment.baseHeightFeet + segment.heightFeet
+  })
+}
+
+export function projectMapsForPlayer(value, geometryState, activeCharacterId = null) {
+  if (!plainObject(value) || !Array.isArray(value.maps)) return value
+  const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
+  return {
+    ...value,
+    maps: value.maps.map((map) => {
+      if (!plainObject(map) || !Array.isArray(map.tokens)) return map
+      const geometry = geometryByMapId.get(map.id)
+      const players = map.tokens.filter((token) => plainObject(token) && token.type === 'player')
+      const viewers = geometry?.vision?.sharePartyVision === false
+        ? players.filter((token) => token.characterId === activeCharacterId)
+        : players
+      const tokens = map.tokens.filter((token) => {
+        if (!plainObject(token)) return false
+        if (token.type === 'player') return true
+        if (token.visibilityMode === 'always') return true
+        if (token.visibilityMode === 'dm-only') return false
+        if (!geometry?.vision?.enabled) return true
+        return viewers.some((viewer) => playerCanSeeToken(map, geometry, viewer, token))
+      })
+      const visibleIds = new Set(tokens.map((token) => token.id))
+      return {
+        ...map,
+        tokens,
+        dnd5ePluginAreas: Array.isArray(map.dnd5ePluginAreas)
+          ? map.dnd5ePluginAreas.filter((area) => !area?.sourceTokenId || visibleIds.has(area.sourceTokenId))
+          : map.dnd5ePluginAreas,
+      }
+    }),
+  }
+}
+
+export function projectMapGeometryForPlayer(value) {
+  if (!plainObject(value) || !Array.isArray(value.maps)) return value
+  return {
+    ...value,
+    maps: value.maps.map((map) => {
+      if (!plainObject(map) || !Array.isArray(map.doors) || !Array.isArray(map.walls)) return map
+      const secretWalls = map.doors.flatMap((door) => door?.secret === true && door.state !== 'open'
+        ? [{
+            id: `wall:${createHash('sha256').update(JSON.stringify([door.points, door.createdAt])).digest('hex').slice(0, 20)}`,
+            kind: 'wall',
+            label: '墙',
+            points: door.points,
+            blocksVision: door.blocksVision,
+            blocksMovement: door.blocksMovement,
+            blocksLineOfEffect: door.blocksLineOfEffect,
+            baseHeightFeet: door.baseHeightFeet,
+            heightFeet: door.heightFeet,
+            createdAt: door.createdAt,
+          }]
+        : [],
+      )
+      return {
+        ...map,
+        walls: [...map.walls, ...secretWalls],
+        doors: map.doors.filter((door) => door?.secret !== true),
+      }
+    }),
+  }
+}
+
 /**
  * Persistence-boundary validation. The browser performs more detailed
  * migrations, while this deliberately conservative shape check prevents a
@@ -1012,6 +1181,8 @@ export function validateSharedStateShape(name, value) {
     'combat-interrupts': 'interrupts',
     'player-action-requests': 'requests',
     'player-action-processed': 'actionIds',
+    'map-fog': 'maps',
+    'map-geometry': 'maps',
   }
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
@@ -1042,6 +1213,10 @@ export function validateSharedStateShape(name, value) {
   if (name === 'combat-interrupts') {
     const interruptReason = validateCombatInterruptState(value)
     if (interruptReason) return { ok: false, reason: interruptReason }
+  }
+  if (name === 'map-geometry') {
+    const geometryReason = validateMapGeometryState(value)
+    if (geometryReason) return { ok: false, reason: geometryReason }
   }
   return { ok: true }
 }
@@ -1117,6 +1292,19 @@ async function readRoomForCampaign(ctx) {
   } catch (error) {
     if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'room-not-found')
     throw error
+  }
+}
+
+async function readMapGeometryForProjection(ctx) {
+  const filePath = path.join(ctx.stateRoot, 'map-geometry.json')
+  try {
+    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const validation = validateSharedStateShape('map-geometry', value)
+    return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
+  } catch (error) {
+    return error?.code === 'ENOENT'
+      ? { value: null, corrupted: false }
+      : { value: null, corrupted: true }
   }
 }
 
@@ -2790,7 +2978,24 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
   ctx = { ...ctx, accessRole: access.role }
-  if (access.role === 'player') {
+  let authenticatedRoomMember = null
+  if ((ctx.roomId ?? 'default') !== 'default') {
+    try {
+      const room = await readRoomForCampaign(ctx)
+      const requestMemberId = req?.headers?.['x-stars-member'] ?? parsed.searchParams.get('member')
+      authenticatedRoomMember = lobbyRoomMember(room, requestMemberId)
+      if (!authenticatedRoomMember) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return true
+      }
+      if (authenticatedRoomMember === room?.host) ctx = { ...ctx, accessRole: 'dm' }
+      else if (authenticatedRoomMember) ctx = { ...ctx, accessRole: 'player' }
+    } catch {
+      writeJson(res, 403, { error: 'forbidden' })
+      return true
+    }
+  }
+  if (ctx.accessRole === 'player') {
     const stateName = parsed.pathname.match(/^\/api\/state\/([a-zA-Z0-9_-]+)$/)?.[1]
     const playerMayWriteState = stateName && PLAYER_WRITABLE_STATE.has(safeName(stateName))
     const forbidden =
@@ -2940,6 +3145,29 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           await rm(sourcePath, { force: true }).catch(() => {})
           writeJson(res, 422, { error: 'state-corrupted', name, reason: validation.reason, quarantineId })
           return true
+        }
+        let roomMember = authenticatedRoomMember
+        let playerRead = ctx.accessRole === 'player'
+        if ((ctx.roomId ?? 'default') !== 'default' && !roomMember) {
+          const room = await readRoomForCampaign(ctx)
+          roomMember = lobbyRoomMember(room, req?.headers?.['x-stars-member'] ?? parsed.searchParams.get('member'))
+          if (roomMember && roomMember !== room.host) playerRead = true
+          if (roomMember === room.host) playerRead = false
+        }
+        if (playerRead && name === 'map-geometry') value = projectMapGeometryForPlayer(value)
+        if (playerRead && name === 'maps') {
+          const geometry = await readMapGeometryForProjection(ctx)
+          if (geometry.corrupted) {
+            value = {
+              ...value,
+              maps: (value.maps ?? []).map((map) => ({
+                ...map,
+                tokens: (map.tokens ?? []).filter((token) => token?.type === 'player' || token?.visibilityMode === 'always'),
+              })),
+            }
+          } else {
+            value = projectMapsForPlayer(value, geometry.value, roomMember?.activeCharacterId ?? null)
+          }
         }
         try {
           const revision = sharedStateRevision(value)

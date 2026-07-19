@@ -207,6 +207,7 @@ export interface DmAdjudicationEffect extends Record<string, unknown> {
 }
 
 export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
+  contextKind?: 'spell' | 'persistent-area-trigger'
   actionId: string
   casterName: string
   spellId: string
@@ -221,6 +222,8 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   proposedDamage?: number
   proposedSaveSuccess?: boolean
   proposedConditionIds?: string[]
+  targetTokenId?: string
+  triggerTiming?: 'on-create' | 'on-enter' | 'turn-start' | 'turn-end'
 }
 
 export type DmDamageAdjustment =

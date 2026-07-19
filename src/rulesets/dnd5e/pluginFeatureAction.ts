@@ -333,6 +333,22 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   const persistentArea = input.prepared.feature.action?.persistentArea
   if (persistentArea && input.prepared.targetCells.length > 0) {
     const id = `plugin-area:${input.prepared.action.id}`
+    const targeting = input.prepared.feature.action!.targeting
+    const triggers = persistentArea.triggers?.map((trigger) => ({
+      ...trigger,
+      savingThrow: trigger.savingThrow
+        ? {
+            ...trigger.savingThrow,
+            dc: trigger.savingThrow.dc === 'source-save-dc'
+              ? Math.max(1, Math.min(40, input.prepared.actor.saveDC))
+              : trigger.savingThrow.dc,
+          }
+        : undefined,
+      damage: trigger.damage ? { ...trigger.damage } : undefined,
+      condition: trigger.condition
+        ? { ...trigger.condition, duration: { ...trigger.condition.duration } }
+        : undefined,
+    }))
     application.map = {
       ...application.map,
       dnd5ePluginAreas: [
@@ -349,6 +365,9 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
           createdRound: input.prepared.action.round,
           expiresAfterRound: input.prepared.action.round + persistentArea.durationRounds - 1,
           concentrationId: persistentArea.concentration ? `plugin-area:${input.prepared.action.id}` : undefined,
+          relation: targeting.kind === 'area' ? targeting.relation ?? 'any' : 'any',
+          includeSelf: targeting.kind === 'area' && targeting.includeSelf === true,
+          triggers: triggers && triggers.length > 0 ? triggers : undefined,
         },
       ],
     }

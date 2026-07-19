@@ -2,6 +2,7 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { DND_FEET_PER_CELL, cellDistance, tokenAnchorCellFromPixel } from '../../lib/gridCombat'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster } from './monsters'
@@ -15,9 +16,12 @@ export function resolveDnd5eMonsterMapMove(input: {
   actorTokenId: string
   to: { x: number; y: number }
   dash?: boolean
-}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' } {
+}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-blocked' } {
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type === 'enemy')
   if (!actorToken?.poolId || !getDnd5eSrdMonster(actorToken.poolId)) return { ok: false, reason: 'invalid-actor' }
+  if (mapGeometryMovementBlocked({
+    geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to: input.to,
+  }).blocked) return { ok: false, reason: 'movement-blocked' }
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
     round: input.round,

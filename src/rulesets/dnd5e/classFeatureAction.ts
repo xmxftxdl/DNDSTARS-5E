@@ -37,6 +37,7 @@ import {
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 
 export type Dnd5eClassFeatureRejectReason =
   | 'invalid-action'
@@ -173,6 +174,7 @@ function openHandPushDestination(map: BattleMap, actor: Token, target: Token): {
   const rows = Math.max(1, Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)))
   let destination = { x: target.x, y: target.y }
   let steps = 0
+  const geometry = mapGeometryRuntimeForMap(map.id)
   for (let step = 1; step <= maximumSteps; step += 1) {
     const anchor = { col: targetAnchor.col + dc * step, row: targetAnchor.row + dr * step }
     const position = tokenCenterForAnchorCell(anchor, target, map)
@@ -180,6 +182,9 @@ function openHandPushDestination(map: BattleMap, actor: Token, target: Token): {
     if (footprint.some((cell) =>
       cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows || blocked.has(cellKey(cell)),
     )) break
+    if (mapGeometryMovementBlocked({
+      geometry, map, token: { ...target, ...destination }, to: position,
+    }).blocked) break
     destination = position
     steps = step
   }
