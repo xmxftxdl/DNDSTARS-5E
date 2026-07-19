@@ -50,7 +50,13 @@ export interface Dnd5eActiveEffectSource {
 
 export type Dnd5eActiveEffectDuration =
   | { type: 'permanent' }
-  | { type: 'rounds'; remainingRounds: number; tickOn: 'target-turn-start' | 'target-turn-end' }
+  | {
+      type: 'rounds'
+      remainingRounds: number
+      tickOn: 'target-turn-start' | 'target-turn-end'
+      /** 防止同一回合边界因多次 Headless 事务而重复扣减。 */
+      lastTickTurnKey?: string
+    }
   | { type: 'until-turn-boundary'; boundary: Dnd5eActiveEffectTurnBoundary; appliedTurnKey?: string }
   | { type: 'concentration'; sourceActorId: string; concentrationId?: string; remainingRounds?: number }
 
@@ -252,7 +258,14 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       rawDuration.type === 'rounds' &&
       (rawDuration.tickOn === 'target-turn-start' || rawDuration.tickOn === 'target-turn-end')
     ) {
-      normalizedDuration = { type: 'rounds', remainingRounds: positiveInteger(rawDuration.remainingRounds), tickOn: rawDuration.tickOn }
+      normalizedDuration = {
+        type: 'rounds',
+        remainingRounds: positiveInteger(rawDuration.remainingRounds),
+        tickOn: rawDuration.tickOn,
+        lastTickTurnKey: typeof rawDuration.lastTickTurnKey === 'string' && rawDuration.lastTickTurnKey.trim().length > 0
+          ? rawDuration.lastTickTurnKey.trim()
+          : undefined,
+      }
     } else if (rawDuration.type === 'until-turn-boundary' && TURN_BOUNDARIES.has(rawDuration.boundary as Dnd5eActiveEffectTurnBoundary)) {
       normalizedDuration = {
         type: 'until-turn-boundary',
@@ -339,6 +352,11 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     if (isRecord(raw.duration) && raw.duration.type === 'rounds' && (
       !Number.isInteger(raw.duration.remainingRounds) || Number(raw.duration.remainingRounds) <= 0
     )) issues.push(`activeEffects[${index}].duration.remainingRounds 无效`)
+    if (isRecord(raw.duration) && raw.duration.type === 'rounds' && raw.duration.lastTickTurnKey != null && (
+      typeof raw.duration.lastTickTurnKey !== 'string' ||
+      raw.duration.lastTickTurnKey.trim().length === 0 ||
+      raw.duration.lastTickTurnKey.length > 512
+    )) issues.push(`activeEffects[${index}].duration.lastTickTurnKey 无效`)
     if (raw.modifiers != null) {
       if (!isRecord(raw.modifiers)) issues.push(`activeEffects[${index}].modifiers 损坏`)
       else {

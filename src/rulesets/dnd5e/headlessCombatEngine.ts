@@ -1080,14 +1080,18 @@ function advanceDnd5eActiveEffectsAtBoundary(input: {
         effect.duration.type === 'rounds' &&
         effect.duration.tickOn === targetBoundary &&
         target.id === input.actor.id &&
-        !(effect.repeatSave && effect.repeatSave.timing === targetBoundary)
+        !(effect.repeatSave && effect.repeatSave.timing === targetBoundary) &&
+        effect.duration.lastTickTurnKey !== boundaryTurnKey
       ) {
         const remainingRounds = Math.max(0, effect.duration.remainingRounds - 1)
         if (remainingRounds === 0) {
           removed.push(effect)
           continue
         }
-        next.push({ ...effect, duration: { ...effect.duration, remainingRounds } })
+        next.push({
+          ...effect,
+          duration: { ...effect.duration, remainingRounds, lastTickTurnKey: boundaryTurnKey },
+        })
         continue
       }
       next.push(effect)
@@ -1171,8 +1175,9 @@ function resolveDnd5eActiveEffectSaves(input: {
         removeDnd5eEffectsByPredicate(input.target, (current) => current.id === effect.id, 'expired', input.events)
       } else {
         const current = reconciledDnd5eActiveEffects(input.target)
+        const boundaryTurnKey = classFeatureTurnKey(input.state, input.target.id)
         commitDnd5eActiveEffects(input.target, current.map((entry) => entry.id === effect.id && entry.duration.type === 'rounds'
-          ? { ...entry, duration: { ...entry.duration, remainingRounds } }
+          ? { ...entry, duration: { ...entry.duration, remainingRounds, lastTickTurnKey: boundaryTurnKey } }
           : entry))
       }
     }
@@ -2120,6 +2125,24 @@ function endDnd5eConcentration(
   if (previousSpellId) {
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'concentration', active: false })
   }
+}
+
+function finalizeDnd5eInstantDeath(
+  state: Dnd5eHeadlessCombatState,
+  target: Dnd5eCombatant,
+  events: Dnd5eCombatEvent[],
+): void {
+  target.currentHp = 0
+  target.temporaryHp = 0
+  target.classState.undeadFortitudePending = undefined
+  target.classState.monsterOnHitSavePending = undefined
+  target.deathSaves = { successes: 0, failures: 3, stable: false, dead: true }
+  if (target.concentrating || target.classState.concentrationSpellId) {
+    endDnd5eConcentration(state, target, events)
+  }
+  endBarbarianRage(target, events)
+  clearTurnUndead(target, events)
+  removeZeroHitPointUnconscious(target, 'death', events)
 }
 
 function endDnd5eSpellEffectOnTarget(
@@ -3841,6 +3864,7 @@ function resolveSpellCast(
       ? diceCount * spell.dice.sides + baseEffectBonus + draconicAffinityBonus + empoweredEvocationBonus
       : rolledTotal
   const applySpellDamage = (combatant: Dnd5eCombatant, amount: number, critical = false) => {
+    const hpBefore = combatant.currentHp
     applyDamage(
       combatant,
       amount,
@@ -3852,13 +3876,7 @@ function resolveSpellCast(
       spell.id === 'disintegrate',
     )
     if (spell.id !== 'disintegrate' || combatant.currentHp > 0) return
-    const hpBefore = combatant.currentHp
-    combatant.currentHp = 0
-    combatant.temporaryHp = 0
-    combatant.classState.undeadFortitudePending = undefined
-    combatant.classState.monsterOnHitSavePending = undefined
-    combatant.deathSaves = { successes: 0, failures: 3, stable: false, dead: true }
-    if (combatant.concentrating) endDnd5eConcentration(state, combatant, events)
+    finalizeDnd5eInstantDeath(state, combatant, events)
     events.push({ type: 'instant-death', sourceId: actor.id, targetId: combatant.id, hpBefore })
   }
   const applySpellOnHitEffect = (affectedTarget: Dnd5eCombatant) => {
@@ -4020,12 +4038,7 @@ function resolveSpellCast(
         if (!allowedHostileTargetIds.has(affectedTarget!.id) || affectedTarget!.currentHp > 100) continue
         const hpBefore = affectedTarget!.currentHp
         if (affectedTarget!.classState.wildShapeFormId) revertDnd5eWildShape(affectedTarget!, 0, events)
-        affectedTarget!.currentHp = 0
-        affectedTarget!.temporaryHp = 0
-        affectedTarget!.classState.undeadFortitudePending = undefined
-        affectedTarget!.classState.monsterOnHitSavePending = undefined
-        affectedTarget!.deathSaves = { successes: 0, failures: 3, stable: false, dead: true }
-        if (affectedTarget!.concentrating) endDnd5eConcentration(state, affectedTarget!, events)
+        finalizeDnd5eInstantDeath(state, affectedTarget!, events)
         events.push({ type: 'instant-death', sourceId: actor.id, targetId: affectedTarget!.id, hpBefore })
       }
       return finishSpellCast()
@@ -5662,7 +5675,7 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
 
   // 地图层按动作重建 Headless 快照，因此回合开始效果也必须能在本回合首个事务中幂等清理；
   // 这样即使上一位是自动怪物或 DM 直接推进先攻，也不会把过期效果带入实际判定。
-  advanceDnd5eActiveEffectsAtBoundary({ state, actor, point: 'start', events })
+  if (!offTurn) advanceDnd5eActiveEffectsAtBoundary({ state, actor, point: 'start', events })
 
   const usesHideInPlainSight = action.type === 'ranger-vanish' ||
     (action.type === 'rogue-cunning-action' && action.option === 'hide') ||
@@ -6607,16 +6620,7 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
         save.target.challengeRating <= destroyThreshold
       ) {
         const hpBefore = save.target.currentHp
-        clearTurnUndead(save.target, events)
-        save.target.currentHp = 0
-        save.target.concentrating = false
-        save.target.classState.undeadFortitudePending = undefined
-        save.target.classState.monsterOnHitSavePending = undefined
-        save.target.deathSaves = { successes: 0, failures: 0, stable: false, dead: true }
-        save.target.classState.concentrationSpellId = undefined
-        save.target.classState.concentrationTargetIds = undefined
-        save.target.classState.concentrationRoundsRemaining = undefined
-        save.target.classState.huntersMarkTargetId = undefined
+        finalizeDnd5eInstantDeath(state, save.target, events)
         events.push({ type: 'hit-points-reduced-to-zero', sourceId: actor.id, targetId: save.target.id, hpBefore })
         events.push({
           type: 'undead-destroyed', actorId: actor.id, targetId: save.target.id,
@@ -6967,13 +6971,6 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
           stateKey: 'draconic-presence-immunity', active: true, value: 14_400,
         })
       } else {
-        actor.classState.concentrationEffectsBySource = {
-          ...(actor.classState.concentrationEffectsBySource ?? {}),
-          [source.id]: effectId!,
-        }
-        source.classState.concentrationTargetIds = [...new Set([
-          ...(source.classState.concentrationTargetIds ?? []), actor.id,
-        ])]
         const incoming = createDnd5eConditionEffect({
           id: `draconic-presence:${source.id}:${actor.id}:${condition}`,
           condition,
@@ -6988,8 +6985,21 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
           effects: reconciledDnd5eActiveEffects(actor), incoming,
           conditionImmunities: actor.conditionImmunities,
         })
-        if (mutation.status !== 'rejected-immune') commitDnd5eActiveEffects(actor, mutation.effects)
-        events.push({ type: 'condition-applied', actorId: source.id, targetId: actor.id, condition })
+        if (mutation.status !== 'rejected-immune') {
+          actor.classState.concentrationEffectsBySource = {
+            ...(actor.classState.concentrationEffectsBySource ?? {}),
+            [source.id]: effectId!,
+          }
+          source.classState.concentrationTargetIds = [...new Set([
+            ...(source.classState.concentrationTargetIds ?? []), actor.id,
+          ])]
+          commitDnd5eActiveEffects(actor, mutation.effects)
+          events.push({ type: 'condition-applied', actorId: source.id, targetId: actor.id, condition })
+          events.push({
+            type: 'active-effect-applied', targetId: actor.id,
+            effectId: incoming.id, definitionId: incoming.definitionId,
+          })
+        }
       }
     } catch {
       return fail(state, events, 'invalid-dice')
@@ -7282,7 +7292,11 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
         const source = state.combatants[sourceId]
         const effectId = source?.classState.concentrationSpellId
         const mode = effectId?.endsWith(':fear') ? 'fear' : effectId?.endsWith(':awe') ? 'awe' : undefined
-        if (!source || !mode || !source.concentrating || source.currentHp <= 0) continue
+        const condition = mode === 'fear' ? 'frightened' : 'charmed'
+        if (
+          !source || !mode || !source.concentrating || source.currentHp <= 0 ||
+          dnd5eConditionImmuneFromSource(next, condition, source)
+        ) continue
         events.push({
           type: 'draconic-presence-save-required', targetId: next.id, sourceId: source.id, mode,
           dc: 8 + source.proficiencyBonus + rules.abilityModifier(source.abilities.cha),

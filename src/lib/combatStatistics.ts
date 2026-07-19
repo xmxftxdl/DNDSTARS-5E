@@ -133,6 +133,7 @@ function applyEvent(
   state: Dnd5eHeadlessCombatState,
   event: Dnd5eCombatEvent,
   fallbackActorId: string | undefined,
+  zeroedByDamage: ReadonlySet<string>,
 ): void {
   if (event.type === 'damage-applied') {
     const sourceId = eventSourceId(event, fallbackActorId)
@@ -226,6 +227,14 @@ function applyEvent(
   if (event.type === 'undead-destroyed') {
     const actor = ensureCombatant(session, state, event.actorId)
     if (actor) actor.kills += 1
+    return
+  }
+  if (event.type === 'instant-death') {
+    const source = ensureCombatant(session, state, event.sourceId)
+    if (!source || event.sourceId === event.targetId) return
+    const targetUsesDeathSaves = state.combatants[event.targetId]?.usesDeathSaves === true
+    if (!zeroedByDamage.has(event.targetId)) source.knockouts += 1
+    if (!zeroedByDamage.has(event.targetId) || targetUsesDeathSaves) source.kills += 1
   }
 }
 
@@ -282,9 +291,12 @@ export function applyDnd5eCombatStatisticsObservation(
   }
   if (session.receipts.includes(observation.receiptId) || !observation.result.ok) return session
   let fallbackActorId = actionActorId(observation.action)
+  const zeroedByDamage = new Set(observation.result.events.flatMap((event) =>
+    event.type === 'damage-applied' && event.hpBefore > 0 && event.hpAfter === 0 ? [event.targetId] : [],
+  ))
   for (const event of observation.result.events) {
     if (event.type === 'turn-started') fallbackActorId = event.actorId
-    applyEvent(session, resultState, event, fallbackActorId)
+    applyEvent(session, resultState, event, fallbackActorId, zeroedByDamage)
   }
   session.receipts = [...session.receipts, observation.receiptId].slice(-COMBAT_STATISTICS_MAX_RECEIPTS)
   session.lastRound = resultState.round

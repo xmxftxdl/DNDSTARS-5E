@@ -111,4 +111,36 @@ describe('Headless combat statistics', () => {
       sessions: [{ ...replayed, combatants: { fighter: { ...replayed.combatants.fighter, damageDealt: -1 } } }],
     })).toBeUndefined()
   })
+
+  it('counts direct and death-save instant deaths without duplicating ordinary monster damage kills', () => {
+    const direct = applyDnd5eCombatStatisticsObservation(undefined, observe({
+      receiptId: 'r4', actorId: 'fighter',
+      events: [{ type: 'instant-death', sourceId: 'fighter', targetId: 'goblin', hpBefore: 40 }],
+    }))
+    expect(direct.combatants.fighter).toMatchObject({ knockouts: 1, kills: 1 })
+
+    const playerTarget = state({
+      combatants: {
+        ...state().combatants,
+        cleric: { ...state().combatants.cleric, currentHp: 0, usesDeathSaves: true },
+      },
+    })
+    const disintegrated = applyDnd5eCombatStatisticsObservation(undefined, observe({
+      receiptId: 'r5', actorId: 'fighter', resultState: playerTarget,
+      events: [
+        { type: 'damage-applied', sourceId: 'fighter', targetId: 'cleric', amount: 30, hpBefore: 30, hpAfter: 0, temporaryHpBefore: 0, temporaryHpAfter: 0 },
+        { type: 'instant-death', sourceId: 'fighter', targetId: 'cleric', hpBefore: 30 },
+      ],
+    }))
+    expect(disintegrated.combatants.fighter).toMatchObject({ knockouts: 1, kills: 1 })
+
+    const damagedMonster = applyDnd5eCombatStatisticsObservation(undefined, observe({
+      receiptId: 'r6', actorId: 'fighter',
+      events: [
+        { type: 'damage-applied', sourceId: 'fighter', targetId: 'goblin', amount: 40, hpBefore: 40, hpAfter: 0, temporaryHpBefore: 0, temporaryHpAfter: 0 },
+        { type: 'instant-death', sourceId: 'fighter', targetId: 'goblin', hpBefore: 40 },
+      ],
+    }))
+    expect(damagedMonster.combatants.fighter).toMatchObject({ knockouts: 1, kills: 1 })
+  })
 })

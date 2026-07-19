@@ -1749,6 +1749,32 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(concentrationEnded.state.combatants.enemy.conditions).not.toContain('frightened')
   })
 
+  it('does not register Draconic Presence against an immune creature', () => {
+    const sorcerer = fighter('sorcerer', 20, {
+      classId: 'sorcerer', subclassId: 'draconic', level: 18, proficiencyBonus: 6,
+      abilities: { ...abilities, cha: 18 },
+      classResources: { 'dnd5e-sorcery-points': { current: 18, max: 18 } },
+    })
+    const enemy = fighter('enemy', 10, {
+      controller: 'dm', draconicPresenceSourceIds: ['sorcerer'], savingThrowBonuses: { wis: 0 },
+      conditionImmunities: ['frightened'],
+    })
+    const activated = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('presence-immunity', [sorcerer, enemy]), {
+      type: 'sorcerer-draconic-presence', actorId: 'sorcerer', mode: 'fear',
+    })
+    expect(activated.ok).toBe(true)
+    if (!activated.ok) return
+    const turnStarted = resolveDnd5eHeadlessAction(activated.state, { type: 'end-turn', actorId: 'sorcerer' })
+    expect(turnStarted.ok).toBe(true)
+    if (!turnStarted.ok) return
+    expect(turnStarted.events).not.toContainEqual(expect.objectContaining({
+      type: 'draconic-presence-save-required', targetId: 'enemy',
+    }))
+    expect(turnStarted.state.combatants.enemy.conditions).not.toContain('frightened')
+    expect(turnStarted.state.combatants.enemy.classState.concentrationEffectsBySource).toBeUndefined()
+    expect(turnStarted.state.combatants.sorcerer.classState.concentrationTargetIds).toEqual([])
+  })
+
   it('converts sorcery points and spell slots in both directions as bonus actions', () => {
     const sorcerer = fighter('s', 20, { classId: 'sorcerer', level: 5, classResources: {
       'dnd5e-sorcery-points': { current: 5, max: 5 },
@@ -2370,5 +2396,26 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }))
     expect(result.events.some((event) => event.type === 'undead-fortitude-save-required')).toBe(false)
     expect(result.state.combatants.target.classState.undeadFortitudePending).toBeUndefined()
+  })
+
+  it('uses the pre-damage hit points and removes zero-HP effects for Disintegrate', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 11, proficiencyBonus: 4,
+      abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['disintegrate'] },
+      classResources: { 'dnd5e-spell-slot-6': { current: 1, max: 1 } },
+    })
+    const target = fighter('target', 10, { controller: 'dm', usesDeathSaves: true, currentHp: 30, maxHp: 30 })
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('disintegrate-player', [wizard, target]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'target', spellId: 'disintegrate', slotLevel: 6,
+      savingThrowD20: 1, effectRolls: Array(10).fill(1),
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.target.deathSaves).toMatchObject({ failures: 3, dead: true })
+    expect(result.state.combatants.target.conditions).not.toEqual(expect.arrayContaining(['unconscious', 'prone']))
+    expect(result.events).toContainEqual({
+      type: 'instant-death', sourceId: 'wizard', targetId: 'target', hpBefore: 30,
+    })
   })
 })

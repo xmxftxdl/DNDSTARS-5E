@@ -14,6 +14,73 @@ function combatant(id: string, initiative: number, patch = {}) {
 }
 
 describe('ActiveEffectInstance Headless 生命周期', () => {
+  it('ticks a round duration only once at the same turn boundary', () => {
+    const startEffect = createDnd5eConditionEffect({
+      condition: 'deafened', targetId: 'actor', source: { kind: 'dm' },
+      duration: { type: 'rounds', remainingRounds: 3, tickOn: 'target-turn-start' },
+    })
+    const state = startDnd5eHeadlessCombat('single-boundary-tick', [
+      combatant('actor', 20, { classState: { activeEffects: [startEffect] } }),
+      combatant('target', 10),
+    ])
+    const moved = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: 'actor', to: { x: 5, y: 0 }, distance: 5,
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) return
+    expect(moved.state.combatants.actor.classState.activeEffects?.[0].duration)
+      .toMatchObject({ remainingRounds: 2, lastTickTurnKey: 'single-boundary-tick:1:actor' })
+
+    const dashed = resolveDnd5eHeadlessAction(moved.state, { type: 'dash', actorId: 'actor' })
+    expect(dashed.ok).toBe(true)
+    if (!dashed.ok) return
+    expect(dashed.state.combatants.actor.classState.activeEffects?.[0].duration)
+      .toMatchObject({ remainingRounds: 2, lastTickTurnKey: 'single-boundary-tick:1:actor' })
+  })
+
+  it('does not run a creature turn-start boundary for an off-turn transaction', () => {
+    const startEffect = createDnd5eConditionEffect({
+      condition: 'deafened', targetId: 'reactor', source: { kind: 'dm' },
+      duration: { type: 'rounds', remainingRounds: 3, tickOn: 'target-turn-start' },
+    })
+    const state = startDnd5eHeadlessCombat('off-turn-boundary', [
+      combatant('actor', 20),
+      combatant('reactor', 10, {
+        concentrating: true,
+        classState: { concentrationSpellId: 'bless', activeEffects: [startEffect] },
+      }),
+    ])
+    const saved = resolveDnd5eHeadlessAction(state, {
+      type: 'concentration-save', actorId: 'reactor', d20: 20, dc: 10,
+    })
+    expect(saved.ok).toBe(true)
+    if (!saved.ok) return
+    expect(saved.state.combatants.reactor.classState.activeEffects?.[0].duration)
+      .toEqual({ type: 'rounds', remainingRounds: 3, tickOn: 'target-turn-start', lastTickTurnKey: undefined })
+  })
+
+  it('does not tick the next creature twice after authoritative turn advancement', () => {
+    const startEffect = createDnd5eConditionEffect({
+      condition: 'deafened', targetId: 'target', source: { kind: 'dm' },
+      duration: { type: 'rounds', remainingRounds: 3, tickOn: 'target-turn-start' },
+    })
+    const state = startDnd5eHeadlessCombat('turn-transition-boundary', [
+      combatant('actor', 20),
+      combatant('target', 10, { classState: { activeEffects: [startEffect] } }),
+    ])
+    const advanced = resolveDnd5eHeadlessAction(state, { type: 'end-turn', actorId: 'actor' })
+    expect(advanced.ok).toBe(true)
+    if (!advanced.ok) return
+    expect(advanced.state.combatants.target.classState.activeEffects?.[0].duration)
+      .toMatchObject({ remainingRounds: 2, lastTickTurnKey: 'turn-transition-boundary:1:target' })
+
+    const dashed = resolveDnd5eHeadlessAction(advanced.state, { type: 'dash', actorId: 'target' })
+    expect(dashed.ok).toBe(true)
+    if (!dashed.ok) return
+    expect(dashed.state.combatants.target.classState.activeEffects?.[0].duration)
+      .toMatchObject({ remainingRounds: 2, lastTickTurnKey: 'turn-transition-boundary:1:target' })
+  })
+
   it('removes effects on movement, attacking, being targeted, being hit and taking damage', () => {
     const moverEffect = createDnd5eConditionEffect({
       condition: 'charmed', targetId: 'actor', source: { kind: 'dm' }, breakOn: ['moves'],

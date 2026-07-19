@@ -78,6 +78,10 @@ describe('D&D 5e ActiveEffectInstance', () => {
       ...effect,
       duration: { type: 'rounds', remainingRounds: 0, tickOn: 'target-turn-end' },
     }])).toMatchObject({ ok: false, issues: expect.arrayContaining([expect.stringContaining('remainingRounds')]) })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end', lastTickTurnKey: '' },
+    }])).toMatchObject({ ok: false, issues: expect.arrayContaining([expect.stringContaining('lastTickTurnKey')]) })
   })
 
   it('migrates old timed mechanics once and then treats them as native active effects', () => {
