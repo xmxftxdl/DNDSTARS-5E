@@ -62,7 +62,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
         baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
       }],
       doors: [], obstacles: [],
-      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
     }])
     expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'effect-line-blocked' })
   })
@@ -83,7 +83,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
         blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
         baseHeightFeet: 0, heightFeet: 5, createdAt: 1,
       }],
-      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
     }])
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
@@ -106,7 +106,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
         baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
       }],
       doors: [], obstacles: [],
-      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
     }])
     expect(dnd5eRepellingBlastPushDestination(map, actor, target))
       .toEqual({ to: { x: target.x, y: target.y }, distanceFeet: 0 })

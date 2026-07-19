@@ -169,6 +169,15 @@ export interface Token {
   elevationFeet?: number
   /** 覆盖地图几何中的默认视野半径。 */
   visionRangeFeet?: number
+  /** 2014 规则中的黑暗视觉距离；0 或缺失表示没有黑暗视觉。 */
+  darkvisionRangeFeet?: number
+  /** Token 携带的火把、法术或物品光源。 */
+  lightSource?: {
+    enabled: boolean
+    brightRadiusFeet: number
+    dimRadiusFeet: number
+    color: string
+  }
   /** 玩家端可见性：动态视野、始终显示，或仅 DM 可见。 */
   visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
 }
@@ -313,6 +322,17 @@ function normalizeToken(raw: unknown): Token {
     creatureSize,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
+    darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
+    lightSource: t.lightSource && typeof t.lightSource === 'object' &&
+      Number.isFinite(t.lightSource.brightRadiusFeet) && Number.isFinite(t.lightSource.dimRadiusFeet) &&
+      typeof t.lightSource.enabled === 'boolean' && typeof t.lightSource.color === 'string'
+      ? {
+          enabled: t.lightSource.enabled,
+          brightRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.brightRadiusFeet)),
+          dimRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.dimRadiusFeet)),
+          color: /^#[0-9a-f]{6}$/i.test(t.lightSource.color) ? t.lightSource.color : '#fbbf24',
+        }
+      : undefined,
     visibilityMode: t.visibilityMode === 'always' || t.visibilityMode === 'dm-only' || t.visibilityMode === 'line-of-sight'
       ? t.visibilityMode
       : undefined,

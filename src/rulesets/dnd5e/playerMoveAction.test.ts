@@ -46,7 +46,7 @@ describe('D&D 5e player map movement', () => {
         baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
       }],
       doors: [], obstacles: [],
-      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true }, updatedAt: 1,
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
     }])
     expect(prepareDnd5ePlayerMove({
       action, map, characters: [character()],

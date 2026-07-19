@@ -1037,6 +1037,7 @@ function validateMapGeometryState(value) {
       map.walls.length + map.doors.length + map.obstacles.length > 4_096 ||
       !plainObject(map.vision) || typeof map.vision.enabled !== 'boolean' ||
       typeof map.vision.sharePartyVision !== 'boolean' || !Number.isFinite(map.vision.defaultRangeFeet) ||
+      (map.vision.ambientLight != null && !['bright', 'dim', 'darkness'].includes(map.vision.ambientLight)) ||
       map.vision.defaultRangeFeet < 0 || !Number.isFinite(map.updatedAt)
     ) return 'invalid-map-geometry'
     mapIds.add(map.mapId)
@@ -1047,6 +1048,23 @@ function validateMapGeometryState(value) {
     ) return 'invalid-map-geometry'
     const entityIds = [...map.walls, ...map.doors, ...map.obstacles].map((entity) => entity.id)
     if (new Set(entityIds).size !== entityIds.length) return 'duplicate-map-geometry-entity'
+  }
+  return null
+}
+
+function validateMapExplorationState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.maps) || value.maps.length > 4_096) return 'invalid-map-exploration'
+  const mapIds = new Set()
+  for (const map of value.maps) {
+    if (!plainObject(map) || typeof map.mapId !== 'string' || !map.mapId || mapIds.has(map.mapId) ||
+      !plainObject(map.byMemberId) || !Number.isFinite(map.updatedAt)) return 'invalid-map-exploration'
+    mapIds.add(map.mapId)
+    for (const [memberId, member] of Object.entries(map.byMemberId)) {
+      if (!memberId || memberId.length > 160 || !plainObject(member) || !Array.isArray(member.polygons) ||
+        member.polygons.length > 256 || !Number.isFinite(member.updatedAt)) return 'invalid-map-exploration'
+      if (member.polygons.some((polygon) => !Array.isArray(polygon) || polygon.length < 3 || polygon.length > 512 ||
+        !polygon.every(validGeometryPoint))) return 'invalid-map-exploration'
+    }
   }
   return null
 }
@@ -1097,20 +1115,44 @@ function tokenElevationFeet(token) {
 function playerCanSeeToken(map, geometry, viewer, target) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
-  const rangeFeet = Number.isFinite(viewer.visionRangeFeet)
+  const normalRangeFeet = Number.isFinite(viewer.visionRangeFeet)
     ? Math.max(0, viewer.visionRangeFeet)
     : Math.max(0, geometry.vision.defaultRangeFeet)
+  const darkvisionRangeFeet = Number.isFinite(viewer.darkvisionRangeFeet) ? Math.max(0, viewer.darkvisionRangeFeet) : 0
+  const carriedLightRangeFeet = viewer.lightSource?.enabled === true
+    ? Math.max(0, Number(viewer.lightSource.brightRadiusFeet) || 0) + Math.max(0, Number(viewer.lightSource.dimRadiusFeet) || 0)
+    : 0
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, carriedLightRangeFeet)
   const rangePx = rangeFeet / feetPerCell * gridSize
-  if (Math.hypot(target.x - viewer.x, target.y - viewer.y) > rangePx) return false
+  const distancePx = Math.hypot(target.x - viewer.x, target.y - viewer.y)
+  if (distancePx > rangePx) return false
   const fromElevation = tokenElevationFeet(viewer)
   const toElevation = tokenElevationFeet(target)
-  return !geometrySegments(geometry).some((segment) => {
+  const lineBlocked = (from, to, sourceElevation = 0, destinationElevation = 0) => geometrySegments(geometry).some((segment) => {
     if (!segment.blocksVision) return false
-    const t = segmentIntersectionParameter(viewer, target, segment.a, segment.b)
+    const t = segmentIntersectionParameter(from, to, segment.a, segment.b)
     if (t == null) return false
-    const rayHeight = fromElevation + 2.5 + (toElevation - fromElevation) * t
+    const rayHeight = sourceElevation + 2.5 + (destinationElevation - sourceElevation) * t
     return rayHeight >= segment.baseHeightFeet && rayHeight < segment.baseHeightFeet + segment.heightFeet
   })
+  if (lineBlocked(viewer, target, fromElevation, toElevation)) return false
+  const ambient = geometry.vision.ambientLight ?? 'bright'
+  if (ambient !== 'bright') {
+    let illuminated = ambient === 'dim'
+    for (const source of map.tokens ?? []) {
+      const light = source?.lightSource
+      if (!light?.enabled) continue
+      const distanceFeet = Math.hypot(target.x - source.x, target.y - source.y) / gridSize * feetPerCell
+      const lightRange = Math.max(0, Number(light.brightRadiusFeet) || 0) + Math.max(0, Number(light.dimRadiusFeet) || 0)
+      if (distanceFeet <= lightRange && !lineBlocked(source, target, tokenElevationFeet(source), toElevation)) {
+        illuminated = true
+        break
+      }
+    }
+    const distanceFeet = distancePx / gridSize * feetPerCell
+    if (!illuminated && distanceFeet > darkvisionRangeFeet) return false
+  }
+  return true
 }
 
 export function projectMapsForPlayer(value, geometryState, activeCharacterId = null) {
@@ -1178,6 +1220,18 @@ export function projectMapGeometryForPlayer(value, memberId = null) {
   }
 }
 
+export function projectMapExplorationForPlayer(value, memberId = null) {
+  if (!plainObject(value) || !Array.isArray(value.maps)) return value
+  return {
+    ...value,
+    maps: value.maps.map((map) => {
+      if (!plainObject(map) || !plainObject(map.byMemberId)) return map
+      const member = typeof memberId === 'string' ? map.byMemberId[memberId] : undefined
+      return { ...map, byMemberId: member ? { [memberId]: member } : {} }
+    }),
+  }
+}
+
 /**
  * Persistence-boundary validation. The browser performs more detailed
  * migrations, while this deliberately conservative shape check prevents a
@@ -1197,6 +1251,7 @@ export function validateSharedStateShape(name, value) {
     'player-action-processed': 'actionIds',
     'map-fog': 'maps',
     'map-geometry': 'maps',
+    'map-exploration': 'maps',
   }
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
@@ -1231,6 +1286,10 @@ export function validateSharedStateShape(name, value) {
   if (name === 'map-geometry') {
     const geometryReason = validateMapGeometryState(value)
     if (geometryReason) return { ok: false, reason: geometryReason }
+  }
+  if (name === 'map-exploration') {
+    const explorationReason = validateMapExplorationState(value)
+    if (explorationReason) return { ok: false, reason: explorationReason }
   }
   return { ok: true }
 }
@@ -3169,6 +3228,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           if (roomMember === room.host) playerRead = false
         }
         if (playerRead && name === 'map-geometry') value = projectMapGeometryForPlayer(value, req.headers['x-stars-member'])
+        if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
           if (geometry.corrupted) {

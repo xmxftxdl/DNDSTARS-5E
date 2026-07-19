@@ -125,6 +125,16 @@ export default function MapGeometryToolbar({
             value={geometry.vision.defaultRangeFeet}
             onChange={(defaultRangeFeet) => setVision(mapId, { defaultRangeFeet })}
           />
+          <select
+            value={geometry.vision.ambientLight}
+            onChange={(event) => setVision(mapId, { ambientLight: event.target.value as MapGeometryState['vision']['ambientLight'] })}
+            className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+            title="场景环境光照"
+          >
+            <option value="bright">明亮光照</option>
+            <option value="dim">微光</option>
+            <option value="darkness">黑暗</option>
+          </select>
           <label className="flex items-center gap-1 text-[10px] text-slate-300" title="玩家共享所有队友的视野；关闭后只使用当前控制角色">
             <input
               type="checkbox"
@@ -386,12 +396,64 @@ export default function MapGeometryToolbar({
             onChange={(elevationFeet) => updateToken(mapId, selectedToken.id, { elevationFeet })}
           />
           {selectedToken.type === 'player' && (
-            <NumberField
-              label="视野"
-              min={0}
-              value={selectedToken.visionRangeFeet ?? geometry.vision.defaultRangeFeet}
-              onChange={(visionRangeFeet) => updateToken(mapId, selectedToken.id, { visionRangeFeet })}
+            <>
+              <NumberField
+                label="视野"
+                min={0}
+                value={selectedToken.visionRangeFeet ?? geometry.vision.defaultRangeFeet}
+                onChange={(visionRangeFeet) => updateToken(mapId, selectedToken.id, { visionRangeFeet })}
+              />
+              <NumberField
+                label="黑暗视觉"
+                min={0}
+                value={selectedToken.darkvisionRangeFeet ?? 0}
+                onChange={(darkvisionRangeFeet) => updateToken(mapId, selectedToken.id, { darkvisionRangeFeet })}
+              />
+            </>
+          )}
+          <label className="flex items-center gap-0.5 text-[10px] text-slate-300">
+            <input
+              type="checkbox"
+              checked={selectedToken.lightSource?.enabled ?? false}
+              onChange={(event) => updateToken(mapId, selectedToken.id, {
+                lightSource: {
+                  enabled: event.target.checked,
+                  brightRadiusFeet: selectedToken.lightSource?.brightRadiusFeet ?? 20,
+                  dimRadiusFeet: selectedToken.lightSource?.dimRadiusFeet ?? 20,
+                  color: selectedToken.lightSource?.color ?? '#fbbf24',
+                },
+              })}
             />
+            光源
+          </label>
+          {selectedToken.lightSource?.enabled && (
+            <>
+              <NumberField
+                label="明亮"
+                min={0}
+                value={selectedToken.lightSource.brightRadiusFeet}
+                onChange={(brightRadiusFeet) => updateToken(mapId, selectedToken.id, {
+                  lightSource: { ...selectedToken.lightSource!, brightRadiusFeet },
+                })}
+              />
+              <NumberField
+                label="微光"
+                min={0}
+                value={selectedToken.lightSource.dimRadiusFeet}
+                onChange={(dimRadiusFeet) => updateToken(mapId, selectedToken.id, {
+                  lightSource: { ...selectedToken.lightSource!, dimRadiusFeet },
+                })}
+              />
+              <input
+                type="color"
+                value={selectedToken.lightSource.color}
+                onChange={(event) => updateToken(mapId, selectedToken.id, {
+                  lightSource: { ...selectedToken.lightSource!, color: event.target.value },
+                })}
+                className="h-5 w-6 rounded border border-white/10 bg-transparent"
+                title="光源颜色"
+              />
+            </>
           )}
         </div>
       )}

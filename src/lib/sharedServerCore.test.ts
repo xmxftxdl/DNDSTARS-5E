@@ -258,6 +258,25 @@ describe('map geometry player projection', () => {
     expect(JSON.stringify(hidden)).not.toContain('secret-door')
   })
 
+  it('projects exploration memory only to the requesting room member', () => {
+    const exploration = {
+      schemaVersion: 1,
+      maps: [{
+        mapId: 'map-1',
+        byMemberId: {
+          alice: { polygons: [[{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]], updatedAt: 1 },
+          bob: { polygons: [[{ x: 100, y: 100 }, { x: 110, y: 100 }, { x: 100, y: 110 }]], updatedAt: 1 },
+        },
+        updatedAt: 1,
+      }],
+      updatedAt: 1,
+    }
+    const projected = sharedServerCore.projectMapExplorationForPlayer(exploration, 'alice')
+    expect(Object.keys(projected.maps[0].byMemberId)).toEqual(['alice'])
+    expect(JSON.stringify(projected)).not.toContain('bob')
+    expect(sharedServerCore.validateSharedStateShape('map-exploration', exploration)).toEqual({ ok: true })
+  })
+
   it('fails closed on malformed geometry resources', () => {
     expect(validateSharedStateShape('map-geometry', geometry)).toEqual({ ok: true })
     expect(validateSharedStateShape('map-geometry', {

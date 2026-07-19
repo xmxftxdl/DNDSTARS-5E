@@ -8,6 +8,7 @@ import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEf
 import { normalizeDnd5ePersistentAreaTriggerSnapshot } from '../rulesets/dnd5e/persistentAreaTypes'
 import { MAP_FOG_RESOURCE, normalizeSharedMapFog } from './fogOfWar'
 import { MAP_GEOMETRY_RESOURCE, normalizeSharedMapGeometry } from './mapGeometry'
+import { MAP_EXPLORATION_RESOURCE, normalizeSharedMapExploration } from './mapExploration'
 import {
   defaultCombatInterruptPhase,
   type CombatInterruptKind,
@@ -45,6 +46,7 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   'player-action-processed': 'actionIds',
   [MAP_FOG_RESOURCE]: 'maps',
   [MAP_GEOMETRY_RESOURCE]: 'maps',
+  [MAP_EXPLORATION_RESOURCE]: 'maps',
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -289,6 +291,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === MAP_GEOMETRY_RESOURCE && !normalizeSharedMapGeometry(input)) {
     reasons.push('地图几何资源结构损坏')
+  }
+  if (name === MAP_EXPLORATION_RESOURCE && !normalizeSharedMapExploration(input)) {
+    reasons.push('地图探索记忆结构损坏')
   }
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {

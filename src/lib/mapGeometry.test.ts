@@ -4,6 +4,7 @@ import {
   createEmptyMapGeometry,
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
+  mapGeometryIlluminationAtPoint,
   mapGeometryMovementBlocked,
   mapGeometryVisibilityPolygon,
   normalizeSharedMapGeometry,
@@ -21,7 +22,7 @@ const map: BattleMap = {
 
 const geometry = (): MapGeometryState => ({
   ...createEmptyMapGeometry(map.id, 1),
-  vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: true },
+  vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' },
   walls: [{
     id: 'wall', kind: 'wall', label: '墙', points: [{ x: 100, y: 0 }, { x: 100, y: 200 }],
     blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
@@ -82,5 +83,23 @@ describe('map geometry', () => {
     const shared = { schemaVersion: 1, maps: [g], updatedAt: 1 }
     expect(normalizeSharedMapGeometry(shared)?.maps).toHaveLength(1)
     expect(normalizeSharedMapGeometry({ ...shared, maps: [{ ...g, doors: [{ id: 'broken' }] }] })).toBeUndefined()
+  })
+
+  it('applies darkness, darkvision, and token light sources to visibility', () => {
+    const g = geometry()
+    g.walls = []
+    g.vision.ambientLight = 'darkness'
+    const viewer = token('viewer', 50, 50)
+    const target = token('target', 100, 50, { type: 'enemy' })
+    const darkMap = { ...map, tokens: [viewer, target] }
+    expect(mapGeometryCanSeeToken({ geometry: g, map: darkMap, viewer, target })).toBe(false)
+    expect(mapGeometryCanSeeToken({ geometry: g, map: darkMap, viewer: { ...viewer, darkvisionRangeFeet: 60 }, target })).toBe(true)
+
+    const torch = token('torch', 50, 50, {
+      lightSource: { enabled: true, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fbbf24' },
+    })
+    const litMap = { ...map, tokens: [viewer, target, torch] }
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map: litMap, point: target })).toBe('bright')
+    expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(true)
   })
 })

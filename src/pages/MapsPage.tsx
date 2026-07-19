@@ -59,6 +59,7 @@ import DiceBoxRollOverlay from '../components/DiceBoxRollOverlay'
 import { characterHpTokenPatch, useMapStore } from '../store/maps'
 import { useFogStore } from '../store/fog'
 import { useMapGeometryStore } from '../store/mapGeometry'
+import { useMapExplorationStore } from '../store/mapExploration'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
 import { useSpellbookStore } from '../store/spellbook'
@@ -78,7 +79,7 @@ import {
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryTargeting } from '../types/inventory'
 import { createEmptyMapFog, type FogTool } from '../lib/fogOfWar'
-import { createEmptyMapGeometry, mapGeometryLineOfEffectBlocked, type MapGeometryTool } from '../lib/mapGeometry'
+import { createEmptyMapGeometry, mapGeometryLineOfEffectBlocked, mapGeometryVisibilityPolygon, type MapGeometryTool } from '../lib/mapGeometry'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import {
@@ -800,6 +801,8 @@ export default function MapsPage() {
   const addGeometryEntity = useMapGeometryStore((s) => s.addEntity)
   const setGeometryDoorState = useMapGeometryStore((s) => s.setDoorState)
   const updateGeometryEntity = useMapGeometryStore((s) => s.updateEntity)
+  const explorationMaps = useMapExplorationStore((s) => s.maps)
+  const recordMapExploration = useMapExplorationStore((s) => s.record)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
@@ -2342,6 +2345,34 @@ export default function MapsPage() {
   const visionSourceTokenIds = activeMap && activeGeometry?.vision.sharePartyVision !== false
     ? activeMap.tokens.filter((token) => token.type === 'player').map((token) => token.id)
     : controlledVisionToken ? [controlledVisionToken.id] : []
+  const activeExploration = activeMap
+    ? explorationMaps.find((entry) => entry.mapId === activeMap.id)
+    : undefined
+  const exploredVisionPolygons = isDM
+    ? Object.values(activeExploration?.byMemberId ?? {}).flatMap((entry) => entry.polygons)
+    : roomSession?.memberId
+      ? activeExploration?.byMemberId[roomSession.memberId]?.polygons ?? []
+      : []
+
+  useEffect(() => {
+    if (!isDM || !activeMap || !activeGeometry?.vision.enabled) return
+    const views = activeMap.tokens.flatMap((token) => {
+      if (token.type !== 'player' || !token.characterId) return []
+      const character = characters.find((candidate) => candidate.id === token.characterId)
+      if (!character?.roomMemberId) return []
+      const polygon = mapGeometryVisibilityPolygon({ geometry: activeGeometry, map: activeMap, viewer: token })
+      return polygon.length >= 3 ? [{ memberId: character.roomMemberId, polygon }] : []
+    })
+    if (views.length === 0) return
+    if (activeGeometry.vision.sharePartyVision) {
+      const polygons = views.map((entry) => entry.polygon)
+      for (const memberId of new Set(views.map((entry) => entry.memberId))) {
+        recordMapExploration(activeMap.id, memberId, polygons)
+      }
+    } else {
+      for (const view of views) recordMapExploration(activeMap.id, view.memberId, [view.polygon])
+    }
+  }, [activeGeometry, activeMap, characters, isDM, recordMapExploration])
 
   const moveCircle = (() => {
     if (!showMoveRange || !activeMap || !myPlayerToken || !turnCharacter) return undefined
@@ -11703,6 +11734,7 @@ export default function MapsPage() {
               geometryPreviewAsPlayer={geometryPreviewAsPlayer}
               geometrySnapToGrid={geometrySnapToGrid}
               visionSourceTokenIds={visionSourceTokenIds}
+              exploredVisionPolygons={exploredVisionPolygons}
               onGeometryEntityCommit={(entity) => {
                 if (isDM) addGeometryEntity(activeMap.id, entity)
               }}

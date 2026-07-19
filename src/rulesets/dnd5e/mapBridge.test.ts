@@ -49,7 +49,7 @@ describe('D&D 5e map bridge', () => {
         cover: 'half', blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
         baseHeightFeet: 0, heightFeet: 5, createdAt: 1,
       }],
-      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true },
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' },
       updatedAt: 1,
     }
     setMapGeometryRuntime([baseGeometry])

@@ -7,6 +7,7 @@ import {
   MAP_GEOMETRY_RESOURCE,
   MAP_GEOMETRY_SCHEMA_VERSION,
   normalizeSharedMapGeometry,
+  normalizeMapGeometry,
   setMapGeometryRuntime,
   type MapGeometryDoorState,
   type MapGeometryEntity,
@@ -250,7 +251,10 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
       name: 'dndstars-map-geometry',
       partialize: (state) => ({ maps: state.maps }),
       onRehydrateStorage: () => (state) => {
-        if (state?.maps) setMapGeometryRuntime(state.maps)
+        if (state?.maps) {
+          state.maps = state.maps.map((map) => normalizeMapGeometry(map) ?? createEmptyMapGeometry(map.mapId))
+          setMapGeometryRuntime(state.maps)
+        }
       },
     },
   ),

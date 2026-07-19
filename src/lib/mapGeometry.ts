@@ -78,6 +78,7 @@ export interface MapGeometryVisionSettings {
   enabled: boolean
   defaultRangeFeet: number
   sharePartyVision: boolean
+  ambientLight: 'bright' | 'dim' | 'darkness'
 }
 
 export interface MapGeometryState {
@@ -113,6 +114,7 @@ const DEFAULT_VISION: MapGeometryVisionSettings = {
   enabled: false,
   defaultRangeFeet: 60,
   sharePartyVision: true,
+  ambientLight: 'bright',
 }
 
 export function createEmptyMapGeometry(mapId: string, now = Date.now()): MapGeometryState {
@@ -226,6 +228,7 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
   const vision = raw.vision as Record<string, unknown>
   if (
     typeof vision.enabled !== 'boolean' || typeof vision.sharePartyVision !== 'boolean' ||
+    (vision.ambientLight != null && !['bright', 'dim', 'darkness'].includes(String(vision.ambientLight))) ||
     !finite(vision.defaultRangeFeet, 0, 10_000)
   ) return undefined
   const walls = raw.walls.map(normalizeMapGeometryEntity)
@@ -246,6 +249,7 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
       enabled: vision.enabled,
       defaultRangeFeet: vision.defaultRangeFeet,
       sharePartyVision: vision.sharePartyVision,
+      ambientLight: (vision.ambientLight as MapGeometryVisionSettings['ambientLight'] | undefined) ?? 'bright',
     },
     updatedAt: raw.updatedAt,
   }
@@ -491,11 +495,27 @@ export function mapGeometryCanSeeToken(input: {
   const geometry = input.geometry
   if (!geometry?.vision.enabled) return true
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
-  const rangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
+  const normalRangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
     ? Math.max(0, input.viewer.visionRangeFeet!)
     : geometry.vision.defaultRangeFeet
+  const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
+    ? Math.max(0, input.viewer.darkvisionRangeFeet!)
+    : 0
+  const carriedLightRangeFeet = input.viewer.lightSource?.enabled
+    ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
+    : 0
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, carriedLightRangeFeet)
   const rangePx = rangeFeet / feetPerCell * Math.max(1, input.map.gridSize)
-  if (Math.hypot(input.target.x - input.viewer.x, input.target.y - input.viewer.y) > rangePx) return false
+  const distancePx = Math.hypot(input.target.x - input.viewer.x, input.target.y - input.viewer.y)
+  if (distancePx > rangePx) return false
+  const illumination = mapGeometryIlluminationAtPoint({
+    geometry,
+    map: input.map,
+    tokens: input.map.tokens,
+    point: input.target,
+  })
+  const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
+  if (illumination === 'darkness' && distanceFeet > darkvisionRangeFeet) return false
   return !rayBlocked({
     geometry,
     from: input.viewer,
@@ -504,6 +524,33 @@ export function mapGeometryCanSeeToken(input: {
     toElevationFeet: tokenElevation(input.target),
     purpose: 'vision',
   })
+}
+
+export type MapGeometryIllumination = 'bright' | 'dim' | 'darkness'
+
+export function mapGeometryIlluminationAtPoint(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  tokens?: readonly Token[]
+  point: MapGeometryPoint
+}): MapGeometryIllumination {
+  const ambient = input.geometry?.vision.ambientLight ?? 'bright'
+  if (ambient === 'bright') return 'bright'
+  let result: MapGeometryIllumination = ambient
+  const gridSize = Math.max(1, input.map.gridSize)
+  const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
+  for (const source of input.tokens ?? input.map.tokens) {
+    const light = source.lightSource
+    if (!light?.enabled) continue
+    const distanceFeet = Math.hypot(input.point.x - source.x, input.point.y - source.y) / gridSize * feetPerCell
+    const brightRadius = Math.max(0, light.brightRadiusFeet)
+    const dimRadius = brightRadius + Math.max(0, light.dimRadiusFeet)
+    if (distanceFeet > dimRadius) continue
+    if (rayBlocked({ geometry: input.geometry, from: source, to: input.point, purpose: 'vision' })) continue
+    if (distanceFeet <= brightRadius) return 'bright'
+    result = 'dim'
+  }
+  return result
 }
 
 function nearestRayPoint(
@@ -531,9 +578,17 @@ export function mapGeometryVisibilityPolygon(input: {
   if (!geometry?.vision.enabled) return []
   const origin = { x: input.viewer.x, y: input.viewer.y }
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
-  const rangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
+  const normalRangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
     ? Math.max(0, input.viewer.visionRangeFeet!)
     : geometry.vision.defaultRangeFeet
+  const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
+    ? Math.max(0, input.viewer.darkvisionRangeFeet!)
+    : 0
+  const lightRangeFeet = input.viewer.lightSource?.enabled
+    ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
+    : 0
+  const ambientVisionRangeFeet = geometry.vision.ambientLight === 'darkness' ? 0 : normalRangeFeet
+  const rangeFeet = Math.max(ambientVisionRangeFeet, darkvisionRangeFeet, lightRangeFeet)
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = tokenElevation(input.viewer)
   const blockers = mapGeometrySegments(geometry).filter((segment) =>

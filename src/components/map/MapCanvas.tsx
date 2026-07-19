@@ -106,6 +106,7 @@ import {
   type MapGeometryEntity,
   type MapGeometryState,
   type MapGeometryTool,
+  type MapGeometryPoint,
 } from '../../lib/mapGeometry'
 
 export interface MoveCircle {
@@ -197,6 +198,7 @@ interface MapCanvasProps {
   geometryPreviewAsPlayer?: boolean
   geometrySnapToGrid?: boolean
   visionSourceTokenIds?: string[]
+  exploredVisionPolygons?: MapGeometryPoint[][]
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
   onGeometryEntitySelect?: (entityId: string | null) => void
   onGeometryDoorInteract?: (doorId: string) => void
@@ -299,10 +301,12 @@ function DynamicVisionLayer({
   map,
   geometry,
   sourceTokenIds,
+  exploredPolygons,
 }: {
   map: BattleMap
   geometry?: MapGeometryState
   sourceTokenIds: readonly string[]
+  exploredPolygons: readonly MapGeometryPoint[][]
 }) {
   if (!geometry?.vision.enabled) return null
   const sourceIds = new Set(sourceTokenIds)
@@ -310,6 +314,17 @@ function DynamicVisionLayer({
   return (
     <Layer listening={false}>
       <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" listening={false} />
+      {exploredPolygons.map((polygon, index) => polygon.length >= 3 ? (
+        <Line
+          key={`explored:${index}`}
+          points={polygon.flatMap((point) => [point.x, point.y])}
+          closed
+          fill="#000"
+          opacity={0.58}
+          globalCompositeOperation="destination-out"
+          listening={false}
+        />
+      ) : null)}
       {viewers.map((viewer) => {
         const polygon = mapGeometryVisibilityPolygon({ geometry, map, viewer })
         return polygon.length >= 3 ? (
@@ -322,6 +337,28 @@ function DynamicVisionLayer({
             listening={false}
           />
         ) : null
+      })}
+    </Layer>
+  )
+}
+
+function LightingLayer({ map, geometry }: { map: BattleMap; geometry?: MapGeometryState }) {
+  if (!geometry?.vision.enabled || geometry.vision.ambientLight === 'bright') return null
+  const gridSize = Math.max(1, map.gridSize)
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  const opacity = geometry.vision.ambientLight === 'darkness' ? 0.72 : 0.3
+  const sources = map.tokens.filter((token) => token.lightSource?.enabled)
+  return (
+    <Layer listening={false}>
+      <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" opacity={opacity} listening={false} />
+      {sources.flatMap((source) => {
+        const light = source.lightSource!
+        const bright = light.brightRadiusFeet / feetPerCell * gridSize
+        const dim = (light.brightRadiusFeet + light.dimRadiusFeet) / feetPerCell * gridSize
+        return [
+          <Circle key={`light-dim:${source.id}`} x={source.x} y={source.y} radius={dim} fill="#000" opacity={0.52} globalCompositeOperation="destination-out" listening={false} />,
+          <Circle key={`light-bright:${source.id}`} x={source.x} y={source.y} radius={bright} fill="#000" globalCompositeOperation="destination-out" listening={false} />,
+        ]
       })}
     </Layer>
   )
@@ -688,6 +725,7 @@ export default function MapCanvas({
   geometryPreviewAsPlayer = false,
   geometrySnapToGrid = true,
   visionSourceTokenIds = [],
+  exploredVisionPolygons = [],
   onGeometryEntityCommit,
   onGeometryEntitySelect,
   onGeometryDoorInteract,
@@ -1694,11 +1732,15 @@ export default function MapCanvas({
           )}
         </Layer>
         {(!isDM || geometryPreviewAsPlayer) && (
-          <DynamicVisionLayer
-            map={map}
-            geometry={geometry}
-            sourceTokenIds={visionSourceTokenIds}
-          />
+          <>
+            <LightingLayer map={map} geometry={geometry} />
+            <DynamicVisionLayer
+              map={map}
+              geometry={geometry}
+              sourceTokenIds={visionSourceTokenIds}
+              exploredPolygons={exploredVisionPolygons}
+            />
+          </>
         )}
         {((isDM && geometryEditMode) || (!isDM && onGeometryDoorInteract)) && (
           <MapGeometryLayer

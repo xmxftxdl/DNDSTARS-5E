@@ -21,6 +21,7 @@ import { subscribeSharedResourceInvalidation } from './lib/sharedApi'
 import { useMapStore } from './store/maps'
 import { useFogStore } from './store/fog'
 import { useMapGeometryStore } from './store/mapGeometry'
+import { useMapExplorationStore } from './store/mapExploration'
 import { useCharacterStore } from './store/characters'
 import { SHARED_SPELLBOOK_RESOURCE, useSpellbookStore } from './store/spellbook'
 import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e'
@@ -28,6 +29,7 @@ import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId } from './lib/playerView'
 import { MAP_FOG_RESOURCE } from './lib/fogOfWar'
 import { MAP_GEOMETRY_RESOURCE } from './lib/mapGeometry'
+import { MAP_EXPLORATION_RESOURCE } from './lib/mapExploration'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 
 export default function App() {
@@ -41,6 +43,7 @@ export default function App() {
   const loadSharedMaps = useMapStore((s) => s.loadShared)
   const loadSharedFog = useFogStore((s) => s.loadShared)
   const loadSharedMapGeometry = useMapGeometryStore((s) => s.loadShared)
+  const loadSharedMapExploration = useMapExplorationStore((s) => s.loadShared)
   const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
   const loadSharedSpellbook = useSpellbookStore((s) => s.loadShared)
 
@@ -113,7 +116,7 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedFog(), loadSharedMapGeometry()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
@@ -124,14 +127,16 @@ export default function App() {
       // Re-fetch the server-side player projection immediately instead of waiting for recovery polling.
       await loadSharedMaps()
     })
+    const stopMapExploration = subscribeSharedResourceInvalidation(MAP_EXPLORATION_RESOURCE, loadSharedMapExploration)
     return () => {
       stopMaps()
       stopCharacters()
       stopSpellbook()
       stopFog()
       stopMapGeometry()
+      stopMapExploration()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedFog, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCharacters, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return
