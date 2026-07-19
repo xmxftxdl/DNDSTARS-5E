@@ -195,6 +195,7 @@ interface MapCanvasProps {
   geometryTool?: MapGeometryTool
   selectedGeometryEntityId?: string | null
   geometryPreviewAsPlayer?: boolean
+  geometrySnapToGrid?: boolean
   visionSourceTokenIds?: string[]
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
   onGeometryEntitySelect?: (entityId: string | null) => void
@@ -679,6 +680,7 @@ export default function MapCanvas({
   geometryTool = 'select',
   selectedGeometryEntityId = null,
   geometryPreviewAsPlayer = false,
+  geometrySnapToGrid = true,
   visionSourceTokenIds = [],
   onGeometryEntityCommit,
   onGeometryEntitySelect,
@@ -1008,13 +1010,25 @@ export default function MapCanvas({
     }
   }
 
+  const snapGeometryPoint = (point: Point): Point => {
+    if (!geometrySnapToGrid) return point
+    const gridSize = Math.max(1, map.gridSize)
+    const offsetX = map.gridOffsetX ?? 0
+    const offsetY = map.gridOffsetY ?? 0
+    return {
+      x: offsetX + Math.round((point.x - offsetX) / gridSize) * gridSize,
+      y: offsetY + Math.round((point.y - offsetY) / gridSize) * gridSize,
+    }
+  }
+
   const handleGeometryMouseDown = (stage: Konva.Stage | null): boolean => {
     if (!geometryEditMode) return false
     if (geometryTool === 'select') {
       onGeometryEntitySelect?.(null)
       return true
     }
-    const point = relativePoint(stage)
+    const rawPoint = relativePoint(stage)
+    const point = rawPoint ? snapGeometryPoint(rawPoint) : null
     if (!point) return true
     geometryDragStartRef.current = {
       point,
@@ -1028,7 +1042,8 @@ export default function MapCanvas({
   const handleGeometryMouseMove = (stage: Konva.Stage | null): boolean => {
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
-    const point = relativePoint(stage)
+    const rawPoint = relativePoint(stage)
+    const point = rawPoint ? snapGeometryPoint(rawPoint) : null
     if (point) setGeometryDraft(geometryEntityFromDrag(drag.point, point))
     return true
   }

@@ -862,6 +862,7 @@ export default function MapsPage() {
   const [geometryEditMode, setGeometryEditMode] = useState(false)
   const [geometryTool, setGeometryTool] = useState<MapGeometryTool>('select')
   const [geometryPreviewAsPlayer, setGeometryPreviewAsPlayer] = useState(false)
+  const [geometrySnapToGrid, setGeometrySnapToGrid] = useState(true)
   const [panelWidth, setPanelWidth] = useState(720)
   const [panelHeight, setPanelHeight] = useState(300)
   const [panelFull, setPanelFull] = useState(false)
@@ -11508,6 +11509,7 @@ export default function MapsPage() {
               geometryTool={geometryTool}
               selectedGeometryEntityId={selectedGeometryEntityId}
               geometryPreviewAsPlayer={geometryPreviewAsPlayer}
+              geometrySnapToGrid={geometrySnapToGrid}
               visionSourceTokenIds={visionSourceTokenIds}
               onGeometryEntityCommit={(entity) => {
                 if (isDM) addGeometryEntity(activeMap.id, entity)
@@ -12998,6 +13000,7 @@ export default function MapsPage() {
                       editMode={geometryEditMode}
                       tool={geometryTool}
                       previewAsPlayer={geometryPreviewAsPlayer}
+                      snapToGrid={geometrySnapToGrid}
                       onEditModeChange={(enabled) => {
                         setGeometryEditMode(enabled)
                         if (enabled) {
@@ -13017,6 +13020,7 @@ export default function MapsPage() {
                         selectGeometryEntity(null)
                       }}
                       onPreviewChange={setGeometryPreviewAsPlayer}
+                      onSnapToGridChange={setGeometrySnapToGrid}
                     />
                   )}
                   <div className="flex items-center gap-1 rounded-lg border border-sky-400/15 bg-sky-500/[0.05] px-1 py-0.5">

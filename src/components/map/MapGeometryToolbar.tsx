@@ -1,5 +1,9 @@
-import { BrickWall, DoorClosed, Eye, LockKeyhole, MousePointer2, Package, Trash2 } from 'lucide-react'
-import type { MapGeometryEntity, MapGeometryState, MapGeometryTool } from '../../lib/mapGeometry'
+import { useRef } from 'react'
+import {
+  BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, LockKeyhole,
+  MousePointer2, Package, Redo2, Trash2, Undo2, Upload,
+} from 'lucide-react'
+import { normalizeMapGeometry, type MapGeometryEntity, type MapGeometryState, type MapGeometryTool } from '../../lib/mapGeometry'
 import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useMapStore, type Token } from '../../store/maps'
 
@@ -11,9 +15,11 @@ interface MapGeometryToolbarProps {
   editMode: boolean
   tool: MapGeometryTool
   previewAsPlayer: boolean
+  snapToGrid: boolean
   onEditModeChange: (enabled: boolean) => void
   onToolChange: (tool: MapGeometryTool) => void
   onPreviewChange: (enabled: boolean) => void
+  onSnapToGridChange: (enabled: boolean) => void
 }
 
 const TOOL_LABELS: Record<MapGeometryTool, string> = {
@@ -56,15 +62,24 @@ export default function MapGeometryToolbar({
   editMode,
   tool,
   previewAsPlayer,
+  snapToGrid,
   onEditModeChange,
   onToolChange,
   onPreviewChange,
+  onSnapToGridChange,
 }: MapGeometryToolbarProps) {
+  const importInputRef = useRef<HTMLInputElement>(null)
   const updateEntity = useMapGeometryStore((state) => state.updateEntity)
   const removeEntity = useMapGeometryStore((state) => state.removeEntity)
   const setDoorState = useMapGeometryStore((state) => state.setDoorState)
   const setVision = useMapGeometryStore((state) => state.setVision)
   const clearMap = useMapGeometryStore((state) => state.clearMap)
+  const duplicateEntity = useMapGeometryStore((state) => state.duplicateEntity)
+  const replaceMap = useMapGeometryStore((state) => state.replaceMap)
+  const undo = useMapGeometryStore((state) => state.undo)
+  const redo = useMapGeometryStore((state) => state.redo)
+  const canUndo = useMapGeometryStore((state) => (state.historyByMapId[mapId]?.length ?? 0) > 0)
+  const canRedo = useMapGeometryStore((state) => (state.futureByMapId[mapId]?.length ?? 0) > 0)
   const updateToken = useMapStore((state) => state.updateToken)
   const count = geometry.walls.length + geometry.doors.length + geometry.obstacles.length
 
@@ -126,6 +141,76 @@ export default function MapGeometryToolbar({
           >
             <Eye className="h-3.5 w-3.5" />
           </button>
+          <button
+            type="button"
+            disabled={!canUndo}
+            onClick={() => undo(mapId)}
+            className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
+            title="撤销几何编辑"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={!canRedo}
+            onClick={() => redo(mapId)}
+            className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
+            title="重做几何编辑"
+          >
+            <Redo2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onSnapToGridChange(!snapToGrid)}
+            className={`rounded-md p-1 ${snapToGrid ? 'bg-violet-500/25 text-violet-100' : 'text-slate-300 hover:bg-white/10'}`}
+            title="绘制时吸附到地图网格"
+          >
+            <Grid3X3 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const blob = new Blob([JSON.stringify(geometry, null, 2)], { type: 'application/json' })
+              const url = URL.createObjectURL(blob)
+              const anchor = document.createElement('a')
+              anchor.href = url
+              anchor.download = `${geometry.mapId}.map-geometry.json`
+              anchor.click()
+              URL.revokeObjectURL(url)
+            }}
+            className="rounded-md p-1 text-slate-300 hover:bg-white/10"
+            title="导出当前地图几何 JSON"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            className="rounded-md p-1 text-slate-300 hover:bg-white/10"
+            title="导入地图几何 JSON"
+          >
+            <Upload className="h-3.5 w-3.5" />
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.currentTarget.value = ''
+              if (!file) return
+              void file.text().then((text) => {
+                try {
+                  const parsed = normalizeMapGeometry(JSON.parse(text))
+                  if (!parsed) throw new Error('结构不符合地图几何 schema')
+                  if (!replaceMap(mapId, { ...parsed, mapId })) throw new Error('地图标识不一致')
+                } catch (error) {
+                  alert(`无法导入地图几何：${error instanceof Error ? error.message : '文件无效'}`)
+                }
+              })
+            }}
+          />
           <span className="text-[10px] text-slate-500">{count} 项</span>
           <button
             type="button"
@@ -205,6 +290,14 @@ export default function MapGeometryToolbar({
               <option value="total">全身掩护</option>
             </select>
           )}
+          <button
+            type="button"
+            onClick={() => duplicateEntity(mapId, selectedEntity.id)}
+            className="rounded p-1 text-slate-300 hover:bg-white/10"
+            title="复制选中几何"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => removeEntity(mapId, selectedEntity.id)}
