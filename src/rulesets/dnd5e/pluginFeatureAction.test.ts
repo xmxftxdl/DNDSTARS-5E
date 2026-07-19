@@ -86,7 +86,7 @@ function action(featureId: string): SharedPlayerActionState {
 }
 
 describe('D&D 5e plugin feature authority action', () => {
-  it('rebuilds area targets from the DM map instead of trusting submitted target ids', () => {
+  it('rebuilds area targets and creates a concentration-bound persistent map entity', async () => {
     let featureId = ''
     const dispose = registerDnd5eRulesPlugin({
       manifest: {
@@ -103,6 +103,7 @@ describe('D&D 5e plugin feature authority action', () => {
               kind: 'area', relation: 'ally', maximumTargets: 4,
               template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 30 },
             },
+            persistentArea: { label: '守护区域', color: '#22c55e', durationRounds: 3, concentration: true },
           },
         })
       },
@@ -130,7 +131,7 @@ describe('D&D 5e plugin feature authority action', () => {
           ...action(featureId),
           targetTokenId: undefined,
           targetTokenIds: ['enemy-token'],
-          targetCell: { col: 2, row: 0 },
+          targetCell: { col: 4, row: 0 },
         },
         map,
         characters: [hero, ally, enemy],
@@ -138,9 +139,23 @@ describe('D&D 5e plugin feature authority action', () => {
       })
       expect(prepared.ok).toBe(true)
       if (!prepared.ok) return
-      expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual(['ally-token'])
-      expect(prepared.prepared.headlessAction.targetIds).toEqual(['ally-token'])
-      expect(prepared.prepared.headlessAction.targetCell).toEqual({ col: 2, row: 0 })
+      expect(prepared.prepared.targetTokens).toEqual([])
+      expect(prepared.prepared.headlessAction.targetId).toBeUndefined()
+      expect(prepared.prepared.headlessAction.targetIds).toEqual([])
+      expect(prepared.prepared.headlessAction.targetCell).toEqual({ col: 4, row: 0 })
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({ prepared: prepared.prepared })
+      expect(resolved.result.ok).toBe(true)
+      expect(resolved.application?.map.dnd5ePluginAreas).toEqual([
+        expect.objectContaining({
+          id: 'plugin-area:plugin-action-1', label: '守护区域', color: '#22c55e',
+          cells: expect.arrayContaining([{ col: 4, row: 0 }]),
+          concentrationId: 'plugin-area:plugin-action-1', expiresAfterRound: 3,
+        }),
+      ])
+      expect(resolved.application?.characters.find((entry) => entry.id === hero.id)).toMatchObject({
+        concentrating: true,
+        dnd5eCombatState: { concentrationSpellId: 'plugin-area:plugin-action-1' },
+      })
     } finally {
       dispose()
     }

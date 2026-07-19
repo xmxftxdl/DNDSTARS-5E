@@ -6,6 +6,7 @@ import { resolveDnd5eAttackOutcome } from './attackResolution'
 import {
   dnd5ePluginFeatureDefinition,
   dnd5ePluginHeadlessActionDefinition,
+  dnd5ePluginResourceDefinition,
   type Dnd5ePluginAction,
 } from './pluginApi'
 import type { Dnd5eSandboxCapabilityOperation } from './pluginSandbox'
@@ -5298,7 +5299,8 @@ export function resolveDnd5eSandboxedPluginCapabilities(
     } else {
       const uniqueIds = [...new Set(action.targetIds ?? [])]
       if (
-        uniqueIds.length < 1 || uniqueIds.length > (targeting.maximumTargets ?? 64) ||
+        (uniqueIds.length < 1 && !pluginFeature.action.persistentArea) ||
+        uniqueIds.length > (targeting.maximumTargets ?? 64) ||
         !action.targetCell || !Number.isInteger(action.targetCell.col) || !Number.isInteger(action.targetCell.row) ||
         (action.targetOrientation != null && (
           !Number.isInteger(action.targetOrientation) || action.targetOrientation < 0 || action.targetOrientation > 3
@@ -5322,6 +5324,20 @@ export function resolveDnd5eSandboxedPluginCapabilities(
 
   const allowedTargetIds = new Set([actor.id, ...pluginTargets.map((target) => target.id)])
   for (const operation of operations) {
+    if (operation.kind === 'spend-resource' || operation.kind === 'restore-resource') {
+      const resource = dnd5ePluginResourceDefinition(operation.resourceId)
+      if (
+        !resource || resource.ownerPluginId !== action.pluginId || resource.classId !== actor.classId ||
+        actor.level < (resource.minimumLevel ?? 1) ||
+        (resource.subclassId != null && resource.subclassId !== actor.subclassId) ||
+        !Number.isInteger(operation.amount) || operation.amount < 1 || operation.amount > 1_000_000 ||
+        !actor.classResources[resource.id]
+      ) return fail(state, events, 'class-resource-unavailable')
+      if (operation.kind === 'spend-resource' && actor.classResources[resource.id].current < operation.amount) {
+        return fail(state, events, 'class-resource-unavailable')
+      }
+      continue
+    }
     if (!allowedTargetIds.has(operation.targetId)) return fail(state, events, 'invalid-plugin-action')
     if (
       operation.kind !== 'apply-standard-condition' &&
@@ -5346,7 +5362,35 @@ export function resolveDnd5eSandboxedPluginCapabilities(
     }
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: pluginEconomy })
   }
+  const persistentArea = pluginFeature?.action?.persistentArea
+  if (persistentArea?.concentration) {
+    if (!action.transactionId) return fail(state, events, 'invalid-plugin-action')
+    beginDnd5eConcentration(
+      state,
+      actor,
+      `plugin-area:${action.transactionId}`,
+      pluginTargets.map((target) => target.id),
+      persistentArea.durationRounds,
+      events,
+    )
+  }
   for (const operation of operations) {
+    if (operation.kind === 'spend-resource') {
+      if (!spendClassResource(actor, operation.resourceId, events, operation.amount)) {
+        return fail(state, events, 'class-resource-unavailable')
+      }
+      continue
+    }
+    if (operation.kind === 'restore-resource') {
+      const resource = actor.classResources[operation.resourceId]
+      if (!resource) return fail(state, events, 'class-resource-unavailable')
+      resource.current = Math.min(resource.max, resource.current + operation.amount)
+      events.push({
+        type: 'class-resource-restored', actorId: actor.id, resourceKey: operation.resourceId,
+        current: resource.current, max: resource.max,
+      })
+      continue
+    }
     const target = state.combatants[operation.targetId]
     if (!target) return fail(state, events, 'invalid-target')
     if (operation.kind === 'grant-temporary-hit-points') {
@@ -5498,7 +5542,8 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
       } else {
         const uniqueIds = [...new Set(action.targetIds ?? [])]
         if (
-          uniqueIds.length < 1 || uniqueIds.length > (targeting.maximumTargets ?? 64) ||
+          (uniqueIds.length < 1 && !pluginFeature.action.persistentArea) ||
+          uniqueIds.length > (targeting.maximumTargets ?? 64) ||
           !action.targetCell || !Number.isInteger(action.targetCell.col) || !Number.isInteger(action.targetCell.row) ||
           (action.targetOrientation != null && (
             !Number.isInteger(action.targetOrientation) || action.targetOrientation < 0 || action.targetOrientation > 3
@@ -5532,6 +5577,17 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
           )
         }
         events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: economy })
+      }
+      if (pluginFeature.action.persistentArea?.concentration) {
+        if (!action.transactionId) return fail(state, events, 'invalid-plugin-action')
+        beginDnd5eConcentration(
+          state,
+          actor,
+          `plugin-area:${action.transactionId}`,
+          pluginTargets.map((target) => target.id),
+          pluginFeature.action.persistentArea.durationRounds,
+          events,
+        )
       }
     } else {
       pluginTarget = action.targetId ? state.combatants[action.targetId] : undefined
@@ -5591,6 +5647,28 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
             sourceKind: 'plugin',
             pluginId: action.pluginId,
           }, events)
+        },
+        spendResource(resourceId, amount = 1) {
+          const definition = dnd5ePluginResourceDefinition(resourceId)
+          if (
+            !definition || definition.ownerPluginId !== action.pluginId || definition.classId !== actor.classId ||
+            actor.level < (definition.minimumLevel ?? 1) ||
+            (definition.subclassId != null && definition.subclassId !== actor.subclassId)
+          ) return false
+          return spendClassResource(actor, resourceId, events, amount)
+        },
+        restoreResource(resourceId, amount = 1) {
+          const definition = dnd5ePluginResourceDefinition(resourceId)
+          const resource = actor.classResources[resourceId]
+          if (
+            !definition || definition.ownerPluginId !== action.pluginId || definition.classId !== actor.classId ||
+            actor.level < (definition.minimumLevel ?? 1) ||
+            (definition.subclassId != null && definition.subclassId !== actor.subclassId) ||
+            !Number.isInteger(amount) || amount < 1 || amount > 1_000_000 || !resource
+          ) return false
+          resource.current = Math.min(resource.max, resource.current + amount)
+          events.push({ type: 'class-resource-restored', actorId: actor.id, resourceKey: resourceId, current: resource.current, max: resource.max })
+          return true
         },
         fail: (reason) => fail(state, events, reason),
         succeed: () => ({ ok: true, state, events }),

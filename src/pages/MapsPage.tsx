@@ -226,8 +226,10 @@ import {
   dnd5eHunterMultiattackClassDamageDefinitions,
   prepareDnd5eClassFeature,
   prepareDnd5ePluginFeatureAction,
+  dnd5ePluginFeatureDefinition,
   dnd5ePluginHeadlessActionDefinition,
   executeDnd5ePluginDiceRolls,
+  reconcileDnd5ePluginAreas,
   prepareDnd5eAbilityCheck,
   prepareDnd5eEquipmentAttack,
   prepareDnd5eFighterFeature,
@@ -2353,6 +2355,18 @@ export default function MapsPage() {
       .map((t) => t.id)
   }, [activeMap?.tokens, characterHpKey, tokenHpKey, characters])
 
+  useEffect(() => {
+    if (!isDM || !activeMap || (activeMap.dnd5ePluginAreas?.length ?? 0) === 0) return
+    const next = reconcileDnd5ePluginAreas(
+      activeMap.dnd5ePluginAreas,
+      useCharacterStore.getState().characters,
+      round,
+    )
+    if (next.length !== activeMap.dnd5ePluginAreas!.length) {
+      updateMap(activeMap.id, { dnd5ePluginAreas: next })
+    }
+  }, [isDM, activeMap, characters, round, updateMap])
+
   // 只有 Token 真正从地图移除时才清空选择。0 HP／阵亡怪物仍需保持可选，
   // 否则详情面板会在点击后的下一帧被关闭，看起来像“闪一下就消失”。
   useEffect(() => {
@@ -3213,7 +3227,10 @@ export default function MapsPage() {
         })
         .map((token) => token.id)
         .slice(0, dnd5ePluginAreaTargeting.targeting.maximumTargets ?? 64)
-      if (targetTokenIds.length < 1) {
+      const persistentArea = dnd5ePluginFeatureDefinition(
+        dnd5ePluginAreaTargeting.featureId,
+      )?.action?.persistentArea
+      if (targetTokenIds.length < 1 && !persistentArea) {
         void showCombatNotice('范围内没有目标', '请重新放置扩展规则的范围模板。', 'amber')
         return
       }
@@ -7924,6 +7941,12 @@ export default function MapsPage() {
       for (const tokenId of resolved.application.changedTokenIds) {
         const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
         if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+      }
+      if (
+        JSON.stringify(resolved.application.map.dnd5ePluginAreas ?? []) !==
+        JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
+      ) {
+        updateMap(authorityMap.id, { dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [] })
       }
       const spentTurnResource = resolved.result.events.find((event) =>
         event.type === 'turn-resource-spent' &&

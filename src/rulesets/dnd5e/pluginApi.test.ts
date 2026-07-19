@@ -11,8 +11,11 @@ import {
   registeredDnd5ePluginAbilityGenerationMethods,
   registeredDnd5ePluginRaces,
   registeredDnd5ePluginSpells,
+  registeredDnd5ePluginSubclasses,
+  dnd5eCharacterHasPluginFeature,
   registeredDnd5eRulesPlugins,
 } from './pluginApi'
+import { syncCharacterClassResources } from '../../lib/classResources'
 import {
   createDnd5eCombatant,
   resolveDnd5eHeadlessAction,
@@ -42,6 +45,52 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e rules plugin API', () => {
+  it('registers a declarative subclass, auto-granted feature, and rest-aware resource', () => {
+    const pluginId = 'com.example.chronomancer'
+    let subclassId = ''
+    let resourceId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Chronomancer', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'time-step', resolve: ({ succeed }) => succeed() })
+        subclassId = api.registerSubclass({
+          id: 'chronomancer', classId: 'wizard', name: '时序学派', summary: '测试声明式子职。',
+          features: [{
+            id: 'time-step', level: 2, name: '时间步', description: '测试自动授予特性。',
+            action: { id: 'time-step', label: '使用时间步', economy: 'bonusAction', targeting: { kind: 'self' } },
+          }],
+          choiceGroups: [{
+            id: 'tempo', level: 2, name: '节奏', maxSelections: 1,
+            options: [{ id: 'slow', name: '缓拍', summary: '测试选项。' }, { id: 'fast', name: '急拍', summary: '测试选项。' }],
+          }],
+        })
+        resourceId = api.registerResource({
+          id: 'time-charges', label: '时间充能', classId: 'wizard', subclassId: 'chronomancer',
+          minimumLevel: 2, maximum: [0, 2, 3], resetOn: 'short-rest',
+        })
+      },
+    })
+    try {
+      const featureId = `${pluginId}:chronomancer.time-step`
+      const wizard = character({
+        charClass: '法师', level: 3,
+        dnd5eClassChoices: { classes: { wizard: { subclass: subclassId, selections: { [`${subclassId}/tempo`]: ['fast'] } } } },
+      })
+      expect(registeredDnd5ePluginSubclasses('wizard')).toEqual([
+        expect.objectContaining({ id: subclassId, name: '时序学派' }),
+      ])
+      expect(dnd5eCharacterHasPluginFeature(wizard, featureId)).toBe(true)
+      expect(syncCharacterClassResources(wizard).classResources?.[resourceId]).toEqual({ current: 3, max: 3 })
+      expect(dnd5eCharacterHasPluginFeature({ ...wizard, dnd5eClassChoices: undefined }, featureId)).toBe(false)
+    } finally {
+      dispose()
+    }
+    expect(registeredDnd5ePluginSubclasses('wizard')).toEqual([])
+  })
+
   it('registers a declarative spell template with V/S/M, damage, upcast and condition metadata', () => {
     const pluginId = 'com.example.spells'
     const dispose = registerDnd5eRulesPlugin({

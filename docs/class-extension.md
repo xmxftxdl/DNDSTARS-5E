@@ -113,3 +113,11 @@ Registry，再进入通用战斗 action switch；不得直接比较职业名称�
 7. 战斗结束、死亡与断线重连。
 
 `classExtensibilityBoundary.test.ts` 会阻止具体技能 ID 再次进入地图页面、攻击路由和 Headless 核心。
+
+## 11. Rules Plugin API V2 子职与资源
+
+第三方规则包不得直接调用本文件中的页面或 Store Registry。插件在 Worker 中使用声明式 `registerSubclass` 和 `registerResource`；Host 会把本地 ID 命名空间化，并桥接到通用职业进度、`classResources`、休息恢复与 Headless 战斗。
+
+- 子职声明必须绑定 12 个 SRD 基础职业之一，并可包含按等级授予的特性和选择组。角色只保存命名空间子职 ID 与选择 ID；自动授予特性由 Host 根据职业、子职和等级投影。
+- 资源可声明固定上限或 1～20 级数组、最低等级、所属子职及短休／长休恢复。资源的 current/max 仍只存放在通用 `classResources`。
+- Worker resolver 只能提出 `spendResource` 或 `restoreResource` 操作。受信任 Headless 层负责检查插件归属、角色职业／子职／等级、余额和上限，并在整个事务成功时一次性提交。

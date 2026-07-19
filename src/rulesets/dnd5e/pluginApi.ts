@@ -1,4 +1,4 @@
-import type { ClassResourceReset } from '../../lib/classDefinitionTypes'
+import type { ClassResourceDefinition, ClassResourceReset } from '../../lib/classDefinitionTypes'
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { RulesetAdapter } from '../contracts'
@@ -19,6 +19,7 @@ import { DND5E_2014_RACE_OPTIONS } from './characterOptions'
 import type { Dnd5eStandardConditionId } from './conditions'
 import type { Dnd5eDamageType } from './monsters'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
+import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
@@ -84,6 +85,8 @@ export interface Dnd5ePluginAction {
   type: 'plugin'
   pluginId: string
   actionId: string
+  /** DM 权威玩家动作事务 ID，用于持续实体和专注来源去重。 */
+  transactionId?: string
   /** API v2 通用特性必须提供；省略时仅用于兼容 API v1 的直接 Headless Action。 */
   featureId?: string
   actorId: string
@@ -164,6 +167,10 @@ export interface Dnd5ePluginHeadlessActionContext {
     condition: Dnd5eStandardConditionId,
     duration: Dnd5ePluginEffectDuration,
   ): boolean
+  /** 只允许消费当前插件声明且角色可用的资源。 */
+  spendResource(resourceId: string, amount?: number): boolean
+  /** 恢复当前插件声明资源，不超过 Host 计算的上限。 */
+  restoreResource(resourceId: string, amount?: number): boolean
   fail(reason: Dnd5eActionFailure): Dnd5eActionResult
   succeed(): Dnd5eActionResult
 }
@@ -211,6 +218,13 @@ export interface Dnd5ePluginFeatureAction {
   targeting: Dnd5ePluginTargeting
   /** 在 action 真正进入 Worker resolver 前，由共享 Interrupt Queue 主动询问。 */
   interrupt?: Dnd5ePluginInterruptDeclaration
+  /** 成功结算后由 Host 在地图上创建的持续区域；仅适用于 area targeting。 */
+  persistentArea?: {
+    label: string
+    color?: string
+    durationRounds: number
+    concentration?: boolean
+  }
 }
 
 export interface Dnd5ePluginFeatureDefinition {
@@ -224,6 +238,10 @@ export interface Dnd5ePluginFeatureDefinition {
   /** 返回 false 时人物卡不能选择，Headless 也会拒绝该特性。 */
   isAvailable?: (character: Character) => boolean
   action?: Dnd5ePluginFeatureAction
+  /** 仅由 registerSubclass 生成；Host 会复核角色所选子职。 */
+  sourceClassId?: Dnd5eClassId
+  sourceSubclassId?: string
+  grantedBySubclass?: boolean
 }
 
 export interface RegisteredDnd5ePluginFeature extends Omit<Dnd5ePluginFeatureDefinition, 'id' | 'action'> {
@@ -232,6 +250,61 @@ export interface RegisteredDnd5ePluginFeature extends Omit<Dnd5ePluginFeatureDef
   ownerPluginName: string
   ownerPluginLicense: string
   action?: Dnd5ePluginFeatureAction
+}
+
+export interface Dnd5ePluginResourceDefinition {
+  id: string
+  label: string
+  shortLabel?: string
+  classId: Dnd5eClassId
+  subclassId?: string
+  minimumLevel?: number
+  /** 每级最大值表；数组不足 20 项时沿用最后一个值。 */
+  maximum: number | readonly number[]
+  resetOn: ClassResourceReset
+}
+
+export interface RegisteredDnd5ePluginResource extends Omit<Dnd5ePluginResourceDefinition, 'id' | 'subclassId'> {
+  id: string
+  subclassId?: string
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+}
+
+export interface Dnd5ePluginSubclassChoiceGroup {
+  id: string
+  level: number
+  name: string
+  description?: string
+  maxSelections: number
+  options: readonly { id: string; name: string; summary: string }[]
+}
+
+export interface Dnd5ePluginSubclassFeature {
+  id: string
+  level: number
+  name: string
+  description: string
+  automation?: Dnd5ePluginAutomationLevel
+  action?: Dnd5ePluginFeatureAction
+}
+
+export interface Dnd5ePluginSubclassDefinition {
+  id: string
+  classId: Dnd5eClassId
+  name: string
+  summary: string
+  features: readonly Dnd5ePluginSubclassFeature[]
+  choiceGroups?: readonly Dnd5ePluginSubclassChoiceGroup[]
+}
+
+export interface RegisteredDnd5ePluginSubclass extends Omit<Dnd5ePluginSubclassDefinition, 'id' | 'features'> {
+  id: string
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+  features: readonly (Dnd5ePluginSubclassFeature & { id: string; featureId: string })[]
 }
 
 export interface Dnd5ePluginFlexibleAbilityBonus {
@@ -296,6 +369,8 @@ export interface Dnd5eRulesPluginApi {
   readonly rulesetId: typeof DND5E_RULES_PLUGIN_RULESET_ID
   registerFighterSubclass(definition: Dnd5ePluginFighterSubclass): string
   registerFeature(definition: Dnd5ePluginFeatureDefinition): string
+  registerResource(definition: Dnd5ePluginResourceDefinition): string
+  registerSubclass(definition: Dnd5ePluginSubclassDefinition): string
   registerHeadlessAction(definition: Dnd5ePluginHeadlessActionDefinition): string
   registerRace(definition: Dnd5ePluginRaceDefinition): string
   registerAbilityGenerationMethod(definition: Dnd5ePluginAbilityGenerationDefinition): string
@@ -324,6 +399,8 @@ interface OwnedHeadlessAction {
 const plugins = new Map<string, RegisteredPlugin>()
 const headlessActions = new Map<string, OwnedHeadlessAction>()
 const pluginFeatures = new Map<string, RegisteredDnd5ePluginFeature>()
+const pluginResources = new Map<string, RegisteredDnd5ePluginResource>()
+const pluginSubclasses = new Map<string, RegisteredDnd5ePluginSubclass>()
 const pluginRaces = new Map<string, RegisteredDnd5ePluginRace>()
 const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()
 const pluginSpells = new Map<string, RegisteredDnd5ePluginSpell>()
@@ -335,6 +412,10 @@ function validId(value: string): boolean {
 }
 
 const ABILITY_KEYS: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
+const DND5E_CLASS_IDS: readonly Dnd5eClassId[] = [
+  'barbarian', 'bard', 'cleric', 'druid', 'fighter', 'monk',
+  'paladin', 'ranger', 'rogue', 'sorcerer', 'warlock', 'wizard',
+]
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
@@ -435,6 +516,7 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
       ...action.interrupt,
       options: action.interrupt.options.map((option) => ({ ...option })),
     } : undefined,
+    persistentArea: action.persistentArea ? { ...action.persistentArea } : undefined,
   }
 }
 
@@ -589,11 +671,28 @@ export function registerDnd5eRulesPlugin(
         if (!['action', 'bonusAction', 'reaction', 'none'].includes(definition.action.economy)) {
           throw new Error(`Invalid plugin feature action economy: ${featureId}`)
         }
+        const area = definition.action.persistentArea
+        if (area && (
+          definition.action.targeting.kind !== 'area' || typeof area.label !== 'string' || !area.label.trim() ||
+          !finiteInteger(area.durationRounds, 1, 14_400) ||
+          (area.color != null && !/^#[0-9a-f]{6}$/i.test(area.color))
+        )) throw new Error(`Invalid plugin persistent area: ${featureId}`)
+      }
+      if (definition.grantedBySubclass) {
+        const subclass = definition.sourceSubclassId ? pluginSubclasses.get(definition.sourceSubclassId) : undefined
+        if (!subclass || subclass.ownerPluginId !== id || subclass.classId !== definition.sourceClassId) {
+          throw new Error(`Invalid plugin subclass feature source: ${featureId}`)
+        }
+      } else if (definition.sourceClassId || definition.sourceSubclassId) {
+        throw new Error(`Standalone plugin feature cannot claim a subclass source: ${featureId}`)
       }
       const action = definition.action ? {
         ...definition.action,
         targeting: clonePluginTargeting(definition.action.targeting, featureId),
         interrupt: clonePluginInterrupt(definition.action.interrupt, featureId),
+        persistentArea: definition.action.persistentArea
+          ? { ...definition.action.persistentArea, label: definition.action.persistentArea.label.trim() }
+          : undefined,
       } : undefined
       const registered: RegisteredDnd5ePluginFeature = {
         ...definition,
@@ -609,6 +708,149 @@ export function registerDnd5eRulesPlugin(
         if (pluginFeatures.get(featureId) === registered) pluginFeatures.delete(featureId)
       })
       return featureId
+    },
+    registerResource(definition) {
+      assertAcceptingContributions()
+      const resourceId = namespacedId(id, definition.id)
+      if (pluginResources.has(resourceId)) throw new Error(`Plugin resource already registered: ${resourceId}`)
+      if (
+        !DND5E_CLASS_IDS.includes(definition.classId) ||
+        typeof definition.label !== 'string' || !definition.label.trim() ||
+        (definition.shortLabel != null && (typeof definition.shortLabel !== 'string' || !definition.shortLabel.trim())) ||
+        !finiteInteger(definition.minimumLevel ?? 1, 1, 20) ||
+        !['combat', 'short-rest', 'long-rest'].includes(definition.resetOn)
+      ) throw new Error(`Invalid plugin resource definition: ${resourceId}`)
+      const maximum = Array.isArray(definition.maximum)
+        ? definition.maximum.map((value) => {
+            if (!finiteInteger(value, 0, 1_000_000)) throw new Error(`Invalid plugin resource maximum: ${resourceId}`)
+            return value
+          })
+        : definition.maximum
+      if (
+        (Array.isArray(maximum) && (maximum.length < 1 || maximum.length > 20)) ||
+        (!Array.isArray(maximum) && !finiteInteger(maximum, 0, 1_000_000))
+      ) throw new Error(`Invalid plugin resource maximum: ${resourceId}`)
+      const subclassId = definition.subclassId ? namespacedId(id, definition.subclassId) : undefined
+      if (subclassId) {
+        const subclass = pluginSubclasses.get(subclassId)
+        if (!subclass || subclass.classId !== definition.classId) {
+          throw new Error(`Plugin resource subclass is unavailable: ${resourceId}`)
+        }
+      }
+      const registered: RegisteredDnd5ePluginResource = {
+        ...definition,
+        id: resourceId,
+        label: definition.label.trim(),
+        shortLabel: definition.shortLabel?.trim(),
+        minimumLevel: definition.minimumLevel ?? 1,
+        maximum: Array.isArray(maximum) ? [...maximum] : maximum,
+        subclassId,
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      }
+      pluginResources.set(resourceId, registered)
+      disposers.push(() => {
+        if (pluginResources.get(resourceId) === registered) pluginResources.delete(resourceId)
+      })
+      return resourceId
+    },
+    registerSubclass(definition) {
+      assertAcceptingContributions()
+      const subclassId = namespacedId(id, definition.id)
+      if (pluginSubclasses.has(subclassId)) throw new Error(`Plugin subclass already registered: ${subclassId}`)
+      if (
+        !DND5E_CLASS_IDS.includes(definition.classId) ||
+        typeof definition.name !== 'string' || !definition.name.trim() ||
+        typeof definition.summary !== 'string' || !definition.summary.trim() ||
+        !Array.isArray(definition.features) || definition.features.length < 1 || definition.features.length > 64
+      ) throw new Error(`Invalid plugin subclass definition: ${subclassId}`)
+      const choiceGroupIds = new Set<string>()
+      const choiceGroups = definition.choiceGroups?.map((group) => {
+        if (
+          !validId(group.id) || choiceGroupIds.has(group.id) ||
+          !finiteInteger(group.level, 1, 20) || !finiteInteger(group.maxSelections, 1, 64) ||
+          typeof group.name !== 'string' || !group.name.trim() || !Array.isArray(group.options) ||
+          (group.description != null && typeof group.description !== 'string') ||
+          group.options.length < group.maxSelections || group.options.length > 128
+        ) throw new Error(`Invalid plugin subclass choice group: ${subclassId}:${group.id}`)
+        choiceGroupIds.add(group.id)
+        const optionIds = new Set<string>()
+        const options = group.options.map((option) => {
+          if (
+            !validId(option.id) || optionIds.has(option.id) || typeof option.name !== 'string' || !option.name.trim() ||
+            typeof option.summary !== 'string' || !option.summary.trim()
+          ) throw new Error(`Invalid plugin subclass choice option: ${subclassId}:${group.id}`)
+          optionIds.add(option.id)
+          return { ...option, name: option.name.trim(), summary: option.summary.trim() }
+        })
+        return { ...group, name: group.name.trim(), options }
+      })
+      let registered: RegisteredDnd5ePluginSubclass = {
+        ...definition,
+        id: subclassId,
+        name: definition.name.trim(),
+        summary: definition.summary.trim(),
+        features: [],
+        choiceGroups,
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      }
+      pluginSubclasses.set(subclassId, registered)
+      disposers.push(() => {
+        if (pluginSubclasses.get(subclassId) === registered) pluginSubclasses.delete(subclassId)
+      })
+      const featureIds = new Set<string>()
+      const features = definition.features.map((feature) => {
+        if (
+          !validId(feature.id) || featureIds.has(feature.id) || !finiteInteger(feature.level, 1, 20) ||
+          typeof feature.name !== 'string' || !feature.name.trim() ||
+          typeof feature.description !== 'string' || !feature.description.trim()
+        ) throw new Error(`Invalid plugin subclass feature: ${subclassId}:${feature.id}`)
+        featureIds.add(feature.id)
+        const featureId = api.registerFeature({
+          id: `${definition.id}.${feature.id}`,
+          name: feature.name,
+          summary: feature.description,
+          description: feature.description,
+          minimumLevel: feature.level,
+          automation: feature.automation ?? (feature.action ? 'full' : 'manual'),
+          action: feature.action,
+          sourceClassId: definition.classId,
+          sourceSubclassId: subclassId,
+          grantedBySubclass: true,
+        })
+        return { ...feature, id: `${subclassId}:${feature.id}`, featureId }
+      })
+      registered = { ...registered, features }
+      pluginSubclasses.set(subclassId, registered)
+      if (definition.classId === 'fighter') {
+        disposers.push(registerFighterSubclassDefinition({
+          id: subclassId,
+          name: registered.name,
+          summary: registered.summary,
+          rulesTextSource: 'third-party-plugin',
+          sourceLabel: `${plugin.manifest.name} · 第三方插件 · ${plugin.manifest.license}`,
+          ownerPluginId: id,
+          features: features.map((feature) => ({
+            id: feature.id,
+            level: feature.level,
+            name: feature.name,
+            description: feature.description,
+            source: subclassId,
+          })),
+          choiceGroups: choiceGroups?.map((group) => ({
+            id: group.id,
+            name: group.name,
+            description: group.description,
+            minLevel: group.level,
+            maxSelections: group.maxSelections,
+            options: group.options,
+          })),
+        }))
+      }
+      return subclassId
     },
     registerHeadlessAction(definition) {
       assertAcceptingContributions()
@@ -888,6 +1130,63 @@ export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginF
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
 
+export function registeredDnd5ePluginResources(): readonly RegisteredDnd5ePluginResource[] {
+  return [...pluginResources.values()]
+    .map((resource) => ({
+      ...resource,
+      maximum: Array.isArray(resource.maximum) ? [...resource.maximum] : resource.maximum,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+}
+
+export function registeredDnd5ePluginSubclasses(classId?: Dnd5eClassId): readonly RegisteredDnd5ePluginSubclass[] {
+  return [...pluginSubclasses.values()]
+    .filter((subclass) => !classId || subclass.classId === classId)
+    .map((subclass) => ({
+      ...subclass,
+      features: subclass.features.map((feature) => ({ ...feature, action: clonePluginFeatureAction(feature.action) })),
+      choiceGroups: subclass.choiceGroups?.map((group) => ({
+        ...group,
+        options: group.options.map((option) => ({ ...option })),
+      })),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+}
+
+export function dnd5ePluginSubclassDefinition(subclassId: string): RegisteredDnd5ePluginSubclass | undefined {
+  return registeredDnd5ePluginSubclasses().find((subclass) => subclass.id === subclassId)
+}
+
+export function dnd5ePluginResourceDefinition(resourceId: string): RegisteredDnd5ePluginResource | undefined {
+  return registeredDnd5ePluginResources().find((resource) => resource.id === resourceId)
+}
+
+function selectedDnd5eSubclassId(character: Character, classId: Dnd5eClassId): string | undefined {
+  return classId === 'fighter'
+    ? character.dnd5eClassChoices?.fighter?.subclass
+    : character.dnd5eClassChoices?.classes?.[classId]?.subclass
+}
+
+export function dnd5ePluginClassResourceDefinitions(character: Character): readonly ClassResourceDefinition[] {
+  const classId = dnd5eClassDefinitionForCharacter(character)?.id
+  if (!classId) return []
+  return registeredDnd5ePluginResources()
+    .filter((resource) => resource.classId === classId)
+    .map((resource) => ({
+      key: resource.id,
+      label: resource.label,
+      shortLabel: resource.shortLabel,
+      resetOn: resource.resetOn,
+      isAvailable: (candidate: Character) =>
+        candidate.level >= (resource.minimumLevel ?? 1) &&
+        (!resource.subclassId || selectedDnd5eSubclassId(candidate, resource.classId) === resource.subclassId),
+      max: (candidate: Character) => {
+        if (!Array.isArray(resource.maximum)) return resource.maximum
+        return resource.maximum[Math.min(resource.maximum.length, Math.max(1, candidate.level)) - 1] ?? 0
+      },
+    }))
+}
+
 export function registeredDnd5ePluginRaces(): readonly RegisteredDnd5ePluginRace[] {
   return [...pluginRaces.values()]
     .map((race) => ({
@@ -964,6 +1263,14 @@ export function dnd5ePluginFeatureAvailableForCharacter(
   feature: RegisteredDnd5ePluginFeature,
   character: Character,
 ): boolean {
+  if (feature.sourceClassId) {
+    const classId = dnd5eClassDefinitionForCharacter(character)?.id
+    if (classId !== feature.sourceClassId) return false
+    if (
+      feature.sourceSubclassId &&
+      selectedDnd5eSubclassId(character, feature.sourceClassId) !== feature.sourceSubclassId
+    ) return false
+  }
   return character.level >= (feature.minimumLevel ?? 1) && (feature.isAvailable?.(character) ?? true)
 }
 
@@ -978,7 +1285,7 @@ export function dnd5ePluginFeaturesAvailableForCharacter(
 export function dnd5eCharacterHasPluginFeature(character: Character, featureId: string): boolean {
   const feature = dnd5ePluginFeatureDefinition(featureId)
   return !!feature &&
-    character.dnd5ePluginFeatureIds?.includes(featureId) === true &&
+    (feature.grantedBySubclass === true || character.dnd5ePluginFeatureIds?.includes(featureId) === true) &&
     dnd5ePluginFeatureAvailableForCharacter(feature, character)
 }
 

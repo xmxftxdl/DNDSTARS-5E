@@ -60,6 +60,7 @@ export interface PreparedDnd5ePluginFeatureAction {
   actorToken: Token
   targetToken: Token
   targetTokens: Token[]
+  targetCells: GridCell[]
   targetCell?: GridCell
   feature: RegisteredDnd5ePluginFeature
   distanceFeet: number
@@ -114,11 +115,8 @@ export function prepareDnd5ePluginFeatureAction(input: {
     token.id === action.actorTokenId && token.characterId === action.characterId,
   )
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  if (!actor.dnd5ePluginFeatureIds?.includes(feature.id)) {
-    return { ok: false, reason: 'feature-not-selected' }
-  }
   if (!dnd5eCharacterHasPluginFeature(actor, feature.id)) {
-    return { ok: false, reason: 'feature-unavailable' }
+    return { ok: false, reason: feature.grantedBySubclass ? 'feature-unavailable' : 'feature-not-selected' }
   }
   const economyFailure = economyRejectReason(feature.action.economy, input.turnEconomy)
   if (economyFailure) return { ok: false, reason: economyFailure }
@@ -126,6 +124,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
   let targetToken: Token | undefined
   let targetTokens: Token[]
   let targetCell: GridCell | undefined
+  let targetCells: GridCell[] = []
   let distanceFeet = 0
   if (feature.action.targeting.kind === 'self') {
     if (action.targetTokenId && action.targetTokenId !== actorToken.id) {
@@ -173,6 +172,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
       rectRotation: targetOrientation,
     })
     const cells = cellsForAoe(targeting.template, orientFrom, targetCell)
+    targetCells = cells
     targetTokens = tokensInCells(input.map, input.map.tokens, cells)
       .filter((token) => {
         if (token.type === 'obstacle') return false
@@ -184,7 +184,12 @@ export function prepareDnd5ePluginFeatureAction(input: {
       })
       .slice(0, targeting.maximumTargets ?? 64)
     targetToken = targetTokens[0]
-    if (!targetToken) return { ok: false, reason: 'invalid-target' }
+    const permitsEmptyPersistentArea = !!feature.action.persistentArea &&
+      feature.action.interrupt?.audience !== 'target'
+    if (!targetToken && !permitsEmptyPersistentArea) return { ok: false, reason: 'invalid-target' }
+    // 持续区域可以放在当前没有生物的格子上。Prepared 的展示目标使用施法者，
+    // 但传给 Headless 的 targetIds 仍为空，避免把施法者伪装成区域目标。
+    targetToken ??= actorToken
   }
 
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -222,6 +227,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
       actorToken,
       targetToken,
       targetTokens,
+      targetCells,
       targetCell,
       feature,
       distanceFeet,
@@ -229,9 +235,10 @@ export function prepareDnd5ePluginFeatureAction(input: {
         type: 'plugin',
         pluginId: feature.ownerPluginId,
         actionId: feature.action.id,
+        transactionId: action.id,
         featureId: feature.id,
         actorId: actorToken.id,
-        targetId: targetToken.id,
+        targetId: targetTokens[0]?.id,
         targetIds: targetTokens.map((token) => token.id),
         targetCell,
         targetOrientation: action.targetOrientation,
@@ -317,13 +324,37 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
     result = resolveDnd5eHeadlessAction(input.prepared.state, headlessAction)
   }
   if (!result.ok) return { result }
+  const application = planDnd5eMapResultApplication({
+    state: result.state,
+    map: input.prepared.map,
+    characters: input.prepared.characters,
+    characterIdByCombatantId: input.prepared.characterIdByCombatantId,
+  })
+  const persistentArea = input.prepared.feature.action?.persistentArea
+  if (persistentArea && input.prepared.targetCells.length > 0) {
+    const id = `plugin-area:${input.prepared.action.id}`
+    application.map = {
+      ...application.map,
+      dnd5ePluginAreas: [
+        ...(application.map.dnd5ePluginAreas ?? []).filter((area) => area.id !== id),
+        {
+          id,
+          pluginId: input.prepared.feature.ownerPluginId,
+          featureId: input.prepared.feature.id,
+          label: persistentArea.label,
+          color: persistentArea.color ?? '#8b5cf6',
+          sourceCharacterId: input.prepared.actor.id,
+          sourceTokenId: input.prepared.actorToken.id,
+          cells: input.prepared.targetCells.map((cell) => ({ ...cell })),
+          createdRound: input.prepared.action.round,
+          expiresAfterRound: input.prepared.action.round + persistentArea.durationRounds - 1,
+          concentrationId: persistentArea.concentration ? `plugin-area:${input.prepared.action.id}` : undefined,
+        },
+      ],
+    }
+  }
   return {
     result,
-    application: planDnd5eMapResultApplication({
-      state: result.state,
-      map: input.prepared.map,
-      characters: input.prepared.characters,
-      characterIdByCombatantId: input.prepared.characterIdByCombatantId,
-    }),
+    application,
   }
 }

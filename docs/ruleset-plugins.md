@@ -131,7 +131,7 @@ await window.DNDSTARS_5E_RULES_PLUGINS.install({
 
 规则包的顶层代码、setup 与 Headless resolver 都只在专用 Worker 中执行，不再通过页面 Blob `import()` 运行。沙箱在执行插件前移除 DOM／`window`、`fetch`、WebSocket、动态／静态模块加载、localStorage、IndexedDB、Cache、跨线程消息和动态代码构造入口；WebAssembly 仍可用于不带浏览器 I/O 的确定性计算。初始化与单次 resolver 都有超时，超时后整条 Worker 会被终止。
 
-页面只接收可序列化的清单、特性和 action 声明。resolver 看不到内部 Store 或可变战斗状态，只能读取经过裁剪并冻结的 actor／target／targets／rolls／action 快照，并调用当前开放的 `grantTemporaryHitPoints`、`heal`、`dealDamage`、`applyStandardCondition`、`succeed`、`fail` capability。骰值由 Host 按 action 的 `rolls` 配方生成：`visibility: "public"` 进入房间骰子事件，`visibility: "dm"` 只在 DM 本地显示；Worker 只能读取经面数、数量、调整值和合计复核的结果。Worker 返回的操作还会在主线程受信任 Headless 层再次校验插件／特性绑定、角色选择、当前回合、阵营、距离、行动经济、范围目标 ID、数值范围，再由 DM 应用并同步。
+页面只接收可序列化的清单、特性和 action 声明。resolver 看不到内部 Store 或可变战斗状态，只能读取经过裁剪并冻结的 actor／target／targets／rolls／action 快照，并调用当前开放的 `grantTemporaryHitPoints`、`heal`、`dealDamage`、`applyStandardCondition`、`spendResource`、`restoreResource`、`succeed`、`fail` capability。骰值由 Host 按 action 的 `rolls` 配方生成：`visibility: "public"` 进入房间骰子事件，`visibility: "dm"` 只在 DM 本地显示；Worker 只能读取经面数、数量、调整值和合计复核的结果。Worker 返回的操作还会在主线程受信任 Headless 层再次校验插件／特性绑定、角色选择、当前回合、阵营、距离、行动经济、范围目标 ID、资源所属插件、角色资格、余额和数值范围，再由 DM 应用并同步。
 
 SHA-256 只能证明下载字节与 DM 上传版本一致，沙箱也不能证明内容合法、正确或平衡。房间文件不进入公共索引，也不跨房间共享，但服务端实际参与保存和分发，因此插件发布者与房主仍必须拥有相应的内容分发权。
 
@@ -187,6 +187,6 @@ const plugin = {
 
 ## API V2 当前稳定边界
 
-V2 已完成单体与范围特性、角色创建数据及声明式法术模板的稳定闭环：命名空间注册、声明式种族与属性生成方式、等级、完整／部分／手动自动化标记、动作／附赠动作／反应／免费行动经济、自身／单目标／地图范围阵营约束、圆形／锥形／直线／矩形模板、法术 V／S／M、伤害／豁免／升环／标准状态元数据、角色选择持久化、房间版本握手、Worker/WASM 沙箱、DM 地图 preflight、Host 声明式骰子、共享 `plugin-choice` Interrupt、受控 Headless resolver、标准伤害／治疗／临时生命值／标准状态 capability、ACK 和多端状态应用。
+V2 已完成单体与范围特性、角色创建数据、声明式法术模板及 P3 内容模型的稳定闭环：命名空间注册、声明式种族与属性生成方式、通用子职、等级特性与多级选择组、逐级职业资源和休息恢复、动作经济、地图范围、持久区域、法术 V／S／M、伤害／豁免／升环／标准状态元数据、角色选择持久化、房间版本握手、Worker/WASM 沙箱、DM 地图 preflight、Host 声明式骰子、共享 `plugin-choice` Interrupt、受控 Headless resolver、标准伤害／治疗／临时生命值／标准状态／资源 capability、ACK 和多端状态应用。
 
-P3 尚未形成稳定 capability 的部分是专注或固定时限的持续区域实体、自定义资源与短休／长休恢复、声明式通用子职及其多级选择组。它们必须继续通过 Host 数据模型和 Headless capability 加入，不能靠插件绕过 DM 权威或直接依赖页面 Store。
+持续区域目前是权威地图实体并支持固定轮数与专注生命周期；区域内生物的“进入区域、回合开始、回合结束”自动触发器仍是下一版能力。插件在该触发能力开放前必须把即时效果放在创建区域的原始事务中，后续效果交给 DM 裁定，不能在 Worker 中自行计时或修改 Store。

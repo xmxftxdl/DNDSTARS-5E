@@ -398,6 +398,45 @@ function Dnd5eItemAreaOverlays({ map }: { map: BattleMap }) {
   )
 }
 
+function Dnd5ePluginAreaOverlays({ map }: { map: BattleMap }) {
+  const grid = Math.max(1, map.gridSize)
+  return (
+    <>
+      {(map.dnd5ePluginAreas ?? []).flatMap((area) => area.cells.map((cell, index) => {
+        const { x, y } = cellTopLeft(cell, map)
+        return (
+          <Group key={`${area.id}:${cellKey(cell)}`} listening={false}>
+            <Rect
+              x={x}
+              y={y}
+              width={grid}
+              height={grid}
+              fill={area.color}
+              opacity={0.18}
+              stroke={area.color}
+              strokeWidth={2}
+              dash={[9, 5]}
+            />
+            {index === 0 && (
+              <Text
+                x={x}
+                y={y + grid * 0.18}
+                width={grid}
+                text="✦"
+                align="center"
+                fontSize={Math.max(12, grid * 0.4)}
+                fill={area.color}
+                shadowBlur={5}
+                shadowColor="rgba(0,0,0,0.9)"
+              />
+            )}
+          </Group>
+        )
+      }))}
+    </>
+  )
+}
+
 export default function MapCanvas({
   map,
   selectedTokenId,
@@ -939,6 +978,7 @@ export default function MapCanvas({
           {gridLines}
           {coordinateLabels}
           <Dnd5eItemAreaOverlays map={map} />
+          <Dnd5ePluginAreaOverlays map={map} />
           {aoeSelectMode && aoeHighlight?.areaCircle && (
             <Circle
               x={aoeHighlight.areaCircle.centerX}

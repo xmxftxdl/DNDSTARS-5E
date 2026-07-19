@@ -7,6 +7,8 @@ type SandboxOperation =
       condition: string
       duration: Record<string, unknown>
     }
+  | { kind: 'spend-resource'; resourceId: string; amount: number }
+  | { kind: 'restore-resource'; resourceId: string; amount: number }
 
 interface SandboxMessageEvent {
   data: {
@@ -188,6 +190,8 @@ function initializePlugin(source: string): {
   races: readonly Record<string, unknown>[]
   abilityGenerationMethods: readonly Record<string, unknown>[]
   spells: readonly Record<string, unknown>[]
+  resources: readonly Record<string, unknown>[]
+  subclasses: readonly Record<string, unknown>[]
   migrations: readonly { fromVersion: number; toVersion: number }[]
 } {
   const factory = pluginFactory(source)
@@ -231,6 +235,8 @@ function initializePlugin(source: string): {
   const races: Record<string, unknown>[] = []
   const abilityGenerationMethods: Record<string, unknown>[] = []
   const spells: Record<string, unknown>[] = []
+  const resources: Record<string, unknown>[] = []
+  const subclasses: Record<string, unknown>[] = []
   const api = Object.freeze({
     apiVersion: 2,
     rulesetId: 'dnd5e-2014-srd-5.1',
@@ -241,6 +247,18 @@ function initializePlugin(source: string): {
       const safe = clonePlain(definition, 'feature') as Record<string, unknown>
       assertId(safe.id, 'feature id')
       features.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
+    registerResource(definition: unknown) {
+      const safe = clonePlain(definition, 'resource') as Record<string, unknown>
+      assertId(safe.id, 'resource id')
+      resources.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
+    registerSubclass(definition: unknown) {
+      const safe = clonePlain(definition, 'subclass') as Record<string, unknown>
+      assertId(safe.id, 'subclass id')
+      subclasses.push(safe)
       return `${manifest.id}:${safe.id}`
     },
     registerHeadlessAction(definition: unknown) {
@@ -290,6 +308,8 @@ function initializePlugin(source: string): {
     races,
     abilityGenerationMethods,
     spells,
+    resources,
+    subclasses,
     migrations: migrationDeclarations,
   }
 }
@@ -335,6 +355,18 @@ async function resolveAction(message: SandboxMessageEvent['data']): Promise<void
     const definition = headlessActions.get(actionId)
     if (!definition) throw new Error(`Unknown sandbox Headless action: ${actionId}`)
     const operations: SandboxOperation[] = []
+    const actorResources = message.actor?.classResources
+    const resourceBalances = new Map<string, { current: number; max: number }>()
+    if (actorResources && typeof actorResources === 'object' && !Array.isArray(actorResources)) {
+      for (const [resourceId, raw] of Object.entries(actorResources)) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+        const state = raw as { current?: unknown; max?: unknown }
+        if (
+          typeof state.current === 'number' && Number.isFinite(state.current) &&
+          typeof state.max === 'number' && Number.isFinite(state.max)
+        ) resourceBalances.set(resourceId, { current: state.current, max: state.max })
+      }
+    }
     const recordOperation = (kind: 'grant-temporary-hit-points' | 'heal', targetId: unknown, amount: unknown): number => {
       if (typeof targetId !== 'string' || !targetId) throw new Error('Headless capability targetId is invalid')
       if (typeof amount !== 'number' || !Number.isFinite(amount)) throw new Error('Headless capability amount is invalid')
@@ -363,6 +395,19 @@ async function resolveAction(message: SandboxMessageEvent['data']): Promise<void
       operations.push({ kind: 'deal-damage', targetId, amount: normalized, damageType })
       return normalized
     }
+    const changeResource = (kind: 'spend-resource' | 'restore-resource', resourceId: unknown, amount: unknown = 1): boolean => {
+      if (typeof resourceId !== 'string' || !resourceId) throw new Error('Headless resource id is invalid')
+      if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 1 || amount > 1_000_000) {
+        throw new Error('Headless resource amount is invalid')
+      }
+      const balance = resourceBalances.get(resourceId)
+      if (!balance || (kind === 'spend-resource' && balance.current < amount)) return false
+      balance.current = kind === 'spend-resource'
+        ? balance.current - amount
+        : Math.min(balance.max, balance.current + amount)
+      operations.push({ kind, resourceId, amount })
+      return true
+    }
     const succeed = () => Object.freeze({ kind: 'success' })
     const fail = (reason: unknown) => Object.freeze({ kind: 'failure', reason: String(reason ?? '') })
     const context = deepFreeze({
@@ -376,6 +421,8 @@ async function resolveAction(message: SandboxMessageEvent['data']): Promise<void
       heal: (targetId: unknown, amount: unknown) => recordOperation('heal', targetId, amount),
       dealDamage,
       applyStandardCondition,
+      spendResource: (resourceId: unknown, amount?: unknown) => changeResource('spend-resource', resourceId, amount),
+      restoreResource: (resourceId: unknown, amount?: unknown) => changeResource('restore-resource', resourceId, amount),
       fail,
       succeed,
     })

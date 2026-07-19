@@ -48,6 +48,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
       // Item areas are DM-authoritative combat entities. A player-side map write
       // must never resurrect a cleared trap or erase a newly placed hazard.
       dnd5eItemAreas: sharedMap.dnd5eItemAreas,
+      dnd5ePluginAreas: sharedMap.dnd5ePluginAreas,
       tokens: map.tokens.map((token) => {
         const sharedToken = sharedTokenById.get(token.id)
         if (!sharedToken) return token
@@ -199,6 +200,8 @@ export interface BattleMap {
   snapMonstersToGrid?: boolean
   /** 由 D&D 5e Headless 物品事务创建的持久地图区域。 */
   dnd5eItemAreas?: Dnd5eItemArea[]
+  /** 由规则包声明、DM Headless 事务创建的持续范围实体。 */
+  dnd5ePluginAreas?: Dnd5ePluginArea[]
   tokens: Token[]
 }
 
@@ -216,6 +219,20 @@ export interface Dnd5eItemArea {
   /** 捕猎陷阱触发后解除武装，并记录当前被困 token。 */
   armed: boolean
   triggeredTokenId?: string
+}
+
+export interface Dnd5ePluginArea {
+  id: string
+  pluginId: string
+  featureId: string
+  label: string
+  color: string
+  sourceCharacterId: string
+  sourceTokenId: string
+  cells: Array<{ col: number; row: number }>
+  createdRound: number
+  expiresAfterRound: number
+  concentrationId?: string
 }
 
 /** 地图存档 V4：旧 token 状态只在 normalizeToken 的迁移边界出现。 */
@@ -323,6 +340,34 @@ function normalizeMap(raw: unknown): BattleMap {
         } satisfies Dnd5eItemArea]
       })
     : []
+  const dnd5ePluginAreas = Array.isArray(m.dnd5ePluginAreas)
+    ? m.dnd5ePluginAreas.flatMap((rawArea) => {
+        const area = (rawArea ?? {}) as Partial<Dnd5ePluginArea>
+        const cells = Array.isArray(area.cells)
+          ? area.cells.flatMap((cell) => Number.isInteger(cell?.col) && Number.isInteger(cell?.row)
+              ? [{ col: cell!.col, row: cell!.row }]
+              : [])
+          : []
+        if (
+          typeof area.id !== 'string' || !area.id || typeof area.pluginId !== 'string' || !area.pluginId ||
+          typeof area.featureId !== 'string' || !area.featureId || cells.length < 1 ||
+          !Number.isInteger(area.createdRound) || !Number.isInteger(area.expiresAfterRound)
+        ) return []
+        return [{
+          id: area.id,
+          pluginId: area.pluginId,
+          featureId: area.featureId,
+          label: typeof area.label === 'string' && area.label ? area.label : '扩展规则区域',
+          color: typeof area.color === 'string' && /^#[0-9a-f]{6}$/i.test(area.color) ? area.color : '#8b5cf6',
+          sourceCharacterId: typeof area.sourceCharacterId === 'string' ? area.sourceCharacterId : '',
+          sourceTokenId: typeof area.sourceTokenId === 'string' ? area.sourceTokenId : '',
+          cells,
+          createdRound: area.createdRound!,
+          expiresAfterRound: area.expiresAfterRound!,
+          concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
+        } satisfies Dnd5ePluginArea]
+      })
+    : []
   return {
     ...m,
     id: typeof m.id === 'string' && m.id ? m.id : uid(),
@@ -334,6 +379,7 @@ function normalizeMap(raw: unknown): BattleMap {
     gridOffsetY: Number.isFinite(m.gridOffsetY) ? (m.gridOffsetY as number) : 0,
     showGrid: typeof m.showGrid === 'boolean' ? m.showGrid : true,
     dnd5eItemAreas,
+    dnd5ePluginAreas,
     tokens,
   }
 }
@@ -454,6 +500,7 @@ export const useMapStore = create<MapState>()(
           showCoordinates: true,
           snapMonstersToGrid: true,
           dnd5eItemAreas: [],
+          dnd5ePluginAreas: [],
           tokens: [],
         }
         set((s) => ({ maps: [...s.maps, map], selectedId: id }))

@@ -10,6 +10,8 @@ const SESSION_KEY = 'stars-room-session:v1'
 const TEMPLATE_PATH = path.resolve('public/plugin-templates/phb-2014-compat-template.dndstars5e')
 const PLUGIN_ID = 'local.example.phb-2014-template'
 const FEATURE_ID = `${PLUGIN_ID}:guardian-spark`
+const SUBCLASS_ID = `${PLUGIN_ID}:astral-school`
+const RESOURCE_ID = `${PLUGIN_ID}:star-charges`
 
 interface RoomMembershipResponse {
   roomId: string
@@ -199,7 +201,14 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   ])
 
   const now = Date.now()
-  const hero = character('plugin-hero', '插件主角', created.roomId, joined.member.memberId)
+  const hero = {
+    ...character('plugin-hero', '插件主角', created.roomId, joined.member.memberId),
+    charClass: '法师',
+    dnd5eClassId: 'wizard',
+    hitDice: '3d6',
+    abilities: { str: 10, dex: 12, con: 14, int: 16, wis: 10, cha: 10 },
+    savingThrows: ['int', 'wis'],
+  }
   const ally = character('plugin-ally', '插件盟友', created.roomId, joined2.member.memberId)
   await putRoomState(request, created.roomId, 'characters', {
     characters: [hero, ally],
@@ -250,6 +259,29 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   await player.getByRole('button', { name: '扩展规则', exact: true }).click()
   await expect(player.locator('article').filter({ hasText: '演示特性：守护火花' }).getByRole('button', { name: '已选择' }))
     .toBeVisible()
+  await player.getByRole('button', { name: '法师', exact: true }).click()
+  await player.getByRole('combobox', { name: /奥术传承/ }).selectOption(SUBCLASS_ID)
+  await expect(player.getByText('演示子职：星辉学派', { exact: true })).toBeVisible()
+  await player.getByRole('button', { name: /金色星辉/ }).click()
+  await expect.poll(async () => {
+    const state = await getRoomState<{
+      characters: Array<{
+        id: string
+        dnd5eClassChoices?: { classes?: { wizard?: { subclass?: string; selections?: Record<string, string[]> } } }
+        classResources?: Record<string, { current: number; max: number }>
+      }>
+    }>(request, created.roomId, 'characters')
+    const saved = state.characters.find((candidate) => candidate.id === hero.id)
+    return {
+      subclass: saved?.dnd5eClassChoices?.classes?.wizard?.subclass,
+      color: saved?.dnd5eClassChoices?.classes?.wizard?.selections?.[`${SUBCLASS_ID}/star-color`],
+      resource: saved?.classResources?.[RESOURCE_ID],
+    }
+  }, { timeout: 20_000 }).toEqual({
+    subclass: SUBCLASS_ID,
+    color: ['gold'],
+    resource: { current: 3, max: 3 },
+  })
 
   const combatId = 'plugin-map:combat'
   await putRoomState(request, created.roomId, 'combat-log', { mapId: 'plugin-map', entries: [], updatedAt: Date.now() })
@@ -290,13 +322,14 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
 
   await expect.poll(async () => {
     const state = await getRoomState<{ characters: Array<{ id: string; tempHp: number }> }>(request, created.roomId, 'characters')
-    return state.characters.find((candidate) => candidate.id === ally.id)?.tempHp ?? 0
-  }, { timeout: 30_000 }).toBe(3)
+    const temporaryHp = state.characters.find((candidate) => candidate.id === ally.id)?.tempHp ?? 0
+    return temporaryHp >= 3 && temporaryHp <= 6
+  }, { timeout: 30_000 }).toBe(true)
   await expect.poll(async () => {
     const state = await getRoomState<{ status: string; actionId: string }>(request, created.roomId, 'player-action-ack')
     return state.actionId === 'none' ? '' : state.status
   }, { timeout: 20_000 }).toBe('accepted')
-  await expect(player2.getByText('+3 临时', { exact: true })).toBeVisible({ timeout: 20_000 })
+  await expect(player2.getByText(/^\+[3-6] 临时$/)).toBeVisible({ timeout: 20_000 })
   await expect(actionButton).toBeDisabled()
 
   await Promise.all([dmContext.close(), playerContext.close(), player2Context.close()])

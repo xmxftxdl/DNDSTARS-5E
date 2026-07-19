@@ -4,6 +4,8 @@ import type {
   Dnd5ePluginDiceRollDeclaration,
   Dnd5ePluginFeatureDefinition,
   Dnd5ePluginRaceDefinition,
+  Dnd5ePluginResourceDefinition,
+  Dnd5ePluginSubclassDefinition,
   Dnd5ePluginSpellDefinition,
   Dnd5eRulesPlugin,
   Dnd5eRulesPluginManifest,
@@ -30,6 +32,8 @@ export type Dnd5eSandboxCapabilityOperation =
       condition: Dnd5eStandardConditionId
       duration: Dnd5eSandboxConditionDuration
     }
+  | { kind: 'spend-resource'; resourceId: string; amount: number }
+  | { kind: 'restore-resource'; resourceId: string; amount: number }
 
 interface SandboxActionDeclaration {
   id: string
@@ -49,6 +53,8 @@ interface SandboxContributions {
   races: Dnd5ePluginRaceDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   spells: Dnd5ePluginSpellDefinition[]
+  resources: Dnd5ePluginResourceDefinition[]
+  subclasses: Dnd5ePluginSubclassDefinition[]
   migrations: Dnd5ePluginStateMigrationDeclaration[]
 }
 
@@ -98,6 +104,8 @@ export interface Dnd5ePluginSandboxSession {
   readonly races: readonly Dnd5ePluginRaceDefinition[]
   readonly abilityGenerationMethods: readonly Dnd5ePluginAbilityGenerationDefinition[]
   readonly spells: readonly Dnd5ePluginSpellDefinition[]
+  readonly resources: readonly Dnd5ePluginResourceDefinition[]
+  readonly subclasses: readonly Dnd5ePluginSubclassDefinition[]
   readonly migrations: readonly Dnd5ePluginStateMigrationDeclaration[]
   migrateState(fromVersion: number, state: JsonValue): Promise<Dnd5ePluginStateMigrationResult>
   resolve(input: {
@@ -127,6 +135,12 @@ function cloneCombatantForSandbox(combatant: Dnd5eCombatant): Record<string, unk
     proficiencyBonus: combatant.proficiencyBonus,
     abilities: { ...combatant.abilities },
     conditions: [...combatant.conditions],
+    classResources: Object.fromEntries(
+      Object.entries(combatant.classResources).map(([key, resource]) => [key, { ...resource }]),
+    ),
+    classSelections: Object.fromEntries(
+      Object.entries(combatant.classSelections).map(([key, values]) => [key, [...values]]),
+    ),
     position: { ...combatant.position },
   }
 }
@@ -134,6 +148,11 @@ function cloneCombatantForSandbox(combatant: Dnd5eCombatant): Record<string, unk
 function validOperation(value: unknown): value is Dnd5eSandboxCapabilityOperation {
   if (!value || typeof value !== 'object') return false
   const operation = value as Partial<Dnd5eSandboxCapabilityOperation>
+  if (operation.kind === 'spend-resource' || operation.kind === 'restore-resource') {
+    return typeof operation.resourceId === 'string' && !!operation.resourceId &&
+      typeof operation.amount === 'number' && Number.isInteger(operation.amount) &&
+      operation.amount > 0 && operation.amount <= 1_000_000
+  }
   if (operation.kind === 'grant-temporary-hit-points' || operation.kind === 'heal' || operation.kind === 'deal-damage') {
     if (
       operation.kind === 'deal-damage' &&
@@ -289,6 +308,8 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
     get races() { return initialized.races },
     get abilityGenerationMethods() { return initialized.abilityGenerationMethods },
     get spells() { return initialized.spells ?? [] },
+    get resources() { return initialized.resources ?? [] },
+    get subclasses() { return initialized.subclasses ?? [] },
     get migrations() { return initialized.migrations },
     migrateState(fromVersion, state) {
       if (terminated) return Promise.reject(new Error('规则包 Worker 已终止'))
@@ -324,6 +345,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
             type: action.type,
             pluginId: action.pluginId,
             actionId: action.actionId,
+            transactionId: action.transactionId,
             featureId: action.featureId,
             actorId: action.actorId,
             targetId: action.targetId,
@@ -359,6 +381,8 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
         api.registerHeadlessAction({ ...action, execution: 'worker' })
       }
       for (const feature of session.features) api.registerFeature(feature)
+      for (const subclass of session.subclasses) api.registerSubclass(subclass)
+      for (const resource of session.resources) api.registerResource(resource)
       for (const race of session.races) api.registerRace(race)
       for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
       for (const spell of session.spells) api.registerSpell(spell)

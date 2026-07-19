@@ -4,6 +4,7 @@ import {
   type ClassResourceDefinition,
   type ClassResourceReset,
 } from './classDefinitionRegistry'
+import { dnd5ePluginClassResourceDefinitions } from '../rulesets/dnd5e/pluginApi'
 
 function finiteNonNegative(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
@@ -20,7 +21,8 @@ function clampResource(current: unknown, max: number): CharacterResourceState {
 export function classResourceDefinitions(character: Character): readonly ClassResourceDefinition[] {
   const registered = classDefinitionForCharacter(character)?.resources
   const definitions = typeof registered === 'function' ? registered(character) : (registered ?? [])
-  return definitions.filter((resource) => resource.isAvailable(character))
+  return [...definitions, ...dnd5ePluginClassResourceDefinitions(character)]
+    .filter((resource) => resource.isAvailable(character))
 }
 
 export function classResourceDefinition(character: Character, key: string): ClassResourceDefinition | undefined {
@@ -48,7 +50,10 @@ function withClassResources(character: Character, resources: Record<string, Char
 export function syncCharacterClassResources(character: Character): Character {
   const available = classResourceDefinitions(character)
   const registered = classDefinitionForCharacter(character)?.resources
-  const registeredDefinitions = typeof registered === 'function' ? registered(character) : (registered ?? [])
+  const registeredDefinitions = [
+    ...(typeof registered === 'function' ? registered(character) : (registered ?? [])),
+    ...dnd5ePluginClassResourceDefinitions(character),
+  ]
   const registeredKeys = new Set(
     registeredDefinitions.map((resource) => resource.key),
   )

@@ -33,9 +33,10 @@ const plugin = {
     }
     api.registerHeadlessAction({
       id: 'guardian-spark',
-      resolve({ target, grantTemporaryHitPoints, succeed, fail }) {
+      rolls: [{ id: 'temporary-hp', label: '守护火花', count: 1, sides: 4, modifier: 2, visibility: 'public' }],
+      resolve({ target, rolls, grantTemporaryHitPoints, succeed, fail }) {
         if (!target) return fail('invalid-target')
-        grantTemporaryHitPoints(target.id, 3)
+        grantTemporaryHitPoints(target.id, rolls['temporary-hp'].total)
         return succeed()
       },
     })
@@ -44,7 +45,7 @@ const plugin = {
       id: 'guardian-spark',
       name: '演示特性：守护火花',
       summary: '原创的接口演示特性，不属于 D&D 官方规则内容。',
-      description: '以一个动作选择30尺内的自己或一名友方生物；目标获得3点临时生命值。',
+      description: '以一个动作选择30尺内的自己或一名友方生物；目标获得1d4＋2点临时生命值。',
       sourceLabel: 'Rules Plugin API V2 演示',
       minimumLevel: 1,
       automation: 'full',
@@ -64,20 +65,78 @@ const plugin = {
 
     api.registerHeadlessAction({
       id: 'ember-lance',
-      resolve({ action, target, dealDamage, applyStandardCondition, succeed, fail }) {
+      rolls: [{ id: 'damage', label: '余烬长枪伤害', count: 2, sides: 6, visibility: 'public' }],
+      resolve({ target, rolls, dealDamage, succeed, fail }) {
         if (!target) return fail('invalid-target')
-        const payload = action.payload || {}
-        const damage = Number(payload.damage)
-        const failedSave = payload.failedSave === true
-        if (!Number.isInteger(damage) || damage < 0) return fail('invalid-dice')
-        dealDamage(target.id, damage, 'fire')
-        if (failedSave) {
-          applyStandardCondition(target.id, 'blinded', {
-            expiresAt: 'target-next-turn-start',
-          })
-        }
+        dealDamage(target.id, rolls.damage.total, 'fire')
         return succeed()
       },
+    })
+
+    let starChargesId = ''
+    api.registerHeadlessAction({
+      id: 'starlight-field',
+      rolls: [{ id: 'damage', label: '星辉领域伤害', count: 1, sides: 6, visibility: 'public' }],
+      resolve({ action, targets, rolls, spendResource, dealDamage, succeed, fail }) {
+        if (action.interruptChoiceId !== 'cast') return fail('invalid-plugin-action')
+        if (!starChargesId || !spendResource(starChargesId, 1)) return fail('class-resource-unavailable')
+        for (const target of targets) dealDamage(target.id, rolls.damage.total, 'radiant')
+        return succeed()
+      },
+    })
+    api.registerSubclass({
+      id: 'astral-school',
+      classId: 'wizard',
+      name: '演示子职：星辉学派',
+      summary: '原创的声明式子职、选择组、资源与持续区域演示，不属于官方规则。',
+      features: [{
+        id: 'starlight-field',
+        level: 2,
+        name: '星辉领域',
+        description: '消耗1点星辉充能，在60尺内放置一个持续区域。',
+        action: {
+          id: 'starlight-field',
+          label: '放置星辉领域',
+          economy: 'action',
+          targeting: {
+            kind: 'area',
+            relation: 'enemy',
+            maximumTargets: 8,
+            template: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 60 },
+          },
+          interrupt: {
+            prompt: '是否消耗星辉充能并建立专注区域？',
+            audience: 'actor',
+            options: [{ id: 'cast', label: '建立领域' }, { id: 'cancel', label: '取消' }],
+            defaultOptionId: 'cancel',
+          },
+          persistentArea: {
+            label: '星辉领域（原创演示）',
+            color: '#8b5cf6',
+            durationRounds: 10,
+            concentration: true,
+          },
+        },
+      }],
+      choiceGroups: [{
+        id: 'star-color',
+        level: 2,
+        name: '星辉色彩',
+        maxSelections: 1,
+        options: [
+          { id: 'violet', name: '紫色星辉', summary: '原创演示选项。' },
+          { id: 'gold', name: '金色星辉', summary: '原创演示选项。' },
+        ],
+      }],
+    })
+    starChargesId = api.registerResource({
+      id: 'star-charges',
+      label: '星辉充能',
+      classId: 'wizard',
+      subclassId: 'astral-school',
+      minimumLevel: 2,
+      maximum: [0, 2, 3, 3, 4],
+      resetOn: 'short-rest',
     })
 
     api.registerSpell({

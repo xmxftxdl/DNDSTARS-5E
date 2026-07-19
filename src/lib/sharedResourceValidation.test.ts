@@ -95,6 +95,24 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
   })
 
+  it('fails closed for malformed plugin persistent areas at the shared map boundary', () => {
+    const validArea = {
+      id: 'plugin-area:action-1', pluginId: 'com.example.area', featureId: 'com.example.area:ward',
+      label: '守护区域', color: '#22c55e', sourceCharacterId: 'hero', sourceTokenId: 'hero-token',
+      cells: [{ col: 2, row: 3 }], createdRound: 1, expiresAfterRound: 3,
+      concentrationId: 'plugin-area:action-1',
+    }
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [validArea] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, cells: [{ col: 2.5, row: 3 }] }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [validArea, validArea] }],
+    }).status).toBe('invalid')
+  })
+
   it('migrates legacy interrupts and rejects duplicate active transaction locks', () => {
     const legacy = {
       mapId: 'map', updatedAt: 2,

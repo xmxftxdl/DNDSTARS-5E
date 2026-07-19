@@ -41,6 +41,8 @@ import {
   DND5E_WILD_SHAPE_KNOWN_FORMS_KEY,
   DND5E_BARD_MAGICAL_SECRETS_KEY,
   DND5E_LORE_ADDITIONAL_MAGICAL_SECRETS_KEY,
+  dnd5ePluginSubclassDefinition,
+  registeredDnd5ePluginSubclasses,
   type Dnd5eClassChoiceGroup,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
@@ -74,6 +76,8 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
 
   const stored = character.dnd5eClassChoices?.classes?.[definition.id] ?? {}
   const selectedSubclass = stored.subclass
+  const selectedPluginSubclass = selectedSubclass ? dnd5ePluginSubclassDefinition(selectedSubclass) : undefined
+  const pluginSubclassOptions = registeredDnd5ePluginSubclasses(definition.id)
   const subclassUnlocked = character.level >= definition.subclassLevel
   const progression = dnd5eClassProgression(definition)
   const classSkillKeys = definition.skillProficiencies === 'any'
@@ -90,9 +94,17 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
       return { id: key, name: skill?.label ?? key, summary: `${abilityLabel(skill?.ability ?? '')}技能` }
     }),
   }
-  const groups = [classSkillGroup, ...dnd5eAllClassChoiceGroups(definition)]
+  const pluginChoiceGroups: Dnd5eClassChoiceGroup[] = (selectedPluginSubclass?.choiceGroups ?? []).map((group) => ({
+    ...group,
+    id: `${selectedPluginSubclass!.id}/${group.id}`,
+    options: group.options.map((option) => ({ ...option })),
+  }))
+  const groups = [classSkillGroup, ...dnd5eAllClassChoiceGroups(definition), ...pluginChoiceGroups]
     .filter((group) => character.level >= group.level)
-    .filter((group) => definition.choiceGroups?.includes(group) || selectedSubclass === definition.subclass.id)
+    .filter((group) =>
+      group === classSkillGroup || pluginChoiceGroups.includes(group) ||
+      definition.choiceGroups?.includes(group) || selectedSubclass === definition.subclass.id,
+    )
   const resources = classResourceDefinitions(character)
     .map((resourceDefinition) => ({
       definition: resourceDefinition,
@@ -207,6 +219,9 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
           >
             <option value="">{subclassUnlocked ? '尚未选择' : `${definition.subclassLevel}级解锁`}</option>
             <option value={definition.subclass.id}>{definition.subclass.name}</option>
+            {pluginSubclassOptions.map((subclass) => (
+              <option key={subclass.id} value={subclass.id}>{subclass.name} · {subclass.ownerPluginName}</option>
+            ))}
           </select>
         </label>
       </div>
@@ -230,6 +245,19 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
             <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-slate-500">SRD 5.1</span>
           </div>
           <p className="mt-1 text-sm text-slate-400">{definition.subclass.summary}</p>
+        </div>
+      )}
+
+      {selectedPluginSubclass && (
+        <div className="mt-4 rounded-xl border border-violet-400/25 bg-violet-500/5 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-violet-100">{selectedPluginSubclass.name}</span>
+            <span className="rounded-full border border-violet-300/20 px-2 py-0.5 text-[10px] text-violet-200">
+              {selectedPluginSubclass.ownerPluginName} · {selectedPluginSubclass.ownerPluginLicense}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-slate-400">{selectedPluginSubclass.summary}</p>
+          <p className="mt-2 text-[11px] text-amber-200/70">第三方规则包内容；平台核心包不将其标记为 SRD 5.1。</p>
         </div>
       )}
 
@@ -537,7 +565,12 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
           {progression.map((entry) => {
             const unlocked = entry.level <= character.level
             const current = entry.level === character.level
-            const features = entry.features.filter((feature) => feature.source === 'class' || selectedSubclass === definition.subclass.id)
+            const features = [
+              ...entry.features.filter((feature) => feature.source === 'class' || selectedSubclass === definition.subclass.id),
+              ...(selectedPluginSubclass?.features ?? [])
+                .filter((feature) => feature.level === entry.level)
+                .map((feature) => ({ ...feature, source: 'subclass' as const })),
+            ]
             return (
               <div key={entry.level} className={`rounded-xl border p-3 ${current ? 'border-arcane-400/60 bg-arcane-500/10' : unlocked ? 'border-white/10 bg-white/[0.03]' : 'border-white/5 bg-void-900/30 opacity-55'}`}>
                 <div className="flex items-center justify-between gap-3">

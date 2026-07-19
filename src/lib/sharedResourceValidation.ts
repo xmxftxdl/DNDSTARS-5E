@@ -57,6 +57,40 @@ function sameStringArray(left: unknown, right: readonly string[]): boolean {
     left.every((entry, index) => typeof entry === 'string' && entry === right[index])
 }
 
+function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
+  if (value == null) return []
+  if (!Array.isArray(value) || value.length > 1_024) return [`${path} 必须是有限数组`]
+  const issues: string[] = []
+  const ids = new Set<string>()
+  value.forEach((raw, index) => {
+    const areaPath = `${path}[${index}]`
+    if (!isPlainObject(raw)) {
+      issues.push(`${areaPath} 必须是对象`)
+      return
+    }
+    if (typeof raw.id !== 'string' || !raw.id || ids.has(raw.id)) issues.push(`${areaPath}.id 无效或重复`)
+    else ids.add(raw.id)
+    for (const key of ['pluginId', 'featureId', 'label', 'sourceCharacterId', 'sourceTokenId'] as const) {
+      if (typeof raw[key] !== 'string' || !raw[key]) issues.push(`${areaPath}.${key} 无效`)
+    }
+    if (typeof raw.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(raw.color)) issues.push(`${areaPath}.color 无效`)
+    if (
+      !Number.isInteger(raw.createdRound) || Number(raw.createdRound) < 0 ||
+      !Number.isInteger(raw.expiresAfterRound) || Number(raw.expiresAfterRound) < Number(raw.createdRound)
+    ) issues.push(`${areaPath} 轮数无效`)
+    if (raw.concentrationId != null && (typeof raw.concentrationId !== 'string' || !raw.concentrationId)) {
+      issues.push(`${areaPath}.concentrationId 无效`)
+    }
+    if (!Array.isArray(raw.cells) || raw.cells.length < 1 || raw.cells.length > 4_096) {
+      issues.push(`${areaPath}.cells 无效`)
+    } else if (raw.cells.some((cell) =>
+      !isPlainObject(cell) || !Number.isInteger(cell.col) || !Number.isInteger(cell.row) ||
+      Math.abs(Number(cell.col)) > 1_000_000 || Math.abs(Number(cell.row)) > 1_000_000
+    )) issues.push(`${areaPath}.cells 包含无效格子`)
+  })
+  return issues
+}
+
 const COMBAT_INTERRUPT_KINDS = new Set<CombatInterruptKind>([
   'dodge', 'stable-mind', 'gale-combo', 'agile-leap', 'opportunity-attack', 'protection',
   'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
@@ -185,7 +219,9 @@ function migrateDnd5eStateEnvelope(
     return { value: { ...input, characters }, issues, migrations }
   }
   const maps = (input.maps as unknown[]).map((entry, mapIndex) => {
-    if (!isPlainObject(entry) || !Array.isArray(entry.tokens)) return entry
+    if (!isPlainObject(entry)) return entry
+    issues.push(...validateDnd5ePluginAreas(entry.dnd5ePluginAreas, `maps[${mapIndex}].dnd5ePluginAreas`))
+    if (!Array.isArray(entry.tokens)) return entry
     return {
       ...entry,
       tokens: entry.tokens.map((token, tokenIndex) =>

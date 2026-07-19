@@ -37,9 +37,11 @@ export default function Dnd5ePluginFeaturesPanel({
     getRoomRulesSnapshot,
     getRoomRulesSnapshot,
   )
-  const features = registeredDnd5ePluginFeatures()
+  const registeredFeatures = registeredDnd5ePluginFeatures()
+  // 子职特性由所选子职和等级自动授予，只在职业进度页展示，不能手动勾选。
+  const features = registeredFeatures.filter((feature) => !feature.grantedBySubclass)
   const selected = new Set(character.dnd5ePluginFeatureIds ?? [])
-  const registeredIds = new Set(features.map((feature) => feature.id))
+  const registeredIds = new Set(registeredFeatures.map((feature) => feature.id))
   const missingIds = [...selected].filter((featureId) => !registeredIds.has(featureId))
 
   const toggle = (featureId: string) => {

@@ -81,7 +81,13 @@ D&D 5e 规则必须实现为独立 `RulesetAdapter`，不得重新硬编码进�
 - Headless action 可声明有限数量的骰子配方；所有骰面由 DM Host 骰子层生成，公开骰同步房间、暗骰只向 DM 显示，Worker 收到的 `rolls` 会在受信任 Headless 层再次逐项校验。
 - 通用插件特性支持圆形、锥形、直线和可旋转矩形范围模板。客户端只提交锚点和朝向；DM preflight 按最新地图占格、阵营、最大目标数重建 `targets`，不会采用玩家伪造的目标列表。
 - 插件行动可声明 `interrupt` 及 actor／target／DM audience。选择进入共享 `plugin-choice` Interrupt Queue；同一 action ID 锁定一个事务，刷新或断线后继续读取，超时采用插件声明的默认项后再进入 Headless。
-- P3 后续边界：持续区域实体、自定义职业资源和恢复规则、声明式通用子职与多级选择组。
+
+## P3 声明式扩展内容
+
+- 插件可用 `registerSubclass` 为 12 个 SRD 基础职业声明通用子职、等级特性和多级选择组。子职、选择和自动授予特性全部使用插件命名空间；Host 按角色职业、所选子职与等级复核，自动特性不能在通用特性页手动勾选。战士插件子职同时接入现有战士进度面板，其余职业进入通用职业进度面板。
+- 插件可用 `registerResource` 声明固定值或逐级上限、最低等级、所属职业／子职以及短休／长休恢复。资源进入通用 `classResources`，由角色同步和休息生命周期管理；Worker 只能请求 `spendResource`／`restoreResource`，受信任 Headless 层会再次检查命名空间、角色资格、余额和上限。
+- 插件范围特性可声明 `persistentArea`。成功事务会在权威地图创建带来源、格子、颜色、轮数与可选专注 ID 的区域实体；固定时限到期或来源专注中断后由 DM Host 清除并同步。区域可放在当前没有生物的合法格子上，玩家提交的目标列表仍不会被信任。
+- `phb-2014-compat-template.dndstars5e` 已扩展为不含专有规则正文的 P2／P3 示例，展示 Host 骰子、Interrupt、原创子职、选择组、职业资源与专注区域。
 
 ## SRD 职业接入状态
 

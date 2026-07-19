@@ -9,6 +9,8 @@ import type {
 import {
   dnd5ePluginFeatureAvailableForCharacter,
   dnd5ePluginFeatureDefinition,
+  dnd5eCharacterHasPluginFeature,
+  registeredDnd5ePluginFeatures,
   dnd5eRulesPluginRegistrySnapshot,
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e'
@@ -67,13 +69,12 @@ export default function Dnd5ePluginCombatPanel({
     getRoomRulesSnapshot,
   )
   const features = useMemo(
-    () => (character.dnd5ePluginFeatureIds ?? []).flatMap((featureId) => {
-      const feature = dnd5ePluginFeatureDefinition(featureId)
-      return feature &&
+    () => registeredDnd5ePluginFeatures().flatMap((feature) => {
+      return dnd5eCharacterHasPluginFeature(character, feature.id) &&
         feature.action &&
         feature.automation !== 'manual' &&
         dnd5ePluginFeatureAvailableForCharacter(feature, character)
-        ? [feature]
+        ? [dnd5ePluginFeatureDefinition(feature.id)!]
         : []
     }),
     [character, pluginRevision],

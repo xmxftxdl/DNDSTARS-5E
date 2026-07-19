@@ -13,6 +13,7 @@ import {
 } from './classes'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import { syncDnd5ePrimalChampion } from './hitPoints'
+import { dnd5eCharacterHasPluginFeature, registeredDnd5ePluginFeatures } from './pluginApi'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -147,7 +148,9 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     classId: classDefinition?.id,
     subclassId,
     classSelections,
-    pluginFeatureIds: [...new Set(character.dnd5ePluginFeatureIds ?? [])],
+    pluginFeatureIds: registeredDnd5ePluginFeatures()
+      .filter((feature) => dnd5eCharacterHasPluginFeature(character, feature.id))
+      .map((feature) => feature.id),
     wearingArmor: armor?.kind === 'armor' || !!character.equipment?.armor,
     wearingHeavyArmor: armor?.kind === 'armor' && armor.category === 'heavy',
     wearingMetalArmor: armor?.kind === 'armor' && (
