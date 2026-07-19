@@ -15,6 +15,7 @@ describe('D&D 5e 2014 ruleset adapter', () => {
       actionAvailable: false,
       bonusActionAvailable: true,
       reactionAvailable: true,
+      objectInteractionAvailable: true,
       movementRemaining: 10,
     })
     expect(rules.validateTurnCost(acted, { resource: 'action' })).toEqual({ valid: false, reason: 'action-unavailable' })

@@ -1,4 +1,4 @@
-import { Clock3, Crosshair, Footprints, HeartPulse, RotateCcw, Shield, Sparkles, Sword, Zap } from 'lucide-react'
+import { Clock3, Crosshair, Footprints, HeartPulse, PackageOpen, RotateCcw, Shield, Sparkles, Sword, Zap } from 'lucide-react'
 import {
   FIGHTER_RESOURCE_KEYS,
   dnd5eArmorClass,
@@ -40,11 +40,12 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
             {canAct ? '你的回合' : '回合外'}
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <EconomyCard icon={Sword} label="主动动作" pool={turnEconomy.action} detail="攻击等" />
           <EconomyCard icon={Sparkles} label="附赠动作" pool={turnEconomy.bonusAction} detail="回气等" />
           <EconomyCard icon={RotateCcw} label="反应" pool={turnEconomy.reaction} detail="借机攻击等" />
           <EconomyCard icon={Footprints} label="移动" pool={turnEconomy.movement} detail="独立于动作" suffix="尺" />
+          <EconomyCard icon={PackageOpen} label="物件交互" pool={turnEconomy.objectInteraction ?? { current: 1, max: 1 }} detail="每回合一次免费" />
         </div>
       </section>
       <div className="rounded-xl border border-white/10 bg-void-900/45 p-4">

@@ -46,6 +46,7 @@ describe('shared combat sync', () => {
       action: { current: 0, max: 1 },
       bonusAction: { current: 1, max: 1 },
       reaction: { current: 1, max: 1 },
+      objectInteraction: { current: 1, max: 1 },
       movement: { current: 20, max: 30 },
     }
     expect(reconcileDnd5eTurnEconomy(
@@ -77,6 +78,17 @@ describe('shared combat sync', () => {
       expect(decision.playerCombatEndedLocked).toBe(false)
       expect(decision.settlementMode).toBe('automatic')
     }
+  })
+
+  it('migrates legacy turn snapshots with a fresh object interaction', () => {
+    const legacy = {
+      turnKey: 'combat-1:2:hero-token', attacksUsed: 0,
+      action: { current: 1, max: 1 }, bonusAction: { current: 1, max: 1 },
+      reaction: { current: 1, max: 1 }, movement: { current: 30, max: 30 },
+    }
+    expect(reconcileDnd5eTurnEconomy(
+      { 'hero-token': legacy }, {}, new Set(['hero-token']),
+    )['hero-token'].objectInteraction).toEqual({ current: 1, max: 1 })
   })
 
   it('ignores wrong-map, empty-token-map, stale, and unchanged snapshots', () => {

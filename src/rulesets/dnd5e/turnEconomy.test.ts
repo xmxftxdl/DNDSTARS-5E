@@ -14,6 +14,7 @@ describe('D&D 5e counted turn economy', () => {
       action: { current: 1, max: 1 },
       bonusAction: { current: 1, max: 1 },
       reaction: { current: 1, max: 1 },
+      objectInteraction: { current: 1, max: 1 },
       movement: { current: 30, max: 30 },
     })
   })
@@ -36,6 +37,16 @@ describe('D&D 5e counted turn economy', () => {
       reaction: { current: 1 },
     })
     expect(spendDnd5eTurnResource(spent.economy, 'bonusAction').ok).toBe(false)
+  })
+
+  it('spends one free object interaction independently from the action', () => {
+    const initial = createDnd5eTurnEconomyCounts('turn')
+    const spent = spendDnd5eTurnResource(initial, 'objectInteraction')
+    expect(spent).toMatchObject({
+      ok: true,
+      economy: { action: { current: 1 }, objectInteraction: { current: 0, max: 1 } },
+    })
+    expect(spendDnd5eTurnResource(spent.economy, 'objectInteraction').ok).toBe(false)
   })
 
   it('Action Surge grants one additional action for the current turn', () => {

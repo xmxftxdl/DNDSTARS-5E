@@ -25,6 +25,8 @@ export interface Dnd5eTurnEconomyCounts {
   action: { current: number; max: number }
   bonusAction: { current: number; max: number }
   reaction: { current: number; max: number }
+  /** 每回合一次与环境物件的免费交互；第二次需改用主动动作。 */
+  objectInteraction?: { current: number; max: number }
   /** 5e 移动不是动作，也不消耗 AP；这里记录本回合尚可移动的尺数。 */
   movement: { current: number; max: number }
 }

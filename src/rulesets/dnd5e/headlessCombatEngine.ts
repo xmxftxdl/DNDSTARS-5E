@@ -462,6 +462,7 @@ export type Dnd5eAction =
   | { type: 'dash'; actorId: string }
   | { type: 'disengage'; actorId: string }
   | { type: 'dodge'; actorId: string }
+  | { type: 'interact-object'; actorId: string; interactionId: string; useAction?: boolean }
   | { type: 'ability-check'; actorId: string; ability: AbilityKey; skill?: string; d20: number; d20Second?: number; mode?: D20RollMode; dc?: number; spendAction?: boolean; bardicInspirationRoll?: number; peerlessSkillRoll?: number; darkOnesOwnLuckRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; strokeOfLuck?: boolean }
   | { type: 'death-save'; actorId: string; d20: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'concentration-save'; actorId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; dc: number }
@@ -578,7 +579,7 @@ export type Dnd5eCombatEvent =
   | { type: 'instant-death'; sourceId: string; targetId: string; hpBefore: number }
   | { type: 'hostile-targeting-prevented'; actorId: string; targetId: string; source: 'tranquility' | 'nature-sanctuary' }
   | { type: 'ability-check-resolved'; actorId: string; ability: AbilityKey; skill?: string; d20: number; modifier: number; total: number; mode: D20RollMode; reliableTalentApplied: boolean; indomitableMightApplied?: boolean; bardicInspirationApplied?: number; peerlessSkillApplied?: number; darkOnesOwnLuckApplied?: number; cuttingWordsApplied?: number; strokeOfLuckApplied?: boolean; dc?: number; success?: boolean }
-  | { type: 'object-action-taken'; actorId: string; action: 'use-object' }
+  | { type: 'object-action-taken'; actorId: string; action: 'use-object' | 'interact-object'; interactionId?: string }
   | { type: 'concentration-check-required'; targetId: string; dc: number }
   | { type: 'relentless-rage-save-required'; targetId: string; dc: number }
   | { type: 'relentless-rage-resolved'; actorId: string; d20: number; total: number; dc: number; success: boolean }
@@ -594,6 +595,7 @@ export type Dnd5eActionFailure =
   | 'invalid-target'
   | 'action-unavailable'
   | 'reaction-unavailable'
+  | 'object-interaction-unavailable'
   | 'bonus-action-unavailable'
   | 'class-resource-unavailable'
   | 'invalid-class-feature'
@@ -7051,6 +7053,18 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
     actor.disengaged = action.type === 'disengage'
     actor.dodging = action.type === 'dodge'
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'interact-object') {
+    if (!action.interactionId.trim() || action.interactionId.length > 320) {
+      return fail(state, events, 'invalid-class-feature')
+    }
+    const resource: TurnResource = action.useAction ? 'action' : 'objectInteraction'
+    if (!spend(actor, resource)) {
+      return fail(state, events, action.useAction ? 'action-unavailable' : 'object-interaction-unavailable')
+    }
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource })
+    events.push({ type: 'object-action-taken', actorId: actor.id, action: 'interact-object', interactionId: action.interactionId })
     return { ok: true, state, events }
   }
 

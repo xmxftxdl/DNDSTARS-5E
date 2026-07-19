@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Clock3, Crosshair, Footprints, RotateCcw, Shield, Sparkles, Sword } from 'lucide-react'
+import { Clock3, Crosshair, Footprints, PackageOpen, RotateCcw, Shield, Sparkles, Sword } from 'lucide-react'
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
 import type { Dnd5eClassFeaturePayload, Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import {
@@ -110,11 +110,12 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><Clock3 className="h-4 w-4 text-arcane-300" />本回合可用行动</div>
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${canAct ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-500'}`}>{canAct ? '你的回合' : '回合外'}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <EconomyCard icon={Sword} label="主动动作" pool={turnEconomy.action} detail="攻击、施法等" />
           <EconomyCard icon={Sparkles} label="附赠动作" pool={turnEconomy.bonusAction} detail="职业特性等" />
           <EconomyCard icon={RotateCcw} label="反应" pool={turnEconomy.reaction} detail="借机攻击等" />
           <EconomyCard icon={Footprints} label="移动" pool={turnEconomy.movement} detail="独立于动作" suffix="尺" />
+          <EconomyCard icon={PackageOpen} label="物件交互" pool={turnEconomy.objectInteraction ?? { current: 1, max: 1 }} detail="每回合一次免费" />
         </div>
       </section>
 

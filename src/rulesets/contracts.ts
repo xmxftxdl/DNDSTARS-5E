@@ -42,10 +42,11 @@ export interface TurnEconomy {
   actionAvailable: boolean
   bonusActionAvailable: boolean
   reactionAvailable: boolean
+  objectInteractionAvailable?: boolean
   movementRemaining: number
 }
 
-export type TurnResource = 'action' | 'bonusAction' | 'reaction' | 'movement'
+export type TurnResource = 'action' | 'bonusAction' | 'reaction' | 'objectInteraction' | 'movement'
 
 export interface TurnResourceCost {
   resource: TurnResource
@@ -54,7 +55,7 @@ export interface TurnResourceCost {
 
 export interface TurnValidationResult {
   valid: boolean
-  reason?: 'action-unavailable' | 'bonus-action-unavailable' | 'reaction-unavailable' | 'insufficient-movement'
+  reason?: 'action-unavailable' | 'bonus-action-unavailable' | 'reaction-unavailable' | 'object-interaction-unavailable' | 'insufficient-movement'
 }
 
 export interface HitDiePool {

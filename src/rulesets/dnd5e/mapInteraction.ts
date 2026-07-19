@@ -18,6 +18,7 @@ export interface PreparedDnd5eMapInteraction {
   checkAbility?: 'str' | 'dex' | 'int' | 'wis'
   checkSkill?: 'athletics' | 'sleightOfHand' | 'investigation' | 'perception'
   spendAction: boolean
+  turnCost: 'object-interaction' | 'action'
   automaticSuccess: boolean
   nextDoorState?: 'open' | 'closed'
 }
@@ -62,16 +63,16 @@ export function prepareDnd5eMapInteraction(input: {
   if (operation === 'open') {
     if (door.state === 'open') return { ok: false, reason: 'door-already-open' }
     if (door.state === 'locked') return { ok: false, reason: 'door-locked' }
-    return { ok: true, prepared: { door, operation, method: 'interact', spendAction: false, automaticSuccess: true, nextDoorState: 'open' } }
+    return { ok: true, prepared: { door, operation, method: 'interact', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'open' } }
   }
   if (operation === 'close') {
     if (door.state !== 'open') return { ok: false, reason: 'door-not-open' }
-    return { ok: true, prepared: { door, operation, method: 'interact', spendAction: false, automaticSuccess: true, nextDoorState: 'closed' } }
+    return { ok: true, prepared: { door, operation, method: 'interact', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'closed' } }
   }
   if (operation === 'unlock') {
     if (door.state !== 'locked') return { ok: false, reason: 'door-not-locked' }
     if (input.payload.method === 'key' && input.hasMatchingKey) {
-      return { ok: true, prepared: { door, operation, method: 'key', spendAction: false, automaticSuccess: true, nextDoorState: 'closed' } }
+      return { ok: true, prepared: { door, operation, method: 'key', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'closed' } }
     }
     if (interaction?.requiresThievesTools !== false && !input.hasThievesTools) {
       return { ok: false, reason: 'thieves-tools-required' }
@@ -80,7 +81,7 @@ export function prepareDnd5eMapInteraction(input: {
       ok: true,
       prepared: {
         door, operation, method: 'thieves-tools', dc: interaction?.lockPickDc ?? DEFAULT_LOCK_PICK_DC,
-        checkAbility: 'dex', checkSkill: 'sleightOfHand', spendAction: true, automaticSuccess: false,
+        checkAbility: 'dex', checkSkill: 'sleightOfHand', spendAction: true, turnCost: 'action', automaticSuccess: false,
         nextDoorState: 'closed',
       },
     }
@@ -91,7 +92,7 @@ export function prepareDnd5eMapInteraction(input: {
       ok: true,
       prepared: {
         door, operation, method: 'force', dc: interaction?.breakDc ?? DEFAULT_BREAK_DC,
-        checkAbility: 'str', checkSkill: 'athletics', spendAction: true, automaticSuccess: false,
+        checkAbility: 'str', checkSkill: 'athletics', spendAction: true, turnCost: 'action', automaticSuccess: false,
         nextDoorState: 'open',
       },
     }
@@ -102,7 +103,7 @@ export function prepareDnd5eMapInteraction(input: {
     prepared: {
       door, operation, method, dc: interaction?.secretDc ?? DEFAULT_SECRET_DC,
       checkAbility: method === 'investigation' ? 'int' : 'wis',
-      checkSkill: method,
+      checkSkill: method, turnCost: 'action',
       spendAction: true,
       automaticSuccess: false,
     },

@@ -36,6 +36,7 @@ function turnFailure(turn: TurnEconomy, cost: TurnResourceCost): TurnValidationR
   if (cost.resource === 'action' && (!turn.actionAvailable || amount !== 1)) return 'action-unavailable'
   if (cost.resource === 'bonusAction' && (!turn.bonusActionAvailable || amount !== 1)) return 'bonus-action-unavailable'
   if (cost.resource === 'reaction' && (!turn.reactionAvailable || amount !== 1)) return 'reaction-unavailable'
+  if (cost.resource === 'objectInteraction' && (turn.objectInteractionAvailable === false || amount !== 1)) return 'object-interaction-unavailable'
   if (cost.resource === 'movement' && turn.movementRemaining < amount) return 'insufficient-movement'
   return undefined
 }
@@ -73,6 +74,7 @@ export const dnd5e2014Adapter: RulesetAdapter = {
       actionAvailable: true,
       bonusActionAvailable: true,
       reactionAvailable: true,
+      objectInteractionAvailable: true,
       movementRemaining: speed,
     }
   },
@@ -89,6 +91,7 @@ export const dnd5e2014Adapter: RulesetAdapter = {
     if (cost.resource === 'action') return { ...turn, actionAvailable: false }
     if (cost.resource === 'bonusAction') return { ...turn, bonusActionAvailable: false }
     if (cost.resource === 'reaction') return { ...turn, reactionAvailable: false }
+    if (cost.resource === 'objectInteraction') return { ...turn, objectInteractionAvailable: false }
     return { ...turn, movementRemaining: turn.movementRemaining - amount }
   },
 

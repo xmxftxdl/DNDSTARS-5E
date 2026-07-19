@@ -12,7 +12,7 @@ describe('shared D&D 5e combat state', () => {
   it('publishes authoritative turn economy without AP fields', () => {
     const headless = startDnd5eHeadlessCombat('combat-1', [combatant('a', 20), combatant('b', 10)])
     const shared = publishDnd5eCombatState(headless, { mapId: 'map-1', revision: 3, updatedAt: 100 })
-    expect(shared.combatants.a.turn).toEqual({ actionAvailable: true, bonusActionAvailable: true, reactionAvailable: true, movementRemaining: 30 })
+    expect(shared.combatants.a.turn).toEqual({ actionAvailable: true, bonusActionAvailable: true, reactionAvailable: true, objectInteractionAvailable: true, movementRemaining: 30 })
     expect(JSON.stringify(shared)).not.toMatch(/actionPoints|currentAP|enemyApByToken|apCost/)
   })
 

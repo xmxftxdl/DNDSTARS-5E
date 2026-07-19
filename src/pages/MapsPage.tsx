@@ -6790,6 +6790,16 @@ export default function MapsPage() {
           return
         }
       }
+      let mapInteractionTurnResource: 'objectInteraction' | 'action' = 'action'
+      if (combatActiveRef.current && prepared.prepared.turnCost === 'object-interaction') {
+        const economy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
+        mapInteractionTurnResource = (economy.objectInteraction?.current ?? 1) > 0 ? 'objectInteraction' : 'action'
+        if (mapInteractionTurnResource === 'action' && economy.action.current < 1) {
+          acknowledgePlayerAction(action, 'rejected', 'object-interaction-unavailable')
+          completePlayerActionRequest(action)
+          return
+        }
+      }
       const adjudication = await requestSharedMapInteractionAdjudication(
         action,
         dnd5eActionActor.name,
@@ -6826,10 +6836,64 @@ export default function MapsPage() {
             ? 'failure'
             : undefined,
       })
-      if (combatActiveRef.current && prepared.prepared.spendAction) {
+      if (combatActiveRef.current) {
+        const economy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
+        const snapshot = createDnd5eMapCombatSnapshot({
+          combatId: action.combatId ?? `map-${authorityMap.id}`,
+          round: liveRound,
+          turnSlotId: initiativeOrderRef.current[liveIndex]?.slotId,
+          map: authorityMap,
+          characters: useCharacterStore.getState().characters,
+          initiativeOrder: initiativeOrderRef.current,
+        })
+        const actorIndex = snapshot.state.initiativeOrder.indexOf(action.actorTokenId)
+        const combatant = snapshot.state.combatants[action.actorTokenId]
+        if (actorIndex < 0 || !combatant) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-map-interaction')
+          completePlayerActionRequest(action)
+          return
+        }
+        combatant.turn = {
+          actionAvailable: economy.action.current > 0,
+          bonusActionAvailable: economy.bonusAction.current > 0,
+          reactionAvailable: economy.reaction.current > 0,
+          objectInteractionAvailable: (economy.objectInteraction?.current ?? 1) > 0,
+          movementRemaining: economy.movement.current,
+        }
+        const economyResult = resolveDnd5eHeadlessAction(
+          { ...snapshot.state, initiativeIndex: actorIndex },
+          {
+            type: 'interact-object', actorId: action.actorTokenId,
+            interactionId: `${prepared.prepared.operation}:${prepared.prepared.door.id}`,
+            useAction: prepared.prepared.turnCost === 'action' || mapInteractionTurnResource === 'action',
+          },
+        )
+        if (!economyResult.ok) {
+          await finishSharedCombatInterrupt(interruptId, adjudication)
+          acknowledgePlayerAction(action, 'rejected', economyResult.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        const application = planDnd5eMapResultApplication({
+          state: economyResult.state,
+          map: authorityMap,
+          characters: useCharacterStore.getState().characters,
+          characterIdByCombatantId: snapshot.characterIdByCombatantId,
+        })
+        for (const characterId of application.changedCharacterIds) {
+          const next = application.characters.find((character) => character.id === characterId)
+          if (next) applyAuthorityCharacterUpdate(characterId, next)
+        }
+        for (const tokenId of application.changedTokenIds) {
+          const next = application.map.tokens.find((token) => token.id === tokenId)
+          if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+        }
         updateDnd5eTurnEconomy(
           action.actorTokenId,
-          (economy) => spendDnd5eTurnResource(economy, 'action').economy,
+          (current) => spendDnd5eTurnResource(
+            current,
+            prepared.prepared.turnCost === 'action' ? 'action' : mapInteractionTurnResource,
+          ).economy,
           liveRound,
         )
       }

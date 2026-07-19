@@ -80,6 +80,27 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dashed.state.combatants.a.turn).toMatchObject({ actionAvailable: false, movementRemaining: 40 })
   })
 
+  it('settles the free object interaction and action fallback in Headless economy', () => {
+    const state = startDnd5eHeadlessCombat('object-interaction', [fighter('a', 20), fighter('b', 10)])
+    const opened = resolveDnd5eHeadlessAction(state, {
+      type: 'interact-object', actorId: 'a', interactionId: 'open:door-1',
+    })
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) return
+    expect(opened.state.combatants.a.turn).toMatchObject({
+      actionAvailable: true, objectInteractionAvailable: false,
+    })
+    expect(resolveDnd5eHeadlessAction(opened.state, {
+      type: 'interact-object', actorId: 'a', interactionId: 'close:door-1',
+    })).toMatchObject({ ok: false, reason: 'object-interaction-unavailable' })
+    const fallback = resolveDnd5eHeadlessAction(opened.state, {
+      type: 'interact-object', actorId: 'a', interactionId: 'close:door-1', useAction: true,
+    })
+    expect(fallback.ok).toBe(true)
+    if (!fallback.ok) return
+    expect(fallback.state.combatants.a.turn.actionAvailable).toBe(false)
+  })
+
   it('emits one observational result for each root Headless transaction', () => {
     const observations: unknown[] = []
     const stop = setDnd5eHeadlessResolutionObserver((observation) => observations.push(observation))

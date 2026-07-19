@@ -37,6 +37,9 @@ export function reconcileDnd5eTurnEconomy(
         action: { ...economy.action },
         bonusAction: { ...economy.bonusAction },
         reaction: { ...economy.reaction },
+        objectInteraction: economy.objectInteraction
+          ? { ...economy.objectInteraction }
+          : { current: 1, max: 1 },
         movement: economy.movement
           ? { ...economy.movement }
           : { current: 30, max: 30 },

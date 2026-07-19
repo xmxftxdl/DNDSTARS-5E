@@ -31,9 +31,22 @@ describe('D&D 5e map interaction transaction', () => {
       payload: { doorId: 'door', operation: 'break', method: 'force' },
     })
     if (!prepared.ok) throw new Error(prepared.reason)
+    expect(prepared.prepared.turnCost).toBe('action')
     expect(resolveDnd5eMapInteraction({ prepared: prepared.prepared, d20: 14, modifier: 3 }).success).toBe(false)
     expect(resolveDnd5eMapInteraction({ prepared: prepared.prepared, d20: 14, modifier: 3, adjustedDc: 15 })).toMatchObject({
       success: true, total: 17, dc: 15, nextDoorState: 'open',
+    })
+  })
+
+  it('uses the free object interaction for opening and closing an unlocked door', () => {
+    const unlocked = structuredClone(geometry)
+    unlocked.doors[0].state = 'closed'
+    const prepared = prepareDnd5eMapInteraction({
+      map, geometry: unlocked, actor, payload: { doorId: 'door', operation: 'open' },
+    })
+    expect(prepared).toMatchObject({
+      ok: true,
+      prepared: { spendAction: false, turnCost: 'object-interaction', automaticSuccess: true },
     })
   })
 
