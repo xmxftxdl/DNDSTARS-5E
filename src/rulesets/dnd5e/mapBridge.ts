@@ -241,7 +241,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       state.distanceFeetByCombatantPair[dnd5eCombatantPairKey(left.id, right.id)] =
         tokenFootprintDistanceCells(left, right, input.map) * feetPerCell
       for (const [attacker, target] of [[left, right], [right, left]] as const) {
-        const cover = mapGeometryCoverBetween(geometry, attacker, target)
+        const cover = mapGeometryCoverBetween(geometry, attacker, target, input.map)
         const directedKey = dnd5eDirectedCombatantPairKey(attacker.id, target.id)
         if (cover.blocksLineOfEffect) state.lineOfEffectBlockedByCombatantPair[directedKey] = true
         else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {

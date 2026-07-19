@@ -59,6 +59,8 @@ export interface MapGeometryObstacle extends MapGeometryHeight, MapGeometryBlock
   label: string
   points: MapGeometryPoint[]
   cover: MapGeometryCover
+  terrainCostMultiplier?: number
+  traversal?: 'ground' | 'climb' | 'swim'
   createdAt: number
 }
 
@@ -72,6 +74,8 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   interaction?: MapGeometryDoorInteraction
   revealedToMemberIds?: string[]
   cover?: MapGeometryCover
+  terrainCostMultiplier?: number
+  traversal?: 'ground' | 'climb' | 'swim'
 }
 
 export interface MapGeometryVisionSettings {
@@ -209,8 +213,14 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
   }
   if (raw.kind === 'obstacle') {
     const points = normalizePoints(raw.points, 3)
-    if (!points || !['none', 'half', 'three-quarters', 'total'].includes(String(raw.cover))) return undefined
-    return { ...common, kind: 'obstacle', points, cover: raw.cover as MapGeometryCover }
+    if (!points || !['none', 'half', 'three-quarters', 'total'].includes(String(raw.cover)) ||
+      (raw.terrainCostMultiplier != null && !finite(raw.terrainCostMultiplier, 1, 10)) ||
+      (raw.traversal != null && !['ground', 'climb', 'swim'].includes(String(raw.traversal)))) return undefined
+    return {
+      ...common, kind: 'obstacle', points, cover: raw.cover as MapGeometryCover,
+      ...(raw.terrainCostMultiplier != null ? { terrainCostMultiplier: raw.terrainCostMultiplier as number } : {}),
+      ...(raw.traversal != null ? { traversal: raw.traversal as MapGeometryObstacle['traversal'] } : {}),
+    }
   }
   return undefined
 }
@@ -465,14 +475,31 @@ export function mapGeometryCoverBetween(
   geometry: MapGeometryState | undefined,
   attacker: Token,
   target: Token,
+  map?: Pick<BattleMap, 'gridSize'>,
 ): MapGeometryCoverResult {
-  return mapGeometryCoverFromPoint({
+  const radius = Math.max(1, (map?.gridSize ?? 50) * Math.max(1, target.size) * 0.4)
+  const samples = [
+    { x: target.x - radius, y: target.y - radius },
+    { x: target.x + radius, y: target.y - radius },
+    { x: target.x + radius, y: target.y + radius },
+    { x: target.x - radius, y: target.y + radius },
+  ].map((to) => mapGeometryCoverFromPoint({
     geometry,
     from: attacker,
-    to: target,
+    to,
     fromElevationFeet: tokenElevation(attacker),
     toElevationFeet: tokenElevation(target),
-  })
+  }))
+  const totalCount = samples.filter((sample) => sample.blocksLineOfEffect || sample.cover === 'total').length
+  const threeQuarterCount = samples.filter((sample) => sample.cover === 'three-quarters').length
+  const affectedCount = samples.filter((sample) => sample.cover !== 'none').length
+  const sourceEntityId = samples.find((sample) => sample.sourceEntityId)?.sourceEntityId
+  if (totalCount === samples.length) return { cover: 'total', armorClassBonus: 0, blocksLineOfEffect: true, sourceEntityId }
+  if (totalCount + threeQuarterCount >= 3) {
+    return { cover: 'three-quarters', armorClassBonus: 5, blocksLineOfEffect: false, sourceEntityId }
+  }
+  if (affectedCount > 0) return { cover: 'half', armorClassBonus: 2, blocksLineOfEffect: false, sourceEntityId }
+  return { cover: 'none', armorClassBonus: 0, blocksLineOfEffect: false }
 }
 
 export function mapGeometryLineOfEffectBlocked(input: {

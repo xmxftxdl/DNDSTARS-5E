@@ -346,17 +346,39 @@ export default function MapGeometryToolbar({
             </>
           )}
           {selectedEntity.kind === 'obstacle' && (
-            <select
-              value={selectedEntity.cover}
-              onChange={(event) => updateEntity(mapId, selectedEntity.id, { cover: event.target.value as 'none' | 'half' | 'three-quarters' | 'total' })}
-              className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
-              title="D&D 5e 掩护等级"
-            >
-              <option value="none">无掩护</option>
-              <option value="half">半身 +2 AC</option>
-              <option value="three-quarters">四分之三 +5 AC</option>
-              <option value="total">全身掩护</option>
-            </select>
+            <>
+              <select
+                value={selectedEntity.cover}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, { cover: event.target.value as 'none' | 'half' | 'three-quarters' | 'total' })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="D&D 5e 掩护等级"
+              >
+                <option value="none">无掩护</option>
+                <option value="half">半身 +2 AC</option>
+                <option value="three-quarters">四分之三 +5 AC</option>
+                <option value="total">全身掩护</option>
+              </select>
+              <NumberField
+                label="地形倍率"
+                min={1}
+                value={selectedEntity.terrainCostMultiplier ?? 1}
+                onChange={(terrainCostMultiplier) => updateEntity(mapId, selectedEntity.id, {
+                  terrainCostMultiplier: Math.max(1, terrainCostMultiplier),
+                })}
+              />
+              <select
+                value={selectedEntity.traversal ?? 'ground'}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                  traversal: event.target.value as 'ground' | 'climb' | 'swim',
+                })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="地形通行方式；没有对应速度时按双倍移动"
+              >
+                <option value="ground">地面</option>
+                <option value="climb">攀爬</option>
+                <option value="swim">游泳</option>
+              </select>
+            </>
           )}
           <button
             type="button"

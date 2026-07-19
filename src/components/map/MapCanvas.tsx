@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DependencyList } from 'react'
 import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow } from 'react-konva'
 import Konva from 'konva'
@@ -108,6 +108,7 @@ import {
   type MapGeometryTool,
   type MapGeometryPoint,
 } from '../../lib/mapGeometry'
+import { findMapGeometryPath } from '../../lib/mapPathfinding'
 
 export interface MoveCircle {
   centerX: number
@@ -955,6 +956,13 @@ export default function MapCanvas({
     }
     return true
   }
+  const movePreviewPath = useMemo(() => {
+    if (!moveSelectMode || !moveCircle || !cursor) return undefined
+    const movingToken = map.tokens.find((token) => token.id === selectedTokenId) ??
+      map.tokens.find((token) => Math.hypot(token.x - moveCircle.centerX, token.y - moveCircle.centerY) < 1)
+    if (!movingToken) return undefined
+    return findMapGeometryPath({ map, geometry, token: movingToken, to: cursor, maximumVisited: 5_000 })
+  }, [cursor, geometry, map, moveCircle, moveSelectMode, selectedTokenId])
 
   const handleFogMouseMove = (stage: Konva.Stage | null): boolean => {
     if (!fogEditMode || !fogDragStartRef.current) return false
@@ -1492,6 +1500,11 @@ export default function MapCanvas({
             e.cancelBubble = true
             return
           }
+          if (moveSelectMode && moveCircle) {
+            const p = relativePoint(e.target.getStage())
+            if (p) setCursor(p)
+            return
+          }
           if (fogEditMode && handleFogMouseUp()) {
             e.cancelBubble = true
             return
@@ -1728,6 +1741,19 @@ export default function MapCanvas({
               snapMeasure={snapMeasure}
               inv={inv}
               preview
+            />
+          )}
+          {moveSelectMode && movePreviewPath && (
+            <Line
+              points={movePreviewPath.points.flatMap((point) => [point.x, point.y])}
+              stroke={movePreviewPath.movementCostFeet <= (moveCircle?.radiusPx ?? 0) / Math.max(1, map.gridSize) * Math.max(1, map.feetPerCell ?? 5)
+                ? 'rgba(56,189,248,0.95)'
+                : 'rgba(248,113,113,0.95)'}
+              strokeWidth={4 / Math.max(view.scale, 0.01)}
+              lineCap="round"
+              lineJoin="round"
+              dash={[10 / Math.max(view.scale, 0.01), 6 / Math.max(view.scale, 0.01)]}
+              listening={false}
             />
           )}
         </Layer>

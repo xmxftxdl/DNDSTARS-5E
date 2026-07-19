@@ -457,7 +457,7 @@ export type Dnd5eAction =
   | { type: 'monster-undead-fortitude-save'; actorId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number }
   | { type: 'monster-on-hit-save'; actorId: string; sourceId: string; actionId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'ranger-hunter-multiattack'; actorId: string; feature: 'volley' | 'whirlwind-attack'; weaponMode: 'melee' | 'ranged'; attackModifier: number; criticalThreshold?: number; damage: { count: number; sides: number; bonus: number; type?: Dnd5eDamageType }; attacks: readonly Dnd5eHunterMultiattackRoll[] }
-  | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; standFromProne?: boolean; carefulMovement?: boolean }
+  | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; standFromProne?: boolean; carefulMovement?: boolean }
   | { type: 'item-area-trigger'; actorId: string; areaId: string; areaKind: 'ball-bearings' | 'caltrops' | 'hunting-trap'; d20: number; d20Second?: number; damageRolls?: readonly number[] }
   | { type: 'dash'; actorId: string }
   | { type: 'disengage'; actorId: string }
@@ -6996,7 +6996,11 @@ function resolveDnd5eHeadlessActionInternal(source: Dnd5eHeadlessCombatState, ac
     const isProne = actor.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
     if (!!action.standFromProne !== isProne) return fail(state, events, 'invalid-class-feature')
     const standCost = isProne ? Math.floor(dnd5eEffectiveSpeed(actor) / 2) : 0
-    const movementCost = action.distance * (action.carefulMovement ? 2 : 1) + standCost
+    const defaultMovementCost = action.distance * (action.carefulMovement ? 2 : 1) + standCost
+    const movementCost = action.movementCost == null ? defaultMovementCost : action.movementCost
+    if (!Number.isFinite(movementCost) || movementCost < action.distance || movementCost < standCost) {
+      return fail(state, events, 'invalid-class-feature')
+    }
     if (!spend(actor, 'movement', movementCost)) return fail(state, events, 'insufficient-movement')
     if (isProne) removeDnd5eConditionEffects(actor, ['prone', '倒地'], 'dm', events)
     const from = { ...actor.position }

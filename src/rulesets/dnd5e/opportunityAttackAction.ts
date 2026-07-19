@@ -27,12 +27,14 @@ export function findDnd5eOpportunityAttackersForMove(input: {
   characters: readonly Character[]
   movingToken: Token
   to: { x: number; y: number }
+  path?: Array<{ x: number; y: number }>
   turnEconomyByToken: Dnd5eTurnEconomyByToken
   disengaged?: boolean
 }): Token[] {
   if (input.disengaged) return []
-  const fromCell = tokenAnchorCellFromPixel(input.movingToken.x, input.movingToken.y, input.movingToken, input.map)
-  const toCell = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.movingToken, input.map)
+  const pathCells = (input.path?.length ? input.path : [input.movingToken, input.to]).map((point) =>
+    tokenAnchorCellFromPixel(point.x, point.y, input.movingToken, input.map),
+  )
   return input.map.tokens.filter((token) => {
     if (token.id === input.movingToken.id || !areOpposedCombatTokens(token, input.movingToken)) return false
     const character = token.characterId
@@ -55,8 +57,10 @@ export function findDnd5eOpportunityAttackersForMove(input: {
     if (reachFeet <= 0) return false
     const attackerCell = tokenAnchorCellFromPixel(token.x, token.y, token, input.map)
     const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-    return cellDistance(attackerCell, fromCell) * feetPerCell <= reachFeet
-      && cellDistance(attackerCell, toCell) * feetPerCell > reachFeet
+    return pathCells.slice(0, -1).some((cell, index) =>
+      cellDistance(attackerCell, cell) * feetPerCell <= reachFeet &&
+      cellDistance(attackerCell, pathCells[index + 1]) * feetPerCell > reachFeet,
+    )
   })
 }
 

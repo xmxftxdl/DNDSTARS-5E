@@ -1024,7 +1024,9 @@ function validGeometryEntity(entity, kind) {
     return true
   }
   return entity.points.length >= 3 && entity.points.length <= 2_048 &&
-    ['none', 'half', 'three-quarters', 'total'].includes(entity.cover)
+    ['none', 'half', 'three-quarters', 'total'].includes(entity.cover) &&
+    (entity.terrainCostMultiplier == null || (Number.isFinite(entity.terrainCostMultiplier) && entity.terrainCostMultiplier >= 1 && entity.terrainCostMultiplier <= 10)) &&
+    (entity.traversal == null || ['ground', 'climb', 'swim'].includes(entity.traversal))
 }
 
 function validateMapGeometryState(value) {

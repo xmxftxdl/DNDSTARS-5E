@@ -162,10 +162,14 @@ export function dnd5eItemAreasEnteredByMove(input: {
   map: BattleMap
   token: Token
   to: { x: number; y: number }
+  path?: Array<{ x: number; y: number }>
 }): Dnd5eEnteredItemArea[] {
   const fromAnchor = tokenAnchorCellFromPixel(input.token.x, input.token.y, input.token, input.map)
   const toAnchor = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
-  const path = dnd5eMovementPathCells(fromAnchor, toAnchor)
+  const path = input.path?.length
+    ? input.path.map((point) => tokenAnchorCellFromPixel(point.x, point.y, input.token, input.map))
+        .filter((cell, index, cells) => index === 0 || cellKey(cell) !== cellKey(cells[index - 1]))
+    : dnd5eMovementPathCells(fromAnchor, toAnchor)
   const found = new Set<string>()
   const entered: Dnd5eEnteredItemArea[] = []
   for (let pathIndex = 1; pathIndex < path.length; pathIndex++) {
@@ -190,4 +194,3 @@ export function markDnd5eHuntingTrapTriggered(
     ? { ...area, armed: false, triggeredTokenId: tokenId }
     : area)
 }
-

@@ -623,13 +623,9 @@ export function dnd5eMonsterProficiencyBonus(challengeRating: string): number {
   return 9
 }
 
-/**
- * The current battle map is two-dimensional, so a creature with a flying speed
- * may use it for tactical movement. Other terrain-specific speeds remain
- * excluded until the map can describe water, climbable surfaces, or burrowing.
- */
+/** The map pathfinder distinguishes ground, climb, and swim terrain. */
 export function dnd5eMonsterMapSpeed(monster: Dnd5eMonsterStatBlock): number {
-  return Math.max(monster.speed.walk, monster.speed.fly ?? 0)
+  return Math.max(monster.speed.walk, monster.speed.fly ?? 0, monster.speed.swim ?? 0, monster.speed.climb ?? 0)
 }
 
 export function dnd5eMonsterSpeedText(monster: Dnd5eMonsterStatBlock): string {

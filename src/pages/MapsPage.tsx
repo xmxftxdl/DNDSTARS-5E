@@ -2835,6 +2835,7 @@ export default function MapsPage() {
     characterIdByCombatantId: Readonly<Record<string, string>>
     token: Token
     to: { x: number; y: number }
+    path?: Array<{ x: number; y: number }>
     carefulMovement?: boolean
   }): Promise<{
     state: Dnd5eHeadlessCombatState
@@ -2843,7 +2844,7 @@ export default function MapsPage() {
     finalPosition: { x: number; y: number }
     logs: string[]
   }> => {
-    const entered = dnd5eItemAreasEnteredByMove({ map: input.map, token: input.token, to: input.to })
+    const entered = dnd5eItemAreasEnteredByMove({ map: input.map, token: input.token, to: input.to, path: input.path })
     let state = input.state
     let map = input.map
     let finalPosition = input.to
@@ -2966,7 +2967,9 @@ export default function MapsPage() {
       characterIdByCombatantId: {},
       token: enemy,
       to: targetPosition,
+      path: resolved.path,
     })
+    for (const doorId of resolved.doorsToOpen) setGeometryDoorState(latestMap.id, doorId, 'open')
     if (JSON.stringify(hazards.map.dnd5eItemAreas ?? []) !== JSON.stringify(latestMap.dnd5eItemAreas ?? [])) {
       updateMap(latestMap.id, { dnd5eItemAreas: hazards.map.dnd5eItemAreas })
     }
@@ -10867,6 +10870,7 @@ export default function MapsPage() {
         characters: useCharacterStore.getState().characters,
         movingToken: move.actorToken,
         to: move.to,
+        path: move.path,
         turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
         disengaged: disengagedCharIds.has(move.actor.id),
       })
@@ -10917,6 +10921,7 @@ export default function MapsPage() {
         characterIdByCombatantId: finalMove.characterIdByCombatantId,
         token: finalMove.actorToken,
         to: finalMove.to,
+        path: finalMove.path,
         carefulMovement: action.dnd5eCarefulMovement,
       })
       if (JSON.stringify(hazards.map.dnd5eItemAreas ?? []) !== JSON.stringify(latestMap.dnd5eItemAreas ?? [])) {
@@ -10939,9 +10944,17 @@ export default function MapsPage() {
       const finalAnchor = tokenAnchorCellFromPixel(
         hazards.finalPosition.x, hazards.finalPosition.y, finalMove.actorToken, latestMap,
       )
-      const actualDistanceFeet = cellDistance(fromAnchor, finalAnchor) * Math.max(1, latestMap.feetPerCell ?? 5)
-      const actualMovementCostFeet = actualDistanceFeet * (action.dnd5eCarefulMovement ? 2 : 1) +
-        (finalMove.standFromProne ? Math.floor(finalMove.actor.speed / 2) : 0)
+      const reachedPlannedDestination = Math.hypot(
+        hazards.finalPosition.x - finalMove.to.x,
+        hazards.finalPosition.y - finalMove.to.y,
+      ) < 1
+      const actualDistanceFeet = reachedPlannedDestination
+        ? finalMove.distanceFeet
+        : cellDistance(fromAnchor, finalAnchor) * Math.max(1, latestMap.feetPerCell ?? 5)
+      const actualMovementCostFeet = reachedPlannedDestination
+        ? finalMove.movementCostFeet
+        : actualDistanceFeet * (action.dnd5eCarefulMovement ? 2 : 1) +
+          (finalMove.standFromProne ? Math.floor(finalMove.actor.speed / 2) : 0)
       const spent = updateDnd5eTurnEconomy(
         action.actorTokenId,
         (economy) => spendDnd5eMovement(economy, actualMovementCostFeet).economy,

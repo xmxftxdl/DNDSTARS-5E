@@ -10,6 +10,14 @@ import {
 import { dnd5eMonsterMapSpeed, getDnd5eSrdMonster, type Dnd5eMonsterAction } from './monsters'
 import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 
+function monsterTraversalGeometry(mapId: string) {
+  const geometry = mapGeometryRuntimeForMap(mapId)
+  return geometry ? {
+    ...geometry,
+    doors: geometry.doors.map((door) => door.state === 'closed' ? { ...door, state: 'open' as const } : door),
+  } : undefined
+}
+
 export interface Dnd5eMonsterTurnPlan {
   moved: boolean
   /** Turned undead use their action to Dash while fleeing. */
@@ -80,7 +88,7 @@ function moveToward(
       if (tokenOccupiedCellsAt(candidate, map, candidate).some((cell) => blocked.has(`${cell.col},${cell.row}`))) continue
       const currentPosition = tokenCenterForAnchorCell(current.cell, enemy, map)
       if (mapGeometryMovementBlocked({
-        geometry: mapGeometryRuntimeForMap(map.id), map, token: { ...enemy, ...currentPosition }, to: position,
+        geometry: monsterTraversalGeometry(map.id), map, token: { ...enemy, ...currentPosition }, to: position,
       }).blocked) continue
       const steps = current.steps + 1
       queue.push({ cell: next, steps })
@@ -120,7 +128,7 @@ function moveAway(
         if (tokenOccupiedCellsAt(placed, map, placed).some((cell) => blocked.has(`${cell.col},${cell.row}`))) return false
         const currentPosition = tokenCenterForAnchorCell(current, enemy, map)
         return !mapGeometryMovementBlocked({
-          geometry: mapGeometryRuntimeForMap(map.id), map, token: { ...enemy, ...currentPosition }, to: position,
+          geometry: monsterTraversalGeometry(map.id), map, token: { ...enemy, ...currentPosition }, to: position,
         }).blocked
       })
       .sort((left, right) =>

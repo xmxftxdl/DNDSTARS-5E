@@ -37,7 +37,7 @@ const action: SharedPlayerActionState = {
 describe('D&D 5e player map movement', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
-  it('rejects movement that crosses a DM-authored movement blocker', () => {
+  it('routes around a DM-authored movement blocker instead of crossing it', () => {
     setMapGeometryRuntime([{
       mapId: map.id,
       walls: [{
@@ -48,11 +48,15 @@ describe('D&D 5e player map movement', () => {
       doors: [], obstacles: [],
       vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
     }])
-    expect(prepareDnd5ePlayerMove({
+    const prepared = prepareDnd5ePlayerMove({
       action, map, characters: [character()],
       initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 }],
       turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
-    })).toEqual({ ok: false, reason: 'movement-blocked' })
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.distanceFeet).toBeGreaterThan(10)
+    expect(prepared.prepared.path).not.toContainEqual({ x: 15, y: 5 })
   })
 
   it('spends movement feet through the 5e Headless engine and never changes AP', () => {

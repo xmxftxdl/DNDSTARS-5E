@@ -1,10 +1,11 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import { isMovementLocked } from '../../lib/combatStatus'
-import { DND_FEET_PER_CELL, cellDistance, snapTokenToGridCenter, tokenAnchorCellFromPixel } from '../../lib/gridCombat'
+import { snapTokenToGridCenter } from '../../lib/gridCombat'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 
@@ -25,6 +26,7 @@ export interface PreparedDnd5ePlayerMove {
   to: { x: number; y: number }
   distanceFeet: number
   movementCostFeet: number
+  path: Array<{ x: number; y: number }>
   standFromProne: boolean
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
@@ -49,14 +51,13 @@ export function prepareDnd5ePlayerMove(input: {
   if (isMovementLocked(actor.conditions)) return { ok: false, reason: 'movement-locked' }
 
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
-  if (mapGeometryMovementBlocked({
+  const path = findMapGeometryPath({
     geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
-  }).blocked) return { ok: false, reason: 'movement-blocked' }
-  const fromCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
-  const toCell = tokenAnchorCellFromPixel(to.x, to.y, actorToken, input.map)
-  const distanceFeet = cellDistance(fromCell, toCell) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
+  })
+  if (!path) return { ok: false, reason: 'movement-blocked' }
+  const distanceFeet = path.distanceFeet
   const standFromProne = actor.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const movementCostFeet = distanceFeet * (action.dnd5eCarefulMovement ? 2 : 1) +
+  const movementCostFeet = path.movementCostFeet * (action.dnd5eCarefulMovement ? 2 : 1) +
     (standFromProne ? Math.floor(actor.speed / 2) : 0)
   if (movementCostFeet > input.turnEconomy.movement.current) return { ok: false, reason: 'insufficient-movement' }
 
@@ -88,6 +89,7 @@ export function prepareDnd5ePlayerMove(input: {
       to,
       distanceFeet,
       movementCostFeet,
+      path: path.points,
       standFromProne,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
@@ -104,6 +106,7 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     actorId: prepared.actorToken.id,
     to: prepared.to,
     distance: prepared.distanceFeet,
+    movementCost: prepared.movementCostFeet,
     standFromProne: prepared.standFromProne,
     carefulMovement: prepared.action.dnd5eCarefulMovement,
   })
