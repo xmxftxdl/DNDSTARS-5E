@@ -90,8 +90,21 @@ function useStatusAnimation(
   }, [active, fps, ...deps])
 }
 
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!media) return
+    const update = () => setReduced(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  return reduced
+}
+
 import { useMapStore } from '../../store/maps'
-import type { BattleMap, Token } from '../../store/maps'
+import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
 import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
 import {
@@ -924,43 +937,159 @@ function Dnd5eItemAreaOverlays({ map }: { map: BattleMap }) {
   )
 }
 
-function Dnd5ePluginAreaOverlays({ map }: { map: BattleMap }) {
+interface ToxicCloudPuff {
+  x: number
+  y: number
+  radius: number
+  phase: number
+  speed: number
+  drift: number
+  color: string
+}
+
+function areaSeed(value: string) {
+  let result = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index)
+    result = Math.imul(result, 16777619)
+  }
+  return result >>> 0
+}
+
+function nextAreaRandom(seed: number) {
+  const next = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+  return [next, next / 4294967296] as const
+}
+
+function toxicCloudPuffs(area: Dnd5ePluginArea, map: BattleMap): ToxicCloudPuff[] {
   const grid = Math.max(1, map.gridSize)
-  return (
-    <>
-      {(map.dnd5ePluginAreas ?? []).flatMap((area) => area.cells.map((cell, index) => {
-        const { x, y } = cellTopLeft(cell, map)
-        return (
-          <Group key={`${area.id}:${cellKey(cell)}`} listening={false}>
-            <Rect
-              x={x}
-              y={y}
-              width={grid}
-              height={grid}
-              fill={area.color}
-              opacity={0.18}
-              stroke={area.color}
-              strokeWidth={2}
-              dash={[9, 5]}
-            />
-            {index === 0 && (
-              <Text
-                x={x}
-                y={y + grid * 0.18}
-                width={grid}
-                text="✦"
-                align="center"
-                fontSize={Math.max(12, grid * 0.4)}
-                fill={area.color}
-                shadowBlur={5}
-                shadowColor="rgba(0,0,0,0.9)"
-              />
-            )}
-          </Group>
-        )
-      }))}
-    </>
+  const intensity = area.visual?.intensity ?? 'normal'
+  const multiplier = intensity === 'subtle' ? 1.4 : intensity === 'strong' ? 3.2 : 2.2
+  const count = Math.min(84, Math.max(8, Math.ceil(area.cells.length * multiplier)))
+  const colors = [area.color, '#84cc16', '#4d7c0f', '#bef264', '#365314']
+  let seed = areaSeed(`${area.id}:${area.cells.map(cellKey).join('|')}`)
+  return Array.from({ length: count }, (_, index) => {
+    let random
+    ;[seed, random] = nextAreaRandom(seed)
+    const cell = area.cells[Math.floor(random * area.cells.length)]
+    const topLeft = cellTopLeft(cell, map)
+    ;[seed, random] = nextAreaRandom(seed)
+    const x = topLeft.x + grid * (0.16 + random * 0.68)
+    ;[seed, random] = nextAreaRandom(seed)
+    const y = topLeft.y + grid * (0.18 + random * 0.64)
+    ;[seed, random] = nextAreaRandom(seed)
+    const radius = grid * (0.13 + random * 0.17)
+    ;[seed, random] = nextAreaRandom(seed)
+    const phase = random * Math.PI * 2
+    ;[seed, random] = nextAreaRandom(seed)
+    const speed = 0.42 + random * 0.48
+    ;[seed, random] = nextAreaRandom(seed)
+    const drift = grid * (0.025 + random * 0.065)
+    return { x, y, radius, phase, speed, drift, color: colors[index % colors.length] }
+  })
+}
+
+function Dnd5eToxicCloudAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
+  const grid = Math.max(1, map.gridSize)
+  const groupRef = useRef<Konva.Group>(null)
+  const boundaryRef = useRef<Konva.Group>(null)
+  const puffRefs = useRef<Array<Konva.Circle | null>>([])
+  const reducedMotion = usePrefersReducedMotion()
+  const puffs = useMemo(() => toxicCloudPuffs(area, map), [area, map])
+  const bounds = useMemo(() => {
+    const points = area.cells.map((cell) => cellTopLeft(cell, map))
+    const minX = Math.min(...points.map((point) => point.x))
+    const minY = Math.min(...points.map((point) => point.y))
+    const maxX = Math.max(...points.map((point) => point.x)) + grid
+    return { minX, minY, maxX }
+  }, [area.cells, grid, map])
+  const opacityScale = area.visual?.intensity === 'subtle' ? 0.7 : area.visual?.intensity === 'strong' ? 1.18 : 1
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    (frame) => {
+      const seconds = (frame?.time ?? 0) / 1000
+      puffRefs.current.forEach((node, index) => {
+        const puff = puffs[index]
+        if (!node || !puff) return
+        const wave = seconds * puff.speed + puff.phase
+        node.x(puff.x + Math.sin(wave) * puff.drift)
+        node.y(puff.y + Math.cos(wave * 0.73) * puff.drift * 0.62)
+        node.scale({ x: 0.88 + Math.sin(wave * 1.19) * 0.12, y: 0.9 + Math.cos(wave) * 0.1 })
+        node.opacity(Math.max(0.1, (0.2 + Math.sin(wave * 0.91) * 0.07) * opacityScale))
+      })
+      boundaryRef.current?.opacity(0.56 + Math.sin(seconds * 1.35) * 0.18)
+      boundaryRef.current?.getChildren().forEach((node) => {
+        if (node instanceof Konva.Rect) node.dashOffset(-seconds * 8)
+      })
+    },
+    [area.id, puffs, opacityScale],
+    { active: !reducedMotion, fps: 24 },
   )
+
+  const labelWidth = Math.min(Math.max(grid * 1.6, area.label.length * Math.max(7, grid * 0.14) + 34), Math.max(grid * 1.6, bounds.maxX - bounds.minX))
+  return (
+    <Group ref={groupRef} listening={false}>
+      {area.cells.map((cell) => {
+        const { x, y } = cellTopLeft(cell, map)
+        return <Rect key={`cloud-fill:${cellKey(cell)}`} x={x} y={y} width={grid} height={grid} fill={area.color} opacity={0.16 * opacityScale} listening={false} />
+      })}
+      {puffs.map((puff, index) => (
+        <Circle
+          key={`cloud-puff:${index}`}
+          ref={(node) => { puffRefs.current[index] = node }}
+          x={puff.x}
+          y={puff.y}
+          radius={puff.radius}
+          fill={puff.color}
+          opacity={0.2 * opacityScale}
+          shadowColor="#1a2e05"
+          shadowBlur={puff.radius * 0.7}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      ))}
+      <Group ref={boundaryRef} listening={false}>
+        {area.cells.map((cell) => {
+          const { x, y } = cellTopLeft(cell, map)
+          return <Rect key={`cloud-boundary:${cellKey(cell)}`} x={x} y={y} width={grid} height={grid} stroke="#bef264" strokeWidth={2.5} dash={[10, 6]} listening={false} />
+        })}
+      </Group>
+      <Group x={bounds.minX + 6} y={Math.max(4, bounds.minY + 6)} listening={false}>
+        <Rect width={labelWidth} height={Math.max(24, grid * 0.34)} fill="rgba(8,15,4,0.82)" stroke="rgba(190,242,100,0.7)" strokeWidth={1} cornerRadius={7} />
+        <Text
+          x={8}
+          y={Math.max(5, grid * 0.08)}
+          width={labelWidth - 16}
+          text={`☁ ${area.label}`}
+          fontSize={Math.max(11, Math.min(15, grid * 0.18))}
+          fontStyle="bold"
+          fill="#ecfccb"
+          ellipsis
+          wrap="none"
+        />
+      </Group>
+    </Group>
+  )
+}
+
+function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
+  const grid = Math.max(1, map.gridSize)
+  return <>{area.cells.map((cell, index) => {
+    const { x, y } = cellTopLeft(cell, map)
+    return (
+      <Group key={`${area.id}:${cellKey(cell)}`} listening={false}>
+        <Rect x={x} y={y} width={grid} height={grid} fill={area.color} opacity={0.18} stroke={area.color} strokeWidth={2} dash={[9, 5]} />
+        {index === 0 && <Text x={x} y={y + grid * 0.18} width={grid} text="✦" align="center" fontSize={Math.max(12, grid * 0.4)} fill={area.color} shadowBlur={5} shadowColor="rgba(0,0,0,0.9)" />}
+      </Group>
+    )
+  })}</>
+}
+
+function Dnd5ePluginAreaOverlays({ map }: { map: BattleMap }) {
+  return <>{(map.dnd5ePluginAreas ?? []).map((area) => area.visual?.preset === 'toxic-cloud'
+    ? <Dnd5eToxicCloudAreaOverlay key={area.id} area={area} map={map} />
+    : <Dnd5eStaticPluginAreaOverlay key={area.id} area={area} map={map} />)}</>
 }
 
 export default function MapCanvas({

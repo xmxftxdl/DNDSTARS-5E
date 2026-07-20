@@ -22,9 +22,11 @@ import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { EquipmentItem } from '../../types/equipment'
 import type { Dnd5eInventoryItemTemplate } from '../../types/inventory'
 import type {
+  Dnd5ePersistentAreaVisual,
   Dnd5ePersistentAreaTriggerDeclaration,
   Dnd5ePluginEffectDuration,
 } from './persistentAreaTypes'
+import { normalizeDnd5ePersistentAreaVisual } from './persistentAreaTypes'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
 import {
@@ -228,6 +230,8 @@ export interface Dnd5ePluginFeatureAction {
     color?: string
     durationRounds: number
     concentration?: boolean
+    /** Whitelisted local renderer; it cannot execute plugin code or affect rules. */
+    visual?: Dnd5ePersistentAreaVisual
     triggers?: readonly Dnd5ePersistentAreaTriggerDeclaration[]
   }
   /** Host 在选定格创建的 SRD 5.1 生物 Token；召唤物由 DM 操作，但阵营可属于施法者一方。 */
@@ -799,6 +803,7 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
     } : undefined,
     persistentArea: action.persistentArea ? {
       ...action.persistentArea,
+      visual: action.persistentArea.visual ? { ...action.persistentArea.visual } : undefined,
       triggers: action.persistentArea.triggers?.map((trigger) => ({
         ...trigger,
         damage: trigger.damage ? { ...trigger.damage } : undefined,
@@ -967,7 +972,8 @@ export function registerDnd5eRulesPlugin(
         if (area && (
           definition.action.targeting.kind !== 'area' || typeof area.label !== 'string' || !area.label.trim() ||
           !finiteInteger(area.durationRounds, 1, 14_400) ||
-          (area.color != null && !/^#[0-9a-f]{6}$/i.test(area.color))
+          (area.color != null && !/^#[0-9a-f]{6}$/i.test(area.color)) ||
+          (area.visual != null && !normalizeDnd5ePersistentAreaVisual(area.visual))
         )) throw new Error(`Invalid plugin persistent area: ${featureId}`)
         const summon = definition.action.summon
         if (summon && (
@@ -996,6 +1002,9 @@ export function registerDnd5eRulesPlugin(
           ? {
               ...definition.action.persistentArea,
               label: definition.action.persistentArea.label.trim(),
+              visual: definition.action.persistentArea.visual
+                ? normalizeDnd5ePersistentAreaVisual(definition.action.persistentArea.visual)
+                : undefined,
               triggers: clonePersistentAreaTriggers(definition.action.persistentArea.triggers, featureId),
             }
           : undefined,

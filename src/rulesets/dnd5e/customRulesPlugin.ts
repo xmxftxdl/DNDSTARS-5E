@@ -9,7 +9,10 @@ import type {
 } from './pluginApi'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
-import type { Dnd5ePluginEffectDuration } from './persistentAreaTypes'
+import {
+  normalizeDnd5ePersistentAreaVisual,
+  type Dnd5ePluginEffectDuration,
+} from './persistentAreaTypes'
 
 export interface Dnd5eCustomHeadlessDiceFormula {
   count: number
@@ -138,18 +141,26 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
         (feature.action.interrupt.timeoutMs ?? 30_000) > 300_000
       ))
     )) errors.push(`特性 ${feature.name || feature.id} 的战斗行动或 Interrupt 无效。`)
+    const persistentArea = feature.action?.persistentArea
+    if (persistentArea && (
+      feature.action?.targeting.kind !== 'area' || !persistentArea.label.trim() ||
+      !/^#[0-9a-f]{6}$/i.test(persistentArea.color ?? '#8b5cf6') ||
+      !Number.isInteger(persistentArea.durationRounds) || persistentArea.durationRounds < 1 ||
+      persistentArea.durationRounds > 14_400 ||
+      (persistentArea.visual != null && !normalizeDnd5ePersistentAreaVisual(persistentArea.visual))
+    )) errors.push(`特性 ${feature.name || feature.id} 的持续区域声明无效。`)
   }
   const headlessActionIds = new Set<string>()
-  const summonActionIds = new Set(
-    draft.features.flatMap((feature) => feature.action?.summon ? [feature.action.id] : []),
+  const effectlessMapActionIds = new Set(
+    draft.features.flatMap((feature) => feature.action?.summon || feature.action?.persistentArea ? [feature.action.id] : []),
   )
   for (const action of draft.headlessActions ?? []) {
     if (!ID_PATTERN.test(action.id)) errors.push(`Headless 行动 ID 无效：${action.id || '未填写'}`)
     if (headlessActionIds.has(action.id)) errors.push(`Headless 行动 ID 重复：${action.id}`)
     headlessActionIds.add(action.id)
     if (!action.label.trim()) errors.push(`Headless 行动 ${action.id || '未命名'} 缺少名称。`)
-    if ((!summonActionIds.has(action.id) && action.effects.length < 1) || action.effects.length > 16) {
-      errors.push(`Headless 行动 ${action.label || action.id} 必须包含 1～16 个效果，纯召唤行动可不含目标效果。`)
+    if ((!effectlessMapActionIds.has(action.id) && action.effects.length < 1) || action.effects.length > 16) {
+      errors.push(`Headless 行动 ${action.label || action.id} 必须包含 1～16 个效果，纯持续区域或召唤行动可不含目标效果。`)
     }
     action.effects.forEach((effect, index) => {
       const effectLabel = `${action.label || action.id} 的第 ${index + 1} 个效果`

@@ -162,4 +162,26 @@ describe('DM custom rules plugin builder', () => {
     }]
     expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('自动化行动 missing-effect 缺少 Headless 效果配方。')
   })
+
+  it('allows an effectless Headless recipe when the Host creates a persistent area', () => {
+    const value = draft()
+    value.features = [{
+      id: 'toxic-cloud-demo', name: '毒云区域', summary: '视觉示例。', description: '由 Host 创建持续区域。',
+      minimumLevel: 1, automation: 'full',
+      action: {
+        id: 'toxic-cloud-demo', label: '放置毒云', economy: 'action',
+        targeting: {
+          kind: 'area', relation: 'any', maximumTargets: 64,
+          template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 90 },
+        },
+        persistentArea: {
+          label: '臭云术区域示例', color: '#65a30d', durationRounds: 10, concentration: true,
+          visual: { preset: 'toxic-cloud', intensity: 'normal' },
+        },
+      },
+    }]
+    value.headlessActions = [{ id: 'toxic-cloud-demo', label: '放置毒云', effects: [] }]
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
+    expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"preset": "toxic-cloud"')
+  })
 })

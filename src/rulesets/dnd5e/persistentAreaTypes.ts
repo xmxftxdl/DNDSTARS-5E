@@ -2,6 +2,20 @@ import type { AbilityKey } from '../../lib/dnd'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 
+export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = ['arcane', 'toxic-cloud'] as const
+
+export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]
+export type Dnd5ePersistentAreaVisualIntensity = 'subtle' | 'normal' | 'strong'
+
+/**
+ * A bounded presentation hint. The Host synchronizes this declaration, while each
+ * client renders the animation locally; no animation frame enters authoritative state.
+ */
+export interface Dnd5ePersistentAreaVisual {
+  preset: Dnd5ePersistentAreaVisualPreset
+  intensity?: Dnd5ePersistentAreaVisualIntensity
+}
+
 export interface Dnd5ePluginEffectDuration {
   expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
   remainingRounds?: number
@@ -74,6 +88,22 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function integer(value: unknown, min: number, max: number): value is number {
   return Number.isInteger(value) && Number(value) >= min && Number(value) <= max
+}
+
+export function normalizeDnd5ePersistentAreaVisual(
+  value: unknown,
+): Dnd5ePersistentAreaVisual | undefined {
+  const visual = record(value)
+  if (!visual || !(DND5E_PERSISTENT_AREA_VISUAL_PRESETS as readonly unknown[]).includes(visual.preset)) {
+    return undefined
+  }
+  if (visual.intensity != null && !['subtle', 'normal', 'strong'].includes(String(visual.intensity))) {
+    return undefined
+  }
+  return {
+    preset: visual.preset as Dnd5ePersistentAreaVisualPreset,
+    intensity: (visual.intensity as Dnd5ePersistentAreaVisualIntensity | undefined) ?? 'normal',
+  }
 }
 
 /** Runtime boundary used by map migration and shared-state validation. */

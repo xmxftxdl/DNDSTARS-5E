@@ -417,6 +417,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
           concentrationId: persistentArea.concentration ? `plugin-area:${input.prepared.action.id}` : undefined,
           relation: targeting.kind === 'area' ? targeting.relation ?? 'any' : 'any',
           includeSelf: targeting.kind === 'area' && targeting.includeSelf === true,
+          visual: persistentArea.visual ? { ...persistentArea.visual } : undefined,
           triggers: triggers && triggers.length > 0 ? triggers : undefined,
         },
       ],

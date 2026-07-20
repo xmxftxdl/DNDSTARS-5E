@@ -165,7 +165,10 @@ describe('D&D 5e plugin feature authority action', () => {
               kind: 'area', relation: 'ally', maximumTargets: 4,
               template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 30 },
             },
-            persistentArea: { label: '守护区域', color: '#22c55e', durationRounds: 3, concentration: true },
+            persistentArea: {
+              label: '守护区域', color: '#22c55e', durationRounds: 3, concentration: true,
+              visual: { preset: 'toxic-cloud', intensity: 'strong' },
+            },
           },
         })
       },
@@ -212,6 +215,7 @@ describe('D&D 5e plugin feature authority action', () => {
           id: 'plugin-area:plugin-action-1', label: '守护区域', color: '#22c55e',
           cells: expect.arrayContaining([{ col: 4, row: 0 }]),
           concentrationId: 'plugin-area:plugin-action-1', expiresAfterRound: 3,
+          visual: { preset: 'toxic-cloud', intensity: 'strong' },
         }),
       ])
       expect(resolved.application?.characters.find((entry) => entry.id === hero.id)).toMatchObject({

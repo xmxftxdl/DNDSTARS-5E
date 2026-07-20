@@ -109,8 +109,11 @@ describe('shared resource runtime validation', () => {
       concentrationId: 'plugin-area:action-1',
     }
     expect(validateAndMigrateSharedResource('maps', {
-      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [validArea] }],
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'toxic-cloud', intensity: 'normal' } }] }],
     }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'remote-script' } }] }],
+    }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, cells: [{ col: 2.5, row: 3 }] }] }],
     }).status).toBe('invalid')

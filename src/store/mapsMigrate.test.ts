@@ -106,4 +106,23 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens[0].movementAnimation?.id).toBe('move')
     expect(result.maps[0].tokens[1].movementAnimation).toBeUndefined()
   })
+
+  it('keeps whitelisted persistent-area visuals and drops unsafe renderer metadata', () => {
+    const area = {
+      pluginId: 'com.example.area', featureId: 'com.example.area:cloud', label: '毒云', color: '#65a30d',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 1, expiresAfterRound: 10,
+    }
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 100, height: 100,
+        dnd5ePluginAreas: [
+          { ...area, id: 'safe', visual: { preset: 'toxic-cloud', intensity: 'strong' } },
+          { ...area, id: 'unsafe', visual: { preset: 'remote-script', url: 'https://example.invalid/effect.js' } },
+        ],
+      }],
+    })
+    expect(result.maps[0].dnd5ePluginAreas?.[0].visual).toEqual({ preset: 'toxic-cloud', intensity: 'strong' })
+    expect(result.maps[0].dnd5ePluginAreas?.[1].visual).toBeUndefined()
+  })
 })

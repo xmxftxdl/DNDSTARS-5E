@@ -15,7 +15,9 @@ import {
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
+  normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
+  type Dnd5ePersistentAreaVisual,
   type Dnd5ePersistentAreaTriggerReceipt,
   type Dnd5ePersistentAreaTriggerSnapshot,
 } from '../rulesets/dnd5e/persistentAreaTypes'
@@ -280,12 +282,13 @@ export interface Dnd5ePluginArea {
   concentrationId?: string
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
+  visual?: Dnd5ePersistentAreaVisual
   triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V7：Token 可携带短期、权威的分段移动路径。 */
-export const MAPS_PERSIST_VERSION = 8
+/** 地图存档 V9：持续区域可携带安全的本地动画预设。 */
+export const MAPS_PERSIST_VERSION = 9
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -479,6 +482,7 @@ function normalizeMap(raw: unknown): BattleMap {
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
           relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
           includeSelf: area.includeSelf === true,
+          visual: area.visual ? normalizeDnd5ePersistentAreaVisual(area.visual) : undefined,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
         } satisfies Dnd5ePluginArea]

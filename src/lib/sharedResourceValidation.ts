@@ -5,7 +5,10 @@ import {
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
-import { normalizeDnd5ePersistentAreaTriggerSnapshot } from '../rulesets/dnd5e/persistentAreaTypes'
+import {
+  normalizeDnd5ePersistentAreaTriggerSnapshot,
+  normalizeDnd5ePersistentAreaVisual,
+} from '../rulesets/dnd5e/persistentAreaTypes'
 import { MAP_FOG_RESOURCE, normalizeSharedMapFog } from './fogOfWar'
 import { MAP_GEOMETRY_RESOURCE, normalizeSharedMapGeometry } from './mapGeometry'
 import { MAP_EXPLORATION_RESOURCE, normalizeSharedMapExploration } from './mapExploration'
@@ -96,6 +99,9 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     }
     if (raw.includeSelf != null && typeof raw.includeSelf !== 'boolean') {
       issues.push(`${areaPath}.includeSelf 无效`)
+    }
+    if (raw.visual != null && !normalizeDnd5ePersistentAreaVisual(raw.visual)) {
+      issues.push(`${areaPath}.visual 无效`)
     }
     const triggerIds = new Set<string>()
     if (raw.triggers != null) {
