@@ -4,7 +4,7 @@ import { useSpellbookStore } from '../../store/spellbook'
 import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
 
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
-import { DND5E_IMPLEMENTED_METAMAGIC_IDS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5eSelectedCombatSpellIds, dnd5eSelectedSpellIds, dnd5eSpellAreaLabel, dnd5eSpellbookEntries, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell } from '../../rulesets/dnd5e'
+import { DND5E_IMPLEMENTED_METAMAGIC_IDS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eSelectedCombatSpellIds, dnd5eSelectedSpellIds, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells } from '../../rulesets/dnd5e'
 
 const DAMAGE_TYPE_LABELS: Record<string, string> = {
   acid: '强酸', cold: '冷冻', fire: '火焰', lightning: '闪电', poison: '毒素',
@@ -78,10 +78,16 @@ export default function MapSpellsPanel({
     const selectedSpells = dnd5eSelectedCombatSpellIds(c)
       .map((id) => getDnd5eSrdCombatSpell(id))
       .filter((spell) => !!spell)
-    const spellbookById = new Map(dnd5eSpellbookEntries(importedSpells).map((spell) => [spell.id, spell]))
-    const adjudicatedSpells = dnd5eSelectedSpellIds(c)
+    const spellbookById = new Map(dnd5eSpellbookEntriesWithPlugins(importedSpells, registeredDnd5ePluginSpells()).map((spell) => [spell.id, spell]))
+    const selectedSpellbookEntries = dnd5eSelectedSpellIds(c)
       .map((id) => spellbookById.get(id))
-      .filter((spell): spell is NonNullable<typeof spell> => !!spell && !spell.headless)
+      .filter((spell): spell is NonNullable<typeof spell> => !!spell)
+    const pluginHeadlessSpells = selectedSpellbookEntries.filter((entry) =>
+      entry.sourceKind === 'room-import' && !!entry.imported && dnd5ePluginSpellAutomationSupported(dnd5ePluginSpellDefinition(entry.id)),
+    )
+    const adjudicatedSpells = selectedSpellbookEntries.filter((entry) =>
+      !entry.headless || (entry.sourceKind === 'room-import' && !dnd5ePluginSpellAutomationSupported(dnd5ePluginSpellDefinition(entry.id))),
+    )
     const wildShapeBlocksSpellcasting = !!c.dnd5eCombatState?.wildShapeFormId && c.level < 18
     return (
       <div className="space-y-3 py-2">
@@ -332,6 +338,34 @@ export default function MapSpellsPanel({
             </div>
           })}
         </div> : <p className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2 text-xs leading-5 text-slate-500">尚未在人物卡的职业页选择已接入 Headless 的战斗法术。</p>}
+        {pluginHeadlessSpells.length > 0 ? <div className="space-y-2 rounded-xl border border-cyan-400/20 bg-cyan-500/[0.035] p-3">
+          <div>
+            <h4 className="text-sm font-semibold text-cyan-100">插件 Headless 法术</h4>
+            <p className="mt-1 text-xs leading-5 text-cyan-100/60">使用与核心法术相同的 DM 权威事务：校验成分和法术位，Host 掷命中／豁免／伤害骰，并处理升环与专注。</p>
+          </div>
+          {pluginHeadlessSpells.map((entry) => {
+            const spell = entry.imported!
+            const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(c.level) : undefined
+            const availableLevels = spell.level === 0 ? [0] : pactLevel != null && spell.level <= 5
+              ? ((getClassResource(c, 'dnd5e-pact-slot')?.current ?? 0) > 0 && pactLevel >= spell.level ? [pactLevel] : [])
+              : Array.from({ length: 9 - spell.level + 1 }, (_, index) => spell.level + index)
+                .filter((level) => (getClassResource(c, `dnd5e-spell-slot-${level}`)?.current ?? 0) > 0)
+            const selectedSlot = availableLevels.includes(slotBySpell[entry.id]) ? slotBySpell[entry.id] : availableLevels[0]
+            const components = [spell.components.verbal ? 'V' : '', spell.components.somatic ? 'S' : '', spell.components.material ? 'M' : ''].filter(Boolean).join('、') || '无'
+            return <div key={entry.id} className="rounded-xl border border-cyan-300/15 bg-black/10 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div><div className="text-sm font-semibold text-cyan-100">{entry.name}</div><div className="text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level}环`} · 成分 {components}{spell.duration.concentration ? ' · 专注' : ''} · Headless</div></div>
+                {spell.level > 0 ? <select value={selectedSlot ?? ''} onChange={(event) => setSlotBySpell((current) => ({ ...current, [entry.id]: Number(event.target.value) }))} className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-200">
+                  {availableLevels.length === 0 ? <option value="">无法术位</option> : availableLevels.map((level) => <option key={level} value={level}>{level}环位</option>)}
+                </select> : null}
+              </div>
+              <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-500">{spell.description}</p>
+              <button type="button" disabled={!canAct || pending || selectedSlot == null || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => selectedSlot != null && onCastSpell?.(entry.id, selectedSlot)} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
+                {targetingSpellId === entry.id ? '请点击地图目标' : spell.castingTime.unit === 'reaction' ? '反应法术暂不支持主动施放' : '选择目标并施放'}
+              </button>
+            </div>
+          })}
+        </div> : null}
         {adjudicatedSpells.length > 0 ? <div className="space-y-2 rounded-xl border border-amber-400/20 bg-amber-500/[0.035] p-3">
           <div>
             <h4 className="text-sm font-semibold text-amber-100">需要 DM 裁定的法术</h4>

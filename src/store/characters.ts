@@ -11,7 +11,7 @@ import { defaultEquipmentForDnd5eCharacter, normalizeDnd5eCharacterEquipment } f
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
 import { syncDnd5eHitPoints } from '../rulesets/dnd5e/hitPoints'
 import { applyDnd5eShortRestResourceFeatures } from '../rulesets/dnd5e/classes'
-import { applyDnd5eInventoryMutation, normalizeDnd5eInventory } from '../rulesets/dnd5e/items'
+import { applyDnd5eInventoryMutation, normalizeDnd5eInventory, restoreDnd5eInventoryResources } from '../rulesets/dnd5e/items'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   projectDnd5eActiveEffectState,
@@ -1091,14 +1091,17 @@ export const useCharacterStore = create<CharacterState>()(
         shortRestAll: () => {
           set((s) => ({
             characters: s.characters.map((character) =>
-              applyDnd5eShortRestResourceFeatures(restoreClassResources({
-                ...character,
-                dnd5eCombatState: character.dnd5eCombatState ? {
-                  ...character.dnd5eCombatState,
-                  relentlessRageDc: undefined,
-                  relentlessRagePendingDc: undefined,
-                } : undefined,
-              }, 'short-rest')),
+              restoreDnd5eInventoryResources(
+                applyDnd5eShortRestResourceFeatures(restoreClassResources({
+                  ...character,
+                  dnd5eCombatState: character.dnd5eCombatState ? {
+                    ...character.dnd5eCombatState,
+                    relentlessRageDc: undefined,
+                    relentlessRagePendingDc: undefined,
+                  } : undefined,
+                }, 'short-rest')),
+                'short-rest',
+              ),
             ),
           }))
           saveCharacters()
@@ -1109,25 +1112,28 @@ export const useCharacterStore = create<CharacterState>()(
               const gainsTranquility = c.rulesetId === 'dnd5e-2014-srd-5.1' && c.charClass === '武僧' && c.level >= 11 &&
                 c.dnd5eClassChoices?.classes?.monk?.subclass === 'open-hand'
               const divineInterventionCooldownDays = c.dnd5eCombatState?.divineInterventionCooldownDays
-              return applyDnd5eDivineInterventionLongRest(restoreClassResources({
-                ...c,
-                currentHp: c.maxHp,
-                tempHp: 0,
-                hitPointDice: c.hitPointDice?.map((pool) => ({
-                  ...pool,
-                  current: Math.min(pool.max, pool.current + Math.max(1, Math.floor(pool.max / 2))),
-                })),
-                deathSaveSuccesses: 0,
-                deathSaveFailures: 0,
-                deathSaveStable: false,
-                concentrating: false,
-                dnd5eCombatState: gainsTranquility || divineInterventionCooldownDays
-                  ? {
-                      ...(gainsTranquility ? { tranquilityActive: true } : {}),
-                      ...(divineInterventionCooldownDays ? { divineInterventionCooldownDays } : {}),
-                    }
-                  : undefined,
-              }, 'long-rest'))
+              return restoreDnd5eInventoryResources(
+                applyDnd5eDivineInterventionLongRest(restoreClassResources({
+                  ...c,
+                  currentHp: c.maxHp,
+                  tempHp: 0,
+                  hitPointDice: c.hitPointDice?.map((pool) => ({
+                    ...pool,
+                    current: Math.min(pool.max, pool.current + Math.max(1, Math.floor(pool.max / 2))),
+                  })),
+                  deathSaveSuccesses: 0,
+                  deathSaveFailures: 0,
+                  deathSaveStable: false,
+                  concentrating: false,
+                  dnd5eCombatState: gainsTranquility || divineInterventionCooldownDays
+                    ? {
+                        ...(gainsTranquility ? { tranquilityActive: true } : {}),
+                        ...(divineInterventionCooldownDays ? { divineInterventionCooldownDays } : {}),
+                      }
+                    : undefined,
+                }, 'long-rest')),
+                'long-rest',
+              )
             }),
           }))
           saveCharacters()

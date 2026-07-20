@@ -30,7 +30,7 @@ const plugin = {
       weightLb: 3,
       cost: { amount: 250, currency: 'gp' },
       stackable: false,
-      resources: [{ id: 'charges', label: '充能', maximum: 4, initial: 4, resetOn: 'dawn' }],
+      resources: [{ id: 'charges', label: '充能', maximum: 4, initial: 4, resetOn: 'long-rest' }],
       headlessEffects: [{
         kind: 'attack-roll-reroll',
         resourceId: 'charges',

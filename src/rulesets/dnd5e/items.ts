@@ -358,6 +358,30 @@ export function spendDnd5eInventoryResource(
   }
 }
 
+/** 恢复明确绑定到短休／长休的实例资源；黎明资源由未来的战役日历事务处理。 */
+export function restoreDnd5eInventoryResources(
+  character: Character,
+  rest: 'short-rest' | 'long-rest',
+): Character {
+  const inventory = normalizeDnd5eInventory(character)
+  let changed = false
+  const entries = inventory.entries.map((entry) => {
+    if (!entry.resources) return entry
+    let entryChanged = false
+    const resources = Object.fromEntries(Object.entries(entry.resources).map(([id, resource]) => {
+      const resets = resource.resetOn === rest || (rest === 'long-rest' && resource.resetOn === 'short-rest')
+      if (!resets || resource.current === resource.maximum) return [id, resource]
+      changed = true
+      entryChanged = true
+      return [id, { ...resource, current: resource.maximum }]
+    }))
+    return entryChanged ? { ...entry, resources } : entry
+  })
+  return changed
+    ? { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+    : character
+}
+
 export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate): number[] {
   if (item.use?.effect.kind !== 'healing') return []
   const { count, sides } = item.use.effect.dice

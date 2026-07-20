@@ -61,6 +61,7 @@ import {
   type Dnd5eActiveEffectBreakTrigger,
   type Dnd5eActiveEffectDuration,
   type Dnd5eActiveEffectInstance,
+  type Dnd5eActiveEffectRepeatSave,
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
 
@@ -443,6 +444,8 @@ export interface Dnd5eAdjudicatedSpellEffect {
   operation?: 'damage' | 'healing' | 'temporary-hit-points'
   amount?: number
   addCondition?: string
+  conditionDuration?: Dnd5eActiveEffectDuration
+  conditionRepeatSave?: Dnd5eActiveEffectRepeatSave
   removeCondition?: string
 }
 
@@ -5120,6 +5123,34 @@ function dnd5eCreatureIsConstruct(combatant: Dnd5eCombatant): boolean {
   return creatureType === '构装生物' || creatureType === 'construct' || creatureType.includes('构装')
 }
 
+function validAdjudicatedSpellConditionDuration(duration: Dnd5eActiveEffectDuration | undefined): boolean {
+  if (!duration) return true
+  if (duration.type === 'permanent') return true
+  if (duration.type === 'rounds') {
+    return Number.isInteger(duration.remainingRounds) && duration.remainingRounds >= 1 && duration.remainingRounds <= 14_400 &&
+      (duration.tickOn === 'target-turn-start' || duration.tickOn === 'target-turn-end') &&
+      (duration.lastTickTurnKey == null || typeof duration.lastTickTurnKey === 'string')
+  }
+  if (duration.type === 'until-turn-boundary') {
+    return ['source-turn-start', 'source-turn-end', 'target-turn-start', 'target-turn-end'].includes(duration.boundary) &&
+      (duration.appliedTurnKey == null || typeof duration.appliedTurnKey === 'string')
+  }
+  return typeof duration.sourceActorId === 'string' && duration.sourceActorId.length > 0 &&
+    (duration.concentrationId == null || typeof duration.concentrationId === 'string') &&
+    (duration.remainingRounds == null || (
+      Number.isInteger(duration.remainingRounds) && duration.remainingRounds >= 1 && duration.remainingRounds <= 14_400
+    ))
+}
+
+function validAdjudicatedSpellRepeatSave(repeatSave: Dnd5eActiveEffectRepeatSave | undefined): boolean {
+  return !repeatSave || (
+    ['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(repeatSave.ability) &&
+    Number.isInteger(repeatSave.dc) && repeatSave.dc >= 1 && repeatSave.dc <= 40 &&
+    (repeatSave.timing === 'target-turn-start' || repeatSave.timing === 'target-turn-end') &&
+    repeatSave.onSuccess === 'remove'
+  )
+}
+
 /**
  * Commits a DM-approved reference spell as one atomic Headless transaction.
  * The player request contains none of these effects; only the DM authority may
@@ -5187,6 +5218,9 @@ function resolveAdjudicatedSpell(
       (hasOperation && (!Number.isInteger(amount) || amount! < 0 || amount! > 1_000_000)) ||
       (!hasOperation && amount != null) ||
       (addCondition?.length ?? 0) > 80 || (removeCondition?.length ?? 0) > 80 ||
+      (!addCondition && (effect.conditionDuration != null || effect.conditionRepeatSave != null)) ||
+      !validAdjudicatedSpellConditionDuration(effect.conditionDuration) ||
+      !validAdjudicatedSpellRepeatSave(effect.conditionRepeatSave) ||
       (!hasOperation && !addCondition && !removeCondition)
     ) return fail(state, events, 'invalid-target')
   }
@@ -5253,7 +5287,7 @@ function resolveAdjudicatedSpell(
       const standard = dnd5eStandardConditionId(addCondition)
       const duration = concentrationRounds != null
         ? { type: 'concentration' as const, sourceActorId: actor.id, concentrationId: action.spellId, remainingRounds: concentrationRounds }
-        : { type: 'permanent' as const }
+        : effect.conditionDuration ?? { type: 'permanent' as const }
       const incoming: Dnd5eActiveEffectInstance = standard
         ? { ...createDnd5eConditionEffect({
             id: `adjudicated:${action.spellId}:${actor.id}:${target.id}:${standard}`,
@@ -5261,6 +5295,7 @@ function resolveAdjudicatedSpell(
             targetId: target.id,
             source: { kind: 'spell', actorId: actor.id, actorName: actor.name, rulesId: action.spellId, label: action.spellName },
             duration,
+            repeatSave: effect.conditionRepeatSave,
             appliedAt: 0,
             appliedRound: state.round,
             appliedTurnKey: turnKey,
@@ -5277,6 +5312,7 @@ function resolveAdjudicatedSpell(
             appliedRound: state.round,
             appliedTurnKey: turnKey,
             duration,
+            repeatSave: effect.conditionRepeatSave,
             stackingKey: `adjudicated:${action.spellId}:${addCondition}`,
             stackingPolicy: 'refresh-duration',
             visibility: 'public',

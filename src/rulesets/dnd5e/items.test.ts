@@ -6,6 +6,7 @@ import {
   applyDnd5eInventoryMutation,
   createDnd5eInventoryForCharacter,
   normalizeDnd5eInventory,
+  restoreDnd5eInventoryResources,
   spendDnd5eInventoryResource,
 } from './items'
 import { DND5E_LONGSWORD } from './equipment'
@@ -194,5 +195,41 @@ describe('SRD 5.1 inventory', () => {
     if (!spent.ok) return
     expect(spent.resource.current).toBe(0)
     expect(spent.character.dnd5eInventory?.entries[0]).toMatchObject({ quantity: 1, resources: { charges: { current: 0 } } })
+  })
+
+  it('restores short/long-rest instance resources without deleting dawn or depleted instances', () => {
+    const hero = character('rest-resource-hero')
+    const item = DND5E_SRD_ITEM_TEMPLATES[0]
+    const withResources: Character = {
+      ...hero,
+      dnd5eInventory: {
+        schemaVersion: 2,
+        entries: [{
+          instanceId: 'rest-item', templateId: 'test:rest-item', quantity: 1, acquiredAt: 1,
+          item: {
+            ...item,
+            id: 'test:rest-item',
+            resources: [
+              { id: 'short', label: '短休', maximum: 4, resetOn: 'short-rest' },
+              { id: 'long', label: '长休', maximum: 3, resetOn: 'long-rest' },
+              { id: 'dawn', label: '黎明', maximum: 2, resetOn: 'dawn' },
+            ],
+          },
+          resources: {
+            short: { id: 'short', label: '短休', current: 0, maximum: 4, resetOn: 'short-rest' },
+            long: { id: 'long', label: '长休', current: 0, maximum: 3, resetOn: 'long-rest' },
+            dawn: { id: 'dawn', label: '黎明', current: 0, maximum: 2, resetOn: 'dawn' },
+          },
+        }],
+      },
+    }
+    const afterShort = restoreDnd5eInventoryResources(withResources, 'short-rest')
+    expect(afterShort.dnd5eInventory?.entries[0]).toMatchObject({
+      quantity: 1, resources: { short: { current: 4 }, long: { current: 0 }, dawn: { current: 0 } },
+    })
+    const afterLong = restoreDnd5eInventoryResources(afterShort, 'long-rest')
+    expect(afterLong.dnd5eInventory?.entries[0]).toMatchObject({
+      quantity: 1, resources: { short: { current: 4 }, long: { current: 3 }, dawn: { current: 0 } },
+    })
   })
 })

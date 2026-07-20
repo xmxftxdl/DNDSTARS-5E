@@ -251,7 +251,9 @@ import {
   dnd5eHunterMultiattackClassDamageDefinitions,
   prepareDnd5eClassFeature,
   prepareDnd5ePluginFeatureAction,
+  prepareDnd5ePluginSpellCast,
   dnd5ePluginFeatureDefinition,
+  dnd5ePluginSpellDefinition,
   dnd5ePluginHeadlessActionDefinition,
   executeDnd5ePluginDiceRolls,
   reconcileDnd5ePluginAreas,
@@ -299,6 +301,7 @@ import {
   resolveDnd5ePlayerEndTurn,
   resolvePreparedDnd5eClassFeature,
   resolvePreparedDnd5ePluginFeatureAction,
+  resolvePreparedDnd5ePluginSpellCast,
   resolvePreparedDnd5eAbilityCheck,
   resolvePreparedDnd5eEquipmentAttack,
   resolvePreparedDnd5eFighterFeature,
@@ -7544,6 +7547,107 @@ export default function MapsPage() {
 
     if (authorityPlan.route === 'dnd5e-spell-cast' && action.type === 'dnd5e-spell-cast') {
       const turnEconomy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
+      const pluginSpell = action.dnd5eSpellCast ? dnd5ePluginSpellDefinition(action.dnd5eSpellCast.spellId) : undefined
+      if (pluginSpell) {
+        const preparedPluginSpell = prepareDnd5ePluginSpellCast({
+          action,
+          map: authorityMap,
+          characters: useCharacterStore.getState().characters,
+          initiativeOrder: initiativeOrderRef.current,
+          turnEconomy,
+          turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
+          roomRequiredPlugins: getRoomSession() ? (getRoomRulesSnapshot()?.requiredPlugins ?? []) : undefined,
+          now: runtimeNow(),
+        })
+        if (!preparedPluginSpell.ok) {
+          acknowledgePlayerAction(action, 'rejected', preparedPluginSpell.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        const pluginCast = preparedPluginSpell.prepared
+        const mechanics = pluginCast.spell.mechanics!
+        const attackD20 = mechanics.resolution === 'spell-attack'
+          ? await rollDiceBoxD20(`${pluginCast.spell.name}·法术攻击`, pluginCast.targetToken.label)
+          : undefined
+        const attackD20Second = mechanics.resolution === 'spell-attack' && pluginCast.attackMode !== 'normal'
+          ? await rollDiceBoxD20(`${pluginCast.spell.name}·法术攻击（${pluginCast.attackMode === 'advantage' ? '优势' : '劣势'}）`, pluginCast.targetToken.label)
+          : undefined
+        const savingThrowD20 = mechanics.resolution === 'saving-throw'
+          ? await rollDiceBoxD20(`${pluginCast.spell.name}·豁免`, pluginCast.targetToken.label)
+          : undefined
+        const savingThrowD20Second = mechanics.resolution === 'saving-throw' && pluginCast.saveMode !== 'normal'
+          ? await rollDiceBoxD20(`${pluginCast.spell.name}·豁免（${pluginCast.saveMode === 'advantage' ? '优势' : '劣势'}）`, pluginCast.targetToken.label)
+          : undefined
+        const selectedAttackD20 = attackD20Second == null
+          ? attackD20
+          : pluginCast.attackMode === 'advantage' ? Math.max(attackD20!, attackD20Second) : Math.min(attackD20!, attackD20Second)
+        const attackHit = selectedAttackD20 == null || selectedAttackD20 === 20 || (selectedAttackD20 !== 1 && selectedAttackD20 + pluginCast.attackModifier >= pluginCast.targetArmorClass)
+        const critical = mechanics.resolution === 'spell-attack' && selectedAttackD20 === 20
+        const damageCount = mechanics.damage && attackHit ? pluginCast.damageDice.count * (critical ? 2 : 1) : 0
+        const damageRolls = damageCount > 0
+          ? await rollDiceBoxValues(damageCount, pluginCast.damageDice.sides, `${pluginCast.spell.name}·伤害`, pluginCast.targetToken.label)
+          : []
+        const resolvedPluginSpell = resolvePreparedDnd5ePluginSpellCast({
+          prepared: pluginCast,
+          rolls: { attackD20, attackD20Second, savingThrowD20, savingThrowD20Second, damageRolls },
+          now: runtimeNow(),
+        })
+        if (!resolvedPluginSpell.result.ok || !resolvedPluginSpell.application) {
+          acknowledgePlayerAction(action, 'rejected', resolvedPluginSpell.result.ok ? 'missing-application' : resolvedPluginSpell.result.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        const settledPluginSpell = await settleDnd5eConcentrationChecks({
+          result: resolvedPluginSpell.result,
+          map: resolvedPluginSpell.application.map,
+          characters: resolvedPluginSpell.application.characters,
+          characterIdByCombatantId: pluginCast.characterIdByCombatantId,
+          rollD20: rollDiceBoxD20,
+          rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
+          requestSavingThrowReroll: requestDnd5eSavingThrowRerollDice,
+          requestBardicInspiration: requestDnd5eBardicInspirationRoll,
+          requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
+        })
+        for (const characterId of settledPluginSpell.application.changedCharacterIds) {
+          const next = settledPluginSpell.application.characters.find((character) => character.id === characterId)
+          if (next) applyAuthorityCharacterUpdate(characterId, next)
+        }
+        for (const tokenId of settledPluginSpell.application.changedTokenIds) {
+          const next = settledPluginSpell.application.map.tokens.find((token) => token.id === tokenId)
+          if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+        }
+        const spentTurnResource = settledPluginSpell.result.events.find((event) =>
+          event.type === 'turn-resource-spent' && (event.resource === 'action' || event.resource === 'bonusAction'),
+        )
+        if (spentTurnResource?.type === 'turn-resource-spent' && (spentTurnResource.resource === 'action' || spentTurnResource.resource === 'bonusAction')) {
+          updateDnd5eTurnEconomy(action.actorTokenId, (economy) => spendDnd5eTurnResource(economy, spentTurnResource.resource as 'action' | 'bonusAction').economy, liveRound)
+        }
+        const values = damageRolls.length > 0 ? damageRolls : attackD20 != null ? [attackD20] : savingThrowD20 != null ? [savingThrowD20] : []
+        if (values.length > 0) {
+          const display: DiceRoll = {
+            values,
+            sides: damageRolls.length > 0 ? pluginCast.damageDice.sides : 20,
+            bonus: damageRolls.length > 0 ? pluginCast.damageDice.bonus : attackD20 != null ? pluginCast.attackModifier : pluginCast.saveModifier ?? 0,
+            total: values.reduce((total, value) => total + value, 0) + (damageRolls.length > 0 ? pluginCast.damageDice.bonus : attackD20 != null ? pluginCast.attackModifier : pluginCast.saveModifier ?? 0),
+            label: `${pluginCast.spell.name}（插件 Headless）`,
+            targetName: pluginCast.targetToken.label,
+          }
+          setRoll(display)
+          publishSharedDiceRoll(display)
+        }
+        const resolutionDetail = mechanics.resolution === 'spell-attack'
+          ? `法术攻击${resolvedPluginSpell.attackHit ? '命中' : '未命中'}${resolvedPluginSpell.critical ? '（重击）' : ''}`
+          : mechanics.resolution === 'saving-throw'
+            ? `${pluginCast.targetToken.label}豁免${resolvedPluginSpell.saveSucceeded ? '成功' : '失败'}`
+            : '自动生效'
+        pushCombatLog(
+          `${pluginCast.actor.name}施放插件法术${pluginCast.spell.name}（${pluginCast.slotLevel === 0 ? '戏法' : `${pluginCast.slotLevel}环位`}）：${resolutionDetail}${resolvedPluginSpell.finalDamage ? `，造成 ${resolvedPluginSpell.finalDamage} 点${mechanics.damage?.type ?? ''}伤害` : ''}${pluginCast.concentrationRounds ? `，开始专注（最多 ${pluginCast.concentrationRounds} 轮）` : ''}。`,
+          (resolvedPluginSpell.finalDamage ?? 0) > 0 ? 'damage' : 'system',
+        )
+        completePlayerActionRequest(action)
+        acknowledgePlayerAction(action, 'accepted')
+        return
+      }
       const prepared = prepareDnd5eSpellCast({
         action,
         map: authorityMap,
@@ -10949,8 +11053,10 @@ export default function MapsPage() {
         classDamageRolls,
       })
       if (!initialResolved.result.ok) {
-        if (attackTransaction) attackTransaction = rollbackCombatTransaction(attackTransaction, initialResolved.result.reason, runtimeNow())
-        acknowledgePlayerAction(action, 'rejected', initialResolved.result.reason)
+        const rollbackReason = attackTransaction
+          ? rollbackCombatTransaction(attackTransaction, initialResolved.result.reason, runtimeNow()).rollbackReason ?? initialResolved.result.reason
+          : initialResolved.result.reason
+        acknowledgePlayerAction(action, 'rejected', rollbackReason)
         completePlayerActionRequest(action)
         return
       }
@@ -11117,12 +11223,16 @@ export default function MapsPage() {
       const stunningText = stunningSave?.type === 'saving-throw-resolved'
         ? `，震慑拳体质豁免 ${stunningSave.d20}${stunningSave.modifier >= 0 ? '+' : ''}${stunningSave.modifier}${stunningInspirationText}=${stunningSave.total} vs DC ${stunningSave.dc}，${stunningSave.success ? '成功' : resolved.result.events.some((event) => event.type === 'condition-applied' && event.condition === '震慑') ? '失败并陷入震慑' : '失败但免疫震慑'}`
         : ''
+      const equipmentReroll = attackTransaction?.rollLedger.entries.flatMap((entry) => entry.rerolls)[0]
+      const equipmentRerollText = equipmentReroll
+        ? `；${equipmentReroll.sourceLabel}将攻击骰 ${equipmentReroll.previousValue} 重掷为 ${equipmentReroll.replacementValue}`
+        : ''
       pushCombatLog(
         !tranquility.passed
           ? `${attack.actor.name} 试图以${attack.profile.weaponName}攻击 ${attack.targetToken.label}，但未通过宁静心境的感知豁免，本次攻击落空`
           : attackHit
-          ? `${attack.actor.name} 使用${attack.profile.weaponName}${attack.offHandAttack ? '进行副手附赠攻击并' : attack.spendsBonusAction ? '发动狂乱附赠攻击并' : attack.classDamageContext.hordeBreakerAttack ? '发动灭群者追加攻击并' : ''}命中 ${attack.targetToken.label}：${d20}${attack.profile.attackModifier >= 0 ? '+' : ''}${attack.profile.attackModifier}${foeSlayerAttackText}${bardicInspirationRoll ? `+${bardicInspirationRoll}（吟游激励）` : ''}${cuttingWordsText}=${effectiveAttackTotal}${strokeOfLuck ? '，幸运一击改为命中' : ''}，造成 ${damage?.type === 'damage-applied' ? damage.amount : 0} 点伤害${classDamageText ? `（${classDamageText}）` : ''}${cuttingWordsDamageText}${stunningText}${attack.countsTowardAttackAction ? `（第 ${attack.attackNumber}/${attack.attacksAllowed} 次攻击）` : ''}`
-          : `${attack.actor.name} 使用${attack.profile.weaponName}攻击 ${attack.targetToken.label} 未命中：${d20}${attack.profile.attackModifier >= 0 ? '+' : ''}${attack.profile.attackModifier}${foeSlayerAttackText}${bardicInspirationRoll ? `+${bardicInspirationRoll}（吟游激励）` : ''}${cuttingWordsText}=${effectiveAttackTotal} vs AC ${attack.targetArmorClass}`,
+          ? `${attack.actor.name} 使用${attack.profile.weaponName}${attack.offHandAttack ? '进行副手附赠攻击并' : attack.spendsBonusAction ? '发动狂乱附赠攻击并' : attack.classDamageContext.hordeBreakerAttack ? '发动灭群者追加攻击并' : ''}命中 ${attack.targetToken.label}：${d20}${attack.profile.attackModifier >= 0 ? '+' : ''}${attack.profile.attackModifier}${foeSlayerAttackText}${bardicInspirationRoll ? `+${bardicInspirationRoll}（吟游激励）` : ''}${cuttingWordsText}=${effectiveAttackTotal}${strokeOfLuck ? '，幸运一击改为命中' : ''}，造成 ${damage?.type === 'damage-applied' ? damage.amount : 0} 点伤害${classDamageText ? `（${classDamageText}）` : ''}${cuttingWordsDamageText}${stunningText}${equipmentRerollText}${attack.countsTowardAttackAction ? `（第 ${attack.attackNumber}/${attack.attacksAllowed} 次攻击）` : ''}`
+          : `${attack.actor.name} 使用${attack.profile.weaponName}攻击 ${attack.targetToken.label} 未命中：${d20}${attack.profile.attackModifier >= 0 ? '+' : ''}${attack.profile.attackModifier}${foeSlayerAttackText}${bardicInspirationRoll ? `+${bardicInspirationRoll}（吟游激励）` : ''}${cuttingWordsText}=${effectiveAttackTotal} vs AC ${attack.targetArmorClass}${equipmentRerollText}`,
         attackHit ? 'damage' : 'attack',
       )
       completePlayerActionRequest(action)
@@ -14143,6 +14253,29 @@ export default function MapsPage() {
                     onCastSpell={(spellId, slotLevel, options) => {
                       setDnd5eWeaponTargeting(null)
                       setDnd5eWeaponAttackOptions(undefined)
+                      const pluginSpell = dnd5ePluginSpellDefinition(spellId)
+                      if (pluginSpell) {
+                        setAoePreviewCell(null)
+                        const casterToken = activeMap?.tokens.find((token) => token.characterId === activeChar.id)
+                        if (pluginSpell.range.type === 'self' && casterToken) {
+                          const payload: Dnd5eSpellCastPayload = { spellId, slotLevel, targetTokenId: casterToken.id }
+                          if (isDM) sendDmLocalDnd5eSpellCastRequest(payload)
+                          else sendPlayerDnd5eSpellCastRequest(payload)
+                          setDnd5eSpellTargeting(null)
+                          return
+                        }
+                        setDnd5eSpellTargeting((current) => current?.characterId === activeChar.id && current.spellId === spellId
+                          ? null
+                          : {
+                              characterId: activeChar.id, spellId, slotLevel, maximumTargets: 1,
+                              allowDuplicateTargets: false, targetTokenIds: [], overchannel: false, empowered: false,
+                              draconicResistance: false, repellingBlast: false, canSculpt: false,
+                              maximumSculptedTargets: 0, sculptedTargetIds: [], sculpting: false,
+                              maximumCarefulTargets: 0, carefulTargetIds: [], carefulSelecting: false,
+                              heightenedTargetId: undefined, heightenedSelecting: false,
+                            })
+                        return
+                      }
                       const spell = getDnd5eSrdCombatSpell(spellId)!
                       if (spell.area && activeMap) {
                         const casterToken = activeMap.tokens.find((token) => token.characterId === activeChar.id)
