@@ -96,6 +96,21 @@ describe('[T7/AC2] AI 目标集合包含 npc/友方', () => {
     const result = planEnemyTurn(makeMap([enemy, ally, obstacle]), enemy, undefined, 2, { round: 2 })
     expect(result.attacked).toBe(false)
   })
+
+  it('把由 DM 操作但属于玩家阵营的召唤物视为目标', () => {
+    const enemy = token({ id: 'e', type: 'enemy', poolId: 'goblin', x: 25, y: 25 })
+    const summon = token({
+      id: 'summon', type: 'enemy', x: 75, y: 25,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'com.example', featureId: 'com.example:wolf',
+        sourceCharacterId: 'hero', sourceTokenId: 'hero-token', createdRound: 1,
+        expiresAfterRound: 10, side: 'player',
+      },
+    })
+    const result = planEnemyTurn(makeMap([enemy, summon]), enemy, undefined, 2, { round: 2 })
+    expect(result.attacked).toBe(true)
+    expect(result.targetTokenId).toBe('summon')
+  })
 })
 
 describe('[T7/AC3] 红/绿龙吐息均由数据驱动（kind:aoe + save）', () => {

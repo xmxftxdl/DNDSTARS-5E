@@ -58,9 +58,10 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
       // must never resurrect a cleared trap or erase a newly placed hazard.
       dnd5eItemAreas: sharedMap.dnd5eItemAreas,
       dnd5ePluginAreas: sharedMap.dnd5ePluginAreas,
-      tokens: map.tokens.map((token) => {
+      tokens: [
+        ...map.tokens.flatMap((token) => {
         const sharedToken = sharedTokenById.get(token.id)
-        if (!sharedToken) return token
+        if (!sharedToken) return token.type === 'player' ? [token] : []
         const dmControlledPosition =
           token.type !== 'player'
             ? {
@@ -68,7 +69,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
                 y: sharedToken.y,
               }
             : {}
-        return {
+        return [{
           ...token,
           ...dmControlledPosition,
           hp: sharedToken.hp,
@@ -77,9 +78,12 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           creatureSize: sharedToken.creatureSize,
           size: sharedToken.size,
           dnd5eCombatState: sharedToken.dnd5eCombatState,
+          dnd5eSummon: sharedToken.dnd5eSummon,
           movementAnimation: sharedToken.movementAnimation,
-        }
-      }),
+        }]
+        }),
+        ...sharedMap.tokens.filter((token) => !map.tokens.some((local) => local.id === token.id)),
+      ],
     }
   })
 }
@@ -123,6 +127,18 @@ export interface Token {
   showDetailOnToken?: boolean
   /** 来自怪物池的模板 id */
   poolId?: string
+  /** 由声明式 Headless 事务创建的召唤物；Token 仍由 DM 操作，side 只表示战斗阵营。 */
+  dnd5eSummon?: {
+    schemaVersion: 1
+    pluginId: string
+    featureId: string
+    sourceCharacterId: string
+    sourceTokenId: string
+    createdRound: number
+    expiresAfterRound: number
+    concentrationId?: string
+    side: 'player' | 'enemy'
+  }
   /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
   dnd5eCombatState?: {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
@@ -269,7 +285,7 @@ export interface Dnd5ePluginArea {
 }
 
 /** 地图存档 V7：Token 可携带短期、权威的分段移动路径。 */
-export const MAPS_PERSIST_VERSION = 7
+export const MAPS_PERSIST_VERSION = 8
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -296,6 +312,29 @@ function normalizeToken(raw: unknown): Token {
   const creatureSize =
     normalizeCreatureSize(t.creatureSize) ?? (type === 'enemy' || type === 'npc' ? sizeFromTokenSize(rawSize) : undefined)
   const creatureTypes = normalizeCreatureTypes(t.creatureTypes)
+  const rawSummon = t.dnd5eSummon
+  const dnd5eSummon = rawSummon && typeof rawSummon === 'object' &&
+    rawSummon.schemaVersion === 1 &&
+    typeof rawSummon.pluginId === 'string' && !!rawSummon.pluginId &&
+    typeof rawSummon.featureId === 'string' && !!rawSummon.featureId &&
+    typeof rawSummon.sourceCharacterId === 'string' && !!rawSummon.sourceCharacterId &&
+    typeof rawSummon.sourceTokenId === 'string' && !!rawSummon.sourceTokenId &&
+    Number.isInteger(rawSummon.createdRound) && Number(rawSummon.createdRound) >= 0 &&
+    Number.isInteger(rawSummon.expiresAfterRound) && Number(rawSummon.expiresAfterRound) >= Number(rawSummon.createdRound) &&
+    (rawSummon.concentrationId == null || (typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId)) &&
+    (rawSummon.side === 'player' || rawSummon.side === 'enemy')
+    ? {
+        schemaVersion: 1 as const,
+        pluginId: rawSummon.pluginId,
+        featureId: rawSummon.featureId,
+        sourceCharacterId: rawSummon.sourceCharacterId,
+        sourceTokenId: rawSummon.sourceTokenId,
+        createdRound: rawSummon.createdRound,
+        expiresAfterRound: rawSummon.expiresAfterRound,
+        concentrationId: rawSummon.concentrationId,
+        side: rawSummon.side,
+      }
+    : undefined
   const invalidCurrentEffects = legacyCombatState?.schemaVersion === DND5E_COMBAT_STATE_SCHEMA_VERSION &&
     !validateDnd5eActiveEffectsStrict(legacyCombatState.activeEffects).ok
   const migratedEffects = legacyCombatState && !invalidCurrentEffects
@@ -329,6 +368,7 @@ function normalizeToken(raw: unknown): Token {
     type,
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
+    dnd5eSummon,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,

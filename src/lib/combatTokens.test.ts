@@ -46,4 +46,17 @@ describe('combat token liveness', () => {
     expect(decideTurnAction(linkedPlayer, [hero])).toBe('skip')
     expect(checkCombatOutcome([linkedPlayer, enemy], [hero]).ended).toBe(true)
   })
+
+  it('counts a DM-controlled allied summon on the player side for combat outcome', () => {
+    const summon = token({
+      id: 'summon', type: 'enemy', hp: 11, maxHp: 11,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'com.example', featureId: 'com.example:wolf',
+        sourceCharacterId: 'hero', sourceTokenId: 'hero-token', createdRound: 1,
+        expiresAfterRound: 10, side: 'player',
+      },
+    })
+    const defeatedEnemy = token({ id: 'enemy', type: 'enemy', hp: 0, maxHp: 7 })
+    expect(checkCombatOutcome([summon, defeatedEnemy], [])).toMatchObject({ ended: true, winner: 'ally' })
+  })
 })

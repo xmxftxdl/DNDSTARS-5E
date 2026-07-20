@@ -142,6 +142,23 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('valid')
   })
 
+  it('fails closed for malformed summoned-token ownership metadata', () => {
+    const summon = {
+      schemaVersion: 1, pluginId: 'com.example', featureId: 'com.example:wolf',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', createdRound: 1,
+      expiresAfterRound: 10, concentrationId: 'plugin-summon:action-1', side: 'player',
+    }
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: summon }] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, side: 'neutral' } }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 0 } }] }],
+    }).status).toBe('invalid')
+  })
+
   it('migrates legacy interrupts and rejects duplicate active transaction locks', () => {
     const legacy = {
       mapId: 'map', updatedAt: 2,

@@ -4,6 +4,7 @@ import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   buildDnd5eCustomRulesPluginSource,
   DND5E_DAMAGE_TYPES,
+  DND5E_SRD_MONSTERS,
   DND5E_STANDARD_CONDITIONS,
   dnd5eCustomRulesPluginFileName,
   validateDnd5eCustomRulesPluginDraft,
@@ -78,6 +79,12 @@ interface HeadlessEffectEditorDraft {
   areaHeightFeet: number
   areaLengthFeet: number
   maximumTargets: number
+  summonEnabled: boolean
+  summonMonsterId: string
+  summonLabel: string
+  summonDurationRounds: number
+  summonConcentration: boolean
+  summonSide: 'ally' | 'enemy'
   damageEnabled: boolean
   damageCount: number
   damageSides: number
@@ -206,6 +213,7 @@ const DAMAGE_TYPE_LABELS: Record<Dnd5eDamageType, string> = {
   radiant: '光耀', slashing: '挥砍', thunder: '雷鸣',
 }
 const HEADLESS_DAMAGE_TYPES = DND5E_DAMAGE_TYPES.map((id) => [id, DAMAGE_TYPE_LABELS[id]] as const)
+const SUMMON_MONSTERS = DND5E_SRD_MONSTERS.map((monster) => [monster.id, `${monster.name}（CR ${monster.challenge.rating}）`] as const)
 const HEADLESS_CONDITIONS = Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => [condition.id, condition.label] as const)
 
 interface Props {
@@ -269,6 +277,8 @@ function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
       relation: 'enemy', includeSelf: false, rangeFeet: 60,
       areaShape: 'circle', areaRadiusFeet: 10, areaWidthFeet: 10, areaHeightFeet: 10,
       areaLengthFeet: 30, maximumTargets: 16,
+      summonEnabled: false, summonMonsterId: 'srd-5.1:wolf', summonLabel: '',
+      summonDurationRounds: 10, summonConcentration: true, summonSide: 'ally',
       damageEnabled: true, damageCount: 1, damageSides: 6, damageModifier: 0, damageType: 'force',
       healingEnabled: false, healingCount: 1, healingSides: 8, healingModifier: 0,
       conditionEnabled: false, condition: 'prone', conditionExpiresAt: 'target-turn-end',
@@ -451,6 +461,15 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
           defaultOptionId: 'cancel',
           cancelOptionId: 'cancel',
           timeoutMs: feature.headless.interruptTimeoutSeconds * 1_000,
+        },
+      } : {}),
+      ...(feature.headless.summonEnabled && feature.headless.targetingKind === 'area' ? {
+        summon: {
+          monsterId: feature.headless.summonMonsterId as `srd-5.1:${string}`,
+          ...(feature.headless.summonLabel.trim() ? { label: feature.headless.summonLabel.trim() } : {}),
+          durationRounds: feature.headless.summonDurationRounds,
+          concentration: feature.headless.summonConcentration,
+          side: feature.headless.summonSide,
         },
       } : {}),
     },
@@ -1079,6 +1098,19 @@ function HeadlessEffectEditor({
             {value.areaShape === 'rect' && <BuilderNumber label="高度（尺）" value={value.areaHeightFeet} min={0} max={10000} onChange={(areaHeightFeet) => patch({ areaHeightFeet })} />}
             {(value.areaShape === 'line' || value.areaShape === 'cone') && <BuilderNumber label="长度（尺）" value={value.areaLengthFeet} min={0} max={10000} onChange={(areaLengthFeet) => patch({ areaLengthFeet })} />}
           </div>
+          <div className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><h5 className="text-xs font-semibold text-cyan-100">召唤生物</h5><p className="mt-1 text-[11px] text-cyan-100/60">在范围锚点创建一个由 DM 操作的 SRD 5.1 生物，并加入权威先攻。</p></div>
+              <Toggle label={value.summonEnabled ? '已启用召唤' : '启用召唤'} value={value.summonEnabled} onChange={(summonEnabled) => patch({ summonEnabled })} />
+            </div>
+            {value.summonEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <BuilderSelect label="生物模板" value={value.summonMonsterId} options={SUMMON_MONSTERS} onChange={(summonMonsterId) => patch({ summonMonsterId })} />
+              <BuilderInput label="显示名称（可选）" value={value.summonLabel} onChange={(summonLabel) => patch({ summonLabel })} />
+              <BuilderNumber label="持续轮数" value={value.summonDurationRounds} min={1} max={14400} onChange={(summonDurationRounds) => patch({ summonDurationRounds })} />
+              <BuilderSelect label="阵营关系" value={value.summonSide} options={[["ally", "施法者友方"], ["enemy", "施法者敌方"]]} onChange={(summonSide) => patch({ summonSide: summonSide as HeadlessEffectEditorDraft['summonSide'] })} />
+              <div className="self-end pb-0.5"><Toggle label="需要专注" value={value.summonConcentration} onChange={(summonConcentration) => patch({ summonConcentration })} /></div>
+            </div>}
+          </div>
         </div>}
 
         <div className="grid gap-3 xl:grid-cols-3">
@@ -1115,8 +1147,8 @@ function HeadlessEffectEditor({
           </fieldset>
         </div>
 
-        {!value.damageEnabled && !(mode === 'feature' && value.healingEnabled) && !value.conditionEnabled && (
-          <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-3 py-2 text-xs text-rose-100">至少启用一种伤害、治疗或标准状态效果。</p>
+        {!value.damageEnabled && !(mode === 'feature' && value.healingEnabled) && !value.conditionEnabled && !(mode === 'feature' && value.summonEnabled && value.targetingKind === 'area') && (
+          <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-3 py-2 text-xs text-rose-100">至少启用一种伤害、治疗、标准状态或召唤效果。</p>
         )}
 
         {mode === 'feature' && <div className="rounded-xl border border-white/8 bg-black/10 p-3">

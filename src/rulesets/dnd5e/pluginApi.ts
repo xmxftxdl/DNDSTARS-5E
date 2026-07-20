@@ -25,6 +25,7 @@ import type {
   Dnd5ePersistentAreaTriggerDeclaration,
   Dnd5ePluginEffectDuration,
 } from './persistentAreaTypes'
+import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
@@ -228,6 +229,14 @@ export interface Dnd5ePluginFeatureAction {
     durationRounds: number
     concentration?: boolean
     triggers?: readonly Dnd5ePersistentAreaTriggerDeclaration[]
+  }
+  /** Host 在选定格创建的 SRD 5.1 生物 Token；召唤物由 DM 操作，但阵营可属于施法者一方。 */
+  summon?: {
+    monsterId: `srd-5.1:${string}`
+    label?: string
+    durationRounds: number
+    concentration?: boolean
+    side?: 'ally' | 'enemy'
   }
 }
 
@@ -799,6 +808,7 @@ function clonePluginFeatureAction(action: Dnd5ePluginFeatureAction | undefined):
           : undefined,
       })),
     } : undefined,
+    summon: action.summon ? { ...action.summon } : undefined,
   }
 }
 
@@ -959,6 +969,16 @@ export function registerDnd5eRulesPlugin(
           !finiteInteger(area.durationRounds, 1, 14_400) ||
           (area.color != null && !/^#[0-9a-f]{6}$/i.test(area.color))
         )) throw new Error(`Invalid plugin persistent area: ${featureId}`)
+        const summon = definition.action.summon
+        if (summon && (
+          definition.action.targeting.kind !== 'area' ||
+          !/^srd-5\.1:[a-z0-9][a-z0-9-]*$/.test(summon.monsterId) ||
+          !getDnd5eSrdMonster(summon.monsterId) ||
+          !finiteInteger(summon.durationRounds, 1, 14_400) ||
+          (summon.label != null && (typeof summon.label !== 'string' || !summon.label.trim())) ||
+          (summon.side != null && summon.side !== 'ally' && summon.side !== 'enemy') ||
+          !!area
+        )) throw new Error(`Invalid plugin summon: ${featureId}`)
       }
       if (definition.grantedBySubclass) {
         const subclass = definition.sourceSubclassId ? pluginSubclasses.get(definition.sourceSubclassId) : undefined
@@ -977,6 +997,13 @@ export function registerDnd5eRulesPlugin(
               ...definition.action.persistentArea,
               label: definition.action.persistentArea.label.trim(),
               triggers: clonePersistentAreaTriggers(definition.action.persistentArea.triggers, featureId),
+            }
+          : undefined,
+        summon: definition.action.summon
+          ? {
+              ...definition.action.summon,
+              label: definition.action.summon.label?.trim(),
+              side: definition.action.summon.side ?? 'ally',
             }
           : undefined,
       } : undefined

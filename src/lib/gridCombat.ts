@@ -1,4 +1,5 @@
 import type { BattleMap, Token } from '../store/maps'
+import { dnd5eCombatTokenSide } from './opportunityAttacks'
 import { creatureSizeToFootprintCells, sizeFromTokenSize } from './monsterTypes'
 
 /** DND：1 格 = 5 尺（格宽仅决定屏幕上每格像素） */
@@ -395,5 +396,5 @@ export function isPlayerToken(t: Token): boolean {
  * 排除 enemy（不打自己人）与 obstacle（障碍物）。仅有 npc 友方的遭遇不再 no-op。
  */
 export function isHostileToEnemy(t: Token): boolean {
-  return t.type === 'player' || t.type === 'npc'
+  return dnd5eCombatTokenSide(t) === 'player' || t.type === 'npc'
 }

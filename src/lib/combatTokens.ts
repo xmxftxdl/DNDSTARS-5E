@@ -3,6 +3,7 @@ import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import { dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
 import { dnd5eConditionsFromActiveEffects } from '../rulesets/dnd5e/activeEffects'
+import { dnd5eCombatTokenSide } from './opportunityAttacks'
 
 /** 是否视为阵亡（优先用当前 HP 快照，与血条显示一致） */
 export function isTokenDefeated(
@@ -60,8 +61,8 @@ export function resolveEnemyAttackTokens(
 }
 
 export function getTokenCombatSide(token: Token): 'ally' | 'enemy' | 'neutral' {
-  if (token.type === 'obstacle') return 'neutral'
-  return token.type === 'enemy' ? 'enemy' : 'ally'
+  const side = dnd5eCombatTokenSide(token)
+  return side === 'player' ? 'ally' : side ?? 'neutral'
 }
 
 export interface CombatOutcome {

@@ -99,7 +99,7 @@ import {
   canSubmitPlayerCombatAction,
 } from '../lib/playerActionAuthorityRouter'
 import { planPlayerActionAuthorityExecution } from '../lib/playerActionAuthorityExecution'
-import { areOpposedCombatTokens } from '../lib/opportunityAttacks'
+import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../lib/opportunityAttacks'
 import {
   clearCharacterScopedRecord,
   removeDisengagedCharacterId,
@@ -344,6 +344,7 @@ import {
   markDnd5eHuntingTrapTriggered,
   placeDnd5eItemArea,
   previewDnd5eItemAreaPlacement,
+  reconcileDnd5eSummonedCreatures,
 } from '../rulesets/dnd5e'
 import {
   clampGridSize,
@@ -433,6 +434,7 @@ import {
 } from './mapsPageConstants'
 import {
   buildInitiativeOrder,
+  insertInitiativeEntriesPreservingActive,
   migrateLegacyApCombatLogText,
   placeableRoomCharacters,
   tokenIntersectsDeleteRect,
@@ -2277,6 +2279,7 @@ export default function MapsPage() {
     currentInitiativeToken?.type === 'enemy' &&
     !!currentInitiativeToken &&
     isTokenAlive(currentInitiativeToken, characters)
+  const isAutomatedEnemyTurn = isEnemyTurn && dnd5eCombatTokenSide(currentInitiativeToken) === 'enemy'
 
   const linkedIds = new Set((activeMap?.tokens ?? []).map((t) => t.characterId).filter(Boolean) as string[])
   void playerAssignmentTick
@@ -2734,6 +2737,34 @@ export default function MapsPage() {
     if (next.length !== activeMap.dnd5ePluginAreas!.length) {
       updateMap(activeMap.id, { dnd5ePluginAreas: next })
     }
+  }, [isDM, activeMap, characters, round, updateMap])
+
+  useEffect(() => {
+    if (!isDM || !activeMap || !activeMap.tokens.some((token) => token.dnd5eSummon)) return
+    const reconciled = reconcileDnd5eSummonedCreatures({
+      map: activeMap,
+      characters: useCharacterStore.getState().characters,
+      round,
+    })
+    if (reconciled.removedTokenIds.length === 0) return
+    updateMap(activeMap.id, { tokens: reconciled.map.tokens })
+    let nextOrder = initiativeOrderRef.current
+    let nextIndex = initiativeIndexRef.current
+    for (const tokenId of reconciled.removedTokenIds) {
+      const pruned = pruneInitiativeForToken(nextOrder, nextIndex, tokenId)
+      nextOrder = pruned.order
+      nextIndex = pruned.index
+    }
+    initiativeOrderRef.current = nextOrder
+    initiativeIndexRef.current = nextIndex
+    setInitiativeOrder(nextOrder)
+    setInitiativeIndex(nextIndex)
+    void publishCombatState({ initiativeOrder: nextOrder, initiativeIndex: nextIndex })
+    for (const tokenId of reconciled.removedTokenIds) {
+      pushCombatLog(`召唤生物 ${activeMap.tokens.find((token) => token.id === tokenId)?.label ?? tokenId} 已离场。`, 'system')
+    }
+  // Reconciliation is keyed by authoritative map/character snapshots; callbacks are intentionally not dependencies.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDM, activeMap, characters, round, updateMap])
 
   // 只有 Token 真正从地图移除时才清空选择。0 HP／阵亡怪物仍需保持可选，
@@ -7105,7 +7136,7 @@ export default function MapsPage() {
   }
 
   const advanceInitiative = () => {
-    if (isEnemyTurn && usesAutomatedMonsterSettlement(settlementModeRef.current)) return
+    if (isAutomatedEnemyTurn && usesAutomatedMonsterSettlement(settlementModeRef.current)) return
     if (isEnemyTurn && currentInitiativeToken?.poolId && getDnd5eSrdMonster(currentInitiativeToken.poolId)) {
       if (dnd5eMonsterEndTurnSettlingRef.current) return
       void (async () => {
@@ -9540,10 +9571,14 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      const summonInitiativeD20 = prepared.prepared.feature.action?.summon
+        ? await rollDiceBoxD20('召唤生物·先攻', prepared.prepared.feature.name)
+        : undefined
       const resolved = await resolvePreparedDnd5ePluginFeatureAction({
         prepared: prepared.prepared,
         rolls: pluginRolls,
         interruptChoiceId: pluginChoiceId,
+        summonInitiativeD20,
       })
       if (!resolved.result.ok || !resolved.application) {
         acknowledgePlayerAction(
@@ -9587,15 +9622,38 @@ export default function MapsPage() {
         const next = pluginApplication.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
+      const addedTokens = pluginApplication.map.tokens.filter((token) =>
+        !authorityMap.tokens.some((existing) => existing.id === token.id),
+      )
+      if (addedTokens.length > 0) {
+        updateMap(authorityMap.id, { tokens: pluginApplication.map.tokens })
+      }
       for (const tokenId of pluginApplication.changedTokenIds) {
         const next = pluginApplication.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+        if (next && !addedTokens.some((token) => token.id === tokenId)) {
+          applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+        }
       }
       if (
         JSON.stringify(pluginApplication.map.dnd5ePluginAreas ?? []) !==
         JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
       ) {
         updateMap(authorityMap.id, { dnd5ePluginAreas: pluginApplication.map.dnd5ePluginAreas ?? [] })
+      }
+      if ((resolved.summonedInitiativeEntries?.length ?? 0) > 0) {
+        const inserted = insertInitiativeEntriesPreservingActive(
+          initiativeOrderRef.current,
+          initiativeIndexRef.current,
+          resolved.summonedInitiativeEntries ?? [],
+        )
+        initiativeOrderRef.current = inserted.order
+        initiativeIndexRef.current = inserted.index
+        setInitiativeOrder(inserted.order)
+        setInitiativeIndex(inserted.index)
+        void publishCombatState({
+          initiativeOrder: inserted.order,
+          initiativeIndex: inserted.index,
+        })
       }
       const spentTurnResource = resolved.result.events.find((event) =>
         event.type === 'turn-resource-spent' &&
@@ -9624,7 +9682,10 @@ export default function MapsPage() {
         .filter((event) => event.type === 'healing-applied')
         .reduce((total, event) => total + event.amount, 0)
       const targetName = prepared.prepared.targetToken.label
-      const detail = temporaryHp > 0
+      const summoned = addedTokens.find((token) => token.dnd5eSummon)
+      const detail = summoned
+        ? `召唤 ${summoned.label}，并加入先攻`
+        : temporaryHp > 0
         ? `${targetName} 获得 ${temporaryHp} 点临时生命值`
         : healing > 0
           ? `${targetName} 恢复 ${healing} 点生命值`
@@ -12881,14 +12942,14 @@ export default function MapsPage() {
       return () => window.clearTimeout(timer)
     }
 
-    if (!isDM || !isEnemyTurn || !currentInitiativeToken || !usesAutomatedMonsterSettlement(settlementMode)) return
+    if (!isDM || !isAutomatedEnemyTurn || !currentInitiativeToken || !usesAutomatedMonsterSettlement(settlementMode)) return
 
     const actKey = `${round}-${initiativeIndex}-${currentInitiativeToken.id}`
     if (enemyAppliedKeysRef.current.has(actKey)) return
 
     enemyAppliedKeysRef.current.add(actKey)
     scheduleEnemyTurn(currentInitiativeToken)
-  }, [combatActive, initiativeIndex, round, activeMap?.id, currentInitiativeToken?.id, isDM, settlementMode])
+  }, [combatActive, initiativeIndex, round, activeMap?.id, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn])
 
   useEffect(() => {
     if (!canControlPlayerTurn) {
@@ -14669,12 +14730,12 @@ export default function MapsPage() {
                     <button
                       data-testid="dm-next-turn"
                       onClick={advanceInitiative}
-                      disabled={initiativeOrder.length === 0 || (isEnemyTurn && usesAutomatedMonsterSettlement(settlementMode))}
+                      disabled={initiativeOrder.length === 0 || (isAutomatedEnemyTurn && usesAutomatedMonsterSettlement(settlementMode))}
                       className="flex items-center gap-1 rounded-lg bg-arcane-500/25 px-2.5 py-1 text-xs font-semibold text-arcane-100 hover:bg-arcane-500/40 disabled:cursor-not-allowed disabled:opacity-40"
-                      title={isEnemyTurn && usesAutomatedMonsterSettlement(settlementMode) ? '敌人回合中，行动结束后自动推进' : undefined}
+                      title={isAutomatedEnemyTurn && usesAutomatedMonsterSettlement(settlementMode) ? '敌人回合中，行动结束后自动推进' : undefined}
                     >
                       <SkipForward className="h-3.5 w-3.5" />
-                      {isEnemyTurn && usesAutomatedMonsterSettlement(settlementMode) ? '敌人行动中…' : '下一位'}
+                      {isAutomatedEnemyTurn && usesAutomatedMonsterSettlement(settlementMode) ? '敌人行动中…' : '下一位'}
                     </button>
                     <button
                       data-testid="dm-end-combat"

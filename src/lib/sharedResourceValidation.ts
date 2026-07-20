@@ -138,6 +138,25 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
   return issues
 }
 
+function validateDnd5eSummon(value: unknown, path: string): string[] {
+  if (value == null) return []
+  if (!isPlainObject(value)) return [`${path} 必须是对象`]
+  const issues: string[] = []
+  if (value.schemaVersion !== 1) issues.push(`${path}.schemaVersion 无效`)
+  for (const key of ['pluginId', 'featureId', 'sourceCharacterId', 'sourceTokenId'] as const) {
+    if (typeof value[key] !== 'string' || !value[key]) issues.push(`${path}.${key} 无效`)
+  }
+  if (
+    !Number.isInteger(value.createdRound) || Number(value.createdRound) < 0 ||
+    !Number.isInteger(value.expiresAfterRound) || Number(value.expiresAfterRound) < Number(value.createdRound)
+  ) issues.push(`${path} 轮数无效`)
+  if (value.concentrationId != null && (typeof value.concentrationId !== 'string' || !value.concentrationId)) {
+    issues.push(`${path}.concentrationId 无效`)
+  }
+  if (value.side !== 'player' && value.side !== 'enemy') issues.push(`${path}.side 无效`)
+  return issues
+}
+
 const COMBAT_INTERRUPT_KINDS = new Set<CombatInterruptKind>([
   'dodge', 'stable-mind', 'gale-combo', 'agile-leap', 'opportunity-attack', 'protection',
   'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
@@ -274,6 +293,7 @@ function migrateDnd5eStateEnvelope(
       tokens: entry.tokens.map((token, tokenIndex) => {
         if (!isPlainObject(token)) return token
         const path = `maps[${mapIndex}].tokens[${tokenIndex}]`
+        issues.push(...validateDnd5eSummon(token.dnd5eSummon, `${path}.dnd5eSummon`))
         const migrated = migrateEntity(token, path, false)
         if (token.movementAnimation == null) return migrated
         const movementAnimation = normalizeTokenMovementAnimation(token.movementAnimation)

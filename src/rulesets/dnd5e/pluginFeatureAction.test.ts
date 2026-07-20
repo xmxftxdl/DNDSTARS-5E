@@ -86,6 +86,68 @@ function action(featureId: string): SharedPlayerActionState {
 }
 
 describe('D&D 5e plugin feature authority action', () => {
+  it('creates a declared summon, joins initiative, and starts concentration', async () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.summon', name: 'Summon', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'call-wolf', resolve: ({ succeed }) => succeed() })
+        featureId = api.registerFeature({
+          id: 'call-wolf', name: '召狼', summary: '召唤一只狼。', description: '测试召唤。', automation: 'full',
+          action: {
+            id: 'call-wolf', label: '召狼', economy: 'action',
+            targeting: {
+              kind: 'area', relation: 'any', maximumTargets: 1,
+              template: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 30 },
+            },
+            summon: { monsterId: 'srd-5.1:wolf', durationRounds: 10, concentration: true },
+          },
+        })
+      },
+    })
+    try {
+      const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
+      const enemy = character('enemy')
+      const map: BattleMap = {
+        id: 'map-1', name: 'Summon map', width: 500, height: 500,
+        gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, feetPerCell: 5, showGrid: true,
+        tokens: [token('hero-token', hero.id, 25), token('enemy-token', enemy.id, 425, 'enemy')],
+      }
+      const initiativeOrder: InitiativeEntry[] = [
+        { slotId: 'hero-token:normal', tokenId: 'hero-token', label: 'hero', emoji: 'H', color: '#fff', roll: 20 },
+        { slotId: 'enemy-token:normal', tokenId: 'enemy-token', label: 'enemy', emoji: 'E', color: '#f00', roll: 5 },
+      ]
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: { ...action(featureId), targetTokenId: undefined, targetCell: { col: 2, row: 0 } },
+        map, characters: [hero, enemy], initiativeOrder,
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      const resolved = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+        summonInitiativeD20: 12,
+      })
+      expect(resolved.result.ok ? 'ok' : resolved.result.reason).toBe('ok')
+      expect(resolved.application?.map.tokens).toHaveLength(3)
+      expect(resolved.application?.map.tokens[2]).toMatchObject({
+        id: 'plugin-summon:plugin-action-1', poolId: 'srd-5.1:wolf',
+        dnd5eSummon: { side: 'player', concentrationId: 'plugin-summon:plugin-action-1' },
+      })
+      expect(resolved.summonedInitiativeEntries).toEqual([
+        expect.objectContaining({ tokenId: 'plugin-summon:plugin-action-1', roll: 14 }),
+      ])
+      expect(resolved.application?.characters[0]).toMatchObject({
+        concentrating: true,
+        dnd5eCombatState: { concentrationSpellId: 'plugin-summon:plugin-action-1' },
+      })
+    } finally {
+      dispose()
+    }
+  })
+
   it('rebuilds area targets and creates a concentration-bound persistent map entity', async () => {
     let featureId = ''
     const dispose = registerDnd5eRulesPlugin({

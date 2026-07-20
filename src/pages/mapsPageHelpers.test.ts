@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Character } from '../types/character'
 import {
   buildInitiativeOrder,
+  insertInitiativeEntriesPreservingActive,
   migrateLegacyApCombatLogText,
   placeableRoomCharacters,
   rollInitiative,
@@ -77,6 +78,18 @@ describe('D&D 5e map helpers', () => {
       { tokenId: 'thief-token', slotId: 'thief-token:thief-reflexes', turnKind: 'thief-reflexes', roll: 4 },
     ])
     expect(buildInitiativeOrder([token], [{ ...thief, conditions: ['受突袭'] }])).toHaveLength(1)
+  })
+
+  it('inserts a summoned initiative slot without changing the active turn', () => {
+    const current = [
+      { slotId: 'hero:normal', tokenId: 'hero', label: '英雄', emoji: 'H', color: '#fff', roll: 15 },
+      { slotId: 'enemy:normal', tokenId: 'enemy', label: '敌人', emoji: 'E', color: '#f00', roll: 8 },
+    ]
+    const inserted = insertInitiativeEntriesPreservingActive(current, 1, [
+      { slotId: 'summon:normal', tokenId: 'summon', label: '召唤物', emoji: 'S', color: '#0ff', roll: 18 },
+    ])
+    expect(inserted.order.map((entry) => entry.tokenId)).toEqual(['summon', 'hero', 'enemy'])
+    expect(inserted.index).toBe(2)
   })
 
   it('migrates a persisted AP movement log without losing the action detail', () => {

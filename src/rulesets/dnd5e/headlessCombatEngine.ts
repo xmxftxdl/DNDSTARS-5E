@@ -6121,7 +6121,7 @@ export function resolveDnd5eSandboxedPluginCapabilities(
     } else {
       const uniqueIds = [...new Set(action.targetIds ?? [])]
       if (
-        (uniqueIds.length < 1 && !pluginFeature.action.persistentArea) ||
+        (uniqueIds.length < 1 && !pluginFeature.action.persistentArea && !pluginFeature.action.summon) ||
         uniqueIds.length > (targeting.maximumTargets ?? 64) ||
         !action.targetCell || !Number.isInteger(action.targetCell.col) || !Number.isInteger(action.targetCell.row) ||
         (action.targetOrientation != null && (
@@ -6196,6 +6196,18 @@ export function resolveDnd5eSandboxedPluginCapabilities(
       `plugin-area:${action.transactionId}`,
       pluginTargets.map((target) => target.id),
       persistentArea.durationRounds,
+      events,
+    )
+  }
+  const summon = pluginFeature?.action?.summon
+  if (summon?.concentration) {
+    if (!action.transactionId) return fail(state, events, 'invalid-plugin-action')
+    beginDnd5eConcentration(
+      state,
+      actor,
+      `plugin-summon:${action.transactionId}`,
+      [],
+      summon.durationRounds,
       events,
     )
   }
@@ -6541,7 +6553,7 @@ function resolveDnd5eHeadlessActionInternal(
       } else {
         const uniqueIds = [...new Set(action.targetIds ?? [])]
         if (
-          (uniqueIds.length < 1 && !pluginFeature.action.persistentArea) ||
+          (uniqueIds.length < 1 && !pluginFeature.action.persistentArea && !pluginFeature.action.summon) ||
           uniqueIds.length > (targeting.maximumTargets ?? 64) ||
           !action.targetCell || !Number.isInteger(action.targetCell.col) || !Number.isInteger(action.targetCell.row) ||
           (action.targetOrientation != null && (
@@ -6588,6 +6600,17 @@ function resolveDnd5eHeadlessActionInternal(
           `plugin-area:${action.transactionId}`,
           pluginTargets.map((target) => target.id),
           pluginFeature.action.persistentArea.durationRounds,
+          events,
+        )
+      }
+      if (pluginFeature.action.summon?.concentration) {
+        if (!action.transactionId) return fail(state, events, 'invalid-plugin-action')
+        beginDnd5eConcentration(
+          state,
+          actor,
+          `plugin-summon:${action.transactionId}`,
+          [],
+          pluginFeature.action.summon.durationRounds,
           events,
         )
       }

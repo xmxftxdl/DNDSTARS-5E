@@ -373,13 +373,24 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     expect(result.tokens[0].movementAnimation).toEqual(movementAnimation)
   })
 
-  it('a token absent from the shared snapshot is left untouched (no spurious overwrite)', () => {
+  it('removes a stale local DM token that is absent from the authoritative snapshot', () => {
     const localMap = map({ tokens: [token({ id: 'only-local', type: 'enemy', x: 50, y: 60, hp: 9, maxHp: 9 })] })
     const sharedMap = map({ tokens: [] })
     const [result] = mergePlayerTokenCombatFields([localMap], [sharedMap])
-    const t = result.tokens.find((x) => x.id === 'only-local')!
-    expect(t.x).toBe(50)
-    expect(t.y).toBe(60)
-    expect(t.hp).toBe(9)
+    expect(result.tokens).toEqual([])
+  })
+
+  it('adds a DM-created summon missing from the player cache', () => {
+    const localMap = map({ tokens: [] })
+    const summon = token({
+      id: 'plugin-summon:action-1', type: 'enemy', x: 150, y: 150,
+      dnd5eSummon: {
+        schemaVersion: 1, pluginId: 'com.example', featureId: 'com.example:wolf',
+        sourceCharacterId: 'hero', sourceTokenId: 'hero-token', createdRound: 1,
+        expiresAfterRound: 10, concentrationId: 'plugin-summon:action-1', side: 'player',
+      },
+    })
+    const [result] = mergePlayerTokenCombatFields([localMap], [map({ tokens: [summon] })])
+    expect(result.tokens).toEqual([summon])
   })
 })

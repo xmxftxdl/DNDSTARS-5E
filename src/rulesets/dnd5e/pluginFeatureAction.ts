@@ -34,6 +34,7 @@ import {
   planDnd5eMapResultApplication,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
+import { planDnd5eSummonedCreature } from './summonedCreatures'
 
 export type Dnd5ePluginFeatureActionRejectReason =
   | 'invalid-action'
@@ -45,6 +46,7 @@ export type Dnd5ePluginFeatureActionRejectReason =
   | 'feature-unavailable'
   | 'invalid-target'
   | 'target-out-of-range'
+  | 'summon-position-blocked'
   | 'action-unavailable'
   | 'bonus-action-unavailable'
   | 'reaction-unavailable'
@@ -184,12 +186,30 @@ export function prepareDnd5ePluginFeatureAction(input: {
       })
       .slice(0, targeting.maximumTargets ?? 64)
     targetToken = targetTokens[0]
-    const permitsEmptyPersistentArea = !!feature.action.persistentArea &&
+    const permitsEmptyArea = (!!feature.action.persistentArea || !!feature.action.summon) &&
       feature.action.interrupt?.audience !== 'target'
-    if (!targetToken && !permitsEmptyPersistentArea) return { ok: false, reason: 'invalid-target' }
+    if (!targetToken && !permitsEmptyArea) return { ok: false, reason: 'invalid-target' }
     // 持续区域可以放在当前没有生物的格子上。Prepared 的展示目标使用施法者，
     // 但传给 Headless 的 targetIds 仍为空，避免把施法者伪装成区域目标。
     targetToken ??= actorToken
+    if (feature.action.summon && targetCell) {
+      const summonPlacement = planDnd5eSummonedCreature({
+        map: input.map,
+        actorToken,
+        sourceCharacterId: actor.id,
+        featureId: feature.id,
+        pluginId: feature.ownerPluginId,
+        actionId: action.id,
+        round: action.round,
+        targetCell,
+        initiativeD20: 1,
+        summon: feature.action.summon,
+      })
+      if (!summonPlacement.ok) return {
+        ok: false,
+        reason: summonPlacement.reason === 'summon-position-blocked' ? 'summon-position-blocked' : 'invalid-target',
+      }
+    }
   }
 
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -276,7 +296,37 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   prepared: PreparedDnd5ePluginFeatureAction
   rolls?: Dnd5ePluginAction['rolls']
   interruptChoiceId?: string
-}): Promise<{ result: Dnd5eActionResult; application?: Dnd5eMapResultPlan }> {
+  summonInitiativeD20?: number
+}): Promise<{
+  result: Dnd5eActionResult
+  application?: Dnd5eMapResultPlan
+  summonedInitiativeEntries?: InitiativeEntry[]
+}> {
+  const summon = input.prepared.feature.action?.summon
+  const summonPlan = summon && input.prepared.targetCell
+    ? planDnd5eSummonedCreature({
+        map: input.prepared.map,
+        actorToken: input.prepared.actorToken,
+        sourceCharacterId: input.prepared.actor.id,
+        featureId: input.prepared.feature.id,
+        pluginId: input.prepared.feature.ownerPluginId,
+        actionId: input.prepared.action.id,
+        round: input.prepared.action.round,
+        targetCell: input.prepared.targetCell,
+        initiativeD20: input.summonInitiativeD20 ?? 0,
+        summon,
+      })
+    : undefined
+  if (summon && (!summonPlan || !summonPlan.ok)) {
+    return {
+      result: {
+        ok: false,
+        state: input.prepared.state,
+        events: [],
+        reason: 'invalid-plugin-action',
+      },
+    }
+  }
   const definition = dnd5ePluginHeadlessActionDefinition(
     input.prepared.headlessAction.pluginId,
     input.prepared.headlessAction.actionId,
@@ -372,8 +422,21 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
       ],
     }
   }
+  if (summonPlan?.ok) {
+    application.map = {
+      ...application.map,
+      tokens: [
+        ...application.map.tokens.filter((token) => token.id !== summonPlan.plan.token.id),
+        summonPlan.plan.token,
+      ],
+    }
+    application.changedTokenIds = [
+      ...new Set([...application.changedTokenIds, summonPlan.plan.token.id]),
+    ]
+  }
   return {
     result,
     application,
+    summonedInitiativeEntries: summonPlan?.ok ? [summonPlan.plan.initiativeEntry] : undefined,
   }
 }

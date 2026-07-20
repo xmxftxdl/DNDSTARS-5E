@@ -191,6 +191,8 @@ const plugin = {
 
 ## API V2 当前稳定边界
 
-V2 已完成单体与范围特性、角色创建数据、声明式法术模板及 P4 持续区域闭环：命名空间注册、声明式种族与属性生成方式、通用子职、等级特性与多级选择组、逐级职业资源和休息恢复、动作经济、地图范围、持久区域、法术 V／S／M、伤害／豁免／升环／标准状态元数据、角色选择持久化、房间版本握手、Worker/WASM 沙箱、DM 地图 preflight、Host 声明式骰子、共享 Interrupt、受控 Headless resolver、标准伤害／治疗／临时生命值／标准状态／资源 capability、ACK 和多端状态应用。
+V2 已完成单体与范围特性、角色创建数据、声明式法术模板及 P4 持续区域闭环：命名空间注册、声明式种族与属性生成方式、通用子职、等级特性与多级选择组、逐级职业资源和休息恢复、动作经济、地图范围、持久区域、单体 SRD 召唤 Token、法术 V／S／M、伤害／豁免／升环／标准状态元数据、角色选择持久化、房间版本握手、Worker/WASM 沙箱、DM 地图 preflight、Host 声明式骰子、共享 Interrupt、受控 Headless resolver、标准伤害／治疗／临时生命值／标准状态／资源 capability、ACK 和多端状态应用。
 
 持续区域可在 `persistentArea.triggers` 中声明 `on-create`、`on-enter`、`turn-start`、`turn-end`。每个触发器可声明每轮一次、属性豁免、成功无伤或减半、伤害骰、伤害类型、标准状态和 ActiveEffect 持续时间；`dmAdjustable: true` 会在提交前建立 DM Interrupt。Host 负责移动路径穿越检测、骰子、抗性／免疫、状态免疫、每轮去重凭据和多端同步。插件仍不得在 Worker 中自行计时、生成随机数或修改 Store。
+
+特性行动可声明 `summon`，并指定核心包中的 `srd-5.1:*` 怪物、持续轮数、是否专注及相对阵营。首版每次行动创建一个生物；Host 负责验证范围锚点和占位、掷先攻、同步 Token、维护所有者与专注生命周期。召唤物由 DM 操作，插件不能注入任意怪物脚本或绕过地图占位。

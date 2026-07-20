@@ -86,6 +86,24 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
     .sort((a, b) => b.roll - a.roll)
 }
 
+export function insertInitiativeEntriesPreservingActive(
+  order: readonly InitiativeEntry[],
+  activeIndex: number,
+  additions: readonly InitiativeEntry[],
+): { order: InitiativeEntry[]; index: number } {
+  if (additions.length === 0) return { order: [...order], index: activeIndex }
+  const activeSlotId = order[activeIndex]?.slotId ?? order[activeIndex]?.tokenId
+  const additionIds = new Set(additions.map((entry) => entry.slotId ?? entry.tokenId))
+  const next = [
+    ...order.filter((entry) => !additionIds.has(entry.slotId ?? entry.tokenId)),
+    ...additions,
+  ].sort((left, right) => right.roll - left.roll)
+  const index = activeSlotId == null
+    ? Math.min(Math.max(0, activeIndex), Math.max(0, next.length - 1))
+    : Math.max(0, next.findIndex((entry) => (entry.slotId ?? entry.tokenId) === activeSlotId))
+  return { order: next, index }
+}
+
 export function tokenIntersectsDeleteRect(token: Token, rect: DeleteSelectionRect, gridSize: number): boolean {
   const tokenSize = Math.max(1, token.size || 1) * gridSize
   const half = tokenSize / 2

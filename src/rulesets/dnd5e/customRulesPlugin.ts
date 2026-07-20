@@ -140,13 +140,16 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     )) errors.push(`特性 ${feature.name || feature.id} 的战斗行动或 Interrupt 无效。`)
   }
   const headlessActionIds = new Set<string>()
+  const summonActionIds = new Set(
+    draft.features.flatMap((feature) => feature.action?.summon ? [feature.action.id] : []),
+  )
   for (const action of draft.headlessActions ?? []) {
     if (!ID_PATTERN.test(action.id)) errors.push(`Headless 行动 ID 无效：${action.id || '未填写'}`)
     if (headlessActionIds.has(action.id)) errors.push(`Headless 行动 ID 重复：${action.id}`)
     headlessActionIds.add(action.id)
     if (!action.label.trim()) errors.push(`Headless 行动 ${action.id || '未命名'} 缺少名称。`)
-    if (action.effects.length < 1 || action.effects.length > 16) {
-      errors.push(`Headless 行动 ${action.label || action.id} 必须包含 1～16 个效果。`)
+    if ((!summonActionIds.has(action.id) && action.effects.length < 1) || action.effects.length > 16) {
+      errors.push(`Headless 行动 ${action.label || action.id} 必须包含 1～16 个效果，纯召唤行动可不含目标效果。`)
     }
     action.effects.forEach((effect, index) => {
       const effectLabel = `${action.label || action.id} 的第 ${index + 1} 个效果`

@@ -1,5 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap, Token } from '../../store/maps'
+import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import type { Character } from '../../types/character'
 import type { Dnd5eAttackCoverOverride } from '../../lib/sharedCombatTypes'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
@@ -227,7 +228,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       characterIdByCombatantId[token.id] = character.id
       const combatant = createCombatantFromDnd5eCharacter({
         character: migrated,
-        controller: token.type === 'player' ? 'player' : 'dm',
+        controller: dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
         initiativeD20: Math.max(1, Math.min(20, initiative - migrated.initiativeBonus)),
         position: { x: token.x, y: token.y },
       })
@@ -243,7 +244,7 @@ export function createDnd5eMapCombatSnapshot(input: {
     return [createDnd5eCombatant({
       id: token.id,
       name: token.label,
-      controller: token.type === 'player' ? 'player' : 'dm',
+      controller: dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
       initiative,
       abilities: monster ? { ...monster.abilities } : { ...DEFAULT_ABILITIES },
       savingThrowBonuses: monster?.savingThrows,
