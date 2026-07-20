@@ -378,6 +378,23 @@ describe('map geometry player projection', () => {
       ...geometry,
       maps: [{ ...geometry.maps[0], windows: [{ ...common, id: 'window', kind: 'window', points: [] }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
+    const v2 = {
+      ...geometry,
+      schemaVersion: 2,
+      maps: [{ ...geometry.maps[0], lights: [] }],
+    }
+    expect(validateSharedStateShape('map-geometry', v2)).toEqual({ ok: true })
+    expect(validateSharedStateShape('map-geometry', {
+      ...v2,
+      maps: [{ ...v2.maps[0], lights: undefined }],
+    })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
+    expect(validateSharedStateShape('map-geometry', {
+      ...v2,
+      maps: [{ ...v2.maps[0], windows: [{
+        ...common, id: 'window-v2', kind: 'window', windowType: 'glass', windowState: 'teleported',
+        points: [{ x: 50, y: 20 }, { x: 50, y: 40 }],
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
   })
 })
 

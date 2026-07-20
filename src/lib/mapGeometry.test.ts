@@ -110,6 +110,13 @@ describe('map geometry', () => {
       .toMatchObject({ blocked: true, entityId: 'window' })
     expect(mapGeometryCoverBetween(g, viewer, target))
       .toMatchObject({ cover: 'total', blocksLineOfEffect: true, sourceEntityId: 'window' })
+    g.windows[0].windowState = 'broken'
+    g.windows[0].cover = 'half'
+    expect(mapGeometryCanSeeToken({ geometry: g, map, viewer, target })).toBe(true)
+    expect(mapGeometryCoverBetween(g, viewer, target))
+      .toMatchObject({ cover: 'half', armorClassBonus: 2, blocksLineOfEffect: false, sourceEntityId: 'window' })
+    expect(mapGeometryMovementBlocked({ geometry: g, map, token: viewer, to: target }))
+      .toMatchObject({ blocked: true, entityId: 'window' })
   })
 
   it('returns D&D 5e cover bonuses and total-cover line-of-effect blocking', () => {
@@ -164,5 +171,23 @@ describe('map geometry', () => {
     expect(normalized?.maps[0].lights).toEqual([])
     expect(normalized?.maps[0].windows).toEqual([])
     expect(normalized?.maps[0].walls[0].material).toBe('stone')
+  })
+
+  it('migrates V1 openings to explicit wall attachments and always emits Schema V2', () => {
+    const g = geometry()
+    g.doors = [{
+      id: 'legacy-door', kind: 'door', label: '旧门', points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
+      state: 'closed', secret: false, blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }]
+    const normalized = normalizeSharedMapGeometry({ schemaVersion: 1, maps: [g], updatedAt: 2 })
+    expect(normalized).toMatchObject({ schemaVersion: 2 })
+    expect(normalized?.maps[0].doors[0]).toMatchObject({
+      parentWallId: 'wall',
+      parentWallSegmentIndex: 0,
+      points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
+    })
+    expect(normalizeSharedMapGeometry({ schemaVersion: '1', maps: [g], updatedAt: 2 })).toBeUndefined()
+    expect(normalizeSharedMapGeometry({ schemaVersion: 3, maps: [g], updatedAt: 2 })).toBeUndefined()
   })
 })

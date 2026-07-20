@@ -1028,7 +1028,9 @@ function validGeometryEntity(entity, kind) {
   if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048 &&
     (entity.material == null || ['stone', 'brick', 'wood', 'metal', 'natural'].includes(entity.material))
   if (kind === 'door') {
-    if (!(entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean')) return false
+    if (!(entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean') ||
+      (entity.hinge != null && !['start', 'end'].includes(entity.hinge)) ||
+      (entity.swing != null && !['clockwise', 'counterclockwise'].includes(entity.swing))) return false
     if (entity.revealedToMemberIds != null && (
       !Array.isArray(entity.revealedToMemberIds) || entity.revealedToMemberIds.length > 64 ||
       entity.revealedToMemberIds.some((id) => typeof id !== 'string' || !id || id.length > 160)
@@ -1042,7 +1044,9 @@ function validGeometryEntity(entity, kind) {
     return true
   }
   if (kind === 'window') {
-    return entity.points.length === 2 && ['glass', 'bars', 'shutters', 'opening'].includes(entity.windowType)
+    return entity.points.length === 2 && ['glass', 'bars', 'shutters', 'opening'].includes(entity.windowType) &&
+      (entity.windowState == null || ['closed', 'open', 'broken'].includes(entity.windowState)) &&
+      (entity.cover == null || ['none', 'half', 'three-quarters', 'total'].includes(entity.cover))
   }
   return entity.points.length >= 3 && entity.points.length <= 2_048 &&
     ['none', 'half', 'three-quarters', 'total'].includes(entity.cover) &&
@@ -1050,15 +1054,28 @@ function validGeometryEntity(entity, kind) {
     (entity.traversal == null || ['ground', 'climb', 'swim'].includes(entity.traversal))
 }
 
+function validGeometryLight(entity) {
+  return plainObject(entity) && entity.kind === 'light' && typeof entity.id === 'string' && entity.id.length > 0 &&
+    typeof entity.label === 'string' && Array.isArray(entity.points) && entity.points.length === 1 &&
+    entity.points.every(validGeometryPoint) && typeof entity.enabled === 'boolean' &&
+    Number.isFinite(entity.brightRadiusFeet) && entity.brightRadiusFeet >= 0 && entity.brightRadiusFeet <= 10_000 &&
+    Number.isFinite(entity.dimRadiusFeet) && entity.dimRadiusFeet >= 0 && entity.dimRadiusFeet <= 10_000 &&
+    typeof entity.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(entity.color) &&
+    Number.isFinite(entity.elevationFeet) && Number.isFinite(entity.createdAt)
+}
+
 function validateMapGeometryState(value) {
-  if (value.schemaVersion !== 1 || !Array.isArray(value.maps) || value.maps.length > 4_096) return 'invalid-map-geometry'
+  if (![1, 2].includes(value.schemaVersion) || !Array.isArray(value.maps) || value.maps.length > 4_096) return 'invalid-map-geometry'
   const mapIds = new Set()
   for (const map of value.maps) {
     if (
       !plainObject(map) || typeof map.mapId !== 'string' || !map.mapId || mapIds.has(map.mapId) ||
       !Array.isArray(map.walls) || !Array.isArray(map.doors) || !Array.isArray(map.obstacles) ||
-      (map.windows != null && !Array.isArray(map.windows)) ||
-      map.walls.length + map.doors.length + (Array.isArray(map.windows) ? map.windows.length : 0) + map.obstacles.length > 4_096 ||
+      (value.schemaVersion === 2
+        ? !Array.isArray(map.windows) || !Array.isArray(map.lights)
+        : map.windows != null && !Array.isArray(map.windows) || map.lights != null && !Array.isArray(map.lights)) ||
+      map.walls.length + map.doors.length + (Array.isArray(map.windows) ? map.windows.length : 0) +
+        map.obstacles.length + (Array.isArray(map.lights) ? map.lights.length : 0) > 4_096 ||
       !plainObject(map.vision) || typeof map.vision.enabled !== 'boolean' ||
       typeof map.vision.sharePartyVision !== 'boolean' || !Number.isFinite(map.vision.defaultRangeFeet) ||
       (map.vision.ambientLight != null && !['bright', 'dim', 'darkness'].includes(map.vision.ambientLight)) ||
@@ -1069,9 +1086,13 @@ function validateMapGeometryState(value) {
       !map.walls.every((entity) => validGeometryEntity(entity, 'wall')) ||
       !map.doors.every((entity) => validGeometryEntity(entity, 'door')) ||
       !(Array.isArray(map.windows) ? map.windows : []).every((entity) => validGeometryEntity(entity, 'window')) ||
-      !map.obstacles.every((entity) => validGeometryEntity(entity, 'obstacle'))
+      !map.obstacles.every((entity) => validGeometryEntity(entity, 'obstacle')) ||
+      !(Array.isArray(map.lights) ? map.lights : []).every(validGeometryLight)
     ) return 'invalid-map-geometry'
-    const entityIds = [...map.walls, ...map.doors, ...(Array.isArray(map.windows) ? map.windows : []), ...map.obstacles].map((entity) => entity.id)
+    const entityIds = [
+      ...map.walls, ...map.doors, ...(Array.isArray(map.windows) ? map.windows : []),
+      ...map.obstacles, ...(Array.isArray(map.lights) ? map.lights : []),
+    ].map((entity) => entity.id)
     if (new Set(entityIds).size !== entityIds.length) return 'duplicate-map-geometry-entity'
   }
   return null
