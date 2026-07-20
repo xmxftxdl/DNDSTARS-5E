@@ -80,7 +80,7 @@ import {
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryTargeting } from '../types/inventory'
 import { createEmptyMapFog, type FogTool } from '../lib/fogOfWar'
-import { createEmptyMapGeometry, mapGeometryLineOfEffectBlocked, mapGeometryVisibilityPolygon, type MapGeometryTool } from '../lib/mapGeometry'
+import { createEmptyMapGeometry, mapGeometryLineOfEffectBlocked, mapGeometryVisibilityPolygon, type MapGeometryTool, type MapGeometryWallMaterial } from '../lib/mapGeometry'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import {
@@ -173,11 +173,9 @@ import {
   answerInterruptWindow,
   appendRollLedgerEntry,
   closeInterruptWindow,
-  commitCombatTransaction,
   createCombatTransaction,
   openInterruptWindow,
   rerollLedgerDie,
-  rollbackCombatTransaction,
   type CombatTransaction,
 } from '../lib/combatTransaction'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
@@ -354,6 +352,7 @@ import { getImage } from '../lib/imageStore'
 import { clearEnemyAiWarnings, type EnemyTurnResult } from '../lib/enemyAi'
 import {
   checkCombatOutcome,
+  characterNeedsDeathSave,
   decideTurnAction,
   hasActionableActor,
   isTokenAlive,
@@ -818,6 +817,7 @@ export default function MapsPage() {
   const selectedGeometryEntityId = useMapGeometryStore((s) => s.selectedEntityId)
   const selectGeometryEntity = useMapGeometryStore((s) => s.selectEntity)
   const addGeometryEntity = useMapGeometryStore((s) => s.addEntity)
+  const removeGeometryEntity = useMapGeometryStore((s) => s.removeEntity)
   const setGeometryDoorState = useMapGeometryStore((s) => s.setDoorState)
   const updateGeometryEntity = useMapGeometryStore((s) => s.updateEntity)
   const explorationMaps = useMapExplorationStore((s) => s.maps)
@@ -894,6 +894,7 @@ export default function MapsPage() {
   const [fogPreviewAsPlayer, setFogPreviewAsPlayer] = useState(false)
   const [geometryEditMode, setGeometryEditMode] = useState(false)
   const [geometryTool, setGeometryTool] = useState<MapGeometryTool>('select')
+  const [geometryWallMaterial, setGeometryWallMaterial] = useState<MapGeometryWallMaterial>('stone')
   const [geometryPreviewAsPlayer, setGeometryPreviewAsPlayer] = useState(false)
   const [geometrySnapToGrid, setGeometrySnapToGrid] = useState(true)
   const [panelWidth, setPanelWidth] = useState(720)
@@ -1679,7 +1680,7 @@ export default function MapsPage() {
     ? geometryMaps.find((geometry) => geometry.mapId === activeMap.id) ?? createEmptyMapGeometry(activeMap.id, 0)
     : undefined
   const selectedGeometryEntity = activeGeometry
-    ? [...activeGeometry.walls, ...activeGeometry.doors, ...activeGeometry.obstacles, ...(activeGeometry.lights ?? [])]
+    ? [...activeGeometry.walls, ...activeGeometry.doors, ...(activeGeometry.windows ?? []), ...activeGeometry.obstacles, ...(activeGeometry.lights ?? [])]
         .find((entity) => entity.id === selectedGeometryEntityId)
     : undefined
   const selectedDoorInteraction = activeGeometry?.doors.find((door) => door.id === selectedDoorInteractionId)
@@ -2257,6 +2258,14 @@ export default function MapsPage() {
     turnCharacter.currentHp > 0 &&
     !!currentInitiativeToken &&
     isTokenAlive(currentInitiativeToken, characters) &&
+    (isDM || (!pendingPlayerAction && turnCharacter.id === playerChar?.id))
+
+  const canControlDeathSaveTurn =
+    combatActive &&
+    usesAutomatedPlayerSettlement(settlementMode) &&
+    currentInitiativeToken?.type === 'player' &&
+    !!turnCharacter &&
+    characterNeedsDeathSave(turnCharacter) &&
     (isDM || (!pendingPlayerAction && turnCharacter.id === playerChar?.id))
 
   const playerCombatLocked = !isDM && playerCombatEndedLocked && !combatActive
@@ -7026,6 +7035,118 @@ export default function MapsPage() {
       return
     }
 
+    if (action.type === 'dnd5e-death-save' && dnd5eActionActor && dnd5eActionActorToken) {
+      if (!characterNeedsDeathSave(dnd5eActionActor)) {
+        acknowledgePlayerAction(action, 'rejected', 'invalid-death-save')
+        completePlayerActionRequest(action)
+        return
+      }
+      const preparedTurn = prepareDnd5ePlayerEndTurn({
+        action,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+      })
+      if (!preparedTurn.ok) {
+        acknowledgePlayerAction(action, 'rejected', preparedTurn.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const activeEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
+      for (const requirement of preparedTurn.prepared.activeEffectSavingThrows) {
+        const d20 = await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合结束豁免`, preparedTurn.prepared.actorName)
+        const d20Second = requirement.mode !== 'normal'
+          ? await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合结束豁免`, preparedTurn.prepared.actorName)
+          : undefined
+        const blessRoll = requirement.blessed
+          ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', preparedTurn.prepared.actorName))[0]
+          : undefined
+        const baneRoll = requirement.baned
+          ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', preparedTurn.prepared.actorName))[0]
+          : undefined
+        activeEffectSavingThrows.push({ effectId: requirement.effect.id, d20, d20Second, blessRoll, baneRoll })
+      }
+      const turnStartActiveEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
+      for (const requirement of preparedTurn.prepared.turnStartActiveEffectSavingThrows) {
+        const d20 = await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合开始豁免`, requirement.targetName)
+        const d20Second = requirement.mode !== 'normal'
+          ? await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合开始豁免`, requirement.targetName)
+          : undefined
+        const blessRoll = requirement.blessed
+          ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', requirement.targetName))[0]
+          : undefined
+        const baneRoll = requirement.baned
+          ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', requirement.targetName))[0]
+          : undefined
+        turnStartActiveEffectSavingThrows.push({ effectId: requirement.effect.id, d20, d20Second, blessRoll, baneRoll })
+      }
+      const actorCombatant = preparedTurn.prepared.state.combatants[dnd5eActionActorToken.id]
+      const deathSaveD20 = await rollDiceBoxD20('死亡豁免', dnd5eActionActor.name)
+      const blessRoll = actorCombatant && dnd5eCombatantHasConcentrationEffect(
+        preparedTurn.prepared.state,
+        actorCombatant.id,
+        'bless',
+      ) ? (await rollDiceBoxValues(1, 4, '祝福术·死亡豁免加值', dnd5eActionActor.name))[0] : undefined
+      const baneRoll = actorCombatant && dnd5eCombatantHasConcentrationEffect(
+        preparedTurn.prepared.state,
+        actorCombatant.id,
+        'bane',
+      ) ? (await rollDiceBoxValues(1, 4, '灾祸术·死亡豁免减值', dnd5eActionActor.name))[0] : undefined
+      const result = resolveDnd5eHeadlessAction(preparedTurn.prepared.state, {
+        type: 'death-save-turn',
+        actorId: dnd5eActionActorToken.id,
+        d20: deathSaveD20,
+        blessRoll,
+        baneRoll,
+        activeEffectSavingThrows,
+        turnStartActiveEffectSavingThrows,
+      }, { transactionId: action.id, mapId: authorityMap.id })
+      if (!result.ok) {
+        acknowledgePlayerAction(action, 'rejected', result.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const settled = await settleDnd5eConcentrationChecks({
+        result,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        characterIdByCombatantId: preparedTurn.prepared.characterIdByCombatantId,
+        rollD20: rollDiceBoxD20,
+        rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
+        requestSavingThrowReroll: requestDnd5eSavingThrowRerollDice,
+        requestBardicInspiration: requestDnd5eBardicInspirationRoll,
+        requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
+      })
+      for (const characterId of settled.application.changedCharacterIds) {
+        const next = settled.application.characters.find((character) => character.id === characterId)
+        if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      for (const tokenId of settled.application.changedTokenIds) {
+        const next = settled.application.map.tokens.find((token) => token.id === tokenId)
+        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+      }
+      const deathSave = settled.result.events.find((event) => event.type === 'death-save-resolved')
+      if (deathSave?.type === 'death-save-resolved') {
+        const outcome = deathSave.currentHp > 0
+          ? '自然 20，恢复 1 点生命值'
+          : deathSave.dead
+            ? '死亡'
+            : deathSave.stable
+              ? '伤势稳定'
+              : `${deathSave.successes} 次成功 / ${deathSave.failures} 次失败`
+        pushCombatLog(`${dnd5eActionActor.name} 进行死亡豁免（d20=${deathSave.d20}）：${outcome}。`, 'turn')
+      }
+      if (
+        settled.result.state.round !== liveRound ||
+        settled.result.state.initiativeIndex !== preparedTurn.prepared.state.initiativeIndex
+      ) {
+        applyDnd5eTurnAdvance(settled.result.state, liveRound, dnd5eActionActor.id)
+      }
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (
       action.type === 'end-turn' &&
       (dnd5eActionActor || (dnd5eActionActorToken?.poolId && getDnd5eSrdMonster(dnd5eActionActorToken.poolId)))
@@ -7182,6 +7303,14 @@ export default function MapsPage() {
           turnEconomy: currentDnd5eTurnEconomy(action.actorTokenId, liveRound),
           areaId: runtimeId(`item-area:${itemTargeting.areaKind}`),
           createdAt: runtimeNow(),
+          transaction: createCombatTransaction({
+            id: action.id,
+            mapId: authorityMap.id,
+            combatId: action.combatId,
+            actorId: action.actorTokenId,
+            actionId: action.id,
+            actionKind: 'item-use',
+          }),
         })
         if (!placed.ok) {
           acknowledgePlayerAction(action, 'rejected', placed.reason)
@@ -7225,10 +7354,21 @@ export default function MapsPage() {
       const healingRolls = healing
         ? await rollDiceBoxValues(healing.count, healing.sides, `${entry.item.name}·恢复生命`, actor.name)
         : undefined
+      const itemTransaction = createCombatTransaction({
+        id: action.id,
+        mapId: authorityMap.id,
+        combatId: action.combatId,
+        actorId: action.actorTokenId,
+        actionId: action.id,
+        actionKind: 'item-use',
+      })
       const resolved = applyDnd5eInventoryMutation(
         characters,
         { type: 'use', characterId: actor.id, instanceId: entry.instanceId, healingRolls },
-        { turnEconomy: currentDnd5eTurnEconomy(action.actorTokenId, liveRound) },
+        {
+          turnEconomy: currentDnd5eTurnEconomy(action.actorTokenId, liveRound),
+          transaction: itemTransaction,
+        },
       )
       if (!resolved.ok) {
         acknowledgePlayerAction(action, 'rejected', resolved.reason ?? 'item-use-rejected')
@@ -11051,11 +11191,10 @@ export default function MapsPage() {
         standAgainstTide,
         damageRolls,
         classDamageRolls,
+        transaction: attackTransaction,
       })
       if (!initialResolved.result.ok) {
-        const rollbackReason = attackTransaction
-          ? rollbackCombatTransaction(attackTransaction, initialResolved.result.reason, runtimeNow()).rollbackReason ?? initialResolved.result.reason
-          : initialResolved.result.reason
+        const rollbackReason = initialResolved.result.transaction?.rollbackReason ?? initialResolved.result.reason
         acknowledgePlayerAction(action, 'rejected', rollbackReason)
         completePlayerActionRequest(action)
         return
@@ -11080,7 +11219,6 @@ export default function MapsPage() {
         }
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
-      if (attackTransaction) attackTransaction = commitCombatTransaction(attackTransaction, runtimeNow())
       for (const tokenId of resolved.application.changedTokenIds) {
         const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
         if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
@@ -11573,6 +11711,17 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${turnCharacter.name} 结束回合`)
   }
 
+  const sendDnd5eDeathSaveRequest = () => {
+    if (!canControlDeathSaveTurn || !turnCharacter || !activeMap || !currentInitiativeToken) return false
+    const action = isDM
+      ? createDmLocalPlayerAction({ type: 'dnd5e-death-save' })
+      : createPlayerActionRequest({ type: 'dnd5e-death-save' })
+    if (!action) return false
+    return isDM
+      ? submitDmLocalPlayerAction(action)
+      : submitPlayerActionRequest(action, `${turnCharacter.name} 进行死亡豁免`)
+  }
+
   const sendPlayerDnd5eWeaponAttackRequest = (targetToken: Token, options?: Dnd5eWeaponAttackOptions) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const action = createPlayerActionRequest({
@@ -11964,11 +12113,14 @@ export default function MapsPage() {
     if (!combatActive || !activeMap || !currentInitiativeToken) return
     if (!isDM) return
     if (tryEndCombatIfNeeded()) return
-    if (!isTokenAlive(currentInitiativeToken, characters)) {
+    if (
+      !isTokenAlive(currentInitiativeToken, characters) &&
+      !(currentInitiativeToken.type === 'player' && turnCharacter && characterNeedsDeathSave(turnCharacter))
+    ) {
       const timer = window.setTimeout(() => requestAdvance(), 50)
       return () => window.clearTimeout(timer)
     }
-  }, [combatActive, activeMap?.id, currentInitiativeToken?.id, characters, defeatedTokenIds.length, isDM])
+  }, [combatActive, activeMap?.id, currentInitiativeToken?.id, characters, defeatedTokenIds.length, isDM, turnCharacter])
 
   useEffect(() => {
     const wasActive = previousCombatActiveRef.current
@@ -12146,6 +12298,7 @@ export default function MapsPage() {
               geometry={activeGeometry}
               geometryEditMode={isDM && geometryEditMode}
               geometryTool={geometryTool}
+              geometryWallMaterial={geometryWallMaterial}
               selectedGeometryEntityId={selectedGeometryEntityId}
               geometryPreviewAsPlayer={geometryPreviewAsPlayer}
               geometrySnapToGrid={geometrySnapToGrid}
@@ -12155,6 +12308,7 @@ export default function MapsPage() {
                 if (isDM) addGeometryEntity(activeMap.id, entity)
               }}
               onGeometryEntitySelect={selectGeometryEntity}
+              onGeometryEntityDelete={(entityId) => removeGeometryEntity(activeMap.id, entityId)}
               onGeometryDoorInteract={!isDM ? setSelectedDoorInteractionId : undefined}
               geometrySearchMode={!isDM && !!dnd5eSecretSearchMethod}
               onGeometrySearch={!isDM && dnd5eSecretSearchMethod ? (point) => {
@@ -13593,6 +13747,19 @@ export default function MapsPage() {
                   </button>
                 ))}
 
+              {canControlDeathSaveTurn && (
+                <button
+                  data-testid="dnd5e-death-save"
+                  onClick={() => sendDnd5eDeathSaveRequest()}
+                  disabled={!!pendingPlayerAction}
+                  className="flex items-center gap-1 rounded-lg bg-rose-500/25 px-2.5 py-1 text-xs font-semibold text-rose-100 hover:bg-rose-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="由 DM 权威投掷并同步死亡豁免；未恢复生命值时自动结束本回合"
+                >
+                  <Skull className="h-3.5 w-3.5" />
+                  进行死亡豁免
+                </button>
+              )}
+
               {/* 玩家：结束自己的回合 */}
               {!isDM && (
                 <button
@@ -13793,6 +13960,7 @@ export default function MapsPage() {
                       selectedToken={selectedToken}
                       editMode={geometryEditMode}
                       tool={geometryTool}
+                      wallMaterial={geometryWallMaterial}
                       previewAsPlayer={geometryPreviewAsPlayer}
                       snapToGrid={geometrySnapToGrid}
                       onEditModeChange={(enabled) => {
@@ -13813,6 +13981,7 @@ export default function MapsPage() {
                         setGeometryTool(nextTool)
                         selectGeometryEntity(null)
                       }}
+                      onWallMaterialChange={setGeometryWallMaterial}
                       onPreviewChange={setGeometryPreviewAsPlayer}
                       onSnapToGridChange={setGeometrySnapToGrid}
                     />

@@ -67,6 +67,7 @@ function replaceEntity(map: MapGeometryState, entityId: string, patch: MapGeomet
     ...map,
     walls: map.walls.map(update),
     doors: map.doors.map(update),
+    windows: (map.windows ?? []).map(update),
     obstacles: map.obstacles.map(update),
     lights: (map.lights ?? []).map(update),
   }
@@ -97,7 +98,12 @@ function offsetEntity(entity: MapGeometryEntity, offset: number): MapGeometryEnt
     createdAt: Date.now(),
     points,
   }
-  if (copy.kind === 'door') return { ...copy, points: [points[0], points[1]] }
+  if (copy.kind === 'door' || copy.kind === 'window') return {
+    ...copy,
+    points: [points[0], points[1]],
+    parentWallId: undefined,
+    parentWallSegmentIndex: undefined,
+  }
   if (copy.kind === 'light') return { ...copy, points: [points[0]] }
   return copy
 }
@@ -126,12 +132,14 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
         set((state) => {
           const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
           const maps = mutateMap(state.maps, mapId, (map) => {
-            const count = map.walls.length + map.doors.length + map.obstacles.length + (map.lights?.length ?? 0)
+            const count = map.walls.length + map.doors.length + (map.windows?.length ?? 0) + map.obstacles.length + (map.lights?.length ?? 0)
             if (count >= MAP_GEOMETRY_MAX_ENTITIES) return map
             return entity.kind === 'wall'
               ? { ...map, walls: [...map.walls, entity] }
               : entity.kind === 'door'
                 ? { ...map, doors: [...map.doors, entity] }
+                : entity.kind === 'window'
+                  ? { ...map, windows: [...(map.windows ?? []), entity] }
                 : entity.kind === 'obstacle'
                   ? { ...map, obstacles: [...map.obstacles, entity] }
                   : { ...map, lights: [...(map.lights ?? []), entity] }
@@ -156,7 +164,8 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           const maps = mutateMap(state.maps, mapId, (map) => ({
             ...map,
             walls: map.walls.filter((entity) => entity.id !== entityId),
-            doors: map.doors.filter((entity) => entity.id !== entityId),
+            doors: map.doors.filter((entity) => entity.id !== entityId && entity.parentWallId !== entityId),
+            windows: (map.windows ?? []).filter((entity) => entity.id !== entityId && entity.parentWallId !== entityId),
             obstacles: map.obstacles.filter((entity) => entity.id !== entityId),
             lights: (map.lights ?? []).filter((entity) => entity.id !== entityId),
           }))
@@ -202,7 +211,7 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
       duplicateEntity: (mapId, entityId, offset = 12) => {
         const state = get()
         const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
-        const source = [...current.walls, ...current.doors, ...current.obstacles, ...(current.lights ?? [])].find((entity) => entity.id === entityId)
+        const source = [...current.walls, ...current.doors, ...(current.windows ?? []), ...current.obstacles, ...(current.lights ?? [])].find((entity) => entity.id === entityId)
         if (!source) return undefined
         const entity = offsetEntity(source, offset)
         get().addEntity(mapId, entity)

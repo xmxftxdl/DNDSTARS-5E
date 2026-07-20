@@ -1020,7 +1020,13 @@ function validGeometryEntity(entity, kind) {
     !Number.isFinite(entity.baseHeightFeet) || !Number.isFinite(entity.heightFeet) || entity.heightFeet < 0 ||
     !Number.isFinite(entity.createdAt)
   ) return false
-  if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048
+  const validWallAttachment = (entity.parentWallId == null && entity.parentWallSegmentIndex == null) || (
+    typeof entity.parentWallId === 'string' && entity.parentWallId.length > 0 && entity.parentWallId.length <= 160 &&
+    Number.isInteger(entity.parentWallSegmentIndex) && entity.parentWallSegmentIndex >= 0 && entity.parentWallSegmentIndex <= 2_047
+  )
+  if (!validWallAttachment) return false
+  if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048 &&
+    (entity.material == null || ['stone', 'brick', 'wood', 'metal', 'natural'].includes(entity.material))
   if (kind === 'door') {
     if (!(entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean')) return false
     if (entity.revealedToMemberIds != null && (
@@ -1035,6 +1041,9 @@ function validGeometryEntity(entity, kind) {
     )) return false
     return true
   }
+  if (kind === 'window') {
+    return entity.points.length === 2 && ['glass', 'bars', 'shutters', 'opening'].includes(entity.windowType)
+  }
   return entity.points.length >= 3 && entity.points.length <= 2_048 &&
     ['none', 'half', 'three-quarters', 'total'].includes(entity.cover) &&
     (entity.terrainCostMultiplier == null || (Number.isFinite(entity.terrainCostMultiplier) && entity.terrainCostMultiplier >= 1 && entity.terrainCostMultiplier <= 10)) &&
@@ -1048,7 +1057,8 @@ function validateMapGeometryState(value) {
     if (
       !plainObject(map) || typeof map.mapId !== 'string' || !map.mapId || mapIds.has(map.mapId) ||
       !Array.isArray(map.walls) || !Array.isArray(map.doors) || !Array.isArray(map.obstacles) ||
-      map.walls.length + map.doors.length + map.obstacles.length > 4_096 ||
+      (map.windows != null && !Array.isArray(map.windows)) ||
+      map.walls.length + map.doors.length + (Array.isArray(map.windows) ? map.windows.length : 0) + map.obstacles.length > 4_096 ||
       !plainObject(map.vision) || typeof map.vision.enabled !== 'boolean' ||
       typeof map.vision.sharePartyVision !== 'boolean' || !Number.isFinite(map.vision.defaultRangeFeet) ||
       (map.vision.ambientLight != null && !['bright', 'dim', 'darkness'].includes(map.vision.ambientLight)) ||
@@ -1058,9 +1068,10 @@ function validateMapGeometryState(value) {
     if (
       !map.walls.every((entity) => validGeometryEntity(entity, 'wall')) ||
       !map.doors.every((entity) => validGeometryEntity(entity, 'door')) ||
+      !(Array.isArray(map.windows) ? map.windows : []).every((entity) => validGeometryEntity(entity, 'window')) ||
       !map.obstacles.every((entity) => validGeometryEntity(entity, 'obstacle'))
     ) return 'invalid-map-geometry'
-    const entityIds = [...map.walls, ...map.doors, ...map.obstacles].map((entity) => entity.id)
+    const entityIds = [...map.walls, ...map.doors, ...(Array.isArray(map.windows) ? map.windows : []), ...map.obstacles].map((entity) => entity.id)
     if (new Set(entityIds).size !== entityIds.length) return 'duplicate-map-geometry-entity'
   }
   return null
@@ -1319,15 +1330,34 @@ export function projectMapGeometryForPlayer(value, memberId = null) {
       const maySeeSecretDoor = (door) => door?.secret !== true || (
         typeof memberId === 'string' && Array.isArray(door.revealedToMemberIds) && door.revealedToMemberIds.includes(memberId)
       )
-      const secretWalls = map.doors.flatMap((door) => !maySeeSecretDoor(door) && door.state !== 'open'
-        ? [{
+      const secretWalls = map.doors.flatMap((door) => {
+        const parentWall = map.walls.find((wall) => wall?.id === door?.parentWallId)
+        return !maySeeSecretDoor(door) && door.state !== 'open' ? [{
             id: `wall:${createHash('sha256').update(JSON.stringify([door.points, door.createdAt])).digest('hex').slice(0, 20)}`,
             kind: 'wall',
             label: '墙',
             points: door.points,
+            material: parentWall?.material ?? 'stone',
             blocksVision: door.blocksVision,
             blocksMovement: door.blocksMovement,
             blocksLineOfEffect: door.blocksLineOfEffect,
+            baseHeightFeet: door.baseHeightFeet,
+            heightFeet: door.heightFeet,
+            createdAt: door.createdAt,
+          }] : []
+      })
+      const secretOpenings = map.doors.flatMap((door) => !maySeeSecretDoor(door) && door.state === 'open'
+        ? [{
+            id: `window:${createHash('sha256').update(JSON.stringify([door.points, door.createdAt, 'open'])).digest('hex').slice(0, 20)}`,
+            kind: 'window',
+            label: '开放通道',
+            points: door.points,
+            windowType: 'opening',
+            parentWallId: door.parentWallId,
+            parentWallSegmentIndex: door.parentWallSegmentIndex,
+            blocksVision: false,
+            blocksMovement: false,
+            blocksLineOfEffect: false,
             baseHeightFeet: door.baseHeightFeet,
             heightFeet: door.heightFeet,
             createdAt: door.createdAt,
@@ -1338,6 +1368,7 @@ export function projectMapGeometryForPlayer(value, memberId = null) {
         ...map,
         walls: [...map.walls, ...secretWalls],
         doors: map.doors.filter(maySeeSecretDoor),
+        windows: [...(Array.isArray(map.windows) ? map.windows : []), ...secretOpenings],
       }
     }),
   }

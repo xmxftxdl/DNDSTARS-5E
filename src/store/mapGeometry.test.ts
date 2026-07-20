@@ -54,4 +54,26 @@ describe('map geometry editor history', () => {
     expect(parsed?.walls[0].label).toBe('北墙')
     expect(useMapGeometryStore.getState().replaceMap('map-1', parsed!)).toBe(true)
   })
+
+  it('removes embedded doors and windows when their parent wall is deleted', () => {
+    const store = useMapGeometryStore.getState()
+    store.addEntity('map-1', wall)
+    store.addEntity('map-1', {
+      id: 'door', kind: 'door', label: '门', points: [{ x: 10, y: 0 }, { x: 20, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, state: 'closed', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+    })
+    store.addEntity('map-1', {
+      id: 'window', kind: 'window', label: '窗户', points: [{ x: 30, y: 0 }, { x: 40, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, windowType: 'glass',
+      blocksVision: false, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 3,
+    })
+    useMapGeometryStore.getState().removeEntity('map-1', wall.id)
+    const geometry = useMapGeometryStore.getState().maps[0]
+    expect(geometry.walls).toEqual([])
+    expect(geometry.doors).toEqual([])
+    expect(geometry.windows).toEqual([])
+  })
 })

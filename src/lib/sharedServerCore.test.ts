@@ -212,6 +212,7 @@ describe('map geometry player projection', () => {
         ...common, id: 'secret-door', kind: 'door',
         points: [{ x: 20, y: 60 }, { x: 30, y: 60 }], state: 'locked', secret: true,
       }],
+      windows: [] as Array<Record<string, unknown>>,
       obstacles: [],
       vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: false },
       updatedAt: 1,
@@ -311,6 +312,22 @@ describe('map geometry player projection', () => {
     expect(JSON.stringify(projected)).not.toContain('secret-door')
   })
 
+  it('projects an opened hidden door as an anonymous non-interactive wall opening', () => {
+    const opened = structuredClone(geometry)
+    Object.assign(opened.maps[0].doors[0], {
+      state: 'open',
+      parentWallId: 'wall-1',
+      parentWallSegmentIndex: 0,
+      points: [{ x: 50, y: 20 }, { x: 50, y: 40 }],
+    })
+    const projected = sharedServerCore.projectMapGeometryForPlayer(opened)
+    expect(projected.maps[0].doors).toEqual([])
+    expect(projected.maps[0].windows).toContainEqual(expect.objectContaining({
+      kind: 'window', windowType: 'opening', blocksMovement: false,
+    }))
+    expect(JSON.stringify(projected)).not.toContain('secret-door')
+  })
+
   it('projects a discovered secret door only to the authorized room member', () => {
     const discovered = structuredClone(geometry)
     Object.assign(discovered.maps[0].doors[0], { revealedToMemberIds: ['member-a'] })
@@ -344,7 +361,22 @@ describe('map geometry player projection', () => {
     expect(validateSharedStateShape('map-geometry', geometry)).toEqual({ ok: true })
     expect(validateSharedStateShape('map-geometry', {
       ...geometry,
+      maps: [{
+        ...geometry.maps[0],
+        windows: [{
+          ...common, id: 'window', kind: 'window', windowType: 'glass',
+          parentWallId: 'wall-1', parentWallSegmentIndex: 0,
+          points: [{ x: 50, y: 20 }, { x: 50, y: 40 }],
+        }],
+      }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('map-geometry', {
+      ...geometry,
       maps: [{ ...geometry.maps[0], vision: { enabled: true } }],
+    })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
+    expect(validateSharedStateShape('map-geometry', {
+      ...geometry,
+      maps: [{ ...geometry.maps[0], windows: [{ ...common, id: 'window', kind: 'window', points: [] }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
   })
 })

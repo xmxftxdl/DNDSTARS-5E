@@ -20,11 +20,19 @@ export interface MapGeometryBlocking {
   blocksLineOfEffect: boolean
 }
 
+export type MapGeometryWallMaterial = 'stone' | 'brick' | 'wood' | 'metal' | 'natural'
+
+export interface MapGeometryWallAttachment {
+  parentWallId?: string
+  parentWallSegmentIndex?: number
+}
+
 export interface MapGeometryWall extends MapGeometryHeight, MapGeometryBlocking {
   id: string
   kind: 'wall'
   label: string
   points: MapGeometryPoint[]
+  material?: MapGeometryWallMaterial
   createdAt: number
 }
 
@@ -38,7 +46,7 @@ export interface MapGeometryDoorInteraction {
   requiresThievesTools: boolean
 }
 
-export interface MapGeometryDoor extends MapGeometryHeight, MapGeometryBlocking {
+export interface MapGeometryDoor extends MapGeometryHeight, MapGeometryBlocking, MapGeometryWallAttachment {
   id: string
   kind: 'door'
   label: string
@@ -48,6 +56,17 @@ export interface MapGeometryDoor extends MapGeometryHeight, MapGeometryBlocking 
   interaction?: MapGeometryDoorInteraction
   /** Room member ids that may receive this secret door in their geometry projection. */
   revealedToMemberIds?: string[]
+  createdAt: number
+}
+
+export type MapGeometryWindowType = 'glass' | 'bars' | 'shutters' | 'opening'
+
+export interface MapGeometryWindow extends MapGeometryHeight, MapGeometryBlocking, MapGeometryWallAttachment {
+  id: string
+  kind: 'window'
+  label: string
+  points: [MapGeometryPoint, MapGeometryPoint]
+  windowType: MapGeometryWindowType
   createdAt: number
 }
 
@@ -77,11 +96,14 @@ export interface MapGeometryLight {
   createdAt: number
 }
 
-export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryObstacle | MapGeometryLight
-export type MapGeometryTool = 'select' | 'wall' | 'door' | 'obstacle' | 'light'
+export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryWindow | MapGeometryObstacle | MapGeometryLight
+export type MapGeometryTool = 'select' | 'wall' | 'door' | 'window' | 'obstacle' | 'light' | 'delete'
 export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBlocking> & {
   label?: string
   points?: MapGeometryPoint[]
+  material?: MapGeometryWallMaterial
+  parentWallId?: string
+  parentWallSegmentIndex?: number
   state?: MapGeometryDoorState
   secret?: boolean
   interaction?: MapGeometryDoorInteraction
@@ -94,6 +116,7 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   dimRadiusFeet?: number
   color?: string
   elevationFeet?: number
+  windowType?: MapGeometryWindowType
 }
 
 export interface MapGeometryVisionSettings {
@@ -107,6 +130,7 @@ export interface MapGeometryState {
   mapId: string
   walls: MapGeometryWall[]
   doors: MapGeometryDoor[]
+  windows?: MapGeometryWindow[]
   obstacles: MapGeometryObstacle[]
   lights?: MapGeometryLight[]
   vision: MapGeometryVisionSettings
@@ -141,7 +165,7 @@ const DEFAULT_VISION: MapGeometryVisionSettings = {
 }
 
 export function createEmptyMapGeometry(mapId: string, now = Date.now()): MapGeometryState {
-  return { mapId, walls: [], doors: [], obstacles: [], lights: [], vision: { ...DEFAULT_VISION }, updatedAt: now }
+  return { mapId, walls: [], doors: [], windows: [], obstacles: [], lights: [], vision: { ...DEFAULT_VISION }, updatedAt: now }
 }
 
 function finite(value: unknown, min: number, max: number): value is number {
@@ -183,6 +207,15 @@ function normalizeCommon(raw: Record<string, unknown>) {
   }
 }
 
+function normalizeWallAttachment(raw: Record<string, unknown>): MapGeometryWallAttachment | undefined {
+  if (raw.parentWallId == null && raw.parentWallSegmentIndex == null) return {}
+  if (
+    typeof raw.parentWallId !== 'string' || !raw.parentWallId || raw.parentWallId.length > 160 ||
+    !Number.isInteger(raw.parentWallSegmentIndex) || !finite(raw.parentWallSegmentIndex, 0, 2_047)
+  ) return undefined
+  return { parentWallId: raw.parentWallId, parentWallSegmentIndex: raw.parentWallSegmentIndex as number }
+}
+
 export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
@@ -205,11 +238,20 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
   if (!common) return undefined
   if (raw.kind === 'wall') {
     const points = normalizePoints(raw.points, 2)
-    return points ? { ...common, kind: 'wall', points } : undefined
+    if (!points || (raw.material != null && !['stone', 'brick', 'wood', 'metal', 'natural'].includes(String(raw.material)))) {
+      return undefined
+    }
+    return {
+      ...common,
+      kind: 'wall',
+      points,
+      material: (raw.material as MapGeometryWallMaterial | undefined) ?? 'stone',
+    }
   }
   if (raw.kind === 'door') {
     const points = normalizePoints(raw.points, 2, 2)
-    if (!points || !['open', 'closed', 'locked'].includes(String(raw.state)) || typeof raw.secret !== 'boolean') return undefined
+    const attachment = normalizeWallAttachment(raw)
+    if (!points || !attachment || !['open', 'closed', 'locked'].includes(String(raw.state)) || typeof raw.secret !== 'boolean') return undefined
     const interactionRaw = raw.interaction
     let interaction: MapGeometryDoorInteraction | undefined
     if (interactionRaw != null) {
@@ -239,10 +281,23 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       points: [points[0], points[1]],
       state: raw.state as MapGeometryDoorState,
       secret: raw.secret,
+      ...attachment,
       ...(interaction ? { interaction } : {}),
       ...(Array.isArray(raw.revealedToMemberIds)
         ? { revealedToMemberIds: [...new Set(raw.revealedToMemberIds as string[])] }
         : {}),
+    }
+  }
+  if (raw.kind === 'window') {
+    const points = normalizePoints(raw.points, 2, 2)
+    const attachment = normalizeWallAttachment(raw)
+    if (!points || !attachment || !['glass', 'bars', 'shutters', 'opening'].includes(String(raw.windowType))) return undefined
+    return {
+      ...common,
+      ...attachment,
+      kind: 'window',
+      points: [points[0], points[1]],
+      windowType: raw.windowType as MapGeometryWindowType,
     }
   }
   if (raw.kind === 'obstacle') {
@@ -265,8 +320,11 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
   if (
     typeof raw.mapId !== 'string' || !raw.mapId || raw.mapId.length > 160 ||
     !Array.isArray(raw.walls) || !Array.isArray(raw.doors) || !Array.isArray(raw.obstacles) ||
+    (raw.windows != null && !Array.isArray(raw.windows)) ||
     (raw.lights != null && !Array.isArray(raw.lights)) ||
-    raw.walls.length + raw.doors.length + raw.obstacles.length + (Array.isArray(raw.lights) ? raw.lights.length : 0) > MAP_GEOMETRY_MAX_ENTITIES ||
+    raw.walls.length + raw.doors.length + raw.obstacles.length +
+      (Array.isArray(raw.windows) ? raw.windows.length : 0) +
+      (Array.isArray(raw.lights) ? raw.lights.length : 0) > MAP_GEOMETRY_MAX_ENTITIES ||
     !raw.vision || typeof raw.vision !== 'object' || Array.isArray(raw.vision) ||
     !finite(raw.updatedAt, 0, Number.MAX_SAFE_INTEGER)
   ) return undefined
@@ -278,18 +336,21 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
   ) return undefined
   const walls = raw.walls.map(normalizeMapGeometryEntity)
   const doors = raw.doors.map(normalizeMapGeometryEntity)
+  const windows = (Array.isArray(raw.windows) ? raw.windows : []).map(normalizeMapGeometryEntity)
   const obstacles = raw.obstacles.map(normalizeMapGeometryEntity)
   const lights = (Array.isArray(raw.lights) ? raw.lights : []).map(normalizeMapGeometryEntity)
   if (
     walls.some((entity) => entity?.kind !== 'wall') || doors.some((entity) => entity?.kind !== 'door') ||
+    windows.some((entity) => entity?.kind !== 'window') ||
     obstacles.some((entity) => entity?.kind !== 'obstacle') || lights.some((entity) => entity?.kind !== 'light')
   ) return undefined
-  const entities = [...walls, ...doors, ...obstacles, ...lights] as MapGeometryEntity[]
+  const entities = [...walls, ...doors, ...windows, ...obstacles, ...lights] as MapGeometryEntity[]
   if (new Set(entities.map((entity) => entity.id)).size !== entities.length) return undefined
   return {
     mapId: raw.mapId,
     walls: walls as MapGeometryWall[],
     doors: doors as MapGeometryDoor[],
+    windows: windows as MapGeometryWindow[],
     obstacles: obstacles as MapGeometryObstacle[],
     lights: lights as MapGeometryLight[],
     vision: {
@@ -316,10 +377,8 @@ export function normalizeSharedMapGeometry(value: unknown): SharedMapGeometrySta
   return { schemaVersion: MAP_GEOMETRY_SCHEMA_VERSION, maps: normalized, updatedAt: raw.updatedAt }
 }
 
-function entitySegments(entity: MapGeometryWall | MapGeometryObstacle): MapGeometrySegment[] {
-  const pairs = entity.kind === 'obstacle'
-    ? entity.points.map((point, index) => [point, entity.points[(index + 1) % entity.points.length]] as const)
-    : entity.points.slice(0, -1).map((point, index) => [point, entity.points[index + 1]] as const)
+function entitySegments(entity: MapGeometryObstacle): MapGeometrySegment[] {
+  const pairs = entity.points.map((point, index) => [point, entity.points[(index + 1) % entity.points.length]] as const)
   return pairs.map(([a, b]) => ({
     entityId: entity.id,
     entityKind: entity.kind,
@@ -333,10 +392,125 @@ function entitySegments(entity: MapGeometryWall | MapGeometryObstacle): MapGeome
   }))
 }
 
+function interpolatePoint(a: MapGeometryPoint, b: MapGeometryPoint, t: number): MapGeometryPoint {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+}
+
+function projectPointToSegment(point: MapGeometryPoint, a: MapGeometryPoint, b: MapGeometryPoint) {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lengthSquared = dx * dx + dy * dy
+  const t = lengthSquared > 0
+    ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared))
+    : 0
+  const projected = interpolatePoint(a, b, t)
+  return { t, point: projected, distance: Math.hypot(point.x - projected.x, point.y - projected.y) }
+}
+
+export interface MapGeometryWallOpeningAttachment {
+  parentWallId: string
+  parentWallSegmentIndex: number
+  points: [MapGeometryPoint, MapGeometryPoint]
+}
+
+export function mapGeometryAttachOpeningToWall(
+  geometry: MapGeometryState | undefined,
+  start: MapGeometryPoint,
+  end: MapGeometryPoint,
+  maxDistance = 24,
+): MapGeometryWallOpeningAttachment | undefined {
+  let best: (MapGeometryWallOpeningAttachment & { score: number }) | undefined
+  for (const wall of geometry?.walls ?? []) {
+    for (let segmentIndex = 0; segmentIndex < wall.points.length - 1; segmentIndex += 1) {
+      const a = wall.points[segmentIndex]
+      const b = wall.points[segmentIndex + 1]
+      const projectedStart = projectPointToSegment(start, a, b)
+      const projectedEnd = projectPointToSegment(end, a, b)
+      if (projectedStart.distance > maxDistance || projectedEnd.distance > maxDistance) continue
+      const score = projectedStart.distance + projectedEnd.distance
+      if (best && best.score <= score) continue
+      best = {
+        parentWallId: wall.id,
+        parentWallSegmentIndex: segmentIndex,
+        points: [projectedStart.point, projectedEnd.point],
+        score,
+      }
+    }
+  }
+  if (!best) return undefined
+  const { score: _score, ...attachment } = best
+  return attachment
+}
+
+export interface MapGeometryWallRenderSegment {
+  wallId: string
+  wallSegmentIndex: number
+  a: MapGeometryPoint
+  b: MapGeometryPoint
+}
+
+function openingIntervalOnWallSegment(
+  opening: MapGeometryDoor | MapGeometryWindow,
+  wall: MapGeometryWall,
+  wallSegmentIndex: number,
+): [number, number] | undefined {
+  const a = wall.points[wallSegmentIndex]
+  const b = wall.points[wallSegmentIndex + 1]
+  const projectedA = projectPointToSegment(opening.points[0], a, b)
+  const projectedB = projectPointToSegment(opening.points[1], a, b)
+  const explicitlyAttached = opening.parentWallId === wall.id && opening.parentWallSegmentIndex === wallSegmentIndex
+  if (!explicitlyAttached && (opening.parentWallId != null || projectedA.distance > 2 || projectedB.distance > 2)) return undefined
+  const start = Math.min(projectedA.t, projectedB.t)
+  const end = Math.max(projectedA.t, projectedB.t)
+  return end - start > 0.0001 ? [start, end] : undefined
+}
+
+export function mapGeometryWallRenderSegments(
+  geometry: MapGeometryState | undefined,
+  wall: MapGeometryWall,
+): MapGeometryWallRenderSegment[] {
+  const openings = [...(geometry?.doors ?? []), ...(geometry?.windows ?? [])]
+  return wall.points.slice(0, -1).flatMap((a, wallSegmentIndex) => {
+    const b = wall.points[wallSegmentIndex + 1]
+    const intervals = openings
+      .map((opening) => openingIntervalOnWallSegment(opening, wall, wallSegmentIndex))
+      .filter((interval): interval is [number, number] => !!interval)
+      .sort((left, right) => left[0] - right[0])
+    const merged: [number, number][] = []
+    for (const interval of intervals) {
+      const previous = merged.at(-1)
+      if (previous && interval[0] <= previous[1] + 0.0001) previous[1] = Math.max(previous[1], interval[1])
+      else merged.push([...interval])
+    }
+    const segments: MapGeometryWallRenderSegment[] = []
+    let cursor = 0
+    for (const [start, end] of merged) {
+      if (start > cursor + 0.0001) {
+        segments.push({ wallId: wall.id, wallSegmentIndex, a: interpolatePoint(a, b, cursor), b: interpolatePoint(a, b, start) })
+      }
+      cursor = Math.max(cursor, end)
+    }
+    if (cursor < 1 - 0.0001) {
+      segments.push({ wallId: wall.id, wallSegmentIndex, a: interpolatePoint(a, b, cursor), b })
+    }
+    return segments
+  })
+}
+
 export function mapGeometrySegments(geometry: MapGeometryState | undefined): MapGeometrySegment[] {
   if (!geometry) return []
   return [
-    ...geometry.walls.flatMap(entitySegments),
+    ...geometry.walls.flatMap((wall) => mapGeometryWallRenderSegments(geometry, wall).map((segment) => ({
+      entityId: wall.id,
+      entityKind: wall.kind,
+      a: segment.a,
+      b: segment.b,
+      blocksVision: wall.blocksVision,
+      blocksMovement: wall.blocksMovement,
+      blocksLineOfEffect: wall.blocksLineOfEffect,
+      baseHeightFeet: wall.baseHeightFeet,
+      heightFeet: wall.heightFeet,
+    }))),
     ...geometry.doors.flatMap((door) => door.state === 'open' ? [] : [{
       entityId: door.id,
       entityKind: door.kind,
@@ -348,6 +522,17 @@ export function mapGeometrySegments(geometry: MapGeometryState | undefined): Map
       baseHeightFeet: door.baseHeightFeet,
       heightFeet: door.heightFeet,
     }]),
+    ...(geometry.windows ?? []).map((window) => ({
+      entityId: window.id,
+      entityKind: window.kind,
+      a: window.points[0],
+      b: window.points[1],
+      blocksVision: window.blocksVision,
+      blocksMovement: window.blocksMovement,
+      blocksLineOfEffect: window.blocksLineOfEffect,
+      baseHeightFeet: window.baseHeightFeet,
+      heightFeet: window.heightFeet,
+    })),
     ...geometry.obstacles.flatMap(entitySegments),
   ]
 }

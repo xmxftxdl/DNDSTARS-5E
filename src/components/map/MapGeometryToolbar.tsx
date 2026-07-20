@@ -1,9 +1,9 @@
 import { useRef } from 'react'
 import {
   BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, Lightbulb, LockKeyhole,
-  MousePointer2, Package, Redo2, Trash2, Undo2, Upload,
+  MousePointer2, Package, Redo2, Square, Trash2, Undo2, Upload,
 } from 'lucide-react'
-import { normalizeMapGeometry, type MapGeometryEntity, type MapGeometryState, type MapGeometryTool } from '../../lib/mapGeometry'
+import { normalizeMapGeometry, type MapGeometryEntity, type MapGeometryState, type MapGeometryTool, type MapGeometryWallMaterial } from '../../lib/mapGeometry'
 import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useMapStore, type Token } from '../../store/maps'
 
@@ -14,10 +14,12 @@ interface MapGeometryToolbarProps {
   selectedToken?: Token | null
   editMode: boolean
   tool: MapGeometryTool
+  wallMaterial: MapGeometryWallMaterial
   previewAsPlayer: boolean
   snapToGrid: boolean
   onEditModeChange: (enabled: boolean) => void
   onToolChange: (tool: MapGeometryTool) => void
+  onWallMaterialChange: (material: MapGeometryWallMaterial) => void
   onPreviewChange: (enabled: boolean) => void
   onSnapToGridChange: (enabled: boolean) => void
 }
@@ -26,8 +28,18 @@ const TOOL_LABELS: Record<MapGeometryTool, string> = {
   select: '选择',
   wall: '墙',
   door: '门',
+  window: '窗户',
   obstacle: '障碍物',
   light: '光源',
+  delete: '删除',
+}
+
+const WALL_MATERIAL_LABELS: Record<MapGeometryWallMaterial, string> = {
+  stone: '石墙',
+  brick: '砖墙',
+  wood: '木墙',
+  metal: '金属墙',
+  natural: '自然墙体',
 }
 
 function NumberField({
@@ -62,10 +74,12 @@ export default function MapGeometryToolbar({
   selectedToken,
   editMode,
   tool,
+  wallMaterial,
   previewAsPlayer,
   snapToGrid,
   onEditModeChange,
   onToolChange,
+  onWallMaterialChange,
   onPreviewChange,
   onSnapToGridChange,
 }: MapGeometryToolbarProps) {
@@ -82,7 +96,7 @@ export default function MapGeometryToolbar({
   const canUndo = useMapGeometryStore((state) => (state.historyByMapId[mapId]?.length ?? 0) > 0)
   const canRedo = useMapGeometryStore((state) => (state.futureByMapId[mapId]?.length ?? 0) > 0)
   const updateToken = useMapStore((state) => state.updateToken)
-  const count = geometry.walls.length + geometry.doors.length + geometry.obstacles.length + (geometry.lights?.length ?? 0)
+  const count = geometry.walls.length + geometry.doors.length + (geometry.windows?.length ?? 0) + geometry.obstacles.length + (geometry.lights?.length ?? 0)
 
   return (
     <div className="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-violet-400/15 bg-violet-500/[0.05] px-1 py-0.5">
@@ -110,8 +124,27 @@ export default function MapGeometryToolbar({
           </select>
           {tool === 'select' && <MousePointer2 className="h-3.5 w-3.5 text-violet-200" />}
           {tool === 'door' && <DoorClosed className="h-3.5 w-3.5 text-amber-200" />}
+          {tool === 'window' && <Square className="h-3.5 w-3.5 text-sky-200" />}
+          {(tool === 'door' || tool === 'window') && (
+            <span className="text-[10px] text-slate-400" title="门窗必须沿现有墙段拖动，端点会自动吸附到墙上">
+              沿墙拖动
+            </span>
+          )}
           {tool === 'obstacle' && <Package className="h-3.5 w-3.5 text-orange-200" />}
           {tool === 'light' && <Lightbulb className="h-3.5 w-3.5 text-amber-200" />}
+          {tool === 'delete' && <Trash2 className="h-3.5 w-3.5 text-rose-300" />}
+          {tool === 'wall' && (
+            <select
+              value={wallMaterial}
+              onChange={(event) => onWallMaterialChange(event.target.value as MapGeometryWallMaterial)}
+              className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+              title="新绘制墙体的材质"
+            >
+              {Object.entries(WALL_MATERIAL_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          )}
 
           <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用动态视野和服务端 Token 可见性过滤">
             <input
@@ -228,7 +261,7 @@ export default function MapGeometryToolbar({
             type="button"
             disabled={count === 0}
             onClick={() => {
-              if (confirm('清除当前地图的全部墙、门、障碍物和场景光源吗？')) clearMap(mapId)
+              if (confirm('清除当前地图的全部墙、门、窗户、障碍物和场景光源吗？')) clearMap(mapId)
             }}
             className="rounded-md p-1 text-rose-300 hover:bg-rose-500/15 disabled:opacity-30"
             title="清空地图几何"
@@ -267,6 +300,18 @@ export default function MapGeometryToolbar({
             value={selectedEntity.heightFeet}
             onChange={(heightFeet) => updateEntity(mapId, selectedEntity.id, { heightFeet })}
           />}
+          {selectedEntity.kind === 'wall' && (
+            <select
+              value={selectedEntity.material ?? 'stone'}
+              onChange={(event) => updateEntity(mapId, selectedEntity.id, { material: event.target.value as MapGeometryWallMaterial })}
+              className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+              title="墙体材质；嵌入的门窗会沿用该材质的墙框"
+            >
+              {Object.entries(WALL_MATERIAL_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          )}
           {selectedEntity.kind === 'door' && (
             <>
               <select
@@ -347,6 +392,34 @@ export default function MapGeometryToolbar({
               </label>
             </>
           )}
+          {selectedEntity.kind === 'window' && (
+            <select
+              value={selectedEntity.windowType}
+              onChange={(event) => {
+                const windowType = event.target.value as typeof selectedEntity.windowType
+                const defaults = windowType === 'shutters'
+                  ? { blocksVision: true, blocksMovement: true, blocksLineOfEffect: true }
+                  : windowType === 'glass'
+                    ? { blocksVision: false, blocksMovement: true, blocksLineOfEffect: true }
+                    : { blocksVision: false, blocksMovement: true, blocksLineOfEffect: false }
+                updateEntity(mapId, selectedEntity.id, { windowType, ...defaults })
+              }}
+              className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+              title="窗户类型会设置默认阻挡，之后仍可单独调整"
+            >
+              <option value="glass">玻璃窗</option>
+              <option value="bars">铁栏窗</option>
+              <option value="shutters">封闭窗板</option>
+              <option value="opening">开放窗口</option>
+            </select>
+          )}
+          {(selectedEntity.kind === 'door' || selectedEntity.kind === 'window') && (
+            <span className="text-[10px] text-slate-400">
+              {selectedEntity.parentWallId
+                ? `嵌入：${geometry.walls.find((wall) => wall.id === selectedEntity.parentWallId)?.label ?? '墙体'}`
+                : '旧式独立几何'}
+            </span>
+          )}
           {selectedEntity.kind === 'obstacle' && (
             <>
               <select
@@ -404,14 +477,14 @@ export default function MapGeometryToolbar({
               />
             </>
           )}
-          <button
+          {selectedEntity.kind !== 'door' && selectedEntity.kind !== 'window' && <button
             type="button"
             onClick={() => duplicateEntity(mapId, selectedEntity.id)}
             className="rounded p-1 text-slate-300 hover:bg-white/10"
             title="复制选中几何"
           >
             <Copy className="h-3.5 w-3.5" />
-          </button>
+          </button>}
           <button
             type="button"
             onClick={() => removeEntity(mapId, selectedEntity.id)}

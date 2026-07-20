@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import {
   createEmptyMapGeometry,
+  mapGeometryAttachOpeningToWall,
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
   mapGeometryMovementBlocked,
+  mapGeometrySegments,
   mapGeometryVisibilityPolygon,
   normalizeSharedMapGeometry,
   type MapGeometryState,
@@ -69,6 +71,47 @@ describe('map geometry', () => {
       .toBe(true)
   })
 
+  it('snaps doors into a wall opening and removes the underlying wall blocker', () => {
+    const g = geometry()
+    const attachment = mapGeometryAttachOpeningToWall(g, { x: 94, y: 50 }, { x: 106, y: 150 }, 20)
+    expect(attachment).toMatchObject({
+      parentWallId: 'wall',
+      parentWallSegmentIndex: 0,
+      points: [{ x: 100, y: 50 }, { x: 100, y: 150 }],
+    })
+    g.doors = [{
+      id: 'embedded-door', kind: 'door', label: '门', points: attachment!.points,
+      parentWallId: attachment!.parentWallId, parentWallSegmentIndex: attachment!.parentWallSegmentIndex,
+      state: 'open', secret: false, blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }]
+    expect(mapGeometrySegments(g).filter((segment) => segment.entityId === 'wall')).toHaveLength(2)
+    expect(mapGeometryMovementBlocked({
+      geometry: g, map, token: token('a', 50, 100), to: { x: 150, y: 100 },
+    }).blocked).toBe(false)
+    g.doors[0].state = 'closed'
+    expect(mapGeometryMovementBlocked({
+      geometry: g, map, token: token('a', 50, 100), to: { x: 150, y: 100 },
+    })).toMatchObject({ blocked: true, entityId: 'embedded-door' })
+  })
+
+  it('lets an embedded window expose vision while retaining its movement and effect-line rules', () => {
+    const g = geometry()
+    g.windows = [{
+      id: 'window', kind: 'window', label: '玻璃窗', points: [{ x: 100, y: 50 }, { x: 100, y: 150 }],
+      parentWallId: 'wall', parentWallSegmentIndex: 0, windowType: 'glass',
+      blocksVision: false, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }]
+    const viewer = token('viewer', 50, 100)
+    const target = token('target', 150, 100, { type: 'enemy' })
+    expect(mapGeometryCanSeeToken({ geometry: g, map, viewer, target })).toBe(true)
+    expect(mapGeometryMovementBlocked({ geometry: g, map, token: viewer, to: target }))
+      .toMatchObject({ blocked: true, entityId: 'window' })
+    expect(mapGeometryCoverBetween(g, viewer, target))
+      .toMatchObject({ cover: 'total', blocksLineOfEffect: true, sourceEntityId: 'window' })
+  })
+
   it('returns D&D 5e cover bonuses and total-cover line-of-effect blocking', () => {
     const g = geometry()
     expect(mapGeometryCoverBetween(g, token('a', 150, 50), token('b', 300, 50)))
@@ -119,5 +162,7 @@ describe('map geometry', () => {
       updatedAt: 1,
     })
     expect(normalized?.maps[0].lights).toEqual([])
+    expect(normalized?.maps[0].windows).toEqual([])
+    expect(normalized?.maps[0].walls[0].material).toBe('stone')
   })
 })

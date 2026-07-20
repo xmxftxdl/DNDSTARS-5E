@@ -103,12 +103,15 @@ import {
 } from '../../lib/fogOfWar'
 import {
   mapGeometryMovementBlocked,
+  mapGeometryAttachOpeningToWall,
   mapGeometryLightPolygon,
+  mapGeometryWallRenderSegments,
   mapGeometryVisibilityPolygon,
   type MapGeometryEntity,
   type MapGeometryState,
   type MapGeometryTool,
   type MapGeometryPoint,
+  type MapGeometryWallMaterial,
 } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 
@@ -197,6 +200,7 @@ interface MapCanvasProps {
   geometry?: MapGeometryState
   geometryEditMode?: boolean
   geometryTool?: MapGeometryTool
+  geometryWallMaterial?: MapGeometryWallMaterial
   selectedGeometryEntityId?: string | null
   geometryPreviewAsPlayer?: boolean
   geometrySnapToGrid?: boolean
@@ -204,6 +208,7 @@ interface MapCanvasProps {
   exploredVisionPolygons?: MapGeometryPoint[][]
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
   onGeometryEntitySelect?: (entityId: string | null) => void
+  onGeometryEntityDelete?: (entityId: string) => void
   onGeometryDoorInteract?: (doorId: string) => void
   geometrySearchMode?: boolean
   onGeometrySearch?: (point: { x: number; y: number }) => void
@@ -392,40 +397,67 @@ function geometryEntityPoints(entity: MapGeometryEntity): number[] {
   return entity.points.flatMap((point) => [point.x, point.y])
 }
 
+const WALL_MATERIAL_STYLE: Record<MapGeometryWallMaterial, { color: string; dash?: number[] }> = {
+  stone: { color: '#94a3b8' },
+  brick: { color: '#c2410c', dash: [12, 2] },
+  wood: { color: '#a16207', dash: [18, 4] },
+  metal: { color: '#cbd5e1', dash: [4, 2] },
+  natural: { color: '#22c55e', dash: [9, 5] },
+}
+
+function geometryWallMaterial(
+  geometry: MapGeometryState | undefined,
+  entity: MapGeometryEntity,
+): MapGeometryWallMaterial {
+  if (entity.kind === 'wall') return entity.material ?? 'stone'
+  if (entity.kind === 'door' || entity.kind === 'window') {
+    return geometry?.walls.find((wall) => wall.id === entity.parentWallId)?.material ?? 'stone'
+  }
+  return 'stone'
+}
+
 function MapGeometryLayer({
   map,
   geometry,
   draft,
   editMode,
   doorInteractionMode,
+  tool,
   selectedEntityId,
   inv,
   onSelect,
+  onDelete,
 }: {
   map: BattleMap
   geometry?: MapGeometryState
   draft: MapGeometryEntity | null
   editMode: boolean
   doorInteractionMode?: boolean
+  tool: MapGeometryTool
   selectedEntityId: string | null
   inv: number
   onSelect?: (entityId: string | null) => void
+  onDelete?: (entityId: string) => void
 }) {
   if (!geometry && !draft) return null
   const allEntities: MapGeometryEntity[] = [
     ...(geometry?.walls ?? []),
     ...(geometry?.doors ?? []),
+    ...(geometry?.windows ?? []),
     ...(geometry?.obstacles ?? []),
+    ...(geometry?.lights ?? []),
     ...(draft ? [draft] : []),
   ]
   const entities = doorInteractionMode && !editMode
     ? allEntities.filter((entity) => entity.kind === 'door')
     : allEntities
+  const entityEditListening = editMode && (tool === 'select' || tool === 'delete')
   return (
-    <Layer listening={editMode || doorInteractionMode}>
+    <Layer listening={entityEditListening || doorInteractionMode}>
       {entities.map((entity) => {
         const selected = entity.id === selectedEntityId
         const isDraft = entity === draft
+        const material = WALL_MATERIAL_STYLE[geometryWallMaterial(geometry, entity)]
         const color = entity.kind === 'door'
           ? entity.state === 'open'
             ? '#34d399'
@@ -436,7 +468,14 @@ function MapGeometryLayer({
             ? '#fb923c'
             : entity.kind === 'light'
               ? entity.color
-              : '#a78bfa'
+              : entity.kind === 'window'
+                ? '#38bdf8'
+                : material.color
+        const selectEntity = (event: Konva.KonvaEventObject<MouseEvent>) => {
+          event.cancelBubble = true
+          if (editMode && tool === 'delete') onDelete?.(entity.id)
+          else onSelect?.(entity.id)
+        }
         if (entity.kind === 'light') {
           const point = entity.points[0]
           const outerRadius = (entity.brightRadiusFeet + entity.dimRadiusFeet) /
@@ -444,13 +483,103 @@ function MapGeometryLayer({
           const brightRadius = entity.brightRadiusFeet /
             Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)
           return (
-            <Group key={entity.id} listening={editMode && !isDraft} onMouseDown={(event) => {
-              event.cancelBubble = true
-              onSelect?.(entity.id)
-            }}>
+            <Group key={entity.id} listening={entityEditListening && !isDraft} onMouseDown={selectEntity}>
               <Circle x={point.x} y={point.y} radius={Math.max(outerRadius, 8 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.45 : 0.3} dash={[6 * inv, 4 * inv]} />
               <Circle x={point.x} y={point.y} radius={Math.max(brightRadius, 5 * inv)} stroke={color} strokeWidth={(selected ? 3 : 1.5) * inv} opacity={isDraft ? 0.6 : 0.5} />
               <Circle x={point.x} y={point.y} radius={6 * inv} fill={entity.enabled ? color : '#64748b'} stroke={selected ? '#fff' : '#111827'} strokeWidth={2 * inv} />
+            </Group>
+          )
+        }
+        if (entity.kind === 'wall') {
+          const segments = mapGeometryWallRenderSegments(geometry, entity)
+          return (
+            <Group key={entity.id} listening={entityEditListening && !isDraft} onMouseDown={selectEntity}>
+              {segments.map((segment, index) => (
+                <Group key={`${entity.id}:${segment.wallSegmentIndex}:${index}`}>
+                  {selected && <Line
+                    points={[segment.a.x, segment.a.y, segment.b.x, segment.b.y]}
+                    stroke="#ffffff"
+                    strokeWidth={8 * inv}
+                    lineCap="round"
+                    hitStrokeWidth={16 * inv}
+                  />}
+                  <Line
+                    points={[segment.a.x, segment.a.y, segment.b.x, segment.b.y]}
+                    stroke={material.color}
+                    strokeWidth={5 * inv}
+                    dash={material.dash?.map((value) => value * inv)}
+                    lineCap="round"
+                    opacity={isDraft ? 0.68 : 0.94}
+                    hitStrokeWidth={16 * inv}
+                  />
+                </Group>
+              ))}
+            </Group>
+          )
+        }
+        if (entity.kind === 'door') {
+          const [hinge, closedEnd] = entity.points
+          const leafEnd = entity.state === 'open'
+            ? { x: hinge.x - (closedEnd.y - hinge.y), y: hinge.y + (closedEnd.x - hinge.x) }
+            : closedEnd
+          const leafPoints = [hinge.x, hinge.y, leafEnd.x, leafEnd.y]
+          return (
+            <Group key={entity.id} listening={(entityEditListening || doorInteractionMode) && !isDraft} onMouseDown={selectEntity}>
+              <Line
+                points={geometryEntityPoints(entity)}
+                stroke="rgba(0,0,0,0.01)"
+                strokeWidth={2 * inv}
+                hitStrokeWidth={18 * inv}
+              />
+              {selected && <Line points={leafPoints} stroke="#ffffff" strokeWidth={10 * inv} lineCap="round" />}
+              <Line
+                points={leafPoints}
+                stroke={material.color}
+                strokeWidth={8 * inv}
+                dash={material.dash?.map((value) => value * inv)}
+                lineCap="round"
+                opacity={isDraft ? 0.68 : 0.96}
+              />
+              <Line
+                points={leafPoints}
+                stroke={color}
+                strokeWidth={3 * inv}
+                dash={entity.secret ? [7 * inv, 5 * inv] : undefined}
+                lineCap="round"
+              />
+              <Circle x={hinge.x} y={hinge.y} radius={3.5 * inv} fill={color} stroke={material.color} strokeWidth={1.5 * inv} />
+            </Group>
+          )
+        }
+        if (entity.kind === 'window') {
+          const [a, b] = entity.points
+          const dx = b.x - a.x
+          const dy = b.y - a.y
+          const length = Math.max(1, Math.hypot(dx, dy))
+          const nx = -dy / length * 5 * inv
+          const ny = dx / length * 5 * inv
+          const ticks = [0.33, 0.67].map((t) => ({ x: a.x + dx * t, y: a.y + dy * t }))
+          return (
+            <Group key={entity.id} listening={entityEditListening && !isDraft} onMouseDown={selectEntity}>
+              {selected && <Line points={geometryEntityPoints(entity)} stroke="#ffffff" strokeWidth={10 * inv} lineCap="round" />}
+              <Line points={geometryEntityPoints(entity)} stroke={material.color} strokeWidth={8 * inv} lineCap="round" />
+              <Line
+                points={geometryEntityPoints(entity)}
+                stroke={color}
+                strokeWidth={3 * inv}
+                dash={entity.windowType === 'bars' ? [4 * inv, 3 * inv] : undefined}
+                lineCap="round"
+                opacity={isDraft ? 0.68 : 0.96}
+                hitStrokeWidth={18 * inv}
+              />
+              {ticks.map((tick, index) => (
+                <Line
+                  key={`${entity.id}:tick:${index}`}
+                  points={[tick.x - nx, tick.y - ny, tick.x + nx, tick.y + ny]}
+                  stroke={color}
+                  strokeWidth={1.5 * inv}
+                />
+              ))}
             </Group>
           )
         }
@@ -459,25 +588,18 @@ function MapGeometryLayer({
           points: geometryEntityPoints(entity),
           stroke: selected ? '#fff' : color,
           strokeWidth: (selected ? 5 : 3) * inv,
-          dash: entity.kind === 'door' && entity.secret ? [7 * inv, 5 * inv] : undefined,
           opacity: isDraft ? 0.68 : 0.92,
           hitStrokeWidth: 14 * inv,
-          listening: (editMode || doorInteractionMode) && !isDraft,
-          onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => {
-            event.cancelBubble = true
-            onSelect?.(entity.id)
-          },
+          listening: entityEditListening && !isDraft,
+          onMouseDown: selectEntity,
         }
-        if (entity.kind === 'obstacle') {
-          return (
-            <Line
-              {...common}
-              closed
-              fill={selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
-            />
-          )
-        }
-        return <Line {...common} lineCap="round" lineJoin="round" />
+        return (
+          <Line
+            {...common}
+            closed
+            fill={selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
+          />
+        )
       })}
     </Layer>
   )
@@ -766,6 +888,7 @@ export default function MapCanvas({
   geometry,
   geometryEditMode = false,
   geometryTool = 'select',
+  geometryWallMaterial = 'stone',
   selectedGeometryEntityId = null,
   geometryPreviewAsPlayer = false,
   geometrySnapToGrid = true,
@@ -773,6 +896,7 @@ export default function MapCanvas({
   exploredVisionPolygons = [],
   onGeometryEntityCommit,
   onGeometryEntitySelect,
+  onGeometryEntityDelete,
   onGeometryDoorInteract,
   geometrySearchMode = false,
   onGeometrySearch,
@@ -1112,10 +1236,10 @@ export default function MapCanvas({
 
   const geometryEntityFromDrag = (start: Point, current: Point): MapGeometryEntity | null => {
     const drag = geometryDragStartRef.current
-    if (!drag || geometryTool === 'select') return null
+    if (!drag || geometryTool === 'select' || geometryTool === 'delete') return null
     const common = {
       id: drag.id,
-      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'light' ? '场景光源' : '障碍物',
+      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : '障碍物',
       createdAt: drag.createdAt,
       baseHeightFeet: 0,
       heightFeet: geometryTool === 'obstacle' ? 5 : 10,
@@ -1123,9 +1247,35 @@ export default function MapCanvas({
       blocksMovement: true,
       blocksLineOfEffect: geometryTool !== 'obstacle',
     }
-    if (geometryTool === 'wall') return { ...common, kind: 'wall', points: [start, current] }
-    if (geometryTool === 'door') {
-      return { ...common, kind: 'door', points: [start, current], state: 'closed', secret: false }
+    if (geometryTool === 'wall') return { ...common, kind: 'wall', material: geometryWallMaterial, points: [start, current] }
+    if (geometryTool === 'door' || geometryTool === 'window') {
+      const attachment = mapGeometryAttachOpeningToWall(
+        geometry,
+        start,
+        current,
+        Math.max(10, map.gridSize * 0.4),
+      )
+      if (!attachment) return null
+      const parentWall = geometry?.walls.find((wall) => wall.id === attachment.parentWallId)
+      const embeddedCommon = {
+        ...common,
+        baseHeightFeet: parentWall?.baseHeightFeet ?? common.baseHeightFeet,
+        heightFeet: parentWall?.heightFeet ?? common.heightFeet,
+        parentWallId: attachment.parentWallId,
+        parentWallSegmentIndex: attachment.parentWallSegmentIndex,
+        points: attachment.points,
+      }
+      if (geometryTool === 'door') {
+        return { ...embeddedCommon, kind: 'door', state: 'closed', secret: false }
+      }
+      return {
+        ...embeddedCommon,
+        kind: 'window',
+        windowType: 'glass',
+        blocksVision: false,
+        blocksMovement: true,
+        blocksLineOfEffect: true,
+      }
     }
     if (geometryTool === 'light') {
       const radiusFeet = Math.max(5, Math.round(
@@ -1164,12 +1314,14 @@ export default function MapCanvas({
 
   const handleGeometryMouseDown = (stage: Konva.Stage | null): boolean => {
     if (!geometryEditMode) return false
-    if (geometryTool === 'select') {
-      onGeometryEntitySelect?.(null)
+    if (geometryTool === 'select' || geometryTool === 'delete') {
+      if (geometryTool === 'select') onGeometryEntitySelect?.(null)
       return true
     }
     const rawPoint = relativePoint(stage)
-    const point = rawPoint ? snapGeometryPoint(rawPoint) : null
+    const point = rawPoint
+      ? geometryTool === 'door' || geometryTool === 'window' ? rawPoint : snapGeometryPoint(rawPoint)
+      : null
     if (!point) return true
     geometryDragStartRef.current = {
       point,
@@ -1184,7 +1336,9 @@ export default function MapCanvas({
     const drag = geometryDragStartRef.current
     if (!geometryEditMode || !drag) return false
     const rawPoint = relativePoint(stage)
-    const point = rawPoint ? snapGeometryPoint(rawPoint) : null
+    const point = rawPoint
+      ? geometryTool === 'door' || geometryTool === 'window' ? rawPoint : snapGeometryPoint(rawPoint)
+      : null
     if (point) setGeometryDraft(geometryEntityFromDrag(drag.point, point))
     return true
   }
@@ -1214,6 +1368,22 @@ export default function MapCanvas({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [geometryEditMode, onGeometryEditCancel])
+
+  useEffect(() => {
+    if (!geometryEditMode || !selectedGeometryEntityId || !onGeometryEntityDelete) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+      const target = event.target
+      if (target instanceof HTMLElement && (
+        target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
+      )) return
+      event.preventDefault()
+      onGeometryEntityDelete(selectedGeometryEntityId)
+      onGeometryEntitySelect?.(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [geometryEditMode, onGeometryEntityDelete, onGeometryEntitySelect, selectedGeometryEntityId])
 
   const snapMeasure = measureSnapsToGrid(map)
   const segmentCells = (a: Point, b: Point): number =>
@@ -1886,11 +2056,13 @@ export default function MapCanvas({
             draft={geometryDraft}
             editMode={geometryEditMode}
             doorInteractionMode={!isDM && !geometrySearchMode}
+            tool={geometryTool}
             selectedEntityId={selectedGeometryEntityId}
             inv={inv}
             onSelect={isDM ? onGeometryEntitySelect : geometrySearchMode ? undefined : (entityId) => {
               if (entityId) onGeometryDoorInteract?.(entityId)
             }}
+            onDelete={isDM ? onGeometryEntityDelete : undefined}
           />
         )}
         <FogOfWarLayer
