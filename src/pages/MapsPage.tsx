@@ -370,6 +370,7 @@ import {
   playerViewCharacters,
   PLAYER_ASSIGNMENT_EVENT,
 } from '../lib/playerView'
+import { resolvePlayerVisionSourceTokenIds } from '../lib/playerVision'
 import type {
   Dnd5eClassFeaturePayload,
   Dnd5ePluginActionPayload,
@@ -2384,12 +2385,13 @@ export default function MapsPage() {
     activeMap && turnCharacter
       ? activeMap.tokens.find((t) => t.type === 'player' && t.characterId === turnCharacter.id)
       : undefined
-  const controlledVisionToken = activeMap?.tokens.find((token) =>
-    token.type === 'player' && token.characterId === (assignedCharacterId ?? turnCharacter?.id),
-  )
-  const visionSourceTokenIds = activeMap && activeGeometry?.vision.sharePartyVision !== false
-    ? activeMap.tokens.filter((token) => token.type === 'player').map((token) => token.id)
-    : controlledVisionToken ? [controlledVisionToken.id] : []
+  const visionSourceTokenIds = activeMap
+    ? resolvePlayerVisionSourceTokenIds({
+        tokens: activeMap.tokens,
+        sharePartyVision: activeGeometry?.vision.sharePartyVision !== false,
+        controlledCharacterIds: [assignedCharacterId, playerChar?.id, ...visibleChars.map((character) => character.id)],
+      })
+    : []
   const activeExploration = activeMap
     ? explorationMaps.find((entry) => entry.mapId === activeMap.id)
     : undefined

@@ -1300,12 +1300,18 @@ function redactUnseenToken(token) {
   }
 }
 
-export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null) {
+export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
   const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
   const characterById = new Map((characterState?.characters ?? [])
     .filter((character) => plainObject(character) && typeof character.id === 'string')
     .map((character) => [character.id, character]))
+  const resolvedActiveCharacterId = typeof activeCharacterId === 'string' && activeCharacterId.length > 0
+    ? activeCharacterId
+    : [...characterById.values()].find((character) =>
+        (typeof viewerIdentity?.memberId === 'string' && character.roomMemberId === viewerIdentity.memberId) ||
+        (typeof viewerIdentity?.accountId === 'string' && character.ownerAccountId === viewerIdentity.accountId),
+      )?.id ?? null
   return {
     ...value,
     maps: value.maps.map((map) => {
@@ -1313,7 +1319,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const geometry = geometryByMapId.get(map.id)
       const players = map.tokens.filter((token) => plainObject(token) && token.type === 'player')
       const viewers = geometry?.vision?.sharePartyVision === false
-        ? players.filter((token) => token.characterId === activeCharacterId)
+        ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players
       const tokens = map.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
@@ -3434,7 +3440,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               })),
             }
           } else {
-            value = projectMapsForPlayer(value, geometry.value, roomMember?.activeCharacterId ?? null, characters.value)
+            value = projectMapsForPlayer(
+              value,
+              geometry.value,
+              roomMember?.activeCharacterId ?? null,
+              characters.value,
+              roomMember,
+            )
           }
         }
         try {

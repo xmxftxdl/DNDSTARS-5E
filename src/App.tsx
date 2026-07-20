@@ -27,7 +27,7 @@ import { useCharacterStore } from './store/characters'
 import { SHARED_SPELLBOOK_RESOURCE, useSpellbookStore } from './store/spellbook'
 import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e'
 import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
-import { getAssignedPlayerCharacterId } from './lib/playerView'
+import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
 import { MAP_FOG_RESOURCE } from './lib/fogOfWar'
 import { MAP_GEOMETRY_RESOURCE } from './lib/mapGeometry'
 import { MAP_EXPLORATION_RESOURCE } from './lib/mapExploration'
@@ -61,12 +61,17 @@ export default function App() {
       pulsing = true
       try {
         const characterState = useCharacterStore.getState()
-        const activeCharacterId = roomSession.role === 'player'
+        const assignedCharacterId = roomSession.role === 'player'
           ? getAssignedPlayerCharacterId(roomSession.slot)
           : characterState.selectedId
-        const activeCharacter = activeCharacterId
-          ? characterState.characters.find((character) => character.id === activeCharacterId)
-          : undefined
+        const activeCharacter = roomSession.role === 'player'
+          ? getPlayerCharacter(characterState.characters, {
+              slot: roomSession.slot,
+              assignedCharacterId,
+            })
+          : assignedCharacterId
+            ? characterState.characters.find((character) => character.id === assignedCharacterId)
+            : undefined
         let rules = await heartbeatRoom(roomSession, activeDnd5eRulesPluginRequirements(), {
           activeCharacterId: activeCharacter?.id ?? null,
           activeCharacterName: activeCharacter?.name ?? null,

@@ -309,24 +309,41 @@ function FogOfWarLayer({
   )
 }
 
-function DynamicVisionLayer({
+function PlayerVisibilityLayer({
   map,
   geometry,
+  fog,
   sourceTokenIds,
   exploredPolygons,
 }: {
   map: BattleMap
   geometry?: MapGeometryState
+  fog?: MapFogState
   sourceTokenIds: readonly string[]
   exploredPolygons: readonly MapGeometryPoint[][]
 }) {
-  if (!geometry?.vision.enabled) return null
+  const dynamicVisionEnabled = geometry?.vision.enabled === true
+  const manualFogEnabled = !!fog && (fog.filled || fog.shapes.length > 0)
+  if (!dynamicVisionEnabled && !manualFogEnabled) return null
   const sourceIds = new Set(sourceTokenIds)
-  const viewers = map.tokens.filter((token) => sourceIds.has(token.id))
+  const viewers = dynamicVisionEnabled ? map.tokens.filter((token) => sourceIds.has(token.id)) : []
+  const revealShapes = fog?.shapes.filter((shape) => shape.operation === 'reveal') ?? []
+  const coverShapes = fog?.shapes.filter((shape) => shape.operation === 'cover') ?? []
+  const fullCover = dynamicVisionEnabled || fog?.filled === true
+  const coverColor = dynamicVisionEnabled ? '#02030a' : fog?.color ?? '#05070f'
+  const coverOpacity = dynamicVisionEnabled ? 1 : fog?.opacity ?? 0.98
   return (
     <Layer listening={false}>
-      <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" listening={false} />
-      {exploredPolygons.map((polygon, index) => polygon.length >= 3 ? (
+      {fullCover && <Rect
+        x={0}
+        y={0}
+        width={map.width}
+        height={map.height}
+        fill={coverColor}
+        opacity={coverOpacity}
+        listening={false}
+      />}
+      {dynamicVisionEnabled && exploredPolygons.map((polygon, index) => polygon.length >= 3 ? (
         <Line
           key={`explored:${index}`}
           points={polygon.flatMap((point) => [point.x, point.y])}
@@ -337,6 +354,7 @@ function DynamicVisionLayer({
           listening={false}
         />
       ) : null)}
+      {revealShapes.map((shape) => fogShapeNode(shape, fog?.color ?? '#05070f', coverOpacity))}
       {viewers.map((viewer) => {
         const polygon = mapGeometryVisibilityPolygon({ geometry, map, viewer })
         return polygon.length >= 3 ? (
@@ -350,6 +368,7 @@ function DynamicVisionLayer({
           />
         ) : null
       })}
+      {coverShapes.map((shape) => fogShapeNode(shape, fog?.color ?? '#05070f', fog?.opacity ?? 0.98))}
     </Layer>
   )
 }
@@ -1690,6 +1709,11 @@ export default function MapCanvas({
   return (
     <div
       ref={containerRef}
+      data-testid="map-canvas"
+      data-vision-source-count={visionSourceTokenIds.length}
+      data-vision-enabled={geometry?.vision.enabled === true ? 'true' : 'false'}
+      data-fog-filled={fog?.filled === true ? 'true' : 'false'}
+      data-visibility-mask="combined"
       className={`h-full w-full overflow-hidden rounded-2xl bg-void-900/60 ${
         gridAdjustMode
           ? 'cursor-move'
@@ -2132,17 +2156,6 @@ export default function MapCanvas({
             />
           )}
         </Layer>
-        {(!isDM || geometryPreviewAsPlayer) && (
-          <>
-            <LightingLayer map={map} geometry={geometry} />
-            <DynamicVisionLayer
-              map={map}
-              geometry={geometry}
-              sourceTokenIds={visionSourceTokenIds}
-              exploredPolygons={exploredVisionPolygons}
-            />
-          </>
-        )}
         {((isDM && geometryEditMode) || (!isDM && onGeometryDoorInteract)) && (
           <MapGeometryLayer
             map={map}
@@ -2160,15 +2173,27 @@ export default function MapCanvas({
             onPointsChange={isDM ? onGeometryEntityPointsChange : undefined}
           />
         )}
-        <FogOfWarLayer
+        {(!isDM || geometryPreviewAsPlayer || fogPreviewAsPlayer) && (
+          <>
+            <LightingLayer map={map} geometry={geometry} />
+            <PlayerVisibilityLayer
+              map={map}
+              geometry={geometry}
+              fog={fog}
+              sourceTokenIds={visionSourceTokenIds}
+              exploredPolygons={exploredVisionPolygons}
+            />
+          </>
+        )}
+        {isDM && !geometryPreviewAsPlayer && !fogPreviewAsPlayer && <FogOfWarLayer
           map={map}
           fog={fog}
-          isDM={isDM}
-          previewAsPlayer={fogPreviewAsPlayer}
+          isDM
+          previewAsPlayer={false}
           draft={fogDraft}
           polygonPoints={fogPolygonPoints}
           inv={inv}
-        />
+        />}
       </Stage>
     </div>
   )

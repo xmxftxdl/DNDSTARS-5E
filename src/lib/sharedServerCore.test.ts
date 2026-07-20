@@ -242,6 +242,23 @@ describe('map geometry player projection', () => {
       .toEqual(['shown-area'])
   })
 
+  it('recovers the player viewer from room ownership before presence catches up', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'near', type: 'enemy', x: 30, y: 20 },
+          { id: 'hidden', type: 'enemy', x: 90, y: 20 },
+        ],
+      }],
+    }, geometry, null, {
+      characters: [{ id: 'character-1', roomMemberId: 'member-1', passivePerception: 10 }],
+    }, { memberId: 'member-1' })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'near'])
+  })
+
   it('uses passive Perception to omit hidden tokens from the serialized player response', () => {
     const projected = sharedServerCore.projectMapsForPlayer({
       maps: [{
