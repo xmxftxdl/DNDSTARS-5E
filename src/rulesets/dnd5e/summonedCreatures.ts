@@ -21,6 +21,27 @@ export interface Dnd5eSummonPlan {
   initiativeEntry: InitiativeEntry
 }
 
+/**
+ * Rebase a resolved plugin transaction onto the latest map immediately before
+ * committing its summon. Only tokens explicitly changed by the transaction
+ * replace current values; unrelated movement/HP edits remain intact.
+ */
+export function rebaseDnd5eSummonedCreatureTokens(input: {
+  latestMap: BattleMap
+  resolvedTokens: readonly Token[]
+  changedTokenIds: readonly string[]
+  summonedToken: Token
+}): Token[] {
+  const changedIds = new Set(input.changedTokenIds)
+  const resolvedById = new Map(input.resolvedTokens.map((token) => [token.id, token]))
+  return [
+    ...input.latestMap.tokens
+      .filter((token) => token.id !== input.summonedToken.id)
+      .map((token) => changedIds.has(token.id) ? (resolvedById.get(token.id) ?? token) : token),
+    input.summonedToken,
+  ]
+}
+
 function summonSide(actorToken: Token, relation: 'ally' | 'enemy' | undefined): 'player' | 'enemy' {
   const actorSide = dnd5eCombatTokenSide(actorToken) ?? 'player'
   if (relation !== 'enemy') return actorSide

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { planDnd5eSummonedCreature, reconcileDnd5eSummonedCreatures } from './summonedCreatures'
+import {
+  planDnd5eSummonedCreature,
+  rebaseDnd5eSummonedCreatureTokens,
+  reconcileDnd5eSummonedCreatures,
+} from './summonedCreatures'
 
 function map(tokens: Token[]): BattleMap {
   return {
@@ -55,6 +59,22 @@ describe('D&D 5e summoned creature lifecycle', () => {
       summon: { monsterId: 'srd-5.1:wolf', durationRounds: 1 },
     })
     expect(result).toEqual({ ok: false, reason: 'summon-position-blocked' })
+  })
+
+  it('rebases summon commits without rolling back unrelated token changes', () => {
+    const summon = { ...actor, id: 'plugin-summon:action-1', x: 125, label: '狼', characterId: undefined }
+    const latestActor = { ...actor, x: 75, hp: 17 }
+    const target = { ...actor, id: 'target', characterId: 'target-character', x: 175, hp: 8 }
+    const resolvedTarget = { ...target, hp: 3 }
+    const tokens = rebaseDnd5eSummonedCreatureTokens({
+      latestMap: map([latestActor, target]),
+      resolvedTokens: [actor, resolvedTarget, summon],
+      changedTokenIds: ['target', summon.id],
+      summonedToken: summon,
+    })
+    expect(tokens.find((token) => token.id === actor.id)).toMatchObject({ x: 75, hp: 17 })
+    expect(tokens.find((token) => token.id === target.id)?.hp).toBe(3)
+    expect(tokens.filter((token) => token.id === summon.id)).toHaveLength(1)
   })
 
   it('removes a summon when concentration ends, duration expires, or it reaches 0 HP', () => {

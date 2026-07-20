@@ -49,6 +49,29 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e rules plugin API', () => {
+  it('rejects summon actions that bypass the turn economy', () => {
+    expect(() => registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.free-summon', name: 'Free Summon', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'summon', resolve: ({ succeed }) => succeed() })
+        api.registerFeature({
+          id: 'summon', name: '无限召唤', summary: '测试。', description: '测试。', automation: 'full',
+          action: {
+            id: 'summon', label: '召唤', economy: 'none',
+            targeting: {
+              kind: 'area', relation: 'any', includeSelf: false,
+              template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 30 },
+            },
+            summon: { monsterId: 'srd-5.1:wolf', durationRounds: 10 },
+          },
+        })
+      },
+    })).toThrow('Invalid plugin summon')
+  })
+
   it('preserves the declared pre-roll Interrupt cancellation option', () => {
     const pluginId = 'com.example.interrupt-cancel'
     const dispose = registerDnd5eRulesPlugin({

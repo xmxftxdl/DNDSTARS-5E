@@ -977,6 +977,7 @@ export function registerDnd5eRulesPlugin(
         )) throw new Error(`Invalid plugin persistent area: ${featureId}`)
         const summon = definition.action.summon
         if (summon && (
+          definition.action.economy === 'none' ||
           definition.action.targeting.kind !== 'area' ||
           !/^srd-5\.1:[a-z0-9][a-z0-9-]*$/.test(summon.monsterId) ||
           !getDnd5eSrdMonster(summon.monsterId) ||

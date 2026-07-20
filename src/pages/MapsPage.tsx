@@ -320,6 +320,8 @@ import {
   resolveDnd5ePlayerEndTurn,
   resolvePreparedDnd5eClassFeature,
   resolvePreparedDnd5ePluginFeatureAction,
+  planDnd5eSummonedCreature,
+  rebaseDnd5eSummonedCreatureTokens,
   resolvePreparedDnd5ePluginSpellCast,
   resolvePreparedDnd5eAbilityCheck,
   resolvePreparedDnd5eEquipmentAttack,
@@ -9618,15 +9620,66 @@ export default function MapsPage() {
           }),
         }
       }
+      let summonedInitiativeEntries = resolved.summonedInitiativeEntries
+      const summonDefinition = prepared.prepared.feature.action?.summon
+      if (summonDefinition && prepared.prepared.targetCell && summonInitiativeD20 != null) {
+        const latestMap = useMapStore.getState().maps.find((map) => map.id === authorityMap.id)
+        const latestActorToken = latestMap?.tokens.find((token) => token.id === prepared.prepared.actorToken.id)
+        if (!latestMap || !latestActorToken) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-actor')
+          completePlayerActionRequest(action)
+          return
+        }
+        const latestSummonPlan = planDnd5eSummonedCreature({
+          map: latestMap,
+          actorToken: latestActorToken,
+          sourceCharacterId: prepared.prepared.actor.id,
+          featureId: prepared.prepared.feature.id,
+          pluginId: prepared.prepared.feature.ownerPluginId,
+          actionId: action.id,
+          round: action.round,
+          targetCell: prepared.prepared.targetCell,
+          initiativeD20: summonInitiativeD20,
+          summon: summonDefinition,
+        })
+        if (!latestSummonPlan.ok) {
+          acknowledgePlayerAction(action, 'rejected', latestSummonPlan.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        pluginApplication = {
+          ...pluginApplication,
+          map: {
+            ...pluginApplication.map,
+            tokens: rebaseDnd5eSummonedCreatureTokens({
+              latestMap,
+              resolvedTokens: pluginApplication.map.tokens,
+              changedTokenIds: pluginApplication.changedTokenIds,
+              summonedToken: latestSummonPlan.plan.token,
+            }),
+          },
+          changedTokenIds: [
+            ...new Set([...pluginApplication.changedTokenIds, latestSummonPlan.plan.token.id]),
+          ],
+        }
+        summonedInitiativeEntries = [latestSummonPlan.plan.initiativeEntry]
+      }
       for (const characterId of pluginApplication.changedCharacterIds) {
         const next = pluginApplication.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
+      const latestMapBeforeCommit = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
       const addedTokens = pluginApplication.map.tokens.filter((token) =>
-        !authorityMap.tokens.some((existing) => existing.id === token.id),
+        !latestMapBeforeCommit.tokens.some((existing) => existing.id === token.id),
       )
       if (addedTokens.length > 0) {
-        updateMap(authorityMap.id, { tokens: pluginApplication.map.tokens })
+        updateMap(authorityMap.id, {
+          tokens: [
+            ...latestMapBeforeCommit.tokens,
+            ...addedTokens.filter((token) =>
+              !latestMapBeforeCommit.tokens.some((existing) => existing.id === token.id)),
+          ],
+        })
       }
       for (const tokenId of pluginApplication.changedTokenIds) {
         const next = pluginApplication.map.tokens.find((token) => token.id === tokenId)
@@ -9640,11 +9693,11 @@ export default function MapsPage() {
       ) {
         updateMap(authorityMap.id, { dnd5ePluginAreas: pluginApplication.map.dnd5ePluginAreas ?? [] })
       }
-      if ((resolved.summonedInitiativeEntries?.length ?? 0) > 0) {
+      if ((summonedInitiativeEntries?.length ?? 0) > 0) {
         const inserted = insertInitiativeEntriesPreservingActive(
           initiativeOrderRef.current,
           initiativeIndexRef.current,
-          resolved.summonedInitiativeEntries ?? [],
+          summonedInitiativeEntries ?? [],
         )
         initiativeOrderRef.current = inserted.order
         initiativeIndexRef.current = inserted.index
