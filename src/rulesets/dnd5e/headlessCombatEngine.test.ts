@@ -816,6 +816,103 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(reaction.state.combatants.b.turn.reactionAvailable).toBe(false)
   })
 
+  it('resolves Dash, Hide, Ready, and Use an Object as authoritative basic actions', () => {
+    const hiddenState = startDnd5eHeadlessCombat('basic-hide', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
+    hiddenState.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('b', 'a')]: true,
+    }
+    const hidden = resolveDnd5eHeadlessAction(hiddenState, { type: 'hide', actorId: 'a', d20: 15 })
+    expect(hidden.ok).toBe(true)
+    if (!hidden.ok) return
+    expect(hidden.state.combatants.a.classState.hiddenCheckTotal).toBe(17)
+
+    const readyState = startDnd5eHeadlessCombat('basic-ready', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
+    const readied = resolveDnd5eHeadlessAction(readyState, {
+      type: 'ready', actorId: 'a', trigger: '敌人进入门口时', actionKind: 'attack', targetId: 'b',
+    })
+    expect(readied.ok).toBe(true)
+    if (!readied.ok) return
+    const ended = resolveDnd5eHeadlessAction(readied.state, { type: 'end-turn', actorId: 'a' })
+    expect(ended.ok).toBe(true)
+    if (!ended.ok) return
+    const triggered = resolveDnd5eHeadlessAction(ended.state, { type: 'trigger-readied-action', actorId: 'a' })
+    expect(triggered.ok).toBe(true)
+    if (!triggered.ok) return
+    expect(triggered.state.combatants.a.turn.reactionAvailable).toBe(false)
+    expect(triggered.events).toContainEqual(expect.objectContaining({ type: 'readied-action-triggered', actionKind: 'attack' }))
+
+    const objectState = startDnd5eHeadlessCombat('basic-object', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
+    const used = resolveDnd5eHeadlessAction(objectState, { type: 'use-object', actorId: 'a', interactionId: 'drink:potion' })
+    expect(used.ok).toBe(true)
+    if (!used.ok) return
+    expect(used.events).toContainEqual({ type: 'object-action-taken', actorId: 'a', action: 'use-object', interactionId: 'drink:potion' })
+  })
+
+  it('grants and consumes Help advantage for an ally ability check and attack', () => {
+    const helper = fighter('helper', 20)
+    const ally = fighter('ally', 15)
+    const enemy = fighter('enemy', 10, { controller: 'dm', armorClass: 16 })
+    const abilityHelp = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('help-check', [helper, ally, enemy]),
+      { type: 'help', actorId: 'helper', targetId: 'ally', helpKind: 'ability-check' },
+    )
+    expect(abilityHelp.ok).toBe(true)
+    if (!abilityHelp.ok) return
+    const helperEnded = resolveDnd5eHeadlessAction(abilityHelp.state, { type: 'end-turn', actorId: 'helper' })
+    expect(helperEnded.ok).toBe(true)
+    if (!helperEnded.ok) return
+    const check = resolveDnd5eHeadlessAction(helperEnded.state, {
+      type: 'ability-check', actorId: 'ally', ability: 'str', d20: 2, d20Second: 18,
+    })
+    expect(check.ok).toBe(true)
+    if (!check.ok) return
+    expect(check.events).toContainEqual(expect.objectContaining({ type: 'ability-check-resolved', d20: 18, mode: 'advantage' }))
+    expect(check.state.combatants.ally.classState.helpedAbilityCheckSourceId).toBeUndefined()
+
+    const attackHelpState = startDnd5eHeadlessCombat('help-attack', [helper, ally, enemy])
+    attackHelpState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('helper', 'enemy')]: 5,
+    }
+    const attackHelp = resolveDnd5eHeadlessAction(attackHelpState, {
+      type: 'help', actorId: 'helper', targetId: 'enemy', helpKind: 'attack',
+    })
+    expect(attackHelp.ok).toBe(true)
+    if (!attackHelp.ok) return
+    const afterHelp = resolveDnd5eHeadlessAction(attackHelp.state, { type: 'end-turn', actorId: 'helper' })
+    expect(afterHelp.ok).toBe(true)
+    if (!afterHelp.ok) return
+    const attack = resolveDnd5eHeadlessAction(afterHelp.state, {
+      type: 'attack', actorId: 'ally', targetId: 'enemy', attackModifier: 0,
+      d20: 2, d20Second: 18, damage: { count: 1, sides: 4, bonus: 0, rolls: [2] },
+    })
+    expect(attack.ok).toBe(true)
+    if (!attack.ok) return
+    expect(attack.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 18, hit: true }))
+    expect(attack.state.combatants.enemy.classState.helpedAttackSourceId).toBeUndefined()
+  })
+
+  it('resolves grapple and shove through opposed Athletics checks', () => {
+    const state = startDnd5eHeadlessCombat('contests', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    const grappled = resolveDnd5eHeadlessAction(state, {
+      type: 'grapple', actorId: 'a', targetId: 'b', actorD20: 18, targetD20: 2, targetDefense: 'athletics',
+    })
+    expect(grappled.ok).toBe(true)
+    if (!grappled.ok) return
+    expect(grappled.state.combatants.b.conditions).toContain('grappled')
+    expect(grappled.events).toContainEqual(expect.objectContaining({ type: 'contest-resolved', contest: 'grapple', success: true }))
+
+    const shoveState = startDnd5eHeadlessCombat('shove', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
+    shoveState.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    const shoved = resolveDnd5eHeadlessAction(shoveState, {
+      type: 'shove', actorId: 'a', targetId: 'b', actorD20: 18, targetD20: 2,
+      targetDefense: 'acrobatics', outcome: 'prone',
+    })
+    expect(shoved.ok).toBe(true)
+    if (!shoved.ok) return
+    expect(shoved.state.combatants.b.conditions).toContain('prone')
+  })
+
   it('rejects an opportunity attack when the reactor cannot see the moving target', () => {
     const state = startDnd5eHeadlessCombat('blocked-opportunity', [fighter('a', 20), fighter('b', 10)])
     state.lineOfSightBlockedByCombatantPair = {

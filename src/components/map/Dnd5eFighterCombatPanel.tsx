@@ -10,16 +10,20 @@ import {
 import type { Dnd5eFighterFeatureId } from '../../rulesets/dnd5e'
 import type { Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
+import Dnd5eBasicActionsPanel, { type Dnd5eBasicActionTarget } from './Dnd5eBasicActionsPanel'
+import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 
-export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, turnEconomy, onAttack, onDisengage, onDodge, onFeature }: {
+export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, turnEconomy, basicActionTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
+  basicActionTargets: readonly Dnd5eBasicActionTarget[]
   onAttack: (options?: Dnd5eWeaponAttackOptions) => void
   onDisengage: () => void
   onDodge: () => void
+  onBasicAction: (payload: Dnd5eBasicActionPayload) => void
   onFeature: (feature: Dnd5eFighterFeatureId) => void
 }) {
   const profile = dnd5eWeaponAttackProfile(character)
@@ -124,6 +128,12 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         </div>
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
+      <Dnd5eBasicActionsPanel
+        canAct={canAct && turnEconomy.action.current > 0}
+        pending={pending}
+        targets={basicActionTargets}
+        onAction={onBasicAction}
+      />
     </div>
   )
 }

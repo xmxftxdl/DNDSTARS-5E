@@ -282,6 +282,7 @@ import {
   prepareDnd5eOpportunityAttack,
   prepareDnd5ePlayerEndTurn,
   prepareDnd5ePlayerMove,
+  prepareDnd5ePlayerBasicAction,
   prepareDnd5eSpellCast,
   prepareDnd5eAdjudicatedSpell,
   dnd5eSpellbookEntries,
@@ -327,6 +328,7 @@ import {
   resolvePreparedDnd5eMonsterAttack,
   resolvePreparedDnd5eOpportunityAttack,
   resolvePreparedDnd5ePlayerMove,
+  resolvePreparedDnd5ePlayerBasicAction,
   resolvePreparedDnd5eSpellCast,
   resolvePreparedDnd5eAdjudicatedSpell,
   resolveDnd5eMonsterMapMove,
@@ -392,6 +394,7 @@ import {
 import { resolvePlayerVisionSourceTokenIds } from '../lib/playerVision'
 import type {
   Dnd5eClassFeaturePayload,
+  Dnd5eBasicActionPayload,
   Dnd5ePluginActionPayload,
   Dnd5eItemUsePayload,
   Dnd5eAbilityCheckPayload,
@@ -7202,6 +7205,23 @@ export default function MapsPage() {
     }
   }
 
+  const handleDnd5eBasicAction = (payload: Dnd5eBasicActionPayload) => {
+    if (!canControlPlayerTurn || !turnCharacter) return
+    if (!isDM) {
+      if (!sendPlayerBasicActionRequest(payload)) {
+        void showCombatNotice(
+          pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
+          pendingPlayerActionRef.current ? '正在等待 DM 结算上一动作。' : '该基础动作需要一个可用动作和合法目标。',
+          'amber',
+        )
+      }
+      return
+    }
+    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'dnd5e-basic-action', dnd5eBasicAction: payload }))) {
+      void showCombatNotice('无法执行基础动作', '当前动作无法提交给 DM 权威结算。', 'amber')
+    }
+  }
+
   const requestDmWeaponCoverOverride = (
     attack: PreparedDnd5eEquipmentAttack,
   ): Promise<'auto' | Dnd5eAttackCoverOverride> => {
@@ -7538,6 +7558,75 @@ export default function MapsPage() {
         liveRound,
       )
       pushHeadlessCombatLog(`${resolved.actor.name} 执行闪避动作，直到其下一回合开始前针对它的攻击具有劣势。`, 'turn', resolved.result.events)
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+    if (action.type === 'dnd5e-basic-action' && dnd5eActionActor && action.dnd5eBasicAction) {
+      const turnEconomy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
+      const prepared = prepareDnd5ePlayerBasicAction({
+        action,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+        turnEconomy,
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const payload = action.dnd5eBasicAction
+      const needsActorRoll = payload.kind === 'hide' || payload.kind === 'grapple' || payload.kind === 'shove'
+      const needsTargetRoll = payload.kind === 'grapple' || payload.kind === 'shove'
+      const actorD20 = needsActorRoll
+        ? await rollDiceBoxD20(`${dnd5eActionActor.name}·${payload.kind === 'hide' ? '躲藏检定' : '力量（运动）对抗检定'}`, dnd5eActionActor.name)
+        : undefined
+      const targetTokenId = 'targetTokenId' in payload ? payload.targetTokenId : undefined
+      const targetName = targetTokenId
+        ? authorityMap.tokens.find((token) => token.id === targetTokenId)?.label ?? '目标'
+        : '目标'
+      const targetD20 = needsTargetRoll
+        ? await rollDiceBoxD20(`${targetName}·${payload.targetDefense === 'acrobatics' ? '敏捷（体操）' : '力量（运动）'}对抗检定`, targetName)
+        : undefined
+      const resolved = resolvePreparedDnd5ePlayerBasicAction({
+        prepared: prepared.prepared,
+        actorD20,
+        targetD20,
+      })
+      if (!resolved.result.ok || !resolved.application) {
+        acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'invalid-basic-action' : resolved.result.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      for (const characterId of resolved.application.changedCharacterIds) {
+        const next = resolved.application.characters.find((character) => character.id === characterId)
+        if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      for (const tokenId of resolved.application.changedTokenIds) {
+        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
+        if (next) updateToken(authorityMap.id, tokenId, next)
+      }
+      updateDnd5eTurnEconomy(
+        action.actorTokenId,
+        (economy) => {
+          const afterAction = prepared.prepared.spendsAction
+            ? spendDnd5eTurnResource(economy, 'action').economy
+            : economy
+          return payload.kind === 'grapple' || payload.kind === 'shove'
+            ? { ...afterAction, attacksUsed: prepared.prepared.attackNumber ?? afterAction.attacksUsed }
+            : afterAction
+        },
+        liveRound,
+      )
+      const label = payload.kind === 'dash' ? '疾走'
+        : payload.kind === 'hide' ? '躲藏'
+          : payload.kind === 'help' ? `协助（${payload.helpKind === 'attack' ? '攻击' : '能力检定'}）`
+            : payload.kind === 'ready' ? `准备动作：${payload.trigger}`
+              : payload.kind === 'use-object' ? '使用物件'
+                : payload.kind === 'grapple' ? '擒抱'
+                  : `推撞（${payload.outcome === 'prone' ? '击倒' : '推开'}）`
+      pushHeadlessCombatLog(`${dnd5eActionActor.name} 执行${label}。`, 'turn', resolved.result.events)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
       return
@@ -12615,6 +12704,20 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${turnCharacter.name} 闪避`)
   }
 
+  const sendPlayerBasicActionRequest = (payload: Dnd5eBasicActionPayload) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    if (currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current < 1) return false
+    const action = createPlayerActionRequest({ type: 'dnd5e-basic-action', dnd5eBasicAction: payload })
+    if (!action) return false
+    const label = payload.kind === 'dash' ? '疾走'
+      : payload.kind === 'hide' ? '躲藏'
+        : payload.kind === 'help' ? '协助'
+          : payload.kind === 'ready' ? '准备动作'
+            : payload.kind === 'use-object' ? '使用物件'
+              : payload.kind === 'grapple' ? '擒抱' : '推撞'
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 请求执行${label}`)
+  }
+
   const waitForAuthoritativePlayerActionSync = async (appliedAt?: number) => {
     await syncAuthoritativePlayerActionState({
       appliedAt,
@@ -15387,6 +15490,7 @@ export default function MapsPage() {
                       targeting={dnd5eWeaponTargeting === activeChar.id}
                       pending={!!pendingPlayerAction}
                       turnEconomy={activeCharDnd5eTurnEconomy}
+                      basicActionTargets={activeCharDnd5eFeatureTargets}
                       onAttack={(options) => {
                         setDnd5eWeaponAttackConfirmation(null)
                         setDnd5eWeaponAttackOptions(options)
@@ -15394,6 +15498,7 @@ export default function MapsPage() {
                       }}
                       onDisengage={handleDisengage}
                       onDodge={handleDodge}
+                      onBasicAction={handleDnd5eBasicAction}
                       onFeature={(feature) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)
@@ -15416,6 +15521,7 @@ export default function MapsPage() {
                       }}
                       onDisengage={handleDisengage}
                       onDodge={handleDodge}
+                      onBasicAction={handleDnd5eBasicAction}
                       onFeature={(payload) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)

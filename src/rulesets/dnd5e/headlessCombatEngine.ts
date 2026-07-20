@@ -153,6 +153,16 @@ export interface Dnd5eCombatant {
     recklessAttackTurnKey?: string
     weaponAttackActionTurnKey?: string
     dodgingTurnKey?: string
+    helpedAbilityCheckSourceId?: string
+    helpedAbilityCheckSourceTurnKey?: string
+    helpedAttackSourceId?: string
+    helpedAttackSourceTurnKey?: string
+    readiedAction?: {
+      trigger: string
+      actionKind: 'attack' | 'move' | 'interact-object' | 'other'
+      targetId?: string
+      preparedTurnKey: string
+    }
     sacredWeaponTurnsRemaining?: number
     holyNimbusRoundsRemaining?: number
     divineInterventionCooldownDays?: number
@@ -329,6 +339,29 @@ function dnd5eFrightenedAttackDisadvantage(
   const sourceIds = new Set(dnd5eConditionSourceIds(combatant, 'frightened'))
   if (combatant.classState.intimidatingPresenceSourceId) sourceIds.add(combatant.classState.intimidatingPresenceSourceId)
   return [...sourceIds].some((sourceId) => dnd5eCombatantCanSee(state, combatant.id, sourceId))
+}
+
+function dnd5eHelpAttackApplies(
+  state: Dnd5eHeadlessCombatState,
+  attacker: Dnd5eCombatant,
+  target: Dnd5eCombatant,
+): boolean {
+  const sourceId = target.classState.helpedAttackSourceId
+  const source = sourceId ? state.combatants[sourceId] : undefined
+  return !!source && source.controller === attacker.controller && target.controller !== attacker.controller
+}
+
+function consumeDnd5eHelpAttack(
+  state: Dnd5eHeadlessCombatState,
+  attacker: Dnd5eCombatant,
+  target: Dnd5eCombatant,
+  events: Dnd5eCombatEvent[],
+): void {
+  if (!dnd5eHelpAttackApplies(state, attacker, target)) return
+  const sourceId = target.classState.helpedAttackSourceId!
+  target.classState.helpedAttackSourceId = undefined
+  target.classState.helpedAttackSourceTurnKey = undefined
+  events.push({ type: 'class-state-changed', actorId: sourceId, targetId: target.id, stateKey: 'help-attack', active: false })
 }
 
 function dnd5eCannotAttackSource(actor: Dnd5eCombatant, targetId: string): boolean {
@@ -554,6 +587,13 @@ export type Dnd5eAction =
   | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; standFromProne?: boolean; carefulMovement?: boolean }
   | { type: 'item-area-trigger'; actorId: string; areaId: string; areaKind: 'ball-bearings' | 'caltrops' | 'hunting-trap'; d20: number; d20Second?: number; damageRolls?: readonly number[] }
   | { type: 'dash'; actorId: string }
+  | { type: 'hide'; actorId: string; d20: number; d20Second?: number }
+  | { type: 'help'; actorId: string; targetId: string; helpKind: 'ability-check' | 'attack' }
+  | { type: 'ready'; actorId: string; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetId?: string }
+  | { type: 'trigger-readied-action'; actorId: string }
+  | { type: 'use-object'; actorId: string; interactionId: string }
+  | { type: 'grapple'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; spendAction?: boolean }
+  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; spendAction?: boolean }
   | { type: 'disengage'; actorId: string }
   | { type: 'dodge'; actorId: string }
   | { type: 'interact-object'; actorId: string; interactionId: string; useAction?: boolean }
@@ -678,6 +718,11 @@ export type Dnd5eCombatEvent =
   | { type: 'hostile-targeting-prevented'; actorId: string; targetId: string; source: 'tranquility' | 'nature-sanctuary' }
   | { type: 'ability-check-resolved'; actorId: string; ability: AbilityKey; skill?: string; d20: number; modifier: number; total: number; mode: D20RollMode; reliableTalentApplied: boolean; indomitableMightApplied?: boolean; bardicInspirationApplied?: number; peerlessSkillApplied?: number; darkOnesOwnLuckApplied?: number; cuttingWordsApplied?: number; strokeOfLuckApplied?: boolean; dc?: number; success?: boolean }
   | { type: 'object-action-taken'; actorId: string; action: 'use-object' | 'interact-object'; interactionId?: string }
+  | { type: 'hide-resolved'; actorId: string; d20: number; total: number }
+  | { type: 'help-granted'; actorId: string; targetId: string; helpKind: 'ability-check' | 'attack' }
+  | { type: 'ready-declared'; actorId: string; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetId?: string }
+  | { type: 'readied-action-triggered'; actorId: string; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetId?: string }
+  | { type: 'contest-resolved'; actorId: string; targetId: string; contest: 'grapple' | 'shove'; actorTotal: number; targetTotal: number; success: boolean; outcome?: 'prone' | 'push' }
   | { type: 'concentration-check-required'; targetId: string; dc: number }
   | { type: 'relentless-rage-save-required'; targetId: string; dc: number }
   | { type: 'relentless-rage-resolved'; actorId: string; d20: number; total: number; dc: number; success: boolean }
@@ -2768,7 +2813,8 @@ function resolveGeneralAbilityCheck(
   const requestedMode = action.mode ?? 'normal'
   const rageStrengthAdvantage = actor.classId === 'barbarian' && actor.level >= 1 &&
     actor.classState.raging === true && action.ability === 'str'
-  const advantage = requestedMode === 'advantage' || rageStrengthAdvantage
+  const helped = actor.classState.helpedAbilityCheckSourceId != null
+  const advantage = requestedMode === 'advantage' || rageStrengthAdvantage || helped
   const disadvantage = requestedMode === 'disadvantage' || actor.exhaustionLevel >= 1 ||
     dnd5eConditionAbilityCheckDisadvantage(actor)
   const mode = resolveDnd5eRollMode({
@@ -2857,6 +2903,12 @@ function resolveGeneralAbilityCheck(
   if (hideInPlainSightApplied) {
     actor.classState.hideInPlainSightPrepared = undefined
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'hide-in-plain-sight', active: false })
+  }
+  if (helped) {
+    const sourceId = actor.classState.helpedAbilityCheckSourceId!
+    actor.classState.helpedAbilityCheckSourceId = undefined
+    actor.classState.helpedAbilityCheckSourceTurnKey = undefined
+    events.push({ type: 'class-state-changed', actorId: sourceId, targetId: actor.id, stateKey: 'help-ability-check', active: false })
   }
   return true
 }
@@ -2975,7 +3027,8 @@ export function dnd5eRepeatedMeleeAttackMode(
   const attackerProne = attacker.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const hasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.recklessAttackTurnKey ||
-      !!target.classState.stunnedByActorId || targetProne || dnd5eAttackerIsUnseenForAttack(state, attacker.id, target.id))
+      !!target.classState.stunnedByActorId || targetProne || dnd5eAttackerIsUnseenForAttack(state, attacker.id, target.id) ||
+      dnd5eHelpAttackApplies(state, attacker, target))
   const hasDisadvantage = requestedMode === 'disadvantage' || attackerProne || dnd5eFrightenedAttackDisadvantage(state, attacker) ||
     dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, attacker.id, target.id)
   return resolveDnd5eRollMode({
@@ -3451,7 +3504,9 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   )
   const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
   const hasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
-    (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || attackingFromHidden || !!target.classState.stunnedByActorId || dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id))
+    (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || attackingFromHidden ||
+      !!target.classState.stunnedByActorId || dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) ||
+      dnd5eHelpAttackApplies(state, actor, target))
   const hasDisadvantage = requestedMode === 'disadvantage' || rangedDisadvantage || viciousMockeryDisadvantage || escapeTheHorde ||
     (action.type === 'attack' && action.protectionReactionActorId != null) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
     dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
@@ -3507,6 +3562,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     ;({ hit, critical } = attackOutcome)
   }
   emitDnd5eAttackResolved(state, { type: 'attack-resolved', actorId: actor.id, targetId: target.id, d20: attack.roll.d20, total: attack.roll.total, armorClass: targetArmorClass, hit, critical }, events)
+  consumeDnd5eHelpAttack(state, actor, target, events)
   if (action.type === 'attack' && action.classDamageContext?.foeSlayer === 'attack') {
     actor.classState.foeSlayerTurnKey = classFeatureTurnKey(state, actor.id)
   }
@@ -6362,6 +6418,7 @@ function resolveDnd5eHeadlessActionInternal(
   const offTurn = action.type === 'opportunity-attack' || action.type === 'hellish-rebuke' || action.type === 'concentration-save' ||
     action.type === 'barbarian-relentless-rage-save' || action.type === 'monk-deflect-missiles-return' ||
     action.type === 'monster-undead-fortitude-save' || action.type === 'monster-on-hit-save' ||
+    action.type === 'trigger-readied-action' ||
     (action.type === 'plugin' && pluginAction?.allowOffTurn === true)
   if (!offTurn && currentActorId(state) !== action.actorId) return fail(state, events, 'stale-turn')
   const actor = state.combatants[action.actorId]
@@ -6379,6 +6436,31 @@ function resolveDnd5eHeadlessActionInternal(
     action.type !== 'end-turn' && action.type !== 'death-save' && action.type !== 'death-save-turn' &&
     action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save'
   ) return fail(state, events, 'invalid-actor')
+  if (!offTurn) {
+    const activeTurnKey = classFeatureTurnKey(state, actor.id)
+    if (actor.classState.readiedAction && actor.classState.readiedAction.preparedTurnKey !== activeTurnKey) {
+      actor.classState.readiedAction = undefined
+      events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'readied-action', active: false })
+    }
+    for (const target of Object.values(state.combatants)) {
+      if (
+        target.classState.helpedAbilityCheckSourceId === actor.id &&
+        target.classState.helpedAbilityCheckSourceTurnKey !== activeTurnKey
+      ) {
+        target.classState.helpedAbilityCheckSourceId = undefined
+        target.classState.helpedAbilityCheckSourceTurnKey = undefined
+        events.push({ type: 'class-state-changed', actorId: actor.id, targetId: target.id, stateKey: 'help-ability-check', active: false })
+      }
+      if (
+        target.classState.helpedAttackSourceId === actor.id &&
+        target.classState.helpedAttackSourceTurnKey !== activeTurnKey
+      ) {
+        target.classState.helpedAttackSourceId = undefined
+        target.classState.helpedAttackSourceTurnKey = undefined
+        events.push({ type: 'class-state-changed', actorId: actor.id, targetId: target.id, stateKey: 'help-attack', active: false })
+      }
+    }
+  }
   if (
     actor.classState.turnedByClericId &&
     action.type !== 'move' && action.type !== 'dash' && action.type !== 'dodge' &&
@@ -7804,6 +7886,154 @@ function resolveDnd5eHeadlessActionInternal(
     if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
     actor.turn = { ...actor.turn, movementRemaining: actor.turn.movementRemaining + dnd5eEffectiveSpeed(actor) }
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'hide') {
+    const seenByHostile = Object.values(state.combatants).some((candidate) =>
+      candidate.id !== actor.id && candidate.controller !== actor.controller && candidate.currentHp > 0 &&
+      !candidate.deathSaves.dead && dnd5eCombatantCanSee(state, candidate.id, actor.id),
+    )
+    if (seenByHostile) return fail(state, events, 'invalid-target')
+    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    const mode = resolveDnd5eRollMode({
+      advantage: [],
+      disadvantage: [{
+        active: actor.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(actor),
+        reason: 'hide-disadvantage',
+      }],
+    }).mode
+    let check
+    try {
+      check = rules.resolveD20({
+        rolls: mode === 'normal' ? [action.d20] : [action.d20, action.d20Second ?? 0],
+        mode,
+        modifier: rules.abilityModifier(actor.abilities.dex) +
+          actor.proficiencyBonus * abilityCheckProficiencyRank(actor, 'stealth'),
+      })
+    } catch {
+      return fail(state, events, 'invalid-dice')
+    }
+    actor.classState.hiddenCheckTotal = check.total
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'hide-resolved', actorId: actor.id, d20: check.d20, total: check.total })
+    events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'hidden', active: true, value: check.total })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'help') {
+    const target = state.combatants[action.targetId]
+    if (!target || target.currentHp <= 0 || target.deathSaves.dead || target.id === actor.id) {
+      return fail(state, events, 'invalid-target')
+    }
+    if (action.helpKind === 'ability-check' && target.controller !== actor.controller) {
+      return fail(state, events, 'invalid-target')
+    }
+    if (action.helpKind === 'attack') {
+      if (target.controller === actor.controller || dnd5eAttackDistanceFeet(state, actor.id, target.id) > 5) {
+        return fail(state, events, 'invalid-target')
+      }
+    }
+    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    const turnKey = classFeatureTurnKey(state, actor.id)
+    if (action.helpKind === 'ability-check') {
+      target.classState.helpedAbilityCheckSourceId = actor.id
+      target.classState.helpedAbilityCheckSourceTurnKey = turnKey
+    } else {
+      target.classState.helpedAttackSourceId = actor.id
+      target.classState.helpedAttackSourceTurnKey = turnKey
+    }
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'help-granted', actorId: actor.id, targetId: target.id, helpKind: action.helpKind })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'ready') {
+    const trigger = action.trigger.trim()
+    if (!trigger || trigger.length > 320 || (action.targetId && !state.combatants[action.targetId])) {
+      return fail(state, events, 'invalid-target')
+    }
+    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    actor.classState.readiedAction = {
+      trigger,
+      actionKind: action.actionKind,
+      targetId: action.targetId,
+      preparedTurnKey: classFeatureTurnKey(state, actor.id),
+    }
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'ready-declared', actorId: actor.id, trigger, actionKind: action.actionKind, targetId: action.targetId })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'trigger-readied-action') {
+    const readied = actor.classState.readiedAction
+    if (!readied || dnd5eReactionsPrevented(actor) || !spend(actor, 'reaction')) {
+      return fail(state, events, 'reaction-unavailable')
+    }
+    actor.classState.readiedAction = undefined
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'reaction' })
+    events.push({
+      type: 'readied-action-triggered', actorId: actor.id, trigger: readied.trigger,
+      actionKind: readied.actionKind, targetId: readied.targetId,
+    })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'use-object') {
+    if (!action.interactionId.trim() || action.interactionId.length > 320) {
+      return fail(state, events, 'invalid-target')
+    }
+    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'object-action-taken', actorId: actor.id, action: 'use-object', interactionId: action.interactionId.trim() })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'grapple' || action.type === 'shove') {
+    const target = state.combatants[action.targetId]
+    if (
+      !target || target.controller === actor.controller || target.currentHp <= 0 || target.deathSaves.dead ||
+      dnd5eAttackDistanceFeet(state, actor.id, target.id) > 5
+    ) return fail(state, events, 'invalid-target')
+    if (action.spendAction !== false && !spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    const actorMode = resolveDnd5eRollMode({
+      advantage: [{ active: actor.classState.raging === true, reason: 'rage-strength-check' }],
+      disadvantage: [{ active: actor.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(actor), reason: 'contest-disadvantage' }],
+    }).mode
+    const targetMode = resolveDnd5eRollMode({
+      disadvantage: [{ active: target.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(target), reason: 'contest-disadvantage' }],
+    }).mode
+    const defenseAbility: AbilityKey = action.targetDefense === 'athletics' ? 'str' : 'dex'
+    let actorCheck
+    let targetCheck
+    try {
+      actorCheck = rules.resolveD20({
+        rolls: actorMode === 'normal' ? [action.actorD20] : [action.actorD20, action.actorD20Second ?? 0],
+        mode: actorMode,
+        modifier: rules.abilityModifier(actor.abilities.str) + actor.proficiencyBonus * abilityCheckProficiencyRank(actor, 'athletics'),
+      })
+      targetCheck = rules.resolveD20({
+        rolls: targetMode === 'normal' ? [action.targetD20] : [action.targetD20, action.targetD20Second ?? 0],
+        mode: targetMode,
+        modifier: rules.abilityModifier(target.abilities[defenseAbility]) +
+          target.proficiencyBonus * abilityCheckProficiencyRank(target, action.targetDefense),
+      })
+    } catch {
+      return fail(state, events, 'invalid-dice')
+    }
+    const success = actorCheck.total > targetCheck.total
+    if (action.spendAction !== false) events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({
+      type: 'contest-resolved', actorId: actor.id, targetId: target.id, contest: action.type,
+      actorTotal: actorCheck.total, targetTotal: targetCheck.total, success,
+      outcome: action.type === 'shove' ? action.outcome : undefined,
+    })
+    if (success && action.type === 'grapple') {
+      applyDnd5eStandardConditionEffect(target, actor, {
+        id: dnd5eActiveEffectId('basic-action:grapple', actor.id, target.id),
+        rulesId: 'basic-action:grapple', condition: 'grappled', duration: { type: 'permanent' }, sourceKind: 'feature',
+      }, events)
+    }
+    if (success && action.type === 'shove' && action.outcome === 'prone') {
+      applyDnd5eStandardConditionEffect(target, actor, {
+        id: dnd5eActiveEffectId('basic-action:shove-prone', actor.id, target.id),
+        rulesId: 'basic-action:shove-prone', condition: 'prone', duration: { type: 'permanent' }, sourceKind: 'feature',
+      }, events)
+    }
     return { ok: true, state, events }
   }
   if (action.type === 'disengage' || action.type === 'dodge') {

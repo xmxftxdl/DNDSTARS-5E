@@ -144,6 +144,16 @@ export interface Character {
     recklessAttackTurnKey?: string
     weaponAttackActionTurnKey?: string
     dodgingTurnKey?: string
+    helpedAbilityCheckSourceId?: string
+    helpedAbilityCheckSourceTurnKey?: string
+    helpedAttackSourceId?: string
+    helpedAttackSourceTurnKey?: string
+    readiedAction?: {
+      trigger: string
+      actionKind: 'attack' | 'move' | 'interact-object' | 'other'
+      targetId?: string
+      preparedTurnKey: string
+    }
     sacredWeaponTurnsRemaining?: number
     /** 奉献之誓20级“神圣光轮”剩余自身回合数。 */
     holyNimbusRoundsRemaining?: number

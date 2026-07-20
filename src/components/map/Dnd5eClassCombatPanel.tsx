@@ -13,6 +13,8 @@ import {
   getDnd5eSrdMonster,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
+import Dnd5eBasicActionsPanel from './Dnd5eBasicActionsPanel'
+import type { Dnd5eBasicActionPayload } from '../../lib/sharedCombatTypes'
 
 export interface Dnd5eFeatureTargetOption {
   tokenId: string
@@ -33,7 +35,7 @@ export interface Dnd5eFeatureTargetOption {
   }[]
 }
 
-export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onDodge, onFeature }: {
+export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
@@ -43,6 +45,7 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
   onAttack: (options?: Dnd5eWeaponAttackOptions) => void
   onDisengage: () => void
   onDodge: () => void
+  onBasicAction: (payload: Dnd5eBasicActionPayload) => void
   onFeature: (payload: Dnd5eClassFeaturePayload) => void
 }) {
   const definition = dnd5eClassDefinitionForCharacter(character)
@@ -259,6 +262,13 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
         turnEconomy={turnEconomy}
         targets={featureTargets}
         onFeature={onFeature}
+      />
+
+      <Dnd5eBasicActionsPanel
+        canAct={canAct && turnEconomy.action.current > 0}
+        pending={pending}
+        targets={featureTargets}
+        onAction={onBasicAction}
       />
 
       <section className="rounded-xl border border-white/10 bg-void-900/45 p-4 md:col-span-2">

@@ -197,6 +197,15 @@ export interface SharedCombatState {
   updatedAt: number
 }
 
+export type Dnd5eBasicActionPayload =
+  | { kind: 'dash' }
+  | { kind: 'hide' }
+  | { kind: 'help'; helpKind: 'ability-check' | 'attack'; targetTokenId: string }
+  | { kind: 'ready'; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetTokenId?: string }
+  | { kind: 'use-object'; interactionId: string }
+  | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
+  | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
+
 export interface SharedPlayerActionState {
   id: string
   mapId: string
@@ -218,6 +227,7 @@ export interface SharedPlayerActionState {
     | 'move-token'
     | 'disengage'
     | 'dodge'
+    | 'dnd5e-basic-action'
   actorTokenId: string
   characterId: string
   targetTokenId?: string
@@ -237,6 +247,7 @@ export interface SharedPlayerActionState {
   dnd5eSpellCast?: Dnd5eSpellCastPayload
   dnd5eAdjudicatedSpell?: Dnd5eAdjudicatedSpellPayload
   dnd5eMapInteraction?: Dnd5eMapInteractionPayload
+  dnd5eBasicAction?: Dnd5eBasicActionPayload
   round: number
   initiativeIndex: number
   seq: number
