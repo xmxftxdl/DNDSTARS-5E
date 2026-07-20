@@ -13,6 +13,7 @@ import {
   dnd5eHasStandardCondition,
   dnd5eStandardConditionId,
 } from './conditions'
+import { resolveDnd5eRollMode } from './rollMode'
 
 export interface Dnd5eDefensiveCreature {
   level: number
@@ -80,8 +81,10 @@ export function dnd5eSavingThrowMode(
     (sourceType === 'fiend' || sourceType.includes('邪魔') || sourceType === 'undead' || sourceType.includes('亡灵'))
   const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || poisonProtection
   const disadvantage = creature.exhaustionLevel >= 3 || dnd5eConditionSavingThrowDisadvantage(creature, ability)
-  if (advantage === disadvantage) return 'normal'
-  return advantage ? 'advantage' : 'disadvantage'
+  return resolveDnd5eRollMode({
+    advantage: [{ active: advantage, reason: 'saving-throw-advantage' }],
+    disadvantage: [{ active: disadvantage, reason: 'saving-throw-disadvantage' }],
+  }).mode
 }
 
 export function dnd5eHasEvasion(creature: Dnd5eDefensiveCreature): boolean {

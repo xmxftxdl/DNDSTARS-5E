@@ -3,6 +3,7 @@ import type { D20RollMode, D20RollResult } from '../contracts'
 import type { Character } from '../../types/character'
 import { dnd5eUnproficientAbilityCheckBonus } from './classes'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
+import { resolveDnd5eRollMode } from './rollMode'
 
 export type Dnd5eCheckProficiencyRank = 0 | 1 | 2
 
@@ -64,8 +65,10 @@ export function dnd5eAbilityCheckMode(
 ): D20RollMode {
   const advantage = context.initiative === true && character.charClass === '野蛮人' && level(character) >= 7
   const disadvantage = (character.exhaustionLevel ?? 0) >= 1
-  if (advantage === disadvantage) return 'normal'
-  return advantage ? 'advantage' : 'disadvantage'
+  return resolveDnd5eRollMode({
+    advantage: [{ active: advantage, reason: 'initiative-advantage' }],
+    disadvantage: [{ active: disadvantage, reason: 'exhaustion' }],
+  }).mode
 }
 
 function reliableTalentApplies(

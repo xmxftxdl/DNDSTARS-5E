@@ -11,8 +11,11 @@ import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
 import { dnd5eMonkMartialArtsEligible, dnd5eOffHandWeaponAttackProfile, dnd5eWeaponAttackProfile, dnd5eWeaponRangeFeet, type Dnd5eWeaponAttackProfile } from './equipment'
 import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from './classes'
+import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import {
+  dnd5eAttackerIsUnseenForAttack,
   dnd5eTargetArmorClassForAttack,
+  dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eTranquilityWardCheck,
   dnd5eIsFavoredEnemy,
@@ -36,7 +39,7 @@ import {
   type Dnd5eAttackCoverSnapshot,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -258,7 +261,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5))
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
   const attackerHasDisadvantage = (actor.exhaustionLevel ?? 0) >= 3 ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
     (profile.mode === 'ranged' && (
@@ -272,12 +275,11 @@ export function prepareDnd5eEquipmentAttack(input: {
       })
     ))
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || attackerHasDisadvantage ||
-    dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target)
-  const attackMode = attackerHasAdvantage === targetImposesDisadvantage
-    ? 'normal'
-    : attackerHasAdvantage
-      ? 'advantage'
-      : 'disadvantage'
+    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id)
+  const attackMode = resolveDnd5eRollMode({
+    advantage: [{ active: attackerHasAdvantage, reason: 'equipment-attack-advantage' }],
+    disadvantage: [{ active: targetImposesDisadvantage, reason: 'equipment-attack-disadvantage' }],
+  }).mode
   const stunningStrikeResolution = stunningStrike
     ? {
         saveDc: 8 + rules.proficiencyBonus(actor.level) + rules.abilityModifier(actor.abilities.wis),
@@ -325,8 +327,7 @@ export function dnd5eAttackModeWithProtection(
   mode: PreparedDnd5eEquipmentAttack['attackMode'],
   protectedAttack: boolean,
 ): PreparedDnd5eEquipmentAttack['attackMode'] {
-  if (!protectedAttack || mode === 'disadvantage') return mode
-  return mode === 'advantage' ? 'normal' : 'disadvantage'
+  return protectedAttack ? imposeDnd5eRollDisadvantage(mode, 'protection').mode : mode
 }
 
 export function previewDnd5eEquipmentAttack(

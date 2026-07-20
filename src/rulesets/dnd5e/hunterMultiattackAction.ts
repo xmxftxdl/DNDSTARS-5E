@@ -8,9 +8,12 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
 import { dnd5eAttackModeWithProtection } from './equipmentAttackAction'
+import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eMonkMartialArtsEligible, dnd5eWeaponAttackProfile, dnd5eWeaponRangeFeet, type Dnd5eWeaponAttackProfile } from './equipment'
 import {
+  dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eTargetIsUnseenForAttack,
   dnd5eTargetArmorClassForAttack,
   dnd5eTranquilityWardCheck,
   dnd5eWeaponClassDamageDefinitions,
@@ -25,7 +28,7 @@ import {
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 
 export type Dnd5eHunterMultiattackFeature = 'volley' | 'whirlwind-attack'
 
@@ -161,14 +164,15 @@ export function prepareDnd5eHunterMultiattack(input: {
     const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
       (dnd5eTargetGrantsAttackAdvantage(target) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
         !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-        dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && targetDistance <= 5))
+        dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || (targetProne && targetDistance <= 5))
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || actorCombatant.exhaustionLevel >= 3 ||
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
-      dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target) || actorProne || (targetProne && targetDistance > 5) ||
+      dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne || (targetProne && targetDistance > 5) ||
       (feature === 'volley' && (rangedThreatened || targetDistance > (profile.rangeFeet?.normal ?? 0)))
-    const attackMode = targetGrantsAdvantage === targetImposesDisadvantage
-      ? 'normal'
-      : targetGrantsAdvantage ? 'advantage' : 'disadvantage'
+    const attackMode = resolveDnd5eRollMode({
+      advantage: [{ active: targetGrantsAdvantage, reason: 'hunter-multiattack-advantage' }],
+      disadvantage: [{ active: targetImposesDisadvantage, reason: 'hunter-multiattack-disadvantage' }],
+    }).mode
     const adjacentEnemyOfTarget = input.map.tokens.some((candidate) => {
       if (candidate.id === actorToken.id || candidate.id === token.id || !areOpposedCombatTokens(actorToken, candidate)) return false
       const combatant = snapshot.state.combatants[candidate.id]

@@ -6,6 +6,7 @@ import { dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5ePactSlotL
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import type { Dnd5eDamageType } from './monsters'
 import { dnd5eBardMagicalSecretsOptions } from './spellCatalog'
+import { imposeDnd5eRollDisadvantage } from './rollMode'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
@@ -699,8 +700,7 @@ export function dnd5eHeightenedSavingThrowMode(
   mode: 'normal' | 'advantage' | 'disadvantage',
   heightened: boolean,
 ): 'normal' | 'advantage' | 'disadvantage' {
-  if (!heightened || mode === 'disadvantage') return mode
-  return mode === 'advantage' ? 'normal' : 'disadvantage'
+  return heightened ? imposeDnd5eRollDisadvantage(mode, 'heightened-spell').mode : mode
 }
 
 export function dnd5eDraconicAncestorDamageType(

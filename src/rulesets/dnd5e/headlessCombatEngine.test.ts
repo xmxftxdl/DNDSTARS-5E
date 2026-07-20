@@ -753,6 +753,37 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(invisibleTarget.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
   })
 
+  it('uses directional map visibility for unseen attacker advantage', () => {
+    const state = startDnd5eHeadlessCombat('directional-visibility', [fighter('a', 20), fighter('b', 10)])
+    state.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('b', 'a')]: true,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'a', targetId: 'b', attackModifier: 0,
+      d20: 2, d20Second: 18,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [2] },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 18, hit: true }))
+  })
+
+  it('cancels unseen attacker advantage when neither side can see the other', () => {
+    const state = startDnd5eHeadlessCombat('mutual-darkness', [fighter('a', 20), fighter('b', 10)])
+    state.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('a', 'b')]: true,
+      [dnd5eDirectedCombatantPairKey('b', 'a')]: true,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'a', targetId: 'b', attackModifier: 0,
+      d20: 2, d20Second: 18,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [] },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
+  })
+
   it('removes attack advantage against a conscious level-18 Rogue with Elusive', () => {
     const rogue = fighter('b', 10, { classId: 'rogue', level: 18 })
     const state = startDnd5eHeadlessCombat('combat', [fighter('a', 20), rogue])
@@ -1000,7 +1031,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     const enemy = fighter('enemy', 10, {
       controller: 'dm', position: { x: 10, y: 0 }, savingThrowBonuses: { wis: 0 },
     })
-    const state = startDnd5eHeadlessCombat('intimidating-presence', [berserker, enemy])
+    const state = startDnd5eHeadlessCombat('intimidating-presence', [berserker, enemy, fighter('victim', 5)])
     const frightened = resolveDnd5eHeadlessAction(state, {
       type: 'barbarian-intimidating-presence', actorId: 'berserker', targetId: 'enemy', savingThrowD20: 2,
     })
@@ -1034,7 +1065,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       [dnd5eDirectedCombatantPairKey('enemy', 'berserker')]: true,
     }
     const unobstructedAttack = resolveDnd5eHeadlessAction(sourceHidden, {
-      type: 'attack', actorId: 'enemy', targetId: 'berserker', attackModifier: 5,
+      type: 'attack', actorId: 'enemy', targetId: 'victim', attackModifier: 5,
       d20: 18, d20Second: 2, damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
     })
     expect(unobstructedAttack.ok).toBe(true)

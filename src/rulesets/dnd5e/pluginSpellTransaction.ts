@@ -13,10 +13,11 @@ import type { Character } from '../../types/character'
 import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eClassDefinitionForCharacter, dnd5ePactSlotLevel } from './classes'
-import { dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { dnd5eAttackerIsUnseenForAttack, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eTargetIsUnseenForAttack, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
+import { resolveDnd5eRollMode } from './rollMode'
 import {
   dnd5ePluginHeadlessActionDefinition,
   dnd5ePluginSpellDefinition,
@@ -228,15 +229,16 @@ export function prepareDnd5ePluginSpellCast(input: {
   const attackAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) && (
     dnd5eTargetGrantsAttackAdvantage(targetCombatant) || actorCombatant.classState.hiddenCheckTotal != null ||
     !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
-    dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5)
+    dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5)
   )
   const attackDisadvantage = actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(targetCombatant) ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
-    dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) || actorProne ||
+    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne ||
     (targetProne && distanceFeet > 5)
-  const attackMode: D20RollMode = attackAdvantage === attackDisadvantage
-    ? 'normal'
-    : attackAdvantage ? 'advantage' : 'disadvantage'
+  const attackMode: D20RollMode = resolveDnd5eRollMode({
+    advantage: [{ active: attackAdvantage, reason: 'plugin-spell-attack-advantage' }],
+    disadvantage: [{ active: attackDisadvantage, reason: 'plugin-spell-attack-disadvantage' }],
+  }).mode
   const saveMode = saveAbility
     ? dnd5eSavingThrowMode(targetCombatant, saveAbility, {
         effectVisible: true,

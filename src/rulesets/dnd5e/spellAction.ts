@@ -15,7 +15,9 @@ import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eClassDefinitionForCharacter, dnd5ePactSlotLevel } from './classes'
 import {
+  dnd5eAttackerIsUnseenForAttack,
   dnd5eTargetArmorClassForAttack,
+  dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
@@ -33,7 +35,8 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDiceCount, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
 import {
   mapGeometryCoverFromPoint,
@@ -437,11 +440,14 @@ export function prepareDnd5eSpellCast(input: {
   const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5))
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
   const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
-    dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) || actorProne || (targetProne && distanceFeet > 5)
+    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
   const attackMode = spell.effect === 'spell-attack' && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
-    ? advantage === disadvantage ? 'normal' : advantage ? 'advantage' : 'disadvantage'
+    ? resolveDnd5eRollMode({
+        advantage: [{ active: advantage, reason: 'spell-attack-advantage' }],
+        disadvantage: [{ active: disadvantage, reason: 'spell-attack-disadvantage' }],
+      }).mode
     : undefined
   const sequencedSpellAttackTargets = dnd5eSpellUsesSequencedAttacks(spell)
     ? projectileTargetIds!.map((targetId) => validTargetTokens.find((token) => token.id === targetId)!)
@@ -458,17 +464,18 @@ export function prepareDnd5eSpellCast(input: {
             (spell.id === 'shocking-grasp' && currentTarget.wearingMetalArmor) ||
             (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
             !!currentTarget.classState.recklessAttackTurnKey || !!currentTarget.classState.stunnedByActorId ||
-            dnd5eAttackerIsUnseen(actorCombatant) ||
+            dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) ||
             (currentTargetProne && currentDistanceFeet <= 5))
         const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(currentTarget) ||
           (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
-          dnd5eUnseenTargetImposesDisadvantage(actorCombatant, currentTarget) || actorProne ||
+          dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) || actorProne ||
           (currentTargetProne && currentDistanceFeet > 5)
         return {
           targetToken: currentTargetToken,
-          mode: currentAdvantage === currentDisadvantage
-            ? 'normal' as const
-            : currentAdvantage ? 'advantage' as const : 'disadvantage' as const,
+          mode: resolveDnd5eRollMode({
+            advantage: [{ active: currentAdvantage, reason: 'spell-target-attack-advantage' }],
+            disadvantage: [{ active: currentDisadvantage, reason: 'spell-target-attack-disadvantage' }],
+          }).mode,
           armorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, currentTargetToken.id),
         }
       })
@@ -580,8 +587,7 @@ export function dnd5eSpellAttackModeWithProtection(
   mode: NonNullable<PreparedDnd5eSpellCast['attackMode']>,
   protectedAttack: boolean,
 ): NonNullable<PreparedDnd5eSpellCast['attackMode']> {
-  if (!protectedAttack || mode === 'disadvantage') return mode
-  return mode === 'advantage' ? 'normal' : 'disadvantage'
+  return protectedAttack ? imposeDnd5eRollDisadvantage(mode, 'protection').mode : mode
 }
 
 export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, protectedAttack = false, blessRoll?: number, baneRoll?: number) {

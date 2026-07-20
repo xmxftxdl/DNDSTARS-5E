@@ -8,6 +8,7 @@ import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eWeaponAttackProfile } from './equipment'
 import {
+  dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantCanSee,
   dnd5eTargetArmorClassForAttack,
@@ -21,7 +22,8 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage } from './passiveDefenses'
+import { resolveDnd5eRollMode } from './rollMode'
 
 export function findDnd5eOpportunityAttackersForMove(input: {
   map: BattleMap
@@ -192,14 +194,16 @@ export function prepareDnd5eOpportunityAttack(input: {
       weaponName: isPlayerMelee ? playerProfile.weaponName : monsterAction!.name,
       attackModifier: isPlayerMelee ? playerProfile.attackModifier : monsterAction!.attack!.toHit,
       attackMode: (() => {
-        const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) || dnd5eAttackerIsUnseen(actorCombatant) || actorCombatant.classState.hiddenCheckTotal != null ||
+        const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) || dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
           targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
         const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
-          dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) ||
           actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
           (targetCombatant.classId === 'ranger' && targetCombatant.subclassId === 'hunter' &&
             targetCombatant.level >= 7 && targetCombatant.classSelections['defensive-tactics']?.includes('escape-the-horde'))
-        return advantage === disadvantage ? 'normal' : advantage ? 'advantage' : 'disadvantage'
+        return resolveDnd5eRollMode({
+          advantage: [{ active: advantage, reason: 'opportunity-attack-advantage' }],
+          disadvantage: [{ active: disadvantage, reason: 'opportunity-attack-disadvantage' }],
+        }).mode
       })(),
       targetArmorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, targetToken.id),
       damage: isPlayerMelee ? { ...playerProfile.damage } : { ...monsterDamage! },

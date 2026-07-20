@@ -19,8 +19,10 @@ import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonkUnarmedStrikeProfile, type Dnd5eUnarmedStrikeProfile } from './equipment'
 import {
+  dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eTargetArmorClassForAttack,
+  dnd5eTargetIsUnseenForAttack,
   resolveDnd5eHeadlessAction,
   dnd5eTranquilityWardCheck,
   type Dnd5eAction,
@@ -36,8 +38,9 @@ import {
   planDnd5eMapResultApplication,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { resolveDnd5eRollMode } from './rollMode'
 
 export type Dnd5eClassFeatureRejectReason =
   | 'invalid-action'
@@ -554,7 +557,10 @@ export function prepareDnd5eClassFeature(input: {
     const supremeSneak = payload.feature === 'rogue-cunning-action' && actorCombatant.subclassId === 'thief' &&
       actorCombatant.level >= 9 && movementSpent <= actorCombatant.speed / 2
     const disadvantage = actorCombatant.exhaustionLevel >= 1
-    const mode = supremeSneak === disadvantage ? 'normal' : supremeSneak ? 'advantage' : 'disadvantage'
+    const mode = resolveDnd5eRollMode({
+      advantage: [{ active: supremeSneak, reason: 'supreme-sneak' }],
+      disadvantage: [{ active: disadvantage, reason: 'exhaustion' }],
+    }).mode
     const observers = Object.values(snapshot.state.combatants).filter((candidate) =>
       candidate.id !== actorCombatant.id && candidate.currentHp > 0 && !candidate.deathSaves.dead &&
       candidate.controller !== actorCombatant.controller,
@@ -602,15 +608,14 @@ export function prepareDnd5eClassFeature(input: {
       const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
         (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
           !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
-          dnd5eAttackerIsUnseen(actorCombatant) || targetProne)
+          dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || targetProne)
       const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) || (actor.exhaustionLevel ?? 0) >= 3 ||
         (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
-        dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) || actorProne
-      const attackMode = targetGrantsAdvantage === targetImposesDisadvantage
-        ? 'normal'
-        : targetGrantsAdvantage
-          ? 'advantage'
-          : 'disadvantage'
+        dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne
+      const attackMode = resolveDnd5eRollMode({
+        advantage: [{ active: targetGrantsAdvantage, reason: 'monk-attack-advantage' }],
+        disadvantage: [{ active: targetImposesDisadvantage, reason: 'monk-attack-disadvantage' }],
+      }).mode
       const openHandEffect = requestedOpenHandTechniques[targetIndex]
       const openHandAbility = openHandEffect === 'prone' ? 'dex' : openHandEffect === 'push' ? 'str' : undefined
       const push = openHandEffect === 'push' ? openHandPushDestination(input.map, actorToken, targetToken) : undefined
