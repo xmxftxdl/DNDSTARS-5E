@@ -2,6 +2,7 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eBasicActionPayload, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
+import type { D20RollMode } from '../contracts'
 import {
   resolveDnd5eHeadlessAction,
   type Dnd5eAction,
@@ -10,6 +11,8 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eAttacksPerAttackAction } from './classes'
+import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
+import { resolveDnd5eRollMode } from './rollMode'
 
 export type Dnd5eBasicActionRejectReason =
   | 'invalid-action'
@@ -30,6 +33,8 @@ export interface PreparedDnd5eBasicAction {
   actorTokenId: string
   spendsAction: boolean
   attackNumber?: number
+  actorRollMode: D20RollMode
+  targetRollMode: D20RollMode
 }
 
 export function prepareDnd5ePlayerBasicAction(input: {
@@ -70,6 +75,25 @@ export function prepareDnd5ePlayerBasicAction(input: {
   const actorIndex = snapshot.state.initiativeOrder.indexOf(token.id)
   const combatant = snapshot.state.combatants[token.id]
   if (actorIndex < 0 || !combatant) return { ok: false, reason: 'combatant-missing' }
+  const targetCombatant = targetTokenId ? snapshot.state.combatants[targetTokenId] : undefined
+  const actorRollMode = resolveDnd5eRollMode({
+    advantage: [{
+      active: replacesAttack && combatant.classState.raging === true,
+      reason: 'rage-strength-check',
+    }],
+    disadvantage: [{
+      active: combatant.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(combatant),
+      reason: payload.kind === 'hide' ? 'hide-disadvantage' : 'contest-disadvantage',
+    }],
+  }).mode
+  const targetRollMode = resolveDnd5eRollMode({
+    disadvantage: [{
+      active: !!targetCombatant && (
+        targetCombatant.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(targetCombatant)
+      ),
+      reason: 'contest-disadvantage',
+    }],
+  }).mode
   combatant.turn = {
     actionAvailable: input.turnEconomy.action.current > 0,
     bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
@@ -90,6 +114,8 @@ export function prepareDnd5ePlayerBasicAction(input: {
       actorTokenId: token.id,
       spendsAction,
       attackNumber,
+      actorRollMode,
+      targetRollMode,
     },
   }
 }

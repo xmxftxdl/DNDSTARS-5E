@@ -7582,6 +7582,9 @@ export default function MapsPage() {
       const actorD20 = needsActorRoll
         ? await rollDiceBoxD20(`${dnd5eActionActor.name}·${payload.kind === 'hide' ? '躲藏检定' : '力量（运动）对抗检定'}`, dnd5eActionActor.name)
         : undefined
+      const actorD20Second = needsActorRoll && prepared.prepared.actorRollMode !== 'normal'
+        ? await rollDiceBoxD20(`${dnd5eActionActor.name}·优势／劣势第二枚`, dnd5eActionActor.name)
+        : undefined
       const targetTokenId = 'targetTokenId' in payload ? payload.targetTokenId : undefined
       const targetName = targetTokenId
         ? authorityMap.tokens.find((token) => token.id === targetTokenId)?.label ?? '目标'
@@ -7589,10 +7592,15 @@ export default function MapsPage() {
       const targetD20 = needsTargetRoll
         ? await rollDiceBoxD20(`${targetName}·${payload.targetDefense === 'acrobatics' ? '敏捷（体操）' : '力量（运动）'}对抗检定`, targetName)
         : undefined
+      const targetD20Second = needsTargetRoll && prepared.prepared.targetRollMode !== 'normal'
+        ? await rollDiceBoxD20(`${targetName}·优势／劣势第二枚`, targetName)
+        : undefined
       const resolved = resolvePreparedDnd5ePlayerBasicAction({
         prepared: prepared.prepared,
         actorD20,
+        actorD20Second,
         targetD20,
+        targetD20Second,
       })
       if (!resolved.result.ok || !resolved.application) {
         acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'invalid-basic-action' : resolved.result.reason)

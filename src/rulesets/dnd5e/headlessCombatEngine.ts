@@ -4929,7 +4929,8 @@ function resolveSpellCast(
         const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(affectedTarget) &&
           (dnd5eTargetGrantsAttackAdvantage(affectedTarget) || (spell.id === 'shocking-grasp' && affectedTarget.wearingMetalArmor) || requestedMode === 'advantage' || (attackIndex === 0 && attackingFromHidden) ||
             !!affectedTarget.classState.recklessAttackTurnKey || !!affectedTarget.classState.stunnedByActorId ||
-            (attackIndex === 0 && castingWhileUnseen) || dnd5eAttackerIsUnseenForAttack(state, actor.id, affectedTarget.id))
+            (attackIndex === 0 && castingWhileUnseen) || dnd5eAttackerIsUnseenForAttack(state, actor.id, affectedTarget.id) ||
+            dnd5eHelpAttackApplies(state, actor, affectedTarget))
         const actorHasDisadvantage = requestedMode === 'disadvantage' || supplied.protectionReactionActorId != null ||
           (spell.rangeFeet > 5 && dnd5eHostileWithinFiveFeet(state, actor)) ||
           (attackIndex === 0 && viciousMockeryDisadvantage) || actor.exhaustionLevel >= 3 ||
@@ -4979,6 +4980,7 @@ function resolveSpellCast(
           type: 'attack-resolved', actorId: actor.id, targetId: affectedTarget.id, d20: attack.roll.d20,
           total: attack.roll.total, armorClass: targetArmorClass, hit, critical,
         }, events)
+        consumeDnd5eHelpAttack(state, actor, affectedTarget, events)
         if (hit) recordHunterMultiattackDefenseHit(state, actor, affectedTarget)
         if (!hit && (supplied.uncannyDodge || supplied.cuttingWordsDamage)) return fail(state, events, 'invalid-class-feature')
         if (hit && supplied.standAgainstTide) return fail(state, events, 'invalid-class-feature')
@@ -5058,7 +5060,8 @@ function resolveSpellCast(
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
     const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
       (dnd5eTargetGrantsAttackAdvantage(target) || (spell.id === 'shocking-grasp' && target.wearingMetalArmor) || requestedMode === 'advantage' || attackingFromHidden || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-        castingWhileUnseen || dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id))
+        castingWhileUnseen || dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) ||
+        dnd5eHelpAttackApplies(state, actor, target))
     const actorHasDisadvantage = requestedMode === 'disadvantage' || action.protectionReactionActorId != null ||
       (spell.rangeFeet > 5 && dnd5eHostileWithinFiveFeet(state, actor)) ||
       viciousMockeryDisadvantage || actor.exhaustionLevel >= 3 ||
@@ -5105,6 +5108,7 @@ function resolveSpellCast(
       type: 'attack-resolved', actorId: actor.id, targetId: target.id, d20: attack.roll.d20,
       total: attack.roll.total, armorClass: targetArmorClass, hit, critical,
     }, events)
+    consumeDnd5eHelpAttack(state, actor, target, events)
     if (hit) recordHunterMultiattackDefenseHit(state, actor, target)
     if (!hit && (action.uncannyDodge || action.cuttingWordsDamage)) return fail(state, events, 'invalid-class-feature')
     if (hit && action.standAgainstTide) return fail(state, events, 'invalid-class-feature')
@@ -5210,7 +5214,8 @@ function resolveMonsterAction(
     const requestedMode = supplied.mode ?? 'normal'
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
     const hasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
-      (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.stunnedByActorId || dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id))
+      (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.stunnedByActorId ||
+        dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) || dnd5eHelpAttackApplies(state, actor, target))
     const rangedDisadvantage = hasKnownDistance && usesRangedAttack && (
       distanceFeet > (attackDefinition.rangeFeet?.normal ?? 0) || dnd5eHostileWithinFiveFeet(state, actor)
     )
@@ -5269,6 +5274,7 @@ function resolveMonsterAction(
       hit,
       critical,
     }, events)
+    consumeDnd5eHelpAttack(state, actor, target, events)
     if (hit) recordHunterMultiattackDefenseHit(state, actor, target)
     if (!hit && (supplied.uncannyDodge || supplied.deflectMissilesD10 != null || supplied.cuttingWordsDamage)) {
       return fail(state, events, 'invalid-class-feature')
@@ -5481,7 +5487,8 @@ function resolveMonkUnarmedBonus(
     const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
     const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
       (dnd5eTargetGrantsAttackAdvantage(target) || (attackIndex === 0 && attackingFromHidden) || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-        dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) || targetProne)
+        dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) || targetProne ||
+        dnd5eHelpAttackApplies(state, actor, target))
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || viciousMockeryDisadvantage ||
       actor.exhaustionLevel >= 3 || dnd5eFrightenedAttackDisadvantage(state, actor) ||
@@ -5532,6 +5539,7 @@ function resolveMonkUnarmedBonus(
       type: 'attack-resolved', actorId: actor.id, targetId: target.id, d20: attack.roll.d20,
       total: attack.roll.total, armorClass: targetArmorClass, hit, critical,
     }, events)
+    consumeDnd5eHelpAttack(state, actor, target, events)
     if (hit && supplied.standAgainstTide) return fail(state, events, 'invalid-class-feature')
     if (!hit) {
       if (supplied.damageRolls.length > 0 || supplied.cuttingWordsDamage) return fail(state, events, 'invalid-dice')
@@ -5754,7 +5762,8 @@ function resolveMonkDeflectMissilesReturn(
 
   const requestedMode = action.mode ?? 'normal'
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
-    (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.stunnedByActorId || dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id))
+    (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.stunnedByActorId ||
+      dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) || dnd5eHelpAttackApplies(state, actor, target))
   const actorHasDisadvantage = requestedMode === 'disadvantage' || action.distanceFeet > 20 || actor.exhaustionLevel >= 3 ||
     dnd5eHasViciousMockeryAttackDisadvantage(actor) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
     dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
@@ -5780,6 +5789,7 @@ function resolveMonkDeflectMissilesReturn(
     type: 'attack-resolved', actorId: actor.id, targetId: target.id, d20: attack.roll.d20,
     total: attack.roll.total, armorClass, hit, critical,
   }, events)
+  consumeDnd5eHelpAttack(state, actor, target, events)
   events.push({
     type: 'class-state-changed', actorId: actor.id, targetId: target.id,
     stateKey: 'deflect-missiles-catch', active: false,

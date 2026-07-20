@@ -71,4 +71,29 @@ describe('D&D 5e player basic action bridge', () => {
     if (!resolved.result.ok) return
     expect(resolved.result.events).not.toContainEqual(expect.objectContaining({ type: 'turn-resource-spent', resource: 'action' }))
   })
+
+  it('asks the Host for the second d20 required by contest disadvantage', () => {
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'grapple', targetTokenId: 'enemy', targetDefense: 'athletics' }),
+      map,
+      characters: [{ ...hero, exhaustionLevel: 1 }],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.actorRollMode).toBe('disadvantage')
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({
+      prepared: prepared.prepared,
+      actorD20: 18,
+      actorD20Second: 1,
+      targetD20: 10,
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')?.dnd5eCombatState?.activeEffects ?? [])
+      .not.toContainEqual(expect.objectContaining({ standardCondition: 'grappled' }))
+  })
 })
