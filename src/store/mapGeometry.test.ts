@@ -76,4 +76,69 @@ describe('map geometry editor history', () => {
     expect(geometry.doors).toEqual([])
     expect(geometry.windows).toEqual([])
   })
+
+  it('extends same-material walls into a continuous polyline', () => {
+    const store = useMapGeometryStore.getState()
+    expect(store.addEntity('map-1', { ...wall, material: 'stone' })).toBe(true)
+    expect(useMapGeometryStore.getState().addEntity('map-1', {
+      ...wall, id: 'wall-2', material: 'stone', points: [{ x: 50, y: 0 }, { x: 100, y: 50 }],
+    })).toBe(true)
+    expect(useMapGeometryStore.getState().maps[0].walls).toEqual([
+      expect.objectContaining({ id: wall.id, points: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 50 }] }),
+    ])
+  })
+
+  it('reprojects attached openings when a wall endpoint moves', () => {
+    const store = useMapGeometryStore.getState()
+    store.addEntity('map-1', wall)
+    store.addEntity('map-1', {
+      id: 'door', kind: 'door', label: '门', points: [{ x: 10, y: 0 }, { x: 20, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, state: 'closed', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+    })
+    expect(useMapGeometryStore.getState().setEntityPoints('map-1', wall.id, [{ x: 0, y: 0 }, { x: 100, y: 0 }])).toBe(true)
+    expect(useMapGeometryStore.getState().maps[0].doors[0].points).toEqual([{ x: 20, y: 0 }, { x: 40, y: 0 }])
+  })
+
+  it('rejects overlapping wall openings without changing history', () => {
+    const store = useMapGeometryStore.getState()
+    store.addEntity('map-1', wall)
+    expect(store.addEntity('map-1', {
+      id: 'door', kind: 'door', label: '门', points: [{ x: 10, y: 0 }, { x: 30, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, state: 'closed', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+    })).toBe(true)
+    const historyLength = useMapGeometryStore.getState().historyByMapId['map-1'].length
+    expect(useMapGeometryStore.getState().addEntity('map-1', {
+      id: 'window', kind: 'window', label: '窗', points: [{ x: 20, y: 0 }, { x: 40, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, windowType: 'glass',
+      blocksVision: false, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 3,
+    })).toBe(false)
+    expect(useMapGeometryStore.getState().maps[0].windows).toEqual([])
+    expect(useMapGeometryStore.getState().historyByMapId['map-1']).toHaveLength(historyLength)
+  })
+
+  it('moves and resizes an opening along its wall but rejects a collision', () => {
+    const store = useMapGeometryStore.getState()
+    store.addEntity('map-1', wall)
+    store.addEntity('map-1', {
+      id: 'door', kind: 'door', label: '门', points: [{ x: 5, y: 0 }, { x: 15, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, state: 'closed', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+    })
+    store.addEntity('map-1', {
+      id: 'window', kind: 'window', label: '窗', points: [{ x: 35, y: 0 }, { x: 45, y: 0 }],
+      parentWallId: wall.id, parentWallSegmentIndex: 0, windowType: 'glass',
+      blocksVision: false, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 3,
+    })
+    expect(useMapGeometryStore.getState().setEntityPoints('map-1', 'door', [{ x: 10, y: 3 }, { x: 25, y: 3 }])).toBe(true)
+    expect(useMapGeometryStore.getState().maps[0].doors[0].points).toEqual([{ x: 10, y: 0 }, { x: 25, y: 0 }])
+    expect(useMapGeometryStore.getState().setEntityPoints('map-1', 'door', [{ x: 25, y: 0 }, { x: 40, y: 0 }])).toBe(false)
+    expect(useMapGeometryStore.getState().maps[0].doors[0].points).toEqual([{ x: 10, y: 0 }, { x: 25, y: 0 }])
+  })
 })

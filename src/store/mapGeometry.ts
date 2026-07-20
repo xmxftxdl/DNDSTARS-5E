@@ -6,12 +6,16 @@ import {
   MAP_GEOMETRY_MAX_ENTITIES,
   MAP_GEOMETRY_RESOURCE,
   MAP_GEOMETRY_SCHEMA_VERSION,
+  mapGeometryMoveOpening,
+  mapGeometryOpeningOverlaps,
+  mapGeometryReprojectWallAttachments,
   normalizeSharedMapGeometry,
   normalizeMapGeometry,
   setMapGeometryRuntime,
   type MapGeometryDoorState,
   type MapGeometryEntity,
   type MapGeometryEntityPatch,
+  type MapGeometryPoint,
   type MapGeometryState,
   type MapGeometryVisionSettings,
   type SharedMapGeometryState,
@@ -25,8 +29,9 @@ interface MapGeometryStoreState {
   futureByMapId: Record<string, MapGeometryState[]>
   loadShared: () => Promise<void>
   selectEntity: (entityId: string | null) => void
-  addEntity: (mapId: string, entity: MapGeometryEntity) => void
+  addEntity: (mapId: string, entity: MapGeometryEntity) => boolean
   updateEntity: (mapId: string, entityId: string, patch: MapGeometryEntityPatch) => void
+  setEntityPoints: (mapId: string, entityId: string, points: MapGeometryPoint[]) => boolean
   removeEntity: (mapId: string, entityId: string) => void
   setDoorState: (mapId: string, doorId: string, state: MapGeometryDoorState) => void
   setVision: (mapId: string, patch: Partial<MapGeometryVisionSettings>) => void
@@ -108,6 +113,28 @@ function offsetEntity(entity: MapGeometryEntity, offset: number): MapGeometryEnt
   return copy
 }
 
+function pointsNear(a: MapGeometryPoint | undefined, b: MapGeometryPoint | undefined, tolerance = 2): boolean {
+  return !!a && !!b && Math.hypot(a.x - b.x, a.y - b.y) <= tolerance
+}
+
+function snapWallPointsToJunctions(
+  geometry: MapGeometryState,
+  wallId: string,
+  points: MapGeometryPoint[],
+  tolerance = 8,
+): MapGeometryPoint[] {
+  const junctions = geometry.walls
+    .filter((wall) => wall.id !== wallId)
+    .flatMap((wall) => [wall.points[0], wall.points.at(-1)!])
+  return points.map((point) => {
+    const nearest = junctions
+      .map((junction) => ({ junction, distance: Math.hypot(point.x - junction.x, point.y - junction.y) }))
+      .filter(({ distance }) => distance <= tolerance)
+      .sort((left, right) => left.distance - right.distance)[0]
+    return nearest ? { ...nearest.junction } : point
+  })
+}
+
 export const useMapGeometryStore = create<MapGeometryStoreState>()(
   persist(
     (set, get) => ({
@@ -126,14 +153,35 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
         lastSharedUpdatedAt = normalized.updatedAt
         setMapGeometryRuntime(normalized.maps)
         set({ maps: normalized.maps, historyByMapId: {}, futureByMapId: {} })
+        if (canWriteSharedState() && shared?.schemaVersion !== MAP_GEOMETRY_SCHEMA_VERSION) publish(get())
       },
       selectEntity: (selectedEntityId) => set({ selectedEntityId }),
       addEntity: (mapId, entity) => {
+        let applied = false
         set((state) => {
           const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          let selectedEntityId = entity.id
           const maps = mutateMap(state.maps, mapId, (map) => {
             const count = map.walls.length + map.doors.length + (map.windows?.length ?? 0) + map.obstacles.length + (map.lights?.length ?? 0)
             if (count >= MAP_GEOMETRY_MAX_ENTITIES) return map
+            if ((entity.kind === 'door' || entity.kind === 'window') && mapGeometryOpeningOverlaps(map, entity)) return map
+            if (entity.kind === 'wall') {
+              const extend = map.walls.find((wall) =>
+                (wall.material ?? 'stone') === (entity.material ?? 'stone') &&
+                pointsNear(wall.points.at(-1), entity.points[0]),
+              )
+              if (extend) {
+                applied = true
+                selectedEntityId = extend.id
+                return {
+                  ...map,
+                  walls: map.walls.map((wall) => wall.id === extend.id
+                    ? { ...wall, points: [...wall.points, ...entity.points.slice(1)] }
+                    : wall),
+                }
+              }
+            }
+            applied = true
             return entity.kind === 'wall'
               ? { ...map, walls: [...map.walls, entity] }
               : entity.kind === 'door'
@@ -144,10 +192,12 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
                   ? { ...map, obstacles: [...map.obstacles, entity] }
                   : { ...map, lights: [...(map.lights ?? []), entity] }
           })
+          if (!applied) return state
           setMapGeometryRuntime(maps)
-          return { maps, selectedEntityId: entity.id, ...pushHistory(state, mapId, current) }
+          return { maps, selectedEntityId, ...pushHistory(state, mapId, current) }
         })
-        publish(get())
+        if (applied) publish(get())
+        return applied
       },
       updateEntity: (mapId, entityId, patch) => {
         set((state) => {
@@ -157,6 +207,35 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           return { maps, ...pushHistory(state, mapId, current) }
         })
         publish(get())
+      },
+      setEntityPoints: (mapId, entityId, points) => {
+        let applied = false
+        set((state) => {
+          const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          const entity = [
+            ...current.walls, ...current.doors, ...(current.windows ?? []),
+            ...current.obstacles, ...(current.lights ?? []),
+          ].find((candidate) => candidate.id === entityId)
+          if (!entity) return state
+          let next: MapGeometryState | undefined
+          if (entity.kind === 'wall') {
+            next = mapGeometryReprojectWallAttachments(current, entityId, snapWallPointsToJunctions(current, entityId, points))
+          }
+          else if (entity.kind === 'door' || entity.kind === 'window') {
+            if (points.length !== 2) return state
+            next = mapGeometryMoveOpening(current, entityId, [points[0], points[1]], 40)
+          } else if (entity.kind === 'light') {
+            if (points.length !== 1) return state
+            next = replaceEntity(current, entityId, { points })
+          } else if (points.length >= 3) next = replaceEntity(current, entityId, { points })
+          if (!next) return state
+          applied = true
+          const maps = [...state.maps.filter((map) => map.mapId !== mapId), { ...next, updatedAt: Date.now() }]
+          setMapGeometryRuntime(maps)
+          return { maps, ...pushHistory(state, mapId, current) }
+        })
+        if (applied) publish(get())
+        return applied
       },
       removeEntity: (mapId, entityId) => {
         set((state) => {

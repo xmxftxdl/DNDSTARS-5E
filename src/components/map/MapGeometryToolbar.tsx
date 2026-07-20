@@ -134,16 +134,21 @@ export default function MapGeometryToolbar({
           {tool === 'light' && <Lightbulb className="h-3.5 w-3.5 text-amber-200" />}
           {tool === 'delete' && <Trash2 className="h-3.5 w-3.5 text-rose-300" />}
           {tool === 'wall' && (
-            <select
-              value={wallMaterial}
-              onChange={(event) => onWallMaterialChange(event.target.value as MapGeometryWallMaterial)}
-              className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-              title="新绘制墙体的材质"
-            >
-              {Object.entries(WALL_MATERIAL_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
+            <>
+              <select
+                value={wallMaterial}
+                onChange={(event) => onWallMaterialChange(event.target.value as MapGeometryWallMaterial)}
+                className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+                title="新绘制墙体的材质"
+              >
+                {Object.entries(WALL_MATERIAL_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <span className="text-[10px] text-slate-400" title="从同材质墙体末端继续绘制会自动合并为连续墙体">
+                末端续画
+              </span>
+            </>
           )}
 
           <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用动态视野和服务端 Token 可见性过滤">
@@ -323,6 +328,24 @@ export default function MapGeometryToolbar({
                 <option value="closed">关闭</option>
                 <option value="locked">上锁</option>
               </select>
+              <select
+                value={selectedEntity.hinge ?? 'start'}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, { hinge: event.target.value as 'start' | 'end' })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="门轴位于墙洞哪一端"
+              >
+                <option value="start">起点门轴</option>
+                <option value="end">终点门轴</option>
+              </select>
+              <select
+                value={selectedEntity.swing ?? 'clockwise'}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, { swing: event.target.value as 'clockwise' | 'counterclockwise' })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="门打开时的旋转方向"
+              >
+                <option value="clockwise">顺时针开</option>
+                <option value="counterclockwise">逆时针开</option>
+              </select>
               <label className="flex items-center gap-0.5 text-[10px] text-slate-300">
                 <input
                   type="checkbox"
@@ -393,31 +416,57 @@ export default function MapGeometryToolbar({
             </>
           )}
           {selectedEntity.kind === 'window' && (
-            <select
-              value={selectedEntity.windowType}
-              onChange={(event) => {
-                const windowType = event.target.value as typeof selectedEntity.windowType
-                const defaults = windowType === 'shutters'
-                  ? { blocksVision: true, blocksMovement: true, blocksLineOfEffect: true }
-                  : windowType === 'glass'
-                    ? { blocksVision: false, blocksMovement: true, blocksLineOfEffect: true }
-                    : { blocksVision: false, blocksMovement: true, blocksLineOfEffect: false }
-                updateEntity(mapId, selectedEntity.id, { windowType, ...defaults })
-              }}
-              className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
-              title="窗户类型会设置默认阻挡，之后仍可单独调整"
-            >
-              <option value="glass">玻璃窗</option>
-              <option value="bars">铁栏窗</option>
-              <option value="shutters">封闭窗板</option>
-              <option value="opening">开放窗口</option>
-            </select>
+            <>
+              <select
+                value={selectedEntity.windowType}
+                onChange={(event) => {
+                  const windowType = event.target.value as typeof selectedEntity.windowType
+                  const defaults = windowType === 'shutters'
+                    ? { blocksVision: true, blocksMovement: true, blocksLineOfEffect: true, cover: 'total' as const }
+                    : windowType === 'glass'
+                      ? { blocksVision: false, blocksMovement: true, blocksLineOfEffect: true, cover: 'total' as const }
+                      : windowType === 'bars'
+                        ? { blocksVision: false, blocksMovement: true, blocksLineOfEffect: false, cover: 'three-quarters' as const }
+                        : { blocksVision: false, blocksMovement: true, blocksLineOfEffect: false, cover: 'half' as const }
+                  updateEntity(mapId, selectedEntity.id, { windowType, ...defaults })
+                }}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="窗户类型会设置默认阻挡，之后仍可单独调整"
+              >
+                <option value="glass">玻璃窗</option>
+                <option value="bars">铁栏窗</option>
+                <option value="shutters">封闭窗板</option>
+                <option value="opening">开放窗口</option>
+              </select>
+              <select
+                value={selectedEntity.windowState ?? 'closed'}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, { windowState: event.target.value as 'closed' | 'open' | 'broken' })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="打开或破损后不再阻挡视线和效果线"
+              >
+                <option value="closed">关闭</option>
+                <option value="open">打开</option>
+                <option value="broken">破损</option>
+              </select>
+              <select
+                value={selectedEntity.cover ?? 'total'}
+                onChange={(event) => updateEntity(mapId, selectedEntity.id, { cover: event.target.value as 'none' | 'half' | 'three-quarters' | 'total' })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="穿过窗洞攻击时提供的 D&D 5e 掩护"
+              >
+                <option value="none">无掩护</option>
+                <option value="half">半身掩护</option>
+                <option value="three-quarters">四分之三掩护</option>
+                <option value="total">全身掩护</option>
+              </select>
+            </>
           )}
           {(selectedEntity.kind === 'door' || selectedEntity.kind === 'window') && (
             <span className="text-[10px] text-slate-400">
               {selectedEntity.parentWallId
                 ? `嵌入：${geometry.walls.find((wall) => wall.id === selectedEntity.parentWallId)?.label ?? '墙体'}`
                 : '旧式独立几何'}
+              {' · 拖动端点调整宽度，拖动中点沿墙移动'}
             </span>
           )}
           {selectedEntity.kind === 'obstacle' && (

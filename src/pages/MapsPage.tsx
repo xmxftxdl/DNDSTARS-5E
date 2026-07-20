@@ -820,6 +820,7 @@ export default function MapsPage() {
   const removeGeometryEntity = useMapGeometryStore((s) => s.removeEntity)
   const setGeometryDoorState = useMapGeometryStore((s) => s.setDoorState)
   const updateGeometryEntity = useMapGeometryStore((s) => s.updateEntity)
+  const setGeometryEntityPoints = useMapGeometryStore((s) => s.setEntityPoints)
   const explorationMaps = useMapExplorationStore((s) => s.maps)
   const recordMapExploration = useMapExplorationStore((s) => s.record)
   const startCombatStatistics = useCombatStatisticsStore((s) => s.startCombat)
@@ -12309,6 +12310,9 @@ export default function MapsPage() {
               }}
               onGeometryEntitySelect={selectGeometryEntity}
               onGeometryEntityDelete={(entityId) => removeGeometryEntity(activeMap.id, entityId)}
+              onGeometryEntityPointsChange={(entityId, points) => {
+                if (isDM) setGeometryEntityPoints(activeMap.id, entityId, points)
+              }}
               onGeometryDoorInteract={!isDM ? setSelectedDoorInteractionId : undefined}
               geometrySearchMode={!isDM && !!dnd5eSecretSearchMethod}
               onGeometrySearch={!isDM && dnd5eSecretSearchMethod ? (point) => {

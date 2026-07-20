@@ -104,6 +104,7 @@ import {
 import {
   mapGeometryMovementBlocked,
   mapGeometryAttachOpeningToWall,
+  mapGeometryOpeningOverlaps,
   mapGeometryLightPolygon,
   mapGeometryWallRenderSegments,
   mapGeometryVisibilityPolygon,
@@ -209,6 +210,7 @@ interface MapCanvasProps {
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
   onGeometryEntitySelect?: (entityId: string | null) => void
   onGeometryEntityDelete?: (entityId: string) => void
+  onGeometryEntityPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
   onGeometryDoorInteract?: (doorId: string) => void
   geometrySearchMode?: boolean
   onGeometrySearch?: (point: { x: number; y: number }) => void
@@ -416,6 +418,72 @@ function geometryWallMaterial(
   return 'stone'
 }
 
+function GeometryEditHandles({
+  entity,
+  inv,
+  onPointsChange,
+}: {
+  entity: MapGeometryEntity
+  inv: number
+  onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
+}) {
+  if (!['wall', 'door', 'window'].includes(entity.kind)) return null
+  const commitPoint = (index: number, point: MapGeometryPoint) => {
+    const points = entity.points.map((current, currentIndex) => currentIndex === index ? point : current)
+    onPointsChange?.(entity.id, points)
+  }
+  const stop = (event: Konva.KonvaEventObject<MouseEvent | DragEvent>) => { event.cancelBubble = true }
+  const midpoint = entity.kind === 'door' || entity.kind === 'window'
+    ? { x: (entity.points[0].x + entity.points[1].x) / 2, y: (entity.points[0].y + entity.points[1].y) / 2 }
+    : undefined
+  return (
+    <Group>
+      {entity.points.map((point, index) => (
+        <Circle
+          key={`${entity.id}:handle:${index}`}
+          x={point.x}
+          y={point.y}
+          radius={6 * inv}
+          fill="#f8fafc"
+          stroke="#7c3aed"
+          strokeWidth={2 * inv}
+          draggable
+          hitStrokeWidth={12 * inv}
+          onMouseDown={stop}
+          onDragStart={stop}
+          onDragEnd={(event) => {
+            stop(event)
+            commitPoint(index, { x: event.target.x(), y: event.target.y() })
+          }}
+        />
+      ))}
+      {midpoint && (
+        <Rect
+          x={midpoint.x - 5 * inv}
+          y={midpoint.y - 5 * inv}
+          width={10 * inv}
+          height={10 * inv}
+          cornerRadius={2 * inv}
+          fill="#a78bfa"
+          stroke="#ffffff"
+          strokeWidth={1.5 * inv}
+          draggable
+          hitStrokeWidth={12 * inv}
+          onMouseDown={stop}
+          onDragStart={stop}
+          onDragEnd={(event) => {
+            stop(event)
+            const nextMidpoint = { x: event.target.x() + 5 * inv, y: event.target.y() + 5 * inv }
+            const dx = nextMidpoint.x - midpoint.x
+            const dy = nextMidpoint.y - midpoint.y
+            onPointsChange?.(entity.id, entity.points.map((point) => ({ x: point.x + dx, y: point.y + dy })))
+          }}
+        />
+      )}
+    </Group>
+  )
+}
+
 function MapGeometryLayer({
   map,
   geometry,
@@ -427,6 +495,7 @@ function MapGeometryLayer({
   inv,
   onSelect,
   onDelete,
+  onPointsChange,
 }: {
   map: BattleMap
   geometry?: MapGeometryState
@@ -438,6 +507,7 @@ function MapGeometryLayer({
   inv: number
   onSelect?: (entityId: string | null) => void
   onDelete?: (entityId: string) => void
+  onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
 }) {
   if (!geometry && !draft) return null
   const allEntities: MapGeometryEntity[] = [
@@ -469,7 +539,11 @@ function MapGeometryLayer({
             : entity.kind === 'light'
               ? entity.color
               : entity.kind === 'window'
-                ? '#38bdf8'
+                ? entity.windowState === 'broken'
+                  ? '#fb7185'
+                  : entity.windowState === 'open'
+                    ? '#34d399'
+                    : '#38bdf8'
                 : material.color
         const selectEntity = (event: Konva.KonvaEventObject<MouseEvent>) => {
           event.cancelBubble = true
@@ -514,13 +588,22 @@ function MapGeometryLayer({
                   />
                 </Group>
               ))}
+              {selected && editMode && tool === 'select' && !isDraft && (
+                <GeometryEditHandles entity={entity} inv={inv} onPointsChange={onPointsChange} />
+              )}
             </Group>
           )
         }
         if (entity.kind === 'door') {
-          const [hinge, closedEnd] = entity.points
+          const hingeIndex = entity.hinge === 'end' ? 1 : 0
+          const hinge = entity.points[hingeIndex]
+          const closedEnd = entity.points[hingeIndex === 0 ? 1 : 0]
+          const swingSign = entity.swing === 'counterclockwise' ? -1 : 1
           const leafEnd = entity.state === 'open'
-            ? { x: hinge.x - (closedEnd.y - hinge.y), y: hinge.y + (closedEnd.x - hinge.x) }
+            ? {
+                x: hinge.x - (closedEnd.y - hinge.y) * swingSign,
+                y: hinge.y + (closedEnd.x - hinge.x) * swingSign,
+              }
             : closedEnd
           const leafPoints = [hinge.x, hinge.y, leafEnd.x, leafEnd.y]
           return (
@@ -548,6 +631,9 @@ function MapGeometryLayer({
                 lineCap="round"
               />
               <Circle x={hinge.x} y={hinge.y} radius={3.5 * inv} fill={color} stroke={material.color} strokeWidth={1.5 * inv} />
+              {selected && editMode && tool === 'select' && !isDraft && (
+                <GeometryEditHandles entity={entity} inv={inv} onPointsChange={onPointsChange} />
+              )}
             </Group>
           )
         }
@@ -580,6 +666,9 @@ function MapGeometryLayer({
                   strokeWidth={1.5 * inv}
                 />
               ))}
+              {selected && editMode && tool === 'select' && !isDraft && (
+                <GeometryEditHandles entity={entity} inv={inv} onPointsChange={onPointsChange} />
+              )}
             </Group>
           )
         }
@@ -897,6 +986,7 @@ export default function MapCanvas({
   onGeometryEntityCommit,
   onGeometryEntitySelect,
   onGeometryEntityDelete,
+  onGeometryEntityPointsChange,
   onGeometryDoorInteract,
   geometrySearchMode = false,
   onGeometrySearch,
@@ -1266,16 +1356,20 @@ export default function MapCanvas({
         points: attachment.points,
       }
       if (geometryTool === 'door') {
-        return { ...embeddedCommon, kind: 'door', state: 'closed', secret: false }
+        const door = { ...embeddedCommon, kind: 'door', state: 'closed', secret: false, hinge: 'start', swing: 'clockwise' } as const
+        return mapGeometryOpeningOverlaps(geometry, door) ? null : door
       }
-      return {
+      const window = {
         ...embeddedCommon,
         kind: 'window',
         windowType: 'glass',
+        windowState: 'closed',
+        cover: 'total',
         blocksVision: false,
         blocksMovement: true,
         blocksLineOfEffect: true,
-      }
+      } as const
+      return mapGeometryOpeningOverlaps(geometry, window) ? null : window
     }
     if (geometryTool === 'light') {
       const radiusFeet = Math.max(5, Math.round(
@@ -2063,6 +2157,7 @@ export default function MapCanvas({
               if (entityId) onGeometryDoorInteract?.(entityId)
             }}
             onDelete={isDM ? onGeometryEntityDelete : undefined}
+            onPointsChange={isDM ? onGeometryEntityPointsChange : undefined}
           />
         )}
         <FogOfWarLayer
