@@ -8598,6 +8598,14 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      if (
+        pluginChoiceId &&
+        prepared.prepared.feature.action?.interrupt?.cancelOptionId === pluginChoiceId
+      ) {
+        acknowledgePlayerAction(action, 'rejected', 'interrupt-cancelled')
+        completePlayerActionRequest(action)
+        return
+      }
       let pluginRolls: Record<string, Dnd5ePluginDiceRollResult>
       try {
         pluginRolls = await executeDnd5ePluginDiceRolls(pluginActionDefinition ?? {}, async (declaration) =>

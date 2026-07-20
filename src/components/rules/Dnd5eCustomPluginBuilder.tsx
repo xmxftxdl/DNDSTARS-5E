@@ -3,9 +3,13 @@ import { Download, FolderOpen, Plus, Save, Trash2 } from 'lucide-react'
 import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   buildDnd5eCustomRulesPluginSource,
+  DND5E_DAMAGE_TYPES,
+  DND5E_STANDARD_CONDITIONS,
   dnd5eCustomRulesPluginFileName,
   validateDnd5eCustomRulesPluginDraft,
+  type Dnd5eCustomHeadlessActionDraft,
   type Dnd5eCustomRulesPluginDraft,
+  type Dnd5eDamageType,
   type Dnd5ePluginAbilityGenerationDefinition,
   type Dnd5ePluginBackgroundDefinition,
   type Dnd5ePluginFeatureDefinition,
@@ -57,6 +61,42 @@ interface FeatureDraft {
   summary: string
   description: string
   minimumLevel: number
+  headless: HeadlessEffectEditorDraft
+}
+
+interface HeadlessEffectEditorDraft {
+  enabled: boolean
+  actionLabel: string
+  economy: 'action' | 'bonusAction' | 'reaction' | 'none'
+  targetingKind: 'self' | 'single-creature' | 'area'
+  relation: 'any' | 'ally' | 'enemy'
+  includeSelf: boolean
+  rangeFeet: number
+  areaShape: 'circle' | 'cone' | 'line' | 'rect'
+  areaRadiusFeet: number
+  areaWidthFeet: number
+  areaHeightFeet: number
+  areaLengthFeet: number
+  maximumTargets: number
+  damageEnabled: boolean
+  damageCount: number
+  damageSides: number
+  damageModifier: number
+  damageType: Dnd5eDamageType
+  healingEnabled: boolean
+  healingCount: number
+  healingSides: number
+  healingModifier: number
+  conditionEnabled: boolean
+  condition: keyof typeof DND5E_STANDARD_CONDITIONS
+  conditionExpiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
+  conditionRounds: number
+  conditionSaveAbility: AbilityKey
+  conditionSaveDc: number
+  interruptEnabled: boolean
+  interruptAudience: 'actor' | 'target' | 'dm'
+  interruptPrompt: string
+  interruptTimeoutSeconds: number
 }
 
 interface SpellDraft {
@@ -138,9 +178,27 @@ const EQUIPMENT_SLOTS = [['mainWeapon', '主手'], ['offHand', '副手'], ['armo
 const WEAPON_CATEGORIES = [['simple', '简易武器'], ['martial', '军用武器']] as const
 const WEAPON_MODES = [['melee', '近战'], ['ranged', '远程']] as const
 const ATTACK_ABILITIES = [['str', '力量'], ['dex', '敏捷'], ['finesse', '灵巧（取高）']] as const
-const DAMAGE_TYPES = [['slashing', '挥砍'], ['piercing', '穿刺'], ['bludgeoning', '钝击']] as const
+const WEAPON_DAMAGE_TYPES = [['slashing', '挥砍'], ['piercing', '穿刺'], ['bludgeoning', '钝击']] as const
 const ARMOR_CATEGORIES = [['light', '轻甲'], ['medium', '中甲'], ['heavy', '重甲']] as const
 const DEXTERITY_BONUSES = [['full', '完整敏捷调整'], ['max-2', '敏捷最高 +2'], ['none', '不加敏捷']] as const
+const ACTION_ECONOMIES = [['action', '动作'], ['bonusAction', '附赠动作'], ['reaction', '反应'], ['none', '免费行动']] as const
+const TARGETING_KINDS = [['self', '自身'], ['single-creature', '单一生物'], ['area', '范围模板']] as const
+const TARGET_RELATIONS = [['enemy', '敌方'], ['ally', '友方'], ['any', '任意']] as const
+const AREA_SHAPES = [['circle', '圆形'], ['cone', '锥形'], ['line', '线形'], ['rect', '矩形']] as const
+const INTERRUPT_AUDIENCES = [['dm', 'DM'], ['actor', '行动者'], ['target', '目标']] as const
+const CONDITION_EXPIRATIONS = [
+  ['source-next-turn-start', '来源下回合开始'],
+  ['target-next-turn-start', '目标下回合开始'],
+  ['target-turn-end', '目标回合结束'],
+  ['target-turn-end-save', '目标回合结束重复豁免'],
+] as const
+const DAMAGE_TYPE_LABELS: Record<Dnd5eDamageType, string> = {
+  acid: '强酸', bludgeoning: '钝击', cold: '寒冷', fire: '火焰', force: '力场',
+  lightning: '闪电', necrotic: '黯蚀', piercing: '穿刺', poison: '毒素', psychic: '心灵',
+  radiant: '光耀', slashing: '挥砍', thunder: '雷鸣',
+}
+const HEADLESS_DAMAGE_TYPES = DND5E_DAMAGE_TYPES.map((id) => [id, DAMAGE_TYPE_LABELS[id]] as const)
+const HEADLESS_CONDITIONS = Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => [condition.id, condition.label] as const)
 
 interface Props {
   defaultPublisher?: string
@@ -192,6 +250,28 @@ function newFeature(index: number): FeatureDraft {
   return {
     id: `custom-feature-${index}`, name: `自定义特性 ${index}`,
     summary: '由 DM 提供的自定义特性。', description: '', minimumLevel: 1,
+    headless: {
+      enabled: false,
+      actionLabel: '使用特性', economy: 'action', targetingKind: 'single-creature',
+      relation: 'enemy', includeSelf: false, rangeFeet: 60,
+      areaShape: 'circle', areaRadiusFeet: 10, areaWidthFeet: 10, areaHeightFeet: 10,
+      areaLengthFeet: 30, maximumTargets: 16,
+      damageEnabled: true, damageCount: 1, damageSides: 6, damageModifier: 0, damageType: 'force',
+      healingEnabled: false, healingCount: 1, healingSides: 8, healingModifier: 0,
+      conditionEnabled: false, condition: 'prone', conditionExpiresAt: 'target-turn-end',
+      conditionRounds: 1, conditionSaveAbility: 'con', conditionSaveDc: 10,
+      interruptEnabled: false, interruptAudience: 'dm',
+      interruptPrompt: '是否允许结算这项自定义效果？', interruptTimeoutSeconds: 30,
+    },
+  }
+}
+
+function restoreFeatureDraft(value: Partial<FeatureDraft>, index: number): FeatureDraft {
+  const fallback = newFeature(index + 1)
+  return {
+    ...fallback,
+    ...value,
+    headless: { ...fallback.headless, ...(value.headless ?? {}) },
   }
 }
 
@@ -286,9 +366,111 @@ function toBackgroundDefinition(background: BackgroundDraft): Dnd5ePluginBackgro
 }
 
 function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinition {
+  if (!feature.headless.enabled) {
+    return {
+      id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
+      description: feature.description.trim(), minimumLevel: feature.minimumLevel, automation: 'manual',
+    }
+  }
+  const targeting = feature.headless.targetingKind === 'self'
+    ? { kind: 'self' as const }
+    : feature.headless.targetingKind === 'single-creature'
+      ? {
+          kind: 'single-creature' as const,
+          relation: feature.headless.relation,
+          rangeFeet: feature.headless.rangeFeet,
+          includeSelf: feature.headless.includeSelf,
+        }
+      : {
+          kind: 'area' as const,
+          relation: feature.headless.relation,
+          includeSelf: feature.headless.includeSelf,
+          maximumTargets: feature.headless.maximumTargets,
+          template: feature.headless.areaShape === 'circle'
+            ? {
+                shape: 'circle' as const, origin: 'point' as const,
+                radiusFeet: feature.headless.areaRadiusFeet, placeRangeFeet: feature.headless.rangeFeet,
+              }
+            : feature.headless.areaShape === 'cone'
+              ? {
+                  shape: 'cone' as const, origin: 'self' as const,
+                  lengthFeet: feature.headless.areaLengthFeet, aimRangeFeet: feature.headless.rangeFeet,
+                }
+              : feature.headless.areaShape === 'line'
+                ? {
+                    shape: 'line' as const, origin: 'self' as const,
+                    widthFeet: feature.headless.areaWidthFeet, lengthFeet: feature.headless.areaLengthFeet,
+                    aimRangeFeet: feature.headless.rangeFeet,
+                  }
+                : {
+                    shape: 'rect' as const, origin: 'point' as const,
+                    widthFeet: feature.headless.areaWidthFeet, heightFeet: feature.headless.areaHeightFeet,
+                    placeRangeFeet: feature.headless.rangeFeet, rotatable: true,
+                  },
+        }
   return {
     id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
-    description: feature.description.trim(), minimumLevel: feature.minimumLevel, automation: 'manual',
+    description: feature.description.trim(), minimumLevel: feature.minimumLevel, automation: 'full',
+    action: {
+      id: feature.id.trim(),
+      label: feature.headless.actionLabel.trim() || `使用${feature.name.trim()}`,
+      description: feature.summary.trim(),
+      economy: feature.headless.economy,
+      targeting,
+      ...(feature.headless.interruptEnabled ? {
+        interrupt: {
+          prompt: feature.headless.interruptPrompt.trim(),
+          audience: feature.headless.interruptAudience,
+          options: [
+            { id: 'apply', label: '确认结算' },
+            { id: 'cancel', label: '取消' },
+          ],
+          defaultOptionId: 'cancel',
+          cancelOptionId: 'cancel',
+          timeoutMs: feature.headless.interruptTimeoutSeconds * 1_000,
+        },
+      } : {}),
+    },
+  }
+}
+
+function toHeadlessActionDraft(feature: FeatureDraft): Dnd5eCustomHeadlessActionDraft | undefined {
+  if (!feature.headless.enabled) return undefined
+  const effects: Dnd5eCustomHeadlessActionDraft['effects'] = []
+  if (feature.headless.damageEnabled) effects.push({
+    kind: 'damage',
+    dice: {
+      count: feature.headless.damageCount,
+      sides: feature.headless.damageSides,
+      modifier: feature.headless.damageModifier,
+    },
+    damageType: feature.headless.damageType,
+  })
+  if (feature.headless.healingEnabled) effects.push({
+    kind: 'healing',
+    dice: {
+      count: feature.headless.healingCount,
+      sides: feature.headless.healingSides,
+      modifier: feature.headless.healingModifier,
+    },
+  })
+  if (feature.headless.conditionEnabled) effects.push({
+    kind: 'condition',
+    condition: feature.headless.condition,
+    duration: {
+      expiresAt: feature.headless.conditionExpiresAt,
+      remainingRounds: feature.headless.conditionRounds,
+      ...(feature.headless.conditionExpiresAt === 'target-turn-end-save' ? {
+        saveAbility: feature.headless.conditionSaveAbility,
+        saveDc: feature.headless.conditionSaveDc,
+      } : {}),
+    },
+  })
+  return {
+    id: feature.id.trim(),
+    label: feature.headless.actionLabel.trim() || feature.name.trim(),
+    effects,
+    ...(feature.headless.interruptEnabled ? { requiredInterruptOptionId: 'apply' } : {}),
   }
 }
 
@@ -415,6 +597,10 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
     spells: spells.map(toSpellDefinition),
     items: items.map(toItemDefinition),
     abilityGenerationMethods: methods.map(toMethodDefinition),
+    headlessActions: features.flatMap((feature) => {
+      const action = toHeadlessActionDraft(feature)
+      return action ? [action] : []
+    }),
   }), [backgrounds, features, items, metadata, methods, races, spells])
 
   const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods })
@@ -440,7 +626,9 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
       setMetadata(saved.metadata)
       setRaces(saved.races)
       setBackgrounds(Array.isArray(saved.backgrounds) ? saved.backgrounds : [])
-      setFeatures(Array.isArray(saved.features) ? saved.features : [])
+      setFeatures(Array.isArray(saved.features)
+        ? saved.features.map((feature, index) => restoreFeatureDraft(feature, index))
+        : [])
       setSpells(Array.isArray(saved.spells) ? saved.spells : [])
       setItems(Array.isArray(saved.items) ? saved.items : [])
       setMethods(saved.methods)
@@ -619,7 +807,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
           {activeSection === 'features' && <div>
             <SectionHeader
               title="自定义特性"
-              description="UI 创建的特性默认标记为 DM 裁定；要自动结算时需另行绑定受控 Headless Action。"
+              description="可保持 DM 裁定，也可用声明式效果编辑器生成受控 Headless Action；所有目标、骰子和结果仍由 DM 权威 Host 复核。"
               actionLabel="添加特性"
               onAdd={() => setFeatures((current) => [...current, newFeature(current.length + 1)])}
             />
@@ -636,6 +824,10 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
                   <BuilderTextarea label="规则正文" value={feature.description} onChange={(value) => patchFeature(index, { description: value })} />
                   <DeleteButton label={`删除特性 ${feature.name}`} onClick={() => setFeatures((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
                 </div>
+                <HeadlessEffectEditor
+                  value={feature.headless}
+                  onChange={(headless) => patchFeature(index, { headless })}
+                />
               </article>)}
             </div>
           </div>}
@@ -709,7 +901,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
                   <BuilderSelect label="武器类别" value={item.weaponCategory} options={WEAPON_CATEGORIES} onChange={(value) => patchItem(index, { weaponCategory: value as ItemDraft['weaponCategory'] })} />
                   <BuilderSelect label="攻击模式" value={item.weaponMode} options={WEAPON_MODES} onChange={(value) => patchItem(index, { weaponMode: value as ItemDraft['weaponMode'] })} />
                   <BuilderSelect label="攻击属性" value={item.attackAbility} options={ATTACK_ABILITIES} onChange={(value) => patchItem(index, { attackAbility: value as ItemDraft['attackAbility'] })} />
-                  <BuilderSelect label="伤害类型" value={item.damageType} options={DAMAGE_TYPES} onChange={(value) => patchItem(index, { damageType: value as ItemDraft['damageType'] })} />
+                  <BuilderSelect label="伤害类型" value={item.damageType} options={WEAPON_DAMAGE_TYPES} onChange={(value) => patchItem(index, { damageType: value as ItemDraft['damageType'] })} />
                   <BuilderNumber label="伤害骰数量" value={item.damageCount} min={0} max={20} onChange={(value) => patchItem(index, { damageCount: value })} />
                   <BuilderNumber label="伤害骰面数" value={item.damageSides} min={2} max={1000} onChange={(value) => patchItem(index, { damageSides: value })} />
                   {item.weaponMode === 'melee' ? <BuilderNumber label="触及（尺）" value={item.reachFeet} min={0} max={500} onChange={(value) => patchItem(index, { reachFeet: value })} /> : <><BuilderNumber label="普通射程" value={item.rangeNormal} min={0} max={10000} onChange={(value) => patchItem(index, { rangeNormal: value })} /><BuilderNumber label="最大射程" value={item.rangeLong} min={0} max={10000} onChange={(value) => patchItem(index, { rangeLong: value })} /></>}
@@ -759,6 +951,108 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
           </div>
         </div>
       )}
+    </section>
+  )
+}
+
+function HeadlessEffectEditor({
+  value,
+  onChange,
+}: {
+  value: HeadlessEffectEditorDraft
+  onChange(value: HeadlessEffectEditorDraft): void
+}) {
+  const patch = (next: Partial<HeadlessEffectEditorDraft>) => onChange({ ...value, ...next })
+  return (
+    <section className="mt-4 rounded-2xl border border-violet-400/15 bg-violet-500/[0.045] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-violet-100">Headless 效果编辑器</h4>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+            只生成伤害、治疗和标准状态 capability。地图目标、范围、行动经济、骰子与最终写入都由 Host 校验。
+          </p>
+        </div>
+        <Toggle label={value.enabled ? '已启用自动结算' : '启用自动结算'} value={value.enabled} onChange={(enabled) => patch({ enabled })} />
+      </div>
+
+      {value.enabled && <div className="mt-4 space-y-4 border-t border-violet-400/10 pt-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <BuilderInput label="战斗按钮文字" value={value.actionLabel} onChange={(actionLabel) => patch({ actionLabel })} />
+          <BuilderSelect label="行动类型" value={value.economy} options={ACTION_ECONOMIES} onChange={(economy) => patch({ economy: economy as HeadlessEffectEditorDraft['economy'] })} />
+          <BuilderSelect label="目标模式" value={value.targetingKind} options={TARGETING_KINDS} onChange={(targetingKind) => patch({ targetingKind: targetingKind as HeadlessEffectEditorDraft['targetingKind'] })} />
+          {value.targetingKind !== 'self' && <BuilderSelect label="目标关系" value={value.relation} options={TARGET_RELATIONS} onChange={(relation) => patch({ relation: relation as HeadlessEffectEditorDraft['relation'] })} />}
+        </div>
+
+        {value.targetingKind === 'single-creature' && <div className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end">
+          <BuilderNumber label="射程（尺）" value={value.rangeFeet} min={0} max={10000} onChange={(rangeFeet) => patch({ rangeFeet })} />
+          <div className="pb-0.5"><Toggle label="允许选择自己" value={value.includeSelf} onChange={(includeSelf) => patch({ includeSelf })} /></div>
+        </div>}
+
+        {value.targetingKind === 'area' && <div className="rounded-xl border border-white/8 bg-black/10 p-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <BuilderSelect label="范围形状" value={value.areaShape} options={AREA_SHAPES} onChange={(areaShape) => patch({ areaShape: areaShape as HeadlessEffectEditorDraft['areaShape'] })} />
+            <BuilderNumber label={value.areaShape === 'circle' || value.areaShape === 'rect' ? '放置射程（尺）' : '瞄准距离（尺）'} value={value.rangeFeet} min={0} max={10000} onChange={(rangeFeet) => patch({ rangeFeet })} />
+            <BuilderNumber label="最多目标" value={value.maximumTargets} min={1} max={256} onChange={(maximumTargets) => patch({ maximumTargets })} />
+            <div className="self-end pb-0.5"><Toggle label="范围可包含自己" value={value.includeSelf} onChange={(includeSelf) => patch({ includeSelf })} /></div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {value.areaShape === 'circle' && <BuilderNumber label="半径（尺）" value={value.areaRadiusFeet} min={0} max={10000} onChange={(areaRadiusFeet) => patch({ areaRadiusFeet })} />}
+            {(value.areaShape === 'line' || value.areaShape === 'rect') && <BuilderNumber label="宽度（尺）" value={value.areaWidthFeet} min={0} max={10000} onChange={(areaWidthFeet) => patch({ areaWidthFeet })} />}
+            {value.areaShape === 'rect' && <BuilderNumber label="高度（尺）" value={value.areaHeightFeet} min={0} max={10000} onChange={(areaHeightFeet) => patch({ areaHeightFeet })} />}
+            {(value.areaShape === 'line' || value.areaShape === 'cone') && <BuilderNumber label="长度（尺）" value={value.areaLengthFeet} min={0} max={10000} onChange={(areaLengthFeet) => patch({ areaLengthFeet })} />}
+          </div>
+        </div>}
+
+        <div className="grid gap-3 xl:grid-cols-3">
+          <fieldset className={`rounded-xl border p-3 ${value.damageEnabled ? 'border-rose-400/25 bg-rose-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
+            <legend className="px-1"><Toggle label="伤害" value={value.damageEnabled} onChange={(damageEnabled) => patch({ damageEnabled })} /></legend>
+            {value.damageEnabled && <div className="mt-2 grid grid-cols-2 gap-3">
+              <BuilderNumber label="骰子数量" value={value.damageCount} min={1} max={12} onChange={(damageCount) => patch({ damageCount })} />
+              <BuilderNumber label="骰面" value={value.damageSides} min={2} max={100} onChange={(damageSides) => patch({ damageSides })} />
+              <BuilderNumber label="固定调整值" value={value.damageModifier} min={-1000000} max={1000000} onChange={(damageModifier) => patch({ damageModifier })} />
+              <BuilderSelect label="伤害类型" value={value.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patch({ damageType: damageType as Dnd5eDamageType })} />
+            </div>}
+          </fieldset>
+
+          <fieldset className={`rounded-xl border p-3 ${value.healingEnabled ? 'border-emerald-400/25 bg-emerald-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
+            <legend className="px-1"><Toggle label="治疗" value={value.healingEnabled} onChange={(healingEnabled) => patch({ healingEnabled })} /></legend>
+            {value.healingEnabled && <div className="mt-2 grid grid-cols-2 gap-3">
+              <BuilderNumber label="治疗骰数量" value={value.healingCount} min={1} max={12} onChange={(healingCount) => patch({ healingCount })} />
+              <BuilderNumber label="治疗骰面" value={value.healingSides} min={2} max={100} onChange={(healingSides) => patch({ healingSides })} />
+              <BuilderNumber label="固定治疗值" value={value.healingModifier} min={-1000000} max={1000000} onChange={(healingModifier) => patch({ healingModifier })} />
+            </div>}
+          </fieldset>
+
+          <fieldset className={`rounded-xl border p-3 ${value.conditionEnabled ? 'border-amber-400/25 bg-amber-500/[0.035]' : 'border-white/8 bg-black/10'}`}>
+            <legend className="px-1"><Toggle label="标准状态" value={value.conditionEnabled} onChange={(conditionEnabled) => patch({ conditionEnabled })} /></legend>
+            {value.conditionEnabled && <div className="mt-2 grid grid-cols-2 gap-3">
+              <BuilderSelect label="状态" value={value.condition} options={HEADLESS_CONDITIONS} onChange={(condition) => patch({ condition: condition as HeadlessEffectEditorDraft['condition'] })} />
+              <BuilderSelect label="解除时点" value={value.conditionExpiresAt} options={CONDITION_EXPIRATIONS} onChange={(conditionExpiresAt) => patch({ conditionExpiresAt: conditionExpiresAt as HeadlessEffectEditorDraft['conditionExpiresAt'] })} />
+              <BuilderNumber label="持续轮数" value={value.conditionRounds} min={1} max={14400} onChange={(conditionRounds) => patch({ conditionRounds })} />
+              {value.conditionExpiresAt === 'target-turn-end-save' && <>
+                <BuilderSelect label="重复豁免属性" value={value.conditionSaveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(conditionSaveAbility) => patch({ conditionSaveAbility: conditionSaveAbility as AbilityKey })} />
+                <BuilderNumber label="重复豁免 DC" value={value.conditionSaveDc} min={1} max={40} onChange={(conditionSaveDc) => patch({ conditionSaveDc })} />
+              </>}
+            </div>}
+          </fieldset>
+        </div>
+
+        {!value.damageEnabled && !value.healingEnabled && !value.conditionEnabled && (
+          <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-3 py-2 text-xs text-rose-100">至少启用一种伤害、治疗或标准状态效果。</p>
+        )}
+
+        <div className="rounded-xl border border-white/8 bg-black/10 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div><h5 className="text-xs font-semibold text-slate-300">Interrupt 确认</h5><p className="mt-1 text-[11px] text-slate-600">在掷骰和写入前暂停事务；取消或超时不会消耗行动经济。</p></div>
+            <Toggle label="启用 Interrupt" value={value.interruptEnabled} onChange={(interruptEnabled) => patch({ interruptEnabled })} />
+          </div>
+          {value.interruptEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="lg:col-span-2"><BuilderInput label="确认提示" value={value.interruptPrompt} onChange={(interruptPrompt) => patch({ interruptPrompt })} /></div>
+            <BuilderSelect label="回答者" value={value.interruptAudience} options={INTERRUPT_AUDIENCES} onChange={(interruptAudience) => patch({ interruptAudience: interruptAudience as HeadlessEffectEditorDraft['interruptAudience'] })} />
+            <BuilderNumber label="超时（秒）" value={value.interruptTimeoutSeconds} min={5} max={300} onChange={(interruptTimeoutSeconds) => patch({ interruptTimeoutSeconds })} />
+          </div>}
+        </div>
+      </div>}
     </section>
   )
 }

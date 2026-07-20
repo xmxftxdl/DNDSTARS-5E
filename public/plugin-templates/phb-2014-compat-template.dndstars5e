@@ -109,6 +109,7 @@ const plugin = {
             audience: 'actor',
             options: [{ id: 'cast', label: '建立领域' }, { id: 'cancel', label: '取消' }],
             defaultOptionId: 'cancel',
+            cancelOptionId: 'cancel',
           },
           persistentArea: {
             label: '星辉领域（原创演示）',

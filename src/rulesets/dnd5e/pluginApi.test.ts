@@ -7,6 +7,7 @@ import {
 import {
   dnd5ePluginAbilityGenerationMethod,
   dnd5ePluginBackgroundDefinition,
+  dnd5ePluginFeatureDefinition,
   dnd5ePluginRaceDefinition,
   registerDnd5eRulesPlugin,
   registeredDnd5ePluginAbilityGenerationMethods,
@@ -48,6 +49,35 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e rules plugin API', () => {
+  it('preserves the declared pre-roll Interrupt cancellation option', () => {
+    const pluginId = 'com.example.interrupt-cancel'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Interrupt Cancel', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'confirm', resolve: ({ succeed }) => succeed() })
+        api.registerFeature({
+          id: 'confirm', name: '确认效果', summary: '测试。', description: '测试。', automation: 'full',
+          action: {
+            id: 'confirm', label: '使用', economy: 'action', targeting: { kind: 'self' },
+            interrupt: {
+              prompt: '是否继续？', audience: 'dm',
+              options: [{ id: 'apply', label: '继续' }, { id: 'cancel', label: '取消' }],
+              defaultOptionId: 'cancel', cancelOptionId: 'cancel',
+            },
+          },
+        })
+      },
+    })
+    try {
+      expect(dnd5ePluginFeatureDefinition(`${pluginId}:confirm`)?.action?.interrupt?.cancelOptionId).toBe('cancel')
+    } finally {
+      dispose()
+    }
+  })
+
   it('registers a declarative subclass, auto-granted feature, and rest-aware resource', () => {
     const pluginId = 'com.example.chronomancer'
     let subclassId = ''

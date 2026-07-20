@@ -138,6 +138,8 @@ export interface Dnd5ePluginInterruptDeclaration {
   audience: 'actor' | 'target' | 'dm'
   options: readonly Dnd5ePluginInterruptOption[]
   defaultOptionId: string
+  /** Host 在掷骰前终止事务的选项；不消费行动经济，也不调用 Worker resolver。 */
+  cancelOptionId?: string
   timeoutMs?: number
 }
 
@@ -692,6 +694,9 @@ function clonePluginInterrupt(
     return { ...option, label: option.label.trim() }
   })
   if (!seen.has(interrupt.defaultOptionId)) throw new Error(`Invalid plugin interrupt default: ${featureId}`)
+  if (interrupt.cancelOptionId != null && !seen.has(interrupt.cancelOptionId)) {
+    throw new Error(`Invalid plugin interrupt cancel option: ${featureId}`)
+  }
   return { ...interrupt, prompt: interrupt.prompt.trim(), timeoutMs: interrupt.timeoutMs ?? 30_000, options }
 }
 
