@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   BookOpen, Bot, ChevronRight, Download, FileJson, Filter, Search, ShieldCheck, Trash2, Upload,
 } from 'lucide-react'
@@ -11,16 +11,22 @@ import {
   DND5E_SPELLCASTING_CLASS_IDS,
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
-  dnd5eSpellbookEntries,
+  dnd5eSpellbookEntriesWithPlugins,
   parseDnd5eSpellImportFile,
   type Dnd5eImportedSpell,
   type Dnd5eSpellbookEntry,
   type Dnd5eSpellcastingClassId,
 } from '../rulesets/dnd5e/spellbook'
+import {
+  dnd5eRulesPluginRegistrySnapshot,
+  registeredDnd5ePluginSpells,
+  subscribeDnd5eRulesPluginRegistry,
+} from '../rulesets/dnd5e/pluginApi'
 import { useSpellbookStore } from '../store/spellbook'
 import { dnd5eConditionLabel } from '../rulesets/dnd5e/conditions'
 
-type SourceFilter = 'all' | 'srd-core' | 'room-import' | 'headless'
+type SourceFilter = 'all' | 'srd-core' | 'room-import'
+type AutomationFilter = 'all' | 'headless' | 'adjudication'
 
 function levelLabel(level: number): string {
   return level === 0 ? '戏法' : `${level} 环`
@@ -28,7 +34,7 @@ function levelLabel(level: number): string {
 
 function sourceLabel(entry: Dnd5eSpellbookEntry): string {
   if (entry.sourceKind === 'room-import') return '房间导入'
-  return entry.headless ? 'SRD 5.1 · 中文正文 · Headless' : 'SRD 5.1 · 中文正文 · DM 裁定'
+  return 'SRD 5.1 · 中文正文'
 }
 
 function castingTimeLabel(spell: Dnd5eImportedSpell): string {
@@ -118,25 +124,37 @@ export default function SpellbookPage() {
   const [level, setLevel] = useState('all')
   const [classId, setClassId] = useState<'all' | Dnd5eSpellcastingClassId>('all')
   const [source, setSource] = useState<SourceFilter>('all')
+  const [automation, setAutomation] = useState<AutomationFilter>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isDM = (getRoomSession()?.role ?? modeFromPort()) !== 'player'
-  const entries = useMemo(() => dnd5eSpellbookEntries(imported), [imported])
+  const pluginRevision = useSyncExternalStore(
+    subscribeDnd5eRulesPluginRegistry,
+    dnd5eRulesPluginRegistrySnapshot,
+    dnd5eRulesPluginRegistrySnapshot,
+  )
+  const entries = useMemo(() => {
+    void pluginRevision
+    return dnd5eSpellbookEntriesWithPlugins(imported, registeredDnd5ePluginSpells())
+  }, [imported, pluginRevision])
+  const headlessCount = entries.filter((entry) => entry.headless).length
+  const adjudicationCount = entries.length - headlessCount
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
     return entries.filter((entry) => {
       if (level !== 'all' && entry.level !== Number(level)) return false
       if (classId !== 'all' && !entry.classes.includes(classId)) return false
-      if (source === 'headless' && !entry.headless) return false
+      if (automation === 'headless' && !entry.headless) return false
+      if (automation === 'adjudication' && entry.headless) return false
       if (source === 'srd-core' && entry.sourceKind !== 'srd-core') return false
       if (source === 'room-import' && entry.sourceKind !== 'room-import') return false
       if (!normalizedQuery) return true
       return `${entry.name} ${entry.englishName ?? ''} ${entry.id}`.toLocaleLowerCase('zh-CN').includes(normalizedQuery)
     })
-  }, [classId, entries, level, query, source])
-  const selected = entries.find((entry) => entry.id === selectedId) ?? filtered[0]
+  }, [automation, classId, entries, level, query, source])
+  const selected = filtered.find((entry) => entry.id === selectedId) ?? filtered[0]
 
   const importFile = async (file: File) => {
     setBusy(true)
@@ -207,9 +225,10 @@ export default function SpellbookPage() {
         </div> : undefined}
       />
 
-      <div className="mb-4 grid gap-3 md:grid-cols-3">
+      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Summary icon={BookOpen} label="SRD 5.1 法术目录" value="319" />
-        <Summary icon={Bot} label="核心 Headless 法术" value={`${entries.filter((entry) => entry.headless).length}`} />
+        <Summary icon={Bot} label="已接入 Headless" value={`${headlessCount}`} />
+        <Summary icon={ShieldCheck} label="需要 DM 裁定" value={`${adjudicationCount}`} />
         <Summary icon={FileJson} label="房间导入法术" value={`${imported.length}`} />
       </div>
 
@@ -221,7 +240,7 @@ export default function SpellbookPage() {
       {notice ? <p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-4 py-3 text-sm text-emerald-200">{notice}</p> : null}
       {error ? <p className="mb-4 rounded-xl border border-red-400/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-200">{error}</p> : null}
 
-      <section className="glass mb-4 grid gap-3 rounded-2xl p-4 md:grid-cols-[minmax(220px,1fr)_repeat(3,minmax(130px,auto))]">
+      <section className="glass mb-4 grid gap-3 rounded-2xl p-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_repeat(4,minmax(130px,auto))]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名、英文名或 ID" className="w-full rounded-xl border border-white/10 bg-void-950/60 py-2.5 pl-10 pr-3 text-sm text-slate-100" />
@@ -238,7 +257,11 @@ export default function SpellbookPage() {
           { value: 'all', label: '全部来源' },
           { value: 'srd-core', label: 'SRD 5.1' },
           { value: 'room-import', label: '房间导入' },
-          { value: 'headless', label: '已接入 Headless' },
+        ]} />
+        <FilterSelect value={automation} onChange={(value) => setAutomation(value as AutomationFilter)} label="自动化状态" options={[
+          { value: 'all', label: `全部状态（${entries.length}）` },
+          { value: 'headless', label: `已接入 Headless（${headlessCount}）` },
+          { value: 'adjudication', label: `需要 DM 裁定（${adjudicationCount}）` },
         ]} />
       </section>
 
@@ -254,6 +277,7 @@ export default function SpellbookPage() {
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-xs font-bold text-violet-200">{entry.level}</span>
               <span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-100">{entry.name}</strong><span className="mt-0.5 block truncate text-[11px] text-slate-500">{entry.englishName && entry.englishName !== entry.name ? `${entry.englishName} · ` : ''}{sourceLabel(entry)}</span></span>
+              <AutomationBadge headless={entry.headless} compact />
               <ChevronRight className="h-4 w-4 shrink-0 text-slate-600" />
             </button>)}
             {filtered.length === 0 ? <p className="px-4 py-16 text-center text-sm text-slate-500">没有符合条件的法术。</p> : null}
@@ -274,7 +298,8 @@ function SpellDetails({ entry, isDM, busy, onRemove }: { entry?: Dnd5eSpellbookE
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4">
       <div><h2 className="text-2xl font-bold text-slate-50">{entry.name}</h2>{entry.englishName && entry.englishName !== entry.name ? <p className="mt-1 text-sm text-slate-500">{entry.englishName}</p> : null}</div>
       <div className="flex items-center gap-2">
-        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${entry.headless ? 'bg-emerald-500/10 text-emerald-200' : entry.sourceKind === 'room-import' ? 'bg-sky-500/10 text-sky-200' : 'bg-slate-500/10 text-slate-400'}`}>{sourceLabel(entry)}</span>
+        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${entry.sourceKind === 'room-import' ? 'bg-sky-500/10 text-sky-200' : 'bg-slate-500/10 text-slate-400'}`}>{sourceLabel(entry)}</span>
+        <AutomationBadge headless={entry.headless} />
         {isDM && imported ? <button type="button" disabled={busy} onClick={() => onRemove(imported)} title="移除房间法术" className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-200"><Trash2 className="h-4 w-4" /></button> : null}
       </div>
     </div>
@@ -312,6 +337,17 @@ function SpellDetails({ entry, isDM, busy, onRemove }: { entry?: Dnd5eSpellbookE
 
 function Summary({ icon: Icon, label, value }: { icon: typeof BookOpen; label: string; value: string }) {
   return <div className="glass flex items-center gap-3 rounded-2xl p-4"><span className="rounded-xl bg-arcane-500/10 p-2.5"><Icon className="h-5 w-5 text-arcane-300" /></span><span><span className="block text-xs text-slate-500">{label}</span><strong className="mt-0.5 block text-xl text-slate-100">{value}</strong></span></div>
+}
+
+function AutomationBadge({ headless, compact = false }: { headless: boolean; compact?: boolean }) {
+  const label = headless ? (compact ? 'HEADLESS' : '已接入 HEADLESS') : 'DM 裁定'
+  return <span
+    title={headless ? '该法术已接入自动战斗结算' : '该法术尚未接入自动结算，需要 DM 按规则正文裁定'}
+    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border font-bold tracking-wide ${compact ? 'px-2 py-1 text-[9px]' : 'px-2.5 py-1 text-[11px]'} ${headless ? 'border-emerald-300/25 bg-emerald-500/15 text-emerald-100' : 'border-amber-300/20 bg-amber-500/10 text-amber-100'}`}
+  >
+    <span className={`h-1.5 w-1.5 rounded-full ${headless ? 'bg-emerald-300' : 'bg-amber-300'}`} />
+    {label}
+  </span>
 }
 
 function FilterSelect({ value, onChange, label, options }: { value: string; onChange: (value: string) => void; label: string; options: Array<{ value: string; label: string }> }) {
