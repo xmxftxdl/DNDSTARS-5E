@@ -33,7 +33,7 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDiceCount, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
 import {
   mapGeometryCoverFromPoint,
@@ -438,7 +438,7 @@ export function prepareDnd5eSpellCast(input: {
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5))
-  const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
+  const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
     dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) || actorProne || (targetProne && distanceFeet > 5)
   const attackMode = spell.effect === 'spell-attack' && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
     ? advantage === disadvantage ? 'normal' : advantage ? 'advantage' : 'disadvantage'
@@ -460,7 +460,7 @@ export function prepareDnd5eSpellCast(input: {
             !!currentTarget.classState.recklessAttackTurnKey || !!currentTarget.classState.stunnedByActorId ||
             dnd5eAttackerIsUnseen(actorCombatant) ||
             (currentTargetProne && currentDistanceFeet <= 5))
-        const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 ||
+        const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(currentTarget) ||
           (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
           dnd5eUnseenTargetImposesDisadvantage(actorCombatant, currentTarget) || actorProne ||
           (currentTargetProne && currentDistanceFeet > 5)
@@ -712,9 +712,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     cuttingWords: input.cuttingWords,
     cuttingWordsDamage: input.cuttingWordsDamage,
     standAgainstTide: input.standAgainstTide,
-    mode: prepared.attackMode
-      ? dnd5eSpellAttackModeWithProtection(prepared.attackMode, !!input.protectionReactionActorId)
-      : undefined,
+    mode: prepared.attackMode,
     targetAttacks: input.targetAttacks,
     protectionReactionActorId: input.protectionReactionActorId,
     shieldSpellReaction: input.shieldSpellReaction,

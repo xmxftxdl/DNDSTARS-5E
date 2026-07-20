@@ -26,7 +26,7 @@ import {
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 export type Dnd5eMonsterAttackRejectReason =
   | 'invalid-actor'
@@ -153,7 +153,7 @@ export function prepareDnd5eMonsterAttack(input: {
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5))
-  const targetImposesDisadvantage = !!target.classState.dodgingTurnKey ||
+  const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
     dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target) || actorProne || (targetProne && distanceFeet > 5)
   const targetAttackMode = targetGrantsAdvantage === targetImposesDisadvantage
     ? 'normal'
@@ -245,10 +245,7 @@ export function resolvePreparedDnd5eMonsterAttack(input: {
     actionId: prepared.action.id,
     rolls: input.rolls.map((roll, attackIndex) => ({
       ...roll,
-      mode: dnd5eMonsterAttackModeWithProtection(
-        dnd5ePreparedMonsterAttackMode(prepared, attackIndex),
-        !!roll.protectionReactionActorId,
-      ),
+      mode: dnd5ePreparedMonsterAttackMode(prepared, attackIndex),
       targetId: prepared.targetToken.id,
     })),
   })

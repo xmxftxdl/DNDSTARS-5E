@@ -36,7 +36,7 @@ import {
   type Dnd5eAttackCoverSnapshot,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -271,7 +271,7 @@ export function prepareDnd5eEquipmentAttack(input: {
           tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
       })
     ))
-  const targetImposesDisadvantage = !!target.classState.dodgingTurnKey || attackerHasDisadvantage ||
+  const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || attackerHasDisadvantage ||
     dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target)
   const attackMode = attackerHasAdvantage === targetImposesDisadvantage
     ? 'normal'
@@ -431,7 +431,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     stunningStrikeDarkOnesOwnLuckRoll: input.stunningStrikeDarkOnesOwnLuckRoll,
     hurlThroughHellDamageRolls: input.hurlThroughHellDamageRolls,
     standAgainstTide: input.standAgainstTide,
-    mode: dnd5eAttackModeWithProtection(prepared.attackMode, !!input.protectionReactionActorId),
+    mode: prepared.attackMode,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
     damage: {

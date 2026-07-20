@@ -11,13 +11,15 @@ import type { Dnd5eFighterFeatureId } from '../../rulesets/dnd5e'
 import type { Dnd5eTurnEconomyCounts, Dnd5eWeaponAttackOptions } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 
-export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, turnEconomy, onAttack, onFeature }: {
+export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, pending, turnEconomy, onAttack, onDisengage, onDodge, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
   pending: boolean
   turnEconomy: Dnd5eTurnEconomyCounts
   onAttack: (options?: Dnd5eWeaponAttackOptions) => void
+  onDisengage: () => void
+  onDodge: () => void
   onFeature: (feature: Dnd5eFighterFeatureId) => void
 }) {
   const profile = dnd5eWeaponAttackProfile(character)
@@ -84,6 +86,14 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         >
           <Sword className="h-4 w-4" />副手附赠攻击（{offHandProfile.damage.count}d{offHandProfile.damage.sides}{offHandProfile.damage.bonus >= 0 ? '+' : ''}{offHandProfile.damage.bonus}）
         </button> : null}
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button type="button" onClick={onDisengage} disabled={!canAct || pending || turnEconomy.action.current < 1} className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+            <Footprints className="h-4 w-4" />撤离
+          </button>
+          <button type="button" onClick={onDodge} disabled={!canAct || pending || turnEconomy.action.current < 1} className="flex items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+            <Shield className="h-4 w-4" />闪避
+          </button>
+        </div>
       </div>
       <div className="rounded-xl border border-white/10 bg-void-900/45 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><Shield className="h-4 w-4 text-sky-300" />防护与装备</div>

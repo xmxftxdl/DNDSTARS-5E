@@ -2,12 +2,13 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { D20RollMode } from '../contracts'
 import type { Dnd5eClassId } from './classes'
 import type { Dnd5eDamageType } from './monsters'
-import { dnd5eActiveEffectsPreventReactions, type Dnd5eActiveEffectInstance } from './activeEffects'
+import { dnd5eActiveEffectsPreventReactions, dnd5eActiveSpeedPenalty, type Dnd5eActiveEffectInstance } from './activeEffects'
 import {
   dnd5eConditionGrantsAttackAdvantage,
   dnd5eConditionGrantsAttackAdvantageToAttacker,
   dnd5eConditionImposesAttackDisadvantage,
   dnd5eConditionIncapacitated,
+  dnd5eConditionSetsSpeedToZero,
   dnd5eConditionSavingThrowDisadvantage,
   dnd5eHasStandardCondition,
   dnd5eStandardConditionId,
@@ -23,6 +24,7 @@ export interface Dnd5eDefensiveCreature {
   classState: {
     activeEffects?: readonly Dnd5eActiveEffectInstance[]
     hiddenCheckTotal?: number
+    dodgingTurnKey?: string
     raging?: boolean
     stunnedByActorId?: string
     turnedByClericId?: string
@@ -33,6 +35,8 @@ export interface Dnd5eDefensiveCreature {
   }
   conditions: readonly string[]
   creatureType?: string
+  speed?: number
+  dodging?: boolean
 }
 
 function hasCondition(creature: Pick<Dnd5eDefensiveCreature, 'conditions'>, values: ReadonlySet<string>): boolean {
@@ -166,6 +170,15 @@ export function dnd5eReactionsPrevented(
   return dnd5eIsIncapacitated(creature) || !!creature.classState.turnedByClericId ||
     dnd5eActiveEffectsPreventReactions(creature.classState.activeEffects) ||
     Object.keys(creature.classState.openHandNoReactionsAppliedTurnKeysBySource ?? {}).length > 0
+}
+
+/** Dodge only grants its defensive benefit while the creature can act and still has non-zero speed. */
+export function dnd5eTargetIsDodging(
+  creature: Pick<Dnd5eDefensiveCreature, 'classState' | 'conditions' | 'speed' | 'dodging'>,
+): boolean {
+  if (dnd5eConditionIncapacitated(creature) || dnd5eConditionSetsSpeedToZero(creature)) return false
+  if (creature.speed != null && creature.speed - dnd5eActiveSpeedPenalty(creature.classState.activeEffects) <= 0) return false
+  return creature.dodging === true || creature.classState.dodgingTurnKey != null
 }
 
 export function dnd5eCanUseUncannyDodge(creature: Dnd5eDefensiveCreature & { currentHp: number; turn: { reactionAvailable: boolean } }): boolean {

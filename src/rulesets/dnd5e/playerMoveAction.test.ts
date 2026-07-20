@@ -3,7 +3,7 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { prepareDnd5ePlayerMove, resolvePreparedDnd5ePlayerMove } from './playerMoveAction'
+import { prepareDnd5ePlayerMove, resolveDnd5ePlayerDodge, resolvePreparedDnd5ePlayerMove } from './playerMoveAction'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
@@ -130,5 +130,25 @@ describe('D&D 5e player map movement', () => {
     expect(resolved.result.state.combatants['hero-token'].turn.movementRemaining).toBe(10)
     expect(resolved.application?.characters[0].conditions).toEqual([])
     expect(resolved.result.events).toContainEqual({ type: 'condition-ended', targetId: 'hero-token', condition: 'prone' })
+  })
+
+  it('persists the Dodge action marker into the character combat state', () => {
+    const dodgeAction: SharedPlayerActionState = { ...action, id: 'dodge', type: 'dodge' }
+    const resolved = resolveDnd5ePlayerDodge({
+      action: dodgeAction,
+      map,
+      characters: [character()],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(resolved).toMatchObject({ ok: true })
+    if (!resolved.ok) return
+    expect(resolved.result.events).toContainEqual({
+      type: 'turn-resource-spent', actorId: 'hero-token', resource: 'action',
+    })
+    expect(resolved.application.characters[0].dnd5eCombatState?.dodgingTurnKey).toBe('combat:1:hero-token')
   })
 })

@@ -25,7 +25,7 @@ import {
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 export type Dnd5eHunterMultiattackFeature = 'volley' | 'whirlwind-attack'
 
@@ -162,7 +162,7 @@ export function prepareDnd5eHunterMultiattack(input: {
       (dnd5eTargetGrantsAttackAdvantage(target) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
         !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
         dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && targetDistance <= 5))
-    const targetImposesDisadvantage = !!target.classState.dodgingTurnKey || actorCombatant.exhaustionLevel >= 3 ||
+    const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || actorCombatant.exhaustionLevel >= 3 ||
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
       dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target) || actorProne || (targetProne && targetDistance > 5) ||
       (feature === 'volley' && (rangedThreatened || targetDistance > (profile.rangeFeet?.normal ?? 0)))
@@ -311,7 +311,7 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
       uncannyDodge: roll.uncannyDodge,
       deflectMissilesD10: roll.deflectMissilesD10,
       tranquilitySave: roll.tranquilitySave,
-      mode: dnd5eAttackModeWithProtection(prepared.targets[index].attackMode, !!roll.protectionReactionActorId),
+      mode: prepared.targets[index].attackMode,
       damageRolls: roll.damageRolls,
       classDamageContext: prepared.targets[index].classDamageContext,
       classDamageRolls: roll.classDamageRolls,

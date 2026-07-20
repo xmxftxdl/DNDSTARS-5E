@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { dnd5eAttackerIsUnseen, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
@@ -785,6 +785,33 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(reaction.state.combatants.b.turn.reactionAvailable).toBe(false)
   })
 
+  it('rejects an opportunity attack when the reactor cannot see the moving target', () => {
+    const state = startDnd5eHeadlessCombat('blocked-opportunity', [fighter('a', 20), fighter('b', 10)])
+    state.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('b', 'a')]: true,
+    }
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'opportunity-attack', actorId: 'b', targetId: 'a', attackModifier: 5, d20: 15,
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('restores a persisted Dodge marker and keeps the target defended until its next turn', () => {
+    const defender = fighter('b', 10, { classState: { dodgingTurnKey: 'combat:1:b' } })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('combat', [fighter('a', 20), defender]),
+      {
+        type: 'attack', actorId: 'a', targetId: 'b', attackModifier: 5,
+        d20: 18, d20Second: 2,
+        damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
+    expect(result.state.combatants.b.currentHp).toBe(20)
+  })
+
   it('authoritatively validates Protection and spends the shield bearer reaction', () => {
     const attacker = fighter('enemy', 20, { controller: 'dm' })
     const protector = fighter('protector', 10, {
@@ -795,7 +822,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     const state = startDnd5eHeadlessCombat('protection', [attacker, protector, target])
     const result = resolveDnd5eHeadlessAction(state, {
       type: 'attack', actorId: 'enemy', targetId: 'ally', attackModifier: 5,
-      protectionReactionActorId: 'protector', mode: 'disadvantage', d20: 18, d20Second: 2,
+      protectionReactionActorId: 'protector', mode: 'normal', d20: 18, d20Second: 2,
       damage: { count: 1, sides: 8, bonus: 3, rolls: [] },
     })
     expect(result.ok).toBe(true)
@@ -809,9 +836,29 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }), target])
     expect(resolveDnd5eHeadlessAction(invalidState, {
       type: 'attack', actorId: 'enemy', targetId: 'ally', attackModifier: 5,
-      protectionReactionActorId: 'no-shield', mode: 'disadvantage', d20: 18, d20Second: 2,
+      protectionReactionActorId: 'no-shield', mode: 'normal', d20: 18, d20Second: 2,
       damage: { count: 1, sides: 8, bonus: 3, rolls: [] },
     })).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+  })
+
+  it('lets Protection cancel an existing advantage instead of turning it into disadvantage twice', () => {
+    const attacker = fighter('enemy', 20, { controller: 'dm' })
+    const protector = fighter('protector', 10, {
+      hasShield: true,
+      classSelections: { 'fighting-style': ['protection'] },
+    })
+    const target = fighter('ally', 5)
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('protection-cancels-advantage', [attacker, protector, target]),
+      {
+        type: 'attack', actorId: 'enemy', targetId: 'ally', attackModifier: 5,
+        protectionReactionActorId: 'protector', mode: 'advantage', d20: 2, d20Second: 18,
+        damage: { count: 1, sides: 8, bonus: 3, rolls: [] },
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', d20: 2, hit: false }))
   })
 
   it('applies Protection to spell attack rolls as well as weapon attacks', () => {
@@ -826,7 +873,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     const target = fighter('ally', 5)
     const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('spell-protection', [caster, protector, target]), {
       type: 'cast-spell', actorId: 'wizard', targetId: 'ally', spellId: 'fire-bolt', slotLevel: 0,
-      protectionReactionActorId: 'protector', mode: 'disadvantage', d20: 18, d20Second: 2, effectRolls: [],
+      protectionReactionActorId: 'protector', mode: 'normal', d20: 18, d20Second: 2, effectRolls: [],
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -974,12 +1021,26 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(cannotApproach).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
     const disadvantagedAttack = resolveDnd5eHeadlessAction(barbarianEnded.state, {
       type: 'attack', actorId: 'enemy', targetId: 'berserker', attackModifier: 5,
-      d20: 18, d20Second: 2, damage: { count: 1, sides: 8, bonus: 3, rolls: [] },
+      d20: 18, d20Second: 2, damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
     })
     expect(disadvantagedAttack.ok).toBe(true)
     if (!disadvantagedAttack.ok) return
     expect(disadvantagedAttack.events).toContainEqual(expect.objectContaining({
       type: 'attack-resolved', actorId: 'enemy', d20: 2, hit: false,
+    }))
+
+    const sourceHidden = structuredClone(barbarianEnded.state)
+    sourceHidden.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('enemy', 'berserker')]: true,
+    }
+    const unobstructedAttack = resolveDnd5eHeadlessAction(sourceHidden, {
+      type: 'attack', actorId: 'enemy', targetId: 'berserker', attackModifier: 5,
+      d20: 18, d20Second: 2, damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
+    })
+    expect(unobstructedAttack.ok).toBe(true)
+    if (!unobstructedAttack.ok) return
+    expect(unobstructedAttack.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: 'enemy', d20: 18, hit: true,
     }))
 
     const immune = resolveDnd5eHeadlessAction(
@@ -1023,6 +1084,55 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     // 9 damage -> Uncanny Dodge 4 -> vulnerability 8 (not vulnerability 18 -> Dodge 9).
     expect(result.state.combatants.rogue.currentHp).toBe(12)
+  })
+
+  it('applies resistance before vulnerability, including odd damage totals', () => {
+    const target = fighter('target', 10, {
+      damageResistances: ['slashing'], damageVulnerabilities: ['slashing'],
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('resistance-before-vulnerability', [fighter('enemy', 20), target]),
+      {
+        type: 'attack', actorId: 'enemy', targetId: 'target', attackModifier: 20, d20: 10,
+        damage: { count: 1, sides: 4, bonus: 0, rolls: [3], type: 'slashing' },
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // 3 点先因抗性减半向下取整为 1，再因易伤翻倍为 2。
+    expect(result.state.combatants.target.currentHp).toBe(18)
+  })
+
+  it('charges double movement while crawling and leaves the actor prone', () => {
+    const state = startDnd5eHeadlessCombat('crawl', [
+      fighter('crawler', 20, { conditions: ['prone'] }), fighter('enemy', 10, { controller: 'dm' }),
+    ])
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: 'crawler', to: { x: 5, y: 0 }, distance: 5,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.crawler.turn.movementRemaining).toBe(20)
+    expect(result.state.combatants.crawler.conditions).toContain('prone')
+    expect(result.events).toContainEqual({
+      type: 'turn-resource-spent', actorId: 'crawler', resource: 'movement', amount: 10,
+    })
+  })
+
+  it('turns a hit within 5 feet against a petrified target into an automatic critical hit', () => {
+    const state = startDnd5eHeadlessCombat('petrified-critical', [
+      fighter('enemy', 20), fighter('target', 10, { conditions: ['petrified'] }),
+    ])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('enemy', 'target')]: 5 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'enemy', targetId: 'target', attackModifier: 20, d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [3, 2], type: 'force' },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', critical: true }))
+    // 石化还会提供所有伤害抗性，因此 5 点重击伤害减半为 2。
+    expect(result.state.combatants.target.currentHp).toBe(18)
   })
 
   it('uses Fighter Indomitable or Monk Diamond Soul only after a failed saving throw', () => {

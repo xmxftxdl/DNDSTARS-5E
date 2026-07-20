@@ -9,6 +9,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eWeaponAttackProfile } from './equipment'
 import {
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eCombatantCanSee,
   dnd5eTargetArmorClassForAttack,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
@@ -70,6 +71,7 @@ export type Dnd5eOpportunityAttackRejectReason =
   | 'reaction-unavailable'
   | 'no-melee-weapon'
   | 'target-out-of-range'
+  | 'target-not-visible'
   | 'combatant-missing'
 
 export interface PreparedDnd5eOpportunityAttack {
@@ -159,6 +161,9 @@ export function prepareDnd5eOpportunityAttack(input: {
   const targetCombatant = snapshot.state.combatants[targetToken.id]
   if (!actorCombatant || !targetCombatant) return { ok: false, reason: 'combatant-missing' }
   if (dnd5eReactionsPrevented(actorCombatant)) return { ok: false, reason: 'reaction-unavailable' }
+  if (!dnd5eCombatantCanSee(snapshot.state, actorToken.id, targetToken.id)) {
+    return { ok: false, reason: 'target-not-visible' }
+  }
   actorCombatant.turn = {
     actionAvailable: input.turnEconomy.action.current > 0,
     bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,

@@ -217,6 +217,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-map-interaction'
     | 'move-token'
     | 'disengage'
+    | 'dodge'
   actorTokenId: string
   characterId: string
   targetTokenId?: string

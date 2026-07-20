@@ -33,6 +33,7 @@ import {
   dnd5eReactionsPrevented,
   dnd5eSavingThrowMode,
   dnd5eTargetGrantsAttackAdvantage,
+  dnd5eTargetIsDodging,
   dnd5eUnseenTargetImposesDisadvantage,
 } from './passiveDefenses'
 import {
@@ -237,6 +238,8 @@ export interface Dnd5eHeadlessCombatState {
   coverBonusByCombatantPair?: Record<string, 2 | 5>
   /** Host 编译的全掩护／效果线阻断。 */
   lineOfEffectBlockedByCombatantPair?: Record<string, true>
+  /** Host 编译的有向不可见关系；同时包含墙门、照明和视距。 */
+  lineOfSightBlockedByCombatantPair?: Record<string, true>
   /** Optional map-scheduler slot identity for creatures with multiple turns. */
   turnSlotId?: string
   combatants: Record<string, Dnd5eCombatant>
@@ -248,6 +251,19 @@ export function dnd5eCombatantPairKey(leftId: string, rightId: string): string {
 
 export function dnd5eDirectedCombatantPairKey(actorId: string, targetId: string): string {
   return `${actorId}\u0000${targetId}`
+}
+
+export function dnd5eCombatantCanSee(
+  state: Dnd5eHeadlessCombatState,
+  viewerId: string,
+  targetId: string,
+): boolean {
+  const viewer = state.combatants[viewerId]
+  const target = state.combatants[targetId]
+  if (!viewer || !target || viewer.currentHp <= 0 || viewer.deathSaves.dead) return false
+  if (dnd5eHasStandardCondition(viewer, 'blinded')) return false
+  if (dnd5eHasStandardCondition(target, 'invisible') || target.classState.hiddenCheckTotal != null) return false
+  return state.lineOfSightBlockedByCombatantPair?.[dnd5eDirectedCombatantPairKey(viewerId, targetId)] !== true
 }
 
 function dnd5eAttackDistanceFeet(
@@ -277,6 +293,16 @@ function dnd5eConditionSourceIds(
   return [...new Set((combatant.classState.activeEffects ?? []).flatMap((effect) =>
     effect.standardCondition === condition && effect.source.actorId ? [effect.source.actorId] : [],
   ))]
+}
+
+function dnd5eFrightenedAttackDisadvantage(
+  state: Dnd5eHeadlessCombatState,
+  combatant: Dnd5eCombatant,
+): boolean {
+  if (!dnd5eHasStandardCondition(combatant, 'frightened')) return false
+  const sourceIds = new Set(dnd5eConditionSourceIds(combatant, 'frightened'))
+  if (combatant.classState.intimidatingPresenceSourceId) sourceIds.add(combatant.classState.intimidatingPresenceSourceId)
+  return [...sourceIds].some((sourceId) => dnd5eCombatantCanSee(state, combatant.id, sourceId))
 }
 
 function dnd5eCannotAttackSource(actor: Dnd5eCombatant, targetId: string): boolean {
@@ -687,6 +713,9 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
     lineOfEffectBlockedByCombatantPair: state.lineOfEffectBlockedByCombatantPair
       ? { ...state.lineOfEffectBlockedByCombatantPair }
       : undefined,
+    lineOfSightBlockedByCombatantPair: state.lineOfSightBlockedByCombatantPair
+      ? { ...state.lineOfSightBlockedByCombatantPair }
+      : undefined,
     combatants: Object.fromEntries(Object.entries(state.combatants).map(([id, combatant]) => [id, {
       ...combatant,
       abilities: { ...combatant.abilities },
@@ -795,7 +824,7 @@ export function createDnd5eCombatant(
     turn: rules.createTurn(dnd5eConditionSetsSpeedToZero({ conditions: dnd5eConditionsFromActiveEffects(activeEffects) })
       ? 0
       : Math.max(0, input.speed - dnd5eActiveSpeedPenalty(activeEffects))),
-    dodging: false,
+    dodging: input.classState?.dodgingTurnKey != null,
     disengaged: false,
     deathSaves: {
       successes: 0,
@@ -2463,7 +2492,7 @@ function resolveDnd5eBaneRoll(
 function adjustDamageForTarget(target: Dnd5eCombatant, amount: number, type?: Dnd5eDamageType): number {
   if (!type) return amount
   if (target.damageImmunities.includes(type)) return 0
-  let adjusted = target.damageVulnerabilities.includes(type) ? amount * 2 : amount
+  let adjusted = amount
   const rageResistance = target.classState.raging && (type === 'bludgeoning' || type === 'piercing' || type === 'slashing')
   const emptyBodyResistance = (target.classState.emptyBodyRoundsRemaining ?? 0) > 0 && type !== 'force'
   const fiendishResilience = target.classId === 'warlock' && target.subclassId === 'fiend' && target.level >= 10 &&
@@ -2477,6 +2506,7 @@ function adjustDamageForTarget(target: Dnd5eCombatant, amount: number, type?: Dn
   if (target.damageResistances.includes(type) || rageResistance || emptyBodyResistance || fiendishResilience || draconicResistance || petrifiedResistance || protectionFromPoison) {
     adjusted = Math.floor(adjusted / 2)
   }
+  if (target.damageVulnerabilities.includes(type)) adjusted *= 2
   return adjusted
 }
 
@@ -2838,11 +2868,6 @@ function resolveRogueDexterityCheck(input: {
   return { roll, success }
 }
 
-function dnd5eIsIntimidated(combatant: Dnd5eCombatant): boolean {
-  return !!combatant.classState.intimidatingPresenceSourceId &&
-    combatant.conditions.some((condition) => ['frightened', '惊惧', '恐慌'].includes(condition.toLowerCase()))
-}
-
 export function dnd5eIsFavoredEnemy(
   ranger: Pick<Dnd5eCombatant, 'classId' | 'classSelections'>,
   target: Pick<Dnd5eCombatant, 'creatureType'>,
@@ -2919,8 +2944,8 @@ export function dnd5eRepeatedMeleeAttackMode(
   const hasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.recklessAttackTurnKey ||
       !!target.classState.stunnedByActorId || targetProne || dnd5eAttackerIsUnseen(attacker))
-  const hasDisadvantage = requestedMode === 'disadvantage' || attackerProne || dnd5eIsIntimidated(attacker) ||
-    target.dodging || dnd5eUnseenTargetImposesDisadvantage(attacker, target)
+  const hasDisadvantage = requestedMode === 'disadvantage' || attackerProne || dnd5eFrightenedAttackDisadvantage(state, attacker) ||
+    dnd5eTargetIsDodging(target) || dnd5eUnseenTargetImposesDisadvantage(attacker, target)
   return hasAdvantage === hasDisadvantage ? 'normal' : hasAdvantage ? 'advantage' : 'disadvantage'
 }
 
@@ -3333,6 +3358,9 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       !actor.classSelections['hunters-prey']?.includes('giant-killer')
     )
   ) return fail(state, events, 'invalid-class-feature')
+  if (action.type === 'opportunity-attack' && !dnd5eCombatantCanSee(state, actor.id, target.id)) {
+    return fail(state, events, 'invalid-target')
+  }
   const foeSlayerAttackBonus = action.type === 'attack' && action.classDamageContext?.foeSlayer
     ? foeSlayerBonus(state, actor, target)
     : 0
@@ -3389,8 +3417,9 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
   const hasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || attackingFromHidden || !!target.classState.stunnedByActorId || dnd5eAttackerIsUnseen(actor))
-  const hasDisadvantage = requestedMode === 'disadvantage' || rangedDisadvantage || viciousMockeryDisadvantage || escapeTheHorde || dnd5eIsIntimidated(actor) ||
-    target.dodging || dnd5eUnseenTargetImposesDisadvantage(actor, target)
+  const hasDisadvantage = requestedMode === 'disadvantage' || rangedDisadvantage || viciousMockeryDisadvantage || escapeTheHorde ||
+    (action.type === 'attack' && action.protectionReactionActorId != null) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
+    dnd5eTargetIsDodging(target) || dnd5eUnseenTargetImposesDisadvantage(actor, target)
   const mode: D20RollMode = hasAdvantage === hasDisadvantage ? 'normal' : hasAdvantage ? 'advantage' : 'disadvantage'
   const rolls = mode === 'normal' ? [action.d20] : [action.d20, action.d20Second ?? action.d20]
   let targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -4807,10 +4836,11 @@ function resolveSpellCast(
           (dnd5eTargetGrantsAttackAdvantage(affectedTarget) || (spell.id === 'shocking-grasp' && affectedTarget.wearingMetalArmor) || requestedMode === 'advantage' || (attackIndex === 0 && attackingFromHidden) ||
             !!affectedTarget.classState.recklessAttackTurnKey || !!affectedTarget.classState.stunnedByActorId ||
             (attackIndex === 0 && castingWhileUnseen) || dnd5eAttackerIsUnseen(actor))
-        const actorHasDisadvantage = requestedMode === 'disadvantage' ||
+        const actorHasDisadvantage = requestedMode === 'disadvantage' || supplied.protectionReactionActorId != null ||
           (spell.rangeFeet > 5 && dnd5eHostileWithinFiveFeet(state, actor)) ||
           (attackIndex === 0 && viciousMockeryDisadvantage) || actor.exhaustionLevel >= 3 ||
-          dnd5eIsIntimidated(actor) || dnd5eUnseenTargetImposesDisadvantage(actor, affectedTarget)
+          dnd5eFrightenedAttackDisadvantage(state, actor) || dnd5eTargetIsDodging(affectedTarget) ||
+          dnd5eUnseenTargetImposesDisadvantage(actor, affectedTarget)
         const mode: D20RollMode = targetGrantsAdvantage === actorHasDisadvantage
           ? 'normal'
           : targetGrantsAdvantage ? 'advantage' : 'disadvantage'
@@ -4934,10 +4964,11 @@ function resolveSpellCast(
     const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
       (dnd5eTargetGrantsAttackAdvantage(target) || (spell.id === 'shocking-grasp' && target.wearingMetalArmor) || requestedMode === 'advantage' || attackingFromHidden || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
         castingWhileUnseen || dnd5eAttackerIsUnseen(actor))
-    const actorHasDisadvantage = requestedMode === 'disadvantage' ||
+    const actorHasDisadvantage = requestedMode === 'disadvantage' || action.protectionReactionActorId != null ||
       (spell.rangeFeet > 5 && dnd5eHostileWithinFiveFeet(state, actor)) ||
       viciousMockeryDisadvantage || actor.exhaustionLevel >= 3 ||
-      dnd5eIsIntimidated(actor) || dnd5eUnseenTargetImposesDisadvantage(actor, target)
+      dnd5eFrightenedAttackDisadvantage(state, actor) || dnd5eTargetIsDodging(target) ||
+      dnd5eUnseenTargetImposesDisadvantage(actor, target)
     const mode: D20RollMode = targetGrantsAdvantage === actorHasDisadvantage
       ? 'normal'
       : targetGrantsAdvantage
@@ -5089,8 +5120,9 @@ function resolveMonsterAction(
     const rangedDisadvantage = hasKnownDistance && usesRangedAttack && (
       distanceFeet > (attackDefinition.rangeFeet?.normal ?? 0) || dnd5eHostileWithinFiveFeet(state, actor)
     )
-    const hasDisadvantage = requestedMode === 'disadvantage' || rangedDisadvantage || viciousMockeryDisadvantage || dnd5eIsIntimidated(actor) ||
-      target.dodging || dnd5eUnseenTargetImposesDisadvantage(actor, target)
+    const hasDisadvantage = requestedMode === 'disadvantage' || supplied.protectionReactionActorId != null ||
+      rangedDisadvantage || viciousMockeryDisadvantage || dnd5eFrightenedAttackDisadvantage(state, actor) ||
+      dnd5eTargetIsDodging(target) || dnd5eUnseenTargetImposesDisadvantage(actor, target)
     const mode: D20RollMode = hasAdvantage === hasDisadvantage ? 'normal' : hasAdvantage ? 'advantage' : 'disadvantage'
     const attackRolls = mode === 'normal' ? [supplied.d20] : [supplied.d20, supplied.d20Second ?? supplied.d20]
     let targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -5354,7 +5386,8 @@ function resolveMonkUnarmedBonus(
       (dnd5eTargetGrantsAttackAdvantage(target) || (attackIndex === 0 && attackingFromHidden) || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
         dnd5eAttackerIsUnseen(actor) || targetProne)
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
-    const targetImposesDisadvantage = !!target.classState.dodgingTurnKey || viciousMockeryDisadvantage || actor.exhaustionLevel >= 3 || dnd5eIsIntimidated(actor) ||
+    const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || viciousMockeryDisadvantage ||
+      actor.exhaustionLevel >= 3 || dnd5eFrightenedAttackDisadvantage(state, actor) ||
       dnd5eUnseenTargetImposesDisadvantage(actor, target) || actorProne
     const mode: D20RollMode = targetGrantsAdvantage === targetImposesDisadvantage
       ? 'normal'
@@ -5627,8 +5660,8 @@ function resolveMonkDeflectMissilesReturn(
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || requestedMode === 'advantage' || !!target.classState.stunnedByActorId || dnd5eAttackerIsUnseen(actor))
   const actorHasDisadvantage = requestedMode === 'disadvantage' || action.distanceFeet > 20 || actor.exhaustionLevel >= 3 ||
-    dnd5eHasViciousMockeryAttackDisadvantage(actor) || dnd5eIsIntimidated(actor) ||
-    dnd5eUnseenTargetImposesDisadvantage(actor, target)
+    dnd5eHasViciousMockeryAttackDisadvantage(actor) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
+    dnd5eTargetIsDodging(target) || dnd5eUnseenTargetImposesDisadvantage(actor, target)
   const mode: D20RollMode = targetGrantsAdvantage === actorHasDisadvantage
     ? 'normal'
     : targetGrantsAdvantage ? 'advantage' : 'disadvantage'
@@ -7687,7 +7720,7 @@ function resolveDnd5eHeadlessActionInternal(
     const fearSource = actor.classState.intimidatingPresenceSourceId
       ? state.combatants[actor.classState.intimidatingPresenceSourceId]
       : undefined
-    if (fearSource) {
+    if (fearSource && dnd5eCombatantCanSee(state, actor.id, fearSource.id)) {
       const currentDistanceSquared = (actor.position.x - fearSource.position.x) ** 2 + (actor.position.y - fearSource.position.y) ** 2
       const nextDistanceSquared = (action.to.x - fearSource.position.x) ** 2 + (action.to.y - fearSource.position.y) ** 2
       if (nextDistanceSquared < currentDistanceSquared) return fail(state, events, 'invalid-class-feature')
@@ -7695,6 +7728,7 @@ function resolveDnd5eHeadlessActionInternal(
     for (const sourceId of dnd5eConditionSourceIds(actor, 'frightened')) {
       const source = state.combatants[sourceId]
       if (!source || source.id === fearSource?.id) continue
+      if (!dnd5eCombatantCanSee(state, actor.id, source.id)) continue
       if (dnd5eConditionPreventsApproachingSource({
         mover: actor,
         sourceId,
@@ -7705,15 +7739,19 @@ function resolveDnd5eHeadlessActionInternal(
       })) return fail(state, events, 'invalid-class-feature')
     }
     const isProne = actor.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-    if (!!action.standFromProne !== isProne) return fail(state, events, 'invalid-class-feature')
-    const standCost = isProne ? Math.floor(dnd5eEffectiveSpeed(actor) / 2) : 0
-    const defaultMovementCost = action.distance * (action.carefulMovement ? 2 : 1) + standCost
+    if (action.standFromProne && !isProne) return fail(state, events, 'invalid-class-feature')
+    const effectiveSpeed = dnd5eEffectiveSpeed(actor)
+    if (action.standFromProne && effectiveSpeed <= 0) return fail(state, events, 'invalid-class-feature')
+    const standCost = action.standFromProne ? Math.floor(effectiveSpeed / 2) : 0
+    const crawlMultiplier = isProne && !action.standFromProne ? 2 : 1
+    const carefulMultiplier = action.carefulMovement ? 2 : 1
+    const defaultMovementCost = action.distance * Math.max(crawlMultiplier, carefulMultiplier) + standCost
     const movementCost = action.movementCost == null ? defaultMovementCost : action.movementCost
-    if (!Number.isFinite(movementCost) || movementCost < action.distance || movementCost < standCost) {
+    if (!Number.isFinite(movementCost) || movementCost < defaultMovementCost) {
       return fail(state, events, 'invalid-class-feature')
     }
     if (!spend(actor, 'movement', movementCost)) return fail(state, events, 'insufficient-movement')
-    if (isProne) removeDnd5eConditionEffects(actor, ['prone', '倒地'], 'dm', events)
+    if (action.standFromProne) removeDnd5eConditionEffects(actor, ['prone', '倒地'], 'dm', events)
     const from = { ...actor.position }
     actor.position = { ...action.to }
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'movement', amount: movementCost })
@@ -7731,6 +7769,7 @@ function resolveDnd5eHeadlessActionInternal(
     if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
     actor.disengaged = action.type === 'disengage'
     actor.dodging = action.type === 'dodge'
+    if (action.type === 'dodge') actor.classState.dodgingTurnKey = classFeatureTurnKey(state, actor.id)
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
     return { ok: true, state, events }
   }

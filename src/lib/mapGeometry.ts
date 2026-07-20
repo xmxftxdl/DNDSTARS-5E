@@ -919,6 +919,18 @@ export function mapGeometryLineOfEffectBlocked(input: {
   return mapGeometryCoverFromPoint(input).blocksLineOfEffect
 }
 
+/** Geometry-only line-of-sight check. Unlike dynamic vision, this always respects vision-blocking walls and doors. */
+export function mapGeometryLineOfSightBlocked(input: {
+  geometry?: MapGeometryState
+  from: MapGeometryPoint
+  to: MapGeometryPoint
+  elevationFeet?: number
+  fromElevationFeet?: number
+  toElevationFeet?: number
+}): boolean {
+  return rayBlocked({ ...input, purpose: 'vision' }) != null
+}
+
 export function mapGeometryCanSeeToken(input: {
   geometry?: MapGeometryState
   map: BattleMap

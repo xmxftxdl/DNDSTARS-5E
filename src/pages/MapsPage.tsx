@@ -315,6 +315,7 @@ import {
   previewDnd5eSpellTargetSavingThrow,
   previewDnd5eSavingThrowRoll,
   resolveDnd5ePlayerDisengage,
+  resolveDnd5ePlayerDodge,
   resolveDnd5ePlayerEndTurn,
   resolvePreparedDnd5eClassFeature,
   resolvePreparedDnd5ePluginFeatureAction,
@@ -7184,6 +7185,23 @@ export default function MapsPage() {
     })
   }
 
+  const handleDodge = () => {
+    if (!canControlPlayerTurn || !turnCharacter) return
+    if (!isDM) {
+      if (!sendPlayerDodgeRequest()) {
+        void showCombatNotice(
+          pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
+          pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '闪避需要消耗一个动作。',
+          'amber',
+        )
+      }
+      return
+    }
+    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'dodge' }))) {
+      void showCombatNotice('无法闪避', '当前闪避无法提交给 DM 结算。', 'amber')
+    }
+  }
+
   const requestDmWeaponCoverOverride = (
     attack: PreparedDnd5eEquipmentAttack,
   ): Promise<'auto' | Dnd5eAttackCoverOverride> => {
@@ -7488,6 +7506,38 @@ export default function MapsPage() {
       )
       setDisengagedCharIds((previous) => new Set(previous).add(resolved.actor.id))
       pushCombatLog(`${resolved.actor.name} 执行撤离动作；本回合移动不会触发借机攻击。`, 'turn')
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+    if (action.type === 'dodge' && dnd5eActionActor) {
+      const turnEconomy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
+      const resolved = resolveDnd5ePlayerDodge({
+        action,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+        turnEconomy,
+      })
+      if (!resolved.ok) {
+        acknowledgePlayerAction(action, 'rejected', resolved.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      for (const characterId of resolved.application.changedCharacterIds) {
+        const next = resolved.application.characters.find((character) => character.id === characterId)
+        if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      for (const tokenId of resolved.application.changedTokenIds) {
+        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
+        if (next) updateToken(authorityMap.id, tokenId, next)
+      }
+      updateDnd5eTurnEconomy(
+        action.actorTokenId,
+        (economy) => spendDnd5eTurnResource(economy, 'action').economy,
+        liveRound,
+      )
+      pushHeadlessCombatLog(`${resolved.actor.name} 执行闪避动作，直到其下一回合开始前针对它的攻击具有劣势。`, 'turn', resolved.result.events)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
       return
@@ -8550,7 +8600,7 @@ export default function MapsPage() {
             attackBaneRoll: targetBaneRoll,
             bardicInspirationRoll: targetBardicInspirationRoll,
             cuttingWords: targetCuttingWords,
-            mode: attackMode,
+            mode: targetAttack.mode,
             protectionReactionActorId: protectedAttack ? protection?.token.id : undefined,
             shieldSpellReaction: targetShieldSpellReaction,
             uncannyDodge: targetUncannyDodge,
@@ -11319,6 +11369,11 @@ export default function MapsPage() {
         }
       }
       const attack = prepared.prepared
+      if (attack.cover.blocksLineOfEffect) {
+        acknowledgePlayerAction(action, 'rejected', 'target-behind-total-cover')
+        completePlayerActionRequest(action)
+        return
+      }
       const actorCombatant = attack.state.combatants[attack.actorToken.id]
       if (!actorCombatant) {
         acknowledgePlayerAction(action, 'rejected', 'combatant-missing')
@@ -12552,6 +12607,14 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${turnCharacter.name} 撤离`)
   }
 
+  const sendPlayerDodgeRequest = () => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    if (currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current < 1) return false
+    const action = createPlayerActionRequest({ type: 'dodge' })
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 闪避`)
+  }
+
   const waitForAuthoritativePlayerActionSync = async (appliedAt?: number) => {
     await syncAuthoritativePlayerActionState({
       appliedAt,
@@ -13079,6 +13142,7 @@ export default function MapsPage() {
                   <button
                     type="button"
                     data-testid="dnd5e-cover-confirm"
+                    disabled={isDM && previewCover === 'total'}
                     onClick={() => {
                       const confirmation = dnd5eWeaponAttackConfirmation
                       if (confirmation.authorityActionId) {
@@ -13101,9 +13165,11 @@ export default function MapsPage() {
                         : sendPlayerDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
                       if (sent) dismissDnd5eWeaponAttackConfirmation()
                     }}
-                    className="rounded-xl bg-violet-500/25 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/35"
+                    className="rounded-xl bg-violet-500/25 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/35 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {dnd5eWeaponAttackConfirmation.authorityActionId ? '应用并继续结算' : '确认攻击'}
+                    {dnd5eWeaponAttackConfirmation.authorityActionId
+                      ? '应用并继续结算'
+                      : !isDM && previewCover === 'total' ? '请求 DM 裁定' : '确认攻击'}
                   </button>
                 </div>
               </div>
@@ -15326,6 +15392,8 @@ export default function MapsPage() {
                         setDnd5eWeaponAttackOptions(options)
                         setDnd5eWeaponTargeting((current) => current === activeChar.id ? null : activeChar.id)
                       }}
+                      onDisengage={handleDisengage}
+                      onDodge={handleDodge}
                       onFeature={(feature) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)
@@ -15347,6 +15415,7 @@ export default function MapsPage() {
                         setDnd5eWeaponTargeting((current) => current === activeChar.id ? null : activeChar.id)
                       }}
                       onDisengage={handleDisengage}
+                      onDodge={handleDodge}
                       onFeature={(payload) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)

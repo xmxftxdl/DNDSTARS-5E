@@ -167,3 +167,59 @@ export function resolveDnd5ePlayerDisengage(input: {
   )
   return result.ok ? { ok: true, result, actor } : { ok: false, reason: result.reason as Dnd5eDisengageRejectReason }
 }
+
+export function resolveDnd5ePlayerDodge(input: {
+  action: SharedPlayerActionState
+  map: BattleMap
+  characters: readonly Character[]
+  initiativeOrder: readonly InitiativeEntry[]
+  turnEconomy: Dnd5eTurnEconomyCounts
+}): {
+  ok: true
+  result: Dnd5eActionResult
+  actor: Character
+  application: Dnd5eMapResultPlan
+} | { ok: false; reason: Dnd5eDisengageRejectReason } {
+  if (input.action.type !== 'dodge') return { ok: false, reason: 'invalid-action' }
+  const actor = input.characters.find((character) => character.id === input.action.characterId)
+  const token = input.map.tokens.find((item) =>
+    item.id === input.action.actorTokenId && item.characterId === input.action.characterId && item.type === 'player',
+  )
+  if (!actor || actor.rulesetId !== 'dnd5e-2014-srd-5.1' || actor.currentHp <= 0 || !token) {
+    return { ok: false, reason: 'invalid-actor' }
+  }
+  if (input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
+  const snapshot = createDnd5eMapCombatSnapshot({
+    combatId: input.action.combatId ?? `map-${input.map.id}`,
+    round: input.action.round,
+    turnSlotId: input.initiativeOrder[input.action.initiativeIndex]?.slotId,
+    map: input.map,
+    characters: input.characters,
+    initiativeOrder: input.initiativeOrder,
+  })
+  const actorIndex = snapshot.state.initiativeOrder.indexOf(token.id)
+  const combatant = snapshot.state.combatants[token.id]
+  if (actorIndex < 0 || !combatant) return { ok: false, reason: 'combatant-missing' }
+  combatant.turn = {
+    actionAvailable: true,
+    bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
+    reactionAvailable: input.turnEconomy.reaction.current > 0,
+    movementRemaining: input.turnEconomy.movement.current,
+  }
+  const result = resolveDnd5eHeadlessAction(
+    { ...snapshot.state, initiativeIndex: actorIndex },
+    { type: 'dodge', actorId: token.id },
+  )
+  if (!result.ok) return { ok: false, reason: result.reason as Dnd5eDisengageRejectReason }
+  return {
+    ok: true,
+    result,
+    actor,
+    application: planDnd5eMapResultApplication({
+      state: result.state,
+      map: input.map,
+      characters: input.characters,
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    }),
+  }
+}

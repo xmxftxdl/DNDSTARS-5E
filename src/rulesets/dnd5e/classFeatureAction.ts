@@ -36,7 +36,7 @@ import {
   planDnd5eMapResultApplication,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
-import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 
 export type Dnd5eClassFeatureRejectReason =
@@ -603,7 +603,7 @@ export function prepareDnd5eClassFeature(input: {
         (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
           !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
           dnd5eAttackerIsUnseen(actorCombatant) || targetProne)
-      const targetImposesDisadvantage = !!targetCombatant.classState.dodgingTurnKey || (actor.exhaustionLevel ?? 0) >= 3 ||
+      const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) || (actor.exhaustionLevel ?? 0) >= 3 ||
         (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
         dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) || actorProne
       const attackMode = targetGrantsAdvantage === targetImposesDisadvantage

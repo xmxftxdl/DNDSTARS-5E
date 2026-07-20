@@ -5,7 +5,7 @@ import type { Dnd5eAttackCoverOverride } from '../../lib/sharedCombatTypes'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
-import { mapGeometryCoverBetween, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { mapGeometryCanSeeToken, mapGeometryCoverBetween, mapGeometryLineOfSightBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
 import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
@@ -290,6 +290,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   state.distanceFeetByCombatantPair = {}
   state.coverBonusByCombatantPair = {}
   state.lineOfEffectBlockedByCombatantPair = {}
+  state.lineOfSightBlockedByCombatantPair = {}
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
@@ -304,6 +305,14 @@ export function createDnd5eMapCombatSnapshot(input: {
         else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
           state.coverBonusByCombatantPair[directedKey] = cover.armorClassBonus
         }
+        const lineOfSightBlocked = mapGeometryLineOfSightBlocked({
+          geometry,
+          from: attacker,
+          to: target,
+          fromElevationFeet: attacker.elevationFeet ?? 0,
+          toElevationFeet: target.elevationFeet ?? 0,
+        }) || !mapGeometryCanSeeToken({ geometry, map: input.map, viewer: attacker, target })
+        if (lineOfSightBlocked) state.lineOfSightBlockedByCombatantPair[directedKey] = true
       }
     }
   }

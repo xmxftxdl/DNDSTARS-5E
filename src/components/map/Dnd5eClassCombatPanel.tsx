@@ -33,7 +33,7 @@ export interface Dnd5eFeatureTargetOption {
   }[]
 }
 
-export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onFeature }: {
+export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onDodge, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
@@ -42,6 +42,7 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
   featureTargets: readonly Dnd5eFeatureTargetOption[]
   onAttack: (options?: Dnd5eWeaponAttackOptions) => void
   onDisengage: () => void
+  onDodge: () => void
   onFeature: (payload: Dnd5eClassFeaturePayload) => void
 }) {
   const definition = dnd5eClassDefinitionForCharacter(character)
@@ -234,6 +235,9 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
         </button> : null}
         <button type="button" onClick={onDisengage} disabled={!canAct || pending || turnEconomy.action.current < 1} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
           <Footprints className="h-4 w-4" />撤离（主动动作）
+        </button>
+        <button type="button" onClick={onDodge} disabled={!canAct || pending || turnEconomy.action.current < 1} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+          <Shield className="h-4 w-4" />闪避（主动动作）
         </button>
       </section>
 
