@@ -89,4 +89,40 @@ describe('map geometry pathfinding', () => {
     )
     expect(findMapGeometryPath({ map, geometry: state, token: large, to: { x: 150, y: 50 } })).toBeUndefined()
   })
+
+  it('does not cut diagonally between occupied corner cells', () => {
+    const map = battleMap({
+      width: 100,
+      height: 100,
+      tokens: [
+        token(),
+        token({ id: 'east-blocker', type: 'enemy', characterId: undefined, x: 75, y: 25 }),
+        token({ id: 'south-blocker', type: 'enemy', characterId: undefined, x: 25, y: 75 }),
+      ],
+    })
+
+    expect(findMapGeometryPath({ map, geometry: geometry(), token: map.tokens[0], to: { x: 75, y: 75 } }))
+      .toBeUndefined()
+  })
+
+  it('does not overshoot an axis and zigzag when an equal-cost direct route exists', () => {
+    const hero = token({ x: 225, y: 225 })
+    const map = battleMap({ width: 300, height: 300, tokens: [hero] })
+    const path = findMapGeometryPath({ map, geometry: geometry(), token: hero, to: { x: 25, y: 125 } })
+
+    expect(path).toBeDefined()
+    expect(path!.cells.every((cell) => cell.col >= 0 && cell.col <= 4)).toBe(true)
+    expect(path!.cells.every((cell) => cell.row >= 2 && cell.row <= 4)).toBe(true)
+    expect(path!.distanceFeet).toBe(20)
+  })
+
+  it('keeps a clear vertical move on the same column', () => {
+    const hero = token({ x: 225, y: 75 })
+    const map = battleMap({ width: 300, height: 300, tokens: [hero] })
+    const path = findMapGeometryPath({ map, geometry: geometry(), token: hero, to: { x: 225, y: 225 } })
+
+    expect(path).toBeDefined()
+    expect(path!.cells.map((cell) => cell.col)).toEqual([4, 4, 4, 4])
+    expect(path!.distanceFeet).toBe(15)
+  })
 })

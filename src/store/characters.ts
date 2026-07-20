@@ -7,6 +7,7 @@ import { getAccountSession } from '../lib/accountSession'
 import { restoreClassResources, syncCharacterClassResources } from '../lib/classResources'
 import { applyDnd5eDivineInterventionLongRest } from '../rulesets/dnd5e/restFeatures'
 import { migrateLegacyCharacterFields } from '../lib/legacyCharacterMigration'
+import { normalizeCharacterPortrait } from '../lib/characterPortrait'
 import { defaultEquipmentForDnd5eCharacter, normalizeDnd5eCharacterEquipment } from '../rulesets/dnd5e/equipment'
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
 import { syncDnd5eHitPoints } from '../rulesets/dnd5e/hitPoints'
@@ -712,6 +713,7 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     ...c,
     // 强制旧存档进入当前 SRD 5.1 规则集，避免 undefined 覆盖默认规则。
     rulesetId: 'dnd5e-2014-srd-5.1',
+    portrait: normalizeCharacterPortrait(c.portrait),
     saveDC: c.saveDC ?? d.saveDC,
     passivePerception: c.passivePerception ?? d.passivePerception,
     inspiration: c.inspiration ?? d.inspiration,

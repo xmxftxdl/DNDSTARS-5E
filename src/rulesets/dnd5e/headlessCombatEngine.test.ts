@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
+import { dnd5eAttackerIsUnseen, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -17,6 +18,213 @@ function fighter(id: string, initiative: number, patch = {}) {
 }
 
 describe('D&D 5e 2014 headless combat engine', () => {
+  it('resolves the first-batch non-damage spells through authoritative Headless state', () => {
+    const cleric = fighter('cleric', 20, {
+      classId: 'cleric', level: 9, abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-cantrips': ['spare-the-dying'], 'spell-prepared': ['mass-healing-word'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const ally = fighter('ally', 10, {
+      currentHp: 0, maxHp: 40, usesDeathSaves: true,
+      deathSaves: { successes: 1, failures: 2, stable: false, dead: false },
+    })
+    const stabilized = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('stabilize', [cleric, ally]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'ally', spellId: 'spare-the-dying', slotLevel: 0,
+      effectRolls: [],
+    })
+    expect(stabilized.ok).toBe(true)
+    if (!stabilized.ok) return
+    expect(stabilized.state.combatants.ally.deathSaves).toEqual({ successes: 0, failures: 0, stable: true, dead: false })
+    expect(stabilized.events).toContainEqual({ type: 'creature-stabilized', actorId: 'cleric', targetId: 'ally' })
+
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 5, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['false-life'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const temporary = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('false-life', [wizard, fighter('enemy', 10, { controller: 'dm' })]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'wizard', spellId: 'false-life', slotLevel: 2,
+      effectRolls: [4],
+    })
+    expect(temporary.ok).toBe(true)
+    if (!temporary.ok) return
+    expect(temporary.state.combatants.wizard.temporaryHp).toBe(13)
+  })
+
+  it('applies choice, repeat-save, concentration, and restoration effects for the first spell batch', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 9, proficiencyBonus: 4, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['blindness-deafness', 'hold-person', 'banishment'] },
+      classResources: {
+        'dnd5e-spell-slot-2': { current: 2, max: 2 },
+        'dnd5e-spell-slot-4': { current: 1, max: 1 },
+      },
+    })
+    const humanoid = fighter('humanoid', 10, { controller: 'dm', creatureType: 'humanoid' })
+    const blinded = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('blindness', [wizard, humanoid]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'humanoid', spellId: 'blindness-deafness', slotLevel: 2,
+      conditionChoice: 'blinded', savingThrowD20: 1, effectRolls: [],
+    })
+    expect(blinded.ok).toBe(true)
+    if (!blinded.ok) return
+    expect(blinded.state.combatants.humanoid.classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'blinded', repeatSave: { ability: 'con', dc: 16, timing: 'target-turn-end', onSuccess: 'remove' },
+    }))
+
+    const held = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('hold', [wizard, humanoid]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'humanoid', spellId: 'hold-person', slotLevel: 2,
+      savingThrowD20: 1, effectRolls: [],
+    })
+    expect(held.ok).toBe(true)
+    if (!held.ok) return
+    expect(held.state.combatants.wizard.classState.concentrationSpellId).toBe('hold-person')
+    expect(held.state.combatants.humanoid.classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'paralyzed', duration: expect.objectContaining({ type: 'concentration', sourceActorId: 'wizard' }),
+    }))
+
+    const cleric = fighter('cleric', 20, {
+      classId: 'cleric', level: 5, abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['lesser-restoration'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const restoredTarget = fighter('restored', 10, { conditions: ['blinded'] })
+    const restored = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('restoration', [cleric, restoredTarget]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'restored', spellId: 'lesser-restoration', slotLevel: 2,
+      conditionChoice: 'blinded', effectRolls: [],
+    })
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) return
+    expect(restored.state.combatants.restored.conditions).not.toContain('blinded')
+  })
+
+  it('resolves Guiding Bolt, fixed healing, healing pools, and Power Word Stun', () => {
+    const cleric = fighter('cleric', 20, {
+      classId: 'cleric', level: 17, proficiencyBonus: 6, abilities: { ...abilities, wis: 20 },
+      classSelections: { 'spell-prepared': ['guiding-bolt', 'heal', 'mass-heal'] },
+      classResources: {
+        'dnd5e-spell-slot-1': { current: 1, max: 1 },
+        'dnd5e-spell-slot-6': { current: 1, max: 1 },
+        'dnd5e-spell-slot-9': { current: 1, max: 1 },
+      },
+    })
+    const enemy = fighter('enemy', 10, { controller: 'dm', currentHp: 100, maxHp: 100 })
+    const bolt = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('guiding-bolt', [cleric, enemy]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'enemy', spellId: 'guiding-bolt', slotLevel: 1,
+      d20: 15, effectRolls: [1, 2, 3, 4],
+    })
+    expect(bolt.ok).toBe(true)
+    if (!bolt.ok) return
+    expect(bolt.state.combatants.enemy.currentHp).toBe(90)
+    expect(bolt.state.combatants.enemy.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:guiding-bolt:attack-advantage', breakOn: ['targeted-by-attack'],
+    }))
+
+    const patient = fighter('patient', 10, { currentHp: 1, maxHp: 200, conditions: ['blinded', 'deafened'] })
+    const healed = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('heal', [cleric, patient]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'patient', spellId: 'heal', slotLevel: 6,
+      effectRolls: [],
+    })
+    expect(healed.ok).toBe(true)
+    if (!healed.ok) return
+    expect(healed.state.combatants.patient).toMatchObject({ currentHp: 71, conditions: [] })
+
+    const first = fighter('first', 10, { currentHp: 1, maxHp: 500 })
+    const second = fighter('second', 5, { currentHp: 1, maxHp: 500 })
+    const pooled = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mass-heal', [cleric, first, second]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'first', targetIds: ['first', 'second'],
+      spellId: 'mass-heal', slotLevel: 9,
+      healingAllocations: [{ targetId: 'first', amount: 300 }, { targetId: 'second', amount: 400 }],
+      effectRolls: [],
+    })
+    expect(pooled.ok).toBe(true)
+    if (!pooled.ok) return
+    expect(pooled.state.combatants.first.currentHp).toBe(301)
+    expect(pooled.state.combatants.second.currentHp).toBe(401)
+
+    const wizard = fighter('stunner', 20, {
+      classId: 'wizard', level: 15, proficiencyBonus: 5, abilities: { ...abilities, int: 20 },
+      classSelections: { 'spell-prepared': ['power-word-stun'] },
+      classResources: { 'dnd5e-spell-slot-8': { current: 1, max: 1 } },
+    })
+    const stunned = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('stun', [wizard, enemy]), {
+      type: 'cast-spell', actorId: 'stunner', targetId: 'enemy', spellId: 'power-word-stun', slotLevel: 8,
+      effectRolls: [],
+    })
+    expect(stunned.ok).toBe(true)
+    if (!stunned.ok) return
+    expect(stunned.state.combatants.enemy.classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'stunned', repeatSave: expect.objectContaining({ ability: 'con', dc: 18 }),
+    }))
+  })
+
+  it('resolves Hellish Rebuke only as an off-turn damage reaction', () => {
+    const attacker = fighter('attacker', 20, { controller: 'dm', currentHp: 50, maxHp: 50, abilities: { ...abilities, dex: 8 } })
+    const warlock = fighter('warlock', 10, {
+      classId: 'warlock', level: 5, controller: 'player', proficiencyBonus: 3,
+      abilities: { ...abilities, cha: 18 },
+      classSelections: { 'spell-known': ['hellish-rebuke'] },
+      classResources: { 'dnd5e-pact-slot': { current: 1, max: 2 } },
+    })
+    const state = startDnd5eHeadlessCombat('hellish-rebuke', [attacker, warlock])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('attacker', 'warlock')]: 30 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'hellish-rebuke', actorId: 'warlock', targetId: 'attacker', slotLevel: 3,
+      triggerDamageAmount: 8, savingThrowD20: 1, effectRolls: [10, 10, 10, 10],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.attacker.currentHp).toBe(10)
+    expect(result.state.combatants.warlock).toMatchObject({
+      turn: { reactionAvailable: false },
+      classResources: { 'dnd5e-pact-slot': { current: 0, max: 2 } },
+    })
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'hellish-rebuke-resolved', actorId: 'warlock', targetId: 'attacker', damage: 40,
+    }))
+  })
+
+  it('handles Banishment, Hold Monster restrictions, and Mass Healing Word targets', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 9, proficiencyBonus: 4, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-prepared': ['banishment', 'hold-monster'] },
+      classResources: {
+        'dnd5e-spell-slot-4': { current: 1, max: 1 },
+        'dnd5e-spell-slot-5': { current: 1, max: 1 },
+      },
+    })
+    const fiend = fighter('fiend', 10, { controller: 'dm', creatureType: 'fiend' })
+    const banished = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('banishment', [wizard, fiend]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'fiend', spellId: 'banishment', slotLevel: 4,
+      savingThrowD20: 1, effectRolls: [],
+    })
+    expect(banished.ok).toBe(true)
+    if (!banished.ok) return
+    expect(banished.state.combatants.fiend.conditions).toContain('banished')
+    expect(banished.state.combatants.wizard.classState.concentrationSpellId).toBe('banishment')
+
+    const undead = fighter('undead', 10, { controller: 'dm', creatureType: 'undead' })
+    expect(resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('hold-undead', [wizard, undead]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'undead', spellId: 'hold-monster', slotLevel: 5,
+      savingThrowD20: 1, effectRolls: [],
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const cleric = fighter('cleric', 20, {
+      classId: 'cleric', level: 5, abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['mass-healing-word'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const first = fighter('first', 10, { currentHp: 1, maxHp: 30 })
+    const second = fighter('second', 5, { currentHp: 2, maxHp: 30 })
+    const massWord = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mass-word', [cleric, first, second]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'first', targetIds: ['first', 'second'],
+      spellId: 'mass-healing-word', slotLevel: 3, effectRolls: [4],
+    })
+    expect(massWord.ok).toBe(true)
+    if (!massWord.ok) return
+    expect(massWord.state.combatants.first.currentHp).toBe(9)
+    expect(massWord.state.combatants.second.currentHp).toBe(10)
+  })
+
   it('resolves Counterspell inside the Headless spell transaction and spends only declared resources', () => {
     const caster = fighter('caster', 20, {
       classId: 'wizard', level: 5, controller: 'player',
@@ -44,6 +252,163 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.events).toContainEqual(expect.objectContaining({
       type: 'counterspell-resolved', actorId: 'reactor', casterId: 'caster', success: true,
     }))
+  })
+
+  it('applies Faerie Fire to failed targets and suppresses every invisibility benefit', () => {
+    const bard = fighter('bard', 20, {
+      classId: 'bard', level: 5, proficiencyBonus: 3, abilities: { ...abilities, cha: 18 },
+      classSelections: { 'spell-known': ['faerie-fire'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const failed = fighter('failed', 10, { controller: 'dm', conditions: ['invisible'], abilities: { ...abilities, dex: 8 } })
+    const passed = fighter('passed', 5, { controller: 'dm', abilities: { ...abilities, dex: 18 } })
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('faerie-fire', [bard, failed, passed]), {
+      type: 'cast-spell', actorId: 'bard', targetId: 'failed', targetIds: ['failed', 'passed'],
+      spellId: 'faerie-fire', slotLevel: 1, effectRolls: [],
+      targetSavingThrows: [{ targetId: 'failed', d20: 1 }, { targetId: 'passed', d20: 20 }],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const outlined = result.state.combatants.failed
+    expect(outlined.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:faerie-fire',
+      duration: expect.objectContaining({ type: 'concentration', sourceActorId: 'bard' }),
+    }))
+    expect(result.state.combatants.passed.classState.activeEffects).toBeUndefined()
+    expect(dnd5eTargetGrantsAttackAdvantage(outlined)).toBe(true)
+    expect(dnd5eAttackerIsUnseen(outlined)).toBe(false)
+    expect(dnd5eUnseenTargetImposesDisadvantage(bard, outlined)).toBe(false)
+  })
+
+  it('ends normal Invisibility on a hostile spell but preserves Greater Invisibility', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 7, proficiencyBonus: 3, abilities: { ...abilities, int: 18 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'], 'spell-prepared': ['invisibility', 'greater-invisibility'] },
+      classResources: {
+        'dnd5e-spell-slot-2': { current: 1, max: 1 },
+        'dnd5e-spell-slot-4': { current: 1, max: 1 },
+      },
+    })
+    const enemy = fighter('enemy', 10, { controller: 'dm', currentHp: 50, maxHp: 50 })
+    const invisible = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('invisibility', [wizard, enemy]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'wizard', spellId: 'invisibility', slotLevel: 2,
+      effectRolls: [],
+    })
+    expect(invisible.ok).toBe(true)
+    if (!invisible.ok) return
+    invisible.state.combatants.wizard.turn.actionAvailable = true
+    const revealed = resolveDnd5eHeadlessAction(invisible.state, {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'enemy', spellId: 'fire-bolt', slotLevel: 0,
+      d20: 15, d20Second: 14, effectRolls: [5, 5],
+    })
+    expect(revealed.ok ? 'ok' : revealed.reason).toBe('ok')
+    if (!revealed.ok) return
+    expect(revealed.state.combatants.wizard.conditions).not.toContain('invisible')
+    expect(revealed.state.combatants.wizard.concentrating).toBe(false)
+
+    const greater = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('greater-invisibility', [wizard, enemy]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'wizard', spellId: 'greater-invisibility', slotLevel: 4,
+      effectRolls: [],
+    })
+    expect(greater.ok).toBe(true)
+    if (!greater.ok) return
+    greater.state.combatants.wizard.turn.actionAvailable = true
+    const stillHidden = resolveDnd5eHeadlessAction(greater.state, {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'enemy', spellId: 'fire-bolt', slotLevel: 0,
+      d20: 15, d20Second: 14, effectRolls: [5, 5],
+    })
+    expect(stillHidden.ok).toBe(true)
+    if (!stillHidden.ok) return
+    expect(stillHidden.state.combatants.wizard.conditions).toContain('invisible')
+    expect(stillHidden.state.combatants.wizard.concentrating).toBe(true)
+  })
+
+  it('enforces Barkskin AC and Protection from Poison through ActiveEffect state', () => {
+    const druid = fighter('druid', 20, {
+      classId: 'druid', level: 5, abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['barkskin', 'protection-from-poison'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 2, max: 2 } },
+    })
+    const ally = fighter('ally', 10, { armorClass: 11, conditions: ['poisoned'] })
+    const poisoner = fighter('poisoner', 5, {
+      controller: 'dm', classId: 'druid', level: 1, abilities: { ...abilities, wis: 20 },
+      classSelections: { 'spell-cantrips': ['poison-spray'] },
+    })
+    const barkskin = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('barkskin', [druid, ally]), {
+      type: 'cast-spell', actorId: 'druid', targetId: 'ally', spellId: 'barkskin', slotLevel: 2,
+      effectRolls: [],
+    })
+    expect(barkskin.ok).toBe(true)
+    if (!barkskin.ok) return
+    expect(dnd5eTargetArmorClassForAttack(barkskin.state, 'druid', 'ally')).toBe(16)
+
+    const poisonProtection = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('poison-protection', [druid, ally, poisoner]), {
+      type: 'cast-spell', actorId: 'druid', targetId: 'ally', spellId: 'protection-from-poison', slotLevel: 2,
+      effectRolls: [],
+    })
+    expect(poisonProtection.ok).toBe(true)
+    if (!poisonProtection.ok) return
+    const protectedAlly = poisonProtection.state.combatants.ally
+    expect(protectedAlly.conditions).not.toContain('poisoned')
+    expect(protectedAlly.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:protection-from-poison',
+    }))
+    expect(dnd5eSavingThrowMode(protectedAlly, 'con', { condition: 'poisoned' })).toBe('advantage')
+    poisonProtection.state.initiativeIndex = poisonProtection.state.initiativeOrder.indexOf('poisoner')
+    const poisoned = resolveDnd5eHeadlessAction(poisonProtection.state, {
+      type: 'cast-spell', actorId: 'poisoner', targetId: 'ally', spellId: 'poison-spray', slotLevel: 0,
+      savingThrowD20: 1, effectRolls: [12],
+    })
+    expect(poisoned.ok ? 'ok' : poisoned.reason).toBe('ok')
+    if (!poisoned.ok) return
+    expect(poisoned.state.combatants.ally.currentHp).toBe(14)
+  })
+
+  it('lets Death Ward prevent both lethal damage and a damage-free instant death', () => {
+    const cleric = fighter('cleric', 20, {
+      classId: 'cleric', level: 17, proficiencyBonus: 6, abilities: { ...abilities, wis: 20 },
+      classSelections: { 'spell-prepared': ['death-ward'] },
+      classResources: { 'dnd5e-spell-slot-4': { current: 2, max: 2 } },
+    })
+    const warded = fighter('warded', 10, { currentHp: 5, maxHp: 30 })
+    const attacker = fighter('attacker', 5, {
+      controller: 'dm', classId: 'wizard', level: 17, proficiencyBonus: 6,
+      abilities: { ...abilities, int: 20 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'], 'spell-prepared': ['power-word-kill'] },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const applied = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('death-ward-damage', [cleric, warded, attacker]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'warded', spellId: 'death-ward', slotLevel: 4,
+      effectRolls: [],
+    })
+    expect(applied.ok).toBe(true)
+    if (!applied.ok) return
+    applied.state.initiativeIndex = applied.state.initiativeOrder.indexOf('attacker')
+    const damaged = resolveDnd5eHeadlessAction(applied.state, {
+      type: 'cast-spell', actorId: 'attacker', targetId: 'warded', spellId: 'fire-bolt', slotLevel: 0,
+      d20: 15, effectRolls: [10, 10, 10, 10],
+    })
+    expect(damaged.ok ? 'ok' : damaged.reason).toBe('ok')
+    if (!damaged.ok) return
+    expect(damaged.state.combatants.warded.currentHp).toBe(1)
+    expect(damaged.events).toContainEqual({ type: 'death-ward-triggered', targetId: 'warded', trigger: 'damage' })
+
+    const appliedAgain = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('death-ward-kill', [cleric, warded, attacker]), {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'warded', spellId: 'death-ward', slotLevel: 4,
+      effectRolls: [],
+    })
+    expect(appliedAgain.ok).toBe(true)
+    if (!appliedAgain.ok) return
+    appliedAgain.state.initiativeIndex = appliedAgain.state.initiativeOrder.indexOf('attacker')
+    const killed = resolveDnd5eHeadlessAction(appliedAgain.state, {
+      type: 'cast-spell', actorId: 'attacker', targetId: 'warded', spellId: 'power-word-kill', slotLevel: 9,
+      effectRolls: [],
+    })
+    expect(killed.ok).toBe(true)
+    if (!killed.ok) return
+    expect(killed.state.combatants.warded.currentHp).toBe(5)
+    expect(killed.state.combatants.warded.deathSaves.dead).toBe(false)
+    expect(killed.events).toContainEqual({ type: 'death-ward-triggered', targetId: 'warded', trigger: 'instant-death' })
   })
 
   it('lets a failed spell save consume Legendary Resistance before damage and conditions', () => {

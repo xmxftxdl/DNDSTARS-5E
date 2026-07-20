@@ -99,6 +99,8 @@ export interface PreparedDnd5eSpellCast {
   carefulTargetIds: readonly string[]
   draconicResistance: boolean
   repellingBlast: boolean
+  conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+  healingAllocations?: readonly { targetId: string; amount: number }[]
 }
 
 /**
@@ -239,6 +241,11 @@ export function prepareDnd5eSpellCast(input: {
   const requestedTargetIds = [...new Set(
     projectileTargetIds?.length ? projectileTargetIds : payload.targetTokenIds?.length ? payload.targetTokenIds : [payload.targetTokenId],
   )]
+  const conditionChoice = payload.conditionChoice
+  if (
+    (spell.conditionOptions?.length && (!conditionChoice || !spell.conditionOptions.includes(conditionChoice))) ||
+    (!spell.conditionOptions?.length && conditionChoice != null)
+  ) return { ok: false, reason: 'invalid-action' }
   const maximumTargets = metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, slotLevel, actor.level)
   if (
     requestedTargetIds.length < 1 || requestedTargetIds.length > maximumTargets ||
@@ -339,6 +346,34 @@ export function prepareDnd5eSpellCast(input: {
     actorIndex < 0 || !actorCombatant || !targetCombatant ||
     validTargetTokens.some((target) => !snapshot.state.combatants[target.id])
   ) return { ok: false, reason: 'combatant-missing' }
+  const targetCombatants = validTargetTokens.map((token) => snapshot.state.combatants[token.id])
+  const isUndeadOrConstruct = (creatureType: string | undefined) =>
+    ['构装体', 'construct', '亡灵', 'undead'].includes((creatureType ?? '').toLowerCase())
+  if (
+    (spell.id === 'false-life' && targetToken.id !== actorToken.id) ||
+    (spell.id === 'spare-the-dying' && (
+      targetCombatant.currentHp !== 0 || targetCombatant.deathSaves.dead || isUndeadOrConstruct(targetCombatant.creatureType)
+    )) ||
+    (spell.id === 'hold-person' && targetCombatants.some((combatant) => {
+      const type = (combatant.creatureType ?? '').toLowerCase()
+      return type !== 'humanoid' && !type.includes('类人')
+    })) ||
+    (spell.id === 'hold-monster' && targetCombatants.some((combatant) => ['亡灵', 'undead'].includes((combatant.creatureType ?? '').toLowerCase())))
+  ) return { ok: false, reason: 'invalid-target' }
+  const healingAllocations = payload.healingAllocations?.map((allocation) => ({
+    targetId: allocation.targetTokenId,
+    amount: allocation.amount,
+  }))
+  if (spell.effect === 'healing-pool') {
+    if (
+      !healingAllocations || healingAllocations.length !== requestedTargetIds.length ||
+      new Set(healingAllocations.map((allocation) => allocation.targetId)).size !== healingAllocations.length ||
+      healingAllocations.some((allocation) =>
+        !requestedTargetIds.includes(allocation.targetId) || !Number.isInteger(allocation.amount) || allocation.amount < 0
+      ) ||
+      healingAllocations.reduce((sum, allocation) => sum + allocation.amount, 0) > (spell.healingPool ?? 0)
+    ) return { ok: false, reason: 'invalid-action' }
+  } else if (healingAllocations?.length) return { ok: false, reason: 'invalid-action' }
   const areaCell = payload.areaTargetCell
   const effectOrigin = spell.area?.origin === 'point' && areaCell
     ? {
@@ -535,6 +570,8 @@ export function prepareDnd5eSpellCast(input: {
       carefulTargetIds,
       draconicResistance,
       repellingBlast,
+      conditionChoice,
+      healingAllocations,
     },
   }
 }
@@ -663,6 +700,8 @@ export function resolvePreparedDnd5eSpellCast(input: {
     empoweredRerolls: input.empoweredRerolls,
     draconicResistance: prepared.draconicResistance,
     repellingBlast: prepared.repellingBlast,
+    conditionChoice: prepared.conditionChoice,
+    healingAllocations: prepared.healingAllocations,
     counterspellReaction: input.counterspellReaction,
     spellId: prepared.spell.id,
     slotLevel: prepared.slotLevel,

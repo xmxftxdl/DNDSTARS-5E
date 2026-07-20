@@ -129,6 +129,75 @@ export function normalizeMapFog(value: unknown): MapFogState | undefined {
   }
 }
 
+export type FogPointState = 'covered' | 'revealed' | 'neutral'
+
+function pointInPolygon(points: readonly number[], x: number, y: number): boolean {
+  let inside = false
+  for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+    const xi = points[i]
+    const yi = points[i + 1]
+    const xj = points[j]
+    const yj = points[j + 1]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
+function pointNearPolyline(points: readonly number[], x: number, y: number, radius: number): boolean {
+  const radiusSquared = radius * radius
+  for (let i = 0; i + 3 < points.length; i += 2) {
+    const ax = points[i]
+    const ay = points[i + 1]
+    const bx = points[i + 2]
+    const by = points[i + 3]
+    const dx = bx - ax
+    const dy = by - ay
+    const lengthSquared = dx * dx + dy * dy
+    const t = lengthSquared > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / lengthSquared)) : 0
+    const px = ax + dx * t - x
+    const py = ay + dy * t - y
+    if (px * px + py * py <= radiusSquared) return true
+  }
+  if (points.length === 2) {
+    const px = points[0] - x
+    const py = points[1] - y
+    return px * px + py * py <= radiusSquared
+  }
+  return false
+}
+
+export function fogShapeContainsPoint(shape: FogShape, x: number, y: number): boolean {
+  if (shape.kind === 'rect') {
+    return x >= shape.x && x <= shape.x + shape.width && y >= shape.y && y <= shape.y + shape.height
+  }
+  if (shape.kind === 'circle') {
+    const dx = x - shape.x
+    const dy = y - shape.y
+    return dx * dx + dy * dy <= shape.radius * shape.radius
+  }
+  if (shape.kind === 'polygon') {
+    return pointInPolygon(shape.points, x, y)
+  }
+  return pointNearPolyline(shape.points, x, y, shape.width / 2)
+}
+
+/**
+ * Evaluates cover/reveal shapes in paint order (later shapes win), matching
+ * how the DM fog editor composites them. 'neutral' means the point is outside
+ * all shapes on an unfilled map.
+ */
+export function fogPointState(fog: Pick<MapFogState, 'filled' | 'shapes'>, x: number, y: number): FogPointState {
+  let state: FogPointState = fog.filled ? 'covered' : 'neutral'
+  for (const shape of fog.shapes) {
+    if (fogShapeContainsPoint(shape, x, y)) state = shape.operation === 'cover' ? 'covered' : 'revealed'
+  }
+  return state
+}
+
+export function fogCoversPoint(fog: Pick<MapFogState, 'filled' | 'shapes'>, x: number, y: number): boolean {
+  return fogPointState(fog, x, y) === 'covered'
+}
+
 export function normalizeSharedMapFog(value: unknown): SharedMapFogState | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>

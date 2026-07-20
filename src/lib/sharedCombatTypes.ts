@@ -105,6 +105,8 @@ export interface Dnd5eItemUsePayload {
 }
 
 export interface Dnd5eWeaponAttackOptions {
+  /** DM-only, single-transaction cover ruling. The Headless authority rejects this field on player requests. */
+  coverOverride?: Dnd5eAttackCoverOverride
   /** 荒野变形后使用当前野兽数据块中的动作序号；由 Headless 重新验证。 */
   wildShapeActionIndex?: number
   /** 仅表示玩家请求；是否可用、法术位与伤害骰均由 DM/Headless 重算。 */
@@ -124,6 +126,8 @@ export interface Dnd5eWeaponAttackOptions {
   /** 游侠 20 级屠灭众敌；对所选宿敌每回合一次，将感知调整值加入命中或伤害。 */
   foeSlayer?: 'attack' | 'damage'
 }
+
+export type Dnd5eAttackCoverOverride = 'none' | 'half' | 'three-quarters' | 'total'
 
 export type Dnd5eMetamagicId =
   | 'careful'
@@ -164,6 +168,10 @@ export interface Dnd5eSpellCastPayload {
   draconicResistance?: boolean
   /** 斥力魔爆：本次魔能爆每道命中的射线都请求将目标推开至多10尺。 */
   repellingBlast?: boolean
+  /** 目盲/耳聋术与次级复原术的受控选择；Headless 会按法术白名单重新验证。 */
+  conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+  /** 群体医疗术的逐目标治疗分配；总和不得超过法术的治疗池。 */
+  healingAllocations?: Array<{ targetTokenId: string; amount: number }>
 }
 
 /**
@@ -321,4 +329,6 @@ export interface CombatLogEntry {
   text: string
   kind: 'system' | 'turn' | 'attack' | 'damage'
   time: string
+  /** 由 Headless 结算事件生成的可读过程；旧日志可不包含。 */
+  details?: string[]
 }

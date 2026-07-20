@@ -1,0 +1,97 @@
+import { useRef, useState } from 'react'
+import { ImagePlus, Sparkles, Trash2 } from 'lucide-react'
+import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+
+interface CharacterPortraitEditorProps {
+  name: string
+  avatar: string
+  accent: string
+  portrait?: string
+  onChange: (portrait?: string) => void
+}
+
+export default function CharacterPortraitEditor({
+  name,
+  avatar,
+  accent,
+  portrait,
+  onChange,
+}: CharacterPortraitEditorProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const upload = async (file: File) => {
+    setBusy(true)
+    setError('')
+    try {
+      onChange(await createCharacterPortraitDataUrl(file))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '立绘上传失败。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="w-full shrink-0 lg:w-56" data-testid="character-portrait-editor">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        aria-label="上传人物立绘"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0]
+          if (file) void upload(file)
+          event.currentTarget.value = ''
+        }}
+      />
+      <div className="group relative aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 bg-void-950/70 shadow-xl">
+        {portrait ? (
+          <img src={portrait} alt={`${name}的人物立绘`} className="h-full w-full object-cover" />
+        ) : (
+          <div className={`flex h-full w-full flex-col items-center justify-center bg-gradient-to-br ${accent}`}>
+            <span className="text-7xl drop-shadow-lg">{avatar}</span>
+            <span className="mt-4 px-4 text-center text-sm font-semibold text-white/85">{name}</span>
+          </div>
+        )}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-12">
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white/15 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm hover:bg-white/25 disabled:cursor-wait disabled:opacity-50"
+          >
+            <ImagePlus className="h-4 w-4" />
+            {busy ? '正在处理…' : portrait ? '替换立绘' : '上传立绘'}
+          </button>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          disabled
+          title="AI 立绘生成功能将在后续版本接入"
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-violet-400/10 bg-violet-500/[0.06] px-2 py-2 text-[11px] font-semibold text-violet-300/45"
+        >
+          <Sparkles className="h-3.5 w-3.5" />AI 生成（稍后）
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setError('')
+            onChange(undefined)
+          }}
+          disabled={!portrait || busy}
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-2 text-[11px] font-semibold text-slate-400 hover:bg-white/[0.08] hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <Trash2 className="h-3.5 w-3.5" />移除
+        </button>
+      </div>
+      <p className={`mt-2 text-[11px] leading-4 ${error ? 'text-rose-300' : 'text-slate-600'}`}>
+        {error || '自动居中裁切为 3:4 竖版，并压缩后随角色存档保存。'}
+      </p>
+    </div>
+  )
+}

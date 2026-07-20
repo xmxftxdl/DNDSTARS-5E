@@ -30,6 +30,9 @@ let lastSharedUpdatedAt = 0
 function publish(state: Pick<FogStoreState, 'maps'>): void {
   if (!canWriteSharedState()) return
   const updatedAt = Math.max(Date.now(), lastSharedUpdatedAt + 1)
+  // 记录本端已发布的时间戳，防止一次由旧事件触发的 loadShared 用
+  // 保存前的快照覆盖刚画好的迷雾。
+  lastSharedUpdatedAt = updatedAt
   const payload: SharedMapFogState = {
     schemaVersion: MAP_FOG_SCHEMA_VERSION,
     maps: state.maps.map((map) => ({ ...map, shapes: map.shapes.map((shape) => ({ ...shape })), updatedAt })),

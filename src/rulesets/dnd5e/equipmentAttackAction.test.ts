@@ -50,6 +50,62 @@ describe('D&D 5e equipment attack authority', () => {
     expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(12)
   })
 
+  it('grants half cover from an intervening creature and accepts a DM-only one-attack override', () => {
+    const input = fixture(225)
+    input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    input.map.tokens.push(token({ id: 'intervening-creature', type: 'player', x: 125, y: 25 }))
+    const automatic = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(automatic.ok).toBe(true)
+    if (!automatic.ok) return
+    expect(automatic.prepared).toMatchObject({
+      targetArmorClass: 12,
+      cover: { cover: 'half', armorClassBonus: 2, overriddenByDm: false },
+    })
+
+    const dmOverride = prepareDnd5eEquipmentAttack({
+      ...input,
+      action: {
+        ...input.action,
+        sourceMode: 'dm',
+        dnd5eWeaponAttackOptions: { coverOverride: 'none' },
+      },
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(dmOverride.ok).toBe(true)
+    if (!dmOverride.ok) return
+    expect(dmOverride.prepared).toMatchObject({
+      targetArmorClass: 10,
+      cover: { cover: 'none', armorClassBonus: 0, overriddenByDm: true },
+    })
+  })
+
+  it('rejects a player request that forges a DM cover override', () => {
+    const input = fixture()
+    expect(prepareDnd5eEquipmentAttack({
+      ...input,
+      action: { ...input.action, dnd5eWeaponAttackOptions: { coverOverride: 'total' } },
+      characters: [input.actor],
+      attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
+  it('accepts a trusted DM-host override while settling a player request', () => {
+    const input = fixture()
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      dmCoverOverride: 'three-quarters',
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      targetArmorClass: 15,
+      cover: { cover: 'three-quarters', armorClassBonus: 5, overriddenByDm: true },
+    })
+  })
+
   it('rejects out-of-range melee targets and a spent Attack action', () => {
     const distant = fixture(175)
     expect(prepareDnd5eEquipmentAttack({ ...distant, characters: [distant.actor], attacksUsed: 0 })).toEqual({ ok: false, reason: 'target-out-of-range' })

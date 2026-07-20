@@ -27,7 +27,15 @@ import {
   type Dnd5eWeaponClassDamageContext,
   type Dnd5eTranquilitySaveRoll,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import {
+  applyDnd5eAttackCoverOverride,
+  createDnd5eMapCombatSnapshot,
+  dnd5eAttackCoverForPair,
+  dnd5eMapTokenCanThreatenRangedAttacker,
+  planDnd5eMapResultApplication,
+  type Dnd5eAttackCoverSnapshot,
+  type Dnd5eMapResultPlan,
+} from './mapBridge'
 import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 export type Dnd5eEquipmentAttackRejectReason =
@@ -58,6 +66,7 @@ export interface PreparedDnd5eEquipmentAttack {
   targetToken: Token
   profile: Dnd5eWeaponAttackProfile
   targetArmorClass: number
+  cover: Dnd5eAttackCoverSnapshot & { overriddenByDm: boolean }
   distanceFeet: number
   attackNumber: number
   attacksAllowed: number
@@ -82,6 +91,8 @@ export interface PreparedDnd5eEquipmentAttack {
 
 export function prepareDnd5eEquipmentAttack(input: {
   action: SharedPlayerActionState
+  /** Trusted DM-host ruling supplied after the player request reaches authority. */
+  dmCoverOverride?: Dnd5eAttackCoverSnapshot['cover']
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
@@ -92,6 +103,9 @@ export function prepareDnd5eEquipmentAttack(input: {
 }): { ok: true; prepared: PreparedDnd5eEquipmentAttack } | { ok: false; reason: Dnd5eEquipmentAttackRejectReason } {
   const { action } = input
   if (action.type !== 'dnd5e-weapon-attack' || !action.targetTokenId) return { ok: false, reason: 'invalid-action' }
+  const requestedCoverOverride = action.dnd5eWeaponAttackOptions?.coverOverride
+  if (requestedCoverOverride != null && action.sourceMode !== 'dm') return { ok: false, reason: 'invalid-action' }
+  const coverOverride = input.dmCoverOverride ?? requestedCoverOverride
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
@@ -182,6 +196,10 @@ export function prepareDnd5eEquipmentAttack(input: {
   const target = snapshot.state.combatants[targetToken.id]
   if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id] || !target) return { ok: false, reason: 'combatant-missing' }
   const actorCombatant = snapshot.state.combatants[actorToken.id]
+  if (coverOverride != null) {
+    applyDnd5eAttackCoverOverride(snapshot.state, actorToken.id, targetToken.id, coverOverride)
+  }
+  const effectiveCover = dnd5eAttackCoverForPair(snapshot.state, actorToken.id, targetToken.id)
   for (const [tokenId, economy] of Object.entries(input.turnEconomyByToken ?? {})) {
     const combatant = snapshot.state.combatants[tokenId]
     if (!combatant) continue
@@ -280,6 +298,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       targetToken,
       profile,
       targetArmorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, targetToken.id),
+      cover: { ...effectiveCover, overriddenByDm: coverOverride != null },
       distanceFeet,
       attackNumber: specialAttack ? 1 : input.attacksUsed + 1,
       attacksAllowed,

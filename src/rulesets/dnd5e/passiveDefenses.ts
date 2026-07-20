@@ -39,6 +39,13 @@ function hasCondition(creature: Pick<Dnd5eDefensiveCreature, 'conditions'>, valu
   return creature.conditions.some((condition) => values.has(condition.toLowerCase()))
 }
 
+function hasMechanicalEffect(
+  creature: Pick<Dnd5eDefensiveCreature, 'classState'>,
+  definitionId: string,
+): boolean {
+  return creature.classState.activeEffects?.some((effect) => effect.definitionId === definitionId) === true
+}
+
 export function dnd5eIsIncapacitated(
   creature: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
 ): boolean {
@@ -61,11 +68,13 @@ export function dnd5eSavingThrowMode(
     creature.classSelections['defensive-tactics']?.includes('steel-will') === true
   const countercharm = (feared || charmed) && (creature.countercharmSourceIds?.length ?? 0) > 0
   const rageStrength = creature.classId === 'barbarian' && creature.level >= 1 && creature.classState.raging === true && ability === 'str'
+  const poisonProtection = ['poisoned', '中毒'].includes((context.condition ?? '').trim().toLowerCase()) &&
+    hasMechanicalEffect(creature, 'srd-5.1:spell:protection-from-poison')
   const sourceType = normalizedCreatureType(context.sourceCreatureType)
   const holyNimbus = creature.classId === 'paladin' && creature.subclassId === 'devotion' && creature.level >= 20 &&
     (creature.classState.holyNimbusRoundsRemaining ?? 0) > 0 && context.sourceIsSpell === true &&
     (sourceType === 'fiend' || sourceType.includes('邪魔') || sourceType === 'undead' || sourceType.includes('亡灵'))
-  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus
+  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || poisonProtection
   const disadvantage = creature.exhaustionLevel >= 3 || dnd5eConditionSavingThrowDisadvantage(creature, ability)
   if (advantage === disadvantage) return 'normal'
   return advantage ? 'advantage' : 'disadvantage'
@@ -102,13 +111,19 @@ export function dnd5eIsBlinded(creature: { conditions?: readonly string[] }): bo
 
 /** 目标目盲时，对其进行的攻击检定具有优势。 */
 export function dnd5eTargetGrantsAttackAdvantage(creature: Dnd5eDefensiveCreature): boolean {
-  return dnd5eConditionGrantsAttackAdvantage({ target: creature }) && !dnd5ePreventsAttackAdvantage(creature)
+  const guidingBolt = creature.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:guiding-bolt:attack-advantage'
+  ) === true
+  const faerieFire = hasMechanicalEffect(creature, 'srd-5.1:spell:faerie-fire')
+  return (dnd5eConditionGrantsAttackAdvantage({ target: creature }) || guidingBolt || faerieFire) &&
+    !dnd5ePreventsAttackAdvantage(creature)
 }
 
 /** 攻击者不可见时，其攻击检定具有优势（特殊感官可在规则扩展层覆盖）。 */
 export function dnd5eAttackerIsUnseen(
   creature: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
 ): boolean {
+  if (hasMechanicalEffect(creature, 'srd-5.1:spell:faerie-fire')) return false
   return dnd5eConditionGrantsAttackAdvantageToAttacker(creature) ||
     (creature.classState.emptyBodyRoundsRemaining ?? 0) > 0
 }
@@ -136,7 +151,8 @@ export function dnd5eUnseenTargetImposesDisadvantage(
     Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
 ): boolean {
   if (dnd5eConditionImposesAttackDisadvantage({ attacker })) return true
-  const targetIsUnseen = dnd5eHasStandardCondition(target, 'invisible') ||
+  const targetIsOutlined = hasMechanicalEffect(target, 'srd-5.1:spell:faerie-fire')
+  const targetIsUnseen = (!targetIsOutlined && dnd5eHasStandardCondition(target, 'invisible')) ||
     (target.classState.emptyBodyRoundsRemaining ?? 0) > 0
   const unseenDisadvantage = targetIsUnseen && !(attacker.classId === 'ranger' && attacker.level >= 18)
   const purityOfSpirit = target.classId === 'paladin' && target.subclassId === 'devotion' && target.level >= 15 &&

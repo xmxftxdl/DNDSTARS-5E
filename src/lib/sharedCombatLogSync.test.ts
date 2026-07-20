@@ -26,4 +26,9 @@ describe('shared combat log sync', () => {
     )
     expect(merged.map((item) => item.id)).toEqual([4, 3])
   })
+
+  it('preserves structured Headless details across shared-log merges', () => {
+    const detailed = { ...entry(5), details: ['命中检定 d20 17，总值 22 vs AC 15｜命中', 'HP 18 → 9'] }
+    expect(mergeSharedCombatLogEntries([], [detailed])).toEqual([detailed])
+  })
 })

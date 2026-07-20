@@ -3,7 +3,7 @@ import type { CombatLogEntry } from './sharedCombatTypes'
 export function mergeSharedCombatLogEntries(
   current: CombatLogEntry[],
   incoming: CombatLogEntry[],
-  limit = 80,
+  limit = 160,
 ): CombatLogEntry[] {
   const merged = [...incoming, ...current]
   const unique = new Map<number, CombatLogEntry>()

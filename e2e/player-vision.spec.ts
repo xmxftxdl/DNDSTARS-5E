@@ -4,7 +4,7 @@ const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
 const SESSION_KEY = 'stars-room-session:v1'
 
-test('dynamic vision cuts through filled static fog after combat setup', async ({ browser, request }) => {
+test('a player token cuts a 30-foot view through filled fog without a separate vision toggle', async ({ browser, request }) => {
   const createdResponse = await request.post(`${DM}/api/rooms`, {
     data: {
       roomName: 'Player vision regression', displayName: 'Vision DM',
@@ -46,13 +46,20 @@ test('dynamic vision cuts through filled static fog after combat setup', async (
     schemaVersion: 2, updatedAt: now,
     maps: [{
       mapId: 'vision-map', walls: [], doors: [], windows: [], obstacles: [], lights: [],
-      vision: { enabled: true, defaultRangeFeet: 20, sharePartyVision: false, ambientLight: 'bright' },
+      vision: { enabled: false, defaultRangeFeet: 30, sharePartyVision: false, ambientLight: 'bright' },
       updatedAt: now,
     }],
   })
   await put('map-fog', {
     schemaVersion: 1, updatedAt: now,
-    maps: [{ mapId: 'vision-map', filled: true, color: '#05070f', opacity: 0.98, shapes: [], updatedAt: now }],
+    maps: [{
+      mapId: 'vision-map', filled: true, color: '#05070f', opacity: 0.98,
+      shapes: [{
+        id: 'cover-current-view', operation: 'cover', kind: 'rect',
+        x: 0, y: 0, width: 400, height: 400, createdAt: now,
+      }],
+      updatedAt: now,
+    }],
   })
 
   const context = await browser.newContext()
@@ -68,7 +75,7 @@ test('dynamic vision cuts through filled static fog after combat setup', async (
   const page = await context.newPage()
   await page.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
   const canvas = page.getByTestId('map-canvas')
-  await expect(canvas).toHaveAttribute('data-vision-enabled', 'true')
+  await expect(canvas).toHaveAttribute('data-vision-enabled', 'false')
   await expect(canvas).toHaveAttribute('data-fog-filled', 'true')
   await expect(canvas).toHaveAttribute('data-vision-source-count', '1')
 

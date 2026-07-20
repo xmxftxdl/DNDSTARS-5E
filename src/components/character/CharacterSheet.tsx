@@ -36,6 +36,7 @@ import Dnd5eClassProgressionPanel from './Dnd5eClassProgressionPanel'
 import Dnd5ePluginFeaturesPanel from './Dnd5ePluginFeaturesPanel'
 import Dnd5eSpellbookPanel from './Dnd5eSpellbookPanel'
 import EquipmentTab from './EquipmentTab'
+import CharacterPortraitEditor from './CharacterPortraitEditor'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
@@ -174,9 +175,13 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
     <div className="space-y-5">
       <section className="glass rounded-2xl p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-          <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-3xl ${c.accent}`}>
-            {c.avatar}
-          </div>
+          <CharacterPortraitEditor
+            name={c.name}
+            avatar={c.avatar}
+            accent={c.accent}
+            portrait={c.portrait}
+            onChange={(portrait) => update(id, { portrait })}
+          />
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="角色名称" value={c.name} onChange={(value) => update(id, { name: value })} className="col-span-2" />
             <SelectField

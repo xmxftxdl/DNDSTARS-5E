@@ -9,7 +9,24 @@ import { dnd5eBardMagicalSecretsOptions } from './spellCatalog'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
-export type Dnd5eSpellEffectKind = 'spell-attack' | 'saving-throw' | 'automatic-damage' | 'healing' | 'mark' | 'armor-class-buff' | 'attack-save-buff' | 'attack-save-debuff' | 'power-word-kill'
+export type Dnd5eSpellEffectKind =
+  | 'spell-attack'
+  | 'saving-throw'
+  | 'automatic-damage'
+  | 'healing'
+  | 'fixed-healing'
+  | 'healing-pool'
+  | 'temporary-hit-points'
+  | 'stabilize'
+  | 'remove-condition'
+  | 'active-effect'
+  | 'mark'
+  | 'armor-class-buff'
+  | 'attack-save-buff'
+  | 'attack-save-debuff'
+  | 'power-word-kill'
+  | 'power-word-stun'
+  | 'counterspell'
 
 export interface Dnd5eSrdSpellDefinition {
   id: string
@@ -41,12 +58,164 @@ export interface Dnd5eSrdSpellDefinition {
   /** 每道射线单独攻击时的基础射线数。 */
   baseProjectiles?: number
   additionalProjectilesPerHigherSlot?: number
-  onHitEffect?: 'ray-of-frost' | 'shocking-grasp'
-  onFailedSaveEffect?: 'vicious-mockery' | 'thunderwave-push' | 'sunburst-blindness'
+  onHitEffect?: 'ray-of-frost' | 'shocking-grasp' | 'guiding-bolt'
+  onFailedSaveEffect?:
+    | 'vicious-mockery'
+    | 'thunderwave-push'
+    | 'sunburst-blindness'
+    | 'blindness-deafness'
+    | 'hold-person'
+    | 'hold-monster'
+    | 'banishment'
+    | 'faerie-fire'
+  appliedEffect?:
+    | 'invisibility'
+    | 'greater-invisibility'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'death-ward'
+  effectDurationRounds?: number
+  conditionOptions?: readonly ('blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease')[]
+  fixedHealing?: number
+  fixedHealingPerHigherSlot?: number
+  healingPool?: number
+  hitPointThreshold?: number
   description: string
 }
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
+  {
+    id: 'faerie-fire', name: '妖火', englishName: 'Faerie Fire', level: 1, school: '塑能',
+    classes: ['bard', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'saving-throw', saveAbility: 'dex',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100,
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
+    onFailedSaveEffect: 'faerie-fire',
+    description: '指定60尺内一处20尺立方区域。区域内生物进行敏捷豁免；失败者被光包围，无法受益于隐形，且能看见它的攻击者对其攻击具有优势。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'invisibility', name: '隐形术', englishName: 'Invisibility', level: 2, school: '幻术',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 600,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, appliedEffect: 'invisibility',
+    description: '触碰一个生物，使其及其随身着装与携带物隐形。目标发动攻击或施展法术时效果结束。需要专注，持续至多1小时；每升一环可额外指定一个目标。',
+  },
+  {
+    id: 'greater-invisibility', name: '高等隐形术', englishName: 'Greater Invisibility', level: 4, school: '幻术',
+    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    appliedEffect: 'greater-invisibility',
+    description: '触碰一个生物，使其及其随身着装与携带物隐形。攻击或施法不会终止此效果。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'barkskin', name: '树肤术', englishName: 'Barkskin', level: 2, school: '变化',
+    classes: ['druid', 'ranger'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 600,
+    appliedEffect: 'barkskin',
+    description: '触碰一个自愿生物。法术持续期间，无论目标着装何种护甲，其AC都不会低于16。需要专注，持续至多1小时。',
+  },
+  {
+    id: 'protection-from-poison', name: '防护毒素', englishName: 'Protection from Poison', level: 2, school: '防护',
+    classes: ['cleric', 'druid', 'paladin', 'ranger'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, appliedEffect: 'protection-from-poison', effectDurationRounds: 600,
+    description: '触碰一个生物并中和其所受毒素，结束中毒状态。目标在1小时内对抗中毒的豁免具有优势，并对毒素伤害具有抗性。',
+  },
+  {
+    id: 'death-ward', name: '防死结界', englishName: 'Death Ward', level: 4, school: '防护',
+    classes: ['cleric', 'paladin'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, appliedEffect: 'death-ward', effectDurationRounds: 4_800,
+    description: '触碰一个生物并给予死亡防护。目标第一次因伤害降至0生命时改为降至1；若受到不造成伤害但会直接致死的效果，则取消该致死效果。触发后法术结束，未触发时持续8小时。',
+  },
+  {
+    id: 'spare-the-dying', name: '维生术', englishName: 'Spare the Dying', level: 0, school: '死灵',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'stabilize',
+    dice: { count: 0, sides: 4, bonus: 0 },
+    description: '触碰一名生命值为0但尚未死亡的活体生物，使其伤势稳定。该法术对构装生物和亡灵无效。',
+  },
+  {
+    id: 'false-life', name: '虚假生命', englishName: 'False Life', level: 1, school: '死灵',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0, target: 'ally', effect: 'temporary-hit-points',
+    dice: { count: 1, sides: 4, bonus: 4 }, fixedHealingPerHigherSlot: 5,
+    description: '以死灵魔法强化自身，获得1d4＋4点临时生命值，持续1小时。每使用高一环法术位，额外获得5点临时生命值。',
+  },
+  {
+    id: 'guiding-bolt', name: '曳光弹', englishName: 'Guiding Bolt', level: 1, school: '塑能',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    dice: { count: 4, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'radiant', onHitEffect: 'guiding-bolt',
+    description: '进行一次远程法术攻击。命中造成4d6光耀伤害；在你的下一回合结束前，下一次对该目标的攻击检定具有优势。每升一环增加1d6伤害。',
+  },
+  {
+    id: 'hellish-rebuke', name: '炼狱叱喝', englishName: 'Hellish Rebuke', level: 1, school: '塑能',
+    classes: ['warlock'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
+    dice: { count: 2, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'fire', damageOnSuccessfulSave: 'half',
+    description: '当60尺内你能看见的生物伤害你时，以反应迫使其进行敏捷豁免；失败受到2d10火焰伤害，成功减半。每升一环增加1d10。系统在符合触发条件时询问。',
+  },
+  {
+    id: 'blindness-deafness', name: '目盲/耳聋术', englishName: 'Blindness/Deafness', level: 2, school: '死灵',
+    classes: ['bard', 'cleric', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'con',
+    dice: { count: 0, sides: 4, bonus: 0 }, maximumTargets: 1, additionalTargetsPerHigherSlot: 1,
+    onFailedSaveEffect: 'blindness-deafness', conditionOptions: ['blinded', 'deafened'],
+    description: '选择使目标目盲或耳聋。目标进行体质豁免；失败承受所选状态1分钟，并在其每个回合结束时重复豁免，成功则结束。每升一环可多选择一个目标。',
+  },
+  {
+    id: 'hold-person', name: '人类定身术', englishName: 'Hold Person', level: 2, school: '附魔',
+    classes: ['bard', 'cleric', 'druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
+    onFailedSaveEffect: 'hold-person',
+    description: '一名类人生物进行感知豁免；失败则陷入麻痹。目标在每个回合结束时重复豁免，成功则结束。需要专注，至多1分钟；每升一环可多选择一个彼此相距不超过30尺的目标。',
+  },
+  {
+    id: 'lesser-restoration', name: '次级复原术', englishName: 'Lesser Restoration', level: 2, school: '防护',
+    classes: ['bard', 'cleric', 'druid', 'paladin', 'ranger'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'remove-condition',
+    dice: { count: 0, sides: 4, bonus: 0 }, conditionOptions: ['blinded', 'deafened', 'paralyzed', 'poisoned', 'disease'],
+    description: '触碰一名生物，结束影响它的一种疾病，或结束目盲、耳聋、麻痹、毒素状态中的一种。',
+  },
+  {
+    id: 'mass-healing-word', name: '群体治愈真言', englishName: 'Mass Healing Word', level: 3, school: '塑能',
+    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing',
+    dice: { count: 1, sides: 4, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
+    description: '以附赠动作使射程内至多六名生物各恢复1d4＋施法属性调整值的生命。每升一环增加1d4治疗。对构装生物和亡灵无效。',
+  },
+  {
+    id: 'counterspell', name: '法术反制', englishName: 'Counterspell', level: 3, school: '防护',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'counterspell',
+    dice: { count: 0, sides: 4, bonus: 0 },
+    description: '当60尺内你能看见的生物施法时，以反应尝试中断该法术。3环及以下法术自动失败；更高环法术需要进行DC 10＋法术环级的施法属性检定。升环可自动反制不高于所用法术位环级的法术。',
+  },
+  {
+    id: 'banishment', name: '放逐术', englishName: 'Banishment', level: 4, school: '防护',
+    classes: ['cleric', 'paladin', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'cha',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, onFailedSaveEffect: 'banishment',
+    description: '目标进行魅力豁免；失败则被放逐并在持续期间陷入失能。需要专注，至多1分钟；每升一环可多选择一个目标。异界生物维持满时长后的位面归返由DM裁定。',
+  },
+  {
+    id: 'hold-monster', name: '怪物定身术', englishName: 'Hold Monster', level: 5, school: '附魔',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
+    onFailedSaveEffect: 'hold-monster',
+    description: '一名非亡灵生物进行感知豁免；失败则陷入麻痹。目标在每个回合结束时重复豁免，成功则结束。需要专注，至多1分钟；每升一环可多选择一个彼此相距不超过30尺的目标。',
+  },
+  {
+    id: 'heal', name: '医疗术', englishName: 'Heal', level: 6, school: '塑能',
+    classes: ['cleric', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'fixed-healing',
+    dice: { count: 0, sides: 4, bonus: 0 }, fixedHealing: 70, fixedHealingPerHigherSlot: 10,
+    description: '目标恢复70点生命，并结束影响它的目盲、耳聋和疾病。每升一环额外恢复10点生命。对构装生物和亡灵无效。',
+  },
+  {
+    id: 'power-word-stun', name: '律令震慑', englishName: 'Power Word Stun', level: 8, school: '附魔',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'power-word-stun',
+    dice: { count: 0, sides: 4, bonus: 0 }, hitPointThreshold: 150,
+    description: '若目标当前生命值不高于150，则陷入震慑；否则法术无效。目标在每个回合结束时进行体质豁免，成功则结束震慑。',
+  },
+  {
+    id: 'mass-heal', name: '群体医疗术', englishName: 'Mass Heal', level: 9, school: '塑能',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'healing-pool',
+    dice: { count: 0, sides: 4, bonus: 0 }, healingPool: 700, maximumTargets: 100,
+    description: '将700点治疗分配给射程内可见的生物；每个目标恢复分配到的数值，并结束影响它的所有疾病、目盲与耳聋。对构装生物和亡灵无效。',
+  },
   {
     id: 'acid-splash', name: '酸液飞溅', englishName: 'Acid Splash', level: 0, school: '咒法',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',

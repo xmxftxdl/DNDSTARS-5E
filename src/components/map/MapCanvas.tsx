@@ -242,22 +242,22 @@ function measurePointsEqual(a: Point, b: Point): boolean {
 
 function fogShapeNode(shape: FogShape, color: string, opacity: number, key = shape.id) {
   const common = {
-    key,
     opacity: shape.operation === 'reveal' ? 1 : opacity,
     globalCompositeOperation: shape.operation === 'reveal' ? 'destination-out' : 'source-over',
     listening: false,
   } as const
   if (shape.kind === 'rect') {
-    return <Rect {...common} x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill={color} />
+    return <Rect key={key} {...common} x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill={color} />
   }
   if (shape.kind === 'circle') {
-    return <Circle {...common} x={shape.x} y={shape.y} radius={shape.radius} fill={color} />
+    return <Circle key={key} {...common} x={shape.x} y={shape.y} radius={shape.radius} fill={color} />
   }
   if (shape.kind === 'polygon') {
-    return <Line {...common} points={shape.points} closed fill={color} />
+    return <Line key={key} {...common} points={shape.points} closed fill={color} />
   }
   return (
     <Line
+      key={key}
       {...common}
       points={shape.points}
       stroke={color}
@@ -286,7 +286,9 @@ function FogOfWarLayer({
   inv: number
 }) {
   if (!fog || (!fog.filled && fog.shapes.length === 0 && !draft && polygonPoints.length === 0)) return null
-  const opacity = isDM && !previewAsPlayer ? Math.min(0.52, fog.opacity) : fog.opacity
+  // 玩家实际看到的迷雾始终完全不透明（见 PlayerVisibilityLayer）；
+  // fog.opacity 只调节 DM 编辑视图下这层半透明预览的浓度。
+  const opacity = isDM && !previewAsPlayer ? Math.max(0.15, Math.min(0.8, fog.opacity * 0.55)) : 1
   return (
     <Layer listening={false}>
       {fog.filled && (
@@ -322,16 +324,15 @@ function PlayerVisibilityLayer({
   sourceTokenIds: readonly string[]
   exploredPolygons: readonly MapGeometryPoint[][]
 }) {
-  const dynamicVisionEnabled = geometry?.vision.enabled === true
   const manualFogEnabled = !!fog && (fog.filled || fog.shapes.length > 0)
-  if (!dynamicVisionEnabled && !manualFogEnabled) return null
+  // Owlbear 语义：玩家端的黑幕完全由战争迷雾层决定（全图填充或画出的
+  // cover 形状）。动态视野只影响视野多边形形状（墙体挡视线）和服务端
+  // Token 过滤，不再单独把整张图罩黑。
+  if (!manualFogEnabled) return null
   const sourceIds = new Set(sourceTokenIds)
-  const viewers = dynamicVisionEnabled ? map.tokens.filter((token) => sourceIds.has(token.id)) : []
-  const revealShapes = fog?.shapes.filter((shape) => shape.operation === 'reveal') ?? []
-  const coverShapes = fog?.shapes.filter((shape) => shape.operation === 'cover') ?? []
-  const fullCover = dynamicVisionEnabled || fog?.filled === true
-  const coverColor = dynamicVisionEnabled ? '#02030a' : fog?.color ?? '#05070f'
-  const coverOpacity = dynamicVisionEnabled ? 1 : fog?.opacity ?? 0.98
+  const viewers = map.tokens.filter((token) => sourceIds.has(token.id))
+  const fullCover = fog?.filled === true
+  const coverColor = fog?.color ?? '#05070f'
   return (
     <Layer listening={false}>
       {fullCover && <Rect
@@ -340,23 +341,30 @@ function PlayerVisibilityLayer({
         width={map.width}
         height={map.height}
         fill={coverColor}
-        opacity={coverOpacity}
+        opacity={1}
         listening={false}
       />}
-      {dynamicVisionEnabled && exploredPolygons.map((polygon, index) => polygon.length >= 3 ? (
+      {/* 玩家端迷雾始终完全不透明（Owlbear 语义）；按绘制顺序合成，
+          后画的 cover 会重新盖住先前 reveal 过的区域，与服务端
+          fogPointState 的判定一致。fog.opacity 只影响 DM 自己的预览。 */}
+      {fog?.shapes.map((shape) => fogShapeNode(shape, fog.color, 1))}
+      {fullCover && exploredPolygons.map((polygon, index) => polygon.length >= 3 ? (
         <Line
           key={`explored:${index}`}
           points={polygon.flatMap((point) => [point.x, point.y])}
           closed
           fill="#000"
-          opacity={0.58}
           globalCompositeOperation="destination-out"
           listening={false}
         />
       ) : null)}
-      {revealShapes.map((shape) => fogShapeNode(shape, fog?.color ?? '#05070f', coverOpacity))}
       {viewers.map((viewer) => {
-        const polygon = mapGeometryVisibilityPolygon({ geometry, map, viewer })
+        const polygon = mapGeometryVisibilityPolygon({
+          geometry,
+          map,
+          viewer,
+          forceEnabled: manualFogEnabled,
+        })
         return polygon.length >= 3 ? (
           <Line
             key={`vision:${viewer.id}`}
@@ -368,7 +376,6 @@ function PlayerVisibilityLayer({
           />
         ) : null
       })}
-      {coverShapes.map((shape) => fogShapeNode(shape, fog?.color ?? '#05070f', fog?.opacity ?? 0.98))}
     </Layer>
   )
 }

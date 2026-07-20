@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   createEmptyMapFog,
+  fogCoversPoint,
   fogOperationForTool,
+  fogPointState,
   normalizeFogShape,
   normalizeSharedMapFog,
+  type FogShape,
 } from './fogOfWar'
 
 describe('static fog of war schema', () => {
@@ -24,6 +27,38 @@ describe('static fog of war schema', () => {
     })
     expect(shared?.maps[0].shapes.map((shape) => shape.operation)).toEqual(['reveal', 'cover', 'reveal', 'cover'])
     expect(fogOperationForTool('reveal-polygon')).toBe('reveal')
+  })
+
+  it('evaluates cover and reveal shapes in paint order', () => {
+    const rect = (id: string, operation: 'cover' | 'reveal', x: number, createdAt: number): FogShape =>
+      ({ id, kind: 'rect', operation, x, y: 0, width: 100, height: 100, createdAt })
+
+    expect(fogPointState({ filled: true, shapes: [] }, 50, 50)).toBe('covered')
+    expect(fogPointState({ filled: false, shapes: [] }, 50, 50)).toBe('neutral')
+    expect(fogPointState({ filled: true, shapes: [rect('a', 'reveal', 0, 1)] }, 50, 50)).toBe('revealed')
+    expect(fogPointState({
+      filled: true,
+      shapes: [rect('a', 'reveal', 0, 1), rect('b', 'cover', 0, 2)],
+    }, 50, 50)).toBe('covered')
+    expect(fogPointState({
+      filled: false,
+      shapes: [rect('a', 'cover', 0, 1), rect('b', 'reveal', 0, 2)],
+    }, 50, 50)).toBe('revealed')
+    expect(fogCoversPoint({ filled: false, shapes: [rect('a', 'cover', 200, 1)] }, 50, 50)).toBe(false)
+  })
+
+  it('tests circle, polygon, and brush membership against real coordinates', () => {
+    const circle: FogShape = { id: 'c', kind: 'circle', operation: 'cover', x: 100, y: 100, radius: 30, createdAt: 1 }
+    expect(fogCoversPoint({ filled: false, shapes: [circle] }, 120, 100)).toBe(true)
+    expect(fogCoversPoint({ filled: false, shapes: [circle] }, 140, 100)).toBe(false)
+
+    const triangle: FogShape = { id: 'p', kind: 'polygon', operation: 'cover', points: [0, 0, 100, 0, 50, 90], createdAt: 1 }
+    expect(fogCoversPoint({ filled: false, shapes: [triangle] }, 50, 30)).toBe(true)
+    expect(fogCoversPoint({ filled: false, shapes: [triangle] }, 5, 80)).toBe(false)
+
+    const brush: FogShape = { id: 'b', kind: 'brush', operation: 'cover', points: [0, 0, 100, 0], width: 20, createdAt: 1 }
+    expect(fogCoversPoint({ filled: false, shapes: [brush] }, 50, 8)).toBe(true)
+    expect(fogCoversPoint({ filled: false, shapes: [brush] }, 50, 15)).toBe(false)
   })
 
   it('fails closed for malformed or duplicate shapes', () => {

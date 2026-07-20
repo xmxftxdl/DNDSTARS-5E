@@ -144,6 +144,13 @@ test('DM 同步三种结算模式，明骰公开、暗骰保密，并可手动�
     const state = await getState<{ characters: Array<{ id: string; currentHp: number }> }>(request, 'characters')
     return state.characters.find((character) => character.id === 'manual-hero')?.currentHp
   }).toBe((beforeDamageHp ?? 7) - 7)
+  await dm.getByRole('button', { name: /^Log/ }).click()
+  await expect(dm.getByText(new RegExp(`HP ${beforeDamageHp} → ${(beforeDamageHp ?? 7) - 7}（上限 \\d+）`))).toBeVisible()
+  await expect(dm.getByText('结算来源：DM 手动调整')).toBeVisible()
+  await expect.poll(async () => {
+    const state = await getState<{ entries: Array<{ details?: string[] }> }>(request, 'combat-log')
+    return state.entries.some((entry) => entry.details?.includes('结算来源：DM 手动调整'))
+  }).toBe(true)
 
   await player.getByLabel('骰子类型').selectOption('6')
   await player.getByLabel('投骰名称').fill('玩家公开检定')
@@ -179,5 +186,17 @@ test('DM 同步三种结算模式，明骰公开、暗骰保密，并可手动�
   await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('自动结算')
   await expect(dm.getByTestId('combat-settlement-panel')).toHaveCount(0)
   await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
+
+  // 结算模式与回合推进会在共享 combat 资源中排队写入。一次结束点击必须
+  // 等待这些旧快照并以 inactive 终态收尾，不能被迟到的 active 快照重新激活。
+  await expect(dm.getByTestId('dm-end-combat')).toBeVisible()
+  await dm.getByTestId('dm-end-combat').click()
+  await expect(dm.getByTestId('dm-start-combat')).toBeVisible({ timeout: 20_000 })
+  await expect.poll(async () => {
+    const state = await getState<{ active: boolean; initiativeOrder: unknown[] }>(request, 'combat')
+    return { active: state.active, initiativeCount: state.initiativeOrder.length }
+  }).toEqual({ active: false, initiativeCount: 0 })
+  await expect(player.getByTestId('combat-status')).toHaveText('未开始', { timeout: 20_000 })
+  await expect(player.getByTestId('player-end-turn-top')).toBeDisabled()
   await context.close()
 })

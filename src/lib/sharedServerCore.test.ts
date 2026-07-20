@@ -259,6 +259,130 @@ describe('map geometry player projection', () => {
       .toEqual(['hero', 'near'])
   })
 
+  it('uses a 30-foot player view when filled fog is active without any geometry state', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'inside-30', type: 'enemy', x: 60, y: 20 },
+          { id: 'outside-30', type: 'enemy', x: 80, y: 20 },
+        ],
+      }],
+    }, null, 'character-1', null, null, {
+      maps: [{ mapId: 'map-1', filled: true, shapes: [] }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'inside-30'])
+  })
+
+  it('respects the configured default vision range for filled fog without dynamic vision', () => {
+    const disabledGeometry = {
+      ...geometry,
+      maps: geometry.maps.map((map) => ({ ...map, walls: [], vision: { ...map.vision, enabled: false } })),
+    }
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'at-35-feet', type: 'enemy', x: 80, y: 20 },
+          { id: 'at-70-feet', type: 'enemy', x: 150, y: 20 },
+        ],
+      }],
+    }, disabledGeometry, 'character-1', null, null, {
+      maps: [{ mapId: 'map-1', filled: true, shapes: [] }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'at-35-feet'])
+  })
+
+  it('hides tokens under cover shapes even when the fog is not filled', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 400, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'in-open', type: 'enemy', x: 390, y: 20 },
+          { id: 'under-cover', type: 'enemy', x: 250, y: 20 },
+        ],
+      }],
+    }, null, 'character-1', null, null, {
+      maps: [{
+        mapId: 'map-1', filled: false,
+        shapes: [{ id: 'cover', kind: 'rect', operation: 'cover', x: 200, y: 0, width: 100, height: 100, createdAt: 1 }],
+      }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'in-open'])
+  })
+
+  it('shows tokens inside revealed fog areas regardless of vision distance', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 400, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'revealed-far', type: 'enemy', x: 350, y: 20 },
+          { id: 'still-fogged', type: 'enemy', x: 150, y: 20 },
+        ],
+      }],
+    }, null, 'character-1', null, null, {
+      maps: [{
+        mapId: 'map-1', filled: true,
+        shapes: [{ id: 'reveal', kind: 'rect', operation: 'reveal', x: 300, y: 0, width: 100, height: 100, createdAt: 1 }],
+      }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'revealed-far'])
+  })
+
+  it('lets a later cover shape re-hide a previously revealed area', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 400, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 're-hidden', type: 'enemy', x: 350, y: 20 },
+        ],
+      }],
+    }, null, 'character-1', null, null, {
+      maps: [{
+        mapId: 'map-1', filled: true,
+        shapes: [
+          { id: 'reveal', kind: 'rect', operation: 'reveal', x: 300, y: 0, width: 100, height: 100, createdAt: 1 },
+          { id: 'cover-again', kind: 'rect', operation: 'cover', x: 300, y: 0, width: 100, height: 100, createdAt: 2 },
+        ],
+      }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero'])
+  })
+
+  it('shows revealed fog areas even when dynamic vision is enabled', () => {
+    const wallless = {
+      ...geometry,
+      maps: geometry.maps.map((map) => ({ ...map, walls: [], vision: { ...map.vision, sharePartyVision: true } })),
+    }
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 400, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'revealed-far', type: 'enemy', x: 350, y: 20 },
+          { id: 'unseen-far', type: 'enemy', x: 200, y: 80 },
+        ],
+      }],
+    }, wallless, 'character-1', null, null, {
+      maps: [{
+        mapId: 'map-1', filled: false,
+        shapes: [{ id: 'reveal', kind: 'rect', operation: 'reveal', x: 300, y: 0, width: 100, height: 100, createdAt: 1 }],
+      }],
+    })
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
+      .toEqual(['hero', 'revealed-far'])
+  })
+
   it('uses passive Perception to omit hidden tokens from the serialized player response', () => {
     const projected = sharedServerCore.projectMapsForPlayer({
       maps: [{

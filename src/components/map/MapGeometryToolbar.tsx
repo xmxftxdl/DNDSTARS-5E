@@ -151,7 +151,7 @@ export default function MapGeometryToolbar({
             </>
           )}
 
-          <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用动态视野和服务端 Token 可见性过滤">
+          <label className="flex items-center gap-1 text-[10px] text-slate-300" title="启用墙体遮挡视线和服务端 Token 可见性过滤；地图黑幕由战争迷雾层单独控制">
             <input
               type="checkbox"
               checked={geometry.vision.enabled}

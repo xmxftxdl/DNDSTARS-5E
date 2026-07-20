@@ -22,6 +22,8 @@ export interface Character {
   player: string
   avatar: string // emoji
   accent: string // tailwind 渐变色起点（用于头像底色）
+  /** 统一裁切压缩后的 3:4 人物立绘；随角色存档、导出与账号角色迁移。 */
+  portrait?: string
 
   race: string
   /** 可选的完整插件命名空间种族 ID；race 保留可读名称。 */

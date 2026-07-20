@@ -91,7 +91,11 @@ export function findMapGeometryPath(input: {
     const currentKey = [...open].sort((left, right) => {
       const a = nodes.get(left)!
       const b = nodes.get(right)!
-      return (a.cost + a.estimate) - (b.cost + b.estimate)
+      const totalCostDifference = (a.cost + a.estimate) - (b.cost + b.estimate)
+      if (totalCostDifference !== 0) return totalCostDifference
+      const aManhattan = Math.abs(destination.col - a.cell.col) + Math.abs(destination.row - a.cell.row)
+      const bManhattan = Math.abs(destination.col - b.cell.col) + Math.abs(destination.row - b.cell.row)
+      return aManhattan - bManhattan
     })[0]
     open.delete(currentKey)
     const current = nodes.get(currentKey)!
@@ -120,7 +124,7 @@ export function findMapGeometryPath(input: {
     }
 
     const currentPosition = tokenCenterForAnchorCell(current.cell, input.token, input.map)
-    for (const direction of directions) {
+    directionLoop: for (const direction of directions) {
       const next = { col: current.cell.col + direction.dc, row: current.cell.row + direction.dr }
       if (next.col < 0 || next.row < 0 || next.col >= columns || next.row >= rows) continue
       const position = tokenCenterForAnchorCell(next, input.token, input.map)
@@ -131,6 +135,35 @@ export function findMapGeometryPath(input: {
       if (mapGeometryMovementBlocked({
         geometry: pathGeometry, map: input.map, token: { ...input.token, ...currentPosition }, to: position,
       }).blocked) continue
+      if (direction.dc !== 0 && direction.dr !== 0) {
+        // A diagonal may not squeeze through the corner between two occupied
+        // cells or wall edges. Requiring both orthogonal approaches to be open
+        // also makes the preview path identical to the authoritative route.
+        const cornerCells = [
+          { col: current.cell.col + direction.dc, row: current.cell.row },
+          { col: current.cell.col, row: current.cell.row + direction.dr },
+        ]
+        for (const cornerCell of cornerCells) {
+          const cornerPosition = tokenCenterForAnchorCell(cornerCell, input.token, input.map)
+          const cornerToken = { ...input.token, ...cornerPosition }
+          if (tokenOccupiedCellsAt(cornerToken, input.map, cornerToken).some((cell) => occupied.has(key(cell)))) {
+            continue directionLoop
+          }
+          if (mapGeometryMovementBlocked({
+            geometry: pathGeometry,
+            map: input.map,
+            token: { ...input.token, ...currentPosition },
+            to: cornerPosition,
+          }).blocked || mapGeometryMovementBlocked({
+            geometry: pathGeometry,
+            map: input.map,
+            token: cornerToken,
+            to: position,
+          }).blocked) {
+            continue directionLoop
+          }
+        }
+      }
       const stepDistanceFeet = feetPerCell
       const multiplier = terrainMultiplierAtPoint(pathGeometry, position, input)
       const nextCost = current.cost + stepDistanceFeet * multiplier

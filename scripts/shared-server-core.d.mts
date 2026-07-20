@@ -34,9 +34,11 @@ export function projectMapsForPlayer<T>(
   activeCharacterId?: string | null,
   characterState?: unknown,
   viewerIdentity?: unknown,
+  fogState?: unknown,
 ): T
 export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null): T
 export function projectMapExplorationForPlayer<T>(value: T, memberId?: string | null): T
+export function fogPointState(fog: unknown, x: number, y: number): 'covered' | 'revealed' | 'neutral'
 
 export function capEventChannels<T>(
   eventBacklog: Map<string, T>,

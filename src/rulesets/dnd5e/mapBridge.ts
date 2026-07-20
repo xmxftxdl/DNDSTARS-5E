@@ -1,6 +1,7 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import type { Dnd5eAttackCoverOverride } from '../../lib/sharedCombatTypes'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
@@ -16,6 +17,47 @@ import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
+}
+
+export interface Dnd5eAttackCoverSnapshot {
+  cover: Dnd5eAttackCoverOverride
+  armorClassBonus: 0 | 2 | 5
+  blocksLineOfEffect: boolean
+}
+
+export function dnd5eAttackCoverForPair(
+  state: Pick<Dnd5eHeadlessCombatState, 'coverBonusByCombatantPair' | 'lineOfEffectBlockedByCombatantPair'>,
+  attackerId: string,
+  targetId: string,
+): Dnd5eAttackCoverSnapshot {
+  const key = dnd5eDirectedCombatantPairKey(attackerId, targetId)
+  if (state.lineOfEffectBlockedByCombatantPair?.[key]) {
+    return { cover: 'total', armorClassBonus: 0, blocksLineOfEffect: true }
+  }
+  const armorClassBonus = state.coverBonusByCombatantPair?.[key] ?? 0
+  return armorClassBonus === 5
+    ? { cover: 'three-quarters', armorClassBonus, blocksLineOfEffect: false }
+    : armorClassBonus === 2
+      ? { cover: 'half', armorClassBonus, blocksLineOfEffect: false }
+      : { cover: 'none', armorClassBonus: 0, blocksLineOfEffect: false }
+}
+
+/** Applies a DM ruling only to the ephemeral state used by one attack transaction. */
+export function applyDnd5eAttackCoverOverride(
+  state: Dnd5eHeadlessCombatState,
+  attackerId: string,
+  targetId: string,
+  cover: Dnd5eAttackCoverOverride,
+): Dnd5eAttackCoverSnapshot {
+  const key = dnd5eDirectedCombatantPairKey(attackerId, targetId)
+  state.coverBonusByCombatantPair ??= {}
+  state.lineOfEffectBlockedByCombatantPair ??= {}
+  delete state.coverBonusByCombatantPair[key]
+  delete state.lineOfEffectBlockedByCombatantPair[key]
+  if (cover === 'total') state.lineOfEffectBlockedByCombatantPair[key] = true
+  else if (cover === 'half') state.coverBonusByCombatantPair[key] = 2
+  else if (cover === 'three-quarters') state.coverBonusByCombatantPair[key] = 5
+  return dnd5eAttackCoverForPair(state, attackerId, targetId)
 }
 
 const DEFAULT_ABILITIES = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const

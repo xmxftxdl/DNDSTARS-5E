@@ -1191,12 +1191,75 @@ function tokenElevationFeet(token) {
   return Number.isFinite(token?.elevationFeet) ? token.elevationFeet : 0
 }
 
-function playerCanSeeToken(map, geometry, viewer, target) {
+const DEFAULT_PLAYER_VISION_RANGE_FEET = 30
+
+// 与 src/lib/fogOfWar.ts 的 fogPointState 保持同一语义：按绘制顺序评估
+// cover/reveal，后画的形状覆盖先画的；未填充地图上不在任何形状内的点为 neutral。
+function fogShapeContainsPoint(shape, x, y) {
+  if (!plainObject(shape)) return false
+  if (shape.kind === 'rect') {
+    return x >= shape.x && x <= shape.x + shape.width && y >= shape.y && y <= shape.y + shape.height
+  }
+  if (shape.kind === 'circle') {
+    const dx = x - shape.x
+    const dy = y - shape.y
+    return dx * dx + dy * dy <= shape.radius * shape.radius
+  }
+  if (shape.kind === 'polygon') {
+    const points = Array.isArray(shape.points) ? shape.points : []
+    let inside = false
+    for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+      const xi = points[i]
+      const yi = points[i + 1]
+      const xj = points[j]
+      const yj = points[j + 1]
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+    }
+    return inside
+  }
+  if (shape.kind === 'brush') {
+    const points = Array.isArray(shape.points) ? shape.points : []
+    const radius = Math.max(0, Number(shape.width) || 0) / 2
+    const radiusSquared = radius * radius
+    for (let i = 0; i + 3 < points.length; i += 2) {
+      const ax = points[i]
+      const ay = points[i + 1]
+      const dx = points[i + 2] - ax
+      const dy = points[i + 3] - ay
+      const lengthSquared = dx * dx + dy * dy
+      const t = lengthSquared > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / lengthSquared)) : 0
+      const px = ax + dx * t - x
+      const py = ay + dy * t - y
+      if (px * px + py * py <= radiusSquared) return true
+    }
+    if (points.length === 2) {
+      const px = points[0] - x
+      const py = points[1] - y
+      return px * px + py * py <= radiusSquared
+    }
+  }
+  return false
+}
+
+export function fogPointState(fog, x, y) {
+  if (!plainObject(fog)) return 'neutral'
+  let state = fog.filled === true ? 'covered' : 'neutral'
+  for (const shape of Array.isArray(fog.shapes) ? fog.shapes : []) {
+    if (fogShapeContainsPoint(shape, x, y)) state = shape.operation === 'cover' ? 'covered' : 'revealed'
+  }
+  return state
+}
+
+function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
   const normalRangeFeet = Number.isFinite(viewer.visionRangeFeet)
     ? Math.max(0, viewer.visionRangeFeet)
-    : Math.max(0, geometry.vision.defaultRangeFeet)
+    : Number.isFinite(fallbackRangeFeet)
+      ? Math.max(0, fallbackRangeFeet)
+      : Number.isFinite(geometry?.vision?.defaultRangeFeet)
+        ? Math.max(0, geometry.vision.defaultRangeFeet)
+        : DEFAULT_PLAYER_VISION_RANGE_FEET
   const darkvisionRangeFeet = Number.isFinite(viewer.darkvisionRangeFeet) ? Math.max(0, viewer.darkvisionRangeFeet) : 0
   const carriedLightRangeFeet = viewer.lightSource?.enabled === true
     ? Math.max(0, Number(viewer.lightSource.brightRadiusFeet) || 0) + Math.max(0, Number(viewer.lightSource.dimRadiusFeet) || 0)
@@ -1215,7 +1278,7 @@ function playerCanSeeToken(map, geometry, viewer, target) {
     return rayHeight >= segment.baseHeightFeet && rayHeight < segment.baseHeightFeet + segment.heightFeet
   })
   if (lineBlocked(viewer, target, fromElevation, toElevation)) return false
-  const ambient = geometry.vision.ambientLight ?? 'bright'
+  const ambient = geometry?.vision?.ambientLight ?? 'bright'
   if (ambient !== 'bright') {
     let illuminated = ambient === 'dim'
     for (const source of map.tokens ?? []) {
@@ -1300,9 +1363,10 @@ function redactUnseenToken(token) {
   }
 }
 
-export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null) {
+export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null, fogState = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
   const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
+  const fogByMapId = new Map((fogState?.maps ?? []).map((fog) => [fog.mapId, fog]))
   const characterById = new Map((characterState?.characters ?? [])
     .filter((character) => plainObject(character) && typeof character.id === 'string')
     .map((character) => [character.id, character]))
@@ -1317,6 +1381,13 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
     maps: value.maps.map((map) => {
       if (!plainObject(map) || !Array.isArray(map.tokens)) return map
       const geometry = geometryByMapId.get(map.id)
+      const fog = fogByMapId.get(map.id)
+      const dynamicVision = geometry?.vision?.enabled === true
+      const manualFogActive = plainObject(fog) &&
+        (fog.filled === true || (Array.isArray(fog.shapes) && fog.shapes.length > 0))
+      const manualFallbackRangeFeet = Number.isFinite(geometry?.vision?.defaultRangeFeet)
+        ? geometry.vision.defaultRangeFeet
+        : DEFAULT_PLAYER_VISION_RANGE_FEET
       const players = map.tokens.filter((token) => plainObject(token) && token.type === 'player')
       const viewers = geometry?.vision?.sharePartyVision === false
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
@@ -1325,8 +1396,14 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         if (!plainObject(token)) return []
         if (token.type === 'player' || token.visibilityMode === 'always') return [token]
         if (token.visibilityMode === 'dm-only') return []
+        // Owlbear 语义：手动迷雾覆盖处的 Token 必须靠实际视野才可见；DM 明确
+        // reveal 的区域即使开着动态视野也直接放行；两者都不命中时，动态视野
+        // 决定是否仍要视野判定（探索过≠正在看见）。
+        const fogState = manualFogActive ? fogPointState(fog, token.x, token.y) : 'neutral'
+        const needVision = fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
         const observingViewers = viewers.filter((viewer) =>
-          !geometry?.vision?.enabled || playerCanSeeToken(map, geometry, viewer, token),
+          !needVision ||
+          playerCanSeeToken(map, geometry, viewer, token, dynamicVision ? null : manualFallbackRangeFeet),
         )
         if (observingViewers.length === 0) return []
         const hiddenCheckTotal = tokenHiddenCheckTotal(token)
@@ -1559,6 +1636,19 @@ async function readMapGeometryForProjection(ctx) {
   try {
     const value = JSON.parse(await readFile(filePath, 'utf8'))
     const validation = validateSharedStateShape('map-geometry', value)
+    return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
+  } catch (error) {
+    return error?.code === 'ENOENT'
+      ? { value: null, corrupted: false }
+      : { value: null, corrupted: true }
+  }
+}
+
+async function readMapFogForProjection(ctx) {
+  const filePath = path.join(ctx.stateRoot, 'map-fog.json')
+  try {
+    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const validation = validateSharedStateShape('map-fog', value)
     return validation.ok ? { value, corrupted: false } : { value: null, corrupted: true }
   } catch (error) {
     return error?.code === 'ENOENT'
@@ -3430,8 +3520,9 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
+          const fog = await readMapFogForProjection(ctx)
           const characters = await readCharactersForProjection(ctx)
-          if (geometry.corrupted || characters.corrupted) {
+          if (geometry.corrupted || fog.corrupted || characters.corrupted) {
             value = {
               ...value,
               maps: (value.maps ?? []).map((map) => ({
@@ -3446,6 +3537,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               roomMember?.activeCharacterId ?? null,
               characters.value,
               roomMember,
+              fog.value,
             )
           }
         }

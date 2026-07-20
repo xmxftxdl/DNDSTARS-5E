@@ -1285,19 +1285,19 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     const attackState = { ...cast.result.state, initiativeIndex: allyIndex }
     const missingD4 = resolveDnd5eHeadlessAction(attackState, {
       type: 'attack', actorId: allyTokens[0].id, targetId: enemy.id,
-      attackModifier: 5, d20: 3, damage: { count: 1, sides: 8, bonus: 3, rolls: [], type: 'slashing' },
+      attackModifier: 5, d20: 5, damage: { count: 1, sides: 8, bonus: 3, rolls: [], type: 'slashing' },
     })
     expect(missingD4).toMatchObject({ ok: false, reason: 'invalid-dice' })
 
     const attack = resolveDnd5eHeadlessAction(attackState, {
       type: 'attack', actorId: allyTokens[0].id, targetId: enemy.id,
-      attackModifier: 5, d20: 3, blessRoll: 2,
+      attackModifier: 5, d20: 5, blessRoll: 2,
       damage: { count: 1, sides: 8, bonus: 3, rolls: [4], type: 'slashing' },
     })
     expect(attack.ok).toBe(true)
     if (!attack.ok) return
     expect(attack.events).toContainEqual(expect.objectContaining({
-      type: 'attack-resolved', actorId: allyTokens[0].id, total: 10, hit: true,
+      type: 'attack-resolved', actorId: allyTokens[0].id, total: 12, armorClass: 12, hit: true,
     }))
   })
 

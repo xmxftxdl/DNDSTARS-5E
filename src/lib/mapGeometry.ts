@@ -169,9 +169,13 @@ export interface MapGeometryCoverResult {
   sourceEntityId?: string
 }
 
+export const MAP_GEOMETRY_CREATURE_COVER_PREFIX = 'creature:'
+
+export const DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET = 30
+
 const DEFAULT_VISION: MapGeometryVisionSettings = {
   enabled: false,
-  defaultRangeFeet: 60,
+  defaultRangeFeet: DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   sharePartyVision: true,
   ambientLight: 'bright',
 }
@@ -481,8 +485,11 @@ export function mapGeometryAttachOpeningToWall(
     }
   }
   if (!best) return undefined
-  const { score: _score, ...attachment } = best
-  return attachment
+  return {
+    parentWallId: best.parentWallId,
+    parentWallSegmentIndex: best.parentWallSegmentIndex,
+    points: best.points,
+  }
 }
 
 export interface MapGeometryWallRenderSegment {
@@ -825,7 +832,7 @@ export function mapGeometryCoverBetween(
   geometry: MapGeometryState | undefined,
   attacker: Token,
   target: Token,
-  map?: Pick<BattleMap, 'gridSize'>,
+  map?: Pick<BattleMap, 'gridSize' | 'tokens'>,
 ): MapGeometryCoverResult {
   const radius = Math.max(1, (map?.gridSize ?? 50) * Math.max(1, target.size) * 0.4)
   const samples = [
@@ -833,23 +840,72 @@ export function mapGeometryCoverBetween(
     { x: target.x + radius, y: target.y - radius },
     { x: target.x + radius, y: target.y + radius },
     { x: target.x - radius, y: target.y + radius },
-  ].map((to) => mapGeometryCoverFromPoint({
-    geometry,
-    from: attacker,
-    to,
-    fromElevationFeet: tokenElevation(attacker),
-    toElevationFeet: tokenElevation(target),
-  }))
+  ].map((to) => {
+    const geometryCover = mapGeometryCoverFromPoint({
+      geometry,
+      from: attacker,
+      to,
+      fromElevationFeet: tokenElevation(attacker),
+      toElevationFeet: tokenElevation(target),
+    })
+    if (geometryCover.cover !== 'none') return geometryCover
+    const creature = map?.tokens.find((candidate) =>
+      candidate.id !== attacker.id && candidate.id !== target.id && candidate.type !== 'obstacle' &&
+      creatureIntersectsCoverRay(attacker, to, candidate, map.gridSize, tokenElevation(target)),
+    )
+    return creature
+      ? {
+          cover: 'half' as const,
+          armorClassBonus: 2 as const,
+          blocksLineOfEffect: false,
+          sourceEntityId: `${MAP_GEOMETRY_CREATURE_COVER_PREFIX}${creature.id}`,
+        }
+      : geometryCover
+  })
   const totalCount = samples.filter((sample) => sample.blocksLineOfEffect || sample.cover === 'total').length
   const threeQuarterCount = samples.filter((sample) => sample.cover === 'three-quarters').length
   const affectedCount = samples.filter((sample) => sample.cover !== 'none').length
-  const sourceEntityId = samples.find((sample) => sample.sourceEntityId)?.sourceEntityId
-  if (totalCount === samples.length) return { cover: 'total', armorClassBonus: 0, blocksLineOfEffect: true, sourceEntityId }
+  if (totalCount === samples.length) {
+    const sourceEntityId = samples.find((sample) => sample.cover === 'total' && sample.sourceEntityId)?.sourceEntityId
+    return { cover: 'total', armorClassBonus: 0, blocksLineOfEffect: true, sourceEntityId }
+  }
   if (totalCount + threeQuarterCount >= 3) {
+    const sourceEntityId = samples.find((sample) =>
+      (sample.cover === 'total' || sample.cover === 'three-quarters') && sample.sourceEntityId,
+    )?.sourceEntityId
     return { cover: 'three-quarters', armorClassBonus: 5, blocksLineOfEffect: false, sourceEntityId }
   }
-  if (affectedCount > 0) return { cover: 'half', armorClassBonus: 2, blocksLineOfEffect: false, sourceEntityId }
+  if (affectedCount > 0) {
+    const sourceEntityId = samples.find((sample) => sample.sourceEntityId)?.sourceEntityId
+    return { cover: 'half', armorClassBonus: 2, blocksLineOfEffect: false, sourceEntityId }
+  }
   return { cover: 'none', armorClassBonus: 0, blocksLineOfEffect: false }
+}
+
+function creatureIntersectsCoverRay(
+  from: Token,
+  to: MapGeometryPoint,
+  creature: Token,
+  gridSize: number,
+  targetElevationFeet: number,
+): boolean {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared <= 1e-6) return false
+  const projection = ((creature.x - from.x) * dx + (creature.y - from.y) * dy) / lengthSquared
+  // 只允许严格位于攻击者与目标采样点之间的生物提供掩护。
+  if (projection <= 1e-4 || projection >= 1 - 1e-4) return false
+  const closestX = from.x + dx * projection
+  const closestY = from.y + dy * projection
+  const footprintRadius = Math.max(1, gridSize * Math.max(1, creature.size) * 0.42)
+  if (Math.hypot(creature.x - closestX, creature.y - closestY) > footprintRadius) return false
+
+  const fromElevationFeet = tokenElevation(from)
+  const rayHeight = fromElevationFeet + 2.5 + (targetElevationFeet - fromElevationFeet) * projection
+  const creatureBase = tokenElevation(creature)
+  const creatureHeight = Math.max(5, Math.max(1, creature.size) * 5)
+  return rayHeight >= creatureBase && rayHeight < creatureBase + creatureHeight
 }
 
 export function mapGeometryLineOfEffectBlocked(input: {
@@ -1001,24 +1057,34 @@ export function mapGeometryVisibilityPolygon(input: {
   geometry?: MapGeometryState
   map: BattleMap
   viewer: Token
+  /** 战争迷雾可独立启用玩家视野，不要求 DM 另行打开动态视野开关。 */
+  forceEnabled?: boolean
+  /** 强制启用视野时使用的基础距离；Token 的明确视野值仍优先。 */
+  fallbackRangeFeet?: number
 }): MapGeometryPoint[] {
   const geometry = input.geometry
-  if (!geometry?.vision.enabled) return []
+  if (!geometry?.vision.enabled && !input.forceEnabled) return []
   const origin = { x: input.viewer.x, y: input.viewer.y }
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const normalRangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
     ? Math.max(0, input.viewer.visionRangeFeet!)
-    : geometry.vision.defaultRangeFeet
+    : input.fallbackRangeFeet ?? geometry?.vision.defaultRangeFeet ?? DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET
   const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
     ? Math.max(0, input.viewer.darkvisionRangeFeet!)
     : 0
   const lightRangeFeet = input.viewer.lightSource?.enabled
     ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
     : 0
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, lightRangeFeet)
+  // 环境黑暗中没有光照的区域只能靠暗视觉或自带光源看见；与服务端
+  // playerCanSeeToken 的口径保持一致（场景光源的照亮由 LightingLayer 展示）。
+  const ambientDarkness = geometry?.vision.enabled === true && geometry.vision.ambientLight === 'darkness'
+  const rangeFeet = ambientDarkness
+    ? Math.max(darkvisionRangeFeet, lightRangeFeet)
+    : Math.max(normalRangeFeet, darkvisionRangeFeet, lightRangeFeet)
+  if (rangeFeet <= 0) return []
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = tokenElevation(input.viewer)
-  const blockers = mapGeometrySegments(geometry).filter((segment) =>
+  const blockers = (geometry ? mapGeometrySegments(geometry) : []).filter((segment) =>
     segment.blocksVision && elevation + 2.5 >= segment.baseHeightFeet &&
       elevation + 2.5 < segment.baseHeightFeet + segment.heightFeet,
   )

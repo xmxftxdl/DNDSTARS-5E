@@ -1,4 +1,9 @@
-import type { MapGeometryPoint } from './mapGeometry'
+import type { BattleMap, Token } from '../store/maps'
+import {
+  mapGeometryVisibilityPolygon,
+  type MapGeometryPoint,
+  type MapGeometryState,
+} from './mapGeometry'
 
 export const MAP_EXPLORATION_RESOURCE = 'map-exploration'
 export const MAP_EXPLORATION_SCHEMA_VERSION = 1
@@ -59,4 +64,52 @@ export function normalizeSharedMapExploration(value: unknown): SharedMapExplorat
 
 export function mapExplorationPolygonSignature(polygon: readonly MapGeometryPoint[]): string {
   return polygon.map((point) => `${Math.round(point.x / 10)},${Math.round(point.y / 10)}`).join(';')
+}
+
+export function mapExplorationPolygonFitsVisionRange(input: {
+  polygon: readonly MapGeometryPoint[]
+  map: Pick<BattleMap, 'gridSize' | 'feetPerCell'>
+  rangeFeet: number
+}): boolean {
+  if (input.polygon.length < 3) return false
+  const xs = input.polygon.map((point) => point.x)
+  const ys = input.polygon.map((point) => point.y)
+  const radius = Math.max(0, input.rangeFeet) /
+    Math.max(1, input.map.feetPerCell ?? 5) * Math.max(1, input.map.gridSize)
+  const maximumSpan = radius * 2 + Math.max(2, input.map.gridSize * 0.1)
+  return Math.max(...xs) - Math.min(...xs) <= maximumSpan &&
+    Math.max(...ys) - Math.min(...ys) <= maximumSpan
+}
+
+/**
+ * Rebuild every visibility polygon crossed by an authoritative token path. The
+ * shared exploration store persists these polygons, so a player keeps the
+ * parts of the map that were actually seen between the start and destination.
+ */
+export function mapExplorationPolygonsForTokenPath(input: {
+  map: BattleMap
+  geometry: MapGeometryState
+  token: Token
+  path: readonly MapGeometryPoint[]
+  forceEnabled?: boolean
+  fallbackRangeFeet?: number
+}): MapGeometryPoint[][] {
+  const positions = input.path.length > 0
+    ? input.path
+    : [{ x: input.token.x, y: input.token.y }]
+  const signatures = new Set<string>()
+  return positions.flatMap((position) => {
+    const polygon = mapGeometryVisibilityPolygon({
+      geometry: input.geometry,
+      map: input.map,
+      viewer: { ...input.token, x: position.x, y: position.y },
+      forceEnabled: input.forceEnabled,
+      fallbackRangeFeet: input.fallbackRangeFeet,
+    })
+    if (polygon.length < 3) return []
+    const signature = mapExplorationPolygonSignature(polygon)
+    if (signatures.has(signature)) return []
+    signatures.add(signature)
+    return [polygon]
+  })
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../store/maps'
 import {
   createEmptyMapGeometry,
+  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   mapGeometryAttachOpeningToWall,
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
@@ -127,12 +128,79 @@ describe('map geometry', () => {
       .toMatchObject({ cover: 'total', blocksLineOfEffect: true, sourceEntityId: 'wall' })
   })
 
+  it('treats another creature between attacker and target as half cover', () => {
+    const attacker = token('attacker', 50, 100)
+    const target = token('target', 250, 100, { type: 'enemy' })
+    const ally = token('ally', 150, 100, { type: 'player' })
+    const openMap = { ...map, gridSize: 50, tokens: [attacker, ally, target] }
+
+    expect(mapGeometryCoverBetween(undefined, attacker, target, openMap)).toMatchObject({
+      cover: 'half',
+      armorClassBonus: 2,
+      blocksLineOfEffect: false,
+      sourceEntityId: 'creature:ally',
+    })
+    expect(mapGeometryCoverBetween(undefined, attacker, target, {
+      ...openMap,
+      tokens: [attacker, { ...ally, y: 220 }, target],
+    })).toMatchObject({ cover: 'none', armorClassBonus: 0 })
+  })
+
+  it('does not grant creature cover when the attack ray passes above it', () => {
+    const attacker = token('attacker', 50, 100, { elevationFeet: 15 })
+    const target = token('target', 250, 100, { type: 'enemy', elevationFeet: 15 })
+    const lowCreature = token('low', 150, 100, { type: 'npc', elevationFeet: 0 })
+    expect(mapGeometryCoverBetween(undefined, attacker, target, {
+      ...map,
+      gridSize: 50,
+      tokens: [attacker, lowCreature, target],
+    })).toMatchObject({ cover: 'none', armorClassBonus: 0 })
+  })
+
   it('builds a bounded visibility polygon and rejects malformed shared geometry', () => {
     const g = geometry()
     expect(mapGeometryVisibilityPolygon({ geometry: g, map, viewer: token('a', 50, 50) }).length).toBeGreaterThan(90)
     const shared = { schemaVersion: 1, maps: [g], updatedAt: 1 }
     expect(normalizeSharedMapGeometry(shared)?.maps).toHaveLength(1)
     expect(normalizeSharedMapGeometry({ ...shared, maps: [{ ...g, doors: [{ id: 'broken' }] }] })).toBeUndefined()
+  })
+
+  it('uses a 30-foot default and cuts filled fog even when dynamic vision is disabled', () => {
+    const fresh = createEmptyMapGeometry(map.id, 1)
+    expect(fresh.vision.defaultRangeFeet).toBe(DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET)
+    const viewer = token('viewer', 250, 250)
+    const polygon = mapGeometryVisibilityPolygon({
+      geometry: fresh,
+      map,
+      viewer,
+      forceEnabled: true,
+      fallbackRangeFeet: DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+    })
+    expect(polygon.length).toBeGreaterThan(90)
+    const radiusPx = DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET / (map.feetPerCell ?? 5) * map.gridSize
+    expect(Math.max(...polygon.map((point) => Math.hypot(point.x - viewer.x, point.y - viewer.y))))
+      .toBeLessThanOrEqual(radiusPx + 0.001)
+  })
+
+  it('clips forced fog vision at a closed door and reveals through it after opening', () => {
+    const g = createEmptyMapGeometry(map.id, 1)
+    g.doors = [{
+      id: 'vision-door', kind: 'door', label: '门',
+      points: [{ x: 300, y: 0 }, { x: 300, y: 500 }], state: 'closed', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    }]
+    const viewer = token('viewer', 250, 250)
+    const eastPoint = () => mapGeometryVisibilityPolygon({
+      geometry: g, map, viewer, forceEnabled: true,
+      fallbackRangeFeet: DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+    }).reduce((nearest, point) => (
+      Math.abs(Math.atan2(point.y - viewer.y, point.x - viewer.x)) <
+      Math.abs(Math.atan2(nearest.y - viewer.y, nearest.x - viewer.x)) ? point : nearest
+    ))
+    expect(eastPoint().x).toBeCloseTo(300, 3)
+    g.doors[0].state = 'open'
+    expect(eastPoint().x).toBeCloseTo(map.width, 3)
   })
 
   it('applies darkness, darkvision, and token light sources to visibility', () => {
