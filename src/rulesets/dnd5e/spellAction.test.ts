@@ -8,6 +8,7 @@ import {
   dnd5eBardMagicalSecretSpellIds,
   dnd5eCombatSpellSelectionLimits,
   dnd5eMetamagicCost,
+  getDnd5eSrdCombatSpell,
 } from './spells'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 
@@ -37,6 +38,13 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
     id: 'cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
     actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: target.id,
     dnd5eSpellCast: { spellId, slotLevel, targetTokenId: target.id }, round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+  }
+  const spell = getDnd5eSrdCombatSpell(spellId)
+  if (spell?.area) {
+    action.dnd5eSpellCast!.areaTargetCell = {
+      col: Math.floor((target.x - map.gridOffsetX) / map.gridSize),
+      row: Math.floor((target.y - map.gridOffsetY) / map.gridSize),
+    }
   }
   return {
     action, map, characters: [actor, ...allies],
@@ -74,7 +82,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const enemy = token('enemy', 'enemy', 575)
     const input = fixture(wizard, 'fireball', 3, enemy)
-    input.action.dnd5eSpellCast!.areaTargetCell = { col: 5, row: 0 }
+    input.action.dnd5eSpellCast!.areaTargetCell = { col: 7, row: 0 }
     setMapGeometryRuntime([{
       mapId: input.map.id, walls: [], doors: [],
       obstacles: [{
@@ -89,6 +97,34 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared.savingThrow?.modifier).toBe(2)
+  })
+
+  it('rebuilds an area on the Host and rejects forged or omitted area targets', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['fireball'] } } } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 2, max: 2 } },
+    })
+    const inside = token('inside', 'enemy', 125)
+    const alsoInside = token('also-inside', 'enemy', 175)
+    const outside = token('outside', 'enemy', 575)
+    const input = fixture(wizard, 'fireball', 3, inside)
+    input.map.tokens.push(alsoInside, outside)
+    input.initiativeOrder.push(
+      { tokenId: alsoInside.id, label: alsoInside.label, emoji: '', color: '', roll: 6 },
+      { tokenId: outside.id, label: outside.label, emoji: '', color: '', roll: 5 },
+    )
+
+    input.action.dnd5eSpellCast = {
+      spellId: 'fireball', slotLevel: 3, targetTokenId: outside.id,
+      targetTokenIds: [outside.id], areaTargetCell: { col: 2, row: 0 },
+    }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'invalid-target' })
+
+    input.action.dnd5eSpellCast = {
+      spellId: 'fireball', slotLevel: 3, targetTokenId: inside.id,
+      targetTokenIds: [inside.id], areaTargetCell: { col: 2, row: 0 },
+    }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'invalid-target' })
   })
 
   it('ignores cover bonuses for Sacred Flame Dexterity saves', () => {
@@ -313,7 +349,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const first = token('first', 'enemy', 575)
     const second = token('second', 'enemy', 625)
-    const bardToken = token('bard-token', 'enemy', 525, bard.id)
+    const bardToken = token('bard-token', 'enemy', 275, bard.id)
     const input = fixture(wizard, 'fireball', 3, first, [bard])
     input.map.tokens.push(second, bardToken)
     input.initiativeOrder.push(
@@ -322,7 +358,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     )
     input.action.dnd5eSpellCast = {
       spellId: 'fireball', slotLevel: 3, targetTokenId: first.id,
-      targetTokenIds: [first.id, second.id],
+      targetTokenIds: [first.id, second.id], areaTargetCell: { col: 11, row: 0 },
     }
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
@@ -425,7 +461,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     input.initiativeOrder.push({ tokenId: allyToken.id, label: allyToken.label, emoji: '', color: '', roll: 5 })
     input.action.dnd5eSpellCast = {
       spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id,
-      targetTokenIds: [enemy.id, allyToken.id], sculptedTargetIds: [allyToken.id],
+      targetTokenIds: [enemy.id, allyToken.id], sculptedTargetIds: [allyToken.id], areaTargetCell: { col: 2, row: 0 },
     }
 
     const prepared = prepareDnd5eSpellCast(input)
@@ -463,13 +499,13 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     forgedInput.initiativeOrder.push({ tokenId: allyToken.id, label: allyToken.label, emoji: '', color: '', roll: 5 })
     forgedInput.action.dnd5eSpellCast = {
       spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id,
-      targetTokenIds: [enemy.id, allyToken.id], sculptedTargetIds: [allyToken.id],
+      targetTokenIds: [enemy.id, allyToken.id], sculptedTargetIds: [allyToken.id], areaTargetCell: { col: 2, row: 0 },
     }
     expect(prepareDnd5eSpellCast(forgedInput)).toEqual({ ok: false, reason: 'invalid-target' })
 
     forgedInput.action.dnd5eSpellCast = {
       spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id,
-      targetTokenIds: [enemy.id, allyToken.id],
+      targetTokenIds: [enemy.id, allyToken.id], areaTargetCell: { col: 2, row: 0 },
     }
     const prepared = prepareDnd5eSpellCast(forgedInput)
     expect(prepared.ok).toBe(true)
@@ -503,6 +539,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     input.action.dnd5eSpellCast = {
       spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id,
       targetTokenIds: [enemy.id, allyToken.id],
+      areaTargetCell: { col: 2, row: 0 },
       metamagic: { kind: 'careful', carefulTargetIds: [allyToken.id] },
     }
     const prepared = prepareDnd5eSpellCast(input)
@@ -713,7 +750,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     const input = fixture(sorcerer, 'fireball', 3, enemy)
     input.action.dnd5eSpellCast = {
       spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id,
-      metamagic: { kind: 'quickened' }, empowered: true,
+      metamagic: { kind: 'quickened' }, empowered: true, areaTargetCell: { col: 11, row: 0 },
     }
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
@@ -752,7 +789,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     const enemy = token('enemy', 'enemy', 575)
     const input = fixture(sorcerer, 'fireball', 3, enemy)
     input.action.dnd5eSpellCast = {
-      spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, empowered: true,
+      spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, empowered: true, areaTargetCell: { col: 11, row: 0 },
     }
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
@@ -945,7 +982,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const enemy = { ...token('enemy', 'enemy', 575), hp: 100, maxHp: 100 }
     const input = fixture(wizard, 'fireball', 3, enemy)
-    input.action.dnd5eSpellCast = { spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, overchannel: true }
+    input.action.dnd5eSpellCast = { spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, overchannel: true, areaTargetCell: { col: 11, row: 0 } }
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -977,7 +1014,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
     const enemy = { ...token('enemy', 'enemy', 575), hp: 100, maxHp: 100 }
     const input = fixture(wizard, 'fireball', 3, enemy)
-    input.action.dnd5eSpellCast = { spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, overchannel: true }
+    input.action.dnd5eSpellCast = { spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, overchannel: true, areaTargetCell: { col: 11, row: 0 } }
     const prepared = prepareDnd5eSpellCast(input)
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1014,7 +1051,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepareDnd5eSpellCast(ineligible)).toEqual({ ok: false, reason: 'invalid-action' })
 
     const eligible = fixture(wizard, 'fireball', 3, enemy)
-    eligible.action.dnd5eSpellCast = { spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, overchannel: true }
+    eligible.action.dnd5eSpellCast = { spellId: 'fireball', slotLevel: 3, targetTokenId: enemy.id, overchannel: true, areaTargetCell: { col: 11, row: 0 } }
     const prepared = prepareDnd5eSpellCast(eligible)
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
@@ -1212,6 +1249,31 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       currentHp: 7, deathSaveFailures: 0, deathSaveSuccesses: 0, deathSaveStable: false,
     })
     expect(resolved.result.events).toContainEqual({ type: 'turn-resource-spent', actorId: 'bard-token', resource: 'bonusAction' })
+  })
+
+  it('casts Mass Cure Wounds on up to six chosen creatures inside the authoritative sphere', () => {
+    const cleric = character('cleric', '牧师', {
+      level: 9, currentHp: 10,
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['mass-cure-wounds'] } } } },
+      classResources: { 'dnd5e-spell-slot-5': { current: 1, max: 1 } },
+    })
+    const ally = character('ally', '战士', { currentHp: 10 })
+    const allyToken = token('ally-token', 'player', 125, ally.id)
+    const input = fixture(cleric, 'mass-cure-wounds', 5, allyToken, [ally])
+    const actorToken = input.map.tokens[0]
+    input.action.dnd5eSpellCast = {
+      spellId: 'mass-cure-wounds', slotLevel: 5, targetTokenId: allyToken.id,
+      targetTokenIds: [actorToken.id, allyToken.id], areaTargetCell: { col: 1, row: 0 },
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [2, 2, 2] })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters.find((entry) => entry.id === cleric.id)?.currentHp).toBe(19)
+    expect(resolved.application?.characters.find((entry) => entry.id === ally.id)?.currentHp).toBe(19)
+    expect(resolved.application?.characters.find((entry) => entry.id === cleric.id)?.classResources?.['dnd5e-spell-slot-5'])
+      .toEqual({ current: 0, max: 1 })
   })
 
   it('maintains Shield of Faith as a Headless concentration effect and removes its +2 AC after a failed save', () => {

@@ -12,6 +12,7 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { Dnd5eSpellMetamagicPayload, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eClassDefinitionForCharacter, dnd5ePactSlotLevel } from './classes'
 import {
@@ -261,6 +262,57 @@ export function prepareDnd5eSpellCast(input: {
     return { ok: false, reason: 'invalid-target' }
   }
   const validTargetTokens = targetTokens as Token[]
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  if (spell.area) {
+    const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
+    const areaCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
+      ? casterCell
+      : payload.areaTargetCell
+    const orientation = payload.areaTargetOrientation
+    const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
+    const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
+    if (
+      !areaCell || !Number.isInteger(areaCell.col) || !Number.isInteger(areaCell.row) ||
+      areaCell.col < 0 || areaCell.row < 0 || areaCell.col >= columns || areaCell.row >= rows ||
+      !canPlaceAoe(spell.area, casterCell, areaCell) ||
+      (orientation != null && (
+        spell.area.shape !== 'rect' || !spell.area.rotatable ||
+        !Number.isInteger(orientation) || orientation < 0 || orientation > 3
+      ))
+    ) return { ok: false, reason: 'invalid-target' }
+    const orientFrom = aoeOrientFromCell(spell.area, casterCell, areaCell, { rectRotation: orientation })
+    const cells = cellsForAoe(spell.area, orientFrom, areaCell)
+    const effectOrigin = spell.area.origin === 'point'
+      ? {
+          x: input.map.gridOffsetX + (areaCell.col + 0.5) * input.map.gridSize,
+          y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
+        }
+      : actorToken
+    const effectOriginElevation = spell.area.origin === 'point' ? 0 : actorToken.elevationFeet ?? 0
+    const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cells).filter((candidate) => {
+      if (candidate.type === 'obstacle' || (candidate.id === actorToken.id && !spell.areaIncludesSelf)) return false
+      const opposed = areOpposedCombatTokens(actorToken, candidate)
+      if (spell.target === 'hostile' && !opposed) return false
+      if (spell.target === 'ally' && opposed) return false
+      return !mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: effectOrigin,
+        to: candidate,
+        fromElevationFeet: effectOriginElevation,
+        toElevationFeet: candidate.elevationFeet ?? 0,
+      })
+    })
+    const authoritativeIds = new Set(authoritativeTargets.map((candidate) => candidate.id))
+    if (requestedTargetIds.some((targetId) => !authoritativeIds.has(targetId))) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    if (
+      spell.target === 'area' &&
+      (requestedTargetIds.length !== authoritativeIds.size || [...authoritativeIds].some((targetId) => !requestedTargetIds.includes(targetId)))
+    ) return { ok: false, reason: 'invalid-target' }
+  } else if (payload.areaTargetCell != null || payload.areaTargetOrientation != null) {
+    return { ok: false, reason: 'invalid-target' }
+  }
   for (let targetIndex = 0; targetIndex < validTargetTokens.length; targetIndex += 1) {
     const target = validTargetTokens[targetIndex]
     const opposed = areOpposedCombatTokens(actorToken, target)
@@ -385,7 +437,6 @@ export function prepareDnd5eSpellCast(input: {
       }
     : actorToken
   const effectOriginElevation = spell.area?.origin === 'point' && areaCell ? 0 : actorToken.elevationFeet ?? 0
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
   if (validTargetTokens.some((currentTarget) => mapGeometryLineOfEffectBlocked({
     geometry,
     from: effectOrigin,

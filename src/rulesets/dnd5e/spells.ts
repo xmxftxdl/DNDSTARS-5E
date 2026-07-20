@@ -56,6 +56,8 @@ export interface Dnd5eSrdSpellDefinition {
   secondaryTargetsWithinFeetOfFirst?: number
   /** 地图选区模板；尺寸属于法术效果，placeRangeFeet 仅限制模板原点。 */
   area?: SkillAoeTargeting
+  /** 少数“选择区域内生物”的法术允许施法者选择自己。 */
+  areaIncludesSelf?: boolean
   /** 每道射线单独攻击时的基础射线数。 */
   baseProjectiles?: number
   additionalProjectilesPerHigherSlot?: number
@@ -177,6 +179,13 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'healing',
     dice: { count: 1, sides: 4, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
     description: '以附赠动作使射程内至多六名生物各恢复1d4＋施法属性调整值的生命。每升一环增加1d4治疗。对构装生物和亡灵无效。',
+  },
+  {
+    id: 'mass-cure-wounds', name: '群体疗伤术', englishName: 'Mass Cure Wounds', level: 5, school: '塑能',
+    classes: ['bard', 'cleric', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'ally', effect: 'healing',
+    dice: { count: 3, sides: 8, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 30, placeRangeFeet: 60 }, areaIncludesSelf: true,
+    description: '在60尺内选择一点，并选择以该点为中心30尺半径内至多六名生物；每个目标恢复3d8＋施法属性调整值的生命。每升一环增加1d8治疗。对构装生物和亡灵无效。',
   },
   {
     id: 'counterspell', name: '法术反制', englishName: 'Counterspell', level: 3, school: '防护',

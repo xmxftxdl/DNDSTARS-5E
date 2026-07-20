@@ -3752,7 +3752,9 @@ export default function MapsPage() {
     const effectOriginElevation = spell?.area?.origin === 'point' ? 0 : actorToken?.elevationFeet ?? 0
     const affectedTokenIds = tokensInCells(activeMap, activeMap.tokens, cells)
       .filter((token) =>
-        token.type !== 'obstacle' && token.id !== actorToken?.id && !!effectOrigin &&
+        token.type !== 'obstacle' && (token.id !== actorToken?.id || spell?.areaIncludesSelf === true) && !!effectOrigin &&
+        (!actorToken || !spell || spell.target === 'area' ||
+          (spell.target === 'hostile' ? areOpposedCombatTokens(actorToken, token) : !areOpposedCombatTokens(actorToken, token))) &&
         !mapGeometryLineOfEffectBlocked({
           geometry: activeGeometry,
           from: effectOrigin,
@@ -12628,6 +12630,9 @@ export default function MapsPage() {
       targetTokenId: dnd5eSpellTargeting.targetTokenIds[0],
       targetTokenIds: [...new Set(dnd5eSpellTargeting.targetTokenIds)],
       areaTargetCell: aoePreviewCell ?? undefined,
+      areaTargetOrientation: dnd5eSpellTargeting.area?.shape === 'rect' && dnd5eSpellTargeting.area.rotatable
+        ? aoeRectRotation as 0 | 1 | 2 | 3
+        : undefined,
       conditionChoice: dnd5eSpellTargeting.conditionChoice,
       healingAllocations,
       projectileTargetIds: dnd5eSpellTargeting.allowDuplicateTargets
