@@ -9,27 +9,42 @@ import type {
 } from '../../types/inventory'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
+import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
 function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
-  if (!rules) return '该装备保留在角色库存中；具体规则由当前规则包或 DM 裁定。'
+  if (!rules) return `该装备不替换基础武器或护甲公式。${equipmentEffectsText(item) || '具体规则由当前规则包或 DM 裁定。'}`
   if (item.id === 'dnd5e-net') return '射程 5/15 尺；命中大型或更小生物时使其受束缚。挣脱、破坏捕网以及每次只能进行一次捕网攻击由 Headless/DM 按 SRD 5.1 裁定。'
-  if (rules.kind === 'shield') return `持用盾牌时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。`
+  if (rules.kind === 'shield') return `持用盾牌时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}`
   if (rules.kind === 'armor') {
     const dexterity = rules.dexterityBonus === 'full'
       ? '加上完整敏捷调整值'
       : rules.dexterityBonus === 'max-2'
         ? '加上至多 +2 的敏捷调整值'
         : '不加敏捷调整值'
-    return `护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。`
+    return `护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}`
   }
   const range = rules.mode === 'ranged' && rules.rangeFeet
     ? `，射程 ${rules.rangeFeet.normal}/${rules.rangeFeet.long} 尺`
     : `，触及 ${rules.reachFeet ?? 5} 尺`
   const properties = rules.properties?.length ? `；属性：${rules.properties.join('、')}` : ''
-  return `命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。`
+  return `命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}`
+}
+
+function equipmentEffectsText(item: EquipmentItem): string {
+  const effects = item.effects
+  if (!effects) return ''
+  const signed = (value: number) => value >= 0 ? `+${value}` : String(value)
+  const labels = [
+    effects.weaponAttackBonus ? `武器命中 ${signed(effects.weaponAttackBonus)}` : '',
+    effects.weaponDamageBonus ? `武器伤害 ${signed(effects.weaponDamageBonus)}` : '',
+    effects.armorClassBonus ? `AC ${signed(effects.armorClassBonus)}` : '',
+    effects.savingThrowBonus ? `全部豁免 ${signed(effects.savingThrowBonus)}` : '',
+    effects.speedBonusFeet ? `步行速度 ${signed(effects.speedBonusFeet)} 尺` : '',
+  ].filter(Boolean)
+  return labels.length > 0 ? ` 装备效果：${labels.join('、')}。` : ''
 }
 
 function equipmentIcon(item: EquipmentItem): Dnd5eInventoryItemTemplate['icon'] {
@@ -232,11 +247,12 @@ export const DND5E_SRD_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
 const ITEM_TEMPLATE_BY_ID = new Map(DND5E_SRD_ITEM_TEMPLATES.map((item) => [item.id, item]))
 
 export function dnd5eInventoryItemTemplate(templateId: string): Dnd5eInventoryItemTemplate | undefined {
-  return ITEM_TEMPLATE_BY_ID.get(templateId)
+  return ITEM_TEMPLATE_BY_ID.get(templateId) ?? dnd5ePluginItemDefinition(templateId)
 }
 
 export function dnd5eInventoryItemTemplateForEquipment(equipmentId: string): Dnd5eInventoryItemTemplate | undefined {
-  return DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES.find((item) => item.equipment?.id === equipmentId)
+  return DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES.find((item) => item.equipment?.id === equipmentId) ??
+    registeredDnd5ePluginItems().find((item) => item.equipment?.id === equipmentId)
 }
 
 export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id' | 'equipment'>): Dnd5eInventory {
@@ -469,7 +485,11 @@ function cloneItemTemplate(item: Dnd5eInventoryItemTemplate): Dnd5eInventoryItem
   return {
     ...item,
     cost: item.cost ? { ...item.cost } : undefined,
-    equipment: item.equipment ? { ...item.equipment, dnd5e: item.equipment.dnd5e ? { ...item.equipment.dnd5e } : undefined } : undefined,
+    equipment: item.equipment ? {
+      ...item.equipment,
+      effects: item.equipment.effects ? { ...item.equipment.effects } : undefined,
+      dnd5e: item.equipment.dnd5e ? structuredClone(item.equipment.dnd5e) : undefined,
+    } : undefined,
     use: item.use ? {
       ...item.use,
       effect: item.use.effect.kind === 'healing'

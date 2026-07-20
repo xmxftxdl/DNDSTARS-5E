@@ -4,6 +4,7 @@ import type { Character } from '../../types/character'
 import type { CharacterEquipment, EquipmentItem } from '../../types/equipment'
 import { fighterCriticalThreshold, fighterSelectedFightingStyles } from './fighter'
 import { dnd5eBarbarianRageDamage, dnd5eClassDefinitionForCharacter, dnd5eMonkMartialArtsDie } from './classes'
+import { dnd5eEquippedEffectTotal, dnd5eWeaponEffectTotal } from './equipmentEffects'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -244,13 +245,14 @@ export function normalizeDnd5eCharacterEquipment(
   ]
   for (const slot of slots) {
     const item = character.equipment?.[slot]
-    const selected = item?.dnd5e ? item : useLegacyDefaults ? defaults?.[slot] : undefined
+    const selected = item?.dnd5e || item?.effects ? item : useLegacyDefaults ? defaults?.[slot] : undefined
     if (!selected) continue
     result[slot] = {
       id: selected.id,
       name: selected.name,
       slot: selected.slot,
       ac: selected.ac,
+      effects: selected.effects ? { ...selected.effects } : undefined,
       dnd5e: structuredClone(selected.dnd5e),
     }
   }
@@ -301,6 +303,7 @@ export function dnd5eArmorClass(character: Character): number {
   if (shield?.kind === 'shield') armorClass += shield.armorClassBonus
   const styles = dnd5eSelectedFightingStyles(character)
   if (armor?.kind === 'armor' && styles.includes('defense')) armorClass += 1
+  armorClass += dnd5eEquippedEffectTotal(character, 'armorClassBonus')
   return Math.max(0, Math.floor(armorClass))
 }
 
@@ -336,19 +339,21 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     (character.dnd5eCombatState?.sacredWeaponTurnsRemaining ?? 0) > 0
     ? Math.max(1, rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.cha))))
     : 0
+  const equipmentAttackBonus = dnd5eWeaponEffectTotal(character, 'mainWeapon', 'weaponAttackBonus')
+  const equipmentDamageBonus = dnd5eWeaponEffectTotal(character, 'mainWeapon', 'weaponDamageBonus')
   return {
     weaponId: weapon.id,
     weaponName: weapon.name,
     mode: data.mode,
     attackAbility: ability,
     finesse: data.attackAbility === 'finesse',
-    attackModifier: abilityModifier + proficiency + attackStyleBonus + sacredWeaponBonus,
+    attackModifier: abilityModifier + proficiency + attackStyleBonus + sacredWeaponBonus + equipmentAttackBonus,
     criticalThreshold: fighterCriticalThreshold(character),
     greatWeaponFighting: data.mode === 'melee' && usesTwoHands && styles.includes('great-weapon-fighting'),
     damage: {
       ...data.damage,
       sides: versatileSides > 0 && usesTwoHands ? versatileSides : data.damage.sides,
-      bonus: abilityModifier + duelingBonus + rageBonus,
+      bonus: abilityModifier + duelingBonus + rageBonus + equipmentDamageBonus,
     },
     reachFeet: data.reachFeet,
     rangeFeet: data.rangeFeet,
@@ -379,18 +384,20 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
     !wearingHeavyArmor && ability === 'str'
     ? dnd5eBarbarianRageDamage(character.level)
     : 0
+  const equipmentAttackBonus = dnd5eWeaponEffectTotal(character, 'offHand', 'weaponAttackBonus')
+  const equipmentDamageBonus = dnd5eWeaponEffectTotal(character, 'offHand', 'weaponDamageBonus')
   return {
     weaponId: weapon.id,
     weaponName: weapon.name,
     mode: 'melee',
     attackAbility: ability,
     finesse: data.attackAbility === 'finesse',
-    attackModifier: abilityModifier + proficiency,
+    attackModifier: abilityModifier + proficiency + equipmentAttackBonus,
     criticalThreshold: fighterCriticalThreshold(character),
     greatWeaponFighting: false,
     damage: {
       ...data.damage,
-      bonus: (styles.includes('two-weapon-fighting') ? abilityModifier : 0) + rageBonus,
+      bonus: (styles.includes('two-weapon-fighting') ? abilityModifier : 0) + rageBonus + equipmentDamageBonus,
     },
     reachFeet: data.reachFeet ?? 5,
   }

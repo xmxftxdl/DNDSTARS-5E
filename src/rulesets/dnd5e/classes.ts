@@ -1,5 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
+import { dnd5eEquippedEffectTotal } from './equipmentEffects'
 import { dnd5eActiveSpeedPenalty } from './activeEffects'
 import { fighterProgression, fighterRemarkableAthleteRunningLongJumpBonus } from './fighter'
 
@@ -902,6 +903,8 @@ export function dnd5eWalkingSpeed(character: Pick<Character, 'charClass' | 'leve
   if (character.charClass === '武僧' && character.level >= 2 && !hasArmor && !hasShield) {
     speed += dnd5eMonkUnarmoredMovementBonus(character.level)
   }
+  speed += dnd5eEquippedEffectTotal(character, 'speedBonusFeet')
+  speed = Math.max(0, speed)
   const exhaustion = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
   if (exhaustion >= 5) return 0
   return exhaustion >= 2 ? Math.floor(speed / 2) : speed

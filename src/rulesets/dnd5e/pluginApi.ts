@@ -19,6 +19,8 @@ import { DND5E_2014_RACE_OPTIONS } from './characterOptions'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
+import type { EquipmentItem } from '../../types/equipment'
+import type { Dnd5eInventoryItemTemplate } from '../../types/inventory'
 import type {
   Dnd5ePersistentAreaTriggerDeclaration,
   Dnd5ePluginEffectDuration,
@@ -364,6 +366,22 @@ export interface RegisteredDnd5ePluginSpell extends Omit<Dnd5eImportedSpell, 'au
     | { mode: 'headless-action'; actionId: string }
 }
 
+/**
+ * 规则包物品只声明数据。装备 ID、名称和来源由 Host 从物品清单生成，避免插件
+ * 伪造核心模板身份；所有可执行效果必须属于 EquipmentItem.effects 白名单。
+ */
+export interface Dnd5ePluginItemDefinition
+  extends Omit<Dnd5eInventoryItemTemplate, 'id' | 'source' | 'equipment'> {
+  id: string
+  equipment?: Omit<EquipmentItem, 'id' | 'name'>
+}
+
+export interface RegisteredDnd5ePluginItem extends Dnd5eInventoryItemTemplate {
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+}
+
 export interface Dnd5eRulesPluginApi {
   readonly apiVersion: typeof DND5E_RULES_PLUGIN_API_VERSION
   readonly rulesetId: typeof DND5E_RULES_PLUGIN_RULESET_ID
@@ -376,6 +394,8 @@ export interface Dnd5eRulesPluginApi {
   registerAbilityGenerationMethod(definition: Dnd5ePluginAbilityGenerationDefinition): string
   /** 注册可发现的法术数据；自动结算必须显式绑定同一插件的 Worker Headless action。 */
   registerSpell(definition: Dnd5ePluginSpellDefinition): string
+  /** 注册可由 DM 分发的声明式物品；装备效果由 Host 白名单结算。 */
+  registerItem(definition: Dnd5ePluginItemDefinition): string
 }
 
 export interface Dnd5eRulesPlugin {
@@ -404,6 +424,7 @@ const pluginSubclasses = new Map<string, RegisteredDnd5ePluginSubclass>()
 const pluginRaces = new Map<string, RegisteredDnd5ePluginRace>()
 const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()
 const pluginSpells = new Map<string, RegisteredDnd5ePluginSpell>()
+const pluginItems = new Map<string, RegisteredDnd5ePluginItem>()
 const pluginListeners = new Set<() => void>()
 let pluginRevision = 0
 
@@ -419,6 +440,156 @@ const DND5E_CLASS_IDS: readonly Dnd5eClassId[] = [
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
+}
+
+const INVENTORY_CATEGORIES = ['equipment', 'adventuring-gear', 'consumable', 'tool', 'container'] as const
+const INVENTORY_ICONS = [
+  'weapon', 'armor', 'shield', 'backpack', 'bedroll', 'rope', 'torch', 'tinderbox',
+  'waterskin', 'rations', 'healers-kit', 'ball-bearings', 'caltrops', 'hunting-trap',
+  'acid', 'alchemists-fire', 'holy-water', 'antitoxin', 'poison', 'healing-potion', 'generic',
+] as const
+const EQUIPMENT_SLOTS = ['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace'] as const
+
+function boundedText(value: unknown, label: string, maximum: number, optional = false): string | undefined {
+  if (value == null && optional) return undefined
+  if (typeof value !== 'string' || !value.trim() || value.length > maximum) {
+    throw new Error(`Invalid plugin item ${label}`)
+  }
+  return value.trim()
+}
+
+function clonePluginItemDefinition(
+  manifest: Dnd5eRulesPluginManifest,
+  definition: Dnd5ePluginItemDefinition,
+  itemId: string,
+): RegisteredDnd5ePluginItem {
+  const name = boundedText(definition.name, `${itemId} name`, 160)!
+  const englishName = boundedText(definition.englishName, `${itemId} English name`, 160, true)
+  const description = boundedText(definition.description, `${itemId} description`, 20_000)!
+  const rulesText = boundedText(definition.rulesText, `${itemId} rules text`, 20_000)!
+  if (!(INVENTORY_CATEGORIES as readonly unknown[]).includes(definition.category)) {
+    throw new Error(`Invalid plugin item category: ${itemId}`)
+  }
+  if (!(INVENTORY_ICONS as readonly unknown[]).includes(definition.icon) || typeof definition.stackable !== 'boolean') {
+    throw new Error(`Invalid plugin item presentation: ${itemId}`)
+  }
+  if (definition.weightLb != null && (
+    typeof definition.weightLb !== 'number' || !Number.isFinite(definition.weightLb) ||
+    definition.weightLb < 0 || definition.weightLb > 1_000_000
+  )) throw new Error(`Invalid plugin item weight: ${itemId}`)
+  if (definition.cost && (
+    typeof definition.cost.amount !== 'number' || !Number.isFinite(definition.cost.amount) ||
+    definition.cost.amount < 0 || definition.cost.amount > 1_000_000_000 ||
+    !['cp', 'sp', 'gp'].includes(definition.cost.currency)
+  )) throw new Error(`Invalid plugin item cost: ${itemId}`)
+
+  let equipment: EquipmentItem | undefined
+  if (definition.equipment) {
+    if (definition.category !== 'equipment' || definition.stackable) {
+      throw new Error(`Plugin equipment must use the equipment category and cannot stack: ${itemId}`)
+    }
+    if (!(EQUIPMENT_SLOTS as readonly unknown[]).includes(definition.equipment.slot)) {
+      throw new Error(`Invalid plugin equipment slot: ${itemId}`)
+    }
+    const effects = definition.equipment.effects
+    if (effects) {
+      for (const [key, value] of Object.entries(effects)) {
+        const limit = key === 'speedBonusFeet' ? 500 : 20
+        if (!['weaponAttackBonus', 'weaponDamageBonus', 'armorClassBonus', 'savingThrowBonus', 'speedBonusFeet'].includes(key) ||
+          !finiteInteger(value, -limit, limit)) {
+          throw new Error(`Invalid plugin equipment effect ${key}: ${itemId}`)
+        }
+      }
+    }
+    const rules = definition.equipment.dnd5e
+    if (rules?.kind === 'weapon') {
+      if (
+        !['simple', 'martial'].includes(rules.category) || !['melee', 'ranged'].includes(rules.mode) ||
+        !['str', 'dex', 'finesse'].includes(rules.attackAbility) ||
+        !finiteInteger(rules.damage.count, 0, 20) || !finiteInteger(rules.damage.sides, 2, 1_000) ||
+        !['slashing', 'piercing', 'bludgeoning'].includes(rules.damage.type) ||
+        (rules.reachFeet != null && !finiteInteger(rules.reachFeet, 0, 500)) ||
+        (rules.rangeFeet != null && (
+          !finiteInteger(rules.rangeFeet.normal, 0, 10_000) ||
+          !finiteInteger(rules.rangeFeet.long, rules.rangeFeet.normal, 10_000)
+        )) ||
+        (rules.properties != null && (
+          !Array.isArray(rules.properties) || rules.properties.length > 32 ||
+          rules.properties.some((property) => typeof property !== 'string' || !property.trim() || property.length > 120)
+        ))
+      ) throw new Error(`Invalid plugin weapon rules: ${itemId}`)
+    } else if (rules?.kind === 'armor') {
+      if (
+        !['light', 'medium', 'heavy'].includes(rules.category) ||
+        !finiteInteger(rules.baseArmorClass, 0, 50) ||
+        !['full', 'max-2', 'none'].includes(rules.dexterityBonus) ||
+        (rules.material != null && !['metal', 'nonmetal'].includes(rules.material)) ||
+        (rules.strengthRequirement != null && !finiteInteger(rules.strengthRequirement, 1, 30)) ||
+        (rules.stealthDisadvantage != null && typeof rules.stealthDisadvantage !== 'boolean')
+      ) throw new Error(`Invalid plugin armor rules: ${itemId}`)
+    } else if (rules?.kind === 'shield') {
+      if (!finiteInteger(rules.armorClassBonus, -20, 20)) throw new Error(`Invalid plugin shield rules: ${itemId}`)
+    } else if (rules != null) {
+      throw new Error(`Invalid plugin equipment rules: ${itemId}`)
+    }
+    equipment = structuredClone({ ...definition.equipment, id: itemId, name })
+  } else if (definition.category === 'equipment') {
+    throw new Error(`Plugin equipment template is missing equipment data: ${itemId}`)
+  }
+
+  const use = definition.use
+  if (use) {
+    if (!['action', 'bonusAction', 'none'].includes(use.economy) || !finiteInteger(use.consumeQuantity, 0, 999)) {
+      throw new Error(`Invalid plugin item use economy: ${itemId}`)
+    }
+    if (use.chargesPerItem != null && !finiteInteger(use.chargesPerItem, 1, 1_000_000)) {
+      throw new Error(`Invalid plugin item charges: ${itemId}`)
+    }
+    if (use.targeting?.kind === 'map-area') {
+      if (
+        !['ball-bearings', 'caltrops', 'hunting-trap'].includes(use.targeting.areaKind) ||
+        !finiteInteger(use.targeting.rangeFeet, 0, 10_000) ||
+        !finiteInteger(use.targeting.widthFeet, 0, 10_000) ||
+        !finiteInteger(use.targeting.heightFeet, 0, 10_000)
+      ) throw new Error(`Invalid plugin item map targeting: ${itemId}`)
+    } else if (use.targeting?.kind === 'creature') {
+      if (!finiteInteger(use.targeting.rangeFeet, 0, 10_000) ||
+        (use.targeting.includeSelf != null && typeof use.targeting.includeSelf !== 'boolean')) {
+        throw new Error(`Invalid plugin item creature targeting: ${itemId}`)
+      }
+    } else if (use.targeting != null) {
+      throw new Error(`Invalid plugin item targeting: ${itemId}`)
+    }
+    if (use.effect.kind === 'healing') {
+      if (
+        !finiteInteger(use.effect.dice.count, 1, 40) || !finiteInteger(use.effect.dice.sides, 2, 100) ||
+        !finiteInteger(use.effect.dice.bonus, -1_000, 1_000)
+      ) throw new Error(`Invalid plugin healing item: ${itemId}`)
+    } else if (use.effect.kind === 'dm-adjudication') {
+      boundedText(use.effect.adjudication, `${itemId} adjudication`, 4_000)
+    } else {
+      throw new Error(`Invalid plugin item effect: ${itemId}`)
+    }
+  }
+
+  return {
+    id: itemId,
+    name,
+    ...(englishName ? { englishName } : {}),
+    category: definition.category,
+    icon: definition.icon,
+    description,
+    rulesText,
+    ...(definition.weightLb != null ? { weightLb: definition.weightLb } : {}),
+    ...(definition.cost ? { cost: { ...definition.cost } } : {}),
+    stackable: definition.stackable,
+    ...(equipment ? { equipment } : {}),
+    ...(use ? { use: structuredClone(use) } : {}),
+    source: { book: manifest.name, license: manifest.license },
+    ownerPluginId: manifest.id,
+    ownerPluginName: manifest.name,
+    ownerPluginLicense: manifest.license,
+  }
 }
 
 function clonePluginRolls(
@@ -1101,6 +1272,17 @@ export function registerDnd5eRulesPlugin(
       })
       return spellId
     },
+    registerItem(definition) {
+      assertAcceptingContributions()
+      const itemId = namespacedId(id, definition.id)
+      if (pluginItems.has(itemId)) throw new Error(`Plugin item already registered: ${itemId}`)
+      const registered = clonePluginItemDefinition(plugin.manifest, definition, itemId)
+      pluginItems.set(itemId, registered)
+      disposers.push(() => {
+        if (pluginItems.get(itemId) === registered) pluginItems.delete(itemId)
+      })
+      return itemId
+    },
   }
 
   try {
@@ -1308,6 +1490,27 @@ export function registeredDnd5ePluginSpells(): readonly RegisteredDnd5ePluginSpe
 
 export function dnd5ePluginSpellDefinition(id: string): RegisteredDnd5ePluginSpell | undefined {
   return registeredDnd5ePluginSpells().find((spell) => spell.id === id)
+}
+
+function cloneRegisteredPluginItem(item: RegisteredDnd5ePluginItem): RegisteredDnd5ePluginItem {
+  return {
+    ...item,
+    cost: item.cost ? { ...item.cost } : undefined,
+    equipment: item.equipment ? structuredClone(item.equipment) : undefined,
+    use: item.use ? structuredClone(item.use) : undefined,
+    source: { ...item.source },
+  }
+}
+
+export function registeredDnd5ePluginItems(): readonly RegisteredDnd5ePluginItem[] {
+  return [...pluginItems.values()]
+    .map(cloneRegisteredPluginItem)
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+}
+
+export function dnd5ePluginItemDefinition(id: string): RegisteredDnd5ePluginItem | undefined {
+  const item = pluginItems.get(id)
+  return item ? cloneRegisteredPluginItem(item) : undefined
 }
 
 export function dnd5ePluginAbilityGenerationMethod(id: string): RegisteredDnd5ePluginAbilityGeneration | undefined {

@@ -4,6 +4,7 @@ import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant, hydrateDnd5eWildShapeCombatant } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eArmorClass } from './equipment'
+import { dnd5eEquippedEffectTotal } from './equipmentEffects'
 import { FIGHTER_RESOURCE_KEYS, fighterResourceState, fighterSelectedFightingStyles } from './fighter'
 import {
   dnd5eClassDefinitionForCharacter,
@@ -53,6 +54,7 @@ export interface Dnd5eCharacter {
   wearingMetalArmor: boolean
   hasShield: boolean
   classState: NonNullable<Character['dnd5eCombatState']>
+  savingThrowEquipmentBonus?: number
 }
 
 const DND5E_DAMAGE_TYPE_SET = new Set<string>(DND5E_DAMAGE_TYPES)
@@ -158,6 +160,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     ),
     hasShield: character.equipment?.offHand?.dnd5e?.kind === 'shield',
     classState: { ...character.dnd5eCombatState },
+    savingThrowEquipmentBonus: dnd5eEquippedEffectTotal(character, 'savingThrowBonus'),
   }
 }
 
@@ -177,7 +180,8 @@ export function createCombatantFromDnd5eCharacter(input: {
   const savingThrowBonuses = Object.fromEntries(abilityKeys.map((ability) => [
     ability,
     rules.abilityModifier(character.abilities[ability]) +
-      (character.savingThrowProficiencies.includes(ability) ? rules.proficiencyBonus(character.level) : 0),
+      (character.savingThrowProficiencies.includes(ability) ? rules.proficiencyBonus(character.level) : 0) +
+      (character.savingThrowEquipmentBonus ?? 0),
   ]))
   const combatant = createDnd5eCombatant({
     id: character.id,

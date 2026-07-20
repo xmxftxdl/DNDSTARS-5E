@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
 import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter, dnd5eArmorClass, dnd5eOffHandWeaponAttackProfile, dnd5eWeaponAttackProfile } from './equipment'
+import { dnd5eWalkingSpeed } from './classes'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -111,5 +112,31 @@ describe('D&D 5e 2014 fighter equipment', () => {
       dnd5eCombatState: { sacredWeaponTurnsRemaining: 10 },
     })
     expect(dnd5eWeaponAttackProfile(paladin)).toMatchObject({ attackModifier: 10, damage: { bonus: 3 } })
+  })
+
+  it('applies declarative equipment effects without leaking a weapon bonus to the other hand', () => {
+    const character = fighter({
+      equipment: {
+        mainWeapon: {
+          ...DND5E_SHORTSWORD,
+          id: 'plugin:main-plus-one',
+          effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+        },
+        offHand: {
+          ...DND5E_OFFHAND_SHORTSWORD,
+          id: 'plugin:offhand-plus-two',
+          effects: { weaponAttackBonus: 2, weaponDamageBonus: 2 },
+        },
+        armor: DND5E_FIGHTER_STARTING_EQUIPMENT.armor,
+        necklace: {
+          id: 'plugin:cloak', name: '测试斗篷', slot: 'necklace',
+          effects: { armorClassBonus: 1, savingThrowBonus: 1, speedBonusFeet: 5 },
+        },
+      },
+    })
+    expect(dnd5eWeaponAttackProfile(character)).toMatchObject({ attackModifier: 6, damage: { bonus: 4 } })
+    expect(dnd5eOffHandWeaponAttackProfile(character)).toMatchObject({ attackModifier: 7, damage: { bonus: 2 } })
+    expect(dnd5eArmorClass(character)).toBe(17)
+    expect(dnd5eWalkingSpeed(character)).toBe(35)
   })
 })

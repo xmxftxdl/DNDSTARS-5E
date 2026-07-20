@@ -190,6 +190,7 @@ function initializePlugin(source: string): {
   races: readonly Record<string, unknown>[]
   abilityGenerationMethods: readonly Record<string, unknown>[]
   spells: readonly Record<string, unknown>[]
+  items: readonly Record<string, unknown>[]
   resources: readonly Record<string, unknown>[]
   subclasses: readonly Record<string, unknown>[]
   migrations: readonly { fromVersion: number; toVersion: number }[]
@@ -235,6 +236,7 @@ function initializePlugin(source: string): {
   const races: Record<string, unknown>[] = []
   const abilityGenerationMethods: Record<string, unknown>[] = []
   const spells: Record<string, unknown>[] = []
+  const items: Record<string, unknown>[] = []
   const resources: Record<string, unknown>[] = []
   const subclasses: Record<string, unknown>[] = []
   const api = Object.freeze({
@@ -298,6 +300,12 @@ function initializePlugin(source: string): {
       spells.push(safe)
       return `${manifest.id}:${safe.id}`
     },
+    registerItem(definition: unknown) {
+      const safe = clonePlain(definition, 'item') as Record<string, unknown>
+      assertId(safe.id, 'item id')
+      items.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
   })
   const dispose = plugin.setup(api)
   if (dispose != null && typeof dispose !== 'function') throw new Error('Plugin setup must be synchronous')
@@ -308,6 +316,7 @@ function initializePlugin(source: string): {
     races,
     abilityGenerationMethods,
     spells,
+    items,
     resources,
     subclasses,
     migrations: migrationDeclarations,

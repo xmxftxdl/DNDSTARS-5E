@@ -39,6 +39,10 @@ class FakeWorker {
             actions: [],
             races: [],
             abilityGenerationMethods: [],
+            items: [{
+              id: 'test-item', name: '测试物品', category: 'adventuring-gear', icon: 'generic',
+              description: '测试。', rulesText: '由 DM 裁定。', stackable: true,
+            }],
             migrations: [{ fromVersion: 1, toVersion: 2 }],
           },
         })
@@ -77,6 +81,7 @@ describe('D&D 5e plugin state migration sandbox protocol', () => {
     })
     const session = await createDnd5ePluginSandbox(new TextEncoder().encode('plugin').buffer)
     expect(session.migrations).toEqual([{ fromVersion: 1, toVersion: 2 }])
+    expect(session.items).toEqual([expect.objectContaining({ id: 'test-item' })])
 
     const result = await session.migrateState(1, { counter: 3 })
     expect(result).toEqual({

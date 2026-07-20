@@ -8,6 +8,7 @@ import {
 } from './items'
 import { DND5E_LONGSWORD } from './equipment'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 import type { Character } from '../../types/character'
 
 function character(id: string, currentHp = 10) {
@@ -35,6 +36,38 @@ describe('SRD 5.1 inventory', () => {
     expect(DND5E_SRD_GEAR_ITEM_TEMPLATES.some((item) => item.id === 'srd-5.1:item:potion-of-healing')).toBe(true)
     expect(DND5E_SRD_ITEM_TEMPLATES.every((item) => item.source.book === 'SRD 5.1')).toBe(true)
     expect(DND5E_SRD_ITEM_TEMPLATES.every((item) => item.source.license === 'CC BY 4.0')).toBe(true)
+  })
+
+  it('grants and equips an active room-plugin equipment template', () => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.inventory-item', name: 'Inventory Item', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerItem({
+          id: 'cloak', name: '测试斗篷', category: 'equipment', icon: 'armor',
+          description: '测试。', rulesText: 'AC +1。', stackable: false,
+          equipment: { slot: 'necklace', effects: { armorClassBonus: 1 } },
+        })
+      },
+    })
+    try {
+      const hero = character('plugin-hero')
+      const granted = applyDnd5eInventoryMutation([hero], {
+        type: 'grant', characterId: hero.id, templateId: 'com.example.inventory-item:cloak', quantity: 1,
+      })
+      expect(granted.ok).toBe(true)
+      const entry = inventoryEntry(granted.characters[0], 'com.example.inventory-item:cloak')
+      const equipped = applyDnd5eInventoryMutation(granted.characters, {
+        type: 'equip', characterId: hero.id, instanceId: entry.instanceId,
+      })
+      expect(equipped.characters[0].equipment?.necklace).toMatchObject({
+        id: 'com.example.inventory-item:cloak', effects: { armorClassBonus: 1 },
+      })
+    } finally {
+      dispose()
+    }
   })
 
   it('migrates currently equipped gear into deterministic inventory instances', () => {

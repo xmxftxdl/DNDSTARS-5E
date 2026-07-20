@@ -230,6 +230,14 @@ export default function RulesPluginsPage() {
               <Download className="h-4 w-4" />
               下载兼容模板
             </a>
+            <a
+              href="/plugin-templates/custom-equipment-pack-template.dndstars5e"
+              download
+              className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 transition-colors hover:border-amber-400/60 hover:text-white"
+            >
+              <Download className="h-4 w-4" />
+              下载装备模板
+            </a>
             {roomSession?.role !== 'player' && (
               <>
                 <input

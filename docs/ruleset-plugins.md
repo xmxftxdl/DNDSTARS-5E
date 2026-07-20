@@ -27,6 +27,7 @@ flowchart LR
 - Headless resolver 只在权威结算路径执行。普通插件 Action 默认只能由当前行动者执行；反应和 Interrupt 必须显式声明 `allowOffTurn`。
 - API V2 的 `registerFeature` 声明特性文字、等级、自动化级别、动作／附赠动作／反应和目标规则。人物卡只保存完整命名空间 ID。
 - `registerRace` 可声明种族名称、速度、固定属性调整和任选属性调整；`registerAbilityGenerationMethod` 可声明六值标准数组、购点预算／成本表或投骰／舍弃最低骰规则。两者同样由 Host 命名空间化，并由角色 Setup 读取。
+- `registerItem` 可声明 DM 可分发的装备、消耗品与一般道具。装备只允许固定命中、伤害、AC、豁免和速度修正等 Host 白名单效果；复杂使用效果必须走受控 Headless capability 或 DM 裁定事务。
 - 玩家提交的目标、距离和行动经济不受信任。DM 根据当前地图 Token 和共享回合状态重建这些数据，再调用纯 Headless resolver。
 - 房间／本机文件安装只接受可序列化的 API V2 通用特性。旧式函数回调子职注册会被沙箱明确拒绝；需要扩展时应新增平台审核过的声明式 schema，而不是把回调带回页面。
 

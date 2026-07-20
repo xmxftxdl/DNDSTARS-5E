@@ -28,6 +28,20 @@ describe('D&D 5e character boundary', () => {
     expect(combatant).toMatchObject({ concentrating: true, initiative: 15, proficiencyBonus: 3, turn: { actionAvailable: true, reactionAvailable: true, movementRemaining: 30 } })
   })
 
+  it('projects equipped saving-throw effects into every Headless saving throw', () => {
+    const migrated = migrateCharacterToDnd5e({
+      ...legacyCharacter(),
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      equipment: {
+        ring: { id: 'plugin:lucky-ring', name: '测试戒指', slot: 'ring', effects: { savingThrowBonus: 1 } },
+      },
+    })
+    const combatant = createCombatantFromDnd5eCharacter({
+      character: migrated, controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 },
+    })
+    expect(combatant.savingThrowBonuses).toMatchObject({ str: 7, dex: 3, con: 6, int: 1, wis: 2, cha: 0 })
+  })
+
   it('applies 2014 exhaustion maximum-HP and death thresholds at the Headless boundary', () => {
     const exhausted = migrateCharacterToDnd5e({ ...legacyCharacter(), exhaustionLevel: 4, maxHp: 41, currentHp: 40 })
     expect(exhausted).toMatchObject({ exhaustionLevel: 4, maxHp: 20, currentHp: 20 })

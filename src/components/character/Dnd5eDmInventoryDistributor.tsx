@@ -1,6 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
 import { Gift, PackagePlus, Search } from 'lucide-react'
 import { DND5E_SRD_ITEM_TEMPLATES } from '../../rulesets/dnd5e/items'
+import {
+  dnd5eRulesPluginRegistrySnapshot,
+  registeredDnd5ePluginItems,
+  subscribeDnd5eRulesPluginRegistry,
+} from '../../rulesets/dnd5e/pluginApi'
 import { useCharacterStore } from '../../store/characters'
 import { getRoomSession } from '../../lib/roomSession'
 import { inventoryFailureMessage } from '../../lib/inventoryAuthority'
@@ -20,6 +25,13 @@ export default function Dnd5eDmInventoryDistributor({
   const [quantity, setQuantity] = useState(1)
   const [filter, setFilter] = useState('')
   const [notice, setNotice] = useState('')
+  const pluginRevision = useSyncExternalStore(
+    subscribeDnd5eRulesPluginRegistry,
+    dnd5eRulesPluginRegistrySnapshot,
+    dnd5eRulesPluginRegistrySnapshot,
+  )
+  void pluginRevision
+  const allTemplates = [...DND5E_SRD_ITEM_TEMPLATES, ...registeredDnd5ePluginItems()]
 
   const currentMemberIds = useMemo(
     () => new Set(players.filter((player) => player.online).map((player) => player.memberId)),
@@ -32,10 +44,10 @@ export default function Dnd5eDmInventoryDistributor({
     [characters, currentMemberIds, session],
   )
   const query = filter.trim().toLocaleLowerCase('zh-CN')
-  const templates = DND5E_SRD_ITEM_TEMPLATES.filter((item) => !query ||
+  const templates = allTemplates.filter((item) => !query ||
     item.name.toLocaleLowerCase('zh-CN').includes(query) ||
     item.englishName?.toLocaleLowerCase('en').includes(query))
-  const selectedTemplate = DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === templateId)
+  const selectedTemplate = allTemplates.find((item) => item.id === templateId)
   const validCharacterId = targets.some((character) => character.id === characterId) ? characterId : ''
 
   const distribute = () => {
@@ -56,10 +68,10 @@ export default function Dnd5eDmInventoryDistributor({
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-100">DM 分发物品</p>
-            <p className="mt-0.5 text-xs text-slate-500">从 SRD 5.1 模板发放装备或道具；结果写入房间权威角色快照。</p>
+            <p className="mt-0.5 text-xs text-slate-500">从 SRD 5.1 或当前房间规则包发放装备与道具；结果写入房间权威角色快照。</p>
           </div>
         </div>
-        <span className="rounded-lg border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] text-slate-500">{DND5E_SRD_ITEM_TEMPLATES.length} 个模板</span>
+        <span className="rounded-lg border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] text-slate-500">{allTemplates.length} 个模板</span>
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(180px,0.8fr)_minmax(260px,1.4fr)_90px_auto]">
@@ -79,10 +91,10 @@ export default function Dnd5eDmInventoryDistributor({
           <select value={templates.some((item) => item.id === templateId) ? templateId : ''} onChange={(event) => setTemplateId(event.target.value)} className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400/50">
             <option value="">选择物品…</option>
             <optgroup label="装备">
-              {templates.filter((item) => item.category === 'equipment').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {templates.filter((item) => item.category === 'equipment').map((item) => <option key={item.id} value={item.id}>{item.name} · {item.source.book}</option>)}
             </optgroup>
             <optgroup label="道具">
-              {templates.filter((item) => item.category !== 'equipment').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {templates.filter((item) => item.category !== 'equipment').map((item) => <option key={item.id} value={item.id}>{item.name} · {item.source.book}</option>)}
             </optgroup>
           </select>
         </label>

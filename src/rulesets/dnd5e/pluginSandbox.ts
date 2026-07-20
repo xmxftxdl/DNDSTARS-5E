@@ -3,6 +3,7 @@ import type {
   Dnd5ePluginAction,
   Dnd5ePluginDiceRollDeclaration,
   Dnd5ePluginFeatureDefinition,
+  Dnd5ePluginItemDefinition,
   Dnd5ePluginRaceDefinition,
   Dnd5ePluginResourceDefinition,
   Dnd5ePluginSubclassDefinition,
@@ -53,6 +54,7 @@ interface SandboxContributions {
   races: Dnd5ePluginRaceDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   spells: Dnd5ePluginSpellDefinition[]
+  items: Dnd5ePluginItemDefinition[]
   resources: Dnd5ePluginResourceDefinition[]
   subclasses: Dnd5ePluginSubclassDefinition[]
   migrations: Dnd5ePluginStateMigrationDeclaration[]
@@ -104,6 +106,7 @@ export interface Dnd5ePluginSandboxSession {
   readonly races: readonly Dnd5ePluginRaceDefinition[]
   readonly abilityGenerationMethods: readonly Dnd5ePluginAbilityGenerationDefinition[]
   readonly spells: readonly Dnd5ePluginSpellDefinition[]
+  readonly items: readonly Dnd5ePluginItemDefinition[]
   readonly resources: readonly Dnd5ePluginResourceDefinition[]
   readonly subclasses: readonly Dnd5ePluginSubclassDefinition[]
   readonly migrations: readonly Dnd5ePluginStateMigrationDeclaration[]
@@ -308,6 +311,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
     get races() { return initialized.races },
     get abilityGenerationMethods() { return initialized.abilityGenerationMethods },
     get spells() { return initialized.spells ?? [] },
+    get items() { return initialized.items ?? [] },
     get resources() { return initialized.resources ?? [] },
     get subclasses() { return initialized.subclasses ?? [] },
     get migrations() { return initialized.migrations },
@@ -386,6 +390,7 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
       for (const race of session.races) api.registerRace(race)
       for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
       for (const spell of session.spells) api.registerSpell(spell)
+      for (const item of session.items) api.registerItem(item)
       return () => {
         if (activeSessions.get(session.manifest.id) === session) {
           activeSessions.delete(session.manifest.id)

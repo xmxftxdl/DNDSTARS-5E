@@ -11,6 +11,7 @@ import {
   registeredDnd5ePluginAbilityGenerationMethods,
   registeredDnd5ePluginRaces,
   registeredDnd5ePluginSpells,
+  registeredDnd5ePluginItems,
   registeredDnd5ePluginSubclasses,
   dnd5eCharacterHasPluginFeature,
   registeredDnd5eRulesPlugins,
@@ -130,6 +131,61 @@ describe('D&D 5e rules plugin API', () => {
       dispose()
     }
     expect(registeredDnd5ePluginSpells()).toEqual([])
+  })
+
+  it('registers namespaced declarative equipment and removes it with the plugin', () => {
+    const pluginId = 'com.example.items'
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: pluginId, name: 'Item Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        expect(api.registerItem({
+          id: 'test-blade', name: '测试剑', category: 'equipment', icon: 'weapon',
+          description: '测试装备。', rulesText: '命中与伤害 +1。', stackable: false,
+          equipment: {
+            slot: 'mainWeapon', effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+            dnd5e: {
+              kind: 'weapon', category: 'martial', mode: 'melee', attackAbility: 'str',
+              damage: { count: 1, sides: 8, type: 'slashing' }, reachFeet: 5,
+            },
+          },
+        })).toBe(`${pluginId}:test-blade`)
+      },
+    })
+    try {
+      expect(registeredDnd5ePluginItems()).toEqual([
+        expect.objectContaining({
+          id: `${pluginId}:test-blade`, name: '测试剑', ownerPluginId: pluginId,
+          source: { book: 'Item Test', license: 'CC0-1.0' },
+          equipment: expect.objectContaining({
+            id: `${pluginId}:test-blade`, name: '测试剑',
+            effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+          }),
+        }),
+      ])
+    } finally {
+      dispose()
+    }
+    expect(registeredDnd5ePluginItems()).toEqual([])
+  })
+
+  it('fails closed on unsupported or unbounded equipment effects', () => {
+    expect(() => registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.invalid-item', name: 'Invalid Item', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerItem({
+          id: 'unsafe', name: '不安全装备', category: 'equipment', icon: 'generic',
+          description: '测试。', rulesText: '测试。', stackable: false,
+          equipment: { slot: 'ring', effects: { armorClassBonus: 999 } },
+        })
+      },
+    })).toThrow('Invalid plugin equipment effect armorClassBonus')
+    expect(registeredDnd5ePluginItems()).toEqual([])
   })
 
   it('registers declarative races and ability generation rules with plugin namespaces', () => {

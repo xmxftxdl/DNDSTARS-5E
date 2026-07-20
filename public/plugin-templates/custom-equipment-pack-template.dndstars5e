@@ -1,0 +1,83 @@
+/*
+ * DNDSTARS 5E · 自定义装备包模板
+ *
+ * 仅含原创演示内容。请只加入你有权使用和分发的文字、数据与图像。
+ * 规则包必须保持单文件、无 import；物品只能声明 Host 开放的白名单效果。
+ */
+
+const plugin = {
+  manifest: {
+    id: 'local.example.custom-equipment',
+    name: '自定义装备包（演示）',
+    version: '0.1.0',
+    apiVersion: 2,
+    rulesetId: 'dnd5e-2014-srd-5.1',
+    stateSchemaVersion: 1,
+    publisher: '本地用户',
+    license: 'CC0-1.0（仅模板与原创演示内容）',
+    description: '演示自定义武器、效果型装备和可使用道具的安全导入格式。',
+  },
+
+  setup(api) {
+    api.registerItem({
+      id: 'star-iron-longsword-plus-1',
+      name: '演示星铁长剑 +1',
+      englishName: 'Demo Star-Iron Longsword +1',
+      category: 'equipment',
+      icon: 'weapon',
+      description: '一柄只用于验证装备导入和 Headless 攻击修正的原创演示长剑。',
+      rulesText: '装备后，使用此武器进行攻击检定与伤害掷骰时获得 +1 加值。',
+      weightLb: 3,
+      cost: { amount: 250, currency: 'gp' },
+      stackable: false,
+      equipment: {
+        slot: 'mainWeapon',
+        effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+        dnd5e: {
+          kind: 'weapon',
+          category: 'martial',
+          mode: 'melee',
+          damage: { count: 1, sides: 8, type: 'slashing' },
+          attackAbility: 'str',
+          reachFeet: 5,
+          properties: ['多才多艺（1d10）'],
+        },
+      },
+    })
+
+    api.registerItem({
+      id: 'wayfarer-cloak',
+      name: '演示远行斗篷',
+      englishName: 'Demo Wayfarer Cloak',
+      category: 'equipment',
+      icon: 'armor',
+      description: '一件用于验证非武器装备效果的原创演示斗篷。',
+      rulesText: '装备后 AC +1、全部豁免 +1，步行速度增加 5 尺。',
+      weightLb: 1,
+      stackable: false,
+      equipment: {
+        slot: 'necklace',
+        effects: { armorClassBonus: 1, savingThrowBonus: 1, speedBonusFeet: 5 },
+      },
+    })
+
+    api.registerItem({
+      id: 'field-tonic',
+      name: '演示野战补剂',
+      englishName: 'Demo Field Tonic',
+      category: 'consumable',
+      icon: 'healing-potion',
+      description: '用于验证自定义消耗品、骰子校验与 DM 权威库存同步。',
+      rulesText: '使用一个动作，恢复 1d4 + 1 点生命值。',
+      weightLb: 0.5,
+      stackable: true,
+      use: {
+        economy: 'action',
+        consumeQuantity: 1,
+        effect: { kind: 'healing', dice: { count: 1, sides: 4, bonus: 1 } },
+      },
+    })
+  },
+}
+
+export default plugin
