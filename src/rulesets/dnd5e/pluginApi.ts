@@ -593,6 +593,28 @@ function clonePluginItemDefinition(
     }
   }
 
+  const resources = definition.resources?.map((resource) => {
+    if (
+      !validId(resource.id) || typeof resource.label !== 'string' || !resource.label.trim() || resource.label.length > 120 ||
+      !finiteInteger(resource.maximum, 1, 1_000_000) ||
+      (resource.initial != null && !finiteInteger(resource.initial, 0, resource.maximum)) ||
+      !['none', 'short-rest', 'long-rest', 'dawn'].includes(resource.resetOn)
+    ) throw new Error(`Invalid plugin item resource: ${itemId}:${resource.id}`)
+    return { ...resource, label: resource.label.trim() }
+  })
+  if (resources && new Set(resources.map((resource) => resource.id)).size !== resources.length) {
+    throw new Error(`Duplicate plugin item resource: ${itemId}`)
+  }
+  const resourceIds = new Set(resources?.map((resource) => resource.id) ?? [])
+  const headlessEffects = definition.headlessEffects?.map((effect) => {
+    if (
+      effect.kind !== 'attack-roll-reroll' || !resourceIds.has(effect.resourceId) || effect.maximumDice !== 1 ||
+      effect.trigger !== 'after-attack-roll' || !['attacks-with-this-weapon', 'weapon-attacks'].includes(effect.appliesTo)
+    ) throw new Error(`Invalid plugin item Headless effect: ${itemId}`)
+    if (!equipment) throw new Error(`Plugin item Headless effect requires equipment: ${itemId}`)
+    return { ...effect }
+  })
+
   return {
     id: itemId,
     name,
@@ -605,6 +627,8 @@ function clonePluginItemDefinition(
     ...(definition.cost ? { cost: { ...definition.cost } } : {}),
     stackable: definition.stackable,
     ...(equipment ? { equipment } : {}),
+    ...(resources?.length ? { resources } : {}),
+    ...(headlessEffects?.length ? { headlessEffects } : {}),
     ...(use ? { use: structuredClone(use) } : {}),
     source: { book: manifest.name, license: manifest.license },
     ownerPluginId: manifest.id,

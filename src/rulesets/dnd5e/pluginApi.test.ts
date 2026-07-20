@@ -176,6 +176,11 @@ describe('D&D 5e rules plugin API', () => {
         expect(api.registerItem({
           id: 'test-blade', name: '测试剑', category: 'equipment', icon: 'weapon',
           description: '测试装备。', rulesText: '命中与伤害 +1。', stackable: false,
+          resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' }],
+          headlessEffects: [{
+            kind: 'attack-roll-reroll', resourceId: 'charges', maximumDice: 1,
+            trigger: 'after-attack-roll', appliesTo: 'attacks-with-this-weapon',
+          }],
           equipment: {
             slot: 'mainWeapon', effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
             dnd5e: {
@@ -195,6 +200,8 @@ describe('D&D 5e rules plugin API', () => {
             id: `${pluginId}:test-blade`, name: '测试剑',
             effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
           }),
+          resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' }],
+          headlessEffects: [expect.objectContaining({ kind: 'attack-roll-reroll', resourceId: 'charges' })],
         }),
       ])
     } finally {

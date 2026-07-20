@@ -169,6 +169,17 @@ import {
   type SharedStandAgainstTidePromptView,
   type SharedPluginChoicePromptView,
 } from '../lib/combatInterruptPrompts'
+import {
+  answerInterruptWindow,
+  appendRollLedgerEntry,
+  closeInterruptWindow,
+  commitCombatTransaction,
+  createCombatTransaction,
+  openInterruptWindow,
+  rerollLedgerDie,
+  rollbackCombatTransaction,
+  type CombatTransaction,
+} from '../lib/combatTransaction'
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
   type Dnd5eFighterFeatureId,
@@ -303,6 +314,8 @@ import {
   planDnd5eMapResultApplication,
   spendDnd5eMovement,
   spendDnd5eTurnResource,
+  spendDnd5eInventoryResource,
+  dnd5eAttackRollRerollCandidates,
   applyDnd5eInventoryMutation,
   dnd5eItemAreasEnteredByMove,
   markDnd5eHuntingTrapTriggered,
@@ -4234,50 +4247,83 @@ export default function MapsPage() {
     })
   }
 
-  const requestSharedPluginChoice = async (
-    prepared: PreparedDnd5ePluginFeatureAction,
-  ): Promise<string | undefined> => {
+  const requestSharedChoiceWindow = async (input: {
+    id: string
+    transactionId: string
+    actor: Character
+    targetCharId?: string
+    pluginId: string
+    featureId: string
+    featureName: string
+    prompt: string
+    audience: 'actor' | 'target' | 'dm'
+    options: Array<{ id: string; label: string; description?: string }>
+    defaultOptionId: string
+    timeoutMs?: number
+    phase?: 'before-action' | 'before-hit' | 'before-damage' | 'after-save' | 'before-condition'
+    context?: Record<string, unknown>
+  }): Promise<string | undefined> => {
     if (!activeMap || !isDM) return undefined
-    const declaration = prepared.feature.action?.interrupt
-    if (!declaration) return undefined
-    const id = `plugin-choice:${prepared.action.id}`
-    const validOptionIds = new Set(declaration.options.map((option) => option.id))
+    const validOptionIds = new Set(input.options.map((option) => option.id))
     const readChoice = (response: PluginChoiceInterruptResponse | undefined) =>
       response?.optionId && validOptionIds.has(response.optionId)
         ? response.optionId
-        : declaration.defaultOptionId
+        : input.defaultOptionId
     const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
     const existing = existingQueue?.mapId === activeMap.id
-      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
+      ? existingQueue.interrupts.find((interrupt) => interrupt.id === input.id)
       : undefined
     if (existing && isCombatInterruptKind(existing, 'plugin-choice')) {
       if (existing.status === 'answered' || existing.status === 'done') {
         return readChoice(existing.response)
       }
-      if (existing.status === 'rolled-back') return declaration.defaultOptionId
+      if (existing.status === 'rolled-back') return input.defaultOptionId
     }
     return new Promise((resolve) => {
-      pendingSharedPluginChoiceRef.current = { id, actionId: prepared.action.id, resolve }
+      pendingSharedPluginChoiceRef.current = { id: input.id, actionId: input.transactionId, resolve }
       if (existing && isCombatInterruptKind(existing, 'plugin-choice') && existing.status === 'pending') return
       const interrupt = createCombatInterrupt<PluginChoiceInterruptPayload, PluginChoiceInterruptResponse>({
-        id,
-        transactionId: prepared.action.id,
+        id: input.id,
+        transactionId: input.transactionId,
         mapId: activeMap.id,
         kind: 'plugin-choice',
-        actorCharId: prepared.actor.id,
-        targetCharId: prepared.targetToken.characterId,
+        phase: input.phase,
+        actorCharId: input.actor.id,
+        targetCharId: input.targetCharId,
         payload: {
-          pluginId: prepared.feature.ownerPluginId,
-          featureId: prepared.feature.id,
-          featureName: prepared.feature.name,
-          prompt: declaration.prompt,
-          audience: declaration.audience,
-          options: declaration.options.map((option) => ({ ...option })),
-          defaultOptionId: declaration.defaultOptionId,
+          pluginId: input.pluginId,
+          featureId: input.featureId,
+          featureName: input.featureName,
+          prompt: input.prompt,
+          audience: input.audience,
+          options: input.options.map((option) => ({ ...option })),
+          defaultOptionId: input.defaultOptionId,
+          ...input.context,
         },
-        expiresAt: runtimeNow() + (declaration.timeoutMs ?? 30_000),
+        expiresAt: runtimeNow() + (input.timeoutMs ?? 30_000),
       })
       void publishCombatInterrupt(interrupt)
+    })
+  }
+
+  const requestSharedPluginChoice = async (
+    prepared: PreparedDnd5ePluginFeatureAction,
+  ): Promise<string | undefined> => {
+    const declaration = prepared.feature.action?.interrupt
+    if (!declaration) return undefined
+    return requestSharedChoiceWindow({
+      id: `plugin-choice:${prepared.action.id}`,
+      transactionId: prepared.action.id,
+      actor: prepared.actor,
+      targetCharId: prepared.targetToken.characterId,
+      pluginId: prepared.feature.ownerPluginId,
+      featureId: prepared.feature.id,
+      featureName: prepared.feature.name,
+      prompt: declaration.prompt,
+      audience: declaration.audience,
+      options: declaration.options.map((option) => ({ ...option })),
+      defaultOptionId: declaration.defaultOptionId,
+      timeoutMs: declaration.timeoutMs,
     })
   }
 
@@ -10523,10 +10569,106 @@ export default function MapsPage() {
         attackName: attack.profile.weaponName,
       }))
       const attackMode = dnd5eAttackModeWithProtection(attack.attackMode, useProtection)
-      const d20 = tranquility.passed ? await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定`, attack.targetToken.label) : 1
-      const d20Second = tranquility.passed && attackMode !== 'normal'
+      let d20 = tranquility.passed ? await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定`, attack.targetToken.label) : 1
+      let d20Second = tranquility.passed && attackMode !== 'normal'
         ? await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定（${attackMode === 'advantage' ? '优势' : '劣势'}）`, attack.targetToken.label)
         : undefined
+      let attackTransaction: CombatTransaction | undefined
+      let resourceSpentActor: Character | undefined
+      if (tranquility.passed) {
+        attackTransaction = appendRollLedgerEntry(createCombatTransaction({
+          id: action.id,
+          mapId: authorityMap.id,
+          combatId: action.combatId,
+          actorId: attack.actor.id,
+          actionId: action.id,
+          actionKind: 'weapon-attack',
+          now: runtimeNow(),
+        }), {
+          id: `${action.id}:attack-roll`,
+          kind: 'attack',
+          label: `${attack.profile.weaponName} 命中检定`,
+          dice: { sides: 20, values: d20Second == null ? [d20] : [d20, d20Second] },
+          modifier: attack.profile.attackModifier,
+          visibility: 'public',
+          sourceId: attack.actor.id,
+          targetId: attack.targetToken.id,
+          createdAt: runtimeNow(),
+        })
+        const rerollCandidates = dnd5eAttackRollRerollCandidates(attack.actor, attack.profile.weaponId)
+        if (rerollCandidates.length > 0) {
+          const dice = d20Second == null ? [d20] : [d20, d20Second]
+          const options = [
+            { id: 'keep', label: '保留当前结果', description: `当前攻击骰：${dice.join('、')}` },
+            ...rerollCandidates.flatMap((candidate) => dice.map((value, dieIndex) => ({
+              id: `reroll:${candidate.instanceId}:${dieIndex}`,
+              label: `用${candidate.itemName}重掷${dice.length > 1 ? `第 ${dieIndex + 1} 枚` : ''} d20`,
+              description: `当前为 ${value}；消耗 1 点${candidate.resource.label}（${candidate.resource.current}/${candidate.resource.maximum}），必须采用新结果。`,
+            }))),
+          ]
+          const windowId = `${action.id}:equipment-reroll`
+          attackTransaction = openInterruptWindow(attackTransaction, {
+            id: windowId,
+            phase: 'before-hit',
+            audience: 'actor',
+            title: '装备：重掷攻击骰',
+            description: '攻击骰已经掷出。你可以消耗装备资源重掷其中一枚 d20。',
+            options,
+            defaultOptionId: 'keep',
+            timeoutPolicy: 'rollback',
+            expiresAt: runtimeNow() + 30_000,
+            openedAt: runtimeNow(),
+          })
+          const choice = await requestSharedChoiceWindow({
+            id: `plugin-choice:${windowId}`,
+            transactionId: action.id,
+            actor: attack.actor,
+            targetCharId: attack.targetToken.characterId,
+            pluginId: 'dndstars.host.inventory',
+            featureId: 'equipment-attack-roll-reroll',
+            featureName: '装备重掷攻击骰',
+            prompt: '是否消耗 1 点装备充能，重掷一枚攻击 d20？新结果必须采用。',
+            audience: 'actor',
+            options,
+            defaultOptionId: 'keep',
+            phase: 'before-hit',
+            context: { contextKind: 'equipment-effect', rollLedgerEntryId: `${action.id}:attack-roll` },
+          }) ?? 'keep'
+          attackTransaction = closeInterruptWindow(
+            answerInterruptWindow(attackTransaction, windowId, choice, runtimeNow()),
+            windowId,
+            runtimeNow(),
+          )
+          if (choice.startsWith('reroll:')) {
+            const match = rerollCandidates
+              .flatMap((candidate) => dice.map((_, dieIndex) => ({ candidate, dieIndex, id: `reroll:${candidate.instanceId}:${dieIndex}` })))
+              .find((entry) => entry.id === choice)
+            if (match) {
+              const replacement = await rollDiceBoxD20(`${match.candidate.itemName}·重掷攻击骰`, attack.targetToken.label)
+              const spent = spendDnd5eInventoryResource(attack.actor, match.candidate.instanceId, match.candidate.effect.resourceId, 1)
+              if (spent.ok) {
+                attackTransaction = rerollLedgerDie(attackTransaction, {
+                  entryId: `${action.id}:attack-roll`,
+                  dieIndex: match.dieIndex,
+                  replacementValue: replacement,
+                  sourceId: match.candidate.instanceId,
+                  sourceLabel: match.candidate.itemName,
+                  spentResource: {
+                    characterId: attack.actor.id,
+                    instanceId: match.candidate.instanceId,
+                    resourceId: match.candidate.effect.resourceId,
+                    amount: 1,
+                  },
+                  now: runtimeNow(),
+                })
+                if (match.dieIndex === 0) d20 = replacement
+                else d20Second = replacement
+                resourceSpentActor = spent.character
+              }
+            }
+          }
+        }
+      }
       const blessRoll = tranquility.passed && attack.blessed
         ? (await rollDiceBoxValues(1, 4, '祝福术·攻击加值', attack.actorToken.label))[0]
         : undefined
@@ -10807,6 +10949,7 @@ export default function MapsPage() {
         classDamageRolls,
       })
       if (!initialResolved.result.ok) {
+        if (attackTransaction) attackTransaction = rollbackCombatTransaction(attackTransaction, initialResolved.result.reason, runtimeNow())
         acknowledgePlayerAction(action, 'rejected', initialResolved.result.reason)
         completePlayerActionRequest(action)
         return
@@ -10822,10 +10965,16 @@ export default function MapsPage() {
       requestBardicInspiration: requestDnd5eBardicInspirationRoll,
       requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
+      const changedCharacterIds = new Set(resolved.application.changedCharacterIds)
+      if (resourceSpentActor) changedCharacterIds.add(resourceSpentActor.id)
+      for (const characterId of changedCharacterIds) {
+        let next = resolved.application.characters.find((character) => character.id === characterId)
+        if (next && resourceSpentActor?.id === characterId) {
+          next = { ...next, dnd5eInventory: resourceSpentActor.dnd5eInventory }
+        }
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
+      if (attackTransaction) attackTransaction = commitCombatTransaction(attackTransaction, runtimeNow())
       for (const tokenId of resolved.application.changedTokenIds) {
         const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
         if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
