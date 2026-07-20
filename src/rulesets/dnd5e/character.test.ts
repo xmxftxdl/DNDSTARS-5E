@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e, normalizeLegacyAbilityScore } from './character'
+import { registerDnd5eRulesPlugin } from './pluginApi'
 
 function legacyCharacter(): Character {
   return {
@@ -40,6 +41,29 @@ describe('D&D 5e character boundary', () => {
       character: migrated, controller: 'player', initiativeD20: 10, position: { x: 0, y: 0 },
     })
     expect(combatant.savingThrowBonuses).toMatchObject({ str: 7, dex: 3, con: 6, int: 1, wis: 2, cha: 0 })
+  })
+
+  it('projects plugin-background skills into the Headless proficiency snapshot', () => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.background', name: 'Background Test', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerBackground({
+          id: 'observer', name: '观察者', skillProficiencies: ['insight', 'perception'],
+        })
+      },
+    })
+    try {
+      const migrated = migrateCharacterToDnd5e({
+        ...legacyCharacter(), rulesetId: 'dnd5e-2014-srd-5.1',
+        background: '观察者', dnd5eBackgroundId: 'com.example.background:observer', skills: [],
+      })
+      expect(migrated.skillProficiencies).toEqual(expect.arrayContaining(['insight', 'perception']))
+    } finally {
+      dispose()
+    }
   })
 
   it('applies 2014 exhaustion maximum-HP and death thresholds at the Headless boundary', () => {

@@ -23,6 +23,10 @@ function draft(): Dnd5eCustomRulesPluginDraft {
       abilityBonuses: { cha: 2 },
       flexibleAbilityBonus: { count: 1, amount: 1, exclude: ['cha'] },
     }],
+    backgrounds: [],
+    features: [],
+    spells: [],
+    items: [],
     abilityGenerationMethods: [{
       id: 'heroic-array',
       name: '英雄数组',
@@ -38,6 +42,10 @@ describe('DM custom rules plugin builder', () => {
     const source = buildDnd5eCustomRulesPluginSource(draft())
     expect(source).toContain('api.registerRace(race)')
     expect(source).toContain('api.registerAbilityGenerationMethod(method)')
+    expect(source).toContain('api.registerBackground(background)')
+    expect(source).toContain('api.registerFeature(feature)')
+    expect(source).toContain('api.registerSpell(spell)')
+    expect(source).toContain('api.registerItem(item)')
     expect(source.trimEnd()).toMatch(/export default plugin;$/)
   })
 
@@ -48,5 +56,31 @@ describe('DM custom rules plugin builder', () => {
       budget: 27, minimum: 8, maximum: 10, costs: { 8: 0, 9: 1 },
     }]
     expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('购点规则 错误购点 的 10 分成本无效。')
+  })
+
+  it('serializes background, feature, spell and item forms into one installable package', () => {
+    const value = draft()
+    value.backgrounds = [{ id: 'observer', name: '观察者', skillProficiencies: ['insight', 'perception'] }]
+    value.features = [{
+      id: 'steady-eye', name: '沉着观察', summary: '测试特性。', description: '由 DM 裁定。',
+      minimumLevel: 1, automation: 'manual',
+    }]
+    value.spells = [{
+      id: 'guiding-glow', name: '引导微光', level: 0, school: 'evocation', ritual: false,
+      castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+      components: { verbal: true, somatic: true, material: false },
+      duration: { type: 'instantaneous', concentration: false }, classes: ['wizard'],
+      description: '原创测试法术。', automation: { mode: 'reference-only' },
+    }]
+    value.items = [{
+      id: 'observer-ring', name: '观察者戒指', category: 'equipment', icon: 'generic',
+      description: '测试装备。', rulesText: '察看 UI 注册结果。', stackable: false,
+      equipment: { slot: 'ring', effects: { savingThrowBonus: 1 } },
+    }]
+    const source = buildDnd5eCustomRulesPluginSource(value)
+    expect(source).toContain('"observer-ring"')
+    expect(source).toContain('"guiding-glow"')
+    expect(source).toContain('api.registerBackground(background)')
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
   })
 })

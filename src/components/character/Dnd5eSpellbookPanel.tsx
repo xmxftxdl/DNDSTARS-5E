@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { BookMarked, BookOpen, Bot, Search, Sparkles, X } from 'lucide-react'
 import type { Character } from '../../types/character'
 import {
   DND5E_SPELL_CLASS_LABELS,
   DND5E_SPELL_SCHOOL_LABELS,
-  dnd5eSpellbookEntries,
+  dnd5eSpellbookEntriesWithPlugins,
   type Dnd5eSpellbookEntry,
 } from '../../rulesets/dnd5e/spellbook'
 import {
@@ -14,6 +14,9 @@ import {
   dnd5eCombatSpellSelectionLimits,
   dnd5ePactSlotLevel,
   dnd5eSpellSelectionKey,
+  dnd5eRulesPluginRegistrySnapshot,
+  registeredDnd5ePluginSpells,
+  subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e'
 import { useSpellbookStore } from '../../store/spellbook'
 
@@ -21,11 +24,18 @@ const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
 export default function Dnd5eSpellbookPanel({ character, onChange }: { character: Character; onChange: (patch: Partial<Character>) => void }) {
   const imported = useSpellbookStore((state) => state.spells)
+  const pluginRevision = useSyncExternalStore(
+    subscribeDnd5eRulesPluginRegistry,
+    dnd5eRulesPluginRegistrySnapshot,
+    dnd5eRulesPluginRegistrySnapshot,
+  )
   const [query, setQuery] = useState('')
   const [levelFilter, setLevelFilter] = useState('all')
   const [detailSpellId, setDetailSpellId] = useState<string | null>(null)
   const definition = dnd5eClassDefinitionForCharacter(character)
-  const allEntries = useMemo(() => dnd5eSpellbookEntries(imported), [imported])
+  void pluginRevision
+  const pluginSpells = registeredDnd5ePluginSpells()
+  const allEntries = dnd5eSpellbookEntriesWithPlugins(imported, pluginSpells)
   if (!definition?.spellcasting) return <section className="glass rounded-2xl p-6 text-sm text-slate-500">该职业没有 D&D 5e 2014 施法或契约魔法能力。</section>
   const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, character.level - 1))]
   const highestSpellLevel = definition.spellcasting.kind === 'pact'

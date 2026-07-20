@@ -3,6 +3,7 @@ import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
   dnd5eSpellbookEntries,
+  dnd5eSpellbookEntriesWithPlugins,
   parseDnd5eSpellImport,
   parseDnd5eSharedSpellCollection,
 } from './spellbook'
@@ -84,5 +85,18 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core').every((entry) => !!entry.reference)).toBe(true)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(34)
     expect(entries.find((entry) => entry.id === 'test-pack:ember-lance')).toMatchObject({ sourceKind: 'room-import', headless: false })
+  })
+
+  it('adds active plugin spells to the spellbook and preserves their automation badge', () => {
+    const imported = parseDnd5eSpellImport(bundle()).spells[0]
+    const entries = dnd5eSpellbookEntriesWithPlugins([], [{
+      ...imported,
+      id: 'test-pack:guided-glow',
+      automation: { mode: 'headless-action', actionId: 'guided-glow' },
+    }])
+    expect(entries.find((entry) => entry.id === 'test-pack:guided-glow')).toMatchObject({
+      sourceKind: 'room-import', headless: true, catalogOnly: false,
+      imported: { automation: { mode: 'reference-only' } },
+    })
   })
 })

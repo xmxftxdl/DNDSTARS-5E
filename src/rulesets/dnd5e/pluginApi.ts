@@ -1,5 +1,5 @@
 import type { ClassResourceDefinition, ClassResourceReset } from '../../lib/classDefinitionTypes'
-import type { AbilityKey } from '../../lib/dnd'
+import { SKILLS, type AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { RulesetAdapter } from '../contracts'
 import {
@@ -15,7 +15,7 @@ import type {
   Dnd5eCombatEvent,
   Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
-import { DND5E_2014_RACE_OPTIONS } from './characterOptions'
+import { DND5E_2014_BACKGROUND_OPTIONS, DND5E_2014_RACE_OPTIONS } from './characterOptions'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
@@ -331,6 +331,23 @@ export interface RegisteredDnd5ePluginRace extends Omit<Dnd5ePluginRaceDefinitio
   ownerPluginLicense: string
 }
 
+export interface Dnd5ePluginBackgroundDefinition {
+  id: string
+  name: string
+  description?: string
+  skillProficiencies: readonly string[]
+  toolProficiencies?: readonly string[]
+  languages?: number
+  feature?: { name: string; description: string }
+}
+
+export interface RegisteredDnd5ePluginBackground extends Omit<Dnd5ePluginBackgroundDefinition, 'id'> {
+  id: string
+  ownerPluginId: string
+  ownerPluginName: string
+  ownerPluginLicense: string
+}
+
 export type Dnd5ePluginAbilityGenerationDefinition = {
   id: string
   name: string
@@ -391,6 +408,7 @@ export interface Dnd5eRulesPluginApi {
   registerSubclass(definition: Dnd5ePluginSubclassDefinition): string
   registerHeadlessAction(definition: Dnd5ePluginHeadlessActionDefinition): string
   registerRace(definition: Dnd5ePluginRaceDefinition): string
+  registerBackground(definition: Dnd5ePluginBackgroundDefinition): string
   registerAbilityGenerationMethod(definition: Dnd5ePluginAbilityGenerationDefinition): string
   /** 注册可发现的法术数据；自动结算必须显式绑定同一插件的 Worker Headless action。 */
   registerSpell(definition: Dnd5ePluginSpellDefinition): string
@@ -422,6 +440,7 @@ const pluginFeatures = new Map<string, RegisteredDnd5ePluginFeature>()
 const pluginResources = new Map<string, RegisteredDnd5ePluginResource>()
 const pluginSubclasses = new Map<string, RegisteredDnd5ePluginSubclass>()
 const pluginRaces = new Map<string, RegisteredDnd5ePluginRace>()
+const pluginBackgrounds = new Map<string, RegisteredDnd5ePluginBackground>()
 const pluginAbilityGenerationMethods = new Map<string, RegisteredDnd5ePluginAbilityGeneration>()
 const pluginSpells = new Map<string, RegisteredDnd5ePluginSpell>()
 const pluginItems = new Map<string, RegisteredDnd5ePluginItem>()
@@ -1162,6 +1181,58 @@ export function registerDnd5eRulesPlugin(
       })
       return raceId
     },
+    registerBackground(definition) {
+      assertAcceptingContributions()
+      const backgroundId = namespacedId(id, definition.id)
+      if (pluginBackgrounds.has(backgroundId)) throw new Error(`Plugin background already registered: ${backgroundId}`)
+      if (typeof definition.name !== 'string' || !definition.name.trim() || definition.name.length > 160) {
+        throw new Error(`Incomplete plugin background definition: ${backgroundId}`)
+      }
+      const name = definition.name.trim()
+      if ((DND5E_2014_BACKGROUND_OPTIONS as readonly string[]).includes(name) ||
+        [...pluginBackgrounds.values()].some((background) => background.name === name)) {
+        throw new Error(`Plugin background name must be unique: ${name}`)
+      }
+      const validSkills = new Set(SKILLS.map((skill) => skill.key))
+      const skillProficiencies = [...new Set(definition.skillProficiencies ?? [])]
+      if (skillProficiencies.length > 2 || skillProficiencies.some((skill) => !validSkills.has(skill))) {
+        throw new Error(`Invalid plugin background skills: ${backgroundId}`)
+      }
+      const toolProficiencies = [...new Set(definition.toolProficiencies ?? [])]
+      if (toolProficiencies.length > 8 || toolProficiencies.some((tool) => typeof tool !== 'string' || !tool.trim() || tool.length > 160)) {
+        throw new Error(`Invalid plugin background tools: ${backgroundId}`)
+      }
+      if (!finiteInteger(definition.languages ?? 0, 0, 8)) {
+        throw new Error(`Invalid plugin background languages: ${backgroundId}`)
+      }
+      if (definition.description != null && (typeof definition.description !== 'string' || definition.description.length > 20_000)) {
+        throw new Error(`Invalid plugin background description: ${backgroundId}`)
+      }
+      if (definition.feature && (
+        typeof definition.feature.name !== 'string' || !definition.feature.name.trim() || definition.feature.name.length > 160 ||
+        typeof definition.feature.description !== 'string' || !definition.feature.description.trim() || definition.feature.description.length > 20_000
+      )) throw new Error(`Invalid plugin background feature: ${backgroundId}`)
+      const registered: RegisteredDnd5ePluginBackground = {
+        id: backgroundId,
+        name,
+        ...(definition.description?.trim() ? { description: definition.description.trim() } : {}),
+        skillProficiencies,
+        ...(toolProficiencies.length > 0 ? { toolProficiencies: toolProficiencies.map((tool) => tool.trim()) } : {}),
+        ...(definition.languages ? { languages: definition.languages } : {}),
+        ...(definition.feature ? { feature: {
+          name: definition.feature.name.trim(),
+          description: definition.feature.description.trim(),
+        } } : {}),
+        ownerPluginId: id,
+        ownerPluginName: plugin.manifest.name,
+        ownerPluginLicense: plugin.manifest.license,
+      }
+      pluginBackgrounds.set(backgroundId, registered)
+      disposers.push(() => {
+        if (pluginBackgrounds.get(backgroundId) === registered) pluginBackgrounds.delete(backgroundId)
+      })
+      return backgroundId
+    },
     registerAbilityGenerationMethod(definition) {
       assertAcceptingContributions()
       const methodId = namespacedId(id, definition.id)
@@ -1459,6 +1530,27 @@ export function dnd5ePluginRaceDefinition(idOrName: string): RegisteredDnd5ePlug
       ...(race.flexibleAbilityBonus.exclude ? { exclude: [...race.flexibleAbilityBonus.exclude] } : {}),
     } : undefined,
   } : undefined
+}
+
+function cloneRegisteredBackground(background: RegisteredDnd5ePluginBackground): RegisteredDnd5ePluginBackground {
+  return {
+    ...background,
+    skillProficiencies: [...background.skillProficiencies],
+    toolProficiencies: background.toolProficiencies ? [...background.toolProficiencies] : undefined,
+    feature: background.feature ? { ...background.feature } : undefined,
+  }
+}
+
+export function registeredDnd5ePluginBackgrounds(): readonly RegisteredDnd5ePluginBackground[] {
+  return [...pluginBackgrounds.values()]
+    .map(cloneRegisteredBackground)
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+}
+
+export function dnd5ePluginBackgroundDefinition(idOrName: string): RegisteredDnd5ePluginBackground | undefined {
+  const background = pluginBackgrounds.get(idOrName) ??
+    [...pluginBackgrounds.values()].find((candidate) => candidate.name === idOrName)
+  return background ? cloneRegisteredBackground(background) : undefined
 }
 
 export function registeredDnd5ePluginAbilityGenerationMethods(): readonly RegisteredDnd5ePluginAbilityGeneration[] {

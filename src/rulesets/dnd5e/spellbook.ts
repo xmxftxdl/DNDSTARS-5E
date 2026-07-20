@@ -105,6 +105,12 @@ export interface Dnd5eSpellbookEntry {
   combat?: Dnd5eSrdSpellDefinition
 }
 
+export interface Dnd5ePluginSpellbookReference extends Omit<Dnd5eImportedSpell, 'automation'> {
+  automation:
+    | { mode: 'reference-only' }
+    | { mode: 'headless-action'; actionId: string }
+}
+
 export class Dnd5eSpellImportError extends Error {
   readonly problems: string[]
 
@@ -372,6 +378,23 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
     imported: spell,
   }))
   return [...core, ...room].sort((left, right) => left.level - right.level || left.name.localeCompare(right.name, 'zh-CN'))
+}
+
+/** 把当前激活规则包的法术并入法术书，同时保留其真实 Headless 标记。 */
+export function dnd5eSpellbookEntriesWithPlugins(
+  imported: readonly Dnd5eImportedSpell[],
+  pluginSpells: readonly Dnd5ePluginSpellbookReference[],
+): Dnd5eSpellbookEntry[] {
+  const automation = new Map(pluginSpells.map((spell) => [spell.id, spell.automation]))
+  const pluginIds = new Set(pluginSpells.map((spell) => spell.id))
+  const references: Dnd5eImportedSpell[] = pluginSpells.map((spell) => ({
+    ...spell,
+    automation: { mode: 'reference-only' },
+  }))
+  return dnd5eSpellbookEntries([...imported.filter((spell) => !pluginIds.has(spell.id)), ...references]).map((entry) =>
+    automation.get(entry.id)?.mode === 'headless-action'
+      ? { ...entry, headless: true, catalogOnly: false }
+      : entry)
 }
 
 export const DND5E_SPELL_SCHOOL_LABELS: Readonly<Record<Dnd5eSpellbookSchoolId, string>> = {

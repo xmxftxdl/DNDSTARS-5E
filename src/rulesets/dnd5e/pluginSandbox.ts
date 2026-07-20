@@ -1,6 +1,7 @@
 import type {
   Dnd5ePluginAbilityGenerationDefinition,
   Dnd5ePluginAction,
+  Dnd5ePluginBackgroundDefinition,
   Dnd5ePluginDiceRollDeclaration,
   Dnd5ePluginFeatureDefinition,
   Dnd5ePluginItemDefinition,
@@ -52,6 +53,7 @@ interface SandboxContributions {
   features: Dnd5ePluginFeatureDefinition[]
   actions: SandboxActionDeclaration[]
   races: Dnd5ePluginRaceDefinition[]
+  backgrounds: Dnd5ePluginBackgroundDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   spells: Dnd5ePluginSpellDefinition[]
   items: Dnd5ePluginItemDefinition[]
@@ -104,6 +106,7 @@ export interface Dnd5ePluginSandboxSession {
   readonly features: readonly Dnd5ePluginFeatureDefinition[]
   readonly actions: readonly SandboxActionDeclaration[]
   readonly races: readonly Dnd5ePluginRaceDefinition[]
+  readonly backgrounds: readonly Dnd5ePluginBackgroundDefinition[]
   readonly abilityGenerationMethods: readonly Dnd5ePluginAbilityGenerationDefinition[]
   readonly spells: readonly Dnd5ePluginSpellDefinition[]
   readonly items: readonly Dnd5ePluginItemDefinition[]
@@ -309,6 +312,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
     get features() { return initialized.features },
     get actions() { return initialized.actions },
     get races() { return initialized.races },
+    get backgrounds() { return initialized.backgrounds ?? [] },
     get abilityGenerationMethods() { return initialized.abilityGenerationMethods },
     get spells() { return initialized.spells ?? [] },
     get items() { return initialized.items ?? [] },
@@ -388,6 +392,7 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
       for (const subclass of session.subclasses) api.registerSubclass(subclass)
       for (const resource of session.resources) api.registerResource(resource)
       for (const race of session.races) api.registerRace(race)
+      for (const background of session.backgrounds) api.registerBackground(background)
       for (const method of session.abilityGenerationMethods) api.registerAbilityGenerationMethod(method)
       for (const spell of session.spells) api.registerSpell(spell)
       for (const item of session.items) api.registerItem(item)

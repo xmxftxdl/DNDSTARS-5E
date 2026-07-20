@@ -24,6 +24,7 @@ import {
   resolveDnd5eShortRestHitDice,
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginFeatures,
+  registeredDnd5ePluginBackgrounds,
   registeredDnd5ePluginRaces,
   dnd5eRaceSpeed,
   subscribeDnd5eRulesPluginRegistry,
@@ -89,7 +90,11 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
   if (!character) return <p className="text-slate-400">未找到角色。</p>
   const c = character
   const pluginRaces = registeredDnd5ePluginRaces()
+  const pluginBackgrounds = registeredDnd5ePluginBackgrounds()
   const raceOptions = [...DND5E_2014_RACE_OPTIONS, ...pluginRaces.map((race) => race.name)]
+  const backgroundOptions = [...DND5E_2014_BACKGROUND_OPTIONS, ...pluginBackgrounds.map((background) => background.name)]
+  const selectedPluginBackground = pluginBackgrounds.find((background) =>
+    background.id === c.dnd5eBackgroundId || background.name === c.background)
   const classDefinition = dnd5eClassDefinitionForCharacter(c)
   const hasSpellbookTab = !!classDefinition?.spellcasting
   const hasPluginTab = registeredDnd5ePluginFeatures().length > 0 || (c.dnd5ePluginFeatureIds?.length ?? 0) > 0
@@ -202,7 +207,23 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                 })
               }}
             />
-            <SelectField label="背景" value={c.background} options={DND5E_2014_BACKGROUND_OPTIONS} onChange={(value) => update(id, { background: value })} />
+            <SelectField
+              label="背景"
+              value={c.background}
+              options={backgroundOptions}
+              onChange={(value) => {
+                const pluginBackground = pluginBackgrounds.find((background) => background.name === value)
+                const previousBackgroundSkills = new Set(c.dnd5eBackgroundSkillProficiencies ?? [])
+                update(id, {
+                  background: value,
+                  dnd5eBackgroundId: pluginBackground?.id,
+                  dnd5eBackgroundSkillProficiencies: pluginBackground ? [...pluginBackground.skillProficiencies] : [],
+                  skills: pluginBackground
+                    ? [...new Set([...c.skills.filter((skill) => !previousBackgroundSkills.has(skill)), ...pluginBackground.skillProficiencies])]
+                    : c.skills.filter((skill) => !previousBackgroundSkills.has(skill)),
+                })
+              }}
+            />
             <SelectField label="阵营" value={c.alignment ?? ''} options={DND5E_2014_ALIGNMENT_OPTIONS} onChange={(value) => update(id, { alignment: value })} />
             <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => update(id, { experience: value })} />
             <Field label="玩家" value={c.player} onChange={(value) => update(id, { player: value })} />
@@ -228,6 +249,15 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
         <Stat icon={Sparkles} label="被动察觉" value={`${passivePerception}`} />
         <Stat icon={Dices} label="规则版本" value="5e 2014" />
       </section>
+
+      {selectedPluginBackground && <section className="glass rounded-2xl border border-amber-400/15 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h3 className="text-sm font-semibold text-amber-100">{selectedPluginBackground.name}</h3><p className="mt-1 text-xs text-slate-500">背景插件：{selectedPluginBackground.ownerPluginName}</p></div>
+          <span className="rounded-lg border border-white/8 bg-black/15 px-2.5 py-1 text-[11px] text-slate-400">技能：{selectedPluginBackground.skillProficiencies.map((key) => SKILLS.find((skill) => skill.key === key)?.label ?? key).join('、') || '无'}</span>
+        </div>
+        {selectedPluginBackground.description && <p className="mt-3 text-xs leading-5 text-slate-400">{selectedPluginBackground.description}</p>}
+        {selectedPluginBackground.feature && <div className="mt-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2"><p className="text-xs font-semibold text-slate-200">背景特性：{selectedPluginBackground.feature.name}</p><p className="mt-1 text-xs leading-5 text-slate-500">{selectedPluginBackground.feature.description}</p></div>}
+      </section>}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <section className="glass rounded-2xl p-4">

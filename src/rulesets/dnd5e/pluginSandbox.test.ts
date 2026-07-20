@@ -38,6 +38,7 @@ class FakeWorker {
             features: [],
             actions: [],
             races: [],
+            backgrounds: [{ id: 'observer', name: '观察者', skillProficiencies: ['perception'] }],
             abilityGenerationMethods: [],
             items: [{
               id: 'test-item', name: '测试物品', category: 'adventuring-gear', icon: 'generic',
@@ -82,6 +83,7 @@ describe('D&D 5e plugin state migration sandbox protocol', () => {
     const session = await createDnd5ePluginSandbox(new TextEncoder().encode('plugin').buffer)
     expect(session.migrations).toEqual([{ fromVersion: 1, toVersion: 2 }])
     expect(session.items).toEqual([expect.objectContaining({ id: 'test-item' })])
+    expect(session.backgrounds).toEqual([expect.objectContaining({ id: 'observer' })])
 
     const result = await session.migrateState(1, { counter: 3 })
     expect(result).toEqual({

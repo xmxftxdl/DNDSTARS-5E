@@ -219,7 +219,7 @@ export default function RulesPluginsPage() {
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="规则插件"
-        description="安装独立规则包，为人物卡和 DM Headless 结算注入第三方特性。核心仍只包含 D&D 5e 2014／SRD 5.1。"
+        description="安装或创建独立规则包，为人物卡和 DM Headless 结算注入种族、背景、特性、法术与装备。核心仍只包含 D&D 5e 2014／SRD 5.1。"
         actions={(
           <div className="flex flex-wrap gap-2">
             <a

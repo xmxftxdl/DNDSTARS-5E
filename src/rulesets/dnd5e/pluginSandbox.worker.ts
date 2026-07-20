@@ -188,6 +188,7 @@ function initializePlugin(source: string): {
   features: readonly Record<string, unknown>[]
   actions: readonly { id: string; allowOffTurn?: boolean; rolls?: readonly Record<string, unknown>[] }[]
   races: readonly Record<string, unknown>[]
+  backgrounds: readonly Record<string, unknown>[]
   abilityGenerationMethods: readonly Record<string, unknown>[]
   spells: readonly Record<string, unknown>[]
   items: readonly Record<string, unknown>[]
@@ -234,6 +235,7 @@ function initializePlugin(source: string): {
   migrationDeclarations.sort((left, right) => left.fromVersion - right.fromVersion)
   const features: Record<string, unknown>[] = []
   const races: Record<string, unknown>[] = []
+  const backgrounds: Record<string, unknown>[] = []
   const abilityGenerationMethods: Record<string, unknown>[] = []
   const spells: Record<string, unknown>[] = []
   const items: Record<string, unknown>[] = []
@@ -288,6 +290,12 @@ function initializePlugin(source: string): {
       races.push(safe)
       return `${manifest.id}:${safe.id}`
     },
+    registerBackground(definition: unknown) {
+      const safe = clonePlain(definition, 'background') as Record<string, unknown>
+      assertId(safe.id, 'background id')
+      backgrounds.push(safe)
+      return `${manifest.id}:${safe.id}`
+    },
     registerAbilityGenerationMethod(definition: unknown) {
       const safe = clonePlain(definition, 'abilityGenerationMethod') as Record<string, unknown>
       assertId(safe.id, 'ability generation method id')
@@ -314,6 +322,7 @@ function initializePlugin(source: string): {
     features,
     actions: [...headlessActions.values()].map(({ id, allowOffTurn, rolls }) => ({ id, allowOffTurn, rolls })),
     races,
+    backgrounds,
     abilityGenerationMethods,
     spells,
     items,

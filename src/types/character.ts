@@ -29,6 +29,10 @@ export interface Character {
   charClass: string
   level: number
   background: string
+  /** 可选的完整插件命名空间背景 ID；background 保留可读名称。 */
+  dnd5eBackgroundId?: string
+  /** 背景授予技能的存档快照；插件暂时未加载时仍可显示，房间兼容检查仍会阻止缺包结算。 */
+  dnd5eBackgroundSkillProficiencies?: string[]
   alignment?: string // D&D 5e 2014 九大阵营
   experience: number // 经验值
   reputation: number // 声望

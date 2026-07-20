@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Download, Plus, Save, Trash2 } from 'lucide-react'
-import { ABILITIES, type AbilityKey } from '../../lib/dnd'
+import { Download, FolderOpen, Plus, Save, Trash2 } from 'lucide-react'
+import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   buildDnd5eCustomRulesPluginSource,
   dnd5eCustomRulesPluginFileName,
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomRulesPluginDraft,
   type Dnd5ePluginAbilityGenerationDefinition,
+  type Dnd5ePluginBackgroundDefinition,
+  type Dnd5ePluginFeatureDefinition,
+  type Dnd5ePluginItemDefinition,
   type Dnd5ePluginRaceDefinition,
+  type Dnd5ePluginSpellDefinition,
 } from '../../rulesets/dnd5e'
 
 interface RaceDraft {
@@ -35,6 +39,108 @@ interface MethodDraft {
   dieSides: number
   dropLowest: number
 }
+
+interface BackgroundDraft {
+  id: string
+  name: string
+  description: string
+  skillProficiencies: string[]
+  toolProficiencies: string
+  languages: number
+  featureName: string
+  featureDescription: string
+}
+
+interface FeatureDraft {
+  id: string
+  name: string
+  summary: string
+  description: string
+  minimumLevel: number
+}
+
+interface SpellDraft {
+  id: string
+  name: string
+  englishName: string
+  level: number
+  school: Dnd5ePluginSpellDefinition['school']
+  classes: Dnd5ePluginSpellDefinition['classes']
+  ritual: boolean
+  castingTimeUnit: Dnd5ePluginSpellDefinition['castingTime']['unit']
+  castingTimeValue: number
+  reactionTrigger: string
+  rangeType: Dnd5ePluginSpellDefinition['range']['type']
+  rangeFeet: number
+  verbal: boolean
+  somatic: boolean
+  material: boolean
+  materialText: string
+  durationType: Dnd5ePluginSpellDefinition['duration']['type']
+  durationValue: number
+  durationUnit: NonNullable<Dnd5ePluginSpellDefinition['duration']['unit']>
+  concentration: boolean
+  description: string
+  higherLevels: string
+}
+
+interface ItemDraft {
+  id: string
+  name: string
+  description: string
+  rulesText: string
+  kind: 'weapon' | 'armor' | 'shield' | 'accessory' | 'consumable'
+  slot: 'mainWeapon' | 'offHand' | 'armor' | 'helmet' | 'shoes' | 'ring' | 'necklace'
+  weaponMode: 'melee' | 'ranged'
+  weaponCategory: 'simple' | 'martial'
+  attackAbility: 'str' | 'dex' | 'finesse'
+  damageCount: number
+  damageSides: number
+  damageType: 'slashing' | 'piercing' | 'bludgeoning'
+  reachFeet: number
+  rangeNormal: number
+  rangeLong: number
+  armorCategory: 'light' | 'medium' | 'heavy'
+  baseArmorClass: number
+  dexterityBonus: 'full' | 'max-2' | 'none'
+  shieldBonus: number
+  weaponAttackBonus: number
+  weaponDamageBonus: number
+  armorClassBonus: number
+  savingThrowBonus: number
+  speedBonusFeet: number
+  healingCount: number
+  healingSides: number
+  healingBonus: number
+}
+
+type BuilderSection = 'races' | 'backgrounds' | 'features' | 'spells' | 'items' | 'methods'
+
+interface SavedBuilderDraft {
+  metadata: { id: string; name: string; version: string; publisher: string; license: string; description: string }
+  races: RaceDraft[]
+  backgrounds: BackgroundDraft[]
+  features: FeatureDraft[]
+  spells: SpellDraft[]
+  items: ItemDraft[]
+  methods: MethodDraft[]
+}
+
+const DRAFT_STORAGE_KEY = 'dndstars5e:custom-rules-workshop:v1'
+const SPELL_SCHOOLS = [['abjuration', '防护'], ['conjuration', '咒法'], ['divination', '预言'], ['enchantment', '惑控'], ['evocation', '塑能'], ['illusion', '幻术'], ['necromancy', '死灵'], ['transmutation', '变化']] as const
+const CASTING_UNITS = [['action', '动作'], ['bonus-action', '附赠动作'], ['reaction', '反应'], ['minute', '分钟'], ['hour', '小时']] as const
+const RANGE_TYPES = [['self', '自身'], ['touch', '触及'], ['distance', '距离'], ['sight', '视线'], ['unlimited', '无限'], ['special', '特殊']] as const
+const DURATION_TYPES = [['instantaneous', '立即'], ['timed', '计时'], ['until-dispelled', '直到被解除'], ['special', '特殊']] as const
+const DURATION_UNITS = [['round', '轮'], ['minute', '分钟'], ['hour', '小时'], ['day', '日']] as const
+const SPELL_CLASSES = [['bard', '吟游诗人'], ['cleric', '牧师'], ['druid', '德鲁伊'], ['paladin', '圣武士'], ['ranger', '游侠'], ['sorcerer', '术士'], ['warlock', '邪术师'], ['wizard', '法师']] as const
+const ITEM_KINDS = [['weapon', '武器'], ['armor', '护甲'], ['shield', '盾牌'], ['accessory', '饰品／其他装备'], ['consumable', '治疗消耗品']] as const
+const EQUIPMENT_SLOTS = [['mainWeapon', '主手'], ['offHand', '副手'], ['armor', '护甲'], ['helmet', '头部'], ['shoes', '足部'], ['ring', '戒指'], ['necklace', '颈部']] as const
+const WEAPON_CATEGORIES = [['simple', '简易武器'], ['martial', '军用武器']] as const
+const WEAPON_MODES = [['melee', '近战'], ['ranged', '远程']] as const
+const ATTACK_ABILITIES = [['str', '力量'], ['dex', '敏捷'], ['finesse', '灵巧（取高）']] as const
+const DAMAGE_TYPES = [['slashing', '挥砍'], ['piercing', '穿刺'], ['bludgeoning', '钝击']] as const
+const ARMOR_CATEGORIES = [['light', '轻甲'], ['medium', '中甲'], ['heavy', '重甲']] as const
+const DEXTERITY_BONUSES = [['full', '完整敏捷调整'], ['max-2', '敏捷最高 +2'], ['none', '不加敏捷']] as const
 
 interface Props {
   defaultPublisher?: string
@@ -71,6 +177,45 @@ function newMethod(index: number): MethodDraft {
     diceCount: 4,
     dieSides: 6,
     dropLowest: 1,
+  }
+}
+
+function newBackground(index: number): BackgroundDraft {
+  return {
+    id: `custom-background-${index}`, name: `自定义背景 ${index}`, description: '',
+    skillProficiencies: [], toolProficiencies: '', languages: 0,
+    featureName: '', featureDescription: '',
+  }
+}
+
+function newFeature(index: number): FeatureDraft {
+  return {
+    id: `custom-feature-${index}`, name: `自定义特性 ${index}`,
+    summary: '由 DM 提供的自定义特性。', description: '', minimumLevel: 1,
+  }
+}
+
+function newSpell(index: number): SpellDraft {
+  return {
+    id: `custom-spell-${index}`, name: `自定义法术 ${index}`, englishName: '', level: 1,
+    school: 'evocation', classes: ['wizard'], ritual: false,
+    castingTimeUnit: 'action', castingTimeValue: 1, reactionTrigger: '', rangeType: 'distance', rangeFeet: 60,
+    verbal: true, somatic: true, material: false, materialText: '',
+    durationType: 'instantaneous', durationValue: 1, durationUnit: 'round', concentration: false,
+    description: '', higherLevels: '',
+  }
+}
+
+function newItem(index: number): ItemDraft {
+  return {
+    id: `custom-item-${index}`, name: `自定义武器 ${index}`, description: '', rulesText: '',
+    kind: 'weapon', slot: 'mainWeapon', weaponMode: 'melee', weaponCategory: 'martial',
+    attackAbility: 'str', damageCount: 1, damageSides: 8, damageType: 'slashing',
+    reachFeet: 5, rangeNormal: 20, rangeLong: 60,
+    armorCategory: 'light', baseArmorClass: 11, dexterityBonus: 'full', shieldBonus: 2,
+    weaponAttackBonus: 0, weaponDamageBonus: 0, armorClassBonus: 0,
+    savingThrowBonus: 0, speedBonusFeet: 0,
+    healingCount: 1, healingSides: 4, healingBonus: 0,
   }
 }
 
@@ -127,19 +272,135 @@ function toMethodDefinition(method: MethodDraft): Dnd5ePluginAbilityGenerationDe
   }
 }
 
+function toBackgroundDefinition(background: BackgroundDraft): Dnd5ePluginBackgroundDefinition {
+  const tools = background.toolProficiencies.split(/[，,]+/).map((value) => value.trim()).filter(Boolean)
+  return {
+    id: background.id.trim(), name: background.name.trim(), description: background.description.trim(),
+    skillProficiencies: [...background.skillProficiencies],
+    ...(tools.length > 0 ? { toolProficiencies: tools } : {}),
+    ...(background.languages > 0 ? { languages: background.languages } : {}),
+    ...(background.featureName.trim() && background.featureDescription.trim() ? {
+      feature: { name: background.featureName.trim(), description: background.featureDescription.trim() },
+    } : {}),
+  }
+}
+
+function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinition {
+  return {
+    id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
+    description: feature.description.trim(), minimumLevel: feature.minimumLevel, automation: 'manual',
+  }
+}
+
+function toSpellDefinition(spell: SpellDraft): Dnd5ePluginSpellDefinition {
+  return {
+    id: spell.id.trim(), name: spell.name.trim(),
+    ...(spell.englishName.trim() ? { englishName: spell.englishName.trim() } : {}),
+    level: spell.level, school: spell.school, ritual: spell.ritual,
+    castingTime: {
+      value: spell.castingTimeValue, unit: spell.castingTimeUnit,
+      ...(spell.castingTimeUnit === 'reaction' && spell.reactionTrigger.trim()
+        ? { reactionTrigger: spell.reactionTrigger.trim() }
+        : {}),
+    },
+    range: {
+      type: spell.rangeType,
+      ...(spell.rangeType === 'distance' ? { feet: spell.rangeFeet } : {}),
+    },
+    components: {
+      verbal: spell.verbal, somatic: spell.somatic, material: spell.material,
+      ...(spell.material && spell.materialText.trim() ? { materialText: spell.materialText.trim() } : {}),
+    },
+    duration: {
+      type: spell.durationType, concentration: spell.durationType !== 'instantaneous' && spell.concentration,
+      ...(spell.durationType === 'timed' ? { value: spell.durationValue, unit: spell.durationUnit } : {}),
+    },
+    classes: [...spell.classes], description: spell.description.trim(),
+    ...(spell.higherLevels.trim() ? { higherLevels: spell.higherLevels.trim() } : {}),
+    automation: { mode: 'reference-only' },
+  }
+}
+
+function staticEffects(item: ItemDraft) {
+  const effects = {
+    ...(item.weaponAttackBonus ? { weaponAttackBonus: item.weaponAttackBonus } : {}),
+    ...(item.weaponDamageBonus ? { weaponDamageBonus: item.weaponDamageBonus } : {}),
+    ...(item.armorClassBonus ? { armorClassBonus: item.armorClassBonus } : {}),
+    ...(item.savingThrowBonus ? { savingThrowBonus: item.savingThrowBonus } : {}),
+    ...(item.speedBonusFeet ? { speedBonusFeet: item.speedBonusFeet } : {}),
+  }
+  return Object.keys(effects).length > 0 ? effects : undefined
+}
+
+function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
+  const common = {
+    id: item.id.trim(), name: item.name.trim(), description: item.description.trim(),
+    rulesText: item.rulesText.trim(), weightLb: 0, stackable: false,
+  }
+  if (item.kind === 'consumable') return {
+    ...common, category: 'consumable', icon: 'healing-potion', stackable: true,
+    use: {
+      economy: 'action', consumeQuantity: 1,
+      effect: { kind: 'healing', dice: { count: item.healingCount, sides: item.healingSides, bonus: item.healingBonus } },
+    },
+  }
+  const effects = staticEffects(item)
+  if (item.kind === 'weapon') return {
+    ...common, category: 'equipment', icon: 'weapon',
+    equipment: {
+      slot: item.slot, ...(effects ? { effects } : {}),
+      dnd5e: {
+        kind: 'weapon', category: item.weaponCategory, mode: item.weaponMode,
+        damage: { count: item.damageCount, sides: item.damageSides, type: item.damageType },
+        attackAbility: item.attackAbility,
+        ...(item.weaponMode === 'melee' ? { reachFeet: item.reachFeet } : {
+          rangeFeet: { normal: item.rangeNormal, long: item.rangeLong },
+        }),
+      },
+    },
+  }
+  if (item.kind === 'armor') return {
+    ...common, category: 'equipment', icon: 'armor',
+    equipment: {
+      slot: 'armor', ...(effects ? { effects } : {}),
+      dnd5e: {
+        kind: 'armor', category: item.armorCategory,
+        baseArmorClass: item.baseArmorClass, dexterityBonus: item.dexterityBonus,
+      },
+    },
+  }
+  if (item.kind === 'shield') return {
+    ...common, category: 'equipment', icon: 'shield',
+    equipment: {
+      slot: 'offHand', ...(effects ? { effects } : {}),
+      dnd5e: { kind: 'shield', armorClassBonus: item.shieldBonus },
+    },
+  }
+  return {
+    ...common, category: 'equipment', icon: 'generic',
+    equipment: { slot: item.slot, ...(effects ? { effects } : {}) },
+  }
+}
+
 export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM', busy = false, onInstall }: Props) {
   const [open, setOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState<BuilderSection>('races')
   const [metadata, setMetadata] = useState({
-    id: 'local.dm.character-creation-rules',
-    name: '房间角色创建规则',
+    id: 'local.dm.custom-rules',
+    name: '房间自定义规则',
     version: '1.0.0',
     publisher: defaultPublisher || '房间 DM',
     license: '自定义内容；由房间 DM 负责授权',
-    description: '由 DNDSTARS 角色规则编辑器生成。',
+    description: '由 DNDSTARS DM 规则包工作室生成。',
   })
   const [races, setRaces] = useState<RaceDraft[]>([])
+  const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>([])
+  const [features, setFeatures] = useState<FeatureDraft[]>([])
+  const [spells, setSpells] = useState<SpellDraft[]>([])
+  const [items, setItems] = useState<ItemDraft[]>([])
   const [methods, setMethods] = useState<MethodDraft[]>([])
   const [localError, setLocalError] = useState<string | null>(null)
+  const [localNotice, setLocalNotice] = useState<string | null>(null)
 
   const draft = useMemo<Dnd5eCustomRulesPluginDraft>(() => ({
     manifest: {
@@ -149,13 +410,52 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
       stateSchemaVersion: 1,
     },
     races: races.map(toRaceDefinition),
+    backgrounds: backgrounds.map(toBackgroundDefinition),
+    features: features.map(toFeatureDefinition),
+    spells: spells.map(toSpellDefinition),
+    items: items.map(toItemDefinition),
     abilityGenerationMethods: methods.map(toMethodDefinition),
-  }), [metadata, methods, races])
+  }), [backgrounds, features, items, metadata, methods, races, spells])
+
+  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods })
+
+  const saveDraft = () => {
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(savedDraft()))
+      setLocalError(null)
+      setLocalNotice('草稿已保存在当前浏览器。')
+    } catch {
+      setLocalError('浏览器无法保存规则包草稿。')
+    }
+  }
+
+  const loadDraft = () => {
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+      if (!raw) return setLocalError('尚未保存本地草稿。')
+      const saved = JSON.parse(raw) as Partial<SavedBuilderDraft>
+      if (!saved.metadata || !Array.isArray(saved.races) || !Array.isArray(saved.methods)) {
+        return setLocalError('本地草稿格式无效。')
+      }
+      setMetadata(saved.metadata)
+      setRaces(saved.races)
+      setBackgrounds(Array.isArray(saved.backgrounds) ? saved.backgrounds : [])
+      setFeatures(Array.isArray(saved.features) ? saved.features : [])
+      setSpells(Array.isArray(saved.spells) ? saved.spells : [])
+      setItems(Array.isArray(saved.items) ? saved.items : [])
+      setMethods(saved.methods)
+      setLocalError(null)
+      setLocalNotice('已载入当前浏览器保存的草稿。')
+    } catch {
+      setLocalError('读取本地草稿失败。')
+    }
+  }
 
   const buildFile = () => {
     const errors = validateDnd5eCustomRulesPluginDraft(draft)
     if (errors.length > 0) {
       setLocalError(errors.join('；'))
+      setLocalNotice(null)
       return null
     }
     setLocalError(null)
@@ -187,18 +487,26 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
   const patchMethod = (index: number, patch: Partial<MethodDraft>) => {
     setMethods((current) => current.map((method, itemIndex) => itemIndex === index ? { ...method, ...patch } : method))
   }
+  const patchBackground = (index: number, patch: Partial<BackgroundDraft>) => setBackgrounds((current) =>
+    current.map((background, itemIndex) => itemIndex === index ? { ...background, ...patch } : background))
+  const patchFeature = (index: number, patch: Partial<FeatureDraft>) => setFeatures((current) =>
+    current.map((feature, itemIndex) => itemIndex === index ? { ...feature, ...patch } : feature))
+  const patchSpell = (index: number, patch: Partial<SpellDraft>) => setSpells((current) =>
+    current.map((spell, itemIndex) => itemIndex === index ? { ...spell, ...patch } : spell))
+  const patchItem = (index: number, patch: Partial<ItemDraft>) => setItems((current) =>
+    current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
 
   return (
     <section data-testid="custom-rules-plugin-builder" className="glass mb-5 rounded-2xl border border-arcane-400/15 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="font-semibold text-slate-100">DM 角色规则插件编辑器</h2>
+          <h2 className="font-semibold text-slate-100">DM 规则包工作室</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-            手工添加种族属性调整、速度和属性生成方式。保存后仍作为 Worker 沙箱插件运行，可下载文件并在以后直接导入。
+            用表单创建装备、特性、法术、种族、背景与加点规则。生成内容仍在 Worker 沙箱中运行，可保存草稿、下载文件或发布到当前房间。
           </p>
         </div>
         <button type="button" onClick={() => setOpen((value) => !value)} className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200">
-          {open ? '收起编辑器' : '创建角色规则插件'}
+          {open ? '收起工作室' : '打开规则包工作室'}
         </button>
       </div>
 
@@ -221,7 +529,25 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
             ))}
           </div>
 
-          <div>
+          <nav className="flex flex-wrap gap-2" aria-label="规则内容分类">
+            {([
+              ['races', '种族', races.length], ['backgrounds', '背景', backgrounds.length],
+              ['features', '特性', features.length], ['spells', '法术', spells.length],
+              ['items', '装备／物品', items.length], ['methods', '加点规则', methods.length],
+            ] as const).map(([section, label, count]) => (
+              <button
+                key={section}
+                type="button"
+                aria-pressed={activeSection === section}
+                onClick={() => setActiveSection(section)}
+                className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${activeSection === section ? 'border-arcane-400/45 bg-arcane-500/12 text-arcane-100' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:text-slate-200'}`}
+              >
+                {label} · {count}
+              </button>
+            ))}
+          </nav>
+
+          {activeSection === 'races' && <div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <div><h3 className="text-sm font-semibold text-slate-200">自定义种族</h3><p className="mt-1 text-xs text-slate-600">固定调整与“任选若干属性”可以同时使用。</p></div>
               <button type="button" onClick={() => setRaces((current) => [...current, newRace(current.length + 1)])} className="inline-flex items-center gap-1.5 rounded-xl bg-arcane-500/12 px-3 py-2 text-xs font-semibold text-arcane-100"><Plus className="h-3.5 w-3.5" /> 添加种族</button>
@@ -250,9 +576,154 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
                 </article>
               ))}
             </div>
-          </div>
+          </div>}
 
-          <div>
+          {activeSection === 'backgrounds' && <div>
+            <SectionHeader
+              title="自定义背景"
+              description="背景技能会自动进入角色与 Headless 熟练项；工具、语言和背景特性作为结构化资料保存。"
+              actionLabel="添加背景"
+              onAdd={() => setBackgrounds((current) => [...current, newBackground(current.length + 1)])}
+            />
+            <div className="space-y-3">
+              {backgrounds.length === 0 && <EmptyState>尚未添加背景。</EmptyState>}
+              {backgrounds.map((background, index) => <article key={index} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <BuilderInput label="背景 ID" value={background.id} onChange={(value) => patchBackground(index, { id: value })} />
+                  <BuilderInput label="显示名称" value={background.name} onChange={(value) => patchBackground(index, { name: value })} />
+                  <BuilderNumber label="额外语言数量" value={background.languages} min={0} max={8} onChange={(value) => patchBackground(index, { languages: value })} />
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <BuilderTextarea label="背景说明" value={background.description} onChange={(value) => patchBackground(index, { description: value })} />
+                  <BuilderInput label="工具熟练（逗号分隔）" value={background.toolProficiencies} onChange={(value) => patchBackground(index, { toolProficiencies: value })} />
+                </div>
+                <fieldset className="mt-3"><legend className="mb-2 text-xs font-semibold text-slate-500">技能熟练（最多 2 项）</legend><div className="flex flex-wrap gap-1.5">
+                  {SKILLS.map((skill) => {
+                    const selected = background.skillProficiencies.includes(skill.key)
+                    return <button key={skill.key} type="button" aria-pressed={selected} onClick={() => patchBackground(index, {
+                      skillProficiencies: selected
+                        ? background.skillProficiencies.filter((key) => key !== skill.key)
+                        : background.skillProficiencies.length < 2 ? [...background.skillProficiencies, skill.key] : background.skillProficiencies,
+                    })} className={`rounded-lg border px-2 py-1 text-xs ${selected ? 'border-amber-400/35 bg-amber-500/10 text-amber-100' : 'border-white/8 text-slate-500'}`}>{skill.label}</button>
+                  })}
+                </div></fieldset>
+                <div className="mt-3 grid gap-3 md:grid-cols-[minmax(180px,0.5fr)_1fr_auto] md:items-end">
+                  <BuilderInput label="背景特性名称" value={background.featureName} onChange={(value) => patchBackground(index, { featureName: value })} />
+                  <BuilderTextarea label="背景特性说明" value={background.featureDescription} onChange={(value) => patchBackground(index, { featureDescription: value })} />
+                  <DeleteButton label={`删除背景 ${background.name}`} onClick={() => setBackgrounds((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
+                </div>
+              </article>)}
+            </div>
+          </div>}
+
+          {activeSection === 'features' && <div>
+            <SectionHeader
+              title="自定义特性"
+              description="UI 创建的特性默认标记为 DM 裁定；要自动结算时需另行绑定受控 Headless Action。"
+              actionLabel="添加特性"
+              onAdd={() => setFeatures((current) => [...current, newFeature(current.length + 1)])}
+            />
+            <div className="space-y-3">
+              {features.length === 0 && <EmptyState>尚未添加特性。</EmptyState>}
+              {features.map((feature, index) => <article key={index} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <BuilderInput label="特性 ID" value={feature.id} onChange={(value) => patchFeature(index, { id: value })} />
+                  <BuilderInput label="显示名称" value={feature.name} onChange={(value) => patchFeature(index, { name: value })} />
+                  <BuilderNumber label="最低等级" value={feature.minimumLevel} min={1} max={20} onChange={(value) => patchFeature(index, { minimumLevel: value })} />
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-[0.65fr_1.35fr_auto] md:items-end">
+                  <BuilderInput label="摘要" value={feature.summary} onChange={(value) => patchFeature(index, { summary: value })} />
+                  <BuilderTextarea label="规则正文" value={feature.description} onChange={(value) => patchFeature(index, { description: value })} />
+                  <DeleteButton label={`删除特性 ${feature.name}`} onClick={() => setFeatures((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
+                </div>
+              </article>)}
+            </div>
+          </div>}
+
+          {activeSection === 'spells' && <div>
+            <SectionHeader
+              title="自定义法术"
+              description="这里生成完整法术资料卡，默认进入 DM 裁定事务，不会伪装成已完成 Headless 自动化。"
+              actionLabel="添加法术"
+              onAdd={() => setSpells((current) => [...current, newSpell(current.length + 1)])}
+            />
+            <div className="space-y-3">
+              {spells.length === 0 && <EmptyState>尚未添加法术。</EmptyState>}
+              {spells.map((spell, index) => <article key={index} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <BuilderInput label="法术 ID" value={spell.id} onChange={(value) => patchSpell(index, { id: value })} />
+                  <BuilderInput label="中文名称" value={spell.name} onChange={(value) => patchSpell(index, { name: value })} />
+                  <BuilderInput label="英文名称（可选）" value={spell.englishName} onChange={(value) => patchSpell(index, { englishName: value })} />
+                  <BuilderNumber label="环级" value={spell.level} min={0} max={9} onChange={(value) => patchSpell(index, { level: value })} />
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <BuilderSelect label="学派" value={spell.school} options={SPELL_SCHOOLS} onChange={(value) => patchSpell(index, { school: value as SpellDraft['school'] })} />
+                  <BuilderSelect label="施法时间" value={spell.castingTimeUnit} options={CASTING_UNITS} onChange={(value) => patchSpell(index, { castingTimeUnit: value as SpellDraft['castingTimeUnit'] })} />
+                  <BuilderNumber label="施法时间数值" value={spell.castingTimeValue} min={1} max={1000} onChange={(value) => patchSpell(index, { castingTimeValue: value })} />
+                  <BuilderSelect label="射程类型" value={spell.rangeType} options={RANGE_TYPES} onChange={(value) => patchSpell(index, { rangeType: value as SpellDraft['rangeType'] })} />
+                </div>
+                {spell.castingTimeUnit === 'reaction' && <div className="mt-3"><BuilderInput label="反应触发条件" value={spell.reactionTrigger} onChange={(value) => patchSpell(index, { reactionTrigger: value })} /></div>}
+                {spell.rangeType === 'distance' && <div className="mt-3 max-w-48"><BuilderNumber label="射程（尺）" value={spell.rangeFeet} min={0} max={10000} onChange={(value) => patchSpell(index, { rangeFeet: value })} /></div>}
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <BuilderSelect label="持续时间" value={spell.durationType} options={DURATION_TYPES} onChange={(value) => patchSpell(index, { durationType: value as SpellDraft['durationType'] })} />
+                  {spell.durationType === 'timed' && <><BuilderNumber label="持续数值" value={spell.durationValue} min={1} max={10000} onChange={(value) => patchSpell(index, { durationValue: value })} /><BuilderSelect label="持续单位" value={spell.durationUnit} options={DURATION_UNITS} onChange={(value) => patchSpell(index, { durationUnit: value as SpellDraft['durationUnit'] })} /></>}
+                </div>
+                <fieldset className="mt-3"><legend className="mb-2 text-xs font-semibold text-slate-500">成分与标记</legend><div className="flex flex-wrap gap-2">
+                  <Toggle label="言语 V" value={spell.verbal} onChange={(value) => patchSpell(index, { verbal: value })} />
+                  <Toggle label="姿势 S" value={spell.somatic} onChange={(value) => patchSpell(index, { somatic: value })} />
+                  <Toggle label="材料 M" value={spell.material} onChange={(value) => patchSpell(index, { material: value })} />
+                  <Toggle label="仪式" value={spell.ritual} onChange={(value) => patchSpell(index, { ritual: value })} />
+                  <Toggle label="专注" value={spell.concentration} onChange={(value) => patchSpell(index, { concentration: value })} />
+                </div></fieldset>
+                {spell.material && <div className="mt-3"><BuilderInput label="材料说明" value={spell.materialText} onChange={(value) => patchSpell(index, { materialText: value })} /></div>}
+                <fieldset className="mt-3"><legend className="mb-2 text-xs font-semibold text-slate-500">职业（至少 1 项）</legend><div className="flex flex-wrap gap-1.5">
+                  {SPELL_CLASSES.map(([id, label]) => <Toggle key={id} label={label} value={spell.classes.includes(id)} onChange={(selected) => patchSpell(index, { classes: selected ? [...spell.classes, id] : spell.classes.filter((value) => value !== id) })} />)}
+                </div></fieldset>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <BuilderTextarea label="规则正文" value={spell.description} onChange={(value) => patchSpell(index, { description: value })} />
+                  <BuilderTextarea label="升环说明（可选）" value={spell.higherLevels} onChange={(value) => patchSpell(index, { higherLevels: value })} />
+                </div>
+                <div className="mt-3 flex justify-end"><DeleteButton label={`删除法术 ${spell.name}`} onClick={() => setSpells((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
+              </article>)}
+            </div>
+          </div>}
+
+          {activeSection === 'items' && <div>
+            <SectionHeader
+              title="自定义装备与物品"
+              description="支持武器、护甲、盾牌、饰品和治疗消耗品；固定效果由 Host 写入 Headless。"
+              actionLabel="添加物品"
+              onAdd={() => setItems((current) => [...current, newItem(current.length + 1)])}
+            />
+            <div className="space-y-3">
+              {items.length === 0 && <EmptyState>尚未添加装备或物品。</EmptyState>}
+              {items.map((item, index) => <article key={index} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <BuilderInput label="物品 ID" value={item.id} onChange={(value) => patchItem(index, { id: value })} />
+                  <BuilderInput label="显示名称" value={item.name} onChange={(value) => patchItem(index, { name: value })} />
+                  <BuilderSelect label="物品类型" value={item.kind} options={ITEM_KINDS} onChange={(value) => patchItem(index, { kind: value as ItemDraft['kind'] })} />
+                  {item.kind !== 'armor' && item.kind !== 'shield' && item.kind !== 'consumable' && <BuilderSelect label="装备槽位" value={item.slot} options={EQUIPMENT_SLOTS} onChange={(value) => patchItem(index, { slot: value as ItemDraft['slot'] })} />}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2"><BuilderTextarea label="物品说明" value={item.description} onChange={(value) => patchItem(index, { description: value })} /><BuilderTextarea label="规则正文" value={item.rulesText} onChange={(value) => patchItem(index, { rulesText: value })} /></div>
+                {item.kind === 'weapon' && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <BuilderSelect label="武器类别" value={item.weaponCategory} options={WEAPON_CATEGORIES} onChange={(value) => patchItem(index, { weaponCategory: value as ItemDraft['weaponCategory'] })} />
+                  <BuilderSelect label="攻击模式" value={item.weaponMode} options={WEAPON_MODES} onChange={(value) => patchItem(index, { weaponMode: value as ItemDraft['weaponMode'] })} />
+                  <BuilderSelect label="攻击属性" value={item.attackAbility} options={ATTACK_ABILITIES} onChange={(value) => patchItem(index, { attackAbility: value as ItemDraft['attackAbility'] })} />
+                  <BuilderSelect label="伤害类型" value={item.damageType} options={DAMAGE_TYPES} onChange={(value) => patchItem(index, { damageType: value as ItemDraft['damageType'] })} />
+                  <BuilderNumber label="伤害骰数量" value={item.damageCount} min={0} max={20} onChange={(value) => patchItem(index, { damageCount: value })} />
+                  <BuilderNumber label="伤害骰面数" value={item.damageSides} min={2} max={1000} onChange={(value) => patchItem(index, { damageSides: value })} />
+                  {item.weaponMode === 'melee' ? <BuilderNumber label="触及（尺）" value={item.reachFeet} min={0} max={500} onChange={(value) => patchItem(index, { reachFeet: value })} /> : <><BuilderNumber label="普通射程" value={item.rangeNormal} min={0} max={10000} onChange={(value) => patchItem(index, { rangeNormal: value })} /><BuilderNumber label="最大射程" value={item.rangeLong} min={0} max={10000} onChange={(value) => patchItem(index, { rangeLong: value })} /></>}
+                </div>}
+                {item.kind === 'armor' && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderSelect label="护甲类别" value={item.armorCategory} options={ARMOR_CATEGORIES} onChange={(value) => patchItem(index, { armorCategory: value as ItemDraft['armorCategory'] })} /><BuilderNumber label="基础 AC" value={item.baseArmorClass} min={0} max={50} onChange={(value) => patchItem(index, { baseArmorClass: value })} /><BuilderSelect label="敏捷调整" value={item.dexterityBonus} options={DEXTERITY_BONUSES} onChange={(value) => patchItem(index, { dexterityBonus: value as ItemDraft['dexterityBonus'] })} /></div>}
+                {item.kind === 'shield' && <div className="mt-3 max-w-48"><BuilderNumber label="盾牌 AC 加值" value={item.shieldBonus} min={-20} max={20} onChange={(value) => patchItem(index, { shieldBonus: value })} /></div>}
+                {item.kind === 'consumable' && <div className="mt-3 grid gap-3 sm:grid-cols-3"><BuilderNumber label="治疗骰数量" value={item.healingCount} min={1} max={40} onChange={(value) => patchItem(index, { healingCount: value })} /><BuilderNumber label="治疗骰面数" value={item.healingSides} min={2} max={100} onChange={(value) => patchItem(index, { healingSides: value })} /><BuilderNumber label="固定治疗" value={item.healingBonus} min={-1000} max={1000} onChange={(value) => patchItem(index, { healingBonus: value })} /></div>}
+                {item.kind !== 'consumable' && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5"><BuilderNumber label="武器命中" value={item.weaponAttackBonus} min={-20} max={20} onChange={(value) => patchItem(index, { weaponAttackBonus: value })} /><BuilderNumber label="武器伤害" value={item.weaponDamageBonus} min={-20} max={20} onChange={(value) => patchItem(index, { weaponDamageBonus: value })} /><BuilderNumber label="AC" value={item.armorClassBonus} min={-20} max={20} onChange={(value) => patchItem(index, { armorClassBonus: value })} /><BuilderNumber label="全部豁免" value={item.savingThrowBonus} min={-20} max={20} onChange={(value) => patchItem(index, { savingThrowBonus: value })} /><BuilderNumber label="速度（尺）" value={item.speedBonusFeet} min={-500} max={500} onChange={(value) => patchItem(index, { speedBonusFeet: value })} /></div>}
+                <div className="mt-3 flex justify-end"><DeleteButton label={`删除物品 ${item.name}`} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} /></div>
+              </article>)}
+            </div>
+          </div>}
+
+          {activeSection === 'methods' && <div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <div><h3 className="text-sm font-semibold text-slate-200">属性生成／加点规则</h3><p className="mt-1 text-xs text-slate-600">支持标准数组、购点成本表和自定义投骰。</p></div>
               <button type="button" onClick={() => setMethods((current) => [...current, newMethod(current.length + 1)])} className="inline-flex items-center gap-1.5 rounded-xl bg-arcane-500/12 px-3 py-2 text-xs font-semibold text-arcane-100"><Plus className="h-3.5 w-3.5" /> 添加加点规则</button>
@@ -276,10 +747,13 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
                 </article>
               ))}
             </div>
-          </div>
+          </div>}
 
           {localError && <p className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">{localError}</p>}
+          {localNotice && <p className="rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">{localNotice}</p>}
           <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" disabled={busy} onClick={loadDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><FolderOpen className="h-4 w-4" /> 载入本地草稿</button>
+            <button type="button" disabled={busy} onClick={saveDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Save className="h-4 w-4" /> 保存本地草稿</button>
             <button type="button" disabled={busy} onClick={download} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Download className="h-4 w-4" /> 下载插件文件</button>
             <button type="button" disabled={busy} onClick={() => void install()} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? '正在保存…' : '保存、启用并发布'}</button>
           </div>
@@ -295,4 +769,28 @@ function BuilderInput({ label, value, onChange, className = '' }: { label: strin
 
 function BuilderNumber({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange(value: number): void }) {
   return <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-500">{label}</span><input aria-label={label} type="number" value={value} min={min} max={max} onChange={(event) => onChange(Number(event.target.value))} className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-arcane-400/50" /></label>
+}
+
+function BuilderTextarea({ label, value, onChange }: { label: string; value: string; onChange(value: string): void }) {
+  return <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-500">{label}</span><textarea aria-label={label} value={value} rows={3} onChange={(event) => onChange(event.target.value)} className="w-full resize-y rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm leading-5 text-slate-100 outline-none focus:border-arcane-400/50" /></label>
+}
+
+function BuilderSelect({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange(value: string): void }) {
+  return <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-500">{label}</span><select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-arcane-400/50">{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>
+}
+
+function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange(value: boolean): void }) {
+  return <button type="button" aria-pressed={value} onClick={() => onChange(!value)} className={`rounded-lg border px-2.5 py-1.5 text-xs ${value ? 'border-arcane-400/40 bg-arcane-500/12 text-arcane-100' : 'border-white/8 text-slate-500'}`}>{label}</button>
+}
+
+function SectionHeader({ title, description, actionLabel, onAdd }: { title: string; description: string; actionLabel: string; onAdd(): void }) {
+  return <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-200">{title}</h3><p className="mt-1 text-xs text-slate-600">{description}</p></div><button type="button" onClick={onAdd} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-arcane-500/12 px-3 py-2 text-xs font-semibold text-arcane-100"><Plus className="h-3.5 w-3.5" /> {actionLabel}</button></div>
+}
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-center text-xs text-slate-600">{children}</p>
+}
+
+function DeleteButton({ label, onClick }: { label: string; onClick(): void }) {
+  return <button type="button" aria-label={label} onClick={onClick} className="rounded-xl border border-rose-400/15 p-2.5 text-rose-300"><Trash2 className="h-4 w-4" /></button>
 }

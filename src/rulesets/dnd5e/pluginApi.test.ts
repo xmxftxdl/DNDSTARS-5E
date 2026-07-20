@@ -6,9 +6,11 @@ import {
 } from './fighter'
 import {
   dnd5ePluginAbilityGenerationMethod,
+  dnd5ePluginBackgroundDefinition,
   dnd5ePluginRaceDefinition,
   registerDnd5eRulesPlugin,
   registeredDnd5ePluginAbilityGenerationMethods,
+  registeredDnd5ePluginBackgrounds,
   registeredDnd5ePluginRaces,
   registeredDnd5ePluginSpells,
   registeredDnd5ePluginItems,
@@ -200,6 +202,11 @@ describe('D&D 5e rules plugin API', () => {
           id: 'starfolk', name: '星裔测试种族', speedFeet: 35,
           abilityBonuses: { cha: 2 }, flexibleAbilityBonus: { count: 1, amount: 1, exclude: ['cha'] },
         })).toBe(`${pluginId}:starfolk`)
+        expect(api.registerBackground({
+          id: 'sky-sailor', name: '天帆水手', description: '测试背景。',
+          skillProficiencies: ['athletics', 'perception'], toolProficiencies: ['导航工具'], languages: 1,
+          feature: { name: '识风', description: '能够辨认常见天气变化。' },
+        })).toBe(`${pluginId}:sky-sailor`)
         expect(api.registerAbilityGenerationMethod({
           id: 'heroic-array', name: '英雄数组', summary: '测试数组。', kind: 'standard-array',
           scores: [16, 15, 14, 12, 10, 8],
@@ -208,13 +215,18 @@ describe('D&D 5e rules plugin API', () => {
     })
     try {
       expect(dnd5ePluginRaceDefinition(`${pluginId}:starfolk`)).toMatchObject({ name: '星裔测试种族', speedFeet: 35 })
+      expect(dnd5ePluginBackgroundDefinition(`${pluginId}:sky-sailor`)).toMatchObject({
+        name: '天帆水手', skillProficiencies: ['athletics', 'perception'], feature: { name: '识风' },
+      })
       expect(dnd5ePluginAbilityGenerationMethod(`${pluginId}:heroic-array`)).toMatchObject({ kind: 'standard-array' })
       expect(registeredDnd5ePluginRaces().map((race) => race.id)).toContain(`${pluginId}:starfolk`)
+      expect(registeredDnd5ePluginBackgrounds().map((background) => background.id)).toContain(`${pluginId}:sky-sailor`)
       expect(registeredDnd5ePluginAbilityGenerationMethods().map((method) => method.id)).toContain(`${pluginId}:heroic-array`)
     } finally {
       dispose()
     }
     expect(dnd5ePluginRaceDefinition(`${pluginId}:starfolk`)).toBeUndefined()
+    expect(dnd5ePluginBackgroundDefinition(`${pluginId}:sky-sailor`)).toBeUndefined()
     expect(dnd5ePluginAbilityGenerationMethod(`${pluginId}:heroic-array`)).toBeUndefined()
   })
 

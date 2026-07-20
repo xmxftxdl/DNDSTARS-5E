@@ -14,7 +14,7 @@ import {
 } from './classes'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import { syncDnd5ePrimalChampion } from './hitPoints'
-import { dnd5eCharacterHasPluginFeature, registeredDnd5ePluginFeatures } from './pluginApi'
+import { dnd5eCharacterHasPluginFeature, dnd5ePluginBackgroundDefinition, registeredDnd5ePluginFeatures } from './pluginApi'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -125,6 +125,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     classSelections['eldritch-invocations']?.includes('beguiling-influence')
     ? ['deception', 'persuasion']
     : []
+  const backgroundSkills = dnd5ePluginBackgroundDefinition(character.dnd5eBackgroundId ?? character.background)
+    ?.skillProficiencies ?? character.dnd5eBackgroundSkillProficiencies ?? []
   return {
     id: character.id,
     name: character.name,
@@ -132,7 +134,7 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     level,
     abilities: character.rulesetId ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
     savingThrowProficiencies: [...dnd5eEffectiveSavingThrowProficiencies(character)],
-    skillProficiencies: [...new Set([...character.skills, ...loreBonusSkills, ...beguilingInfluenceSkills])],
+    skillProficiencies: [...new Set([...character.skills, ...backgroundSkills, ...loreBonusSkills, ...beguilingInfluenceSkills])],
     passivePerception: Math.max(0, Math.floor(character.passivePerception)),
     armorClass: dnd5eArmorClass(character),
     currentHp: exhaustionLevel >= 6 ? 0 : Math.max(0, Math.min(effectiveMaxHp, character.currentHp)),

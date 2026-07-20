@@ -54,9 +54,11 @@ import {
 import { dnd5eInventoryItemTemplate } from '../../rulesets/dnd5e/items'
 import {
   dnd5ePluginAbilityGenerationMethod,
+  dnd5ePluginBackgroundDefinition,
   dnd5ePluginRaceDefinition,
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginAbilityGenerationMethods,
+  registeredDnd5ePluginBackgrounds,
   registeredDnd5ePluginRaces,
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e/pluginApi'
@@ -78,6 +80,8 @@ export interface CharacterSetupResult extends SetupIdentity {
   racialBonuses: Abilities
   abilities: Abilities
   dnd5eRaceId?: string
+  dnd5eBackgroundId?: string
+  backgroundSkillProficiencies?: string[]
   racialBonusChoices: AbilityKey[]
   startingEquipment: Dnd5eStartingEquipmentSelection
   recommendation?: {
@@ -261,17 +265,19 @@ function PreferenceQuestion({
 function IdentityFields({
   identity,
   raceOptions,
+  backgroundOptions,
   onChange,
 }: {
   identity: SetupIdentity
   raceOptions: readonly { value: string; label: string }[]
+  backgroundOptions: readonly { value: string; label: string }[]
   onChange(patch: Partial<SetupIdentity>): void
 }) {
   const fields = [
     ['职业', 'charClass', DND5E_2014_CLASS_OPTIONS.map((value) => ({ value, label: value }))],
     ['种族', 'race', raceOptions],
     ['阵营', 'alignment', DND5E_2014_ALIGNMENT_OPTIONS.map((value) => ({ value, label: value }))],
-    ['背景', 'background', DND5E_2014_BACKGROUND_OPTIONS.map((value) => ({ value, label: value }))],
+    ['背景', 'background', backgroundOptions],
   ] as const
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -364,7 +370,7 @@ function StartingEquipmentFields({
         </span>)}
         {fixed.length === 0 ? <span className="text-xs text-slate-500">没有额外固定物品，全部由上方选择决定。</span> : null}
       </div>
-      {plan.background !== '侍僧' ? <p className="mt-3 text-[11px] leading-5 text-slate-500">“自定义背景”的装备依照玩家与 DM 约定，创建后可由 DM 分发或从物品栏补充；核心包不会擅自生成未选定的背景物品。</p> : null}
+      {plan.background !== '侍僧' ? <p className="mt-3 text-[11px] leading-5 text-slate-500">该背景没有核心起始装备表；创建后可由 DM 从 SRD 或当前规则包分发物品。</p> : null}
     </section>
   </div>
 }
@@ -376,10 +382,18 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     dnd5eRulesPluginRegistrySnapshot,
   )
   const pluginRaces = registeredDnd5ePluginRaces()
+  const pluginBackgrounds = registeredDnd5ePluginBackgrounds()
   const pluginMethods = registeredDnd5ePluginAbilityGenerationMethods()
   const raceOptions = [
     ...DND5E_2014_RACE_OPTIONS.map((value) => ({ value, label: value })),
     ...pluginRaces.map((race) => ({ value: race.id, label: `${race.name} · ${race.ownerPluginName}` })),
+  ]
+  const backgroundOptions = [
+    ...DND5E_2014_BACKGROUND_OPTIONS.map((value) => ({ value, label: value })),
+    ...pluginBackgrounds.map((background) => ({
+      value: background.id,
+      label: `${background.name} · ${background.ownerPluginName}`,
+    })),
   ]
   const abilityMethodOptions = [
     ...METHOD_OPTIONS,
@@ -562,10 +576,16 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const complete = () => {
     if (!name.trim() || !racialBonusChoicesComplete) return
     const pluginRace = dnd5ePluginRaceDefinition(identity.race)
+    const pluginBackground = dnd5ePluginBackgroundDefinition(identity.background)
     onComplete({
       ...identity,
       race: pluginRace?.name ?? identity.race,
+      background: pluginBackground?.name ?? identity.background,
       ...(pluginRace ? { dnd5eRaceId: pluginRace.id } : {}),
+      ...(pluginBackground ? {
+        dnd5eBackgroundId: pluginBackground.id,
+        backgroundSkillProficiencies: [...pluginBackground.skillProficiencies],
+      } : {}),
       name: name.trim(),
       method,
       baseAbilities,
@@ -664,9 +684,9 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
             <div className="mx-auto max-w-2xl">
               <div className="mb-5 rounded-2xl border border-sky-400/15 bg-sky-500/[0.05] p-4 text-sm leading-6 text-slate-400">
                 <BookOpen className="mr-2 inline h-4 w-4 text-sky-300" />
-                背景列表遵守当前 SRD 5.1 内容边界：侍僧是完整示例；其他经历请使用“自定义背景”。
+                核心仅内置 SRD 5.1 的侍僧示例和自定义背景路径；当前房间规则包提供的背景会在这里标明插件来源。
               </div>
-              <IdentityFields identity={identity} raceOptions={raceOptions} onChange={updateIdentity} />
+              <IdentityFields identity={identity} raceOptions={raceOptions} backgroundOptions={backgroundOptions} onChange={updateIdentity} />
             </div>
           )}
 
@@ -834,7 +854,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">角色名称</span>
                     <input autoFocus aria-label="角色名称" value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-xl border border-white/10 bg-void-900/80 px-4 py-3 text-sm text-slate-100 outline-none focus:border-arcane-400/50" />
                   </label>
-                  <IdentityFields identity={identity} raceOptions={raceOptions} onChange={updateIdentity} />
+                  <IdentityFields identity={identity} raceOptions={raceOptions} backgroundOptions={backgroundOptions} onChange={updateIdentity} />
                 </div>
                 <div className="rounded-2xl border border-white/8 bg-black/15 p-4">
                   <div className="flex items-start justify-between gap-3">
