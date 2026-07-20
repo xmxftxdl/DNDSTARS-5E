@@ -66,6 +66,23 @@ export function buildSharedPlayerAction(input: BuildSharedPlayerActionInput): Sh
   }
 }
 
+/**
+ * Actions arriving through the player-writable queue/event channels never
+ * inherit DM-only claims from their JSON payload. The transport path, rather
+ * than the client-reported sourceMode, establishes the caller identity.
+ */
+export function normalizeRemotePlayerActionForDm(action: SharedPlayerActionState): SharedPlayerActionState {
+  const weaponOptions = action.dnd5eWeaponAttackOptions
+  if (!weaponOptions?.coverOverride && action.sourceMode === 'player') return action
+  if (!weaponOptions) return { ...action, sourceMode: 'player' }
+  const { coverOverride: _untrustedCoverOverride, ...trustedWeaponOptions } = weaponOptions
+  return {
+    ...action,
+    sourceMode: 'player',
+    dnd5eWeaponAttackOptions: trustedWeaponOptions,
+  }
+}
+
 export function createSharedPlayerActionEnvelope(input: {
   mapId?: string
   combatId?: string

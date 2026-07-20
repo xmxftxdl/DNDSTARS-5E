@@ -4,6 +4,7 @@ import {
   clearPendingLocalClassChoicesForTest,
   clearPendingLocalPluginFeaturesForTest,
   clearPendingLocalCharacterLevelEditsForTest,
+  clearPendingLocalCharacterHitPointEditsForTest,
   clearPendingLocalCharacterCreationsForTest,
   filterLegacySampleCharacters,
   mergeCharactersForSharedSave,
@@ -11,8 +12,10 @@ import {
   mergePendingLocalClassChoices,
   mergePendingLocalPluginFeatures,
   mergePendingLocalCharacterLevelEdits,
+  mergePendingLocalCharacterHitPointEdits,
   mergePlayerWritableCharacter,
   markPendingLocalCharacterLevelEdit,
+  markPendingLocalCharacterHitPointEdit,
   markPendingLocalFighterChoices,
   markPendingLocalClassChoices,
   markPendingLocalPluginFeatures,
@@ -20,6 +23,7 @@ import {
   resetPendingLocalClassChoicesMemoryForTest,
   resetPendingLocalPluginFeaturesMemoryForTest,
   resetPendingLocalCharacterLevelEditMemoryForTest,
+  resetPendingLocalCharacterHitPointEditMemoryForTest,
 } from './characters'
 import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
 import type { Character } from '../types/character'
@@ -209,6 +213,60 @@ describe('pending local character level edits', () => {
 
     expect(mergePendingLocalCharacterLevelEdits([char({ id: 'hero', level: 12 })], 1_002)[0].level).toBe(12)
     expect(values.size).toBe(0)
+  })
+})
+
+describe('pending local character-sheet hit point edits', () => {
+  afterEach(() => {
+    clearPendingLocalCharacterHitPointEditsForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('preserves healing until the shared room snapshot acknowledges it', () => {
+    markPendingLocalCharacterHitPointEdit('hero', { currentHp: 24 }, 1_000)
+    const stale = mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 10 })],
+      1_001,
+    )
+    expect(stale[0].currentHp).toBe(24)
+
+    const acknowledged = mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 24 })],
+      1_002,
+    )
+    expect(acknowledged[0].currentHp).toBe(24)
+    expect(mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 8 })],
+      1_003,
+    )[0].currentHp).toBe(8)
+  })
+
+  it('does not compare wall clocks from different clients while awaiting acknowledgement', () => {
+    markPendingLocalCharacterHitPointEdit('hero', { currentHp: 24, maxHp: 40 }, 1_000)
+    const clockSkewedSnapshot = mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 7, maxHp: 35 })],
+      1_002,
+    )
+    expect(clockSkewedSnapshot[0]).toMatchObject({ currentHp: 24, maxHp: 40 })
+  })
+
+  it('restores a persisted edit after a page reload', () => {
+    const storage = new Map<string, string>()
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    })
+    clearPendingLocalCharacterHitPointEditsForTest()
+    markPendingLocalCharacterHitPointEdit('hero', { currentHp: 24 }, 1_000)
+    resetPendingLocalCharacterHitPointEditMemoryForTest()
+
+    expect(mergePendingLocalCharacterHitPointEdits(
+      [char({ currentHp: 10 })],
+      1_001,
+    )[0].currentHp).toBe(24)
   })
 })
 

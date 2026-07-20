@@ -40,6 +40,13 @@ const LOCAL_CHARACTER_LEVEL_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_CHARACTER_LEVEL_EDITS_STORAGE_KEY = 'stars-character-level-edits-v1'
 const pendingLocalCharacterLevelEdits = new Map<string, { level: number; updatedAt: number }>()
 let pendingLocalCharacterLevelEditsHydrated = false
+const LOCAL_CHARACTER_HIT_POINT_EDIT_TTL_MS = 30000
+const PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY = 'stars-character-hit-point-edits-v1'
+type PendingLocalCharacterHitPointEdit = Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp'>> & {
+  updatedAt: number
+}
+const pendingLocalCharacterHitPointEdits = new Map<string, PendingLocalCharacterHitPointEdit>()
+let pendingLocalCharacterHitPointEditsHydrated = false
 
 function pendingLocalCharacterEditStorage(): Storage | null {
   if (typeof window === 'undefined') return null
@@ -146,6 +153,124 @@ export function mergePendingLocalCharacterLevelEdits(
       return character
     }
     return { ...character, level: pending.level }
+  })
+}
+
+function persistPendingLocalCharacterHitPointEdits(): void {
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalCharacterHitPointEdits.size === 0) {
+      storage.removeItem(PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalCharacterHitPointEdits)),
+    )
+  } catch {
+    // The in-memory guard remains useful when localStorage is unavailable.
+  }
+}
+
+function hydratePendingLocalCharacterHitPointEdits(): void {
+  if (pendingLocalCharacterHitPointEditsHydrated) return
+  pendingLocalCharacterHitPointEditsHydrated = true
+  const storage = pendingLocalCharacterEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, PendingLocalCharacterHitPointEdit>
+    for (const [id, pending] of Object.entries(parsed)) {
+      const updatedAt = Number(pending?.updatedAt)
+      if (!id || !Number.isFinite(updatedAt)) continue
+      const normalized: PendingLocalCharacterHitPointEdit = { updatedAt }
+      if (Number.isFinite(pending.currentHp)) normalized.currentHp = Math.max(0, Math.floor(pending.currentHp!))
+      if (Number.isFinite(pending.maxHp)) normalized.maxHp = Math.max(1, Math.floor(pending.maxHp!))
+      if (Number.isFinite(pending.tempHp)) normalized.tempHp = Math.max(0, Math.floor(pending.tempHp!))
+      if (normalized.currentHp == null && normalized.maxHp == null && normalized.tempHp == null) continue
+      pendingLocalCharacterHitPointEdits.set(id, normalized)
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject both reads and writes.
+    }
+  }
+}
+
+function gcPendingLocalCharacterHitPointEdits(now: number = Date.now()): void {
+  hydratePendingLocalCharacterHitPointEdits()
+  let changed = false
+  for (const [id, pending] of pendingLocalCharacterHitPointEdits) {
+    if (now - pending.updatedAt > LOCAL_CHARACTER_HIT_POINT_EDIT_TTL_MS) {
+      pendingLocalCharacterHitPointEdits.delete(id)
+      changed = true
+    }
+  }
+  if (changed) persistPendingLocalCharacterHitPointEdits()
+}
+
+export function markPendingLocalCharacterHitPointEdit(
+  id: string,
+  patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp'>>,
+  now: number = Date.now(),
+): void {
+  hydratePendingLocalCharacterHitPointEdits()
+  const pending: PendingLocalCharacterHitPointEdit = { updatedAt: now }
+  if (Number.isFinite(patch.currentHp)) pending.currentHp = Math.max(0, Math.floor(patch.currentHp!))
+  if (Number.isFinite(patch.maxHp)) pending.maxHp = Math.max(1, Math.floor(patch.maxHp!))
+  if (Number.isFinite(patch.tempHp)) pending.tempHp = Math.max(0, Math.floor(patch.tempHp!))
+  if (pending.currentHp == null && pending.maxHp == null && pending.tempHp == null) return
+  pendingLocalCharacterHitPointEdits.set(id, pending)
+  persistPendingLocalCharacterHitPointEdits()
+}
+
+function clearPendingLocalCharacterHitPointEdit(id: string): void {
+  if (!pendingLocalCharacterHitPointEdits.delete(id)) return
+  persistPendingLocalCharacterHitPointEdits()
+}
+
+export function clearPendingLocalCharacterHitPointEditsForTest(): void {
+  pendingLocalCharacterHitPointEdits.clear()
+  pendingLocalCharacterHitPointEditsHydrated = true
+  persistPendingLocalCharacterHitPointEdits()
+}
+
+export function resetPendingLocalCharacterHitPointEditMemoryForTest(): void {
+  pendingLocalCharacterHitPointEdits.clear()
+  pendingLocalCharacterHitPointEditsHydrated = false
+}
+
+/**
+ * 角色页生命值编辑在服务器回显确认前保留。客户端墙钟不可跨设备比较；
+ * 并发顺序由共享资源的服务器 revision/CAS 负责，待确认值只按回显或 TTL 清除。
+ */
+export function mergePendingLocalCharacterHitPointEdits(
+  sharedCharacters: Character[],
+  now: number = Date.now(),
+): Character[] {
+  gcPendingLocalCharacterHitPointEdits(now)
+  if (pendingLocalCharacterHitPointEdits.size === 0) return sharedCharacters
+  return sharedCharacters.map((character) => {
+    const pending = pendingLocalCharacterHitPointEdits.get(character.id)
+    if (!pending) return character
+    const acknowledged =
+      (pending.currentHp == null || character.currentHp === pending.currentHp) &&
+      (pending.maxHp == null || character.maxHp === pending.maxHp) &&
+      (pending.tempHp == null || character.tempHp === pending.tempHp)
+    if (acknowledged) {
+      clearPendingLocalCharacterHitPointEdit(character.id)
+      return character
+    }
+    return {
+      ...character,
+      ...(pending.currentHp == null ? {} : { currentHp: pending.currentHp }),
+      ...(pending.maxHp == null ? {} : { maxHp: pending.maxHp }),
+      ...(pending.tempHp == null ? {} : { tempHp: pending.tempHp }),
+    }
   })
 }
 
@@ -784,6 +909,10 @@ interface CharacterState {
   importCharacter: (character: Partial<Character>) => string
   attachAccountCharacter: (character: Character) => string
   update: (id: string, patch: Partial<Character>) => void
+  updateSheetHitPoints: (
+    id: string,
+    patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp' | 'hitPointDice'>>,
+  ) => void
   applyAuthorityUpdate: (id: string, patch: Partial<Character>) => void
   applyInventoryMutation: (mutation: Dnd5eInventoryMutation) => Dnd5eInventoryMutationResult
   remove: (id: string) => void
@@ -820,7 +949,11 @@ export const useCharacterStore = create<CharacterState>()(
           if (seq !== characterSaveSeq) return
           if (shared?.characters) {
             if (isPlayerPort()) {
-              const sharedById = new Map(shared.characters.map((ch) => [ch.id, ch]))
+              const protectedSharedCharacters = mergePendingLocalCharacterHitPointEdits(
+                shared.characters,
+                Date.now(),
+              )
+              const sharedById = new Map(protectedSharedCharacters.map((ch) => [ch.id, ch]))
               characters = characters.map((ch) => {
                 const sharedChar = sharedById.get(ch.id)
                 if (!sharedChar) return ch
@@ -889,6 +1022,10 @@ export const useCharacterStore = create<CharacterState>()(
           const sharedCharactersWithPendingPluginFeatures = mergePendingLocalPluginFeatures(
             sharedCharactersWithAllPendingChoices,
           )
+          const sharedCharactersWithPendingHitPoints = mergePendingLocalCharacterHitPointEdits(
+            sharedCharactersWithPendingPluginFeatures,
+            Date.now(),
+          )
           const pendingLevelMustBeRepublished = sharedCharactersWithPendingLevels.some(
             (character, index) => character.level !== filteredSharedCharacters[index]?.level,
           )
@@ -904,9 +1041,19 @@ export const useCharacterStore = create<CharacterState>()(
             (character, index) => pluginFeatureIdsSnapshot(character.dnd5ePluginFeatureIds) !==
               pluginFeatureIdsSnapshot(sharedCharactersWithAllPendingChoices[index]?.dnd5ePluginFeatureIds),
           )
+          const pendingHitPointsMustBeRepublished = sharedCharactersWithPendingHitPoints.some(
+            (character, index) => {
+              const incoming = sharedCharactersWithPendingPluginFeatures[index]
+              return !!incoming && (
+                character.currentHp !== incoming.currentHp || character.maxHp !== incoming.maxHp ||
+                character.tempHp !== incoming.tempHp
+              )
+            },
+          )
           const pendingCharacterEditMustBeRepublished =
             pendingLevelMustBeRepublished || pendingFighterChoicesMustBeRepublished ||
-            pendingClassChoicesMustBeRepublished || pendingPluginFeaturesMustBeRepublished
+            pendingClassChoicesMustBeRepublished || pendingPluginFeaturesMustBeRepublished ||
+            pendingHitPointsMustBeRepublished
           const snapshot = JSON.stringify(shared)
           // 普通重复快照可短路；若它仍落后于持久化的本地编辑，则必须重新应用并重试保存。
           if (snapshot === lastSharedCharactersSnapshot && !pendingCharacterEditMustBeRepublished) {
@@ -922,7 +1069,7 @@ export const useCharacterStore = create<CharacterState>()(
           const currentRoomSession = getRoomSession()
           const currentAccount = getAccountSession()
           let accountOwnershipMustBeRepublished = false
-          const sharedCharacters = sharedCharactersWithPendingPluginFeatures.map(finalizeCharacter).map((character) => {
+          const sharedCharacters = sharedCharactersWithPendingHitPoints.map(finalizeCharacter).map((character) => {
             if (
               currentRoomSession?.role === 'player' && currentAccount &&
               character.roomId === currentRoomSession.roomId &&
@@ -1061,14 +1208,31 @@ export const useCharacterStore = create<CharacterState>()(
           }
           updateChar(id, (c) => finalizeCharacter({ ...c, ...patch }))
         },
-        applyAuthorityUpdate: (id, patch) =>
-          set((state) => ({
+        updateSheetHitPoints: (id, patch) => {
+          const current = get().characters.find((character) => character.id === id)
+          if (!current) return
+          const next = finalizeCharacter({ ...current, ...patch })
+          if (isPlayerPort()) {
+            markPendingLocalCharacterHitPointEdit(id, {
+              ...(patch.currentHp == null && next.currentHp === current.currentHp ? {} : { currentHp: next.currentHp }),
+              ...(patch.maxHp == null && next.maxHp === current.maxHp ? {} : { maxHp: next.maxHp }),
+              ...(patch.tempHp == null && next.tempHp === current.tempHp ? {} : { tempHp: next.tempHp }),
+            })
+          }
+          updateChar(id, () => next)
+        },
+        applyAuthorityUpdate: (id, patch) => {
+          if (patch.currentHp != null || patch.maxHp != null || patch.tempHp != null) {
+            clearPendingLocalCharacterHitPointEdit(id)
+          }
+          return set((state) => ({
             characters: state.characters.map((character) =>
               character.id === id
                 ? finalizeCharacter({ ...character, ...patch })
                 : character,
             ),
-          })),
+          }))
+        },
         applyInventoryMutation: (mutation) => {
           const result = applyDnd5eInventoryMutation(get().characters, mutation)
           if (!result.ok) return result

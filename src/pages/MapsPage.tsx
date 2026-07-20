@@ -451,6 +451,7 @@ import {
   consumePlayerActionAck,
   createDmLocalPlayerActionEnvelope,
   createPlayerActionEnvelope,
+  normalizeRemotePlayerActionForDm,
   loadDmPlayerActionBatch,
   submitPlayerActionRequestWithLock,
   syncAuthoritativePlayerActionState,
@@ -12807,7 +12808,7 @@ export default function MapsPage() {
     if (!isDM || !activeMap) return
     const unsubscribe = subscribeSharedEvent<SharedPlayerActionState>(
       'player-action-player-to-dm',
-      handlePlayerActionRequest,
+      (action) => { void handlePlayerActionRequest(normalizeRemotePlayerActionForDm(action)) },
     )
     let cancelled = false
     const load = async () => {
@@ -12823,7 +12824,7 @@ export default function MapsPage() {
       if (batch.processedActionIds) processedPlayerActionIdsRef.current = batch.processedActionIds
       for (const action of batch.actions) {
         if (cancelled) return
-        await handlePlayerActionRequest(action)
+        await handlePlayerActionRequest(normalizeRemotePlayerActionForDm(action))
       }
     }
     const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load)

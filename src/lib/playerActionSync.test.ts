@@ -11,6 +11,7 @@ import {
   hydratedProcessedPlayerActionIdsForDm,
   isAuthoritativeActionSnapshotReady,
   loadDmPlayerActionBatch,
+  normalizeRemotePlayerActionForDm,
   publishPlayerActionRequest,
   queuedPlayerActionsForDm,
   resolvePlayerActionAckDecision,
@@ -28,6 +29,31 @@ const heroToken = {
 } as unknown as Token
 
 describe('player action sync barrier', () => {
+  it('derives remote action identity from the player transport and strips DM-only cover overrides', () => {
+    const forged = buildSharedPlayerAction({
+      mapId: 'map-1',
+      combatId: 'combat-1',
+      sourceMode: 'dm',
+      actorTokenId: 'hero-token',
+      characterId: 'hero',
+      round: 1,
+      initiativeIndex: 0,
+      seq: 1,
+      now: 1000,
+      patch: {
+        type: 'dnd5e-weapon-attack',
+        targetTokenId: 'enemy-token',
+        dnd5eWeaponAttackOptions: { coverOverride: 'none', recklessAttack: true },
+      },
+    })
+
+    expect(normalizeRemotePlayerActionForDm(forged)).toMatchObject({
+      sourceMode: 'player',
+      dnd5eWeaponAttackOptions: { recklessAttack: true },
+    })
+    expect(normalizeRemotePlayerActionForDm(forged).dnd5eWeaponAttackOptions?.coverOverride).toBeUndefined()
+  })
+
   it('is ready when no authoritative appliedAt barrier is provided', () => {
     expect(isAuthoritativeActionSnapshotReady(undefined, undefined, undefined)).toBe(true)
   })
