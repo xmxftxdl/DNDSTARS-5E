@@ -1262,20 +1262,19 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })
   })
 
-  it('turns a hit within 5 feet against a petrified target into an automatic critical hit', () => {
+  it('does not turn a hit within 5 feet against a petrified target into an automatic critical hit', () => {
     const state = startDnd5eHeadlessCombat('petrified-critical', [
       fighter('enemy', 20), fighter('target', 10, { conditions: ['petrified'] }),
     ])
     state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('enemy', 'target')]: 5 }
     const result = resolveDnd5eHeadlessAction(state, {
       type: 'attack', actorId: 'enemy', targetId: 'target', attackModifier: 20, d20: 10,
-      damage: { count: 1, sides: 4, bonus: 0, rolls: [3, 2], type: 'force' },
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [3], type: 'force' },
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', critical: true }))
-    // 石化还会提供所有伤害抗性，因此 5 点重击伤害减半为 2。
-    expect(result.state.combatants.target.currentHp).toBe(18)
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', critical: false }))
+    expect(result.state.combatants.target.currentHp).toBe(19)
   })
 
   it('uses Fighter Indomitable or Monk Diamond Soul only after a failed saving throw', () => {
@@ -2667,6 +2666,32 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!healed.ok) return
     expect(healed.state.combatants.ally.currentHp).toBe(15)
     expect(healed.state.combatants.cleric.currentHp).toBe(13)
+
+    const poolCleric = fighter('pool-cleric', 20, {
+      classId: 'cleric', subclassId: 'life', level: 17, currentHp: 1,
+      abilities: { ...abilities, wis: 16 },
+      classSelections: { 'spell-prepared': ['mass-heal'] },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const first = fighter('first', 10, { currentHp: 1, maxHp: 100 })
+    const second = fighter('second', 5, { currentHp: 1, maxHp: 100 })
+    const zeroAllocation = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('zero-allocation', [poolCleric, first, second]), {
+      type: 'cast-spell', actorId: 'pool-cleric', targetId: 'first', targetIds: ['first', 'second'],
+      spellId: 'mass-heal', slotLevel: 9, effectRolls: [],
+      healingAllocations: [{ targetId: 'first', amount: 10 }, { targetId: 'second', amount: 0 }],
+    })
+    expect(zeroAllocation).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+
+    const pooled = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('blessed-healer-once', [poolCleric, first, second]), {
+      type: 'cast-spell', actorId: 'pool-cleric', targetId: 'first', targetIds: ['first', 'second'],
+      spellId: 'mass-heal', slotLevel: 9, effectRolls: [],
+      healingAllocations: [{ targetId: 'first', amount: 10 }, { targetId: 'second', amount: 10 }],
+    })
+    expect(pooled.ok).toBe(true)
+    if (!pooled.ok) return
+    expect(pooled.state.combatants['pool-cleric'].currentHp).toBe(12)
+    expect(pooled.state.combatants.first.currentHp).toBe(22)
+    expect(pooled.state.combatants.second.currentHp).toBe(22)
 
     const striker = fighter('cleric', 20, { classId: 'cleric', subclassId: 'life', level: 14 })
     const strikeState = startDnd5eHeadlessCombat('divine-strike', [striker, fighter('enemy', 10, { controller: 'dm' })])

@@ -75,7 +75,8 @@ export function normalizeRemotePlayerActionForDm(action: SharedPlayerActionState
   const weaponOptions = action.dnd5eWeaponAttackOptions
   if (!weaponOptions?.coverOverride && action.sourceMode === 'player') return action
   if (!weaponOptions) return { ...action, sourceMode: 'player' }
-  const { coverOverride: _untrustedCoverOverride, ...trustedWeaponOptions } = weaponOptions
+  const trustedWeaponOptions = { ...weaponOptions }
+  delete trustedWeaponOptions.coverOverride
   return {
     ...action,
     sourceMode: 'player',

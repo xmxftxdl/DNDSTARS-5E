@@ -360,7 +360,6 @@ function PlayerVisibilityLayer({
       {/* 玩家端迷雾始终完全不透明（Owlbear 语义）；按绘制顺序合成，
           后画的 cover 会重新盖住先前 reveal 过的区域，与服务端
           fogPointState 的判定一致。fog.opacity 只影响 DM 自己的预览。 */}
-      {fog?.shapes.map((shape) => fogShapeNode(shape, fog.color, 1))}
       {fullCover && exploredPolygons.map((polygon, index) => polygon.length >= 3 ? (
         <Line
           key={`explored:${index}`}
@@ -371,6 +370,7 @@ function PlayerVisibilityLayer({
           listening={false}
         />
       ) : null)}
+      {fog?.shapes.map((shape) => fogShapeNode(shape, fog.color, 1))}
       {viewers.map((viewer) => {
         const polygon = mapGeometryVisibilityPolygon({
           geometry,

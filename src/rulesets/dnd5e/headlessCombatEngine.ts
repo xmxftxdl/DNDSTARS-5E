@@ -273,7 +273,10 @@ export function dnd5eCombatantCanSee(
   const target = state.combatants[targetId]
   if (!viewer || !target || viewer.currentHp <= 0 || viewer.deathSaves.dead) return false
   if (dnd5eHasStandardCondition(viewer, 'blinded')) return false
-  if (dnd5eHasStandardCondition(target, 'invisible') || target.classState.hiddenCheckTotal != null) return false
+  const outlinedByFaerieFire = target.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:faerie-fire',
+  ) === true
+  if ((!outlinedByFaerieFire && dnd5eHasStandardCondition(target, 'invisible')) || target.classState.hiddenCheckTotal != null) return false
   return state.lineOfSightBlockedByCombatantPair?.[dnd5eDirectedCombatantPairKey(viewerId, targetId)] !== true
 }
 
@@ -3855,7 +3858,7 @@ function resolveSpellCast(
       healingAllocations.length !== requestedTargetIds.length ||
       new Set(healingAllocations.map((allocation) => allocation.targetId)).size !== healingAllocations.length ||
       healingAllocations.some((allocation) =>
-        !requestedTargetIds.includes(allocation.targetId) || !Number.isInteger(allocation.amount) || allocation.amount < 0
+        !requestedTargetIds.includes(allocation.targetId) || !Number.isInteger(allocation.amount) || allocation.amount <= 0
       ) ||
       healingAllocations.reduce((sum, allocation) => sum + allocation.amount, 0) > (spell.healingPool ?? 0)
     ) return fail(state, events, 'invalid-class-feature')
@@ -4603,15 +4606,17 @@ function resolveSpellCast(
     }
     if (spell.effect === 'healing-pool') {
       if (action.effectRolls.length > 0) return fail(state, events, 'invalid-dice')
+      const lifeDomain = actor.classId === 'cleric' && actor.subclassId === 'life'
+      let restoredOtherCreature = false
       for (const allocation of healingAllocations) {
         const affectedTarget = state.combatants[allocation.targetId]!
-        const lifeDomain = actor.classId === 'cleric' && actor.subclassId === 'life'
         const domainBonus = lifeDomain ? 2 + spell.level : 0
         const restored = applyHealing(affectedTarget, allocation.amount + domainBonus, events)
         cureHealAilments(affectedTarget)
-        if (lifeDomain && actor.level >= 6 && affectedTarget.id !== actor.id && restored > 0) {
-          applyHealing(actor, 2 + spell.level, events)
-        }
+        if (affectedTarget.id !== actor.id && restored > 0) restoredOtherCreature = true
+      }
+      if (lifeDomain && actor.level >= 6 && restoredOtherCreature) {
+        applyHealing(actor, 2 + spell.level, events)
       }
       return finishSpellCast()
     }
@@ -4622,11 +4627,13 @@ function resolveSpellCast(
         ? diceCount * spell.dice.sides + baseEffectBonus
         : healing.total
       const domainBonus = lifeDomain && spell.level > 0 ? 2 + spell.level : 0
+      let restoredOtherCreature = false
       for (const affectedTarget of targets) {
         const restored = applyHealing(affectedTarget!, maximumHealing + domainBonus, events)
-        if (lifeDomain && actor.level >= 6 && spell.level > 0 && affectedTarget!.id !== actor.id && restored > 0) {
-          applyHealing(actor, 2 + spell.level, events)
-        }
+        if (affectedTarget!.id !== actor.id && restored > 0) restoredOtherCreature = true
+      }
+      if (lifeDomain && actor.level >= 6 && spell.level > 0 && restoredOtherCreature) {
+        applyHealing(actor, 2 + spell.level, events)
       }
       return finishSpellCast()
     }

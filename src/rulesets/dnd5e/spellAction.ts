@@ -424,7 +424,7 @@ export function prepareDnd5eSpellCast(input: {
       !healingAllocations || healingAllocations.length !== requestedTargetIds.length ||
       new Set(healingAllocations.map((allocation) => allocation.targetId)).size !== healingAllocations.length ||
       healingAllocations.some((allocation) =>
-        !requestedTargetIds.includes(allocation.targetId) || !Number.isInteger(allocation.amount) || allocation.amount < 0
+        !requestedTargetIds.includes(allocation.targetId) || !Number.isInteger(allocation.amount) || allocation.amount <= 0
       ) ||
       healingAllocations.reduce((sum, allocation) => sum + allocation.amount, 0) > (spell.healingPool ?? 0)
     ) return { ok: false, reason: 'invalid-action' }

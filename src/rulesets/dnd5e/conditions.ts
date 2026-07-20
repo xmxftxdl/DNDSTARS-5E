@@ -73,7 +73,7 @@ export const DND5E_STANDARD_CONDITIONS: Readonly<Record<Dnd5eStandardConditionId
   petrified: {
     id: 'petrified', label: '石化', aliases: ['petrified', '石化'], incapacitated: true,
     cannotMove: true, cannotSpeak: true, attacksAgainstHaveAdvantage: true,
-    strengthDexteritySavesAutomaticallyFail: true, hitsWithinFiveFeetAreCritical: true,
+    strengthDexteritySavesAutomaticallyFail: true,
   },
   poisoned: {
     id: 'poisoned', label: '中毒', aliases: ['poisoned', '中毒'],

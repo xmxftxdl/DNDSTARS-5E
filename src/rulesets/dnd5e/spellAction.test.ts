@@ -55,6 +55,23 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
+  it('rejects a zero-point Mass Heal allocation before settlement', () => {
+    const cleric = character('cleric', '牧师', {
+      level: 17,
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['mass-heal'] } } } },
+      classResources: { 'dnd5e-spell-slot-9': { current: 1, max: 1 } },
+    })
+    const ally = character('ally', '战士', { currentHp: 1, maxHp: 30 })
+    const allyToken = token('ally-token', 'player', 75, ally.id)
+    const input = fixture(cleric, 'mass-heal', 9, allyToken, [ally])
+    input.action.dnd5eSpellCast = {
+      spellId: 'mass-heal', slotLevel: 9, targetTokenId: allyToken.id,
+      targetTokenIds: [allyToken.id],
+      healingAllocations: [{ targetTokenId: allyToken.id, amount: 0 }],
+    }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'invalid-action' })
+  })
+
   it('rejects a targeted spell when DM geometry blocks its effect line', () => {
     const wizard = character('wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } } } },
