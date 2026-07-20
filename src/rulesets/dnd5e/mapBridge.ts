@@ -9,7 +9,7 @@ import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './ch
 import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster } from './monsters'
-import { dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
+import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
 import { dnd5eChallengeRatingValue } from './wildShape'
 import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 
@@ -19,6 +19,20 @@ export interface Dnd5eMapCombatSnapshot {
 }
 
 const DEFAULT_ABILITIES = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
+
+export function dnd5eMapTokenCanThreatenRangedAttacker(
+  attacker: Dnd5eCombatant,
+  hostileToken: Token,
+  hostileCombatant?: Dnd5eCombatant,
+): boolean {
+  const currentHp = hostileCombatant?.currentHp ?? hostileToken.hp ?? hostileToken.maxHp ?? 1
+  if (currentHp <= 0 || hostileCombatant?.deathSaves.dead) return false
+  const tokenState = hostileToken.dnd5eCombatState
+  return dnd5eCanThreatenRangedAttacker(attacker, hostileCombatant ?? {
+    classState: tokenState ?? {},
+    conditions: tokenState?.conditions ?? [],
+  })
+}
 
 function compactOptionalRecord<T extends object>(value: T): Partial<T> | undefined {
   const entries = Object.entries(value).filter(([, entry]) => entry !== undefined)
@@ -228,6 +242,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   applyHolyNimbusSources(input.map, combatants)
   applyDraconicPresenceSources(input.map, combatants)
   const state = startDnd5eHeadlessCombat(input.combatId, combatants)
+  state.mapId = input.map.id
   const combatantTokens = input.map.tokens.filter((token) => state.combatants[token.id])
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   state.distanceFeetByCombatantPair = {}

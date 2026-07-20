@@ -29,6 +29,25 @@ export function isTokenAlive(token: Token, characters: Character[]): boolean {
   return true
 }
 
+export function characterNeedsDeathSave(character: Pick<
+  Character,
+  'currentHp' | 'deathSaveFailures' | 'deathSaveStable'
+>): boolean {
+  return character.currentHp === 0 &&
+    !character.deathSaveStable &&
+    Math.max(0, character.deathSaveFailures ?? 0) < 3
+}
+
+function isTokenFinallyDefeated(token: Token, characters: Character[]): boolean {
+  const character = token.characterId
+    ? characters.find((candidate) => candidate.id === token.characterId)
+    : undefined
+  if (token.type === 'player' && character && character.currentHp === 0) {
+    return Math.max(0, character.deathSaveFailures ?? 0) >= 3
+  }
+  return !isTokenAlive(token, characters)
+}
+
 /** 战斗阵营：玩家与 NPC 为友方，敌人为敌方 */
 export function resolveEnemyAttackTokens(
   tokens: Token[],
@@ -59,10 +78,10 @@ export function checkCombatOutcome(
   const allies = tokens.filter((t) => getTokenCombatSide(t) === 'ally')
   const enemies = tokens.filter((t) => getTokenCombatSide(t) === 'enemy')
 
-  if (enemies.length > 0 && enemies.every((t) => !isTokenAlive(t, characters))) {
+  if (enemies.length > 0 && enemies.every((t) => isTokenFinallyDefeated(t, characters))) {
     return { ended: true, winner: 'ally', message: '所有敌人已被击败，战斗结束。' }
   }
-  if (allies.length > 0 && allies.every((t) => !isTokenAlive(t, characters))) {
+  if (allies.length > 0 && allies.every((t) => isTokenFinallyDefeated(t, characters))) {
     return { ended: true, winner: 'enemy', message: '所有友方角色已阵亡，战斗结束。' }
   }
   return { ended: false }
@@ -106,10 +125,13 @@ export function decideTurnAction(
   characters: Character[],
 ): TurnAction {
   if (!token) return 'prune'
-  if (!isTokenAlive(token, characters)) return 'skip'
   const character = token.characterId
     ? characters.find((candidate) => candidate.id === token.characterId)
     : undefined
+  if (!isTokenAlive(token, characters) && !(token.type === 'player' && character && characterNeedsDeathSave(character))) {
+    return 'skip'
+  }
+  if (token.type === 'player' && character && characterNeedsDeathSave(character)) return 'player'
   const conditions = character?.conditions ?? token.dnd5eCombatState?.conditions ??
     dnd5eConditionsFromActiveEffects(token.dnd5eCombatState?.activeEffects)
   const cannotAct = conditions.some((condition) => {
@@ -134,7 +156,12 @@ export function hasActionableActor(
   const tokenById = new Map(tokens.map((t) => [t.id, t]))
   return order.some((e) => {
     const t = tokenById.get(e.tokenId)
-    return !!t && (t.type === 'player' || t.type === 'enemy') && isTokenAlive(t, characters)
+    if (!t || (t.type !== 'player' && t.type !== 'enemy')) return false
+    if (isTokenAlive(t, characters)) return true
+    const character = t.characterId
+      ? characters.find((candidate) => candidate.id === t.characterId)
+      : undefined
+    return t.type === 'player' && !!character && characterNeedsDeathSave(character)
   })
 }
 

@@ -16,6 +16,7 @@ import {
 } from './headlessCombatEngine'
 import {
   createDnd5eMapCombatSnapshot,
+  dnd5eMapTokenCanThreatenRangedAttacker,
   planDnd5eMapResultApplication,
   type Dnd5eMapResultPlan,
 } from './mapBridge'
@@ -48,6 +49,7 @@ export interface PreparedDnd5eMonsterAttack {
   targetArmorClass: number
   distanceFeet: number
   targetAttackMode: 'normal' | 'advantage' | 'disadvantage'
+  attackModes: readonly ('normal' | 'advantage' | 'disadvantage')[]
   viciousMockeryAttackDisadvantage: boolean
   tranquilityWard?: ReturnType<typeof dnd5eTranquilityWardCheck>
   blessed: boolean
@@ -95,9 +97,12 @@ export function prepareDnd5eMonsterAttack(input: {
   if (attacks.length !== attackIds.length || attacks.length === 0) return { ok: false, reason: 'invalid-action' }
   const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map)
     * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-  const allAttacksInRange = attacks.every(({ attack }) => distanceFeet <= Math.max(
-    attack.reachFeet ?? 0,
-    attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0,
+  const allAttacksInRange = attacks.every(({ attack }) => distanceFeet <= (
+    attack.mode === 'melee'
+      ? attack.reachFeet ?? 5
+      : attack.mode === 'ranged'
+        ? attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0
+        : Math.max(attack.reachFeet ?? 5, attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0)
   ))
   if (!allAttacksInRange) return { ok: false, reason: 'target-out-of-range' }
 
@@ -155,6 +160,20 @@ export function prepareDnd5eMonsterAttack(input: {
     : targetGrantsAdvantage
       ? 'advantage'
       : 'disadvantage'
+  const rangedThreatened = input.map.tokens.some((candidate) => {
+    const candidateCombatant = snapshot.state.combatants[candidate.id]
+    return candidate.id !== actorToken.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(actorToken, candidate) &&
+      dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
+      tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+  })
+  const attackModes = attacks.map(({ attack }) => {
+    const usesRangedAttack = attack.mode === 'ranged' || (attack.mode === 'melee-or-ranged' && distanceFeet > (attack.reachFeet ?? 5))
+    const rangeDisadvantage = usesRangedAttack && (
+      rangedThreatened || distanceFeet > (attack.rangeFeet?.normal ?? 0)
+    )
+    if (!rangeDisadvantage) return targetAttackMode
+    return targetAttackMode === 'advantage' ? 'normal' : 'disadvantage'
+  })
   return {
     ok: true,
     prepared: {
@@ -170,6 +189,7 @@ export function prepareDnd5eMonsterAttack(input: {
       targetArmorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, targetToken.id),
       distanceFeet,
       targetAttackMode,
+      attackModes,
       viciousMockeryAttackDisadvantage: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant),
       tranquilityWard: dnd5eTranquilityWardCheck(actorCombatant, target, snapshot.state),
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
@@ -206,11 +226,12 @@ export function dnd5eMonsterAttackModeWithProtection(
 }
 
 export function dnd5ePreparedMonsterAttackMode(
-  prepared: Pick<PreparedDnd5eMonsterAttack, 'targetAttackMode' | 'viciousMockeryAttackDisadvantage'>,
+  prepared: Pick<PreparedDnd5eMonsterAttack, 'targetAttackMode' | 'attackModes' | 'viciousMockeryAttackDisadvantage'>,
   attackIndex: number,
 ): PreparedDnd5eMonsterAttack['targetAttackMode'] {
-  if (!prepared.viciousMockeryAttackDisadvantage || attackIndex !== 0) return prepared.targetAttackMode
-  return prepared.targetAttackMode === 'advantage' ? 'normal' : 'disadvantage'
+  const baseMode = prepared.attackModes[attackIndex] ?? prepared.targetAttackMode
+  if (!prepared.viciousMockeryAttackDisadvantage || attackIndex !== 0) return baseMode
+  return baseMode === 'advantage' ? 'normal' : 'disadvantage'
 }
 
 export function resolvePreparedDnd5eMonsterAttack(input: {

@@ -642,6 +642,24 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.events).toContainEqual({ type: 'turn-resource-spent', actorId: 'rogue', resource: 'reaction' })
   })
 
+  it('applies attack-wide reductions before vulnerability and resistance', () => {
+    const rogue = fighter('rogue', 10, {
+      classId: 'rogue', level: 5, damageVulnerabilities: ['slashing'],
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('damage-order', [fighter('enemy', 20), rogue]),
+      {
+        type: 'attack', actorId: 'enemy', targetId: 'rogue', attackModifier: 20, d20: 10,
+        uncannyDodge: true,
+        damage: { count: 1, sides: 8, bonus: 1, rolls: [8], type: 'slashing' },
+      },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // 9 damage -> Uncanny Dodge 4 -> vulnerability 8 (not vulnerability 18 -> Dodge 9).
+    expect(result.state.combatants.rogue.currentHp).toBe(12)
+  })
+
   it('uses Fighter Indomitable or Monk Diamond Soul only after a failed saving throw', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric', level: 5, abilities: { ...abilities, wis: 16 },
@@ -677,6 +695,28 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(concentration.ok).toBe(true)
     if (!concentration.ok) return
     expect(concentration.state.combatants.a.concentrating).toBe(false)
+  })
+
+  it('settles an unconscious turn as one death-save transaction and advances only when still at 0 HP', () => {
+    const state = startDnd5eHeadlessCombat('death-save-turn', [
+      fighter('a', 20, { currentHp: 0 }),
+      fighter('b', 10),
+    ])
+    const failed = resolveDnd5eHeadlessAction(state, { type: 'death-save-turn', actorId: 'a', d20: 5 })
+    expect(failed.ok).toBe(true)
+    if (!failed.ok) return
+    expect(failed.state.combatants.a.deathSaves.failures).toBe(1)
+    expect(failed.state.initiativeIndex).toBe(1)
+    expect(failed.transaction?.status).toBe('committed')
+    expect(failed.transaction?.rollLedger.entries).toContainEqual(expect.objectContaining({
+      kind: 'saving-throw', dice: { sides: 20, values: [5] },
+    }))
+
+    const recovered = resolveDnd5eHeadlessAction(state, { type: 'death-save-turn', actorId: 'a', d20: 20 })
+    expect(recovered.ok).toBe(true)
+    if (!recovered.ok) return
+    expect(recovered.state.combatants.a.currentHp).toBe(1)
+    expect(recovered.state.initiativeIndex).toBe(0)
   })
 
   it('applies unconscious and prone at 0 HP and enforces massive-damage instant death', () => {

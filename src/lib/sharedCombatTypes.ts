@@ -197,6 +197,7 @@ export interface SharedPlayerActionState {
   status: 'pending' | 'done'
   type:
     | 'end-turn'
+    | 'dnd5e-death-save'
     | 'dnd5e-weapon-attack'
     | 'dnd5e-fighter-feature'
     | 'dnd5e-class-feature'

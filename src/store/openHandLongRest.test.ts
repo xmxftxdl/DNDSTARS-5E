@@ -115,4 +115,20 @@ describe('Open Hand Tranquility long-rest state', () => {
     expect(rested.classResources?.['dnd5e-divine-intervention']).toEqual({ current: 0, max: 1 })
     useCharacterStore.setState({ characters: originalCharacters, selectedId: originalSelectedId })
   })
+
+  it('removes exactly one level of exhaustion from an SRD 5.1 character on a long rest', async () => {
+    const { useCharacterStore } = await import('./characters')
+    const originalCharacters = useCharacterStore.getState().characters
+    const originalSelectedId = useCharacterStore.getState().selectedId
+    const base = testCharacter()
+    useCharacterStore.setState({
+      characters: [{ ...base, exhaustionLevel: 3, currentHp: 1 }],
+      selectedId: base.id,
+    })
+
+    useCharacterStore.getState().longRestAll()
+
+    expect(useCharacterStore.getState().characters[0]).toMatchObject({ exhaustionLevel: 2, currentHp: 12 })
+    useCharacterStore.setState({ characters: originalCharacters, selectedId: originalSelectedId })
+  })
 })

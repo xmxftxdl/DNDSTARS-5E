@@ -31,7 +31,7 @@ import {
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDiceCount, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
@@ -355,7 +355,7 @@ export function prepareDnd5eSpellCast(input: {
     fromElevationFeet: effectOriginElevation,
     toElevationFeet: currentTarget.elevationFeet ?? 0,
   }))) return { ok: false, reason: 'effect-line-blocked' }
-  if (spell.saveAbility === 'dex') {
+  if (spell.saveAbility === 'dex' && spell.id !== 'sacred-flame') {
     for (const currentTarget of validTargetTokens) {
       const combatant = snapshot.state.combatants[currentTarget.id]
       const cover = mapGeometryCoverFromPoint({
@@ -392,12 +392,18 @@ export function prepareDnd5eSpellCast(input: {
     }
   }
   const abilityModifier = rules.abilityModifier(actor.abilities[definition.spellcasting.ability])
+  const rangedSpellThreatened = spell.effect === 'spell-attack' && spell.rangeFeet > 5 && input.map.tokens.some((candidate) => {
+    const candidateCombatant = snapshot.state.combatants[candidate.id]
+    return candidate.id !== actorToken.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(actorToken, candidate) &&
+      dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
+      tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+  })
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5))
-  const disadvantage = actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
+  const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
     dnd5eUnseenTargetImposesDisadvantage(actorCombatant, targetCombatant) || actorProne || (targetProne && distanceFeet > 5)
   const attackMode = spell.effect === 'spell-attack' && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
     ? advantage === disadvantage ? 'normal' : advantage ? 'advantage' : 'disadvantage'
@@ -419,7 +425,7 @@ export function prepareDnd5eSpellCast(input: {
             !!currentTarget.classState.recklessAttackTurnKey || !!currentTarget.classState.stunnedByActorId ||
             dnd5eAttackerIsUnseen(actorCombatant) ||
             (currentTargetProne && currentDistanceFeet <= 5))
-        const currentDisadvantage = actorCombatant.exhaustionLevel >= 3 ||
+        const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 ||
           (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
           dnd5eUnseenTargetImposesDisadvantage(actorCombatant, currentTarget) || actorProne ||
           (currentTargetProne && currentDistanceFeet > 5)

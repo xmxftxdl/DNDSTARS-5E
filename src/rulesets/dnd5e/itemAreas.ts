@@ -8,6 +8,7 @@ import {
   type GridCell,
 } from '../../lib/gridCombat'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import { rollbackCombatTransaction, type CombatTransaction } from '../../lib/combatTransaction'
 import type { BattleMap, Dnd5eItemArea, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5eInventoryEntry, Dnd5eInventoryTargeting } from '../../types/inventory'
@@ -94,24 +95,32 @@ export function placeDnd5eItemArea(input: {
   turnEconomy: Dnd5eTurnEconomyCounts
   areaId: string
   createdAt: number
+  transaction?: CombatTransaction
 }):
-  | { ok: true; map: BattleMap; characters: Character[]; area: Dnd5eItemArea; spentEconomy?: 'action' | 'bonusAction' }
-  | { ok: false; reason: Dnd5eItemAreaPlacementFailure } {
+  | { ok: true; map: BattleMap; characters: Character[]; area: Dnd5eItemArea; spentEconomy?: 'action' | 'bonusAction'; transaction?: CombatTransaction }
+  | { ok: false; reason: Dnd5eItemAreaPlacementFailure; transaction?: CombatTransaction } {
+  const rejected = (reason: Dnd5eItemAreaPlacementFailure) => ({
+    ok: false as const,
+    reason,
+    transaction: input.transaction
+      ? rollbackCombatTransaction(input.transaction, reason)
+      : undefined,
+  })
   const targeting = input.entry.item.use?.targeting
-  if (!targeting || targeting.kind !== 'map-area') return { ok: false, reason: 'invalid-targeting' }
+  if (!targeting || targeting.kind !== 'map-area') return rejected('invalid-targeting')
   const preview = previewDnd5eItemAreaPlacement({
     map: input.map,
     actorToken: input.actorToken,
     targeting,
     targetCell: input.targetCell,
   })
-  if (!preview.valid) return { ok: false, reason: preview.reason ?? 'invalid-target-cell' }
+  if (!preview.valid) return rejected(preview.reason ?? 'invalid-target-cell')
   const mutation = applyDnd5eInventoryMutation(
     input.characters,
     { type: 'use', characterId: input.actor.id, instanceId: input.entry.instanceId },
-    { turnEconomy: input.turnEconomy },
+    { turnEconomy: input.turnEconomy, transaction: input.transaction },
   )
-  if (!mutation.ok) return { ok: false, reason: 'item-use-rejected' }
+  if (!mutation.ok) return { ok: false, reason: 'item-use-rejected', transaction: mutation.transaction }
   const area: Dnd5eItemArea = {
     id: input.areaId,
     kind: targeting.areaKind,
@@ -129,6 +138,7 @@ export function placeDnd5eItemArea(input: {
     characters: mutation.characters,
     area,
     spentEconomy: mutation.spentEconomy,
+    transaction: mutation.transaction,
   }
 }
 

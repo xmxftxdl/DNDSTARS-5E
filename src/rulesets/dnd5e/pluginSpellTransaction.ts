@@ -221,7 +221,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   const saveAbility = spell.mechanics.savingThrow?.ability
   const saveModifier = saveAbility
     ? (targetCombatant.savingThrowBonuses[saveAbility] ?? rules.abilityModifier(targetCombatant.abilities[saveAbility])) +
-      (saveAbility === 'dex' ? snapshot.state.coverBonusByCombatantPair?.[directedPairKey] ?? 0 : 0)
+      (saveAbility === 'dex' && spell.id !== 'sacred-flame' ? snapshot.state.coverBonusByCombatantPair?.[directedPairKey] ?? 0 : 0)
     : undefined
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
@@ -356,9 +356,11 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
     castingTime: prepared.castingTime,
     effects,
     concentrationRounds: prepared.concentrationRounds,
-  })
-  if (!result.ok) return { result, transaction: rollbackCombatTransaction(transaction, result.reason, now), attackHit, critical, saveSucceeded, rawDamage, finalDamage }
-  transaction = commitCombatTransaction(transaction, now)
+  }, { transaction, now })
+  transaction = result.transaction ?? (result.ok
+    ? commitCombatTransaction(transaction, now)
+    : rollbackCombatTransaction(transaction, result.reason, now))
+  if (!result.ok) return { result, transaction, attackHit, critical, saveSucceeded, rawDamage, finalDamage }
   return {
     result,
     application: planDnd5eMapResultApplication({ state: result.state, map: prepared.map, characters: prepared.characters, characterIdByCombatantId: prepared.characterIdByCombatantId }),

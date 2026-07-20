@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
+import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
 import {
   dnd5eEquipmentClassDamageDefinitions,
   prepareDnd5eEquipmentAttack,
@@ -55,6 +55,33 @@ describe('D&D 5e equipment attack authority', () => {
     expect(prepareDnd5eEquipmentAttack({ ...distant, characters: [distant.actor], attacksUsed: 0 })).toEqual({ ok: false, reason: 'target-out-of-range' })
     const adjacent = fixture()
     expect(prepareDnd5eEquipmentAttack({ ...adjacent, characters: [adjacent.actor], attacksUsed: 2 })).toEqual({ ok: false, reason: 'attack-action-spent' })
+  })
+
+  it('allows long-range weapon attacks with disadvantage and rejects targets beyond long range', () => {
+    const longRange = fixture(2025)
+    longRange.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    const prepared = prepareDnd5eEquipmentAttack({ ...longRange, characters: [longRange.actor], attacksUsed: 0 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ distanceFeet: 200, attackMode: 'disadvantage' })
+
+    const beyondLongRange = fixture(6075)
+    beyondLongRange.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    expect(prepareDnd5eEquipmentAttack({
+      ...beyondLongRange,
+      characters: [beyondLongRange.actor],
+      attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'target-out-of-range' })
+  })
+
+  it('applies disadvantage to a ranged weapon attack while a hostile creature is within 5 feet', () => {
+    const input = fixture(775)
+    input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    input.map.tokens.push(token({ id: 'adjacent-enemy', type: 'enemy', x: 75, y: 25 }))
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('disadvantage')
   })
 
   it('grants a second full Attack action after Action Surge', () => {

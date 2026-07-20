@@ -14,6 +14,39 @@ function combatant(id: string, initiative: number, patch = {}) {
 }
 
 describe('ActiveEffectInstance Headless 生命周期', () => {
+  it('enforces charmed and frightened restrictions against their actual effect source', () => {
+    const charmed = createDnd5eConditionEffect({
+      condition: 'charmed', targetId: 'actor', source: { kind: 'spell', actorId: 'source', rulesId: 'charm-person' },
+    })
+    const frightened = createDnd5eConditionEffect({
+      condition: 'frightened', targetId: 'actor', source: { kind: 'spell', actorId: 'source', rulesId: 'fear' },
+    })
+    const state = startDnd5eHeadlessCombat('condition-source', [
+      combatant('actor', 20, {
+        position: { x: 10, y: 0 },
+        classState: { activeEffects: [charmed, frightened] },
+      }),
+      combatant('source', 10, { controller: 'dm', position: { x: 0, y: 0 } }),
+      combatant('other', 5, { controller: 'dm', position: { x: 20, y: 0 } }),
+    ])
+
+    const sourceAttack = resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: 'actor', targetId: 'source', attackModifier: 8, d20: 15,
+      damage: { count: 1, sides: 6, bonus: 2, rolls: [4] },
+    })
+    expect(sourceAttack).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const towardSource = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: 'actor', to: { x: 5, y: 0 }, distance: 5,
+    })
+    expect(towardSource).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+
+    const awayFromSource = resolveDnd5eHeadlessAction(state, {
+      type: 'move', actorId: 'actor', to: { x: 15, y: 0 }, distance: 5,
+    })
+    expect(awayFromSource.ok).toBe(true)
+  })
+
   it('ticks a round duration only once at the same turn boundary', () => {
     const startEffect = createDnd5eConditionEffect({
       condition: 'deafened', targetId: 'actor', source: { kind: 'dm' },

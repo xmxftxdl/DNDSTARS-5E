@@ -68,6 +68,7 @@ function preflight() {
 describe('player action authority execution plan', () => {
   it('only classifies SRD 5.1 authority routes as supported', () => {
     expect(playerActionAuthorityRoute(action('end-turn'))).toBe('end-turn')
+    expect(playerActionAuthorityRoute(action('dnd5e-death-save'))).toBe('dnd5e-death-save')
     expect(playerActionAuthorityRoute(action('disengage'))).toBe('disengage')
     expect(playerActionAuthorityRoute(action('dnd5e-weapon-attack'))).toBe('dnd5e-weapon-attack')
     expect(playerActionAuthorityRoute(action('dnd5e-fighter-feature'))).toBe('dnd5e-fighter-feature')

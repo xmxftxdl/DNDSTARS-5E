@@ -11,6 +11,7 @@ import {
 } from './items'
 import { DND5E_LONGSWORD } from './equipment'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
+import { createCombatTransaction } from '../../lib/combatTransaction'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import type { Character } from '../../types/character'
 
@@ -98,11 +99,21 @@ describe('SRD 5.1 inventory', () => {
     const economy = createDnd5eTurnEconomyCounts('combat:1:hero')
     const used = applyDnd5eInventoryMutation(granted.characters, {
       type: 'use', characterId: hero.id, instanceId: stack.instanceId, healingRolls: [4, 3],
-    }, { turnEconomy: economy })
+    }, {
+      turnEconomy: economy,
+      transaction: createCombatTransaction({
+        id: 'potion-use', mapId: 'map', combatId: 'combat', actorId: hero.id,
+        actionId: 'potion-use', actionKind: 'item-use', now: 1,
+      }),
+    })
     expect(used).toMatchObject({ ok: true, healingRolled: 9, healingApplied: 9, spentEconomy: 'action' })
     expect(used.characters[0].currentHp).toBe(18)
     expect(used.characters[0].dnd5eCombatState?.caltropsSpeedPenaltyFeet).toBeUndefined()
     expect(inventoryEntry(used.characters[0], stack.templateId).quantity).toBe(1)
+    expect(used.transaction).toMatchObject({ status: 'committed', actionKind: 'item-use' })
+    expect(used.transaction?.rollLedger.entries).toContainEqual(expect.objectContaining({
+      kind: 'healing', dice: { sides: 4, values: [4, 3] }, modifier: 2,
+    }))
   })
 
   it('does not consume an item when the combat action is unavailable', () => {

@@ -22,6 +22,7 @@ export interface Dnd5eDefensiveCreature {
   countercharmSourceIds?: readonly string[]
   classState: {
     activeEffects?: readonly Dnd5eActiveEffectInstance[]
+    hiddenCheckTotal?: number
     raging?: boolean
     stunnedByActorId?: string
     turnedByClericId?: string
@@ -110,6 +111,17 @@ export function dnd5eAttackerIsUnseen(
 ): boolean {
   return dnd5eConditionGrantsAttackAdvantageToAttacker(creature) ||
     (creature.classState.emptyBodyRoundsRemaining ?? 0) > 0
+}
+
+/** A nearby hostile only penalizes a ranged attack if it can see the attacker and is not incapacitated. */
+export function dnd5eCanThreatenRangedAttacker(
+  attacker: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
+  hostile: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
+): boolean {
+  return attacker.classState.hiddenCheckTotal == null &&
+    !dnd5eAttackerIsUnseen(attacker) &&
+    !dnd5eIsIncapacitated(hostile) &&
+    !dnd5eHasStandardCondition(hostile, 'blinded')
 }
 
 export function dnd5eHasViciousMockeryAttackDisadvantage(

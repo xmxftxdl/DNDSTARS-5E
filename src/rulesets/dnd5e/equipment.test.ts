@@ -30,10 +30,16 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(dnd5eWeaponAttackProfile(character)).toMatchObject({
       weaponName: '长剑',
       attackAbility: 'str',
+      proficient: true,
       attackModifier: 5,
       damage: { count: 1, sides: 8, bonus: 3, type: 'slashing' },
       reachFeet: 5,
     })
+  })
+
+  it('does not add proficiency when a class uses a weapon it is not proficient with', () => {
+    const wizard = fighter({ charClass: '法师', equipment: { mainWeapon: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon } })
+    expect(dnd5eWeaponAttackProfile(wizard)).toMatchObject({ proficient: false, attackModifier: 3 })
   })
 
   it('applies the 2014 Dueling damage bonus while a shield is held', () => {

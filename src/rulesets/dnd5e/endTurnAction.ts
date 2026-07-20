@@ -50,7 +50,9 @@ export function prepareDnd5ePlayerEndTurn(input: {
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
 }): { ok: true; prepared: PreparedDnd5ePlayerEndTurn } | { ok: false; reason: Dnd5eEndTurnRejectReason } {
-  if (input.action.type !== 'end-turn') return { ok: false, reason: 'invalid-action' }
+  if (input.action.type !== 'end-turn' && input.action.type !== 'dnd5e-death-save') {
+    return { ok: false, reason: 'invalid-action' }
+  }
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId)
   const actor = actorToken?.characterId
     ? input.characters.find((character) => character.id === actorToken.characterId)

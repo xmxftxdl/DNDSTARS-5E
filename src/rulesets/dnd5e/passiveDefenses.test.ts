@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   dnd5eCanUseUncannyDodge,
+  dnd5eCanThreatenRangedAttacker,
   dnd5eClassPassiveDefenses,
   dnd5eConditionImmuneFromSource,
   dnd5eDamageAfterSavingThrow,
@@ -67,6 +68,15 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eTargetGrantsAttackAdvantage(creature({
       classId: 'rogue', level: 18, conditions: ['blinded'],
     }))).toBe(false)
+  })
+
+  it('only lets a nearby hostile threaten ranged attacks when it can see and act', () => {
+    const attacker = creature()
+    expect(dnd5eCanThreatenRangedAttacker(attacker, creature())).toBe(true)
+    expect(dnd5eCanThreatenRangedAttacker(attacker, creature({ conditions: ['incapacitated'] }))).toBe(false)
+    expect(dnd5eCanThreatenRangedAttacker(attacker, creature({ conditions: ['blinded'] }))).toBe(false)
+    expect(dnd5eCanThreatenRangedAttacker(creature({ conditions: ['invisible'] }), creature())).toBe(false)
+    expect(dnd5eCanThreatenRangedAttacker(creature({ classState: { hiddenCheckTotal: 18 } }), creature())).toBe(false)
   })
 
   it('applies Evasion to Rogue, Monk, and the selected Hunter defense', () => {

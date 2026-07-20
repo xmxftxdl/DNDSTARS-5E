@@ -11,6 +11,12 @@ import type {
 } from '../../types/inventory'
 import { DND5E_INVENTORY_SCHEMA_VERSION } from '../../types/inventory'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import {
+  appendRollLedgerEntry,
+  commitCombatTransaction,
+  rollbackCombatTransaction,
+  type CombatTransaction,
+} from '../../lib/combatTransaction'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
 
@@ -389,6 +395,42 @@ export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate): num
 }
 
 export function applyDnd5eInventoryMutation(
+  characters: readonly Character[],
+  mutation: Dnd5eInventoryMutation,
+  options: { turnEconomy?: Dnd5eTurnEconomyCounts; transaction?: CombatTransaction } = {},
+): Dnd5eInventoryMutationResult & { transaction?: CombatTransaction } {
+  const result = applyDnd5eInventoryMutationInternal(characters, mutation, { turnEconomy: options.turnEconomy })
+  let transaction = options.transaction
+  if (!transaction) return result
+
+  if (mutation.type === 'use' && mutation.healingRolls?.length) {
+    const character = characters.find((candidate) => candidate.id === mutation.characterId)
+    const entry = character?.dnd5eInventory?.entries.find((candidate) => candidate.instanceId === mutation.instanceId)
+    const dice = entry?.item.use?.effect.kind === 'healing' ? entry.item.use.effect.dice : undefined
+    if (
+      dice && mutation.healingRolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= dice.sides) &&
+      !transaction.rollLedger.entries.some((candidate) => candidate.id === `${transaction!.id}:item-healing`)
+    ) {
+      transaction = appendRollLedgerEntry(transaction, {
+        id: `${transaction.id}:item-healing`,
+        kind: 'healing',
+        label: entry?.item.name ?? 'item healing',
+        dice: { sides: dice.sides, values: [...mutation.healingRolls] },
+        modifier: dice.bonus,
+        visibility: 'public',
+        sourceId: mutation.characterId,
+      })
+    }
+  }
+  return {
+    ...result,
+    transaction: result.ok
+      ? commitCombatTransaction(transaction)
+      : rollbackCombatTransaction(transaction, result.reason ?? 'inventory-mutation-rejected'),
+  }
+}
+
+function applyDnd5eInventoryMutationInternal(
   characters: readonly Character[],
   mutation: Dnd5eInventoryMutation,
   options: { turnEconomy?: Dnd5eTurnEconomyCounts } = {},

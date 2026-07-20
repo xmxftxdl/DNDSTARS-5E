@@ -8,6 +8,7 @@ import {
 
 export type PlayerActionAuthorityRoute =
   | 'end-turn'
+  | 'dnd5e-death-save'
   | 'disengage'
   | 'dnd5e-weapon-attack'
   | 'dnd5e-fighter-feature'
@@ -28,6 +29,7 @@ export type PlayerActionAuthorityExecutionPlan =
 
 export function playerActionAuthorityRoute(action: Pick<SharedPlayerActionState, 'type'>): PlayerActionAuthorityRoute {
   if (action.type === 'end-turn') return 'end-turn'
+  if (action.type === 'dnd5e-death-save') return 'dnd5e-death-save'
   if (action.type === 'disengage') return 'disengage'
   if (action.type === 'dnd5e-weapon-attack') return 'dnd5e-weapon-attack'
   if (action.type === 'dnd5e-fighter-feature') return 'dnd5e-fighter-feature'

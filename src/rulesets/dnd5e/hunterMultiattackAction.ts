@@ -24,7 +24,7 @@ import {
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 export type Dnd5eHunterMultiattackFeature = 'volley' | 'whirlwind-attack'
@@ -146,6 +146,13 @@ export function prepareDnd5eHunterMultiattack(input: {
   })
   if (targetTokens.length < 1) return { ok: false, reason: 'no-targets' }
 
+  const rangedThreatened = feature === 'volley' && input.map.tokens.some((candidate) => {
+    const candidateCombatant = snapshot.state.combatants[candidate.id]
+    return candidate.id !== actorToken.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(actorToken, candidate) &&
+      dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
+      distanceFeet(actorToken, candidate, input.map) <= 5
+  })
+
   const targets = targetTokens.map((token, targetIndex): PreparedDnd5eHunterMultiattackTarget => {
     const target = snapshot.state.combatants[token.id]!
     const targetDistance = distanceFeet(actorToken, token, input.map)
@@ -157,7 +164,8 @@ export function prepareDnd5eHunterMultiattack(input: {
         dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && targetDistance <= 5))
     const targetImposesDisadvantage = !!target.classState.dodgingTurnKey || actorCombatant.exhaustionLevel >= 3 ||
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
-      dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target) || actorProne || (targetProne && targetDistance > 5)
+      dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target) || actorProne || (targetProne && targetDistance > 5) ||
+      (feature === 'volley' && (rangedThreatened || targetDistance > (profile.rangeFeet?.normal ?? 0)))
     const attackMode = targetGrantsAdvantage === targetImposesDisadvantage
       ? 'normal'
       : targetGrantsAdvantage ? 'advantage' : 'disadvantage'
@@ -173,6 +181,9 @@ export function prepareDnd5eHunterMultiattack(input: {
       attackMode,
       classDamageContext: {
         mode: profile.mode,
+        distanceFeet: targetDistance,
+        normalRangeFeet: profile.rangeFeet?.normal,
+        longRangeFeet: profile.rangeFeet?.long,
         finesse: profile.finesse,
         strengthBased: profile.attackAbility === 'str',
         monkMartialArtsEligible: dnd5eMonkMartialArtsEligible(actor),

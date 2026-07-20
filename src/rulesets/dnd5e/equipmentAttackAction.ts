@@ -3,6 +3,7 @@ import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCo
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import type { CombatTransaction } from '../../lib/combatTransaction'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
@@ -26,7 +27,7 @@ import {
   type Dnd5eWeaponClassDamageContext,
   type Dnd5eTranquilitySaveRoll,
 } from './headlessCombatEngine'
-import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eAttackerIsUnseen, dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
 export type Dnd5eEquipmentAttackRejectReason =
@@ -217,6 +218,9 @@ export function prepareDnd5eEquipmentAttack(input: {
   })
   const classDamageContext: Dnd5eWeaponClassDamageContext = {
     mode: profile.mode,
+    distanceFeet,
+    normalRangeFeet: profile.rangeFeet?.normal,
+    longRangeFeet: profile.rangeFeet?.long,
     finesse: profile.finesse,
     strengthBased: profile.attackAbility === 'str',
     monkMartialArtsEligible: dnd5eMonkMartialArtsEligible(actor),
@@ -238,7 +242,17 @@ export function prepareDnd5eEquipmentAttack(input: {
     (dnd5eTargetGrantsAttackAdvantage(target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseen(actorCombatant) || (targetProne && distanceFeet <= 5))
   const attackerHasDisadvantage = (actor.exhaustionLevel ?? 0) >= 3 ||
-    dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || actorProne || (targetProne && distanceFeet > 5)
+    dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
+    (profile.mode === 'ranged' && (
+      distanceFeet > (profile.rangeFeet?.normal ?? 0) ||
+      input.map.tokens.some((candidate) => {
+        const candidateCombatant = snapshot.state.combatants[candidate.id]
+        return candidate.id !== actorToken.id && candidate.type !== 'obstacle' &&
+          areOpposedCombatTokens(actorToken, candidate) &&
+          dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
+          tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+      })
+    ))
   const targetImposesDisadvantage = !!target.classState.dodgingTurnKey || attackerHasDisadvantage ||
     dnd5eUnseenTargetImposesDisadvantage(actorCombatant, target)
   const attackMode = attackerHasAdvantage === targetImposesDisadvantage
@@ -364,6 +378,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   standAgainstTide?: Dnd5eStandAgainstTideUse
   damageRolls: readonly number[]
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
+  transaction?: CombatTransaction
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
   const result = resolveDnd5eHeadlessAction(prepared.state, {
@@ -407,7 +422,7 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
       rolls: input.damageRolls,
       type: prepared.profile.damage.type,
     },
-  })
+  }, { transaction: input.transaction })
   if (!result.ok) return { result }
   return {
     result,

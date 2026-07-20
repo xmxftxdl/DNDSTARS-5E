@@ -186,6 +186,7 @@ export interface Dnd5eWeaponAttackProfile {
   mode: 'melee' | 'ranged'
   attackAbility: AbilityKey
   finesse: boolean
+  proficient: boolean
   attackModifier: number
   criticalThreshold: number
   greatWeaponFighting: boolean
@@ -317,7 +318,8 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
     : data.attackAbility
   const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
-  const proficiency = rules.proficiencyBonus(Math.min(20, Math.max(1, character.level)))
+  const proficient = dnd5eWeaponProficient(character, weapon)
+  const proficiency = proficient ? rules.proficiencyBonus(Math.min(20, Math.max(1, character.level))) : 0
   const styles = dnd5eSelectedFightingStyles(character)
   const properties = data.properties ?? []
   const versatileProperty = properties.find((property) => property.includes('多才多艺'))
@@ -325,7 +327,7 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
   const usesTwoHands = properties.some((property) => property.includes('双手')) ||
     (!!versatileProperty && !character.equipment?.offHand)
   const attackStyleBonus = data.mode === 'ranged' && styles.includes('archery') ? 2 : 0
-  const duelingBonus = data.mode === 'melee' && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
+  const duelingBonus = data.mode === 'melee' && !usesTwoHands && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
   const armor = character.equipment?.armor?.dnd5e
   const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
   const rageBonus = character.charClass === '野蛮人' &&
@@ -347,6 +349,7 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     mode: data.mode,
     attackAbility: ability,
     finesse: data.attackAbility === 'finesse',
+    proficient,
     attackModifier: abilityModifier + proficiency + attackStyleBonus + sacredWeaponBonus + equipmentAttackBonus,
     criticalThreshold: fighterCriticalThreshold(character),
     greatWeaponFighting: data.mode === 'melee' && usesTwoHands && styles.includes('great-weapon-fighting'),
@@ -376,7 +379,8 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
     ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
     : data.attackAbility
   const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
-  const proficiency = rules.proficiencyBonus(Math.min(20, Math.max(1, character.level)))
+  const proficient = dnd5eWeaponProficient(character, weapon)
+  const proficiency = proficient ? rules.proficiencyBonus(Math.min(20, Math.max(1, character.level))) : 0
   const styles = dnd5eSelectedFightingStyles(character)
   const armor = character.equipment?.armor?.dnd5e
   const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
@@ -392,6 +396,7 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
     mode: 'melee',
     attackAbility: ability,
     finesse: data.attackAbility === 'finesse',
+    proficient,
     attackModifier: abilityModifier + proficiency + equipmentAttackBonus,
     criticalThreshold: fighterCriticalThreshold(character),
     greatWeaponFighting: false,
@@ -417,5 +422,24 @@ export function dnd5eSelectedFightingStyles(character: Character): readonly stri
 }
 
 export function dnd5eWeaponRangeFeet(profile: Dnd5eWeaponAttackProfile): number {
-  return profile.mode === 'melee' ? (profile.reachFeet ?? 5) : (profile.rangeFeet?.normal ?? 0)
+  return profile.mode === 'melee' ? (profile.reachFeet ?? 5) : (profile.rangeFeet?.long ?? profile.rangeFeet?.normal ?? 0)
+}
+
+export function dnd5eWeaponProficient(character: Character, weapon: EquipmentItem): boolean {
+  const data = weapon.dnd5e
+  if (!data || data.kind !== 'weapon') return false
+  const classId = dnd5eClassDefinitionForCharacter(character)?.id
+  if (!classId) return false
+  if (new Set(['barbarian', 'fighter', 'paladin', 'ranger']).has(classId)) return true
+  if (data.category === 'simple' && new Set(['bard', 'cleric', 'monk', 'rogue', 'warlock']).has(classId)) return true
+  const weaponId = weapon.id.replace(/-offhand$/, '')
+  const special: Partial<Record<typeof classId, ReadonlySet<string>>> = {
+    bard: new Set(['dnd5e-hand-crossbow', 'dnd5e-longsword', 'dnd5e-rapier', 'dnd5e-shortsword']),
+    rogue: new Set(['dnd5e-hand-crossbow', 'dnd5e-longsword', 'dnd5e-rapier', 'dnd5e-shortsword']),
+    monk: new Set(['dnd5e-shortsword']),
+    druid: new Set(['dnd5e-club', 'dnd5e-dagger', 'dnd5e-dart', 'dnd5e-javelin', 'dnd5e-mace', 'dnd5e-quarterstaff', 'dnd5e-scimitar', 'dnd5e-sickle', 'dnd5e-sling', 'dnd5e-spear']),
+    sorcerer: new Set(['dnd5e-dagger', 'dnd5e-dart', 'dnd5e-sling', 'dnd5e-quarterstaff', 'dnd5e-light-crossbow']),
+    wizard: new Set(['dnd5e-dagger', 'dnd5e-dart', 'dnd5e-sling', 'dnd5e-quarterstaff', 'dnd5e-light-crossbow']),
+  }
+  return special[classId]?.has(weaponId) === true
 }

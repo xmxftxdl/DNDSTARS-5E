@@ -1112,9 +1112,13 @@ export const useCharacterStore = create<CharacterState>()(
               const gainsTranquility = c.rulesetId === 'dnd5e-2014-srd-5.1' && c.charClass === '武僧' && c.level >= 11 &&
                 c.dnd5eClassChoices?.classes?.monk?.subclass === 'open-hand'
               const divineInterventionCooldownDays = c.dnd5eCombatState?.divineInterventionCooldownDays
+              const exhaustionLevel = c.rulesetId === 'dnd5e-2014-srd-5.1'
+                ? Math.max(0, Math.floor(c.exhaustionLevel ?? 0) - 1)
+                : c.exhaustionLevel
               return restoreDnd5eInventoryResources(
                 applyDnd5eDivineInterventionLongRest(restoreClassResources({
                   ...c,
+                  exhaustionLevel,
                   currentHp: c.maxHp,
                   tempHp: 0,
                   hitPointDice: c.hitPointDice?.map((pool) => ({

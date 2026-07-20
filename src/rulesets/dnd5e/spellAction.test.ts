@@ -91,6 +91,29 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepared.prepared.savingThrow?.modifier).toBe(2)
   })
 
+  it('ignores cover bonuses for Sacred Flame Dexterity saves', () => {
+    const cleric = character('cleric', '牧师', {
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-cantrips': ['sacred-flame'] } } } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const input = fixture(cleric, 'sacred-flame', 0, enemy)
+    setMapGeometryRuntime([{
+      mapId: input.map.id, walls: [], doors: [],
+      obstacles: [{
+        id: 'crate', kind: 'obstacle', label: '木箱', cover: 'three-quarters',
+        points: [{ x: 400, y: 10 }, { x: 450, y: 10 }, { x: 450, y: 40 }, { x: 400, y: 40 }],
+        blocksVision: false, blocksMovement: true, blocksLineOfEffect: false,
+        baseHeightFeet: 0, heightFeet: 5, createdAt: 1,
+      }],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
+    }])
+
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.savingThrow?.modifier).toBe(0)
+  })
+
   it('stops forced spell movement at a movement-blocking wall', () => {
     const actor = token('actor', 'player', 25, 'wizard')
     const target = token('target', 'enemy', 75)
