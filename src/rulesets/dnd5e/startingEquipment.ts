@@ -1,5 +1,5 @@
 import type { CharacterEquipment, EquipmentItem, EquipmentSlot } from '../../types/equipment'
-import type { Dnd5eInventory, Dnd5eInventoryEntry } from '../../types/inventory'
+import { DND5E_INVENTORY_SCHEMA_VERSION, type Dnd5eInventory, type Dnd5eInventoryEntry } from '../../types/inventory'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { dnd5eInventoryItemTemplate } from './items'
 
@@ -404,7 +404,14 @@ export function resolveDnd5eStartingEquipment(
       templateId: entry.templateId,
       item: itemSnapshot,
       quantity: entry.quantity,
-      ...(itemSnapshot.use?.chargesPerItem ? { remainingCharges: itemSnapshot.use.chargesPerItem * entry.quantity } : {}),
+      ...(itemSnapshot.use?.chargesPerItem ? {
+        resources: {
+          uses: {
+            id: 'uses', label: '使用次数', current: itemSnapshot.use.chargesPerItem * entry.quantity,
+            maximum: itemSnapshot.use.chargesPerItem * entry.quantity, resetOn: 'none' as const,
+          },
+        },
+      } : {}),
       ...(entry.equipSlot ? { equippedSlot: entry.equipSlot } : {}),
       acquiredAt: 0,
     })
@@ -412,7 +419,7 @@ export function resolveDnd5eStartingEquipment(
   return {
     grants,
     equipment: Object.keys(equipment).length > 0 ? equipment : undefined,
-    inventory: { schemaVersion: 1, entries: inventoryEntries },
+    inventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries: inventoryEntries },
   }
 }
 

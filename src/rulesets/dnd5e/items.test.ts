@@ -5,6 +5,8 @@ import {
   DND5E_SRD_ITEM_TEMPLATES,
   applyDnd5eInventoryMutation,
   createDnd5eInventoryForCharacter,
+  normalizeDnd5eInventory,
+  spendDnd5eInventoryResource,
 } from './items'
 import { DND5E_LONGSWORD } from './equipment'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
@@ -139,15 +141,58 @@ describe('SRD 5.1 inventory', () => {
     })
     let current = granted.characters
     let stack = inventoryEntry(current[0], 'srd-5.1:item:healers-kit')
-    expect(stack.remainingCharges).toBe(10)
+    expect(stack.resources?.uses.current).toBe(10)
     for (let index = 0; index < 9; index += 1) {
       const used = applyDnd5eInventoryMutation(current, { type: 'use', characterId: hero.id, instanceId: stack.instanceId })
       expect(used.ok).toBe(true)
       current = used.characters
       stack = inventoryEntry(current[0], 'srd-5.1:item:healers-kit')
     }
-    expect(stack.remainingCharges).toBe(1)
+    expect(stack.resources?.uses.current).toBe(1)
     const finalUse = applyDnd5eInventoryMutation(current, { type: 'use', characterId: hero.id, instanceId: stack.instanceId })
-    expect(finalUse.characters[0].dnd5eInventory!.entries.some((entry) => entry.templateId === stack.templateId)).toBe(false)
+    const depleted = inventoryEntry(finalUse.characters[0], stack.templateId)
+    expect(depleted.quantity).toBe(1)
+    expect(depleted.resources?.uses.current).toBe(0)
+    const exhausted = applyDnd5eInventoryMutation(finalUse.characters, { type: 'use', characterId: hero.id, instanceId: stack.instanceId })
+    expect(exhausted).toMatchObject({ ok: false, reason: 'insufficient-quantity' })
+  })
+
+  it('migrates V1 remainingCharges to an instance resource and never deletes a depleted instance', () => {
+    const hero = character('legacy')
+    const kit = DND5E_SRD_GEAR_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:item:healers-kit')!
+    const legacy = {
+      ...hero,
+      dnd5eInventory: {
+        schemaVersion: 1 as const,
+        entries: [{ instanceId: 'legacy-kit', templateId: kit.id, item: kit, quantity: 1, remainingCharges: 0, acquiredAt: 1 }],
+      },
+    }
+    const migrated = normalizeDnd5eInventory(legacy)
+    expect(migrated.schemaVersion).toBe(2)
+    expect(migrated.entries[0].remainingCharges).toBeUndefined()
+    expect(migrated.entries[0].resources?.uses).toMatchObject({ current: 0, maximum: 10 })
+  })
+
+  it('spends generic item resources without changing quantity', () => {
+    const hero = character('resource-hero')
+    const item = DND5E_SRD_ITEM_TEMPLATES[0]
+    const withResource = {
+      ...hero,
+      dnd5eInventory: {
+        schemaVersion: 2 as const,
+        entries: [{
+          instanceId: 'charged-item', templateId: 'test:charged-item',
+          item: { ...item, id: 'test:charged-item', resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' as const }] },
+          quantity: 1,
+          resources: { charges: { id: 'charges', label: '充能', current: 1, maximum: 4, resetOn: 'dawn' as const } },
+          acquiredAt: 1,
+        }],
+      },
+    }
+    const spent = spendDnd5eInventoryResource(withResource, 'charged-item', 'charges')
+    expect(spent.ok).toBe(true)
+    if (!spent.ok) return
+    expect(spent.resource.current).toBe(0)
+    expect(spent.character.dnd5eInventory?.entries[0]).toMatchObject({ quantity: 1, resources: { charges: { current: 0 } } })
   })
 })

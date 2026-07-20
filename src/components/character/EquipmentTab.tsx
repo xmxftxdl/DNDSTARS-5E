@@ -200,7 +200,7 @@ export default function EquipmentTab({
             <div>
               <p className="font-semibold text-slate-100">{selected.item.name}</p>
               <p className="mt-1 text-xs text-slate-500">
-                持有 {selected.quantity}{selected.remainingCharges != null ? ` · 剩余使用 ${selected.remainingCharges} 次` : ''} · {selected.item.englishName ?? CATEGORY_LABELS[selected.item.category]}
+                持有 {selected.quantity}{inventoryResourceSummary(selected) ? ` · ${inventoryResourceSummary(selected)}` : ''} · {selected.item.englishName ?? CATEGORY_LABELS[selected.item.category]}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -282,6 +282,7 @@ export default function EquipmentTab({
 function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEntry; selected: boolean; onSelect: () => void }) {
   const Icon = ICONS[entry.item.icon] ?? PackageOpen
   const usable = !!entry.item.use
+  const primaryResource = Object.values(entry.resources ?? {})[0]
   return (
     <button
       type="button"
@@ -300,10 +301,10 @@ function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEnt
       <p className="mt-2 line-clamp-2 text-xs font-semibold leading-snug text-slate-100">{entry.item.name}</p>
       <p className="mt-1 text-[10px] text-slate-600">{CATEGORY_LABELS[entry.item.category]}</p>
       {entry.quantity > 1 && (
-        <span className={`absolute right-2 ${entry.remainingCharges != null ? 'top-8' : 'top-2'} min-w-6 rounded-full border border-white/10 bg-void-950/90 px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-200`}>×{entry.quantity}</span>
+        <span className={`absolute right-2 ${primaryResource ? 'top-8' : 'top-2'} min-w-6 rounded-full border border-white/10 bg-void-950/90 px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-200`}>×{entry.quantity}</span>
       )}
-      {entry.remainingCharges != null && (
-        <span className="absolute right-2 top-2 min-w-6 rounded-full border border-emerald-300/15 bg-emerald-500/15 px-1.5 py-0.5 text-center text-[10px] font-bold text-emerald-100">{entry.remainingCharges} 次</span>
+      {primaryResource && (
+        <span className={`absolute right-2 top-2 min-w-6 rounded-full border px-1.5 py-0.5 text-center text-[10px] font-bold ${primaryResource.current > 0 ? 'border-emerald-300/15 bg-emerald-500/15 text-emerald-100' : 'border-slate-400/15 bg-slate-500/10 text-slate-400'}`}>{primaryResource.current}/{primaryResource.maximum}</span>
       )}
       {entry.equippedSlot && (
         <span className="absolute bottom-2 right-2 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-200">已装备</span>
@@ -329,11 +330,15 @@ function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
         {item.weightLb != null && <span>{item.weightLb} 磅</span>}
         {item.cost && <span>{item.cost.amount} {item.cost.currency}</span>}
         {item.use && <span>{item.use.economy === 'action' ? '动作' : item.use.economy === 'bonusAction' ? '附赠动作' : '无需行动'}</span>}
-        {entry.remainingCharges != null && <span>剩余 {entry.remainingCharges} 次</span>}
+        {Object.values(entry.resources ?? {}).map((resource) => <span key={resource.id}>{resource.label} {resource.current}/{resource.maximum}</span>)}
       </span>
       <span className="mt-3 block border-t border-white/8 pt-2 text-[10px] text-slate-600">{item.source.book} · {item.source.license}</span>
     </span>
   )
+}
+
+function inventoryResourceSummary(entry: Dnd5eInventoryEntry): string {
+  return Object.values(entry.resources ?? {}).map((resource) => `${resource.label} ${resource.current}/${resource.maximum}`).join(' · ')
 }
 
 function GroupButton({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: ComponentType<{ className?: string }>; children: string }) {

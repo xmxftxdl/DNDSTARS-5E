@@ -6,7 +6,10 @@ import type {
   Dnd5eInventoryItemTemplate,
   Dnd5eInventoryMutation,
   Dnd5eInventoryMutationResult,
+  Dnd5eInventoryResourceDefinition,
+  Dnd5eInventoryResourceState,
 } from '../../types/inventory'
+import { DND5E_INVENTORY_SCHEMA_VERSION } from '../../types/inventory'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
@@ -264,11 +267,12 @@ export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id'
       templateId: template.id,
       item: cloneItemTemplate(template),
       quantity: 1,
+      resources: createInventoryResources(template, 1),
       equippedSlot: slot as EquipmentSlot,
       acquiredAt: 0,
     } satisfies Dnd5eInventoryEntry]
   })
-  return { schemaVersion: 1, entries }
+  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries }
 }
 
 export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
@@ -278,18 +282,13 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     .map((entry) => {
       const item = cloneItemTemplate(dnd5eInventoryItemTemplate(entry.templateId) ?? entry.item)
       const quantity = Math.max(1, Math.floor(Number(entry.quantity) || 1))
-      const chargesPerItem = item.use?.chargesPerItem
-      const storedCharges = Number(entry.remainingCharges)
+      const resources = normalizeInventoryResources(item, quantity, entry.resources, entry.remainingCharges)
       return {
         ...entry,
         item,
         quantity,
-        remainingCharges: chargesPerItem
-          ? Math.min(
-              Number.isFinite(storedCharges) ? Math.max(0, Math.floor(storedCharges)) : chargesPerItem * quantity,
-              chargesPerItem * quantity,
-            )
-          : undefined,
+        resources,
+        remainingCharges: undefined,
         acquiredAt: Number.isFinite(entry.acquiredAt) ? entry.acquiredAt : 0,
       }
     })
@@ -312,6 +311,7 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
       templateId: template.id,
       item: cloneItemTemplate(template),
       quantity: 1,
+      resources: createInventoryResources(template, 1),
       equippedSlot: slot,
       acquiredAt: 0,
     }
@@ -323,7 +323,39 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     const equipped = character.equipment?.[entry.equippedSlot]
     if (!equipped || equipped.id !== entry.item.equipment?.id) entry.equippedSlot = undefined
   }
-  return { schemaVersion: 1, entries }
+  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries }
+}
+
+export function dnd5eInventoryEntryResource(
+  entry: Pick<Dnd5eInventoryEntry, 'resources'>,
+  resourceId: string,
+): Dnd5eInventoryResourceState | undefined {
+  return entry.resources?.[resourceId]
+}
+
+/** 权威事务使用的实例资源扣除函数。资源归零后仍保留物品实例。 */
+export function spendDnd5eInventoryResource(
+  character: Character,
+  instanceId: string,
+  resourceId: string,
+  amount = 1,
+): { ok: true; character: Character; resource: Dnd5eInventoryResourceState } | { ok: false; reason: 'item-not-found' | 'resource-not-found' | 'insufficient-resource'; character: Character } {
+  const inventory = normalizeDnd5eInventory(character)
+  const entry = inventory.entries.find((candidate) => candidate.instanceId === instanceId)
+  if (!entry) return { ok: false, reason: 'item-not-found', character }
+  const resource = entry.resources?.[resourceId]
+  if (!resource) return { ok: false, reason: 'resource-not-found', character }
+  const spend = Math.max(1, Math.floor(Number(amount) || 1))
+  if (resource.current < spend) return { ok: false, reason: 'insufficient-resource', character }
+  const nextResource = { ...resource, current: resource.current - spend }
+  const entries = inventory.entries.map((candidate) => candidate.instanceId === instanceId
+    ? { ...candidate, resources: { ...candidate.resources, [resourceId]: nextResource } }
+    : candidate)
+  return {
+    ok: true,
+    character: { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } },
+    resource: nextResource,
+  }
 }
 
 export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate): number[] {
@@ -389,7 +421,7 @@ export function applyDnd5eInventoryMutation(
 
   const use = entry.item.use
   if (!use) return failed(characters, 'not-usable')
-  if (entry.quantity < use.consumeQuantity || (use.chargesPerItem && (entry.remainingCharges ?? use.chargesPerItem * entry.quantity) < 1)) {
+  if (entry.quantity < use.consumeQuantity || (use.chargesPerItem && (entry.resources?.uses?.current ?? 0) < 1)) {
     return failed(characters, 'insufficient-quantity')
   }
   if (options.turnEconomy && use.economy === 'action' && options.turnEconomy.action.current < 1) {
@@ -421,7 +453,7 @@ export function applyDnd5eInventoryMutation(
   } else {
     requiresDmAdjudication = use.effect.adjudication
   }
-  if (use.chargesPerItem) next = consumeItemCharge(next, entry, use.chargesPerItem)
+  if (use.chargesPerItem) next = consumeItemCharge(next, entry)
   else if (use.consumeQuantity > 0) next = removeItem(next, entry, use.consumeQuantity)
   const result = succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 使用了 ${entry.item.name}。`)
   return {
@@ -490,6 +522,8 @@ function cloneItemTemplate(item: Dnd5eInventoryItemTemplate): Dnd5eInventoryItem
       effects: item.equipment.effects ? { ...item.equipment.effects } : undefined,
       dnd5e: item.equipment.dnd5e ? structuredClone(item.equipment.dnd5e) : undefined,
     } : undefined,
+    resources: item.resources?.map((resource) => ({ ...resource })),
+    headlessEffects: item.headlessEffects?.map((effect) => ({ ...effect })),
     use: item.use ? {
       ...item.use,
       effect: item.use.effect.kind === 'healing'
@@ -514,9 +548,7 @@ function addItem(character: Character, item: Dnd5eInventoryItemTemplate, quantit
       entries[existingIndex] = {
         ...existing,
         quantity: existing.quantity + quantity,
-        remainingCharges: item.use?.chargesPerItem
-          ? (existing.remainingCharges ?? existing.quantity * item.use.chargesPerItem) + quantity * item.use.chargesPerItem
-          : existing.remainingCharges,
+        resources: addInventoryResourceCapacity(existing.resources, inventoryResourceDefinitions(item), quantity),
       }
     } else {
       entries.push(newEntry(item, quantity))
@@ -524,7 +556,7 @@ function addItem(character: Character, item: Dnd5eInventoryItemTemplate, quantit
   } else {
     for (let index = 0; index < quantity; index += 1) entries.push(newEntry(item, 1))
   }
-  return { ...character, dnd5eInventory: { schemaVersion: 1, entries } }
+  return { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
 }
 
 function removeItem(character: Character, entry: Dnd5eInventoryEntry, quantity: number): Character {
@@ -537,12 +569,10 @@ function removeItem(character: Character, entry: Dnd5eInventoryEntry, quantity: 
     return [{
       ...candidate,
       quantity: nextQuantity,
-      remainingCharges: candidate.item.use?.chargesPerItem
-        ? Math.min(candidate.remainingCharges ?? candidate.quantity * candidate.item.use.chargesPerItem, nextQuantity * candidate.item.use.chargesPerItem)
-        : candidate.remainingCharges,
+      resources: resizeInventoryResources(candidate.resources, inventoryResourceDefinitions(candidate.item), nextQuantity),
     }]
   })
-  return { ...next, dnd5eInventory: { schemaVersion: 1, entries } }
+  return { ...next, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
 }
 
 function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character {
@@ -560,7 +590,7 @@ function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character
   return {
     ...character,
     equipment: { ...(character.equipment ?? {}), [slot]: { ...equipment } },
-    dnd5eInventory: { schemaVersion: 1, entries },
+    dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
   }
 }
 
@@ -573,7 +603,7 @@ function unequipEntry(character: Character, entry: Dnd5eInventoryEntry): Charact
     : candidate)
   const equipment: CharacterEquipment = { ...(character.equipment ?? {}) }
   if (equipment[slot]?.id === entry.item.equipment?.id) delete equipment[slot]
-  return { ...character, equipment, dnd5eInventory: { schemaVersion: 1, entries } }
+  return { ...character, equipment, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
 }
 
 function newEntry(item: Dnd5eInventoryItemTemplate, quantity: number): Dnd5eInventoryEntry {
@@ -582,21 +612,95 @@ function newEntry(item: Dnd5eInventoryItemTemplate, quantity: number): Dnd5eInve
     templateId: item.id,
     item: cloneItemTemplate(item),
     quantity,
-    remainingCharges: item.use?.chargesPerItem ? item.use.chargesPerItem * quantity : undefined,
+    resources: createInventoryResources(item, quantity),
     acquiredAt: Date.now(),
   }
 }
 
-function consumeItemCharge(character: Character, entry: Dnd5eInventoryEntry, chargesPerItem: number): Character {
-  const inventory = normalizeDnd5eInventory(character)
-  const current = entry.remainingCharges ?? chargesPerItem * entry.quantity
-  const remainingCharges = Math.max(0, current - 1)
-  const quantity = Math.ceil(remainingCharges / chargesPerItem)
-  const entries = inventory.entries.flatMap((candidate) => {
-    if (candidate.instanceId !== entry.instanceId) return [candidate]
-    return remainingCharges > 0 ? [{ ...candidate, quantity, remainingCharges }] : []
-  })
-  return { ...character, dnd5eInventory: { schemaVersion: 1, entries } }
+function consumeItemCharge(character: Character, entry: Dnd5eInventoryEntry): Character {
+  const result = spendDnd5eInventoryResource(character, entry.instanceId, 'uses', 1)
+  return result.ok ? result.character : character
+}
+
+function inventoryResourceDefinitions(item: Dnd5eInventoryItemTemplate): Dnd5eInventoryResourceDefinition[] {
+  const definitions = (item.resources ?? []).map((resource) => ({ ...resource }))
+  if (item.use?.chargesPerItem && !definitions.some((resource) => resource.id === 'uses')) {
+    definitions.push({ id: 'uses', label: '使用次数', maximum: item.use.chargesPerItem, initial: item.use.chargesPerItem, resetOn: 'none' })
+  }
+  return definitions
+}
+
+function createInventoryResources(item: Dnd5eInventoryItemTemplate, quantity: number): Record<string, Dnd5eInventoryResourceState> | undefined {
+  const definitions = inventoryResourceDefinitions(item)
+  if (definitions.length === 0) return undefined
+  return Object.fromEntries(definitions.map((definition) => {
+    const maximum = Math.max(0, Math.floor(definition.maximum)) * quantity
+    const initialPerItem = definition.initial == null ? definition.maximum : definition.initial
+    return [definition.id, {
+      id: definition.id,
+      label: definition.label,
+      current: Math.min(maximum, Math.max(0, Math.floor(initialPerItem)) * quantity),
+      maximum,
+      resetOn: definition.resetOn,
+    }]
+  }))
+}
+
+function normalizeInventoryResources(
+  item: Dnd5eInventoryItemTemplate,
+  quantity: number,
+  stored: Record<string, Dnd5eInventoryResourceState> | undefined,
+  legacyRemainingCharges: number | undefined,
+): Record<string, Dnd5eInventoryResourceState> | undefined {
+  const created = createInventoryResources(item, quantity)
+  if (!created) return undefined
+  return Object.fromEntries(Object.entries(created).map(([id, fallback]) => {
+    const candidate = stored?.[id]
+    const legacy = id === 'uses' ? Number(legacyRemainingCharges) : Number.NaN
+    const current = Number.isFinite(Number(candidate?.current))
+      ? Number(candidate?.current)
+      : Number.isFinite(legacy) ? legacy : fallback.current
+    return [id, { ...fallback, current: Math.min(fallback.maximum, Math.max(0, Math.floor(current))) }]
+  }))
+}
+
+function addInventoryResourceCapacity(
+  current: Record<string, Dnd5eInventoryResourceState> | undefined,
+  definitions: readonly Dnd5eInventoryResourceDefinition[],
+  addedQuantity: number,
+): Record<string, Dnd5eInventoryResourceState> | undefined {
+  if (definitions.length === 0) return current
+  return Object.fromEntries(definitions.map((definition) => {
+    const existing = current?.[definition.id]
+    const maximumAdded = Math.max(0, Math.floor(definition.maximum)) * addedQuantity
+    const initialAdded = Math.min(maximumAdded, Math.max(0, Math.floor(definition.initial ?? definition.maximum)) * addedQuantity)
+    return [definition.id, {
+      id: definition.id,
+      label: definition.label,
+      current: (existing?.current ?? 0) + initialAdded,
+      maximum: (existing?.maximum ?? 0) + maximumAdded,
+      resetOn: definition.resetOn,
+    }]
+  }))
+}
+
+function resizeInventoryResources(
+  current: Record<string, Dnd5eInventoryResourceState> | undefined,
+  definitions: readonly Dnd5eInventoryResourceDefinition[],
+  quantity: number,
+): Record<string, Dnd5eInventoryResourceState> | undefined {
+  if (!current || definitions.length === 0) return current
+  return Object.fromEntries(definitions.map((definition) => {
+    const existing = current[definition.id]
+    const maximum = Math.max(0, Math.floor(definition.maximum)) * quantity
+    return [definition.id, {
+      id: definition.id,
+      label: definition.label,
+      current: Math.min(maximum, Math.max(0, existing?.current ?? 0)),
+      maximum,
+      resetOn: definition.resetOn,
+    }]
+  }))
 }
 
 function inventoryId(): string {

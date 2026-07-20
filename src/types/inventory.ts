@@ -25,6 +25,37 @@ export type Dnd5eInventoryIconId =
 
 export type Dnd5eInventoryCategory = 'equipment' | 'adventuring-gear' | 'consumable' | 'tool' | 'container'
 
+export const DND5E_INVENTORY_SCHEMA_VERSION = 2 as const
+
+export type Dnd5eInventoryResourceReset = 'none' | 'short-rest' | 'long-rest' | 'dawn'
+
+/** 模板声明每一件物品提供的实例资源；实际当前值只保存在库存实例中。 */
+export interface Dnd5eInventoryResourceDefinition {
+  id: string
+  label: string
+  maximum: number
+  initial?: number
+  resetOn: Dnd5eInventoryResourceReset
+}
+
+export interface Dnd5eInventoryResourceState {
+  id: string
+  label: string
+  current: number
+  maximum: number
+  resetOn: Dnd5eInventoryResourceReset
+}
+
+export interface Dnd5eAttackRollRerollEffect {
+  kind: 'attack-roll-reroll'
+  resourceId: string
+  maximumDice: 1
+  trigger: 'after-attack-roll'
+  appliesTo: 'attacks-with-this-weapon' | 'weapon-attacks'
+}
+
+export type Dnd5eInventoryHeadlessEffect = Dnd5eAttackRollRerollEffect
+
 export interface Dnd5eItemCost {
   amount: number
   currency: 'cp' | 'sp' | 'gp'
@@ -67,6 +98,10 @@ export interface Dnd5eInventoryItemTemplate {
   cost?: Dnd5eItemCost
   stackable: boolean
   equipment?: EquipmentItem
+  /** 可持久化的实例资源，例如充能。归零不会删除物品实例。 */
+  resources?: readonly Dnd5eInventoryResourceDefinition[]
+  /** 只能由 Host Headless 事务解释，插件不能直接执行这些效果。 */
+  headlessEffects?: readonly Dnd5eInventoryHeadlessEffect[]
   use?: {
     economy: 'action' | 'bonusAction' | 'none'
     consumeQuantity: number
@@ -91,13 +126,16 @@ export interface Dnd5eInventoryEntry {
   templateId: string
   item: Dnd5eInventoryItemTemplate
   quantity: number
+  resources?: Record<string, Dnd5eInventoryResourceState>
+  /** schema V1 迁移字段；V2 运行时不会再写入。 */
   remainingCharges?: number
   equippedSlot?: EquipmentSlot
   acquiredAt: number
 }
 
 export interface Dnd5eInventory {
-  schemaVersion: 1
+  /** 允许读入 V1 旧存档；所有规范化和写入都会升级为 V2。 */
+  schemaVersion: 1 | typeof DND5E_INVENTORY_SCHEMA_VERSION
   entries: Dnd5eInventoryEntry[]
 }
 
