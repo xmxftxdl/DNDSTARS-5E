@@ -921,7 +921,6 @@ export default function MapsPage() {
   const updateMap = useMapStore((s) => s.updateMap)
   const removeMap = useMapStore((s) => s.removeMap)
   const addToken = useMapStore((s) => s.addToken)
-  const addObstacle = useMapStore((s) => s.addObstacle)
   const addEnemyFromPool = useMapStore((s) => s.addEnemyFromPool)
   const addCharacterToken = useMapStore((s) => s.addCharacterToken)
   const updateToken = useMapStore((s) => s.updateToken)
@@ -15196,23 +15195,6 @@ export default function MapsPage() {
                     <User className="h-3.5 w-3.5" />
                     NPC
                   </button>
-                  <label className="flex items-center gap-1 rounded-lg bg-slate-500/15 px-2 py-1 text-xs font-medium text-slate-200">
-                    <Square className="h-3.5 w-3.5" />
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        if (e.target.value) addObstacle(activeMap.id, e.target.value)
-                        e.target.value = ''
-                      }}
-                      className="cursor-pointer bg-transparent text-xs text-slate-200 outline-none [&>option]:bg-void-900"
-                    >
-                      <option value="">障碍物…</option>
-                      <option value="rock">石头</option>
-                      <option value="chair">椅子</option>
-                      <option value="pillar">石柱</option>
-                      <option value="table">翻倒的桌子</option>
-                    </select>
-                  </label>
                   <button
                     onClick={() => {
                       if (confirm(`删除地图「${activeMap.name}」？`)) removeMap(activeMap.id)

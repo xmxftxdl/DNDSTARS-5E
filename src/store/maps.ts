@@ -556,7 +556,6 @@ interface MapState {
   updateMap: (id: string, patch: Partial<BattleMap>) => void
   removeMap: (id: string) => void
   addToken: (mapId: string, type: Token['type']) => void
-  addObstacle: (mapId: string, kind: string) => void
   addEnemyFromPool: (mapId: string, template: EnemyTemplate) => string | null
   addCharacterToken: (
     mapId: string,
@@ -672,36 +671,6 @@ export const useMapStore = create<MapState>()(
           creatureSize,
           hp: defaultHp,
           maxHp: defaultHp,
-        }
-        set((s) => ({
-          maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
-        }))
-        publishMapsState(get())
-      },
-
-      addObstacle: (mapId, kind) => {
-        const map = get().maps.find((m) => m.id === mapId)
-        if (!map) return
-        const templates: Record<string, { label: string; emoji: string; size: number; color: string }> = {
-          rock: { label: '石头', emoji: '🪨', size: 1, color: '#94a3b8' },
-          chair: { label: '椅子', emoji: '🪑', size: 1, color: '#a16207' },
-          pillar: { label: '石柱', emoji: '🏛️', size: 1, color: '#cbd5e1' },
-          table: { label: '翻倒的桌子', emoji: '▰', size: 2, color: '#92400e' },
-        }
-        const tpl = templates[kind] ?? templates.rock
-        const spawn = snapTokenToGridCenter(map.width / 2, map.height / 2, { size: tpl.size }, map)
-        const token: Token = {
-          id: uid(),
-          label: tpl.label,
-          x: spawn.x,
-          y: spawn.y,
-          color: tpl.color,
-          emoji: tpl.emoji,
-          size: tpl.size,
-          type: 'obstacle',
-          obstacleKind: kind,
-          showHpOnToken: false,
-          showDetailOnToken: false,
         }
         set((s) => ({
           maps: s.maps.map((m) => (m.id === mapId ? { ...m, tokens: [...m.tokens, token] } : m)),
