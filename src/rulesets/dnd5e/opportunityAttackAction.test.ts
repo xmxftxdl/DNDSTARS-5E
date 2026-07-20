@@ -3,6 +3,7 @@ import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { DND5E_FIGHTER_STARTING_EQUIPMENT } from './equipment'
+import { createDnd5eConditionEffect } from './activeEffects'
 import {
   findDnd5eOpportunityAttackersForMove,
   prepareDnd5eOpportunityAttack,
@@ -89,6 +90,25 @@ describe('D&D 5e opportunity attack bridge', () => {
     })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.characters[0].currentHp).toBe(30)
+  })
+
+  it('includes the attacker condition disadvantage while preparing an opportunity attack', () => {
+    const { character, map, initiativeOrder } = fixture()
+    map.tokens[0].dnd5eCombatState = {
+      schemaVersion: 2,
+      activeEffects: [createDnd5eConditionEffect({
+        condition: 'poisoned', targetId: 'kobold',
+        source: { kind: 'dm', label: 'DM 裁定' }, appliedAt: 1,
+      })],
+    }
+    const prepared = prepareDnd5eOpportunityAttack({
+      combatId: 'combat', map, characters: [character], initiativeOrder,
+      actorTokenId: 'kobold', targetTokenId: 'hero-token',
+      turnEconomy: createDnd5eTurnEconomyCounts('kobold-turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('disadvantage')
   })
 
   it('prepares Berserker Retaliation only for a level-14 Berserker in melee reach', () => {

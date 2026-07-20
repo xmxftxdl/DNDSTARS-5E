@@ -98,6 +98,37 @@ describe('D&D 5e map bridge', () => {
     expect(reconnected.state.combatants[enemy.id].classState.activeEffects).toEqual(enemyEffects)
   })
 
+  it('persists a Help attack marker on an unlinked monster token', () => {
+    const helper = token({ id: 'helper-token', type: 'player', x: 0, y: 0 })
+    const enemy = token({ id: 'enemy-token', type: 'enemy', x: 10, y: 0 })
+    const map: BattleMap = {
+      id: 'help-map', name: 'Help', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [helper, enemy],
+    }
+    const initiativeOrder = [
+      { tokenId: helper.id, label: helper.label, emoji: '', color: '', roll: 20 },
+      { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 10 },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({ combatId: 'help', map, characters: [], initiativeOrder })
+    const helped = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'help', actorId: helper.id, targetId: enemy.id, helpKind: 'attack',
+    })
+    expect(helped.ok).toBe(true)
+    if (!helped.ok) return
+    const plan = planDnd5eMapResultApplication({
+      state: helped.state, map, characters: [], characterIdByCombatantId: {},
+    })
+    const persistedEnemy = plan.map.tokens.find((entry) => entry.id === enemy.id)
+    expect(persistedEnemy?.dnd5eCombatState).toMatchObject({
+      helpedAttackSourceId: helper.id,
+      helpedAttackSourceTurnKey: 'help:1:helper-token',
+    })
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'help', map: plan.map, characters: [], initiativeOrder,
+    })
+    expect(reconnected.state.combatants[enemy.id].classState.helpedAttackSourceId).toBe(helper.id)
+  })
+
   it('persists pending monster saving-throw transactions across map reconnect snapshots', () => {
     const hero: Character = {
       ...character(),

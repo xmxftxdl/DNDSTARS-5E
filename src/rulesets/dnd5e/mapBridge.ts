@@ -382,6 +382,8 @@ export function planDnd5eMapResultApplication(input: {
             concentrationRoundsRemaining: combatant.classState.concentrationRoundsRemaining,
             concentrationEffectsBySource: combatant.classState.concentrationEffectsBySource,
             viciousMockeryAttackDisadvantage: combatant.classState.viciousMockeryAttackDisadvantage,
+            helpedAttackSourceId: combatant.classState.helpedAttackSourceId,
+            helpedAttackSourceTurnKey: combatant.classState.helpedAttackSourceTurnKey,
             shieldSpellActive: combatant.classState.shieldSpellActive,
             hurlThroughHellSourceId: combatant.classState.hurlThroughHellSourceId,
             hurlThroughHellDamage: combatant.classState.hurlThroughHellDamage,

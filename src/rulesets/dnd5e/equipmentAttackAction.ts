@@ -14,6 +14,8 @@ import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from '.
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import {
   dnd5eAttackerIsUnseenForAttack,
+  dnd5eFrightenedAttackDisadvantage,
+  dnd5eHelpAttackApplies,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
@@ -260,10 +262,11 @@ export function prepareDnd5eEquipmentAttack(input: {
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
-    (dnd5eTargetGrantsAttackAdvantage(target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
+    (dnd5eTargetGrantsAttackAdvantage(target) || dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
   const attackerHasDisadvantage = (actor.exhaustionLevel ?? 0) >= 3 ||
-    dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
+    dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
+    dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
     (profile.mode === 'ranged' && (
       distanceFeet > (profile.rangeFeet?.normal ?? 0) ||
       input.map.tokens.some((candidate) => {

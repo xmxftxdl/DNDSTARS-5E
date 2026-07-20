@@ -11,7 +11,10 @@ import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantCanSee,
+  dnd5eFrightenedAttackDisadvantage,
+  dnd5eHelpAttackApplies,
   dnd5eTargetArmorClassForAttack,
+  dnd5eTargetIsUnseenForAttack,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
@@ -194,9 +197,13 @@ export function prepareDnd5eOpportunityAttack(input: {
       weaponName: isPlayerMelee ? playerProfile.weaponName : monsterAction!.name,
       attackModifier: isPlayerMelee ? playerProfile.attackModifier : monsterAction!.attack!.toHit,
       attackMode: (() => {
-        const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) || dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
+        const advantage = dnd5eTargetGrantsAttackAdvantage(targetCombatant) ||
+          dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) ||
+          dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
           targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
         const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
+          dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
+          dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
           actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
           (targetCombatant.classId === 'ranger' && targetCombatant.subclassId === 'hunter' &&
             targetCombatant.level >= 7 && targetCombatant.classSelections['defensive-tactics']?.includes('escape-the-horde'))

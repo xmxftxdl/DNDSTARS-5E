@@ -7650,15 +7650,29 @@ export default function MapsPage() {
         const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
         if (next) updateToken(authorityMap.id, tokenId, next)
       }
+      const grantedMovement = resolved.result.events
+        .flatMap((event) => event.type === 'movement-granted' && event.actorId === action.actorTokenId
+          ? [event.amount]
+          : [])
+        .reduce((total, amount) => total + amount, 0)
       updateDnd5eTurnEconomy(
         action.actorTokenId,
         (economy) => {
           const afterAction = prepared.prepared.spendsAction
             ? spendDnd5eTurnResource(economy, 'action').economy
             : economy
-          return payload.kind === 'grapple' || payload.kind === 'shove'
+          const afterAttackReplacement = payload.kind === 'grapple' || payload.kind === 'shove'
             ? { ...afterAction, attacksUsed: prepared.prepared.attackNumber ?? afterAction.attacksUsed }
             : afterAction
+          return grantedMovement > 0
+            ? {
+                ...afterAttackReplacement,
+                movement: {
+                  current: afterAttackReplacement.movement.current + grantedMovement,
+                  max: afterAttackReplacement.movement.max + grantedMovement,
+                },
+              }
+            : afterAttackReplacement
         },
         liveRound,
       )

@@ -443,6 +443,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dashed.ok).toBe(true)
     if (!dashed.ok) return
     expect(dashed.state.combatants.a.turn).toMatchObject({ actionAvailable: false, movementRemaining: 40 })
+    expect(dashed.events).toContainEqual({ type: 'movement-granted', actorId: 'a', amount: 30 })
   })
 
   it('settles the free object interaction and action fallback in Headless economy', () => {
@@ -825,6 +826,20 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(hidden.ok).toBe(true)
     if (!hidden.ok) return
     expect(hidden.state.combatants.a.classState.hiddenCheckTotal).toBe(17)
+
+    const noticedState = startDnd5eHeadlessCombat('basic-hide-failed', [
+      fighter('a', 20),
+      fighter('b', 10, { controller: 'dm', passivePerception: 15 }),
+    ])
+    noticedState.lineOfSightBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('b', 'a')]: true,
+    }
+    const noticed = resolveDnd5eHeadlessAction(noticedState, { type: 'hide', actorId: 'a', d20: 1 })
+    expect(noticed.ok).toBe(true)
+    if (!noticed.ok) return
+    expect(noticed.state.combatants.a.classState.hiddenCheckTotal).toBeUndefined()
+    expect(noticed.state.combatants.a.turn.actionAvailable).toBe(false)
+
 
     const readyState = startDnd5eHeadlessCombat('basic-ready', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
     const readied = resolveDnd5eHeadlessAction(readyState, {

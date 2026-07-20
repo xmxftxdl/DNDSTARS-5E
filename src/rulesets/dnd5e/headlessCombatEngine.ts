@@ -331,7 +331,7 @@ function dnd5eConditionSourceIds(
   ))]
 }
 
-function dnd5eFrightenedAttackDisadvantage(
+export function dnd5eFrightenedAttackDisadvantage(
   state: Dnd5eHeadlessCombatState,
   combatant: Dnd5eCombatant,
 ): boolean {
@@ -341,7 +341,7 @@ function dnd5eFrightenedAttackDisadvantage(
   return [...sourceIds].some((sourceId) => dnd5eCombatantCanSee(state, combatant.id, sourceId))
 }
 
-function dnd5eHelpAttackApplies(
+export function dnd5eHelpAttackApplies(
   state: Dnd5eHeadlessCombatState,
   attacker: Dnd5eCombatant,
   target: Dnd5eCombatant,
@@ -7917,8 +7917,10 @@ function resolveDnd5eHeadlessActionInternal(
   }
   if (action.type === 'dash') {
     if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
-    actor.turn = { ...actor.turn, movementRemaining: actor.turn.movementRemaining + dnd5eEffectiveSpeed(actor) }
+    const grantedMovement = dnd5eEffectiveSpeed(actor)
+    actor.turn = { ...actor.turn, movementRemaining: actor.turn.movementRemaining + grantedMovement }
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'movement-granted', actorId: actor.id, amount: grantedMovement })
     return { ok: true, state, events }
   }
   if (action.type === 'hide') {
@@ -7946,9 +7948,23 @@ function resolveDnd5eHeadlessActionInternal(
     } catch {
       return fail(state, events, 'invalid-dice')
     }
-    actor.classState.hiddenCheckTotal = check.total
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
     events.push({ type: 'hide-resolved', actorId: actor.id, d20: check.d20, total: check.total })
+    const hostilePassivePerception = Math.max(0, ...Object.values(state.combatants).flatMap((candidate) =>
+      candidate.id !== actor.id && candidate.controller !== actor.controller && candidate.currentHp > 0 &&
+      !candidate.deathSaves.dead
+        ? [candidate.passivePerception]
+        : [],
+    ))
+    if (check.total < hostilePassivePerception) {
+      actor.classState.hiddenCheckTotal = undefined
+      events.push({
+        type: 'class-state-changed', actorId: actor.id,
+        stateKey: 'hidden', active: false, value: check.total,
+      })
+      return { ok: true, state, events }
+    }
+    actor.classState.hiddenCheckTotal = check.total
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'hidden', active: true, value: check.total })
     return { ok: true, state, events }
   }

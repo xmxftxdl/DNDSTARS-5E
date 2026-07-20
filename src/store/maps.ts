@@ -181,6 +181,8 @@ export interface Token {
     concentrationRoundsRemaining?: number
     concentrationEffectsBySource?: Record<string, string>
     viciousMockeryAttackDisadvantage?: boolean
+    helpedAttackSourceId?: string
+    helpedAttackSourceTurnKey?: string
     shieldSpellActive?: boolean
     legendaryResistanceUses?: number
     hurlThroughHellSourceId?: string

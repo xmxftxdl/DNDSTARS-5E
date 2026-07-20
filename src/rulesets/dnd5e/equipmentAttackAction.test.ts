@@ -140,6 +140,23 @@ describe('D&D 5e equipment attack authority', () => {
     expect(prepared.prepared.attackMode).toBe('disadvantage')
   })
 
+  it('prepares two d20s when an allied Help marker grants attack advantage', () => {
+    const input = fixture()
+    const helper = token({ id: 'helper-token', type: 'player', x: 75, y: 75 })
+    input.targetToken.dnd5eCombatState = {
+      helpedAttackSourceId: helper.id,
+      helpedAttackSourceTurnKey: '1:helper-token',
+    }
+    input.map.tokens.push(helper)
+    input.initiativeOrder.push({
+      tokenId: helper.id, label: helper.label, emoji: '', color: '', roll: 5,
+    })
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('advantage')
+  })
+
   it('grants a second full Attack action after Action Surge', () => {
     const input = fixture()
     const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 2, attackActionsAvailable: 2 })
