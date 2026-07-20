@@ -4,16 +4,12 @@ import {
   Users,
   Swords,
   Bot,
-  Scroll,
   Dices,
   ChevronRight,
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
-import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
-import { SharedSyncDiagnosticsPanel } from '../components/SharedSyncStatus'
-import RoomManagementPanel from '../components/RoomManagementPanel'
-import Dnd5eEffectDiagnosticsPanel from '../components/Dnd5eEffectDiagnosticsPanel'
+import CampaignCombatStatisticsPanel from '../components/CampaignCombatStatisticsPanel'
 
 const stats = [
   { label: '已上传地图', value: '0', icon: MapIcon, color: 'text-sky-300' },
@@ -78,21 +74,10 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Recent activity placeholder */}
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
-        最近动态
+        战役战斗统计
       </h3>
-      <Card>
-        <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-          <Scroll className="h-10 w-10 text-slate-600" />
-          <p className="text-slate-400">还没有任何战役记录</p>
-          <p className="text-sm text-slate-500">创建你的第一个战役，开启冒险吧。</p>
-        </div>
-      </Card>
-      <CampaignSafetyPanel />
-      <RoomManagementPanel />
-      <SharedSyncDiagnosticsPanel />
-      <Dnd5eEffectDiagnosticsPanel />
+      <CampaignCombatStatisticsPanel />
     </div>
   )
 }

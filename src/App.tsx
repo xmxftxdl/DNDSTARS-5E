@@ -213,7 +213,7 @@ export default function App() {
           <Route path="/maps" element={<PageErrorBoundary scope="地图与战斗"><MapsPage /></PageErrorBoundary>} />
           <Route path="/characters" element={<PageErrorBoundary scope="角色页面"><CharactersPage /></PageErrorBoundary>} />
           <Route path="/spellbook" element={<PageErrorBoundary scope="法术书"><SpellbookPage /></PageErrorBoundary>} />
-          <Route path="/settings" element={<PageErrorBoundary scope="规则包页面"><RulesPluginsPage /></PageErrorBoundary>} />
+          <Route path="/settings" element={<PageErrorBoundary scope="设置页面"><RulesPluginsPage /></PageErrorBoundary>} />
           {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}
         </Routes>
       </main>

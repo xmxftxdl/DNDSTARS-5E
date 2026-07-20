@@ -52,7 +52,6 @@ import Dnd5eAbilityCheckPanel from '../components/map/Dnd5eAbilityCheckPanel'
 import Dnd5ePluginCombatPanel from '../components/map/Dnd5ePluginCombatPanel'
 import Dnd5eActiveEffectDetailsDialog from '../components/map/Dnd5eActiveEffectDetailsDialog'
 import CombatSettlementPanel, { type ManualSettlementTarget } from '../components/map/CombatSettlementPanel'
-import CombatStatisticsPanel from '../components/map/CombatStatisticsPanel'
 import DiceRollOverlay from '../components/DiceRollOverlay'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
@@ -807,7 +806,6 @@ export default function MapsPage() {
   const updateGeometryEntity = useMapGeometryStore((s) => s.updateEntity)
   const explorationMaps = useMapExplorationStore((s) => s.maps)
   const recordMapExploration = useMapExplorationStore((s) => s.record)
-  const combatStatisticsSessions = useCombatStatisticsStore((s) => s.sessions)
   const startCombatStatistics = useCombatStatisticsStore((s) => s.startCombat)
   const recordCombatStatistics = useCombatStatisticsStore((s) => s.record)
 
@@ -863,7 +861,6 @@ export default function MapsPage() {
   const dnd5eTurnEconomyByTokenRef = useRef<Dnd5eTurnEconomyByToken>({})
   const [combatLog, setCombatLog] = useState<CombatLogEntry[]>([])
   const [combatLogOpen, setCombatLogOpen] = useState(false)
-  const [combatStatisticsOpen, setCombatStatisticsOpen] = useState(false)
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
   const [selectedCharacterTokenId, setSelectedCharacterTokenId] = useState<string | null>(null)
   const [effectDetailTokenId, setEffectDetailTokenId] = useState<string | null>(null)
@@ -1647,9 +1644,6 @@ export default function MapsPage() {
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
   const activeMapId = activeMap?.id
-  const combatStatisticsSession = combatStatisticsSessions.find((session) => session.combatId === combatId) ??
-    [...combatStatisticsSessions].reverse().find((session) => session.mapId === activeMapId)
-
   useEffect(() => {
     if (!isDM || !activeMapId) return
     return setDnd5eHeadlessResolutionObserver((observation) => {
@@ -13110,17 +13104,6 @@ export default function MapsPage() {
               currentTurnTokenId={currentInitiativeToken?.id}
               onRoll={handleManualDiceRoll}
               onSettle={isDM ? handleManualSettlement : undefined}
-            />
-          )}
-
-          {isDM && (combatActive || !!combatStatisticsSession) && (
-            <CombatStatisticsPanel
-              session={combatStatisticsSession}
-              open={combatStatisticsOpen}
-              onOpenChange={setCombatStatisticsOpen}
-              onReset={combatId && activeMap
-                ? () => startCombatStatistics(combatId, activeMap.id)
-                : undefined}
             />
           )}
 

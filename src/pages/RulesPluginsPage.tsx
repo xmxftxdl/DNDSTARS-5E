@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { AlertTriangle, CheckCircle2, Download, Plug, RefreshCw, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, Download, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
+import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
+import Dnd5eEffectDiagnosticsPanel from '../components/Dnd5eEffectDiagnosticsPanel'
+import RoomManagementPanel from '../components/RoomManagementPanel'
+import { SharedSyncDiagnosticsPanel } from '../components/SharedSyncStatus'
 import Dnd5eCustomPluginBuilder from '../components/rules/Dnd5eCustomPluginBuilder'
 import {
   activeDnd5eRulesPluginRequirements,
@@ -43,6 +47,7 @@ export default function RulesPluginsPage() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [settingsSection, setSettingsSection] = useState<'plugins' | 'room' | 'diagnostics'>('plugins')
   const installed = host?.listInstalled() ?? []
   const activeById = new Map((host?.listActive() ?? []).map((plugin) => [plugin.id, plugin]))
   const activeRequirements = activeDnd5eRulesPluginRequirements()
@@ -218,9 +223,9 @@ export default function RulesPluginsPage() {
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
-        title="规则插件"
-        description="安装或创建独立规则包，为人物卡和 DM Headless 结算注入种族、背景、特性、法术与装备。核心仍只包含 D&D 5e 2014／SRD 5.1。"
-        actions={(
+        title="设置"
+        description="管理规则插件、房间权限、战役备份与高级数据诊断。"
+        actions={settingsSection === 'plugins' ? (
           <div className="flex flex-wrap gap-2">
             <a
               href="/plugin-templates/phb-2014-compat-template.dndstars5e"
@@ -263,9 +268,34 @@ export default function RulesPluginsPage() {
               </>
             )}
           </div>
-        )}
+        ) : undefined}
       />
 
+      <nav className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/15 p-2" aria-label="设置分类">
+        {[
+          { id: 'plugins' as const, label: '规则插件', icon: Puzzle },
+          ...(roomSession?.role === 'player' ? [] : [
+            { id: 'room' as const, label: '房间与恢复', icon: Shield },
+            { id: 'diagnostics' as const, label: '高级诊断', icon: Activity },
+          ]),
+        ].map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSettingsSection(id)}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+              settingsSection === id
+                ? 'bg-arcane-500/15 text-arcane-200 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.25)]'
+                : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {settingsSection === 'plugins' && <div className="contents">
       {roomSession && (
         <section
           data-testid="room-rules-status"
@@ -454,6 +484,33 @@ export default function RulesPluginsPage() {
             )
           })}
         </div>
+      )}
+      </div>}
+
+      {settingsSection === 'room' && roomSession?.role !== 'player' && (
+        <section>
+          <div className="rounded-2xl border border-white/8 bg-black/15 p-5">
+            <h2 className="font-semibold text-slate-100">房间、安全与恢复</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              这些入口负责在线成员权限、DM 转让、战役导入导出与快照回滚，属于正式管理能力，仅在需要时使用。
+            </p>
+          </div>
+          <RoomManagementPanel />
+          <CampaignSafetyPanel />
+        </section>
+      )}
+
+      {settingsSection === 'diagnostics' && roomSession?.role !== 'player' && (
+        <section>
+          <div className="rounded-2xl border border-white/8 bg-black/15 p-5">
+            <h2 className="font-semibold text-slate-100">高级诊断</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              多人同步版本和 ActiveEffect 数据检查仍用于定位断线、冲突、旧存档迁移与状态投影错误；正常游戏时无需操作。
+            </p>
+          </div>
+          <SharedSyncDiagnosticsPanel />
+          <Dnd5eEffectDiagnosticsPanel />
+        </section>
       )}
     </div>
   )

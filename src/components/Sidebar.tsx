@@ -136,7 +136,7 @@ export default function Sidebar({
           ].join(' ')}
         >
           <Settings className="h-5 w-5 text-slate-500" />
-          规则插件
+          设置
         </NavLink>
         {onLeaveRoom && (
           <button
