@@ -156,10 +156,13 @@ export function reconcileDnd5ePluginAreas(
     if (!area.concentrationId) return true
     const source = charactersById.get(area.sourceCharacterId)
     return !!source?.concentrating && source.dnd5eCombatState?.concentrationSpellId === area.concentrationId
-  }).map((area) => ({
-    ...area,
-    triggerReceipts: area.triggerReceipts?.filter((receipt) => receipt.round >= round - 2),
-  }))
+  }).map((area) => {
+    if (!area.triggerReceipts) return area
+    const triggerReceipts = area.triggerReceipts.filter((receipt) => receipt.round >= round - 2)
+    return triggerReceipts.length === area.triggerReceipts.length
+      ? area
+      : { ...area, triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined }
+  })
 }
 
 export function reconcileDnd5ePluginAreasOnMap(
@@ -168,6 +171,7 @@ export function reconcileDnd5ePluginAreasOnMap(
   round: number,
 ): BattleMap {
   const next = reconcileDnd5ePluginAreas(map.dnd5ePluginAreas, characters, round)
-  if (next.length === (map.dnd5ePluginAreas ?? []).length) return map
+  const previous = map.dnd5ePluginAreas ?? []
+  if (next.length === previous.length && next.every((area, index) => area === previous[index])) return map
   return { ...map, dnd5ePluginAreas: next }
 }

@@ -4,6 +4,7 @@ import type { Character } from '../../types/character'
 import {
   collectDnd5ePersistentAreaTriggers,
   reconcileDnd5ePluginAreas,
+  reconcileDnd5ePluginAreasOnMap,
 } from './pluginAreas'
 import {
   prepareDnd5ePersistentAreaTrigger,
@@ -37,6 +38,26 @@ describe('D&D 5e plugin persistent areas', () => {
       dnd5eCombatState: { concentrationSpellId: 'plugin-area:action-1' },
     })], 2)).toHaveLength(1)
     expect(reconcileDnd5ePluginAreas([concentrated], [character({ concentrating: false })], 2)).toHaveLength(0)
+  })
+
+  it('persists old trigger-receipt cleanup even when the area count does not change', () => {
+    const retained = area({
+      expiresAfterRound: 10,
+      triggerReceipts: [
+        { triggerId: 'tick', targetTokenId: 'target', round: 1, transactionId: 'old' },
+        { triggerId: 'tick', targetTokenId: 'target', round: 5, transactionId: 'recent' },
+      ],
+    })
+    const map = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [], dnd5ePluginAreas: [retained],
+    }
+    const reconciled = reconcileDnd5ePluginAreasOnMap(map, [character()], 6)
+    expect(reconciled).not.toBe(map)
+    expect(reconciled.dnd5ePluginAreas?.[0].triggerReceipts).toEqual([
+      expect.objectContaining({ transactionId: 'recent' }),
+    ])
+    expect(reconcileDnd5ePluginAreasOnMap(reconciled, [character()], 6)).toBe(reconciled)
   })
 
   it('detects entry along the complete movement path and deduplicates once-per-round triggers', () => {

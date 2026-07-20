@@ -270,7 +270,7 @@ import {
   dnd5ePluginSpellDefinition,
   dnd5ePluginHeadlessActionDefinition,
   executeDnd5ePluginDiceRolls,
-  reconcileDnd5ePluginAreas,
+  reconcileDnd5ePluginAreasOnMap,
   collectDnd5ePersistentAreaTriggers,
   prepareDnd5ePersistentAreaTrigger,
   resolvePreparedDnd5ePersistentAreaTrigger,
@@ -2729,13 +2729,13 @@ export default function MapsPage() {
 
   useEffect(() => {
     if (!isDM || !activeMap || (activeMap.dnd5ePluginAreas?.length ?? 0) === 0) return
-    const next = reconcileDnd5ePluginAreas(
-      activeMap.dnd5ePluginAreas,
+    const next = reconcileDnd5ePluginAreasOnMap(
+      activeMap,
       useCharacterStore.getState().characters,
       round,
     )
-    if (next.length !== activeMap.dnd5ePluginAreas!.length) {
-      updateMap(activeMap.id, { dnd5ePluginAreas: next })
+    if (next !== activeMap) {
+      updateMap(activeMap.id, { dnd5ePluginAreas: next.dnd5ePluginAreas })
     }
   }, [isDM, activeMap, characters, round, updateMap])
 
