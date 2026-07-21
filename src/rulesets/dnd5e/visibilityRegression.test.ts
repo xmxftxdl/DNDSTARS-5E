@@ -29,6 +29,7 @@ describe('D&D 5e visibility regressions', () => {
     target.conditions = dnd5eConditionsFromActiveEffects(invisibleEffects)
 
     const state = startDnd5eHeadlessCombat('faerie-fire-visibility', [bard, target])
+    state.combatants.target.classState.hiddenCheckTotal = 20
     expect(dnd5eCombatantCanSee(state, bard.id, target.id)).toBe(false)
 
     state.combatants.target.classState.activeEffects = [

@@ -18,7 +18,15 @@ export function dnd5eActionAllowedWhileSurprised(
   action: Dnd5eAction,
 ): boolean {
   if (!dnd5eCombatantIsSurprised(combatant, combatId)) return true
-  if (action.type === 'end-turn') return true
+  if ([
+    'end-turn',
+    'death-save',
+    'death-save-turn',
+    'concentration-save',
+    'barbarian-relentless-rage-save',
+    'monster-undead-fortitude-save',
+    'monster-on-hit-save',
+  ].includes(action.type)) return true
   return action.type === 'barbarian-rage' && !action.end && dnd5eCanUseFeralInstinctWhileSurprised(combatant)
 }
 

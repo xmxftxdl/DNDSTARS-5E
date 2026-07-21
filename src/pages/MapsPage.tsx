@@ -386,7 +386,10 @@ import {
   reconcileDnd5eSummonedCreatures,
   getDnd5eCoreSpellAreaDeclaration,
   mergeDnd5eSpellEffectTokenDelta,
-  dnd5ePersistentAreaMovementCostMultiplierAt,
+  dnd5ePersistentAreaDifficultTerrainMultiplierAt,
+  dnd5ePersistentAreaSpeedCostMultiplierAt,
+  dnd5eClimbingMovementCost,
+  dnd5eRunningJumpBonusFeet,
 } from '../rulesets/dnd5e'
 import { dnd5eTraversalMovementCost, type Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import {
@@ -2900,6 +2903,44 @@ export default function MapsPage() {
     return { map, characters, logs }
   }
 
+  const settleDnd5ePersistentAreasForForcedMovement = async (input: {
+    beforeMap: BattleMap
+    afterMap: BattleMap
+    characters: readonly Character[]
+    tokenId: string
+    round: number
+    turnKey: string
+  }): Promise<{ map: BattleMap; characters: Character[]; logs: string[] }> => {
+    const beforeToken = input.beforeMap.tokens.find((token) => token.id === input.tokenId)
+    const afterToken = input.afterMap.tokens.find((token) => token.id === input.tokenId)
+    if (!beforeToken || !afterToken || (beforeToken.x === afterToken.x && beforeToken.y === afterToken.y)) {
+      return { map: input.afterMap, characters: [...input.characters], logs: [] }
+    }
+    const movement = { token: beforeToken, to: { x: afterToken.x, y: afterToken.y } }
+    const candidates = [
+      ...collectDnd5ePersistentAreaTriggers({
+        map: input.afterMap,
+        timing: 'on-enter',
+        round: input.round,
+        turnKey: input.turnKey,
+        movement,
+      }),
+      ...collectDnd5ePersistentAreaTriggers({
+        map: input.afterMap,
+        timing: 'on-move-distance',
+        round: input.round,
+        turnKey: input.turnKey,
+        movement,
+      }),
+    ].sort((left, right) => (left.pathIndex ?? 0) - (right.pathIndex ?? 0))
+    return settleDnd5ePersistentAreaCandidates({
+      candidates,
+      map: input.afterMap,
+      characters: input.characters,
+      round: input.round,
+    })
+  }
+
   const settleDnd5eItemAreasForMove = async (input: {
     state: Dnd5eHeadlessCombatState
     map: BattleMap
@@ -3467,8 +3508,10 @@ export default function MapsPage() {
       geometry: activeGeometry,
       token: myPlayerToken,
       to: pos,
-      additionalCostMultiplier: (token, position) =>
-        dnd5ePersistentAreaMovementCostMultiplierAt({ map: activeMap, token, position }),
+      additionalDifficultTerrainMultiplier: (token, position) =>
+        dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position }),
+      additionalSpeedCostMultiplier: (token, position) =>
+        dnd5ePersistentAreaSpeedCostMultiplierAt({ map: activeMap, token, position }),
     })
     if (!path) {
       void showCombatNotice('路径受阻', '目标格无法通过合法路径抵达；墙、关闭的门、障碍物或其他 Token 可能阻挡了路线。', 'amber')
@@ -3480,13 +3523,16 @@ export default function MapsPage() {
     const standFromProne = isProne && dnd5eStandFromProne
     const targetElevationFeet = Math.max(-1_000, Math.min(10_000, Math.floor(dnd5eTargetElevationFeet)))
     const traversal = dnd5eTraversalMovementCost({
-      distanceFeet: path.movementCostFeet,
+      distanceFeet: path.distanceFeet,
+      baseMovementCostFeet: path.movementCostFeet,
       elevationGainFeet: Math.max(0, targetElevationFeet - (myPlayerToken.elevationFeet ?? 0)),
       mode: dnd5eTraversalMode,
       profile: {
         strengthScore: turnCharacter.abilities.str,
         strengthModifier: Math.floor((turnCharacter.abilities.str - 10) / 2),
         walkSpeed: dnd5eEffectiveWalkingSpeed(turnCharacter),
+        climbWithoutSpeedCostMultiplier: dnd5eClimbingMovementCost(turnCharacter, 1),
+        runningLongJumpBonusFeet: dnd5eRunningJumpBonusFeet(turnCharacter),
       },
     })
     if (!traversal.ok) {
@@ -7765,13 +7811,40 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
+      let basicApplication = resolved.application
+      if (payload.kind === 'shove' && payload.outcome === 'push') {
+        const areaSettlement = await settleDnd5ePersistentAreasForForcedMovement({
+          beforeMap: authorityMap,
+          afterMap: basicApplication.map,
+          characters: basicApplication.characters,
+          tokenId: payload.targetTokenId,
+          round: liveRound,
+          turnKey: `${liveRound}:${currentInitiativeToken?.id ?? action.actorTokenId}`,
+        })
+        for (const log of areaSettlement.logs) pushCombatLog(log, 'system')
+        basicApplication = {
+          map: areaSettlement.map,
+          characters: areaSettlement.characters,
+          changedCharacterIds: areaSettlement.characters.flatMap((character) => {
+            const before = useCharacterStore.getState().characters.find((candidate) => candidate.id === character.id)
+            return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+          }),
+          changedTokenIds: areaSettlement.map.tokens.flatMap((token) => {
+            const before = authorityMap.tokens.find((candidate) => candidate.id === token.id)
+            return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+          }),
+        }
+      }
+      for (const characterId of basicApplication.changedCharacterIds) {
+        const next = basicApplication.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
+      for (const tokenId of basicApplication.changedTokenIds) {
+        const next = basicApplication.map.tokens.find((token) => token.id === tokenId)
         if (next) updateToken(authorityMap.id, tokenId, next)
+      }
+      if (JSON.stringify(basicApplication.map.dnd5ePluginAreas ?? []) !== JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])) {
+        applyAuthorityMapUpdate(authorityMap.id, { dnd5ePluginAreas: basicApplication.map.dnd5ePluginAreas ?? [] })
       }
       const grantedMovement = resolved.result.events
         .flatMap((event) => event.type === 'movement-granted' && event.actorId === action.actorTokenId
@@ -8478,6 +8551,7 @@ export default function MapsPage() {
         map: authorityMap,
         characters: useCharacterStore.getState().characters,
         initiativeOrder: initiativeOrderRef.current,
+        turnEconomy: currentDnd5eTurnEconomy(action.actorTokenId, liveRound),
       })
       if (!prepared.ok) {
         acknowledgePlayerAction(action, 'rejected', prepared.reason)
@@ -9666,28 +9740,52 @@ export default function MapsPage() {
         requestBardicInspiration: requestDnd5eBardicInspirationRoll,
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
+      let spellApplication = resolved.application
+      for (const tokenId of new Set(forcedMovements.map((movement) => movement.targetId))) {
+        const areaSettlement = await settleDnd5ePersistentAreasForForcedMovement({
+          beforeMap: authorityMap,
+          afterMap: spellApplication.map,
+          characters: spellApplication.characters,
+          tokenId,
+          round: liveRound,
+          turnKey: `${liveRound}:${currentInitiativeToken?.id ?? action.actorTokenId}`,
+        })
+        for (const log of areaSettlement.logs) pushCombatLog(log, 'system')
+        spellApplication = {
+          map: areaSettlement.map,
+          characters: areaSettlement.characters,
+          changedCharacterIds: areaSettlement.characters.flatMap((character) => {
+            const before = useCharacterStore.getState().characters.find((candidate) => candidate.id === character.id)
+            return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+          }),
+          changedTokenIds: areaSettlement.map.tokens.flatMap((token) => {
+            const before = authorityMap.tokens.find((candidate) => candidate.id === token.id)
+            return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+          }),
+        }
+      }
+      for (const tokenId of spellApplication.changedTokenIds) {
+        const next = spellApplication.map.tokens.find((token) => token.id === tokenId)
         if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
       }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
+      for (const characterId of spellApplication.changedCharacterIds) {
+        const next = spellApplication.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
-      const areasChanged = JSON.stringify(resolved.application.map.dnd5ePluginAreas ?? []) !==
+      const areasChanged = JSON.stringify(spellApplication.map.dnd5ePluginAreas ?? []) !==
         JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
-      const effectTokensChanged = JSON.stringify(resolved.application.map.tokens.filter((token) => token.dnd5eSpellEffect)) !==
+      const effectTokensChanged = JSON.stringify(spellApplication.map.tokens.filter((token) => token.dnd5eSpellEffect)) !==
         JSON.stringify(authorityMap.tokens.filter((token) => token.dnd5eSpellEffect))
       if (areasChanged || effectTokensChanged) {
         const latestMap = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
         applyAuthorityMapUpdate(authorityMap.id, {
-          dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [],
+          dnd5ePluginAreas: spellApplication.map.dnd5ePluginAreas ?? [],
           ...(effectTokensChanged
             ? {
                 tokens: mergeDnd5eSpellEffectTokenDelta({
                   currentMap: latestMap,
                   beforeMap: authorityMap,
-                  afterMap: resolved.application.map,
+                afterMap: spellApplication.map,
                 }),
               }
             : {}),
@@ -13053,16 +13151,23 @@ export default function MapsPage() {
           void showCombatNotice('治疗分配无效', `请输入0至${remaining}之间的整数。`, 'amber')
           return false
         }
-        healingAllocations.push({ targetTokenId, amount })
+        if (amount > 0) healingAllocations.push({ targetTokenId, amount })
         remaining -= amount
       }
+      if (healingAllocations.length === 0) {
+        void showCombatNotice('治疗分配无效', '至少需要为一个目标分配 1 点治疗。', 'amber')
+        return false
+      }
     }
+    const committedTargetIds = healingAllocations
+      ? healingAllocations.map((allocation) => allocation.targetTokenId)
+      : [...new Set(dnd5eSpellTargeting.targetTokenIds)]
     const payload: Dnd5eSpellCastPayload = {
       spellId: dnd5eSpellTargeting.spellId,
       castingClassId: dnd5eSpellTargeting.castingClassId,
       slotLevel: dnd5eSpellTargeting.slotLevel,
-      targetTokenId: dnd5eSpellTargeting.targetTokenIds[0] ?? currentInitiativeToken?.id ?? '',
-      targetTokenIds: [...new Set(dnd5eSpellTargeting.targetTokenIds)],
+      targetTokenId: committedTargetIds[0] ?? currentInitiativeToken?.id ?? '',
+      targetTokenIds: committedTargetIds,
       areaTargetCell: aoePreviewCell ?? undefined,
       areaTargetOrientation: dnd5eSpellTargeting.area?.shape === 'rect' && dnd5eSpellTargeting.area.rotatable
         ? aoeRectRotation as 0 | 1 | 2 | 3
@@ -13161,7 +13266,8 @@ export default function MapsPage() {
 
   const sendPlayerBasicActionRequest = (payload: Dnd5eBasicActionPayload) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
-    if (currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current < 1) return false
+    const replacesAttack = payload.kind === 'grapple' || payload.kind === 'shove'
+    if (!replacesAttack && currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current < 1) return false
     const action = createPlayerActionRequest({ type: 'dnd5e-basic-action', dnd5eBasicAction: payload })
     if (!action) return false
     const label = payload.kind === 'dash' ? '疾走'
@@ -13243,7 +13349,7 @@ export default function MapsPage() {
         : undefined
       const canUseFeralInstinct = surprisedCharacter != null &&
         dnd5eCharacterClassLevel(surprisedCharacter, 'barbarian') >= 7
-      if (!canUseFeralInstinct) {
+      if (!canUseFeralInstinct && !(surprisedCharacter && characterNeedsDeathSave(surprisedCharacter))) {
         const skipKey = `surprised-${combatIdRef.current}-${token.id}`
         if (incapacitatedSkippedKeysRef.current.has(skipKey)) return
         incapacitatedSkippedKeysRef.current.add(skipKey)
@@ -13429,8 +13535,10 @@ export default function MapsPage() {
               moveSelectMode={!playerCombatLocked && inMoveSelectMode && !!activeMoveCircle && !activeAoeTargeting && !dnd5eItemAreaTargeting}
               moveCircle={activeMoveCircle}
               onMoveSelect={handleMoveSelect}
-              movementCostMultiplierAtPosition={(token, position) =>
-                dnd5ePersistentAreaMovementCostMultiplierAt({ map: activeMap, token, position })}
+              difficultTerrainMultiplierAtPosition={(token, position) =>
+                dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position })}
+              speedCostMultiplierAtPosition={(token, position) =>
+                dnd5ePersistentAreaSpeedCostMultiplierAt({ map: activeMap, token, position })}
               aoeSelectMode={!playerCombatLocked && (!!activeAoeTargeting || !!dnd5eItemAreaTargeting)}
               aoeHighlight={aoeHighlight}
               rangedRangeCells={rangedRangeCells}

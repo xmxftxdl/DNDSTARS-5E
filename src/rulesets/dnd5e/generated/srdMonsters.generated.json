@@ -374,6 +374,7 @@
         "rating": "14",
         "xp": 11500
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -594,6 +595,7 @@
         "rating": "16",
         "xp": 15000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -819,6 +821,7 @@
         "rating": "13",
         "xp": 10000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -1032,6 +1035,7 @@
         "rating": "15",
         "xp": 13000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -1250,6 +1254,7 @@
         "rating": "14",
         "xp": 11500
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -1468,6 +1473,7 @@
         "rating": "17",
         "xp": 18000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -1698,6 +1704,7 @@
         "rating": "15",
         "xp": 13000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -1918,6 +1925,7 @@
         "rating": "17",
         "xp": 18000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -2142,6 +2150,7 @@
         "rating": "16",
         "xp": 15000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -2351,6 +2360,7 @@
         "rating": "13",
         "xp": 10000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Ice Walk",
@@ -2691,6 +2701,7 @@
         "rating": "21",
         "xp": 33000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -2911,6 +2922,7 @@
         "rating": "23",
         "xp": 50000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -3136,6 +3148,7 @@
         "rating": "20",
         "xp": 25000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -3356,6 +3369,7 @@
         "rating": "22",
         "xp": 41000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -3581,6 +3595,7 @@
         "rating": "21",
         "xp": 33000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -3806,6 +3821,7 @@
         "rating": "24",
         "xp": 62000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -4043,6 +4059,7 @@
         "rating": "22",
         "xp": 41000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Amphibious",
@@ -4263,6 +4280,7 @@
         "rating": "24",
         "xp": 62000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -4487,6 +4505,7 @@
         "rating": "23",
         "xp": 50000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -4703,6 +4722,7 @@
         "rating": "20",
         "xp": 25000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Ice Walk",
@@ -8311,7 +8331,7 @@
       ],
       "challenge": {
         "rating": "1",
-        "xp": 100
+        "xp": 200
       },
       "traits": [],
       "actions": [
@@ -11168,7 +11188,7 @@
       ],
       "challenge": {
         "rating": "1/2",
-        "xp": 50
+        "xp": 100
       },
       "traits": [
         {
@@ -11660,7 +11680,7 @@
             "scimitar",
             "scimitar"
           ],
-          "automation": "headless"
+          "automation": "dm-adjudication"
         },
         {
           "id": "scimitar",
@@ -11682,7 +11702,7 @@
             ],
             "reachFeet": 5
           },
-          "automation": "headless"
+          "automation": "dm-adjudication"
         },
         {
           "id": "create-whirlwind",
@@ -12125,7 +12145,7 @@
       ],
       "challenge": {
         "rating": "1/4",
-        "xp": 25
+        "xp": 50
       },
       "traits": [],
       "actions": [
@@ -14481,7 +14501,7 @@
             ],
             "reachFeet": 5
           },
-          "automation": "headless"
+          "automation": "dm-adjudication"
         }
       ],
       "capabilities": {
@@ -23615,6 +23635,7 @@
         "rating": "21",
         "xp": 33000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -28172,7 +28193,7 @@
             ],
             "reachFeet": 10
           },
-          "automation": "headless"
+          "automation": "dm-adjudication"
         },
         {
           "id": "tail",
@@ -30008,7 +30029,7 @@
       "languages": [],
       "challenge": {
         "rating": "1/4",
-        "xp": 25
+        "xp": 50
       },
       "traits": [],
       "actions": [
@@ -34789,6 +34810,7 @@
         "rating": "30",
         "xp": 155000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Legendary Resistance",
@@ -36173,6 +36195,7 @@
         "rating": "13",
         "xp": 10000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Shapechanger",
@@ -36352,6 +36375,7 @@
         "rating": "13",
         "xp": 10000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Shapechanger",
@@ -36486,6 +36510,7 @@
         "rating": "13",
         "xp": 10000
       },
+      "legendaryResistanceUses": 3,
       "traits": [
         {
           "name": "Shapechanger",

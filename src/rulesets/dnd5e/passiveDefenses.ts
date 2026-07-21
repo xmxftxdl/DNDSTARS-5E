@@ -36,6 +36,8 @@ export interface Dnd5eDefensiveCreature {
     viciousMockeryAttackDisadvantage?: boolean
     emptyBodyRoundsRemaining?: number
     holyNimbusRoundsRemaining?: number
+    surprisedCombatId?: string
+    surpriseResolvedCombatId?: string
   }
   conditions: readonly string[]
   creatureType?: string
@@ -189,7 +191,9 @@ export function dnd5eUnseenTargetImposesDisadvantage(
 export function dnd5eReactionsPrevented(
   creature: Pick<Dnd5eDefensiveCreature, 'classState'> & Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
 ): boolean {
-  return dnd5eIsIncapacitated(creature) || !!creature.classState.turnedByClericId ||
+  const surpriseUnresolved = creature.classState.surprisedCombatId != null &&
+    creature.classState.surpriseResolvedCombatId !== creature.classState.surprisedCombatId
+  return surpriseUnresolved || dnd5eIsIncapacitated(creature) || !!creature.classState.turnedByClericId ||
     dnd5eActiveEffectsPreventReactions(creature.classState.activeEffects) ||
     Object.keys(creature.classState.openHandNoReactionsAppliedTurnKeysBySource ?? {}).length > 0
 }

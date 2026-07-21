@@ -14,6 +14,8 @@ import { dnd5eMonkMartialArtsEligible, dnd5eWeaponAttackProfile, dnd5eWeaponRang
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eFrightenedAttackDisadvantage,
+  dnd5eHelpAttackApplies,
   dnd5eTargetIsUnseenForAttack,
   dnd5eTargetArmorClassForAttack,
   dnd5eTranquilityWardCheck,
@@ -165,8 +167,11 @@ export function prepareDnd5eHunterMultiattack(input: {
     const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
       (dnd5eTargetGrantsAttackAdvantage(target) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
         !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-        dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || (targetProne && targetDistance <= 5))
+        dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) ||
+        (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target)) ||
+        (targetProne && targetDistance <= 5))
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || actorCombatant.exhaustionLevel >= 3 ||
+      dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
       dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne || (targetProne && targetDistance > 5) ||
       (feature === 'volley' && (rangedThreatened || targetDistance > (profile.rangeFeet?.normal ?? 0)))

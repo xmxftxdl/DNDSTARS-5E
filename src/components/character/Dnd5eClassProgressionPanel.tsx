@@ -52,6 +52,7 @@ interface Dnd5eClassProgressionPanelProps {
   character: Character
   onChange: (patch: Partial<Character>) => void
   isStartingClass?: boolean
+  totalCharacterLevel?: number
 }
 
 const SPELLCASTING_KIND_LABELS = {
@@ -87,7 +88,7 @@ function resetLabel(reset: 'combat' | 'short-rest' | 'long-rest'): string {
   return '战斗开始时恢复'
 }
 
-export default function Dnd5eClassProgressionPanel({ character, onChange, isStartingClass = true }: Dnd5eClassProgressionPanelProps) {
+export default function Dnd5eClassProgressionPanel({ character, onChange, isStartingClass = true, totalCharacterLevel = character.level }: Dnd5eClassProgressionPanelProps) {
   const definition = dnd5eClassDefinitionForCharacter(character)
   if (!definition || definition.id === 'fighter') return null
 
@@ -352,6 +353,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
               definition.spellcasting.kind,
               progression[Math.max(0, Math.min(progression.length - 1, character.level - 1))],
               character,
+              totalCharacterLevel,
             ).map((item) => (
               <InfoBlock key={item.label} title={item.label} text={item.value} />
             ))}
@@ -780,10 +782,11 @@ function classMetrics(character: Character): Array<{ label: string; value: strin
   return []
 }
 
-function spellcastingSummary(kind: string, entry: ReturnType<typeof dnd5eClassProgression>[number], character: Character): Array<{ label: string; value: string }> {
+function spellcastingSummary(kind: string, entry: ReturnType<typeof dnd5eClassProgression>[number], character: Character, totalCharacterLevel: number): Array<{ label: string; value: string }> {
   const items: Array<{ label: string; value: string }> = []
-  items.push({ label: '法术豁免 DC', value: `${dnd5eSpellSaveDc(character) ?? '—'}` })
-  const spellAttack = dnd5eSpellAttackModifier(character)
+  const spellcastingCharacter = { ...character, level: totalCharacterLevel }
+  items.push({ label: '法术豁免 DC', value: `${dnd5eSpellSaveDc(spellcastingCharacter) ?? '—'}` })
+  const spellAttack = dnd5eSpellAttackModifier(spellcastingCharacter)
   items.push({ label: '法术攻击', value: spellAttack == null ? '—' : `${spellAttack >= 0 ? '+' : ''}${spellAttack}` })
   if (entry.cantripsKnown != null) items.push({ label: '已知戏法', value: `${entry.cantripsKnown}` })
   if (entry.spellsKnown != null) items.push({ label: '已知法术', value: `${entry.spellsKnown}` })

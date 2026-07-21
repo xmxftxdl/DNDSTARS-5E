@@ -10,6 +10,8 @@ import {
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eFrightenedAttackDisadvantage,
+  dnd5eHelpAttackApplies,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
@@ -168,8 +170,10 @@ export function prepareDnd5eMonsterAttack(input: {
   })
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5) || packTactics)
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
+      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || (targetProne && distanceFeet <= 5) || packTactics)
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
+    dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
   const targetAttackMode = resolveDnd5eRollMode({
     advantage: [{ active: targetGrantsAdvantage, reason: 'monster-attack-advantage' }],

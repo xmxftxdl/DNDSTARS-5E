@@ -167,6 +167,12 @@ describe('SRD 5.1 passive class defenses', () => {
     }
     expect(dnd5eReactionsPrevented(denied)).toBe(true)
     expect(dnd5eCanUseUncannyDodge(denied)).toBe(false)
+    expect(dnd5eReactionsPrevented({
+      classState: { surprisedCombatId: 'combat', surpriseResolvedCombatId: undefined },
+    })).toBe(true)
+    expect(dnd5eReactionsPrevented({
+      classState: { surprisedCombatId: 'combat', surpriseResolvedCombatId: 'combat' },
+    })).toBe(false)
     expect(dnd5eReactionsPrevented({ classState: { turnedByClericId: 'cleric' } })).toBe(true)
     expect(dnd5eReactionsPrevented({ classState: { activeEffects: [createDnd5eMechanicalEffect({
       id: 'shock', definitionId: 'spell:shocking-grasp:reaction-lock', label: '无法反应',

@@ -21,6 +21,12 @@ describe('D&D 5e surprise', () => {
     expect(dnd5eCombatantIsSurprised(combatant, 'combat')).toBe(true)
     expect(dnd5eActionAllowedWhileSurprised(combatant, 'combat', { type: 'dash', actorId: 'hero' })).toBe(false)
     expect(dnd5eActionAllowedWhileSurprised(combatant, 'combat', { type: 'end-turn', actorId: 'hero' })).toBe(true)
+    expect(dnd5eActionAllowedWhileSurprised(combatant, 'combat', {
+      type: 'death-save', actorId: 'hero', d20: 10,
+    })).toBe(true)
+    expect(dnd5eActionAllowedWhileSurprised(combatant, 'combat', {
+      type: 'monster-on-hit-save', actorId: 'hero', sourceId: 'enemy', actionId: 'bite', d20: 10,
+    })).toBe(true)
     expect(dnd5eCombatantIsSurprised(resolveDnd5eSurpriseForCombatant(combatant, 'combat'), 'combat')).toBe(false)
   })
 

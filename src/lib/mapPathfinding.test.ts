@@ -42,6 +42,14 @@ describe('map geometry pathfinding', () => {
     })
     const mud = findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 } })
     expect(mud).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      additionalDifficultTerrainMultiplier: (_token, position) => position.x <= 100 ? 2 : 1,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+    expect(findMapGeometryPath({
+      map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 },
+      additionalSpeedCostMultiplier: () => 2,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 30 })
 
     state.obstacles[0] = { ...state.obstacles[0], terrainCostMultiplier: 1, traversal: 'climb' }
     expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 } }))

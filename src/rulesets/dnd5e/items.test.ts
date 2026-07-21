@@ -175,6 +175,31 @@ describe('SRD 5.1 inventory', () => {
     })).toMatchObject({ ok: false, reason: 'attunement-limit' })
   })
 
+  it('cannot bypass a structured class attunement requirement with UI confirmation', () => {
+    const fighter = character('fighter')
+    const granted = applyDnd5eInventoryMutation([fighter], {
+      type: 'grant', characterId: fighter.id, templateId: 'srd-5.1:magic-item:holy-avenger', quantity: 1,
+    })
+    const holyAvenger = inventoryEntry(granted.characters[0], 'srd-5.1:magic-item:holy-avenger')
+    expect(applyDnd5eInventoryMutation(granted.characters, {
+      type: 'prepare-attunement', characterId: fighter.id, instanceId: holyAvenger.instanceId,
+      prerequisiteConfirmed: true,
+    })).toMatchObject({ ok: false, reason: 'attunement-prerequisite' })
+
+    const thief = normalizeCharacter({
+      ...character('thief'), charClass: '游荡者', level: 13,
+      dnd5eClassLevels: { rogue: 13 },
+      dnd5eClassChoices: { classes: { rogue: { subclass: 'thief' } } },
+    })
+    const thiefGranted = applyDnd5eInventoryMutation([thief], {
+      type: 'grant', characterId: thief.id, templateId: 'srd-5.1:magic-item:holy-avenger', quantity: 1,
+    })
+    const thiefItem = inventoryEntry(thiefGranted.characters[0], 'srd-5.1:magic-item:holy-avenger')
+    expect(applyDnd5eInventoryMutation(thiefGranted.characters, {
+      type: 'prepare-attunement', characterId: thief.id, instanceId: thiefItem.instanceId,
+    })).toMatchObject({ ok: true })
+  })
+
   it('tracks all ten healer kit uses without consuming the kit early', () => {
     const hero = character('healer')
     const granted = applyDnd5eInventoryMutation([hero], {

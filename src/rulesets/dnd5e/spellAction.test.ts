@@ -15,6 +15,7 @@ import { dnd5eClassDefinition } from './classes'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { prepareDnd5eCoreSpellAreaMove, resolvePreparedDnd5eCoreSpellAreaMove } from './coreSpellAreaAction'
 import { collectDnd5ePersistentAreaTriggers } from './pluginAreas'
+import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -125,6 +126,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       map: resolved.application.map,
       characters: resolved.application.characters,
       initiativeOrder: input.initiativeOrder,
+      turnEconomy: createDnd5eTurnEconomyCounts('moonbeam-turn'),
     })
     expect(movePrepared).toEqual(expect.objectContaining({ ok: true }))
     if (!movePrepared.ok) return
@@ -134,6 +136,43 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       type: 'turn-resource-spent', actorId: input.action.actorTokenId, resource: 'action',
     }))
     expect(moved.application?.map.dnd5ePluginAreas?.[0].anchorCell).toEqual({ col: 8, row: 2 })
+  })
+
+  it('rejects a persistent-area anchor behind a line-of-effect wall', () => {
+    const druid = character('druid', '德鲁伊', {
+      dnd5eClassChoices: { classes: { druid: { selections: { 'spell-prepared': ['moonbeam'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const input = fixture(druid, 'moonbeam', 2, token('enemy', 'enemy', 575))
+    input.action.dnd5eSpellCast = {
+      spellId: 'moonbeam', slotLevel: 2, targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [], areaTargetCell: { col: 4, row: 0 },
+    }
+    setMapGeometryRuntime([{
+      mapId: input.map.id,
+      walls: [{
+        id: 'wall', kind: 'wall', label: '阻挡墙', points: [{ x: 150, y: 0 }, { x: 150, y: 100 }],
+        blocksVision: false, blocksMovement: false, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+      doors: [], obstacles: [],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' }, updatedAt: 1,
+    }])
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'effect-line-blocked' })
+  })
+
+  it('requires Flaming Sphere to be created in an unoccupied space', () => {
+    const druid = character('druid', '德鲁伊', {
+      dnd5eClassChoices: { classes: { druid: { selections: { 'spell-prepared': ['flaming-sphere'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const occupied = token('enemy', 'enemy', 225)
+    const input = fixture(druid, 'flaming-sphere', 2, occupied)
+    input.action.dnd5eSpellCast = {
+      spellId: 'flaming-sphere', slotLevel: 2, targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [], areaTargetCell: { col: 4, row: 0 },
+    }
+    expect(prepareDnd5eSpellCast(input)).toEqual({ ok: false, reason: 'invalid-target' })
   })
 
   it('casts Spirit Guardians as an enemy-only aura attached to an evil caster', () => {
@@ -236,6 +275,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       map: cast.application.map,
       characters: cast.application.characters,
       initiativeOrder: input.initiativeOrder,
+      turnEconomy: createDnd5eTurnEconomyCounts('flaming-sphere-turn'),
     })
     expect(movePrepared).toEqual(expect.objectContaining({ ok: true }))
     if (!movePrepared.ok) return

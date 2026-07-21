@@ -22,11 +22,19 @@ describe('D&D 5e 2014 traversal', () => {
       .toEqual({ ok: true, movementCostFeet: 30 })
     expect(dnd5eTraversalMovementCost({ distanceFeet: 15, mode: 'swim', profile: { ...profile, swimSpeed: 30 } }))
       .toEqual({ ok: true, movementCostFeet: 15 })
+    expect(dnd5eTraversalMovementCost({ distanceFeet: 30, mode: 'climb', profile: { ...profile, climbSpeed: 60 } }))
+      .toEqual({ ok: true, movementCostFeet: 15 })
+    expect(dnd5eTraversalMovementCost({
+      distanceFeet: 15, mode: 'climb', profile: { ...profile, climbWithoutSpeedCostMultiplier: 1 },
+    })).toEqual({ ok: true, movementCostFeet: 15 })
   })
 
   it('rejects jumps beyond the automatic distance', () => {
     expect(dnd5eTraversalMovementCost({ distanceFeet: 17, mode: 'long-jump-running', profile }))
       .toEqual({ ok: false, reason: 'jump-too-far' })
+    expect(dnd5eTraversalMovementCost({
+      distanceFeet: 19, mode: 'long-jump-running', profile: { ...profile, runningLongJumpBonusFeet: 3 },
+    })).toEqual({ ok: true, movementCostFeet: 19 })
   })
 
   it('deals 1d6 per 10 feet up to 20d6 and knocks the faller prone', () => {

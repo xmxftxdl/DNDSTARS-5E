@@ -26,7 +26,7 @@ import {
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage } from './passiveDefenses'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 
@@ -205,6 +205,7 @@ export function prepareDnd5eOpportunityAttack(input: {
           targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
         const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
           dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
+          dnd5eTargetIsDodging(targetCombatant) ||
           dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
           actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
           (targetCombatant.classId === 'ranger' && targetCombatant.subclassId === 'hunter' &&

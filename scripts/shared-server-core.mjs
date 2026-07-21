@@ -857,7 +857,6 @@ function scopedContext(ctx, roomId) {
 }
 
 function browserProtocolIsCurrent(req) {
-  if (typeof req?.headers?.origin !== 'string') return true
   return Number(req?.headers?.['x-stars-protocol']) === SHARED_PROTOCOL_VERSION
 }
 
@@ -4840,6 +4839,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 403, { error: 'forbidden' })
         return true
       }
+      if (authenticatedRoomMember !== room.host && roomPlayerPresence(authenticatedRoomMember) === 'removed') {
+        writeJson(res, 403, { error: 'member-removed' })
+        return true
+      }
       if (authenticatedRoomMember === room?.host) ctx = { ...ctx, accessRole: 'dm' }
       else if (authenticatedRoomMember?.role === 'spectator') ctx = { ...ctx, accessRole: 'spectator' }
       else if (authenticatedRoomMember) ctx = { ...ctx, accessRole: 'player' }
@@ -4871,6 +4874,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   if (
     req.method !== 'GET' &&
     (parsed.pathname.startsWith('/api/state/') || parsed.pathname.startsWith('/api/events/') || parsed.pathname.startsWith('/api/images/')) &&
+    ((ctx.roomId ?? 'default') !== 'default' || typeof req?.headers?.origin === 'string') &&
     !browserProtocolIsCurrent(req)
   ) {
     writeJson(res, 426, {
@@ -5368,6 +5372,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         await maybeWriteAutoCampaignSnapshot(ctx)
         const expectedHeader = req?.headers?.['x-stars-expected-revision']
+        if ((ctx.roomId ?? 'default') !== 'default' && (expectedHeader == null || expectedHeader === '')) {
+          writeJson(res, 428, { error: 'expected-revision-required', name })
+          return true
+        }
         const expectedRevision = expectedHeader == null || expectedHeader === '' ? null : Number(expectedHeader)
         if (expectedRevision != null && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
           writeJson(res, 400, { error: 'invalid-expected-revision', name })
@@ -5425,6 +5433,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       if (req.method === 'DELETE') {
         await maybeWriteAutoCampaignSnapshot(ctx)
         const expectedHeader = req?.headers?.['x-stars-expected-revision']
+        if ((ctx.roomId ?? 'default') !== 'default' && (expectedHeader == null || expectedHeader === '')) {
+          writeJson(res, 428, { error: 'expected-revision-required', name })
+          return true
+        }
         const expectedRevision = expectedHeader == null || expectedHeader === '' ? null : Number(expectedHeader)
         if (expectedRevision != null && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
           writeJson(res, 400, { error: 'invalid-expected-revision', name })

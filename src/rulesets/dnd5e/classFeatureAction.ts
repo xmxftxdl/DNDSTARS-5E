@@ -23,6 +23,8 @@ import {
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantClassLevel,
   dnd5eCombatantHasSubclass,
+  dnd5eFrightenedAttackDisadvantage,
+  dnd5eHelpAttackApplies,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   resolveDnd5eHeadlessAction,
@@ -616,8 +618,10 @@ export function prepareDnd5eClassFeature(input: {
       const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
         (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (targetIndex === 0 && actorCombatant.classState.hiddenCheckTotal != null) ||
           !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
-          dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || targetProne)
+          dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
+          (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant)) || targetProne)
       const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) || (actor.exhaustionLevel ?? 0) >= 3 ||
+        dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
         (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
         dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne
       const attackMode = resolveDnd5eRollMode({

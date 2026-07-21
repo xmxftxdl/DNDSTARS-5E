@@ -20,6 +20,8 @@ import {
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eFrightenedAttackDisadvantage,
+  dnd5eHelpAttackApplies,
   dnd5eTranquilityWardCheck,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
@@ -308,6 +310,23 @@ export function prepareDnd5eSpellCast(input: {
         !Number.isInteger(orientation) || orientation < 0 || orientation > 3
       ))
     ) return { ok: false, reason: 'invalid-target' }
+    if (spell.area.origin === 'point') {
+      const areaPoint = {
+        x: input.map.gridOffsetX + (areaCell.col + 0.5) * input.map.gridSize,
+        y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
+      }
+      if (mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: actorToken,
+        to: areaPoint,
+        fromElevationFeet: actorToken.elevationFeet ?? 0,
+        toElevationFeet: 0,
+      })) return { ok: false, reason: 'effect-line-blocked' }
+      if (spell.id === 'flaming-sphere' && input.map.tokens.some((candidate) =>
+        candidate.type !== 'obstacle' && tokenOccupiedCellsAt(candidate, input.map, candidate)
+          .some((cell) => cellKey(cell) === cellKey(areaCell)),
+      )) return { ok: false, reason: 'invalid-target' }
+    }
     const orientFrom = aoeOrientFromCell(spell.area, casterCell, areaCell, { rectRotation: orientation })
     const cells = cellsForAoe(spell.area, orientFrom, areaCell)
     areaCells = cells
@@ -527,8 +546,10 @@ export function prepareDnd5eSpellCast(input: {
   const targetProne = targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const advantage = !dnd5ePreventsAttackAdvantage(targetCombatant) &&
     (dnd5eTargetGrantsAttackAdvantage(targetCombatant) || (spell.id === 'shocking-grasp' && targetCombatant.wearingMetalArmor) || actorCombatant.classState.hiddenCheckTotal != null || !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
+      dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5))
   const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
+    dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
   const attackMode = spell.effect === 'spell-attack' && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
     ? resolveDnd5eRollMode({

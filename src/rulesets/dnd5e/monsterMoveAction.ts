@@ -7,7 +7,7 @@ import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster } from './monsters'
-import { dnd5ePersistentAreaMovementCostMultiplierAt } from './pluginAreas'
+import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
 
 export function resolveDnd5eMonsterMapMove(input: {
   combatId: string
@@ -28,8 +28,10 @@ export function resolveDnd5eMonsterMapMove(input: {
     allowOpenUnlockedDoors: true,
     canClimb: (monster.speed.climb ?? 0) > 0,
     canSwim: (monster.speed.swim ?? 0) > 0,
-    additionalCostMultiplier: (token, position) =>
-      dnd5ePersistentAreaMovementCostMultiplierAt({ map: input.map, token, position }),
+    additionalDifficultTerrainMultiplier: (token, position) =>
+      dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+    additionalSpeedCostMultiplier: (token, position) =>
+      dnd5ePersistentAreaSpeedCostMultiplierAt({ map: input.map, token, position }),
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
   if (path.doorsToOpen.length > 1) return { ok: false, reason: 'movement-blocked' }

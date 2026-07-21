@@ -61,6 +61,42 @@ export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
   return multiplier
 }
 
+export function dnd5ePersistentAreaDifficultTerrainMultiplierAt(input: {
+  map: BattleMap
+  token: Token
+  position: { x: number; y: number }
+}): number {
+  let multiplier = 1
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (
+      area.coreSpellId === 'spirit-guardians' ||
+      (area.movementCostMultiplier ?? 1) <= 1 ||
+      !areaAllowsTarget(area, input.token, input.map) ||
+      !tokenIntersectsAreaAt(input.token, input.map, area, input.position)
+    ) continue
+    multiplier = Math.max(multiplier, area.movementCostMultiplier ?? 1)
+  }
+  return multiplier
+}
+
+export function dnd5ePersistentAreaSpeedCostMultiplierAt(input: {
+  map: BattleMap
+  token: Token
+  position: { x: number; y: number }
+}): number {
+  let multiplier = 1
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (
+      area.coreSpellId !== 'spirit-guardians' ||
+      (area.movementCostMultiplier ?? 1) <= 1 ||
+      !areaAllowsTarget(area, input.token, input.map) ||
+      !tokenIntersectsAreaAt(input.token, input.map, area, input.position)
+    ) continue
+    multiplier = Math.max(multiplier, area.movementCostMultiplier ?? 1)
+  }
+  return multiplier
+}
+
 function alreadyTriggered(
   area: Dnd5ePluginArea,
   trigger: Dnd5ePersistentAreaTriggerSnapshot,

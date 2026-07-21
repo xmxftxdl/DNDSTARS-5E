@@ -39,6 +39,16 @@ const DAMAGE_TYPES = new Set([
   'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder',
 ])
 
+const CHALLENGE_RATING_XP = {
+  '1/8': 25, '1/4': 50, '1/2': 100,
+  '1': 200, '2': 450, '3': 700, '4': 1_100, '5': 1_800,
+  '6': 2_300, '7': 2_900, '8': 3_900, '9': 5_000, '10': 5_900,
+  '11': 7_200, '12': 8_400, '13': 10_000, '14': 11_500, '15': 13_000,
+  '16': 15_000, '17': 18_000, '18': 20_000, '19': 22_000, '20': 25_000,
+  '21': 33_000, '22': 41_000, '23': 50_000, '24': 62_000, '25': 75_000,
+  '26': 90_000, '27': 105_000, '28': 120_000, '29': 135_000, '30': 155_000,
+}
+
 const ABILITY_KEYS = {
   str: 'str', dex: 'dex', con: 'con', int: 'int', wis: 'wis', cha: 'cha',
   strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha',
@@ -143,8 +153,16 @@ function normalizedAttack(action) {
   return result
 }
 
+function damageStructureIsComplete(action, attack) {
+  if (!attack) return false
+  const sourceSegments = Array.isArray(action?.damage) ? action.damage.length : 0
+  if (sourceSegments === 0 || attack.damage.length !== sourceSegments) return false
+  const proseAdditionalSegments = [...String(action?.desc ?? '').matchAll(/\bplus\s+\d+\s*\(/gi)].length
+  return attack.damage.length >= 1 + proseAdditionalSegments
+}
+
 function safelyAutomatedWeapon(action, attack) {
-  if (!attack || action.dc || action.usage || action.options) return false
+  if (!damageStructureIsComplete(action, attack) || action.dc || action.usage || action.options) return false
   const text = String(action.desc ?? '')
   return !/(saving throw|must succeed|is grappled|escape dc|knocked prone|restrained|poisoned|paralyzed|unconscious|swallow|regains? hit points|reduces? (?:its|the target)|teleport|recharge|until the|at the (?:start|end)|each creature|cone|line that is|radius|area|half of its hit points|damage, or|\bif the\b|if it is|attaches to|is cursed|catches fire|while enlarged|with shillelagh|in (?:small|medium|large|huge|gargantuan) form|one prone creature)/i.test(text)
 }
@@ -270,8 +288,14 @@ function normalizedMonster(raw) {
     description: String(trait.desc ?? ''),
     automation: 'dm-adjudication',
   }))
-  const legendaryResistance = traits.find((trait) => /legendary resistance/i.test(trait.name))
-  const legendaryUses = Number(legendaryResistance?.usage?.times ?? legendaryResistance?.name.match(/\((\d+)\/day\)/i)?.[1])
+  const rawLegendaryResistance = (raw.special_abilities ?? [])
+    .find((trait) => /legendary resistance/i.test(String(trait?.name ?? '')))
+  const legendaryUses = Number(
+    rawLegendaryResistance?.usage?.times ??
+    String(rawLegendaryResistance?.name ?? '').match(/\((\d+)\/day\)/i)?.[1],
+  )
+  const rating = challengeRating(raw.challenge_rating)
+  const canonicalXp = CHALLENGE_RATING_XP[rating]
   return {
     id: `srd-5.1:${raw.index}`,
     slug: String(raw.index),
@@ -297,7 +321,7 @@ function normalizedMonster(raw) {
     senses: normalizedSenses(raw.senses),
     passivePerception: Number(raw.senses?.passive_perception) || 10,
     languages: normalizedLanguages(raw.languages),
-    challenge: { rating: challengeRating(raw.challenge_rating), xp: Number(raw.xp) || 0 },
+    challenge: { rating, xp: (canonicalXp ?? Number(raw.xp)) || 0 },
     ...(Number.isFinite(legendaryUses) ? { legendaryResistanceUses: legendaryUses } : {}),
     traits,
     actions: normalizedActions(raw.actions),

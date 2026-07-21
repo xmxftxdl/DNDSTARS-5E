@@ -22,6 +22,11 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         diceFrame: path.resolve(__dirname, 'dice-box-frame.html'),
       },
+      output: {
+        manualChunks(id) {
+          if (id.includes('srdMonsters.generated.json')) return 'srd-monster-catalog'
+        },
+      },
     },
   },
 })

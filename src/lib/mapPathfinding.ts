@@ -66,6 +66,11 @@ export function findMapGeometryPath(input: {
   ignoreTokens?: boolean
   allowOccupiedDestination?: boolean
   maximumVisited?: number
+  /** Additional difficult-terrain sources do not stack with each other. */
+  additionalDifficultTerrainMultiplier?: (token: Token, position: { x: number; y: number }) => number
+  /** Speed/cost modifiers stack with difficult terrain. */
+  additionalSpeedCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
+  /** @deprecated Use the classified callbacks above; retained for extension compatibility. */
   additionalCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
 }): MapPathResult | undefined {
   const gridSize = Math.max(1, input.map.gridSize)
@@ -169,8 +174,16 @@ export function findMapGeometryPath(input: {
         }
       }
       const stepDistanceFeet = feetPerCell
-      const multiplier = terrainMultiplierAtPoint(pathGeometry, position, input) *
-        Math.max(1, input.additionalCostMultiplier?.(input.token, position) ?? 1)
+      const difficultTerrainMultiplier = Math.max(
+        terrainMultiplierAtPoint(pathGeometry, position, input),
+        input.additionalDifficultTerrainMultiplier?.(input.token, position) ?? 1,
+      )
+      const speedCostMultiplier = Math.max(
+        1,
+        input.additionalSpeedCostMultiplier?.(input.token, position) ?? 1,
+        input.additionalCostMultiplier?.(input.token, position) ?? 1,
+      )
+      const multiplier = difficultTerrainMultiplier * speedCostMultiplier
       const nextCost = current.cost + stepDistanceFeet * multiplier
       const nextKey = key(next)
       const previous = nodes.get(nextKey)

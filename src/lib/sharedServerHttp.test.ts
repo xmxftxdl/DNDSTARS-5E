@@ -205,7 +205,10 @@ describe('地图几何的房间权限与安全投影', () => {
         ],
       }],
     }
-    const dmHeaders = { 'Content-Type': 'application/json', 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken }
+    const dmHeaders = {
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '4', 'X-Stars-Expected-Revision': '0',
+      'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken,
+    }
     expect((await fetch(stateUrl('map-geometry'), {
       method: 'PUT', headers: dmHeaders, body: JSON.stringify(geometry),
     })).status).toBe(200)
@@ -833,11 +836,15 @@ describe('P0 战役快照、完整导出与还原', () => {
     })
     const created = await createResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const query = `?room=${created.roomId}`
-    const memberHeaders = { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken }
+    const memberHeaders = {
+      'X-Stars-Protocol': '4',
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    }
 
     expect((await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      headers: { 'Content-Type': 'application/json', 'X-Stars-Expected-Revision': '0', ...memberHeaders },
       body: JSON.stringify({ characters: [{ id: 'hero', name: '原始角色' }], updatedAt: 100 }),
     })).status).toBe(200)
     expect((await fetch(`${offServer.base}/api/campaign/snapshots${query}`, { method: 'POST' })).status).toBe(403)
@@ -859,7 +866,7 @@ describe('P0 战役快照、完整导出与还原', () => {
 
     await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...memberHeaders },
+      headers: { 'Content-Type': 'application/json', 'X-Stars-Expected-Revision': '1', ...memberHeaders },
       body: JSON.stringify({ characters: [{ id: 'hero', name: '被覆盖角色' }], updatedAt: 200 }),
     })
     const restored = await fetch(
@@ -1007,6 +1014,21 @@ describe('P1 房间管理与共享状态 CAS', () => {
     })
     expect(kickedHeartbeat.status).toBe(403)
     expect(await kickedHeartbeat.json()).toEqual({ error: 'member-removed' })
+    const kickedDataHeaders = {
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'X-Stars-Member': playerA.member.memberId, 'X-Stars-Room-Token': playerA.member.roomToken,
+    }
+    const kickedStateRead = await fetch(`${offServer.base}/api/state/characters?room=${created.roomId}`, {
+      headers: kickedDataHeaders,
+    })
+    expect(kickedStateRead.status).toBe(403)
+    expect(await kickedStateRead.json()).toEqual({ error: 'member-removed' })
+    const kickedEvent = await fetch(`${offServer.base}/api/events/map-tabletop?room=${created.roomId}`, {
+      method: 'POST', headers: kickedDataHeaders,
+      body: JSON.stringify({ type: 'ping', mapId: 'map', point: { x: 1, y: 1 } }),
+    })
+    expect(kickedEvent.status).toBe(403)
+    expect(await kickedEvent.json()).toEqual({ error: 'member-removed' })
 
     const transfer = await admin({ operation: 'transfer-dm', targetMemberId: playerB.member.memberId })
     expect(transfer.status).toBe(200)
@@ -1100,12 +1122,35 @@ describe('room session capability tokens', () => {
       body: stateBody,
     })
     expect(wrongToken.status).toBe(403)
+    const missingProtocol = await fetch(stateUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': joined.member.roomToken,
+        'X-Stars-Expected-Revision': '0',
+      },
+      body: stateBody,
+    })
+    expect(missingProtocol.status).toBe(426)
+    const missingRevision = await fetch(stateUrl, {
+      method: 'PUT',
+      headers: {
+        ...protocolHeaders,
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': joined.member.roomToken,
+      },
+      body: stateBody,
+    })
+    expect(missingRevision.status).toBe(428)
+    expect(await missingRevision.json()).toMatchObject({ error: 'expected-revision-required' })
     const validToken = await fetch(stateUrl, {
       method: 'PUT',
       headers: {
         ...protocolHeaders,
         'X-Stars-Member': joined.member.memberId,
         'X-Stars-Room-Token': joined.member.roomToken,
+        'X-Stars-Expected-Revision': '0',
       },
       body: stateBody,
     })
@@ -1170,6 +1215,7 @@ describe('room privacy projections and event channel ACLs', () => {
     const query = `?room=${created.roomId}`
     const dmHeaders = {
       'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'X-Stars-Expected-Revision': '0',
       'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken,
     }
     const playerHeaders = {

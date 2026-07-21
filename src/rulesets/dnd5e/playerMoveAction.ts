@@ -8,8 +8,9 @@ import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { dnd5eEffectiveSpeed, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5ePersistentAreaMovementCostMultiplierAt } from './pluginAreas'
+import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
 import { dnd5eFallingDamageDice, dnd5eTraversalMovementCost } from './traversal'
+import { dnd5eClimbingMovementCost, dnd5eRunningJumpBonusFeet } from './classes'
 
 export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
@@ -57,8 +58,10 @@ export function prepareDnd5ePlayerMove(input: {
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
   const path = findMapGeometryPath({
     geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
-    additionalCostMultiplier: (token, position) =>
-      dnd5ePersistentAreaMovementCostMultiplierAt({ map: input.map, token, position }),
+    additionalDifficultTerrainMultiplier: (token, position) =>
+      dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+    additionalSpeedCostMultiplier: (token, position) =>
+      dnd5ePersistentAreaSpeedCostMultiplierAt({ map: input.map, token, position }),
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -79,7 +82,8 @@ export function prepareDnd5ePlayerMove(input: {
     ? Math.max(-1_000, Math.min(10_000, Math.floor(action.targetElevationFeet!)))
     : actorToken.elevationFeet ?? 0
   const traversal = dnd5eTraversalMovementCost({
-    distanceFeet: path.movementCostFeet,
+    distanceFeet: path.distanceFeet,
+    baseMovementCostFeet: path.movementCostFeet,
     elevationGainFeet: Math.max(0, toElevationFeet - (actorToken.elevationFeet ?? 0)),
     mode: action.dnd5eTraversalMode ?? 'walk',
     profile: {
@@ -88,6 +92,8 @@ export function prepareDnd5ePlayerMove(input: {
       walkSpeed: actorCombatant.movementSpeeds?.walk ?? actorCombatant.speed,
       climbSpeed: actorCombatant.movementSpeeds?.climb,
       swimSpeed: actorCombatant.movementSpeeds?.swim,
+      climbWithoutSpeedCostMultiplier: dnd5eClimbingMovementCost(actor, 1),
+      runningLongJumpBonusFeet: dnd5eRunningJumpBonusFeet(actor),
     },
   })
   if (!traversal.ok) return { ok: false, reason: 'movement-blocked' }

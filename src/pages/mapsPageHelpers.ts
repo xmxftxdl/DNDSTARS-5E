@@ -72,9 +72,8 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         accent: ch?.accent,
         roll,
       }
-      const surprised = ch?.conditions.some((condition) =>
-        ['surprised', '受突袭', '惊讶'].includes(condition.trim().toLowerCase()),
-      ) === true
+      const surprised = ch?.dnd5eCombatState?.surprisedCombatId != null &&
+        ch.dnd5eCombatState.surpriseResolvedCombatId !== ch.dnd5eCombatState.surprisedCombatId
       const reflexesInitiative = ch ? dnd5eThiefReflexesInitiative(ch, roll, surprised) : undefined
       return reflexesInitiative == null
         ? [normal]

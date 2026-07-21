@@ -119,13 +119,13 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     visual: { preset: 'spirit-guardians', intensity: 'normal' },
     triggers: [
       {
-        id: 'spirit-guardians-enter', label: '灵体卫士·进入区域', timing: 'on-enter', oncePerRound: true,
+        id: 'spirit-guardians-damage', label: '灵体卫士·进入区域', timing: 'on-enter', oncePerTurn: true,
         savingThrow: { ability: 'wis', onSuccess: 'half' },
         damage: { count: 3, sides: 8, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
       },
       {
-        id: 'spirit-guardians-turn-start', label: '灵体卫士·回合开始', timing: 'turn-start', oncePerRound: true,
+        id: 'spirit-guardians-damage', label: '灵体卫士·回合开始', timing: 'turn-start', oncePerTurn: true,
         savingThrow: { ability: 'wis', onSuccess: 'half' },
         damage: { count: 3, sides: 8, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
@@ -147,13 +147,13 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     visual: { preset: 'moonbeam', intensity: 'strong' },
     triggers: [
       {
-        id: 'moonbeam-enter', label: '月华之光·进入光柱', timing: 'on-enter', oncePerRound: true,
+        id: 'moonbeam-damage', label: '月华之光·进入光柱', timing: 'on-enter', oncePerTurn: true,
         savingThrow: { ability: 'con', onSuccess: 'half' },
         damage: { count: 2, sides: 10, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
       },
       {
-        id: 'moonbeam-turn-start', label: '月华之光·回合开始', timing: 'turn-start', oncePerRound: true,
+        id: 'moonbeam-damage', label: '月华之光·回合开始', timing: 'turn-start', oncePerTurn: true,
         savingThrow: { ability: 'con', onSuccess: 'half' },
         damage: { count: 2, sides: 10, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
@@ -178,7 +178,8 @@ function resolvedTrigger(
     id: declaration.id,
     label: declaration.label,
     timing: declaration.timing,
-    oncePerRound: declaration.oncePerRound !== false,
+    oncePerRound: declaration.oncePerTurn === true ? false : declaration.oncePerRound !== false,
+    oncePerTurn: declaration.oncePerTurn === true,
     movementIntervalFeet: declaration.movementIntervalFeet,
     savingThrow: declaration.savingThrow
       ? { ...declaration.savingThrow, dc: input.sourceSaveDc }

@@ -71,6 +71,25 @@ describe('SRD 5.1 monster catalog', () => {
     expect(getDnd5eSrdMonster('srd-5.1:frog')).toMatchObject({ challenge: { rating: '0' }, speed: { swim: 20 } })
   })
 
+  it('preserves legendary resistance uses and canonical CR experience', () => {
+    const legendary = DND5E_SRD_MONSTERS.filter((monster) => monster.legendaryResistanceUses != null)
+    expect(legendary.length).toBeGreaterThanOrEqual(20)
+    expect(legendary.every((monster) => (monster.legendaryResistanceUses ?? 0) > 0)).toBe(true)
+    expect(getDnd5eSrdMonster('srd-5.1:lich')?.legendaryResistanceUses).toBe(3)
+    expect(getDnd5eSrdMonster('srd-5.1:brass-dragon-wyrmling')?.challenge).toEqual({ rating: '1', xp: 200 })
+    expect(getDnd5eSrdMonster('srd-5.1:dretch')?.challenge).toEqual({ rating: '1/4', xp: 50 })
+    expect(getDnd5eSrdMonster('srd-5.1:riding-horse')?.challenge).toEqual({ rating: '1/4', xp: 50 })
+    expect(getDnd5eSrdMonster('srd-5.1:deep-gnome-svirfneblin')?.challenge).toEqual({ rating: '1/2', xp: 100 })
+  })
+
+  it('never marks a generated weapon attack headless after dropping a damage segment', () => {
+    for (const slug of ['djinni', 'flying-snake', 'pit-fiend']) {
+      const monster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+      const suspect = monster.actions.filter((action) => action.kind === 'weapon-attack')
+      expect(suspect.some((action) => action.automation === 'dm-adjudication')).toBe(true)
+    }
+  })
+
   it('supports Chinese, English and type search plus CR proficiency', () => {
     expect(searchDnd5eSrdMonsters('哥布林').map((monster) => monster.slug)).toEqual(['goblin'])
     expect(searchDnd5eSrdMonsters('dire wolf').map((monster) => monster.slug)).toEqual(['dire-wolf'])

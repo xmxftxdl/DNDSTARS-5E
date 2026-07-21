@@ -20,7 +20,7 @@ import {
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { DND5E_SRD_MAGIC_ITEM_TEMPLATES } from './magicItems'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
-import { dnd5eClassDefinition } from './classes'
+import { DND5E_SRD_CLASS_DEFINITIONS, dnd5eClassDefinition, dnd5eIgnoresMagicItemRequirements } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
@@ -716,14 +716,11 @@ function dnd5eAttunementRequirementMet(
 ): boolean {
   const requirement = entry.item.magicItem?.attunementRequirement
   if (!requirement) return true
+  if (dnd5eIgnoresMagicItemRequirements(character)) return true
   if (requirement.includes('仅限矮人')) return character.race.includes('矮人')
   if (requirement.includes('善良阵营')) return character.alignment?.includes('善良') === true
   if (requirement.includes('邪恶阵营')) return character.alignment?.includes('邪恶') === true
   const levels = normalizeDnd5eClassLevels(character)
-  const classNames = Object.keys(levels).flatMap((classId) => {
-    const definition = dnd5eClassDefinition(classId)
-    return definition && dnd5eCharacterClassLevel(character, definition.id) > 0 ? [definition.name] : []
-  })
   if (requirement.includes('仅限施法者')) {
     return Object.entries(levels).some(([classId, level]) => {
       const definition = dnd5eClassDefinition(classId)
@@ -731,8 +728,12 @@ function dnd5eAttunementRequirementMet(
       return !['half-known', 'half-prepared'].includes(definition.spellcasting.kind) || (level ?? 0) >= 2
     })
   }
-  const mentionedClasses = classNames.filter((name) => requirement.includes(name))
-  if (mentionedClasses.length > 0) return true
+  const requiredClassIds = DND5E_SRD_CLASS_DEFINITIONS
+    .filter((definition) => requirement.includes(definition.name))
+    .map((definition) => definition.id)
+  if (requiredClassIds.length > 0) {
+    return requiredClassIds.some((classId) => dnd5eCharacterClassLevel(character, classId) > 0)
+  }
   return prerequisiteConfirmed
 }
 

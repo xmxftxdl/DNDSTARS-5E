@@ -1,5 +1,5 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
+import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
@@ -22,6 +22,7 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
+  turnEconomy: Dnd5eTurnEconomyCounts
 }): { ok: true; prepared: PreparedDnd5eCoreSpellAreaMove } | { ok: false; reason: string } {
   const payload = input.action.dnd5ePersistentAreaMove
   if (input.action.type !== 'dnd5e-persistent-area-move' || !payload) {
@@ -53,7 +54,15 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     initiativeOrder: input.initiativeOrder,
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
-  if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id]) return { ok: false, reason: 'combatant-missing' }
+  const actorCombatant = snapshot.state.combatants[actorToken.id]
+  if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
+  actorCombatant.turn = {
+    ...actorCombatant.turn,
+    actionAvailable: input.turnEconomy.action.current > 0,
+    bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,
+    reactionAvailable: input.turnEconomy.reaction.current > 0,
+    movementRemaining: input.turnEconomy.movement.current,
+  }
   return {
     ok: true,
     prepared: {

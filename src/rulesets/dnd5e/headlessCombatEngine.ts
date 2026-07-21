@@ -320,7 +320,10 @@ export function dnd5eCombatantCanSee(
   const outlinedByFaerieFire = target.classState.activeEffects?.some((effect) =>
     effect.definitionId === 'srd-5.1:spell:faerie-fire',
   ) === true
-  if ((!outlinedByFaerieFire && !hasBlindsight && !hasTruesight && dnd5eHasStandardCondition(target, 'invisible')) || target.classState.hiddenCheckTotal != null) return false
+  if (!outlinedByFaerieFire && (
+    (!hasBlindsight && !hasTruesight && dnd5eHasStandardCondition(target, 'invisible')) ||
+    target.classState.hiddenCheckTotal != null
+  )) return false
   return hasBlindsight || hasTruesight ||
     state.lineOfSightBlockedByCombatantPair?.[dnd5eDirectedCombatantPairKey(viewerId, targetId)] !== true
 }
@@ -5492,7 +5495,8 @@ function resolveSpellCast(
       advantage: [{ active: targetGrantsAdvantage, reason: 'spell-attack-advantage' }],
       disadvantage: [{ active: actorHasDisadvantage, reason: 'spell-attack-disadvantage' }],
     }).mode
-    const rolls = mode === 'normal' ? [action.d20 ?? 0] : [action.d20 ?? 0, action.d20Second ?? 0]
+    const primaryD20 = action.d20 ?? 0
+    const rolls = mode === 'normal' ? [primaryD20] : [primaryD20, action.d20Second ?? primaryD20]
     let targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
     const inspiredAttack = applyBardicInspirationToAttack(
       actor,
@@ -8379,6 +8383,14 @@ function resolveDnd5eHeadlessActionInternal(
         walkSpeed: actor.movementSpeeds?.walk ?? actor.speed,
         climbSpeed: actor.movementSpeeds?.climb,
         swimSpeed: actor.movementSpeeds?.swim,
+        climbWithoutSpeedCostMultiplier: dnd5eCombatantClassLevel(actor, 'rogue') >= 3 &&
+          dnd5eCombatantHasSubclass(actor, 'rogue', 'thief') ? 1 : 2,
+        runningLongJumpBonusFeet: dnd5eCombatantClassLevel(actor, 'rogue') >= 3 &&
+          dnd5eCombatantHasSubclass(actor, 'rogue', 'thief')
+          ? Math.max(0, rules.abilityModifier(actor.abilities.dex))
+          : dnd5eCombatantClassLevel(actor, 'fighter') >= 7 && dnd5eCombatantHasSubclass(actor, 'fighter', 'champion')
+            ? Math.max(0, rules.abilityModifier(actor.abilities.str))
+            : 0,
       },
     })
     if (!traversal.ok) return fail(state, events, 'invalid-class-feature')
