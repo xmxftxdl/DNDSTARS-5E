@@ -32,7 +32,9 @@ const ITEM_USE_ECONOMY_LABELS = {
 const ITEM_CURRENCY_LABELS = {
   cp: '铜币',
   sp: '银币',
+  ep: '银金币',
   gp: '金币',
+  pp: '铂金币',
 } as const
 
 export default function Dnd5eDmInventoryDistributor({
@@ -46,6 +48,7 @@ export default function Dnd5eDmInventoryDistributor({
   const [characterId, setCharacterId] = useState('')
   const [templateId, setTemplateId] = useState('srd-5.1:item:potion-of-healing')
   const [quantity, setQuantity] = useState(1)
+  const [identified, setIdentified] = useState(true)
   const [filter, setFilter] = useState('')
   const [notice, setNotice] = useState('')
   const pluginRevision = useSyncExternalStore(
@@ -78,7 +81,7 @@ export default function Dnd5eDmInventoryDistributor({
       setNotice('请先选择角色和物品。')
       return
     }
-    const result = applyInventoryMutation({ type: 'grant', characterId: validCharacterId, templateId, quantity })
+    const result = applyInventoryMutation({ type: 'grant', characterId: validCharacterId, templateId, quantity, identified: selectedTemplate?.magicItem ? identified : true })
     setNotice(result.ok ? (result.message ?? '分发完成。') : inventoryFailureMessage(result.reason))
   }
 
@@ -96,6 +99,13 @@ export default function Dnd5eDmInventoryDistributor({
         </div>
         <span className="rounded-lg border border-white/8 bg-black/20 px-2.5 py-1 text-[10px] text-slate-500">{allTemplates.length} 个模板</span>
       </div>
+
+      {selectedTemplate?.magicItem && (
+        <label className="mt-3 inline-flex items-center gap-2 rounded-lg border border-fuchsia-300/10 bg-fuchsia-500/[0.04] px-3 py-2 text-xs text-fuchsia-100/80">
+          <input type="checkbox" checked={identified} onChange={(event) => setIdentified(event.target.checked)} />
+          分发时公开并标记为已鉴定
+        </label>
+      )}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(180px,0.8fr)_minmax(260px,1.4fr)_90px_auto]">
         <label className="space-y-1 text-xs text-slate-500">

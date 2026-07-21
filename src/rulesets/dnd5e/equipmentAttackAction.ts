@@ -43,6 +43,7 @@ import {
   type Dnd5eMapResultPlan,
 } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
+import { consumeDnd5eWeaponAmmunition } from './items'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -50,6 +51,7 @@ export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-target'
   | 'not-dnd5e-class'
   | 'no-weapon'
+  | 'ammunition-unavailable'
   | 'target-out-of-range'
   | 'attack-action-spent'
   | 'divine-smite-unavailable'
@@ -121,6 +123,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const offHandAttack = action.dnd5eWeaponAttackOptions?.offHandAttack === true
   const profile = offHandAttack ? dnd5eOffHandWeaponAttackProfile(actor) : dnd5eWeaponAttackProfile(actor)
   if (!profile) return { ok: false, reason: 'no-weapon' }
+  if (!consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
   if (
     offHandAttack && (
       input.attacksUsed < 1 || (input.turnEconomy?.bonusAction.current ?? 1) < 1 ||
@@ -448,13 +451,21 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     },
   }, { transaction: input.transaction })
   if (!result.ok) return { result }
+  const ammunition = consumeDnd5eWeaponAmmunition(prepared.actor, prepared.profile.weaponId)
+  const characters = ammunition.ok
+    ? prepared.characters.map((character) => character.id === prepared.actor.id ? ammunition.character : character)
+    : prepared.characters
+  const application = planDnd5eMapResultApplication({
+    state: result.state,
+    map: prepared.map,
+    characters,
+    characterIdByCombatantId: prepared.characterIdByCombatantId,
+  })
+  if (ammunition.ok && ammunition.instanceId && !application.changedCharacterIds.includes(prepared.actor.id)) {
+    application.changedCharacterIds = [...application.changedCharacterIds, prepared.actor.id]
+  }
   return {
     result,
-    application: planDnd5eMapResultApplication({
-      state: result.state,
-      map: prepared.map,
-      characters: prepared.characters,
-      characterIdByCombatantId: prepared.characterIdByCombatantId,
-    }),
+    application,
   }
 }

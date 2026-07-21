@@ -19,17 +19,20 @@ import {
   TentTree,
   Trash2,
   TriangleAlert,
+  Weight,
 } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
 import { EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
 import { formatEquipmentStatLine } from '../../lib/combatStats'
+import { modeFromPort } from '../../lib/appMode'
+import { getRoomSession } from '../../lib/roomSession'
 import { submitDnd5eInventoryMutation } from '../../lib/inventoryAuthority'
-import { normalizeDnd5eInventory } from '../../rulesets/dnd5e/items'
+import { dnd5eInventoryLoad, normalizeDnd5eInventory } from '../../rulesets/dnd5e/items'
 import {
   DND5E_MAGIC_ITEM_KIND_LABELS,
   DND5E_MAGIC_ITEM_RARITY_LABELS,
 } from '../../rulesets/dnd5e/magicItems'
-import type { Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
+import type { Dnd5eCurrency, Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
 import type { EquipmentSlot } from '../../types/equipment'
 
 const ICONS: Record<Dnd5eInventoryIconId, ComponentType<{ className?: string }>> = {
@@ -80,6 +83,9 @@ const CATEGORY_LABELS = {
   container: '容器',
 } as const
 
+const CURRENCY_LABELS: Readonly<Record<Dnd5eCurrency, string>> = { cp: '铜币', sp: '银币', ep: '银金币', gp: '金币', pp: '铂金币' }
+const CURRENCIES = Object.keys(CURRENCY_LABELS) as Dnd5eCurrency[]
+
 export interface EquipmentTabProps {
   charId: string
   editable?: boolean
@@ -104,6 +110,7 @@ export default function EquipmentTab({
   const [quantity, setQuantity] = useState(1)
   const [notice, setNotice] = useState('')
   const combatManagementLocked = !!onUseItem
+  const canIdentify = (getRoomSession()?.role ?? modeFromPort()) === 'dm'
 
   const inventory = useMemo(() => character ? normalizeDnd5eInventory(character) : null, [character])
   if (!character || !inventory) return null
@@ -117,7 +124,8 @@ export default function EquipmentTab({
     candidate.visibleToPlayers !== false &&
     (!character.roomId || !candidate.roomId || candidate.roomId === character.roomId),
   )
-  const totalWeight = inventory.entries.reduce((sum, entry) => sum + (entry.item.weightLb ?? 0) * entry.quantity, 0)
+  const load = dnd5eInventoryLoad(character)
+  const containers = inventory.entries.filter((entry) => entry.item.containerCapacityWeightLb != null && entry.instanceId !== selected?.instanceId)
 
   const run = (mutation: Parameters<typeof submitDnd5eInventoryMutation>[0]) => {
     const result = submitDnd5eInventoryMutation(mutation)
@@ -144,11 +152,40 @@ export default function EquipmentTab({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">物品栏</p>
-            <p className="mt-1 text-xs text-slate-500">{inventory.entries.length} 个物品栏位 · 约 {formatWeight(totalWeight)} 磅</p>
+            <p className="mt-1 text-xs text-slate-500">{inventory.entries.length} 个物品栏位 · {formatWeight(load.totalWeightLb)} / {load.carryingCapacityLb} 磅</p>
           </div>
           <div className="flex rounded-xl border border-white/8 bg-black/20 p-1">
             <GroupButton active={group === 'equipment'} onClick={() => { setGroup('equipment'); setSelectedId(null) }} icon={Shield}>装备</GroupButton>
             <GroupButton active={group === 'items'} onClick={() => { setGroup('items'); setSelectedId(null) }} icon={Backpack}>道具</GroupButton>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
+          <div className="grid grid-cols-5 gap-2 rounded-xl border border-white/8 bg-black/15 p-3">
+            {CURRENCIES.map((currency) => (
+              <label key={`${currency}:${inventory.currency?.[currency] ?? 0}`} className="space-y-1 text-[10px] text-slate-500">
+                <span>{CURRENCY_LABELS[currency]}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  defaultValue={inventory.currency?.[currency] ?? 0}
+                  disabled={!editable || pending || combatManagementLocked}
+                  onBlur={(event) => {
+                    const current = inventory.currency?.[currency] ?? 0
+                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
+                    if (next !== current) run({ type: 'adjust-currency', characterId: character.id, currency, delta: next - current })
+                  }}
+                  className="w-full rounded-lg border border-white/10 bg-void-900/70 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-arcane-500 disabled:opacity-50"
+                />
+              </label>
+            ))}
+          </div>
+          <div className={`rounded-xl border p-3 ${load.status === 'normal' ? 'border-emerald-300/10 bg-emerald-500/[0.035]' : 'border-amber-300/15 bg-amber-500/[0.05]'}`}>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-200"><Weight className="h-4 w-4" />负重</div>
+            <p className="mt-1.5 text-xs text-slate-400">物品 {formatWeight(load.itemWeightLb)} 磅 · 钱币 {formatWeight(load.currencyWeightLb)} 磅 · 总计 {formatWeight(load.totalWeightLb)} 磅</p>
+            <p className="mt-1 text-[11px] text-slate-500">可选负重阈值 {load.encumberedThresholdLb} / {load.heavilyEncumberedThresholdLb} 磅 · 携带上限 {load.carryingCapacityLb} 磅</p>
+            {load.status !== 'normal' && <p className="mt-1 text-[11px] text-amber-200">{load.status === 'encumbered' ? '负重：速度 -10 尺。' : load.status === 'heavily-encumbered' ? '重度负重：速度 -20 尺，并承受相应检定与豁免劣势。' : '超过携带上限，通常无法继续携带或移动。'}</p>}
           </div>
         </div>
 
@@ -208,13 +245,13 @@ export default function EquipmentTab({
         <section className="glass rounded-2xl p-4" data-testid="inventory-item-actions">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="font-semibold text-slate-100">{selected.item.name}</p>
+              <p className="font-semibold text-slate-100">{displayItemName(selected)}</p>
               <p className="mt-1 text-xs text-slate-500">
-                持有 {selected.quantity}{inventoryResourceSummary(selected) ? ` · ${inventoryResourceSummary(selected)}` : ''} · {selected.item.englishName ?? CATEGORY_LABELS[selected.item.category]}
+                持有 {selected.quantity}{inventoryResourceSummary(selected) ? ` · ${inventoryResourceSummary(selected)}` : ''} · {selected.identified === false ? '未鉴定魔法物品' : selected.item.englishName ?? CATEGORY_LABELS[selected.item.category]}
               </p>
             </div>
             {editable && <div className="flex flex-wrap gap-2">
-              {selected.item.equipment && !selected.equippedSlot && (
+              {selected.item.equipment && !selected.equippedSlot && selected.identified !== false && (
                 <ActionButton icon={Shield} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId })}>装备</ActionButton>
               )}
               {selected.equippedSlot && (
@@ -237,13 +274,20 @@ export default function EquipmentTab({
               {selected.attuned && (
                 <ActionButton icon={Sparkles} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'end-attunement', characterId: character.id, instanceId: selected.instanceId })}>结束同调</ActionButton>
               )}
-              {selected.item.use && (
+              {selected.item.use && selected.identified !== false && (
                 <ActionButton icon={HandHelping} disabled={pending} onClick={useSelected}>使用</ActionButton>
+              )}
+              {selected.item.magicItem && selected.identified === false && canIdentify && (
+                <ActionButton icon={Sparkles} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'identify', characterId: character.id, instanceId: selected.instanceId })}>完成鉴定</ActionButton>
               )}
             </div>}
           </div>
 
-          <div className="mt-4 space-y-3">
+          {selected.identified === false ? (
+            <div className="mt-4 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] p-4 text-sm text-fuchsia-100/85">
+              该魔法物品尚未鉴定。名称、稀有度、规则正文与 Headless 效果由 DM 权威端隐藏；完成鉴定后才可使用、装备或同调。
+            </div>
+          ) : <div className="mt-4 space-y-3">
             <div className="rounded-xl border border-violet-300/15 bg-violet-500/[0.055] p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-200/70">完整规则效果</p>
               <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-200">{selected.item.rulesText}</p>
@@ -265,9 +309,9 @@ export default function EquipmentTab({
                 {selected.item.magicItem.attunementRequirement ? ` 条件：${selected.item.magicItem.attunementRequirement}。` : ''}
               </div>
             )}
-          </div>
+          </div>}
 
-          {editable && <div className="mt-4 grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)_auto]">
+          {editable && <div className="mt-4 grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)_minmax(180px,0.8fr)_auto]">
             <label className="space-y-1 text-xs text-slate-500">
               <span>数量</span>
               <input
@@ -290,6 +334,18 @@ export default function EquipmentTab({
                 {transferTargets.map((target) => <option key={target.id} value={target.id}>{target.name}（{target.player || '未填写玩家'}）</option>)}
               </select>
             </label>
+            <label className="space-y-1 text-xs text-slate-500">
+              <span>存放于</span>
+              <select
+                value={selected.containerInstanceId ?? ''}
+                onChange={(event) => run({ type: 'set-container', characterId: character.id, instanceId: selected.instanceId, containerInstanceId: event.target.value || undefined })}
+                disabled={pending || combatManagementLocked}
+                className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-arcane-500 disabled:opacity-50"
+              >
+                <option value="">随身携带</option>
+                {containers.map((container) => <option key={container.instanceId} value={container.instanceId}>{displayItemName(container)}（{container.item.containerCapacityWeightLb} 磅）</option>)}
+              </select>
+            </label>
             <div className="flex items-end gap-2">
               <ActionButton
                 icon={HandHelping}
@@ -303,7 +359,7 @@ export default function EquipmentTab({
                 tone="danger"
                 disabled={pending || combatManagementLocked}
                 onClick={() => {
-                  if (window.confirm(`确定丢弃 ${selected.item.name} ×${quantity} 吗？`)) {
+                  if (window.confirm(`确定丢弃 ${displayItemName(selected)} ×${quantity} 吗？`)) {
                     run({ type: 'discard', characterId: character.id, instanceId: selected.instanceId, quantity })
                   }
                 }}
@@ -332,13 +388,13 @@ export default function EquipmentTab({
 
 function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEntry; selected: boolean; onSelect: () => void }) {
   const Icon = ICONS[entry.item.icon] ?? PackageOpen
-  const usable = !!entry.item.use
+  const usable = !!entry.item.use && entry.identified !== false
   const primaryResource = Object.values(entry.resources ?? {})[0]
   return (
     <button
       type="button"
       onClick={onSelect}
-      title={`${entry.item.name}\n${entry.item.rulesText}`}
+      title={entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name}\n${entry.item.rulesText}`}
       className={`group relative min-h-28 rounded-2xl border p-3 text-left transition ${selected
         ? 'border-arcane-400/60 bg-arcane-500/15 shadow-[0_0_22px_rgba(124,92,255,0.16)]'
         : 'border-white/8 bg-gradient-to-b from-white/[0.045] to-black/20 hover:-translate-y-0.5 hover:border-white/20'}`}
@@ -349,7 +405,7 @@ function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEnt
       >
         <Icon className="h-6 w-6" />
       </div>
-      <p className="mt-2 line-clamp-2 text-xs font-semibold leading-snug text-slate-100">{entry.item.name}</p>
+      <p className="mt-2 line-clamp-2 text-xs font-semibold leading-snug text-slate-100">{displayItemName(entry)}</p>
       <p className="mt-1 text-[10px] text-slate-600">{CATEGORY_LABELS[entry.item.category]}</p>
       {entry.quantity > 1 && (
         <span className={`absolute right-2 ${primaryResource ? 'top-8' : 'top-2'} min-w-6 rounded-full border border-white/10 bg-void-950/90 px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-200`}>×{entry.quantity}</span>
@@ -366,6 +422,9 @@ function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEnt
       {entry.attunementPending && !entry.attuned && (
         <span className="absolute bottom-2 left-2 rounded-md bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-100">短休同调</span>
       )}
+      {entry.identified === false && (
+        <span className="absolute bottom-2 left-2 rounded-md bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] text-fuchsia-100">未鉴定</span>
+      )}
       {entry.item.magicItem && !entry.equippedSlot && (
         <span className={`absolute bottom-2 right-2 rounded-md px-1.5 py-0.5 text-[9px] ${entry.item.magicItem.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-violet-500/15 text-violet-200'}`}>
           {entry.item.magicItem.automation === 'headless' ? 'Headless' : 'DM 裁定'}
@@ -378,6 +437,14 @@ function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEnt
 
 function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
   const item = entry.item
+  if (entry.identified === false) {
+    return (
+      <span className="pointer-events-none invisible absolute bottom-[calc(100%+8px)] left-0 z-[100] w-72 translate-y-1 rounded-xl border border-fuchsia-300/15 bg-void-950/95 p-4 text-left opacity-0 shadow-2xl backdrop-blur-xl transition group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
+        <span className="block text-sm font-semibold text-white">未鉴定魔法物品</span>
+        <span className="mt-2 block text-xs leading-relaxed text-slate-300">需由 DM 权威端完成鉴定后，才公开物品身份和规则效果。</span>
+      </span>
+    )
+  }
   return (
     <span className="pointer-events-none invisible absolute bottom-[calc(100%+8px)] left-0 z-[100] w-80 translate-y-1 rounded-xl border border-white/15 bg-void-950/95 p-4 text-left opacity-0 shadow-2xl backdrop-blur-xl transition group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
       <span className="flex items-start justify-between gap-3">
@@ -404,6 +471,10 @@ function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
 
 function inventoryResourceSummary(entry: Dnd5eInventoryEntry): string {
   return Object.values(entry.resources ?? {}).map((resource) => `${resource.label} ${resource.current}/${resource.maximum}`).join(' · ')
+}
+
+function displayItemName(entry: Dnd5eInventoryEntry): string {
+  return entry.item.magicItem && entry.identified === false ? '未鉴定魔法物品' : entry.item.name
 }
 
 function GroupButton({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: ComponentType<{ className?: string }>; children: string }) {

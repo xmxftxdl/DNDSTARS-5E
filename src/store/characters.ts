@@ -771,7 +771,11 @@ export function mergePlayerWritableCharacter(local: Character, shared: Character
       : undefined,
     equipment: shared.equipment ? { ...shared.equipment } : undefined,
     dnd5eInventory: shared.dnd5eInventory
-      ? { ...shared.dnd5eInventory, entries: shared.dnd5eInventory.entries.map((entry) => ({ ...entry })) }
+      ? {
+          ...shared.dnd5eInventory,
+          currency: shared.dnd5eInventory.currency ? { ...shared.dnd5eInventory.currency } : undefined,
+          entries: shared.dnd5eInventory.entries.map((entry) => ({ ...entry })),
+        }
       : undefined,
   }
 }

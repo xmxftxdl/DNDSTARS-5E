@@ -2,6 +2,8 @@ import type { Character } from '../../types/character'
 import type { CharacterEquipment, EquipmentItem, EquipmentSlot } from '../../types/equipment'
 import type {
   Dnd5eInventory,
+  Dnd5eAmmunitionKind,
+  Dnd5eCurrencyWallet,
   Dnd5eInventoryEntry,
   Dnd5eInventoryItemTemplate,
   Dnd5eInventoryMutation,
@@ -24,6 +26,33 @@ import { DND5E_SRD_CLASS_DEFINITIONS, dnd5eClassDefinition, dnd5eIgnoresMagicIte
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
+const EMPTY_CURRENCY: Dnd5eCurrencyWallet = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 }
+
+const CONTAINER_CAPACITY_WEIGHT_LB: Readonly<Record<string, number>> = {
+  backpack: 30,
+  chest: 300,
+  'map-scroll-case': 1,
+  'alms-box': 5,
+  'component-pouch': 6,
+  'coin-pouch-15gp': 6,
+}
+
+const AMMUNITION_KIND_BY_ITEM_ID: Readonly<Record<string, Dnd5eAmmunitionKind>> = {
+  arrows: 'arrow',
+  'crossbow-bolts': 'crossbow-bolt',
+  'sling-bullets': 'sling-bullet',
+  'blowgun-needles': 'blowgun-needle',
+}
+
+const AMMUNITION_KIND_BY_WEAPON_ID: Readonly<Record<string, Dnd5eAmmunitionKind>> = {
+  'dnd5e-longbow': 'arrow',
+  'dnd5e-shortbow': 'arrow',
+  'dnd5e-light-crossbow': 'crossbow-bolt',
+  'dnd5e-hand-crossbow': 'crossbow-bolt',
+  'dnd5e-heavy-crossbow': 'crossbow-bolt',
+  'dnd5e-sling': 'sling-bullet',
+  'dnd5e-blowgun': 'blowgun-needle',
+}
 
 function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
@@ -183,6 +212,8 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
   gear('small-knife', '小刀', 'Small knife', 'adventuring-gear', 'generic', 0, 0, 'cp', '学者套组中的小刀；不作为战斗武器。'),
   gear('arrows', '箭', 'Arrows', 'adventuring-gear', 'generic', 0.05, 5, 'cp', '短弓和长弓使用的弹药。'),
   gear('crossbow-bolts', '弩矢', 'Crossbow bolts', 'adventuring-gear', 'generic', 0.075, 5, 'cp', '轻弩等弩类武器使用的弹药。'),
+  gear('sling-bullets', '投石索弹丸', 'Sling bullets', 'adventuring-gear', 'generic', 0.075, 4, 'cp', '投石索使用的铅制弹丸。'),
+  gear('blowgun-needles', '吹箭针', 'Blowgun needles', 'adventuring-gear', 'generic', 0.02, 2, 'cp', '吹箭筒使用的细针。'),
   gear('component-pouch', '材料包', 'Component pouch', 'container', 'generic', 2, 25, 'gp', '存放施展法术所需、未标明价格且不会被消耗的材料成分。'),
   gear('arcane-focus', '奥术法器', 'Arcane focus', 'adventuring-gear', 'generic', 1, 10, 'gp', '奥术施法职业可用作法术材料成分替代物。'),
   gear('druidic-focus', '德鲁伊法器', 'Druidic focus', 'adventuring-gear', 'generic', 1, 1, 'gp', '德鲁伊可用作法术材料成分替代物。'),
@@ -279,15 +310,17 @@ export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id'
       item: cloneItemTemplate(template),
       quantity: 1,
       resources: createInventoryResources(template, 1),
+      identified: true,
       equippedSlot: slot as EquipmentSlot,
       acquiredAt: 0,
     } satisfies Dnd5eInventoryEntry]
   })
-  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries }
+  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries, currency: { ...EMPTY_CURRENCY } }
 }
 
 export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
   const raw = character.dnd5eInventory
+  const currency = normalizeCurrency(raw?.currency)
   const entries: Dnd5eInventoryEntry[] = (raw?.entries ?? [])
     .filter((entry) => entry && typeof entry.instanceId === 'string' && typeof entry.templateId === 'string')
     .map((entry) => {
@@ -299,6 +332,7 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
         item,
         quantity,
         resources,
+        identified: item.magicItem ? (raw?.schemaVersion === 3 ? entry.identified !== false : true) : true,
         remainingCharges: undefined,
         acquiredAt: Number.isFinite(entry.acquiredAt) ? entry.acquiredAt : 0,
       }
@@ -323,6 +357,7 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
       item: cloneItemTemplate(template),
       quantity: 1,
       resources: createInventoryResources(template, 1),
+      identified: true,
       equippedSlot: slot,
       acquiredAt: 0,
     }
@@ -334,7 +369,65 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     const equipped = character.equipment?.[entry.equippedSlot]
     if (!equipped || equipped.id !== entry.item.equipment?.id) entry.equippedSlot = undefined
   }
-  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries }
+  normalizeContainerLinks(entries)
+  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries, currency }
+}
+
+export interface Dnd5eInventoryLoad {
+  itemWeightLb: number
+  currencyWeightLb: number
+  totalWeightLb: number
+  carryingCapacityLb: number
+  encumberedThresholdLb: number
+  heavilyEncumberedThresholdLb: number
+  status: 'normal' | 'encumbered' | 'heavily-encumbered' | 'over-capacity'
+  speedPenaltyFeet: 0 | 10 | 20
+}
+
+/** SRD 携带重量，以及可选负重规则的两档阈值。货币按每 50 枚 1 磅计算。 */
+export function dnd5eInventoryLoad(character: Character): Dnd5eInventoryLoad {
+  const inventory = normalizeDnd5eInventory(character)
+  const itemWeightLb = inventory.entries.reduce((sum, entry) => sum + entryWeight(entry), 0)
+  const currencyWeightLb = Object.values(inventory.currency ?? EMPTY_CURRENCY).reduce((sum, amount) => sum + amount, 0) / 50
+  const strength = Math.max(1, Math.floor(character.abilities?.str ?? 10))
+  const totalWeightLb = itemWeightLb + currencyWeightLb
+  const carryingCapacityLb = strength * 15
+  const encumberedThresholdLb = strength * 5
+  const heavilyEncumberedThresholdLb = strength * 10
+  const status = totalWeightLb > carryingCapacityLb
+    ? 'over-capacity'
+    : totalWeightLb > heavilyEncumberedThresholdLb
+      ? 'heavily-encumbered'
+      : totalWeightLb > encumberedThresholdLb
+        ? 'encumbered'
+        : 'normal'
+  return {
+    itemWeightLb,
+    currencyWeightLb,
+    totalWeightLb,
+    carryingCapacityLb,
+    encumberedThresholdLb,
+    heavilyEncumberedThresholdLb,
+    status,
+    speedPenaltyFeet: status === 'encumbered' ? 10 : status === 'heavily-encumbered' || status === 'over-capacity' ? 20 : 0,
+  }
+}
+
+export function dnd5eWeaponAmmunitionKind(equipmentId: string | undefined): Dnd5eAmmunitionKind | undefined {
+  return equipmentId ? AMMUNITION_KIND_BY_WEAPON_ID[equipmentId] : undefined
+}
+
+/** 权威攻击事务使用：只在攻击成功进入结算后扣除一枚对应弹药。 */
+export function consumeDnd5eWeaponAmmunition(
+  character: Character,
+  equipmentId: string | undefined,
+): { ok: true; character: Character; instanceId?: string } | { ok: false; character: Character; reason: 'ammunition-unavailable' } {
+  const kind = dnd5eWeaponAmmunitionKind(equipmentId)
+  if (!kind) return { ok: true, character }
+  const inventory = normalizeDnd5eInventory(character)
+  const ammunition = inventory.entries.find((entry) => entry.item.ammunitionKind === kind && entry.quantity > 0)
+  if (!ammunition) return { ok: false, character, reason: 'ammunition-unavailable' }
+  return { ok: true, character: removeItem(character, ammunition, 1), instanceId: ammunition.instanceId }
 }
 
 export function dnd5eInventoryEntryResource(
@@ -364,7 +457,7 @@ export function spendDnd5eInventoryResource(
     : candidate)
   return {
     ok: true,
-    character: { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } },
+    character: { ...character, dnd5eInventory: inventoryWithEntries(inventory, entries) },
     resource: nextResource,
   }
 }
@@ -389,7 +482,7 @@ export function restoreDnd5eInventoryResources(
     return entryChanged ? { ...entry, resources } : entry
   })
   return changed
-    ? { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+    ? { ...character, dnd5eInventory: inventoryWithEntries(inventory, entries) }
     : character
 }
 
@@ -398,6 +491,7 @@ export function dnd5eAttunedItemCount(character: Character): number {
 }
 
 export function dnd5eInventoryEntryIsActive(entry: Dnd5eInventoryEntry): boolean {
+  if (entry.item.magicItem && entry.identified === false) return false
   return entry.item.magicItem?.attunement !== 'required' || entry.attuned === true
 }
 
@@ -413,7 +507,7 @@ export function resolveDnd5eAttunementAfterShortRest(character: Character, now =
       ? { ...entry, attunementPending: undefined }
       : { ...entry, attuned: true, attunementPending: undefined, attunedAt: now }
   })
-  return { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+  return { ...character, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
 
 export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate): number[] {
@@ -472,8 +566,20 @@ function applyDnd5eInventoryMutationInternal(
     if (!quantity) return failed(characters, 'invalid-quantity')
     const template = dnd5eInventoryItemTemplate(mutation.templateId)
     if (!template) return failed(characters, 'template-not-found')
-    const next = addItem(source, template, quantity)
+    const next = addItem(source, template, quantity, { identified: mutation.identified ?? true })
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 获得 ${template.name} ×${quantity}。`)
+  }
+
+  if (mutation.type === 'adjust-currency') {
+    const delta = Math.trunc(Number(mutation.delta))
+    if (!Number.isFinite(delta) || delta === 0 || !isCurrency(mutation.currency)) return failed(characters, 'invalid-currency')
+    const inventory = normalizeDnd5eInventory(source)
+    const currency = { ...EMPTY_CURRENCY, ...inventory.currency }
+    const nextAmount = currency[mutation.currency] + delta
+    if (nextAmount < 0) return failed(characters, 'insufficient-currency')
+    currency[mutation.currency] = nextAmount
+    const next = { ...source, dnd5eInventory: { ...inventory, currency } }
+    return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 的${currencyLabel(mutation.currency)}变更 ${delta > 0 ? '+' : ''}${delta}。`)
   }
 
   const entry = source.dnd5eInventory!.entries.find((candidate) => candidate.instanceId === mutation.instanceId)
@@ -496,13 +602,14 @@ function applyDnd5eInventoryMutationInternal(
     if (quantity > entry.quantity) return failed(characters, 'insufficient-quantity')
     const target = withNormalizedInventory(characters[targetIndex])
     const nextSource = removeItem(source, entry, quantity)
-    const nextTarget = addItem(target, entry.item, quantity)
+    const nextTarget = addItem(target, entry.item, quantity, { identified: entry.identified !== false })
     const afterSource = replaceAt(characters, sourceIndex, nextSource)
     return succeeded(replaceAt(afterSource, targetIndex, nextTarget), `${source.name} 将 ${entry.item.name} ×${quantity} 转交给 ${target.name}。`)
   }
 
   if (mutation.type === 'equip') {
     if (!entry.item.equipment) return failed(characters, 'not-equipment')
+    if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
     const next = equipEntry(source, entry)
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 装备了 ${entry.item.name}。`)
   }
@@ -514,6 +621,7 @@ function applyDnd5eInventoryMutationInternal(
   }
 
   if (mutation.type === 'prepare-attunement') {
+    if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
     if (entry.item.magicItem?.attunement !== 'required') return failed(characters, 'attunement-not-required')
     if (entry.attuned) return succeeded(characters, `${source.name} 已与 ${entry.item.name} 同调。`)
     if (source.dnd5eInventory!.entries.filter((candidate) => candidate.attuned).length >= 3) {
@@ -528,7 +636,7 @@ function applyDnd5eInventoryMutationInternal(
     }))
     return succeeded(replaceAt(characters, sourceIndex, {
       ...source,
-      dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+      dnd5eInventory: inventoryWithEntries(source.dnd5eInventory!, entries),
     }), `${source.name} 将在下一次短休中与 ${entry.item.name} 同调。`)
   }
 
@@ -538,7 +646,7 @@ function applyDnd5eInventoryMutationInternal(
       : candidate)
     return succeeded(replaceAt(characters, sourceIndex, {
       ...source,
-      dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+      dnd5eInventory: inventoryWithEntries(source.dnd5eInventory!, entries),
     }), `${source.name} 取消了同调准备。`)
   }
 
@@ -548,11 +656,47 @@ function applyDnd5eInventoryMutationInternal(
       : candidate)
     return succeeded(replaceAt(characters, sourceIndex, {
       ...source,
-      dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+      dnd5eInventory: inventoryWithEntries(source.dnd5eInventory!, entries),
     }), `${source.name} 结束了与 ${entry.item.name} 的同调。`)
   }
 
+  if (mutation.type === 'identify') {
+    if (!entry.item.magicItem) return failed(characters, 'not-magic-item')
+    if (entry.identified !== false) return succeeded(characters, `${entry.item.name} 已经完成鉴定。`)
+    const inventory = normalizeDnd5eInventory(source)
+    const entries = inventory.entries.map((candidate) => candidate.instanceId === entry.instanceId
+      ? { ...candidate, identified: true }
+      : candidate)
+    return succeeded(replaceAt(characters, sourceIndex, {
+      ...source,
+      dnd5eInventory: inventoryWithEntries(inventory, entries),
+    }), `${source.name} 鉴定了 ${entry.item.name}。`)
+  }
+
+  if (mutation.type === 'set-container') {
+    const inventory = normalizeDnd5eInventory(source)
+    const target = mutation.containerInstanceId
+      ? inventory.entries.find((candidate) => candidate.instanceId === mutation.containerInstanceId)
+      : undefined
+    if (mutation.containerInstanceId && (!target || target.item.containerCapacityWeightLb == null)) return failed(characters, 'not-container')
+    if (target && (target.instanceId === entry.instanceId || containerIsDescendant(inventory.entries, target.instanceId, entry.instanceId))) {
+      return failed(characters, 'container-cycle')
+    }
+    const moved = inventory.entries.map((candidate) => candidate.instanceId === entry.instanceId
+      ? { ...candidate, containerInstanceId: target?.instanceId, equippedSlot: target ? undefined : candidate.equippedSlot }
+      : candidate)
+    if (target && directContainerContentsWeight(moved, target.instanceId) > (target.item.containerCapacityWeightLb ?? 0)) {
+      return failed(characters, 'container-capacity')
+    }
+    const next = entry.equippedSlot ? unequipEntry(source, entry) : source
+    return succeeded(replaceAt(characters, sourceIndex, {
+      ...next,
+      dnd5eInventory: inventoryWithEntries(normalizeDnd5eInventory(next), moved),
+    }), target ? `${entry.item.name} 已放入 ${target.item.name}。` : `${entry.item.name} 已从容器取出。`)
+  }
+
   const use = entry.item.use
+  if (entry.item.magicItem && entry.identified === false) return failed(characters, 'item-unidentified')
   if (!use) return failed(characters, 'not-usable')
   if (entry.quantity < use.consumeQuantity || (use.chargesPerItem && (entry.resources?.uses?.current ?? 0) < 1)) {
     return failed(characters, 'insufficient-quantity')
@@ -620,7 +764,9 @@ function gear(
     rulesText,
     weightLb,
     cost: { amount, currency },
-    stackable: true,
+    stackable: category !== 'container',
+    containerCapacityWeightLb: CONTAINER_CAPACITY_WEIGHT_LB[id],
+    ammunitionKind: AMMUNITION_KIND_BY_ITEM_ID[id],
     use,
     source: SRD_SOURCE,
   }
@@ -672,11 +818,17 @@ function withNormalizedInventory(character: Character): Character {
   return { ...character, dnd5eInventory: normalizeDnd5eInventory(character) }
 }
 
-function addItem(character: Character, item: Dnd5eInventoryItemTemplate, quantity: number): Character {
+function addItem(
+  character: Character,
+  item: Dnd5eInventoryItemTemplate,
+  quantity: number,
+  options: { identified?: boolean } = {},
+): Character {
   const inventory = normalizeDnd5eInventory(character)
   const entries = [...inventory.entries]
   if (item.stackable) {
-    const existingIndex = entries.findIndex((entry) => entry.templateId === item.id && !entry.equippedSlot)
+    const identified = item.magicItem ? options.identified !== false : true
+    const existingIndex = entries.findIndex((entry) => entry.templateId === item.id && !entry.equippedSlot && !entry.containerInstanceId && (entry.identified !== false) === identified)
     if (existingIndex >= 0) {
       const existing = entries[existingIndex]
       entries[existingIndex] = {
@@ -685,19 +837,23 @@ function addItem(character: Character, item: Dnd5eInventoryItemTemplate, quantit
         resources: addInventoryResourceCapacity(existing.resources, inventoryResourceDefinitions(item), quantity),
       }
     } else {
-      entries.push(newEntry(item, quantity))
+      entries.push(newEntry(item, quantity, identified))
     }
   } else {
-    for (let index = 0; index < quantity; index += 1) entries.push(newEntry(item, 1))
+    for (let index = 0; index < quantity; index += 1) entries.push(newEntry(item, 1, item.magicItem ? options.identified !== false : true))
   }
-  return { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+  return { ...character, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
 
 function removeItem(character: Character, entry: Dnd5eInventoryEntry, quantity: number): Character {
   const next = entry.equippedSlot ? unequipEntry(character, entry) : character
   const inventory = normalizeDnd5eInventory(next)
   const entries = inventory.entries.flatMap((candidate) => {
-    if (candidate.instanceId !== entry.instanceId) return [candidate]
+    if (candidate.instanceId !== entry.instanceId) {
+      return candidate.containerInstanceId === entry.instanceId && entry.quantity <= quantity
+        ? [{ ...candidate, containerInstanceId: undefined }]
+        : [candidate]
+    }
     if (candidate.quantity <= quantity) return []
     const nextQuantity = candidate.quantity - quantity
     return [{
@@ -706,7 +862,7 @@ function removeItem(character: Character, entry: Dnd5eInventoryEntry, quantity: 
       resources: resizeInventoryResources(candidate.resources, inventoryResourceDefinitions(candidate.item), nextQuantity),
     }]
   })
-  return { ...next, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+  return { ...next, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
 
 function dnd5eAttunementRequirementMet(
@@ -752,7 +908,7 @@ function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character
   return {
     ...character,
     equipment: { ...(character.equipment ?? {}), [slot]: { ...equipment } },
-    dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+    dnd5eInventory: inventoryWithEntries(inventory, entries),
   }
 }
 
@@ -765,16 +921,17 @@ function unequipEntry(character: Character, entry: Dnd5eInventoryEntry): Charact
     : candidate)
   const equipment: CharacterEquipment = { ...(character.equipment ?? {}) }
   if (equipment[slot]?.id === entry.item.equipment?.id) delete equipment[slot]
-  return { ...character, equipment, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+  return { ...character, equipment, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
 
-function newEntry(item: Dnd5eInventoryItemTemplate, quantity: number): Dnd5eInventoryEntry {
+function newEntry(item: Dnd5eInventoryItemTemplate, quantity: number, identified = true): Dnd5eInventoryEntry {
   return {
     instanceId: inventoryId(),
     templateId: item.id,
     item: cloneItemTemplate(item),
     quantity,
     resources: createInventoryResources(item, quantity),
+    identified,
     acquiredAt: Date.now(),
   }
 }
@@ -882,6 +1039,82 @@ function secureDie(sides: number): number {
 function validQuantity(quantity: number): number | null {
   const next = Math.floor(Number(quantity))
   return Number.isInteger(next) && next > 0 ? next : null
+}
+
+function normalizeCurrency(value: Partial<Dnd5eCurrencyWallet> | undefined): Dnd5eCurrencyWallet {
+  return Object.fromEntries(Object.keys(EMPTY_CURRENCY).map((currency) => {
+    const amount = Number(value?.[currency as keyof Dnd5eCurrencyWallet])
+    return [currency, Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : 0]
+  })) as unknown as Dnd5eCurrencyWallet
+}
+
+function inventoryWithEntries(inventory: Dnd5eInventory, entries: Dnd5eInventoryEntry[]): Dnd5eInventory {
+  return {
+    schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+    entries,
+    currency: normalizeCurrency(inventory.currency),
+  }
+}
+
+function normalizeContainerLinks(entries: Dnd5eInventoryEntry[]): void {
+  const byId = new Map(entries.map((entry) => [entry.instanceId, entry]))
+  for (const entry of entries) {
+    const container = entry.containerInstanceId ? byId.get(entry.containerInstanceId) : undefined
+    if (!container || container.item.containerCapacityWeightLb == null || container.instanceId === entry.instanceId) {
+      entry.containerInstanceId = undefined
+      continue
+    }
+    const visited = new Set([entry.instanceId])
+    let cursor: Dnd5eInventoryEntry | undefined = container
+    while (cursor) {
+      if (visited.has(cursor.instanceId)) {
+        entry.containerInstanceId = undefined
+        break
+      }
+      visited.add(cursor.instanceId)
+      cursor = cursor.containerInstanceId ? byId.get(cursor.containerInstanceId) : undefined
+    }
+  }
+}
+
+function containerIsDescendant(entries: readonly Dnd5eInventoryEntry[], possibleDescendantId: string, ancestorId: string): boolean {
+  const byId = new Map(entries.map((entry) => [entry.instanceId, entry]))
+  let cursor = byId.get(possibleDescendantId)
+  const visited = new Set<string>()
+  while (cursor?.containerInstanceId && !visited.has(cursor.instanceId)) {
+    if (cursor.containerInstanceId === ancestorId) return true
+    visited.add(cursor.instanceId)
+    cursor = byId.get(cursor.containerInstanceId)
+  }
+  return false
+}
+
+function directContainerContentsWeight(entries: readonly Dnd5eInventoryEntry[], containerId: string): number {
+  return entries
+    .filter((entry) => entry.containerInstanceId === containerId)
+    .reduce((sum, entry) => sum + entryTreeWeight(entries, entry.instanceId, new Set()), 0)
+}
+
+function entryTreeWeight(entries: readonly Dnd5eInventoryEntry[], instanceId: string, visited: Set<string>): number {
+  if (visited.has(instanceId)) return 0
+  visited.add(instanceId)
+  const entry = entries.find((candidate) => candidate.instanceId === instanceId)
+  if (!entry) return 0
+  return entryWeight(entry) + entries
+    .filter((candidate) => candidate.containerInstanceId === instanceId)
+    .reduce((sum, child) => sum + entryTreeWeight(entries, child.instanceId, visited), 0)
+}
+
+function entryWeight(entry: Dnd5eInventoryEntry): number {
+  return Math.max(0, Number(entry.item.weightLb) || 0) * Math.max(1, entry.quantity)
+}
+
+function isCurrency(value: string): value is keyof Dnd5eCurrencyWallet {
+  return Object.prototype.hasOwnProperty.call(EMPTY_CURRENCY, value)
+}
+
+function currencyLabel(currency: keyof Dnd5eCurrencyWallet): string {
+  return ({ cp: '铜币', sp: '银币', ep: '银金币', gp: '金币', pp: '铂金币' } as const)[currency]
 }
 
 function replaceAt(characters: readonly Character[], index: number, character: Character): Character[] {

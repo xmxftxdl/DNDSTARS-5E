@@ -60,7 +60,13 @@ export interface Dnd5eMagicItemMetadata {
   automation: 'headless' | 'dm-adjudication'
 }
 
-export const DND5E_INVENTORY_SCHEMA_VERSION = 2 as const
+export const DND5E_INVENTORY_SCHEMA_VERSION = 3 as const
+
+export type Dnd5eCurrency = 'cp' | 'sp' | 'ep' | 'gp' | 'pp'
+
+export type Dnd5eCurrencyWallet = Record<Dnd5eCurrency, number>
+
+export type Dnd5eAmmunitionKind = 'arrow' | 'crossbow-bolt' | 'sling-bullet' | 'blowgun-needle'
 
 export type Dnd5eInventoryResourceReset = 'none' | 'short-rest' | 'long-rest' | 'dawn'
 
@@ -93,7 +99,7 @@ export type Dnd5eInventoryHeadlessEffect = Dnd5eAttackRollRerollEffect
 
 export interface Dnd5eItemCost {
   amount: number
-  currency: 'cp' | 'sp' | 'gp'
+  currency: Dnd5eCurrency
 }
 
 export type Dnd5eInventoryUseEffect =
@@ -131,6 +137,10 @@ export interface Dnd5eInventoryItemTemplate {
   rulesText: string
   weightLb?: number
   cost?: Dnd5eItemCost
+  /** 装入该容器的物品总重上限。只限制内容物，不包含容器自身重量。 */
+  containerCapacityWeightLb?: number
+  /** 弹药模板的标准弹药种类；远程武器事务按该字段权威扣除。 */
+  ammunitionKind?: Dnd5eAmmunitionKind
   stackable: boolean
   equipment?: EquipmentItem
   /** SRD 魔法物品的可检索规则元数据；普通装备不携带此字段。 */
@@ -172,17 +182,23 @@ export interface Dnd5eInventoryEntry {
   /** 角色在下一次短休中准备与此物品同调；每次短休至多完成一件。 */
   attunementPending?: boolean
   attunedAt?: number
+  /** 未鉴定魔法物品不会公开规则正文，也不会激活装备或 Headless 效果。 */
+  identified?: boolean
+  /** 直接容器。容器仍属于同一角色，且禁止形成嵌套循环。 */
+  containerInstanceId?: string
   acquiredAt: number
 }
 
 export interface Dnd5eInventory {
-  /** 允许读入 V1 旧存档；所有规范化和写入都会升级为 V2。 */
-  schemaVersion: 1 | typeof DND5E_INVENTORY_SCHEMA_VERSION
+  /** 允许读入 V1/V2 旧存档；所有规范化和写入都会升级为 V3。 */
+  schemaVersion: 1 | 2 | typeof DND5E_INVENTORY_SCHEMA_VERSION
   entries: Dnd5eInventoryEntry[]
+  /** V1/V2 存档可缺失；规范化后总会补齐五种币值。 */
+  currency?: Dnd5eCurrencyWallet
 }
 
 export type Dnd5eInventoryMutation =
-  | { type: 'grant'; characterId: string; templateId: string; quantity: number }
+  | { type: 'grant'; characterId: string; templateId: string; quantity: number; identified?: boolean }
   | { type: 'discard'; characterId: string; instanceId: string; quantity: number }
   | { type: 'transfer'; characterId: string; targetCharacterId: string; instanceId: string; quantity: number }
   | { type: 'equip'; characterId: string; instanceId: string }
@@ -190,6 +206,9 @@ export type Dnd5eInventoryMutation =
   | { type: 'prepare-attunement'; characterId: string; instanceId: string; prerequisiteConfirmed?: boolean }
   | { type: 'cancel-attunement'; characterId: string; instanceId: string }
   | { type: 'end-attunement'; characterId: string; instanceId: string }
+  | { type: 'set-container'; characterId: string; instanceId: string; containerInstanceId?: string }
+  | { type: 'adjust-currency'; characterId: string; currency: Dnd5eCurrency; delta: number }
+  | { type: 'identify'; characterId: string; instanceId: string }
   | { type: 'use'; characterId: string; instanceId: string; healingRolls?: number[] }
 
 export type Dnd5eInventoryMutationFailure =
@@ -208,6 +227,14 @@ export type Dnd5eInventoryMutationFailure =
   | 'action-unavailable'
   | 'bonus-action-unavailable'
   | 'same-character'
+  | 'invalid-currency'
+  | 'insufficient-currency'
+  | 'not-container'
+  | 'container-cycle'
+  | 'container-capacity'
+  | 'item-unidentified'
+  | 'not-magic-item'
+  | 'ammunition-unavailable'
   | 'unauthorized'
 
 export interface Dnd5eInventoryMutationResult {

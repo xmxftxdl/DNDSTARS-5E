@@ -5,6 +5,8 @@ import {
   DND5E_SRD_ITEM_TEMPLATES,
   applyDnd5eInventoryMutation,
   createDnd5eInventoryForCharacter,
+  consumeDnd5eWeaponAmmunition,
+  dnd5eInventoryLoad,
   normalizeDnd5eInventory,
   resolveDnd5eAttunementAfterShortRest,
   restoreDnd5eInventoryResources,
@@ -234,7 +236,7 @@ describe('SRD 5.1 inventory', () => {
       },
     }
     const migrated = normalizeDnd5eInventory(legacy)
-    expect(migrated.schemaVersion).toBe(2)
+    expect(migrated.schemaVersion).toBe(3)
     expect(migrated.entries[0].remainingCharges).toBeUndefined()
     expect(migrated.entries[0].resources?.uses).toMatchObject({ current: 0, maximum: 10 })
   })
@@ -327,5 +329,74 @@ describe('SRD 5.1 inventory', () => {
     })
     const afterDawn = restoreDnd5eInventoryResources(afterLong, 'dawn')
     expect(afterDawn.dnd5eInventory?.entries[0]).toMatchObject({ resources: { dawn: { current: 2 } } })
+  })
+
+  it('migrates currency, calculates coin weight, and rejects overspending', () => {
+    const hero = { ...character('coin-hero'), abilities: { ...character('coin-hero').abilities, str: 10 } }
+    const added = applyDnd5eInventoryMutation([hero], {
+      type: 'adjust-currency', characterId: hero.id, currency: 'gp', delta: 250,
+    })
+    expect(added.ok).toBe(true)
+    expect(added.characters[0].dnd5eInventory).toMatchObject({ schemaVersion: 3, currency: { gp: 250 } })
+    expect(dnd5eInventoryLoad(added.characters[0])).toMatchObject({ currencyWeightLb: 5, carryingCapacityLb: 150 })
+    expect(applyDnd5eInventoryMutation(added.characters, {
+      type: 'adjust-currency', characterId: hero.id, currency: 'gp', delta: -251,
+    })).toMatchObject({ ok: false, reason: 'insufficient-currency' })
+  })
+
+  it('enforces container capacity and prevents container cycles', () => {
+    let characters = applyDnd5eInventoryMutation([character('packer')], {
+      type: 'grant', characterId: 'packer', templateId: 'srd-5.1:item:backpack', quantity: 1,
+    }).characters
+    characters = applyDnd5eInventoryMutation(characters, {
+      type: 'grant', characterId: 'packer', templateId: 'srd-5.1:item:chest', quantity: 1,
+    }).characters
+    characters = applyDnd5eInventoryMutation(characters, {
+      type: 'grant', characterId: 'packer', templateId: 'srd-5.1:item:rope-hempen-50-feet', quantity: 4,
+    }).characters
+    const backpack = inventoryEntry(characters[0], 'srd-5.1:item:backpack')
+    const chest = inventoryEntry(characters[0], 'srd-5.1:item:chest')
+    const rope = inventoryEntry(characters[0], 'srd-5.1:item:rope-hempen-50-feet')
+    expect(applyDnd5eInventoryMutation(characters, {
+      type: 'set-container', characterId: 'packer', instanceId: rope.instanceId, containerInstanceId: backpack.instanceId,
+    })).toMatchObject({ ok: false, reason: 'container-capacity' })
+    const nested = applyDnd5eInventoryMutation(characters, {
+      type: 'set-container', characterId: 'packer', instanceId: backpack.instanceId, containerInstanceId: chest.instanceId,
+    })
+    expect(nested.ok).toBe(true)
+    expect(applyDnd5eInventoryMutation(nested.characters, {
+      type: 'set-container', characterId: 'packer', instanceId: chest.instanceId, containerInstanceId: backpack.instanceId,
+    })).toMatchObject({ ok: false, reason: 'container-cycle' })
+  })
+
+  it('keeps unidentified magic item rules inactive until DM identification', () => {
+    const hero = character('unknown-owner')
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:magic-item:ring-of-protection', quantity: 1, identified: false,
+    })
+    const ring = inventoryEntry(granted.characters[0], 'srd-5.1:magic-item:ring-of-protection')
+    expect(ring.identified).toBe(false)
+    expect(applyDnd5eInventoryMutation(granted.characters, {
+      type: 'prepare-attunement', characterId: hero.id, instanceId: ring.instanceId,
+    })).toMatchObject({ ok: false, reason: 'item-unidentified' })
+    const identified = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'identify', characterId: hero.id, instanceId: ring.instanceId,
+    })
+    expect(inventoryEntry(identified.characters[0], ring.templateId).identified).toBe(true)
+  })
+
+  it('consumes standard ammunition without deleting unrelated inventory', () => {
+    const hero = character('archer')
+    const granted = applyDnd5eInventoryMutation([hero], {
+      type: 'grant', characterId: hero.id, templateId: 'srd-5.1:item:arrows', quantity: 2,
+    })
+    const fired = consumeDnd5eWeaponAmmunition(granted.characters[0], 'dnd5e-longbow')
+    expect(fired.ok).toBe(true)
+    if (!fired.ok) return
+    expect(inventoryEntry(fired.character, 'srd-5.1:item:arrows').quantity).toBe(1)
+    const last = consumeDnd5eWeaponAmmunition(fired.character, 'dnd5e-longbow')
+    expect(last.ok).toBe(true)
+    if (!last.ok) return
+    expect(consumeDnd5eWeaponAmmunition(last.character, 'dnd5e-longbow')).toMatchObject({ ok: false, reason: 'ammunition-unavailable' })
   })
 })

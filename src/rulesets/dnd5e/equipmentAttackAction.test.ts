@@ -10,14 +10,18 @@ import {
   resolvePreparedDnd5eEquipmentAttack,
 } from './equipmentAttackAction'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
+import { applyDnd5eInventoryMutation } from './items'
 
 function fighter(): Character {
-  return {
+  const base: Character = {
     id: 'fighter', name: '战士', player: '', avatar: '', accent: '', race: '人类', charClass: '战士', level: 5, background: '士兵', experience: 6500, reputation: 0,
     abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: ['str', 'con'], skills: ['athletics'], maxHp: 44, currentHp: 44, tempHp: 0, hitDice: '1d10', ac: 10, speed: 30, initiativeBonus: 0,
     saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true,
     equipment: DND5E_FIGHTER_STARTING_EQUIPMENT,
   }
+  return applyDnd5eInventoryMutation([base], {
+    type: 'grant', characterId: base.id, templateId: 'srd-5.1:item:arrows', quantity: 20,
+  }).characters[0]
 }
 
 function token(patch: Partial<Token>): Token {

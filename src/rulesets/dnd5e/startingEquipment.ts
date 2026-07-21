@@ -413,13 +413,18 @@ export function resolveDnd5eStartingEquipment(
         },
       } : {}),
       ...(entry.equipSlot ? { equippedSlot: entry.equipSlot } : {}),
+      identified: true,
       acquiredAt: 0,
     })
   })
   return {
     grants,
     equipment: Object.keys(equipment).length > 0 ? equipment : undefined,
-    inventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries: inventoryEntries },
+    inventory: {
+      schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+      entries: inventoryEntries,
+      currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+    },
   }
 }
 

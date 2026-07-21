@@ -899,7 +899,9 @@ export function dnd5eWizardArcaneRecoveryLevels(level: number): number {
 }
 
 /** 以角色存档中的种族基础速度为基准，应用职业带来的步行速度修正。 */
-export function dnd5eWalkingSpeed(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel'>): number {
+export function dnd5eWalkingSpeed(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel'> & Partial<Pick<Character, 'abilities'>>,
+): number {
   const base = Math.max(0, Math.floor(character.speed))
   const armor = character.equipment?.armor?.dnd5e
   const hasArmor = armor?.kind === 'armor' || !!character.equipment?.armor
@@ -914,6 +916,14 @@ export function dnd5eWalkingSpeed(character: Pick<Character, 'charClass' | 'leve
   }
   speed += dnd5eEquippedEffectTotal(character, 'speedBonusFeet')
   speed = Math.max(0, speed)
+  if (character.abilities) {
+    const itemWeight = character.dnd5eInventory?.entries.reduce(
+      (sum, entry) => sum + Math.max(0, Number(entry.item.weightLb) || 0) * Math.max(1, Number(entry.quantity) || 1),
+      0,
+    ) ?? 0
+    const coinCount = Object.values(character.dnd5eInventory?.currency ?? {}).reduce((sum, amount) => sum + Math.max(0, Number(amount) || 0), 0)
+    if (itemWeight + coinCount / 50 > Math.max(1, character.abilities.str) * 15) return 0
+  }
   const exhaustion = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
   if (exhaustion >= 5) return 0
   return exhaustion >= 2 ? Math.floor(speed / 2) : speed

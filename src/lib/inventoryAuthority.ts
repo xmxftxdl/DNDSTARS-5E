@@ -105,6 +105,14 @@ export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['r
     case 'action-unavailable': return '本回合已经没有可用动作。'
     case 'bonus-action-unavailable': return '本回合已经没有可用附赠动作。'
     case 'same-character': return '不能把物品转交给自己。'
+    case 'invalid-currency': return '货币变更必须是有效的非零整数。'
+    case 'insufficient-currency': return '货币余额不足。'
+    case 'not-container': return '目标不是有效容器。'
+    case 'container-cycle': return '容器不能装入自身或自己的内容物。'
+    case 'container-capacity': return '物品总重超过该容器的容量。'
+    case 'item-unidentified': return '该魔法物品尚未鉴定，不能启用其规则效果。'
+    case 'not-magic-item': return '该物品不需要鉴定。'
+    case 'ammunition-unavailable': return '没有可供该武器使用的弹药。'
     case 'unauthorized': return '当前房间成员无权变更该角色的库存。'
     default: return '物品操作未能完成。'
   }
@@ -126,7 +134,7 @@ function stripPlayerRolls(
 
 function validRequest(request: Dnd5eInventoryAuthorityRequest, dmRoomId?: string): boolean {
   if (!request || !request.mutation || typeof request.mutation !== 'object') return false
-  if (!['discard', 'transfer', 'equip', 'unequip', 'prepare-attunement', 'cancel-attunement', 'end-attunement', 'use'].includes(request.mutation.type)) return false
+  if (!['discard', 'transfer', 'equip', 'unequip', 'prepare-attunement', 'cancel-attunement', 'end-attunement', 'set-container', 'adjust-currency', 'use'].includes(request.mutation.type)) return false
   if (dmRoomId && (request.roomId !== dmRoomId || typeof request.memberId !== 'string')) return false
   return request.sourceMode === 'player' &&
     typeof request.id === 'string' && !seenRequestIds.has(request.id) &&
