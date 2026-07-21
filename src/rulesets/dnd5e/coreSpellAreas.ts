@@ -50,7 +50,36 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  * 核心区域注册表按法术逐项扩充。插件不会写入这个表；它们继续通过
  * Headless Plugin API V2 的声明边界创建区域。
  */
-export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = []
+export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
+  {
+    spellId: 'moonbeam',
+    label: '月华之光',
+    minimumSlotLevel: 2,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 120 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    movement: { economy: 'action', maximumFeet: 60 },
+    relation: 'any',
+    includeSelf: true,
+    color: '#dbeafe',
+    visual: { preset: 'moonbeam', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'moonbeam-enter', label: '月华之光·进入光柱', timing: 'on-enter', oncePerRound: true,
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 2, sides: 10, perHigherSlot: 1, type: 'radiant' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'moonbeam-turn-start', label: '月华之光·回合开始', timing: 'turn-start', oncePerRound: true,
+        savingThrow: { ability: 'con', onSuccess: 'half' },
+        damage: { count: 2, sides: 10, perHigherSlot: 1, type: 'radiant' },
+        dmAdjustable: true,
+      },
+    ],
+  },
+]
 
 export function getDnd5eCoreSpellAreaDeclaration(
   spellId: string,
@@ -96,6 +125,7 @@ export function createDnd5eCoreSpellArea(input: {
   cells: readonly GridCell[]
   anchorCell: GridCell
   anchorTokenId?: string
+  durationRounds?: number
 }): Dnd5ePluginArea {
   const declaration = input.declaration
   return {
@@ -111,7 +141,7 @@ export function createDnd5eCoreSpellArea(input: {
     sourceTokenId: input.sourceTokenId,
     cells: input.cells.map((cell) => ({ ...cell })),
     createdRound: input.round,
-    expiresAfterRound: input.round + declaration.durationRounds,
+    expiresAfterRound: input.round + (input.durationRounds ?? declaration.durationRounds),
     concentrationId: declaration.concentration ? declaration.spellId : undefined,
     anchorMode: declaration.anchorMode,
     anchorTokenId: input.anchorTokenId ?? (
@@ -164,7 +194,7 @@ export function moveDnd5eCoreSpellArea(input: {
     cells: shiftedCells(area, input.targetCell, input.map),
     anchorCell: { ...input.targetCell },
   }
-  if (nextArea.cells.length < 1) return { ok: false, reason: 'invalid-target' }
+  if (nextArea.cells.length !== area.cells.length) return { ok: false, reason: 'invalid-target' }
   return {
     ok: true,
     map: {

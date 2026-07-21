@@ -28,6 +28,7 @@ export type Dnd5eSpellEffectKind =
   | 'power-word-kill'
   | 'power-word-stun'
   | 'counterspell'
+  | 'persistent-area'
 
 export interface Dnd5eSpellDamageComponentDefinition {
   dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
@@ -106,6 +107,14 @@ export interface Dnd5eSrdSpellDefinition {
 }
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
+  {
+    id: 'moonbeam', name: '月华之光', englishName: 'Moonbeam', level: 2, school: '塑能',
+    classes: ['druid'], castingTime: 'action', rangeFeet: 120, target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 10, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 120 },
+    description: '在射程内一点创造一道半径5尺、高40尺的银白光柱，持续至多1分钟并需要专注。生物在一个回合内第一次进入光柱或在其中开始回合时进行体质豁免；失败受到2d10光耀伤害，成功减半。每使用高于2环一环的法术位，伤害增加1d10。施法后的每个你的回合中，可以用动作将光柱向任意方向移动至多60尺。',
+  },
   {
     id: 'faerie-fire', name: '妖火', englishName: 'Faerie Fire', level: 1, school: '塑能',
     classes: ['bard', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'saving-throw', saveAbility: 'dex',

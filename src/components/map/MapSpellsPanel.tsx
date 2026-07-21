@@ -19,6 +19,7 @@ interface MapSpellsPanelProps {
   targetingMaximumTargets?: number
   targetingAllowsDuplicateTargets?: boolean
   targetingRequiresExactTargets?: boolean
+  targetingAllowsEmptyArea?: boolean
   targetingCanSculpt?: boolean
   targetingSculptedCount?: number
   targetingMaximumSculptedTargets?: number
@@ -30,6 +31,13 @@ interface MapSpellsPanelProps {
   targetingCanHeightened?: boolean
   targetingHeightenedSelected?: boolean
   targetingHeightenedSelecting?: boolean
+  movablePersistentAreas?: readonly {
+    id: string
+    label: string
+    economy: 'action' | 'bonus-action'
+    maximumFeet: number
+  }[]
+  movingPersistentAreaId?: string
   onCastSpell?: (spellId: string, slotLevel: number, options?: { overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
   onRequestAdjudication?: (spellId: string, slotLevel: number) => void
   onConfirmSpellTargets?: () => void
@@ -37,19 +45,23 @@ interface MapSpellsPanelProps {
   onToggleSculptSpellTargets?: () => void
   onToggleCarefulSpellTargets?: () => void
   onToggleHeightenedSpellTarget?: () => void
+  onMovePersistentArea?: (areaId: string) => void
 }
 
 /** 地图战斗 · 法术栏（施法职业显示法术型技能） */
 export default function MapSpellsPanel({
   charId, canAct = true, pending = false,
   targetingSpellId, targetingTargetCount = 0, targetingMaximumTargets = 1,
-  targetingAllowsDuplicateTargets = false, targetingRequiresExactTargets = false, targetingCanSculpt = false,
+  targetingAllowsDuplicateTargets = false, targetingRequiresExactTargets = false,
+  targetingAllowsEmptyArea = false, targetingCanSculpt = false,
   targetingSculptedCount = 0, targetingMaximumSculptedTargets = 0, targetingSculpting = false,
   targetingCanCareful = false, targetingCarefulCount = 0, targetingMaximumCarefulTargets = 0,
   targetingCarefulSelecting = false,
   targetingCanHeightened = false, targetingHeightenedSelected = false, targetingHeightenedSelecting = false,
+  movablePersistentAreas = [], movingPersistentAreaId,
   onCastSpell, onRequestAdjudication, onConfirmSpellTargets, onUndoSpellTarget, onToggleSculptSpellTargets,
   onToggleCarefulSpellTargets, onToggleHeightenedSpellTarget,
+  onMovePersistentArea,
 }: MapSpellsPanelProps) {
   const c = useCharacterStore((s) => s.characters.find((x) => x.id === charId))
   const importedSpells = useSpellbookStore((s) => s.spells)
@@ -106,6 +118,19 @@ export default function MapSpellsPanel({
             </div>
           ))}
         </div>
+        {movablePersistentAreas.length > 0 ? <div className="space-y-2 rounded-xl border border-sky-300/20 bg-sky-400/[0.04] p-3">
+          <div className="text-xs font-semibold text-sky-100">场上持续法术</div>
+          {movablePersistentAreas.map((area) => <button
+            key={area.id}
+            type="button"
+            disabled={!canAct || pending}
+            onClick={() => onMovePersistentArea?.(area.id)}
+            className={`w-full rounded-lg border px-3 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${movingPersistentAreaId === area.id ? 'border-amber-300/50 bg-amber-400/10 text-amber-100' : 'border-sky-300/20 bg-black/10 text-sky-100 hover:bg-sky-400/10'}`}
+          >
+            <strong>{movingPersistentAreaId === area.id ? '请在地图选择新位置' : `移动${area.label}`}</strong>
+            <span className="mt-0.5 block text-[10px] opacity-70">消耗{area.economy === 'action' ? '动作' : '附赠动作'}，至多移动 {area.maximumFeet} 尺</span>
+          </button>)}
+        </div> : null}
         {selectedSpells.length > 0 ? <div className="grid gap-2">
           {selectedSpells.map((spell) => {
             const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(c.level) : undefined
@@ -323,7 +348,7 @@ export default function MapSpellsPanel({
                 </button> : null}
                 <button
                   type="button"
-                  disabled={pending || targetingTargetCount < 1 ||
+                  disabled={pending || (!targetingAllowsEmptyArea && targetingTargetCount < 1) ||
                     ((targetingAllowsDuplicateTargets || targetingRequiresExactTargets) && targetingTargetCount !== targetingMaximumTargets) ||
                     (targetingCanCareful && targetingCarefulCount < 1) ||
                     (targetingCanHeightened && !targetingHeightenedSelected)}
@@ -332,7 +357,9 @@ export default function MapSpellsPanel({
                 >
                   {targetingAllowsDuplicateTargets
                     ? `发射已分配的 ${targetingTargetCount} ${projectileUnit}`
-                    : `施放到已选 ${targetingTargetCount} 个目标${targetingSculptedCount > 0 ? `，保护 ${targetingSculptedCount} 个` : ''}${targetingCarefulCount > 0 ? `，谨慎自动成功 ${targetingCarefulCount} 个` : ''}`}
+                    : targetingAllowsEmptyArea && targetingTargetCount < 1
+                      ? '在当前区域创建持续法术效果'
+                      : `施放到已选 ${targetingTargetCount} 个目标${targetingSculptedCount > 0 ? `，保护 ${targetingSculptedCount} 个` : ''}${targetingCarefulCount > 0 ? `，谨慎自动成功 ${targetingCarefulCount} 个` : ''}`}
                 </button>
               </> : null}
             </div>

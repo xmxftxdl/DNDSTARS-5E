@@ -11,6 +11,7 @@ import {
   getDnd5eSrdCombatSpell,
 } from './spells'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
+import { prepareDnd5eCoreSpellAreaMove, resolvePreparedDnd5eCoreSpellAreaMove } from './coreSpellAreaAction'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -54,6 +55,58 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
+
+  it('casts Moonbeam into an empty area and creates a concentration-linked authority area', () => {
+    const druid = character('druid', '德鲁伊', {
+      dnd5eClassChoices: { classes: { druid: { selections: { 'spell-prepared': ['moonbeam'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const input = fixture(druid, 'moonbeam', 2, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'moonbeam', slotLevel: 2, targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [], areaTargetCell: { col: 4, row: 2 },
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters.find((candidate) => candidate.id === druid.id)).toMatchObject({
+      concentrating: true,
+      dnd5eCombatState: { concentrationSpellId: 'moonbeam' },
+      classResources: { 'dnd5e-spell-slot-2': { current: 0, max: 1 } },
+    })
+    expect(resolved.application?.map.dnd5ePluginAreas).toEqual([
+      expect.objectContaining({
+        sourceKind: 'core-spell', coreSpellId: 'moonbeam', anchorCell: { col: 4, row: 2 },
+        concentrationId: 'moonbeam', visual: { preset: 'moonbeam', intensity: 'strong' },
+      }),
+    ])
+    if (!resolved.application) return
+    const areaId = resolved.application.map.dnd5ePluginAreas![0].id
+    const moveAction: SharedPlayerActionState = {
+      ...input.action,
+      id: 'move-moonbeam',
+      type: 'dnd5e-persistent-area-move',
+      dnd5eSpellCast: undefined,
+      dnd5ePersistentAreaMove: { areaId, targetCell: { col: 8, row: 2 } },
+    }
+    const movePrepared = prepareDnd5eCoreSpellAreaMove({
+      action: moveAction,
+      map: resolved.application.map,
+      characters: resolved.application.characters,
+      initiativeOrder: input.initiativeOrder,
+    })
+    expect(movePrepared.ok).toBe(true)
+    if (!movePrepared.ok) return
+    const moved = resolvePreparedDnd5eCoreSpellAreaMove({ prepared: movePrepared.prepared })
+    expect(moved.result.ok).toBe(true)
+    expect(moved.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: input.action.actorTokenId, resource: 'action',
+    }))
+    expect(moved.application?.map.dnd5ePluginAreas?.[0].anchorCell).toEqual({ col: 8, row: 2 })
+  })
 
   it('rejects a zero-point Mass Heal allocation before settlement', () => {
     const cleric = character('cleric', '牧师', {

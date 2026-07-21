@@ -77,6 +77,7 @@ describe('player action authority execution plan', () => {
     expect(playerActionAuthorityRoute(action('dnd5e-item-use'))).toBe('dnd5e-item-use')
     expect(playerActionAuthorityRoute(action('dnd5e-ability-check'))).toBe('dnd5e-ability-check')
     expect(playerActionAuthorityRoute(action('dnd5e-spell-cast'))).toBe('dnd5e-spell-cast')
+    expect(playerActionAuthorityRoute(action('dnd5e-persistent-area-move'))).toBe('dnd5e-persistent-area-move')
     expect(playerActionAuthorityRoute(action('move-token'))).toBe('move-token')
   })
 

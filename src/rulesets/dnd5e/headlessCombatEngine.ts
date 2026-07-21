@@ -593,6 +593,7 @@ export type Dnd5eAction =
   | { type: 'monster-on-hit-save'; actorId: string; sourceId: string; actionId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'ranger-hunter-multiattack'; actorId: string; feature: 'volley' | 'whirlwind-attack'; weaponMode: 'melee' | 'ranged'; attackModifier: number; criticalThreshold?: number; damage: { count: number; sides: number; bonus: number; type?: Dnd5eDamageType }; attacks: readonly Dnd5eHunterMultiattackRoll[] }
   | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; standFromProne?: boolean; carefulMovement?: boolean }
+  | { type: 'move-persistent-area'; actorId: string; areaId: string; economy: 'action' | 'bonusAction' }
   | { type: 'item-area-trigger'; actorId: string; areaId: string; areaKind: 'ball-bearings' | 'caltrops' | 'hunting-trap'; d20: number; d20Second?: number; damageRolls?: readonly number[] }
   | { type: 'dash'; actorId: string }
   | { type: 'hide'; actorId: string; d20: number; d20Second?: number }
@@ -3804,16 +3805,17 @@ function resolveSpellCast(
   const actor = state.combatants[action.actorId]
   const spell = getDnd5eSrdCombatSpell(action.spellId)
   const metamagic = action.metamagic
-  const requestedTargetIds = [...new Set(action.targetIds?.length ? action.targetIds : [action.targetId])]
+  const persistentArea = spell?.effect === 'persistent-area'
+  const requestedTargetIds = persistentArea ? [] : [...new Set(action.targetIds?.length ? action.targetIds : [action.targetId])]
   const legendaryResistanceTargetIds = [...new Set(action.legendaryResistanceTargetIds ?? [])]
   const targets = requestedTargetIds.map((targetId) => state.combatants[targetId])
-  const target = targets[0]
+  const target = targets[0] ?? actor
   const classDefinition = actor?.classId ? dnd5eClassDefinition(actor.classId) : undefined
   const spellcasting = classDefinition?.spellcasting
   if (
     !actor || actor.currentHp <= 0 || dnd5eCombatantIsBanished(actor) || !target ||
     targets.some((candidate) => !candidate || candidate.deathSaves.dead || dnd5eCombatantIsBanished(candidate)) ||
-    !spell || requestedTargetIds.length < 1 ||
+    !spell || (!persistentArea && requestedTargetIds.length < 1) ||
     requestedTargetIds.length > (metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, action.slotLevel, actor.level)) ||
     (metamagic?.kind === 'twinned' && requestedTargetIds.length !== 2) ||
     !spellcasting || !actor.classId
@@ -4172,6 +4174,18 @@ function resolveSpellCast(
   const concentrationDurationRounds = metamagic?.kind === 'extended'
     ? Math.min(14_400, baseConcentrationDurationRounds * 2)
     : baseConcentrationDurationRounds
+
+  if (spell.effect === 'persistent-area') {
+    if (!spell.concentration || action.effectRolls.length > 0 || requestedTargetIds.length > 0) {
+      return fail(state, events, 'invalid-dice')
+    }
+    beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events)
+    events.push({
+      type: 'class-state-changed', actorId: actor.id,
+      stateKey: `persistent-area:${spell.id}`, active: true,
+    })
+    return finishSpellCast()
+  }
 
   if (spell.effect === 'mark') {
     if (action.effectRolls.length > 0) return fail(state, events, 'invalid-dice')
@@ -7027,6 +7041,17 @@ function resolveDnd5eHeadlessActionInternal(
   }
 
   if (action.type === 'monster-action') return resolveMonsterAction(state, action, events)
+  if (action.type === 'move-persistent-area') {
+    if (!action.areaId || !spend(actor, action.economy)) {
+      return fail(state, events, action.economy === 'action' ? 'action-unavailable' : 'bonus-action-unavailable')
+    }
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: action.economy })
+    events.push({
+      type: 'class-state-changed', actorId: actor.id,
+      stateKey: `persistent-area-moved:${action.areaId}`, active: true,
+    })
+    return { ok: true, state, events }
+  }
   if (action.type === 'hellish-rebuke') return resolveHellishRebuke(state, action, events)
   if (action.type === 'cast-spell') return resolveSpellCast(state, action, events)
   if (action.type === 'adjudicated-spell') return resolveAdjudicatedSpell(state, action, events)

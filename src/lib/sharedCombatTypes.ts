@@ -188,6 +188,11 @@ export interface Dnd5eAdjudicatedSpellPayload {
   slotLevel: number
 }
 
+export interface Dnd5ePersistentAreaMovePayload {
+  areaId: string
+  targetCell: GridCell
+}
+
 export interface SharedCombatState {
   mapId: string
   combatId?: string
@@ -226,6 +231,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-item-use'
     | 'dnd5e-ability-check'
     | 'dnd5e-spell-cast'
+    | 'dnd5e-persistent-area-move'
     | 'dnd5e-adjudicated-spell'
     | 'dnd5e-map-interaction'
     | 'move-token'
@@ -251,6 +257,7 @@ export interface SharedPlayerActionState {
   dnd5eAbilityCheck?: Dnd5eAbilityCheckPayload
   dnd5eWeaponAttackOptions?: Dnd5eWeaponAttackOptions
   dnd5eSpellCast?: Dnd5eSpellCastPayload
+  dnd5ePersistentAreaMove?: Dnd5ePersistentAreaMovePayload
   dnd5eAdjudicatedSpell?: Dnd5eAdjudicatedSpellPayload
   dnd5eMapInteraction?: Dnd5eMapInteractionPayload
   dnd5eBasicAction?: Dnd5eBasicActionPayload

@@ -35,7 +35,7 @@ import {
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
@@ -45,6 +45,7 @@ import {
   mapGeometryMovementBlocked,
   mapGeometryRuntimeForMap,
 } from '../../lib/mapGeometry'
+import { createDnd5eCoreSpellArea, getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
 
 export type Dnd5eSpellCastRejectReason =
   | 'invalid-action'
@@ -108,6 +109,9 @@ export interface PreparedDnd5eSpellCast {
   repellingBlast: boolean
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   healingAllocations?: readonly { targetId: string; amount: number }[]
+  areaCells?: readonly { col: number; row: number }[]
+  areaAnchorCell?: { col: number; row: number }
+  areaDurationRounds?: number
 }
 
 /**
@@ -250,7 +254,8 @@ export function prepareDnd5eSpellCast(input: {
     (repeatedTargets && projectileTargetIds?.length !== projectileCount) ||
     (!repeatedTargets && (payload.projectileTargetIds?.length ?? 0) > 0)
   ) return { ok: false, reason: 'invalid-target' }
-  const requestedTargetIds = [...new Set(
+  const persistentArea = spell.effect === 'persistent-area'
+  const requestedTargetIds = persistentArea ? [] : [...new Set(
     projectileTargetIds?.length ? projectileTargetIds : payload.targetTokenIds?.length ? payload.targetTokenIds : [payload.targetTokenId],
   )]
   const conditionChoice = payload.conditionChoice
@@ -260,7 +265,7 @@ export function prepareDnd5eSpellCast(input: {
   ) return { ok: false, reason: 'invalid-action' }
   const maximumTargets = metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, slotLevel, actor.level)
   if (
-    requestedTargetIds.length < 1 || requestedTargetIds.length > maximumTargets ||
+    (!persistentArea && requestedTargetIds.length < 1) || requestedTargetIds.length > maximumTargets ||
     (metamagic?.kind === 'twinned' && requestedTargetIds.length !== 2)
   ) {
     return { ok: false, reason: 'invalid-target' }
@@ -271,6 +276,8 @@ export function prepareDnd5eSpellCast(input: {
   }
   const validTargetTokens = targetTokens as Token[]
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  let areaCells: readonly { col: number; row: number }[] | undefined
+  let areaAnchorCell: { col: number; row: number } | undefined
   if (spell.area) {
     const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
     const areaCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
@@ -290,6 +297,8 @@ export function prepareDnd5eSpellCast(input: {
     ) return { ok: false, reason: 'invalid-target' }
     const orientFrom = aoeOrientFromCell(spell.area, casterCell, areaCell, { rectRotation: orientation })
     const cells = cellsForAoe(spell.area, orientFrom, areaCell)
+    areaCells = cells
+    areaAnchorCell = areaCell
     const effectOrigin = spell.area.origin === 'point'
       ? {
           x: input.map.gridOffsetX + (areaCell.col + 0.5) * input.map.gridSize,
@@ -315,7 +324,7 @@ export function prepareDnd5eSpellCast(input: {
       return { ok: false, reason: 'invalid-target' }
     }
     if (
-      spell.target === 'area' &&
+      spell.target === 'area' && !persistentArea &&
       (requestedTargetIds.length !== authoritativeIds.size || [...authoritativeIds].some((targetId) => !requestedTargetIds.includes(targetId)))
     ) return { ok: false, reason: 'invalid-target' }
   } else if (payload.areaTargetCell != null || payload.areaTargetOrientation != null) {
@@ -361,7 +370,7 @@ export function prepareDnd5eSpellCast(input: {
       if (separationFeet > spell.secondaryTargetsWithinFeetOfFirst) return { ok: false, reason: 'invalid-target' }
     }
   }
-  const targetToken = validTargetTokens[0]
+  const targetToken = validTargetTokens[0] ?? actorToken
   const suppliedSculptedTargetIds = payload.sculptedTargetIds ?? []
   const sculptedTargetIds = [...new Set(suppliedSculptedTargetIds)]
   const canSculpt = dnd5eCanSculptSpell({
@@ -647,6 +656,14 @@ export function prepareDnd5eSpellCast(input: {
       repellingBlast,
       conditionChoice,
       healingAllocations,
+      areaCells,
+      areaAnchorCell,
+      areaDurationRounds: spell.concentration
+        ? Math.min(
+            14_400,
+            dnd5eSpellConcentrationDurationRounds(spell, slotLevel) * (metamagic?.kind === 'extended' ? 2 : 1),
+          )
+        : undefined,
     },
   }
 }
@@ -816,13 +833,44 @@ export function resolvePreparedDnd5eSpellCast(input: {
     delayedEffectRolls: input.delayedEffectRolls,
   })
   if (!result.ok) return { result }
-  return {
-    result,
-    application: planDnd5eMapResultApplication({
+  const application = planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,
       characters: prepared.characters,
       characterIdByCombatantId: prepared.characterIdByCombatantId,
-    }),
+    })
+  const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)
+  if (declaration && prepared.areaCells && prepared.areaAnchorCell) {
+    const actorCombatant = result.state.combatants[prepared.actorToken.id]
+    const definition = dnd5eClassDefinitionForCharacter(prepared.actor)
+    if (actorCombatant && definition?.spellcasting) {
+      const sourceSaveDc = 8 + actorCombatant.proficiencyBonus +
+        rules.abilityModifier(actorCombatant.abilities[definition.spellcasting.ability])
+      const area = createDnd5eCoreSpellArea({
+        declaration,
+        actionId: prepared.action.id,
+        sourceCharacterId: prepared.actor.id,
+        sourceTokenId: prepared.actorToken.id,
+        slotLevel: prepared.slotLevel,
+        sourceSaveDc,
+        round: result.state.round,
+        cells: prepared.areaCells,
+        anchorCell: prepared.areaAnchorCell,
+        durationRounds: prepared.areaDurationRounds,
+      })
+      application.map = {
+        ...application.map,
+        dnd5ePluginAreas: [
+          ...(application.map.dnd5ePluginAreas ?? []).filter((candidate) =>
+            candidate.sourceTokenId !== prepared.actorToken.id || !candidate.concentrationId,
+          ),
+          area,
+        ],
+      }
+    }
+  }
+  return {
+    result,
+    application,
   }
 }

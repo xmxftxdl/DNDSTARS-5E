@@ -302,6 +302,7 @@ import {
   prepareDnd5ePlayerMove,
   prepareDnd5ePlayerBasicAction,
   prepareDnd5eSpellCast,
+  prepareDnd5eCoreSpellAreaMove,
   prepareDnd5eAdjudicatedSpell,
   dnd5eSpellbookEntries,
   dnd5eRepellingBlastPushDestination,
@@ -350,6 +351,7 @@ import {
   resolvePreparedDnd5ePlayerMove,
   resolvePreparedDnd5ePlayerBasicAction,
   resolvePreparedDnd5eSpellCast,
+  resolvePreparedDnd5eCoreSpellAreaMove,
   resolvePreparedDnd5eAdjudicatedSpell,
   resolveDnd5eMonsterMapMove,
   resolveDnd5eHeadlessAction,
@@ -365,6 +367,7 @@ import {
   placeDnd5eItemArea,
   previewDnd5eItemAreaPlacement,
   reconcileDnd5eSummonedCreatures,
+  getDnd5eCoreSpellAreaDeclaration,
 } from '../rulesets/dnd5e'
 import {
   clampGridSize,
@@ -420,6 +423,7 @@ import type {
   Dnd5eItemUsePayload,
   Dnd5eAbilityCheckPayload,
   Dnd5eSpellCastPayload,
+  Dnd5ePersistentAreaMovePayload,
   Dnd5eAdjudicatedSpellPayload,
   Dnd5eSpellMetamagicPayload,
   Dnd5eAttackCoverOverride,
@@ -1427,6 +1431,12 @@ export default function MapsPage() {
     id: string
     actionId: string
     resolve: (response: DmAdjudicationInterruptResponse) => void
+  } | null>(null)
+  const [dnd5eCoreAreaMoveTargeting, setDnd5eCoreAreaMoveTargeting] = useState<{
+    characterId: string
+    areaId: string
+    targeting: SkillAoeTargeting
+    originCell: GridCell
   } | null>(null)
   const pendingD20ConfirmationsRef = useRef(new Map<string, {
     originalValue: number
@@ -2885,8 +2895,11 @@ export default function MapsPage() {
     }
   }, [selectedTokenId, activeMap?.tokens])
 
-  const activeAoeTargeting = dnd5ePluginAreaTargeting?.targeting.template ?? dnd5eSpellTargeting?.area
-  const activeAoeCasterId = dnd5ePluginAreaTargeting
+  const activeAoeTargeting = dnd5eCoreAreaMoveTargeting?.targeting ??
+    dnd5ePluginAreaTargeting?.targeting.template ?? dnd5eSpellTargeting?.area
+  const activeAoeCasterId = dnd5eCoreAreaMoveTargeting
+    ? dnd5eCoreAreaMoveTargeting.characterId
+    : dnd5ePluginAreaTargeting
     ? dnd5ePluginAreaTargeting.characterId
     : dnd5eItemAreaTargeting
     ? dnd5eItemAreaTargeting.characterId
@@ -2894,6 +2907,7 @@ export default function MapsPage() {
       ? dnd5eSpellTargeting.characterId
       : undefined
   const aoeCasterCell = ((): GridCell | null => {
+    if (dnd5eCoreAreaMoveTargeting) return dnd5eCoreAreaMoveTargeting.originCell
     if (!activeMap || !activeAoeCasterId) return null
     const casterToken = activeMap.tokens.find((t) => t.characterId === activeAoeCasterId)
     if (!casterToken) return null
@@ -3936,6 +3950,18 @@ export default function MapsPage() {
   }
 
   const handleAoeConfirm = (cell: GridCell) => {
+    if (dnd5eCoreAreaMoveTargeting) {
+      if (!aoeHighlight?.valid) return
+      const payload = { areaId: dnd5eCoreAreaMoveTargeting.areaId, targetCell: cell }
+      const submitted = isDM
+        ? sendDmLocalDnd5ePersistentAreaMoveRequest(payload)
+        : sendPlayerDnd5ePersistentAreaMoveRequest(payload)
+      if (submitted) {
+        setDnd5eCoreAreaMoveTargeting(null)
+        setAoePreviewCell(null)
+      }
+      return
+    }
     if (dnd5eItemAreaTargeting) {
       if (!aoeHighlight?.valid) return
       const payload: Dnd5eItemUsePayload = {
@@ -8638,6 +8664,50 @@ export default function MapsPage() {
       return
     }
 
+    if (authorityPlan.route === 'dnd5e-persistent-area-move' && action.type === 'dnd5e-persistent-area-move') {
+      const prepared = prepareDnd5eCoreSpellAreaMove({
+        action,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const resolved = resolvePreparedDnd5eCoreSpellAreaMove({ prepared: prepared.prepared })
+      if (!resolved.result.ok || !resolved.application) {
+        acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'missing-application' : resolved.result.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      updateMap(authorityMap.id, { dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [] })
+      const spent = resolved.result.events.find((event) =>
+        event.type === 'turn-resource-spent' &&
+        (event.resource === 'action' || event.resource === 'bonusAction'),
+      )
+      if (spent?.type === 'turn-resource-spent' && (spent.resource === 'action' || spent.resource === 'bonusAction')) {
+        updateDnd5eTurnEconomy(
+          action.actorTokenId,
+          (economy) => spendDnd5eTurnResource(economy, spent.resource as 'action' | 'bonusAction').economy,
+          liveRound,
+        )
+      }
+      const movedArea = resolved.application.map.dnd5ePluginAreas?.find((area) =>
+        area.id === action.dnd5ePersistentAreaMove?.areaId,
+      )
+      pushHeadlessCombatLog(
+        `${prepared.prepared.characters.find((character) => character.id === action.characterId)?.name ?? '施法者'}移动${movedArea?.label ?? '持续法术区域'}。`,
+        'system',
+        resolved.result.events,
+        [`区域：${movedArea?.label ?? action.dnd5ePersistentAreaMove?.areaId ?? '未知'}｜消耗：${spent?.type === 'turn-resource-spent' && spent.resource === 'bonusAction' ? '附赠动作' : '动作'}`],
+      )
+      acknowledgePlayerAction(action, 'accepted')
+      completePlayerActionRequest(action)
+      return
+    }
+
     if (authorityPlan.route === 'dnd5e-spell-cast' && action.type === 'dnd5e-spell-cast') {
       const turnEconomy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
       const pluginSpell = action.dnd5eSpellCast ? dnd5ePluginSpellDefinition(action.dnd5eSpellCast.spellId) : undefined
@@ -9467,7 +9537,7 @@ export default function MapsPage() {
         spellCast.spell.effect === 'power-word-stun' || spellCast.spell.effect === 'stabilize' ||
         spellCast.spell.effect === 'remove-condition' || spellCast.spell.effect === 'fixed-healing' ||
         spellCast.spell.effect === 'healing-pool' || spellCast.spell.effect === 'counterspell' ||
-        spellCast.spell.effect === 'active-effect'
+        spellCast.spell.effect === 'active-effect' || spellCast.spell.effect === 'persistent-area'
       ) {
         effectRolls = []
       } else if (spellCast.spell.id === 'magic-missile') {
@@ -9730,6 +9800,12 @@ export default function MapsPage() {
       for (const characterId of resolved.application.changedCharacterIds) {
         const next = resolved.application.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      if (
+        JSON.stringify(resolved.application.map.dnd5ePluginAreas ?? []) !==
+        JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
+      ) {
+        updateMap(authorityMap.id, { dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [] })
       }
       await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
@@ -12850,6 +12926,15 @@ export default function MapsPage() {
       }),
     )
 
+  const sendDmLocalDnd5ePersistentAreaMoveRequest = (payload: Dnd5ePersistentAreaMovePayload) =>
+    submitDmLocalPlayerAction(
+      createDmLocalPlayerAction({
+        type: 'dnd5e-persistent-area-move',
+        targetCell: payload.targetCell,
+        dnd5ePersistentAreaMove: payload,
+      }),
+    )
+
   const sendDmLocalDnd5eAdjudicatedSpellRequest = (payload: Dnd5eAdjudicatedSpellPayload) =>
     submitDmLocalPlayerAction(
       createDmLocalPlayerAction({
@@ -13025,6 +13110,17 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${turnCharacter.name} 施放 SRD 法术`)
   }
 
+  const sendPlayerDnd5ePersistentAreaMoveRequest = (payload: Dnd5ePersistentAreaMovePayload) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const action = createPlayerActionRequest({
+      type: 'dnd5e-persistent-area-move',
+      targetCell: payload.targetCell,
+      dnd5ePersistentAreaMove: payload,
+    })
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 请求移动持续法术区域`)
+  }
+
   const sendPlayerDnd5eAdjudicatedSpellRequest = (payload: Dnd5eAdjudicatedSpellPayload) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const action = createPlayerActionRequest({
@@ -13036,7 +13132,10 @@ export default function MapsPage() {
   }
 
   const submitSelectedDnd5eSpellTargets = () => {
-    if (!dnd5eSpellTargeting || dnd5eSpellTargeting.targetTokenIds.length < 1) return false
+    if (!dnd5eSpellTargeting) return false
+    const selectedSpell = getDnd5eSrdCombatSpell(dnd5eSpellTargeting.spellId)
+    const allowsEmptyArea = selectedSpell?.effect === 'persistent-area' && !!aoePreviewCell
+    if (dnd5eSpellTargeting.targetTokenIds.length < 1 && !allowsEmptyArea) return false
     if (
       dnd5eSpellTargeting.allowDuplicateTargets &&
       dnd5eSpellTargeting.targetTokenIds.length !== dnd5eSpellTargeting.maximumTargets
@@ -13046,7 +13145,6 @@ export default function MapsPage() {
       dnd5eSpellTargeting.targetTokenIds.length !== 2
     ) return false
     let healingAllocations: Dnd5eSpellCastPayload['healingAllocations']
-    const selectedSpell = getDnd5eSrdCombatSpell(dnd5eSpellTargeting.spellId)
     if (selectedSpell?.effect === 'healing-pool') {
       let remaining = selectedSpell.healingPool ?? 0
       healingAllocations = []
@@ -13073,7 +13171,7 @@ export default function MapsPage() {
     const payload: Dnd5eSpellCastPayload = {
       spellId: dnd5eSpellTargeting.spellId,
       slotLevel: dnd5eSpellTargeting.slotLevel,
-      targetTokenId: dnd5eSpellTargeting.targetTokenIds[0],
+      targetTokenId: dnd5eSpellTargeting.targetTokenIds[0] ?? currentInitiativeToken?.id ?? '',
       targetTokenIds: [...new Set(dnd5eSpellTargeting.targetTokenIds)],
       areaTargetCell: aoePreviewCell ?? undefined,
       areaTargetOrientation: dnd5eSpellTargeting.area?.shape === 'rect' && dnd5eSpellTargeting.area.rotatable
@@ -13553,6 +13651,7 @@ export default function MapsPage() {
               onAoePreviewCell={handleAoePreviewCell}
               onAoeConfirm={handleAoeConfirm}
               onAoeCancel={() => {
+                setDnd5eCoreAreaMoveTargeting(null)
                 setDnd5eSpellTargeting(null)
                 setDnd5eItemAreaTargeting(null)
                 setDnd5ePluginAreaTargeting(null)
@@ -15825,6 +15924,8 @@ export default function MapsPage() {
                     targetingMaximumTargets={dnd5eSpellTargeting?.characterId === activeChar.id ? dnd5eSpellTargeting.maximumTargets : 1}
                     targetingAllowsDuplicateTargets={dnd5eSpellTargeting?.characterId === activeChar.id && dnd5eSpellTargeting.allowDuplicateTargets}
                     targetingRequiresExactTargets={dnd5eSpellTargeting?.characterId === activeChar.id && dnd5eSpellTargeting.metamagic?.kind === 'twinned'}
+                    targetingAllowsEmptyArea={dnd5eSpellTargeting?.characterId === activeChar.id &&
+                      getDnd5eSrdCombatSpell(dnd5eSpellTargeting.spellId)?.effect === 'persistent-area' && !!aoePreviewCell}
                     targetingCanSculpt={dnd5eSpellTargeting?.characterId === activeChar.id && dnd5eSpellTargeting.canSculpt}
                     targetingSculptedCount={dnd5eSpellTargeting?.characterId === activeChar.id ? dnd5eSpellTargeting.sculptedTargetIds.length : 0}
                     targetingMaximumSculptedTargets={dnd5eSpellTargeting?.characterId === activeChar.id ? dnd5eSpellTargeting.maximumSculptedTargets : 0}
@@ -15836,6 +15937,41 @@ export default function MapsPage() {
                     targetingCanHeightened={dnd5eSpellTargeting?.characterId === activeChar.id && dnd5eSpellTargeting.metamagic?.kind === 'heightened'}
                     targetingHeightenedSelected={dnd5eSpellTargeting?.characterId === activeChar.id && !!dnd5eSpellTargeting.heightenedTargetId}
                     targetingHeightenedSelecting={dnd5eSpellTargeting?.characterId === activeChar.id && dnd5eSpellTargeting.heightenedSelecting}
+                    movablePersistentAreas={(activeMap?.dnd5ePluginAreas ?? []).flatMap((area) =>
+                      area.sourceKind === 'core-spell' && area.sourceCharacterId === activeChar.id && area.movement
+                        ? [{
+                            id: area.id,
+                            label: area.label,
+                            economy: area.movement.economy,
+                            maximumFeet: area.movement.maximumFeet,
+                          }]
+                        : [],
+                    )}
+                    movingPersistentAreaId={dnd5eCoreAreaMoveTargeting?.characterId === activeChar.id
+                      ? dnd5eCoreAreaMoveTargeting.areaId
+                      : undefined}
+                    onMovePersistentArea={(areaId) => {
+                      const area = activeMap?.dnd5ePluginAreas?.find((candidate) => candidate.id === areaId)
+                      const declaration = area?.coreSpellId
+                        ? getDnd5eCoreSpellAreaDeclaration(area.coreSpellId)
+                        : undefined
+                      if (!area?.movement || !area.anchorCell || !declaration) return
+                      const movement = area.movement
+                      const originCell = { col: area.anchorCell.col, row: area.anchorCell.row }
+                      setDnd5eSpellTargeting(null)
+                      setDnd5eCoreAreaMoveTargeting((current) => current?.areaId === areaId
+                        ? null
+                        : {
+                            characterId: activeChar.id,
+                            areaId,
+                            targeting: {
+                              ...declaration.template,
+                              placeRangeFeet: movement.maximumFeet,
+                            } as SkillAoeTargeting,
+                            originCell,
+                          })
+                      setAoePreviewCell(originCell)
+                    }}
                     onConfirmSpellTargets={submitSelectedDnd5eSpellTargets}
                     onUndoSpellTarget={undoLastDnd5eSpellTarget}
                     onToggleSculptSpellTargets={toggleDnd5eSculptSpellTargets}
