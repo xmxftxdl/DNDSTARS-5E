@@ -44,7 +44,9 @@ export default function Sidebar({
 }) {
   const [copied, setCopied] = useState(false)
   const unreadHandouts = useRoomCommunicationsStore((state) => state.unreadHandoutIds.length)
-  const items = mode === 'player' ? playerNavItems : navItems
+  const items = roomSession?.role === 'spectator'
+    ? navItems.filter((item) => item.to === '/maps')
+    : mode === 'player' ? playerNavItems : navItems
   const copyRoomCode = async () => {
     if (!roomSession) return
     await navigator.clipboard?.writeText(roomSession.roomId)
@@ -121,7 +123,7 @@ export default function Sidebar({
             </div>
             <span className="flex shrink-0 items-center gap-1 rounded-lg bg-arcane-500/10 px-2 py-1 text-[10px] font-semibold text-arcane-200">
               {roomSession.role === 'dm' ? <Crown className="h-3 w-3" /> : null}
-              {roomSession.role === 'dm' ? 'DM' : `玩家 ${roomSession.slot?.slice(-1) ?? '1'}`}
+              {roomSession.role === 'dm' ? 'DM' : roomSession.role === 'spectator' ? '观战' : `玩家 ${roomSession.slot?.slice(-1) ?? '1'}`}
             </span>
           </div>
           <button
@@ -139,7 +141,7 @@ export default function Sidebar({
 
       {/* Footer */}
       <div className="space-y-1 border-t border-white/10 p-3">
-        <NavLink
+        {roomSession?.role !== 'spectator' && <NavLink
           to="/settings"
           className={({ isActive }) => [
             'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
@@ -148,7 +150,7 @@ export default function Sidebar({
         >
           <Settings className="h-5 w-5 text-slate-500" />
           设置
-        </NavLink>
+        </NavLink>}
         {onLeaveRoom && (
           <button
             type="button"

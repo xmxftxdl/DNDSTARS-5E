@@ -6,7 +6,7 @@ export const ROOM_SESSION_EVENT = 'stars-room-session-changed'
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
 export const DND5E_2014_RULESET_LABEL = 'D&D 5e 2014 · SRD 5.1'
 
-export type RoomRole = 'dm' | 'player'
+export type RoomRole = 'dm' | 'player' | 'spectator'
 export type RoomPlayerSlot = 'player1' | 'player2' | 'player3' | 'player4' | 'player5' | 'player6' | 'player7' | 'player8'
 
 export interface RoomPluginRequirement {
@@ -79,7 +79,7 @@ export function isRoomSession(value: unknown): value is RoomSession {
   if (
     !/^[A-HJ-NP-Z2-9]{6}$/.test(session.roomId ?? '') ||
     session.rulesetId !== DND5E_2014_RULESET_ID ||
-    (session.role !== 'dm' && session.role !== 'player') ||
+    (session.role !== 'dm' && session.role !== 'player' && session.role !== 'spectator') ||
     typeof session.memberId !== 'string' ||
     (session.accountId != null && !/^[A-HJ-NP-Z2-9]{12}$/.test(session.accountId)) ||
     typeof session.clientId !== 'string' ||
@@ -87,7 +87,7 @@ export function isRoomSession(value: unknown): value is RoomSession {
     typeof session.roomName !== 'string' ||
     typeof session.createdAt !== 'number'
   ) return false
-  return session.role === 'dm' ? session.slot == null : isRoomPlayerSlot(session.slot)
+  return session.role === 'player' ? isRoomPlayerSlot(session.slot) : session.slot == null
 }
 
 export function getRoomClientId(): string {
@@ -163,7 +163,7 @@ export function getRecentRoomPlayerResumeIdentity(): RoomPlayerResumeIdentity | 
 }
 
 function rememberRoomPlayerIdentity(session: RoomSession, touch = false): void {
-  if (!localStorageAvailable() || session.role !== 'player') return
+  if (!localStorageAvailable() || (session.role !== 'player' && session.role !== 'spectator')) return
   const identities = roomPlayerResumeIdentities()
   const existing = identities[session.roomId]
   if (

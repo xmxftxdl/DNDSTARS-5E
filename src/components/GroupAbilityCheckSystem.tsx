@@ -70,7 +70,8 @@ export default function GroupAbilityCheckSystem() {
     setLoadingRoster(true)
     try {
       const next = await loadRoomRoster(session)
-      const current = next.players.filter((player) => player.status === 'online' || player.status === 'temporarily-offline')
+      const current = next.players.filter((player) =>
+        player.role === 'player' && (player.status === 'online' || player.status === 'temporarily-offline'))
       setRoster(current)
       setError(null)
     } catch (cause) {

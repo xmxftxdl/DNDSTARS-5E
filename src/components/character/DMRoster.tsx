@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertTriangle, Clock3, Eye, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
-import { playerSlotLabel } from '../../lib/appMode'
 import { roomCharactersOwnedByMembers } from '../../lib/playerView'
-import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../../lib/roomApi'
+import { loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
 import { getRoomSession } from '../../lib/roomSession'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
@@ -26,7 +25,7 @@ export default function DMRoster() {
     }
     try {
       const roster = await loadRoomRoster(roomSession)
-      setPlayers(roster.players)
+      setPlayers(roster.players.filter((member) => member.role === 'player'))
       setError(null)
     } catch (cause) {
       setError(roomApiErrorMessage(cause))
@@ -140,7 +139,7 @@ export default function DMRoster() {
                         {player.online ? '在线' : '暂时断线'}
                       </span>
                     </div>
-                    <p className="mt-0.5 text-xs text-slate-500">{playerSlotLabel(player.slot)}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{roomRosterMemberLabel(player)}</p>
                     <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
                       <Clock3 className="h-3.5 w-3.5" />最后在线：{lastSeenLabel(player.lastSeenAt)}
                     </p>

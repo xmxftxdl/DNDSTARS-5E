@@ -25,6 +25,10 @@ import {
   Eye,
   Undo2,
   Redo2,
+  LocateFixed,
+  ArrowUpRight,
+  Circle as CircleIcon,
+  Eraser,
 } from 'lucide-react'
 import MapCanvas from '../components/map/MapCanvas'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
@@ -90,6 +94,18 @@ import {
   type MapGeometryWallMaterial,
 } from '../lib/mapGeometry'
 import { mapExplorationPolygonsForTokenPath } from '../lib/mapExploration'
+import {
+  EMPTY_MAP_TABLETOP_STATE,
+  MAP_TABLETOP_CHANNEL,
+  clearMapTabletopAnnotations,
+  mapTabletopForMap,
+  publishMapTabletopAnnotation,
+  publishMapTabletopFocus,
+  publishMapTabletopPing,
+  reduceMapTabletopState,
+  type MapTabletopState,
+  type MapTabletopTool,
+} from '../lib/mapTabletop'
 import { findMapGeometryPath } from '../lib/mapPathfinding'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { formatDnd5eCombatLogDetails } from '../lib/combatLogDetails'
@@ -570,6 +586,7 @@ export default function MapsPage() {
   const applyAuthorityCharacterUpdate = useCharacterStore((s) => s.applyAuthorityUpdate)
   const saveCharactersSharedNow = useCharacterStore((s) => s.saveSharedNow)
   const roomSession = useMemo(() => getRoomSession(), [])
+  const isSpectator = roomSession?.role === 'spectator'
   const roomRulesSnapshot = useSyncExternalStore(
     subscribeRoomRules,
     getRoomRulesSnapshot,
@@ -584,7 +601,7 @@ export default function MapsPage() {
       try {
         const roster = await loadRoomRoster(roomSession)
         if (!disposed) setRoomPlayerMemberIds(new Set(
-          roster.players.filter((player) => player.online).map((player) => player.memberId),
+          roster.players.filter((player) => player.online && player.role === 'player').map((player) => player.memberId),
         ))
       } catch {
         // Keep the last successful roster while the room service reconnects.
@@ -648,6 +665,8 @@ export default function MapsPage() {
   const [geometryWallMaterial, setGeometryWallMaterial] = useState<MapGeometryWallMaterial>('stone')
   const [geometryPreviewAsPlayer, setGeometryPreviewAsPlayer] = useState(false)
   const [geometrySnapToGrid, setGeometrySnapToGrid] = useState(true)
+  const [mapTabletopTool, setMapTabletopTool] = useState<MapTabletopTool>('none')
+  const [mapTabletopState, setMapTabletopState] = useState<MapTabletopState>(EMPTY_MAP_TABLETOP_STATE)
   const [panelWidth, setPanelWidth] = useState(720)
   const [panelHeight, setPanelHeight] = useState(300)
   const [panelFull, setPanelFull] = useState(false)
@@ -1558,8 +1577,8 @@ export default function MapsPage() {
   }
 
   const isDM = mode === 'dm'
-  const playerSlot = currentPlayerSlot()
-  const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
+  const playerSlot = isSpectator ? null : currentPlayerSlot()
+  const assignedCharacterId = isDM || isSpectator ? null : getAssignedPlayerCharacterId(playerSlot ?? undefined)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
   const displayActiveMapTokens = activeMap
     ? projectCharacterTokenPresentations(activeMap.tokens, characters)
@@ -1576,6 +1595,20 @@ export default function MapsPage() {
     return { ...entry, emoji: token.emoji, label: token.label }
   })
   const activeMapId = activeMap?.id
+  const activeMapTabletop = activeMapId
+    ? mapTabletopForMap(mapTabletopState, activeMapId)
+    : { pings: [], annotations: [], focus: null }
+
+  useEffect(() => subscribeSharedEvent(MAP_TABLETOP_CHANNEL, (event) => {
+    setMapTabletopState((current) => reduceMapTabletopState(current, event))
+  }), [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setMapTabletopState((current) => reduceMapTabletopState(current, null))
+    }, 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
   const applySharedCombatStateEvent = useEffectEvent((state: SharedCombatState | null) => {
     applySharedCombatState(state)
   })
@@ -2028,7 +2061,7 @@ export default function MapsPage() {
 
   const linkedIds = new Set((activeMap?.tokens ?? []).map((t) => t.characterId).filter(Boolean) as string[])
   void playerAssignmentTick
-  const visibleChars = isDM ? [] : playerViewCharacters(characters, {
+  const visibleChars = isDM || isSpectator ? [] : playerViewCharacters(characters, {
     slot: playerSlot,
     assignedCharacterId,
   })
@@ -2175,8 +2208,9 @@ export default function MapsPage() {
     }
   }, [isDM, combatActive, combatId, round, initiativeIndex, currentInitiativeEntry?.slotId, currentInitiativeToken, turnCharacter, activeMap?.id, applyAuthorityCharacterUpdate])
 
-  const playerChar =
-    getPlayerCharacter(characters, {
+  const playerChar = isSpectator
+    ? undefined
+    : getPlayerCharacter(characters, {
       slot: playerSlot,
       assignedCharacterId,
     }) ?? visibleChars[0]
@@ -4228,6 +4262,20 @@ export default function MapsPage() {
         if (!alreadySettled) setCombatExperienceDraft(endingExperienceDraft)
       }
     }
+  }
+
+  const chooseMapTabletopTool = (tool: Exclude<MapTabletopTool, 'none'>) => {
+    if (!isDM) return
+    setMapTabletopTool((current) => current === tool ? 'none' : tool)
+    setMeasureMode(false)
+    setDeleteSelectMode(false)
+    setGridAdjustMode(false)
+    setFogEditMode(false)
+    setFogPreviewAsPlayer(false)
+    setGeometryEditMode(false)
+    setGeometryPreviewAsPlayer(false)
+    setShowMoveRange(false)
+    selectGeometryEntity(null)
   }
 
   const settleEndedCombatExperience = async (
@@ -13320,6 +13368,25 @@ export default function MapsPage() {
               onSelectToken={handleSelectToken}
               targetSelectTokenIds={[]}
               isDM={isDM}
+              tabletopTool={
+                isDM && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode
+                  ? mapTabletopTool
+                  : 'none'
+              }
+              tabletopPings={activeMapTabletop.pings}
+              tabletopAnnotations={activeMapTabletop.annotations}
+              tabletopFocus={activeMapTabletop.focus}
+              pingEnabled={!isSpectator && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
+              onMapPing={(point) => void publishMapTabletopPing(activeMap.id, point)}
+              onTabletopPoint={(point) => {
+                if (!isDM) return
+                setMapTabletopTool('none')
+                void publishMapTabletopFocus(activeMap.id, point)
+              }}
+              onTabletopAnnotation={(shape, from, to) => {
+                if (!isDM) return
+                void publishMapTabletopAnnotation({ mapId: activeMap.id, shape, from, to })
+              }}
               measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
               hpByToken={hpByToken}
               dnd5eConditionsByToken={dnd5eConditionsByToken}
@@ -13377,9 +13444,9 @@ export default function MapsPage() {
               onGeometryEntityPointsChange={(entityId, points) => {
                 if (isDM) setGeometryEntityPoints(activeMap.id, entityId, points)
               }}
-              onGeometryDoorInteract={!isDM ? setSelectedDoorInteractionId : undefined}
-              geometrySearchMode={!isDM && !!dnd5eSecretSearchMethod}
-              onGeometrySearch={!isDM && dnd5eSecretSearchMethod ? (point) => {
+              onGeometryDoorInteract={!isDM && !isSpectator ? setSelectedDoorInteractionId : undefined}
+              geometrySearchMode={!isDM && !isSpectator && !!dnd5eSecretSearchMethod}
+              onGeometrySearch={!isDM && !isSpectator && dnd5eSecretSearchMethod ? (point) => {
                 sendPlayerDnd5eMapInteractionRequest({
                   operation: 'search',
                   point,
@@ -13427,6 +13494,11 @@ export default function MapsPage() {
               }
             />
           </div>
+          {!isDM && (
+            <div className="pointer-events-none absolute right-4 top-4 z-20 rounded-lg border border-white/10 bg-void-950/78 px-3 py-2 text-[11px] font-medium text-slate-300 shadow-lg backdrop-blur-sm">
+              {isSpectator ? '只读观战 · 使用玩家安全视野' : '双击地图可发送 Ping 标记'}
+            </div>
+          )}
           {dnd5eWeaponAttackConfirmation && previewCover ? (
             <Dnd5eWeaponAttackConfirmationPanel
               confirmation={dnd5eWeaponAttackConfirmation}
@@ -13470,7 +13542,7 @@ export default function MapsPage() {
               正在等待 DM 同步战斗状态
             </div>
           )}
-          {!isDM && (
+          {!isDM && !isSpectator && (
             <div className="absolute bottom-24 left-1/2 z-[58] -translate-x-1/2 rounded-xl border border-violet-300/25 bg-void-950/92 p-2 shadow-xl backdrop-blur-md">
               {dnd5eSecretSearchMethod ? (
                 <div className="flex items-center gap-2">
@@ -14354,6 +14426,42 @@ export default function MapsPage() {
                       className="w-10 accent-arcane-500"
                       title="网格透明度"
                     />
+                  </div>
+                  <div className="flex items-center gap-1 rounded-lg border border-amber-400/15 bg-amber-500/[0.05] px-1 py-0.5" title="临时桌面协作标记，不写入永久地图几何或战争迷雾">
+                    <button
+                      type="button"
+                      onClick={() => chooseMapTabletopTool('focus')}
+                      className={`rounded-md p-1.5 ${mapTabletopTool === 'focus' ? 'bg-amber-500/25 text-amber-100' : 'text-slate-400 hover:bg-white/10'}`}
+                      title="点击地图，把全员视角聚焦到该处"
+                    >
+                      <LocateFixed className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => chooseMapTabletopTool('arrow')}
+                      className={`rounded-md p-1.5 ${mapTabletopTool === 'arrow' ? 'bg-amber-500/25 text-amber-100' : 'text-slate-400 hover:bg-white/10'}`}
+                      title="拖动画临时箭头"
+                    >
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => chooseMapTabletopTool('circle')}
+                      className={`rounded-md p-1.5 ${mapTabletopTool === 'circle' ? 'bg-amber-500/25 text-amber-100' : 'text-slate-400 hover:bg-white/10'}`}
+                      title="从圆心向外拖动画临时圈选"
+                    >
+                      <CircleIcon className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={activeMapTabletop.annotations.length === 0}
+                      onClick={() => void clearMapTabletopAnnotations(activeMap.id)}
+                      className="rounded-md p-1.5 text-slate-400 hover:bg-white/10 hover:text-rose-200 disabled:opacity-30"
+                      title="清除当前地图的全部临时标注"
+                    >
+                      <Eraser className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="px-1 text-[10px] text-amber-200/70">双击 Ping</span>
                   </div>
                   {activeGeometry && (
                     <MapGeometryToolbar

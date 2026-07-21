@@ -130,6 +130,13 @@ import {
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { campaignLightIsActive } from '../../lib/campaignTime'
 import { useCampaignTimeStore } from '../../store/campaignTime'
+import type {
+  MapTabletopAnnotation,
+  MapTabletopFocus,
+  MapTabletopPing,
+  MapTabletopPoint,
+  MapTabletopTool,
+} from '../../lib/mapTabletop'
 
 export interface MoveCircle {
   centerX: number
@@ -232,6 +239,14 @@ interface MapCanvasProps {
   onGeometrySearch?: (point: { x: number; y: number }) => void
   onGeometryEditCancel?: () => void
   onTokenMoveBlocked?: (entityId?: string) => void
+  tabletopTool?: MapTabletopTool
+  tabletopPings?: readonly MapTabletopPing[]
+  tabletopAnnotations?: readonly MapTabletopAnnotation[]
+  tabletopFocus?: MapTabletopFocus | null
+  pingEnabled?: boolean
+  onMapPing?: (point: MapTabletopPoint) => void
+  onTabletopPoint?: (point: MapTabletopPoint) => void
+  onTabletopAnnotation?: (shape: 'arrow' | 'circle', from: MapTabletopPoint, to: MapTabletopPoint) => void
   /** DM 视角：始终显示敌人血量条；玩家视角受 token.showHpOnToken 控制 */
   isDM?: boolean
 }
@@ -1251,6 +1266,14 @@ export default function MapCanvas({
   onGeometrySearch,
   onGeometryEditCancel,
   onTokenMoveBlocked,
+  tabletopTool = 'none',
+  tabletopPings = [],
+  tabletopAnnotations = [],
+  tabletopFocus = null,
+  pingEnabled = false,
+  onMapPing,
+  onTabletopPoint,
+  onTabletopAnnotation,
   isDM = false,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1272,6 +1295,14 @@ export default function MapCanvas({
   const [fogPolygonPoints, setFogPolygonPoints] = useState<number[]>([])
   const geometryDragStartRef = useRef<{ point: Point; id: string; createdAt: number } | null>(null)
   const [geometryDraft, setGeometryDraft] = useState<MapGeometryEntity | null>(null)
+  const tabletopDragStartRef = useRef<MapTabletopPoint | null>(null)
+  const [tabletopDraft, setTabletopDraft] = useState<{
+    shape: 'arrow' | 'circle'
+    from: MapTabletopPoint
+    to: MapTabletopPoint
+  } | null>(null)
+  const [tabletopNow, setTabletopNow] = useState(() => Date.now())
+  const appliedFocusIdRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
 
   // Measurement state in image coordinates: fixed segments plus pending/cursor points.
@@ -1304,6 +1335,23 @@ export default function MapCanvas({
     frame = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(frame)
   }, [map.tokens, movementSignature])
+
+  useEffect(() => {
+    if (!tabletopPings.some((ping) => ping.expiresAt > Date.now())) return
+    let frame = 0
+    let lastFrame = 0
+    const tick = (time: number) => {
+      if (time - lastFrame >= 1000 / 30) {
+        lastFrame = time
+        setTabletopNow(Date.now())
+      }
+      if (tabletopPings.some((ping) => ping.expiresAt > Date.now())) {
+        frame = window.requestAnimationFrame(tick)
+      }
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
+  }, [tabletopPings])
 
   const movementPosition = (token: Token): Point | undefined => {
     const animation = token.movementAnimation
@@ -1821,6 +1869,17 @@ export default function MapCanvas({
     fittedRef.current = true
   }, [image, size, map.width, map.height])
 
+  useEffect(() => {
+    if (!tabletopFocus || tabletopFocus.mapId !== map.id || appliedFocusIdRef.current === tabletopFocus.id) return
+    appliedFocusIdRef.current = tabletopFocus.id
+    const scale = Math.max(0.1, Math.min(4, tabletopFocus.scale ?? view.scale))
+    setView({
+      scale,
+      x: size.width / 2 - tabletopFocus.point.x * scale,
+      y: size.height / 2 - tabletopFocus.point.y * scale,
+    })
+  }, [map.id, size.height, size.width, tabletopFocus, view.scale])
+
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     if (gridAdjustMode && onGridSizeChange) {
       e.evt.preventDefault()
@@ -1959,7 +2018,9 @@ export default function MapCanvas({
       data-fog-filled={fog?.filled === true ? 'true' : 'false'}
       data-visibility-mask="combined"
       className={`h-full w-full overflow-hidden rounded-2xl bg-void-900/60 ${
-        gridAdjustMode
+        tabletopTool !== 'none'
+          ? 'cursor-crosshair'
+        : gridAdjustMode
           ? 'cursor-move'
           : geometryEditMode
             ? geometryTool === 'select' ? 'cursor-default' : 'cursor-crosshair'
@@ -1985,7 +2046,7 @@ export default function MapCanvas({
         scaleY={view.scale}
         x={view.x}
         y={view.y}
-        draggable={!measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !geometrySearchMode}
+        draggable={tabletopTool === 'none' && !measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !geometrySearchMode}
         onWheel={handleWheel}
         onDragEnd={(e) => {
           // Only update viewport when dragging the stage itself.
@@ -1996,6 +2057,11 @@ export default function MapCanvas({
         onContextMenu={(e) => {
           // 屏蔽浏览器右键菜单；测距时右键取消正在放置的起点
           e.evt.preventDefault()
+          if (tabletopTool !== 'none') {
+            tabletopDragStartRef.current = null
+            setTabletopDraft(null)
+            return
+          }
           if (geometryEditMode) {
             geometryDragStartRef.current = null
             setGeometryDraft(null)
@@ -2027,6 +2093,18 @@ export default function MapCanvas({
         }}
         onMouseDown={(e) => {
           const stage = e.target.getStage()
+          if (tabletopTool !== 'none' && e.evt.button === 0) {
+            e.cancelBubble = true
+            const point = relativePoint(stage)
+            if (!point) return
+            if (tabletopTool === 'focus') {
+              onTabletopPoint?.(point)
+              return
+            }
+            tabletopDragStartRef.current = point
+            setTabletopDraft({ shape: tabletopTool, from: point, to: point })
+            return
+          }
           if (geometrySearchMode && e.evt.button === 0 && !isMapTokenNode(e.target)) {
             e.cancelBubble = true
             const point = relativePoint(stage)
@@ -2095,6 +2173,11 @@ export default function MapCanvas({
           if (!isMapTokenNode(e.target)) onSelectToken(null)
         }}
         onMouseMove={(e) => {
+          if (tabletopTool !== 'none' && tabletopDragStartRef.current) {
+            const point = relativePoint(e.target.getStage())
+            if (point) setTabletopDraft((draft) => draft ? { ...draft, to: point } : draft)
+            return
+          }
           if (geometryEditMode && handleGeometryMouseMove(e.target.getStage())) return
           if (fogEditMode && handleFogMouseMove(e.target.getStage())) return
           if (deleteSelectMode && deleteDrag) {
@@ -2123,6 +2206,18 @@ export default function MapCanvas({
           }
         }}
         onMouseUp={(e) => {
+          if (tabletopTool !== 'none' && tabletopDragStartRef.current) {
+            e.cancelBubble = true
+            const from = tabletopDragStartRef.current
+            const to = relativePoint(e.target.getStage()) ?? tabletopDraft?.to ?? from
+            tabletopDragStartRef.current = null
+            const shape = tabletopDraft?.shape
+            setTabletopDraft(null)
+            if (shape && Math.hypot(to.x - from.x, to.y - from.y) >= 4) {
+              onTabletopAnnotation?.(shape, from, to)
+            }
+            return
+          }
           if (geometryEditMode && handleGeometryMouseUp()) {
             e.cancelBubble = true
             return
@@ -2144,9 +2239,16 @@ export default function MapCanvas({
           if (rect.width >= 4 && rect.height >= 4) onDeleteBoxConfirm?.(rect)
         }}
         onDblClick={(e) => {
-          if (!fogEditMode || fogShapeKindForTool(fogTool) !== 'polygon') return
+          if (fogEditMode && fogShapeKindForTool(fogTool) === 'polygon') {
+            e.cancelBubble = true
+            commitFogPolygon()
+            return
+          }
+          if (!pingEnabled || tabletopTool !== 'none') return
+          const point = relativePoint(e.target.getStage())
+          if (!point) return
           e.cancelBubble = true
-          commitFogPolygon()
+          onMapPing?.(point)
         }}
       >
         <Layer>
@@ -2282,6 +2384,79 @@ export default function MapCanvas({
           {projectiles.map((projectile) => (
             <ProjectileArrow key={projectile.id} projectile={projectile} />
           ))}
+
+          {tabletopAnnotations.map((annotation) => annotation.shape === 'arrow' ? (
+            <Arrow
+              key={annotation.id}
+              points={[annotation.from.x, annotation.from.y, annotation.to.x, annotation.to.y]}
+              stroke={annotation.color}
+              fill={annotation.color}
+              strokeWidth={4 * inv}
+              pointerLength={13 * inv}
+              pointerWidth={12 * inv}
+              lineCap="round"
+              lineJoin="round"
+              shadowColor="rgba(15,23,42,0.8)"
+              shadowBlur={4 * inv}
+              listening={false}
+            />
+          ) : (
+            <Circle
+              key={annotation.id}
+              x={annotation.from.x}
+              y={annotation.from.y}
+              radius={Math.hypot(annotation.to.x - annotation.from.x, annotation.to.y - annotation.from.y)}
+              stroke={annotation.color}
+              strokeWidth={4 * inv}
+              fill={`${annotation.color}18`}
+              dash={[10 * inv, 6 * inv]}
+              listening={false}
+            />
+          ))}
+          {tabletopDraft && (tabletopDraft.shape === 'arrow' ? (
+            <Arrow
+              points={[tabletopDraft.from.x, tabletopDraft.from.y, tabletopDraft.to.x, tabletopDraft.to.y]}
+              stroke="#fde68a"
+              fill="#fde68a"
+              strokeWidth={4 * inv}
+              pointerLength={13 * inv}
+              pointerWidth={12 * inv}
+              opacity={0.78}
+              listening={false}
+            />
+          ) : (
+            <Circle
+              x={tabletopDraft.from.x}
+              y={tabletopDraft.from.y}
+              radius={Math.hypot(tabletopDraft.to.x - tabletopDraft.from.x, tabletopDraft.to.y - tabletopDraft.from.y)}
+              stroke="#fde68a"
+              strokeWidth={4 * inv}
+              fill="rgba(251,191,36,0.08)"
+              dash={[10 * inv, 6 * inv]}
+              listening={false}
+            />
+          ))}
+          {tabletopPings.filter((ping) => ping.expiresAt > tabletopNow).map((ping) => {
+            const duration = Math.max(1, ping.expiresAt - ping.createdAt)
+            const progress = Math.max(0, Math.min(1, (tabletopNow - ping.createdAt) / duration))
+            return (
+              <Group key={ping.id} x={ping.point.x} y={ping.point.y} listening={false}>
+                <Circle
+                  radius={(10 + progress * 42) * inv}
+                  stroke={ping.role === 'dm' ? '#fbbf24' : '#38bdf8'}
+                  strokeWidth={3 * inv}
+                  opacity={1 - progress}
+                />
+                <Circle
+                  radius={(7 + ((progress + 0.38) % 1) * 32) * inv}
+                  stroke={ping.role === 'dm' ? '#fde68a' : '#bae6fd'}
+                  strokeWidth={2 * inv}
+                  opacity={(1 - ((progress + 0.38) % 1)) * 0.8}
+                />
+                <Circle radius={5 * inv} fill={ping.role === 'dm' ? '#fbbf24' : '#38bdf8'} opacity={0.9} />
+              </Group>
+            )
+          })}
 
           {map.tokens.map((t) => {
             const hp = hpByToken?.[t.id]

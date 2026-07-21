@@ -126,7 +126,8 @@ export default function CommunicationsPage() {
     const load = async () => {
       try {
         const next = await loadRoomRoster(session)
-        if (!disposed) setRoster(next.players.filter((entry) => entry.status !== 'removed' && entry.status !== 'left'))
+        if (!disposed) setRoster(next.players.filter((entry) =>
+          entry.role === 'player' && entry.status !== 'removed' && entry.status !== 'left'))
       } catch (cause) {
         if (!disposed) setError(roomApiErrorMessage(cause))
       }

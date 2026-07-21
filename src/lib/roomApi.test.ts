@@ -32,6 +32,7 @@ describe('room roster payload migration', () => {
       players: [{
         memberId: 'player-1',
         displayName: '旧房间玩家',
+        role: 'player',
         slot: 'player1',
         joinedAt: 100,
         lastSeenAt: 200,
@@ -45,6 +46,7 @@ describe('room roster payload migration', () => {
       players: [{
         memberId: 'player-1',
         displayName: '旧房间玩家',
+        role: 'player',
         slot: 'player1',
         joinedAt: 100,
         lastSeenAt: 200,

@@ -6,6 +6,7 @@ import {
   loadRoomRoster,
   restoreRoomPlayer,
   roomApiErrorMessage,
+  roomRosterMemberLabel,
   setRoomCapacity,
   setRoomLocked,
   setRoomPassword,
@@ -13,7 +14,6 @@ import {
   type RoomRoster,
 } from '../lib/roomApi'
 import { getRoomSession } from '../lib/roomSession'
-import { playerSlotLabel } from '../lib/appMode'
 
 export default function RoomManagementPanel() {
   const session = useMemo(() => getRoomSession(), [])
@@ -106,7 +106,7 @@ export default function RoomManagementPanel() {
             onChange={(event) => void run('capacity', () => setRoomCapacity(session, Number(event.target.value)), `玩家上限已改为 ${event.target.value}。`)}
             className="rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-sm text-slate-200"
           >
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count} disabled={count < currentPlayers.length}>{count}</option>)}
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((count) => <option key={count} value={count} disabled={count < currentPlayers.filter((member) => member.role === 'player').length}>{count}</option>)}
           </select>
         </label>
         <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/30 p-2">
@@ -144,17 +144,17 @@ export default function RoomManagementPanel() {
               <div key={player.memberId} className="flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-slate-950/25 px-3 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-slate-200">{player.displayName}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{playerSlotLabel(player.slot)} · {player.online ? '在线' : '暂时断线'} · {player.ready ? '规则就绪' : '规则未就绪'}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{roomRosterMemberLabel(player)} · {player.online ? '在线' : '暂时断线'} · {player.ready ? '规则就绪' : '规则未就绪'}</p>
                   <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-600"><Clock3 className="h-3 w-3" />最后在线 {lastSeenLabel(player.lastSeenAt)} · 当前角色 {player.activeCharacterName ?? '未选择'}</p>
                 </div>
                 <div className="flex shrink-0 gap-1.5">
-                  <button
+                  {player.role === 'player' && <button
                     type="button"
                     data-testid={`room-transfer-${player.memberId}`}
                     disabled={busy !== null || !player.ready || !player.online}
                     title={!player.online ? '玩家必须在线才能接管 DM' : player.ready ? '转让 DM' : '规则包未就绪，不能接管 DM'}
                     onClick={() => {
-                      if (!window.confirm(`确定把 DM 权限转让给「${player.displayName}」吗？你会变为 ${playerSlotLabel(player.slot)}。`)) return
+                      if (!window.confirm(`确定把 DM 权限转让给「${player.displayName}」吗？你会变为 ${roomRosterMemberLabel(player)}。`)) return
                       void run(`transfer:${player.memberId}`, async () => {
                         await transferRoomDm(session, player.memberId)
                         window.location.assign('/maps')
@@ -163,7 +163,7 @@ export default function RoomManagementPanel() {
                     className="rounded-lg border border-arcane-400/20 p-2 text-arcane-300 hover:bg-arcane-500/10 disabled:opacity-30"
                   >
                     <Crown className="h-4 w-4" />
-                  </button>
+                  </button>}
                   <button
                     type="button"
                     data-testid={`room-kick-${player.memberId}`}

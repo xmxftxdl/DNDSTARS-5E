@@ -29,6 +29,10 @@ export const ROOM_HOST_TTL_MS = Math.max(30_000, Number(process.env.STARS_ROOM_H
 export const ROOM_PLAYER_TTL_MS = Math.max(60_000, Number(process.env.STARS_ROOM_PLAYER_TTL_MS) || 300_000)
 export const ROOM_PRESENCE_ONLINE_MS = Math.max(10_000, Number(process.env.STARS_ROOM_PRESENCE_ONLINE_MS) || 20_000)
 export const ROOM_PLAYER_SLOTS = Object.freeze(['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8'])
+export const ROOM_SPECTATOR_LIMIT = 16
+export const MAP_TABLETOP_CHANNEL = 'map-tabletop'
+export const MAP_PING_LIFETIME_MS = 3_200
+export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION = 3
 export const SHARED_MIN_CLIENT_PROTOCOL = 3
@@ -548,9 +552,19 @@ export function roomPluginReadiness(required, active) {
   return { ready: missing.length === 0 && mismatched.length === 0, missing, mismatched }
 }
 
-function activeRoomPlayers(room, now) {
+function activeRoomPlayers(room, now = Date.now()) {
   return Array.isArray(room?.players)
     ? room.players.filter((player) =>
+      player?.role !== 'spectator' &&
+      !player?.leftAt && !player?.removedAt && Number.isFinite(player?.lastSeenAt) &&
+      now - player.lastSeenAt <= ROOM_PLAYER_TTL_MS)
+    : []
+}
+
+function activeRoomSpectators(room, now = Date.now()) {
+  return Array.isArray(room?.players)
+    ? room.players.filter((player) =>
+      player?.role === 'spectator' &&
       !player?.leftAt && !player?.removedAt && Number.isFinite(player?.lastSeenAt) &&
       now - player.lastSeenAt <= ROOM_PLAYER_TTL_MS)
     : []
@@ -619,6 +633,7 @@ export function assignRoomPlayer(room, input, now = Date.now()) {
       ...(input.accountId ? { accountId: input.accountId } : {}),
       clientId: input.clientId,
       displayName: input.displayName,
+      role: 'player',
       slot,
       activePlugins: input.activePlugins ?? resumed.activePlugins ?? [],
       lastSeenAt: now,
@@ -654,6 +669,7 @@ export function assignRoomPlayer(room, input, now = Date.now()) {
     ...(input.accountId ? { accountId: input.accountId } : {}),
     clientId: input.clientId,
     displayName: input.displayName,
+    role: 'player',
     slot,
     activePlugins: input.activePlugins ?? [],
     joinedAt: now,
@@ -1179,6 +1195,125 @@ export function parseRoomChatRollCommand(value) {
     modifier,
     label: boundedText(match[5], 160) || undefined,
   }
+}
+
+/** 观战者不占玩家槽位，但仍是可恢复、可被 DM 移除的房间成员。 */
+export function assignRoomSpectator(room, input, now = Date.now()) {
+  if (room?.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+  if (!roomHostIsOnline(room, now)) return { ok: false, status: 409, error: 'room-offline' }
+  const members = Array.isArray(room?.players) ? room.players : []
+  const resumedByAccount = input.accountId
+    ? members
+      .filter((member) => member.accountId === input.accountId)
+      .sort((left, right) => Number(right.lastSeenAt ?? 0) - Number(left.lastSeenAt ?? 0))[0]
+    : undefined
+  const resumedByClient = members
+    .filter((member) => member.clientId === input.clientId && (!input.accountId || !member.accountId || member.accountId === input.accountId))
+    .sort((left, right) => Number(right.lastSeenAt ?? 0) - Number(left.lastSeenAt ?? 0))[0]
+  const resumedByMember = members.find((member) => member.memberId === input.memberId)
+  if (!resumedByAccount && !resumedByClient && resumedByMember && resumedByMember.clientId !== input.clientId) {
+    return { ok: false, status: 409, error: 'invalid-resume-member' }
+  }
+  const resumed = resumedByAccount ?? resumedByClient ?? resumedByMember
+  if (resumed && roomPlayerPresence(resumed, now) === 'removed') {
+    return { ok: false, status: 403, error: 'member-removed' }
+  }
+  if (!resumed && room?.locked) return { ok: false, status: 409, error: 'room-locked' }
+  const occupied = activeRoomSpectators(room, now)
+    .filter((member) => member.memberId !== resumed?.memberId && member.clientId !== resumed?.clientId)
+  if (occupied.length >= ROOM_SPECTATOR_LIMIT) return { ok: false, status: 409, error: 'spectator-full' }
+  const member = {
+    ...(resumed ?? {}),
+    memberId: resumed?.memberId ?? input.memberId,
+    ...(input.accountId ? { accountId: input.accountId } : {}),
+    clientId: input.clientId,
+    displayName: input.displayName,
+    role: 'spectator',
+    activePlugins: input.activePlugins ?? resumed?.activePlugins ?? [],
+    joinedAt: resumed?.joinedAt ?? now,
+    lastSeenAt: now,
+  }
+  delete member.slot
+  delete member.leftAt
+  delete member.removedAt
+  return {
+    ok: true,
+    member,
+    next: {
+      ...room,
+      players: [
+        ...members.filter((candidate) =>
+          candidate.memberId !== member.memberId && candidate.clientId !== member.clientId),
+        member,
+      ],
+      updatedAt: now,
+    },
+  }
+}
+
+function validMapTabletopPoint(value) {
+  return plainObject(value) && Number.isFinite(value.x) && Number.isFinite(value.y) &&
+    Math.abs(value.x) <= 1_000_000 && Math.abs(value.y) <= 1_000_000
+}
+
+/** Validate and author ephemeral tabletop events at the room authority boundary. */
+export function normalizeMapTabletopEvent(payload, actor, now = Date.now()) {
+  const role = actor?.role === 'dm' || actor?.role === 'player' ? actor.role : null
+  if (!role) return { ok: false, status: 403, error: 'forbidden' }
+  const type = payload?.type
+  const mapId = normalizedLabel(payload?.mapId, 160)
+  if (!mapId) return { ok: false, status: 400, error: 'invalid-map-tabletop-event' }
+  const common = {
+    id: randomUUID(),
+    type,
+    mapId,
+    memberId: normalizedLabel(actor?.memberId, 160) || 'local-dm',
+    memberName: normalizedLabel(actor?.displayName, 80) || (role === 'dm' ? 'DM' : '玩家'),
+    role,
+    createdAt: now,
+  }
+  if (type === 'ping') {
+    if (!validMapTabletopPoint(payload?.point)) return { ok: false, status: 400, error: 'invalid-map-tabletop-event' }
+    return { ok: true, event: { ...common, point: { x: payload.point.x, y: payload.point.y }, expiresAt: now + MAP_PING_LIFETIME_MS } }
+  }
+  if (role !== 'dm') return { ok: false, status: 403, error: 'forbidden' }
+  if (type === 'focus') {
+    if (!validMapTabletopPoint(payload?.point) ||
+      (payload?.scale != null && (!Number.isFinite(payload.scale) || payload.scale < 0.1 || payload.scale > 4))) {
+      return { ok: false, status: 400, error: 'invalid-map-tabletop-event' }
+    }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        point: { x: payload.point.x, y: payload.point.y },
+        ...(payload.scale == null ? {} : { scale: payload.scale }),
+        expiresAt: now + 15_000,
+      },
+    }
+  }
+  if (type === 'clear-annotations') {
+    return { ok: true, event: { ...common, expiresAt: now + 15_000 } }
+  }
+  if (type === 'annotation') {
+    if (
+      !['arrow', 'circle'].includes(payload?.shape) ||
+      !validMapTabletopPoint(payload?.from) || !validMapTabletopPoint(payload?.to) ||
+      (payload?.color != null && (typeof payload.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(payload.color)))
+    ) return { ok: false, status: 400, error: 'invalid-map-tabletop-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        shape: payload.shape,
+        from: { x: payload.from.x, y: payload.from.y },
+        to: { x: payload.to.x, y: payload.to.y },
+        color: payload.color ?? '#fbbf24',
+        expiresAt: now + MAP_ANNOTATION_LIFETIME_MS,
+      },
+    }
+  }
+  return { ok: false, status: 400, error: 'invalid-map-tabletop-event' }
 }
 
 function communicationPersona(member, context, npcTokenId) {
@@ -3652,6 +3787,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       locked: result.room.locked === true,
       passwordRequired: plainObject(result.room.joinSecret),
       playerCount: activeRoomPlayers(result.room).length,
+      spectatorCount: activeRoomSpectators(result.room).length,
       maxPlayers: Number.isInteger(result.room.maxPlayers) ? result.room.maxPlayers : 3,
       plugins: rules.plugins,
     })
@@ -4103,8 +4239,10 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         }
         const nextHost = { ...target, lastSeenAt: now }
         delete nextHost.slot
+        delete nextHost.role
         const previousHostAsPlayer = {
           ...room.host,
+          role: 'player',
           slot: target.slot,
           joinedAt: room.host.joinedAt ?? room.createdAt,
           lastSeenAt: now,
@@ -4193,6 +4331,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         memberId: player.memberId,
         accountId: player.accountId,
         displayName: player.displayName,
+        role: player.role === 'spectator' ? 'spectator' : 'player',
         slot: player.slot,
         joinedAt: player.joinedAt,
         lastSeenAt: player.lastSeenAt,
@@ -4214,6 +4353,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     const clientId = payload?.clientId
     const resumeMemberId = payload?.resumeMemberId
     const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
+    const requestedRole = payload?.role === 'spectator' ? 'spectator' : 'player'
     const account = await authenticateAccount(req, ctx, true)
     if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
     if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
@@ -4235,7 +4375,8 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
       }
       if (!roomPasswordMatches(room, payload?.password)) return { ok: false, status: 403, error: 'invalid-room-password' }
-      return assignRoomPlayer(room, {
+      const assign = requestedRole === 'spectator' ? assignRoomSpectator : assignRoomPlayer
+      return assign(room, {
         clientId,
         displayName,
         memberId: resumeMemberId ?? randomUUID(),
@@ -4243,7 +4384,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         activePlugins,
       })
     })
-    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role ?? 'player'))
+    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role ?? requestedRole))
     return true
   }
 
@@ -4274,7 +4415,9 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       if (!member) return { ok: false, status: 404, error: 'member-not-found' }
       if (!roomMemberAccountAuthorized(member, account)) return { ok: false, status: 403, error: 'forbidden' }
       if (roomPlayerPresence(member, now) === 'removed') return { ok: false, status: 403, error: 'member-removed' }
-      const resumed = assignRoomPlayer(room, {
+      const memberRole = member.role === 'spectator' ? 'spectator' : 'player'
+      const assign = memberRole === 'spectator' ? assignRoomSpectator : assignRoomPlayer
+      const resumed = assign(room, {
         memberId: member.memberId,
         accountId: member.accountId,
         clientId: member.clientId,
@@ -4290,7 +4433,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       return {
         ok: true,
         member: refreshed,
-        role: 'player',
+        role: memberRole,
         next: {
           ...resumed.next,
           players: resumed.next.players.map((player) => player.memberId === refreshed.memberId ? refreshed : player),
@@ -4517,6 +4660,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (authenticatedRoomMember === room?.host) ctx = { ...ctx, accessRole: 'dm' }
+      else if (authenticatedRoomMember?.role === 'spectator') ctx = { ...ctx, accessRole: 'spectator' }
       else if (authenticatedRoomMember) ctx = { ...ctx, accessRole: 'player' }
     } catch {
       writeJson(res, 403, { error: 'forbidden' })
@@ -4535,6 +4679,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       res.end(JSON.stringify({ error: 'forbidden' }))
       return true
     }
+  }
+  // Spectators may read the same server-projected resources as players, but
+  // cannot mutate state, images, event channels, combat actions, or journals.
+  if (ctx.accessRole === 'spectator' && req.method !== 'GET') {
+    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ error: 'forbidden' }))
+    return true
   }
   if (
     req.method !== 'GET' &&
@@ -4586,7 +4737,19 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
       if (req.method === 'POST') {
         const body = await readBody(req)
-        const payload = JSON.parse(body.toString('utf8'))
+        let payload = JSON.parse(body.toString('utf8'))
+        if (channel === MAP_TABLETOP_CHANNEL) {
+          const normalized = normalizeMapTabletopEvent(payload, {
+            role: ctx.accessRole === 'open' ? 'dm' : ctx.accessRole,
+            memberId: authenticatedRoomMember?.memberId,
+            displayName: authenticatedRoomMember?.displayName,
+          })
+          if (!normalized.ok) {
+            writeJson(res, normalized.status, { error: normalized.error })
+            return true
+          }
+          payload = normalized.event
+        }
         publishEvent(ctx, channel, payload)
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end('{"ok":true}')
@@ -4886,7 +5049,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           return true
         }
         let roomMember = authenticatedRoomMember
-        let playerRead = ctx.accessRole === 'player'
+        let playerRead = ctx.accessRole === 'player' || ctx.accessRole === 'spectator'
         if ((ctx.roomId ?? 'default') !== 'default' && !roomMember) {
           const room = await readRoomForCampaign(ctx)
           roomMember = lobbyRoomMember(room, req?.headers?.['x-stars-member'] ?? parsed.searchParams.get('member'))
@@ -5082,7 +5245,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const metaPath = path.join(ctx.imageRoot, `${id}.json`)
       if (req.method === 'GET') {
         try {
-          if (ctx.accessRole === 'player' && id.startsWith('handout-image-')) {
+          if ((ctx.accessRole === 'player' || ctx.accessRole === 'spectator') && id.startsWith('handout-image-')) {
             let journal = null
             try {
               journal = JSON.parse(await readFile(path.join(ctx.stateRoot, 'room-journal.json'), 'utf8'))

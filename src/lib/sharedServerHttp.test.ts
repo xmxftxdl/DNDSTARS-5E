@@ -98,6 +98,65 @@ describe('AC7 — 玩家 PUT 在两种 flag 状态都成功', () => {
   })
 })
 
+describe('观战席位与地图桌面事件权限', () => {
+  it('观战不占玩家槽位，并在服务端禁止一切共享写入', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '地图桌面测试', displayName: 'DM', rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'tabletop-dm-client', activePlugins: [], maxPlayers: 1,
+      }),
+    })
+    const created = await createdResponse.json() as { roomId: string; member: { memberId: string } }
+    const join = async (body: Record<string, unknown>) => {
+      const response = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      return { response, body: await response.json() as { member: { memberId: string; role: string; slot?: string } } }
+    }
+    const spectator = await join({
+      displayName: '观战者', clientId: 'tabletop-spectator-client', activePlugins: [], role: 'spectator',
+    })
+    expect(spectator.response.status).toBe(200)
+    expect(spectator.body.member).toMatchObject({ role: 'spectator' })
+    expect(spectator.body.member.slot).toBeUndefined()
+    const player = await join({ displayName: '玩家', clientId: 'tabletop-player-client', activePlugins: [] })
+    expect(player.body.member).toMatchObject({ role: 'player', slot: 'player1' })
+    const preview = await fetch(`${offServer.base}/api/rooms/${created.roomId}/preview`).then((response) => response.json()) as {
+      playerCount: number
+      spectatorCount: number
+    }
+    expect(preview).toMatchObject({ playerCount: 1, spectatorCount: 1 })
+
+    const roomQuery = `room=${created.roomId}`
+    const protocol = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '3' }
+    const spectatorWrite = await fetch(`${offServer.base}/api/state/characters?${roomQuery}`, {
+      method: 'PUT',
+      headers: { ...protocol, 'X-Stars-Member': spectator.body.member.memberId },
+      body: JSON.stringify({ characters: [], updatedAt: Date.now() }),
+    })
+    expect(spectatorWrite.status).toBe(403)
+
+    const eventUrl = `${offServer.base}/api/events/map-tabletop?${roomQuery}`
+    const playerPing = await fetch(eventUrl, {
+      method: 'POST', headers: { ...protocol, 'X-Stars-Member': player.body.member.memberId },
+      body: JSON.stringify({ type: 'ping', mapId: 'map-1', point: { x: 10, y: 20 } }),
+    })
+    expect(playerPing.status).toBe(200)
+    const playerFocus = await fetch(eventUrl, {
+      method: 'POST', headers: { ...protocol, 'X-Stars-Member': player.body.member.memberId },
+      body: JSON.stringify({ type: 'focus', mapId: 'map-1', point: { x: 10, y: 20 } }),
+    })
+    expect(playerFocus.status).toBe(403)
+    const dmFocus = await fetch(eventUrl, {
+      method: 'POST', headers: { ...protocol, 'X-Stars-Member': created.member.memberId },
+      body: JSON.stringify({ type: 'focus', mapId: 'map-1', point: { x: 10, y: 20 } }),
+    })
+    expect(dmFocus.status).toBe(200)
+  })
+})
+
 describe('地图几何的房间权限与安全投影', () => {
   it('只允许 DM 写地图，并在 HTTP 响应前移除玩家不可见 Token 和暗门元数据', async () => {
     const createdResponse = await fetch(`${offServer.base}/api/rooms`, {

@@ -4,6 +4,7 @@ import {
   Check,
   Crown,
   DoorOpen,
+  Eye,
   Dices,
   LoaderCircle,
   Copy,
@@ -53,6 +54,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
   const [playerName, setPlayerName] = useState(
     recentResume?.roomId === initialRoomCode ? recentResume.displayName : '',
   )
+  const [joinRole, setJoinRole] = useState<'player' | 'spectator'>('player')
   const [roomPassword, setRoomPassword] = useState('')
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [busy, setBusy] = useState(false)
@@ -126,7 +128,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
       const activePlugins = activeDnd5eRulesPluginRequirements()
       const connection = mode === 'create'
         ? await createRoom({ roomName, displayName: dmName, password: roomPassword, maxPlayers, activePlugins })
-        : await joinRoom({ roomId: roomCode, displayName: playerName, password: roomPassword, activePlugins })
+        : await joinRoom({ roomId: roomCode, displayName: playerName, password: roomPassword, activePlugins, role: joinRole })
       saveRoomSession(connection.session)
       setRoomRulesSnapshot(connection.rules)
       window.location.assign(
@@ -243,7 +245,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                 <p className="mt-1 text-sm text-slate-500">
                   {mode === 'create'
                     ? '创建成功后，你将以 DM 身份进入管理端。'
-                    : '房间创建者必须在线，系统会自动分配玩家端。'}
+                    : '房间创建者必须在线；可加入玩家席位，或使用只读观战席位。'}
                 </p>
               </div>
 
@@ -405,7 +407,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">玩家称呼</span>
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">房间称呼</span>
                     <input
                       value={playerName}
                       onChange={(event) => setPlayerName(event.target.value)}
@@ -415,6 +417,28 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                       placeholder="输入你的称呼"
                     />
                   </label>
+                  <div>
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">加入身份</span>
+                    <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/20 p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setJoinRole('player')}
+                        className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-semibold transition ${joinRole === 'player' ? 'bg-arcane-500/20 text-arcane-100' : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'}`}
+                      >
+                        <Users className="h-4 w-4" />玩家
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setJoinRole('spectator')}
+                        className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-xs font-semibold transition ${joinRole === 'spectator' ? 'bg-sky-500/20 text-sky-100' : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'}`}
+                      >
+                        <Eye className="h-4 w-4" />只读观战
+                      </button>
+                    </div>
+                    {joinRole === 'spectator' && (
+                      <p className="mt-2 text-xs leading-5 text-sky-200/75">观战者使用玩家安全视野，不占玩家名额，不能移动单位、掷骰或修改房间数据。</p>
+                    )}
+                  </div>
                   {preview?.passwordRequired && (
                     <label className="block">
                       <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">房间密码</span>
@@ -443,7 +467,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                             <div>
                               <p className="text-sm font-semibold text-slate-100">{preview.roomName}</p>
                               <p className="mt-1 text-xs text-slate-400">DM：{preview.dmDisplayName}</p>
-                              <p className="mt-1 text-xs text-slate-500">玩家：{preview.playerCount}/{preview.maxPlayers} · {preview.passwordRequired ? '需要密码' : '无需密码'} · 游戏协议 v{preview.gameProtocolVersion}</p>
+                              <p className="mt-1 text-xs text-slate-500">玩家：{preview.playerCount}/{preview.maxPlayers} · 观战：{preview.spectatorCount ?? 0} · {preview.passwordRequired ? '需要密码' : '无需密码'} · 游戏协议 v{preview.gameProtocolVersion}</p>
                               {preview.hostStatus === 'grace' && (
                                 <p className="mt-1 text-[11px] text-amber-300">DM 暂时断线，房间正处于重连宽限期。</p>
                               )}
@@ -516,7 +540,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                   ? '正在连接…'
                   : !account
                     ? '创建账号并生成恢复码'
-                    : mode === 'create' ? '创建并以 DM 身份进入' : '加入并进入玩家端'}
+                    : mode === 'create' ? '创建并以 DM 身份进入' : joinRole === 'spectator' ? '以观战者身份进入' : '加入并进入玩家端'}
               </button>
             </form>
           </div>

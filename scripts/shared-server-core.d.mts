@@ -11,6 +11,10 @@ export const ROOM_HOST_TTL_MS: number
 export const ROOM_PLAYER_TTL_MS: number
 export const ROOM_PRESENCE_ONLINE_MS: number
 export const ROOM_PLAYER_SLOTS: readonly ['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8']
+export const ROOM_SPECTATOR_LIMIT: number
+export const MAP_TABLETOP_CHANNEL: 'map-tabletop'
+export const MAP_PING_LIFETIME_MS: number
+export const MAP_ANNOTATION_LIFETIME_MS: number
 export const DND5E_2014_RULESET_ID: 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION: number
 export const SHARED_MIN_CLIENT_PROTOCOL: number
@@ -217,6 +221,32 @@ export function assignRoomPlayer(
       member: Record<string, unknown>
       next: Record<string, unknown>
     }
+
+export function assignRoomSpectator(
+  room: Record<string, unknown>,
+  input: {
+    clientId: string
+    displayName: string
+    memberId: string
+    accountId?: string
+    activePlugins?: readonly RoomPluginRequirement[]
+  },
+  now?: number,
+):
+  | { ok: false; status: number; error: string }
+  | {
+      ok: true
+      member: Record<string, unknown>
+      next: Record<string, unknown>
+    }
+
+export function normalizeMapTabletopEvent(
+  payload: unknown,
+  actor: { role?: string; memberId?: string; displayName?: string },
+  now?: number,
+):
+  | { ok: false; status: number; error: string }
+  | { ok: true; event: Record<string, unknown> }
 
 export function authorizeStateWrite(
   resourceName: string,

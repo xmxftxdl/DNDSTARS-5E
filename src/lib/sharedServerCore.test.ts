@@ -15,6 +15,7 @@ import {
   ROOM_HOST_TTL_MS,
   ROOM_PLAYER_TTL_MS,
   assignRoomPlayer,
+  assignRoomSpectator,
   capEventChannels,
   STATE_MAX_BYTES,
   SHARED_PROTOCOL_VERSION,
@@ -32,6 +33,7 @@ import {
   normalizeLobbyRoomCode,
   normalizeAccountRecoveryCode,
   normalizeRoomPluginRequirements,
+  normalizeMapTabletopEvent,
   mutateRoomChatState,
   mutateRoomJournalState,
   mutateGroupAbilityChecksState,
@@ -489,6 +491,47 @@ describe('map geometry player projection', () => {
     })
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
       .toEqual(['hero', 'at-35-feet'])
+  })
+
+  it('assigns a recoverable spectator without consuming a player slot', () => {
+    const timestamp = 10_000
+    const room = {
+      id: 'ABC234', maxPlayers: 1, locked: false, players: [],
+      host: { memberId: 'dm', clientId: 'dm-client', displayName: 'DM', lastSeenAt: timestamp },
+    }
+    const spectator = assignRoomSpectator(room, {
+      memberId: 'spectator-member', clientId: 'spectator-client', displayName: '观战者',
+    }, timestamp)
+    expect(spectator).toMatchObject({
+      ok: true,
+      member: { memberId: 'spectator-member', role: 'spectator' },
+    })
+    if (!spectator.ok) throw new Error('expected spectator allocation')
+    expect(spectator.member.slot).toBeUndefined()
+    const player = assignRoomPlayer(spectator.next, {
+      memberId: 'player-member', clientId: 'player-client', displayName: '玩家',
+    }, timestamp + 1)
+    expect(player).toMatchObject({ ok: true, member: { slot: 'player1', role: 'player' } })
+  })
+
+  it('authorizes tabletop pings for players but reserves focus and annotations for the DM', () => {
+    const timestamp = 20_000
+    const point = { x: 40, y: 60 }
+    expect(normalizeMapTabletopEvent(
+      { type: 'ping', mapId: 'map-1', point },
+      { role: 'player', memberId: 'player', displayName: '玩家' },
+      timestamp,
+    )).toMatchObject({ ok: true, event: { type: 'ping', point, role: 'player', createdAt: timestamp } })
+    expect(normalizeMapTabletopEvent(
+      { type: 'focus', mapId: 'map-1', point },
+      { role: 'player', memberId: 'player', displayName: '玩家' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 403 })
+    expect(normalizeMapTabletopEvent(
+      { type: 'annotation', mapId: 'map-1', shape: 'arrow', from: point, to: { x: 80, y: 90 } },
+      { role: 'dm', memberId: 'dm', displayName: 'DM' },
+      timestamp,
+    )).toMatchObject({ ok: true, event: { type: 'annotation', role: 'dm', shape: 'arrow' } })
   })
 
   it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {

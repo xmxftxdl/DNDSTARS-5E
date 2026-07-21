@@ -55,6 +55,7 @@ export interface RoomPreview {
   locked: boolean
   passwordRequired: boolean
   playerCount: number
+  spectatorCount: number
   maxPlayers: number
   plugins: RoomPluginMetadata[]
 }
@@ -63,7 +64,8 @@ export interface RoomRosterMember {
   memberId: string
   accountId?: string
   displayName: string
-  slot: RoomPlayerSlot
+  role: 'player' | 'spectator'
+  slot?: RoomPlayerSlot
   joinedAt: number
   lastSeenAt: number
   online: boolean
@@ -85,6 +87,10 @@ export interface RoomRoster {
 
 export function onlineRoomRoster(roster: RoomRoster): RoomRoster {
   return { ...roster, players: roster.players.filter((player) => player.online) }
+}
+
+export function roomRosterMemberLabel(member: Pick<RoomRosterMember, 'role' | 'slot'>): string {
+  return member.role === 'spectator' ? '观战者' : `玩家${member.slot?.replace('player', '') || '1'}`
 }
 
 function normalizedRosterRequirement(value: unknown): RoomPluginRequirement | null {
@@ -121,7 +127,7 @@ export function normalizeRoomRosterPayload(value: unknown, expectedRoomId: strin
     if (
       typeof player.memberId !== 'string' ||
       typeof player.displayName !== 'string' ||
-      !isRoomPlayerSlot(player.slot)
+      (player.role === 'spectator' ? player.slot != null : !isRoomPlayerSlot(player.slot))
     ) return []
     const missing = (Array.isArray(player.missing) ? player.missing : [])
       .map(normalizedRosterRequirement)
@@ -133,7 +139,8 @@ export function normalizeRoomRosterPayload(value: unknown, expectedRoomId: strin
       memberId: player.memberId,
       ...(typeof player.accountId === 'string' ? { accountId: player.accountId } : {}),
       displayName: player.displayName,
-      slot: player.slot,
+      role: player.role === 'spectator' ? 'spectator' : 'player',
+      ...(isRoomPlayerSlot(player.slot) ? { slot: player.slot } : {}),
       joinedAt: Number.isFinite(player.joinedAt) ? Number(player.joinedAt) : 0,
       lastSeenAt: Number.isFinite(player.lastSeenAt) ? Number(player.lastSeenAt) : 0,
       online: player.online === true,
@@ -282,6 +289,7 @@ export async function joinRoom(input: {
   roomId: string
   displayName: string
   password?: string
+  role?: 'player' | 'spectator'
   activePlugins?: readonly { id: string; version: string; integrity?: string; stateSchemaVersion?: number }[]
 }): Promise<RoomConnection> {
   const account = getAccountSession()
@@ -297,6 +305,7 @@ export async function joinRoom(input: {
       ...(resumeIdentity ? { resumeMemberId: resumeIdentity.memberId } : {}),
       activePlugins: exactRoomPluginRequirements(input.activePlugins ?? []),
       password: input.password ?? '',
+      role: input.role ?? 'player',
     }),
   })
   return { session: responseToSession(response), rules: response.rules }
@@ -566,6 +575,7 @@ export function roomApiErrorMessage(error: unknown): string {
     'room-offline': '房间创建者当前不在线，暂时无法加入。',
     'room-closed': '这个房间已经关闭。',
     'room-full': '房间的玩家席位已满。',
+    'spectator-full': '房间的观战席位已满。',
     'room-locked': '房间当前已锁定，暂不接受新玩家。',
     'member-not-found': '当前房间席位已失效，请重新加入。',
     forbidden: '只有房间创建者可以查看房间玩家名册。',

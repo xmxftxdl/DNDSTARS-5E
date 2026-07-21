@@ -25,6 +25,7 @@ function playerSlotFromEnv(): PlayerSlot | null {
 
 export function modeFromPort(): AppMode | null {
   const sessionMode = getRoomSession()?.role
+  if (sessionMode === 'spectator') return 'player'
   if (sessionMode === 'dm' || sessionMode === 'player') return sessionMode
   const envMode = modeFromEnv()
   if (envMode) return envMode
@@ -35,7 +36,9 @@ export function modeFromPort(): AppMode | null {
 }
 
 export function playerSlotFromPort(port?: string): PlayerSlot | null {
-  const sessionSlot = getRoomSession()?.slot
+  const session = getRoomSession()
+  if (session?.role === 'spectator') return null
+  const sessionSlot = session?.slot
   if (isRoomPlayerSlot(sessionSlot)) return sessionSlot
   const resolvedPort = port ?? (typeof window !== 'undefined' ? window.location.port : '')
   return playerSlotFromEnv() ?? PLAYER_PORT_TO_SLOT[resolvedPort] ?? null
@@ -50,5 +53,7 @@ export function isPlayerPort(): boolean {
 }
 
 export function canWriteSharedState(): boolean {
+  const session = getRoomSession()
+  if (session?.role === 'spectator') return false
   return modeFromPort() !== 'player'
 }

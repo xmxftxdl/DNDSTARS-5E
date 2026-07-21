@@ -11,9 +11,8 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react'
-import { playerSlotLabel } from '../lib/appMode'
 import { roomCharactersOwnedByMembers } from '../lib/playerView'
-import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../lib/roomApi'
+import { loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../lib/roomApi'
 import { getRoomSession } from '../lib/roomSession'
 import { useCharacterStore } from '../store/characters'
 
@@ -66,7 +65,7 @@ export default function RoomPartyOverview() {
     [players],
   )
   const currentMemberIds = useMemo(
-    () => new Set(currentPlayers.map((player) => player.memberId)),
+    () => new Set(currentPlayers.filter((player) => player.role === 'player').map((player) => player.memberId)),
     [currentPlayers],
   )
   const currentRoomCharacters = useMemo(
@@ -148,7 +147,7 @@ export default function RoomPartyOverview() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="truncate font-semibold text-slate-100">{player.displayName}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">{playerSlotLabel(player.slot)}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{roomRosterMemberLabel(player)}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`inline-flex items-center gap-1 text-[11px] ${player.ready ? 'text-emerald-300' : 'text-amber-300'}`}>

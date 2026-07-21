@@ -209,6 +209,7 @@ async function sharedCombatIsActive(): Promise<boolean> {
 }
 
 async function performSharedResourceSave<T>(name: string, data: T): Promise<void> {
+  if (getRoomSession()?.role === 'spectator') return
   if (!canWriteSharedState()) {
     if (
       name !== 'characters' &&
@@ -314,6 +315,7 @@ export function saveSharedResource<T>(name: string, data: T): Promise<void> {
 }
 
 export async function publishSharedEvent<T>(channel: string, data: T): Promise<void> {
+  if (getRoomSession()?.role === 'spectator') return
   await Promise.allSettled(
     sharedEventApiCandidates().map((api) =>
       fetch(sharedSessionUrl(`${api}/events/${encodeURIComponent(channel)}`), {
@@ -326,6 +328,7 @@ export async function publishSharedEvent<T>(channel: string, data: T): Promise<v
 }
 
 export async function clearSharedEventBacklog(channels?: string[]): Promise<void> {
+  if (getRoomSession()?.role === 'spectator') return
   const targets = channels && channels.length > 0 ? channels : ['_all']
   await Promise.allSettled(
     sharedEventApiCandidates().flatMap((api) =>
@@ -340,6 +343,7 @@ export async function clearSharedEventBacklog(channels?: string[]): Promise<void
 }
 
 async function performClearSharedResource(name: string): Promise<void> {
+  if (getRoomSession()?.role === 'spectator') return
   if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
   const expectedRevision = sharedResourceRevisions.get(name) ?? 0
   for (const api of sharedWriteApiCandidates()) {

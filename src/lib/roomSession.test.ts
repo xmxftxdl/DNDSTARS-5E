@@ -71,4 +71,18 @@ describe('room player resume identity', () => {
     expect(getRoomSession()).toMatchObject({ memberId: 'existing-member-123' })
     expect(getRoomPlayerResumeIdentity('ABC234')).toMatchObject({ memberId: 'existing-member-123' })
   })
+
+  it('persists a spectator identity without assigning a player slot', () => {
+    const localStorage = localStorageDouble()
+    localStorage.setItem(ROOM_CLIENT_ID_STORAGE_KEY, 'spectator-browser-client')
+    vi.stubGlobal('window', { localStorage, dispatchEvent: vi.fn() })
+    saveRoomSession({
+      roomId: 'ABC234', roomName: '观战房间', rulesetId: 'dnd5e-2014-srd-5.1',
+      memberId: 'spectator-member-123', clientId: 'spectator-browser-client', role: 'spectator',
+      displayName: '观战者', createdAt: 1,
+    })
+    expect(getRoomSession()).toMatchObject({ role: 'spectator' })
+    expect(getRoomSession()?.slot).toBeUndefined()
+    expect(getRoomPlayerResumeIdentity('ABC234')).toMatchObject({ memberId: 'spectator-member-123' })
+  })
 })

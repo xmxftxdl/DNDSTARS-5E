@@ -51,7 +51,8 @@ export default function App() {
   const [roomSession, setRoomSession] = useState(() => getRoomSession())
   const [roomNotice, setRoomNotice] = useState<string | null>(null)
   const [connection, setConnection] = useState<'online' | 'reconnecting'>('online')
-  const endpointMode = roomSession?.role ?? modeFromPort()
+  const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
+  const isSpectator = roomSession?.role === 'spectator'
   const roomReady = !!roomSession || bypassRoomLobby
   const loadSharedMaps = useMapStore((s) => s.loadShared)
   const loadSharedFog = useFogStore((s) => s.loadShared)
@@ -79,13 +80,13 @@ export default function App() {
         const characterState = useCharacterStore.getState()
         const assignedCharacterId = roomSession.role === 'player'
           ? getAssignedPlayerCharacterId(roomSession.slot)
-          : characterState.selectedId
+          : roomSession.role === 'dm' ? characterState.selectedId : null
         const activeCharacter = roomSession.role === 'player'
           ? getPlayerCharacter(characterState.characters, {
               slot: roomSession.slot,
               assignedCharacterId,
             })
-          : assignedCharacterId
+          : roomSession.role === 'dm' && assignedCharacterId
             ? characterState.characters.find((character) => character.id === assignedCharacterId)
             : undefined
         let rules = await heartbeatRoom(roomSession, activeDnd5eRulesPluginRequirements(), {
@@ -175,7 +176,7 @@ export default function App() {
   }, [endpointMode, loadSharedCampaignTime, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedGroupAbilityChecks, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
-    if (!roomReady) return
+    if (!roomReady || roomSession?.role === 'spectator') return
     const stopInventory = startDnd5eInventoryAuthoritySync()
     return () => stopInventory()
   }, [endpointMode, roomReady, roomSession])
@@ -213,8 +214,8 @@ export default function App() {
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
-      <RoomHandoutNotification />
-      <GroupAbilityCheckSystem />
+      {!isSpectator && <RoomHandoutNotification />}
+      {!isSpectator && <GroupAbilityCheckSystem />}
       <CampaignTimeSystem isDm={endpointMode !== 'player'} />
       <iframe
         title="D20 dice preloader"
@@ -245,10 +246,10 @@ export default function App() {
         <Routes>
           <Route path="/" element={endpointMode === 'player' ? <Navigate to="/maps" replace /> : <PageErrorBoundary scope="战役总览"><Dashboard /></PageErrorBoundary>} />
           <Route path="/maps" element={<PageErrorBoundary scope="地图与战斗"><MapsPage /></PageErrorBoundary>} />
-          <Route path="/characters" element={<PageErrorBoundary scope="角色页面"><CharactersPage /></PageErrorBoundary>} />
-          <Route path="/spellbook" element={<PageErrorBoundary scope="法术书"><SpellbookPage /></PageErrorBoundary>} />
-          <Route path="/communications" element={<PageErrorBoundary scope="通讯与日志"><CommunicationsPage /></PageErrorBoundary>} />
-          <Route path="/settings" element={<PageErrorBoundary scope="设置页面"><RulesPluginsPage /></PageErrorBoundary>} />
+          {!isSpectator && <Route path="/characters" element={<PageErrorBoundary scope="角色页面"><CharactersPage /></PageErrorBoundary>} />}
+          {!isSpectator && <Route path="/spellbook" element={<PageErrorBoundary scope="法术书"><SpellbookPage /></PageErrorBoundary>} />}
+          {!isSpectator && <Route path="/communications" element={<PageErrorBoundary scope="通讯与日志"><CommunicationsPage /></PageErrorBoundary>} />}
+          {!isSpectator && <Route path="/settings" element={<PageErrorBoundary scope="设置页面"><RulesPluginsPage /></PageErrorBoundary>} />}
           {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}
         </Routes>
       </main>
