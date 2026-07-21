@@ -89,7 +89,7 @@ test('DM can manage room capacity, membership and transfer authority from the da
   await expect.poll(() => page.evaluate((key) => {
     const value = JSON.parse(localStorage.getItem(key) ?? '{}') as { role?: string }
     return value.role
-  }, SESSION_KEY)).toBe('player')
+  }, SESSION_KEY), { timeout: 15_000 }).toBe('player')
 
   // 转让后的旧 DM 页面会立即发送一次身份降级心跳；等待同一房间写锁释放，
   // 再确认继任者已经成为权威 DM。

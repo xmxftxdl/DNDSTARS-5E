@@ -426,7 +426,10 @@ import {
 } from '../lib/combatTokens'
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import { modeFromPort } from '../lib/appMode'
-import { DmActionTransactionCoordinator } from '../lib/dmActionTransactionCoordinator'
+import {
+  DmActionTransactionCoordinator,
+  type DmAuthoritativeActionOutcome,
+} from '../lib/dmActionTransactionCoordinator'
 import { runMapsPlayerActionTransaction } from './maps/runMapsPlayerActionTransaction'
 import { TimerRegistry } from '../lib/timerRegistry'
 import {
@@ -1158,7 +1161,7 @@ export default function MapsPage() {
   const combatOutcomeNoticeCombatIdRef = useRef('')
   const playerActionResultBaselinesRef = useRef<Record<string, PlayerActionResultBaseline>>({})
   const playerActionCoordinatorRef = useRef(new DmActionTransactionCoordinator())
-  const playerActionTransactionOutcomeRef = useRef(new Map<string, { status: 'accepted' } | { status: 'rejected'; reason: string }>())
+  const playerActionTransactionOutcomeRef = useRef(new Map<string, DmAuthoritativeActionOutcome>())
   const activeInterruptTransactionIdRef = useRef<string | null>(null)
   const playerActionAuthorityCommitRef = useRef<Promise<void>>(Promise.resolve())
   const applyingPlayerActionTransactionRef = useRef(false)
@@ -2219,8 +2222,15 @@ export default function MapsPage() {
       assignedCharacterId,
     }) ?? visibleChars[0]
 
+  const playerAuthorityReadyForCurrentCombat = isDM || matchesDmAuthorityReady(dmAuthorityReady, {
+    mapId: activeMap?.id,
+    combatId,
+    combatActive,
+  })
+
   const canControlPlayerTurn =
     combatActive &&
+    playerAuthorityReadyForCurrentCombat &&
     usesAutomatedPlayerSettlement(settlementMode) &&
     currentInitiativeToken?.type === 'player' &&
     !!turnCharacter &&
@@ -2231,6 +2241,7 @@ export default function MapsPage() {
 
   const canControlDeathSaveTurn =
     combatActive &&
+    playerAuthorityReadyForCurrentCombat &&
     usesAutomatedPlayerSettlement(settlementMode) &&
     currentInitiativeToken?.type === 'player' &&
     !!turnCharacter &&
@@ -7451,7 +7462,10 @@ export default function MapsPage() {
       },
       recentActionKeys: recentPlayerActionKeysRef.current,
     })
-    if (authorityPlan.status === 'ignored') return
+    if (authorityPlan.status === 'ignored') {
+      playerActionTransactionOutcomeRef.current.set(action.id, { status: 'ignored' })
+      return
+    }
     if (authorityPlan.status === 'rejected') {
       acknowledgePlayerAction(action, 'rejected', authorityPlan.reason)
       completePlayerActionRequest(action)

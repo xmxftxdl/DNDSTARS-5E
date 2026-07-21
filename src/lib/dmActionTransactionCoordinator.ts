@@ -18,6 +18,7 @@ export interface DmAuthoritativeActionTransactionInput {
 export type DmAuthoritativeActionOutcome =
   | { status: 'accepted' }
   | { status: 'rejected'; reason: string }
+  | { status: 'ignored' }
 
 export class DmActionTransactionCoordinator {
   private queue: Promise<void> = Promise.resolve()
@@ -61,6 +62,7 @@ export class DmActionTransactionCoordinator {
     const existing = this.inFlight.get(input.id)
     if (existing) return existing
 
+    const previousTransaction = this.transactions.get(input.id)
     const transaction = createCombatTransaction(input)
     this.transactions.set(input.id, transaction)
     return this.enqueueTransaction(
@@ -68,12 +70,14 @@ export class DmActionTransactionCoordinator {
       async () => {
         const outcome = await run(transaction)
         const current = this.transactions.get(input.id) ?? transaction
-        this.transactions.set(
-          input.id,
-          outcome.status === 'accepted'
-            ? commitCombatTransaction(current)
-            : rollbackCombatTransaction(current, outcome.reason),
-        )
+        if (outcome.status === 'ignored') {
+          if (previousTransaction) this.transactions.set(input.id, previousTransaction)
+          else this.transactions.delete(input.id)
+          return
+        }
+        this.transactions.set(input.id, outcome.status === 'accepted'
+          ? commitCombatTransaction(current)
+          : rollbackCombatTransaction(current, outcome.reason))
       },
       async (error) => {
         const current = this.transactions.get(input.id) ?? transaction

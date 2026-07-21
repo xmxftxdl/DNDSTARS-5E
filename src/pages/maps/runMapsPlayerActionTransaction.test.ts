@@ -53,4 +53,55 @@ describe('runMapsPlayerActionTransaction', () => {
     expect(recover).toHaveBeenCalledOnce()
     expect(coordinator.transaction('action-1')?.status).toBe('rolled-back')
   })
+
+  it('silently drops an authority replay without recovery or a new transaction', async () => {
+    const coordinator = new DmActionTransactionCoordinator()
+    const recover = vi.fn(async () => undefined)
+    let outcome: { status: 'ignored' } | undefined
+
+    await runMapsPlayerActionTransaction({
+      coordinator,
+      action,
+      run: async () => { outcome = { status: 'ignored' } },
+      waitForAuthorityCommit: async () => undefined,
+      readOutcome: () => outcome,
+      clearOutcome: () => { outcome = undefined },
+      setTransactionActive: () => undefined,
+      recover,
+      now: 1,
+    })
+
+    expect(recover).not.toHaveBeenCalled()
+    expect(coordinator.transaction('action-1')).toBeUndefined()
+  })
+
+  it('does not clear the first outcome when an in-flight SSE replay is coalesced', async () => {
+    const coordinator = new DmActionTransactionCoordinator()
+    let outcome: { status: 'accepted' } | undefined
+    let release!: () => void
+    const authorityCommit = new Promise<void>((resolve) => { release = resolve })
+    const clearOutcome = vi.fn(() => { outcome = undefined })
+    const input = {
+      coordinator,
+      action,
+      run: async () => { outcome = { status: 'accepted' } },
+      waitForAuthorityCommit: () => authorityCommit,
+      readOutcome: () => outcome,
+      clearOutcome,
+      setTransactionActive: () => undefined,
+      recover: async () => undefined,
+      now: 1,
+    }
+
+    const first = runMapsPlayerActionTransaction(input)
+    await vi.waitFor(() => expect(outcome).toEqual({ status: 'accepted' }))
+    const replay = runMapsPlayerActionTransaction(input)
+    expect(replay).toBe(first)
+    expect(clearOutcome).toHaveBeenCalledOnce()
+
+    release()
+    await Promise.all([first, replay])
+    expect(clearOutcome).toHaveBeenCalledTimes(2)
+    expect(coordinator.transaction('action-1')?.status).toBe('committed')
+  })
 })

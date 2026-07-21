@@ -22,7 +22,6 @@ export interface RunMapsPlayerActionTransactionInput {
  */
 export function runMapsPlayerActionTransaction(input: RunMapsPlayerActionTransactionInput): Promise<void> {
   const { action } = input
-  input.clearOutcome(action.id)
   return input.coordinator.enqueueCombatTransaction(
     {
       id: action.id,
@@ -34,6 +33,10 @@ export function runMapsPlayerActionTransaction(input: RunMapsPlayerActionTransac
       now: input.now,
     },
     async () => {
+      // Only the invocation that actually owns the coordinator slot may clear
+      // an earlier result. A coalesced SSE replay must not erase the outcome
+      // while the first delivery is waiting for its authority commit barrier.
+      input.clearOutcome(action.id)
       input.setTransactionActive(true, action.id)
       try {
         await input.run()
