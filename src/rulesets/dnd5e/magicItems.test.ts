@@ -8,6 +8,7 @@ import {
   DND5E_SRD_MAGIC_SHIELD_TEMPLATES,
   DND5E_SRD_MAGIC_WEAPON_TEMPLATES,
 } from './magicItems'
+import { DND5E_SRD_MAGIC_ITEM_RULES_ZH } from './magicItemRulesZh.generated'
 
 describe('SRD 5.1 magic items', () => {
   it('publishes the complete base catalog, including the shield family missing from common API mirrors', () => {
@@ -19,6 +20,23 @@ describe('SRD 5.1 magic items', () => {
       id: 'orb-of-dragonkind', rarity: 'artifact',
     }))
     expect(new Set(DND5E_SRD_MAGIC_ITEM_CATALOG.map((item) => item.id)).size).toBe(240)
+  })
+
+  it('publishes a complete SRD rule body for every base catalog item', () => {
+    expect(Object.keys(DND5E_SRD_MAGIC_ITEM_RULES_ZH)).toHaveLength(240)
+    expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES).toHaveLength(240)
+    for (const template of DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES) {
+      expect(template.rulesText.length, template.id).toBeGreaterThan(10)
+      expect(template.rulesText, template.id).not.toContain('该物品已收录于 SRD 5.1 魔法物品目录')
+    }
+  })
+
+  it('shows the full Ring of Feather Falling rule instead of the catalog placeholder', () => {
+    const ring = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:ring-of-feather-falling',
+    )
+    expect(ring?.rulesText).toBe('着装这枚戒指期间，你在坠落时每轮下降 60 尺，并且不会受到坠落伤害。')
+    expect(DND5E_SRD_MAGIC_ITEM_RULES_ZH['ring-of-feather-falling']?.sourcePage).toBeGreaterThan(200)
   })
 
   it('keeps rarity, attunement and automation metadata on distributable templates', () => {

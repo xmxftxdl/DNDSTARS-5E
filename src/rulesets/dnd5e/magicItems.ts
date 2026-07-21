@@ -6,14 +6,15 @@ import type {
   Dnd5eMagicItemRarity,
 } from '../../types/inventory'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
+import { DND5E_SRD_MAGIC_ITEM_RULES_ZH } from './magicItemRulesZh.generated'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
 type CatalogRuleOverride = Pick<Dnd5eInventoryItemTemplate, 'description' | 'rulesText' | 'use'>
 
 /**
- * 已逐条核对 SRD 5.1 正文的目录物品规则。未列在这里的物品仍保持
- * “目录已收录、具体效果由 DM 裁定”的保守状态，避免把不完整摘要伪装成完整规则。
+ * 需要声明式 Headless 行为或人工润色的目录条目覆盖。
+ * 其余物品正文来自已校验的 SRD 5.1 中文规则数据集。
  */
 const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
   'amulet-of-the-planes': {
@@ -405,6 +406,10 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
   const rarity = DND5E_MAGIC_ITEM_RARITY_LABELS[entry.rarity]
   const kind = DND5E_MAGIC_ITEM_KIND_LABELS[entry.kind]
   const rules = CATALOG_RULE_OVERRIDES[entry.id]
+  const srdRules = DND5E_SRD_MAGIC_ITEM_RULES_ZH[entry.id]
+  if (!srdRules) {
+    throw new Error(`SRD 5.1 magic item rule text is missing: ${entry.id}`)
+  }
   return {
     id: `srd-5.1:magic-item:${entry.id}`,
     name: entry.name,
@@ -412,7 +417,7 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     category: entry.kind === 'potion' ? 'consumable' : 'magic-item',
     icon: iconForKind(entry.kind),
     description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
-    rulesText: rules?.rulesText ?? `该物品已收录于 SRD 5.1 魔法物品目录。当前版本完整保存其类型、稀有度与同调要求；尚未声明式接入的主动、被动或充能效果由 DM 按 SRD 5.1 正文裁定。`,
+    rulesText: rules?.rulesText ?? srdRules.rulesText,
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
     ...(rules?.use ? { use: rules.use } : {}),
     magicItem: {
