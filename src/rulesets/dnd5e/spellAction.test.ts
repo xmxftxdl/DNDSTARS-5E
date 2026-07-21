@@ -136,6 +136,32 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     })
   })
 
+  it('casts Spike Growth with difficult terrain and one damage trigger per five feet', () => {
+    const druid = character('druid', '德鲁伊', {
+      dnd5eClassChoices: { classes: { druid: { selections: { 'spell-prepared': ['spike-growth'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const input = fixture(druid, 'spike-growth', 2, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'spike-growth', slotLevel: 2,
+      targetTokenId: input.action.actorTokenId, targetTokenIds: [],
+      areaTargetCell: { col: 5, row: 2 },
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(resolved.application?.map.dnd5ePluginAreas?.[0]).toMatchObject({
+      coreSpellId: 'spike-growth', anchorMode: 'fixed', movementCostMultiplier: 2,
+      visual: { preset: 'spike-growth', intensity: 'strong' },
+      triggers: [{
+        timing: 'on-move-distance', oncePerRound: false, movementIntervalFeet: 5,
+        damage: { count: 2, sides: 4, type: 'piercing' },
+      }],
+    })
+  })
+
   it('rejects a zero-point Mass Heal allocation before settlement', () => {
     const cleric = character('cleric', '牧师', {
       level: 17,

@@ -53,6 +53,26 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
   {
+    spellId: 'spike-growth',
+    label: '荆棘丛生',
+    minimumSlotLevel: 2,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 150 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#84cc16',
+    visual: { preset: 'spike-growth', intensity: 'strong' },
+    triggers: [{
+      id: 'spike-growth-movement', label: '荆棘丛生·区域内移动', timing: 'on-move-distance',
+      oncePerRound: false, movementIntervalFeet: 5,
+      damage: { count: 2, sides: 4, type: 'piercing' },
+      dmAdjustable: true,
+    }],
+  },
+  {
     spellId: 'spirit-guardians',
     label: '灵体卫士',
     minimumSlotLevel: 3,

@@ -108,6 +108,14 @@ export interface Dnd5eSrdSpellDefinition {
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
+    id: 'spike-growth', name: '荆棘丛生', englishName: 'Spike Growth', level: 2, school: '变化',
+    classes: ['druid', 'ranger'], castingTime: 'action', rangeFeet: 150, target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 100,
+    maximumTargets: 100,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 150 },
+    description: '使射程内一点周围20尺半径的地面长出坚硬尖刺，持续至多10分钟并需要专注。区域成为困难地形；生物在区域内每移动5尺受到2d4穿刺伤害。地面外观保持自然，施法时未看见区域形成的生物必须以动作进行感知（察觉）检定对抗施法豁免DC，才能在进入前辨认危险。',
+  },
+  {
     id: 'spirit-guardians', name: '灵体卫士', englishName: 'Spirit Guardians', level: 3, school: '咒法',
     classes: ['cleric'], castingTime: 'action', rangeFeet: 0, target: 'area', effect: 'persistent-area',
     dice: { count: 0, sides: 8, bonus: 0 }, concentration: true, concentrationDurationRounds: 100,
