@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { defaultTokenSizeForMap, realignTokensToGrid, snapTokenToGridCenter } from '../lib/gridCombat'
 import { applyGridDetectPatch, type GridDetectResult } from '../lib/gridDetect'
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
+import { dnd5eEncounterGridOffset, dnd5eEncounterRoster, type Dnd5eEncounterEntry } from '../rulesets/dnd5e/encounterBuilder'
 import { putImage, deleteImage, pruneOrphanImages } from '../lib/imageStore'
 import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
 import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
@@ -706,6 +707,7 @@ interface MapState {
   removeMap: (id: string) => void
   addToken: (mapId: string, type: Token['type']) => void
   addEnemyFromPool: (mapId: string, template: EnemyTemplate) => string | null
+  addEncounterFromPool: (mapId: string, entries: readonly Dnd5eEncounterEntry[]) => string[]
   addCharacterToken: (
     mapId: string,
     payload: { characterId: string; name: string; emoji: string; type?: Token['type'] },
@@ -860,6 +862,39 @@ export const useMapStore = create<MapState>()(
         }))
         publishMapsState(get())
         return token.id
+      },
+      addEncounterFromPool: (mapId, entries) => {
+        const map = get().maps.find((candidate) => candidate.id === mapId)
+        if (!map) return []
+        const roster = dnd5eEncounterRoster(entries)
+        if (roster.length === 0) return []
+        const tokens = roster.map((template, index): Token => {
+          const patch = enemyTemplateToTokenPatch(template)
+          const offset = dnd5eEncounterGridOffset(index, roster.length)
+          const spacing = Math.max(1, map.gridSize * 2)
+          const spawn = snapTokenToGridCenter(
+            map.width / 2 + offset.column * spacing,
+            map.height / 2 + offset.row * spacing,
+            { size: patch.size ?? defaultTokenSizeForMap(map), creatureSize: patch.creatureSize },
+            map,
+          )
+          return {
+            id: uid(), label: patch.label ?? template.name, x: spawn.x, y: spawn.y,
+            color: patch.color ?? '#f87171', emoji: patch.emoji ?? '👾',
+            size: patch.size ?? defaultTokenSizeForMap(map), type: 'enemy',
+            hp: patch.hp, maxHp: patch.maxHp, poolId: patch.poolId,
+            creatureTypes: patch.creatureTypes, creatureSize: patch.creatureSize,
+            showHpOnToken: patch.showHpOnToken ?? true,
+            showDetailOnToken: patch.showDetailOnToken ?? true,
+          }
+        })
+        set((state) => ({
+          maps: state.maps.map((candidate) => candidate.id === mapId
+            ? { ...candidate, tokens: [...candidate.tokens, ...tokens] }
+            : candidate),
+        }))
+        publishMapsState(get())
+        return tokens.map((token) => token.id)
       },
       addCharacterToken: (mapId, { characterId, name, emoji, type = 'player' }) => {
         const map = get().maps.find((m) => m.id === mapId)

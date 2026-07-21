@@ -29,7 +29,8 @@ import {
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
-import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
+import { dnd5eMonsterHasGenericAbility } from './monsterGenericAbilities'
+import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 
 export type Dnd5eMonsterAttackRejectReason =
@@ -54,6 +55,7 @@ export interface PreparedDnd5eMonsterAttack {
   distanceFeet: number
   targetAttackMode: 'normal' | 'advantage' | 'disadvantage'
   attackModes: readonly ('normal' | 'advantage' | 'disadvantage')[]
+  packTactics: boolean
   viciousMockeryAttackDisadvantage: boolean
   tranquilityWard?: ReturnType<typeof dnd5eTranquilityWardCheck>
   blessed: boolean
@@ -157,9 +159,16 @@ export function prepareDnd5eMonsterAttack(input: {
   }
   const actorProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+  const packTactics = dnd5eMonsterHasGenericAbility(monster, 'pack-tactics') && input.map.tokens.some((candidate) => {
+    if (candidate.id === actorToken.id || candidate.id === targetToken.id || candidate.type === 'obstacle' || (candidate.hp ?? 1) <= 0) return false
+    if (areOpposedCombatTokens(actorToken, candidate)) return false
+    const ally = snapshot.state.combatants[candidate.id]
+    return !!ally && !dnd5eIsIncapacitated(ally) &&
+      tokenFootprintDistanceCells(candidate, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
+  })
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || !!target.classState.recklessAttackTurnKey || !!target.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5) || packTactics)
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
   const targetAttackMode = resolveDnd5eRollMode({
@@ -196,6 +205,7 @@ export function prepareDnd5eMonsterAttack(input: {
       distanceFeet,
       targetAttackMode,
       attackModes,
+      packTactics,
       viciousMockeryAttackDisadvantage: dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant),
       tranquilityWard: dnd5eTranquilityWardCheck(actorCombatant, target, snapshot.state),
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),

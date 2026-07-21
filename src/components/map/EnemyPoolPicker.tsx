@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, Skull, Wrench, X } from 'lucide-react'
+import { Search, Skull, Swords, Wrench, X } from 'lucide-react'
 import {
   DND5E_SRD_ENEMY_POOL,
   dnd5eMonsterToEnemyTemplate,
@@ -8,6 +8,8 @@ import {
 } from '../../lib/enemyPool'
 import { useCustomMonsterStore } from '../../store/customMonsters'
 import Dnd5eMonsterWorkshopDialog from './Dnd5eMonsterWorkshopDialog'
+import Dnd5eEncounterBuilderDialog from './Dnd5eEncounterBuilderDialog'
+import type { Dnd5eEncounterEntry } from '../../rulesets/dnd5e/encounterBuilder'
 
 export default function EnemyPoolPicker({
   open,
@@ -16,6 +18,7 @@ export default function EnemyPoolPicker({
   canManageCustom = false,
   onClose,
   onPick,
+  onBuildEncounter,
 }: {
   open: boolean
   title?: string
@@ -23,9 +26,11 @@ export default function EnemyPoolPicker({
   canManageCustom?: boolean
   onClose: () => void
   onPick: (template: EnemyTemplate) => void
+  onBuildEncounter?: (entries: readonly Dnd5eEncounterEntry[]) => void
 }) {
   const [query, setQuery] = useState('')
   const [workshopOpen, setWorkshopOpen] = useState(false)
+  const [encounterOpen, setEncounterOpen] = useState(false)
   const customMonsters = useCustomMonsterStore((state) => state.monsters)
   const pool = useMemo(
     () => [...DND5E_SRD_ENEMY_POOL, ...customMonsters.map(dnd5eMonsterToEnemyTemplate)],
@@ -51,6 +56,16 @@ export default function EnemyPoolPicker({
             <h2 className="text-base font-semibold text-slate-100">{title}</h2>
             {hint && <p className="text-xs text-slate-500">{hint}</p>}
           </div>
+          {canManageCustom && (
+            <button
+              type="button"
+              onClick={() => setEncounterOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-rose-500/15 px-2.5 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"
+            >
+              <Swords className="h-3.5 w-3.5" />
+              遭遇构建
+            </button>
+          )}
           {canManageCustom && (
             <button
               type="button"
@@ -151,5 +166,15 @@ export default function EnemyPoolPicker({
       </div>
     </div>
     <Dnd5eMonsterWorkshopDialog open={workshopOpen} onClose={() => setWorkshopOpen(false)} />
+    <Dnd5eEncounterBuilderDialog
+      open={encounterOpen}
+      pool={pool}
+      onClose={() => setEncounterOpen(false)}
+      onConfirm={(entries) => {
+        onBuildEncounter?.(entries)
+        setEncounterOpen(false)
+        onClose()
+      }}
+    />
   </>
 }

@@ -555,6 +555,7 @@ export default function MapsPage() {
   const removeMap = useMapStore((s) => s.removeMap)
   const addToken = useMapStore((s) => s.addToken)
   const addEnemyFromPool = useMapStore((s) => s.addEnemyFromPool)
+  const addEncounterFromPool = useMapStore((s) => s.addEncounterFromPool)
   const addCharacterToken = useMapStore((s) => s.addCharacterToken)
   const updateToken = useMapStore((s) => s.updateToken)
   const applyAuthorityTokenUpdate = useMapStore((s) => s.applyAuthorityTokenUpdate)
@@ -4264,6 +4265,12 @@ export default function MapsPage() {
         if (!alreadySettled) setCombatExperienceDraft(endingExperienceDraft)
       }
     }
+  }
+
+  const handleEncounterBuild = (entries: Parameters<typeof addEncounterFromPool>[1]) => {
+    if (!activeMap || enemyPoolMode !== 'add') return
+    const ids = addEncounterFromPool(activeMap.id, entries)
+    if (ids[0]) setSelectedTokenId(ids[0])
   }
 
   const chooseMapTabletopTool = (tool: Exclude<MapTabletopTool, 'none'>) => {
@@ -15232,6 +15239,7 @@ export default function MapsPage() {
           }
           onClose={() => setEnemyPoolOpen(false)}
           onPick={handleEnemyPoolPick}
+          onBuildEncounter={enemyPoolMode === 'add' ? handleEncounterBuild : undefined}
         />
       )}
     </div>

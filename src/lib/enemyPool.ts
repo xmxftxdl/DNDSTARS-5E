@@ -28,6 +28,7 @@ export interface EnemyTemplate {
   description?: string
   armorClass?: number
   challengeRating?: string
+  experiencePoints?: number
   hitDice?: string
   source?: string
 }
@@ -81,6 +82,7 @@ export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): Ene
       : `${monster.englishName} · ${monster.description}`,
     armorClass: monster.armorClass.value,
     challengeRating: monster.challenge.rating,
+    experiencePoints: monster.challenge.xp,
     hitDice: monster.hitPoints.dice,
     source: monster.source,
   }

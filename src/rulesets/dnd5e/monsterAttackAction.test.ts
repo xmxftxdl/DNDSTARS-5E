@@ -17,6 +17,28 @@ function token(patch: Partial<Token>): Token {
 }
 
 describe('SRD monster map action adapter', () => {
+  it('applies Pack Tactics only while a conscious ally is within 5 feet of the target', () => {
+    const hero = character()
+    const wolf = token({ id: 'wolf', x: 0, poolId: 'srd-5.1:wolf' })
+    const ally = token({ id: 'ally', x: 20, poolId: 'srd-5.1:wolf' })
+    const heroToken = token({ id: 'hero-token', x: 10, type: 'player', characterId: hero.id })
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [wolf, ally, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'combat', map, characters: [hero],
+      initiativeOrder: [wolf, ally, heroToken].map((entry, index) => ({
+        tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+      })),
+      actorTokenId: wolf.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.packTactics).toBe(true)
+    expect(prepared.prepared.targetAttackMode).toBe('advantage')
+  })
+
   it('prepares the owlbear multiattack and returns one authoritative map application', () => {
     const hero = character()
     const owlbear = token({ id: 'owlbear', label: '枭熊', poolId: 'srd-5.1:owlbear', hp: 59, maxHp: 59 })
