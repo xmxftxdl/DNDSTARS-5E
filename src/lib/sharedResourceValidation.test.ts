@@ -14,6 +14,7 @@ describe('shared resource runtime validation', () => {
       'room-chat': { schemaVersion: 1, messages: [], updatedAt: 1 },
       'room-journal': { schemaVersion: 1, handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 1 },
       'group-ability-checks': { schemaVersion: 1, checks: [], updatedAt: 1 },
+      'campaign-time': { schemaVersion: 1, worldMinute: 480, timers: [], advances: [], updatedAt: 1 },
       'dice-events': { events: [], updatedAt: 1 },
       'combat-interrupts': { interrupts: [], updatedAt: 1 },
       'player-action-requests': { requests: [], updatedAt: 1 },
@@ -40,6 +41,7 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-journal', { handouts: [], campaignEntries: 'broken', sharedNotes: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('group-ability-checks', { schemaVersion: 1, checks: [{ id: 'broken' }] }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('campaign-time', { schemaVersion: 1, worldMinute: -1, timers: [], advances: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('map-fog', {
       schemaVersion: 1,
       updatedAt: 1,

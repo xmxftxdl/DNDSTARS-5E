@@ -100,6 +100,10 @@ export interface Character {
   deathSaveStable?: boolean
   concentrating?: boolean
   exhaustionLevel?: number
+  /** 最近一次实际获得长休收益的战役分钟；用于执行每 24 小时至多一次。 */
+  dnd5eLastLongRestWorldMinute?: number
+  /** 已应用到该角色的战役时间；支持刷新或断线后幂等补算黎明与长休事务。 */
+  dnd5eWorldTimeAppliedMinute?: number
   dnd5eClassChoices?: {
     fighter?: {
       /** Core uses "champion"; third-party values are namespaced by the rules plugin host. */
@@ -178,7 +182,7 @@ export interface Character {
     sacredWeaponTurnsRemaining?: number
     /** 奉献之誓20级“神圣光轮”剩余自身回合数。 */
     holyNimbusRoundsRemaining?: number
-    /** 神圣干预成功后的冷却天数；一次长休按经过一天递减。 */
+    /** 神圣干预成功后的冷却天数；由战役时钟跨过每日黎明递减。 */
     divineInterventionCooldownDays?: number
     monkAttackActionTurnKey?: string
     monkMartialArtsTurnKey?: string

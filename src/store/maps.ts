@@ -36,6 +36,7 @@ import {
   normalizeTokenMovementAnimation,
   type TokenMovementAnimation,
 } from '../lib/tokenMovementAnimation'
+import { campaignLightIsActive, type CampaignLightSourceKind } from '../lib/campaignTime'
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -222,6 +223,10 @@ export interface Token {
     brightRadiusFeet: number
     dimRadiusFeet: number
     color: string
+    sourceKind?: CampaignLightSourceKind
+    startedAtWorldMinute?: number
+    durationMinutes?: number
+    expiresAtWorldMinute?: number
   }
   /** 玩家端可见性：动态视野、始终显示，或仅 DM 可见。 */
   visibilityMode?: 'line-of-sight' | 'always' | 'dm-only'
@@ -321,7 +326,7 @@ export interface Dnd5ePluginArea {
 }
 
 /** 地图存档 V11：增加无战斗属性的核心法术效果 Token。 */
-export const MAPS_PERSIST_VERSION = 11
+export const MAPS_PERSIST_VERSION = 12
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -444,6 +449,18 @@ function normalizeToken(raw: unknown): Token {
           brightRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.brightRadiusFeet)),
           dimRadiusFeet: Math.max(0, Math.min(10_000, t.lightSource.dimRadiusFeet)),
           color: /^#[0-9a-f]{6}$/i.test(t.lightSource.color) ? t.lightSource.color : '#fbbf24',
+          sourceKind: ['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(t.lightSource.sourceKind))
+            ? t.lightSource.sourceKind as CampaignLightSourceKind
+            : undefined,
+          startedAtWorldMinute: Number.isSafeInteger(t.lightSource.startedAtWorldMinute) && Number(t.lightSource.startedAtWorldMinute) >= 0
+            ? Number(t.lightSource.startedAtWorldMinute)
+            : undefined,
+          durationMinutes: Number.isSafeInteger(t.lightSource.durationMinutes) && Number(t.lightSource.durationMinutes) > 0
+            ? Number(t.lightSource.durationMinutes)
+            : undefined,
+          expiresAtWorldMinute: Number.isSafeInteger(t.lightSource.expiresAtWorldMinute) && Number(t.lightSource.expiresAtWorldMinute) >= 0
+            ? Number(t.lightSource.expiresAtWorldMinute)
+            : undefined,
         }
       : undefined,
     visibilityMode: t.visibilityMode === 'always' || t.visibilityMode === 'dm-only' || t.visibilityMode === 'line-of-sight'
@@ -696,6 +713,7 @@ interface MapState {
   updateToken: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   applyAuthorityTokenUpdate: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   applyAuthorityMapUpdate: (mapId: string, patch: Partial<BattleMap>) => void
+  expireTimedLights: (worldMinute: number) => number
   removeToken: (mapId: string, tokenId: string) => void
 }
 
@@ -896,6 +914,23 @@ export const useMapStore = create<MapState>()(
         set((state) => ({
           maps: state.maps.map((map) => map.id === mapId ? { ...map, ...patch } : map),
         }))
+      },
+
+      expireTimedLights: (worldMinute) => {
+        let expired = 0
+        const maps = get().maps.map((map) => ({
+            ...map,
+            tokens: map.tokens.map((token) => {
+              if (!token.lightSource?.enabled || campaignLightIsActive(token.lightSource, worldMinute)) return token
+              expired += 1
+              return { ...token, lightSource: { ...token.lightSource, enabled: false } }
+            }),
+          }))
+        if (expired > 0) {
+          set({ maps })
+          publishMapsState(get())
+        }
+        return expired
       },
 
       removeToken: (mapId, tokenId) => {

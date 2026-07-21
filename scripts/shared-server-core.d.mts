@@ -37,8 +37,9 @@ export function projectMapsForPlayer<T>(
   characterState?: unknown,
   viewerIdentity?: unknown,
   fogState?: unknown,
+  worldMinute?: number | null,
 ): T
-export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null): T
+export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | null, worldMinute?: number | null): T
 export function projectMapExplorationForPlayer<T>(value: T, memberId?: string | null): T
 export function fogPointState(fog: unknown, x: number, y: number): 'covered' | 'revealed' | 'neutral'
 
@@ -98,6 +99,13 @@ export function projectGroupAbilityChecksForMember(
   memberId: string,
   isDm?: boolean,
 ): Record<string, unknown> & { checks: Array<Record<string, unknown>> }
+export function mutateCampaignTimeState(
+  current: unknown,
+  mutation: Record<string, unknown>,
+  now: number,
+  member: Record<string, unknown>,
+  context?: Record<string, unknown>,
+): RoomCommunicationMutationResult
 
 export function capEventChannels<T>(
   eventBacklog: Map<string, T>,

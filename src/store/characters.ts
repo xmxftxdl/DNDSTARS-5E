@@ -5,7 +5,6 @@ import { isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { getAccountSession } from '../lib/accountSession'
 import { restoreClassResources, syncCharacterClassResources } from '../lib/classResources'
-import { applyDnd5eDivineInterventionLongRest } from '../rulesets/dnd5e/restFeatures'
 import { migrateLegacyCharacterFields } from '../lib/legacyCharacterMigration'
 import { normalizeCharacterPortrait } from '../lib/characterPortrait'
 import { normalizeCharacterAvatar } from '../lib/characterAvatar'
@@ -22,6 +21,10 @@ import {
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
+import type { SharedCampaignTimeState } from '../lib/campaignTime'
+import { applyDnd5eLongRestBenefits, reconcileDnd5eCharacterCampaignTime } from '../rulesets/dnd5e/campaignTimeRules'
+import { canBenefitFromLongRest } from '../lib/campaignTime'
+import { useCampaignTimeStore } from './campaignTime'
 
 import type { Character } from '../types/character'
 import type { LegacyCharacterSave } from '../types/legacyCharacter'
@@ -989,6 +992,12 @@ interface CharacterState {
   remove: (id: string) => void
   shortRestAll: () => void
   longRestAll: () => void
+  reconcileCampaignTime: (clock: SharedCampaignTimeState) => {
+    changed: boolean
+    dawnsApplied: number
+    longRestsApplied: number
+    longRestsBlocked: number
+  }
 }
 
 export const useCharacterStore = create<CharacterState>()(
@@ -1364,40 +1373,36 @@ export const useCharacterStore = create<CharacterState>()(
           saveCharacters()
         },
         longRestAll: () => {
-          set((s) => ({
-            characters: s.characters.map((c) => {
-              const gainsTranquility = c.rulesetId === 'dnd5e-2014-srd-5.1' && c.charClass === '武僧' && c.level >= 11 &&
-                c.dnd5eClassChoices?.classes?.monk?.subclass === 'open-hand'
-              const divineInterventionCooldownDays = c.dnd5eCombatState?.divineInterventionCooldownDays
-              const exhaustionLevel = c.rulesetId === 'dnd5e-2014-srd-5.1'
-                ? Math.max(0, Math.floor(c.exhaustionLevel ?? 0) - 1)
-                : c.exhaustionLevel
-              return restoreDnd5eInventoryResources(
-                applyDnd5eDivineInterventionLongRest(restoreClassResources({
-                  ...c,
-                  exhaustionLevel,
-                  currentHp: c.maxHp,
-                  tempHp: 0,
-                  hitPointDice: c.hitPointDice?.map((pool) => ({
-                    ...pool,
-                    current: Math.min(pool.max, pool.current + Math.max(1, Math.floor(pool.max / 2))),
-                  })),
-                  deathSaveSuccesses: 0,
-                  deathSaveFailures: 0,
-                  deathSaveStable: false,
-                  concentrating: false,
-                  dnd5eCombatState: gainsTranquility || divineInterventionCooldownDays
-                    ? {
-                        ...(gainsTranquility ? { tranquilityActive: true } : {}),
-                        ...(divineInterventionCooldownDays ? { divineInterventionCooldownDays } : {}),
-                      }
-                    : undefined,
-                }, 'long-rest')),
-                'long-rest',
-              )
-            }),
+          if (getRoomSession()) {
+            void useCampaignTimeStore.getState().mutate({ operation: 'long-rest' }).catch((error) => {
+              console.error('[战役时间] 长休事务失败', error)
+            })
+            return
+          }
+          // 无房间的本地/测试模式保留同步入口；房间内永远等待服务端时间事务后再结算。
+          const completionWorldMinute = useCampaignTimeStore.getState().state.worldMinute + 8 * 60
+          set((state) => ({
+            characters: state.characters.map((character) =>
+              canBenefitFromLongRest(character.dnd5eLastLongRestWorldMinute, completionWorldMinute)
+                ? applyDnd5eLongRestBenefits(character, completionWorldMinute)
+                : character),
           }))
           saveCharacters()
+        },
+        reconcileCampaignTime: (clock) => {
+          let dawnsApplied = 0
+          let longRestsApplied = 0
+          let longRestsBlocked = 0
+          const results = get().characters.map((character) => reconcileDnd5eCharacterCampaignTime(character, clock))
+          const changed = results.some((result) => result.changed)
+          for (const result of results) {
+            dawnsApplied += result.dawnsApplied
+            longRestsApplied += result.longRestsApplied
+            longRestsBlocked += result.longRestsBlocked
+          }
+          if (changed) set({ characters: results.map((result) => result.character) })
+          if (changed) saveCharacters()
+          return { changed, dawnsApplied, longRestsApplied, longRestsBlocked }
         },
 
       }

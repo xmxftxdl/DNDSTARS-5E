@@ -86,7 +86,7 @@ describe('SRD 5.1 rest class features', () => {
     expect(result.recovered).toBe(3)
   })
 
-  it('keeps Divine Intervention unavailable until seven long rests have elapsed', () => {
+  it('keeps Divine Intervention unavailable until seven campaign days have elapsed', () => {
     let cleric = character({
       charClass: '牧师', level: 10,
       dnd5eCombatState: { divineInterventionCooldownDays: 7 },

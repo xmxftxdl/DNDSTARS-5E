@@ -21,6 +21,7 @@ import {
   type SharedMapGeometryState,
 } from '../lib/mapGeometry'
 import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { campaignLightIsActive } from '../lib/campaignTime'
 
 interface MapGeometryStoreState {
   maps: MapGeometryState[]
@@ -38,6 +39,7 @@ interface MapGeometryStoreState {
   clearMap: (mapId: string) => void
   duplicateEntity: (mapId: string, entityId: string, offset?: number) => string | undefined
   replaceMap: (mapId: string, geometry: MapGeometryState) => boolean
+  expireTimedLights: (worldMinute: number) => number
   undo: (mapId: string) => void
   redo: (mapId: string) => void
 }
@@ -277,6 +279,23 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           return { maps, ...pushHistory(state, mapId, current) }
         })
         publish(get())
+      },
+      expireTimedLights: (worldMinute) => {
+        let expired = 0
+        set((state) => {
+          const maps = state.maps.map((map) => ({
+            ...map,
+            lights: (map.lights ?? []).map((light) => {
+              if (!light.enabled || campaignLightIsActive(light, worldMinute)) return light
+              expired += 1
+              return { ...light, enabled: false }
+            }),
+          }))
+          if (expired > 0) setMapGeometryRuntime(maps)
+          return expired > 0 ? { maps } : state
+        })
+        if (expired > 0) publish(get())
+        return expired
       },
       clearMap: (mapId) => {
         set((state) => {

@@ -1624,6 +1624,146 @@ export function projectGroupAbilityChecksForMember(value, memberId, isDm = false
   }
 }
 
+const CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE = 8 * 60
+const CAMPAIGN_TIME_TIMER_LIMIT = 256
+const CAMPAIGN_TIME_ADVANCE_LIMIT = 512
+const CAMPAIGN_TIME_MAX_ADVANCE_MINUTES = 365 * 24 * 60
+
+function campaignDawnsCrossed(fromWorldMinute, toWorldMinute) {
+  const from = Math.max(0, Math.floor(Number(fromWorldMinute) || 0))
+  const to = Math.max(from, Math.floor(Number(toWorldMinute) || 0))
+  return Math.max(0, Math.floor((to - 360) / 1_440) - Math.floor((from - 360) / 1_440))
+}
+
+function validateCampaignTimeState(value) {
+  if (
+    value?.schemaVersion !== 1 || !Number.isSafeInteger(value.worldMinute) || value.worldMinute < 0 ||
+    !Array.isArray(value.timers) || value.timers.length > CAMPAIGN_TIME_TIMER_LIMIT ||
+    !Array.isArray(value.advances) || value.advances.length > CAMPAIGN_TIME_ADVANCE_LIMIT ||
+    !Number.isFinite(value.updatedAt) || value.updatedAt < 0
+  ) return 'invalid-campaign-time-envelope'
+  const timerIds = new Set()
+  for (const timer of value.timers) {
+    if (
+      !plainObject(timer) || typeof timer.id !== 'string' || !timer.id || timer.id.length > 160 || timerIds.has(timer.id) ||
+      !['reminder', 'concentration'].includes(timer.kind) || typeof timer.label !== 'string' || !timer.label.trim() || timer.label.length > 160 ||
+      !['active', 'expired', 'dismissed', 'cancelled'].includes(timer.status) ||
+      !Number.isSafeInteger(timer.createdAtWorldMinute) || timer.createdAtWorldMinute < 0 ||
+      !Number.isSafeInteger(timer.expiresAtWorldMinute) || timer.expiresAtWorldMinute <= timer.createdAtWorldMinute ||
+      !Number.isFinite(timer.createdAt) || timer.createdAt < 0 ||
+      (timer.characterId != null && (typeof timer.characterId !== 'string' || !timer.characterId || timer.characterId.length > 160)) ||
+      (timer.characterName != null && (typeof timer.characterName !== 'string' || timer.characterName.length > 80)) ||
+      (timer.spellId != null && (typeof timer.spellId !== 'string' || !timer.spellId || timer.spellId.length > 160))
+    ) return 'invalid-campaign-timer'
+    timerIds.add(timer.id)
+  }
+  const advanceIds = new Set()
+  let previousTo = 0
+  for (const advance of value.advances) {
+    if (
+      !plainObject(advance) || typeof advance.id !== 'string' || !advance.id || advance.id.length > 160 || advanceIds.has(advance.id) ||
+      !['advance', 'long-rest'].includes(advance.kind) ||
+      !Number.isSafeInteger(advance.fromWorldMinute) || advance.fromWorldMinute < previousTo ||
+      !Number.isSafeInteger(advance.toWorldMinute) || advance.toWorldMinute > value.worldMinute ||
+      !Number.isSafeInteger(advance.minutes) || advance.minutes < 1 || advance.minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES ||
+      advance.toWorldMinute - advance.fromWorldMinute !== advance.minutes ||
+      !Number.isSafeInteger(advance.dawnsCrossed) || advance.dawnsCrossed < 0 ||
+      !Array.isArray(advance.expiredTimerIds) || advance.expiredTimerIds.length > CAMPAIGN_TIME_TIMER_LIMIT ||
+      advance.expiredTimerIds.some((id) => typeof id !== 'string' || !id || id.length > 160) ||
+      typeof advance.reason !== 'string' || advance.reason.length > 160 ||
+      !Number.isFinite(advance.createdAt) || advance.createdAt < 0
+    ) return 'invalid-campaign-time-advance'
+    previousTo = advance.toWorldMinute
+    advanceIds.add(advance.id)
+  }
+  return null
+}
+
+export function mutateCampaignTimeState(current, mutation, now, member, context = {}) {
+  const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
+  if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
+  const base = validateCampaignTimeState(current) == null
+    ? current
+    : { schemaVersion: 1, worldMinute: CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE, timers: [], advances: [], updatedAt: 0 }
+  if (mutation?.operation === 'advance' || mutation?.operation === 'long-rest') {
+    const minutes = mutation.operation === 'long-rest' ? 8 * 60 : Number(mutation.minutes)
+    if (!Number.isSafeInteger(minutes) || minutes < 1 || minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES) {
+      return { ok: false, status: 400, error: 'invalid-campaign-time-advance' }
+    }
+    const fromWorldMinute = base.worldMinute
+    const toWorldMinute = fromWorldMinute + minutes
+    if (!Number.isSafeInteger(toWorldMinute)) return { ok: false, status: 400, error: 'campaign-time-overflow' }
+    const expiredTimerIds = []
+    const timers = base.timers.map((timer) => {
+      if (timer.status !== 'active' || timer.expiresAtWorldMinute > toWorldMinute) return timer
+      expiredTimerIds.push(timer.id)
+      return { ...timer, status: 'expired', expiredAtWorldMinute: timer.expiresAtWorldMinute }
+    })
+    const kind = mutation.operation === 'long-rest' ? 'long-rest' : 'advance'
+    const reason = boundedText(mutation.reason, 160) || (kind === 'long-rest' ? '完成长休' : '推进时间')
+    const advance = {
+      id: `campaign-time-${randomUUID()}`,
+      kind,
+      fromWorldMinute,
+      toWorldMinute,
+      minutes,
+      reason,
+      dawnsCrossed: campaignDawnsCrossed(fromWorldMinute, toWorldMinute),
+      expiredTimerIds,
+      createdAt: now,
+    }
+    return {
+      ok: true,
+      changed: true,
+      next: {
+        schemaVersion: 1,
+        worldMinute: toWorldMinute,
+        timers,
+        advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+        updatedAt: now,
+      },
+      advance,
+    }
+  }
+  if (mutation?.operation === 'create-timer') {
+    if (base.timers.length >= CAMPAIGN_TIME_TIMER_LIMIT) return { ok: false, status: 409, error: 'campaign-timer-limit-reached' }
+    const label = boundedText(mutation.label, 160)
+    const durationMinutes = Number(mutation.durationMinutes)
+    if (!label || !['reminder', 'concentration'].includes(mutation.kind) || !Number.isSafeInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES) {
+      return { ok: false, status: 400, error: 'invalid-campaign-timer' }
+    }
+    const timer = {
+      id: `campaign-timer-${randomUUID()}`,
+      kind: mutation.kind,
+      label,
+      ...(boundedText(mutation.characterId, 160) ? { characterId: boundedText(mutation.characterId, 160) } : {}),
+      ...(boundedText(mutation.characterName, 80) ? { characterName: boundedText(mutation.characterName, 80) } : {}),
+      ...(boundedText(mutation.spellId, 160) ? { spellId: boundedText(mutation.spellId, 160) } : {}),
+      createdAtWorldMinute: base.worldMinute,
+      expiresAtWorldMinute: base.worldMinute + durationMinutes,
+      status: 'active',
+      createdAt: now,
+    }
+    return { ok: true, changed: true, next: { ...base, timers: [...base.timers, timer], updatedAt: now }, timer }
+  }
+  if (mutation?.operation === 'dismiss-timer' || mutation?.operation === 'cancel-timer') {
+    const timerId = boundedText(mutation.timerId, 160)
+    const index = base.timers.findIndex((timer) => timer.id === timerId)
+    if (index < 0) return { ok: false, status: 404, error: 'campaign-timer-not-found' }
+    const timer = base.timers[index]
+    const status = mutation.operation === 'dismiss-timer' ? 'dismissed' : 'cancelled'
+    if (timer.status === status) return { ok: true, changed: false, next: base }
+    const timers = [...base.timers]
+    timers[index] = {
+      ...timer,
+      status,
+      ...(status === 'dismissed' ? { dismissedAt: now } : { cancelledAt: now }),
+    }
+    return { ok: true, changed: true, next: { ...base, timers, updatedAt: now } }
+  }
+  return { ok: false, status: 400, error: 'invalid-campaign-time-operation' }
+}
+
 export function mutateGroupAbilityChecksState(current, mutation, now, member, context = {}) {
   const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
   const checks = Array.isArray(current?.checks) ? current.checks : []
@@ -1754,6 +1894,20 @@ function validDnd5eRoundLifecycle(value) {
     value.expiresAfterRound - value.createdRound + 1 <= 14_400
 }
 
+function validTimedLightState(light) {
+  if (!plainObject(light) || typeof light.enabled !== 'boolean' ||
+    !Number.isFinite(light.brightRadiusFeet) || light.brightRadiusFeet < 0 || light.brightRadiusFeet > 10_000 ||
+    !Number.isFinite(light.dimRadiusFeet) || light.dimRadiusFeet < 0 || light.dimRadiusFeet > 10_000 ||
+    typeof light.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(light.color) ||
+    (light.sourceKind != null && !['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(light.sourceKind))) return false
+  const timing = [light.startedAtWorldMinute, light.durationMinutes, light.expiresAtWorldMinute]
+  const hasTiming = timing.some((value) => value != null)
+  if (!hasTiming) return !['torch', 'candle', 'lamp', 'hooded-lantern'].includes(light.sourceKind)
+  return timing.every((value) => Number.isSafeInteger(value) && value >= 0) &&
+    light.durationMinutes > 0 && light.durationMinutes <= CAMPAIGN_TIME_MAX_ADVANCE_MINUTES &&
+    light.expiresAtWorldMinute === light.startedAtWorldMinute + light.durationMinutes
+}
+
 function validateCustomMonsterState(value) {
   if (value.schemaVersion !== 1 || !Array.isArray(value.monsters) || value.monsters.length > 512) {
     return 'invalid-custom-monster-envelope'
@@ -1820,6 +1974,7 @@ function validateDnd5eResourceStates(name, value) {
       if (!plainObject(map) || !Array.isArray(map.tokens)) continue
       for (const token of map.tokens) {
         if (!plainObject(token)) continue
+        if (token.lightSource != null && !validTimedLightState(token.lightSource)) return 'invalid-token-light-source'
         if (token.movementAnimation != null && !validTokenMovementAnimation(token.movementAnimation)) {
           return 'invalid-token-movement-animation'
         }
@@ -1936,7 +2091,7 @@ function validGeometryLight(entity) {
     Number.isFinite(entity.brightRadiusFeet) && entity.brightRadiusFeet >= 0 && entity.brightRadiusFeet <= 10_000 &&
     Number.isFinite(entity.dimRadiusFeet) && entity.dimRadiusFeet >= 0 && entity.dimRadiusFeet <= 10_000 &&
     typeof entity.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(entity.color) &&
-    Number.isFinite(entity.elevationFeet) && Number.isFinite(entity.createdAt)
+    Number.isFinite(entity.elevationFeet) && Number.isFinite(entity.createdAt) && validTimedLightState(entity)
 }
 
 function validateMapGeometryState(value) {
@@ -2164,6 +2319,12 @@ export function fogPointState(fog, x, y) {
   return state
 }
 
+function campaignLightActive(light, worldMinute = null) {
+  if (light?.enabled !== true) return false
+  return !Number.isFinite(worldMinute) || !Number.isFinite(light.expiresAtWorldMinute) ||
+    Number(worldMinute) < Number(light.expiresAtWorldMinute)
+}
+
 function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
@@ -2306,7 +2467,7 @@ function redactUnseenToken(token) {
   }
 }
 
-export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null, fogState = null) {
+export function projectMapsForPlayer(value, geometryState, activeCharacterId = null, characterState = null, viewerIdentity = null, fogState = null, worldMinute = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
   const geometryByMapId = new Map((geometryState?.maps ?? []).map((geometry) => [geometry.mapId, geometry]))
   const fogByMapId = new Map((fogState?.maps ?? []).map((fog) => [fog.mapId, fog]))
@@ -2323,7 +2484,23 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
     ...value,
     maps: value.maps.map((map) => {
       if (!plainObject(map) || !Array.isArray(map.tokens)) return map
-      const geometry = geometryByMapId.get(map.id)
+      const effectiveMap = {
+        ...map,
+        tokens: map.tokens.map((token) => plainObject(token) && plainObject(token.lightSource) &&
+          !campaignLightActive(token.lightSource, worldMinute)
+          ? { ...token, lightSource: { ...token.lightSource, enabled: false } }
+          : token),
+      }
+      const rawGeometry = geometryByMapId.get(map.id)
+      const geometry = plainObject(rawGeometry)
+        ? {
+            ...rawGeometry,
+            lights: (Array.isArray(rawGeometry.lights) ? rawGeometry.lights : []).map((light) =>
+              plainObject(light) && !campaignLightActive(light, worldMinute)
+                ? { ...light, enabled: false }
+                : light),
+          }
+        : rawGeometry
       const fog = fogByMapId.get(map.id)
       const dynamicVision = geometry?.vision?.enabled === true
       const manualFogActive = plainObject(fog) &&
@@ -2331,11 +2508,11 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       const manualFallbackRangeFeet = Number.isFinite(geometry?.vision?.defaultRangeFeet)
         ? geometry.vision.defaultRangeFeet
         : DEFAULT_PLAYER_VISION_RANGE_FEET
-      const players = map.tokens.filter((token) => plainObject(token) && token.type === 'player')
+      const players = effectiveMap.tokens.filter((token) => plainObject(token) && token.type === 'player')
       const viewers = geometry?.vision?.sharePartyVision === false
         ? players.filter((token) => token.characterId === resolvedActiveCharacterId)
         : players
-      const tokens = map.tokens.flatMap((token) => {
+      const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
         if (token.type === 'player' || token.visibilityMode === 'always') return [token]
         if (token.visibilityMode === 'dm-only') return []
@@ -2347,7 +2524,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         const observingViewers = viewers.filter((viewer) =>
           !needVision ||
           playerCanSeeToken(
-            map,
+            effectiveMap,
             geometry,
             viewer,
             token,
@@ -2356,7 +2533,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
           ),
         )
         const tremorsenseViewers = viewers.filter((viewer) =>
-          playerSpecialSenseRange(viewer, token, 'tremorsense', map) &&
+          playerSpecialSenseRange(viewer, token, 'tremorsense', effectiveMap) &&
           Math.abs(tokenElevationFeet(viewer) - tokenElevationFeet(token)) <= 5 &&
           token.airborne !== true,
         )
@@ -2384,7 +2561,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
   }
 }
 
-export function projectMapGeometryForPlayer(value, memberId = null) {
+export function projectMapGeometryForPlayer(value, memberId = null, worldMinute = null) {
   if (!plainObject(value) || !Array.isArray(value.maps)) return value
   return {
     ...value,
@@ -2432,6 +2609,10 @@ export function projectMapGeometryForPlayer(value, memberId = null) {
         walls: [...map.walls, ...secretWalls],
         doors: map.doors.filter(maySeeSecretDoor),
         windows: [...(Array.isArray(map.windows) ? map.windows : []), ...secretOpenings],
+        lights: (Array.isArray(map.lights) ? map.lights : []).map((light) =>
+          plainObject(light) && !campaignLightActive(light, worldMinute)
+            ? { ...light, enabled: false }
+            : light),
       }
     }),
   }
@@ -2520,6 +2701,10 @@ export function validateSharedStateShape(name, value) {
     const statisticsReason = validateCombatStatisticsState(value)
     if (statisticsReason) return { ok: false, reason: statisticsReason }
   }
+  if (name === 'campaign-time') {
+    const campaignTimeReason = validateCampaignTimeState(value)
+    if (campaignTimeReason) return { ok: false, reason: campaignTimeReason }
+  }
   return { ok: true }
 }
 
@@ -2607,6 +2792,21 @@ async function readMapGeometryForProjection(ctx) {
     return error?.code === 'ENOENT'
       ? { value: null, corrupted: false }
       : { value: null, corrupted: true }
+  }
+}
+
+async function readCampaignTimeForProjection(ctx) {
+  const filePath = path.join(ctx.stateRoot, 'campaign-time.json')
+  try {
+    const value = JSON.parse(await readFile(filePath, 'utf8'))
+    const validation = validateSharedStateShape('campaign-time', value)
+    return validation.ok
+      ? { value, worldMinute: value.worldMinute, corrupted: false }
+      : { value: null, worldMinute: Number.MAX_SAFE_INTEGER, corrupted: true }
+  } catch (error) {
+    return error?.code === 'ENOENT'
+      ? { value: null, worldMinute: CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE, corrupted: false }
+      : { value: null, worldMinute: Number.MAX_SAFE_INTEGER, corrupted: true }
   }
 }
 
@@ -4564,6 +4764,47 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       return true
     }
 
+    if (parsed.pathname === '/api/state/campaign-time/mutation' && req.method === 'PATCH') {
+      if (!authenticatedRoomMember) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      const body = await readBody(req)
+      let mutation
+      try {
+        mutation = JSON.parse(body.toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const room = await readRoomForCampaign(ctx)
+      const now = Date.now()
+      const filePath = path.join(ctx.stateRoot, 'campaign-time.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
+        mutateCampaignTimeState(state, mutation, now, authenticatedRoomMember, { host: room?.host }),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      if (result.changed) {
+        for (const name of ['campaign-time', 'maps', 'map-geometry']) {
+          publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `${name}:${now}:${Math.random().toString(36).slice(2)}`,
+            name,
+            updatedAt: now,
+          })
+        }
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(result.next))
+      return true
+    }
+
     if (parsed.pathname === '/api/state/combat-interrupts/interrupt' && req.method === 'PATCH') {
       const auth = authorizeStateWrite('combat-interrupts', extractSecret(req))
       if (!auth.ok) {
@@ -4652,7 +4893,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           if (roomMember && roomMember !== room.host) playerRead = true
           if (roomMember === room.host) playerRead = false
         }
-        if (playerRead && name === 'map-geometry') value = projectMapGeometryForPlayer(value, req.headers['x-stars-member'])
+        if (playerRead && name === 'map-geometry') {
+          const campaignTime = await readCampaignTimeForProjection(ctx)
+          value = projectMapGeometryForPlayer(value, req.headers['x-stars-member'], campaignTime.worldMinute)
+        }
         if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
@@ -4661,7 +4905,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           const geometry = await readMapGeometryForProjection(ctx)
           const fog = await readMapFogForProjection(ctx)
           const characters = await readCharactersForProjection(ctx)
-          if (geometry.corrupted || fog.corrupted || characters.corrupted) {
+          const campaignTime = await readCampaignTimeForProjection(ctx)
+          if (geometry.corrupted || fog.corrupted || characters.corrupted || campaignTime.corrupted) {
             value = {
               ...value,
               maps: (value.maps ?? []).map((map) => ({
@@ -4677,6 +4922,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               characters.value,
               roomMember,
               fog.value,
+              campaignTime.worldMinute,
             )
           }
         }

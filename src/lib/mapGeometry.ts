@@ -1,4 +1,5 @@
 import type { BattleMap, Token } from '../store/maps'
+import { campaignLightIsActive, type CampaignLightSourceKind } from './campaignTime'
 
 export const MAP_GEOMETRY_RESOURCE = 'map-geometry'
 export const MAP_GEOMETRY_SCHEMA_VERSION = 2
@@ -102,6 +103,10 @@ export interface MapGeometryLight {
   color: string
   elevationFeet: number
   createdAt: number
+  sourceKind?: CampaignLightSourceKind
+  startedAtWorldMinute?: number
+  durationMinutes?: number
+  expiresAtWorldMinute?: number
 }
 
 export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryWindow | MapGeometryObstacle | MapGeometryLight
@@ -126,6 +131,10 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   dimRadiusFeet?: number
   color?: string
   elevationFeet?: number
+  sourceKind?: CampaignLightSourceKind
+  startedAtWorldMinute?: number
+  durationMinutes?: number
+  expiresAtWorldMinute?: number
   windowType?: MapGeometryWindowType
   windowState?: MapGeometryWindowState
 }
@@ -188,6 +197,16 @@ function finite(value: unknown, min: number, max: number): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
 }
 
+function validLightTiming(raw: Record<string, unknown>): boolean {
+  if (raw.sourceKind != null && !['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(raw.sourceKind))) return false
+  const timing = [raw.startedAtWorldMinute, raw.durationMinutes, raw.expiresAtWorldMinute]
+  const hasTiming = timing.some((value) => value != null)
+  if (!hasTiming) return !['torch', 'candle', 'lamp', 'hooded-lantern'].includes(String(raw.sourceKind))
+  return timing.every((value) => Number.isSafeInteger(value) && Number(value) >= 0) &&
+    Number(raw.durationMinutes) > 0 && Number(raw.durationMinutes) <= 365 * 24 * 60 &&
+    Number(raw.expiresAtWorldMinute) === Number(raw.startedAtWorldMinute) + Number(raw.durationMinutes)
+}
+
 function normalizePoint(value: unknown): MapGeometryPoint | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
@@ -242,12 +261,25 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       typeof raw.label !== 'string' || raw.label.length > 120 || typeof raw.enabled !== 'boolean' ||
       !finite(raw.brightRadiusFeet, 0, 10_000) || !finite(raw.dimRadiusFeet, 0, 10_000) ||
       typeof raw.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(raw.color) ||
-      !finite(raw.elevationFeet, -1_000, 10_000) || !finite(raw.createdAt, 0, Number.MAX_SAFE_INTEGER)
+      !finite(raw.elevationFeet, -1_000, 10_000) || !finite(raw.createdAt, 0, Number.MAX_SAFE_INTEGER) ||
+      !validLightTiming(raw)
     ) return undefined
     return {
       id: raw.id, kind: 'light', label: raw.label, points: [points[0]], enabled: raw.enabled,
       brightRadiusFeet: raw.brightRadiusFeet, dimRadiusFeet: raw.dimRadiusFeet,
       color: raw.color.toLowerCase(), elevationFeet: raw.elevationFeet, createdAt: raw.createdAt,
+      sourceKind: ['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(raw.sourceKind))
+        ? raw.sourceKind as CampaignLightSourceKind
+        : undefined,
+      startedAtWorldMinute: finite(raw.startedAtWorldMinute, 0, Number.MAX_SAFE_INTEGER)
+        ? raw.startedAtWorldMinute as number
+        : undefined,
+      durationMinutes: finite(raw.durationMinutes, 1, 365 * 24 * 60)
+        ? raw.durationMinutes as number
+        : undefined,
+      expiresAtWorldMinute: finite(raw.expiresAtWorldMinute, 0, Number.MAX_SAFE_INTEGER)
+        ? raw.expiresAtWorldMinute as number
+        : undefined,
     }
   }
   const common = normalizeCommon(raw)
@@ -971,6 +1003,7 @@ export function mapGeometryCanSeeToken(input: {
   map: BattleMap
   viewer: Token
   target: Token
+  worldMinute?: number
 }): boolean {
   const geometry = input.geometry
   if (!geometry?.vision.enabled) return true
@@ -987,8 +1020,8 @@ export function mapGeometryCanSeeToken(input: {
   const truesightRangeFeet = Number.isFinite(input.viewer.truesightRangeFeet)
     ? Math.max(0, input.viewer.truesightRangeFeet!)
     : 0
-  const carriedLightRangeFeet = input.viewer.lightSource?.enabled
-    ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
+  const carriedLightRangeFeet = campaignLightIsActive(input.viewer.lightSource, input.worldMinute ?? 0)
+    ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
   const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
   const rangePx = rangeFeet / feetPerCell * Math.max(1, input.map.gridSize)
@@ -999,6 +1032,7 @@ export function mapGeometryCanSeeToken(input: {
     map: input.map,
     tokens: input.map.tokens,
     point: input.target,
+    worldMinute: input.worldMinute,
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
   if (illumination === 'darkness' && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
@@ -1019,6 +1053,7 @@ export function mapGeometryIlluminationAtPoint(input: {
   map: BattleMap
   tokens?: readonly Token[]
   point: MapGeometryPoint
+  worldMinute?: number
 }): MapGeometryIllumination {
   const ambient = input.geometry?.vision.ambientLight ?? 'bright'
   if (ambient === 'bright') return 'bright'
@@ -1027,17 +1062,17 @@ export function mapGeometryIlluminationAtPoint(input: {
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   for (const source of input.tokens ?? input.map.tokens) {
     const light = source.lightSource
-    if (!light?.enabled) continue
+    if (!campaignLightIsActive(light, input.worldMinute ?? 0)) continue
     const distanceFeet = Math.hypot(input.point.x - source.x, input.point.y - source.y) / gridSize * feetPerCell
-    const brightRadius = Math.max(0, light.brightRadiusFeet)
-    const dimRadius = brightRadius + Math.max(0, light.dimRadiusFeet)
+    const brightRadius = Math.max(0, light?.brightRadiusFeet ?? 0)
+    const dimRadius = brightRadius + Math.max(0, light?.dimRadiusFeet ?? 0)
     if (distanceFeet > dimRadius) continue
     if (rayBlocked({ geometry: input.geometry, from: source, to: input.point, purpose: 'vision' })) continue
     if (distanceFeet <= brightRadius) return 'bright'
     result = 'dim'
   }
   for (const source of input.geometry?.lights ?? []) {
-    if (!source.enabled) continue
+    if (!campaignLightIsActive(source, input.worldMinute ?? 0)) continue
     const point = source.points[0]
     const distanceFeet = Math.hypot(input.point.x - point.x, input.point.y - point.y) / gridSize * feetPerCell
     const dimRadius = source.brightRadiusFeet + source.dimRadiusFeet
@@ -1114,6 +1149,7 @@ export function mapGeometryVisibilityPolygon(input: {
   forceEnabled?: boolean
   /** 强制启用视野时使用的基础距离；Token 的明确视野值仍优先。 */
   fallbackRangeFeet?: number
+  worldMinute?: number
 }): MapGeometryPoint[] {
   const geometry = input.geometry
   if (!geometry?.vision.enabled && !input.forceEnabled) return []
@@ -1131,8 +1167,8 @@ export function mapGeometryVisibilityPolygon(input: {
   const truesightRangeFeet = Number.isFinite(input.viewer.truesightRangeFeet)
     ? Math.max(0, input.viewer.truesightRangeFeet!)
     : 0
-  const lightRangeFeet = input.viewer.lightSource?.enabled
-    ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
+  const lightRangeFeet = campaignLightIsActive(input.viewer.lightSource, input.worldMinute ?? 0)
+    ? (input.viewer.lightSource?.brightRadiusFeet ?? 0) + (input.viewer.lightSource?.dimRadiusFeet ?? 0)
     : 0
   // 地形遮罩使用正常视距；暗光、黑暗和场景光源在 LightingLayer 内表现。
   // 服务端仍会单独过滤未被照亮的生物，因此不会因地形可见而泄露隐藏 Token。

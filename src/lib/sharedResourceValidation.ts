@@ -27,6 +27,7 @@ import {
   type CombatInterruptStatus,
 } from './combatInterruptQueue'
 import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
+import { CAMPAIGN_TIME_RESOURCE, validateSharedCampaignTime } from './campaignTime'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -68,6 +69,20 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validTimedLightState(value: unknown): boolean {
+  if (!isPlainObject(value) || typeof value.enabled !== 'boolean' ||
+    !Number.isFinite(value.brightRadiusFeet) || Number(value.brightRadiusFeet) < 0 ||
+    !Number.isFinite(value.dimRadiusFeet) || Number(value.dimRadiusFeet) < 0 ||
+    typeof value.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(value.color) ||
+    (value.sourceKind != null && !['permanent', 'torch', 'candle', 'lamp', 'hooded-lantern', 'spell', 'custom'].includes(String(value.sourceKind)))) return false
+  const timing = [value.startedAtWorldMinute, value.durationMinutes, value.expiresAtWorldMinute]
+  const hasTiming = timing.some((entry) => entry != null)
+  if (!hasTiming) return !['torch', 'candle', 'lamp', 'hooded-lantern'].includes(String(value.sourceKind))
+  return timing.every((entry) => Number.isSafeInteger(entry) && Number(entry) >= 0) &&
+    Number(value.durationMinutes) > 0 && Number(value.durationMinutes) <= 365 * 24 * 60 &&
+    Number(value.expiresAtWorldMinute) === Number(value.startedAtWorldMinute) + Number(value.durationMinutes)
 }
 
 function validEntityArray(value: unknown, resource: string): boolean {
@@ -395,6 +410,9 @@ function migrateDnd5eStateEnvelope(
       tokens: entry.tokens.map((token, tokenIndex) => {
         if (!isPlainObject(token)) return token
         const path = `maps[${mapIndex}].tokens[${tokenIndex}]`
+        if (token.lightSource != null && !validTimedLightState(token.lightSource)) {
+          issues.push(`${path}.lightSource 不是有效的限时光源`)
+        }
         issues.push(...validateDnd5eSummon(token.dnd5eSummon, `${path}.dnd5eSummon`))
         issues.push(...validateDnd5eSpellEffect(token.dnd5eSpellEffect, `${path}.dnd5eSpellEffect`))
         const migrated = migrateEntity(token, path, false)
@@ -433,6 +451,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === GROUP_ABILITY_CHECK_RESOURCE && !validateSharedGroupAbilityChecks(input)) {
     reasons.push('群体检定资源结构损坏')
+  }
+  if (name === CAMPAIGN_TIME_RESOURCE && !validateSharedCampaignTime(input)) {
+    reasons.push('战役时间资源结构损坏')
   }
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {

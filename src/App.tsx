@@ -6,6 +6,7 @@ import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
 import RoomHandoutNotification from './components/RoomHandoutNotification'
 import GroupAbilityCheckSystem from './components/GroupAbilityCheckSystem'
+import CampaignTimeSystem from './components/CampaignTimeSystem'
 import PageErrorBoundary from './components/PageErrorBoundary'
 import { SharedSyncRecoveryBanner } from './components/SharedSyncStatus'
 import RoomLobbyPage from './pages/RoomLobbyPage'
@@ -41,6 +42,8 @@ import { ROOM_CHAT_RESOURCE, ROOM_JOURNAL_RESOURCE } from './lib/roomCommunicati
 import { useRoomCommunicationsStore } from './store/roomCommunications'
 import { GROUP_ABILITY_CHECK_RESOURCE } from './lib/groupAbilityChecks'
 import { useGroupAbilityChecksStore } from './store/groupAbilityChecks'
+import { CAMPAIGN_TIME_RESOURCE } from './lib/campaignTime'
+import { useCampaignTimeStore } from './store/campaignTime'
 
 export default function App() {
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
@@ -61,6 +64,7 @@ export default function App() {
   const loadSharedRoomChat = useRoomCommunicationsStore((s) => s.loadChat)
   const loadSharedRoomJournal = useRoomCommunicationsStore((s) => s.loadJournal)
   const loadSharedGroupAbilityChecks = useGroupAbilityChecksStore((s) => s.loadShared)
+  const loadSharedCampaignTime = useCampaignTimeStore((s) => s.loadShared)
 
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
@@ -136,7 +140,7 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics(), loadSharedRoomChat(), loadSharedRoomJournal(), loadSharedGroupAbilityChecks()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics(), loadSharedRoomChat(), loadSharedRoomJournal(), loadSharedGroupAbilityChecks(), loadSharedCampaignTime()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
@@ -153,6 +157,7 @@ export default function App() {
     const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat)
     const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal)
     const stopGroupAbilityChecks = subscribeSharedResourceInvalidation(GROUP_ABILITY_CHECK_RESOURCE, loadSharedGroupAbilityChecks)
+    const stopCampaignTime = subscribeSharedResourceInvalidation(CAMPAIGN_TIME_RESOURCE, loadSharedCampaignTime)
     return () => {
       stopMaps()
       stopCharacters()
@@ -165,8 +170,9 @@ export default function App() {
       stopRoomChat()
       stopRoomJournal()
       stopGroupAbilityChecks()
+      stopCampaignTime()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedGroupAbilityChecks, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCampaignTime, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedGroupAbilityChecks, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return
@@ -209,6 +215,7 @@ export default function App() {
       <SharedSyncRecoveryBanner />
       <RoomHandoutNotification />
       <GroupAbilityCheckSystem />
+      <CampaignTimeSystem isDm={endpointMode !== 'player'} />
       <iframe
         title="D20 dice preloader"
         src="/dice-box-frame.html?badge=0"

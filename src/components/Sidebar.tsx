@@ -17,6 +17,7 @@ import {
 import type { AppMode } from '../lib/appMode'
 import type { RoomSession } from '../lib/roomSession'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
+import CampaignTimeWidget from './CampaignTimeWidget'
 
 const navItems = [
   { to: '/', label: '战役总览', icon: LayoutDashboard, end: true },
@@ -132,6 +133,7 @@ export default function Sidebar({
             <span className="font-mono text-base font-bold tracking-[0.18em] text-slate-100">{roomSession.roomId}</span>
             {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4 text-slate-500" />}
           </button>
+          <CampaignTimeWidget mode={mode} />
         </div>
       )}
 

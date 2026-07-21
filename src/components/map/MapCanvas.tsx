@@ -128,6 +128,8 @@ import {
   type MapGeometryWallMaterial,
 } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
+import { campaignLightIsActive } from '../../lib/campaignTime'
+import { useCampaignTimeStore } from '../../store/campaignTime'
 
 export interface MoveCircle {
   centerX: number
@@ -331,12 +333,14 @@ function PlayerVisibilityLayer({
   fog,
   sourceTokenIds,
   exploredPolygons,
+  worldMinute,
 }: {
   map: BattleMap
   geometry?: MapGeometryState
   fog?: MapFogState
   sourceTokenIds: readonly string[]
   exploredPolygons: readonly MapGeometryPoint[][]
+  worldMinute: number
 }) {
   const manualFogEnabled = !!fog && (fog.filled || fog.shapes.length > 0)
   // Owlbear 语义：玩家端的黑幕完全由战争迷雾层决定（全图填充或画出的
@@ -378,6 +382,7 @@ function PlayerVisibilityLayer({
           map,
           viewer,
           forceEnabled: manualFogEnabled,
+          worldMinute,
         })
         return polygon.length >= 3 ? (
           <Line
@@ -394,18 +399,18 @@ function PlayerVisibilityLayer({
   )
 }
 
-function LightingLayer({ map, geometry }: { map: BattleMap; geometry?: MapGeometryState }) {
+function LightingLayer({ map, geometry, worldMinute }: { map: BattleMap; geometry?: MapGeometryState; worldMinute: number }) {
   if (!geometry?.vision.enabled || geometry.vision.ambientLight === 'bright') return null
   const opacity = geometry.vision.ambientLight === 'darkness' ? 0.9 : 0.3
   const sources = [
-    ...map.tokens.filter((token) => token.lightSource?.enabled).map((token) => ({
+    ...map.tokens.filter((token) => campaignLightIsActive(token.lightSource, worldMinute)).map((token) => ({
       id: `token:${token.id}`,
       point: { x: token.x, y: token.y },
       elevationFeet: token.elevationFeet ?? 0,
       brightRadiusFeet: token.lightSource!.brightRadiusFeet,
       dimRadiusFeet: token.lightSource!.dimRadiusFeet,
     })),
-    ...(geometry.lights ?? []).filter((light) => light.enabled).map((light) => ({
+    ...(geometry.lights ?? []).filter((light) => campaignLightIsActive(light, worldMinute)).map((light) => ({
       id: `scene:${light.id}`,
       point: light.points[0],
       elevationFeet: light.elevationFeet,
@@ -1275,6 +1280,7 @@ export default function MapCanvas({
   const [cursor, setCursor] = useState<Point | null>(null)
 
   const updateToken = useMapStore((s) => s.updateToken)
+  const worldMinute = useCampaignTimeStore((state) => state.state.worldMinute)
 
   const movementSignature = map.tokens
     .map((token) => token.movementAnimation?.id ?? '')
@@ -2413,13 +2419,14 @@ export default function MapCanvas({
         )}
         {(!isDM || geometryPreviewAsPlayer || fogPreviewAsPlayer) && (
           <>
-            <LightingLayer map={map} geometry={geometry} />
+            <LightingLayer map={map} geometry={geometry} worldMinute={worldMinute} />
             <PlayerVisibilityLayer
               map={map}
               geometry={geometry}
               fog={fog}
               sourceTokenIds={visionSourceTokenIds}
               exploredPolygons={exploredVisionPolygons}
+              worldMinute={worldMinute}
             />
           </>
         )}

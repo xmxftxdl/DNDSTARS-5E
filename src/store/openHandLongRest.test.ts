@@ -91,7 +91,7 @@ describe('Open Hand Tranquility long-rest state', () => {
     useCharacterStore.setState({ characters: originalCharacters, selectedId: originalSelectedId })
   })
 
-  it('advances Divine Intervention by one day without restoring the use during cooldown', async () => {
+  it('keeps Divine Intervention locked until the campaign calendar advances a day', async () => {
     const { useCharacterStore } = await import('./characters')
     const originalCharacters = useCharacterStore.getState().characters
     const originalSelectedId = useCharacterStore.getState().selectedId
@@ -111,7 +111,7 @@ describe('Open Hand Tranquility long-rest state', () => {
     useCharacterStore.getState().longRestAll()
 
     const rested = useCharacterStore.getState().characters[0]
-    expect(rested.dnd5eCombatState).toEqual({ divineInterventionCooldownDays: 6 })
+    expect(rested.dnd5eCombatState).toEqual({ divineInterventionCooldownDays: 7 })
     expect(rested.classResources?.['dnd5e-divine-intervention']).toEqual({ current: 0, max: 1 })
     useCharacterStore.setState({ characters: originalCharacters, selectedId: originalSelectedId })
   })

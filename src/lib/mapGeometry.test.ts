@@ -221,6 +221,24 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(true)
   })
 
+  it('stops timed token lights from illuminating after their campaign expiry', () => {
+    const g = geometry()
+    g.walls = []
+    g.vision.ambientLight = 'darkness'
+    const viewer = token('viewer', 50, 50)
+    const target = token('target', 100, 50, { type: 'enemy' })
+    const torch = token('torch', 50, 50, {
+      lightSource: {
+        enabled: true, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fbbf24',
+        sourceKind: 'torch', startedAtWorldMinute: 480, durationMinutes: 60, expiresAtWorldMinute: 540,
+      },
+    })
+    const litMap = { ...map, tokens: [viewer, target, torch] }
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map: litMap, point: target, worldMinute: 539 })).toBe('bright')
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map: litMap, point: target, worldMinute: 540 })).toBe('darkness')
+    expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target, worldMinute: 540 })).toBe(false)
+  })
+
   it('keeps the normal terrain envelope in darkness while creature visibility still requires light', () => {
     const g = geometry()
     g.walls = []

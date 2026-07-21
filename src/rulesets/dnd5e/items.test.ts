@@ -300,5 +300,7 @@ describe('SRD 5.1 inventory', () => {
     expect(afterLong.dnd5eInventory?.entries[0]).toMatchObject({
       quantity: 1, resources: { short: { current: 4 }, long: { current: 3 }, dawn: { current: 0 } },
     })
+    const afterDawn = restoreDnd5eInventoryResources(afterLong, 'dawn')
+    expect(afterDawn.dnd5eInventory?.entries[0]).toMatchObject({ resources: { dawn: { current: 2 } } })
   })
 })

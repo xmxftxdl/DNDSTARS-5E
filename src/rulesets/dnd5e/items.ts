@@ -372,7 +372,7 @@ export function spendDnd5eInventoryResource(
 /** 恢复明确绑定到短休／长休的实例资源；黎明资源由未来的战役日历事务处理。 */
 export function restoreDnd5eInventoryResources(
   character: Character,
-  rest: 'short-rest' | 'long-rest',
+  rest: 'short-rest' | 'long-rest' | 'dawn',
 ): Character {
   const inventory = normalizeDnd5eInventory(character)
   let changed = false

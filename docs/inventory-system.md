@@ -5,7 +5,7 @@
 - `Dnd5eInventoryItemTemplate` 保存物品规则、图标语义、重量、价格、来源、使用动作和效果声明。
 - `Dnd5eInventoryEntry` 是角色实际持有的物品实例，保存数量、获得时间、当前装备槽位和实例资源；实例同时保留模板快照，避免扩展规则暂时未加载时物品消失。
 - 库存 schema V2 使用 `resources[]` 保存充能、次数等实例状态。资源的 `current` 归零只表示暂时耗尽，不会删除物品、减少数量或丢失模板快照；V1 的 `remainingCharges` 会在载入时迁移到对应实例资源。
-- `short-rest` 资源会在短休或长休恢复，`long-rest` 资源在长休恢复；`dawn` 已保留在 schema 中，但在战役日历／世界时间事务完成前仍由 DM 推进，不能用休息按钮冒充黎明。
+- `short-rest` 资源会在短休或长休恢复，`long-rest` 资源在长休恢复；`dawn` 资源由 DM 权威战役时钟跨过每日 06:00 时自动恢复，休息按钮不再冒充黎明。
 - `Character.dnd5eInventory` 随角色权威快照同步。旧角色首次迁移时会为当前武器、盾牌和护甲生成确定性实例。
 - SRD 核心目录入口位于 `src/rulesets/dnd5e/items.ts`；魔法物品的独立目录、稀有度、类型、同调要求和自动化状态位于 `src/rulesets/dnd5e/magicItems.ts`。所有核心模板标明 `SRD 5.1 / CC BY 4.0`。
 - Rules Plugin API V2 的 `registerItem` 可注册房间级自定义物品。Worker 只传出纯数据，Host 会校验模板 ID、文本长度、分类、图标、槽位、价格、重量、骰子、射程与全部效果数值。

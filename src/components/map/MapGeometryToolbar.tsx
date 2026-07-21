@@ -6,6 +6,14 @@ import {
 import { normalizeMapGeometry, type MapGeometryEntity, type MapGeometryState, type MapGeometryTool, type MapGeometryWallMaterial } from '../../lib/mapGeometry'
 import { useMapGeometryStore } from '../../store/mapGeometry'
 import { useMapStore, type Token } from '../../store/maps'
+import {
+  CAMPAIGN_LIGHT_PRESETS,
+  campaignLightPresetPatch,
+  campaignLightRemainingMinutes,
+  formatCampaignDuration,
+  type CampaignLightPreset,
+} from '../../lib/campaignTime'
+import { useCampaignTimeStore } from '../../store/campaignTime'
 
 interface MapGeometryToolbarProps {
   mapId: string
@@ -96,6 +104,7 @@ export default function MapGeometryToolbar({
   const canUndo = useMapGeometryStore((state) => (state.historyByMapId[mapId]?.length ?? 0) > 0)
   const canRedo = useMapGeometryStore((state) => (state.futureByMapId[mapId]?.length ?? 0) > 0)
   const updateToken = useMapStore((state) => state.updateToken)
+  const worldMinute = useCampaignTimeStore((state) => state.state.worldMinute)
   const count = geometry.walls.length + geometry.doors.length + (geometry.windows?.length ?? 0) + geometry.obstacles.length + (geometry.lights?.length ?? 0)
 
   return (
@@ -506,11 +515,29 @@ export default function MapGeometryToolbar({
           )}
           {selectedEntity.kind === 'light' && (
             <>
+              <select
+                value={CAMPAIGN_LIGHT_PRESETS.some((preset) => preset.id === selectedEntity.sourceKind) ? selectedEntity.sourceKind : 'permanent'}
+                onChange={(event) => updateEntity(
+                  mapId,
+                  selectedEntity.id,
+                  campaignLightPresetPatch(event.target.value as CampaignLightPreset['id'], worldMinute),
+                )}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="选择光源与燃烧时长"
+              >
+                {CAMPAIGN_LIGHT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              </select>
               <label className="flex items-center gap-0.5 text-[10px] text-slate-300">
                 <input
                   type="checkbox"
                   checked={selectedEntity.enabled}
-                  onChange={(event) => updateEntity(mapId, selectedEntity.id, { enabled: event.target.checked })}
+                  onChange={(event) => {
+                    const preset = CAMPAIGN_LIGHT_PRESETS.find((entry) => entry.id === selectedEntity.sourceKind)
+                    updateEntity(mapId, selectedEntity.id,
+                      event.target.checked && preset?.durationMinutes && campaignLightRemainingMinutes(selectedEntity, worldMinute) === 0
+                        ? campaignLightPresetPatch(preset.id, worldMinute)
+                        : { enabled: event.target.checked })
+                  }}
                 />
                 开启
               </label>
@@ -524,6 +551,11 @@ export default function MapGeometryToolbar({
                 className="h-5 w-6 rounded border border-white/10 bg-transparent"
                 title="场景光源颜色"
               />
+              {campaignLightRemainingMinutes(selectedEntity, worldMinute) != null && (
+                <span className="text-[10px] text-amber-300">
+                  剩余 {formatCampaignDuration(campaignLightRemainingMinutes(selectedEntity, worldMinute) ?? 0)}
+                </span>
+              )}
             </>
           )}
           {selectedEntity.kind !== 'door' && selectedEntity.kind !== 'window' && <button
@@ -586,19 +618,36 @@ export default function MapGeometryToolbar({
             <input
               type="checkbox"
               checked={selectedToken.lightSource?.enabled ?? false}
-              onChange={(event) => updateToken(mapId, selectedToken.id, {
-                lightSource: {
-                  enabled: event.target.checked,
-                  brightRadiusFeet: selectedToken.lightSource?.brightRadiusFeet ?? 20,
-                  dimRadiusFeet: selectedToken.lightSource?.dimRadiusFeet ?? 20,
-                  color: selectedToken.lightSource?.color ?? '#fbbf24',
-                },
-              })}
+              onChange={(event) => {
+                const existing = selectedToken.lightSource
+                const preset = CAMPAIGN_LIGHT_PRESETS.find((entry) => entry.id === existing?.sourceKind)
+                updateToken(mapId, selectedToken.id, {
+                  lightSource: event.target.checked && preset?.durationMinutes && campaignLightRemainingMinutes(existing, worldMinute) === 0
+                    ? campaignLightPresetPatch(preset.id, worldMinute)
+                    : {
+                        ...existing,
+                        enabled: event.target.checked,
+                        brightRadiusFeet: existing?.brightRadiusFeet ?? 20,
+                        dimRadiusFeet: existing?.dimRadiusFeet ?? 20,
+                        color: existing?.color ?? '#fbbf24',
+                      },
+                })
+              }}
             />
             光源
           </label>
           {selectedToken.lightSource?.enabled && (
             <>
+              <select
+                value={CAMPAIGN_LIGHT_PRESETS.some((preset) => preset.id === selectedToken.lightSource?.sourceKind) ? selectedToken.lightSource.sourceKind : 'permanent'}
+                onChange={(event) => updateToken(mapId, selectedToken.id, {
+                  lightSource: campaignLightPresetPatch(event.target.value as CampaignLightPreset['id'], worldMinute),
+                })}
+                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                title="选择携带光源与燃烧时长"
+              >
+                {CAMPAIGN_LIGHT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              </select>
               <NumberField
                 label="明亮"
                 min={0}
@@ -624,6 +673,11 @@ export default function MapGeometryToolbar({
                 className="h-5 w-6 rounded border border-white/10 bg-transparent"
                 title="光源颜色"
               />
+              {campaignLightRemainingMinutes(selectedToken.lightSource, worldMinute) != null && (
+                <span className="text-[10px] text-amber-300">
+                  剩余 {formatCampaignDuration(campaignLightRemainingMinutes(selectedToken.lightSource, worldMinute) ?? 0)}
+                </span>
+              )}
             </>
           )}
         </div>

@@ -35,6 +35,7 @@ import {
   mutateRoomChatState,
   mutateRoomJournalState,
   mutateGroupAbilityChecksState,
+  mutateCampaignTimeState,
   parseRoomChatRollCommand,
   projectRoomChatForMember,
   projectRoomJournalForMember,
@@ -47,6 +48,38 @@ import {
   withWriteLock,
   validateSharedStateShape,
 } from '../../scripts/shared-server-core.mjs'
+
+describe('authoritative campaign time', () => {
+  const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }
+  const player = { role: 'player', memberId: 'player-member', displayName: '玩家' }
+  const context = { host }
+
+  it('allows only the DM to advance the monotonic room clock', () => {
+    expect(mutateCampaignTimeState(null, { operation: 'advance', minutes: 10 }, 1, player, context))
+      .toMatchObject({ ok: false, error: 'dm-authority-required' })
+    const result = mutateCampaignTimeState(null, { operation: 'advance', minutes: 60, reason: '旅行' }, 2, host, context)
+    expect(result).toMatchObject({
+      ok: true,
+      next: { worldMinute: 540, advances: [{ fromWorldMinute: 480, toWorldMinute: 540, reason: '旅行' }] },
+    })
+  })
+
+  it('expires timers atomically and records long rests as eight hours', () => {
+    const timer = mutateCampaignTimeState(null, {
+      operation: 'create-timer', kind: 'concentration', label: '隐形术', durationMinutes: 10,
+    }, 10, host, context)
+    if (!timer.ok) throw new Error('expected timer creation')
+    const rest = mutateCampaignTimeState(timer.next, { operation: 'long-rest' }, 20, host, context)
+    expect(rest).toMatchObject({
+      ok: true,
+      next: {
+        worldMinute: 960,
+        timers: [{ status: 'expired', expiredAtWorldMinute: 490 }],
+        advances: [{ kind: 'long-rest', minutes: 480, expiredTimerIds: [expect.any(String)] }],
+      },
+    })
+  })
+})
 
 describe('authoritative group ability checks', () => {
   const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }
@@ -491,6 +524,32 @@ describe('map geometry player projection', () => {
     expect(sharedServerCore.projectMapsForPlayer(maps, disabledGeometry, 'character-1', null, null, {
       maps: [{ mapId: 'map-1', filled: true, shapes: [] }],
     }).maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'lit', 'unlit'])
+  })
+
+  it('fails closed for expired timed lights in player map and geometry projections', () => {
+    const timedGeometry = {
+      ...geometry,
+      maps: geometry.maps.map((entry) => ({
+        ...entry,
+        walls: [],
+        lights: [{
+          id: 'torch', kind: 'light', label: '火把', points: [{ x: 80, y: 20 }], enabled: true,
+          brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#ffffff', elevationFeet: 5, createdAt: 1,
+          sourceKind: 'torch', startedAtWorldMinute: 480, durationMinutes: 60, expiresAtWorldMinute: 540,
+        }],
+        vision: { ...entry.vision, enabled: true, ambientLight: 'darkness', defaultRangeFeet: 60 },
+      })),
+    }
+    const maps = { maps: [{
+      id: 'map-1', width: 200, height: 120, gridSize: 10, feetPerCell: 5,
+      tokens: [
+        { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+        { id: 'target', type: 'enemy', x: 80, y: 20 },
+      ],
+    }] }
+    expect(sharedServerCore.projectMapsForPlayer(maps, timedGeometry, 'character-1', null, null, null, 540)
+      .maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero'])
+    expect(sharedServerCore.projectMapGeometryForPlayer(timedGeometry, null, 540).maps[0].lights[0].enabled).toBe(false)
   })
 
   it('hides tokens under cover shapes even when the fog is not filled', () => {

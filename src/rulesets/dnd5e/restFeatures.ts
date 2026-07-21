@@ -111,14 +111,10 @@ export function applyDnd5eEldritchMaster(character: Character): Dnd5eRestFeature
   }
 }
 
-/**
- * The map has no calendar subsystem yet, so a completed long rest advances the
- * Divine Intervention lockout by one day. A successful use starts at 7 and the
- * class resource stays unavailable until seven long rests have elapsed.
- */
-export function applyDnd5eDivineInterventionLongRest(character: Character): Character {
+/** 按战役日历经过的天数推进神圣干预冷却；冷却期间资源始终不可用。 */
+export function advanceDnd5eDivineInterventionCalendarDays(character: Character, days: number): Character {
   const currentCooldown = Math.max(0, Math.floor(character.dnd5eCombatState?.divineInterventionCooldownDays ?? 0))
-  const remainingCooldown = Math.max(0, currentCooldown - 1)
+  const remainingCooldown = Math.max(0, currentCooldown - Math.max(0, Math.floor(days)))
   const intervention = character.classResources?.['dnd5e-divine-intervention']
   return {
     ...character,
@@ -130,9 +126,14 @@ export function applyDnd5eDivineInterventionLongRest(character: Character): Char
           ...character.classResources,
           'dnd5e-divine-intervention': {
             ...intervention,
-            current: remainingCooldown > 0 ? 0 : intervention.current,
+            current: remainingCooldown > 0 ? 0 : intervention.max,
           },
         }
       : character.classResources,
   }
+}
+
+/** 旧调用兼容层；新运行时由战役日历的黎明事务驱动。 */
+export function applyDnd5eDivineInterventionLongRest(character: Character): Character {
+  return advanceDnd5eDivineInterventionCalendarDays(character, 1)
 }
