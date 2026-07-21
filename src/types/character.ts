@@ -243,6 +243,7 @@ export interface Character {
   inspiration: number // 激励骰数量
 
   conditions: string[] // 状态效果
+  backstory?: string // 玩家编写的角色背景故事
   notes: string // 玩家可见笔记
 
   /** D&D 5e 职业资源与法术位。 */

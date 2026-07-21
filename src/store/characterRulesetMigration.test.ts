@@ -60,4 +60,14 @@ describe('D&D 5e character save migration', () => {
     ])
     expect(serializeDnd5eCharacterSnapshot(migrated).dnd5eExperienceAwards).toEqual(migrated.dnd5eExperienceAwards)
   })
+
+  it('persists a player-authored backstory and initializes old saves with an empty one', () => {
+    const withBackstory = normalizeCharacter({
+      id: 'story-hero',
+      name: '故事角色',
+      backstory: '曾在边境村庄担任守卫，为寻找失踪的导师踏上旅程。',
+    })
+    expect(serializeDnd5eCharacterSnapshot(withBackstory).backstory).toBe(withBackstory.backstory)
+    expect(normalizeCharacter({ id: 'legacy-hero', name: '旧角色' }).backstory).toBe('')
+  })
 })

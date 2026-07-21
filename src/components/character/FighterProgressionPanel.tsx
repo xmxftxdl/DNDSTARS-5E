@@ -201,9 +201,10 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
       )}
 
       <div className="mt-5">
-        <h4 className="text-sm font-semibold text-slate-200">1–20 级特性进度</h4>
+        <h4 className="text-sm font-semibold text-slate-200">职业特性进度</h4>
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
           {progression.map((entry) => {
+            if (entry.features.length === 0) return null
             const unlocked = entry.level <= character.level
             const current = entry.level === character.level
             return (

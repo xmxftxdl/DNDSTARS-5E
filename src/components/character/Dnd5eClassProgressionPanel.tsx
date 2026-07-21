@@ -560,7 +560,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
       })}
 
       <div className="mt-5">
-        <h4 className="text-sm font-semibold text-slate-200">1–20 级特性进度</h4>
+        <h4 className="text-sm font-semibold text-slate-200">职业特性进度</h4>
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
           {progression.map((entry) => {
             const unlocked = entry.level <= character.level
@@ -571,6 +571,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
                 .filter((feature) => feature.level === entry.level)
                 .map((feature) => ({ ...feature, source: 'subclass' as const })),
             ]
+            if (features.length === 0) return null
             return (
               <div key={entry.level} className={`rounded-xl border p-3 ${current ? 'border-arcane-400/60 bg-arcane-500/10' : unlocked ? 'border-white/10 bg-white/[0.03]' : 'border-white/5 bg-void-900/30 opacity-55'}`}>
                 <div className="flex items-center justify-between gap-3">
@@ -578,7 +579,6 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
                   <span className="text-[11px] text-slate-500">熟练加值 +{entry.proficiencyBonus}</span>
                 </div>
                 <div className="mt-2 space-y-2">
-                  {features.length === 0 && <p className="text-xs text-slate-600">本级没有新的职业特性。</p>}
                   {features.map((feature) => (
                     <div key={feature.id}>
                       <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">

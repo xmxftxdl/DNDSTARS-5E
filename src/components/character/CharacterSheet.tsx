@@ -475,6 +475,19 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
           </section>
 
           <section className="glass rounded-2xl p-4">
+            <h3 className="mb-2 text-sm font-semibold text-slate-200">背景故事</h3>
+            <p className="mb-3 text-xs leading-5 text-slate-500">记录角色的出身、重要经历、关系、目标以及踏上冒险的原因。</p>
+            <textarea
+              aria-label="背景故事"
+              value={c.backstory ?? ''}
+              onChange={(event) => updateCharacter({ backstory: event.target.value })}
+              rows={8}
+              placeholder="例如：角色来自哪里？为什么离开故乡？他最在意的人或目标是什么？"
+              className="w-full resize-y rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm leading-6 text-slate-200 outline-none focus:border-arcane-500"
+            />
+          </section>
+
+          <section className="glass rounded-2xl p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-200">角色笔记</h3>
             <textarea aria-label="角色笔记" value={c.notes} onChange={(event) => updateCharacter({ notes: event.target.value })} rows={5} className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200" />
             {isDM && (
