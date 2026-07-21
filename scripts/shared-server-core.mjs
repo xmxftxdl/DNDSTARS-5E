@@ -1158,7 +1158,49 @@ function validDnd5eRoundLifecycle(value) {
     value.expiresAfterRound - value.createdRound + 1 <= 14_400
 }
 
+function validateCustomMonsterState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.monsters) || value.monsters.length > 512) {
+    return 'invalid-custom-monster-envelope'
+  }
+  const ids = new Set()
+  const slugs = new Set()
+  for (const monster of value.monsters) {
+    if (
+      !plainObject(monster) || typeof monster.id !== 'string' ||
+      !/^room-monster:[a-z0-9][a-z0-9-]{0,95}$/.test(monster.id) || ids.has(monster.id) ||
+      typeof monster.slug !== 'string' || !/^[a-z0-9][a-z0-9-]{0,95}$/.test(monster.slug) || slugs.has(monster.slug) ||
+      monster.source !== 'DM 自定义' || typeof monster.name !== 'string' || !monster.name.trim() || monster.name.length > 240 ||
+      typeof monster.englishName !== 'string' || !monster.englishName.trim() || monster.englishName.length > 240 ||
+      !['微型', '小型', '中型', '大型', '超大型', '巨型'].includes(monster.size) ||
+      typeof monster.creatureType !== 'string' || !monster.creatureType.trim() ||
+      !plainObject(monster.armorClass) || !Number.isInteger(monster.armorClass.value) || monster.armorClass.value < 1 || monster.armorClass.value > 100 ||
+      !plainObject(monster.hitPoints) || !Number.isInteger(monster.hitPoints.average) || monster.hitPoints.average < 1 ||
+      typeof monster.hitPoints.dice !== 'string' || !/^\d+d\d+(?:\s*[+\-−]\s*\d+)?$/i.test(monster.hitPoints.dice) ||
+      !plainObject(monster.speed) || !Number.isInteger(monster.speed.walk) || monster.speed.walk < 0 ||
+      !plainObject(monster.abilities) || ['str', 'dex', 'con', 'int', 'wis', 'cha'].some((key) =>
+        !Number.isInteger(monster.abilities[key]) || monster.abilities[key] < 1 || monster.abilities[key] > 30
+      ) ||
+      !Array.isArray(monster.senses) || !Array.isArray(monster.languages) || !Array.isArray(monster.traits) ||
+      !Array.isArray(monster.actions) || monster.actions.length > 128 ||
+      !plainObject(monster.challenge) || typeof monster.challenge.rating !== 'string' ||
+      !Number.isSafeInteger(monster.challenge.xp) || monster.challenge.xp < 0
+    ) return 'invalid-custom-monster'
+    for (const action of monster.actions) {
+      if (
+        !plainObject(action) || typeof action.id !== 'string' || !action.id ||
+        typeof action.name !== 'string' || !action.name.trim() || typeof action.description !== 'string' || !action.description.trim() ||
+        !['weapon-attack', 'multiattack', 'other'].includes(action.kind) ||
+        (action.automation != null && !['headless', 'dm-adjudication'].includes(action.automation))
+      ) return 'invalid-custom-monster-action'
+    }
+    ids.add(monster.id)
+    slugs.add(monster.slug)
+  }
+  return null
+}
+
 function validateDnd5eResourceStates(name, value) {
+  if (name === 'custom-monsters') return validateCustomMonsterState(value)
   if (name === 'characters') {
     let portraitLength = 0
     for (const character of value.characters ?? []) {
@@ -1800,6 +1842,7 @@ export function validateSharedStateShape(name, value) {
     characters: 'characters',
     maps: 'maps',
     spellbook: 'spells',
+    'custom-monsters': 'monsters',
     'combat-log': 'entries',
     'dice-events': 'events',
     'combat-interrupts': 'interrupts',

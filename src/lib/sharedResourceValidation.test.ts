@@ -8,6 +8,7 @@ describe('shared resource runtime validation', () => {
       characters: { characters: [], updatedAt: 1 },
       maps: { maps: [], updatedAt: 1 },
       spellbook: { spells: [], updatedAt: 1 },
+      'custom-monsters': { schemaVersion: 1, monsters: [], updatedAt: 1 },
       combat: { active: false, updatedAt: 1 },
       'combat-log': { entries: [], updatedAt: 1 },
       'dice-events': { events: [], updatedAt: 1 },
@@ -31,6 +32,7 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('characters', { characters: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', { maps: [{ id: '' }] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('spellbook', { spells: 'broken' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('custom-monsters', { monsters: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('map-fog', {
       schemaVersion: 1,

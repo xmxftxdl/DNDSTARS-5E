@@ -25,6 +25,7 @@ import { useMapExplorationStore } from './store/mapExploration'
 import { useCombatStatisticsStore } from './store/combatStatistics'
 import { useCharacterStore } from './store/characters'
 import { SHARED_SPELLBOOK_RESOURCE, useSpellbookStore } from './store/spellbook'
+import { SHARED_CUSTOM_MONSTERS_RESOURCE, useCustomMonsterStore } from './store/customMonsters'
 import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e'
 import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
@@ -49,6 +50,7 @@ export default function App() {
   const loadSharedCombatStatistics = useCombatStatisticsStore((s) => s.loadShared)
   const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
   const loadSharedSpellbook = useSpellbookStore((s) => s.loadShared)
+  const loadSharedCustomMonsters = useCustomMonsterStore((s) => s.loadShared)
 
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
@@ -124,10 +126,11 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
+    const stopCustomMonsters = subscribeSharedResourceInvalidation(SHARED_CUSTOM_MONSTERS_RESOURCE, loadSharedCustomMonsters)
     const stopFog = subscribeSharedResourceInvalidation(MAP_FOG_RESOURCE, loadSharedFog)
     const stopMapGeometry = subscribeSharedResourceInvalidation(MAP_GEOMETRY_RESOURCE, async () => {
       await loadSharedMapGeometry()
@@ -141,12 +144,13 @@ export default function App() {
       stopMaps()
       stopCharacters()
       stopSpellbook()
+      stopCustomMonsters()
       stopFog()
       stopMapGeometry()
       stopMapExploration()
       stopCombatStatistics()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return

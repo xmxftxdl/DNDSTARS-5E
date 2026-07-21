@@ -603,7 +603,13 @@ describe('P0 shared state boundary', () => {
   it('rejects damaged known envelopes and accepts object plugin state', () => {
     expect(validateSharedStateShape('characters', { characters: [] })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('spellbook', { spells: [] })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('custom-monsters', { schemaVersion: 1, monsters: [] })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('spellbook', { spells: 'broken' })).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('custom-monsters', { monsters: 'broken' })).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('custom-monsters', { schemaVersion: 1, monsters: [{ id: 'forged' }] })).toMatchObject({
+      ok: false,
+      reason: 'invalid-custom-monster',
+    })
     expect(validateSharedStateShape('characters', { characters: 'broken' })).toMatchObject({ ok: false })
     expect(validateSharedStateShape('maps', [])).toMatchObject({ ok: false })
     expect(validateSharedStateShape('maps', {

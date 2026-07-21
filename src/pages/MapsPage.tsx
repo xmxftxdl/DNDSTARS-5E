@@ -6146,7 +6146,7 @@ export default function MapsPage() {
         sides: lastAttack.damage[0]?.sides ?? result.attack.sides,
         bonus: lastDamage - lastValues.reduce((sum, value) => sum + value, 0),
         total: lastDamage,
-        label: `${monsterAttack.monster.name}·${monsterAttack.action.name}（SRD 5.1）`,
+        label: `${monsterAttack.monster.name}·${monsterAttack.action.name}（${monsterAttack.monster.source}）`,
         targetName: targetChar.name,
         d20Roll: lastEvent ? {
           value: lastEvent.d20,
@@ -6538,7 +6538,7 @@ export default function MapsPage() {
     const attackerToken = result.attackerTokenId
       ? activeMap.tokens.find((token) => token.id === result.attackerTokenId)
       : undefined
-    const isSrd5eMonsterAttack = !!(attackerToken?.poolId && getDnd5eSrdMonster(attackerToken.poolId))
+    const isDnd5eMonsterAttack = !!(attackerToken?.poolId && getDnd5eSrdMonster(attackerToken.poolId))
     const targetChar = resolveAttackTargetCharacter(targetToken, chars, result.targetCharacterId)
     const targetAlive =
       !targetChar ||
@@ -6547,8 +6547,8 @@ export default function MapsPage() {
       completeIfCombatContinues()
       return
     }
-    if (!isSrd5eMonsterAttack) {
-      pushCombatLog(`${attackerToken?.label ?? '敌人'} 不是 SRD 5.1 怪物，已拒绝旧规则攻击。`, 'system')
+    if (!isDnd5eMonsterAttack) {
+      pushCombatLog(`${attackerToken?.label ?? '敌人'} 没有通过 D&D 5e 怪物 schema 校验，已拒绝旧规则攻击。`, 'system')
       completeIfCombatContinues()
       return
     }
@@ -6935,9 +6935,9 @@ export default function MapsPage() {
       await settleDnd5eMonsterEndTurn(enemy)
       return
     }
-    const isSrd5eEnemy = !!(enemy.poolId && getDnd5eSrdMonster(enemy.poolId))
-    if (!isSrd5eEnemy) {
-      pushCombatLog(`${enemy.label} 没有可用的 SRD 5.1 怪物数据块，本回合跳过。`, 'system')
+    const isDnd5eEnemy = !!(enemy.poolId && getDnd5eSrdMonster(enemy.poolId))
+    if (!isDnd5eEnemy) {
+      pushCombatLog(`${enemy.label} 没有可用的 D&D 5e 怪物数据块，本回合跳过。`, 'system')
       const id = window.setTimeout(() => { void advanceEnemyIfCurrent() }, 300)
       enemyTurnTimersRef.current.add(id)
       return
@@ -14914,10 +14914,11 @@ export default function MapsPage() {
       {isDM && (
         <EnemyPoolPicker
           open={enemyPoolOpen}
-          title={enemyPoolMode === 'add' ? '添加 SRD 5.1 怪物' : '更换为 SRD 5.1 怪物'}
+          title={enemyPoolMode === 'add' ? '添加怪物' : '更换怪物'}
+          canManageCustom
           hint={
             enemyPoolMode === 'add'
-              ? '选择一种 SRD 5.1 怪物放置到地图中央'
+              ? '从完整 SRD 5.1 目录或房间自定义目录中选择，并放置到地图中央'
               : selectedToken
                 ? `为「${selectedToken.label}」选择新种类`
                 : undefined

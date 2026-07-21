@@ -1,31 +1,42 @@
 import { useMemo, useState } from 'react'
-import { Search, Skull, X } from 'lucide-react'
+import { Search, Skull, Wrench, X } from 'lucide-react'
 import {
   DND5E_SRD_ENEMY_POOL,
+  dnd5eMonsterToEnemyTemplate,
   searchEnemyPool,
   type EnemyTemplate,
 } from '../../lib/enemyPool'
+import { useCustomMonsterStore } from '../../store/customMonsters'
+import Dnd5eMonsterWorkshopDialog from './Dnd5eMonsterWorkshopDialog'
 
 export default function EnemyPoolPicker({
   open,
   title = '怪物池',
   hint,
+  canManageCustom = false,
   onClose,
   onPick,
 }: {
   open: boolean
   title?: string
   hint?: string
+  canManageCustom?: boolean
   onClose: () => void
   onPick: (template: EnemyTemplate) => void
 }) {
   const [query, setQuery] = useState('')
+  const [workshopOpen, setWorkshopOpen] = useState(false)
+  const customMonsters = useCustomMonsterStore((state) => state.monsters)
+  const pool = useMemo(
+    () => [...DND5E_SRD_ENEMY_POOL, ...customMonsters.map(dnd5eMonsterToEnemyTemplate)],
+    [customMonsters],
+  )
 
-  const results = useMemo(() => searchEnemyPool(query, DND5E_SRD_ENEMY_POOL), [query])
+  const results = useMemo(() => searchEnemyPool(query, pool), [pool, query])
 
   if (!open) return null
 
-  return (
+  return <>
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={onClose}
@@ -40,6 +51,16 @@ export default function EnemyPoolPicker({
             <h2 className="text-base font-semibold text-slate-100">{title}</h2>
             {hint && <p className="text-xs text-slate-500">{hint}</p>}
           </div>
+          {canManageCustom && (
+            <button
+              type="button"
+              onClick={() => setWorkshopOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-arcane-500/15 px-2.5 py-1.5 text-xs font-semibold text-arcane-200 hover:bg-arcane-500/25"
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              怪物工坊
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -61,7 +82,7 @@ export default function EnemyPoolPicker({
             />
           </div>
           <p className="mt-2 text-xs text-slate-500">
-            SRD 5.1 · 共 {DND5E_SRD_ENEMY_POOL.length} 种怪物 · 显示 {results.length} 项
+            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间自定义：{customMonsters.length} · 显示 {results.length} 项
           </p>
         </div>
 
@@ -129,5 +150,6 @@ export default function EnemyPoolPicker({
         </div>
       </div>
     </div>
-  )
+    <Dnd5eMonsterWorkshopDialog open={workshopOpen} onClose={() => setWorkshopOpen(false)} />
+  </>
 }

@@ -50,6 +50,7 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   characters: 'characters',
   maps: 'maps',
   spellbook: 'spells',
+  'custom-monsters': 'monsters',
   'combat-log': 'entries',
   'dice-events': 'events',
   'combat-interrupts': 'interrupts',
