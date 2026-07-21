@@ -195,6 +195,6 @@ V2 已完成单体与范围特性、角色创建数据、声明式法术模板�
 
 持续区域可在 `persistentArea.triggers` 中声明 `on-create`、`on-enter`、`turn-start`、`turn-end`。每个触发器可声明每轮一次、属性豁免、成功无伤或减半、伤害骰、伤害类型、标准状态和 ActiveEffect 持续时间；`dmAdjustable: true` 会在提交前建立 DM Interrupt。Host 负责移动路径穿越检测、骰子、抗性／免疫、状态免疫、每轮去重凭据和多端同步。插件仍不得在 Worker 中自行计时、生成随机数或修改 Store。
 
-`persistentArea.visual` 可以选择平台白名单中的区域表现。目前支持 `arcane` 和 `toxic-cloud`，并可用 `subtle`、`normal`、`strong` 调整强度。Host 只同步预设名，地图端以固定上限、24 FPS 的本地 Konva 动画表现；动画帧不写入 Store，也不改变格子范围、触发器或视线判定。DM 的 Headless 效果编辑器提供“载入臭云术动画示例”，用于快速生成 20 尺半径、90 尺放置距离、10 轮专注的视觉演示；它不会冒充尚未声明的臭云术回合效果。
+`persistentArea.visual` 可以选择平台白名单中的区域表现。目前支持 `arcane` 和 `toxic-cloud`，并可用 `subtle`、`normal`、`strong` 调整强度。Host 只同步预设名，地图端以固定上限、24 FPS 的本地 Konva 动画表现；动画帧不写入 Store，也不改变格子范围、触发器或视线判定。DM 的 Headless 效果编辑器提供“载入毒云区域示例”，并同时生成一个可编辑的进入区域伤害触发器；示例是原创模板，不代表任何尚未专门实现的 SRD 法术。
 
 特性行动可声明 `summon`，并指定核心包中的 `srd-5.1:*` 怪物、持续轮数、是否专注及相对阵营。首版每次行动创建一个生物；Host 负责验证范围锚点和占位、掷先攻、同步 Token、维护所有者与专注生命周期。召唤物由 DM 操作，插件不能注入任意怪物脚本或绕过地图占位。

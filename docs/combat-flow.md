@@ -92,6 +92,12 @@ DM 在战斗控制栏选择结算模式，选择结果写入 `SharedCombatState.
 
 手动应用生命值仍由 DM 端写入权威 Store 并经既有多端状态同步传播。伤害先扣临时生命值，治疗不超过生命上限，新临时生命值与旧值取较高者。它是显式的 DM 裁定入口，不调用自动攻击 resolver，也不恢复旧 AP 或攻防差值规则。
 
+## 战斗经验结算
+
+战斗停止后，DM 端按结束时的权威地图快照统计经验值：只计算当前已被击败的敌方单位，优先读取 SRD 怪物模板的 `challenge.xp`；旧模板按 SRD CR→XP 表回退。仍存活、无 CR 的空白敌人和规则／法术召唤物均不计入。
+
+参战角色取本场先攻列表中的友方角色 Token。DM 可以选择平均分配或逐角色自由分配；自由分配总和必须等于本场总 XP。确认后，角色经验值、角色上的 `combatId` 发奖收据及战役统计中的经验结算记录共同持久化。角色收据防止断线重试重复加值，统计会显示每场怪物 XP 与分配明细。“本场不发放”也会留下已处理记录，但不会修改角色经验值。
+
 ## 迁移守卫
 
 `headlessMigrationBoundary.test.ts` 禁止 `MapsPage.tsx` 重新导入核心 resolver、旧 `CombatResolutionRunner` 或 mutation authority。新增战斗行为应扩展领域 action 和 headless engine，而不是在页面直接改 HP、行动经济或 store。
