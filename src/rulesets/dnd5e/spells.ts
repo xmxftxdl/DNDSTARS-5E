@@ -98,6 +98,9 @@ export interface Dnd5eSrdSpellDefinition {
     | 'barkskin'
     | 'protection-from-poison'
     | 'death-ward'
+    | 'protection-from-energy'
+    | 'longstrider'
+  effectDamageTypeOptions?: readonly Dnd5eDamageType[]
   effectDurationRounds?: number
   conditionOptions?: readonly ('blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease')[]
   fixedHealing?: number
@@ -175,6 +178,22 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['cleric', 'druid', 'paladin', 'ranger'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
     dice: { count: 0, sides: 4, bonus: 0 }, appliedEffect: 'protection-from-poison', effectDurationRounds: 600,
     description: '触碰一个生物并中和其所受毒素，结束中毒状态。目标在1小时内对抗中毒的豁免具有优势，并对毒素伤害具有抗性。',
+  },
+  {
+    id: 'protection-from-energy', name: '防护能量伤害', englishName: 'Protection from Energy', level: 3, school: '防护',
+    classes: ['cleric', 'druid', 'ranger', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 600, appliedEffect: 'protection-from-energy',
+    effectDamageTypeOptions: ['acid', 'cold', 'fire', 'lightning', 'thunder'],
+    description: '触碰一个自愿生物，选择强酸、寒冷、火焰、闪电或雷鸣。目标在法术持续期间对所选伤害类型具有抗性。需要专注，持续至多1小时。',
+  },
+  {
+    id: 'longstrider', name: '大步奔行', englishName: 'Longstrider', level: 1, school: '变化',
+    classes: ['bard', 'druid', 'ranger', 'wizard'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'longstrider', effectDurationRounds: 600,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1,
+    description: '触碰一个生物，使其速度增加10尺，持续1小时。使用高于1环的法术位时，每高一环可额外指定一个生物。',
   },
   {
     id: 'death-ward', name: '防死结界', englishName: 'Death Ward', level: 4, school: '防护',

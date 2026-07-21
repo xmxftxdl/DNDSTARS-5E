@@ -2,7 +2,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { D20RollMode } from '../contracts'
 import type { Dnd5eClassId } from './classes'
 import type { Dnd5eDamageType } from './monsters'
-import { dnd5eActiveEffectsPreventReactions, dnd5eActiveSpeedPenalty, type Dnd5eActiveEffectInstance } from './activeEffects'
+import { dnd5eActiveEffectsPreventReactions, dnd5eActiveSpeedBonus, dnd5eActiveSpeedPenalty, type Dnd5eActiveEffectInstance } from './activeEffects'
 import {
   dnd5eConditionGrantsAttackAdvantage,
   dnd5eConditionGrantsAttackAdvantageToAttacker,
@@ -199,7 +199,7 @@ export function dnd5eTargetIsDodging(
   creature: Pick<Dnd5eDefensiveCreature, 'classState' | 'conditions' | 'speed' | 'dodging'>,
 ): boolean {
   if (dnd5eConditionIncapacitated(creature) || dnd5eConditionSetsSpeedToZero(creature)) return false
-  if (creature.speed != null && creature.speed - dnd5eActiveSpeedPenalty(creature.classState.activeEffects) <= 0) return false
+  if (creature.speed != null && creature.speed + dnd5eActiveSpeedBonus(creature.classState.activeEffects) - dnd5eActiveSpeedPenalty(creature.classState.activeEffects) <= 0) return false
   return creature.dodging === true || creature.classState.dodgingTurnKey != null
 }
 

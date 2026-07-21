@@ -719,6 +719,7 @@ export default function MapsPage() {
     heightenedSelecting: boolean
     area?: SkillAoeTargeting
     conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+    effectDamageType?: NonNullable<Dnd5eSpellCastPayload['effectDamageType']>
     higherSlotDamageType?: Dnd5eDamageType
   } | null>(null)
   const [dnd5eItemAreaTargeting, setDnd5eItemAreaTargeting] = useState<{
@@ -3782,6 +3783,7 @@ export default function MapsPage() {
         slotLevel: dnd5eSpellTargeting.slotLevel,
         targetTokenId: targetToken.id,
         conditionChoice: dnd5eSpellTargeting.conditionChoice,
+        effectDamageType: dnd5eSpellTargeting.effectDamageType,
         higherSlotDamageType: dnd5eSpellTargeting.higherSlotDamageType,
         overchannel: dnd5eSpellTargeting.overchannel || undefined,
         empowered: dnd5eSpellTargeting.empowered || undefined,
@@ -13053,6 +13055,7 @@ export default function MapsPage() {
         : undefined,
       higherSlotDamageType: dnd5eSpellTargeting.higherSlotDamageType,
       conditionChoice: dnd5eSpellTargeting.conditionChoice,
+      effectDamageType: dnd5eSpellTargeting.effectDamageType,
       healingAllocations,
       projectileTargetIds: dnd5eSpellTargeting.allowDuplicateTargets
         ? [...dnd5eSpellTargeting.targetTokenIds]
@@ -14991,6 +14994,7 @@ export default function MapsPage() {
                       }
                       const spell = getDnd5eSrdCombatSpell(spellId)!
                       let conditionChoice: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease' | undefined
+                      let effectDamageType: NonNullable<Dnd5eSpellCastPayload['effectDamageType']> | undefined
                       let higherSlotDamageType: Dnd5eDamageType | undefined
                       if (spell.id === 'blindness-deafness') {
                         const selected = window.prompt('选择法术效果：输入 1 造成目盲，输入 2 造成耳聋。', '1')
@@ -15014,6 +15018,20 @@ export default function MapsPage() {
                         }
                         conditionChoice = choices[selectedIndex]
                       }
+                      if (spell.id === 'protection-from-energy') {
+                        const selected = window.prompt(
+                          '选择抗性：1 强酸、2 寒冷、3 火焰、4 闪电、5 雷鸣。',
+                          '3',
+                        )
+                        const choices = ['acid', 'cold', 'fire', 'lightning', 'thunder'] as const
+                        const selectedIndex = Number(selected) - 1
+                        if (selected == null) return
+                        if (!Number.isInteger(selectedIndex) || !choices[selectedIndex]) {
+                          void showCombatNotice('法术选项无效', '防护能量伤害必须选择一种规则允许的伤害类型。', 'amber')
+                          return
+                        }
+                        effectDamageType = choices[selectedIndex]
+                      }
                       if (spell.id === 'flame-strike' && slotLevel > spell.level) {
                         const selected = window.prompt('焰击术升环伤害加入哪一种类型？输入 1 选择火焰，输入 2 选择光耀。', '1')
                         if (selected == null) return
@@ -15031,6 +15049,7 @@ export default function MapsPage() {
                           slotLevel,
                           targetTokenId: casterToken.id,
                           conditionChoice,
+                          effectDamageType,
                           higherSlotDamageType,
                           overchannel: options?.overchannel,
                           metamagic: options?.metamagic,
@@ -15087,6 +15106,7 @@ export default function MapsPage() {
                             heightenedSelecting: false,
                             area: spell.area,
                             conditionChoice,
+                            effectDamageType,
                             higherSlotDamageType,
                           })
                     }}

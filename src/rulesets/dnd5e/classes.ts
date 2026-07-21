@@ -1,7 +1,7 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import { dnd5eEquippedEffectTotal } from './equipmentEffects'
-import { dnd5eActiveSpeedPenalty } from './activeEffects'
+import { dnd5eActiveSpeedBonus, dnd5eActiveSpeedPenalty } from './activeEffects'
 import { fighterProgression, fighterRemarkableAthleteRunningLongJumpBonus } from './fighter'
 
 export type Dnd5eClassId =
@@ -927,7 +927,8 @@ export function dnd5eEffectiveWalkingSpeed(
     0,
     dnd5eWalkingSpeed(character) -
       dnd5eActiveSpeedPenalty(character.dnd5eCombatState?.activeEffects) -
-      Math.max(0, character.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0),
+      Math.max(0, character.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) +
+      dnd5eActiveSpeedBonus(character.dnd5eCombatState?.activeEffects),
   )
 }
 

@@ -176,6 +176,8 @@ export interface Dnd5eSpellCastPayload {
   repellingBlast?: boolean
   /** 目盲/耳聋术与次级复原术的受控选择；Headless 会按法术白名单重新验证。 */
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+  /** 防护能量伤害等法术的受控伤害类型选择；DM Host 会按法术白名单复核。 */
+  effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'
   /** 群体医疗术的逐目标治疗分配；总和不得超过法术的治疗池。 */
   healingAllocations?: Array<{ targetTokenId: string; amount: number }>
   /** 焰击术等法术升环时，由施法者选择额外伤害加入哪一种法术伤害类型。 */

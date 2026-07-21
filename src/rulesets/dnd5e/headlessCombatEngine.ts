@@ -60,6 +60,7 @@ import {
   createDnd5eConditionEffect,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eActiveEffectId,
+  dnd5eActiveSpeedBonus,
   dnd5eActiveSpeedPenalty,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
@@ -694,7 +695,7 @@ export type Dnd5eAction =
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; healingAllocations?: readonly { targetId: string; amount: number }[]; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
+  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; healingAllocations?: readonly { targetId: string; amount: number }[]; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
   | { type: 'hellish-rebuke'; actorId: string; targetId: string; slotLevel: number; triggerDamageAmount: number; savingThrowD20: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; effectRolls: readonly number[] }
   | { type: 'adjudicated-spell'; actorId: string; castingClassId?: Dnd5eClassId; spellId: string; spellName: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action'; effects: readonly Dnd5eAdjudicatedSpellEffect[]; concentrationRounds?: number }
   | { type: 'paladin-sacred-weapon'; actorId: string }
@@ -1032,7 +1033,8 @@ export function dnd5eEffectiveSpeed(
     0,
     Math.floor(combatant.speed) -
       dnd5eActiveSpeedPenalty(combatant.classState.activeEffects) -
-      Math.max(0, combatant.classState.caltropsSpeedPenaltyFeet ?? 0),
+      Math.max(0, combatant.classState.caltropsSpeedPenaltyFeet ?? 0) +
+      dnd5eActiveSpeedBonus(combatant.classState.activeEffects),
   )
 }
 
@@ -1106,7 +1108,9 @@ function applyDnd5eMechanicalStatusEffect(
     duration: Dnd5eActiveEffectDuration
     appliedTurnKey?: string
     speedPenaltyFeet?: number
+    speedBonusFeet?: number
     preventReactions?: boolean
+    damageResistance?: Dnd5eDamageType
     breakOn?: Dnd5eActiveEffectInstance['breakOn']
   },
   events: Dnd5eCombatEvent[],
@@ -1121,7 +1125,9 @@ function applyDnd5eMechanicalStatusEffect(
     appliedTurnKey: input.appliedTurnKey,
     modifiers: {
       speedPenaltyFeet: input.speedPenaltyFeet,
+      speedBonusFeet: input.speedBonusFeet,
       preventReactions: input.preventReactions,
+      damageResistance: input.damageResistance,
     },
     breakOn: input.breakOn,
   })
@@ -2749,7 +2755,10 @@ function adjustDamageForTarget(target: Dnd5eCombatant, amount: number, type?: Dn
   const protectionFromPoison = type === 'poison' && target.classState.activeEffects?.some((effect) =>
     effect.definitionId === 'srd-5.1:spell:protection-from-poison'
   ) === true
-  if (target.damageResistances.includes(type) || rageResistance || emptyBodyResistance || fiendishResilience || draconicResistance || petrifiedResistance || protectionFromPoison) {
+  const protectionFromEnergy = target.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:protection-from-energy' && effect.modifiers?.damageResistance === type
+  ) === true
+  if (target.damageResistances.includes(type) || rageResistance || emptyBodyResistance || fiendishResilience || draconicResistance || petrifiedResistance || protectionFromPoison || protectionFromEnergy) {
     adjusted = Math.floor(adjusted / 2)
   }
   if (target.damageVulnerabilities.includes(type)) adjusted *= 2
@@ -4077,6 +4086,10 @@ function resolveSpellCast(
     (spell.conditionOptions?.length && (!action.conditionChoice || !spell.conditionOptions.includes(action.conditionChoice))) ||
     (!spell.conditionOptions?.length && action.conditionChoice != null)
   ) return fail(state, events, 'invalid-class-feature')
+  if (
+    (spell.effectDamageTypeOptions?.length && (!action.effectDamageType || !spell.effectDamageTypeOptions.includes(action.effectDamageType))) ||
+    (!spell.effectDamageTypeOptions?.length && action.effectDamageType != null)
+  ) return fail(state, events, 'invalid-class-feature')
   const healingAllocations = action.healingAllocations ?? []
   if (spell.effect === 'healing-pool') {
     if (
@@ -4528,12 +4541,16 @@ function resolveSpellCast(
           barkskin: '树肤术：AC不低于16',
           'protection-from-poison': '防护毒素：毒素抗性',
           'death-ward': '防死结界',
+          'protection-from-energy': `防护能量伤害：${action.effectDamageType ?? ''}抗性`,
+          longstrider: '大步奔行：速度+10尺',
         } as const
         applyDnd5eMechanicalStatusEffect(affected, actor, {
           definitionId: `srd-5.1:spell:${spell.appliedEffect}`,
           label: labels[spell.appliedEffect],
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
           duration,
+          speedBonusFeet: spell.appliedEffect === 'longstrider' ? 10 : undefined,
+          damageResistance: spell.appliedEffect === 'protection-from-energy' ? action.effectDamageType : undefined,
         }, events)
       }
       events.push({

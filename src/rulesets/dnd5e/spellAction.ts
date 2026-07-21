@@ -111,6 +111,7 @@ export interface PreparedDnd5eSpellCast {
   draconicResistance: boolean
   repellingBlast: boolean
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+  effectDamageType?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['effectDamageType']
   healingAllocations?: readonly { targetId: string; amount: number }[]
   areaCells?: readonly { col: number; row: number }[]
   areaAnchorCell?: { col: number; row: number }
@@ -269,6 +270,11 @@ export function prepareDnd5eSpellCast(input: {
   if (
     (spell.conditionOptions?.length && (!conditionChoice || !spell.conditionOptions.includes(conditionChoice))) ||
     (!spell.conditionOptions?.length && conditionChoice != null)
+  ) return { ok: false, reason: 'invalid-action' }
+  const effectDamageType = payload.effectDamageType
+  if (
+    (spell.effectDamageTypeOptions?.length && (!effectDamageType || !spell.effectDamageTypeOptions.includes(effectDamageType))) ||
+    (!spell.effectDamageTypeOptions?.length && effectDamageType != null)
   ) return { ok: false, reason: 'invalid-action' }
   const maximumTargets = metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, slotLevel, actor.level)
   if (
@@ -664,6 +670,7 @@ export function prepareDnd5eSpellCast(input: {
       draconicResistance,
       repellingBlast,
       conditionChoice,
+      effectDamageType,
       healingAllocations,
       areaCells,
       areaAnchorCell,
@@ -804,6 +811,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     draconicResistance: prepared.draconicResistance,
     repellingBlast: prepared.repellingBlast,
     conditionChoice: prepared.conditionChoice,
+    effectDamageType: prepared.effectDamageType,
     healingAllocations: prepared.healingAllocations,
     counterspellReaction: input.counterspellReaction,
     spellId: prepared.spell.id,

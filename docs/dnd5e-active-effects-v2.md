@@ -10,7 +10,7 @@
 dnd5eCombatState.activeEffects: ActiveEffectInstance[]
 ```
 
-每个实例包含稳定 ID、状态定义 ID、来源角色、来源法术或特性、持续方式、重复豁免、事件解除条件、叠加策略、可见性及受限的 Headless modifier。当前 modifier 支持速度减值与禁止反应；规则插件只能通过公开 capability 创建声明式实例，不能注入任意结算代码。
+每个实例包含稳定 ID、状态定义 ID、来源角色、来源法术或特性、持续方式、重复豁免、事件解除条件、叠加策略、可见性及受限的 Headless modifier。当前核心 modifier 支持速度加值、速度减值、禁止反应与指定伤害类型抗性；规则插件只能通过公开 capability 创建声明式实例，不能注入任意结算代码。
 
 `conditions: string[]` 只保留为 `activeEffects` 自动生成的只读投影，供现有规则查询与旧界面显示。角色卡不能直接编辑它；DM、法术、职业特性、怪物能力及插件都必须通过统一 ActiveEffect 工厂和 Headless 事务写入。
 

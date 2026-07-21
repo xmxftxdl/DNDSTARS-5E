@@ -4,6 +4,7 @@ import {
   dnd5eStandardConditionId,
   type Dnd5eStandardConditionId,
 } from './conditions'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 
 export const DND5E_ACTIVE_EFFECT_SCHEMA_VERSION = 1 as const
 export const DND5E_COMBAT_STATE_SCHEMA_VERSION = 2 as const
@@ -85,7 +86,9 @@ export interface Dnd5eActiveEffectSavingThrowRoll {
  */
 export interface Dnd5eActiveEffectModifiers {
   speedPenaltyFeet?: number
+  speedBonusFeet?: number
   preventReactions?: boolean
+  damageResistance?: Dnd5eDamageType
 }
 
 /**
@@ -308,8 +311,15 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             Number.isFinite(rawModifiers.speedPenaltyFeet) && rawModifiers.speedPenaltyFeet >= 0
             ? rawModifiers.speedPenaltyFeet
             : undefined,
+          speedBonusFeet: typeof rawModifiers.speedBonusFeet === 'number' &&
+            Number.isFinite(rawModifiers.speedBonusFeet) && rawModifiers.speedBonusFeet >= 0
+            ? rawModifiers.speedBonusFeet
+            : undefined,
           preventReactions: typeof rawModifiers.preventReactions === 'boolean'
             ? rawModifiers.preventReactions
+            : undefined,
+          damageResistance: (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawModifiers.damageResistance)
+            ? rawModifiers.damageResistance as Dnd5eDamageType
             : undefined,
         }
       : undefined
@@ -326,7 +336,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       breakOn: Array.isArray(candidate.breakOn)
         ? [...new Set(candidate.breakOn.filter((entry): entry is Dnd5eActiveEffectBreakTrigger => BREAK_TRIGGERS.has(entry as Dnd5eActiveEffectBreakTrigger)))]
         : undefined,
-      modifiers: modifiers && (modifiers.speedPenaltyFeet != null || modifiers.preventReactions != null)
+      modifiers: modifiers && (modifiers.speedPenaltyFeet != null || modifiers.speedBonusFeet != null || modifiers.preventReactions != null || modifiers.damageResistance != null)
         ? modifiers
         : undefined,
     })
@@ -374,8 +384,15 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           typeof raw.modifiers.speedPenaltyFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.speedPenaltyFeet) || raw.modifiers.speedPenaltyFeet < 0
         )) issues.push(`activeEffects[${index}].modifiers.speedPenaltyFeet 无效`)
+        if (raw.modifiers.speedBonusFeet != null && (
+          typeof raw.modifiers.speedBonusFeet !== 'number' ||
+          !Number.isFinite(raw.modifiers.speedBonusFeet) || raw.modifiers.speedBonusFeet < 0
+        )) issues.push(`activeEffects[${index}].modifiers.speedBonusFeet 无效`)
         if (raw.modifiers.preventReactions != null && typeof raw.modifiers.preventReactions !== 'boolean') {
           issues.push(`activeEffects[${index}].modifiers.preventReactions 无效`)
+        }
+        if (raw.modifiers.damageResistance != null && !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(raw.modifiers.damageResistance)) {
+          issues.push(`activeEffects[${index}].modifiers.damageResistance 无效`)
         }
       }
     }
@@ -388,6 +405,15 @@ export function dnd5eActiveSpeedPenalty(
 ): number {
   return normalizeDnd5eActiveEffects(effects).reduce(
     (total, effect) => total + Math.max(0, effect.modifiers?.speedPenaltyFeet ?? 0),
+    0,
+  )
+}
+
+export function dnd5eActiveSpeedBonus(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (total, effect) => total + Math.max(0, effect.modifiers?.speedBonusFeet ?? 0),
     0,
   )
 }
