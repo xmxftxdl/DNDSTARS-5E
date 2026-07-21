@@ -28,6 +28,17 @@ async function setSession(context: BrowserContext, membership: Membership) {
   await context.addInitScript(([key, session]) => localStorage.setItem(key, JSON.stringify(session)), [SESSION_KEY, sessionFrom(membership)] as const)
 }
 
+async function installNonVoidScrollIntoView(context: BrowserContext) {
+  await context.addInitScript(() => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value() {
+        return { animated: true }
+      },
+    })
+  })
+}
+
 test('chat, private DM notes, server rolls and targeted handouts synchronize across ports', async ({ browser, request }) => {
   const createdResponse = await request.post(`${DM}/api/rooms`, {
     data: { roomName: '通讯 E2E', displayName: '测试 DM', rulesetId: 'dnd5e-2014-srd-5.1', clientId: `communications-dm-${Date.now()}` },
@@ -47,6 +58,11 @@ test('chat, private DM notes, server rolls and targeted handouts synchronize acr
   const dmContext = await browser.newContext()
   const playerAContext = await browser.newContext()
   const playerBContext = await browser.newContext()
+  await Promise.all([
+    installNonVoidScrollIntoView(dmContext),
+    installNonVoidScrollIntoView(playerAContext),
+    installNonVoidScrollIntoView(playerBContext),
+  ])
   await setSession(dmContext, dm)
   await setSession(playerAContext, playerA)
   await setSession(playerBContext, playerB)

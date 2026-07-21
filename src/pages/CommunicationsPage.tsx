@@ -271,7 +271,9 @@ function ChatPanel({ isDm, memberId, messages, roster, maps, busy, onSend }: {
     .filter((token) => token.type === 'npc' || token.type === 'enemy'), [maps])
   const visibleMessages = messages.filter((message) => message.channel === channel)
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages.length, channel])
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages.length, channel])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!text.trim()) return
