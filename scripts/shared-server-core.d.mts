@@ -86,6 +86,18 @@ export function projectRoomJournalForMember(
   campaignEntries: Array<Record<string, unknown>>
   sharedNotes: Array<Record<string, unknown>>
 }
+export function mutateGroupAbilityChecksState(
+  current: unknown,
+  mutation: Record<string, unknown>,
+  now: number,
+  member: Record<string, unknown>,
+  context?: Record<string, unknown>,
+): RoomCommunicationMutationResult
+export function projectGroupAbilityChecksForMember(
+  value: Record<string, unknown>,
+  memberId: string,
+  isDm?: boolean,
+): Record<string, unknown> & { checks: Array<Record<string, unknown>> }
 
 export function capEventChannels<T>(
   eventBacklog: Map<string, T>,

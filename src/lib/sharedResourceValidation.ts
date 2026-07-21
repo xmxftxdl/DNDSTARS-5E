@@ -26,6 +26,7 @@ import {
   type CombatInterruptPhase,
   type CombatInterruptStatus,
 } from './combatInterruptQueue'
+import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -54,6 +55,7 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   'combat-log': 'entries',
   'room-chat': 'messages',
   'room-journal': 'handouts',
+  'group-ability-checks': 'checks',
   'dice-events': 'events',
   'combat-interrupts': 'interrupts',
   'player-action-requests': 'requests',
@@ -428,6 +430,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === COMBAT_STATISTICS_RESOURCE && !normalizeSharedCombatStatistics(input)) {
     reasons.push('战斗统计资源结构损坏')
+  }
+  if (name === GROUP_ABILITY_CHECK_RESOURCE && !validateSharedGroupAbilityChecks(input)) {
+    reasons.push('群体检定资源结构损坏')
   }
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {

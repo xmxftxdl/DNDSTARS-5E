@@ -1414,6 +1414,340 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
   return { ok: false, status: 400, error: 'invalid-journal-operation' }
 }
 
+const GROUP_ABILITY_CHECK_LIMIT = 40
+const GROUP_ABILITY_CHECK_SKILLS = Object.freeze({
+  acrobatics: 'dex', animalHandling: 'wis', arcana: 'int', athletics: 'str', deception: 'cha',
+  history: 'int', insight: 'wis', intimidation: 'cha', investigation: 'int', medicine: 'wis',
+  nature: 'int', perception: 'wis', performance: 'cha', persuasion: 'cha', religion: 'int',
+  sleightOfHand: 'dex', stealth: 'dex', survival: 'wis',
+})
+const GROUP_ABILITY_KEYS = new Set(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+const CLASS_NAME_TO_ID = Object.freeze({
+  barbarian: 'barbarian', '野蛮人': 'barbarian', bard: 'bard', '吟游诗人': 'bard',
+  cleric: 'cleric', '牧师': 'cleric', druid: 'druid', '德鲁伊': 'druid',
+  fighter: 'fighter', '战士': 'fighter', monk: 'monk', '武僧': 'monk',
+  paladin: 'paladin', '圣武士': 'paladin', ranger: 'ranger', '游侠': 'ranger',
+  rogue: 'rogue', '游荡者': 'rogue', sorcerer: 'sorcerer', '术士': 'sorcerer',
+  warlock: 'warlock', '邪术师': 'warlock', wizard: 'wizard', '法师': 'wizard',
+})
+
+function groupCheckClassLevel(character, classId) {
+  const explicit = Number(character?.dnd5eClassLevels?.[classId])
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(20, Math.floor(explicit))
+  const primary = CLASS_NAME_TO_ID[String(character?.charClass ?? '').trim().toLowerCase()] ??
+    CLASS_NAME_TO_ID[String(character?.charClass ?? '').trim()]
+  return primary === classId ? Math.min(20, Math.max(1, Math.floor(Number(character?.level) || 1))) : 0
+}
+
+function groupCheckProficiencyRank(character, skill) {
+  if (!skill) return 0
+  const choices = character?.dnd5eClassChoices?.classes ?? {}
+  const bard = choices?.bard?.selections ?? {}
+  const rogue = choices?.rogue?.selections ?? {}
+  const warlock = choices?.warlock?.selections ?? {}
+  const beguilingInfluence = groupCheckClassLevel(character, 'warlock') >= 2 &&
+    (warlock['eldritch-invocations'] ?? []).includes('beguiling-influence') &&
+    (skill === 'deception' || skill === 'persuasion')
+  const proficient = (Array.isArray(character?.skills) && character.skills.includes(skill)) ||
+    (groupCheckClassLevel(character, 'bard') >= 3 && (bard['lore-bonus-skills'] ?? []).includes(skill)) ||
+    beguilingInfluence
+  if (!proficient) return 0
+  return [...(bard.expertise ?? []), ...(rogue.expertise ?? [])].includes(skill) ? 2 : 1
+}
+
+function groupCheckModifier(character, ability, skill) {
+  const level = Math.min(20, Math.max(1, Math.floor(Number(character?.level) || 1)))
+  const score = Math.min(30, Math.max(1, Math.floor(Number(character?.abilities?.[ability]) || 10)))
+  const abilityModifier = Math.floor((score - 10) / 2)
+  const proficiencyBonus = 2 + Math.floor((level - 1) / 4)
+  const rank = groupCheckProficiencyRank(character, skill)
+  if (rank > 0) return { modifier: abilityModifier + proficiencyBonus * rank, rank, score }
+  const bardBonus = groupCheckClassLevel(character, 'bard') >= 2 ? Math.floor(proficiencyBonus / 2) : 0
+  const championBonus = groupCheckClassLevel(character, 'fighter') >= 7 &&
+    character?.dnd5eClassChoices?.fighter?.subclass === 'champion' && ['str', 'dex', 'con'].includes(ability)
+    ? Math.ceil(proficiencyBonus / 2)
+    : 0
+  return { modifier: abilityModifier + Math.max(bardBonus, championBonus), rank: 0, score }
+}
+
+function groupCheckEffectiveMode(requestedMode, character) {
+  const requestedAdvantage = requestedMode === 'advantage'
+  const requestedDisadvantage = requestedMode === 'disadvantage'
+  const exhaustionDisadvantage = Number(character?.exhaustionLevel) >= 1
+  const disadvantage = requestedDisadvantage || exhaustionDisadvantage
+  if (requestedAdvantage && disadvantage) return 'normal'
+  if (requestedAdvantage) return 'advantage'
+  if (disadvantage) return 'disadvantage'
+  return 'normal'
+}
+
+function groupCheckResult(character, check, now, options = {}) {
+  const { modifier, rank, score } = groupCheckModifier(character, check.ability, check.skill)
+  const mode = groupCheckEffectiveMode(check.requestedMode, character)
+  const passiveTotal = 10 + modifier + (mode === 'advantage' ? 5 : mode === 'disadvantage' ? -5 : 0)
+  if (options.passiveOnly) {
+    return {
+      memberId: options.memberId,
+      characterId: character.id,
+      rolls: [], effectiveRolls: [], d20: 0, modifier,
+      rolledTotal: passiveTotal, passiveTotal, finalTotal: passiveTotal,
+      success: passiveTotal >= check.dc, mode, proficiencyRank: rank,
+      reliableTalentApplied: false, indomitableMightApplied: false,
+      source: 'passive-only', rolledAt: now,
+    }
+  }
+  const rollDie = options.rollDie ?? (() => randomInt(1, 21))
+  const rolls = Array.from({ length: mode === 'normal' ? 1 : 2 }, () => rollDie())
+  const reliableTalent = groupCheckClassLevel(character, 'rogue') >= 11 && rank > 0
+  const effectiveRolls = reliableTalent ? rolls.map((roll) => Math.max(10, roll)) : [...rolls]
+  const d20 = mode === 'advantage' ? Math.max(...effectiveRolls) : mode === 'disadvantage' ? Math.min(...effectiveRolls) : effectiveRolls[0]
+  const rawTotal = d20 + modifier
+  const indomitableMight = groupCheckClassLevel(character, 'barbarian') >= 18 && check.ability === 'str' && rawTotal < score
+  const rolledTotal = indomitableMight ? score : rawTotal
+  const usePassive = check.allowPassiveFallback && passiveTotal > rolledTotal
+  const finalTotal = usePassive ? passiveTotal : rolledTotal
+  return {
+    memberId: options.memberId,
+    characterId: character.id,
+    rolls,
+    effectiveRolls,
+    d20,
+    modifier,
+    rolledTotal,
+    passiveTotal,
+    finalTotal,
+    success: finalTotal >= check.dc,
+    mode,
+    proficiencyRank: rank,
+    reliableTalentApplied: reliableTalent && rolls.some((roll) => roll < 10),
+    indomitableMightApplied: indomitableMight,
+    source: usePassive ? 'roll-passive-fallback' : 'roll',
+    rolledAt: now,
+  }
+}
+
+function groupCheckAggregate(check) {
+  const participantCount = check.participants.length
+  const resolvedCount = check.results.length
+  const successCount = check.results.filter((result) => result.success).length
+  const requiredSuccesses = Math.ceil(participantCount / 2)
+  return {
+    participantCount,
+    resolvedCount,
+    successCount,
+    failureCount: resolvedCount - successCount,
+    requiredSuccesses,
+    groupSuccess: resolvedCount === participantCount && successCount >= requiredSuccesses,
+  }
+}
+
+function validateGroupAbilityCheckState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.checks) || value.checks.length > GROUP_ABILITY_CHECK_LIMIT) {
+    return 'invalid-group-check-envelope'
+  }
+  const checkIds = new Set()
+  for (const check of value.checks) {
+    if (
+      !plainObject(check) || typeof check.id !== 'string' || !check.id || checkIds.has(check.id) ||
+      !['open', 'completed', 'cancelled'].includes(check.status) ||
+      typeof check.label !== 'string' || !check.label.trim() || check.label.length > 160 ||
+      !GROUP_ABILITY_KEYS.has(check.ability) ||
+      (check.skill != null && GROUP_ABILITY_CHECK_SKILLS[check.skill] !== check.ability) ||
+      !Number.isInteger(check.dc) || check.dc < 0 || check.dc > 100 ||
+      !['normal', 'advantage', 'disadvantage'].includes(check.requestedMode) ||
+      typeof check.allowPassiveFallback !== 'boolean' ||
+      !Array.isArray(check.participants) || check.participants.length < 1 || check.participants.length > 8 ||
+      !Array.isArray(check.results) || check.results.length > check.participants.length ||
+      !Number.isFinite(check.createdAt) || !Number.isFinite(check.expiresAt) || check.expiresAt < check.createdAt ||
+      !Number.isFinite(check.updatedAt)
+    ) return 'invalid-group-check'
+    const participants = new Map()
+    for (const participant of check.participants) {
+      if (
+        !plainObject(participant) || typeof participant.memberId !== 'string' || !participant.memberId || participants.has(participant.memberId) ||
+        typeof participant.memberName !== 'string' || !participant.memberName ||
+        typeof participant.characterId !== 'string' || !participant.characterId ||
+        typeof participant.characterName !== 'string' || !participant.characterName ||
+        typeof participant.avatar !== 'string'
+      ) return 'invalid-group-check-participant'
+      participants.set(participant.memberId, participant)
+    }
+    const resultMembers = new Set()
+    for (const result of check.results) {
+      const participant = participants.get(result?.memberId)
+      const expectedRolls = result?.mode === 'normal' ? 1 : 2
+      if (
+        !plainObject(result) || !participant || participant.characterId !== result.characterId || resultMembers.has(result.memberId) ||
+        !['normal', 'advantage', 'disadvantage'].includes(result.mode) ||
+        !['roll', 'roll-passive-fallback', 'passive-only'].includes(result.source) ||
+        !Array.isArray(result.rolls) || !Array.isArray(result.effectiveRolls) ||
+        !result.rolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= 20) ||
+        !result.effectiveRolls.every((roll) => Number.isInteger(roll) && roll >= 1 && roll <= 20) ||
+        ![result.d20, result.modifier, result.rolledTotal, result.passiveTotal, result.finalTotal, result.rolledAt].every(Number.isFinite) ||
+        ![0, 1, 2].includes(result.proficiencyRank) || typeof result.success !== 'boolean' ||
+        typeof result.reliableTalentApplied !== 'boolean' || typeof result.indomitableMightApplied !== 'boolean' ||
+        (result.source === 'passive-only'
+          ? result.rolls.length !== 0 || result.effectiveRolls.length !== 0 || result.d20 !== 0
+          : result.rolls.length !== expectedRolls || result.effectiveRolls.length !== expectedRolls)
+      ) return 'invalid-group-check-result'
+      resultMembers.add(result.memberId)
+    }
+    if (check.status === 'completed') {
+      const expected = groupCheckAggregate(check)
+      if (
+        !plainObject(check.aggregate) || check.results.length !== check.participants.length ||
+        Object.entries(expected).some(([key, expectedValue]) => check.aggregate[key] !== expectedValue)
+      ) return 'invalid-group-check-aggregate'
+    }
+    checkIds.add(check.id)
+  }
+  return null
+}
+
+export function projectGroupAbilityChecksForMember(value, memberId, isDm = false) {
+  const checks = Array.isArray(value?.checks) ? value.checks : []
+  return {
+    schemaVersion: 1,
+    checks: isDm ? checks : checks.flatMap((check) => {
+      const participant = (Array.isArray(check?.participants) ? check.participants : [])
+        .find((entry) => entry?.memberId === memberId)
+      if (!participant) return []
+      return [{
+        ...check,
+        participants: [participant],
+        results: (Array.isArray(check.results) ? check.results : []).filter((entry) => entry?.memberId === memberId),
+        aggregate: check.status === 'completed' ? check.aggregate : undefined,
+      }]
+    }),
+    updatedAt: Number(value?.updatedAt) || 0,
+    ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
+  }
+}
+
+export function mutateGroupAbilityChecksState(current, mutation, now, member, context = {}) {
+  const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
+  const checks = Array.isArray(current?.checks) ? current.checks : []
+  const base = { schemaVersion: 1, checks, updatedAt: now }
+  const characters = Array.isArray(context?.characters?.characters) ? context.characters.characters : []
+  const players = Array.isArray(context?.players) ? context.players : []
+  if (mutation?.operation === 'create') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
+    if (checks.some((check) => check?.status === 'open')) return { ok: false, status: 409, error: 'group-check-already-open' }
+    const selection = boundedText(mutation?.selection, 100)
+    const abilityMatch = selection.match(/^ability:(str|dex|con|int|wis|cha)$/)
+    const skillMatch = selection.match(/^skill:([a-zA-Z]+)$/)
+    const skill = skillMatch?.[1]
+    const ability = abilityMatch?.[1] ?? GROUP_ABILITY_CHECK_SKILLS[skill]
+    if (!GROUP_ABILITY_KEYS.has(ability) || (skill && !GROUP_ABILITY_CHECK_SKILLS[skill])) {
+      return { ok: false, status: 400, error: 'invalid-group-check-selection' }
+    }
+    const dc = Number(mutation?.dc)
+    const mode = mutation?.mode
+    const characterIds = Array.isArray(mutation?.participantCharacterIds)
+      ? [...new Set(mutation.participantCharacterIds.map((id) => boundedText(id, 160)).filter(Boolean))]
+      : []
+    if (!Number.isInteger(dc) || dc < 0 || dc > 100 || !['normal', 'advantage', 'disadvantage'].includes(mode) || characterIds.length < 1 || characterIds.length > 8) {
+      return { ok: false, status: 400, error: 'invalid-group-check' }
+    }
+    const participants = []
+    for (const characterId of characterIds) {
+      const character = characters.find((entry) => entry?.id === characterId)
+      const player = players.find((entry) => {
+        if (entry?.memberId !== character?.roomMemberId || entry?.removedAt || entry?.leftAt) return false
+        const explicitlyActive = entry?.activeCharacterId === characterId ||
+          (!entry?.activeCharacterId && entry?.activeCharacterName === character?.name)
+        const ownedCharacters = characters.filter((candidate) => candidate?.roomMemberId === entry.memberId)
+        const unambiguousFallback = !entry?.activeCharacterId && !entry?.activeCharacterName &&
+          ownedCharacters.length === 1 && ownedCharacters[0]?.id === characterId
+        return explicitlyActive || unambiguousFallback
+      })
+      if (!character || !player || participants.some((entry) => entry.memberId === player.memberId)) {
+        return { ok: false, status: 409, error: 'invalid-group-check-participant' }
+      }
+      participants.push({
+        memberId: player.memberId,
+        memberName: boundedText(player.displayName, 80) || '玩家',
+        characterId: character.id,
+        characterName: boundedText(character.name, 80) || '未命名角色',
+        avatar: boundedText(character.avatar, 12) || '🎲',
+      })
+    }
+    const label = boundedText(mutation?.label, 160) || '群体检定'
+    const check = {
+      id: `group-check-${randomUUID()}`,
+      status: 'open',
+      label,
+      ability,
+      ...(skill ? { skill } : {}),
+      dc,
+      requestedMode: mode,
+      allowPassiveFallback: mutation?.allowPassiveFallback === true,
+      ...(boundedText(mutation?.mapId, 160) ? { mapId: boundedText(mutation.mapId, 160) } : {}),
+      participants,
+      results: [],
+      createdByMemberId: member.memberId,
+      createdByName: boundedText(member.displayName, 80) || 'DM',
+      createdAt: now,
+      expiresAt: now + 10 * 60 * 1_000,
+      updatedAt: now,
+    }
+    return { ok: true, changed: true, next: { ...base, checks: [...checks, check].slice(-GROUP_ABILITY_CHECK_LIMIT) }, check }
+  }
+  const checkId = boundedText(mutation?.checkId, 160)
+  const index = checks.findIndex((check) => check?.id === checkId)
+  if (index < 0) return { ok: false, status: 404, error: 'group-check-not-found' }
+  const currentCheck = checks[index]
+  if (mutation?.operation === 'roll') {
+    if (isDm) return { ok: false, status: 403, error: 'player-response-required' }
+    if (currentCheck.status !== 'open') return { ok: false, status: 409, error: 'group-check-closed' }
+    if (now >= currentCheck.expiresAt) return { ok: false, status: 409, error: 'group-check-expired' }
+    const participant = currentCheck.participants.find((entry) => entry?.memberId === member?.memberId)
+    if (!participant) return { ok: false, status: 403, error: 'not-a-group-check-participant' }
+    if (currentCheck.results.some((entry) => entry?.memberId === member.memberId)) {
+      return { ok: true, changed: false, next: base }
+    }
+    const character = characters.find((entry) =>
+      entry?.id === participant.characterId && entry?.roomMemberId === member.memberId)
+    if (!character) return { ok: false, status: 409, error: 'participant-character-missing' }
+    const result = groupCheckResult(character, currentCheck, now, { memberId: member.memberId, rollDie: context.rollDie })
+    const updated = { ...currentCheck, results: [...currentCheck.results, result], updatedAt: now }
+    const nextChecks = [...checks]
+    nextChecks[index] = updated
+    return { ok: true, changed: true, next: { ...base, checks: nextChecks }, result }
+  }
+  if (mutation?.operation === 'finalize') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
+    if (currentCheck.status !== 'open') return { ok: true, changed: false, next: base }
+    let results = [...currentCheck.results]
+    const missing = currentCheck.participants.filter((participant) => !results.some((entry) => entry.memberId === participant.memberId))
+    if (missing.length > 0 && mutation?.usePassiveForPending !== true) {
+      return { ok: false, status: 409, error: 'group-check-responses-pending' }
+    }
+    if (missing.length > 0 && !currentCheck.allowPassiveFallback) {
+      return { ok: false, status: 409, error: 'passive-fallback-disabled' }
+    }
+    for (const participant of missing) {
+      const character = characters.find((entry) => entry?.id === participant.characterId && entry?.roomMemberId === participant.memberId)
+      if (!character) return { ok: false, status: 409, error: 'participant-character-missing' }
+      results.push(groupCheckResult(character, currentCheck, now, { memberId: participant.memberId, passiveOnly: true }))
+    }
+    const complete = { ...currentCheck, status: 'completed', results, completedAt: now, updatedAt: now }
+    complete.aggregate = groupCheckAggregate(complete)
+    const nextChecks = [...checks]
+    nextChecks[index] = complete
+    return { ok: true, changed: true, next: { ...base, checks: nextChecks }, check: complete }
+  }
+  if (mutation?.operation === 'cancel') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
+    if (currentCheck.status !== 'open') return { ok: true, changed: false, next: base }
+    const cancelled = { ...currentCheck, status: 'cancelled', cancelledAt: now, updatedAt: now }
+    const nextChecks = [...checks]
+    nextChecks[index] = cancelled
+    return { ok: true, changed: true, next: { ...base, checks: nextChecks } }
+  }
+  return { ok: false, status: 400, error: 'invalid-group-check-operation' }
+}
+
 function validDnd5eRoundLifecycle(value) {
   return plainObject(value) && Number.isInteger(value.createdRound) && value.createdRound >= 0 &&
     Number.isInteger(value.expiresAfterRound) && value.expiresAfterRound >= value.createdRound &&
@@ -1463,6 +1797,7 @@ function validateCustomMonsterState(value) {
 
 function validateDnd5eResourceStates(name, value) {
   if (name === 'custom-monsters') return validateCustomMonsterState(value)
+  if (name === 'group-ability-checks') return validateGroupAbilityCheckState(value)
   if (name === 'characters') {
     let portraitLength = 0
     for (const character of value.characters ?? []) {
@@ -2130,6 +2465,7 @@ export function validateSharedStateShape(name, value) {
     'combat-log': 'entries',
     'room-chat': 'messages',
     'room-journal': 'handouts',
+    'group-ability-checks': 'checks',
     'dice-events': 'events',
     'combat-interrupts': 'interrupts',
     'player-action-requests': 'requests',
@@ -4180,6 +4516,54 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       return true
     }
 
+    if (parsed.pathname === '/api/state/group-ability-checks/mutation' && req.method === 'PATCH') {
+      if (!authenticatedRoomMember) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      const body = await readBody(req)
+      const mutation = JSON.parse(body.toString('utf8'))
+      const room = await readRoomForCampaign(ctx)
+      let characters = null
+      try {
+        characters = JSON.parse(await readFile(path.join(ctx.stateRoot, 'characters.json'), 'utf8'))
+      } catch {
+        // Participant validation fails closed when the authoritative character state is unavailable.
+      }
+      const now = Date.now()
+      const filePath = path.join(ctx.stateRoot, 'group-ability-checks.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
+        mutateGroupAbilityChecksState(state, mutation, now, authenticatedRoomMember, {
+          host: room.host,
+          players: Array.isArray(room.players) ? room.players : [],
+          characters,
+        }),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      if (result.changed) {
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `group-ability-checks:${now}:${Math.random().toString(36).slice(2)}`,
+          name: 'group-ability-checks',
+          updatedAt: now,
+        })
+      }
+      const projected = projectGroupAbilityChecksForMember(
+        result.next,
+        authenticatedRoomMember.memberId,
+        authenticatedRoomMember.memberId === room.host?.memberId,
+      )
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(projected))
+      return true
+    }
+
     if (parsed.pathname === '/api/state/combat-interrupts/interrupt' && req.method === 'PATCH') {
       const auth = authorizeStateWrite('combat-interrupts', extractSecret(req))
       if (!auth.ok) {
@@ -4272,6 +4656,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
+        if (playerRead && name === 'group-ability-checks') value = projectGroupAbilityChecksForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
           const fog = await readMapFogForProjection(ctx)

@@ -34,9 +34,11 @@ import {
   normalizeRoomPluginRequirements,
   mutateRoomChatState,
   mutateRoomJournalState,
+  mutateGroupAbilityChecksState,
   parseRoomChatRollCommand,
   projectRoomChatForMember,
   projectRoomJournalForMember,
+  projectGroupAbilityChecksForMember,
   pushBacklog,
   replaySlice,
   safeName,
@@ -45,6 +47,90 @@ import {
   withWriteLock,
   validateSharedStateShape,
 } from '../../scripts/shared-server-core.mjs'
+
+describe('authoritative group ability checks', () => {
+  const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }
+  const playerA = { role: 'player', memberId: 'player-a', displayName: '玩家甲' }
+  const playerB = { role: 'player', memberId: 'player-b', displayName: '玩家乙' }
+  const characters = {
+    characters: [
+      {
+        id: 'hero-a', roomMemberId: 'player-a', name: '游荡者', avatar: '🗡️', level: 11,
+        charClass: 'rogue', abilities: { str: 10, dex: 16, con: 10, int: 10, wis: 12, cha: 10 },
+        skills: ['perception'], dnd5eClassChoices: { classes: { rogue: { selections: {} } } },
+      },
+      {
+        id: 'hero-b', roomMemberId: 'player-b', name: '吟游诗人', avatar: '🎵', level: 2,
+        charClass: 'bard', abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 8, cha: 16 },
+        skills: [], dnd5eClassChoices: { classes: { bard: { selections: {} } } },
+      },
+    ],
+  }
+  const context = {
+    host,
+    players: [
+      { ...playerA, activeCharacterId: 'hero-a' },
+      { ...playerB, activeCharacterId: 'hero-b' },
+    ],
+    characters,
+  }
+
+  function createCheck(now = 1_000, overrides: Record<string, unknown> = {}) {
+    return mutateGroupAbilityChecksState(null, {
+      operation: 'create', label: '全队察觉检定', selection: 'skill:perception', dc: 15,
+      mode: 'normal', allowPassiveFallback: false,
+      participantCharacterIds: ['hero-a', 'hero-b'], ...overrides,
+    }, now, host, context)
+  }
+
+  it('collects one server roll per member and only exposes each player own row', () => {
+    const created = createCheck()
+    if (!created.ok) throw new Error('expected group check creation')
+    const checkId = String((created as unknown as { check: { id: string } }).check.id)
+    const first = mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 1_100, playerA, { ...context, rollDie: () => 1 })
+    if (!first.ok) throw new Error('expected first roll')
+    expect(first).toMatchObject({ result: { rolls: [1], d20: 10, modifier: 5, finalTotal: 15, reliableTalentApplied: true, success: true } })
+    const duplicate = mutateGroupAbilityChecksState(first.next, { operation: 'roll', checkId }, 1_150, playerA, { ...context, rollDie: () => 20 })
+    expect(duplicate).toMatchObject({ ok: true, changed: false })
+    const second = mutateGroupAbilityChecksState(first.next, { operation: 'roll', checkId }, 1_200, playerB, { ...context, rollDie: () => 4 })
+    if (!second.ok) throw new Error('expected second roll')
+    const projectedA = projectGroupAbilityChecksForMember(second.next, 'player-a', false)
+    expect(projectedA.checks[0]).toMatchObject({ participants: [{ memberId: 'player-a' }], results: [{ memberId: 'player-a' }] })
+    expect((projectedA.checks[0].participants as unknown[])).toHaveLength(1)
+    expect((projectedA.checks[0].results as unknown[])).toHaveLength(1)
+    const completed = mutateGroupAbilityChecksState(second.next, { operation: 'finalize', checkId }, 1_300, host, context)
+    expect(completed).toMatchObject({ ok: true, check: { status: 'completed', aggregate: { successCount: 1, requiredSuccesses: 1, groupSuccess: true } } })
+  })
+
+  it('lets the DM settle missing players by passive value only when enabled', () => {
+    const created = createCheck(2_000, { allowPassiveFallback: true, dc: 10 })
+    if (!created.ok) throw new Error('expected group check creation')
+    const checkId = String((created as unknown as { check: { id: string } }).check.id)
+    expect(mutateGroupAbilityChecksState(created.next, { operation: 'finalize', checkId }, 2_100, host, context)).toMatchObject({
+      ok: false, error: 'group-check-responses-pending',
+    })
+    const completed = mutateGroupAbilityChecksState(created.next, { operation: 'finalize', checkId, usePassiveForPending: true }, 2_200, host, context)
+    expect(completed).toMatchObject({
+      ok: true,
+      check: {
+        results: [
+          { source: 'passive-only', finalTotal: 15, success: true },
+          { source: 'passive-only', finalTotal: 10, success: true },
+        ],
+        aggregate: { successCount: 2, groupSuccess: true },
+      },
+    })
+  })
+
+  it('rejects forged participants, late rolls and non-participant responses', () => {
+    expect(createCheck(3_000, { participantCharacterIds: ['hero-a', 'missing'] })).toMatchObject({ ok: false, error: 'invalid-group-check-participant' })
+    const created = createCheck(3_000)
+    if (!created.ok) throw new Error('expected group check creation')
+    const checkId = String((created as unknown as { check: { id: string } }).check.id)
+    expect(mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 3_100, { role: 'player', memberId: 'outsider' }, context)).toMatchObject({ ok: false, error: 'not-a-group-check-participant' })
+    expect(mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 3_000 + 10 * 60 * 1_000, playerA, context)).toMatchObject({ ok: false, error: 'group-check-expired' })
+  })
+})
 
 describe('room communications authority', () => {
   const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }

@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
 import RoomHandoutNotification from './components/RoomHandoutNotification'
+import GroupAbilityCheckSystem from './components/GroupAbilityCheckSystem'
 import PageErrorBoundary from './components/PageErrorBoundary'
 import { SharedSyncRecoveryBanner } from './components/SharedSyncStatus'
 import RoomLobbyPage from './pages/RoomLobbyPage'
@@ -38,6 +39,8 @@ import { COMBAT_STATISTICS_RESOURCE } from './lib/combatStatistics'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 import { ROOM_CHAT_RESOURCE, ROOM_JOURNAL_RESOURCE } from './lib/roomCommunications'
 import { useRoomCommunicationsStore } from './store/roomCommunications'
+import { GROUP_ABILITY_CHECK_RESOURCE } from './lib/groupAbilityChecks'
+import { useGroupAbilityChecksStore } from './store/groupAbilityChecks'
 
 export default function App() {
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
@@ -57,6 +60,7 @@ export default function App() {
   const loadSharedCustomMonsters = useCustomMonsterStore((s) => s.loadShared)
   const loadSharedRoomChat = useRoomCommunicationsStore((s) => s.loadChat)
   const loadSharedRoomJournal = useRoomCommunicationsStore((s) => s.loadJournal)
+  const loadSharedGroupAbilityChecks = useGroupAbilityChecksStore((s) => s.loadShared)
 
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
@@ -132,7 +136,7 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics(), loadSharedRoomChat(), loadSharedRoomJournal()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics(), loadSharedRoomChat(), loadSharedRoomJournal(), loadSharedGroupAbilityChecks()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
@@ -148,6 +152,7 @@ export default function App() {
     const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics)
     const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat)
     const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal)
+    const stopGroupAbilityChecks = subscribeSharedResourceInvalidation(GROUP_ABILITY_CHECK_RESOURCE, loadSharedGroupAbilityChecks)
     return () => {
       stopMaps()
       stopCharacters()
@@ -159,8 +164,9 @@ export default function App() {
       stopCombatStatistics()
       stopRoomChat()
       stopRoomJournal()
+      stopGroupAbilityChecks()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedGroupAbilityChecks, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return
@@ -178,7 +184,6 @@ export default function App() {
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
-      <RoomHandoutNotification />
       <RoomLobbyPage notice={roomNotice} />
     </>
   )
@@ -202,6 +207,8 @@ export default function App() {
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
+      <RoomHandoutNotification />
+      <GroupAbilityCheckSystem />
       <iframe
         title="D20 dice preloader"
         src="/dice-box-frame.html?badge=0"
