@@ -7,6 +7,7 @@ import {
   Crown,
   LayoutDashboard,
   LogOut,
+  MessageSquareText,
   PanelLeftClose,
   Settings,
   Sparkles,
@@ -15,15 +16,17 @@ import {
 } from 'lucide-react'
 import type { AppMode } from '../lib/appMode'
 import type { RoomSession } from '../lib/roomSession'
+import { useRoomCommunicationsStore } from '../store/roomCommunications'
 
 const navItems = [
   { to: '/', label: '战役总览', icon: LayoutDashboard, end: true },
   { to: '/maps', label: '战斗地图', icon: Swords },
   { to: '/characters', label: '角色', icon: Users },
   { to: '/spellbook', label: '法术书', icon: BookOpen },
+  { to: '/communications', label: '通讯与日志', icon: MessageSquareText },
 ]
 
-const playerNavItems = navItems.filter((item) => item.to === '/maps' || item.to === '/characters' || item.to === '/spellbook')
+const playerNavItems = navItems.filter((item) => item.to === '/maps' || item.to === '/characters' || item.to === '/spellbook' || item.to === '/communications')
 
 export default function Sidebar({
   onCollapse,
@@ -39,6 +42,7 @@ export default function Sidebar({
   onLeaveRoom?: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const unreadHandouts = useRoomCommunicationsStore((state) => state.unreadHandoutIds.length)
   const items = mode === 'player' ? playerNavItems : navItems
   const copyRoomCode = async () => {
     if (!roomSession) return
@@ -92,7 +96,12 @@ export default function Sidebar({
                     isActive ? 'text-arcane-300' : 'text-slate-500 group-hover:text-slate-200',
                   ].join(' ')}
                 />
-                {label}
+                <span className="flex-1">{label}</span>
+                {to === '/communications' && unreadHandouts > 0 && (
+                  <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-950">
+                    {unreadHandouts}
+                  </span>
+                )}
               </>
             )}
           </NavLink>

@@ -11,6 +11,8 @@ describe('shared resource runtime validation', () => {
       'custom-monsters': { schemaVersion: 1, monsters: [], updatedAt: 1 },
       combat: { active: false, updatedAt: 1 },
       'combat-log': { entries: [], updatedAt: 1 },
+      'room-chat': { schemaVersion: 1, messages: [], updatedAt: 1 },
+      'room-journal': { schemaVersion: 1, handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 1 },
       'dice-events': { events: [], updatedAt: 1 },
       'combat-interrupts': { interrupts: [], updatedAt: 1 },
       'player-action-requests': { requests: [], updatedAt: 1 },
@@ -34,6 +36,8 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('spellbook', { spells: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('custom-monsters', { monsters: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('room-journal', { handouts: [], campaignEntries: 'broken', sharedNotes: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('map-fog', {
       schemaVersion: 1,
       updatedAt: 1,

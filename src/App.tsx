@@ -4,6 +4,7 @@ import { PanelLeftOpen } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
+import RoomHandoutNotification from './components/RoomHandoutNotification'
 import PageErrorBoundary from './components/PageErrorBoundary'
 import { SharedSyncRecoveryBanner } from './components/SharedSyncStatus'
 import RoomLobbyPage from './pages/RoomLobbyPage'
@@ -12,6 +13,7 @@ import MapsPage from './pages/MapsPage'
 import CharactersPage from './pages/CharactersPage'
 import RulesPluginsPage from './pages/RulesPluginsPage'
 import SpellbookPage from './pages/SpellbookPage'
+import CommunicationsPage from './pages/CommunicationsPage'
 import { modeFromPort } from './lib/appMode'
 import { heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
 import { clearRoomSession, getRoomSession, subscribeRoomSession } from './lib/roomSession'
@@ -34,6 +36,8 @@ import { MAP_GEOMETRY_RESOURCE } from './lib/mapGeometry'
 import { MAP_EXPLORATION_RESOURCE } from './lib/mapExploration'
 import { COMBAT_STATISTICS_RESOURCE } from './lib/combatStatistics'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
+import { ROOM_CHAT_RESOURCE, ROOM_JOURNAL_RESOURCE } from './lib/roomCommunications'
+import { useRoomCommunicationsStore } from './store/roomCommunications'
 
 export default function App() {
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
@@ -51,6 +55,8 @@ export default function App() {
   const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
   const loadSharedSpellbook = useSpellbookStore((s) => s.loadShared)
   const loadSharedCustomMonsters = useCustomMonsterStore((s) => s.loadShared)
+  const loadSharedRoomChat = useRoomCommunicationsStore((s) => s.loadChat)
+  const loadSharedRoomJournal = useRoomCommunicationsStore((s) => s.loadJournal)
 
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
@@ -126,7 +132,7 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics()])
+    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics(), loadSharedRoomChat(), loadSharedRoomJournal()])
     const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
     const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
     const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
@@ -140,6 +146,8 @@ export default function App() {
     })
     const stopMapExploration = subscribeSharedResourceInvalidation(MAP_EXPLORATION_RESOURCE, loadSharedMapExploration)
     const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics)
+    const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat)
+    const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal)
     return () => {
       stopMaps()
       stopCharacters()
@@ -149,8 +157,10 @@ export default function App() {
       stopMapGeometry()
       stopMapExploration()
       stopCombatStatistics()
+      stopRoomChat()
+      stopRoomJournal()
     }
-  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady) return
@@ -168,6 +178,7 @@ export default function App() {
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
+      <RoomHandoutNotification />
       <RoomLobbyPage notice={roomNotice} />
     </>
   )
@@ -222,6 +233,7 @@ export default function App() {
           <Route path="/maps" element={<PageErrorBoundary scope="地图与战斗"><MapsPage /></PageErrorBoundary>} />
           <Route path="/characters" element={<PageErrorBoundary scope="角色页面"><CharactersPage /></PageErrorBoundary>} />
           <Route path="/spellbook" element={<PageErrorBoundary scope="法术书"><SpellbookPage /></PageErrorBoundary>} />
+          <Route path="/communications" element={<PageErrorBoundary scope="通讯与日志"><CommunicationsPage /></PageErrorBoundary>} />
           <Route path="/settings" element={<PageErrorBoundary scope="设置页面"><RulesPluginsPage /></PageErrorBoundary>} />
           {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}
         </Routes>

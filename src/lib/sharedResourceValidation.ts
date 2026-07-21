@@ -52,6 +52,8 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   spellbook: 'spells',
   'custom-monsters': 'monsters',
   'combat-log': 'entries',
+  'room-chat': 'messages',
+  'room-journal': 'handouts',
   'dice-events': 'events',
   'combat-interrupts': 'interrupts',
   'player-action-requests': 'requests',
@@ -430,6 +432,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {
     reasons.push(`缺少或损坏数组字段 ${requiredArray}`)
+  }
+  if (name === 'room-journal' && (!Array.isArray(input.campaignEntries) || !Array.isArray(input.sharedNotes))) {
+    reasons.push('讲义资源缺少 campaignEntries 或 sharedNotes 数组')
   }
   if (input.updatedAt != null && (!Number.isFinite(input.updatedAt) || Number(input.updatedAt) < 0)) {
     reasons.push('updatedAt 不是有效时间戳')

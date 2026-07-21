@@ -564,6 +564,43 @@ export function subscribeSharedResourceInvalidation(
   }
 }
 
+/**
+ * Sends a server-authoritative, atomic mutation for append-oriented room resources.
+ * Chat and journal entries must never use a client-side read/modify/PUT cycle: an
+ * overlapping message would otherwise be lost and a client could forge its author.
+ */
+export async function mutateSharedRoomResource<T>(
+  resourceName: string,
+  endpoint: string,
+  mutation: unknown,
+): Promise<T> {
+  let lastError = '共享服务暂时不可用'
+  for (const api of sharedEventApiCandidates()) {
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}${endpoint}`), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...sharedAccessHeaders(),
+          ...sharedMemberHeaders(),
+          ...sharedProtocolHeaders(),
+        },
+        body: JSON.stringify(mutation),
+      })
+      const body = await response.json().catch(() => ({})) as T & { error?: string }
+      if (!response.ok) {
+        lastError = body?.error || `共享服务返回 ${response.status}`
+        continue
+      }
+      rememberSharedResourceRevision(resourceName, body, response)
+      return body
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  throw new Error(lastError)
+}
+
 export async function putSharedImage(id: string, blob: Blob): Promise<boolean> {
   if (!canWriteSharedState()) return false
   for (const api of sharedApiCandidates()) {

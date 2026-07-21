@@ -3,7 +3,7 @@
 // import 同一份纯逻辑，避免双份漂移；纯函数集中在此以便 src/ 下的 vitest 直接 import .mjs。
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
-import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
@@ -86,7 +86,7 @@ export function normalizeDedicatedDnd5eSharedState(name, value) {
 
 // ── AC4：图片配额 ───────────────────────────────────────────────────────────
 // 最多保留多少张共享图片（含 meta，不计 .json）。超过时按 mtime 最旧优先 GC。
-export const IMAGE_COUNT_LIMIT = 64
+export const IMAGE_COUNT_LIMIT = 128
 
 // ── AC1：跨进程写锁（lockfile + 陈旧超时，崩溃不死锁）───────────────────────
 // 锁陈旧超时：持锁进程崩溃后，锁最多被视为有效这么久；超过即判为陈旧可抢占。
@@ -851,6 +851,9 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
       },
     }
     const body = JSON.stringify(next)
+    if (Buffer.byteLength(body, 'utf8') > STATE_MAX_BYTES) {
+      return { ok: false, changed: false, status: 413, error: 'state-too-large', next: current }
+    }
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
     await writeFile(tmpPath, body)
     await rename(tmpPath, filePath)
@@ -1150,6 +1153,265 @@ function validTokenMovementAnimation(animation) {
       Math.abs(point.x) <= 1_000_000 && Math.abs(point.y) <= 1_000_000) &&
     Number.isFinite(animation.durationMs) && animation.durationMs >= 240 && animation.durationMs <= 3_000 &&
     Number.isFinite(animation.issuedAt) && animation.issuedAt >= 0
+}
+
+const ROOM_CHAT_MESSAGE_LIMIT = 500
+const ROOM_HANDOUT_LIMIT = 100
+const ROOM_JOURNAL_ENTRY_LIMIT = 200
+const ROOM_SHARED_NOTE_LIMIT = 200
+
+function boundedText(value, maxLength) {
+  return String(value ?? '').trim().slice(0, maxLength)
+}
+
+export function parseRoomChatRollCommand(value) {
+  const match = boundedText(value, 1_000).match(/^\/roll\s+(?:(\d{0,3})d)?(\d{1,4})(?:\s*([+-])\s*(\d{1,5}))?(?:\s+(.+))?$/i)
+  if (!match) return null
+  const count = match[1] ? Number(match[1]) : 1
+  const sides = Number(match[2])
+  const unsignedModifier = Number(match[4] ?? 0)
+  const modifier = match[3] === '-' ? -unsignedModifier : unsignedModifier
+  if (count < 1 || count > 100 || sides < 2 || sides > 1_000 || Math.abs(modifier) > 10_000) return null
+  return {
+    expression: `${count}d${sides}${modifier === 0 ? '' : modifier > 0 ? `+${modifier}` : modifier}`,
+    count,
+    sides,
+    modifier,
+    label: boundedText(match[5], 160) || undefined,
+  }
+}
+
+function communicationPersona(member, context, npcTokenId) {
+  if (member?.role === 'dm' || member?.memberId === context?.host?.memberId) {
+    if (npcTokenId) {
+      const maps = Array.isArray(context?.maps?.maps) ? context.maps.maps : []
+      const token = maps.flatMap((map) => Array.isArray(map?.tokens) ? map.tokens : [])
+        .find((entry) => entry?.id === npcTokenId && (entry?.type === 'npc' || entry?.type === 'enemy'))
+      if (!token) return null
+      return {
+        kind: 'npc',
+        name: boundedText(token.label, 80) || 'NPC',
+        avatar: boundedText(token.emoji, 12) || '🎭',
+        sourceId: token.id,
+      }
+    }
+    return { kind: 'dm', name: boundedText(member?.displayName, 80) || 'DM', avatar: '🎲' }
+  }
+  const characterId = boundedText(member?.activeCharacterId, 160)
+  const characters = Array.isArray(context?.characters?.characters) ? context.characters.characters : []
+  const character = characters.find((entry) =>
+    entry?.id === characterId && (
+      entry?.roomMemberId === member?.memberId ||
+      (!entry?.roomMemberId && boundedText(entry?.name, 80) === boundedText(member?.activeCharacterName, 80))
+    ))
+  if (character) {
+    return {
+      kind: 'character',
+      name: boundedText(character.name, 80) || boundedText(member?.displayName, 80),
+      avatar: boundedText(character.avatar, 12) || '🧙',
+      sourceId: character.id,
+    }
+  }
+  return { kind: 'player', name: boundedText(member?.displayName, 80) || '玩家', avatar: '👤' }
+}
+
+export function projectRoomChatForMember(value, memberId, isDm = false) {
+  const messages = Array.isArray(value?.messages) ? value.messages : []
+  return {
+    schemaVersion: 1,
+    messages: messages.filter((message) =>
+      message?.channel !== 'dm-private' || isDm ||
+      message?.senderMemberId === memberId || message?.recipientMemberId === memberId),
+    updatedAt: Number(value?.updatedAt) || 0,
+    ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
+  }
+}
+
+export function mutateRoomChatState(current, mutation, now, member, context = {}) {
+  const channel = mutation?.channel
+  if (channel !== 'ic' && channel !== 'ooc' && channel !== 'dm-private') {
+    return { ok: false, status: 400, error: 'invalid-chat-channel' }
+  }
+  const rawText = boundedText(mutation?.text, 1_000)
+  if (!rawText) return { ok: false, status: 400, error: 'empty-message' }
+  const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
+  let recipientMemberId
+  if (channel === 'dm-private') {
+    if (isDm) {
+      recipientMemberId = boundedText(mutation?.recipientMemberId, 160)
+      if (!context.playerMemberIds?.includes(recipientMemberId)) {
+        return { ok: false, status: 400, error: 'invalid-private-recipient' }
+      }
+    } else {
+      recipientMemberId = boundedText(context.host?.memberId, 160)
+      if (!recipientMemberId) return { ok: false, status: 409, error: 'dm-unavailable' }
+    }
+  }
+  const npcTokenId = isDm ? boundedText(mutation?.npcTokenId, 160) : ''
+  const persona = communicationPersona(member, context, npcTokenId)
+  if (!persona) return { ok: false, status: 400, error: 'invalid-npc-persona' }
+  const rollCommand = parseRoomChatRollCommand(rawText)
+  if (/^\/roll\b/i.test(rawText) && !rollCommand) {
+    return { ok: false, status: 400, error: 'invalid-roll-command' }
+  }
+  const roll = rollCommand ? {
+    ...rollCommand,
+    values: Array.from({ length: rollCommand.count }, () =>
+      (context.rollDie ?? ((sides) => randomInt(1, sides + 1)))(rollCommand.sides)),
+  } : undefined
+  if (roll) roll.total = roll.values.reduce((sum, value) => sum + value, roll.modifier)
+  const message = {
+    id: `chat-${randomUUID()}`,
+    channel,
+    createdAt: now,
+    senderMemberId: boundedText(member?.memberId, 160),
+    senderRole: isDm ? 'dm' : 'player',
+    senderDisplayName: boundedText(member?.displayName, 80) || (isDm ? 'DM' : '玩家'),
+    ...(recipientMemberId ? { recipientMemberId } : {}),
+    persona,
+    text: roll ? (roll.label || '掷骰') : rawText,
+    ...(roll ? { roll } : {}),
+  }
+  const baseMessages = Array.isArray(current?.messages) ? current.messages : []
+  const next = {
+    schemaVersion: 1,
+    messages: [...baseMessages, message].slice(-ROOM_CHAT_MESSAGE_LIMIT),
+    updatedAt: now,
+  }
+  return { ok: true, changed: true, next, message }
+}
+
+export function projectRoomJournalForMember(value, memberId, isDm = false) {
+  const handouts = Array.isArray(value?.handouts) ? value.handouts : []
+  return {
+    schemaVersion: 1,
+    handouts: handouts.filter((handout) =>
+      isDm || handout?.audience === 'all' ||
+      (Array.isArray(handout?.audience) && handout.audience.includes(memberId))),
+    campaignEntries: Array.isArray(value?.campaignEntries) ? value.campaignEntries : [],
+    sharedNotes: Array.isArray(value?.sharedNotes) ? value.sharedNotes : [],
+    updatedAt: Number(value?.updatedAt) || 0,
+    ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
+  }
+}
+
+export function mutateRoomJournalState(current, mutation, now, member, context = {}) {
+  const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
+  const base = {
+    schemaVersion: 1,
+    handouts: Array.isArray(current?.handouts) ? current.handouts : [],
+    campaignEntries: Array.isArray(current?.campaignEntries) ? current.campaignEntries : [],
+    sharedNotes: Array.isArray(current?.sharedNotes) ? current.sharedNotes : [],
+    updatedAt: now,
+  }
+  const authorMemberId = boundedText(member?.memberId, 160)
+  const authorName = boundedText(member?.displayName, 80) || (isDm ? 'DM' : '玩家')
+  const operation = mutation?.operation
+  if (operation === 'add-handout') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-only' }
+    const title = boundedText(mutation?.title, 120)
+    const body = boundedText(mutation?.body, 20_000)
+    const imageId = boundedText(mutation?.imageId, 160)
+    if (!title || (!body && !imageId)) return { ok: false, status: 400, error: 'invalid-handout' }
+    let audience = mutation?.audience
+    if (audience !== 'all') {
+      if (!Array.isArray(audience)) return { ok: false, status: 400, error: 'invalid-audience' }
+      audience = [...new Set(audience.map((entry) => boundedText(entry, 160)).filter(Boolean))]
+      if (audience.length < 1 || audience.some((id) => !context.playerMemberIds?.includes(id))) {
+        return { ok: false, status: 400, error: 'invalid-audience' }
+      }
+    }
+    const handout = {
+      id: `handout-${randomUUID()}`,
+      title,
+      body,
+      ...(imageId ? {
+        imageId,
+        imageMimeType: boundedText(mutation?.imageMimeType, 120) || 'application/octet-stream',
+        imageName: boundedText(mutation?.imageName, 240) || '讲义图片',
+      } : {}),
+      audience,
+      authorMemberId,
+      authorName,
+      createdAt: now,
+      updatedAt: now,
+    }
+    return { ok: true, changed: true, next: { ...base, handouts: [...base.handouts, handout].slice(-ROOM_HANDOUT_LIMIT) } }
+  }
+  if (operation === 'remove-handout') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-only' }
+    const id = boundedText(mutation?.id, 120)
+    if (!base.handouts.some((entry) => entry?.id === id)) return { ok: false, status: 404, error: 'handout-not-found' }
+    return { ok: true, changed: true, next: { ...base, handouts: base.handouts.filter((entry) => entry?.id !== id) } }
+  }
+  if (operation === 'add-campaign-entry') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-only' }
+    const title = boundedText(mutation?.title, 120)
+    const body = boundedText(mutation?.body, 40_000)
+    if (!title || !body) return { ok: false, status: 400, error: 'invalid-campaign-entry' }
+    const entry = {
+      id: `journal-${randomUUID()}`,
+      title,
+      body,
+      source: mutation?.source === 'combat-summary' ? 'combat-summary' : 'dm',
+      ...(boundedText(mutation?.combatId, 160) ? { combatId: boundedText(mutation.combatId, 160) } : {}),
+      authorMemberId,
+      authorName,
+      createdAt: now,
+      updatedAt: now,
+    }
+    return { ok: true, changed: true, next: { ...base, campaignEntries: [...base.campaignEntries, entry].slice(-ROOM_JOURNAL_ENTRY_LIMIT) } }
+  }
+  if (operation === 'remove-campaign-entry') {
+    if (!isDm) return { ok: false, status: 403, error: 'dm-only' }
+    const id = boundedText(mutation?.id, 120)
+    if (!base.campaignEntries.some((entry) => entry?.id === id)) return { ok: false, status: 404, error: 'journal-entry-not-found' }
+    return { ok: true, changed: true, next: { ...base, campaignEntries: base.campaignEntries.filter((entry) => entry?.id !== id) } }
+  }
+  if (operation === 'add-shared-note') {
+    const title = boundedText(mutation?.title, 120)
+    if (!title) return { ok: false, status: 400, error: 'invalid-shared-note' }
+    const note = {
+      id: `note-${randomUUID()}`,
+      kind: mutation?.kind === 'task' || mutation?.kind === 'clue' ? mutation.kind : 'note',
+      status: 'open',
+      title,
+      body: boundedText(mutation?.body, 20_000),
+      authorMemberId,
+      authorName,
+      lastEditorMemberId: authorMemberId,
+      lastEditorName: authorName,
+      createdAt: now,
+      updatedAt: now,
+    }
+    return { ok: true, changed: true, next: { ...base, sharedNotes: [...base.sharedNotes, note].slice(-ROOM_SHARED_NOTE_LIMIT) } }
+  }
+  if (operation === 'update-shared-note') {
+    const id = boundedText(mutation?.id, 120)
+    const note = base.sharedNotes.find((entry) => entry?.id === id)
+    if (!note) return { ok: false, status: 404, error: 'shared-note-not-found' }
+    const title = mutation?.title == null ? note.title : boundedText(mutation.title, 120)
+    if (!title) return { ok: false, status: 400, error: 'invalid-shared-note' }
+    const updated = {
+      ...note,
+      title,
+      body: mutation?.body == null ? note.body : boundedText(mutation.body, 20_000),
+      kind: mutation?.kind === 'task' || mutation?.kind === 'clue' || mutation?.kind === 'note' ? mutation.kind : note.kind,
+      status: mutation?.status === 'done' || mutation?.status === 'open' ? mutation.status : note.status,
+      lastEditorMemberId: authorMemberId,
+      lastEditorName: authorName,
+      updatedAt: now,
+    }
+    return { ok: true, changed: true, next: { ...base, sharedNotes: base.sharedNotes.map((entry) => entry?.id === id ? updated : entry) } }
+  }
+  if (operation === 'remove-shared-note') {
+    const id = boundedText(mutation?.id, 120)
+    const note = base.sharedNotes.find((entry) => entry?.id === id)
+    if (!note) return { ok: false, status: 404, error: 'shared-note-not-found' }
+    if (!isDm && note.authorMemberId !== authorMemberId) return { ok: false, status: 403, error: 'forbidden' }
+    return { ok: true, changed: true, next: { ...base, sharedNotes: base.sharedNotes.filter((entry) => entry?.id !== id) } }
+  }
+  return { ok: false, status: 400, error: 'invalid-journal-operation' }
 }
 
 function validDnd5eRoundLifecycle(value) {
@@ -1866,6 +2128,8 @@ export function validateSharedStateShape(name, value) {
     spellbook: 'spells',
     'custom-monsters': 'monsters',
     'combat-log': 'entries',
+    'room-chat': 'messages',
+    'room-journal': 'handouts',
     'dice-events': 'events',
     'combat-interrupts': 'interrupts',
     'player-action-requests': 'requests',
@@ -1878,6 +2142,9 @@ export function validateSharedStateShape(name, value) {
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
     return { ok: false, reason: `missing-array:${arrayField}` }
+  }
+  if (name === 'room-journal' && (!Array.isArray(value.campaignEntries) || !Array.isArray(value.sharedNotes))) {
+    return { ok: false, reason: 'missing-journal-arrays' }
   }
   if (value.updatedAt != null && (!Number.isFinite(value.updatedAt) || value.updatedAt < 0)) {
     return { ok: false, reason: 'invalid-updated-at' }
@@ -3791,6 +4058,128 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       }
     }
 
+    if (parsed.pathname === '/api/state/room-chat/message' && req.method === 'PATCH') {
+      if (!authenticatedRoomMember) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      const body = await readBody(req)
+      const mutation = JSON.parse(body.toString('utf8'))
+      const room = await readRoomForCampaign(ctx)
+      const readState = async (name) => {
+        try {
+          return JSON.parse(await readFile(path.join(ctx.stateRoot, `${name}.json`), 'utf8'))
+        } catch {
+          return null
+        }
+      }
+      const [characters, maps] = await Promise.all([readState('characters'), readState('maps')])
+      const now = Date.now()
+      const filePath = path.join(ctx.stateRoot, 'room-chat.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
+        mutateRoomChatState(state, mutation, now, authenticatedRoomMember, {
+          host: room.host,
+          playerMemberIds: (Array.isArray(room.players) ? room.players : []).map((player) => player.memberId),
+          characters,
+          maps,
+        }),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+        id: `room-chat:${now}:${Math.random().toString(36).slice(2)}`,
+        name: 'room-chat',
+        updatedAt: now,
+      })
+      if (result.message?.roll && result.message.channel !== 'dm-private') {
+        const combat = await readState('combat')
+        const logPath = path.join(ctx.stateRoot, 'combat-log.json')
+        const logResult = await atomicMutateJsonStateLocked(logPath, (state) => {
+          const entries = Array.isArray(state?.entries) ? state.entries : []
+          const nextId = Math.max(0, ...entries.map((entry) => Number(entry?.id) || 0)) + 1
+          const roll = result.message.roll
+          const modifierText = roll.modifier === 0 ? '' : roll.modifier > 0 ? ` + ${roll.modifier}` : ` - ${Math.abs(roll.modifier)}`
+          return {
+            ok: true,
+            changed: true,
+            next: {
+              mapId: boundedText(state?.mapId || combat?.mapId || maps?.selectedId, 160),
+              entries: [...entries, {
+                id: nextId,
+                round: Number.isInteger(combat?.round) ? combat.round : 0,
+                text: `${result.message.persona.name} 掷骰 ${roll.expression}：${roll.total}`,
+                kind: 'system',
+                time: new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(now),
+                details: [`骰面：${roll.values.join(' + ')}${modifierText}`, ...(roll.label ? [`说明：${roll.label}`] : [])],
+              }].slice(-1_000),
+              updatedAt: now,
+            },
+          }
+        })
+        if (logResult?.changed) {
+          publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+            id: `combat-log:${now}:${Math.random().toString(36).slice(2)}`,
+            name: 'combat-log',
+            updatedAt: now,
+          })
+        }
+      }
+      const projected = projectRoomChatForMember(
+        result.next,
+        authenticatedRoomMember.memberId,
+        authenticatedRoomMember.memberId === room.host?.memberId,
+      )
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(projected))
+      return true
+    }
+
+    if (parsed.pathname === '/api/state/room-journal/mutation' && req.method === 'PATCH') {
+      if (!authenticatedRoomMember) {
+        writeJson(res, 403, { error: 'forbidden' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      await maybeWriteAutoCampaignSnapshot(ctx)
+      const body = await readBody(req)
+      const mutation = JSON.parse(body.toString('utf8'))
+      const room = await readRoomForCampaign(ctx)
+      const now = Date.now()
+      const filePath = path.join(ctx.stateRoot, 'room-journal.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
+        mutateRoomJournalState(state, mutation, now, authenticatedRoomMember, {
+          host: room.host,
+          playerMemberIds: (Array.isArray(room.players) ? room.players : []).map((player) => player.memberId),
+        }),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+        id: `room-journal:${now}:${Math.random().toString(36).slice(2)}`,
+        name: 'room-journal',
+        updatedAt: now,
+      })
+      const projected = projectRoomJournalForMember(
+        result.next,
+        authenticatedRoomMember.memberId,
+        authenticatedRoomMember.memberId === room.host?.memberId,
+      )
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(projected))
+      return true
+    }
+
     if (parsed.pathname === '/api/state/combat-interrupts/interrupt' && req.method === 'PATCH') {
       const auth = authorizeStateWrite('combat-interrupts', extractSecret(req))
       if (!auth.ok) {
@@ -3881,6 +4270,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         if (playerRead && name === 'map-geometry') value = projectMapGeometryForPlayer(value, req.headers['x-stars-member'])
         if (playerRead && name === 'map-exploration') value = projectMapExplorationForPlayer(value, req.headers['x-stars-member'])
+        if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
+        if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
           const fog = await readMapFogForProjection(ctx)
@@ -4060,6 +4451,19 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const metaPath = path.join(ctx.imageRoot, `${id}.json`)
       if (req.method === 'GET') {
         try {
+          if (ctx.accessRole === 'player' && id.startsWith('handout-image-')) {
+            let journal = null
+            try {
+              journal = JSON.parse(await readFile(path.join(ctx.stateRoot, 'room-journal.json'), 'utf8'))
+            } catch {
+              // Missing or damaged metadata denies access to a protected handout image.
+            }
+            const visible = projectRoomJournalForMember(journal, authenticatedRoomMember?.memberId ?? '', false)
+            if (!visible.handouts.some((handout) => handout?.imageId === id)) {
+              writeJson(res, 403, { error: 'forbidden' })
+              return true
+            }
+          }
           let sourcePath = filePath
           let sourceMetaPath = metaPath
           try {

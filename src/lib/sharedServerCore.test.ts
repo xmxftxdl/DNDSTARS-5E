@@ -32,6 +32,11 @@ import {
   normalizeLobbyRoomCode,
   normalizeAccountRecoveryCode,
   normalizeRoomPluginRequirements,
+  mutateRoomChatState,
+  mutateRoomJournalState,
+  parseRoomChatRollCommand,
+  projectRoomChatForMember,
+  projectRoomJournalForMember,
   pushBacklog,
   replaySlice,
   safeName,
@@ -40,6 +45,74 @@ import {
   withWriteLock,
   validateSharedStateShape,
 } from '../../scripts/shared-server-core.mjs'
+
+describe('room communications authority', () => {
+  const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }
+  const player = {
+    role: 'player', memberId: 'player-a', displayName: '玩家甲', activeCharacterId: 'hero-a',
+  }
+  const context = {
+    host,
+    playerMemberIds: ['player-a', 'player-b'],
+    characters: { characters: [{ id: 'hero-a', roomMemberId: 'player-a', name: '艾琳', avatar: '🧝' }] },
+    maps: { maps: [{ tokens: [{ id: 'npc-innkeeper', type: 'npc', label: '旅店老板', emoji: '🧔' }] }] },
+    rollDie: () => 4,
+  }
+
+  it('parses bounded inline dice commands', () => {
+    expect(parseRoomChatRollCommand('/roll 2d6+3 搜索暗门')).toEqual({
+      expression: '2d6+3', count: 2, sides: 6, modifier: 3, label: '搜索暗门',
+    })
+    expect(parseRoomChatRollCommand('/roll 101d6')).toBeNull()
+    expect(parseRoomChatRollCommand('/roll 1d1')).toBeNull()
+  })
+
+  it('stamps player identity and resolves dice on the server', () => {
+    const result = mutateRoomChatState(null, { channel: 'ic', text: '/roll 2d6+3 搜索暗门' }, 1_000, player, context)
+    expect(result).toMatchObject({
+      ok: true,
+      message: {
+        senderMemberId: 'player-a',
+        senderRole: 'player',
+        persona: { kind: 'character', name: '艾琳', avatar: '🧝' },
+        roll: { values: [4, 4], total: 11 },
+      },
+    })
+  })
+
+  it('validates an NPC persona against the DM map snapshot', () => {
+    expect(mutateRoomChatState(null, {
+      channel: 'ic', text: '欢迎光临。', npcTokenId: 'npc-innkeeper',
+    }, 1_000, host, context)).toMatchObject({
+      ok: true,
+      message: { persona: { kind: 'npc', name: '旅店老板', avatar: '🧔' } },
+    })
+    expect(mutateRoomChatState(null, {
+      channel: 'ic', text: '伪造身份', npcTokenId: 'missing',
+    }, 1_000, host, context)).toMatchObject({ ok: false, error: 'invalid-npc-persona' })
+  })
+
+  it('projects private notes only to the related player and DM', () => {
+    const first = mutateRoomChatState(null, { channel: 'dm-private', text: '我检查口袋。' }, 1_000, player, context)
+    if (!first.ok) throw new Error('expected chat mutation')
+    expect(projectRoomChatForMember(first.next, 'player-a', false).messages).toHaveLength(1)
+    expect(projectRoomChatForMember(first.next, 'player-b', false).messages).toHaveLength(0)
+    expect(projectRoomChatForMember(first.next, 'dm-member', true).messages).toHaveLength(1)
+  })
+
+  it('keeps targeted handouts hidden while shared notes remain collaborative', () => {
+    const handout = mutateRoomJournalState(null, {
+      operation: 'add-handout', title: '密信', body: '只给甲', audience: ['player-a'],
+    }, 2_000, host, context)
+    if (!handout.ok) throw new Error('expected journal mutation')
+    expect(projectRoomJournalForMember(handout.next, 'player-a', false).handouts).toHaveLength(1)
+    expect(projectRoomJournalForMember(handout.next, 'player-b', false).handouts).toHaveLength(0)
+    const note = mutateRoomJournalState(handout.next, {
+      operation: 'add-shared-note', kind: 'task', title: '寻找钥匙', body: '',
+    }, 2_100, player, context)
+    expect(note).toMatchObject({ ok: true, next: { sharedNotes: [{ authorMemberId: 'player-a' }] } })
+  })
+})
 
 describe('room lobby allocation', () => {
   const now = 1_000_000

@@ -42,6 +42,51 @@ export function projectMapGeometryForPlayer<T>(value: T, memberId?: string | nul
 export function projectMapExplorationForPlayer<T>(value: T, memberId?: string | null): T
 export function fogPointState(fog: unknown, x: number, y: number): 'covered' | 'revealed' | 'neutral'
 
+export interface ParsedRoomChatRollCommand {
+  expression: string
+  count: number
+  sides: number
+  modifier: number
+  label?: string
+}
+export type RoomCommunicationMutationResult =
+  | { ok: false; status: number; error: string }
+  | {
+      ok: true
+      changed: boolean
+      next: Record<string, unknown>
+      message?: Record<string, unknown>
+    }
+export function parseRoomChatRollCommand(value: unknown): ParsedRoomChatRollCommand | null
+export function mutateRoomChatState(
+  current: unknown,
+  mutation: Record<string, unknown>,
+  now: number,
+  member: Record<string, unknown>,
+  context?: Record<string, unknown>,
+): RoomCommunicationMutationResult
+export function projectRoomChatForMember(
+  value: Record<string, unknown>,
+  memberId: string,
+  isDm?: boolean,
+): Record<string, unknown> & { messages: Array<Record<string, unknown>> }
+export function mutateRoomJournalState(
+  current: unknown,
+  mutation: Record<string, unknown>,
+  now: number,
+  member: Record<string, unknown>,
+  context?: Record<string, unknown>,
+): RoomCommunicationMutationResult
+export function projectRoomJournalForMember(
+  value: Record<string, unknown>,
+  memberId: string,
+  isDm?: boolean,
+): Record<string, unknown> & {
+  handouts: Array<Record<string, unknown>>
+  campaignEntries: Array<Record<string, unknown>>
+  sharedNotes: Array<Record<string, unknown>>
+}
+
 export function capEventChannels<T>(
   eventBacklog: Map<string, T>,
   limit?: number,
