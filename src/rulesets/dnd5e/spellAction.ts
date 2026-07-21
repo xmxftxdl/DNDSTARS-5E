@@ -14,7 +14,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eClassDefinitionForCharacter, dnd5ePactSlotLevel } from './classes'
+import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eTargetArmorClassForAttack,
@@ -35,7 +35,7 @@ import {
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
@@ -46,6 +46,7 @@ import {
   mapGeometryRuntimeForMap,
 } from '../../lib/mapGeometry'
 import { createDnd5eCoreSpellArea, getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eSpellCastRejectReason =
   | 'invalid-action'
@@ -64,6 +65,8 @@ export interface PreparedDnd5eSpellCast {
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actor: Character
+  castingClassId: Dnd5eClassId
+  castingClassLevel: number
   actorToken: Token
   targetToken: Token
   targetTokens: readonly Token[]
@@ -166,11 +169,15 @@ export function prepareDnd5eSpellCast(input: {
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
   const spell = getDnd5eSrdCombatSpell(payload.spellId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  const definition = dnd5eClassDefinitionForCharacter(actor)
-  if (!spell || !definition?.spellcasting || !dnd5eSelectedCombatSpellIds(actor).includes(spell.id)) {
+  const castingClassId = spell
+    ? dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
+    : undefined
+  const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
+  const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
+  if (!spell || !definition?.spellcasting || !castingClassId || castingClassLevel < 1) {
     return { ok: false, reason: 'spell-unavailable' }
   }
-  if (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || actor.level < 18)) {
+  if (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18)) {
     return { ok: false, reason: 'spell-unavailable' }
   }
   if (spell.castingTime === 'reaction') return { ok: false, reason: 'invalid-action' }
@@ -178,7 +185,7 @@ export function prepareDnd5eSpellCast(input: {
   const slotLevel = spell.level === 0
     ? 0
     : definition.spellcasting.kind === 'pact' && spell.level <= 5
-      ? dnd5ePactSlotLevel(actor.level)
+      ? dnd5ePactSlotLevel(castingClassLevel)
       : payload.slotLevel
   const higherSlotDamageChoices = dnd5eSpellHigherSlotDamageChoices(spell, slotLevel)
   if (
@@ -190,7 +197,7 @@ export function prepareDnd5eSpellCast(input: {
     const slot = actor.classResources?.[resourceKey]
     const freeCastSource = dnd5eFreeSpellCastSource({
       classId: definition.id,
-      level: actor.level,
+      level: castingClassLevel,
       classSelections: actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {},
       classResources: actor.classResources ?? {},
     }, spell, slotLevel)
@@ -203,7 +210,7 @@ export function prepareDnd5eSpellCast(input: {
   if (overchannel && !dnd5eCanOverchannelSpell({
     classId: definition.id,
     subclassId: actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
-    level: actor.level,
+    level: castingClassLevel,
   }, spell, slotLevel)) return { ok: false, reason: 'invalid-action' }
   const overchannelUses = Math.max(0, Math.floor(actor.dnd5eCombatState?.overchannelUsesSinceLongRest ?? 0))
   const overchannelSelfDamageDiceCount = overchannel && overchannelUses > 0
@@ -216,14 +223,14 @@ export function prepareDnd5eSpellCast(input: {
   if (metamagic) {
     const selectedMetamagic = classSelections.metamagic ?? []
     if (
-      definition.id !== 'sorcerer' || actor.level < 3 || !selectedMetamagic.includes(metamagic.kind) ||
+      definition.id !== 'sorcerer' || castingClassLevel < 3 || !selectedMetamagic.includes(metamagic.kind) ||
       !dnd5eMetamagicAvailableForSpell(metamagic.kind, spell, slotLevel)
     ) return { ok: false, reason: 'invalid-action' }
   }
   const empowered = payload.empowered === true
   if (
     empowered && (
-      definition.id !== 'sorcerer' || actor.level < 3 ||
+      definition.id !== 'sorcerer' || castingClassLevel < 3 ||
       !(classSelections.metamagic ?? []).includes('empowered') ||
       !dnd5eCanEmpowerSpell(spell) || overchannel
     )
@@ -238,7 +245,7 @@ export function prepareDnd5eSpellCast(input: {
   const draconicResistanceType = dnd5eDraconicElementalResistanceType({
     classId: definition.id,
     subclassId: actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
-    level: actor.level,
+    level: castingClassLevel,
     classSelections,
   }, spell)
   const totalSorceryPointCost = metamagicCost + (empowered ? 1 : 0) + (draconicResistance ? 1 : 0)
@@ -376,7 +383,7 @@ export function prepareDnd5eSpellCast(input: {
   const canSculpt = dnd5eCanSculptSpell({
     classId: definition.id,
     subclassId: actor.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
-    level: actor.level,
+    level: castingClassLevel,
   }, spell)
   if (
     sculptedTargetIds.length !== suppliedSculptedTargetIds.length ||
@@ -621,6 +628,8 @@ export function prepareDnd5eSpellCast(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
+      castingClassId,
+      castingClassLevel,
       actorToken,
       targetToken,
       targetTokens: validTargetTokens,
@@ -677,7 +686,7 @@ export function dnd5eSpellAttackModeWithProtection(
 
 export function previewDnd5eSpellAttack(prepared: PreparedDnd5eSpellCast, d20: number, d20Second?: number, protectedAttack = false, blessRoll?: number, baneRoll?: number) {
   if (!prepared.attackMode) throw new TypeError('spell does not use a spell attack')
-  const definition = dnd5eClassDefinitionForCharacter(prepared.actor)!
+  const definition = dnd5eClassDefinition(prepared.castingClassId)!
   const mode = dnd5eSpellAttackModeWithProtection(prepared.attackMode, protectedAttack)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   return rules.resolveAttack({
@@ -699,7 +708,7 @@ export function previewDnd5eSpellTargetAttack(
 ) {
   const target = prepared.targetSpellAttacks?.[targetIndex]
   if (!target) throw new RangeError('spell does not use a target spell attack at this index')
-  const definition = dnd5eClassDefinitionForCharacter(prepared.actor)!
+  const definition = dnd5eClassDefinition(prepared.castingClassId)!
   const mode = dnd5eSpellAttackModeWithProtection(target.mode, protectedAttack)
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   return rules.resolveAttack({
@@ -784,6 +793,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   const result = resolveDnd5eHeadlessAction(prepared.state, {
     type: 'cast-spell',
     actorId: prepared.actorToken.id,
+    castingClassId: prepared.castingClassId,
     targetId: prepared.targetToken.id,
     targetIds: prepared.targetTokens.map((target) => target.id),
     projectileTargetIds: prepared.projectileTargetIds,
@@ -842,7 +852,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   const declaration = getDnd5eCoreSpellAreaDeclaration(prepared.spell.id)
   if (declaration && prepared.areaCells && prepared.areaAnchorCell) {
     const actorCombatant = result.state.combatants[prepared.actorToken.id]
-    const definition = dnd5eClassDefinitionForCharacter(prepared.actor)
+    const definition = dnd5eClassDefinition(prepared.castingClassId)
     if (actorCombatant && definition?.spellcasting) {
       const sourceSaveDc = 8 + actorCombatant.proficiencyBonus +
         rules.abilityModifier(actorCombatant.abilities[definition.spellcasting.ability])

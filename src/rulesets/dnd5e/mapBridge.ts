@@ -8,12 +8,13 @@ import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCo
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import { mapGeometryCanSeeToken, mapGeometryCoverBetween, mapGeometryLineOfSightBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster } from './monsters'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
 import { dnd5eChallengeRatingValue } from './wildShape'
 import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
+import { normalizeDnd5eSpecialSenses, type Dnd5eSpecialSense } from './specialSenses'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -63,6 +64,22 @@ export function applyDnd5eAttackCoverOverride(
 
 const DEFAULT_ABILITIES = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } as const
 
+function tokenSpecialSenses(token: Token): Dnd5eSpecialSense[] {
+  return [
+    token.blindsightRangeFeet ? { kind: 'blindsight' as const, rangeFeet: token.blindsightRangeFeet } : undefined,
+    token.tremorsenseRangeFeet ? { kind: 'tremorsense' as const, rangeFeet: token.tremorsenseRangeFeet } : undefined,
+    token.truesightRangeFeet ? { kind: 'truesight' as const, rangeFeet: token.truesightRangeFeet } : undefined,
+  ].filter((sense): sense is Dnd5eSpecialSense => !!sense && sense.rangeFeet > 0)
+}
+
+function mergeSpecialSenses(...groups: readonly Dnd5eSpecialSense[][]): Dnd5eSpecialSense[] {
+  const maximumByKind = new Map<Dnd5eSpecialSense['kind'], number>()
+  for (const sense of groups.flat()) {
+    maximumByKind.set(sense.kind, Math.max(maximumByKind.get(sense.kind) ?? 0, sense.rangeFeet))
+  }
+  return [...maximumByKind].map(([kind, rangeFeet]) => ({ kind, rangeFeet }))
+}
+
 export function dnd5eMapTokenCanThreatenRangedAttacker(
   attacker: Dnd5eCombatant,
   hostileToken: Token,
@@ -85,7 +102,7 @@ function compactOptionalRecord<T extends object>(value: T): Partial<T> | undefin
 function applyPaladinAuras(map: BattleMap, combatants: Dnd5eCombatant[]): void {
   const tokenById = new Map(map.tokens.map((token) => [token.id, token]))
   const paladins = combatants.filter((combatant) =>
-    combatant.classId === 'paladin' && combatant.level >= 6 && combatant.currentHp > 0 && !combatant.classState.stunnedByActorId,
+    dnd5eCombatantClassLevel(combatant, 'paladin') >= 6 && combatant.currentHp > 0 && !combatant.classState.stunnedByActorId,
   )
   if (paladins.length === 0) return
   const feetPerCell = Math.max(1, map.feetPerCell ?? DND_FEET_PER_CELL)
@@ -98,11 +115,12 @@ function applyPaladinAuras(map: BattleMap, combatants: Dnd5eCombatant[]): void {
     for (const paladin of paladins) {
       const paladinToken = tokenById.get(paladin.id)
       if (!paladinToken || areOpposedCombatTokens(paladinToken, targetToken)) continue
-      const radius = paladin.level >= 18 ? 30 : 10
+      const paladinLevel = dnd5eCombatantClassLevel(paladin, 'paladin')
+      const radius = paladinLevel >= 18 ? 30 : 10
       if (tokenFootprintDistanceCells(paladinToken, targetToken, map) * feetPerCell > radius) continue
       savingThrowAuraBonus = Math.max(savingThrowAuraBonus, Math.max(1, rules.abilityModifier(paladin.abilities.cha)))
-      if (paladin.level >= 10) courageAura = true
-      if (paladin.subclassId === 'devotion' && paladin.level >= 7) devotionAura = true
+      if (paladinLevel >= 10) courageAura = true
+      if (dnd5eCombatantHasSubclass(paladin, 'paladin', 'devotion') && paladinLevel >= 7) devotionAura = true
     }
     if (savingThrowAuraBonus > 0) {
       for (const ability of ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const) {
@@ -130,7 +148,7 @@ function applyClassPassiveDefenses(combatants: Dnd5eCombatant[]): void {
 function applyBardCountercharm(map: BattleMap, combatants: Dnd5eCombatant[]): void {
   const tokenById = new Map(map.tokens.map((token) => [token.id, token]))
   const sources = combatants.filter((combatant) => {
-    if (combatant.classId !== 'bard' || combatant.level < 6 || (combatant.classState.countercharmRoundsRemaining ?? 0) <= 0) return false
+    if (dnd5eCombatantClassLevel(combatant, 'bard') < 6 || (combatant.classState.countercharmRoundsRemaining ?? 0) <= 0) return false
     const performanceEnded = combatant.currentHp <= 0 || dnd5eIsIncapacitated(combatant) ||
       combatant.conditions.some((condition) => ['silenced', '沉默'].includes(condition.toLowerCase()))
     if (performanceEnded) combatant.classState.countercharmRoundsRemaining = undefined
@@ -154,7 +172,7 @@ function applyBardCountercharm(map: BattleMap, combatants: Dnd5eCombatant[]): vo
 function applyHolyNimbusSources(map: BattleMap, combatants: Dnd5eCombatant[]): void {
   const tokenById = new Map(map.tokens.map((token) => [token.id, token]))
   const sources = combatants.filter((combatant) =>
-    combatant.classId === 'paladin' && combatant.subclassId === 'devotion' && combatant.level >= 20 &&
+    dnd5eCombatantClassLevel(combatant, 'paladin') >= 20 && dnd5eCombatantHasSubclass(combatant, 'paladin', 'devotion') &&
     combatant.currentHp > 0 && (combatant.classState.holyNimbusRoundsRemaining ?? 0) > 0,
   )
   if (sources.length === 0) return
@@ -174,7 +192,7 @@ function applyHolyNimbusSources(map: BattleMap, combatants: Dnd5eCombatant[]): v
 function applyDraconicPresenceSources(map: BattleMap, combatants: Dnd5eCombatant[]): void {
   const tokenById = new Map(map.tokens.map((token) => [token.id, token]))
   const sources = combatants.filter((combatant) =>
-    combatant.classId === 'sorcerer' && combatant.subclassId === 'draconic' && combatant.level >= 18 &&
+    dnd5eCombatantClassLevel(combatant, 'sorcerer') >= 18 && dnd5eCombatantHasSubclass(combatant, 'sorcerer', 'draconic') &&
     combatant.currentHp > 0 && combatant.concentrating &&
     combatant.classState.concentrationSpellId?.startsWith('class:draconic-presence:'),
   )
@@ -238,6 +256,8 @@ export function createDnd5eMapCombatSnapshot(input: {
         name: token.label,
         initiative,
         sizeRank: ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? '中型'],
+        elevationFeet: token.elevationFeet ?? 0,
+        specialSenses: tokenSpecialSenses(token),
       }]
     }
     const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
@@ -266,7 +286,16 @@ export function createDnd5eMapCombatSnapshot(input: {
       temporaryHp: Math.max(0, Math.floor(tokenTemporaryHp ?? 0)),
       exhaustionLevel: 0,
       speed: monster ? dnd5eMonsterMapSpeed(monster) : 30,
+      movementSpeeds: monster ? {
+        walk: monster.speed.walk ?? 0,
+        climb: monster.speed.climb,
+        swim: monster.speed.swim,
+        fly: monster.speed.fly,
+      } : { walk: 30 },
       position: { x: token.x, y: token.y },
+      elevationFeet: token.elevationFeet ?? 0,
+      airborne: !!monster?.speed.fly && (token.elevationFeet ?? 0) > 0,
+      specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
       concentrating: !!tokenClassState.concentrationSpellId,
       classState: {
         ...tokenClassState,
@@ -299,6 +328,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   state.coverBonusByCombatantPair = {}
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
+  state.physicalLineOfSightBlockedByCombatantPair = {}
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
@@ -313,13 +343,15 @@ export function createDnd5eMapCombatSnapshot(input: {
         else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
           state.coverBonusByCombatantPair[directedKey] = cover.armorClassBonus
         }
-        const lineOfSightBlocked = mapGeometryLineOfSightBlocked({
+        const physicalLineOfSightBlocked = mapGeometryLineOfSightBlocked({
           geometry,
           from: attacker,
           to: target,
           fromElevationFeet: attacker.elevationFeet ?? 0,
           toElevationFeet: target.elevationFeet ?? 0,
-        }) || !mapGeometryCanSeeToken({ geometry, map: input.map, viewer: attacker, target })
+        })
+        if (physicalLineOfSightBlocked) state.physicalLineOfSightBlockedByCombatantPair[directedKey] = true
+        const lineOfSightBlocked = physicalLineOfSightBlocked || !mapGeometryCanSeeToken({ geometry, map: input.map, viewer: attacker, target })
         if (lineOfSightBlocked) state.lineOfSightBlockedByCombatantPair[directedKey] = true
       }
     }
@@ -371,6 +403,8 @@ export function planDnd5eMapResultApplication(input: {
             bardicInspirationDie: combatant.classState.bardicInspirationDie,
             bardicInspirationSourceId: combatant.classState.bardicInspirationSourceId,
             bardicInspirationRoundsRemaining: combatant.classState.bardicInspirationRoundsRemaining,
+            surprisedCombatId: combatant.classState.surprisedCombatId,
+            surpriseResolvedCombatId: combatant.classState.surpriseResolvedCombatId,
             countercharmRoundsRemaining: combatant.classState.countercharmRoundsRemaining,
             intimidatingPresenceSourceId: combatant.classState.intimidatingPresenceSourceId,
             intimidatingPresenceRoundsRemaining: combatant.classState.intimidatingPresenceRoundsRemaining,
@@ -400,6 +434,9 @@ export function planDnd5eMapResultApplication(input: {
       const patch: Partial<Token> = {
         x: combatant.position.x,
         y: combatant.position.y,
+        elevationFeet: combatant.elevationFeet === 0 && token.elevationFeet == null
+          ? undefined
+          : combatant.elevationFeet,
         hp: combatant.currentHp,
         maxHp: combatant.maxHp,
         ...(!token.characterId ? { dnd5eCombatState: nextTokenClassState } : {}),
@@ -407,7 +444,7 @@ export function planDnd5eMapResultApplication(input: {
       const tokenClassStateUnchanged = token.characterId ||
         JSON.stringify(token.dnd5eCombatState ?? {}) === JSON.stringify(nextTokenClassState ?? {})
       if (
-        token.x === patch.x && token.y === patch.y && token.hp === patch.hp && token.maxHp === patch.maxHp &&
+        token.x === patch.x && token.y === patch.y && token.elevationFeet === patch.elevationFeet && token.hp === patch.hp && token.maxHp === patch.maxHp &&
         tokenClassStateUnchanged
       ) return token
       changedTokenIds.push(token.id)

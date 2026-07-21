@@ -981,10 +981,16 @@ export function mapGeometryCanSeeToken(input: {
   const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
     ? Math.max(0, input.viewer.darkvisionRangeFeet!)
     : 0
+  const blindsightRangeFeet = Number.isFinite(input.viewer.blindsightRangeFeet)
+    ? Math.max(0, input.viewer.blindsightRangeFeet!)
+    : 0
+  const truesightRangeFeet = Number.isFinite(input.viewer.truesightRangeFeet)
+    ? Math.max(0, input.viewer.truesightRangeFeet!)
+    : 0
   const carriedLightRangeFeet = input.viewer.lightSource?.enabled
     ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
     : 0
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, carriedLightRangeFeet)
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
   const rangePx = rangeFeet / feetPerCell * Math.max(1, input.map.gridSize)
   const distancePx = Math.hypot(input.target.x - input.viewer.x, input.target.y - input.viewer.y)
   if (distancePx > rangePx) return false
@@ -995,7 +1001,7 @@ export function mapGeometryCanSeeToken(input: {
     point: input.target,
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
-  if (illumination === 'darkness' && distanceFeet > darkvisionRangeFeet) return false
+  if (illumination === 'darkness' && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
   return !rayBlocked({
     geometry,
     from: input.viewer,
@@ -1119,12 +1125,18 @@ export function mapGeometryVisibilityPolygon(input: {
   const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
     ? Math.max(0, input.viewer.darkvisionRangeFeet!)
     : 0
+  const blindsightRangeFeet = Number.isFinite(input.viewer.blindsightRangeFeet)
+    ? Math.max(0, input.viewer.blindsightRangeFeet!)
+    : 0
+  const truesightRangeFeet = Number.isFinite(input.viewer.truesightRangeFeet)
+    ? Math.max(0, input.viewer.truesightRangeFeet!)
+    : 0
   const lightRangeFeet = input.viewer.lightSource?.enabled
     ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
     : 0
   // 地形遮罩使用正常视距；暗光、黑暗和场景光源在 LightingLayer 内表现。
   // 服务端仍会单独过滤未被照亮的生物，因此不会因地形可见而泄露隐藏 Token。
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, lightRangeFeet)
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, lightRangeFeet)
   if (rangeFeet <= 0) return []
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = tokenElevation(input.viewer)

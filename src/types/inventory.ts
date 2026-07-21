@@ -167,6 +167,11 @@ export interface Dnd5eInventoryEntry {
   /** schema V1 迁移字段；V2 运行时不会再写入。 */
   remainingCharges?: number
   equippedSlot?: EquipmentSlot
+  /** 同调只属于具体实例；转交、丢弃或失去该实例时不会跟随模板。 */
+  attuned?: boolean
+  /** 角色在下一次短休中准备与此物品同调；每次短休至多完成一件。 */
+  attunementPending?: boolean
+  attunedAt?: number
   acquiredAt: number
 }
 
@@ -182,6 +187,9 @@ export type Dnd5eInventoryMutation =
   | { type: 'transfer'; characterId: string; targetCharacterId: string; instanceId: string; quantity: number }
   | { type: 'equip'; characterId: string; instanceId: string }
   | { type: 'unequip'; characterId: string; instanceId: string }
+  | { type: 'prepare-attunement'; characterId: string; instanceId: string; prerequisiteConfirmed?: boolean }
+  | { type: 'cancel-attunement'; characterId: string; instanceId: string }
+  | { type: 'end-attunement'; characterId: string; instanceId: string }
   | { type: 'use'; characterId: string; instanceId: string; healingRolls?: number[] }
 
 export type Dnd5eInventoryMutationFailure =
@@ -193,6 +201,9 @@ export type Dnd5eInventoryMutationFailure =
   | 'insufficient-quantity'
   | 'not-equipment'
   | 'not-usable'
+  | 'attunement-not-required'
+  | 'attunement-limit'
+  | 'attunement-prerequisite'
   | 'invalid-rolls'
   | 'action-unavailable'
   | 'bonus-action-unavailable'

@@ -4,6 +4,7 @@ import type { Character } from '../../types/character'
 import { dnd5eUnproficientAbilityCheckBonus } from './classes'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eRollMode } from './rollMode'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eCheckProficiencyRank = 0 | 1 | 2
 
@@ -15,31 +16,25 @@ function abilityScore(character: Pick<Character, 'abilities'>, ability: AbilityK
   return Math.min(30, Math.max(1, Math.floor(character.abilities[ability])))
 }
 
-function selectedClassChoices(character: Pick<Character, 'charClass' | 'dnd5eClassChoices'>): Record<string, string[]> {
-  const classId = character.charClass === '吟游诗人' ? 'bard'
-    : character.charClass === '游荡者' ? 'rogue'
-      : character.charClass === '邪术师' ? 'warlock'
-        : undefined
-  return classId ? character.dnd5eClassChoices?.classes?.[classId]?.selections ?? {} : {}
-}
-
 export function dnd5eSkillCheckProficiencyRank(
-  character: Pick<Character, 'charClass' | 'skills' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'skills' | 'dnd5eClassChoices'>,
   skillKey: string,
 ): Dnd5eCheckProficiencyRank {
-  const choices = selectedClassChoices(character)
-  const beguilingInfluence = character.charClass === '邪术师' &&
-    (choices['eldritch-invocations'] ?? []).includes('beguiling-influence') &&
+  const bardChoices = character.dnd5eClassChoices?.classes?.bard?.selections ?? {}
+  const rogueChoices = character.dnd5eClassChoices?.classes?.rogue?.selections ?? {}
+  const warlockChoices = character.dnd5eClassChoices?.classes?.warlock?.selections ?? {}
+  const beguilingInfluence = dnd5eCharacterClassLevel(character, 'warlock') >= 2 &&
+    (warlockChoices['eldritch-invocations'] ?? []).includes('beguiling-influence') &&
     (skillKey === 'deception' || skillKey === 'persuasion')
   const proficient = character.skills.includes(skillKey) ||
-    (character.charClass === '吟游诗人' && (choices['lore-bonus-skills'] ?? []).includes(skillKey)) ||
+    (dnd5eCharacterClassLevel(character, 'bard') >= 3 && (bardChoices['lore-bonus-skills'] ?? []).includes(skillKey)) ||
     beguilingInfluence
   if (!proficient) return 0
-  return (choices.expertise ?? []).includes(skillKey) ? 2 : 1
+  return [...(bardChoices.expertise ?? []), ...(rogueChoices.expertise ?? [])].includes(skillKey) ? 2 : 1
 }
 
 export function dnd5eAbilityCheckModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'abilities' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices'>,
   ability: AbilityKey,
   proficiencyRank: Dnd5eCheckProficiencyRank = 0,
 ): number {
@@ -51,7 +46,7 @@ export function dnd5eAbilityCheckModifier(
 }
 
 export function dnd5eSkillCheckModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'abilities' | 'skills' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'skills' | 'dnd5eClassChoices'>,
   skillKey: string,
 ): number {
   const skill = SKILLS.find((candidate) => candidate.key === skillKey)
@@ -60,10 +55,10 @@ export function dnd5eSkillCheckModifier(
 }
 
 export function dnd5eAbilityCheckMode(
-  character: Pick<Character, 'charClass' | 'level' | 'exhaustionLevel'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'exhaustionLevel'>,
   context: { initiative?: boolean } = {},
 ): D20RollMode {
-  const advantage = context.initiative === true && character.charClass === '野蛮人' && level(character) >= 7
+  const advantage = context.initiative === true && dnd5eCharacterClassLevel(character, 'barbarian') >= 7
   const disadvantage = (character.exhaustionLevel ?? 0) >= 1
   return resolveDnd5eRollMode({
     advantage: [{ active: advantage, reason: 'initiative-advantage' }],
@@ -72,10 +67,10 @@ export function dnd5eAbilityCheckMode(
 }
 
 function reliableTalentApplies(
-  character: Pick<Character, 'charClass' | 'level'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
   proficiencyRank: Dnd5eCheckProficiencyRank,
 ): boolean {
-  return character.charClass === '游荡者' && level(character) >= 11 && proficiencyRank > 0
+  return dnd5eCharacterClassLevel(character, 'rogue') >= 11 && proficiencyRank > 0
 }
 
 export interface Dnd5eAbilityCheckResult {
@@ -95,7 +90,7 @@ export function previewDnd5eSavingThrowRoll(input: {
 }
 
 export function resolveDnd5eAbilityCheck(input: {
-  character: Pick<Character, 'charClass' | 'level' | 'abilities' | 'dnd5eClassChoices' | 'exhaustionLevel'>
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'exhaustionLevel'>
   ability: AbilityKey
   rolls: readonly number[]
   proficiencyRank?: Dnd5eCheckProficiencyRank
@@ -111,7 +106,7 @@ export function resolveDnd5eAbilityCheck(input: {
     mode,
     modifier: dnd5eAbilityCheckModifier(input.character, input.ability, proficiencyRank) + (input.additionalModifier ?? 0),
   })
-  const indomitableMight = input.character.charClass === '野蛮人' && level(input.character) >= 18 &&
+  const indomitableMight = dnd5eCharacterClassLevel(input.character, 'barbarian') >= 18 &&
     input.ability === 'str' && resolvedRoll.total < abilityScore(input.character, 'str')
   const roll = indomitableMight
     ? { ...resolvedRoll, total: abilityScore(input.character, 'str') }
@@ -125,13 +120,13 @@ export function resolveDnd5eAbilityCheck(input: {
 }
 
 export function dnd5eStoredCharacterInitiativeModifier(
-  character: Pick<Character, 'charClass' | 'level' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus'>,
 ): number {
   return dnd5eAbilityCheckModifier(character, 'dex') + Math.floor(character.initiativeBonus)
 }
 
 export function resolveDnd5eInitiative(input: {
-  character: Pick<Character, 'charClass' | 'level' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'exhaustionLevel'>
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices' | 'initiativeBonus' | 'exhaustionLevel'>
   rolls: readonly number[]
 }): Dnd5eAbilityCheckResult {
   return resolveDnd5eAbilityCheck({

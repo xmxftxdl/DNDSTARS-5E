@@ -20,6 +20,8 @@ import {
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 import { DND5E_SRD_MAGIC_ITEM_TEMPLATES } from './magicItems'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
+import { dnd5eClassDefinition } from './classes'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
@@ -391,6 +393,29 @@ export function restoreDnd5eInventoryResources(
     : character
 }
 
+export function dnd5eAttunedItemCount(character: Character): number {
+  return normalizeDnd5eInventory(character).entries.filter((entry) => entry.attuned).length
+}
+
+export function dnd5eInventoryEntryIsActive(entry: Dnd5eInventoryEntry): boolean {
+  return entry.item.magicItem?.attunement !== 'required' || entry.attuned === true
+}
+
+/** 完成短休时只完成一件预先选择的同调，并再次核验三件上限。 */
+export function resolveDnd5eAttunementAfterShortRest(character: Character, now = Date.now()): Character {
+  const inventory = normalizeDnd5eInventory(character)
+  const pending = inventory.entries.find((entry) => entry.attunementPending)
+  if (!pending) return character
+  const currentCount = inventory.entries.filter((entry) => entry.attuned).length
+  const entries = inventory.entries.map((entry) => {
+    if (entry.instanceId !== pending.instanceId) return entry.attunementPending ? { ...entry, attunementPending: undefined } : entry
+    return currentCount >= 3
+      ? { ...entry, attunementPending: undefined }
+      : { ...entry, attuned: true, attunementPending: undefined, attunedAt: now }
+  })
+  return { ...character, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
+}
+
 export function rollDnd5eInventoryHealing(item: Dnd5eInventoryItemTemplate): number[] {
   if (item.use?.effect.kind !== 'healing') return []
   const { count, sides } = item.use.effect.dice
@@ -486,6 +511,45 @@ function applyDnd5eInventoryMutationInternal(
     if (!entry.equippedSlot) return failed(characters, 'not-equipment')
     const next = unequipEntry(source, entry)
     return succeeded(replaceAt(characters, sourceIndex, next), `${source.name} 卸下了 ${entry.item.name}。`)
+  }
+
+  if (mutation.type === 'prepare-attunement') {
+    if (entry.item.magicItem?.attunement !== 'required') return failed(characters, 'attunement-not-required')
+    if (entry.attuned) return succeeded(characters, `${source.name} 已与 ${entry.item.name} 同调。`)
+    if (source.dnd5eInventory!.entries.filter((candidate) => candidate.attuned).length >= 3) {
+      return failed(characters, 'attunement-limit')
+    }
+    if (!dnd5eAttunementRequirementMet(source, entry, mutation.prerequisiteConfirmed === true)) {
+      return failed(characters, 'attunement-prerequisite')
+    }
+    const entries = source.dnd5eInventory!.entries.map((candidate) => ({
+      ...candidate,
+      attunementPending: candidate.instanceId === entry.instanceId ? true : undefined,
+    }))
+    return succeeded(replaceAt(characters, sourceIndex, {
+      ...source,
+      dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+    }), `${source.name} 将在下一次短休中与 ${entry.item.name} 同调。`)
+  }
+
+  if (mutation.type === 'cancel-attunement') {
+    const entries = source.dnd5eInventory!.entries.map((candidate) => candidate.instanceId === entry.instanceId
+      ? { ...candidate, attunementPending: undefined }
+      : candidate)
+    return succeeded(replaceAt(characters, sourceIndex, {
+      ...source,
+      dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+    }), `${source.name} 取消了同调准备。`)
+  }
+
+  if (mutation.type === 'end-attunement') {
+    const entries = source.dnd5eInventory!.entries.map((candidate) => candidate.instanceId === entry.instanceId
+      ? { ...candidate, attuned: undefined, attunementPending: undefined, attunedAt: undefined }
+      : candidate)
+    return succeeded(replaceAt(characters, sourceIndex, {
+      ...source,
+      dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries },
+    }), `${source.name} 结束了与 ${entry.item.name} 的同调。`)
   }
 
   const use = entry.item.use
@@ -645,6 +709,33 @@ function removeItem(character: Character, entry: Dnd5eInventoryEntry, quantity: 
   return { ...next, dnd5eInventory: { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries } }
 }
 
+function dnd5eAttunementRequirementMet(
+  character: Character,
+  entry: Dnd5eInventoryEntry,
+  prerequisiteConfirmed: boolean,
+): boolean {
+  const requirement = entry.item.magicItem?.attunementRequirement
+  if (!requirement) return true
+  if (requirement.includes('仅限矮人')) return character.race.includes('矮人')
+  if (requirement.includes('善良阵营')) return character.alignment?.includes('善良') === true
+  if (requirement.includes('邪恶阵营')) return character.alignment?.includes('邪恶') === true
+  const levels = normalizeDnd5eClassLevels(character)
+  const classNames = Object.keys(levels).flatMap((classId) => {
+    const definition = dnd5eClassDefinition(classId)
+    return definition && dnd5eCharacterClassLevel(character, definition.id) > 0 ? [definition.name] : []
+  })
+  if (requirement.includes('仅限施法者')) {
+    return Object.entries(levels).some(([classId, level]) => {
+      const definition = dnd5eClassDefinition(classId)
+      if (!definition?.spellcasting) return false
+      return !['half-known', 'half-prepared'].includes(definition.spellcasting.kind) || (level ?? 0) >= 2
+    })
+  }
+  const mentionedClasses = classNames.filter((name) => requirement.includes(name))
+  if (mentionedClasses.length > 0) return true
+  return prerequisiteConfirmed
+}
+
 function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character {
   const equipment = entry.item.equipment!
   const slot = equipment.slot
@@ -800,6 +891,6 @@ function failed(characters: readonly Character[], reason: NonNullable<Dnd5eInven
   return { ok: false, reason, characters: [...characters] }
 }
 
-function succeeded(characters: Character[], message: string): Dnd5eInventoryMutationResult {
-  return { ok: true, characters, message }
+function succeeded(characters: readonly Character[], message: string): Dnd5eInventoryMutationResult {
+  return { ok: true, characters: [...characters], message }
 }

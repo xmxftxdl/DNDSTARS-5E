@@ -12,7 +12,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eClassDefinitionForCharacter, dnd5ePactSlotLevel } from './classes'
+import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import { dnd5eAttackerIsUnseenForAttack, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eTargetIsUnseenForAttack, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
@@ -24,8 +24,9 @@ import {
   missingDnd5eRulesPluginRequirements,
   type RegisteredDnd5ePluginSpell,
 } from './pluginApi'
-import { dnd5eSelectedSpellIds } from './spells'
+import { dnd5eSpellcastingClassIdForSpell } from './spells'
 import type { Dnd5eSpellConditionDuration, Dnd5eSpellMechanicsDefinition } from './spellMechanics'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -60,6 +61,8 @@ export interface PreparedDnd5ePluginSpellCast {
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actor: Character
+  castingClassId: Dnd5eClassId
+  castingClassLevel: number
   actorToken: Token
   targetToken: Token
   slotLevel: number
@@ -141,11 +144,12 @@ export function prepareDnd5ePluginSpellCast(input: {
   const actor = input.characters.find((character) => character.id === input.action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  const classDefinition = dnd5eClassDefinitionForCharacter(actor)
+  const castingClassId = dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
+  const classDefinition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
+  const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
   if (
-    !classDefinition?.spellcasting || !spell.classes.some((classId) => classId === classDefinition.id) ||
-    !dnd5eSelectedSpellIds(actor).includes(spell.id) ||
-    (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || actor.level < 18))
+    !classDefinition?.spellcasting || !castingClassId || castingClassLevel < 1 ||
+    (actor.dnd5eCombatState?.wildShapeFormId && (classDefinition.id !== 'druid' || castingClassLevel < 18))
   ) return { ok: false, reason: 'spell-unavailable' }
   if (spell.castingTime.value !== 1 || !['action', 'bonus-action'].includes(spell.castingTime.unit)) {
     return { ok: false, reason: 'invalid-action' }
@@ -161,7 +165,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   const slotLevel = spell.level === 0
     ? 0
     : classDefinition.spellcasting.kind === 'pact' && spell.level <= 5
-      ? dnd5ePactSlotLevel(actor.level)
+      ? dnd5ePactSlotLevel(castingClassLevel)
       : requestedSlot
   if (!Number.isInteger(requestedSlot) || requestedSlot < 0 || requestedSlot > 9 || slotLevel < spell.level) {
     return { ok: false, reason: 'slot-unavailable' }
@@ -221,6 +225,8 @@ export function prepareDnd5ePluginSpellCast(input: {
   const castingModifier = damage?.addSpellcastingModifier
     ? rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
     : 0
+  const spellSaveDc = 8 + rules.proficiencyBonus(actor.level) +
+    rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
   const saveAbility = spell.mechanics.savingThrow?.ability
   const saveModifier = saveAbility
     ? (targetCombatant.savingThrowBonuses[saveAbility] ?? rules.abilityModifier(targetCombatant.abilities[saveAbility])) +
@@ -261,14 +267,16 @@ export function prepareDnd5ePluginSpellCast(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
+      castingClassId,
+      castingClassLevel,
       actorToken,
       targetToken,
       slotLevel,
       castingTime,
       componentCheck,
-      attackModifier: actor.saveDC - 8,
+      attackModifier: spellSaveDc - 8,
       attackMode,
-      saveDc: actor.saveDC,
+      saveDc: spellSaveDc,
       saveModifier,
       saveMode,
       saveAutomaticallyFails: saveAbility ? dnd5eConditionSavingThrowAutomaticallyFails(targetCombatant, saveAbility) : false,
@@ -353,6 +361,7 @@ export function resolvePreparedDnd5ePluginSpellCast(input: {
   const result = resolveDnd5eHeadlessAction(prepared.state, {
     type: 'adjudicated-spell',
     actorId: prepared.actorToken.id,
+    castingClassId: prepared.castingClassId,
     spellId: prepared.spell.id,
     spellName: prepared.spell.name,
     spellLevel: prepared.spell.level,

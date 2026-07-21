@@ -1578,10 +1578,12 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
         ? Math.max(0, geometry.vision.defaultRangeFeet)
         : DEFAULT_PLAYER_VISION_RANGE_FEET
   const darkvisionRangeFeet = Number.isFinite(viewer.darkvisionRangeFeet) ? Math.max(0, viewer.darkvisionRangeFeet) : 0
+  const blindsightRangeFeet = Number.isFinite(viewer.blindsightRangeFeet) ? Math.max(0, viewer.blindsightRangeFeet) : 0
+  const truesightRangeFeet = Number.isFinite(viewer.truesightRangeFeet) ? Math.max(0, viewer.truesightRangeFeet) : 0
   const carriedLightRangeFeet = viewer.lightSource?.enabled === true
     ? Math.max(0, Number(viewer.lightSource.brightRadiusFeet) || 0) + Math.max(0, Number(viewer.lightSource.dimRadiusFeet) || 0)
     : 0
-  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, carriedLightRangeFeet)
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
   const rangePx = rangeFeet / feetPerCell * gridSize
   const distancePx = Math.hypot(target.x - viewer.x, target.y - viewer.y)
   if (distancePx > rangePx) return false
@@ -1625,9 +1627,20 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
       }
     }
     const distanceFeet = distancePx / gridSize * feetPerCell
-    if (!illuminated && distanceFeet > darkvisionRangeFeet) return false
+    if (!illuminated && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
   }
   return true
+}
+
+function playerSpecialSenseRange(viewer, target, kind, map) {
+  const property = kind === 'blindsight' ? 'blindsightRangeFeet'
+    : kind === 'tremorsense' ? 'tremorsenseRangeFeet'
+      : 'truesightRangeFeet'
+  const rangeFeet = Number.isFinite(viewer?.[property]) ? Math.max(0, viewer[property]) : 0
+  if (rangeFeet <= 0) return false
+  const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
+  const gridSize = Math.max(1, Number(map.gridSize) || 1)
+  return Math.hypot(target.x - viewer.x, target.y - viewer.y) / gridSize * feetPerCell <= rangeFeet
 }
 
 function tokenHiddenCheckTotal(token) {
@@ -1745,13 +1758,22 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
             dynamicVision,
           ),
         )
-        if (observingViewers.length === 0) return []
+        const tremorsenseViewers = viewers.filter((viewer) =>
+          playerSpecialSenseRange(viewer, token, 'tremorsense', map) &&
+          Math.abs(tokenElevationFeet(viewer) - tokenElevationFeet(token)) <= 5 &&
+          token.airborne !== true,
+        )
+        if (observingViewers.length === 0) return tremorsenseViewers.length > 0 ? [redactUnseenToken(token)] : []
         const hiddenCheckTotal = tokenHiddenCheckTotal(token)
         if (
           hiddenCheckTotal != null &&
           !observingViewers.some((viewer) => passivePerceptionForViewer(viewer, characterById) >= hiddenCheckTotal)
         ) return []
-        return [tokenIsInvisible(token) ? redactUnseenToken(token) : token]
+        const specialSenseSeesInvisible = observingViewers.some((viewer) =>
+          playerSpecialSenseRange(viewer, token, 'blindsight', map) ||
+          playerSpecialSenseRange(viewer, token, 'truesight', map),
+        )
+        return [tokenIsInvisible(token) && !specialSenseSeesInvisible ? redactUnseenToken(token) : token]
       })
       const visibleIds = new Set(tokens.map((token) => token.id))
       return {

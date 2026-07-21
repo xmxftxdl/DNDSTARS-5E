@@ -9,6 +9,7 @@ import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { dnd5eEffectiveSpeed, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5ePersistentAreaMovementCostMultiplierAt } from './pluginAreas'
+import { dnd5eFallingDamageDice, dnd5eTraversalMovementCost } from './traversal'
 
 export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
@@ -27,6 +28,8 @@ export interface PreparedDnd5ePlayerMove {
   to: { x: number; y: number }
   distanceFeet: number
   movementCostFeet: number
+  toElevationFeet: number
+  fallingDamageDice: number
   path: Array<{ x: number; y: number }>
   standFromProne: boolean
   state: Dnd5eHeadlessCombatState
@@ -72,8 +75,25 @@ export function prepareDnd5ePlayerMove(input: {
   const distanceFeet = path.distanceFeet
   const isProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const standFromProne = isProne && action.dnd5eStandFromProne !== false
-  const traversalMultiplier = action.dnd5eCarefulMovement || (isProne && !standFromProne) ? 2 : 1
-  const movementCostFeet = path.movementCostFeet * traversalMultiplier +
+  const toElevationFeet = Number.isFinite(action.targetElevationFeet)
+    ? Math.max(-1_000, Math.min(10_000, Math.floor(action.targetElevationFeet!)))
+    : actorToken.elevationFeet ?? 0
+  const traversal = dnd5eTraversalMovementCost({
+    distanceFeet: path.movementCostFeet,
+    elevationGainFeet: Math.max(0, toElevationFeet - (actorToken.elevationFeet ?? 0)),
+    mode: action.dnd5eTraversalMode ?? 'walk',
+    profile: {
+      strengthScore: actorCombatant.abilities.str,
+      strengthModifier: Math.floor((actorCombatant.abilities.str - 10) / 2),
+      walkSpeed: actorCombatant.movementSpeeds?.walk ?? actorCombatant.speed,
+      climbSpeed: actorCombatant.movementSpeeds?.climb,
+      swimSpeed: actorCombatant.movementSpeeds?.swim,
+    },
+  })
+  if (!traversal.ok) return { ok: false, reason: 'movement-blocked' }
+  const movementCostFeet = traversal.movementCostFeet +
+    (action.dnd5eCarefulMovement ? path.distanceFeet : 0) +
+    (isProne && !standFromProne ? path.distanceFeet : 0) +
     (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0)
   if (movementCostFeet > input.turnEconomy.movement.current) return { ok: false, reason: 'insufficient-movement' }
   actorCombatant.turn = {
@@ -93,6 +113,10 @@ export function prepareDnd5ePlayerMove(input: {
       to,
       distanceFeet,
       movementCostFeet,
+      toElevationFeet,
+      fallingDamageDice: action.dnd5eTraversalMode === 'fall'
+        ? dnd5eFallingDamageDice(Math.max(0, (actorToken.elevationFeet ?? 0) - toElevationFeet))
+        : 0,
       path: path.points,
       standFromProne,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
@@ -103,6 +127,7 @@ export function prepareDnd5ePlayerMove(input: {
 
 export function resolvePreparedDnd5ePlayerMove(input: {
   prepared: PreparedDnd5ePlayerMove
+  fallingDamageRolls?: readonly number[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
   const result = resolveDnd5eHeadlessAction(prepared.state, {
@@ -113,6 +138,9 @@ export function resolvePreparedDnd5ePlayerMove(input: {
     movementCost: prepared.movementCostFeet,
     standFromProne: prepared.standFromProne,
     carefulMovement: prepared.action.dnd5eCarefulMovement,
+    traversalMode: prepared.action.dnd5eTraversalMode,
+    toElevationFeet: prepared.toElevationFeet,
+    fallingDamageRolls: input.fallingDamageRolls,
   })
   if (!result.ok) return { result }
   return {

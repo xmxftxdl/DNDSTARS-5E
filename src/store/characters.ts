@@ -12,8 +12,9 @@ import { normalizeCharacterAvatar } from '../lib/characterAvatar'
 import { defaultEquipmentForDnd5eCharacter, normalizeDnd5eCharacterEquipment } from '../rulesets/dnd5e/equipment'
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
 import { syncDnd5eHitPoints } from '../rulesets/dnd5e/hitPoints'
-import { applyDnd5eShortRestResourceFeatures } from '../rulesets/dnd5e/classes'
-import { applyDnd5eInventoryMutation, normalizeDnd5eInventory, restoreDnd5eInventoryResources } from '../rulesets/dnd5e/items'
+import { applyDnd5eShortRestResourceFeatures, dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
+import { applyDnd5eInventoryMutation, normalizeDnd5eInventory, resolveDnd5eAttunementAfterShortRest, restoreDnd5eInventoryResources } from '../rulesets/dnd5e/items'
+import { dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels } from '../rulesets/dnd5e/multiclass'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   projectDnd5eActiveEffectState,
@@ -844,6 +845,7 @@ function emptyCharacter(): Character {
     accent: 'from-arcane-500 to-arcane-600',
     race: '人类',
     charClass: '战士',
+    dnd5eClassLevels: { fighter: 1 },
     level: 1,
     background: '侍僧',
     experience: 0,
@@ -903,6 +905,8 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     classResources: c.classResources,
     equipment: c.equipment ?? defaultEquipmentForDnd5eCharacter({ charClass: c.charClass ?? '战士' }),
   } as Character
+  normalized.dnd5eClassLevels = normalizeDnd5eClassLevels(normalized)
+  normalized.level = dnd5eTotalCharacterLevel(normalized)
   normalized.equipment = normalizeDnd5eCharacterEquipment(normalized)
   const normalizedInventory = normalizeDnd5eInventory(normalized)
   // V2 数据损坏时 fail closed：不接受部分实例，也不从损坏投影恢复状态。
@@ -949,6 +953,21 @@ export function serializeDnd5eCharacterSnapshot(character: Character): Character
 
 function serializeDnd5eCharacterSnapshots(characters: readonly Character[]): Character[] {
   return characters.map(serializeDnd5eCharacterSnapshot)
+}
+
+function reconcileDnd5eClassLevelPatch(current: Character, patch: Partial<Character>): Partial<Character> {
+  if (patch.dnd5eClassLevels) return patch
+  if (patch.charClass != null) {
+    const definition = dnd5eClassDefinition(patch.charClass)
+    return definition
+      ? { ...patch, dnd5eClassLevels: { [definition.id]: Math.max(1, Math.min(20, Math.floor(patch.level ?? current.level))) } }
+      : patch
+  }
+  if (patch.level == null) return patch
+  const levels = normalizeDnd5eClassLevels(current)
+  const ids = Object.keys(levels) as Array<keyof typeof levels>
+  if (ids.length !== 1) return { ...patch, level: current.level }
+  return { ...patch, dnd5eClassLevels: { [ids[0]]: Math.max(1, Math.min(20, Math.floor(patch.level))) } }
 }
 
 interface CharacterState {
@@ -1264,9 +1283,10 @@ export const useCharacterStore = create<CharacterState>()(
           }
           const current = get().characters.find((character) => character.id === id)
           if (!current) return
-          const next = finalizeCharacter({ ...current, ...patch })
+          const adjustedPatch = reconcileDnd5eClassLevelPatch(current, patch)
+          const next = finalizeCharacter({ ...current, ...adjustedPatch })
           const hitPointPlanChanged =
-            patch.level != null || patch.charClass != null || patch.hitPointMaximumMode != null ||
+            patch.level != null || patch.charClass != null || patch.dnd5eClassLevels != null || patch.hitPointMaximumMode != null ||
             patch.hitPointRolls != null || (patch.abilities != null && patch.abilities.con !== current.abilities.con)
           if (isPlayerPort() && hitPointPlanChanged) {
             markPendingLocalCharacterHitPointEdit(id, {
@@ -1328,7 +1348,7 @@ export const useCharacterStore = create<CharacterState>()(
         shortRestAll: () => {
           set((s) => ({
             characters: s.characters.map((character) =>
-              restoreDnd5eInventoryResources(
+              resolveDnd5eAttunementAfterShortRest(restoreDnd5eInventoryResources(
                 applyDnd5eShortRestResourceFeatures(restoreClassResources({
                   ...character,
                   dnd5eCombatState: character.dnd5eCombatState ? {
@@ -1338,7 +1358,7 @@ export const useCharacterStore = create<CharacterState>()(
                   } : undefined,
                 }, 'short-rest')),
                 'short-rest',
-              ),
+              )),
             ),
           }))
           saveCharacters()

@@ -5,6 +5,7 @@ import {
   applyDnd5eInitiativeResourceFeatures,
   applyDnd5eShortRestResourceFeatures,
   dnd5eAllClassChoiceGroups,
+  dnd5eAttacksPerAttackAction,
   dnd5eBarbarianRageDamage,
   dnd5eBarbarianRageUses,
   dnd5eBardicInspirationDie,
@@ -82,6 +83,15 @@ describe('SRD 5.1 class catalog', () => {
       'favored-enemy', 'favored-terrain', 'fighting-style', 'hunters-prey', 'defensive-tactics', 'multiattack', 'superior-hunters-defense',
     ])
     expect(dnd5eAllClassChoiceGroups(dnd5eClassDefinition('warlock')!).find((group) => group.id === 'eldritch-invocations')?.options).toHaveLength(32)
+  })
+
+  it('uses the best Extra Attack source instead of the starting class', () => {
+    expect(dnd5eAttacksPerAttackAction({
+      charClass: '战士', level: 6, dnd5eClassLevels: { fighter: 1, paladin: 5 },
+    })).toBe(2)
+    expect(dnd5eAttacksPerAttackAction({
+      charClass: '圣武士', level: 16, dnd5eClassLevels: { paladin: 5, fighter: 11 },
+    })).toBe(3)
   })
 
   it('enforces Eldritch Invocation level, pact boon, and known-spell prerequisites', () => {

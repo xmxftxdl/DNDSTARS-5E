@@ -98,6 +98,9 @@ export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['r
     case 'insufficient-quantity': return '库存数量不足。'
     case 'not-equipment': return '该物品不能装备或卸下。'
     case 'not-usable': return '该物品没有可执行的使用规则。'
+    case 'attunement-not-required': return '该物品不需要同调。'
+    case 'attunement-limit': return '同调上限为三件魔法物品；请先结束一项同调。'
+    case 'attunement-prerequisite': return '角色不满足该物品的同调先决条件，或尚未由 DM 确认环境条件。'
     case 'invalid-rolls': return '权威骰值无效。'
     case 'action-unavailable': return '本回合已经没有可用动作。'
     case 'bonus-action-unavailable': return '本回合已经没有可用附赠动作。'
@@ -123,7 +126,7 @@ function stripPlayerRolls(
 
 function validRequest(request: Dnd5eInventoryAuthorityRequest, dmRoomId?: string): boolean {
   if (!request || !request.mutation || typeof request.mutation !== 'object') return false
-  if (!['discard', 'transfer', 'equip', 'unequip', 'use'].includes(request.mutation.type)) return false
+  if (!['discard', 'transfer', 'equip', 'unequip', 'prepare-attunement', 'cancel-attunement', 'end-attunement', 'use'].includes(request.mutation.type)) return false
   if (dmRoomId && (request.roomId !== dmRoomId || typeof request.memberId !== 'string')) return false
   return request.sourceMode === 'player' &&
     typeof request.id === 'string' && !seenRequestIds.has(request.id) &&

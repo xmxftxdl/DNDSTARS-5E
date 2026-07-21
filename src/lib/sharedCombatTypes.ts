@@ -5,6 +5,8 @@ import type { GridCell } from './gridCombat'
 import type { PlayerActionResultSummary } from './playerActionResult'
 import type { CombatSettlementMode } from './combatSettlementMode'
 import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
+import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
+import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
 
 // Shared DM/player state contracts transported through sharedApi.
 // Keep these runtime-free so UI, sync helpers, and headless services can depend
@@ -149,6 +151,8 @@ export interface Dnd5eSpellMetamagicPayload {
 
 export interface Dnd5eSpellCastPayload {
   spellId: string
+  /** The class whose spellcasting feature authorizes this cast. */
+  castingClassId?: Dnd5eClassId
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
@@ -185,6 +189,8 @@ export interface Dnd5eSpellCastPayload {
  */
 export interface Dnd5eAdjudicatedSpellPayload {
   spellId: string
+  /** The class whose spellcasting feature authorizes this cast. */
+  castingClassId?: Dnd5eClassId
   slotLevel: number
 }
 
@@ -251,6 +257,9 @@ export interface SharedPlayerActionState {
   dnd5eCarefulMovement?: boolean
   /** 倒地移动时，true/省略表示先起身；false 表示保持倒地并以匍匐规则移动。 */
   dnd5eStandFromProne?: boolean
+  /** 攀爬、游泳与跳跃由玩家声明，DM 按角色速度、力量和海拔重新计算。 */
+  dnd5eTraversalMode?: Dnd5eTraversalMode
+  targetElevationFeet?: number
   dnd5eFighterFeature?: 'second-wind' | 'action-surge'
   dnd5eClassFeature?: Dnd5eClassFeaturePayload
   dnd5ePluginAction?: Dnd5ePluginActionPayload

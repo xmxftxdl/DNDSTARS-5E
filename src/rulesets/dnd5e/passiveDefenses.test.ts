@@ -29,6 +29,27 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode(barbarian, 'con')).toBe('normal')
   })
 
+  it('uses the relevant secondary class level for passive defenses', () => {
+    const fighterBarbarian = creature({
+      classId: 'fighter',
+      level: 10,
+      classLevels: { fighter: 8, barbarian: 2 },
+    })
+    expect(dnd5eSavingThrowMode(fighterBarbarian, 'dex')).toBe('advantage')
+    const wizardRogue = creature({
+      classId: 'wizard',
+      level: 8,
+      classLevels: { wizard: 1, rogue: 7 },
+    })
+    expect(dnd5eDamageAfterSavingThrow({
+      creature: wizardRogue,
+      ability: 'dex',
+      damage: 15,
+      success: true,
+      successfulSave: 'half',
+    })).toBe(0)
+  })
+
   it('grants a raging Barbarian advantage on Strength saving throws', () => {
     const barbarian = creature({ classId: 'barbarian', level: 1, classState: { raging: true } })
     expect(dnd5eSavingThrowMode(barbarian, 'str')).toBe('advantage')

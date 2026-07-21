@@ -220,6 +220,23 @@ export default function EquipmentTab({
               {selected.equippedSlot && (
                 <ActionButton icon={Shield} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'unequip', characterId: character.id, instanceId: selected.instanceId })}>卸下</ActionButton>
               )}
+              {selected.item.magicItem?.attunement === 'required' && !selected.attuned && !selected.attunementPending && (
+                <ActionButton
+                  icon={Sparkles}
+                  disabled={pending || combatManagementLocked}
+                  onClick={() => {
+                    const requirement = selected.item.magicItem?.attunementRequirement
+                    const prerequisiteConfirmed = !requirement || window.confirm(`确认角色满足同调条件：${requirement}？\n确认后将在下一次短休完成同调。`)
+                    if (prerequisiteConfirmed) run({ type: 'prepare-attunement', characterId: character.id, instanceId: selected.instanceId, prerequisiteConfirmed })
+                  }}
+                >准备同调</ActionButton>
+              )}
+              {selected.attunementPending && (
+                <ActionButton icon={Sparkles} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'cancel-attunement', characterId: character.id, instanceId: selected.instanceId })}>取消准备</ActionButton>
+              )}
+              {selected.attuned && (
+                <ActionButton icon={Sparkles} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'end-attunement', characterId: character.id, instanceId: selected.instanceId })}>结束同调</ActionButton>
+              )}
               {selected.item.use && (
                 <ActionButton icon={HandHelping} disabled={pending} onClick={useSelected}>使用</ActionButton>
               )}
@@ -239,6 +256,13 @@ export default function EquipmentTab({
               <div className="rounded-xl border border-amber-300/12 bg-amber-500/[0.045] p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200/70">平台结算边界</p>
                 <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-amber-50/80">{selected.item.use.effect.adjudication}</p>
+              </div>
+            )}
+            {selected.item.magicItem?.attunement === 'required' && (
+              <div className="rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] p-3 text-xs text-fuchsia-100/85">
+                <span className="font-semibold">同调状态：</span>
+                {selected.attuned ? '已同调，规则效果已启用。' : selected.attunementPending ? '等待下一次短休完成。' : '未同调，需同调效果不会进入 Headless。'}
+                {selected.item.magicItem.attunementRequirement ? ` 条件：${selected.item.magicItem.attunementRequirement}。` : ''}
               </div>
             )}
           </div>
@@ -335,6 +359,12 @@ function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEnt
       )}
       {entry.equippedSlot && (
         <span className="absolute bottom-2 right-2 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-200">已装备</span>
+      )}
+      {entry.attuned && (
+        <span className="absolute bottom-2 left-2 rounded-md bg-fuchsia-500/20 px-1.5 py-0.5 text-[9px] text-fuchsia-100">已同调</span>
+      )}
+      {entry.attunementPending && !entry.attuned && (
+        <span className="absolute bottom-2 left-2 rounded-md bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-100">短休同调</span>
       )}
       {entry.item.magicItem && !entry.equippedSlot && (
         <span className={`absolute bottom-2 right-2 rounded-md px-1.5 py-0.5 text-[9px] ${entry.item.magicItem.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-violet-500/15 text-violet-200'}`}>

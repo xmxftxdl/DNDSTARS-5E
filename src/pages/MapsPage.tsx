@@ -207,6 +207,7 @@ import {
 import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import {
   type Dnd5eFighterFeatureId,
+  type Dnd5eClassId,
   type Dnd5eClassDamageRolls,
   type Dnd5eCuttingWordsUse,
   type Dnd5eHunterMultiattackResolutionRoll,
@@ -245,7 +246,8 @@ import {
   createDnd5eMapCombatSnapshot,
   applyDnd5eAttackCoverOverride,
   dnd5eAttackCoverForPair,
-  dnd5eClassDefinitionForCharacter,
+  dnd5eClassDefinition,
+  dnd5eCharacterClassLevel,
   dnd5eClassFeatureLabel,
   dnd5eCarefulSpellMaximumTargets,
   dnd5eCanUseUncannyDodge,
@@ -253,6 +255,7 @@ import {
   dnd5eMonkMartialArtsDie,
   dnd5eCanCastShieldSpell,
   dnd5eCounterspellSlotLevels,
+  dnd5eCounterspellCastingAbility,
   dnd5eCombatantPairKey,
   dnd5eSavingThrowRerollFeature,
   dnd5eSavingThrowMode,
@@ -260,6 +263,8 @@ import {
   dnd5eBardicInspirationDie,
   dnd5eDarkOnesOwnLuckAvailable,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eCombatantClassLevel,
+  dnd5eCombatantHasSubclass,
   dnd5eTargetArmorClassForAttack,
   dnd5eRepeatedMeleeAttackMode,
   dnd5eWeaponClassDamageDefinitions,
@@ -367,6 +372,7 @@ import {
   mergeDnd5eSpellEffectTokenDelta,
   dnd5ePersistentAreaMovementCostMultiplierAt,
 } from '../rulesets/dnd5e'
+import { dnd5eTraversalMovementCost, type Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import {
   clampGridSize,
   cellKey,
@@ -604,6 +610,8 @@ export default function MapsPage() {
   })
   const mode = forcedMode ?? selectedMode
   const [combatActive, setCombatActive] = useState(false)
+  const [showSurpriseSetup, setShowSurpriseSetup] = useState(false)
+  const [surpriseSelection, setSurpriseSelection] = useState<Set<string>>(() => new Set())
   const [combatEnding, setCombatEnding] = useState(false)
   const [combatExperienceDraft, setCombatExperienceDraft] = useState<CombatExperienceDraft | null>(null)
   const [combatExperienceBusy, setCombatExperienceBusy] = useState(false)
@@ -668,6 +676,7 @@ export default function MapsPage() {
   }
   const [dnd5eSpellTargeting, setDnd5eSpellTargeting] = useState<{
     characterId: string
+    castingClassId: Dnd5eClassId
     spellId: string
     slotLevel: number
     maximumTargets: number
@@ -931,10 +940,13 @@ export default function MapsPage() {
   const [showMoveRange, setShowMoveRange] = useState(false)
   const [dnd5eCarefulMovement, setDnd5eCarefulMovement] = useState(false)
   const [dnd5eStandFromProne, setDnd5eStandFromProne] = useState(true)
+  const [dnd5eTraversalMode, setDnd5eTraversalMode] = useState<Dnd5eTraversalMode>('walk')
+  const [dnd5eTargetElevationFeet, setDnd5eTargetElevationFeet] = useState(0)
   const clearPlayerCombatUI = () => {
     setShowMoveRange(false)
     setDnd5eCarefulMovement(false)
     setDnd5eStandFromProne(true)
+    setDnd5eTraversalMode('walk')
     setDnd5eItemAreaTargeting(null)
     setDnd5eItemCreatureTargeting(null)
     setDnd5ePluginAreaTargeting(null)
@@ -3140,7 +3152,8 @@ export default function MapsPage() {
     const attackTotal = attackTotalBeforeCuttingWords - (cuttingWords?.roll ?? 0)
     const attackHitAfterCuttingWords = preview.critical || (!preview.roll.naturalOne && attackTotal >= attack.targetArmorClass)
     const strokeOfLuck = !!(
-      tranquility.passed && !attackHitAfterCuttingWords && attackerCharacter && attackerCombatant?.classId === 'rogue' && attackerCombatant.level >= 20 &&
+      tranquility.passed && !attackHitAfterCuttingWords && attackerCharacter && attackerCombatant &&
+      dnd5eCombatantClassLevel(attackerCombatant, 'rogue') >= 20 &&
       (attackerCombatant.classResources['dnd5e-stroke-of-luck']?.current ?? 0) > 0 &&
       await requestSharedStrokeOfLuckChoice(attackerCharacter, {
         targetName: attack.targetName,
@@ -3416,8 +3429,24 @@ export default function MapsPage() {
       ['prone', '倒地'].includes(condition.toLowerCase()),
     )
     const standFromProne = isProne && dnd5eStandFromProne
-    const traversalMultiplier = dnd5eCarefulMovement || (isProne && !standFromProne) ? 2 : 1
-    const movementCostFeet = path.movementCostFeet * traversalMultiplier +
+    const targetElevationFeet = Math.max(-1_000, Math.min(10_000, Math.floor(dnd5eTargetElevationFeet)))
+    const traversal = dnd5eTraversalMovementCost({
+      distanceFeet: path.movementCostFeet,
+      elevationGainFeet: Math.max(0, targetElevationFeet - (myPlayerToken.elevationFeet ?? 0)),
+      mode: dnd5eTraversalMode,
+      profile: {
+        strengthScore: turnCharacter.abilities.str,
+        strengthModifier: Math.floor((turnCharacter.abilities.str - 10) / 2),
+        walkSpeed: dnd5eEffectiveWalkingSpeed(turnCharacter),
+      },
+    })
+    if (!traversal.ok) {
+      void showCombatNotice('跳跃距离不足', traversal.reason === 'jump-too-high' ? '当前力量不足以跳到该高度。' : '当前力量不足以完成这段跳跃。', 'amber')
+      return
+    }
+    const movementCostFeet = traversal.movementCostFeet +
+      (dnd5eCarefulMovement ? path.distanceFeet : 0) +
+      (isProne && !standFromProne ? path.distanceFeet : 0) +
       (standFromProne ? Math.floor(dnd5eEffectiveWalkingSpeed(turnCharacter) / 2) : 0)
     if (movementCostFeet > remainingMovementFeet) {
       void showCombatNotice(
@@ -3448,6 +3477,8 @@ export default function MapsPage() {
       targetPosition: pos,
       dnd5eCarefulMovement,
       dnd5eStandFromProne: standFromProne,
+      dnd5eTraversalMode,
+      targetElevationFeet,
     }))) {
       void showCombatNotice('无法移动', '当前移动无法提交给 DM 结算。', 'amber')
       return
@@ -3710,6 +3741,7 @@ export default function MapsPage() {
       }
       const payload: Dnd5eSpellCastPayload = {
         spellId: dnd5eSpellTargeting.spellId,
+        castingClassId: dnd5eSpellTargeting.castingClassId,
         slotLevel: dnd5eSpellTargeting.slotLevel,
         targetTokenId: targetToken.id,
         conditionChoice: dnd5eSpellTargeting.conditionChoice,
@@ -3827,6 +3859,8 @@ export default function MapsPage() {
       if (isDM) setActiveCharId(turnCharacter!.id)
       setShowMoveRange((v) => !v)
       setDnd5eStandFromProne(true)
+      setDnd5eTraversalMode('walk')
+      setDnd5eTargetElevationFeet(myPlayerToken.elevationFeet ?? 0)
       setSelectedTokenId(isDM ? tokenId : null)
       if (!isDM) setSelectedCharacterTokenId(null)
       return
@@ -3994,8 +4028,10 @@ export default function MapsPage() {
     await Promise.all(writes)
   }
 
-  const startCombat = async () => {
+  const startCombat = async (surprisedTokenIds: readonly string[] = []) => {
     if (!activeMap) return
+    setShowSurpriseSetup(false)
+    const surprisedSet = new Set(surprisedTokenIds)
     const nextCombatId = runtimeId(`${activeMap.id}:combat`)
     locallyEndedCombatIdRef.current = ''
     combatOutcomeNoticeCombatIdRef.current = ''
@@ -4022,6 +4058,18 @@ export default function MapsPage() {
     setDisengagedCharIds(new Set())
     clearPlayerCombatUI()
     let recoveredCharacters = useCharacterStore.getState().characters.map(applyDnd5eInitiativeResourceFeatures)
+    recoveredCharacters = recoveredCharacters.map((character) => {
+      const token = activeMap.tokens.find((candidate) => candidate.characterId === character.id)
+      if (!token || (token.type !== 'player' && token.type !== 'enemy')) return character
+      return {
+        ...character,
+        dnd5eCombatState: {
+          ...character.dnd5eCombatState,
+          surprisedCombatId: surprisedSet.has(token.id) ? nextCombatId : undefined,
+          surpriseResolvedCombatId: undefined,
+        },
+      }
+    })
     for (const recovered of recoveredCharacters) {
       const current = useCharacterStore.getState().characters.find((character) => character.id === recovered.id)
       if (current && current !== recovered) applyAuthorityCharacterUpdate(recovered.id, recovered)
@@ -4049,7 +4097,7 @@ export default function MapsPage() {
       for (const recovered of recoveredCharacters) applyAuthorityCharacterUpdate(recovered.id, recovered)
     }
     const storedMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
-    const latestMap = shouldClearStatuses
+    const statusPreparedMap = shouldClearStatuses
       ? {
           ...storedMap,
           tokens: storedMap.tokens.map((token) => token.dnd5eCombatState
@@ -4068,8 +4116,23 @@ export default function MapsPage() {
             : token),
         }
       : storedMap
-    if (shouldClearStatuses) {
-      for (const token of latestMap.tokens) applyAuthorityTokenUpdate(latestMap.id, token.id, token)
+    const latestMap = {
+      ...statusPreparedMap,
+      tokens: statusPreparedMap.tokens.map((token) => {
+        if (token.characterId || (token.type !== 'player' && token.type !== 'enemy')) return token
+        return {
+          ...token,
+          dnd5eCombatState: {
+            ...token.dnd5eCombatState,
+            surprisedCombatId: surprisedSet.has(token.id) ? nextCombatId : undefined,
+            surpriseResolvedCombatId: undefined,
+          },
+        }
+      }),
+    }
+    for (const token of latestMap.tokens) {
+      const previous = storedMap.tokens.find((candidate) => candidate.id === token.id)
+      if (JSON.stringify(previous) !== JSON.stringify(token)) applyAuthorityTokenUpdate(latestMap.id, token.id, token)
     }
     const started = createDnd5eMapCombatSnapshot({
       combatId: nextCombatId,
@@ -4097,7 +4160,7 @@ export default function MapsPage() {
     const combatantCount = new Set(order.map((entry) => entry.tokenId)).size
     const extraTurnCount = order.filter((entry) => entry.turnKind === 'thief-reflexes').length
     pushCombatLog(
-      `战斗开始：${combatantCount} 名单位加入先攻${extraTurnCount > 0 ? `；盗贼反射生成 ${extraTurnCount} 个首轮额外回合` : ''}`,
+      `战斗开始：${combatantCount} 名单位加入先攻${surprisedSet.size > 0 ? `；${surprisedSet.size} 名单位受突袭` : ''}${extraTurnCount > 0 ? `；盗贼反射生成 ${extraTurnCount} 个首轮额外回合` : ''}`,
       'system',
       1,
     )
@@ -4676,7 +4739,7 @@ export default function MapsPage() {
       .find((entry): entry is { character: Character; token: Token; combatant: Dnd5eCombatant; distanceFeet: number } => {
         const { character, combatant, distanceFeet } = entry
         return !!character && !!combatant && combatant.currentHp > 0 && distanceFeet <= 60 &&
-          combatant.classId === 'bard' && combatant.subclassId === 'lore' && combatant.level >= 3 &&
+          dnd5eCombatantClassLevel(combatant, 'bard') >= 3 && dnd5eCombatantHasSubclass(combatant, 'bard', 'lore') &&
           combatant.turn.reactionAvailable &&
           (combatant.classResources['dnd5e-bardic-inspiration']?.current ?? 0) > 0 &&
           !combatant.conditions.some((condition) =>
@@ -5603,7 +5666,7 @@ export default function MapsPage() {
       attackTotal -= cuttingWords.roll
       hit = selectedD20 !== 1 && (critical || attackTotal >= armorClass)
     }
-    const canStrokeOfLuck = !hit && attacker.classId === 'rogue' && attacker.level >= 20 &&
+    const canStrokeOfLuck = !hit && dnd5eCombatantClassLevel(attacker, 'rogue') >= 20 &&
       (attacker.classResources['dnd5e-stroke-of-luck']?.current ?? 0) > 0
     const strokeOfLuck = !!(canStrokeOfLuck && attackerCharacter && await requestSharedStrokeOfLuckChoice(attackerCharacter, {
       targetName: redirectToken.label,
@@ -7020,6 +7083,34 @@ export default function MapsPage() {
     })
   }
 
+  const tokenIsStillSurprised = useCallback((token: Token): boolean => {
+    const character = token.characterId
+      ? useCharacterStore.getState().characters.find((candidate) => candidate.id === token.characterId)
+      : undefined
+    const state = character?.dnd5eCombatState ?? token.dnd5eCombatState
+    return state?.surprisedCombatId === combatIdRef.current && state.surpriseResolvedCombatId !== combatIdRef.current
+  }, [])
+
+  const resolveSurpriseForToken = useCallback((token: Token): void => {
+    if (!tokenIsStillSurprised(token)) return
+    const character = token.characterId
+      ? useCharacterStore.getState().characters.find((candidate) => candidate.id === token.characterId)
+      : undefined
+    if (character) {
+      applyAuthorityCharacterUpdate(character.id, {
+        ...character,
+        dnd5eCombatState: { ...character.dnd5eCombatState, surpriseResolvedCombatId: combatIdRef.current },
+      })
+    } else if (activeMapId) {
+      const currentToken = useMapStore.getState().maps
+        .find((map) => map.id === activeMapId)?.tokens.find((candidate) => candidate.id === token.id) ?? token
+      applyAuthorityTokenUpdate(activeMapId, token.id, {
+        ...currentToken,
+        dnd5eCombatState: { ...currentToken.dnd5eCombatState, surpriseResolvedCombatId: combatIdRef.current },
+      })
+    }
+  }, [activeMapId, applyAuthorityCharacterUpdate, applyAuthorityTokenUpdate, tokenIsStillSurprised])
+
   // Single reentrancy-guarded entry point for ALL automatic advances
   // (death-skip effects, prune timers, enemy-turn completion, npc auto-skip in T1).
   // Previously advancingTurnRef only protected the manual wrapper below, so a manual
@@ -7048,6 +7139,10 @@ export default function MapsPage() {
         return
       })()
       return
+    }
+    if (currentInitiativeToken && tokenIsStillSurprised(currentInitiativeToken)) {
+      resolveSurpriseForToken(currentInitiativeToken)
+      pushCombatLog(`${currentInitiativeToken.label} 的受突袭回合结束；现在可以进行反应。`, 'turn')
     }
     requestAdvance()
   }
@@ -8062,9 +8157,10 @@ export default function MapsPage() {
           })
         : undefined
       runningTotal += bardicInspirationRoll ?? 0
-      const peerlessSkillDie = actorCombatant.classId === 'bard' && actorCombatant.subclassId === 'lore' &&
-        actorCombatant.level >= 14 && (actorCombatant.classResources['dnd5e-bardic-inspiration']?.current ?? 0) > 0
-        ? dnd5eBardicInspirationDie(actorCombatant.level)
+      const bardLevel = dnd5eCombatantClassLevel(actorCombatant, 'bard')
+      const peerlessSkillDie = dnd5eCombatantHasSubclass(actorCombatant, 'bard', 'lore') &&
+        bardLevel >= 14 && (actorCombatant.classResources['dnd5e-bardic-inspiration']?.current ?? 0) > 0
+        ? dnd5eBardicInspirationDie(bardLevel)
         : undefined
       const peerlessSkillRoll = runningTotal < check.payload.dc && peerlessSkillDie &&
         runningTotal + peerlessSkillDie >= check.payload.dc
@@ -8102,7 +8198,7 @@ export default function MapsPage() {
         : undefined
       runningTotal -= cuttingWords?.roll ?? 0
       const strokeOfLuck = !!(
-        runningTotal < check.payload.dc && actorCombatant.classId === 'rogue' && actorCombatant.level >= 20 &&
+        runningTotal < check.payload.dc && dnd5eCombatantClassLevel(actorCombatant, 'rogue') >= 20 &&
         (actorCombatant.classResources['dnd5e-stroke-of-luck']?.current ?? 0) > 0 &&
         20 + preview.modifier >= check.payload.dc &&
         await requestSharedStrokeOfLuckChoice(check.actor, {
@@ -8581,7 +8677,10 @@ export default function MapsPage() {
           abilityCheckDc,
         })
         if (accepted) {
-          const ability = counterspellCandidate.combatant.classId === 'wizard' ? 'int' : 'cha'
+          const ability = dnd5eCounterspellCastingAbility(
+            counterspellCandidate.combatant,
+            counterspellCandidate.slotLevel,
+          ) ?? 'cha'
           const d20 = abilityCheckDc == null
             ? undefined
             : await rollDiceBoxD20('法术反制·施法属性检定', counterspellCandidate.character.name)
@@ -9077,8 +9176,9 @@ export default function MapsPage() {
           multiTargetDamageRequired ||=
             !preview.success ||
             spellCast.spell.damageOnSuccessfulSave === 'half' ||
-            (spellActorCombatant.classId === 'wizard' && spellActorCombatant.subclassId === 'evocation' &&
-              spellActorCombatant.level >= 6 && spellCast.spell.level === 0)
+            (spellCast.castingClassId === 'wizard' &&
+              dnd5eCombatantHasSubclass(spellActorCombatant, 'wizard', 'evocation') &&
+              spellCast.castingClassLevel >= 6 && spellCast.spell.level === 0)
         }
         effectRolls = spellCast.overchannel || spellCast.spell.effect === 'attack-save-debuff' ||
           spellCast.diceCount < 1 || !multiTargetDamageRequired
@@ -9341,15 +9441,19 @@ export default function MapsPage() {
         reroll.group === group && reroll.targetId === targetId &&
         (reroll.attackIndex == null || reroll.attackIndex === attackIndex) && reroll.dieIndex === dieIndex,
       )?.reroll ?? roll)
-      const draconicDamageType = spellActorCombatant.classSelections['dragon-ancestor']?.[0]?.split('-').at(-1)
+      const draconicDamageType = (
+        spellActorCombatant.classSelectionsByClass?.sorcerer ?? spellActorCombatant.classSelections
+      )['dragon-ancestor']?.[0]?.split('-').at(-1)
       const spellClassDamageBonus = (
-        spellActorCombatant.classId === 'sorcerer' && spellActorCombatant.subclassId === 'draconic' &&
-        spellActorCombatant.level >= 6 && draconicDamageType === spellCast.spell.damageType
+        spellCast.castingClassId === 'sorcerer' &&
+        dnd5eCombatantHasSubclass(spellActorCombatant, 'sorcerer', 'draconic') &&
+        spellCast.castingClassLevel >= 6 && draconicDamageType === spellCast.spell.damageType
           ? Math.max(0, Math.floor((spellActorCombatant.abilities.cha - 10) / 2))
           : 0
       ) + (
-        spellActorCombatant.classId === 'wizard' && spellActorCombatant.subclassId === 'evocation' &&
-        spellActorCombatant.level >= 10 && spellCast.spell.school === '塑能'
+        spellCast.castingClassId === 'wizard' &&
+        dnd5eCombatantHasSubclass(spellActorCombatant, 'wizard', 'evocation') &&
+        spellCast.castingClassLevel >= 10 && spellCast.spell.school === '塑能'
           ? Math.max(0, Math.floor((spellActorCombatant.abilities.int - 10) / 2))
           : 0
       )
@@ -10399,7 +10503,8 @@ export default function MapsPage() {
           })
         }
       }
-      if (feature.payload.feature === 'cleric-divine-intervention' && feature.actor.level < 20) {
+      const clericLevel = dnd5eCharacterClassLevel(feature.actor, 'cleric')
+      if (feature.payload.feature === 'cleric-divine-intervention' && clericLevel < 20) {
         divineInterventionD100 = (await rollDiceBoxValues(1, 100, '神圣干预', feature.actor.name))[0]
       }
       if (feature.intimidatingPresence && !feature.intimidatingPresence.extending) {
@@ -10780,8 +10885,8 @@ export default function MapsPage() {
             if (intervention?.type !== 'divine-intervention-resolved') return '请求神祇援助'
             if (intervention.success) return intervention.automatic
               ? '20级神圣干预自动成功；具体援助效果由 DM 裁定，7天内不能再次使用'
-              : `百分骰 ${intervention.d100} ≤ 牧师等级 ${feature.actor.level}，干预成功；具体援助效果由 DM 裁定，7天内不能再次使用`
-            return `百分骰 ${intervention.d100} > 牧师等级 ${feature.actor.level}，干预未成功；完成长休后可再次尝试`
+              : `百分骰 ${intervention.d100} ≤ 牧师等级 ${dnd5eCharacterClassLevel(feature.actor, 'cleric')}，干预成功；具体援助效果由 DM 裁定，7天内不能再次使用`
+            return `百分骰 ${intervention.d100} > 牧师等级 ${dnd5eCharacterClassLevel(feature.actor, 'cleric')}，干预未成功；完成长休后可再次尝试`
           }
           case 'sorcerer-create-spell-slot': return `创造 1 个 ${feature.payload.slotLevel} 环法术位`
           case 'sorcerer-convert-spell-slot': return `消耗 1 个 ${feature.payload.slotLevel} 环法术位并恢复 ${feature.payload.slotLevel} 点术法点`
@@ -10853,7 +10958,7 @@ export default function MapsPage() {
       const healing = resolved.result.events.find((event) => event.type === 'healing-applied')
       pushHeadlessCombatLog(
         feature.feature === 'second-wind'
-          ? `${feature.actor.name} 使用回气，恢复 ${healing?.type === 'healing-applied' ? healing.amount : 0} 点生命值（1d10=${d10}＋战士等级 ${feature.actor.level}）`
+          ? `${feature.actor.name} 使用回气，恢复 ${healing?.type === 'healing-applied' ? healing.amount : 0} 点生命值（1d10=${d10}＋战士等级 ${dnd5eCharacterClassLevel(feature.actor, 'fighter')}）`
           : `${feature.actor.name} 使用动作如潮，本回合获得第二个动作`,
         feature.feature === 'second-wind' ? 'damage' : 'system',
         resolved.result.events,
@@ -11869,7 +11974,7 @@ export default function MapsPage() {
       const attackHitAfterCuttingWords = preview.critical || (!preview.roll.naturalOne &&
         effectiveAttackTotal >= attack.targetArmorClass)
       const strokeOfLuck = !!(
-        tranquility.passed && !attackHitAfterCuttingWords && actorCombatant.classId === 'rogue' && actorCombatant.level >= 20 &&
+        tranquility.passed && !attackHitAfterCuttingWords && dnd5eCombatantClassLevel(actorCombatant, 'rogue') >= 20 &&
         (actorCombatant.classResources['dnd5e-stroke-of-luck']?.current ?? 0) > 0 &&
         await requestSharedStrokeOfLuckChoice(attack.actor, {
           targetName: attack.targetToken.label,
@@ -12356,7 +12461,10 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      const resolved = resolvePreparedDnd5ePlayerMove({ prepared: finalPrepared.prepared })
+      const fallingDamageRolls = finalPrepared.prepared.fallingDamageDice > 0
+        ? await rollDiceBoxValues(finalPrepared.prepared.fallingDamageDice, 6, '坠落伤害', finalPrepared.prepared.actor.name)
+        : undefined
+      const resolved = resolvePreparedDnd5ePlayerMove({ prepared: finalPrepared.prepared, fallingDamageRolls })
       if (!resolved.result.ok || !resolved.application) {
         acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'missing-application' : resolved.result.reason)
         completePlayerActionRequest(action)
@@ -12874,6 +12982,7 @@ export default function MapsPage() {
     }
     const payload: Dnd5eSpellCastPayload = {
       spellId: dnd5eSpellTargeting.spellId,
+      castingClassId: dnd5eSpellTargeting.castingClassId,
       slotLevel: dnd5eSpellTargeting.slotLevel,
       targetTokenId: dnd5eSpellTargeting.targetTokenIds[0] ?? currentInitiativeToken?.id ?? '',
       targetTokenIds: [...new Set(dnd5eSpellTargeting.targetTokenIds)],
@@ -12946,6 +13055,8 @@ export default function MapsPage() {
       targetPosition,
       dnd5eCarefulMovement,
       dnd5eStandFromProne: isProne ? dnd5eStandFromProne : undefined,
+      dnd5eTraversalMode,
+      targetElevationFeet: dnd5eTargetElevationFeet,
     })
     if (!action) return false
     return submitPlayerActionRequest(
@@ -13048,6 +13159,23 @@ export default function MapsPage() {
       return () => window.clearTimeout(timer)
     }
 
+    if (token && tokenIsStillSurprised(token)) {
+      const surprisedCharacter = token.characterId
+        ? chars.find((character) => character.id === token.characterId)
+        : undefined
+      const canUseFeralInstinct = surprisedCharacter != null &&
+        dnd5eCharacterClassLevel(surprisedCharacter, 'barbarian') >= 7
+      if (!canUseFeralInstinct) {
+        const skipKey = `surprised-${combatIdRef.current}-${token.id}`
+        if (incapacitatedSkippedKeysRef.current.has(skipKey)) return
+        incapacitatedSkippedKeysRef.current.add(skipKey)
+        resolveSurpriseForToken(token)
+        pushCombatLogEvent(`${token.label} 受突袭：首回合不能移动或采取动作，跳过该回合。`, 'turn')
+        const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
+        return () => window.clearTimeout(timer)
+      }
+    }
+
     // 'skip' 合并三类：死亡 / 眩晕 / 存活非行动者。各自副作用保持独立（与原三分支逐字节一致）。
     if (action === 'skip') {
       // token 此处必非空（decideTurnAction 仅在 token 缺失时返回 'prune'）。
@@ -13091,7 +13219,7 @@ export default function MapsPage() {
 
     enemyAppliedKeysRef.current.add(actKey)
     void scheduleEnemyTurnEvent(token)
-  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey])
+  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey, resolveSurpriseForToken])
 
   useEffect(() => {
     if (!canControlPlayerTurn) {
@@ -13440,6 +13568,31 @@ export default function MapsPage() {
               <span className="text-slate-200">
                 选择移动落点 · 可达 {moveCircle.feet} 尺
               </span>
+              <select
+                aria-label="移动方式"
+                value={dnd5eTraversalMode}
+                onChange={(event) => setDnd5eTraversalMode(event.target.value as Dnd5eTraversalMode)}
+                className="rounded-lg border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-200"
+              >
+                <option value="walk">步行</option>
+                <option value="climb">攀爬（通常半速）</option>
+                <option value="swim">游泳（通常半速）</option>
+                <option value="long-jump-running">助跑跳远</option>
+                <option value="long-jump-standing">立定跳远</option>
+                <option value="fall">坠落（按海拔差结算）</option>
+              </select>
+              <label className="flex items-center gap-1 text-xs text-slate-300">
+                目标海拔
+                <input
+                  aria-label="目标海拔"
+                  type="number"
+                  step={5}
+                  value={dnd5eTargetElevationFeet}
+                  onChange={(event) => setDnd5eTargetElevationFeet(Number(event.target.value) || 0)}
+                  className="w-16 rounded-lg border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-100"
+                />
+                尺
+              </label>
               <button
                 type="button"
                 onClick={() => setDnd5eCarefulMovement((current) => !current)}
@@ -13588,6 +13741,40 @@ export default function MapsPage() {
             onEmpoweredSpellChoice={handleSharedEmpoweredSpellChoice}
             onStandAgainstTideChoice={handleSharedStandAgainstTideChoice}
           />
+          {isDM && showSurpriseSetup && !combatActive && activeMap && (
+            <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+              <div role="dialog" aria-modal="true" aria-label="突袭设置" className="w-full max-w-xl rounded-2xl border border-rose-400/25 bg-void-950 p-5 shadow-2xl">
+                <h3 className="text-lg font-semibold text-rose-100">开始战斗 · 突袭判定</h3>
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  勾选没有察觉威胁的单位。受突袭者在自己的首回合结束前不能移动、采取动作或进行反应；7级野蛮人的野性直觉可先进入狂暴后正常行动。
+                </p>
+                <div className="mt-4 grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2">
+                  {activeMap.tokens.filter((token) => token.type === 'player' || token.type === 'enemy').map((token) => (
+                    <label key={token.id} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.035] px-3 py-2 text-sm text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={surpriseSelection.has(token.id)}
+                        onChange={(event) => setSurpriseSelection((current) => {
+                          const next = new Set(current)
+                          if (event.target.checked) next.add(token.id)
+                          else next.delete(token.id)
+                          return next
+                        })}
+                        className="accent-rose-500"
+                      />
+                      <span className="text-lg">{token.emoji || '◉'}</span>
+                      <span className="min-w-0 flex-1 truncate">{token.label}</span>
+                      <span className="text-[10px] text-slate-500">{token.type === 'player' ? '玩家' : '敌人'}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button type="button" onClick={() => setShowSurpriseSetup(false)} className="rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5">取消</button>
+                  <button type="button" onClick={() => void startCombat([...surpriseSelection])} className="rounded-lg bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400">确认并开始</button>
+                </div>
+              </div>
+            </div>
+          )}
           {!isDM && selectedDoorInteraction && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
               <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl border border-violet-400/30 bg-void-950 p-5 shadow-2xl">
@@ -13952,7 +14139,10 @@ export default function MapsPage() {
                 ) : (
                   <button
                     data-testid="dm-start-combat"
-                    onClick={startCombat}
+                    onClick={() => {
+                      setSurpriseSelection(new Set())
+                      setShowSurpriseSetup(true)
+                    }}
                     className="flex items-center gap-1 rounded-lg bg-gradient-to-br from-rose-500 to-rose-600 px-2.5 py-1 text-xs font-semibold text-white"
                   >
                     <Play className="h-3.5 w-3.5" />
@@ -14644,15 +14834,15 @@ export default function MapsPage() {
                     onToggleSculptSpellTargets={toggleDnd5eSculptSpellTargets}
                     onToggleCarefulSpellTargets={toggleDnd5eCarefulSpellTargets}
                     onToggleHeightenedSpellTarget={toggleDnd5eHeightenedSpellTarget}
-                    onRequestAdjudication={(spellId, slotLevel) => {
+                    onRequestAdjudication={(spellId, slotLevel, castingClassId) => {
                       setDnd5eSpellTargeting(null)
                       setDnd5eWeaponTargeting(null)
                       setDnd5eWeaponAttackOptions(undefined)
-                      const payload: Dnd5eAdjudicatedSpellPayload = { spellId, slotLevel }
+                      const payload: Dnd5eAdjudicatedSpellPayload = { spellId, slotLevel, castingClassId }
                       if (isDM) sendDmLocalDnd5eAdjudicatedSpellRequest(payload)
                       else sendPlayerDnd5eAdjudicatedSpellRequest(payload)
                     }}
-                    onCastSpell={(spellId, slotLevel, options) => {
+                    onCastSpell={(spellId, slotLevel, castingClassId, options) => {
                       setDnd5eWeaponTargeting(null)
                       setDnd5eWeaponAttackOptions(undefined)
                       const pluginSpell = dnd5ePluginSpellDefinition(spellId)
@@ -14660,7 +14850,7 @@ export default function MapsPage() {
                         setAoePreviewCell(null)
                         const casterToken = activeMap?.tokens.find((token) => token.characterId === activeChar.id)
                         if (pluginSpell.range.type === 'self' && casterToken) {
-                          const payload: Dnd5eSpellCastPayload = { spellId, slotLevel, targetTokenId: casterToken.id }
+                          const payload: Dnd5eSpellCastPayload = { spellId, slotLevel, castingClassId, targetTokenId: casterToken.id }
                           if (isDM) sendDmLocalDnd5eSpellCastRequest(payload)
                           else sendPlayerDnd5eSpellCastRequest(payload)
                           setDnd5eSpellTargeting(null)
@@ -14669,7 +14859,7 @@ export default function MapsPage() {
                         setDnd5eSpellTargeting((current) => current?.characterId === activeChar.id && current.spellId === spellId
                           ? null
                           : {
-                              characterId: activeChar.id, spellId, slotLevel, maximumTargets: 1,
+                              characterId: activeChar.id, castingClassId, spellId, slotLevel, maximumTargets: 1,
                               allowDuplicateTargets: false, targetTokenIds: [], overchannel: false, empowered: false,
                               draconicResistance: false, repellingBlast: false, canSculpt: false,
                               maximumSculptedTargets: 0, sculptedTargetIds: [], sculpting: false,
@@ -14716,6 +14906,7 @@ export default function MapsPage() {
                       if (spell.rangeFeet === 0 && spell.target === 'ally' && casterToken) {
                         const payload: Dnd5eSpellCastPayload = {
                           spellId,
+                          castingClassId,
                           slotLevel,
                           targetTokenId: casterToken.id,
                           conditionChoice,
@@ -14736,18 +14927,20 @@ export default function MapsPage() {
                       } else {
                         setAoePreviewCell(null)
                       }
-                      const classDefinition = dnd5eClassDefinitionForCharacter(activeChar)
+                      const classDefinition = dnd5eClassDefinition(castingClassId)
+                      const castingClassLevel = dnd5eCharacterClassLevel(activeChar, castingClassId)
                       const canSculpt = dnd5eCanSculptSpell({
                         classId: classDefinition?.id,
                         subclassId: classDefinition
                           ? activeChar.dnd5eClassChoices?.classes?.[classDefinition.id]?.subclass
                           : undefined,
-                        level: activeChar.level,
+                        level: castingClassLevel,
                       }, spell)
                       setDnd5eSpellTargeting((current) => current?.characterId === activeChar.id && current.spellId === spellId
                         ? null
                         : {
                             characterId: activeChar.id,
+                            castingClassId,
                             spellId,
                             slotLevel,
                             maximumTargets: options?.metamagic?.kind === 'twinned'

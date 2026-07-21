@@ -6,6 +6,7 @@ import {
   applyDnd5eInventoryMutation,
   createDnd5eInventoryForCharacter,
   normalizeDnd5eInventory,
+  resolveDnd5eAttunementAfterShortRest,
   restoreDnd5eInventoryResources,
   spendDnd5eInventoryResource,
 } from './items'
@@ -144,6 +145,34 @@ describe('SRD 5.1 inventory', () => {
     expect(transferred.ok).toBe(true)
     expect(inventoryEntry(transferred.characters[0], stack.templateId).quantity).toBe(1)
     expect(inventoryEntry(transferred.characters[1], stack.templateId).quantity).toBe(3)
+  })
+
+  it('prepares one attunement, completes it on a short rest, and enforces the three-item limit', () => {
+    const hero = character('attuner')
+    let characters: Character[] = [hero]
+    const templateIds = [
+      'srd-5.1:magic-item:amulet-of-health',
+      'srd-5.1:magic-item:cloak-of-protection',
+      'srd-5.1:magic-item:ring-of-protection',
+      'srd-5.1:magic-item:ring-of-warmth',
+    ]
+    for (const templateId of templateIds) {
+      characters = applyDnd5eInventoryMutation(characters, {
+        type: 'grant', characterId: hero.id, templateId, quantity: 1,
+      }).characters
+    }
+    for (const templateId of templateIds.slice(0, 3)) {
+      const entry = inventoryEntry(characters[0], templateId)
+      characters = applyDnd5eInventoryMutation(characters, {
+        type: 'prepare-attunement', characterId: hero.id, instanceId: entry.instanceId,
+      }).characters
+      characters = [resolveDnd5eAttunementAfterShortRest(characters[0], 100)]
+    }
+    expect(characters[0].dnd5eInventory?.entries.filter((entry) => entry.attuned)).toHaveLength(3)
+    const fourth = inventoryEntry(characters[0], templateIds[3])
+    expect(applyDnd5eInventoryMutation(characters, {
+      type: 'prepare-attunement', characterId: hero.id, instanceId: fourth.instanceId,
+    })).toMatchObject({ ok: false, reason: 'attunement-limit' })
   })
 
   it('tracks all ten healer kit uses without consuming the kit early', () => {

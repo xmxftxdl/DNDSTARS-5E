@@ -223,4 +223,22 @@ describe('D&D 5e 2014 character hit points', () => {
       spends: [{ poolIndex: 0, rolls: [11] }],
     })).toThrow(RangeError)
   })
+
+  it('uses each class hit die and class level for a multiclass fixed maximum', () => {
+    const result = syncDnd5eHitPoints(fighter({
+      level: 6,
+      dnd5eClassLevels: { fighter: 5, wizard: 1 },
+      abilities: { str: 16, dex: 12, con: 14, int: 13, wis: 10, cha: 10 },
+      maxHp: 44,
+      currentHp: 44,
+      hitPointMaximumMode: 'fixed',
+      hitPointDice: [{ sides: 10, current: 5, max: 5 }],
+    }))
+    expect(result.maxHp).toBe(50)
+    expect(result.currentHp).toBe(50)
+    expect(result.hitPointDice).toEqual([
+      { sides: 10, current: 5, max: 5 },
+      { sides: 6, current: 1, max: 1 },
+    ])
+  })
 })

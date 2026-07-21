@@ -92,9 +92,9 @@ describe('D&D 5e 2014 fighter equipment', () => {
   })
 
   it('uses the paladin and ranger fighting-style selections in attack and AC math', () => {
-    const paladin = fighter({ charClass: '圣武士', dnd5eClassChoices: { classes: { paladin: { selections: { 'fighting-style': ['dueling'] } } } } })
+    const paladin = fighter({ charClass: '圣武士', level: 2, dnd5eClassChoices: { classes: { paladin: { selections: { 'fighting-style': ['dueling'] } } } } })
     expect(dnd5eWeaponAttackProfile(paladin)?.damage.bonus).toBe(5)
-    const ranger = fighter({ charClass: '游侠', dnd5eClassChoices: { classes: { ranger: { selections: { 'fighting-style': ['defense'] } } } } })
+    const ranger = fighter({ charClass: '游侠', level: 2, dnd5eClassChoices: { classes: { ranger: { selections: { 'fighting-style': ['defense'] } } } } })
     expect(dnd5eArmorClass(ranger)).toBe(19)
   })
 

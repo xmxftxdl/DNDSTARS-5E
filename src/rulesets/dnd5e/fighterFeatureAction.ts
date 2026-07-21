@@ -8,6 +8,7 @@ import {
 } from './fighter'
 import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eFighterFeatureId = 'second-wind' | 'action-surge'
 
@@ -50,10 +51,11 @@ export function prepareDnd5eFighterFeature(input: {
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  if (actor.charClass !== '战士') return { ok: false, reason: 'not-fighter' }
-  if (feature === 'action-surge' && actor.level < 2) return { ok: false, reason: 'feature-locked' }
+  const fighterLevel = dnd5eCharacterClassLevel(actor, 'fighter')
+  if (fighterLevel < 1) return { ok: false, reason: 'not-fighter' }
+  if (feature === 'action-surge' && fighterLevel < 2) return { ok: false, reason: 'feature-locked' }
   const resourceKey = feature === 'second-wind' ? FIGHTER_RESOURCE_KEYS.secondWind : FIGHTER_RESOURCE_KEYS.actionSurge
-  if (fighterResourceState(actor, resourceKey).current < 1) return { ok: false, reason: 'feature-unavailable' }
+  if (fighterResourceState({ ...actor, level: fighterLevel }, resourceKey).current < 1) return { ok: false, reason: 'feature-unavailable' }
   if (feature === 'action-surge' && input.actionSurgeAlreadyUsed) return { ok: false, reason: 'feature-already-used' }
   if (feature === 'second-wind' && input.turnEconomy && input.turnEconomy.bonusAction.current < 1) {
     return { ok: false, reason: 'bonus-action-unavailable' }

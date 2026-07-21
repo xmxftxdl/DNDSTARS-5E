@@ -21,6 +21,8 @@ import { dnd5eMonkUnarmedStrikeProfile, type Dnd5eUnarmedStrikeProfile } from '.
 import {
   dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
+  dnd5eCombatantClassLevel,
+  dnd5eCombatantHasSubclass,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   resolveDnd5eHeadlessAction,
@@ -41,6 +43,7 @@ import {
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { resolveDnd5eRollMode } from './rollMode'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eClassFeatureRejectReason =
   | 'invalid-action'
@@ -465,7 +468,10 @@ export function prepareDnd5eClassFeature(input: {
 
   const requirement = featureClassRequirement(payload)
   if (actorCombatant.classId !== requirement.classId) return { ok: false, reason: 'wrong-class' }
-  if (actorCombatant.level < requirement.minimumLevel || (requirement.subclassId && actorCombatant.subclassId !== requirement.subclassId)) {
+  if (
+    dnd5eCombatantClassLevel(actorCombatant, requirement.classId) < requirement.minimumLevel ||
+    (requirement.subclassId && !dnd5eCombatantHasSubclass(actorCombatant, requirement.classId, requirement.subclassId))
+  ) {
     return { ok: false, reason: 'feature-locked' }
   }
 
@@ -554,8 +560,9 @@ export function prepareDnd5eClassFeature(input: {
     const modifier = rules.abilityModifier(actorCombatant.abilities.dex) + actorCombatant.proficiencyBonus * rank +
       (skill === 'stealth' && actorCombatant.classState.hideInPlainSightPrepared ? 10 : 0)
     const movementSpent = Math.max(0, actorCombatant.speed - (input.turnEconomy?.movement.current ?? actorCombatant.turn.movementRemaining))
-    const supremeSneak = payload.feature === 'rogue-cunning-action' && actorCombatant.subclassId === 'thief' &&
-      actorCombatant.level >= 9 && movementSpent <= actorCombatant.speed / 2
+    const supremeSneak = payload.feature === 'rogue-cunning-action' &&
+      dnd5eCombatantHasSubclass(actorCombatant, 'rogue', 'thief') &&
+      dnd5eCombatantClassLevel(actorCombatant, 'rogue') >= 9 && movementSpent <= actorCombatant.speed / 2
     const disadvantage = actorCombatant.exhaustionLevel >= 1
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: supremeSneak, reason: 'supreme-sneak' }],
@@ -579,18 +586,19 @@ export function prepareDnd5eClassFeature(input: {
     if (payload.targetTokenIds.length !== expectedTargets) return { ok: false, reason: 'invalid-action' }
     const profile = dnd5eMonkUnarmedStrikeProfile(actor)
     if (!profile) return { ok: false, reason: 'wrong-class' }
-    if (payload.stunningStrike && actor.level < 5) return { ok: false, reason: 'feature-locked' }
+    const monkLevel = dnd5eCharacterClassLevel(actor, 'monk')
+    if (payload.stunningStrike && monkLevel < 5) return { ok: false, reason: 'feature-locked' }
     if (
       payload.quiveringPalmAttackIndex != null &&
       (!Number.isInteger(payload.quiveringPalmAttackIndex) || payload.quiveringPalmAttackIndex < 0 ||
-        payload.quiveringPalmAttackIndex >= expectedTargets || actor.level < 17 ||
+        payload.quiveringPalmAttackIndex >= expectedTargets || monkLevel < 17 ||
         actor.dnd5eClassChoices?.classes?.monk?.subclass !== 'open-hand')
     ) return { ok: false, reason: 'feature-locked' }
     const requestedOpenHandTechniques = payload.openHandTechniques ?? []
     if (
       requestedOpenHandTechniques.length > expectedTargets ||
       (requestedOpenHandTechniques.some(Boolean) &&
-        (payload.mode !== 'flurry' || actor.level < 3 || actor.dnd5eClassChoices?.classes?.monk?.subclass !== 'open-hand'))
+        (payload.mode !== 'flurry' || monkLevel < 3 || actor.dnd5eClassChoices?.classes?.monk?.subclass !== 'open-hand'))
     ) return { ok: false, reason: 'feature-locked' }
     if (
       requestedOpenHandTechniques[0] === 'push' &&

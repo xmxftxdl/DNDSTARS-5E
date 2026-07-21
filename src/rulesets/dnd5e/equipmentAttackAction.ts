@@ -11,6 +11,7 @@ import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
 import { dnd5eMonkMartialArtsEligible, dnd5eOffHandWeaponAttackProfile, dnd5eWeaponAttackProfile, dnd5eWeaponRangeFeet, type Dnd5eWeaponAttackProfile } from './equipment'
 import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from './classes'
+import { dnd5eCharacterClassLevel } from './multiclass'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import {
   dnd5eAttackerIsUnseenForAttack,
@@ -132,7 +133,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   if (divineSmiteSlotLevel != null) {
     const slot = actor.classResources?.[`dnd5e-spell-slot-${divineSmiteSlotLevel}`]
     if (
-      actor.charClass !== '圣武士' || actor.level < 2 || profile.mode !== 'melee' ||
+      dnd5eCharacterClassLevel(actor, 'paladin') < 2 || profile.mode !== 'melee' ||
       !Number.isInteger(divineSmiteSlotLevel) || divineSmiteSlotLevel < 1 || divineSmiteSlotLevel > 9 ||
       !slot || slot.current < 1
     ) return { ok: false, reason: 'divine-smite-unavailable' }
@@ -143,7 +144,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const recklessAttack = action.dnd5eWeaponAttackOptions?.recklessAttack === true
   if (
     recklessAttack && (
-      actor.charClass !== '野蛮人' || actor.level < 2 || profile.mode !== 'melee' || profile.attackAbility !== 'str' ||
+      dnd5eCharacterClassLevel(actor, 'barbarian') < 2 || profile.mode !== 'melee' || profile.attackAbility !== 'str' ||
       input.attacksUsed !== 0
     )
   ) return { ok: false, reason: 'reckless-attack-unavailable' }
@@ -151,7 +152,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const barbarianSubclass = actor.dnd5eClassChoices?.classes?.barbarian?.subclass
   if (
     frenzyAttack && (
-      actor.charClass !== '野蛮人' || barbarianSubclass !== 'berserker' || actor.level < 3 ||
+      dnd5eCharacterClassLevel(actor, 'barbarian') < 3 || barbarianSubclass !== 'berserker' ||
       actor.dnd5eCombatState?.raging !== true || actor.dnd5eCombatState?.frenzying !== true ||
       actor.dnd5eCombatState?.frenzyStartedTurnKey === turnKey || profile.mode !== 'melee' ||
       (input.turnEconomy?.bonusAction.current ?? 1) < 1
@@ -159,7 +160,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   ) return { ok: false, reason: 'frenzy-attack-unavailable' }
   const hordeBreakerAttack = action.dnd5eWeaponAttackOptions?.hordeBreakerAttack === true
   const rangerChoices = actor.dnd5eClassChoices?.classes?.ranger
-  const hordeBreakerSelected = actor.charClass === '游侠' && actor.level >= 3 && rangerChoices?.subclass === 'hunter' &&
+  const hordeBreakerSelected = dnd5eCharacterClassLevel(actor, 'ranger') >= 3 && rangerChoices?.subclass === 'hunter' &&
     rangerChoices.selections?.['hunters-prey']?.includes('horde-breaker') === true
   const hordeSourceToken = actor.dnd5eCombatState?.hordeBreakerSourceTargetId
     ? input.map.tokens.find((token) => token.id === actor.dnd5eCombatState?.hordeBreakerSourceTargetId)
@@ -176,7 +177,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const stunningStrike = action.dnd5eWeaponAttackOptions?.stunningStrike === true
   if (
     stunningStrike && (
-      actor.charClass !== '武僧' || actor.level < 5 || profile.mode !== 'melee' ||
+      dnd5eCharacterClassLevel(actor, 'monk') < 5 || profile.mode !== 'melee' ||
       (actor.classResources?.['dnd5e-ki']?.current ?? 0) < 1
     )
   ) return { ok: false, reason: 'stunning-strike-unavailable' }
@@ -221,7 +222,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     : 0
   if (
     foeSlayer && (
-      actor.charClass !== '游侠' || actor.level < 20 || foeSlayerAttackBonus <= 0 ||
+      dnd5eCharacterClassLevel(actor, 'ranger') < 20 || foeSlayerAttackBonus <= 0 ||
       actorCombatant.classState.foeSlayerTurnKey === turnKey || !dnd5eIsFavoredEnemy(actorCombatant, target)
     )
   ) return { ok: false, reason: 'foe-slayer-unavailable' }

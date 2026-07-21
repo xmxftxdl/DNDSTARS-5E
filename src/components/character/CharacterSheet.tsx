@@ -29,6 +29,9 @@ import {
   registeredDnd5ePluginRaces,
   dnd5eRaceSpeed,
   subscribeDnd5eRulesPluginRegistry,
+  normalizeDnd5eClassLevels,
+  dnd5eCharacterClassLevel,
+  type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { normalizeLegacyAbilities } from '../../rulesets/dnd5e/character'
 import HpPanel from './HpPanel'
@@ -38,6 +41,7 @@ import Dnd5ePluginFeaturesPanel from './Dnd5ePluginFeaturesPanel'
 import Dnd5eSpellbookPanel from './Dnd5eSpellbookPanel'
 import EquipmentTab from './EquipmentTab'
 import CharacterPortraitEditor from './CharacterPortraitEditor'
+import Dnd5eMulticlassPanel from './Dnd5eMulticlassPanel'
 import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInput'
 
 interface CharacterSheetProps {
@@ -55,6 +59,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
   const [shortRestHitDice, setShortRestHitDice] = useState<Record<number, number>>({})
   const [useSongOfRest, setUseSongOfRest] = useState(false)
   const [shortRestResult, setShortRestResult] = useState('')
+  const [selectedClassId, setSelectedClassId] = useState<Dnd5eClassId | undefined>()
   const characters = useCharacterStore((state) => state.characters)
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
@@ -108,7 +113,16 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
   const selectedPluginBackground = pluginBackgrounds.find((background) =>
     background.id === c.dnd5eBackgroundId || background.name === c.background)
   const classDefinition = dnd5eClassDefinitionForCharacter(c)
-  const hasSpellbookTab = !!classDefinition?.spellcasting
+  const classLevels = normalizeDnd5eClassLevels(c)
+  const activeClassId = selectedClassId && classLevels[selectedClassId]
+    ? selectedClassId
+    : classDefinition?.id
+  const activeClassDefinition = activeClassId ? dnd5eClassDefinition(activeClassId) : classDefinition
+  const activeClassLevel = activeClassId ? dnd5eCharacterClassLevel(c, activeClassId) : c.level
+  const classCharacter = activeClassDefinition
+    ? { ...c, charClass: activeClassDefinition.name, level: activeClassLevel }
+    : c
+  const hasSpellbookTab = Object.keys(classLevels).some((classId) => !!dnd5eClassDefinition(classId)?.spellcasting)
   const hasPluginTab = registeredDnd5ePluginFeatures().length > 0 || (c.dnd5ePluginFeatureIds?.length ?? 0) > 0
   const activeTab = selectedTab === 'class' && !classDefinition
     ? 'sheet'
@@ -128,8 +142,8 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
   const manualHitPointRolls = dnd5eManualHitPointRolls(c)
   const constitutionModifier = rules.abilityModifier(clamp(c.abilities.con, 1, 30))
   const songOfRestBard = characters
-    .filter((candidate) => candidate.rulesetId === 'dnd5e-2014-srd-5.1' && candidate.charClass === '吟游诗人' && candidate.level >= 2)
-    .map((candidate) => ({ character: candidate, dieSides: dnd5eBardSongOfRestDie(candidate.level) }))
+    .filter((candidate) => candidate.rulesetId === 'dnd5e-2014-srd-5.1' && dnd5eCharacterClassLevel(candidate, 'bard') >= 2)
+    .map((candidate) => ({ character: candidate, dieSides: dnd5eBardSongOfRestDie(dnd5eCharacterClassLevel(candidate, 'bard')) }))
     .filter((entry) => entry.dieSides > 0)
     .sort((left, right) => right.dieSides - left.dieSides)[0]
   const selectedHitDiceCount = hitDice.reduce((total, pool, index) =>
@@ -206,9 +220,10 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="角色名称" value={c.name} onChange={(value) => updateCharacter({ name: value })} className="col-span-2" />
             <SelectField
-              label="职业"
+              label="起始职业"
               value={c.charClass}
               options={DND5E_2014_CLASS_OPTIONS}
+              disabled={Object.keys(classLevels).length > 1}
               onChange={(value) => {
                 const nextClass = dnd5eClassDefinition(value)
                 setSelectedTab('sheet')
@@ -219,7 +234,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                 })
               }}
             />
-            <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => updateCharacter({ level: value })} />
+            <NumberField label="等级" value={c.level} min={1} max={20} disabled={Object.keys(classLevels).length > 1} onChange={(value) => updateCharacter({ level: value })} />
             <SelectField
               label="种族"
               value={c.race}
@@ -261,7 +276,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
 
       <nav className="glass flex gap-1 rounded-2xl p-1.5" aria-label="角色页面分页">
           <CharacterTab active={activeTab === 'sheet'} onClick={() => setSelectedTab('sheet')}>人物卡</CharacterTab>
-          {classDefinition && <CharacterTab active={activeTab === 'class'} onClick={() => setSelectedTab('class')}>{c.charClass}</CharacterTab>}
+          {classDefinition && <CharacterTab active={activeTab === 'class'} onClick={() => setSelectedTab('class')}>职业</CharacterTab>}
           <CharacterTab active={activeTab === 'inventory'} onClick={() => setSelectedTab('inventory')}>物品栏</CharacterTab>
           {hasSpellbookTab && <CharacterTab active={activeTab === 'spellbook'} onClick={() => setSelectedTab('spellbook')}>法术书</CharacterTab>}
           {hasPluginTab && <CharacterTab active={activeTab === 'plugins'} onClick={() => setSelectedTab('plugins')}>扩展规则</CharacterTab>}
@@ -506,8 +521,9 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
       </>}
       </fieldset>
 
-      {activeTab === 'class' && c.charClass === '战士' && <FighterProgressionPanel character={c} onChange={updateCharacter} />}
-      {activeTab === 'class' && c.charClass !== '战士' && <Dnd5eClassProgressionPanel character={c} onChange={updateCharacter} />}
+      {activeTab === 'class' && <Dnd5eMulticlassPanel character={c} selectedClassId={activeClassId} onSelectClass={setSelectedClassId} onChange={updateCharacter} />}
+      {activeTab === 'class' && activeClassDefinition?.id === 'fighter' && <FighterProgressionPanel character={classCharacter} onChange={updateCharacter} />}
+      {activeTab === 'class' && activeClassDefinition && activeClassDefinition.id !== 'fighter' && <Dnd5eClassProgressionPanel character={classCharacter} isStartingClass={activeClassDefinition.name === c.charClass} onChange={updateCharacter} />}
       {activeTab === 'inventory' && <EquipmentTab charId={c.id} editable={!readOnly} />}
       {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} onChange={updateCharacter} />}
       {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={updateCharacter} />}
@@ -616,12 +632,12 @@ function Field({ label, value, onChange, className = '' }: { label: string; valu
   return <label className={`flex flex-col gap-1 ${className}`}><span className="text-xs font-semibold tracking-wider text-slate-500">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200" /></label>
 }
 
-function SelectField({ label, value, options, onChange }: { label: string; value: string; options: readonly string[]; onChange: (value: string) => void }) {
+function SelectField({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: readonly string[]; onChange: (value: string) => void; disabled?: boolean }) {
   const legacyValue = value && !options.some((option) => option === value)
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs font-semibold tracking-wider text-slate-500">{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200">
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-50">
         <option value="">未选择</option>
         {legacyValue && <option value={value}>{value}（旧数据）</option>}
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -630,7 +646,7 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   )
 }
 
-function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+function NumberField({ label, value, min, max, onChange, disabled = false }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void; disabled?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null)
   const displayedValue = draft ?? String(value)
 
@@ -648,6 +664,7 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
         value={displayedValue}
         min={min}
         max={max}
+        disabled={disabled}
         onFocus={() => setDraft(String(value))}
         onChange={(event) => {
           const nextDraft = event.target.value
@@ -659,7 +676,7 @@ function NumberField({ label, value, min, max, onChange }: { label: string; valu
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
         }}
-        className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200"
+        className="rounded-lg border border-white/10 bg-void-900/60 px-3 py-1.5 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
       />
     </label>
   )

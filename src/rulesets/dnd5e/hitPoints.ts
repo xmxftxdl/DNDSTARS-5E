@@ -1,4 +1,6 @@
 import type { Character } from '../../types/character'
+import { dnd5eClassDefinition } from './classes'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
 
@@ -52,12 +54,11 @@ function abilityModifier(score: number): number {
 }
 
 function draconicResilienceHitPoints(
-  character: Pick<Character, 'charClass' | 'dnd5eClassChoices'>,
-  level: number,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): number {
-  return character.charClass === '术士' &&
+  return dnd5eCharacterClassLevel(character, 'sorcerer') > 0 &&
     character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
-    ? level
+    ? dnd5eCharacterClassLevel(character, 'sorcerer')
     : 0
 }
 
@@ -71,7 +72,7 @@ export function isDnd5e2014Character(character: Pick<Character, 'rulesetId'>): b
  */
 export function syncDnd5ePrimalChampion(character: Character): Character {
   if (!isDnd5e2014Character(character)) return character
-  const shouldApply = character.charClass === '野蛮人' && clampLevel(character.level) >= 20
+  const shouldApply = dnd5eCharacterClassLevel(character, 'barbarian') >= 20
   const applied = character.dnd5ePrimalChampionApplied === true
   if (shouldApply === applied) return character
   const delta = shouldApply ? 4 : -4
@@ -101,34 +102,52 @@ export function dnd5eClassHitPointRule(
  * 每一级都加入体质调整值，并保证该级至少获得 1 点生命值。
  */
 export function dnd5eFixedMaxHp(
-  character: Pick<Character, 'charClass' | 'hitDice' | 'level' | 'abilities' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'hitDice' | 'level' | 'abilities' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): number {
-  const level = clampLevel(character.level)
-  const rule = dnd5eClassHitPointRule(character)
   const constitutionModifier = abilityModifier(character.abilities.con)
-  const firstLevel = Math.max(1, rule.hitDieSides + constitutionModifier)
-  const laterLevel = Math.max(1, rule.fixedHitPointsPerLevel + constitutionModifier)
-  const draconicResilience = draconicResilienceHitPoints(character, level)
-  return firstLevel + (level - 1) * laterLevel + draconicResilience
+  const levels = normalizeDnd5eClassLevels(character)
+  const primary = dnd5eClassDefinition(character.charClass)
+  const primaryRule = dnd5eClassHitPointRule(character)
+  const firstLevel = Math.max(1, primaryRule.hitDieSides + constitutionModifier)
+  let laterLevels = 0
+  for (const [classId, classLevel] of Object.entries(levels)) {
+    const definition = dnd5eClassDefinition(classId)
+    if (!definition || !classLevel) continue
+    const rule = CLASS_HIT_POINT_RULES[definition.name] ?? { hitDieSides: definition.hitDie, fixedHitPointsPerLevel: Math.floor(definition.hitDie / 2) + 1 }
+    const laterLevelCount = Math.max(0, classLevel - (definition.id === primary?.id ? 1 : 0))
+    laterLevels += laterLevelCount * Math.max(1, rule.fixedHitPointsPerLevel + constitutionModifier)
+  }
+  const draconicResilience = draconicResilienceHitPoints(character)
+  return firstLevel + laterLevels + draconicResilience
 }
 
 export function dnd5eRolledMaxHpRange(
-  character: Pick<Character, 'charClass' | 'hitDice' | 'level' | 'abilities' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'hitDice' | 'level' | 'abilities' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): { minimum: number; maximum: number } {
-  const level = clampLevel(character.level)
-  const rule = dnd5eClassHitPointRule(character)
   const constitutionModifier = abilityModifier(character.abilities.con)
-  const firstLevel = Math.max(1, rule.hitDieSides + constitutionModifier)
-  const draconicResilience = draconicResilienceHitPoints(character, level)
+  const primaryRule = dnd5eClassHitPointRule(character)
+  const firstLevel = Math.max(1, primaryRule.hitDieSides + constitutionModifier)
+  const draconicResilience = draconicResilienceHitPoints(character)
+  const levels = normalizeDnd5eClassLevels(character)
+  const primary = dnd5eClassDefinition(character.charClass)
+  let minimum = firstLevel + draconicResilience
+  let maximum = firstLevel + draconicResilience
+  for (const [classId, classLevel] of Object.entries(levels)) {
+    const definition = dnd5eClassDefinition(classId)
+    if (!definition || !classLevel) continue
+    const laterLevelCount = Math.max(0, classLevel - (definition.id === primary?.id ? 1 : 0))
+    minimum += laterLevelCount * Math.max(1, 1 + constitutionModifier)
+    maximum += laterLevelCount * Math.max(1, definition.hitDie + constitutionModifier)
+  }
   return {
-    minimum: firstLevel + (level - 1) * Math.max(1, 1 + constitutionModifier) + draconicResilience,
-    maximum: firstLevel + (level - 1) * Math.max(1, rule.hitDieSides + constitutionModifier) + draconicResilience,
+    minimum,
+    maximum,
   }
 }
 
 type ManualHitPointCharacter = Pick<
   Character,
-  'charClass' | 'hitDice' | 'level' | 'abilities' | 'maxHp' | 'hitPointRolls' | 'dnd5eClassChoices'
+  'charClass' | 'hitDice' | 'level' | 'abilities' | 'maxHp' | 'hitPointRolls' | 'dnd5eClassLevels' | 'dnd5eClassChoices'
 >
 
 function hitPointsForRoll(roll: number, constitutionModifier: number): number {
@@ -152,7 +171,7 @@ function reconstructManualHitPointRolls(character: ManualHitPointCharacter): num
   const constitutionModifier = abilityModifier(character.abilities.con)
   const firstLevel = hitPointsForRoll(rule.hitDieSides, constitutionModifier)
   const targetLaterLevels = Math.floor(Number(character.maxHp) || 0) - firstLevel -
-    draconicResilienceHitPoints(character, level)
+    draconicResilienceHitPoints(character)
   const laterLevelMinimum = hitPointsForRoll(1, constitutionModifier)
   const laterLevelMaximum = hitPointsForRoll(rule.hitDieSides, constitutionModifier)
   const laterLevelCount = level - 1
@@ -200,7 +219,7 @@ export function dnd5eManualMaxHp(
   const constitutionModifier = abilityModifier(character.abilities.con)
   return rolls.slice(0, level).reduce(
     (total, roll) => total + hitPointsForRoll(roll, constitutionModifier),
-    draconicResilienceHitPoints(character, level),
+    draconicResilienceHitPoints(character),
   )
 }
 
@@ -209,8 +228,9 @@ export function dnd5eManualMaxHp(
  * impossible values (for example a level-12 fighter with 1 HP maximum) migrate to fixed HP.
  */
 export function dnd5eHitPointMaximumMode(
-  character: Pick<Character, 'charClass' | 'hitDice' | 'level' | 'abilities' | 'maxHp' | 'hitPointMaximumMode' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'hitDice' | 'level' | 'abilities' | 'maxHp' | 'hitPointMaximumMode' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): Dnd5eHitPointMaximumMode {
+  if (Object.keys(normalizeDnd5eClassLevels(character)).length > 1) return 'fixed'
   if (character.hitPointMaximumMode === 'fixed' || character.hitPointMaximumMode === 'manual') {
     return character.hitPointMaximumMode
   }
@@ -223,21 +243,22 @@ export function dnd5eHitPointMaximumMode(
 }
 
 function syncHitPointDice(
-  character: Pick<Character, 'level' | 'hitPointDice'>,
-  hitDieSides: number,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'hitPointDice'>,
 ): Array<{ sides: number; current: number; max: number }> {
-  const level = clampLevel(character.level)
-  const existing = character.hitPointDice?.length === 1 && character.hitPointDice[0].sides === hitDieSides
-    ? character.hitPointDice[0]
-    : undefined
-  if (!existing) return [{ sides: hitDieSides, current: level, max: level }]
-
-  const previousMaximum = Math.max(0, Math.floor(Number(existing.max) || 0))
-  const previousCurrent = Math.min(previousMaximum, Math.max(0, Math.floor(Number(existing.current) || 0)))
-  const current = level > previousMaximum
-    ? Math.min(level, previousCurrent + (level - previousMaximum))
-    : Math.min(level, previousCurrent)
-  return [{ sides: hitDieSides, current, max: level }]
+  const maximumBySides = new Map<number, number>()
+  for (const [classId, classLevel] of Object.entries(normalizeDnd5eClassLevels(character))) {
+    const definition = dnd5eClassDefinition(classId)
+    if (definition && classLevel) maximumBySides.set(definition.hitDie, (maximumBySides.get(definition.hitDie) ?? 0) + classLevel)
+  }
+  return [...maximumBySides].sort(([left], [right]) => right - left).map(([sides, max]) => {
+    const existing = character.hitPointDice?.find((pool) => pool.sides === sides)
+    const previousMaximum = Math.max(0, Math.floor(Number(existing?.max) || 0))
+    const previousCurrent = Math.min(previousMaximum, Math.max(0, Math.floor(Number(existing?.current) || 0)))
+    const current = existing
+      ? max > previousMaximum ? Math.min(max, previousCurrent + (max - previousMaximum)) : Math.min(max, previousCurrent)
+      : max
+    return { sides, current, max }
+  })
 }
 
 export function syncDnd5eHitPoints(inputCharacter: Character): Character {
@@ -263,7 +284,7 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
     maxHp,
     currentHp,
     hitDice: `${level}d${rule.hitDieSides}`,
-    hitPointDice: syncHitPointDice(character, rule.hitDieSides),
+    hitPointDice: syncHitPointDice(character),
     hitPointMaximumMode: mode,
     hitPointRolls,
   }

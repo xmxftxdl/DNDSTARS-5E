@@ -5,6 +5,7 @@ import type { CharacterEquipment, EquipmentItem } from '../../types/equipment'
 import { fighterCriticalThreshold, fighterSelectedFightingStyles } from './fighter'
 import { dnd5eBarbarianRageDamage, dnd5eClassDefinitionForCharacter, dnd5eMonkMartialArtsDie } from './classes'
 import { dnd5eEquippedEffectTotal, dnd5eWeaponEffectTotal } from './equipmentEffects'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -203,7 +204,7 @@ export interface Dnd5eUnarmedStrikeProfile {
 }
 
 export function dnd5eMonkMartialArtsEligible(character: Character): boolean {
-  if (character.charClass !== '武僧') return false
+  if (dnd5eCharacterClassLevel(character, 'monk') < 1) return false
   if (character.equipment?.armor || character.equipment?.offHand?.dnd5e?.kind === 'shield') return false
   const weapon = character.equipment?.mainWeapon
   const data = weapon?.dnd5e
@@ -213,7 +214,8 @@ export function dnd5eMonkMartialArtsEligible(character: Character): boolean {
 }
 
 export function dnd5eMonkUnarmedStrikeProfile(character: Character): Dnd5eUnarmedStrikeProfile | undefined {
-  if (character.charClass !== '武僧') return undefined
+  const monkLevel = dnd5eCharacterClassLevel(character, 'monk')
+  if (monkLevel < 1) return undefined
   const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
   const martialArts = dnd5eMonkMartialArtsEligible(character)
@@ -223,7 +225,7 @@ export function dnd5eMonkUnarmedStrikeProfile(character: Character): Dnd5eUnarme
     attackAbility,
     attackModifier: abilityModifier + rules.proficiencyBonus(Math.min(20, Math.max(1, character.level))),
     damage: martialArts
-      ? { count: 1, sides: dnd5eMonkMartialArtsDie(character.level), bonus: abilityModifier, type: 'bludgeoning' }
+      ? { count: 1, sides: dnd5eMonkMartialArtsDie(monkLevel), bonus: abilityModifier, type: 'bludgeoning' }
       : { count: 0, sides: 2, bonus: 1 + strengthModifier, type: 'bludgeoning' },
     martialArts,
   }
@@ -293,10 +295,10 @@ export function dnd5eArmorClass(character: Character): number {
     const constitutionModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.con)))
     const wisdomModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.wis)))
     const hasShield = character.equipment?.offHand?.dnd5e?.kind === 'shield'
-    if (character.charClass === '野蛮人') armorClass = Math.max(armorClass, 10 + dexterityModifier + constitutionModifier)
-    if (character.charClass === '武僧' && !hasShield) armorClass = Math.max(armorClass, 10 + dexterityModifier + wisdomModifier)
+    if (dnd5eCharacterClassLevel(character, 'barbarian') >= 1) armorClass = Math.max(armorClass, 10 + dexterityModifier + constitutionModifier)
+    if (dnd5eCharacterClassLevel(character, 'monk') >= 1 && !hasShield) armorClass = Math.max(armorClass, 10 + dexterityModifier + wisdomModifier)
     if (
-      character.charClass === '术士' &&
+      dnd5eCharacterClassLevel(character, 'sorcerer') >= 1 &&
       character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
     ) armorClass = Math.max(armorClass, 13 + dexterityModifier)
   }
@@ -330,14 +332,15 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
   const duelingBonus = data.mode === 'melee' && !usesTwoHands && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
   const armor = character.equipment?.armor?.dnd5e
   const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
-  const rageBonus = character.charClass === '野蛮人' &&
+  const barbarianLevel = dnd5eCharacterClassLevel(character, 'barbarian')
+  const rageBonus = barbarianLevel >= 1 &&
     character.dnd5eCombatState?.raging === true &&
     !wearingHeavyArmor &&
     data.mode === 'melee' &&
     ability === 'str'
-    ? dnd5eBarbarianRageDamage(character.level)
+    ? dnd5eBarbarianRageDamage(barbarianLevel)
     : 0
-  const sacredWeaponBonus = character.charClass === '圣武士' &&
+  const sacredWeaponBonus = dnd5eCharacterClassLevel(character, 'paladin') >= 3 &&
     (character.dnd5eCombatState?.sacredWeaponTurnsRemaining ?? 0) > 0
     ? Math.max(1, rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.cha))))
     : 0
@@ -351,7 +354,10 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     finesse: data.attackAbility === 'finesse',
     proficient,
     attackModifier: abilityModifier + proficiency + attackStyleBonus + sacredWeaponBonus + equipmentAttackBonus,
-    criticalThreshold: fighterCriticalThreshold(character),
+    criticalThreshold: fighterCriticalThreshold({
+      ...character,
+      level: dnd5eCharacterClassLevel(character, 'fighter'),
+    }),
     greatWeaponFighting: data.mode === 'melee' && usesTwoHands && styles.includes('great-weapon-fighting'),
     damage: {
       ...data.damage,
@@ -384,9 +390,10 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
   const styles = dnd5eSelectedFightingStyles(character)
   const armor = character.equipment?.armor?.dnd5e
   const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
-  const rageBonus = character.charClass === '野蛮人' && character.dnd5eCombatState?.raging === true &&
+  const barbarianLevel = dnd5eCharacterClassLevel(character, 'barbarian')
+  const rageBonus = barbarianLevel >= 1 && character.dnd5eCombatState?.raging === true &&
     !wearingHeavyArmor && ability === 'str'
-    ? dnd5eBarbarianRageDamage(character.level)
+    ? dnd5eBarbarianRageDamage(barbarianLevel)
     : 0
   const equipmentAttackBonus = dnd5eWeaponEffectTotal(character, 'offHand', 'weaponAttackBonus')
   const equipmentDamageBonus = dnd5eWeaponEffectTotal(character, 'offHand', 'weaponDamageBonus')
@@ -398,7 +405,10 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
     finesse: data.attackAbility === 'finesse',
     proficient,
     attackModifier: abilityModifier + proficiency + equipmentAttackBonus,
-    criticalThreshold: fighterCriticalThreshold(character),
+    criticalThreshold: fighterCriticalThreshold({
+      ...character,
+      level: dnd5eCharacterClassLevel(character, 'fighter'),
+    }),
     greatWeaponFighting: false,
     damage: {
       ...data.damage,
@@ -409,16 +419,15 @@ export function dnd5eOffHandWeaponAttackProfile(character: Character): Dnd5eWeap
 }
 
 export function dnd5eSelectedFightingStyles(character: Character): readonly string[] {
-  if (character.charClass === '战士') return fighterSelectedFightingStyles(character)
-  const definition = dnd5eClassDefinitionForCharacter(character)
-  if (!definition) return []
-  const allowed = new Set(
-    definition.choiceGroups
-      ?.find((group) => group.id === 'fighting-style')
-      ?.options.map((option) => option.id) ?? [],
-  )
-  return [...new Set(character.dnd5eClassChoices?.classes?.[definition.id]?.selections?.['fighting-style'] ?? [])]
-    .filter((style) => allowed.has(style))
+  const fighterLevel = dnd5eCharacterClassLevel(character, 'fighter')
+  const styles: string[] = fighterLevel > 0 ? [...fighterSelectedFightingStyles({ ...character, level: fighterLevel })] : []
+  for (const classId of ['paladin', 'ranger'] as const) {
+    if (dnd5eCharacterClassLevel(character, classId) < 2) continue
+    const definition = dnd5eClassDefinitionForCharacter({ charClass: classId === 'paladin' ? '圣武士' : '游侠' })
+    const allowed = new Set(definition?.choiceGroups?.find((group) => group.id === 'fighting-style')?.options.map((option) => option.id) ?? [])
+    styles.push(...(character.dnd5eClassChoices?.classes?.[classId]?.selections?.['fighting-style'] ?? []).filter((style) => allowed.has(style)))
+  }
+  return [...new Set(styles)]
 }
 
 export function dnd5eWeaponRangeFeet(profile: Dnd5eWeaponAttackProfile): number {
@@ -428,12 +437,18 @@ export function dnd5eWeaponRangeFeet(profile: Dnd5eWeaponAttackProfile): number 
 export function dnd5eWeaponProficient(character: Character, weapon: EquipmentItem): boolean {
   const data = weapon.dnd5e
   if (!data || data.kind !== 'weapon') return false
-  const classId = dnd5eClassDefinitionForCharacter(character)?.id
-  if (!classId) return false
-  if (new Set(['barbarian', 'fighter', 'paladin', 'ranger']).has(classId)) return true
-  if (data.category === 'simple' && new Set(['bard', 'cleric', 'monk', 'rogue', 'warlock']).has(classId)) return true
+  const classIds = Object.keys(normalizeDnd5eClassLevels(character))
+  if (classIds.length === 0) return false
+  const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id
+  const multiclassIds = classIds.filter((classId) => classId !== primaryClassId)
+  if (primaryClassId && new Set(['barbarian', 'fighter', 'paladin', 'ranger']).has(primaryClassId)) return true
+  if (multiclassIds.some((classId) => new Set(['barbarian', 'fighter', 'paladin', 'ranger']).has(classId))) return true
+  if (data.category === 'simple' && (
+    !!primaryClassId && new Set(['bard', 'cleric', 'monk', 'rogue', 'warlock']).has(primaryClassId) ||
+    multiclassIds.some((classId) => new Set(['barbarian', 'fighter', 'monk', 'paladin', 'ranger', 'warlock']).has(classId))
+  )) return true
   const weaponId = weapon.id.replace(/-offhand$/, '')
-  const special: Partial<Record<typeof classId, ReadonlySet<string>>> = {
+  const special: Partial<Record<string, ReadonlySet<string>>> = {
     bard: new Set(['dnd5e-hand-crossbow', 'dnd5e-longsword', 'dnd5e-rapier', 'dnd5e-shortsword']),
     rogue: new Set(['dnd5e-hand-crossbow', 'dnd5e-longsword', 'dnd5e-rapier', 'dnd5e-shortsword']),
     monk: new Set(['dnd5e-shortsword']),
@@ -441,5 +456,6 @@ export function dnd5eWeaponProficient(character: Character, weapon: EquipmentIte
     sorcerer: new Set(['dnd5e-dagger', 'dnd5e-dart', 'dnd5e-sling', 'dnd5e-quarterstaff', 'dnd5e-light-crossbow']),
     wizard: new Set(['dnd5e-dagger', 'dnd5e-dart', 'dnd5e-sling', 'dnd5e-quarterstaff', 'dnd5e-light-crossbow']),
   }
-  return special[classId]?.has(weaponId) === true
+  if (primaryClassId && special[primaryClassId]?.has(weaponId)) return true
+  return multiclassIds.includes('monk') && weaponId === 'dnd5e-shortsword'
 }

@@ -29,6 +29,15 @@ export interface Character {
   /** 可选的完整插件命名空间种族 ID；race 保留可读名称。 */
   dnd5eRaceId?: string
   charClass: string
+  /**
+   * 2014 兼职职业等级。旧存档缺失时由 charClass + level 自动迁移；
+   * level 始终是所有职业等级之和，charClass 保留为首要／起始职业。
+   */
+  dnd5eClassLevels?: Partial<Record<
+    'barbarian' | 'bard' | 'cleric' | 'druid' | 'fighter' | 'monk' |
+    'paladin' | 'ranger' | 'rogue' | 'sorcerer' | 'warlock' | 'wizard',
+    number
+  >>
   level: number
   background: string
   /** 可选的完整插件命名空间背景 ID；background 保留可读名称。 */
@@ -118,6 +127,9 @@ export interface Character {
     /** 铁蒺藜伤势造成的速度减值；恢复至少 1 点生命值时由 Headless 清除。 */
     caltropsSpeedPenaltyFeet?: number
     raging?: boolean
+    /** 本场战斗由 DM 判定为受突袭；自身首回合结束后失效。 */
+    surprisedCombatId?: string
+    surpriseResolvedCombatId?: string
     frenzying?: boolean
     frenzyStartedTurnKey?: string
     rageTurnsRemaining?: number

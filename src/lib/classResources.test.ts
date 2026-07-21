@@ -47,4 +47,14 @@ describe('D&D 5e class resources', () => {
       unregister()
     }
   })
+
+  it('combines multiclass spell slots and preserves pact slots separately', () => {
+    const synced = syncCharacterClassResources(character({
+      charClass: '法师', level: 10, hitDice: '5d6',
+      dnd5eClassLevels: { wizard: 5, paladin: 4, warlock: 1 },
+    }))
+    expect(synced.classResources?.['dnd5e-spell-slot-1']).toEqual({ current: 4, max: 4 })
+    expect(synced.classResources?.['dnd5e-spell-slot-4']).toEqual({ current: 1, max: 1 })
+    expect(synced.classResources?.['dnd5e-pact-slot']).toEqual({ current: 1, max: 1 })
+  })
 })

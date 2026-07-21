@@ -2205,6 +2205,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(invalidDie).toMatchObject({ ok: false, reason: 'invalid-dice' })
 
     state.combatants.warlock.subclassId = 'other'
+    state.combatants.warlock.subclassIds = { warlock: 'other' }
     const invalidSubclass = resolveDnd5eHeadlessAction(state, {
       type: 'concentration-save', actorId: 'warlock', d20: 5, darkOnesOwnLuckRoll: 3, dc: 10,
     })
@@ -3345,5 +3346,30 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.events).toContainEqual({
       type: 'instant-death', sourceId: 'wizard', targetId: 'target', hpBefore: 30,
     })
+  })
+
+  it('scales class features from their class level after multiclassing', () => {
+    const bardFighter = fighter('bard-fighter', 20, {
+      classId: 'fighter', level: 15, classLevels: { fighter: 10, bard: 5 },
+      classResources: { 'dnd5e-bardic-inspiration': { current: 1, max: 1 } },
+    })
+    const ally = fighter('ally', 10)
+    const inspired = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('multiclass-bard', [bardFighter, ally]), {
+      type: 'bardic-inspiration', actorId: 'bard-fighter', targetId: 'ally',
+    })
+    expect(inspired.ok).toBe(true)
+    if (!inspired.ok) return
+    expect(inspired.state.combatants.ally.classState.bardicInspirationDie).toBe(8)
+
+    const fighterWizard = fighter('fighter-wizard', 20, {
+      classId: 'fighter', level: 11, classLevels: { fighter: 1, wizard: 10 }, currentHp: 10, maxHp: 30,
+      classResources: { fighterSecondWind: { current: 1, max: 1 } },
+    })
+    const healed = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('multiclass-second-wind', [fighterWizard, fighter('enemy', 10)]), {
+      type: 'fighter-second-wind', actorId: 'fighter-wizard', resourceKey: 'fighterSecondWind', d10: 5,
+    })
+    expect(healed.ok).toBe(true)
+    if (!healed.ok) return
+    expect(healed.state.combatants['fighter-wizard'].currentHp).toBe(16)
   })
 })

@@ -4,6 +4,7 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { dnd5eCharacterClassLevel } from './multiclass'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
@@ -106,7 +107,7 @@ export function prepareDnd5eHunterMultiattack(input: {
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
   const choices = actor.dnd5eClassChoices?.classes?.ranger
   if (
-    actor.charClass !== '游侠' || actor.level < 11 || choices?.subclass !== 'hunter' ||
+    dnd5eCharacterClassLevel(actor, 'ranger') < 11 || choices?.subclass !== 'hunter' ||
     !choices.selections?.multiattack?.includes(feature)
   ) return { ok: false, reason: 'feature-locked' }
   const profile = dnd5eWeaponAttackProfile(actor)

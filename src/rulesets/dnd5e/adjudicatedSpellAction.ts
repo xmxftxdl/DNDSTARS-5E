@@ -10,7 +10,7 @@ import type {
 } from '../../lib/combatInterruptProtocol'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { dnd5eClassDefinitionForCharacter, dnd5ePactSlotLevel } from './classes'
+import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
@@ -23,9 +23,10 @@ import {
 } from './mapBridge'
 import {
   dnd5eFreeSpellCastSource,
-  dnd5eSelectedSpellIds,
+  dnd5eSpellcastingClassIdForSpell,
 } from './spells'
 import type { Dnd5eSpellbookEntry } from './spellbook'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eAdjudicatedSpellRejectReason =
   | 'invalid-action'
@@ -50,6 +51,8 @@ export interface PreparedDnd5eAdjudicatedSpell {
   characterIdByCombatantId: Record<string, string>
   state: Dnd5eHeadlessCombatState
   actor: Character
+  castingClassId: Dnd5eClassId
+  castingClassLevel: number
   actorToken: Token
   slotLevel: number
 }
@@ -125,10 +128,17 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     token.id === input.action.actorTokenId && token.characterId === input.action.characterId,
   )
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
-  const definition = dnd5eClassDefinitionForCharacter(actor)
+  const castingClassId = dnd5eSpellcastingClassIdForSpell(
+    actor,
+    input.spell.id,
+    payload.castingClassId,
+    input.spell.classes,
+  )
+  const definition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
+  const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0
   if (
-    !definition?.spellcasting || !dnd5eSelectedSpellIds(actor).includes(input.spell.id) ||
-    (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || actor.level < 18))
+    !definition?.spellcasting || !castingClassId || castingClassLevel < 1 ||
+    (actor.dnd5eCombatState?.wildShapeFormId && (definition.id !== 'druid' || castingClassLevel < 18))
   ) return { ok: false, reason: 'spell-unavailable' }
   const castingTime = dnd5eSpellbookEntryCastingTime(input.spell)
   if (castingTime === 'reaction' || castingTime === 'unsupported') return { ok: false, reason: 'invalid-action' }
@@ -136,7 +146,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
   const slotLevel = input.spell.level === 0
     ? 0
     : definition.spellcasting.kind === 'pact' && input.spell.level <= 5
-      ? dnd5ePactSlotLevel(actor.level)
+      ? dnd5ePactSlotLevel(castingClassLevel)
       : payload.slotLevel
   const selections = actor.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {}
   if (input.spell.level > 0) {
@@ -145,7 +155,7 @@ export function prepareDnd5eAdjudicatedSpell(input: {
       : `dnd5e-spell-slot-${slotLevel}`
     const freeCastSource = dnd5eFreeSpellCastSource({
       classId: definition.id,
-      level: actor.level,
+      level: castingClassLevel,
       classSelections: selections,
       classResources: actor.classResources ?? {},
     }, { id: input.spell.id, level: input.spell.level }, slotLevel)
@@ -200,6 +210,8 @@ export function prepareDnd5eAdjudicatedSpell(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
+      castingClassId,
+      castingClassLevel,
       actorToken,
       slotLevel,
     },
@@ -249,6 +261,7 @@ export function resolvePreparedDnd5eAdjudicatedSpell(input: {
   const result = resolveDnd5eHeadlessAction(prepared.state, {
     type: 'adjudicated-spell',
     actorId: prepared.actorToken.id,
+    castingClassId: prepared.castingClassId,
     spellId: prepared.spell.id,
     spellName: prepared.spell.name,
     spellLevel: prepared.spell.level,

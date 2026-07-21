@@ -8,8 +8,10 @@ import {
   dnd5eBardMagicalSecretSpellIds,
   dnd5eCombatSpellSelectionLimits,
   dnd5eMetamagicCost,
+  dnd5eSelectedSpellIds,
   getDnd5eSrdCombatSpell,
 } from './spells'
+import { dnd5eClassDefinition } from './classes'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { prepareDnd5eCoreSpellAreaMove, resolvePreparedDnd5eCoreSpellAreaMove } from './coreSpellAreaAction'
 import { collectDnd5ePersistentAreaTriggers } from './pluginAreas'
@@ -56,6 +58,31 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
+
+  it('casts a secondary class spell with that class ability and class level', () => {
+    const multiclass = character('multiclass', dnd5eClassDefinition('fighter')!.name, {
+      level: 6,
+      dnd5eClassLevels: { fighter: 1, wizard: 5 },
+      dnd5eClassChoices: {
+        classes: {
+          fighter: {},
+          wizard: { selections: { 'spell-cantrips': ['fire-bolt'] } },
+        },
+      },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(multiclass, 'fire-bolt', 0, enemy)
+    input.action.dnd5eSpellCast!.castingClassId = 'wizard'
+
+    expect(dnd5eSelectedSpellIds(multiclass)).toContain('fire-bolt')
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ castingClassId: 'wizard', castingClassLevel: 5 })
+    expect(previewDnd5eSpellAttack(prepared.prepared, 10).roll.modifier).toBe(6)
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, d20: 15, effectRolls: [5, 5] })
+    expect(resolved.result.ok).toBe(true)
+  })
 
   it('casts Moonbeam into an empty area and creates a concentration-linked authority area', () => {
     const druid = character('druid', '德鲁伊', {

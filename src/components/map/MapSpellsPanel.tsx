@@ -4,7 +4,7 @@ import { useSpellbookStore } from '../../store/spellbook'
 import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
 
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
-import { DND5E_IMPLEMENTED_METAMAGIC_IDS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eSelectedCombatSpellIds, dnd5eSelectedSpellIds, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, registeredDnd5ePluginSpells } from '../../rulesets/dnd5e'
+import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_SRD_CLASS_DEFINITIONS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, normalizeDnd5eClassLevels, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
 
 const DAMAGE_TYPE_LABELS: Record<string, string> = {
   acid: '强酸', cold: '冷冻', fire: '火焰', lightning: '闪电', poison: '毒素',
@@ -38,8 +38,8 @@ interface MapSpellsPanelProps {
     maximumFeet: number
   }[]
   movingPersistentAreaId?: string
-  onCastSpell?: (spellId: string, slotLevel: number, options?: { overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
-  onRequestAdjudication?: (spellId: string, slotLevel: number) => void
+  onCastSpell?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId, options?: { overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
+  onRequestAdjudication?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId) => void
   onConfirmSpellTargets?: () => void
   onUndoSpellTarget?: () => void
   onToggleSculptSpellTargets?: () => void
@@ -71,6 +71,7 @@ export default function MapSpellsPanel({
   const [empoweredBySpell, setEmpoweredBySpell] = useState<Record<string, boolean>>({})
   const [draconicResistanceBySpell, setDraconicResistanceBySpell] = useState<Record<string, boolean>>({})
   const [repellingBlastBySpell, setRepellingBlastBySpell] = useState<Record<string, boolean>>({})
+  const [selectedCastingClassId, setSelectedCastingClassId] = useState<Dnd5eClassId | undefined>()
 
   if (!c) return null
 
@@ -78,20 +79,26 @@ export default function MapSpellsPanel({
     return <p className="py-6 text-center text-sm text-slate-500">该角色不是当前 SRD 5.1 角色，请先完成存档迁移。</p>
   }
 
-    const definition = dnd5eClassDefinitionForCharacter(c)
+    const classLevels = normalizeDnd5eClassLevels(c)
+    const castingDefinitions = DND5E_SRD_CLASS_DEFINITIONS.filter((candidate) =>
+      !!candidate.spellcasting && (classLevels[candidate.id] ?? 0) > 0,
+    )
+    const definition = castingDefinitions.find((candidate) => candidate.id === selectedCastingClassId) ?? castingDefinitions[0]
     if (!definition?.spellcasting) {
       return <p className="py-6 text-center text-sm text-slate-500">该职业在 SRD 5.1 中没有施法或契约魔法。</p>
     }
-    const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, c.level - 1))]
+    const classLevel = classLevels[definition.id] ?? 0
+    const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, classLevel - 1))]
     const slots = classResourceDefinitions(c)
       .filter((resource) => resource.key.startsWith('dnd5e-spell-slot-') || resource.key === 'dnd5e-pact-slot' || resource.key.startsWith('dnd5e-mystic-arcanum-'))
       .map((resource) => ({ resource, state: getClassResource(c, resource.key) }))
       .filter((entry) => entry.state && entry.state.max > 0)
-    const selectedSpells = dnd5eSelectedCombatSpellIds(c)
+    const selectedClassSpellIds = dnd5eSelectedSpellIdsForClass(c, definition.id)
+    const selectedSpells = selectedClassSpellIds
       .map((id) => getDnd5eSrdCombatSpell(id))
       .filter((spell) => !!spell)
     const spellbookById = new Map(dnd5eSpellbookEntriesWithPlugins(importedSpells, registeredDnd5ePluginSpells()).map((spell) => [spell.id, spell]))
-    const selectedSpellbookEntries = dnd5eSelectedSpellIds(c)
+    const selectedSpellbookEntries = selectedClassSpellIds
       .map((id) => spellbookById.get(id))
       .filter((spell): spell is NonNullable<typeof spell> => !!spell)
     const pluginHeadlessSpells = selectedSpellbookEntries.filter((entry) =>
@@ -100,9 +107,22 @@ export default function MapSpellsPanel({
     const adjudicatedSpells = selectedSpellbookEntries.filter((entry) =>
       !entry.headless || (entry.sourceKind === 'room-import' && !dnd5ePluginSpellAutomationSupported(dnd5ePluginSpellDefinition(entry.id))),
     )
-    const wildShapeBlocksSpellcasting = !!c.dnd5eCombatState?.wildShapeFormId && c.level < 18
+    const wildShapeBlocksSpellcasting = !!c.dnd5eCombatState?.wildShapeFormId &&
+      (definition.id !== 'druid' || classLevel < 18)
     return (
       <div className="space-y-3 py-2">
+        {castingDefinitions.length > 1 ? <label className="flex items-center justify-between gap-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 text-xs text-slate-400">
+          <span>施法职业</span>
+          <select
+            value={definition.id}
+            onChange={(event) => setSelectedCastingClassId(event.target.value as Dnd5eClassId)}
+            className="rounded-lg border border-white/10 bg-void-950/70 px-2 py-1 text-xs text-slate-200"
+          >
+            {castingDefinitions.map((candidate) => <option key={candidate.id} value={candidate.id}>
+              {candidate.name} {classLevels[candidate.id]}级
+            </option>)}
+          </select>
+        </label> : null}
         <div>
           <h4 className="text-sm font-semibold text-slate-200">{definition.name}法术资源</h4>
           <p className="mt-1 text-xs text-slate-500">SRD 5.1 · {definition.spellcasting.kind === 'pact' ? '契约位在短休或长休后恢复' : '法术位在长休后恢复'}。</p>
@@ -133,10 +153,10 @@ export default function MapSpellsPanel({
         </div> : null}
         {selectedSpells.length > 0 ? <div className="grid gap-2">
           {selectedSpells.map((spell) => {
-            const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(c.level) : undefined
+            const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
             const freeBaseCast = spell.level > 0 ? dnd5eFreeSpellCastSource({
               classId: definition.id,
-              level: c.level,
+              level: classLevel,
               classSelections: c.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {},
               classResources: c.classResources ?? {},
             }, spell, spell.level) : undefined
@@ -152,7 +172,7 @@ export default function MapSpellsPanel({
             const canOverchannel = selectedSlot != null && dnd5eCanOverchannelSpell({
               classId: definition.id,
               subclassId: c.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
-              level: c.level,
+              level: classLevel,
             }, spell, selectedSlot)
             const overchannel = canOverchannel && overchannelBySpell[spell.id] === true
             const priorOverchannelUses = Math.max(0, Math.floor(c.dnd5eCombatState?.overchannelUsesSinceLongRest ?? 0))
@@ -174,7 +194,7 @@ export default function MapSpellsPanel({
             const draconicResistanceType = dnd5eDraconicElementalResistanceType({
               classId: definition.id,
               subclassId: c.dnd5eClassChoices?.classes?.[definition.id]?.subclass,
-              level: c.level,
+              level: classLevel,
               classSelections: c.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {},
             }, spell)
             const draconicResistance = !!draconicResistanceType && draconicResistanceBySpell[spell.id] === true
@@ -282,7 +302,7 @@ export default function MapSpellsPanel({
               <button
                 type="button"
                 disabled={!canAct || pending || selectedSlot == null || wildShapeBlocksSpellcasting || spell.castingTime === 'reaction' || totalSorceryPointCost > sorceryPoints}
-                onClick={() => selectedSlot != null && onCastSpell?.(spell.id, selectedSlot, {
+                onClick={() => selectedSlot != null && onCastSpell?.(spell.id, selectedSlot, definition.id, {
                   overchannel,
                   metamagic: selectedMetamagic ? { kind: selectedMetamagic } : undefined,
                   empowered,
@@ -372,7 +392,7 @@ export default function MapSpellsPanel({
           </div>
           {pluginHeadlessSpells.map((entry) => {
             const spell = entry.imported!
-            const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(c.level) : undefined
+            const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
             const availableLevels = spell.level === 0 ? [0] : pactLevel != null && spell.level <= 5
               ? ((getClassResource(c, 'dnd5e-pact-slot')?.current ?? 0) > 0 && pactLevel >= spell.level ? [pactLevel] : [])
               : Array.from({ length: 9 - spell.level + 1 }, (_, index) => spell.level + index)
@@ -387,7 +407,7 @@ export default function MapSpellsPanel({
                 </select> : null}
               </div>
               <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-500">{spell.description}</p>
-              <button type="button" disabled={!canAct || pending || selectedSlot == null || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => selectedSlot != null && onCastSpell?.(entry.id, selectedSlot)} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
+              <button type="button" disabled={!canAct || pending || selectedSlot == null || wildShapeBlocksSpellcasting || spell.castingTime.unit === 'reaction'} onClick={() => selectedSlot != null && onCastSpell?.(entry.id, selectedSlot, definition.id)} className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === entry.id ? 'bg-amber-400 text-void-950' : 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'}`}>
                 {targetingSpellId === entry.id ? '请点击地图目标' : spell.castingTime.unit === 'reaction' ? '反应法术暂不支持主动施放' : '选择目标并施放'}
               </button>
             </div>
@@ -403,10 +423,10 @@ export default function MapSpellsPanel({
           <div className="grid gap-2">
             {adjudicatedSpells.map((spell) => {
               const castingTime = dnd5eSpellbookEntryCastingTime(spell)
-              const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(c.level) : undefined
+              const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
               const freeBaseCast = spell.level > 0 ? dnd5eFreeSpellCastSource({
                 classId: definition.id,
-                level: c.level,
+                level: classLevel,
                 classSelections: c.dnd5eClassChoices?.classes?.[definition.id]?.selections ?? {},
                 classResources: c.classResources ?? {},
               }, { id: spell.id, level: spell.level }, spell.level) : undefined
@@ -446,7 +466,7 @@ export default function MapSpellsPanel({
                 <button
                   type="button"
                   disabled={!canAct || pending || selectedSlot == null || wildShapeBlocksSpellcasting || unsupported}
-                  onClick={() => selectedSlot != null && onRequestAdjudication?.(spell.id, selectedSlot)}
+                  onClick={() => selectedSlot != null && onRequestAdjudication?.(spell.id, selectedSlot, definition.id)}
                   className="mt-2 w-full rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {castingTime === 'reaction'

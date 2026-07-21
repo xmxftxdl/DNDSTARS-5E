@@ -5,6 +5,8 @@ import {
   type ClassResourceReset,
 } from './classDefinitionRegistry'
 import { dnd5ePluginClassResourceDefinitions } from '../rulesets/dnd5e/pluginApi'
+import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
+import { dnd5eMulticlassPactSlots, dnd5eMulticlassSpellSlots, normalizeDnd5eClassLevels } from '../rulesets/dnd5e/multiclass'
 
 function finiteNonNegative(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
@@ -18,11 +20,73 @@ function clampResource(current: unknown, max: number): CharacterResourceState {
   }
 }
 
+function dnd5eClassViews(character: Character): Character[] {
+  if (character.rulesetId !== 'dnd5e-2014-srd-5.1') return [character]
+  const views = Object.entries(normalizeDnd5eClassLevels(character)).flatMap(([classId, level]) => {
+    const definition = dnd5eClassDefinition(classId)
+    return definition && level ? [{ ...character, charClass: definition.name, level }] : []
+  })
+  return views.length > 0 ? views : [character]
+}
+
+function registeredResourceDefinitions(character: Character): ClassResourceDefinition[] {
+  const views = dnd5eClassViews(character)
+  const definitions = views.flatMap((view) => {
+    const registered = classDefinitionForCharacter(view)?.resources
+    const native = typeof registered === 'function' ? registered(view) : (registered ?? [])
+    return [...native, ...dnd5ePluginClassResourceDefinitions(view)].map((definition) => ({
+      ...definition,
+      isAvailable: () => definition.isAvailable(view),
+      max: () => definition.max(view),
+      unlimited: definition.unlimited ? () => definition.unlimited!(view) : undefined,
+    }))
+  })
+  if (character.rulesetId !== 'dnd5e-2014-srd-5.1') return definitions
+
+  const withoutSharedSlots = definitions.filter((definition) =>
+    !definition.key.startsWith('dnd5e-spell-slot-') && definition.key !== 'dnd5e-pact-slot')
+  const deduplicated = new Map<string, ClassResourceDefinition>()
+  for (const definition of withoutSharedSlots) {
+    const previous = deduplicated.get(definition.key)
+    if (!previous) {
+      deduplicated.set(definition.key, definition)
+      continue
+    }
+    deduplicated.set(definition.key, {
+      ...previous,
+      isAvailable: () => previous.isAvailable(character) || definition.isAvailable(),
+      max: () => Math.max(previous.max(character), definition.max()),
+      unlimited: () => previous.unlimited?.(character) === true || definition.unlimited?.() === true,
+    })
+  }
+
+  const slots = dnd5eMulticlassSpellSlots(character)
+  slots.forEach((maximum, index) => {
+    if (maximum < 1) return
+    const spellLevel = index + 1
+    deduplicated.set(`dnd5e-spell-slot-${spellLevel}`, {
+      key: `dnd5e-spell-slot-${spellLevel}`,
+      label: `${spellLevel}环法术位`,
+      shortLabel: `${spellLevel}环`,
+      isAvailable: () => true,
+      max: () => maximum,
+      resetOn: 'long-rest',
+    })
+  })
+  const pact = dnd5eMulticlassPactSlots(character)
+  if (pact) deduplicated.set('dnd5e-pact-slot', {
+    key: 'dnd5e-pact-slot',
+    label: `契约法术位（${pact.slotLevel}环）`,
+    shortLabel: '契约位',
+    isAvailable: () => true,
+    max: () => pact.count,
+    resetOn: 'short-rest',
+  })
+  return [...deduplicated.values()]
+}
+
 export function classResourceDefinitions(character: Character): readonly ClassResourceDefinition[] {
-  const registered = classDefinitionForCharacter(character)?.resources
-  const definitions = typeof registered === 'function' ? registered(character) : (registered ?? [])
-  return [...definitions, ...dnd5ePluginClassResourceDefinitions(character)]
-    .filter((resource) => resource.isAvailable(character))
+  return registeredResourceDefinitions(character).filter((resource) => resource.isAvailable(character))
 }
 
 export function classResourceDefinition(character: Character, key: string): ClassResourceDefinition | undefined {
@@ -49,11 +113,7 @@ function withClassResources(character: Character, resources: Record<string, Char
 
 export function syncCharacterClassResources(character: Character): Character {
   const available = classResourceDefinitions(character)
-  const registered = classDefinitionForCharacter(character)?.resources
-  const registeredDefinitions = [
-    ...(typeof registered === 'function' ? registered(character) : (registered ?? [])),
-    ...dnd5ePluginClassResourceDefinitions(character),
-  ]
+  const registeredDefinitions = registeredResourceDefinitions(character)
   const registeredKeys = new Set(
     registeredDefinitions.map((resource) => resource.key),
   )

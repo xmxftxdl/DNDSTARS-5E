@@ -15,6 +15,7 @@ import {
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import { syncDnd5ePrimalChampion } from './hitPoints'
 import { dnd5eCharacterHasPluginFeature, dnd5ePluginBackgroundDefinition, registeredDnd5ePluginFeatures } from './pluginApi'
+import { dnd5eCharacterClassLevel, dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels, type Dnd5eClassLevels } from './multiclass'
 
 export interface Dnd5eDeathSaves {
   successes: number
@@ -47,7 +48,10 @@ export interface Dnd5eCharacter {
   classResources: Record<string, { current: number; max: number }>
   classId?: Dnd5eClassId
   subclassId?: string
+  classLevels: Dnd5eClassLevels
+  subclassIds: Partial<Record<Dnd5eClassId, string>>
   classSelections: Record<string, string[]>
+  classSelectionsByClass: Partial<Record<Dnd5eClassId, Record<string, string[]>>>
   pluginFeatureIds: readonly string[]
   wearingArmor: boolean
   wearingHeavyArmor: boolean
@@ -66,9 +70,10 @@ function normalizedDamageTypes(values: readonly string[] | undefined): Dnd5eDama
 
 function dnd5eClassResources(character: Character): Record<string, { current: number; max: number }> {
   const resources = Object.fromEntries(Object.entries(character.classResources ?? {}).map(([key, value]) => [key, { ...value }]))
-  if (character.charClass !== '战士') return resources
+  const fighterLevel = dnd5eCharacterClassLevel(character, 'fighter')
+  if (fighterLevel < 1) return resources
   for (const key of Object.values(FIGHTER_RESOURCE_KEYS)) {
-    const resource = fighterResourceState(character, key)
+    const resource = fighterResourceState({ ...character, level: fighterLevel }, key)
     if (resource.max > 0) resources[key] = resource
   }
   return resources
@@ -102,7 +107,8 @@ function parseHitPointDie(value: string): number {
  */
 export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharacter {
   const character = syncDnd5ePrimalChampion(inputCharacter)
-  const level = Math.min(20, Math.max(1, Math.floor(character.level)))
+  const classLevels = normalizeDnd5eClassLevels(character)
+  const level = dnd5eTotalCharacterLevel(character)
   const hitDieSides = parseHitPointDie(character.hitDice)
   const classDefinition = dnd5eClassDefinitionForCharacter(character)
   const subclassId = classDefinition?.id === 'fighter'
@@ -114,14 +120,32 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
   const exhaustionLevel = Math.min(6, Math.max(0, Math.floor(character.exhaustionLevel ?? 0)))
   const storedMaxHp = Math.max(1, Math.floor(character.maxHp))
   const effectiveMaxHp = exhaustionLevel >= 4 ? Math.max(1, Math.floor(storedMaxHp / 2)) : storedMaxHp
-  const classSelections: Record<string, string[]> = classDefinition
-    ? {
-        ...Object.fromEntries(Object.entries(character.dnd5eClassChoices?.classes?.[classDefinition.id]?.selections ?? {}).map(([key, values]) => [key, [...values]])),
-        ...(classDefinition.id === 'fighter' ? { 'fighting-style': [...fighterSelectedFightingStyles(character)] } : {}),
-      }
-    : {}
-  const loreBonusSkills = classDefinition?.id === 'bard' ? classSelections['lore-bonus-skills'] ?? [] : []
-  const beguilingInfluenceSkills = classDefinition?.id === 'warlock' &&
+  const classSelectionsByClass = Object.fromEntries(Object.keys(classLevels).map((classId) => {
+    const typedClassId = classId as Dnd5eClassId
+    const selections = Object.fromEntries(Object.entries(character.dnd5eClassChoices?.classes?.[typedClassId]?.selections ?? {})
+      .map(([key, values]) => [key, [...values]]))
+    if (typedClassId === 'fighter') selections['fighting-style'] = [...fighterSelectedFightingStyles({
+      ...character,
+      level: dnd5eCharacterClassLevel(character, 'fighter'),
+    })]
+    return [typedClassId, selections]
+  })) as Partial<Record<Dnd5eClassId, Record<string, string[]>>>
+  const classSelections: Record<string, string[]> = Object.values(classSelectionsByClass).reduce<Record<string, string[]>>(
+    (all, selections) => {
+      for (const [key, values] of Object.entries(selections ?? {})) all[key] = [...new Set([...(all[key] ?? []), ...values])]
+      return all
+    },
+    {},
+  )
+  const subclassIds = Object.fromEntries(Object.keys(classLevels).flatMap((classId) => {
+    const typedClassId = classId as Dnd5eClassId
+    const selected = typedClassId === 'fighter'
+      ? character.dnd5eClassChoices?.fighter?.subclass
+      : character.dnd5eClassChoices?.classes?.[typedClassId]?.subclass
+    return selected ? [[typedClassId, selected]] : []
+  })) as Partial<Record<Dnd5eClassId, string>>
+  const loreBonusSkills = dnd5eCharacterClassLevel(character, 'bard') >= 3 ? classSelections['lore-bonus-skills'] ?? [] : []
+  const beguilingInfluenceSkills = dnd5eCharacterClassLevel(character, 'warlock') >= 2 &&
     classSelections['eldritch-invocations']?.includes('beguiling-influence')
     ? ['deception', 'persuasion']
     : []
@@ -143,7 +167,9 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     exhaustionLevel,
     speed: dnd5eWalkingSpeed(character),
     initiativeBonus: Math.floor(character.initiativeBonus),
-    hitPointDice: [{ sides: hitDieSides, current: level, max: level }],
+    hitPointDice: character.hitPointDice?.length
+      ? character.hitPointDice.map((pool) => ({ ...pool }))
+      : [{ sides: hitDieSides, current: level, max: level }],
     deathSaves: { successes: 0, failures: 0, stable: false, dead: false },
     concentrating: character.concentrating ?? false,
     inspiration: character.inspiration > 0,
@@ -151,7 +177,10 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     classResources: dnd5eClassResources(character),
     classId: classDefinition?.id,
     subclassId,
+    classLevels,
+    subclassIds,
     classSelections,
+    classSelectionsByClass,
     pluginFeatureIds: registeredDnd5ePluginFeatures()
       .filter((feature) => dnd5eCharacterHasPluginFeature(character, feature.id))
       .map((feature) => feature.id),
@@ -210,7 +239,10 @@ export function createCombatantFromDnd5eCharacter(input: {
     classResources: character.classResources,
     classId: character.classId,
     subclassId: character.subclassId,
+    classLevels: character.classLevels,
+    subclassIds: character.subclassIds,
     classSelections: character.classSelections,
+    classSelectionsByClass: character.classSelectionsByClass,
     pluginFeatureIds: character.pluginFeatureIds,
     wearingArmor: character.wearingArmor,
     wearingHeavyArmor: character.wearingHeavyArmor,

@@ -2,11 +2,12 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eMetamagicId } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
-import { dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5ePactSlotLevel, dnd5ePreparedSpellCount, type Dnd5eClassId } from './classes'
+import { dnd5eClassDefinition, dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5ePactSlotLevel, dnd5ePreparedSpellCount, type Dnd5eClassId } from './classes'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import type { Dnd5eDamageType } from './monsters'
 import { dnd5eBardMagicalSecretsOptions } from './spellCatalog'
 import { imposeDnd5eRollDisadvantage } from './rollMode'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
@@ -699,13 +700,16 @@ export function dnd5eBardMagicalSecretSpellIds(character: Character): readonly s
 }
 
 /** All spells selected on the character sheet, including reference-only entries. */
-export function dnd5eSelectedSpellIds(character: Character): readonly string[] {
-  const definition = dnd5eClassDefinitionForCharacter(character)
+export function dnd5eSelectedSpellIdsForClass(character: Character, classId: Dnd5eClassId): readonly string[] {
+  const definition = dnd5eClassDefinition(classId)
   if (!definition?.spellcasting) return []
+  const classLevel = dnd5eCharacterClassLevel(character, classId)
+  if (classLevel < 1) return []
+  const classCharacter = { ...character, charClass: definition.name, level: classLevel }
   const selections = character.dnd5eClassChoices?.classes?.[definition.id]?.selections
   return [...new Set([
     ...(selections?.['spell-cantrips'] ?? []),
-    ...(selections?.[dnd5eSpellSelectionKey(character) ?? ''] ?? []),
+    ...(selections?.[dnd5eSpellSelectionKey(classCharacter) ?? ''] ?? []),
     ...(selections?.['spell-mastery-1'] ?? []),
     ...(selections?.['spell-mastery-2'] ?? []),
     ...(selections?.['signature-spells'] ?? []),
@@ -713,8 +717,48 @@ export function dnd5eSelectedSpellIds(character: Character): readonly string[] {
     ...(selections?.['mystic-arcanum-7'] ?? []),
     ...(selections?.['mystic-arcanum-8'] ?? []),
     ...(selections?.['mystic-arcanum-9'] ?? []),
-    ...dnd5eBardMagicalSecretSpellIds(character),
+    ...(classId === 'bard' ? dnd5eBardMagicalSecretSpellIds(classCharacter) : []),
   ])]
+}
+
+/** All spells selected on every owned spellcasting class. */
+export function dnd5eSelectedSpellIds(character: Character): readonly string[] {
+  return [...new Set((Object.keys(normalizeDnd5eClassLevels(character)) as Dnd5eClassId[])
+    .flatMap((classId) => dnd5eSelectedSpellIdsForClass(character, classId)))]
+}
+
+/**
+ * Returns every owned class that can authoritatively cast this selected spell.
+ * Bard Magical Secrets remain bard spells for this purpose even when the spell
+ * does not normally appear on the bard list.
+ */
+export function dnd5eSpellcastingClassIdsForSpell(
+  character: Character,
+  spellId: string,
+  allowedClasses?: readonly Dnd5eClassId[],
+): readonly Dnd5eClassId[] {
+  return (Object.keys(normalizeDnd5eClassLevels(character)) as Dnd5eClassId[]).filter((classId) => {
+    if (!dnd5eClassDefinition(classId)?.spellcasting) return false
+    if (!dnd5eSelectedSpellIdsForClass(character, classId).includes(spellId)) return false
+    if (!allowedClasses || allowedClasses.includes(classId)) return true
+    return classId === 'bard' && dnd5eBardMagicalSecretSpellIds({
+      ...character,
+      charClass: dnd5eClassDefinition('bard')!.name,
+      level: dnd5eCharacterClassLevel(character, 'bard'),
+    }).includes(spellId)
+  })
+}
+
+export function dnd5eSpellcastingClassIdForSpell(
+  character: Character,
+  spellId: string,
+  requestedClassId?: Dnd5eClassId,
+  allowedClasses?: readonly Dnd5eClassId[],
+): Dnd5eClassId | undefined {
+  const available = dnd5eSpellcastingClassIdsForSpell(character, spellId, allowedClasses)
+  if (requestedClassId) return available.includes(requestedClassId) ? requestedClassId : undefined
+  const primary = dnd5eClassDefinitionForCharacter(character)?.id
+  return primary && available.includes(primary) ? primary : available[0]
 }
 
 export function dnd5eSelectedCombatSpellIds(character: Character): readonly string[] {

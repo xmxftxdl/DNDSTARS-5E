@@ -4,6 +4,7 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import type { Dnd5eTurnEconomyByToken, Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { dnd5eCharacterClassLevel } from './multiclass'
 import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eWeaponAttackProfile } from './equipment'
@@ -128,12 +129,12 @@ export function prepareDnd5eOpportunityAttack(input: {
   if (target ? target.currentHp <= 0 : (targetToken.hp ?? 1) <= 0) return { ok: false, reason: 'invalid-target' }
   if (
     input.reactionFeature === 'berserker-retaliation' &&
-    (!actor || actor.charClass !== '野蛮人' || actor.level < 14 || actor.dnd5eClassChoices?.classes?.barbarian?.subclass !== 'berserker')
+    (!actor || dnd5eCharacterClassLevel(actor, 'barbarian') < 14 || actor.dnd5eClassChoices?.classes?.barbarian?.subclass !== 'berserker')
   ) return { ok: false, reason: 'invalid-actor' }
   if (
     input.reactionFeature === 'hunter-giant-killer' &&
     (
-      !actor || actor.charClass !== '游侠' || actor.level < 3 ||
+      !actor || dnd5eCharacterClassLevel(actor, 'ranger') < 3 ||
       actor.dnd5eClassChoices?.classes?.ranger?.subclass !== 'hunter' ||
       !actor.dnd5eClassChoices?.classes?.ranger?.selections?.['hunters-prey']?.includes('giant-killer')
     )

@@ -1,6 +1,7 @@
 import type { Character } from '../../types/character'
 import { dnd5eDruidWildShapeLimits } from './classes'
 import { DND5E_SRD_MONSTERS, type Dnd5eMonsterStatBlock } from './monsters'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export const DND5E_WILD_SHAPE_KNOWN_FORMS_KEY = 'wild-shape-known-forms'
 
@@ -15,11 +16,12 @@ export function dnd5eWildShapeDurationHours(level: number): number {
 }
 
 export function dnd5eAvailableWildShapeForms(
-  character: Pick<Character, 'charClass' | 'level'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
   monsters: readonly Dnd5eMonsterStatBlock[] = DND5E_SRD_MONSTERS,
 ): readonly Dnd5eMonsterStatBlock[] {
-  if (character.charClass !== '德鲁伊' || character.level < 2) return []
-  return monsters.filter((monster) => dnd5eWildShapeFormAllowedForLevel(character.level, monster))
+  const druidLevel = dnd5eCharacterClassLevel(character, 'druid')
+  if (druidLevel < 2) return []
+  return monsters.filter((monster) => dnd5eWildShapeFormAllowedForLevel(druidLevel, monster))
 }
 
 export function dnd5eWildShapeFormAllowedForLevel(level: number, monster: Dnd5eMonsterStatBlock): boolean {
@@ -32,14 +34,14 @@ export function dnd5eWildShapeFormAllowedForLevel(level: number, monster: Dnd5eM
 }
 
 export function dnd5eKnownWildShapeForms(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): readonly Dnd5eMonsterStatBlock[] {
   const known = new Set(character.dnd5eClassChoices?.classes?.druid?.selections?.[DND5E_WILD_SHAPE_KNOWN_FORMS_KEY] ?? [])
   return dnd5eAvailableWildShapeForms(character).filter((monster) => known.has(monster.id))
 }
 
 export function dnd5eCanWildShapeInto(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
   formId: string,
 ): boolean {
   return dnd5eKnownWildShapeForms(character).some((monster) => monster.id === formId)

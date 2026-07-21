@@ -1,6 +1,6 @@
 import type { Character } from '../../types/character'
 import type { Dnd5eAttackRollRerollEffect, Dnd5eInventoryEntry, Dnd5eInventoryResourceState } from '../../types/inventory'
-import { normalizeDnd5eInventory } from './items'
+import { dnd5eInventoryEntryIsActive, normalizeDnd5eInventory } from './items'
 
 export interface Dnd5eAttackRollRerollCandidate {
   instanceId: string
@@ -14,7 +14,7 @@ export function dnd5eAttackRollRerollCandidates(
   weaponId: string,
 ): Dnd5eAttackRollRerollCandidate[] {
   return normalizeDnd5eInventory(character).entries.flatMap((entry) => {
-    if (!entry.equippedSlot) return []
+    if (!entry.equippedSlot || !dnd5eInventoryEntryIsActive(entry)) return []
     return (entry.item.headlessEffects ?? []).flatMap((effect) => {
       if (effect.kind !== 'attack-roll-reroll') return []
       if (effect.appliesTo === 'attacks-with-this-weapon' && entry.item.equipment?.id !== weaponId) return []

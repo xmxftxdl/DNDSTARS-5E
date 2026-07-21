@@ -681,6 +681,14 @@ export function dnd5eClassDefinitionForCharacter(character: Pick<Character, 'cha
   return byName.get(character.charClass)
 }
 
+function classLevel(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>, classId: Dnd5eClassId): number {
+  const stored = character.dnd5eClassLevels?.[classId]
+  if (stored != null) return Math.max(0, Math.min(20, Math.floor(stored)))
+  return dnd5eClassDefinition(character.charClass)?.id === classId
+    ? Math.max(1, Math.min(20, Math.floor(character.level)))
+    : 0
+}
+
 export function dnd5eClassChoiceLimit(group: Dnd5eClassChoiceGroup, level: number): number {
   const value = typeof group.maxSelections === 'function' ? group.maxSelections(level) : group.maxSelections
   return Math.max(0, Math.floor(value))
@@ -824,14 +832,14 @@ export function dnd5eRogueSneakAttackDice(level: number): number {
   return Math.ceil(Math.min(20, Math.max(1, Math.floor(level))) / 2)
 }
 
-export function dnd5eAttacksPerAttackAction(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>): number {
-  const level = Math.min(20, Math.max(1, Math.floor(character.level)))
-  if (character.charClass === '战士') return level >= 20 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1
-  if (['野蛮人', '武僧', '圣武士', '游侠'].includes(character.charClass)) return level >= 5 ? 2 : 1
+export function dnd5eAttacksPerAttackAction(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>): number {
+  const fighterLevel = classLevel(character, 'fighter')
+  let attacks = fighterLevel >= 20 ? 4 : fighterLevel >= 11 ? 3 : fighterLevel >= 5 ? 2 : 1
+  if ((['barbarian', 'monk', 'paladin', 'ranger'] as Dnd5eClassId[]).some((id) => classLevel(character, id) >= 5)) attacks = Math.max(attacks, 2)
   const invocations = character.dnd5eClassChoices?.classes?.warlock?.selections?.['eldritch-invocations'] ?? []
   const pact = character.dnd5eClassChoices?.classes?.warlock?.selections?.['pact-boon'] ?? []
-  if (character.charClass === '邪术师' && level >= 5 && invocations.includes('thirsting-blade') && pact.includes('blade')) return 2
-  return 1
+  if (classLevel(character, 'warlock') >= 5 && invocations.includes('thirsting-blade') && pact.includes('blade')) attacks = Math.max(attacks, 2)
+  return attacks
 }
 
 export function dnd5eSpellSaveDc(character: Pick<Character, 'charClass' | 'level' | 'abilities'>): number | undefined {
@@ -842,15 +850,14 @@ export function dnd5eSpellSaveDc(character: Pick<Character, 'charClass' | 'level
 }
 
 export function dnd5eUnproficientAbilityCheckBonus(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
   ability: AbilityKey,
   alreadyProficient = false,
 ): number {
   if (alreadyProficient) return 0
   const proficiency = 2 + Math.floor((Math.min(20, Math.max(1, character.level)) - 1) / 4)
-  const bardBonus = character.charClass === '吟游诗人' && character.level >= 2 ? Math.floor(proficiency / 2) : 0
-  const championBonus = character.charClass === '战士' &&
-    character.level >= 7 &&
+  const bardBonus = classLevel(character, 'bard') >= 2 ? Math.floor(proficiency / 2) : 0
+  const championBonus = classLevel(character, 'fighter') >= 7 &&
     character.dnd5eClassChoices?.fighter?.subclass === 'champion' &&
     (['str', 'dex', 'con'] as AbilityKey[]).includes(ability)
     ? Math.ceil(proficiency / 2)
@@ -859,17 +866,17 @@ export function dnd5eUnproficientAbilityCheckBonus(
 }
 
 export function dnd5eEffectiveSavingThrowProficiencies(
-  character: Pick<Character, 'charClass' | 'level' | 'savingThrows'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'savingThrows'>,
 ): readonly AbilityKey[] {
-  if (character.charClass === '武僧' && character.level >= 14) return ['str', 'dex', 'con', 'int', 'wis', 'cha']
-  if (character.charClass === '游荡者' && character.level >= 15) return [...new Set([...character.savingThrows, 'wis' as const])]
+  if (classLevel(character, 'monk') >= 14) return ['str', 'dex', 'con', 'int', 'wis', 'cha']
+  if (classLevel(character, 'rogue') >= 15) return [...new Set([...character.savingThrows, 'wis' as const])]
   return character.savingThrows
 }
 
 export function dnd5eSelfSavingThrowAuraBonus(
-  character: Pick<Character, 'charClass' | 'level' | 'abilities'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities'>,
 ): number {
-  if (character.charClass !== '圣武士' || character.level < 6) return 0
+  if (classLevel(character, 'paladin') < 6) return 0
   return Math.max(1, Math.floor((character.abilities.cha - 10) / 2))
 }
 
@@ -892,16 +899,18 @@ export function dnd5eWizardArcaneRecoveryLevels(level: number): number {
 }
 
 /** 以角色存档中的种族基础速度为基准，应用职业带来的步行速度修正。 */
-export function dnd5eWalkingSpeed(character: Pick<Character, 'charClass' | 'level' | 'speed' | 'equipment' | 'exhaustionLevel'>): number {
+export function dnd5eWalkingSpeed(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel'>): number {
   const base = Math.max(0, Math.floor(character.speed))
   const armor = character.equipment?.armor?.dnd5e
   const hasArmor = armor?.kind === 'armor' || !!character.equipment?.armor
   const hasShield = character.equipment?.offHand?.dnd5e?.kind === 'shield'
   const wearingHeavyArmor = armor?.kind === 'armor' && armor.category === 'heavy'
   let speed = base
-  if (character.charClass === '野蛮人' && character.level >= 5 && !wearingHeavyArmor) speed += 10
-  if (character.charClass === '武僧' && character.level >= 2 && !hasArmor && !hasShield) {
-    speed += dnd5eMonkUnarmoredMovementBonus(character.level)
+  const barbarianLevel = classLevel(character, 'barbarian')
+  const monkLevel = classLevel(character, 'monk')
+  if (barbarianLevel >= 5 && !wearingHeavyArmor) speed += 10
+  if (monkLevel >= 2 && !hasArmor && !hasShield) {
+    speed += dnd5eMonkUnarmoredMovementBonus(monkLevel)
   }
   speed += dnd5eEquippedEffectTotal(character, 'speedBonusFeet')
   speed = Math.max(0, speed)
@@ -912,7 +921,7 @@ export function dnd5eWalkingSpeed(character: Pick<Character, 'charClass' | 'leve
 
 /** 角色面板与地图回合资源使用的当前有效速度；基础速度仍由 dnd5eWalkingSpeed 提供给 Headless。 */
 export function dnd5eEffectiveWalkingSpeed(
-  character: Pick<Character, 'charClass' | 'level' | 'speed' | 'equipment' | 'exhaustionLevel' | 'dnd5eCombatState'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel' | 'dnd5eCombatState'>,
 ): number {
   return Math.max(
     0,
@@ -922,14 +931,14 @@ export function dnd5eEffectiveWalkingSpeed(
   )
 }
 
-function isSrdThief(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>, minimumLevel: number): boolean {
-  return character.charClass === '游荡者' && character.level >= minimumLevel &&
+function isSrdThief(character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>, minimumLevel: number): boolean {
+  return classLevel(character, 'rogue') >= minimumLevel &&
     character.dnd5eClassChoices?.classes?.rogue?.subclass === 'thief'
 }
 
 /** 飞檐走壁：普通攀爬每尺消耗 2 尺移动，3级盗贼子职改为 1:1。 */
 export function dnd5eClimbingMovementCost(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
   climbedFeet: number,
 ): number {
   const distance = Math.max(0, Math.floor(climbedFeet))
@@ -938,22 +947,22 @@ export function dnd5eClimbingMovementCost(
 
 /** 职业特性带来的助跑跳跃额外距离：勇士“运动健将”或盗贼“飞檐走壁”。 */
 export function dnd5eRunningJumpBonusFeet(
-  character: Pick<Character, 'charClass' | 'level' | 'abilities' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities' | 'dnd5eClassChoices'>,
 ): number {
   if (isSrdThief(character, 3)) return Math.max(0, Math.floor((character.abilities.dex - 10) / 2))
-  return fighterRemarkableAthleteRunningLongJumpBonus(character)
+  return fighterRemarkableAthleteRunningLongJumpBonus({ ...character, level: classLevel(character, 'fighter') })
 }
 
 /** 使用魔法装置：13级盗贼忽略魔法物品的职业、种族与等级要求。 */
 export function dnd5eIgnoresMagicItemRequirements(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): boolean {
   return isSrdThief(character, 13)
 }
 
 /** 盗贼反射的第二先攻值；实际额外回合由战斗调度器消费。 */
 export function dnd5eThiefReflexesInitiative(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
   initiative: number,
   surprised = false,
 ): number | undefined {
@@ -974,11 +983,11 @@ function restoreDnd5eResource(character: Character, key: string, amount: number)
 
 /** SRD 5.1 在投先攻时触发的 20 级职业资源兜底。 */
 export function applyDnd5eInitiativeResourceFeatures(character: Character): Character {
-  if (character.rulesetId !== 'dnd5e-2014-srd-5.1' || character.level < 20) return character
-  if (character.charClass === '吟游诗人' && character.classResources?.['dnd5e-bardic-inspiration']?.current === 0) {
+  if (character.rulesetId !== 'dnd5e-2014-srd-5.1') return character
+  if (classLevel(character, 'bard') >= 20 && character.classResources?.['dnd5e-bardic-inspiration']?.current === 0) {
     return restoreDnd5eResource(character, 'dnd5e-bardic-inspiration', 1)
   }
-  if (character.charClass === '武僧' && character.classResources?.['dnd5e-ki']?.current === 0) {
+  if (classLevel(character, 'monk') >= 20 && character.classResources?.['dnd5e-ki']?.current === 0) {
     return restoreDnd5eResource(character, 'dnd5e-ki', 4)
   }
   return character
@@ -988,8 +997,7 @@ export function applyDnd5eInitiativeResourceFeatures(character: Character): Char
 export function applyDnd5eShortRestResourceFeatures(character: Character): Character {
   if (
     character.rulesetId !== 'dnd5e-2014-srd-5.1' ||
-    character.charClass !== '术士' ||
-    character.level < 20
+    classLevel(character, 'sorcerer') < 20
   ) return character
   return restoreDnd5eResource(character, 'dnd5e-sorcery-points', 4)
 }

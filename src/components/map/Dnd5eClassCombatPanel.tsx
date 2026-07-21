@@ -11,6 +11,9 @@ import {
   dnd5eWalkingSpeed,
   dnd5eWeaponAttackProfile,
   getDnd5eSrdMonster,
+  DND5E_SRD_CLASS_DEFINITIONS,
+  normalizeDnd5eClassLevels,
+  type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 import Dnd5eBasicActionsPanel from './Dnd5eBasicActionsPanel'
@@ -35,7 +38,7 @@ export interface Dnd5eFeatureTargetOption {
   }[]
 }
 
-export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
+export default function Dnd5eClassCombatPanel({ character: storedCharacter, canAct, targeting, pending, turnEconomy, featureTargets, onAttack, onDisengage, onDodge, onBasicAction, onFeature }: {
   character: Character
   canAct: boolean
   targeting: boolean
@@ -48,9 +51,16 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
   onBasicAction: (payload: Dnd5eBasicActionPayload) => void
   onFeature: (payload: Dnd5eClassFeaturePayload) => void
 }) {
+  const classLevels = normalizeDnd5eClassLevels(storedCharacter)
+  const ownedDefinitions = DND5E_SRD_CLASS_DEFINITIONS.filter((candidate) => (classLevels[candidate.id] ?? 0) > 0)
+  const [selectedClassId, setSelectedClassId] = useState<Dnd5eClassId | undefined>()
+  const selectedDefinition = ownedDefinitions.find((candidate) => candidate.id === selectedClassId) ?? ownedDefinitions[0]
+  const character = selectedDefinition
+    ? { ...storedCharacter, charClass: selectedDefinition.name, level: classLevels[selectedDefinition.id] ?? storedCharacter.level }
+    : storedCharacter
   const definition = dnd5eClassDefinitionForCharacter(character)
-  const profile = dnd5eWeaponAttackProfile(character)
-  const offHandProfile = dnd5eOffHandWeaponAttackProfile(character)
+  const profile = dnd5eWeaponAttackProfile(storedCharacter)
+  const offHandProfile = dnd5eOffHandWeaponAttackProfile(storedCharacter)
   const activeWildShape = character.dnd5eCombatState?.wildShapeFormId
     ? getDnd5eSrdMonster(character.dnd5eCombatState.wildShapeFormId)
     : undefined
@@ -97,18 +107,26 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
   const hunterMultiattackAvailable = !!profile && turnEconomy.action.current > 0 &&
     ((hunterMultiattack === 'volley' && profile.mode === 'ranged') ||
       (hunterMultiattack === 'whirlwind-attack' && profile.mode === 'melee'))
-  const attacksPerAction = dnd5eAttacksPerAttackAction(character)
+  const attacksPerAction = dnd5eAttacksPerAttackAction(storedCharacter)
   const attackLimit = attacksPerAction * Math.max(1, turnEconomy.action.max)
   const canContinueAttackAction = turnEconomy.attacksUsed > 0 && turnEconomy.attacksUsed % attacksPerAction !== 0
   const weaponAttackAvailable = turnEconomy.attacksUsed < attackLimit && (turnEconomy.action.current > 0 || canContinueAttackAction)
   const offHandAttackAvailable = !!offHandProfile && turnEconomy.attacksUsed > 0 && turnEconomy.bonusAction.current > 0
-  const resources = classResourceDefinitions(character)
+  const resources = classResourceDefinitions(storedCharacter)
     .filter((resource) => !resource.key.startsWith('dnd5e-spell-slot-') && resource.key !== 'dnd5e-pact-slot')
-    .map((resource) => ({ resource, state: getClassResource(character, resource.key) }))
+    .map((resource) => ({ resource, state: getClassResource(storedCharacter, resource.key) }))
     .filter((entry) => entry.state)
 
   return (
     <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+      {ownedDefinitions.length > 1 && <section className="rounded-xl border border-violet-400/15 bg-violet-500/[0.05] p-3 md:col-span-2">
+        <label className="flex items-center justify-between gap-3 text-xs text-slate-400">
+          <span>当前职业操作面板</span>
+          <select value={definition?.id} onChange={(event) => setSelectedClassId(event.target.value as Dnd5eClassId)} className="rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-xs text-slate-200">
+            {ownedDefinitions.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} {classLevels[candidate.id]}级</option>)}
+          </select>
+        </label>
+      </section>}
       <section className="rounded-xl border border-white/10 bg-void-900/45 p-3 md:col-span-2" aria-label="本回合行动经济">
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><Clock3 className="h-4 w-4 text-arcane-300" />本回合可用行动</div>
@@ -137,7 +155,7 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
             <Stat label="武器" value={profile.weaponName} />
             <Stat label="命中" value={`${profile.attackModifier >= 0 ? '+' : ''}${profile.attackModifier}`} />
             <Stat label="伤害" value={`${profile.damage.count}d${profile.damage.sides}${profile.damage.bonus >= 0 ? '+' : ''}${profile.damage.bonus}`} />
-            <Stat label="攻击次数" value={`${dnd5eAttacksPerAttackAction(character)} 次／动作`} />
+            <Stat label="攻击次数" value={`${dnd5eAttacksPerAttackAction(storedCharacter)} 次／动作`} />
           </div>
         ) : <p className="mt-4 text-sm text-rose-300">没有装备可用的 5e 武器。</p>}
         {definition?.id === 'paladin' && character.level >= 2 && profile?.mode === 'melee' ? <label className="mt-4 block text-xs text-slate-400">
@@ -274,7 +292,7 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
       <section className="rounded-xl border border-white/10 bg-void-900/45 p-4 md:col-span-2">
         <div className="text-sm font-semibold text-slate-200">职业资源</div>
         {resources.length > 0 ? <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {resources.map(({ resource, state }) => <Stat key={resource.key} label={resource.label} value={resource.unlimited?.(character) ? '∞' : `${state!.current}/${state!.max}`} />)}
+          {resources.map(({ resource, state }) => <Stat key={resource.key} label={resource.label} value={resource.unlimited?.(storedCharacter) ? '∞' : `${state!.current}/${state!.max}`} />)}
         </div> : <p className="mt-2 text-xs text-slate-500">当前等级没有需记录次数的职业资源。</p>}
         <p className="mt-3 text-xs text-slate-500">职业资源只通过 D&amp;D Headless 的动作、附赠动作或反应事务消费。</p>
       </section>

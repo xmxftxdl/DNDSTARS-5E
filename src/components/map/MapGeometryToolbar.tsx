@@ -577,6 +577,9 @@ export default function MapGeometryToolbar({
                 value={selectedToken.darkvisionRangeFeet ?? 0}
                 onChange={(darkvisionRangeFeet) => updateToken(mapId, selectedToken.id, { darkvisionRangeFeet })}
               />
+              <NumberField label="盲视" min={0} value={selectedToken.blindsightRangeFeet ?? 0} onChange={(blindsightRangeFeet) => updateToken(mapId, selectedToken.id, { blindsightRangeFeet })} />
+              <NumberField label="震颤" min={0} value={selectedToken.tremorsenseRangeFeet ?? 0} onChange={(tremorsenseRangeFeet) => updateToken(mapId, selectedToken.id, { tremorsenseRangeFeet })} />
+              <NumberField label="真视" min={0} value={selectedToken.truesightRangeFeet ?? 0} onChange={(truesightRangeFeet) => updateToken(mapId, selectedToken.id, { truesightRangeFeet })} />
             </>
           )}
           <label className="flex items-center gap-0.5 text-[10px] text-slate-300">

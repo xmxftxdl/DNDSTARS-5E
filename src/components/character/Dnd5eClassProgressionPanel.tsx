@@ -44,12 +44,14 @@ import {
   dnd5ePluginSubclassDefinition,
   registeredDnd5ePluginSubclasses,
   type Dnd5eClassChoiceGroup,
+  type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
 
 interface Dnd5eClassProgressionPanelProps {
   character: Character
   onChange: (patch: Partial<Character>) => void
+  isStartingClass?: boolean
 }
 
 const SPELLCASTING_KIND_LABELS = {
@@ -64,13 +66,28 @@ function abilityLabel(key: string): string {
   return ABILITIES.find((ability) => ability.key === key)?.label ?? key.toUpperCase()
 }
 
+const MULTICLASS_PROFICIENCIES: Partial<Record<Dnd5eClassId, { armor: string; weapons: string }>> = {
+  barbarian: { armor: '盾牌', weapons: '简易武器、军用武器' },
+  bard: { armor: '轻甲', weapons: '无额外武器熟练' },
+  cleric: { armor: '轻甲、中甲、盾牌', weapons: '无额外武器熟练' },
+  druid: { armor: '轻甲、中甲、盾牌（不使用金属制品）', weapons: '无额外武器熟练' },
+  fighter: { armor: '轻甲、中甲、盾牌', weapons: '简易武器、军用武器' },
+  monk: { armor: '无额外护甲熟练', weapons: '简易武器、短剑' },
+  paladin: { armor: '轻甲、中甲、盾牌', weapons: '简易武器、军用武器' },
+  ranger: { armor: '轻甲、中甲、盾牌', weapons: '简易武器、军用武器' },
+  rogue: { armor: '轻甲', weapons: '无额外武器熟练' },
+  sorcerer: { armor: '无额外护甲熟练', weapons: '无额外武器熟练' },
+  warlock: { armor: '轻甲', weapons: '简易武器' },
+  wizard: { armor: '无额外护甲熟练', weapons: '无额外武器熟练' },
+}
+
 function resetLabel(reset: 'combat' | 'short-rest' | 'long-rest'): string {
   if (reset === 'short-rest') return '短休或长休恢复'
   if (reset === 'long-rest') return '长休恢复'
   return '战斗开始时恢复'
 }
 
-export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5eClassProgressionPanelProps) {
+export default function Dnd5eClassProgressionPanel({ character, onChange, isStartingClass = true }: Dnd5eClassProgressionPanelProps) {
   const definition = dnd5eClassDefinitionForCharacter(character)
   if (!definition || definition.id === 'fighter') return null
 
@@ -80,15 +97,20 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
   const pluginSubclassOptions = registeredDnd5ePluginSubclasses(definition.id)
   const subclassUnlocked = character.level >= definition.subclassLevel
   const progression = dnd5eClassProgression(definition)
-  const classSkillKeys = definition.skillProficiencies === 'any'
+  const multiclassSkillCount = ['bard', 'ranger', 'rogue'].includes(definition.id) ? 1 : 0
+  const classSkillCount = isStartingClass ? definition.skillChoiceCount : multiclassSkillCount
+  const displayedProficiencies = isStartingClass
+    ? { armor: definition.armorProficiencies, weapons: definition.weaponProficiencies }
+    : MULTICLASS_PROFICIENCIES[definition.id] ?? { armor: '无额外护甲熟练', weapons: '无额外武器熟练' }
+  const classSkillKeys = (!isStartingClass && (definition.id === 'bard' || definition.id === 'rogue')) || definition.skillProficiencies === 'any'
     ? SKILLS.map((skill) => skill.key)
     : definition.skillProficiencies
   const classSkillGroup: Dnd5eClassChoiceGroup = {
     id: 'class-skills',
     level: 1,
-    name: '起始职业技能',
-    description: `从本职业允许的技能中选择 ${definition.skillChoiceCount} 项；这些选择会同步到人物卡的技能熟练。`,
-    maxSelections: definition.skillChoiceCount,
+    name: isStartingClass ? '起始职业技能' : '兼职获得技能',
+    description: `从本职业允许的技能中选择 ${classSkillCount} 项；这些选择会同步到人物卡的技能熟练。`,
+    maxSelections: classSkillCount,
     options: classSkillKeys.map((key) => {
       const skill = SKILLS.find((candidate) => candidate.key === key)
       return { id: key, name: skill?.label ?? key, summary: `${abilityLabel(skill?.ability ?? '')}技能` }
@@ -101,6 +123,7 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
   }))
   const groups = [classSkillGroup, ...dnd5eAllClassChoiceGroups(definition), ...pluginChoiceGroups]
     .filter((group) => character.level >= group.level)
+    .filter((group) => group !== classSkillGroup || classSkillCount > 0)
     .filter((group) =>
       group === classSkillGroup || pluginChoiceGroups.includes(group) ||
       definition.choiceGroups?.includes(group) || selectedSubclass === definition.subclass.id,
@@ -146,9 +169,15 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
     if (!selected && current.length >= limit) return
     const next = selected ? current.filter((id) => id !== optionId) : [...current, optionId]
     const grantsSkillProficiency = group.id === 'class-skills' || group.id === 'lore-bonus-skills'
+    const grantedElsewhere = selected && (
+      character.dnd5eBackgroundSkillProficiencies?.includes(optionId) === true ||
+      Object.entries(character.dnd5eClassChoices?.classes ?? {}).some(([classId, choices]) =>
+        classId !== definition.id && Object.entries(choices.selections ?? {}).some(([selectionId, values]) =>
+          (selectionId === 'class-skills' || selectionId === 'lore-bonus-skills') && values.includes(optionId)))
+    )
     const nextSkills = grantsSkillProficiency
       ? (selected
-          ? character.skills.filter((skill) => skill !== optionId)
+          ? grantedElsewhere ? character.skills : character.skills.filter((skill) => skill !== optionId)
           : [...new Set([...character.skills, optionId])])
       : undefined
     setClassChoices({
@@ -229,13 +258,13 @@ export default function Dnd5eClassProgressionPanel({ character, onChange }: Dnd5
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Summary icon={Dices} label="生命骰" value={`d${definition.hitDie}`} />
         <Summary icon={Sparkles} label="主要属性" value={definition.primaryAbilities.map(abilityLabel).join('、')} />
-        <Summary icon={Shield} label="豁免熟练" value={definition.savingThrows.map(abilityLabel).join('、')} />
-        <Summary icon={GraduationCap} label="技能选择" value={`从职业技能中选择 ${definition.skillChoiceCount} 项`} />
+        <Summary icon={Shield} label="豁免熟练" value={isStartingClass ? definition.savingThrows.map(abilityLabel).join('、') : '不额外获得'} />
+        <Summary icon={GraduationCap} label="技能选择" value={classSkillCount > 0 ? `从职业技能中选择 ${classSkillCount} 项` : '不额外获得'} />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <InfoBlock title="护甲熟练" text={definition.armorProficiencies} />
-        <InfoBlock title="武器熟练" text={definition.weaponProficiencies} />
+        <InfoBlock title={isStartingClass ? '护甲熟练' : '兼职护甲熟练'} text={displayedProficiencies.armor} />
+        <InfoBlock title={isStartingClass ? '武器熟练' : '兼职武器熟练'} text={displayedProficiencies.weapons} />
       </div>
 
       {selectedSubclass === definition.subclass.id && (

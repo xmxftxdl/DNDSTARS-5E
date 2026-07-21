@@ -1,0 +1,140 @@
+import type { AbilityKey } from '../../lib/dnd'
+import type { Character } from '../../types/character'
+import {
+  dnd5eClassDefinition,
+  dnd5eClassSpellSlots,
+  dnd5ePactSlotLevel,
+  type Dnd5eClassId,
+} from './classes'
+
+export type Dnd5eClassLevels = Partial<Record<Dnd5eClassId, number>>
+
+const MULTICLASS_PREREQUISITES: Readonly<Record<Dnd5eClassId, readonly (readonly AbilityKey[])[]>> = {
+  barbarian: [['str']],
+  bard: [['cha']],
+  cleric: [['wis']],
+  druid: [['wis']],
+  fighter: [['str', 'dex']],
+  monk: [['dex'], ['wis']],
+  paladin: [['str'], ['cha']],
+  ranger: [['dex'], ['wis']],
+  rogue: [['dex']],
+  sorcerer: [['cha']],
+  warlock: [['cha']],
+  wizard: [['int']],
+}
+
+const FULL_CASTERS = new Set<Dnd5eClassId>(['bard', 'cleric', 'druid', 'sorcerer', 'wizard'])
+const HALF_CASTERS = new Set<Dnd5eClassId>(['paladin', 'ranger'])
+
+export function normalizeDnd5eClassLevels(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+): Dnd5eClassLevels {
+  const normalized: Dnd5eClassLevels = {}
+  for (const [classId, rawLevel] of Object.entries(character.dnd5eClassLevels ?? {}) as Array<[Dnd5eClassId, number]>) {
+    if (!dnd5eClassDefinition(classId) || !Number.isFinite(rawLevel)) continue
+    const level = Math.max(0, Math.min(20, Math.floor(rawLevel)))
+    if (level > 0) normalized[classId] = level
+  }
+  if (Object.keys(normalized).length > 0) return normalized
+  const primary = dnd5eClassDefinition(character.charClass)
+  return primary ? { [primary.id]: Math.max(1, Math.min(20, Math.floor(character.level || 1))) } : {}
+}
+
+export function dnd5eTotalCharacterLevel(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+): number {
+  const levels = normalizeDnd5eClassLevels(character)
+  const total = Object.values(levels).reduce((sum, level) => sum + (level ?? 0), 0)
+  return Math.max(1, Math.min(20, total || Math.floor(character.level || 1)))
+}
+
+export function dnd5eCharacterClassLevel(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+  classId: Dnd5eClassId,
+): number {
+  return normalizeDnd5eClassLevels(character)[classId] ?? 0
+}
+
+export function dnd5eMeetsMulticlassPrerequisite(
+  character: Pick<Character, 'abilities'>,
+  classId: Dnd5eClassId,
+): boolean {
+  return MULTICLASS_PREREQUISITES[classId].every((alternatives) =>
+    alternatives.some((ability) => character.abilities[ability] >= 13),
+  )
+}
+
+export function validateDnd5eMulticlassLevelGain(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'abilities'>,
+  targetClassId: Dnd5eClassId,
+): { ok: true } | { ok: false; reason: 'maximum-level' | 'current-class-prerequisite' | 'target-class-prerequisite' } {
+  if (dnd5eTotalCharacterLevel(character) >= 20) return { ok: false, reason: 'maximum-level' }
+  const levels = normalizeDnd5eClassLevels(character)
+  if ((levels[targetClassId] ?? 0) > 0) return { ok: true }
+  for (const classId of Object.keys(levels) as Dnd5eClassId[]) {
+    if (!dnd5eMeetsMulticlassPrerequisite(character, classId)) {
+      return { ok: false, reason: 'current-class-prerequisite' }
+    }
+  }
+  return dnd5eMeetsMulticlassPrerequisite(character, targetClassId)
+    ? { ok: true }
+    : { ok: false, reason: 'target-class-prerequisite' }
+}
+
+/** SRD 5.1 兼职施法者等级；邪术师契约魔法始终保持独立。 */
+export function dnd5eMulticlassCasterLevel(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+): number {
+  const levels = normalizeDnd5eClassLevels(character)
+  let casterLevel = 0
+  for (const [classId, level] of Object.entries(levels) as Array<[Dnd5eClassId, number]>) {
+    if (FULL_CASTERS.has(classId)) casterLevel += level
+    else if (HALF_CASTERS.has(classId)) casterLevel += Math.floor(level / 2)
+  }
+  return Math.max(0, Math.min(20, casterLevel))
+}
+
+export function dnd5eMulticlassSpellSlots(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+): readonly number[] {
+  const levels = normalizeDnd5eClassLevels(character)
+  const spellcastingClasses = (Object.entries(levels) as Array<[Dnd5eClassId, number]>).filter(([classId]) =>
+    FULL_CASTERS.has(classId) || HALF_CASTERS.has(classId),
+  )
+  // The multiclass slot table applies only after Spellcasting is gained from
+  // more than one class. A Paladin/Fighter, for example, keeps the Paladin table.
+  if (spellcastingClasses.length === 1) {
+    const [classId, classLevel] = spellcastingClasses[0]
+    const definition = dnd5eClassDefinition(classId)
+    return definition ? dnd5eClassSpellSlots(definition, classLevel) : []
+  }
+  const casterLevel = dnd5eMulticlassCasterLevel(character)
+  const fullCaster = dnd5eClassDefinition('wizard')
+  return casterLevel > 0 && fullCaster ? dnd5eClassSpellSlots(fullCaster, casterLevel) : []
+}
+
+export function dnd5eMulticlassPactSlots(
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels'>,
+): { count: number; slotLevel: number } | undefined {
+  const warlockLevel = dnd5eCharacterClassLevel(character, 'warlock')
+  if (warlockLevel < 1) return undefined
+  return {
+    count: warlockLevel >= 17 ? 4 : warlockLevel >= 11 ? 3 : warlockLevel >= 2 ? 2 : 1,
+    slotLevel: dnd5ePactSlotLevel(warlockLevel),
+  }
+}
+
+export function addDnd5eMulticlassLevel(character: Character, classId: Dnd5eClassId): Character {
+  const validation = validateDnd5eMulticlassLevelGain(character, classId)
+  if (!validation.ok) return character
+  const levels = normalizeDnd5eClassLevels(character)
+  levels[classId] = (levels[classId] ?? 0) + 1
+  return {
+    ...character,
+    level: dnd5eTotalCharacterLevel({ ...character, dnd5eClassLevels: levels }),
+    dnd5eClassLevels: levels,
+  }
+}
+
+export const DND5E_MULTICLASS_PREREQUISITES = MULTICLASS_PREREQUISITES

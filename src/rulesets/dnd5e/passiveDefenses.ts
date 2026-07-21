@@ -20,7 +20,10 @@ export interface Dnd5eDefensiveCreature {
   exhaustionLevel: number
   classId?: Dnd5eClassId
   subclassId?: string
+  classLevels?: Partial<Record<Dnd5eClassId, number>>
+  subclassIds?: Partial<Record<Dnd5eClassId, string>>
   classSelections: Record<string, string[]>
+  classSelectionsByClass?: Partial<Record<Dnd5eClassId, Record<string, string[]>>>
   countercharmSourceIds?: readonly string[]
   classState: {
     activeEffects?: readonly Dnd5eActiveEffectInstance[]
@@ -38,6 +41,20 @@ export interface Dnd5eDefensiveCreature {
   creatureType?: string
   speed?: number
   dodging?: boolean
+}
+
+function defensiveClassLevel(creature: Dnd5eDefensiveCreature, classId: Dnd5eClassId): number {
+  const stored = creature.classLevels?.[classId]
+  if (stored != null) return Math.max(0, Math.min(20, Math.floor(stored)))
+  return creature.classId === classId ? Math.max(1, Math.min(20, Math.floor(creature.level))) : 0
+}
+
+function defensiveHasSubclass(creature: Dnd5eDefensiveCreature, classId: Dnd5eClassId, subclassId: string): boolean {
+  return (creature.subclassIds?.[classId] ?? (creature.classId === classId ? creature.subclassId : undefined)) === subclassId
+}
+
+function defensiveSelections(creature: Dnd5eDefensiveCreature, classId: Dnd5eClassId): Record<string, string[]> {
+  return creature.classSelectionsByClass?.[classId] ?? creature.classSelections
 }
 
 function hasCondition(creature: Pick<Dnd5eDefensiveCreature, 'conditions'>, values: ReadonlySet<string>): boolean {
@@ -65,18 +82,18 @@ export function dnd5eSavingThrowMode(
   const dangerSenseBlocked = dnd5eIsIncapacitated(creature) || hasCondition(creature, new Set([
     'blinded', 'deafened', '目盲', '耳聋',
   ]))
-  const dangerSense = creature.classId === 'barbarian' && creature.level >= 2 && ability === 'dex' &&
+  const dangerSense = defensiveClassLevel(creature, 'barbarian') >= 2 && ability === 'dex' &&
     context.effectVisible !== false && !dangerSenseBlocked
   const feared = context.condition != null && new Set(['frightened', '惊惧', '恐慌']).has(context.condition.toLowerCase())
   const charmed = context.condition != null && new Set(['charmed', '魅惑']).has(context.condition.toLowerCase())
-  const steelWill = creature.classId === 'ranger' && creature.subclassId === 'hunter' && creature.level >= 7 && feared &&
-    creature.classSelections['defensive-tactics']?.includes('steel-will') === true
+  const steelWill = defensiveClassLevel(creature, 'ranger') >= 7 && defensiveHasSubclass(creature, 'ranger', 'hunter') && feared &&
+    defensiveSelections(creature, 'ranger')['defensive-tactics']?.includes('steel-will') === true
   const countercharm = (feared || charmed) && (creature.countercharmSourceIds?.length ?? 0) > 0
-  const rageStrength = creature.classId === 'barbarian' && creature.level >= 1 && creature.classState.raging === true && ability === 'str'
+  const rageStrength = defensiveClassLevel(creature, 'barbarian') >= 1 && creature.classState.raging === true && ability === 'str'
   const poisonProtection = ['poisoned', '中毒'].includes((context.condition ?? '').trim().toLowerCase()) &&
     hasMechanicalEffect(creature, 'srd-5.1:spell:protection-from-poison')
   const sourceType = normalizedCreatureType(context.sourceCreatureType)
-  const holyNimbus = creature.classId === 'paladin' && creature.subclassId === 'devotion' && creature.level >= 20 &&
+  const holyNimbus = defensiveClassLevel(creature, 'paladin') >= 20 && defensiveHasSubclass(creature, 'paladin', 'devotion') &&
     (creature.classState.holyNimbusRoundsRemaining ?? 0) > 0 && context.sourceIsSpell === true &&
     (sourceType === 'fiend' || sourceType.includes('邪魔') || sourceType === 'undead' || sourceType.includes('亡灵'))
   const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
@@ -89,9 +106,9 @@ export function dnd5eSavingThrowMode(
 }
 
 export function dnd5eHasEvasion(creature: Dnd5eDefensiveCreature): boolean {
-  if ((creature.classId === 'rogue' || creature.classId === 'monk') && creature.level >= 7) return true
-  return creature.classId === 'ranger' && creature.subclassId === 'hunter' && creature.level >= 15 &&
-    creature.classSelections['superior-hunters-defense']?.includes('evasion') === true
+  if (defensiveClassLevel(creature, 'rogue') >= 7 || defensiveClassLevel(creature, 'monk') >= 7) return true
+  return defensiveClassLevel(creature, 'ranger') >= 15 && defensiveHasSubclass(creature, 'ranger', 'hunter') &&
+    defensiveSelections(creature, 'ranger')['superior-hunters-defense']?.includes('evasion') === true
 }
 
 export function dnd5eDamageAfterSavingThrow(input: {
@@ -110,7 +127,7 @@ export function dnd5eDamageAfterSavingThrow(input: {
 }
 
 export function dnd5ePreventsAttackAdvantage(creature: Dnd5eDefensiveCreature): boolean {
-  return creature.classId === 'rogue' && creature.level >= 18 && !dnd5eIsIncapacitated(creature)
+  return defensiveClassLevel(creature, 'rogue') >= 18 && !dnd5eIsIncapacitated(creature)
 }
 
 export function dnd5eIsBlinded(creature: { conditions?: readonly string[] }): boolean {
@@ -154,16 +171,17 @@ export function dnd5eHasViciousMockeryAttackDisadvantage(
 }
 
 export function dnd5eUnseenTargetImposesDisadvantage(
-  attacker: Pick<Dnd5eDefensiveCreature, 'classId' | 'level' | 'creatureType'> & { conditions?: readonly string[] },
-  target: Pick<Dnd5eDefensiveCreature, 'classId' | 'subclassId' | 'level' | 'classState'> &
+  attacker: Pick<Dnd5eDefensiveCreature, 'classId' | 'level' | 'classLevels' | 'creatureType'> & { conditions?: readonly string[] },
+  target: Pick<Dnd5eDefensiveCreature, 'classId' | 'subclassId' | 'level' | 'classLevels' | 'subclassIds' | 'classState'> &
     Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
 ): boolean {
   if (dnd5eConditionImposesAttackDisadvantage({ attacker })) return true
   const targetIsOutlined = hasMechanicalEffect(target, 'srd-5.1:spell:faerie-fire')
   const targetIsUnseen = (!targetIsOutlined && dnd5eHasStandardCondition(target, 'invisible')) ||
     (target.classState.emptyBodyRoundsRemaining ?? 0) > 0
-  const unseenDisadvantage = targetIsUnseen && !(attacker.classId === 'ranger' && attacker.level >= 18)
-  const purityOfSpirit = target.classId === 'paladin' && target.subclassId === 'devotion' && target.level >= 15 &&
+  const unseenDisadvantage = targetIsUnseen && !(defensiveClassLevel(attacker as Dnd5eDefensiveCreature, 'ranger') >= 18)
+  const purityOfSpirit = defensiveClassLevel(target as Dnd5eDefensiveCreature, 'paladin') >= 15 &&
+    defensiveHasSubclass(target as Dnd5eDefensiveCreature, 'paladin', 'devotion') &&
     dnd5eProtectionCreatureType(attacker.creatureType)
   return unseenDisadvantage || purityOfSpirit
 }
@@ -190,13 +208,13 @@ export function dnd5eCanUseUncannyDodge(creature: Dnd5eDefensiveCreature & { cur
     creature.currentHp <= 0 || !creature.turn.reactionAvailable ||
     dnd5eIsIncapacitated(creature) || dnd5eReactionsPrevented(creature)
   ) return false
-  if (creature.classId === 'rogue' && creature.level >= 5) return true
-  return creature.classId === 'ranger' && creature.subclassId === 'hunter' && creature.level >= 15 &&
-    creature.classSelections['superior-hunters-defense']?.includes('uncanny-dodge') === true
+  if (defensiveClassLevel(creature, 'rogue') >= 5) return true
+  return defensiveClassLevel(creature, 'ranger') >= 15 && defensiveHasSubclass(creature, 'ranger', 'hunter') &&
+    defensiveSelections(creature, 'ranger')['superior-hunters-defense']?.includes('uncanny-dodge') === true
 }
 
 export function dnd5eCanUseDeflectMissiles(creature: Dnd5eDefensiveCreature & { currentHp: number; turn: { reactionAvailable: boolean } }): boolean {
-  return creature.classId === 'monk' && creature.level >= 3 && creature.currentHp > 0 &&
+  return defensiveClassLevel(creature, 'monk') >= 3 && creature.currentHp > 0 &&
     creature.turn.reactionAvailable && !dnd5eIsIncapacitated(creature) && !dnd5eReactionsPrevented(creature)
 }
 
@@ -236,12 +254,13 @@ export function dnd5eConditionImmuneFromSource(
   )) return true
   const charmFearOrPossession = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌', 'possessed', '附身'].includes(normalized)
   if (
-    charmFearOrPossession && target.classId === 'paladin' && target.subclassId === 'devotion' && target.level >= 15 &&
+    charmFearOrPossession && defensiveClassLevel(target, 'paladin') >= 15 &&
+    defensiveHasSubclass(target, 'paladin', 'devotion') &&
     dnd5eProtectionCreatureType(source?.creatureType)
   ) return true
   const charmOrFear = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌'].includes(normalized)
   if (
-    !charmOrFear || target.classId !== 'druid' || target.subclassId !== 'land' || target.level < 10
+    !charmOrFear || defensiveClassLevel(target, 'druid') < 10 || !defensiveHasSubclass(target, 'druid', 'land')
   ) return false
   const sourceType = normalizedCreatureType(source?.creatureType)
   return sourceType === 'elemental' || sourceType.includes('元素') || sourceType === 'fey' || sourceType.includes('精类') || sourceType.includes('妖精')
@@ -253,18 +272,18 @@ export function dnd5eClassPassiveDefenses(creature: Dnd5eDefensiveCreature): {
 } {
   const damageImmunities: Dnd5eDamageType[] = []
   const conditionImmunities: string[] = []
-  if (creature.classId === 'paladin' && creature.level >= 3) {
+  if (defensiveClassLevel(creature, 'paladin') >= 3) {
     conditionImmunities.push('disease', '疾病')
   }
-  if (creature.classId === 'monk' && creature.level >= 10) {
+  if (defensiveClassLevel(creature, 'monk') >= 10) {
     damageImmunities.push('poison')
     conditionImmunities.push('poisoned', '中毒', 'disease', '疾病')
   }
-  if (creature.classId === 'druid' && creature.subclassId === 'land' && creature.level >= 10) {
+  if (defensiveClassLevel(creature, 'druid') >= 10 && defensiveHasSubclass(creature, 'druid', 'land')) {
     damageImmunities.push('poison')
     conditionImmunities.push('poisoned', '中毒', 'disease', '疾病')
   }
-  if (creature.classId === 'barbarian' && creature.subclassId === 'berserker' && creature.level >= 6 && creature.classState.raging) {
+  if (defensiveClassLevel(creature, 'barbarian') >= 6 && defensiveHasSubclass(creature, 'barbarian', 'berserker') && creature.classState.raging) {
     conditionImmunities.push('charmed', '魅惑', 'frightened', '惊惧', '恐慌')
   }
   return { damageImmunities, conditionImmunities }

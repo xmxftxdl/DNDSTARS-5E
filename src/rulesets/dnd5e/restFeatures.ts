@@ -1,5 +1,6 @@
 import type { Character } from '../../types/character'
 import { dnd5ePactSlotLevel } from './classes'
+import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eSpellSlotRecoveryFeature = 'arcane-recovery' | 'natural-recovery'
 
@@ -24,21 +25,25 @@ function featureResourceKey(feature: Dnd5eSpellSlotRecoveryFeature): string {
 }
 
 export function dnd5eSpellSlotRecoveryFeature(
-  character: Pick<Character, 'rulesetId' | 'charClass' | 'level' | 'dnd5eClassChoices'>,
+  character: Pick<Character, 'rulesetId' | 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): Dnd5eSpellSlotRecoveryFeature | undefined {
   if (character.rulesetId !== 'dnd5e-2014-srd-5.1') return undefined
-  if (character.charClass === '法师' && character.level >= 1) return 'arcane-recovery'
-  if (
-    character.charClass === '德鲁伊' && character.level >= 2 &&
+  const arcaneRecovery = dnd5eCharacterClassLevel(character, 'wizard') >= 1
+  const naturalRecovery = dnd5eCharacterClassLevel(character, 'druid') >= 2 &&
     character.dnd5eClassChoices?.classes?.druid?.subclass === 'land'
-  ) return 'natural-recovery'
-  return undefined
+  if (character.charClass === '德鲁伊' && naturalRecovery) return 'natural-recovery'
+  if (character.charClass === '法师' && arcaneRecovery) return 'arcane-recovery'
+  return arcaneRecovery ? 'arcane-recovery' : naturalRecovery ? 'natural-recovery' : undefined
 }
 
 export function dnd5eSpellSlotRecoveryLimit(
-  character: Pick<Character, 'level'>,
+  character: Pick<Character, 'rulesetId' | 'charClass' | 'level' | 'dnd5eClassLevels' | 'dnd5eClassChoices'>,
 ): number {
-  return Math.max(1, Math.ceil(Math.max(1, character.level) / 2))
+  const feature = dnd5eSpellSlotRecoveryFeature(character)
+  const classLevel = feature === 'natural-recovery'
+    ? dnd5eCharacterClassLevel(character, 'druid')
+    : dnd5eCharacterClassLevel(character, 'wizard')
+  return Math.max(1, Math.ceil(Math.max(1, classLevel) / 2))
 }
 
 export function applyDnd5eSpellSlotRecovery(
@@ -84,7 +89,7 @@ export function applyDnd5eSpellSlotRecovery(
 
 export function applyDnd5eEldritchMaster(character: Character): Dnd5eRestFeatureResult {
   if (
-    character.rulesetId !== 'dnd5e-2014-srd-5.1' || character.charClass !== '邪术师' || character.level < 20
+    character.rulesetId !== 'dnd5e-2014-srd-5.1' || dnd5eCharacterClassLevel(character, 'warlock') < 20
   ) return { ok: false, reason: 'feature-unavailable' }
   const feature = character.classResources?.['dnd5e-eldritch-master']
   const pactSlots = character.classResources?.['dnd5e-pact-slot']
@@ -102,7 +107,7 @@ export function applyDnd5eEldritchMaster(character: Character): Dnd5eRestFeature
       },
     },
     recovered,
-    levelsRecovered: recovered * dnd5ePactSlotLevel(character.level),
+    levelsRecovered: recovered * dnd5ePactSlotLevel(dnd5eCharacterClassLevel(character, 'warlock')),
   }
 }
 

@@ -173,6 +173,8 @@ export interface Token {
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
+    surprisedCombatId?: string
+    surpriseResolvedCombatId?: string
     countercharmRoundsRemaining?: number
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
@@ -210,6 +212,10 @@ export interface Token {
   visionRangeFeet?: number
   /** 2014 规则中的黑暗视觉距离；0 或缺失表示没有黑暗视觉。 */
   darkvisionRangeFeet?: number
+  /** 特殊感官由地图快照投影到 Headless；距离外仍按普通视线判定。 */
+  blindsightRangeFeet?: number
+  tremorsenseRangeFeet?: number
+  truesightRangeFeet?: number
   /** Token 携带的火把、法术或物品光源。 */
   lightSource?: {
     enabled: boolean
@@ -427,6 +433,9 @@ function normalizeToken(raw: unknown): Token {
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,
+    blindsightRangeFeet: Number.isFinite(t.blindsightRangeFeet) ? Math.max(0, Math.min(10_000, t.blindsightRangeFeet as number)) : undefined,
+    tremorsenseRangeFeet: Number.isFinite(t.tremorsenseRangeFeet) ? Math.max(0, Math.min(10_000, t.tremorsenseRangeFeet as number)) : undefined,
+    truesightRangeFeet: Number.isFinite(t.truesightRangeFeet) ? Math.max(0, Math.min(10_000, t.truesightRangeFeet as number)) : undefined,
     lightSource: t.lightSource && typeof t.lightSource === 'object' &&
       Number.isFinite(t.lightSource.brightRadiusFeet) && Number.isFinite(t.lightSource.dimRadiusFeet) &&
       typeof t.lightSource.enabled === 'boolean' && typeof t.lightSource.color === 'string'

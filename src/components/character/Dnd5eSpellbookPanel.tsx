@@ -17,6 +17,10 @@ import {
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginSpells,
   subscribeDnd5eRulesPluginRegistry,
+  DND5E_SRD_CLASS_DEFINITIONS,
+  dnd5eCharacterClassLevel,
+  normalizeDnd5eClassLevels,
+  type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { useSpellbookStore } from '../../store/spellbook'
 
@@ -32,19 +36,25 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   const [query, setQuery] = useState('')
   const [levelFilter, setLevelFilter] = useState('all')
   const [detailSpellId, setDetailSpellId] = useState<string | null>(null)
-  const definition = dnd5eClassDefinitionForCharacter(character)
+  const classLevels = normalizeDnd5eClassLevels(character)
+  const castingDefinitions = DND5E_SRD_CLASS_DEFINITIONS.filter((candidate) =>
+    (classLevels[candidate.id] ?? 0) > 0 && !!candidate.spellcasting)
+  const [casterClassId, setCasterClassId] = useState<Dnd5eClassId | undefined>()
+  const definition = castingDefinitions.find((candidate) => candidate.id === casterClassId) ?? castingDefinitions[0] ?? dnd5eClassDefinitionForCharacter(character)
   void pluginRevision
   const pluginSpells = registeredDnd5ePluginSpells()
   const allEntries = dnd5eSpellbookEntriesWithPlugins(imported, pluginSpells)
   if (!definition?.spellcasting) return <section className="glass rounded-2xl p-6 text-sm text-slate-500">该职业没有 D&D 5e 2014 施法或契约魔法能力。</section>
-  const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, character.level - 1))]
+  const classLevel = dnd5eCharacterClassLevel(character, definition.id)
+  const classCharacter = { ...character, charClass: definition.name, level: classLevel }
+  const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, classLevel - 1))]
   const highestSpellLevel = definition.spellcasting.kind === 'pact'
-    ? dnd5ePactSlotLevel(character.level)
+    ? dnd5ePactSlotLevel(classLevel)
     : progression.spellSlots.length
-  const limits = dnd5eCombatSpellSelectionLimits(character)
+  const limits = dnd5eCombatSpellSelectionLimits(classCharacter)
   const stored = character.dnd5eClassChoices?.classes?.[definition.id] ?? { subclass: definition.subclass.id, selections: {} }
   const selections = stored.selections ?? {}
-  const selectionKey = dnd5eSpellSelectionKey(character)
+  const selectionKey = dnd5eSpellSelectionKey(classCharacter)
   const selectedCantrips = [...new Set(selections['spell-cantrips'] ?? [])]
   const selectedSpells = [...new Set(selectionKey ? selections[selectionKey] ?? [] : [])]
   const wizardBook = [...new Set([
@@ -140,7 +150,10 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     <div className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-start lg:justify-between">
       <div>
         <div className="flex items-center gap-2"><BookMarked className="h-5 w-5 text-violet-300" /><h3 className="text-lg font-bold text-slate-100">{definition.name}法术书</h3></div>
-        <p className="mt-1 text-sm text-slate-500">{modeLabel} · 最高可用 {highestSpellLevel} 环 · 施法属性由职业规则决定</p>
+        <p className="mt-1 text-sm text-slate-500">{definition.name} {classLevel}级 · {modeLabel} · 最高可学 {highestSpellLevel} 环</p>
+        {castingDefinitions.length > 1 && <select aria-label="选择施法职业" value={definition.id} onChange={(event) => setCasterClassId(event.target.value as Dnd5eClassId)} className="mt-3 rounded-lg border border-white/10 bg-void-950/70 px-3 py-2 text-xs text-slate-200">
+          {castingDefinitions.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} {classLevels[candidate.id]}级</option>)}
+        </select>}
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
         <CountBadge label="戏法" current={selectedCantrips.length} max={limits.cantrips} />
