@@ -427,6 +427,7 @@ import {
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import { modeFromPort } from '../lib/appMode'
 import { DmActionTransactionCoordinator } from '../lib/dmActionTransactionCoordinator'
+import { runMapsPlayerActionTransaction } from './maps/runMapsPlayerActionTransaction'
 import { TimerRegistry } from '../lib/timerRegistry'
 import {
   currentPlayerSlot,
@@ -1155,6 +1156,7 @@ export default function MapsPage() {
   const combatOutcomeNoticeCombatIdRef = useRef('')
   const playerActionResultBaselinesRef = useRef<Record<string, PlayerActionResultBaseline>>({})
   const playerActionCoordinatorRef = useRef(new DmActionTransactionCoordinator())
+  const playerActionTransactionOutcomeRef = useRef(new Map<string, { status: 'accepted' } | { status: 'rejected'; reason: string }>())
   const activeInterruptTransactionIdRef = useRef<string | null>(null)
   const playerActionAuthorityCommitRef = useRef<Promise<void>>(Promise.resolve())
   const applyingPlayerActionTransactionRef = useRef(false)
@@ -7202,6 +7204,12 @@ export default function MapsPage() {
     acceptedPosition?: { x: number; y: number },
   ) => {
     if (!activeMap || mode !== 'dm') return
+    playerActionTransactionOutcomeRef.current.set(
+      action.id,
+      status === 'accepted'
+        ? { status: 'accepted' }
+        : { status: 'rejected', reason: reason ?? status },
+    )
     const appliedAt = runtimeNow()
     const baseline = playerActionResultBaselinesRef.current[action.id]
     const afterBaseline =
@@ -12631,29 +12639,26 @@ export default function MapsPage() {
       completePlayerActionRequest(action)
       return Promise.resolve()
     }
-    return playerActionCoordinatorRef.current.enqueueTransaction(
-      action.id,
-      async () => {
-        applyingPlayerActionTransactionRef.current = true
-        activeInterruptTransactionIdRef.current = action.id
-        try {
-          await processPlayerActionRequest(action)
-          await playerActionAuthorityCommitRef.current
-        } finally {
-          applyingPlayerActionTransactionRef.current = false
-          activeInterruptTransactionIdRef.current = null
-        }
+    return runMapsPlayerActionTransaction({
+      coordinator: playerActionCoordinatorRef.current,
+      action,
+      run: () => processPlayerActionRequest(action),
+      waitForAuthorityCommit: () => playerActionAuthorityCommitRef.current,
+      readOutcome: (actionId) => playerActionTransactionOutcomeRef.current.get(actionId),
+      clearOutcome: (actionId) => playerActionTransactionOutcomeRef.current.delete(actionId),
+      setTransactionActive: (active, transactionId) => {
+        applyingPlayerActionTransactionRef.current = active
+        activeInterruptTransactionIdRef.current = transactionId
       },
-      async (error) => {
-        applyingPlayerActionTransactionRef.current = false
-        activeInterruptTransactionIdRef.current = null
+      now: runtimeNow(),
+      recover: async (error) => {
         console.error('[dm-authority] player action failed', error)
         await Promise.all([
           useMapStore.getState().loadShared(),
           useCharacterStore.getState().loadShared(),
         ])
       },
-    )
+    })
   }
 
   const canSendPlayerCombatAction = () => {
