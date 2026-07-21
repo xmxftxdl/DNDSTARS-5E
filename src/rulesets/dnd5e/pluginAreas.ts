@@ -43,6 +43,23 @@ function areaAllowsTarget(area: Dnd5ePluginArea, target: Token, map: BattleMap):
   return area.relation === 'enemy' ? opposed : !opposed
 }
 
+export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
+  map: BattleMap
+  token: Token
+  position: { x: number; y: number }
+}): number {
+  let multiplier = 1
+  for (const area of input.map.dnd5ePluginAreas ?? []) {
+    if (
+      (area.movementCostMultiplier ?? 1) <= 1 ||
+      !areaAllowsTarget(area, input.token, input.map) ||
+      !tokenIntersectsAreaAt(input.token, input.map, area, input.position)
+    ) continue
+    multiplier = Math.max(multiplier, area.movementCostMultiplier ?? 1)
+  }
+  return multiplier
+}
+
 function alreadyTriggeredThisRound(
   area: Dnd5ePluginArea,
   trigger: Dnd5ePersistentAreaTriggerSnapshot,

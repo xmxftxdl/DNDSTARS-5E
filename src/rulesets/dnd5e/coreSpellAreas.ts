@@ -41,6 +41,7 @@ export interface Dnd5eCoreSpellAreaDeclaration {
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
   movementCostMultiplier?: number
+  damageTypeBySourceAlignment?: { evil: Dnd5eCoreSpellAreaDamageDeclaration['type']; otherwise: Dnd5eCoreSpellAreaDamageDeclaration['type'] }
   color: string
   visual: Dnd5ePersistentAreaVisual
   triggers: readonly Dnd5eCoreSpellAreaTriggerDeclaration[]
@@ -51,6 +52,35 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  * Headless Plugin API V2 的声明边界创建区域。
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
+  {
+    spellId: 'spirit-guardians',
+    label: '灵体卫士',
+    minimumSlotLevel: 3,
+    template: { shape: 'circle', origin: 'self', radiusFeet: 15 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'source-token',
+    relation: 'enemy',
+    includeSelf: false,
+    movementCostMultiplier: 2,
+    damageTypeBySourceAlignment: { evil: 'necrotic', otherwise: 'radiant' },
+    color: '#fef3c7',
+    visual: { preset: 'spirit-guardians', intensity: 'normal' },
+    triggers: [
+      {
+        id: 'spirit-guardians-enter', label: '灵体卫士·进入区域', timing: 'on-enter', oncePerRound: true,
+        savingThrow: { ability: 'wis', onSuccess: 'half' },
+        damage: { count: 3, sides: 8, perHigherSlot: 1, type: 'radiant' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'spirit-guardians-turn-start', label: '灵体卫士·回合开始', timing: 'turn-start', oncePerRound: true,
+        savingThrow: { ability: 'wis', onSuccess: 'half' },
+        damage: { count: 3, sides: 8, perHigherSlot: 1, type: 'radiant' },
+        dmAdjustable: true,
+      },
+    ],
+  },
   {
     spellId: 'moonbeam',
     label: '月华之光',
@@ -90,6 +120,7 @@ export function getDnd5eCoreSpellAreaDeclaration(
 function resolvedTrigger(
   declaration: Dnd5eCoreSpellAreaTriggerDeclaration,
   input: { slotLevel: number; minimumSlotLevel: number; sourceSaveDc: number },
+  damageType?: Dnd5eCoreSpellAreaDamageDeclaration['type'],
 ): Dnd5ePersistentAreaTriggerSnapshot {
   const higherLevels = Math.max(0, input.slotLevel - input.minimumSlotLevel)
   return {
@@ -106,7 +137,7 @@ function resolvedTrigger(
           count: declaration.damage.count + higherLevels * (declaration.damage.perHigherSlot ?? 0),
           sides: declaration.damage.sides,
           modifier: declaration.damage.modifier ?? 0,
-          type: declaration.damage.type,
+          type: damageType ?? declaration.damage.type,
         }
       : undefined,
     condition: declaration.condition,
@@ -126,8 +157,15 @@ export function createDnd5eCoreSpellArea(input: {
   anchorCell: GridCell
   anchorTokenId?: string
   durationRounds?: number
+  sourceAlignment?: string
 }): Dnd5ePluginArea {
   const declaration = input.declaration
+  const sourceIsEvil = /邪恶|evil/i.test(input.sourceAlignment ?? '')
+  const alignmentDamageType = declaration.damageTypeBySourceAlignment
+    ? sourceIsEvil
+      ? declaration.damageTypeBySourceAlignment.evil
+      : declaration.damageTypeBySourceAlignment.otherwise
+    : undefined
   return {
     id: `core-spell-area:${input.actionId}`,
     pluginId: 'srd-5.1',
@@ -157,7 +195,7 @@ export function createDnd5eCoreSpellArea(input: {
       slotLevel: input.slotLevel,
       minimumSlotLevel: declaration.minimumSlotLevel,
       sourceSaveDc: input.sourceSaveDc,
-    })),
+    }, alignmentDamageType)),
   }
 }
 

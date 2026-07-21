@@ -66,6 +66,7 @@ export function findMapGeometryPath(input: {
   ignoreTokens?: boolean
   allowOccupiedDestination?: boolean
   maximumVisited?: number
+  additionalCostMultiplier?: (token: Token, position: { x: number; y: number }) => number
 }): MapPathResult | undefined {
   const gridSize = Math.max(1, input.map.gridSize)
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
@@ -165,7 +166,8 @@ export function findMapGeometryPath(input: {
         }
       }
       const stepDistanceFeet = feetPerCell
-      const multiplier = terrainMultiplierAtPoint(pathGeometry, position, input)
+      const multiplier = terrainMultiplierAtPoint(pathGeometry, position, input) *
+        Math.max(1, input.additionalCostMultiplier?.(input.token, position) ?? 1)
       const nextCost = current.cost + stepDistanceFeet * multiplier
       const nextKey = key(next)
       const previous = nodes.get(nextKey)

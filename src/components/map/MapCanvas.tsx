@@ -177,6 +177,7 @@ interface MapCanvasProps {
   moveSelectMode?: boolean
   moveCircle?: MoveCircle
   onMoveSelect?: (point: { x: number; y: number }) => void
+  movementCostMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
   /** Circular AOE selection: highlighted cells plus click confirm. */
   aoeSelectMode?: boolean
   aoeHighlight?: AoeHighlight
@@ -1102,6 +1103,7 @@ export default function MapCanvas({
   moveSelectMode = false,
   moveCircle,
   onMoveSelect,
+  movementCostMultiplierAtPosition,
   aoeSelectMode = false,
   aoeHighlight,
   rangedRangeCells = [],
@@ -1408,8 +1410,11 @@ export default function MapCanvas({
     const movingToken = map.tokens.find((token) => token.id === selectedTokenId) ??
       map.tokens.find((token) => Math.hypot(token.x - moveCircle.centerX, token.y - moveCircle.centerY) < 1)
     if (!movingToken) return undefined
-    return findMapGeometryPath({ map, geometry, token: movingToken, to: cursor, maximumVisited: 5_000 })
-  }, [cursor, geometry, map, moveCircle, moveSelectMode, selectedTokenId])
+    return findMapGeometryPath({
+      map, geometry, token: movingToken, to: cursor, maximumVisited: 5_000,
+      additionalCostMultiplier: movementCostMultiplierAtPosition,
+    })
+  }, [cursor, geometry, map, moveCircle, moveSelectMode, movementCostMultiplierAtPosition, selectedTokenId])
 
   const handleFogMouseMove = (stage: Konva.Stage | null): boolean => {
     if (!fogEditMode || !fogDragStartRef.current) return false

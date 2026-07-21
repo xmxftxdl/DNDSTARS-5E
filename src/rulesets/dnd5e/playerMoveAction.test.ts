@@ -108,6 +108,32 @@ describe('D&D 5e player map movement', () => {
     }))
   })
 
+  it('charges double movement while an enemy crosses Spirit Guardians', () => {
+    const guardedMap: BattleMap = {
+      ...map,
+      dnd5ePluginAreas: [{
+        id: 'spirit-guardians', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:spirit-guardians',
+        sourceKind: 'core-spell', coreSpellId: 'spirit-guardians', label: '灵体卫士', color: '#fef3c7',
+        sourceCharacterId: 'enemy', sourceTokenId: 'enemy-token', cells: [{ col: 1, row: 0 }, { col: 2, row: 0 }],
+        createdRound: 1, expiresAfterRound: 100, relation: 'enemy', includeSelf: false,
+        movementCostMultiplier: 2,
+      }],
+    }
+    const prepared = prepareDnd5ePlayerMove({
+      action,
+      map: guardedMap,
+      characters: [character()],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ distanceFeet: 10, movementCostFeet: 15 })
+  })
+
   it('spends half speed to stand from prone before moving and clears the condition', () => {
     const hero = character()
     const activeEffects = migrateLegacyDnd5eConditions({ targetId: hero.id, conditions: ['prone'] })

@@ -108,6 +108,34 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(moved.application?.map.dnd5ePluginAreas?.[0].anchorCell).toEqual({ col: 8, row: 2 })
   })
 
+  it('casts Spirit Guardians as an enemy-only aura attached to an evil caster', () => {
+    const cleric = character('cleric', '牧师', {
+      alignment: '守序邪恶',
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['spirit-guardians'] } } } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(cleric, 'spirit-guardians', 3, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'spirit-guardians', slotLevel: 3,
+      targetTokenId: input.action.actorTokenId, targetTokenIds: [],
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    const area = resolved.application?.map.dnd5ePluginAreas?.[0]
+    expect(area).toMatchObject({
+      coreSpellId: 'spirit-guardians', anchorMode: 'source-token',
+      anchorTokenId: input.action.actorTokenId, relation: 'enemy', movementCostMultiplier: 2,
+      visual: { preset: 'spirit-guardians', intensity: 'normal' },
+    })
+    expect(area?.triggers?.[0]).toMatchObject({
+      savingThrow: { ability: 'wis', dc: 14, onSuccess: 'half' },
+      damage: { count: 3, sides: 8, type: 'necrotic' },
+    })
+  })
+
   it('rejects a zero-point Mass Heal allocation before settlement', () => {
     const cleric = character('cleric', '牧师', {
       level: 17,

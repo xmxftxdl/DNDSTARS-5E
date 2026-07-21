@@ -368,6 +368,7 @@ import {
   previewDnd5eItemAreaPlacement,
   reconcileDnd5eSummonedCreatures,
   getDnd5eCoreSpellAreaDeclaration,
+  dnd5ePersistentAreaMovementCostMultiplierAt,
 } from '../rulesets/dnd5e'
 import {
   clampGridSize,
@@ -3823,6 +3824,8 @@ export default function MapsPage() {
       geometry: activeGeometry,
       token: myPlayerToken,
       to: pos,
+      additionalCostMultiplier: (token, position) =>
+        dnd5ePersistentAreaMovementCostMultiplierAt({ map: activeMap, token, position }),
     })
     if (!path) {
       void showCombatNotice('路径受阻', '目标格无法通过合法路径抵达；墙、关闭的门、障碍物或其他 Token 可能阻挡了路线。', 'amber')
@@ -13645,6 +13648,8 @@ export default function MapsPage() {
               moveSelectMode={!playerCombatLocked && inMoveSelectMode && !!activeMoveCircle && !activeAoeTargeting && !dnd5eItemAreaTargeting}
               moveCircle={activeMoveCircle}
               onMoveSelect={handleMoveSelect}
+              movementCostMultiplierAtPosition={(token, position) =>
+                dnd5ePersistentAreaMovementCostMultiplierAt({ map: activeMap, token, position })}
               aoeSelectMode={!playerCombatLocked && (!!activeAoeTargeting || !!dnd5eItemAreaTargeting)}
               aoeHighlight={aoeHighlight}
               rangedRangeCells={rangedRangeCells}

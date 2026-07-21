@@ -108,6 +108,14 @@ export interface Dnd5eSrdSpellDefinition {
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
+    id: 'spirit-guardians', name: '灵体卫士', englishName: 'Spirit Guardians', level: 3, school: '咒法',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 0, target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 8, bonus: 0 }, concentration: true, concentrationDurationRounds: 100,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'self', radiusFeet: 15 },
+    description: '呼唤灵体环绕你15尺，持续至多10分钟并需要专注。施法时指定任意数量可见生物不受影响；本实现默认排除友方。受影响生物在区域内的移动速度减半，并在一个回合内第一次进入区域或在其中开始回合时进行感知豁免；失败受到3d8光耀伤害（邪恶施法者改为黯蚀伤害），成功减半。每使用高于3环一环的法术位，伤害增加1d8。',
+  },
+  {
     id: 'moonbeam', name: '月华之光', englishName: 'Moonbeam', level: 2, school: '塑能',
     classes: ['druid'], castingTime: 'action', rangeFeet: 120, target: 'area', effect: 'persistent-area',
     dice: { count: 0, sides: 10, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,

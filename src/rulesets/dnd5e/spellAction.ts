@@ -857,6 +857,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
         cells: prepared.areaCells,
         anchorCell: prepared.areaAnchorCell,
         durationRounds: prepared.areaDurationRounds,
+        sourceAlignment: prepared.actor.alignment,
       })
       application.map = {
         ...application.map,

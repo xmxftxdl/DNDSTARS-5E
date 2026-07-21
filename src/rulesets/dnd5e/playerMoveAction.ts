@@ -8,6 +8,7 @@ import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { dnd5eEffectiveSpeed, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { dnd5ePersistentAreaMovementCostMultiplierAt } from './pluginAreas'
 
 export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
@@ -53,6 +54,8 @@ export function prepareDnd5ePlayerMove(input: {
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
   const path = findMapGeometryPath({
     geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
+    additionalCostMultiplier: (token, position) =>
+      dnd5ePersistentAreaMovementCostMultiplierAt({ map: input.map, token, position }),
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
   const snapshot = createDnd5eMapCombatSnapshot({
