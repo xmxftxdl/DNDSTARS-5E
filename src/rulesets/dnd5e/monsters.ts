@@ -1,23 +1,10 @@
 import type { AbilityKey } from '../../lib/dnd'
 import generatedSrdMonsterCatalog from './generated/srdMonsters.generated.json'
+import { getDnd5eRoomMonster } from './roomMonsterCatalog'
+import type { Dnd5eDamageType } from './damageTypes'
 
-export const DND5E_DAMAGE_TYPES = [
-  'acid',
-  'bludgeoning',
-  'cold',
-  'fire',
-  'force',
-  'lightning',
-  'necrotic',
-  'piercing',
-  'poison',
-  'psychic',
-  'radiant',
-  'slashing',
-  'thunder',
-] as const
-
-export type Dnd5eDamageType = (typeof DND5E_DAMAGE_TYPES)[number]
+export { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
+export { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
 export type Dnd5eMonsterSize = '微型' | '小型' | '中型' | '大型' | '超大型' | '巨型'
 export type Dnd5eMonsterAutomation = 'headless' | 'dm-adjudication'
 
@@ -671,14 +658,9 @@ export const DND5E_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] =
 
 const MONSTERS_BY_ID = new Map(DND5E_SRD_MONSTERS.map((monster) => [monster.id, monster]))
 const MONSTERS_BY_SLUG = new Map(DND5E_SRD_MONSTERS.map((monster) => [monster.slug, monster]))
-let roomMonstersById = new Map<string, Dnd5eMonsterStatBlock>()
-
-export function setDnd5eRoomMonsterCatalog(monsters: readonly Dnd5eMonsterStatBlock[]): void {
-  roomMonstersById = new Map(monsters.map((monster) => [monster.id, monster]))
-}
 
 export function getDnd5eSrdMonster(id: string): Dnd5eMonsterStatBlock | undefined {
-  return roomMonstersById.get(id) ?? MONSTERS_BY_ID.get(id)
+  return getDnd5eRoomMonster(id) ?? MONSTERS_BY_ID.get(id)
 }
 
 export function getDnd5eSrdMonsterBySlug(slug: string): Dnd5eMonsterStatBlock | undefined {

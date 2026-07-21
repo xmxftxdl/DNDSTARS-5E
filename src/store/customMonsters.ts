@@ -7,10 +7,8 @@ import {
   parseDnd5eMonsterStatBlock,
   type Dnd5eMonsterSchemaIssue,
 } from '../rulesets/dnd5e/monsterSchema'
-import {
-  setDnd5eRoomMonsterCatalog,
-  type Dnd5eMonsterStatBlock,
-} from '../rulesets/dnd5e/monsters'
+import type { Dnd5eMonsterStatBlock } from '../rulesets/dnd5e/monsters'
+import { setDnd5eRoomMonsterCatalog } from '../rulesets/dnd5e/roomMonsterCatalog'
 
 export const SHARED_CUSTOM_MONSTERS_RESOURCE = 'custom-monsters'
 export const DND5E_CUSTOM_MONSTER_SCHEMA_VERSION = 1

@@ -17,7 +17,7 @@ import type {
 } from './headlessCombatEngine'
 import { DND5E_2014_BACKGROUND_OPTIONS, DND5E_2014_RACE_OPTIONS } from './characterOptions'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
-import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { EquipmentItem } from '../../types/equipment'
 import type { Dnd5eInventoryItemTemplate } from '../../types/inventory'
@@ -31,7 +31,6 @@ import {
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
-import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
@@ -1005,7 +1004,6 @@ export function registerDnd5eRulesPlugin(
           definition.action.economy === 'none' ||
           definition.action.targeting.kind !== 'area' ||
           !/^srd-5\.1:[a-z0-9][a-z0-9-]*$/.test(summon.monsterId) ||
-          !getDnd5eSrdMonster(summon.monsterId) ||
           !finiteInteger(summon.durationRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS) ||
           (summon.label != null && (
             typeof summon.label !== 'string' || !summon.label.trim() ||

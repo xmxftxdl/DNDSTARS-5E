@@ -4,7 +4,7 @@ import {
   dnd5eStandardConditionId,
   type Dnd5eStandardConditionId,
 } from './conditions'
-import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 
 export const DND5E_ACTIVE_EFFECT_SCHEMA_VERSION = 1 as const
 export const DND5E_COMBAT_STATE_SCHEMA_VERSION = 2 as const

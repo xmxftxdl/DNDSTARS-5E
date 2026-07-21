@@ -1,6 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
-import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 
 export const DND5E_DECLARATIVE_LABEL_MAX_LENGTH = 120
 export const DND5E_DECLARATIVE_DURATION_MAX_ROUNDS = 14_400

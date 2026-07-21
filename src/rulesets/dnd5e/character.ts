@@ -12,7 +12,7 @@ import {
   dnd5eWalkingSpeed,
   type Dnd5eClassId,
 } from './classes'
-import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import { syncDnd5ePrimalChampion } from './hitPoints'
 import { dnd5eCharacterHasPluginFeature, dnd5ePluginBackgroundDefinition, registeredDnd5ePluginFeatures } from './pluginApi'
 import { dnd5eCharacterClassLevel, dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels, type Dnd5eClassLevels } from './multiclass'

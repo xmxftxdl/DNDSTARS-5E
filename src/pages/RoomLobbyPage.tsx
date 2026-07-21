@@ -37,7 +37,7 @@ import {
   saveRoomSession,
 } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
-import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e'
+import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
 
 type LobbyMode = 'create' | 'join'
 

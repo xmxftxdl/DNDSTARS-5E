@@ -1,5 +1,5 @@
 import type { AbilityKey } from '../../lib/dnd'
-import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 import {
   DND5E_STANDARD_CONDITION_IDS,
   type Dnd5eStandardConditionId,

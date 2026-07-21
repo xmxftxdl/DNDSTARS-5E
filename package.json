@@ -17,6 +17,7 @@
     "serve:player2": "node scripts/static-server.mjs --host 127.0.0.1 --port 5275 --root dist",
     "serve:player3": "node scripts/static-server.mjs --host 127.0.0.1 --port 5276 --root dist",
     "build": "tsc -b && vite build",
+    "build:check": "npm run build && node scripts/check-bundle-budget.mjs",
     "lint": "eslint .",
     "lint:ratchet": "node scripts/eslint-ratchet.mjs",
     "test": "vitest run",

@@ -1,8 +1,8 @@
 import {
-  DND5E_DAMAGE_TYPES,
   type Dnd5eMonsterAction,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
+import { DND5E_DAMAGE_TYPES } from './damageTypes'
 
 export interface Dnd5eMonsterSchemaIssue {
   monsterId: string

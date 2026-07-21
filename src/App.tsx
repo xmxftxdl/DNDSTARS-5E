@@ -1,49 +1,48 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Routes, Route } from 'react-router-dom'
 import { PanelLeftOpen } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
-import RoomHandoutNotification from './components/RoomHandoutNotification'
-import GroupAbilityCheckSystem from './components/GroupAbilityCheckSystem'
-import CampaignTimeSystem from './components/CampaignTimeSystem'
 import PageErrorBoundary from './components/PageErrorBoundary'
 import { SharedSyncRecoveryBanner } from './components/SharedSyncStatus'
-import RoomLobbyPage from './pages/RoomLobbyPage'
-import Dashboard from './pages/Dashboard'
-import MapsPage from './pages/MapsPage'
-import CharactersPage from './pages/CharactersPage'
-import RulesPluginsPage from './pages/RulesPluginsPage'
-import SpellbookPage from './pages/SpellbookPage'
-import CommunicationsPage from './pages/CommunicationsPage'
 import { modeFromPort } from './lib/appMode'
 import { heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
 import { clearRoomSession, getRoomSession, subscribeRoomSession } from './lib/roomSession'
 import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesState'
 import { synchronizeRoomPlugins } from './lib/roomPluginSync'
-import { subscribeSharedResourceInvalidation } from './lib/sharedApi'
-import { useMapStore } from './store/maps'
-import { useFogStore } from './store/fog'
-import { useMapGeometryStore } from './store/mapGeometry'
-import { useMapExplorationStore } from './store/mapExploration'
-import { useCombatStatisticsStore } from './store/combatStatistics'
 import { useCharacterStore } from './store/characters'
-import { SHARED_SPELLBOOK_RESOURCE, useSpellbookStore } from './store/spellbook'
-import { SHARED_CUSTOM_MONSTERS_RESOURCE, useCustomMonsterStore } from './store/customMonsters'
-import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e'
+import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e/pluginApi'
 import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
-import { MAP_FOG_RESOURCE } from './lib/fogOfWar'
-import { MAP_GEOMETRY_RESOURCE } from './lib/mapGeometry'
-import { MAP_EXPLORATION_RESOURCE } from './lib/mapExploration'
-import { COMBAT_STATISTICS_RESOURCE } from './lib/combatStatistics'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
-import { ROOM_CHAT_RESOURCE, ROOM_JOURNAL_RESOURCE } from './lib/roomCommunications'
-import { useRoomCommunicationsStore } from './store/roomCommunications'
-import { GROUP_ABILITY_CHECK_RESOURCE } from './lib/groupAbilityChecks'
-import { useGroupAbilityChecksStore } from './store/groupAbilityChecks'
-import { CAMPAIGN_TIME_RESOURCE } from './lib/campaignTime'
-import { useCampaignTimeStore } from './store/campaignTime'
+
+const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const MapsPage = lazy(() => import('./pages/MapsPage'))
+const CharactersPage = lazy(() => import('./pages/CharactersPage'))
+const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
+const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
+const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
+const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
+const GroupAbilityCheckSystem = lazy(() => import('./components/GroupAbilityCheckSystem'))
+const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
+
+function PageLoadingFallback() {
+  return (
+    <div className="flex min-h-48 items-center justify-center text-sm text-slate-400" role="status">
+      正在加载界面…
+    </div>
+  )
+}
+
+function lazyPage(scope: string, content: ReactNode) {
+  return (
+    <PageErrorBoundary scope={scope}>
+      <Suspense fallback={<PageLoadingFallback />}>{content}</Suspense>
+    </PageErrorBoundary>
+  )
+}
 
 export default function App() {
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
@@ -54,19 +53,6 @@ export default function App() {
   const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
   const isSpectator = roomSession?.role === 'spectator'
   const roomReady = !!roomSession || bypassRoomLobby
-  const loadSharedMaps = useMapStore((s) => s.loadShared)
-  const loadSharedFog = useFogStore((s) => s.loadShared)
-  const loadSharedMapGeometry = useMapGeometryStore((s) => s.loadShared)
-  const loadSharedMapExploration = useMapExplorationStore((s) => s.loadShared)
-  const loadSharedCombatStatistics = useCombatStatisticsStore((s) => s.loadShared)
-  const loadSharedCharacters = useCharacterStore((s) => s.loadShared)
-  const loadSharedSpellbook = useSpellbookStore((s) => s.loadShared)
-  const loadSharedCustomMonsters = useCustomMonsterStore((s) => s.loadShared)
-  const loadSharedRoomChat = useRoomCommunicationsStore((s) => s.loadChat)
-  const loadSharedRoomJournal = useRoomCommunicationsStore((s) => s.loadJournal)
-  const loadSharedGroupAbilityChecks = useGroupAbilityChecksStore((s) => s.loadShared)
-  const loadSharedCampaignTime = useCampaignTimeStore((s) => s.loadShared)
-
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
   useEffect(() => {
@@ -141,39 +127,17 @@ export default function App() {
 
   useEffect(() => {
     if (!roomReady) return
-    void Promise.all([loadSharedMaps(), loadSharedCharacters(), loadSharedSpellbook(), loadSharedCustomMonsters(), loadSharedFog(), loadSharedMapGeometry(), loadSharedMapExploration(), loadSharedCombatStatistics(), loadSharedRoomChat(), loadSharedRoomJournal(), loadSharedGroupAbilityChecks(), loadSharedCampaignTime()])
-    const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
-    const stopCharacters = subscribeSharedResourceInvalidation('characters', loadSharedCharacters)
-    const stopSpellbook = subscribeSharedResourceInvalidation(SHARED_SPELLBOOK_RESOURCE, loadSharedSpellbook)
-    const stopCustomMonsters = subscribeSharedResourceInvalidation(SHARED_CUSTOM_MONSTERS_RESOURCE, loadSharedCustomMonsters)
-    const stopFog = subscribeSharedResourceInvalidation(MAP_FOG_RESOURCE, loadSharedFog)
-    const stopMapGeometry = subscribeSharedResourceInvalidation(MAP_GEOMETRY_RESOURCE, async () => {
-      await loadSharedMapGeometry()
-      // Geometry changes can make tokens newly visible or hidden without changing the map resource.
-      // Re-fetch the server-side player projection immediately instead of waiting for recovery polling.
-      await loadSharedMaps()
+    let disposed = false
+    let stop: (() => void) | undefined
+    void import('./lib/roomSharedStateSync').then(({ startRoomSharedStateSync }) => {
+      if (disposed) return
+      stop = startRoomSharedStateSync()
     })
-    const stopMapExploration = subscribeSharedResourceInvalidation(MAP_EXPLORATION_RESOURCE, loadSharedMapExploration)
-    const stopCombatStatistics = subscribeSharedResourceInvalidation(COMBAT_STATISTICS_RESOURCE, loadSharedCombatStatistics)
-    const stopRoomChat = subscribeSharedResourceInvalidation(ROOM_CHAT_RESOURCE, loadSharedRoomChat)
-    const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal)
-    const stopGroupAbilityChecks = subscribeSharedResourceInvalidation(GROUP_ABILITY_CHECK_RESOURCE, loadSharedGroupAbilityChecks)
-    const stopCampaignTime = subscribeSharedResourceInvalidation(CAMPAIGN_TIME_RESOURCE, loadSharedCampaignTime)
     return () => {
-      stopMaps()
-      stopCharacters()
-      stopSpellbook()
-      stopCustomMonsters()
-      stopFog()
-      stopMapGeometry()
-      stopMapExploration()
-      stopCombatStatistics()
-      stopRoomChat()
-      stopRoomJournal()
-      stopGroupAbilityChecks()
-      stopCampaignTime()
+      disposed = true
+      stop?.()
     }
-  }, [endpointMode, loadSharedCampaignTime, loadSharedCharacters, loadSharedCombatStatistics, loadSharedCustomMonsters, loadSharedFog, loadSharedGroupAbilityChecks, loadSharedMapExploration, loadSharedMapGeometry, loadSharedMaps, loadSharedRoomChat, loadSharedRoomJournal, loadSharedSpellbook, roomReady, roomSession])
+  }, [endpointMode, roomReady, roomSession])
 
   useEffect(() => {
     if (!roomReady || roomSession?.role === 'spectator') return
@@ -191,7 +155,9 @@ export default function App() {
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
-      <RoomLobbyPage notice={roomNotice} />
+      <Suspense fallback={<PageLoadingFallback />}>
+        <RoomLobbyPage notice={roomNotice} />
+      </Suspense>
     </>
   )
 
@@ -214,9 +180,11 @@ export default function App() {
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
-      {!isSpectator && <RoomHandoutNotification />}
-      {!isSpectator && <GroupAbilityCheckSystem />}
-      <CampaignTimeSystem isDm={endpointMode !== 'player'} />
+      <Suspense fallback={null}>
+        {!isSpectator && <RoomHandoutNotification />}
+        {!isSpectator && <GroupAbilityCheckSystem />}
+        <CampaignTimeSystem isDm={endpointMode !== 'player'} />
+      </Suspense>
       <iframe
         title="D20 dice preloader"
         src="/dice-box-frame.html?badge=0"
@@ -244,12 +212,12 @@ export default function App() {
           </button>
         )}
         <Routes>
-          <Route path="/" element={endpointMode === 'player' ? <Navigate to="/maps" replace /> : <PageErrorBoundary scope="战役总览"><Dashboard /></PageErrorBoundary>} />
-          <Route path="/maps" element={<PageErrorBoundary scope="地图与战斗"><MapsPage /></PageErrorBoundary>} />
-          {!isSpectator && <Route path="/characters" element={<PageErrorBoundary scope="角色页面"><CharactersPage /></PageErrorBoundary>} />}
-          {!isSpectator && <Route path="/spellbook" element={<PageErrorBoundary scope="法术书"><SpellbookPage /></PageErrorBoundary>} />}
-          {!isSpectator && <Route path="/communications" element={<PageErrorBoundary scope="通讯与日志"><CommunicationsPage /></PageErrorBoundary>} />}
-          {!isSpectator && <Route path="/settings" element={<PageErrorBoundary scope="设置页面"><RulesPluginsPage /></PageErrorBoundary>} />}
+          <Route path="/" element={endpointMode === 'player' ? <Navigate to="/maps" replace /> : lazyPage('战役总览', <Dashboard />)} />
+          <Route path="/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
+          {!isSpectator && <Route path="/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
+          {!isSpectator && <Route path="/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
+          {!isSpectator && <Route path="/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
+          {!isSpectator && <Route path="/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
           {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}
         </Routes>
       </main>
