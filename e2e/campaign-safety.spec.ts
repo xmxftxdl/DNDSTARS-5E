@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test'
 const dmUrl = 'http://127.0.0.1:6173'
 
 test('DM can create and export a server-side campaign recovery point', async ({ page }) => {
-  await page.goto(dmUrl)
+  await page.goto(`${dmUrl}/settings`)
+  await page.getByRole('button', { name: '房间与恢复' }).click()
   await expect(page.getByRole('heading', { name: '战役安全与恢复' })).toBeVisible()
 
   await page.getByRole('button', { name: '立即创建快照' }).click()
@@ -17,7 +18,8 @@ test('DM can create and export a server-side campaign recovery point', async ({ 
 })
 
 test('campaign import is preflighted before restore is enabled', async ({ page }) => {
-  await page.goto(dmUrl)
+  await page.goto(`${dmUrl}/settings`)
+  await page.getByRole('button', { name: '房间与恢复' }).click()
   const input = page.locator('input[type="file"][accept*="application/json"]')
   await input.setInputFiles({
     name: 'not-a-campaign.json',

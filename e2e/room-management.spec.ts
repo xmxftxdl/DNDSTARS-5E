@@ -54,7 +54,8 @@ test('DM can manage room capacity, membership and transfer authority from the da
     localStorage.setItem(key, JSON.stringify(session))
   }, [SESSION_KEY, sessionFrom(created)] as const)
   const page = await context.newPage()
-  await page.goto(DM, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${DM}/settings`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: '房间与恢复' }).click()
 
   await expect(page.getByTestId('room-management-panel')).toBeVisible()
   await expect(page.getByTestId(`room-transfer-${playerA.member.memberId}`)).toBeVisible()

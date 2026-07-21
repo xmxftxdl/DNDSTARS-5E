@@ -61,13 +61,37 @@ test('DM character page is a read-only room-player roster', async ({ browser, re
   await player.getByRole('button', { name: '选择属性方式' }).click()
   await player.getByRole('button', { name: /标准数组/ }).click()
   await player.getByRole('button', { name: '开始分配' }).click()
-  await player.getByRole('button', { name: '加入种族调整' }).click()
+  await player.getByRole('button', { name: '加入种族调整并选择装备' }).click()
+  await player.getByRole('button', { name: '确认起始装备' }).click()
   await player.getByRole('textbox', { name: '角色名称' }).fill('爱丽丝的战士')
   await player.getByRole('button', { name: '创建角色' }).click()
+
+  const currentHp = player.getByRole('spinbutton', { name: '当前生命值' })
+  await currentHp.fill('1')
+  await player.getByRole('spinbutton', { name: '生命值变化量' }).fill('3')
+  await player.getByRole('button', { name: '恢复生命值' }).click()
+  await expect(currentHp).toHaveValue('4')
+  await expect.poll(async () => {
+    const response = await request.get(`${DM}/api/state/characters?room=${created.roomId}`, {
+      headers: { 'X-Stars-Member': joined.member.memberId },
+    })
+    if (!response.ok()) return null
+    const state = await response.json() as { characters?: Array<{ name?: string; currentHp?: number }> }
+    return state.characters?.find((character) => character.name === '爱丽丝的战士')?.currentHp ?? null
+  }, { timeout: 20_000 }).toBe(4)
 
   const roster = dm.getByTestId('dm-room-player-roster')
   await expect(roster.getByText('爱丽丝', { exact: true })).toBeVisible()
   await expect(roster.getByText('爱丽丝的战士', { exact: true })).toBeVisible({ timeout: 20_000 })
+  await roster.getByRole('button', { name: '查看角色卡：爱丽丝的战士' }).click()
+  const detail = dm.getByRole('dialog', { name: '爱丽丝的战士的角色卡详情' })
+  await expect(detail).toBeVisible()
+  await expect(detail.getByText('DM 只读检视：这里展示玩家同步到房间的角色快照，任何字段都不能从此窗口修改。')).toBeVisible()
+  await expect(detail.getByRole('textbox', { name: '角色名称' })).toBeDisabled()
+  await detail.getByRole('button', { name: '物品栏' }).click()
+  await expect(detail.getByTestId('dnd5e-inventory')).toBeVisible()
+  await detail.getByRole('button', { name: '关闭角色卡详情' }).click()
+  await expect(detail).toHaveCount(0)
   await expect(dm.getByRole('button', { name: '新建角色' })).toHaveCount(0)
   await expect(dm.getByTitle('删除')).toHaveCount(0)
   await expect(dm.getByText('一键短休')).toHaveCount(0)

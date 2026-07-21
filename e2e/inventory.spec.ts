@@ -52,7 +52,8 @@ test('DM distributes an SRD item and the player uses it through authority sync',
   await player.getByRole('button', { name: '选择属性方式' }).click()
   await player.getByRole('button', { name: /标准数组/ }).click()
   await player.getByRole('button', { name: '开始分配' }).click()
-  await player.getByRole('button', { name: '加入种族调整' }).click()
+  await player.getByRole('button', { name: '加入种族调整并选择装备' }).click()
+  await player.getByRole('button', { name: '确认起始装备' }).click()
   await player.getByRole('textbox', { name: '角色名称' }).fill('背包测试战士')
   await player.getByRole('button', { name: '创建角色' }).click()
 
@@ -73,7 +74,8 @@ test('DM distributes an SRD item and the player uses it through authority sync',
   await expect(inventory.getByText('饮用者恢复 2d4 + 2 点生命值。', { exact: false })).toBeVisible()
   await potion.click()
   await inventory.getByRole('button', { name: '使用', exact: true }).click()
-  await expect(inventory.getByText('这个分类目前是空的')).toBeVisible({ timeout: 20_000 })
+  await expect(inventory.getByRole('button', { name: /治疗药水/ })).toHaveCount(0, { timeout: 20_000 })
+  await expect(inventory.getByText('已提交给 DM 权威端，完成后库存会自动同步。')).toBeVisible()
 
   await dmContext.close()
   await playerContext.close()

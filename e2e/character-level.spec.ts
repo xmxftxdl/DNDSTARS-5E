@@ -59,7 +59,9 @@ test('character level auto-saves while editing and survives an immediate refresh
   await expect(page.getByRole('spinbutton', { name: '等级', exact: true })).toHaveValue('12')
 
   await expect.poll(async () => {
-    const response = await request.get(`http://127.0.0.1:6173/api/state/characters?room=${created.roomId}`)
+    const response = await request.get(`http://127.0.0.1:6173/api/state/characters?room=${created.roomId}`, {
+      headers: { 'X-Stars-Member': joined.member.memberId },
+    })
     if (!response.ok()) return null
     const state = await response.json() as { characters?: Array<{ name?: string; level?: number }> }
     return state.characters?.find((character) => character.name === name)?.level ?? null

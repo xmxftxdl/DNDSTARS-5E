@@ -2,15 +2,59 @@ import { expect, test } from '@playwright/test'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
+const SESSION_KEY = 'stars-room-session:v1'
 
-test('人物立绘上传后随角色保存，并在刷新后恢复', async ({ page, request }) => {
+interface Membership {
+  roomId: string
+  roomName: string
+  rulesetId: 'dnd5e-2014-srd-5.1'
+  createdAt: number
+  member: {
+    memberId: string
+    clientId: string
+    role: 'dm' | 'player'
+    slot?: 'player1'
+    displayName: string
+  }
+}
+
+function sessionFrom(response: Membership) {
+  return {
+    roomId: response.roomId,
+    roomName: response.roomName,
+    rulesetId: response.rulesetId,
+    createdAt: response.createdAt,
+    ...response.member,
+  }
+}
+
+test('人物立绘上传后随房间角色保存，并在刷新后恢复', async ({ page, request }) => {
+  const createdResponse = await request.post(`${DM}/api/rooms`, {
+    data: {
+      roomName: '人物立绘 E2E',
+      displayName: '立绘测试 DM',
+      rulesetId: 'dnd5e-2014-srd-5.1',
+      clientId: `portrait-dm-${Date.now()}`,
+    },
+  })
+  expect(createdResponse.ok()).toBeTruthy()
+  const created = await createdResponse.json() as Membership
+  const joinedResponse = await request.post(`${DM}/api/rooms/${created.roomId}/join`, {
+    data: { displayName: '立绘测试玩家', clientId: `portrait-player-${Date.now()}` },
+  })
+  expect(joinedResponse.ok()).toBeTruthy()
+  const joined = await joinedResponse.json() as Membership
+
   const characterId = `portrait-${Date.now()}`
-  const response = await request.put(`${DM}/api/state/characters`, {
+  const response = await request.put(`${DM}/api/state/characters?room=${created.roomId}`, {
+    headers: { 'X-Stars-Member': created.member.memberId },
     data: {
       characters: [{
         id: characterId,
         name: '立绘测试角色',
-        player: 'player1',
+        player: joined.member.displayName,
+        roomId: created.roomId,
+        roomMemberId: joined.member.memberId,
         avatar: '⚔️',
         accent: 'from-amber-500 to-rose-500',
         rulesetId: 'dnd5e-2014-srd-5.1',
@@ -44,6 +88,12 @@ test('人物立绘上传后随角色保存，并在刷新后恢复', async ({ pa
   expect(response.ok()).toBeTruthy()
 
   await page.goto(`${PLAYER}/characters`, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [
+    SESSION_KEY,
+    sessionFrom(joined),
+  ] as const)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+
   const editor = page.getByTestId('character-portrait-editor')
   await expect(editor).toBeVisible()
   await editor.locator('input[type="file"]').setInputFiles({
@@ -57,7 +107,9 @@ test('人物立绘上传后随角色保存，并在刷新后恢复', async ({ pa
 
   await expect(editor.locator('img')).toHaveAttribute('src', /^data:image\/(?:webp|jpeg);base64,/)
   await expect.poll(async () => {
-    const state = await (await request.get(`${DM}/api/state/characters`)).json() as {
+    const state = await (await request.get(`${DM}/api/state/characters?room=${created.roomId}`, {
+      headers: { 'X-Stars-Member': joined.member.memberId },
+    })).json() as {
       characters?: Array<{ id?: string; portrait?: string }>
     }
     return state.characters?.find((character) => character.id === characterId)?.portrait ?? ''
