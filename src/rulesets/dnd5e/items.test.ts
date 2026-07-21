@@ -185,6 +185,35 @@ describe('SRD 5.1 inventory', () => {
     expect(migrated.entries[0].resources?.uses).toMatchObject({ current: 0, maximum: 10 })
   })
 
+  it('rehydrates previously granted SRD magic items with the latest complete rule text', () => {
+    const hero = character('amulet-owner')
+    const legacyAmulet = {
+      ...DND5E_SRD_ITEM_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:amulet-of-the-planes')!,
+      description: '极珍稀奇物，需要同调。',
+      rulesText: '旧目录占位文案。',
+      use: undefined,
+    }
+    const normalized = normalizeDnd5eInventory({
+      ...hero,
+      dnd5eInventory: {
+        schemaVersion: 2,
+        entries: [{
+          instanceId: 'old-amulet',
+          templateId: legacyAmulet.id,
+          item: legacyAmulet,
+          quantity: 1,
+          acquiredAt: 1,
+        }],
+      },
+    })
+
+    expect(normalized.entries[0].item.description).toContain('跨位面旅行')
+    expect(normalized.entries[0].item.rulesText).toContain('DC 15 智力检定')
+    expect(normalized.entries[0].item.use).toMatchObject({
+      economy: 'action', consumeQuantity: 0, effect: { kind: 'dm-adjudication' },
+    })
+  })
+
   it('spends generic item resources without changing quantity', () => {
     const hero = character('resource-hero')
     const item = DND5E_SRD_ITEM_TEMPLATES[0]

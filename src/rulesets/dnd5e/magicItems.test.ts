@@ -33,6 +33,27 @@ describe('SRD 5.1 magic items', () => {
     })
   })
 
+  it('publishes the complete SRD adjudication rule for the Amulet of the Planes', () => {
+    const amulet = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:amulet-of-the-planes')
+    expect(amulet).toMatchObject({
+      name: '位面护符',
+      use: {
+        economy: 'action',
+        consumeQuantity: 0,
+        effect: { kind: 'dm-adjudication' },
+      },
+      magicItem: {
+        kind: 'wondrous-item', rarity: 'very-rare', attunement: 'required', automation: 'dm-adjudication',
+      },
+    })
+    expect(amulet?.description).toContain('跨位面旅行')
+    expect(amulet?.rulesText).toContain('DC 15 智力检定')
+    expect(amulet?.rulesText).toContain('异界传送术')
+    expect(amulet?.rulesText).toContain('距你 15 尺内的每个生物和每件物件')
+    expect(amulet?.rulesText).toContain('01–60')
+    expect(amulet?.rulesText).toContain('61–100')
+  })
+
   it('generates concrete +1 to +3 weapons with authoritative attack and damage bonuses', () => {
     const longsword = DND5E_SRD_MAGIC_WEAPON_TEMPLATES.find((item) => item.id === 'srd-5.1:magic-item:weapon-longsword-plus-3')
     expect(longsword).toMatchObject({

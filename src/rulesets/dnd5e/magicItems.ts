@@ -9,6 +9,37 @@ import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
+type CatalogRuleOverride = Pick<Dnd5eInventoryItemTemplate, 'description' | 'rulesText' | 'use'>
+
+/**
+ * 已逐条核对 SRD 5.1 正文的目录物品规则。未列在这里的物品仍保持
+ * “目录已收录、具体效果由 DM 裁定”的保守状态，避免把不完整摘要伪装成完整规则。
+ */
+const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
+  'amulet-of-the-planes': {
+    description: '一枚用于跨位面旅行的极珍稀奇物。只有完成同调并佩戴它的生物才能激活；检定失败时，它可能把佩戴者与周围所有生物和物件送往随机目的地。',
+    rulesText: [
+      '激活：完成同调并佩戴护符时，你可以使用一个动作，说出另一个存在位面上你熟悉的一处地点。',
+      '',
+      '检定：进行一次 DC 15 智力检定。',
+      '',
+      '成功：你通过护符施展“异界传送术”。',
+      '',
+      '失败：你、距你 15 尺内的每个生物和每件物件一同前往随机目的地。掷 1d100：',
+      '• 01–60：抵达你所指定位面上的一个随机地点。',
+      '• 61–100：抵达随机决定的一个存在位面。',
+    ].join('\n'),
+    use: {
+      economy: 'action',
+      consumeQuantity: 0,
+      effect: {
+        kind: 'dm-adjudication',
+        adjudication: '位面护符：先处理 DC 15 智力检定。成功时按“异界传送术”裁定；失败时掷 1d100，并处理佩戴者周围 15 尺内所有生物、物件及随机目的地。',
+      },
+    },
+  },
+}
+
 export interface Dnd5eSrdMagicItemCatalogEntry {
   id: string
   name: string
@@ -373,15 +404,17 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
   const requirement = ATTUNEMENT_REQUIREMENTS[entry.id]
   const rarity = DND5E_MAGIC_ITEM_RARITY_LABELS[entry.rarity]
   const kind = DND5E_MAGIC_ITEM_KIND_LABELS[entry.kind]
+  const rules = CATALOG_RULE_OVERRIDES[entry.id]
   return {
     id: `srd-5.1:magic-item:${entry.id}`,
     name: entry.name,
     englishName: entry.englishName,
     category: entry.kind === 'potion' ? 'consumable' : 'magic-item',
     icon: iconForKind(entry.kind),
-    description: `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
-    rulesText: `该物品已收录于 SRD 5.1 魔法物品目录。当前版本完整保存其类型、稀有度与同调要求；尚未声明式接入的主动、被动或充能效果由 DM 按 SRD 5.1 正文裁定。`,
+    description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
+    rulesText: rules?.rulesText ?? `该物品已收录于 SRD 5.1 魔法物品目录。当前版本完整保存其类型、稀有度与同调要求；尚未声明式接入的主动、被动或充能效果由 DM 按 SRD 5.1 正文裁定。`,
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
+    ...(rules?.use ? { use: rules.use } : {}),
     magicItem: {
       kind: entry.kind,
       rarity: entry.rarity,

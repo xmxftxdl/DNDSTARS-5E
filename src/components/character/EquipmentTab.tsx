@@ -204,7 +204,7 @@ export default function EquipmentTab({
         )}
       </section>
 
-      {editable && selected && (
+      {selected && (
         <section className="glass rounded-2xl p-4" data-testid="inventory-item-actions">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -213,7 +213,7 @@ export default function EquipmentTab({
                 持有 {selected.quantity}{inventoryResourceSummary(selected) ? ` · ${inventoryResourceSummary(selected)}` : ''} · {selected.item.englishName ?? CATEGORY_LABELS[selected.item.category]}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            {editable && <div className="flex flex-wrap gap-2">
               {selected.item.equipment && !selected.equippedSlot && (
                 <ActionButton icon={Shield} disabled={pending || combatManagementLocked} onClick={() => run({ type: 'equip', characterId: character.id, instanceId: selected.instanceId })}>装备</ActionButton>
               )}
@@ -223,10 +223,27 @@ export default function EquipmentTab({
               {selected.item.use && (
                 <ActionButton icon={HandHelping} disabled={pending} onClick={useSelected}>使用</ActionButton>
               )}
-            </div>
+            </div>}
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)_auto]">
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl border border-violet-300/15 bg-violet-500/[0.055] p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-200/70">完整规则效果</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-200">{selected.item.rulesText}</p>
+            </div>
+            <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">物品简介</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-300">{selected.item.description}</p>
+            </div>
+            {selected.item.use?.effect.kind === 'dm-adjudication' && (
+              <div className="rounded-xl border border-amber-300/12 bg-amber-500/[0.045] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200/70">平台结算边界</p>
+                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-amber-50/80">{selected.item.use.effect.adjudication}</p>
+              </div>
+            )}
+          </div>
+
+          {editable && <div className="mt-4 grid gap-3 lg:grid-cols-[110px_minmax(0,1fr)_auto]">
             <label className="space-y-1 text-xs text-slate-500">
               <span>数量</span>
               <input
@@ -270,7 +287,7 @@ export default function EquipmentTab({
                 丢弃
               </ActionButton>
             </div>
-          </div>
+          </div>}
           {combatManagementLocked && (
             <p className="mt-3 text-[11px] text-amber-300/80">战斗中仅开放已接入行动经济的“使用物品”；换装、丢弃和转交需在角色页处理，直至物品交互事务接入 Headless。</p>
           )}

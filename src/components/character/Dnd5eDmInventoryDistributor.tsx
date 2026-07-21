@@ -163,15 +163,21 @@ export default function Dnd5eDmInventoryDistributor({
             </div>
           </div>
 
-          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="mt-3 space-y-3">
+            <div className="rounded-lg border border-violet-300/15 bg-violet-500/[0.055] p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-200/70">完整规则效果</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-200">{selectedTemplate.rulesText}</p>
+            </div>
             <div className="rounded-lg border border-white/6 bg-white/[0.02] p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">物品描述</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">物品简介</p>
               <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-300">{selectedTemplate.description}</p>
             </div>
-            <div className="rounded-lg border border-white/6 bg-white/[0.02] p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">规则效果</p>
-              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-300">{selectedTemplate.rulesText}</p>
-            </div>
+            {selectedTemplate.use?.effect.kind === 'dm-adjudication' && (
+              <div className="rounded-lg border border-amber-300/12 bg-amber-500/[0.045] p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200/70">平台结算边界</p>
+                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-amber-50/80">{selectedTemplate.use.effect.adjudication}</p>
+              </div>
+            )}
           </div>
 
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
