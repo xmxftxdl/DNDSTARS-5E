@@ -14,12 +14,12 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
     },
   })
   expect(createdResponse.status()).toBe(201)
-  const created = await createdResponse.json() as { roomId: string; member: { memberId: string } }
+  const created = await createdResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
   const joinedResponse = await request.post(`${PLAYER}/api/rooms/${created.roomId}/join`, {
     data: { displayName: 'Geometry Player', clientId: `geometry-v2-player-${Date.now()}`, activePlugins: [] },
   })
   expect(joinedResponse.ok()).toBeTruthy()
-  const joined = await joinedResponse.json() as { member: { memberId: string } }
+  const joined = await joinedResponse.json() as { member: { memberId: string; roomToken: string } }
   const resourceUrl = `${DM}/api/state/map-geometry?room=${created.roomId}`
   const common = {
     label: '石制结构', blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
@@ -51,10 +51,17 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
       updatedAt: 1,
     }],
   }
-  const dmHeaders = { 'Content-Type': 'application/json', 'X-Stars-Member': created.member.memberId }
+  const dmHeaders = {
+    'Content-Type': 'application/json',
+    'X-Stars-Member': created.member.memberId,
+    'X-Stars-Room-Token': created.member.roomToken,
+  }
   expect((await request.put(resourceUrl, { headers: dmHeaders, data: geometry })).ok()).toBeTruthy()
 
-  const playerHeaders = { 'X-Stars-Member': joined.member.memberId }
+  const playerHeaders = {
+    'X-Stars-Member': joined.member.memberId,
+    'X-Stars-Room-Token': joined.member.roomToken,
+  }
   const playerResponse = await request.get(`${PLAYER}/api/state/map-geometry?room=${created.roomId}`, { headers: playerHeaders })
   expect(playerResponse.ok()).toBeTruthy()
   expect(await playerResponse.json()).toMatchObject({

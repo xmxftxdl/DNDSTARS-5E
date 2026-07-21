@@ -10,6 +10,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: `player${number}`
@@ -76,7 +77,7 @@ test('DM can manage room capacity, membership and transfer authority from the da
   await page.getByTestId(`room-kick-${playerB.member.memberId}`).click()
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/rooms/${created.roomId}/roster`, {
-      headers: { 'X-Stars-Member': created.member.memberId },
+      headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     })
     const roster = await response.json() as { players: Array<{ memberId: string; status: string }> }
     return roster.players.find((member) => member.memberId === playerB.member.memberId)?.status
@@ -94,6 +95,10 @@ test('DM can manage room capacity, membership and transfer authority from the da
   // 再确认继任者已经成为权威 DM。
   await expect.poll(async () => {
     const heartbeat = await request.post(`${DM}/api/rooms/${created.roomId}/heartbeat`, {
+      headers: {
+        'X-Stars-Member': playerA.member.memberId,
+        'X-Stars-Room-Token': playerA.member.roomToken,
+      },
       data: { memberId: playerA.member.memberId, activePlugins: [] },
     })
     if (!heartbeat.ok()) return `http-${heartbeat.status()}`

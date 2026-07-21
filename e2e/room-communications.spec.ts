@@ -12,6 +12,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: `player${number}`
@@ -67,7 +68,9 @@ test('chat, private DM notes, server rolls and targeted handouts synchronize acr
   await expect(dmPage.getByText('搜索暗门')).toBeVisible()
 
   await expect.poll(async () => {
-    const response = await request.get(`${DM}/api/state/combat-log?room=${dm.roomId}`, { headers: { 'X-Stars-Member': dm.member.memberId } })
+    const response = await request.get(`${DM}/api/state/combat-log?room=${dm.roomId}`, {
+      headers: { 'X-Stars-Member': dm.member.memberId, 'X-Stars-Room-Token': dm.member.roomToken },
+    })
     const body = await response.json() as { entries?: Array<{ text: string }> }
     return body.entries?.some((entry) => entry.text.includes('2d6+3')) ?? false
   }).toBe(true)

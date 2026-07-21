@@ -11,6 +11,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: 'player1'
@@ -47,7 +48,7 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
 
   const characterId = `portrait-${Date.now()}`
   const response = await request.put(`${DM}/api/state/characters?room=${created.roomId}`, {
-    headers: { 'X-Stars-Member': created.member.memberId },
+    headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     data: {
       characters: [{
         id: characterId,
@@ -108,7 +109,7 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
   await expect(editor.locator('img')).toHaveAttribute('src', /^data:image\/(?:webp|jpeg);base64,/)
   await expect.poll(async () => {
     const state = await (await request.get(`${DM}/api/state/characters?room=${created.roomId}`, {
-      headers: { 'X-Stars-Member': joined.member.memberId },
+      headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
     })).json() as {
       characters?: Array<{ id?: string; portrait?: string }>
     }

@@ -892,6 +892,9 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     ...c,
     // 强制旧存档进入当前 SRD 5.1 规则集，避免 undefined 覆盖默认规则。
     rulesetId: 'dnd5e-2014-srd-5.1',
+    // Do not inherit emptyCharacter's fighter level when migrating a legacy
+    // single-class save that did not yet have the multiclass field.
+    dnd5eClassLevels: c.dnd5eClassLevels,
     avatar: normalizeCharacterAvatar(c.avatar),
     portrait: normalizeCharacterPortrait(c.portrait),
     saveDC: c.saveDC ?? d.saveDC,

@@ -11,6 +11,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: `player${number}`
@@ -65,7 +66,7 @@ test('DM campaign clock, timers and expiry synchronize to the player port', asyn
   await expect(playerPage.getByText('侦测魔法专注到期', { exact: true })).toBeVisible()
 
   const forbidden = await request.patch(`${DM}/api/state/campaign-time/mutation?room=${dm.roomId}`, {
-    headers: { 'X-Stars-Member': player.member.memberId },
+    headers: { 'X-Stars-Member': player.member.memberId, 'X-Stars-Room-Token': player.member.roomToken },
     data: { operation: 'advance', minutes: 1 },
   })
   expect(forbidden.status()).toBe(403)

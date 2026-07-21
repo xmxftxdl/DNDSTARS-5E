@@ -175,7 +175,7 @@ async function seedPlayer2VsRedDragon(request: APIRequestContext, mapId: string)
 async function sendPlayer2Action(page: Page, action: Record<string, unknown>) {
   await page.evaluate(async (payload) => {
     const protocolHeaders = {
-      'X-Stars-Protocol': '3',
+      'X-Stars-Protocol': '4',
       'X-Stars-Writer': 'e2e-player2-direct-client',
     }
     const queueRes = await fetch('http://127.0.0.1:6173/api/state/player-action-requests')

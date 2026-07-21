@@ -120,7 +120,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
   const activeClassDefinition = activeClassId ? dnd5eClassDefinition(activeClassId) : classDefinition
   const activeClassLevel = activeClassId ? dnd5eCharacterClassLevel(c, activeClassId) : c.level
   const classCharacter = activeClassDefinition
-    ? { ...c, charClass: activeClassDefinition.name, level: activeClassLevel }
+    ? { ...c, charClass: activeClassDefinition.name, level: Math.max(1, activeClassLevel) }
     : c
   const hasSpellbookTab = Object.keys(classLevels).some((classId) => !!dnd5eClassDefinition(classId)?.spellcasting)
   const hasPluginTab = registeredDnd5ePluginFeatures().length > 0 || (c.dnd5ePluginFeatureIds?.length ?? 0) > 0

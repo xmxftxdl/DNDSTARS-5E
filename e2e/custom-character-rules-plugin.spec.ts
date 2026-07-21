@@ -12,6 +12,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: 'player1' | 'player2' | 'player3'

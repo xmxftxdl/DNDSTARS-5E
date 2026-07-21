@@ -348,7 +348,11 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
             )}
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {spellcastingSummary(definition.spellcasting.kind, progression[character.level - 1], character).map((item) => (
+            {spellcastingSummary(
+              definition.spellcasting.kind,
+              progression[Math.max(0, Math.min(progression.length - 1, character.level - 1))],
+              character,
+            ).map((item) => (
               <InfoBlock key={item.label} title={item.label} text={item.value} />
             ))}
           </div>

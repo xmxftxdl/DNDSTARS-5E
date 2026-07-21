@@ -70,4 +70,15 @@ describe('D&D 5e character save migration', () => {
     expect(serializeDnd5eCharacterSnapshot(withBackstory).backstory).toBe(withBackstory.backstory)
     expect(normalizeCharacter({ id: 'legacy-hero', name: '旧角色' }).backstory).toBe('')
   })
+
+  it('derives legacy single-class levels from the saved class instead of the new-character fighter default', () => {
+    const wizard = normalizeCharacter({
+      id: 'legacy-wizard',
+      name: '旧法师',
+      charClass: '法师',
+      level: 3,
+    })
+    expect(wizard.level).toBe(3)
+    expect(wizard.dnd5eClassLevels).toEqual({ wizard: 3 })
+  })
 })

@@ -873,6 +873,7 @@ export function eventChannelOperationAllowed(channel, operation, role) {
   if (channel === '_all') return operation === 'subscribe'
   const policy = EVENT_CHANNEL_POLICIES[channel]
   if (!policy) return false
+  if (role === 'open') return true
   return policy[operation].includes(normalizedEventRole(role))
 }
 
@@ -4900,7 +4901,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     if (eventMatch) {
       const channel = safeName(eventMatch[1])
       const viewer = {
-        role: normalizedEventRole(ctx.accessRole),
+        role: ctx.accessRole,
         memberId: authenticatedRoomMember?.memberId,
       }
       if (req.method === 'DELETE') {

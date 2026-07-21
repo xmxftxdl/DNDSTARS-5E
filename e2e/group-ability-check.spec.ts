@@ -12,6 +12,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: `player${number}`
@@ -29,6 +30,10 @@ async function setSession(context: BrowserContext, membership: Membership) {
 
 async function heartbeat(request: APIRequestContext, roomId: string, membership: Membership, characterId: string, characterName: string) {
   const response = await request.post(`${DM}/api/rooms/${roomId}/heartbeat`, {
+    headers: {
+      'X-Stars-Member': membership.member.memberId,
+      'X-Stars-Room-Token': membership.member.roomToken,
+    },
     data: { memberId: membership.member.memberId, activePlugins: [], activeCharacterId: characterId, activeCharacterName: characterName },
   })
   expect(response.ok()).toBeTruthy()
@@ -60,7 +65,7 @@ test('DM group check collects independent player rolls and projects only each pl
     inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true, equipment: {},
   })
   const stateResponse = await request.put(`${DM}/api/state/characters?room=${dm.roomId}`, {
-    headers: { 'X-Stars-Member': dm.member.memberId },
+    headers: { 'X-Stars-Member': dm.member.memberId, 'X-Stars-Room-Token': dm.member.roomToken },
     data: {
       characters: [character('hero-a', '斥候甲', playerA, 14), character('hero-b', '斥候乙', playerB, 12)],
       selectedId: 'hero-a', updatedAt: Date.now(),
@@ -104,7 +109,7 @@ test('DM group check collects independent player rolls and projects only each pl
   await expect(playerBDialog.getByText('服务端权威结果')).toBeVisible()
 
   const playerAState = await (await request.get(`${DM}/api/state/group-ability-checks?room=${dm.roomId}`, {
-    headers: { 'X-Stars-Member': playerA.member.memberId },
+    headers: { 'X-Stars-Member': playerA.member.memberId, 'X-Stars-Room-Token': playerA.member.roomToken },
   })).json() as { checks: Array<{ participants: unknown[]; results: unknown[] }> }
   expect(playerAState.checks[0].participants).toHaveLength(1)
   expect(playerAState.checks[0].results).toHaveLength(1)

@@ -14,7 +14,7 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   expect(createdResponse.status()).toBe(201)
   const created = await createdResponse.json() as {
     roomId: string; roomName: string; rulesetId: string; createdAt: number
-    member: { memberId: string; clientId: string; role: 'dm'; displayName: string }
+    member: { memberId: string; roomToken: string; clientId: string; role: 'dm'; displayName: string }
   }
   const joinedResponse = await request.post(`${PLAYER}/api/rooms/${created.roomId}/join`, {
     data: { displayName: 'Vision Player', clientId: `vision-player-${Date.now()}`, activePlugins: [] },
@@ -22,10 +22,14 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   expect(joinedResponse.ok()).toBeTruthy()
   const joined = await joinedResponse.json() as {
     roomId: string; roomName: string; rulesetId: string; createdAt: number
-    member: { memberId: string; clientId: string; role: 'player'; slot: 'player1'; displayName: string }
+    member: { memberId: string; roomToken: string; clientId: string; role: 'player'; slot: 'player1'; displayName: string }
   }
   const now = Date.now()
-  const dmHeaders = { 'Content-Type': 'application/json', 'X-Stars-Member': created.member.memberId }
+  const dmHeaders = {
+    'Content-Type': 'application/json',
+    'X-Stars-Member': created.member.memberId,
+    'X-Stars-Room-Token': created.member.roomToken,
+  }
   const stateUrl = (name: string) => `${DM}/api/state/${name}?room=${created.roomId}`
   const put = async (name: string, data: unknown) => {
     const response = await request.put(stateUrl(name), { headers: dmHeaders, data })
@@ -83,7 +87,7 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   await expect(canvas).toHaveAttribute('data-vision-source-count', '1')
 
   const projectedMaps = await request.get(`${PLAYER}/api/state/maps?room=${created.roomId}`, {
-    headers: { 'X-Stars-Member': joined.member.memberId },
+    headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
   })
   expect(projectedMaps.ok()).toBeTruthy()
   const projectedBody = await projectedMaps.json() as { maps: Array<{ tokens: Array<{ id: string }> }> }

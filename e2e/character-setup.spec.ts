@@ -22,7 +22,7 @@ async function enterFreshPlayerRoom(page: Page, request: APIRequestContext) {
   const joined = await (await request.post(`${DM}/api/rooms/${created.roomId}/join`, {
     data: { displayName: 'Setup 玩家', clientId: `setup-player-${suffix}` },
   })).json() as {
-    member: { memberId: string; clientId: string; role: 'player'; slot: 'player1'; displayName: string }
+    member: { memberId: string; roomToken: string; clientId: string; role: 'player'; slot: 'player1'; displayName: string }
   }
   await page.goto(`${PLAYER}/characters`, { waitUntil: 'domcontentloaded' })
   await page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [

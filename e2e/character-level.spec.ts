@@ -20,6 +20,7 @@ test('character level auto-saves while editing and survives an immediate refresh
   })).json() as {
     member: {
       memberId: string
+      roomToken: string
       clientId: string
       role: 'player'
       slot: 'player1'
@@ -60,7 +61,7 @@ test('character level auto-saves while editing and survives an immediate refresh
 
   await expect.poll(async () => {
     const response = await request.get(`http://127.0.0.1:6173/api/state/characters?room=${created.roomId}`, {
-      headers: { 'X-Stars-Member': joined.member.memberId },
+      headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
     })
     if (!response.ok()) return null
     const state = await response.json() as { characters?: Array<{ name?: string; level?: number }> }

@@ -11,6 +11,7 @@ interface Membership {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: 'player1'
@@ -40,12 +41,12 @@ async function enterRoom(page: Page, origin: string, membership: Membership, pat
 async function putRoomState(
   request: APIRequestContext,
   roomId: string,
-  memberId: string,
+  member: Membership['member'],
   resource: string,
   value: unknown,
 ) {
   const response = await request.put(`${DM}/api/state/${resource}?room=${roomId}`, {
-    headers: { 'X-Stars-Member': memberId },
+    headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
     data: value,
   })
   expect(response.ok()).toBeTruthy()
@@ -55,10 +56,10 @@ async function readCharacters(
   request: APIRequestContext,
   origin: string,
   roomId: string,
-  memberId: string,
+  member: Membership['member'],
 ) {
   const response = await request.get(`${origin}/api/state/characters?room=${roomId}`, {
-    headers: { 'X-Stars-Member': memberId },
+    headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
   })
   expect(response.ok()).toBeTruthy()
   return response.json() as Promise<{
@@ -178,13 +179,13 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
     ],
   }
 
-  await putRoomState(request, created.roomId, created.member.memberId, 'characters', {
+  await putRoomState(request, created.roomId, created.member, 'characters', {
     characters: [character], selectedId: characterId, updatedAt: now,
   })
-  await putRoomState(request, created.roomId, created.member.memberId, 'maps', {
+  await putRoomState(request, created.roomId, created.member, 'maps', {
     maps: [map], selectedId: mapId, updatedAt: now,
   })
-  await putRoomState(request, created.roomId, created.member.memberId, 'combat', {
+  await putRoomState(request, created.roomId, created.member, 'combat', {
     mapId,
     combatId,
     active: true,
@@ -197,7 +198,7 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
     settlementMode: 'automatic',
     updatedAt: now,
   })
-  await putRoomState(request, created.roomId, created.member.memberId, 'combat-statistics', {
+  await putRoomState(request, created.roomId, created.member, 'combat-statistics', {
     schemaVersion: 2,
     sessions: [{
       combatId,
@@ -233,8 +234,8 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
   })
   await expect(dialog).toHaveCount(0, { timeout: 20_000 })
 
-  const assertAwardedOnce = async (origin: string, memberId: string) => {
-    const state = await readCharacters(request, origin, created.roomId, memberId)
+  const assertAwardedOnce = async (origin: string, member: Membership['member']) => {
+    const state = await readCharacters(request, origin, created.roomId, member)
     const awarded = state.characters.find((entry) => entry.id === characterId)
     return {
       experience: awarded?.experience,
@@ -243,9 +244,9 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
         .map((receipt) => ({ combatId: receipt.combatId, xp: receipt.xp })) ?? [],
     }
   }
-  await expect.poll(() => assertAwardedOnce(DM, created.member.memberId), { timeout: 20_000 })
+  await expect.poll(() => assertAwardedOnce(DM, created.member), { timeout: 20_000 })
     .toEqual({ experience: 150, receipts: [{ combatId, xp: 50 }] })
-  await expect.poll(() => assertAwardedOnce(PLAYER, joined.member.memberId), { timeout: 20_000 })
+  await expect.poll(() => assertAwardedOnce(PLAYER, joined.member), { timeout: 20_000 })
     .toEqual({ experience: 150, receipts: [{ combatId, xp: 50 }] })
 
   await Promise.all([
@@ -254,7 +255,7 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
   ])
   await expect(dm.getByTestId('combat-experience-dialog')).toHaveCount(0)
   await expect(player.getByTestId('combat-status')).toHaveText('未开始', { timeout: 20_000 })
-  expect(await assertAwardedOnce(DM, created.member.memberId)).toEqual({
+  expect(await assertAwardedOnce(DM, created.member)).toEqual({
     experience: 150,
     receipts: [{ combatId, xp: 50 }],
   })
@@ -264,7 +265,7 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
   const rejoinedPlayer = await rejoinedContext.newPage()
   await enterRoom(rejoinedPlayer, PLAYER, joined, '/characters')
   await expect(rejoinedPlayer.getByRole('option', { name: character.name })).toBeAttached({ timeout: 20_000 })
-  expect(await assertAwardedOnce(PLAYER, joined.member.memberId)).toEqual({
+  expect(await assertAwardedOnce(PLAYER, joined.member)).toEqual({
     experience: 150,
     receipts: [{ combatId, xp: 50 }],
   })

@@ -11,6 +11,7 @@ interface RoomMembershipResponse {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: 'player1' | 'player2' | 'player3'
@@ -73,7 +74,7 @@ test('DM character page is a read-only room-player roster', async ({ browser, re
   await expect(currentHp).toHaveValue('4')
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/state/characters?room=${created.roomId}`, {
-      headers: { 'X-Stars-Member': joined.member.memberId },
+      headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
     })
     if (!response.ok()) return null
     const state = await response.json() as { characters?: Array<{ name?: string; currentHp?: number }> }

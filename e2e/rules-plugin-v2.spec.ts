@@ -20,6 +20,7 @@ interface RoomMembershipResponse {
   createdAt: number
   member: {
     memberId: string
+    roomToken: string
     clientId: string
     role: 'dm' | 'player'
     slot?: 'player1' | 'player2' | 'player3'
@@ -80,10 +81,10 @@ async function putRoomState(
   roomId: string,
   name: string,
   value: unknown,
-  memberId: string,
+  member: RoomMembershipResponse['member'],
 ) {
   const response = await request.put(`${DM}/api/state/${name}?room=${roomId}`, {
-    headers: { 'X-Stars-Member': memberId },
+    headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
     data: value,
   })
   expect(response.ok()).toBeTruthy()
@@ -93,10 +94,10 @@ async function getRoomState<T>(
   request: APIRequestContext,
   roomId: string,
   name: string,
-  memberId: string,
+  member: RoomMembershipResponse['member'],
 ): Promise<T> {
   const response = await request.get(`${DM}/api/state/${name}?room=${roomId}`, {
-    headers: { 'X-Stars-Member': memberId },
+    headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
   })
   expect(response.ok()).toBeTruthy()
   return response.json() as Promise<T>
@@ -202,7 +203,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   await uploadTemplateFromDm(dm)
   await expect.poll(async () => {
     const response = await request.get(`${DM}/api/rooms/${created.roomId}/rules`, {
-      headers: { 'X-Stars-Member': created.member.memberId },
+      headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     })
     const rules = await response.json() as { requiredPlugins: unknown[] }
     return rules.requiredPlugins
@@ -230,7 +231,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
     characters: [hero, ally],
     selectedId: hero.id,
     updatedAt: now,
-  }, created.member.memberId)
+  }, created.member)
   await putRoomState(request, created.roomId, 'maps', {
     selectedId: 'plugin-map',
     updatedAt: now,
@@ -255,7 +256,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
         { id: 'goblin-token', label: '地精', x: 525, y: 105, color: '#ef4444', emoji: '👺', size: 1, type: 'enemy', poolId: 'goblin', hp: 7, maxHp: 7 },
       ],
     }],
-  }, created.member.memberId)
+  }, created.member)
 
   await player.goto(`${PLAYER}/characters`, { waitUntil: 'domcontentloaded' })
   await expect(player.getByRole('textbox', { name: '角色名称' })).toHaveValue('插件主角', { timeout: 20_000 })
@@ -268,7 +269,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
       request,
       created.roomId,
       'characters',
-      joined.member.memberId,
+      joined.member,
     )
     return state.characters.find((candidate) => candidate.id === hero.id)?.dnd5ePluginFeatureIds ?? []
   }, { timeout: 20_000 }).toContain(FEATURE_ID)
@@ -276,7 +277,8 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   await player.getByRole('button', { name: '扩展规则', exact: true }).click()
   await expect(player.locator('article').filter({ hasText: '演示特性：守护火花' }).getByRole('button', { name: '已选择' }))
     .toBeVisible()
-  await player.getByRole('button', { name: '法师', exact: true }).click()
+  await player.getByRole('button', { name: '职业', exact: true }).click()
+  await player.getByRole('button', { name: /^法师\s+\d+级/ }).click()
   await player.getByRole('combobox', { name: /奥术传承/ }).selectOption(SUBCLASS_ID)
   await expect(player.getByText('演示子职：星辉学派', { exact: true })).toBeVisible()
   await player.getByRole('button', { name: /金色星辉/ }).click()
@@ -287,7 +289,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
         dnd5eClassChoices?: { classes?: { wizard?: { subclass?: string; selections?: Record<string, string[]> } } }
         classResources?: Record<string, { current: number; max: number }>
       }>
-    }>(request, created.roomId, 'characters', joined.member.memberId)
+    }>(request, created.roomId, 'characters', joined.member)
     const saved = state.characters.find((candidate) => candidate.id === hero.id)
     return {
       subclass: saved?.dnd5eClassChoices?.classes?.wizard?.subclass,
@@ -301,13 +303,13 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   })
 
   const combatId = 'plugin-map:combat'
-  await putRoomState(request, created.roomId, 'combat-log', { mapId: 'plugin-map', entries: [], updatedAt: Date.now() }, created.member.memberId)
-  await putRoomState(request, created.roomId, 'player-action-requests', { mapId: 'plugin-map', combatId, requests: [], updatedAt: Date.now() }, created.member.memberId)
-  await putRoomState(request, created.roomId, 'player-action-processed', { mapId: 'plugin-map', combatId, actionIds: [], updatedAt: Date.now() }, created.member.memberId)
+  await putRoomState(request, created.roomId, 'combat-log', { mapId: 'plugin-map', entries: [], updatedAt: Date.now() }, created.member)
+  await putRoomState(request, created.roomId, 'player-action-requests', { mapId: 'plugin-map', combatId, requests: [], updatedAt: Date.now() }, created.member)
+  await putRoomState(request, created.roomId, 'player-action-processed', { mapId: 'plugin-map', combatId, actionIds: [], updatedAt: Date.now() }, created.member)
   await putRoomState(request, created.roomId, 'player-action-ack', {
     id: 'plugin-none', mapId: 'plugin-map', combatId, actionId: 'none', status: 'accepted',
     round: 1, initiativeIndex: 0, updatedAt: Date.now(),
-  }, created.member.memberId)
+  }, created.member)
   await putRoomState(request, created.roomId, 'combat', {
     mapId: 'plugin-map',
     combatId,
@@ -320,7 +322,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
       { slotId: 'goblin-token:normal', tokenId: 'goblin-token', label: '地精', emoji: '👺', color: '#ef4444', roll: 5 },
     ],
     updatedAt: Date.now(),
-  }, created.member.memberId)
+  }, created.member)
 
   await Promise.all([
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
@@ -338,12 +340,12 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   await actionButton.click()
 
   await expect.poll(async () => {
-    const state = await getRoomState<{ characters: Array<{ id: string; tempHp: number }> }>(request, created.roomId, 'characters', joined.member.memberId)
+    const state = await getRoomState<{ characters: Array<{ id: string; tempHp: number }> }>(request, created.roomId, 'characters', joined.member)
     const temporaryHp = state.characters.find((candidate) => candidate.id === ally.id)?.tempHp ?? 0
     return temporaryHp >= 3 && temporaryHp <= 6
   }, { timeout: 30_000 }).toBe(true)
   await expect.poll(async () => {
-    const state = await getRoomState<{ status: string; actionId: string }>(request, created.roomId, 'player-action-ack', joined.member.memberId)
+    const state = await getRoomState<{ status: string; actionId: string }>(request, created.roomId, 'player-action-ack', joined.member)
     return state.actionId === 'none' ? '' : state.status
   }, { timeout: 20_000 }).toBe('accepted')
   await expect(player2.getByText(/^\+[3-6] 临时$/)).toBeVisible({ timeout: 20_000 })
