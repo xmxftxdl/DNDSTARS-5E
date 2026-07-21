@@ -846,6 +846,9 @@ export function resolvePreparedDnd5eSpellCast(input: {
     if (actorCombatant && definition?.spellcasting) {
       const sourceSaveDc = 8 + actorCombatant.proficiencyBonus +
         rules.abilityModifier(actorCombatant.abilities[definition.spellcasting.ability])
+      const effectTokenId = declaration.anchorMode === 'effect-token'
+        ? `core-spell-effect:${prepared.action.id}`
+        : undefined
       const area = createDnd5eCoreSpellArea({
         declaration,
         actionId: prepared.action.id,
@@ -858,9 +861,39 @@ export function resolvePreparedDnd5eSpellCast(input: {
         anchorCell: prepared.areaAnchorCell,
         durationRounds: prepared.areaDurationRounds,
         sourceAlignment: prepared.actor.alignment,
+        anchorTokenId: effectTokenId,
       })
+      const effectToken = effectTokenId
+        ? {
+            id: effectTokenId,
+            label: declaration.label,
+            ...tokenCenterForAnchorCell(prepared.areaAnchorCell, { size: 1 }, application.map),
+            color: declaration.color,
+            emoji: prepared.spell.id === 'flaming-sphere' ? '🔥' : '✦',
+            size: 1,
+            type: 'obstacle' as const,
+            showHpOnToken: false,
+            showDetailOnToken: false,
+            dnd5eSpellEffect: {
+              schemaVersion: 1 as const,
+              spellId: prepared.spell.id,
+              sourceCharacterId: prepared.actor.id,
+              sourceTokenId: prepared.actorToken.id,
+              createdRound: result.state.round,
+              expiresAfterRound: area.expiresAfterRound,
+              concentrationId: area.concentrationId,
+            },
+          }
+        : undefined
       application.map = {
         ...application.map,
+        tokens: [
+          ...application.map.tokens.filter((candidate) =>
+            candidate.dnd5eSpellEffect?.sourceTokenId !== prepared.actorToken.id ||
+            !candidate.dnd5eSpellEffect.concentrationId,
+          ),
+          ...(effectToken ? [effectToken] : []),
+        ],
         dnd5ePluginAreas: [
           ...(application.map.dnd5ePluginAreas ?? []).filter((candidate) =>
             candidate.sourceTokenId !== prepared.actorToken.id || !candidate.concentrationId,

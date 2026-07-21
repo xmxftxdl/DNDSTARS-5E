@@ -84,6 +84,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           size: sharedToken.size,
           dnd5eCombatState: sharedToken.dnd5eCombatState,
           dnd5eSummon: sharedToken.dnd5eSummon,
+          dnd5eSpellEffect: sharedToken.dnd5eSpellEffect,
           movementAnimation: sharedToken.movementAnimation,
         }]
         }),
@@ -143,6 +144,16 @@ export interface Token {
     expiresAfterRound: number
     concentrationId?: string
     side: 'player' | 'enemy'
+  }
+  /** 无战斗属性的核心法术实体；位置与生命周期只由 DM Headless 区域事务控制。 */
+  dnd5eSpellEffect?: {
+    schemaVersion: 1
+    spellId: string
+    sourceCharacterId: string
+    sourceTokenId: string
+    createdRound: number
+    expiresAfterRound: number
+    concentrationId?: string
   }
   /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
   dnd5eCombatState?: {
@@ -303,8 +314,8 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V10：持续区域增加核心法术来源、锚点与移动语义。 */
-export const MAPS_PERSIST_VERSION = 10
+/** 地图存档 V11：增加无战斗属性的核心法术效果 Token。 */
+export const MAPS_PERSIST_VERSION = 11
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -354,6 +365,28 @@ function normalizeToken(raw: unknown): Token {
         side: rawSummon.side,
       }
     : undefined
+  const rawSpellEffect = t.dnd5eSpellEffect
+  const dnd5eSpellEffect = rawSpellEffect && typeof rawSpellEffect === 'object' &&
+    t.type === 'obstacle' &&
+    rawSpellEffect.schemaVersion === 1 &&
+    typeof rawSpellEffect.spellId === 'string' && !!rawSpellEffect.spellId &&
+    typeof rawSpellEffect.sourceCharacterId === 'string' && !!rawSpellEffect.sourceCharacterId &&
+    typeof rawSpellEffect.sourceTokenId === 'string' && !!rawSpellEffect.sourceTokenId &&
+    Number.isInteger(rawSpellEffect.createdRound) && Number(rawSpellEffect.createdRound) >= 0 &&
+    Number.isInteger(rawSpellEffect.expiresAfterRound) &&
+    Number(rawSpellEffect.expiresAfterRound) >= Number(rawSpellEffect.createdRound) &&
+    (rawSpellEffect.concentrationId == null ||
+      (typeof rawSpellEffect.concentrationId === 'string' && !!rawSpellEffect.concentrationId))
+    ? {
+        schemaVersion: 1 as const,
+        spellId: rawSpellEffect.spellId,
+        sourceCharacterId: rawSpellEffect.sourceCharacterId,
+        sourceTokenId: rawSpellEffect.sourceTokenId,
+        createdRound: rawSpellEffect.createdRound,
+        expiresAfterRound: rawSpellEffect.expiresAfterRound,
+        concentrationId: rawSpellEffect.concentrationId,
+      }
+    : undefined
   const invalidCurrentEffects = legacyCombatState?.schemaVersion === DND5E_COMBAT_STATE_SCHEMA_VERSION &&
     !validateDnd5eActiveEffectsStrict(legacyCombatState.activeEffects).ok
   const migratedEffects = legacyCombatState && !invalidCurrentEffects
@@ -388,6 +421,7 @@ function normalizeToken(raw: unknown): Token {
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
     dnd5eSummon,
+    dnd5eSpellEffect,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
     visionRangeFeet: Number.isFinite(t.visionRangeFeet) ? Math.max(0, Math.min(10_000, t.visionRangeFeet as number)) : undefined,
     darkvisionRangeFeet: Number.isFinite(t.darkvisionRangeFeet) ? Math.max(0, Math.min(10_000, t.darkvisionRangeFeet as number)) : undefined,

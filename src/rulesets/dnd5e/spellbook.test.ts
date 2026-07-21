@@ -83,7 +83,7 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.find((entry) => entry.id === 'fireball')).toMatchObject({ name: '火球术', sourceKind: 'srd-core', headless: true, reference: { sourcePage: 241 } })
     expect(entries.find((entry) => entry.id === 'arcane-hand')).toMatchObject({ name: '奥术之手', sourceKind: 'srd-core', headless: false, reference: { sourceName: '毕格比之手' } })
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core').every((entry) => !!entry.reference)).toBe(true)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(60)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(61)
     expect(entries.find((entry) => entry.id === 'test-pack:ember-lance')).toMatchObject({ sourceKind: 'room-import', headless: false })
   })
 

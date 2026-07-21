@@ -162,6 +162,35 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
   })
 
+  it('fails closed for malformed core spell effect-token ownership metadata', () => {
+    const effect = {
+      schemaVersion: 1, spellId: 'flaming-sphere', sourceCharacterId: 'wizard',
+      sourceTokenId: 'wizard-token', createdRound: 2, expiresAfterRound: 12,
+      concentrationId: 'flaming-sphere',
+    }
+    const area = {
+      id: 'sphere-area', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:flaming-sphere',
+      sourceKind: 'core-spell', coreSpellId: 'flaming-sphere', label: '炽焰法球', color: '#f97316',
+      sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 2, expiresAfterRound: 12, anchorMode: 'effect-token', anchorTokenId: 'sphere',
+    }
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'sphere', type: 'obstacle', dnd5eSpellEffect: effect }], dnd5ePluginAreas: [area] }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'sphere', type: 'obstacle', dnd5eSpellEffect: { ...effect, spellId: '' } }], dnd5ePluginAreas: [area] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'sphere', type: 'obstacle', dnd5eSpellEffect: { ...effect, expiresAfterRound: 1 } }], dnd5ePluginAreas: [area] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'sphere', type: 'player', dnd5eSpellEffect: effect }], dnd5ePluginAreas: [area] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'sphere', type: 'obstacle', dnd5eSpellEffect: effect }], dnd5ePluginAreas: [] }],
+    }).status).toBe('invalid')
+  })
+
   it('migrates legacy interrupts and rejects duplicate active transaction locks', () => {
     const legacy = {
       mapId: 'map', updatedAt: 2,

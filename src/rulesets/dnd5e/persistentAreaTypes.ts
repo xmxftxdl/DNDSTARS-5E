@@ -34,6 +34,7 @@ export type Dnd5ePersistentAreaTriggerTiming =
   | 'on-create'
   | 'on-enter'
   | 'on-move-distance'
+  | 'on-area-move-impact'
   | 'turn-start'
   | 'turn-end'
 
@@ -94,7 +95,7 @@ export interface Dnd5ePersistentAreaTriggerReceipt {
 
 const ABILITIES: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
 const TIMINGS: readonly Dnd5ePersistentAreaTriggerTiming[] = [
-  'on-create', 'on-enter', 'on-move-distance', 'turn-start', 'turn-end',
+  'on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end',
 ]
 const EXPIRATIONS: readonly Dnd5ePluginEffectDuration['expiresAt'][] = [
   'source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save',

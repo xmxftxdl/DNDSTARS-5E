@@ -1087,10 +1087,107 @@ function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; ma
   })}</>
 }
 
+const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>> = {
+  moonbeam: { icon: '☾', glow: '#eff6ff' },
+  'spirit-guardians': { icon: '✦', glow: '#fef3c7' },
+  'spike-growth': { icon: '✣', glow: '#bef264' },
+  'flaming-sphere': { icon: '🔥', glow: '#fdba74' },
+}
+
+function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: BattleMap }) {
+  const grid = Math.max(1, map.gridSize)
+  const groupRef = useRef<Konva.Group>(null)
+  const boundaryRef = useRef<Konva.Group>(null)
+  const iconRef = useRef<Konva.Text>(null)
+  const reducedMotion = usePrefersReducedMotion()
+  const preset = area.visual?.preset ?? ''
+  const visual = CORE_AREA_VISUALS[preset] ?? { icon: '✦', glow: area.color }
+  const firstCell = area.anchorCell ?? area.cells[0]
+  const iconPoint = firstCell ? cellTopLeft(firstCell, map) : { x: 0, y: 0 }
+  const intensity = area.visual?.intensity === 'strong' ? 1.18 : area.visual?.intensity === 'subtle' ? 0.72 : 1
+
+  useStatusAnimation(
+    () => groupRef.current?.getLayer() ?? null,
+    (frame) => {
+      const seconds = (frame?.time ?? 0) / 1000
+      groupRef.current?.opacity((0.84 + Math.sin(seconds * 2.1) * 0.12) * intensity)
+      boundaryRef.current?.getChildren().forEach((node) => {
+        if (node instanceof Konva.Rect) node.dashOffset(-seconds * (preset === 'flaming-sphere' ? 18 : 10))
+      })
+      const iconScale = 1 + Math.sin(seconds * (preset === 'flaming-sphere' ? 4.4 : 2.4)) * 0.08
+      iconRef.current?.scale({ x: iconScale, y: iconScale })
+      if (preset === 'spirit-guardians') iconRef.current?.rotation(Math.sin(seconds * 1.4) * 8)
+    },
+    [area.id, intensity, preset],
+    { active: !reducedMotion, fps: 24 },
+  )
+
+  return (
+    <Group ref={groupRef} listening={false}>
+      {area.cells.map((cell) => {
+        const { x, y } = cellTopLeft(cell, map)
+        return (
+          <Rect
+            key={`core-fill:${area.id}:${cellKey(cell)}`}
+            x={x}
+            y={y}
+            width={grid}
+            height={grid}
+            fill={area.color}
+            opacity={preset === 'spike-growth' ? 0.22 : 0.16}
+            shadowColor={visual.glow}
+            shadowBlur={preset === 'flaming-sphere' || preset === 'moonbeam' ? grid * 0.18 : grid * 0.08}
+            listening={false}
+          />
+        )
+      })}
+      <Group ref={boundaryRef} listening={false}>
+        {area.cells.map((cell) => {
+          const { x, y } = cellTopLeft(cell, map)
+          return (
+            <Rect
+              key={`core-boundary:${area.id}:${cellKey(cell)}`}
+              x={x}
+              y={y}
+              width={grid}
+              height={grid}
+              stroke={visual.glow}
+              strokeWidth={2.5}
+              dash={preset === 'spike-growth' ? [4, 4] : [10, 6]}
+              listening={false}
+            />
+          )
+        })}
+      </Group>
+      {firstCell && (
+        <Text
+          ref={iconRef}
+          x={iconPoint.x}
+          y={iconPoint.y + grid * 0.13}
+          width={grid}
+          height={grid}
+          text={visual.icon}
+          align="center"
+          fontSize={Math.max(14, grid * 0.48)}
+          fill={visual.glow}
+          shadowColor={visual.glow}
+          shadowBlur={8}
+          offsetX={0}
+          offsetY={0}
+          listening={false}
+        />
+      )}
+    </Group>
+  )
+}
+
 function Dnd5ePluginAreaOverlays({ map }: { map: BattleMap }) {
-  return <>{(map.dnd5ePluginAreas ?? []).map((area) => area.visual?.preset === 'toxic-cloud'
-    ? <Dnd5eToxicCloudAreaOverlay key={area.id} area={area} map={map} />
-    : <Dnd5eStaticPluginAreaOverlay key={area.id} area={area} map={map} />)}</>
+  return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
+    const preset = area.visual?.preset ?? ''
+    if (preset === 'toxic-cloud') return <Dnd5eToxicCloudAreaOverlay key={area.id} area={area} map={map} />
+    if (CORE_AREA_VISUALS[preset]) return <Dnd5eCoreSpellAreaOverlay key={area.id} area={area} map={map} />
+    return <Dnd5eStaticPluginAreaOverlay key={area.id} area={area} map={map} />
+  })}</>
 }
 
 export default function MapCanvas({

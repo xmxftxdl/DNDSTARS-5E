@@ -1,6 +1,7 @@
 import {
   DND_FEET_PER_CELL,
   tokenAnchorCellFromPixel,
+  tokenCenterForAnchorCell,
   type GridCell,
 } from '../../lib/gridCombat'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
@@ -52,6 +53,36 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  * Headless Plugin API V2 的声明边界创建区域。
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
+  {
+    spellId: 'flaming-sphere',
+    label: '炽焰法球',
+    minimumSlotLevel: 2,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'effect-token',
+    movement: { economy: 'bonus-action', maximumFeet: 30 },
+    relation: 'any',
+    includeSelf: true,
+    color: '#f97316',
+    visual: { preset: 'flaming-sphere', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'flaming-sphere-impact', label: '炽焰法球·撞击', timing: 'on-area-move-impact',
+        oncePerRound: false,
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 2, sides: 6, perHigherSlot: 1, type: 'fire' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'flaming-sphere-turn-end', label: '炽焰法球·回合结束', timing: 'turn-end',
+        oncePerRound: true,
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 2, sides: 6, perHigherSlot: 1, type: 'fire' },
+        dmAdjustable: true,
+      },
+    ],
+  },
   {
     spellId: 'spike-growth',
     label: '荆棘丛生',
@@ -253,6 +284,12 @@ export function moveDnd5eCoreSpellArea(input: {
     anchorCell: { ...input.targetCell },
   }
   if (nextArea.cells.length !== area.cells.length) return { ok: false, reason: 'invalid-target' }
+  const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
+    ? input.map.tokens.find((token) => token.id === area.anchorTokenId)
+    : undefined
+  const anchorPosition = anchorToken
+    ? tokenCenterForAnchorCell(input.targetCell, anchorToken, input.map)
+    : undefined
   return {
     ok: true,
     map: {
@@ -260,10 +297,42 @@ export function moveDnd5eCoreSpellArea(input: {
       dnd5ePluginAreas: input.map.dnd5ePluginAreas?.map((candidate) =>
         candidate.id === area.id ? nextArea : candidate,
       ),
+      tokens: anchorToken && anchorPosition
+        ? input.map.tokens.map((token) => token.id === anchorToken.id ? { ...token, ...anchorPosition } : token)
+        : input.map.tokens,
     },
     area: nextArea,
     distanceFeet,
   }
+}
+
+/**
+ * 将一次 Headless 结算对核心法术效果 Token 的增删改合并到最新地图，
+ * 避免 Interrupt 等待期间用旧地图快照覆盖其他 Token 的移动或生命值。
+ */
+export function mergeDnd5eSpellEffectTokenDelta(input: {
+  currentMap: BattleMap
+  beforeMap: BattleMap
+  afterMap: BattleMap
+}): Token[] {
+  const before = new Map(input.beforeMap.tokens
+    .filter((token) => token.dnd5eSpellEffect)
+    .map((token) => [token.id, token]))
+  const after = new Map(input.afterMap.tokens
+    .filter((token) => token.dnd5eSpellEffect)
+    .map((token) => [token.id, token]))
+  const removedIds = new Set([...before.keys()].filter((id) => !after.has(id)))
+  const changed = new Map([...after].filter(([id, token]) =>
+    JSON.stringify(before.get(id)) !== JSON.stringify(token),
+  ))
+  const merged = input.currentMap.tokens
+    .filter((token) => !removedIds.has(token.id))
+    .map((token) => changed.get(token.id) ?? token)
+  const presentIds = new Set(merged.map((token) => token.id))
+  for (const [id, token] of changed) {
+    if (!presentIds.has(id)) merged.push(token)
+  }
+  return merged
 }
 
 export function reconcileDnd5ePersistentAreaAnchors(map: BattleMap): BattleMap {

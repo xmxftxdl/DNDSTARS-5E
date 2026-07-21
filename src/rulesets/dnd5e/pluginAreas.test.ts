@@ -153,6 +153,47 @@ describe('D&D 5e plugin persistent areas', () => {
       .toMatchObject([{ trigger: { id: 'ended' } }])
   })
 
+  it('collects an explicit area-move impact and removes orphaned effect tokens', () => {
+    const source = {
+      id: 'caster-token', label: 'caster', x: 25, y: 25, color: '#fff', emoji: 'C', size: 1,
+      type: 'player' as const, characterId: 'caster',
+    }
+    const target = {
+      id: 'target-token', label: 'target', x: 75, y: 25, color: '#fff', emoji: 'T', size: 1,
+      type: 'enemy' as const,
+    }
+    const sphere = {
+      id: 'sphere-token', label: '炽焰法球', x: 75, y: 25, color: '#f97316', emoji: '🔥', size: 1,
+      type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'flaming-sphere', sourceCharacterId: 'caster',
+        sourceTokenId: source.id, createdRound: 1, expiresAfterRound: 11,
+        concentrationId: 'flaming-sphere',
+      },
+    }
+    const triggerArea = area({
+      sourceKind: 'core-spell', coreSpellId: 'flaming-sphere', sourceTokenId: source.id,
+      cells: [{ col: 1, row: 0 }], anchorMode: 'effect-token', anchorTokenId: sphere.id,
+      anchorCell: { col: 1, row: 0 }, concentrationId: 'flaming-sphere',
+      triggers: [{
+        id: 'impact', label: '撞击', timing: 'on-area-move-impact', oncePerRound: false,
+        damage: { count: 2, sides: 6, modifier: 0, type: 'fire' },
+      }],
+    })
+    const map = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, target, sphere], dnd5ePluginAreas: [triggerArea],
+    }
+    expect(collectDnd5ePersistentAreaTriggers({
+      map, timing: 'on-area-move-impact', round: 2, targetTokenId: target.id, areaId: triggerArea.id,
+    })).toMatchObject([{ trigger: { id: 'impact' }, targetToken: { id: target.id } }])
+
+    const reconciled = reconcileDnd5ePluginAreasOnMap(map, [character({ concentrating: false })], 2)
+    expect(reconciled.dnd5ePluginAreas).toEqual([])
+    expect(reconciled.tokens.map((token) => token.id)).toEqual([source.id, target.id])
+  })
+
   it('emits one movement-distance trigger for every declared interval along the authoritative path', () => {
     const moving = {
       id: 'target-token', label: 'target', x: 25, y: 25, color: '#fff', emoji: 'T', size: 1,

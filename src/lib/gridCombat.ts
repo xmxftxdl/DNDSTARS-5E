@@ -338,7 +338,7 @@ export function getReachableCells(
 export function occupiedCells(tokens: Token[], map: BattleMap, excludeTokenId: string): Set<string> {
   const set = new Set<string>()
   for (const t of tokens) {
-    if (t.id === excludeTokenId) continue
+    if (t.id === excludeTokenId || t.dnd5eSpellEffect) continue
     for (const cell of tokenOccupiedCellsAt(t, map, t)) {
       set.add(cellKey(cell))
     }

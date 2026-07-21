@@ -12,6 +12,7 @@ import {
 } from './spells'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { prepareDnd5eCoreSpellAreaMove, resolvePreparedDnd5eCoreSpellAreaMove } from './coreSpellAreaAction'
+import { collectDnd5ePersistentAreaTriggers } from './pluginAreas'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -98,7 +99,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       characters: resolved.application.characters,
       initiativeOrder: input.initiativeOrder,
     })
-    expect(movePrepared.ok).toBe(true)
+    expect(movePrepared).toEqual(expect.objectContaining({ ok: true }))
     if (!movePrepared.ok) return
     const moved = resolvePreparedDnd5eCoreSpellAreaMove({ prepared: movePrepared.prepared })
     expect(moved.result.ok).toBe(true)
@@ -160,6 +161,70 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
         damage: { count: 2, sides: 4, type: 'piercing' },
       }],
     })
+  })
+
+  it('casts Flaming Sphere as an independent effect token and moves it with a bonus action into an impact', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['flaming-sphere'] } } } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    enemy.y = 125
+    const input = fixture(wizard, 'flaming-sphere', 3, enemy)
+    input.action.dnd5eSpellCast = {
+      spellId: 'flaming-sphere', slotLevel: 3,
+      targetTokenId: input.action.actorTokenId, targetTokenIds: [],
+      areaTargetCell: { col: 5, row: 2 },
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(cast.result.ok).toBe(true)
+    if (!cast.application) return
+    const area = cast.application.map.dnd5ePluginAreas?.[0]
+    const effectToken = cast.application.map.tokens.find((candidate) => candidate.dnd5eSpellEffect)
+    expect(area).toMatchObject({
+      coreSpellId: 'flaming-sphere', anchorMode: 'effect-token', movement: { economy: 'bonus-action', maximumFeet: 30 },
+      anchorTokenId: effectToken?.id,
+      triggers: [
+        { timing: 'on-area-move-impact', damage: { count: 3, sides: 6, type: 'fire' } },
+        { timing: 'turn-end', damage: { count: 3, sides: 6, type: 'fire' } },
+      ],
+    })
+    expect(effectToken).toMatchObject({
+      x: 275, y: 125, type: 'obstacle', emoji: '🔥',
+      dnd5eSpellEffect: { spellId: 'flaming-sphere', sourceTokenId: input.action.actorTokenId },
+    })
+    if (!area) return
+    const moveAction: SharedPlayerActionState = {
+      ...input.action,
+      id: 'move-flaming-sphere',
+      type: 'dnd5e-persistent-area-move',
+      dnd5eSpellCast: undefined,
+      dnd5ePersistentAreaMove: { areaId: area.id, targetCell: { col: 11, row: 2 } },
+    }
+    const movePrepared = prepareDnd5eCoreSpellAreaMove({
+      action: moveAction,
+      map: cast.application.map,
+      characters: cast.application.characters,
+      initiativeOrder: input.initiativeOrder,
+    })
+    expect(movePrepared).toEqual(expect.objectContaining({ ok: true }))
+    if (!movePrepared.ok) return
+    const moved = resolvePreparedDnd5eCoreSpellAreaMove({ prepared: movePrepared.prepared })
+    expect(moved.result.events).toContainEqual(expect.objectContaining({
+      type: 'turn-resource-spent', actorId: input.action.actorTokenId, resource: 'bonusAction',
+    }))
+    expect(moved.application?.map.tokens.find((candidate) => candidate.id === effectToken?.id))
+      .toMatchObject({ x: 575, y: 125 })
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: moved.application!.map,
+      timing: 'on-area-move-impact',
+      round: 1,
+      targetTokenId: enemy.id,
+      areaId: area.id,
+    })).toMatchObject([{ trigger: { id: 'flaming-sphere-impact' }, targetToken: { id: enemy.id } }])
   })
 
   it('rejects a zero-point Mass Heal allocation before settlement', () => {

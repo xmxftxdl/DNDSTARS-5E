@@ -108,6 +108,14 @@ export interface Dnd5eSrdSpellDefinition {
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
+    id: 'flaming-sphere', name: '炽焰法球', englishName: 'Flaming Sphere', level: 2, school: '咒法',
+    classes: ['druid', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 6, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
+    description: '在射程内未被占据的空间创造一个直径5尺的火焰球，持续至多1分钟并需要专注。生物在法球5尺内结束回合时进行敏捷豁免；失败受到2d6火焰伤害，成功减半。每使用高于2环一环的法术位，伤害增加1d6。施法后的每个你的回合中，可以用附赠动作将法球移动至多30尺；若撞击生物，该生物立即进行同一豁免，法球在其空间停止。',
+  },
+  {
     id: 'spike-growth', name: '荆棘丛生', englishName: 'Spike Growth', level: 2, school: '变化',
     classes: ['druid', 'ranger'], castingTime: 'action', rangeFeet: 150, target: 'area', effect: 'persistent-area',
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 100,

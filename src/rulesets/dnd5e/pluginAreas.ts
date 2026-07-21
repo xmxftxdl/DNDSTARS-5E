@@ -245,6 +245,15 @@ export function reconcileDnd5ePluginAreasOnMap(
   const anchoredMap = reconcileDnd5ePersistentAreaAnchors(map)
   const next = reconcileDnd5ePluginAreas(anchoredMap.dnd5ePluginAreas, characters, round)
   const previous = anchoredMap.dnd5ePluginAreas ?? []
-  if (next.length === previous.length && next.every((area, index) => area === previous[index])) return anchoredMap
-  return { ...anchoredMap, dnd5ePluginAreas: next }
+  const liveEffectTokenIds = new Set(next.flatMap((area) =>
+    area.anchorMode === 'effect-token' && area.anchorTokenId ? [area.anchorTokenId] : [],
+  ))
+  const tokens = anchoredMap.tokens.filter((token) =>
+    !token.dnd5eSpellEffect || liveEffectTokenIds.has(token.id),
+  )
+  if (
+    next.length === previous.length && next.every((area, index) => area === previous[index]) &&
+    tokens.length === anchoredMap.tokens.length
+  ) return anchoredMap
+  return { ...anchoredMap, dnd5ePluginAreas: next, tokens }
 }

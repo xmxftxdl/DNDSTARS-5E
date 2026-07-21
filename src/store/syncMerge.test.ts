@@ -451,4 +451,21 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
     const [result] = mergePlayerTokenCombatFields([localMap], [map({ tokens: [summon] })])
     expect(result.tokens).toEqual([summon])
   })
+
+  it('takes core spell effect-token ownership and position from the DM snapshot', () => {
+    const effect = {
+      schemaVersion: 1 as const, spellId: 'flaming-sphere', sourceCharacterId: 'wizard',
+      sourceTokenId: 'wizard-token', createdRound: 1, expiresAfterRound: 11,
+      concentrationId: 'flaming-sphere',
+    }
+    const local = token({ id: 'sphere', type: 'obstacle', x: 50, y: 50 })
+    const authoritative = token({
+      id: 'sphere', type: 'obstacle', x: 250, y: 150, dnd5eSpellEffect: effect,
+    })
+    const [result] = mergePlayerTokenCombatFields(
+      [map({ tokens: [local] })],
+      [map({ tokens: [authoritative] })],
+    )
+    expect(result.tokens[0]).toMatchObject({ x: 250, y: 150, dnd5eSpellEffect: effect })
+  })
 })

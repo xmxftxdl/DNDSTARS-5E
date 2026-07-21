@@ -368,6 +368,7 @@ import {
   previewDnd5eItemAreaPlacement,
   reconcileDnd5eSummonedCreatures,
   getDnd5eCoreSpellAreaDeclaration,
+  mergeDnd5eSpellEffectTokenDelta,
   dnd5ePersistentAreaMovementCostMultiplierAt,
 } from '../rulesets/dnd5e'
 import {
@@ -2855,7 +2856,10 @@ export default function MapsPage() {
       round,
     )
     if (next !== activeMap) {
-      updateMap(activeMap.id, { dnd5ePluginAreas: next.dnd5ePluginAreas })
+      updateMap(activeMap.id, {
+        dnd5ePluginAreas: next.dnd5ePluginAreas,
+        tokens: next.tokens,
+      })
     }
   }, [isDM, activeMap, characters, round, updateMap])
 
@@ -3254,7 +3258,7 @@ export default function MapsPage() {
         ? `，豁免 ${saveEvent.total} vs DC ${saveEvent.dc} ${saveEvent.success ? '成功' : '失败'}`
         : ''
       logs.push(
-        `${candidate.area.label} 在${({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[candidate.trigger.timing]}触发 ${prepared.prepared.targetName}${saveText}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.damage > 0 ? `，造成 ${triggerEvent.damage} 点伤害` : ''}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.conditionApplied ? `，施加 ${dnd5eConditionLabel(triggerEvent.conditionApplied)}` : ''}。`,
+        `${candidate.area.label} 在${({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'on-area-move-impact': '区域移动撞击', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[candidate.trigger.timing]}触发 ${prepared.prepared.targetName}${saveText}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.damage > 0 ? `，造成 ${triggerEvent.damage} 点伤害` : ''}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.conditionApplied ? `，施加 ${dnd5eConditionLabel(triggerEvent.conditionApplied)}` : ''}。`,
       )
     }
     return { map, characters, logs }
@@ -8685,7 +8689,61 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      updateMap(authorityMap.id, { dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [] })
+      let areaApplication = resolved.application
+      const movedArea = areaApplication.map.dnd5ePluginAreas?.find((area) =>
+        area.id === action.dnd5ePersistentAreaMove?.areaId,
+      )
+      if (movedArea?.coreSpellId === 'flaming-sphere' && movedArea.anchorCell) {
+        const impactTarget = areaApplication.map.tokens.find((token) =>
+          token.type !== 'obstacle' &&
+          tokenOccupiedCellsAt(token, areaApplication.map, token)
+            .some((cell) => cellKey(cell) === cellKey(movedArea.anchorCell!)),
+        )
+        if (impactTarget) {
+          const impact = await settleDnd5ePersistentAreaCandidates({
+            candidates: collectDnd5ePersistentAreaTriggers({
+              map: areaApplication.map,
+              timing: 'on-area-move-impact',
+              round: liveRound,
+              targetTokenId: impactTarget.id,
+              areaId: movedArea.id,
+            }),
+            map: areaApplication.map,
+            characters: areaApplication.characters,
+            round: liveRound,
+          })
+          for (const log of impact.logs) pushCombatLog(log, 'system')
+          areaApplication = {
+            map: impact.map,
+            characters: impact.characters,
+            changedCharacterIds: impact.characters.flatMap((character) => {
+              const before = prepared.prepared.characters.find((candidate) => candidate.id === character.id)
+              return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+            }),
+            changedTokenIds: impact.map.tokens.flatMap((token) => {
+              const before = authorityMap.tokens.find((candidate) => candidate.id === token.id)
+              return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+            }),
+          }
+        }
+      }
+      for (const characterId of areaApplication.changedCharacterIds) {
+        const next = areaApplication.characters.find((character) => character.id === characterId)
+        if (next) applyAuthorityCharacterUpdate(characterId, next)
+      }
+      for (const tokenId of areaApplication.changedTokenIds) {
+        const next = areaApplication.map.tokens.find((token) => token.id === tokenId)
+        if (next && !next.dnd5eSpellEffect) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
+      }
+      const latestMap = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
+      applyAuthorityMapUpdate(authorityMap.id, {
+        dnd5ePluginAreas: areaApplication.map.dnd5ePluginAreas ?? [],
+        tokens: mergeDnd5eSpellEffectTokenDelta({
+          currentMap: latestMap,
+          beforeMap: authorityMap,
+          afterMap: areaApplication.map,
+        }),
+      })
       const spent = resolved.result.events.find((event) =>
         event.type === 'turn-resource-spent' &&
         (event.resource === 'action' || event.resource === 'bonusAction'),
@@ -8697,9 +8755,6 @@ export default function MapsPage() {
           liveRound,
         )
       }
-      const movedArea = resolved.application.map.dnd5ePluginAreas?.find((area) =>
-        area.id === action.dnd5ePersistentAreaMove?.areaId,
-      )
       pushHeadlessCombatLog(
         `${prepared.prepared.characters.find((character) => character.id === action.characterId)?.name ?? '施法者'}移动${movedArea?.label ?? '持续法术区域'}。`,
         'system',
@@ -9783,10 +9838,15 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      if (!initialResolved.application) {
+        acknowledgePlayerAction(action, 'rejected', 'missing-application')
+        completePlayerActionRequest(action)
+        return
+      }
       const resolved = await settleDnd5eConcentrationChecks({
         result: initialResolved.result,
-        map: spellCast.map,
-        characters: spellCast.characters,
+        map: initialResolved.application.map,
+        characters: initialResolved.application.characters,
         characterIdByCombatantId: spellCast.characterIdByCombatantId,
         rollD20: rollDiceBoxD20,
         rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
@@ -9804,11 +9864,24 @@ export default function MapsPage() {
         const next = resolved.application.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
-      if (
-        JSON.stringify(resolved.application.map.dnd5ePluginAreas ?? []) !==
+      const areasChanged = JSON.stringify(resolved.application.map.dnd5ePluginAreas ?? []) !==
         JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
-      ) {
-        updateMap(authorityMap.id, { dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [] })
+      const effectTokensChanged = JSON.stringify(resolved.application.map.tokens.filter((token) => token.dnd5eSpellEffect)) !==
+        JSON.stringify(authorityMap.tokens.filter((token) => token.dnd5eSpellEffect))
+      if (areasChanged || effectTokensChanged) {
+        const latestMap = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
+        applyAuthorityMapUpdate(authorityMap.id, {
+          dnd5ePluginAreas: resolved.application.map.dnd5ePluginAreas ?? [],
+          ...(effectTokensChanged
+            ? {
+                tokens: mergeDnd5eSpellEffectTokenDelta({
+                  currentMap: latestMap,
+                  beforeMap: authorityMap,
+                  afterMap: resolved.application.map,
+                }),
+              }
+            : {}),
+        })
       }
       await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
@@ -14526,7 +14599,7 @@ export default function MapsPage() {
                       </h3>
                       <p className="mt-1 text-xs text-slate-400">
                         {sharedDmAdjudicationPrompt.payload.casterName} · {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
-                          ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
+                          ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'on-area-move-impact': '区域移动撞击', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
                           : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                             ? 'DM 权威地图事务'
                           : <>{

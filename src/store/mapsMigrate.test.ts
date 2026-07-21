@@ -107,6 +107,25 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens[1].movementAnimation).toBeUndefined()
   })
 
+  it('keeps valid core spell effect tokens and drops malformed metadata', () => {
+    const effect = {
+      schemaVersion: 1, spellId: 'flaming-sphere', sourceCharacterId: 'wizard',
+      sourceTokenId: 'wizard-token', createdRound: 2, expiresAfterRound: 12,
+      concentrationId: 'flaming-sphere',
+    }
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 100, height: 100,
+        tokens: [
+          { id: 'valid', type: 'obstacle', dnd5eSpellEffect: effect },
+          { id: 'invalid', type: 'obstacle', dnd5eSpellEffect: { ...effect, expiresAfterRound: 1 } },
+        ],
+      }],
+    })
+    expect(result.maps[0].tokens[0].dnd5eSpellEffect).toEqual(effect)
+    expect(result.maps[0].tokens[1].dnd5eSpellEffect).toBeUndefined()
+  })
+
   it('keeps whitelisted persistent-area visuals and drops unsafe renderer metadata', () => {
     const area = {
       pluginId: 'com.example.area', featureId: 'com.example.area:cloud', label: '毒云', color: '#65a30d',

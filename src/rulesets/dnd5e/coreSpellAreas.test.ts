@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BattleMap } from '../../store/maps'
 import {
   createDnd5eCoreSpellArea,
+  mergeDnd5eSpellEffectTokenDelta,
   moveDnd5eCoreSpellArea,
   reconcileDnd5ePersistentAreaAnchors,
   type Dnd5eCoreSpellAreaDeclaration,
@@ -108,5 +109,40 @@ describe('core spell persistent area declarations', () => {
       anchorCell: { col: 3, row: 2 },
       cells: [{ col: 3, row: 2 }, { col: 4, row: 2 }],
     })
+  })
+
+  it('moves an effect-token anchor and merges only its authoritative delta into the latest map', () => {
+    const base = map()
+    const effectToken = {
+      id: 'sphere-token', label: '炽焰法球', x: 125, y: 125, color: '#f97316', emoji: '🔥',
+      size: 1, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'flaming-sphere', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+        concentrationId: 'flaming-sphere',
+      },
+    }
+    const attached = createDnd5eCoreSpellArea({
+      declaration: { ...declaration, spellId: 'flaming-sphere', anchorMode: 'effect-token' },
+      actionId: 'cast-sphere', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 2, sourceSaveDc: 13, round: 1, cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 }, anchorTokenId: effectToken.id,
+    })
+    const before = { ...base, tokens: [...base.tokens, effectToken], dnd5ePluginAreas: [attached] }
+    const moved = moveDnd5eCoreSpellArea({
+      map: before, areaId: attached.id, sourceTokenId: 'caster-token', targetCell: { col: 5, row: 4 },
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) return
+    expect(moved.map.tokens.find((token) => token.id === effectToken.id)).toMatchObject({ x: 275, y: 225 })
+
+    const concurrent = { id: 'other', label: 'other', x: 400, y: 400, color: '#fff', emoji: 'O', size: 1, type: 'enemy' as const }
+    const merged = mergeDnd5eSpellEffectTokenDelta({
+      currentMap: { ...before, tokens: [...before.tokens, concurrent] },
+      beforeMap: before,
+      afterMap: moved.map,
+    })
+    expect(merged.find((token) => token.id === effectToken.id)).toMatchObject({ x: 275, y: 225 })
+    expect(merged).toContainEqual(concurrent)
   })
 })
