@@ -30,6 +30,7 @@ import {
 } from './monsterGenericAbilities'
 import { dnd5eBardicInspirationDie, dnd5eClassDefinition, dnd5eMonkMartialArtsDie, dnd5ePactSlotLevel, dnd5eRogueSneakAttackDice, type Dnd5eClassId } from './classes'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell } from './spells'
+import { getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
 import {
   dnd5eCanUseUncannyDodge,
   dnd5eCanThreatenRangedAttacker,
@@ -673,6 +674,11 @@ export interface Dnd5eMonsterRechargeRoll {
   roll: number
 }
 
+export interface Dnd5eDispelMagicCheck {
+  effectId: string
+  d20: number
+}
+
 export type Dnd5eMonsterAdjudicatedEffect = Dnd5eAdjudicatedSpellEffect
 
 export interface Dnd5eTargetTranquilitySaveRoll {
@@ -728,7 +734,7 @@ export type Dnd5eAction =
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; healingAllocations?: readonly { targetId: string; amount: number }[]; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
+  | { type: 'cast-spell'; actorId: string; castingClassId?: Dnd5eClassId; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'; healingAllocations?: readonly { targetId: string; amount: number }[]; dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
   | { type: 'hellish-rebuke'; actorId: string; targetId: string; slotLevel: number; triggerDamageAmount: number; savingThrowD20: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; effectRolls: readonly number[] }
   | { type: 'adjudicated-spell'; actorId: string; castingClassId?: Dnd5eClassId; spellId: string; spellName: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action'; effects: readonly Dnd5eAdjudicatedSpellEffect[]; concentrationRounds?: number }
   | { type: 'paladin-sacred-weapon'; actorId: string }
@@ -821,6 +827,7 @@ export type Dnd5eCombatEvent =
   | { type: 'active-effect-save-resolved'; targetId: string; effectId: string; ability: AbilityKey; dc: number; total: number; success: boolean }
   | { type: 'spell-cast'; actorId: string; targetId: string; spellId: string; slotLevel: number }
   | { type: 'counterspell-resolved'; actorId: string; casterId: string; spellId: string; spellLevel: number; slotLevel: number; dc?: number; abilityCheckTotal?: number; success: boolean }
+  | { type: 'spell-dispelled'; actorId: string; targetId: string; spellId: string; spellLevel: number; effectId: string; dc?: number; total?: number; success: boolean }
   | { type: 'hellish-rebuke-resolved'; actorId: string; targetId: string; slotLevel: number; dc: number; saveTotal: number; success: boolean; damage: number }
   | { type: 'adjudicated-spell-resolved'; actorId: string; spellId: string; spellName: string; slotLevel: number; effectCount: number }
   | { type: 'spell-sculpted'; actorId: string; targetId: string; spellId: string }
@@ -3327,7 +3334,15 @@ export function dnd5eTargetArmorClassForAttack(
   const barkskin = target.classState.activeEffects?.some((effect) =>
     effect.definitionId === 'srd-5.1:spell:barkskin'
   ) === true
-  const baseArmorClass = barkskin ? Math.max(16, target.armorClass) : target.armorClass
+  const mageArmor = !target.wearingArmor && target.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:mage-armor'
+  ) === true
+  const mageArmorClass = 13 + rules.abilityModifier(target.abilities.dex)
+  const baseArmorClass = Math.max(
+    target.armorClass,
+    barkskin ? 16 : 0,
+    mageArmor ? mageArmorClass : 0,
+  )
   return baseArmorClass + (multiattackDefense ? 4 : 0) + (shieldOfFaith ? 2 : 0) +
     (target.classState.shieldSpellActive ? 5 : 0) + coverBonus
 }
@@ -4489,6 +4504,76 @@ function resolveSpellCast(
     return finishSpellCast()
   }
 
+  if (spell.effect === 'dispel-magic') {
+    if (action.effectRolls.length > 0 || requestedTargetIds.length !== 1) return fail(state, events, 'invalid-dice')
+    const spellEffects = new Map<string, { spellId: string; spellLevel: number; effectId: string; sourceActorId?: string }>()
+    for (const effect of target.classState.activeEffects ?? []) {
+      if (effect.source.kind !== 'spell' || !effect.source.rulesId) continue
+      const catalog = getDnd5eSrdSpellCatalogEntry(effect.source.rulesId)
+      if (!catalog) continue
+      const key = `${effect.source.actorId ?? 'unknown'}\u0000${catalog.id}`
+      if (!spellEffects.has(key)) {
+        spellEffects.set(key, {
+          spellId: catalog.id,
+          spellLevel: catalog.level,
+          effectId: effect.id,
+          sourceActorId: effect.source.actorId,
+        })
+      }
+    }
+    for (const [sourceActorId, spellId] of Object.entries(target.classState.concentrationEffectsBySource ?? {})) {
+      const catalog = getDnd5eSrdSpellCatalogEntry(spellId)
+      if (!catalog) continue
+      const key = `${sourceActorId}\u0000${catalog.id}`
+      if (!spellEffects.has(key)) {
+        spellEffects.set(key, {
+          spellId: catalog.id,
+          spellLevel: catalog.level,
+          effectId: `concentration:${sourceActorId}:${catalog.id}`,
+          sourceActorId,
+        })
+      }
+    }
+    const higherLevelEffects = [...spellEffects.values()].filter((entry) => entry.spellLevel > action.slotLevel)
+    const suppliedChecks = action.dispelMagicChecks ?? []
+    if (
+      suppliedChecks.length !== higherLevelEffects.length ||
+      new Set(suppliedChecks.map((check) => check.effectId)).size !== suppliedChecks.length ||
+      suppliedChecks.some((check) => !higherLevelEffects.some((entry) => entry.effectId === check.effectId))
+    ) return fail(state, events, 'invalid-dice')
+    const castingModifier = rules.abilityModifier(actor.abilities[spellcasting.ability])
+    for (const entry of spellEffects.values()) {
+      const check = suppliedChecks.find((candidate) => candidate.effectId === entry.effectId)
+      if (check && (!Number.isInteger(check.d20) || check.d20 < 1 || check.d20 > 20)) {
+        return fail(state, events, 'invalid-dice')
+      }
+      const dc = entry.spellLevel > action.slotLevel ? 10 + entry.spellLevel : undefined
+      const total = check ? check.d20 + castingModifier : undefined
+      const success = dc == null || (total ?? 0) >= dc
+      if (success) {
+        const source = entry.sourceActorId ? state.combatants[entry.sourceActorId] : undefined
+        const endedConcentrationTarget = source
+          ? endDnd5eSpellEffectOnTarget(state, source, target, entry.spellId, events)
+          : false
+        if (!endedConcentrationTarget) {
+          removeDnd5eEffectsByPredicate(
+            target,
+            (effect) => effect.source.kind === 'spell' && effect.source.rulesId === entry.spellId &&
+              effect.source.actorId === entry.sourceActorId,
+            'dm',
+            events,
+          )
+        }
+      }
+      events.push({
+        type: 'spell-dispelled', actorId: actor.id, targetId: target.id,
+        spellId: entry.spellId, spellLevel: entry.spellLevel, effectId: entry.effectId,
+        dc, total, success,
+      })
+    }
+    return finishSpellCast()
+  }
+
   if (spell.effect === 'mark') {
     if (action.effectRolls.length > 0) return fail(state, events, 'invalid-dice')
     beginDnd5eConcentration(
@@ -4624,6 +4709,9 @@ function resolveSpellCast(
 
   if (spell.effect === 'active-effect') {
     if (!spell.appliedEffect || action.effectRolls.length > 0) return fail(state, events, 'invalid-dice')
+    if (spell.appliedEffect === 'mage-armor' && targets.some((candidate) => candidate!.wearingArmor)) {
+      return fail(state, events, 'invalid-target')
+    }
     if (spell.concentration) {
       beginDnd5eConcentration(
         state,
@@ -4664,6 +4752,7 @@ function resolveSpellCast(
           'death-ward': '防死结界',
           'protection-from-energy': `防护能量伤害：${action.effectDamageType ?? ''}抗性`,
           longstrider: '大步奔行：速度+10尺',
+          'mage-armor': '法师护甲：基础 AC 为 13＋敏捷调整值',
         } as const
         applyDnd5eMechanicalStatusEffect(affected, actor, {
           definitionId: `srd-5.1:spell:${spell.appliedEffect}`,

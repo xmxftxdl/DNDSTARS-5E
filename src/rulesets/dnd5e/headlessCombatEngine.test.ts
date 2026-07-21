@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
-import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { dnd5eAttackerIsUnseen, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
 
@@ -3424,5 +3424,62 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(healed.ok).toBe(true)
     if (!healed.ok) return
     expect(healed.state.combatants['fighter-wizard'].currentHp).toBe(16)
+  })
+
+  it('applies Mage Armor to the real AC calculation and rejects armored targets', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 3, abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-prepared': ['mage-armor'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 2, max: 2 } },
+    })
+    const ally = fighter('ally', 10, { armorClass: 10, abilities: { ...abilities, dex: 14 } })
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mage-armor', [wizard, ally]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'ally', spellId: 'mage-armor', slotLevel: 1,
+      effectRolls: [],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(dnd5eTargetArmorClassForAttack(result.state, 'wizard', 'ally')).toBe(15)
+
+    const armored = fighter('armored', 10, { wearingArmor: true })
+    expect(resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mage-armor-armored', [wizard, armored]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'armored', spellId: 'mage-armor', slotLevel: 1,
+      effectRolls: [],
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('resolves Dispel Magic per spell and preserves failed higher-level effects', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 7, abilities: { ...abilities, int: 18 }, proficiencyBonus: 3,
+      classSelections: { 'spell-prepared': ['dispel-magic'] },
+      classResources: { 'dnd5e-spell-slot-3': { current: 2, max: 2 } },
+    })
+    const target = fighter('target', 10)
+    target.classState.activeEffects = [
+      createDnd5eMechanicalEffect({
+        id: 'shield-of-faith-effect', definitionId: 'srd-5.1:spell:shield-of-faith', label: '虔诚护盾',
+        kind: 'buff', source: { kind: 'spell', actorId: 'cleric', rulesId: 'shield-of-faith' },
+        targetId: 'target', duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      }),
+      createDnd5eMechanicalEffect({
+        id: 'greater-invisibility-effect', definitionId: 'srd-5.1:spell:greater-invisibility', label: '高等隐形术',
+        kind: 'buff', source: { kind: 'spell', actorId: 'sorcerer', rulesId: 'greater-invisibility' },
+        targetId: 'target', duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      }),
+    ]
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('dispel', [wizard, target]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'target', spellId: 'dispel-magic', slotLevel: 3,
+      dispelMagicChecks: [{ effectId: 'greater-invisibility-effect', d20: 1 }], effectRolls: [],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.target.classState.activeEffects?.map((effect) => effect.id))
+      .toEqual(['greater-invisibility-effect'])
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'spell-dispelled', spellId: 'shield-of-faith', success: true,
+    }))
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'spell-dispelled', spellId: 'greater-invisibility', dc: 14, total: 5, success: false,
+    }))
   })
 })

@@ -238,6 +238,7 @@ import {
   type Dnd5eEmpoweredSpellReroll,
   type Dnd5eStandAgainstTideUse,
   type Dnd5eCounterspellReaction,
+  type Dnd5eDispelMagicCheck,
   type Dnd5eWeaponClassDamageContext,
   type Dnd5eDamageType,
   type Dnd5eStandardConditionId,
@@ -342,6 +343,7 @@ import {
   dnd5eWeaponAttackProfile,
   dnd5eWeaponRangeFeet,
   getDnd5eSrdCombatSpell,
+  getDnd5eSrdSpellCatalogEntry,
   previewDnd5eMonkBonusAttack,
   previewDnd5eMonsterAttack,
   previewDnd5eOpportunityAttack,
@@ -8855,6 +8857,7 @@ export default function MapsPage() {
       let useProtection = false
       let shieldSpellReaction = false
       let counterspellReaction: Dnd5eCounterspellReaction | undefined
+      let dispelMagicChecks: Dnd5eDispelMagicCheck[] | undefined
       const shieldSpellReactionTargetIds: string[] = []
       const legendaryResistanceTargetIds: string[] = []
       const cuttingWordsReactionTokenIds = new Set<string>()
@@ -8867,6 +8870,40 @@ export default function MapsPage() {
         acknowledgePlayerAction(action, 'rejected', 'combatant-missing')
         completePlayerActionRequest(action)
         return
+      }
+      if (spellCast.spell.effect === 'dispel-magic') {
+        const targetCombatant = spellCast.state.combatants[spellCast.targetToken.id]
+        const candidates = new Map<string, { effectId: string; spellId: string; spellLevel: number }>()
+        for (const effect of targetCombatant?.classState.activeEffects ?? []) {
+          if (effect.source.kind !== 'spell' || !effect.source.rulesId) continue
+          const catalog = getDnd5eSrdSpellCatalogEntry(effect.source.rulesId)
+          if (!catalog) continue
+          const key = `${effect.source.actorId ?? 'unknown'}\u0000${catalog.id}`
+          if (!candidates.has(key)) candidates.set(key, { effectId: effect.id, spellId: catalog.id, spellLevel: catalog.level })
+        }
+        for (const [sourceActorId, spellId] of Object.entries(targetCombatant?.classState.concentrationEffectsBySource ?? {})) {
+          const catalog = getDnd5eSrdSpellCatalogEntry(spellId)
+          if (!catalog) continue
+          const key = `${sourceActorId}\u0000${catalog.id}`
+          if (!candidates.has(key)) {
+            candidates.set(key, {
+              effectId: `concentration:${sourceActorId}:${catalog.id}`,
+              spellId: catalog.id,
+              spellLevel: catalog.level,
+            })
+          }
+        }
+        dispelMagicChecks = []
+        for (const candidate of candidates.values()) {
+          if (candidate.spellLevel <= spellCast.slotLevel) continue
+          dispelMagicChecks.push({
+            effectId: candidate.effectId,
+            d20: await rollDiceBoxD20(
+              `解除魔法·${candidate.spellId}（DC ${10 + candidate.spellLevel}）`,
+              spellCast.actor.name,
+            ),
+          })
+        }
       }
       const adjudicatedForcedFallTargetIds = new Set<string>()
       const adjudicateForcedFall = async (targetToken: Token) => {
@@ -9571,7 +9608,8 @@ export default function MapsPage() {
         spellCast.spell.effect === 'power-word-stun' || spellCast.spell.effect === 'stabilize' ||
         spellCast.spell.effect === 'remove-condition' || spellCast.spell.effect === 'fixed-healing' ||
         spellCast.spell.effect === 'healing-pool' || spellCast.spell.effect === 'counterspell' ||
-        spellCast.spell.effect === 'active-effect' || spellCast.spell.effect === 'persistent-area'
+        spellCast.spell.effect === 'active-effect' || spellCast.spell.effect === 'dispel-magic' ||
+        spellCast.spell.effect === 'persistent-area'
       ) {
         effectRolls = []
       } else if (spellCast.spell.id === 'magic-missile') {
@@ -9806,6 +9844,7 @@ export default function MapsPage() {
         protectionReactionActorId: useProtection ? protectionCandidate?.token.id : undefined,
         counterspellReaction,
         legendaryResistanceTargetIds,
+        dispelMagicChecks,
         shieldSpellReaction,
         shieldSpellReactionTargetIds,
         tranquilitySave: tranquility.roll,

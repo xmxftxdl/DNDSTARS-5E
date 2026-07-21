@@ -29,6 +29,7 @@ export type Dnd5eSpellEffectKind =
   | 'power-word-kill'
   | 'power-word-stun'
   | 'counterspell'
+  | 'dispel-magic'
   | 'persistent-area'
 
 export interface Dnd5eSpellDamageComponentDefinition {
@@ -47,7 +48,7 @@ export interface Dnd5eSrdSpellDefinition {
   classes: readonly Dnd5eClassId[]
   castingTime: Dnd5eSpellCastingTime
   rangeFeet: number
-  target: 'hostile' | 'ally' | 'area'
+  target: 'hostile' | 'ally' | 'creature' | 'area'
   effect: Dnd5eSpellEffectKind
   saveAbility?: AbilityKey
   damageOnSuccessfulSave?: 'none' | 'half'
@@ -100,6 +101,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'death-ward'
     | 'protection-from-energy'
     | 'longstrider'
+    | 'mage-armor'
   effectDamageTypeOptions?: readonly Dnd5eDamageType[]
   effectDurationRounds?: number
   conditionOptions?: readonly ('blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease')[]
@@ -111,6 +113,19 @@ export interface Dnd5eSrdSpellDefinition {
 }
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
+  {
+    id: 'mage-armor', name: '法师护甲', englishName: 'Mage Armor', level: 1, school: '防护',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, appliedEffect: 'mage-armor', effectDurationRounds: 4_800,
+    description: '触碰一名未穿护甲的自愿生物。法术持续期间，其基础护甲等级为13＋敏捷调整值；穿上护甲时效果提前结束。持续8小时。',
+  },
+  {
+    id: 'dispel-magic', name: '解除魔法', englishName: 'Dispel Magic', level: 3, school: '防护',
+    classes: ['bard', 'cleric', 'druid', 'paladin', 'sorcerer', 'warlock', 'wizard'],
+    castingTime: 'action', rangeFeet: 120, target: 'creature', effect: 'dispel-magic',
+    dice: { count: 0, sides: 20, bonus: 0 },
+    description: '选择射程内一个生物。目标身上不高于本次施法环级的法术自动结束；每个更高环级法术分别进行一次施法属性检定，DC为10＋该法术环级，成功则结束该法术。',
+  },
   {
     id: 'flaming-sphere', name: '炽焰法球', englishName: 'Flaming Sphere', level: 2, school: '咒法',
     classes: ['druid', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'persistent-area',

@@ -27,6 +27,7 @@ import {
   type Dnd5eActionResult,
   type Dnd5eCuttingWordsUse,
   type Dnd5eCounterspellReaction,
+  type Dnd5eDispelMagicCheck,
   type Dnd5eEmpoweredSpellReroll,
   type Dnd5eSpellForcedMovement,
   type Dnd5eHeadlessCombatState,
@@ -811,6 +812,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   counterspellReaction?: Dnd5eCounterspellReaction
   shieldSpellReactionTargetIds?: readonly string[]
   legendaryResistanceTargetIds?: readonly string[]
+  dispelMagicChecks?: readonly Dnd5eDispelMagicCheck[]
   tranquilitySave?: Dnd5eTranquilitySaveRoll
   uncannyDodge?: boolean
   effectRolls: readonly number[]
@@ -851,6 +853,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     shieldSpellReaction: input.shieldSpellReaction,
     shieldSpellReactionTargetIds: input.shieldSpellReactionTargetIds,
     legendaryResistanceTargetIds: input.legendaryResistanceTargetIds,
+    dispelMagicChecks: input.dispelMagicChecks,
     tranquilitySave: input.tranquilitySave,
     targetTranquilitySaves: input.targetTranquilitySaves,
     savingThrowD20: input.savingThrowD20,
