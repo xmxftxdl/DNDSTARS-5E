@@ -104,15 +104,16 @@ function alreadyTriggered(
   round: number,
   turnKey?: string,
 ): boolean {
+  const frequencyId = trigger.frequencyGroupId ?? trigger.id
   if (trigger.oncePerTurn === true) {
     if (!turnKey) return true
     return (area.triggerReceipts ?? []).some((receipt) =>
-      receipt.triggerId === trigger.id && receipt.targetTokenId === targetTokenId && receipt.turnKey === turnKey,
+      receipt.triggerId === frequencyId && receipt.targetTokenId === targetTokenId && receipt.turnKey === turnKey,
     )
   }
   if (trigger.oncePerRound === false) return false
   return (area.triggerReceipts ?? []).some((receipt) =>
-    receipt.triggerId === trigger.id && receipt.targetTokenId === targetTokenId && receipt.round === round,
+    receipt.triggerId === frequencyId && receipt.targetTokenId === targetTokenId && receipt.round === round,
   )
 }
 
@@ -164,7 +165,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     if (alreadyTriggered(area, trigger, targetTokenId, input.round, input.turnKey)) return false
     if (trigger.oncePerRound === false && trigger.oncePerTurn !== true) return true
     const frequencyKey = trigger.oncePerTurn === true ? input.turnKey : input.round
-    const key = `${area.id}\u0000${trigger.id}\u0000${targetTokenId}\u0000${frequencyKey}`
+    const key = `${area.id}\u0000${trigger.frequencyGroupId ?? trigger.id}\u0000${targetTokenId}\u0000${frequencyKey}`
     if (queuedLimited.has(key)) return false
     queuedLimited.add(key)
     return true
@@ -258,7 +259,7 @@ export function recordDnd5ePersistentAreaTrigger(
     if (area.id !== resolved.area.id) return area
     const receipts = (area.triggerReceipts ?? []).filter((receipt) => receipt.transactionId !== resolved.transactionId)
     receipts.push({
-      triggerId: resolved.trigger.id,
+      triggerId: resolved.trigger.frequencyGroupId ?? resolved.trigger.id,
       targetTokenId: resolved.targetToken.id,
       round,
       turnKey: resolved.turnKey,

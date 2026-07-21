@@ -8536,6 +8536,10 @@ export default function MapsPage() {
         const next = resolved.application.characters.find((character) => character.id === characterId)
         if (next) applyAuthorityCharacterUpdate(characterId, next)
       }
+      await Promise.all([
+        useMapStore.getState().saveSharedNow(),
+        useCharacterStore.getState().saveSharedNow(),
+      ])
       const spentTurnResource = resolved.result.events.find((event) =>
         event.type === 'turn-resource-spent' && (event.resource === 'action' || event.resource === 'bonusAction'),
       )
@@ -8726,6 +8730,7 @@ export default function MapsPage() {
           result: resolvedPluginSpell.result,
           map: resolvedPluginSpell.application.map,
           characters: resolvedPluginSpell.application.characters,
+          priorApplication: resolvedPluginSpell.application,
           characterIdByCombatantId: pluginCast.characterIdByCombatantId,
           rollD20: rollDiceBoxD20,
           rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
@@ -9789,6 +9794,7 @@ export default function MapsPage() {
         result: initialResolved.result,
         map: initialResolved.application.map,
         characters: initialResolved.application.characters,
+        priorApplication: initialResolved.application,
         characterIdByCombatantId: spellCast.characterIdByCombatantId,
         rollD20: rollDiceBoxD20,
         rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
@@ -9853,6 +9859,10 @@ export default function MapsPage() {
             : {}),
         })
       }
+      await Promise.all([
+        useMapStore.getState().saveSharedNow(),
+        useCharacterStore.getState().saveSharedNow(),
+      ])
       await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
       for (const tokenId of new Set(resolved.result.events.flatMap((event) =>

@@ -20,6 +20,7 @@ export async function settleDnd5eConcentrationChecks(input: {
   result: Extract<Dnd5eActionResult, { ok: true }>
   map: BattleMap
   characters: readonly Character[]
+  priorApplication?: Pick<Dnd5eMapResultPlan, 'changedTokenIds' | 'changedCharacterIds'>
   characterIdByCombatantId: Readonly<Record<string, string>>
   rollD20: (label: string, targetName: string) => Promise<number>
   rollD4: (label: string, targetName: string) => Promise<number>
@@ -384,15 +385,25 @@ export async function settleDnd5eConcentrationChecks(input: {
     }
   }
   const result = { ok: true as const, state, events }
+  const application = planDnd5eMapResultApplication({
+    state,
+    map: input.map,
+    characters: input.characters,
+    characterIdByCombatantId: input.characterIdByCombatantId,
+  })
   return {
     result,
-    application: planDnd5eMapResultApplication({
-      state,
-      map: input.map,
-      characters: input.characters,
-      characterIdByCombatantId: input.characterIdByCombatantId,
-    }),
+    application: {
+      ...application,
+      changedTokenIds: [...new Set([
+        ...(input.priorApplication?.changedTokenIds ?? []),
+        ...application.changedTokenIds,
+      ])],
+      changedCharacterIds: [...new Set([
+        ...(input.priorApplication?.changedCharacterIds ?? []),
+        ...application.changedCharacterIds,
+      ])],
+    },
   }
 }
-
 

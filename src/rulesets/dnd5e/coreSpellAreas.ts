@@ -124,13 +124,15 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     visual: { preset: 'spirit-guardians', intensity: 'normal' },
     triggers: [
       {
-        id: 'spirit-guardians-damage', label: '灵体卫士·进入区域', timing: 'on-enter', oncePerTurn: true,
+        id: 'spirit-guardians-enter', frequencyGroupId: 'spirit-guardians-damage',
+        label: '灵体卫士·进入区域', timing: 'on-enter', oncePerTurn: true,
         savingThrow: { ability: 'wis', onSuccess: 'half' },
         damage: { count: 3, sides: 8, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
       },
       {
-        id: 'spirit-guardians-damage', label: '灵体卫士·回合开始', timing: 'turn-start', oncePerTurn: true,
+        id: 'spirit-guardians-turn-start', frequencyGroupId: 'spirit-guardians-damage',
+        label: '灵体卫士·回合开始', timing: 'turn-start', oncePerTurn: true,
         savingThrow: { ability: 'wis', onSuccess: 'half' },
         damage: { count: 3, sides: 8, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
@@ -152,7 +154,8 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     visual: { preset: 'moonbeam', intensity: 'strong' },
     triggers: [
       {
-        id: 'moonbeam-damage', label: '月华之光·进入光柱', timing: 'on-enter', oncePerTurn: true,
+        id: 'moonbeam-enter', frequencyGroupId: 'moonbeam-damage',
+        label: '月华之光·进入光柱', timing: 'on-enter', oncePerTurn: true,
         savingThrow: {
           ability: 'con', onSuccess: 'half',
           shapechangerDisadvantage: true, revertShapechangerOnFailure: true,
@@ -161,7 +164,8 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         dmAdjustable: true,
       },
       {
-        id: 'moonbeam-damage', label: '月华之光·回合开始', timing: 'turn-start', oncePerTurn: true,
+        id: 'moonbeam-turn-start', frequencyGroupId: 'moonbeam-damage',
+        label: '月华之光·回合开始', timing: 'turn-start', oncePerTurn: true,
         savingThrow: {
           ability: 'con', onSuccess: 'half',
           shapechangerDisadvantage: true, revertShapechangerOnFailure: true,
@@ -187,6 +191,7 @@ function resolvedTrigger(
   const higherLevels = Math.max(0, input.slotLevel - input.minimumSlotLevel)
   return {
     id: declaration.id,
+    frequencyGroupId: declaration.frequencyGroupId,
     label: declaration.label,
     timing: declaration.timing,
     oncePerRound: declaration.oncePerTurn === true ? false : declaration.oncePerRound !== false,

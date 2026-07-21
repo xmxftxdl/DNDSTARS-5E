@@ -134,6 +134,7 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
       issues.push(`${areaPath}.visual 无效`)
     }
     const triggerIds = new Set<string>()
+    const receiptTriggerIds = new Set<string>()
     if (raw.triggers != null) {
       if (!Array.isArray(raw.triggers) || raw.triggers.length > 16) {
         issues.push(`${areaPath}.triggers 无效`)
@@ -142,7 +143,11 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
           const normalized = normalizeDnd5ePersistentAreaTriggerSnapshot(trigger)
           if (!normalized || triggerIds.has(normalized.id)) {
             issues.push(`${areaPath}.triggers[${triggerIndex}] 无效或重复`)
-          } else triggerIds.add(normalized.id)
+          } else {
+            triggerIds.add(normalized.id)
+            receiptTriggerIds.add(normalized.id)
+            if (normalized.frequencyGroupId) receiptTriggerIds.add(normalized.frequencyGroupId)
+          }
         })
       }
     }
@@ -154,7 +159,7 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
         raw.triggerReceipts.forEach((receipt, receiptIndex) => {
           const receiptPath = `${areaPath}.triggerReceipts[${receiptIndex}]`
           if (
-            !isPlainObject(receipt) || !triggerIds.has(String(receipt.triggerId)) ||
+            !isPlainObject(receipt) || !receiptTriggerIds.has(String(receipt.triggerId)) ||
             typeof receipt.targetTokenId !== 'string' || !receipt.targetTokenId ||
             !Number.isInteger(receipt.round) || Number(receipt.round) < 0 ||
             (receipt.turnKey != null && (typeof receipt.turnKey !== 'string' || !receipt.turnKey || receipt.turnKey.length > 160)) ||

@@ -192,6 +192,52 @@ describe('D&D 5e plugin persistent areas', () => {
     })).toHaveLength(1)
   })
 
+  it('shares a once-per-turn frequency group across different trigger timings', () => {
+    const source = {
+      id: 'caster-token', label: 'caster', x: 25, y: 125, color: '#fff', emoji: 'C', size: 1,
+      type: 'player' as const, characterId: 'caster',
+    }
+    const targetInside = {
+      id: 'target-token', label: 'target', x: 75, y: 25, color: '#fff', emoji: 'T', size: 1,
+      type: 'enemy' as const,
+    }
+    const groupedArea = area({
+      cells: [{ col: 1, row: 0 }],
+      triggers: [
+        {
+          id: 'damage-at-start', frequencyGroupId: 'shared-damage', label: '回合开始',
+          timing: 'turn-start', oncePerTurn: true,
+          damage: { count: 1, sides: 6, modifier: 0, type: 'radiant' },
+        },
+        {
+          id: 'damage-on-enter', frequencyGroupId: 'shared-damage', label: '首次进入',
+          timing: 'on-enter', oncePerTurn: true,
+          damage: { count: 1, sides: 6, modifier: 0, type: 'radiant' },
+        },
+      ],
+    })
+    const baseMap = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, targetInside], dnd5ePluginAreas: [groupedArea],
+    }
+    const start = collectDnd5ePersistentAreaTriggers({
+      map: baseMap, timing: 'turn-start', round: 2, turnKey: '2:target-token', targetTokenId: targetInside.id,
+    })[0]
+    const recorded = recordDnd5ePersistentAreaTrigger(baseMap.dnd5ePluginAreas, start, 2)
+    const targetOutside = { ...targetInside, x: 25 }
+    const recordedMap = { ...baseMap, tokens: [source, targetOutside], dnd5ePluginAreas: recorded }
+
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: recordedMap, timing: 'on-enter', round: 2, turnKey: '2:target-token',
+      movement: { token: targetOutside, to: { x: 75, y: 25 } },
+    })).toHaveLength(0)
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: recordedMap, timing: 'on-enter', round: 2, turnKey: '2:other-token',
+      movement: { token: targetOutside, to: { x: 75, y: 25 } },
+    })).toHaveLength(1)
+  })
+
   it('collects an explicit area-move impact and removes orphaned effect tokens', () => {
     const source = {
       id: 'caster-token', label: 'caster', x: 25, y: 25, color: '#fff', emoji: 'C', size: 1,

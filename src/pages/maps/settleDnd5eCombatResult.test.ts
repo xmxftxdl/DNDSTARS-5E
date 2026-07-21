@@ -68,6 +68,28 @@ describe('地图战斗结果结算器', () => {
     expect(settled.application.map.id).toBe('map')
   })
 
+  it('保留前一事务阶段已经产生的地图与角色变更标识', async () => {
+    const state = startDnd5eHeadlessCombat('combat', [combatant('hero', 20), combatant('enemy', 10)])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = { ok: true, state, events: [] }
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      priorApplication: {
+        changedTokenIds: ['hero'],
+        changedCharacterIds: ['character-hero'],
+      },
+      characterIdByCombatantId: {},
+      rollD20: unusedRoll,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(settled.application.changedTokenIds).toContain('hero')
+    expect(settled.application.changedCharacterIds).toContain('character-hero')
+  })
+
   it('依序结算专注豁免，失败时解除专注并保留结算事件', async () => {
     const state = startDnd5eHeadlessCombat('combat', [combatant('hero', 20, true), combatant('enemy', 10)])
     const result: Extract<Dnd5eActionResult, { ok: true }> = {

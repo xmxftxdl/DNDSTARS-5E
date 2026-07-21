@@ -96,9 +96,9 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
   })
 }
 
-function publishMapsState(state: Pick<MapState, 'maps' | 'selectedId'>): void {
+function publishMapsState(state: Pick<MapState, 'maps' | 'selectedId'>): Promise<void> {
   const seq = ++mapSaveSeq
-  void (async () => {
+  return (async () => {
     let maps = state.maps
     if (isPlayerPort()) {
       const shared = await loadSharedResource<SharedMapsState>('maps')
@@ -536,7 +536,10 @@ function normalizeMap(raw: unknown): BattleMap {
               return normalized ? [normalized] : []
             })
           : []
-        const triggerIds = new Set(triggers.map((trigger) => trigger.id))
+        const triggerIds = new Set(triggers.flatMap((trigger) => [
+          trigger.id,
+          ...(trigger.frequencyGroupId ? [trigger.frequencyGroupId] : []),
+        ]))
         const triggerReceipts = Array.isArray(area.triggerReceipts)
           ? area.triggerReceipts.flatMap((receipt) =>
               receipt && triggerIds.has(receipt.triggerId) && typeof receipt.targetTokenId === 'string' &&
@@ -698,6 +701,7 @@ interface MapState {
   maps: BattleMap[]
   selectedId: string | null
   loadShared: () => Promise<void>
+  saveSharedNow: () => Promise<void>
   select: (id: string | null) => void
   addMap: (meta: {
     name: string
@@ -748,6 +752,7 @@ export const useMapStore = create<MapState>()(
         // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
         if (isPlayerPort()) void pruneOrphanImages(shared.maps.map((m) => m.id))
       },
+      saveSharedNow: () => publishMapsState(get()),
       select: (id) => set({ selectedId: id }),
 
       addMap: async ({ name, width, height, blob, gridDetect }) => {

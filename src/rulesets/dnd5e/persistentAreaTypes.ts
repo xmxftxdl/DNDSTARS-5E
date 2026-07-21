@@ -77,6 +77,8 @@ export interface Dnd5ePersistentAreaConditionDeclaration {
  */
 export interface Dnd5ePersistentAreaTriggerDeclaration {
   id: string
+  /** 不同触发时机可共享同一频率组，实现“首次进入或回合开始，每回合仅一次”。 */
+  frequencyGroupId?: string
   label: string
   timing: Dnd5ePersistentAreaTriggerTiming
   oncePerRound?: boolean
@@ -145,10 +147,14 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
   const trigger = record(value)
   if (!trigger) return undefined
   const id = trigger.id
+  const frequencyGroupId = trigger.frequencyGroupId
   const label = trigger.label
   const timing = trigger.timing as Dnd5ePersistentAreaTriggerTiming
   if (
     typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(id) ||
+    (frequencyGroupId != null && (
+      typeof frequencyGroupId !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(frequencyGroupId)
+    )) ||
     typeof label !== 'string' || !label.trim() || label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
     !TIMINGS.includes(timing)
   ) return undefined
@@ -206,6 +212,7 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
   if (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) return undefined
   return {
     id,
+    frequencyGroupId: frequencyGroupId as string | undefined,
     label: label.trim(),
     timing,
     oncePerRound: trigger.oncePerTurn === true ? false : trigger.oncePerRound !== false,
