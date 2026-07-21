@@ -21,10 +21,7 @@ import {
   RefreshCw,
   Move,
   Magnet,
-  CloudFog,
   Eye,
-  Undo2,
-  Redo2,
   LocateFixed,
   ArrowUpRight,
   Circle as CircleIcon,
@@ -527,6 +524,7 @@ import DmAdjudicationPanel, {
   type DmAdjudicationEffectDraft,
   type SharedDmAdjudicationPromptView,
 } from './maps/DmAdjudicationPanel'
+import MapFogToolbar from './maps/MapFogToolbar'
 import {
   capturePlayerActionResultBaseline,
   type PlayerActionResultBaseline,
@@ -14796,115 +14794,35 @@ export default function MapsPage() {
                       onSnapToGridChange={setGeometrySnapToGrid}
                     />
                   )}
-                  <div className="flex items-center gap-1 rounded-lg border border-sky-400/15 bg-sky-500/[0.05] px-1 py-0.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFogEditMode((current) => {
-                          const next = !current
-                          if (next) {
-                            setMeasureMode(false)
-                            setDeleteSelectMode(false)
-                            setGridAdjustMode(false)
-                            setShowMoveRange(false)
-                            setGeometryEditMode(false)
-                            setGeometryPreviewAsPlayer(false)
-                            selectGeometryEntity(null)
-                          } else {
-                            setFogPreviewAsPlayer(false)
-                          }
-                          return next
-                        })
-                      }}
-                      className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${fogEditMode ? 'bg-sky-500/25 text-sky-100' : 'text-slate-400 hover:bg-white/5'}`}
-                      title="编辑静态战争迷雾"
-                    >
-                      <CloudFog className="h-3.5 w-3.5" />
-                      迷雾
-                    </button>
-                    {fogEditMode && (
-                      <>
-                        <select
-                          value={fogTool}
-                          onChange={(event) => setFogTool(event.target.value as FogTool)}
-                          className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
-                          title="迷雾绘制工具；多边形双击或按 Enter 完成"
-                        >
-                          <option value="reveal-rect">矩形揭示</option>
-                          <option value="cover-rect">矩形遮盖</option>
-                          <option value="reveal-circle">圆形揭示</option>
-                          <option value="cover-circle">圆形遮盖</option>
-                          <option value="reveal-polygon">多边形揭示</option>
-                          <option value="cover-polygon">多边形遮盖</option>
-                          <option value="reveal-brush">画笔揭示</option>
-                          <option value="cover-brush">画笔遮盖</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if ((activeFog?.shapes.length ?? 0) === 0 || confirm('填满整张地图会清除现有迷雾笔画，继续吗？')) fillFog(activeMap.id)
-                          }}
-                          className="rounded-md px-1.5 py-1 text-[11px] text-amber-200 hover:bg-amber-500/15"
-                          title="填满全图并清除现有笔画"
-                        >
-                          全遮
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if ((!activeFog?.filled && (activeFog?.shapes.length ?? 0) === 0) || confirm('清空这张地图的全部战争迷雾吗？')) clearFog(activeMap.id)
-                          }}
-                          className="rounded-md px-1.5 py-1 text-[11px] text-emerald-200 hover:bg-emerald-500/15"
-                          title="清空全图迷雾"
-                        >
-                          全显
-                        </button>
-                        <button
-                          type="button"
-                          disabled={(activeFog?.shapes.length ?? 0) === 0}
-                          onClick={() => undoFog(activeMap.id)}
-                          className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
-                          title="撤销最后一笔"
-                        >
-                          <Undo2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={(fogRedoByMap[activeMap.id]?.length ?? 0) === 0}
-                          onClick={() => redoFog(activeMap.id)}
-                          className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
-                          title="重做"
-                        >
-                          <Redo2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFogPreviewAsPlayer((value) => !value)}
-                          className={`rounded-md p-1 ${fogPreviewAsPlayer ? 'bg-violet-500/25 text-violet-100' : 'text-slate-300 hover:bg-white/10'}`}
-                          title="预览玩家看到的不透明迷雾"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
-                        <input
-                          type="color"
-                          value={activeFog?.color ?? '#05070f'}
-                          onChange={(event) => setFogStyle(activeMap.id, { color: event.target.value })}
-                          className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
-                          title="迷雾颜色"
-                        />
-                        <input
-                          type="range"
-                          min={0.5}
-                          max={1}
-                          step={0.02}
-                          value={activeFog?.opacity ?? 0.98}
-                          onChange={(event) => setFogStyle(activeMap.id, { opacity: Number(event.target.value) })}
-                          className="w-10 accent-sky-400"
-                          title="DM 预览迷雾浓度（玩家端始终完全遮蔽）"
-                        />
-                      </>
-                    )}
-                  </div>
+                  <MapFogToolbar
+                    mapId={activeMap.id}
+                    fog={activeFog}
+                    redoCount={fogRedoByMap[activeMap.id]?.length ?? 0}
+                    editMode={fogEditMode}
+                    tool={fogTool}
+                    previewAsPlayer={fogPreviewAsPlayer}
+                    onEditModeChange={(enabled) => {
+                      setFogEditMode(enabled)
+                      if (enabled) {
+                        setMeasureMode(false)
+                        setDeleteSelectMode(false)
+                        setGridAdjustMode(false)
+                        setShowMoveRange(false)
+                        setGeometryEditMode(false)
+                        setGeometryPreviewAsPlayer(false)
+                        selectGeometryEntity(null)
+                      } else {
+                        setFogPreviewAsPlayer(false)
+                      }
+                    }}
+                    onToolChange={setFogTool}
+                    onFill={fillFog}
+                    onClear={clearFog}
+                    onUndo={undoFog}
+                    onRedo={redoFog}
+                    onPreviewChange={setFogPreviewAsPlayer}
+                    onStyleChange={setFogStyle}
+                  />
                   <button
                     onClick={() =>
                       setMeasureMode((v) => {
