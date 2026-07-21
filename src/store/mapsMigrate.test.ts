@@ -125,4 +125,31 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].dnd5ePluginAreas?.[0].visual).toEqual({ preset: 'toxic-cloud', intensity: 'strong' })
     expect(result.maps[0].dnd5ePluginAreas?.[1].visual).toBeUndefined()
   })
+
+  it('migrates bounded core-spell anchor and movement metadata while rejecting incomplete core sources', () => {
+    const base = {
+      pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:test', label: '核心区域', color: '#8b5cf6',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 1, expiresAfterRound: 10, sourceKind: 'core-spell',
+    }
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 500, height: 500,
+        dnd5ePluginAreas: [
+          {
+            ...base, id: 'valid', coreSpellId: 'test', slotLevel: 3,
+            anchorMode: 'source-token', anchorTokenId: 'hero-token', anchorCell: { col: 1, row: 1 },
+            movement: { economy: 'bonus-action', maximumFeet: 30 }, movementCostMultiplier: 2,
+          },
+          { ...base, id: 'missing-spell-id' },
+        ],
+      }],
+    })
+    expect(result.maps[0].dnd5ePluginAreas).toHaveLength(1)
+    expect(result.maps[0].dnd5ePluginAreas?.[0]).toMatchObject({
+      sourceKind: 'core-spell', coreSpellId: 'test', slotLevel: 3,
+      anchorMode: 'source-token', anchorCell: { col: 1, row: 1 },
+      movement: { economy: 'bonus-action', maximumFeet: 30 }, movementCostMultiplier: 2,
+    })
+  })
 })

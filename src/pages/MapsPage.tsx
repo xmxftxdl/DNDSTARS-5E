@@ -3239,7 +3239,7 @@ export default function MapsPage() {
         ? `，豁免 ${saveEvent.total} vs DC ${saveEvent.dc} ${saveEvent.success ? '成功' : '失败'}`
         : ''
       logs.push(
-        `${candidate.area.label} 在${({ 'on-create': '首次创建', 'on-enter': '进入区域', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[candidate.trigger.timing]}触发 ${prepared.prepared.targetName}${saveText}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.damage > 0 ? `，造成 ${triggerEvent.damage} 点伤害` : ''}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.conditionApplied ? `，施加 ${dnd5eConditionLabel(triggerEvent.conditionApplied)}` : ''}。`,
+        `${candidate.area.label} 在${({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[candidate.trigger.timing]}触发 ${prepared.prepared.targetName}${saveText}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.damage > 0 ? `，造成 ${triggerEvent.damage} 点伤害` : ''}${triggerEvent?.type === 'persistent-area-triggered' && triggerEvent.conditionApplied ? `，施加 ${dnd5eConditionLabel(triggerEvent.conditionApplied)}` : ''}。`,
       )
     }
     return { map, characters, logs }
@@ -3321,10 +3321,17 @@ export default function MapsPage() {
       map: baseApplication.map,
       timing: 'on-enter',
       round: roundRef.current,
-      movement: { token: input.token, to: finalPosition },
+      movement: { token: input.token, to: finalPosition, path: input.path },
+    })
+    const movementDistanceCandidates = collectDnd5ePersistentAreaTriggers({
+      map: baseApplication.map,
+      timing: 'on-move-distance',
+      round: roundRef.current,
+      movement: { token: input.token, to: finalPosition, path: input.path },
     })
     const pluginAreas = await settleDnd5ePersistentAreaCandidates({
-      candidates: pluginCandidates,
+      candidates: [...pluginCandidates, ...movementDistanceCandidates]
+        .sort((left, right) => (left.pathIndex ?? 0) - (right.pathIndex ?? 0)),
       map: baseApplication.map,
       characters: baseApplication.characters,
       round: roundRef.current,
@@ -14415,7 +14422,7 @@ export default function MapsPage() {
                       </h3>
                       <p className="mt-1 text-xs text-slate-400">
                         {sharedDmAdjudicationPrompt.payload.casterName} · {sharedDmAdjudicationPrompt.payload.contextKind === 'persistent-area-trigger'
-                          ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
+                          ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
                           : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                             ? 'DM 权威地图事务'
                           : <>{

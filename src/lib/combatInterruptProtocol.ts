@@ -224,7 +224,7 @@ export type DmAdjudicationInterruptPayload = Record<string, unknown> & {
   proposedSaveSuccess?: boolean
   proposedConditionIds?: string[]
   targetTokenId?: string
-  triggerTiming?: 'on-create' | 'on-enter' | 'turn-start' | 'turn-end'
+  triggerTiming?: 'on-create' | 'on-enter' | 'on-move-distance' | 'turn-start' | 'turn-end'
   proposedDc?: number
   doorId?: string
   mapInteractionOperation?: string

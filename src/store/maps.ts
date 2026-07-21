@@ -17,6 +17,9 @@ import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEf
 import {
   normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
+  type Dnd5ePersistentAreaAnchorMode,
+  type Dnd5ePersistentAreaMovementDeclaration,
+  type Dnd5ePersistentAreaSourceKind,
   type Dnd5ePersistentAreaVisual,
   type Dnd5ePersistentAreaTriggerReceipt,
   type Dnd5ePersistentAreaTriggerSnapshot,
@@ -274,6 +277,10 @@ export interface Dnd5ePluginArea {
   id: string
   pluginId: string
   featureId: string
+  /** 旧存档缺省为 plugin-feature；核心 SRD 法术使用 core-spell。 */
+  sourceKind?: Dnd5ePersistentAreaSourceKind
+  coreSpellId?: string
+  slotLevel?: number
   label: string
   color: string
   sourceCharacterId: string
@@ -282,6 +289,13 @@ export interface Dnd5ePluginArea {
   createdRound: number
   expiresAfterRound: number
   concentrationId?: string
+  /** fixed 保持落点；source-token 跟随施法者；effect-token 跟随独立法术实体。 */
+  anchorMode?: Dnd5ePersistentAreaAnchorMode
+  anchorTokenId?: string
+  anchorCell?: { col: number; row: number }
+  movement?: Dnd5ePersistentAreaMovementDeclaration
+  /** 区域内移动成本倍数；例如灵体卫士为 2。 */
+  movementCostMultiplier?: number
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
   visual?: Dnd5ePersistentAreaVisual
@@ -289,8 +303,8 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V9：持续区域可携带安全的本地动画预设。 */
-export const MAPS_PERSIST_VERSION = 9
+/** 地图存档 V10：持续区域增加核心法术来源、锚点与移动语义。 */
+export const MAPS_PERSIST_VERSION = 10
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -470,10 +484,37 @@ function normalizeMap(raw: unknown): BattleMap {
                 : [],
             ).slice(-2_048)
           : []
+        const sourceKind: Dnd5ePersistentAreaSourceKind = area.sourceKind === 'core-spell'
+          ? 'core-spell'
+          : 'plugin-feature'
+        const coreSpellId = sourceKind === 'core-spell' && typeof area.coreSpellId === 'string' && area.coreSpellId
+          ? area.coreSpellId
+          : undefined
+        if (sourceKind === 'core-spell' && !coreSpellId) return []
+        const anchorMode: Dnd5ePersistentAreaAnchorMode =
+          area.anchorMode === 'source-token' || area.anchorMode === 'effect-token'
+            ? area.anchorMode
+            : 'fixed'
+        const anchorCell = area.anchorCell && Number.isInteger(area.anchorCell.col) && Number.isInteger(area.anchorCell.row)
+          ? { col: area.anchorCell.col, row: area.anchorCell.row }
+          : { ...cells[0] }
+        const movement = area.movement &&
+          (area.movement.economy === 'action' || area.movement.economy === 'bonus-action') &&
+          Number.isFinite(area.movement.maximumFeet) && area.movement.maximumFeet > 0 && area.movement.maximumFeet <= 1_000
+          ? {
+              economy: area.movement.economy,
+              maximumFeet: Math.floor(area.movement.maximumFeet),
+            }
+          : undefined
         return [{
           id: area.id,
           pluginId: area.pluginId,
           featureId: area.featureId,
+          sourceKind,
+          coreSpellId,
+          slotLevel: Number.isInteger(area.slotLevel) && Number(area.slotLevel) >= 0 && Number(area.slotLevel) <= 9
+            ? Number(area.slotLevel)
+            : undefined,
           label: typeof area.label === 'string' && area.label ? area.label : '扩展规则区域',
           color: typeof area.color === 'string' && /^#[0-9a-f]{6}$/i.test(area.color) ? area.color : '#8b5cf6',
           sourceCharacterId: typeof area.sourceCharacterId === 'string' ? area.sourceCharacterId : '',
@@ -482,6 +523,16 @@ function normalizeMap(raw: unknown): BattleMap {
           createdRound: area.createdRound!,
           expiresAfterRound: area.expiresAfterRound!,
           concentrationId: typeof area.concentrationId === 'string' ? area.concentrationId : undefined,
+          anchorMode,
+          anchorTokenId: typeof area.anchorTokenId === 'string' && area.anchorTokenId
+            ? area.anchorTokenId
+            : anchorMode === 'source-token' ? area.sourceTokenId : undefined,
+          anchorCell,
+          movement,
+          movementCostMultiplier: Number.isFinite(area.movementCostMultiplier) &&
+            Number(area.movementCostMultiplier) >= 1 && Number(area.movementCostMultiplier) <= 10
+            ? Number(area.movementCostMultiplier)
+            : undefined,
           relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
           includeSelf: area.includeSelf === true,
           visual: area.visual ? normalizeDnd5ePersistentAreaVisual(area.visual) : undefined,

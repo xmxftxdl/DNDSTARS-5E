@@ -153,6 +153,45 @@ describe('D&D 5e plugin persistent areas', () => {
       .toMatchObject([{ trigger: { id: 'ended' } }])
   })
 
+  it('emits one movement-distance trigger for every declared interval along the authoritative path', () => {
+    const moving = {
+      id: 'target-token', label: 'target', x: 25, y: 25, color: '#fff', emoji: 'T', size: 1,
+      type: 'player' as const, characterId: 'target',
+    }
+    const source = {
+      id: 'caster-token', label: 'caster', x: 25, y: 125, color: '#fff', emoji: 'C', size: 1,
+      type: 'player' as const, characterId: 'caster',
+    }
+    const triggerArea = area({
+      cells: [{ col: 1, row: 0 }, { col: 2, row: 0 }, { col: 2, row: 1 }],
+      triggers: [{
+        id: 'thorn-step', label: '荆棘移动', timing: 'on-move-distance', oncePerRound: false,
+        movementIntervalFeet: 5,
+        damage: { count: 2, sides: 4, modifier: 0, type: 'piercing' },
+      }],
+    })
+    const map = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, moving], dnd5ePluginAreas: [triggerArea],
+    }
+    const found = collectDnd5ePersistentAreaTriggers({
+      map,
+      timing: 'on-move-distance',
+      round: 2,
+      movement: {
+        token: moving,
+        to: { x: 125, y: 75 },
+        path: [{ x: 75, y: 25 }, { x: 125, y: 25 }, { x: 125, y: 75 }],
+      },
+    })
+    expect(found).toHaveLength(3)
+    expect(found.map((candidate) => candidate.enteredAt)).toEqual([
+      { col: 1, row: 0 }, { col: 2, row: 0 }, { col: 2, row: 1 },
+    ])
+    expect(new Set(found.map((candidate) => candidate.transactionId)).size).toBe(3)
+  })
+
   it('resolves saves, half damage and ActiveEffect conditions through Headless', () => {
     const triggerArea = area({
       sourceTokenId: 'caster-token',

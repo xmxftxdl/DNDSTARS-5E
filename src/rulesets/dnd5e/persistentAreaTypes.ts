@@ -2,7 +2,14 @@ import type { AbilityKey } from '../../lib/dnd'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 
-export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = ['arcane', 'toxic-cloud'] as const
+export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
+  'arcane',
+  'toxic-cloud',
+  'moonbeam',
+  'spirit-guardians',
+  'spike-growth',
+  'flaming-sphere',
+] as const
 
 export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]
 export type Dnd5ePersistentAreaVisualIntensity = 'subtle' | 'normal' | 'strong'
@@ -26,8 +33,17 @@ export interface Dnd5ePluginEffectDuration {
 export type Dnd5ePersistentAreaTriggerTiming =
   | 'on-create'
   | 'on-enter'
+  | 'on-move-distance'
   | 'turn-start'
   | 'turn-end'
+
+export type Dnd5ePersistentAreaSourceKind = 'plugin-feature' | 'core-spell'
+export type Dnd5ePersistentAreaAnchorMode = 'fixed' | 'source-token' | 'effect-token'
+
+export interface Dnd5ePersistentAreaMovementDeclaration {
+  economy: 'action' | 'bonus-action'
+  maximumFeet: number
+}
 
 export interface Dnd5ePersistentAreaDamageDeclaration {
   count: number
@@ -56,6 +72,8 @@ export interface Dnd5ePersistentAreaTriggerDeclaration {
   label: string
   timing: Dnd5ePersistentAreaTriggerTiming
   oncePerRound?: boolean
+  /** `on-move-distance` 每累计多少尺触发一次；由 Host 根据完整移动路径计数。 */
+  movementIntervalFeet?: number
   savingThrow?: Dnd5ePersistentAreaSaveDeclaration
   damage?: Dnd5ePersistentAreaDamageDeclaration
   condition?: Dnd5ePersistentAreaConditionDeclaration
@@ -75,7 +93,9 @@ export interface Dnd5ePersistentAreaTriggerReceipt {
 }
 
 const ABILITIES: readonly AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
-const TIMINGS: readonly Dnd5ePersistentAreaTriggerTiming[] = ['on-create', 'on-enter', 'turn-start', 'turn-end']
+const TIMINGS: readonly Dnd5ePersistentAreaTriggerTiming[] = [
+  'on-create', 'on-enter', 'on-move-distance', 'turn-start', 'turn-end',
+]
 const EXPIRATIONS: readonly Dnd5ePluginEffectDuration['expiresAt'][] = [
   'source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save',
 ]
@@ -164,11 +184,18 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
 
   if (!damage && !condition) return undefined
   if (trigger.savingThrow != null && !savingThrow) return undefined
+  const movementIntervalFeet = trigger.timing === 'on-move-distance' &&
+    integer(trigger.movementIntervalFeet, 1, 1_000)
+    ? trigger.movementIntervalFeet
+    : undefined
+  if (trigger.timing === 'on-move-distance' && movementIntervalFeet == null) return undefined
+  if (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) return undefined
   return {
     id,
     label: label.trim(),
     timing,
     oncePerRound: trigger.oncePerRound !== false,
+    movementIntervalFeet,
     savingThrow,
     damage,
     condition,

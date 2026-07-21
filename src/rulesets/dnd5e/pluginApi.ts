@@ -766,7 +766,9 @@ function clonePersistentAreaTriggers(
     if (
       !validId(trigger.id) || seen.has(trigger.id) ||
       typeof trigger.label !== 'string' || !trigger.label.trim() || trigger.label.length > 120 ||
-      !['on-create', 'on-enter', 'turn-start', 'turn-end'].includes(trigger.timing) ||
+      !['on-create', 'on-enter', 'on-move-distance', 'turn-start', 'turn-end'].includes(trigger.timing) ||
+      (trigger.timing === 'on-move-distance' && !finiteInteger(trigger.movementIntervalFeet, 1, 1_000)) ||
+      (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) ||
       (!trigger.damage && !trigger.condition)
     ) throw new Error(`Invalid plugin persistent area trigger: ${featureId}`)
     seen.add(trigger.id)

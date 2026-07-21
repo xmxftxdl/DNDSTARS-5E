@@ -13,6 +13,7 @@ import type {
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaTriggerTiming,
 } from './persistentAreaTypes'
+import { reconcileDnd5ePersistentAreaAnchors } from './coreSpellAreas'
 
 export interface Dnd5ePersistentAreaTriggerCandidate {
   area: Dnd5ePluginArea
@@ -79,7 +80,12 @@ export function collectDnd5ePersistentAreaTriggers(input: {
   round: number
   targetTokenId?: string
   areaId?: string
-  movement?: { token: Token; to: { x: number; y: number } }
+  movement?: {
+    token: Token
+    to: { x: number; y: number }
+    /** 权威移动规划器生成的完整折线路径；缺省时才回退为起终点直线。 */
+    path?: readonly { x: number; y: number }[]
+  }
 }): Dnd5ePersistentAreaTriggerCandidate[] {
   const areas = (input.map.dnd5ePluginAreas ?? []).filter((area) => !input.areaId || area.id === input.areaId)
   if (areas.length === 0) return []
@@ -98,26 +104,62 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     return true
   }
 
-  if (input.timing === 'on-enter') {
+  if (input.timing === 'on-enter' || input.timing === 'on-move-distance') {
     const movement = input.movement
     if (!movement) return []
     const target = movement.token
     const from = tokenAnchorCellFromPixel(target.x, target.y, target, input.map)
     const to = tokenAnchorCellFromPixel(movement.to.x, movement.to.y, target, input.map)
-    const path = dnd5eMovementPathCells(from, to)
+    const declaredPath = movement.path?.map((point) =>
+      tokenAnchorCellFromPixel(point.x, point.y, target, input.map),
+    ) ?? []
+    const path = declaredPath.length > 0
+      ? [from, ...declaredPath, to].filter((cell, index, cells) =>
+          index === 0 || cell.col !== cells[index - 1].col || cell.row !== cells[index - 1].row,
+        )
+      : dnd5eMovementPathCells(from, to)
     for (const area of areas) {
       if (!areaAllowsTarget(area, target, input.map)) continue
       let inside = tokenIntersectsAreaAt(target, input.map, area, target)
       let occurrence = 0
+      let distanceInsideFeet = 0
+      const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
       for (let pathIndex = 1; pathIndex < path.length; pathIndex += 1) {
         const position = tokenCenterForAnchorCell(path[pathIndex], target, input.map)
         const nextInside = tokenIntersectsAreaAt(target, input.map, area, position)
-        if (!inside && nextInside) {
+        if (input.timing === 'on-enter' && !inside && nextInside) {
           for (const trigger of area.triggers ?? []) {
             if (trigger.timing !== 'on-enter' || !mayQueue(area, trigger, target.id)) continue
             out.push(candidate(area, trigger, target, input.round, `enter-${pathIndex}-${occurrence}`, path[pathIndex], pathIndex))
           }
           occurrence += 1
+        }
+        if (input.timing === 'on-move-distance' && nextInside) {
+          const previousCell = path[pathIndex - 1]
+          const stepCells = Math.max(
+            Math.abs(path[pathIndex].col - previousCell.col),
+            Math.abs(path[pathIndex].row - previousCell.row),
+          )
+          distanceInsideFeet += stepCells * feetPerCell
+          for (const trigger of area.triggers ?? []) {
+            if (trigger.timing !== 'on-move-distance') continue
+            const interval = Math.max(1, trigger.movementIntervalFeet ?? feetPerCell)
+            while (distanceInsideFeet >= interval) {
+              distanceInsideFeet -= interval
+              if (mayQueue(area, trigger, target.id)) {
+                out.push(candidate(
+                  area,
+                  trigger,
+                  target,
+                  input.round,
+                  `move-${pathIndex}-${occurrence}`,
+                  path[pathIndex],
+                  pathIndex,
+                ))
+              }
+              occurrence += 1
+            }
+          }
         }
         inside = nextInside
       }
@@ -183,8 +225,9 @@ export function reconcileDnd5ePluginAreasOnMap(
   characters: readonly Character[],
   round: number,
 ): BattleMap {
-  const next = reconcileDnd5ePluginAreas(map.dnd5ePluginAreas, characters, round)
-  const previous = map.dnd5ePluginAreas ?? []
-  if (next.length === previous.length && next.every((area, index) => area === previous[index])) return map
-  return { ...map, dnd5ePluginAreas: next }
+  const anchoredMap = reconcileDnd5ePersistentAreaAnchors(map)
+  const next = reconcileDnd5ePluginAreas(anchoredMap.dnd5ePluginAreas, characters, round)
+  const previous = anchoredMap.dnd5ePluginAreas ?? []
+  if (next.length === previous.length && next.every((area, index) => area === previous[index])) return anchoredMap
+  return { ...anchoredMap, dnd5ePluginAreas: next }
 }
