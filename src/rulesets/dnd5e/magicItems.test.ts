@@ -39,6 +39,16 @@ describe('SRD 5.1 magic items', () => {
     expect(DND5E_SRD_MAGIC_ITEM_RULES_ZH['ring-of-feather-falling']?.sourcePage).toBeGreaterThan(200)
   })
 
+  it('uses the established Chinese spell names in magic-item rules', () => {
+    const boots = DND5E_SRD_MAGIC_ITEM_RULES_ZH['boots-of-levitation']?.rulesText
+    const crystalBall = DND5E_SRD_MAGIC_ITEM_RULES_ZH['crystal-ball']?.rulesText
+
+    expect(boots).toContain('浮空术')
+    expect(boots).not.toContain('悬浮法术')
+    expect(crystalBall).toContain('施放暗示术（豁免 DC 17）')
+    expect(Object.values(DND5E_SRD_MAGIC_ITEM_RULES_ZH).map((entry) => entry.rulesText).join('\n')).not.toMatch(/暗示咒语|悬浮法术/)
+  })
+
   it('keeps rarity, attunement and automation metadata on distributable templates', () => {
     const holyAvenger = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find((item) => item.englishName === 'Holy Avenger')
     expect(holyAvenger).toMatchObject({
