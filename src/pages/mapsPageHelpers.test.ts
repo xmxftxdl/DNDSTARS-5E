@@ -61,6 +61,13 @@ describe('D&D 5e map helpers', () => {
     expect(rollInitiative({} as never, { ...barbarian, exhaustionLevel: 1 })).toBe(11)
   })
 
+  it('uses the monster Dexterity modifier for initiative instead of a random bonus', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.45) // d20 = 10
+    const goblin = { poolId: 'srd-5.1:goblin' } as never
+    expect(rollInitiative(goblin)).toBe(12) // DEX 14 = +2
+    expect(Math.random).toHaveBeenCalledTimes(1)
+  })
+
   it('adds a distinct first-round Thief Reflexes slot unless the Thief is surprised', () => {
     const thief = {
       ...champion(), id: 'thief', name: '盗贼', charClass: '游荡者', level: 17,

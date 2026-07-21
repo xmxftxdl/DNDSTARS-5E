@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   answerCombatInterrupt,
+  contributeCombatInterrupt,
   createCombatInterrupt,
   emptyCombatInterruptQueue,
   finishCombatInterrupt,
@@ -103,5 +104,30 @@ describe('combatInterruptQueue', () => {
     })
     const waiting = waitCombatInterruptForDm(upsertCombatInterrupt(null, interrupt), interrupt.id, 151)!
     expect(findCombatInterrupt(waiting, interrupt.id)).toMatchObject({ status: 'waiting-for-dm', expiresAt: undefined })
+  })
+
+  it('collects player d20 replacement declarations without settling the roll', () => {
+    const interrupt = createCombatInterrupt({
+      id: 'confirm-1', mapId: 'm1', kind: 'roll-confirmation', payload: {}, now: 100,
+    })
+    const queue = upsertCombatInterrupt(null, interrupt, 100)
+    const contributed = contributeCombatInterrupt(queue, interrupt.id, {
+      id: 'confirm-1:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+      featureId: 'portent', featureLabel: '预兆', dieIndex: 0, replacementValue: 18, createdAt: 110,
+    }, 110)!
+    const updated = contributeCombatInterrupt(contributed, interrupt.id, {
+      id: 'confirm-1:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+      featureId: 'portent', featureLabel: '预兆', dieIndex: 0, replacementValue: 9, createdAt: 120,
+    }, 120)!
+
+    expect(findCombatInterrupt(updated, interrupt.id)).toMatchObject({
+      status: 'pending',
+      contributions: [{ characterId: 'wizard', replacementValue: 9 }],
+    })
+    const answered = answerCombatInterrupt(updated, interrupt.id, { decision: 'continue', finalValue: 9 }, 130)!
+    expect(contributeCombatInterrupt(answered, interrupt.id, {
+      id: 'late', kind: 'replace-d20', characterId: 'rogue', characterName: '游荡者',
+      featureLabel: '幸运', dieIndex: 0, replacementValue: 20, createdAt: 140,
+    }, 140)?.interrupts[0].contributions).toHaveLength(1)
   })
 })

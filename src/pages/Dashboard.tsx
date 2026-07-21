@@ -1,27 +1,20 @@
-import { Link } from 'react-router-dom'
 import {
   Map as MapIcon,
   Users,
   Swords,
   Bot,
   Dices,
-  ChevronRight,
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import CampaignCombatStatisticsPanel from '../components/CampaignCombatStatisticsPanel'
+import RoomPartyOverview from '../components/RoomPartyOverview'
 
 const stats = [
   { label: '已上传地图', value: '0', icon: MapIcon, color: 'text-sky-300' },
   { label: '角色卡', value: '0', icon: Users, color: 'text-emerald-300' },
   { label: '敌人模板', value: '0', icon: Bot, color: 'text-rose-300' },
   { label: '进行中战斗', value: '0', icon: Swords, color: 'text-amber-300' },
-]
-
-const quickActions = [
-  { to: '/maps', label: '上传地图', desc: '导入战斗地图并设置网格', icon: MapIcon },
-  { to: '/characters', label: '创建角色', desc: '录入冒险者的属性与技能', icon: Users },
-  { to: '/maps', label: '开始战斗', desc: '在地图中启动 D&D 5e Headless 战斗', icon: Swords },
 ]
 
 export default function Dashboard() {
@@ -53,25 +46,8 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Quick actions */}
-      <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
-        快速开始
-      </h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {quickActions.map(({ to, label, desc, icon: Icon }) => (
-          <Link key={`${label}:${to}`} to={to}>
-            <Card className="group flex items-center gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-arcane-500/15 text-arcane-300 transition-colors group-hover:bg-arcane-500/25">
-                <Icon className="h-6 w-6" />
-              </div>
-              <div className="flex-1">
-                <p className="font-semibold text-slate-100">{label}</p>
-                <p className="text-sm text-slate-400">{desc}</p>
-              </div>
-              <ChevronRight className="h-5 w-5 text-slate-600 transition-transform group-hover:translate-x-1 group-hover:text-arcane-300" />
-            </Card>
-          </Link>
-        ))}
+      <div className="mt-8">
+        <RoomPartyOverview />
       </div>
 
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">

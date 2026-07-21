@@ -59,6 +59,7 @@ describe('combatInterruptProtocol', () => {
     expect(defaultCombatInterruptResponse('shield-spell')).toEqual({ useShieldSpell: false })
     expect(defaultCombatInterruptResponse('stand-against-tide')).toEqual({})
     expect(defaultCombatInterruptResponse('plugin-choice')).toEqual({ optionId: '' })
+    expect(defaultCombatInterruptResponse('roll-confirmation')).toEqual({ decision: 'cancelled' })
   })
 
   it('routes plugin choices to the declared actor or DM audience', () => {

@@ -7,6 +7,7 @@ import {
 } from './combatInterruptQueue'
 import {
   answerSharedCombatInterrupt,
+  contributeSharedCombatInterrupt,
   finishSharedCombatInterrupt,
   markSharedCombatInterruptRolling,
   publishSharedCombatInterrupt,
@@ -172,5 +173,21 @@ describe('combat interrupt sync', () => {
     })
 
     expect(savedName).toBe(COMBAT_INTERRUPT_RESOURCE)
+  })
+
+  it('submits a roll contribution through the atomic mutation transport', async () => {
+    const mutations: SharedCombatInterruptMutation[] = []
+    const contribution = {
+      id: 'confirm:wizard', kind: 'replace-d20' as const, characterId: 'wizard', characterName: '先知',
+      featureLabel: '预兆', dieIndex: 0, replacementValue: 16, createdAt: 120,
+    }
+    await contributeSharedCombatInterrupt({
+      ...makeStore(), mapId: 'map-1', id: 'confirm', contribution,
+      mutateSharedCombatInterrupt: async <T>(mutation: SharedCombatInterruptMutation) => {
+        mutations.push(mutation)
+        return {} as T
+      },
+    })
+    expect(mutations).toEqual([{ operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution }])
   })
 })

@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { PlugZap } from 'lucide-react'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
@@ -68,17 +68,15 @@ export default function Dnd5ePluginCombatPanel({
     getRoomRulesSnapshot,
     getRoomRulesSnapshot,
   )
-  const features = useMemo(
-    () => registeredDnd5ePluginFeatures().flatMap((feature) => {
-      return dnd5eCharacterHasPluginFeature(character, feature.id) &&
-        feature.action &&
-        feature.automation !== 'manual' &&
-        dnd5ePluginFeatureAvailableForCharacter(feature, character)
-        ? [dnd5ePluginFeatureDefinition(feature.id)!]
-        : []
-    }),
-    [character, pluginRevision],
-  )
+  void pluginRevision
+  const features = registeredDnd5ePluginFeatures().flatMap((feature) => {
+    return dnd5eCharacterHasPluginFeature(character, feature.id) &&
+      feature.action &&
+      feature.automation !== 'manual' &&
+      dnd5ePluginFeatureAvailableForCharacter(feature, character)
+      ? [dnd5ePluginFeatureDefinition(feature.id)!]
+      : []
+  })
   if (features.length === 0) return null
 
   return (

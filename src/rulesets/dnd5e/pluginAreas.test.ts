@@ -87,6 +87,25 @@ describe('D&D 5e plugin persistent areas', () => {
     expect(found).toHaveLength(1)
     expect(found[0].enteredAt).toEqual({ col: 2, row: 0 })
 
+    const reenteredArea = {
+      ...triggerArea,
+      cells: [{ col: 1, row: 0 }, { col: 3, row: 0 }],
+    }
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: { ...map, dnd5ePluginAreas: [reenteredArea] }, timing: 'on-enter', round: 2,
+      movement: { token: moving, to: { x: 225, y: 25 } },
+    })).toHaveLength(1)
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: {
+        ...map,
+        dnd5ePluginAreas: [{
+          ...reenteredArea,
+          triggers: reenteredArea.triggers?.map((trigger) => ({ ...trigger, oncePerRound: false })),
+        }],
+      },
+      timing: 'on-enter', round: 2, movement: { token: moving, to: { x: 225, y: 25 } },
+    })).toHaveLength(2)
+
     const withReceipt = {
       ...map,
       dnd5ePluginAreas: [{

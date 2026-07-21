@@ -395,6 +395,148 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.application?.characters.find((entry) => entry.id === bard.id)?.classResources?.['dnd5e-bardic-inspiration']).toEqual({ current: 1, max: 3 })
   })
 
+  it('resolves Flame Strike as one mixed fire-and-radiant damage event', () => {
+    const cleric = character('cleric', '牧师', {
+      level: 9,
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['flame-strike'] } } } },
+      classResources: { 'dnd5e-spell-slot-5': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(cleric, 'flame-strike', 5, enemy)
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.damageDiceCounts).toEqual([4, 4])
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      savingThrowD20: 1,
+      effectRolls: [1, 2, 3, 4],
+      additionalEffectRolls: [[4, 3, 2, 1]],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(10)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'damage-applied', targetId: enemy.id, amount: 20,
+    }))
+  })
+
+  it('requires and validates Flame Strike higher-slot damage-type allocation', () => {
+    const cleric = character('cleric', '牧师', {
+      level: 11,
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['flame-strike'] } } } },
+      classResources: { 'dnd5e-spell-slot-6': { current: 2, max: 2 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const missingChoice = fixture(cleric, 'flame-strike', 6, enemy)
+    expect(prepareDnd5eSpellCast(missingChoice)).toEqual({ ok: false, reason: 'invalid-action' })
+
+    const input = fixture(cleric, 'flame-strike', 6, enemy)
+    input.action.dnd5eSpellCast!.higherSlotDamageType = 'radiant'
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.damageDiceCounts).toEqual([4, 5])
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      savingThrowD20: 20,
+      effectRolls: [1, 1, 1, 1],
+      additionalEffectRolls: [[1, 1, 1, 1, 1]],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(26)
+  })
+
+  it('queues Acid Arrow follow-up damage and resolves it at the target next turn end', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['acid-arrow'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const prepared = prepareDnd5eSpellCast(fixture(wizard, 'acid-arrow', 2, enemy))
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ diceCount: 4, delayedDamageDiceCount: 2 })
+    const cast = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      d20: 15,
+      effectRolls: [4, 4, 4, 4],
+      delayedEffectRolls: [3, 3],
+    })
+    expect(cast.result.ok, cast.result.ok ? undefined : cast.result.reason).toBe(true)
+    if (!cast.result.ok) return
+    expect(cast.result.state.combatants[enemy.id].currentHp).toBe(14)
+    expect(cast.result.state.combatants[enemy.id].classState.activeEffects).toEqual([
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:acid-arrow:delayed-damage',
+        potency: 6,
+      }),
+    ])
+    const casterEnded = resolveDnd5eHeadlessAction(cast.result.state, { type: 'end-turn', actorId: 'wizard-token' })
+    expect(casterEnded.ok).toBe(true)
+    const targetEnded = resolveDnd5eHeadlessAction(casterEnded.state, { type: 'end-turn', actorId: enemy.id })
+    expect(targetEnded.ok).toBe(true)
+    expect(targetEnded.state.combatants[enemy.id].currentHp).toBe(8)
+    expect(targetEnded.state.combatants[enemy.id].classState.activeEffects).toBeUndefined()
+    expect(targetEnded.events).toContainEqual({
+      type: 'delayed-spell-damage-triggered',
+      sourceId: 'wizard-token',
+      targetId: enemy.id,
+      spellId: 'acid-arrow',
+      amount: 6,
+    })
+  })
+
+  it('deals half initial Acid Arrow damage on a miss without queuing follow-up damage', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['acid-arrow'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const prepared = prepareDnd5eSpellCast(fixture(wizard, 'acid-arrow', 2, enemy))
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      d20: 1,
+      effectRolls: [4, 4, 4, 4],
+      delayedEffectRolls: [],
+    })
+    expect(cast.result.ok, cast.result.ok ? undefined : cast.result.reason).toBe(true)
+    expect(cast.application?.map.tokens.find((entry) => entry.id === enemy.id)?.hp).toBe(22)
+    expect(cast.result.state.combatants[enemy.id].classState.activeEffects).toBeUndefined()
+  })
+
+  it('maximizes both Acid Arrow damage timings with Overchannel', () => {
+    const wizard = character('wizard', '法师', {
+      level: 14,
+      dnd5eClassChoices: { classes: { wizard: { subclass: 'evocation', selections: { 'spell-prepared': ['acid-arrow'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 575)
+    const input = fixture(wizard, 'acid-arrow', 2, enemy)
+    input.action.dnd5eSpellCast!.overchannel = true
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      d20: 15,
+      effectRolls: [],
+      delayedEffectRolls: [],
+    })
+    expect(cast.result.ok, cast.result.ok ? undefined : cast.result.reason).toBe(true)
+    if (!cast.result.ok) return
+    expect(cast.result.state.combatants[enemy.id].currentHp).toBe(11)
+    expect(cast.result.state.combatants[enemy.id].classState.activeEffects).toEqual([
+      expect.objectContaining({ potency: 8 }),
+    ])
+    const casterEnded = resolveDnd5eHeadlessAction(cast.result.state, { type: 'end-turn', actorId: 'wizard-token' })
+    expect(casterEnded.ok).toBe(true)
+    const targetEnded = resolveDnd5eHeadlessAction(casterEnded.state, { type: 'end-turn', actorId: enemy.id })
+    expect(targetEnded.ok).toBe(true)
+    expect(targetEnded.state.combatants[enemy.id].currentHp).toBe(3)
+  })
+
   it('upcasts Magic Missile, consumes the selected slot, and applies all darts to the chosen target', () => {
     const wizard = character('wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['magic-missile'] } } } },

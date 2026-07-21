@@ -177,6 +177,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.state.combatants.warlock).toMatchObject({
       turn: { reactionAvailable: false },
       classResources: { 'dnd5e-pact-slot': { current: 0, max: 2 } },
+      classState: { leveledSpellTurnKey: 'hellish-rebuke:1:warlock' },
     })
     expect(result.events).toContainEqual(expect.objectContaining({
       type: 'hellish-rebuke-resolved', actorId: 'warlock', targetId: 'attacker', damage: 40,
@@ -249,9 +250,50 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(result.state.combatants.caster.turn.actionAvailable).toBe(false)
     expect(result.state.combatants.reactor.turn.reactionAvailable).toBe(false)
     expect(result.state.combatants.reactor.classResources['dnd5e-spell-slot-3'].current).toBe(0)
+    expect(result.state.combatants.reactor.classState.leveledSpellTurnKey).toBe('counterspell:1:reactor')
     expect(result.events).toContainEqual(expect.objectContaining({
       type: 'counterspell-resolved', actorId: 'reactor', casterId: 'caster', success: true,
     }))
+  })
+
+  it('forbids reaction spells and bonus-action spells in either order during the same turn', () => {
+    const sorcerer = fighter('sorcerer', 20, {
+      classId: 'sorcerer', level: 5, abilities: { ...abilities, cha: 18 },
+      classSelections: { 'spell-cantrips': ['fire-bolt'], 'spell-known': ['shield'], metamagic: ['quickened'] },
+      classResources: {
+        'dnd5e-spell-slot-1': { current: 1, max: 1 },
+        'dnd5e-sorcery-points': { current: 4, max: 5 },
+      },
+    })
+    const enemy = fighter('enemy', 10, { controller: 'dm', armorClass: 10 })
+    const quickenedAction = {
+      type: 'cast-spell' as const, actorId: 'sorcerer', targetId: 'enemy', spellId: 'fire-bolt', slotLevel: 0,
+      metamagic: { kind: 'quickened' as const }, d20: 15, d20Second: 15, effectRolls: [4, 4],
+    }
+    const opportunityAttack = {
+      type: 'opportunity-attack' as const, actorId: 'enemy', targetId: 'sorcerer', attackModifier: 5,
+      d20: 15, shieldSpellReaction: true,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [2] },
+    }
+
+    const afterQuickened = startDnd5eHeadlessCombat('bonus-then-reaction', [sorcerer, enemy])
+    afterQuickened.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('sorcerer', 'enemy')]: 5 }
+    const quickened = resolveDnd5eHeadlessAction(afterQuickened, quickenedAction)
+    expect(quickened.ok).toBe(true)
+    if (!quickened.ok) return
+    expect(resolveDnd5eHeadlessAction(quickened.state, opportunityAttack)).toMatchObject({
+      ok: false, reason: 'invalid-class-feature',
+    })
+
+    const beforeQuickened = startDnd5eHeadlessCombat('reaction-then-bonus', [sorcerer, enemy])
+    beforeQuickened.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('sorcerer', 'enemy')]: 5 }
+    const shielded = resolveDnd5eHeadlessAction(beforeQuickened, opportunityAttack)
+    expect(shielded.ok).toBe(true)
+    if (!shielded.ok) return
+    expect(shielded.state.combatants.sorcerer.classState.leveledSpellTurnKey).toBe('reaction-then-bonus:1:sorcerer')
+    expect(resolveDnd5eHeadlessAction(shielded.state, quickenedAction)).toMatchObject({
+      ok: false, reason: 'invalid-class-feature',
+    })
   })
 
   it('applies Faerie Fire to failed targets and suppresses every invisibility benefit', () => {
@@ -278,6 +320,74 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dnd5eTargetGrantsAttackAdvantage(outlined)).toBe(true)
     expect(dnd5eAttackerIsUnseen(outlined)).toBe(false)
     expect(dnd5eUnseenTargetImposesDisadvantage(bard, outlined)).toBe(false)
+  })
+
+  it('applies every Chill Touch rider until the caster next turn', () => {
+    const warlock = fighter('warlock', 20, {
+      classId: 'warlock', level: 1, controller: 'player', abilities: { ...abilities, cha: 18 },
+      classSelections: { 'spell-cantrips': ['chill-touch'] },
+    })
+    const target = fighter('target', 15, { controller: 'dm', armorClass: 10, currentHp: 12, maxHp: 30 })
+    const cleric = fighter('cleric', 10, {
+      classId: 'cleric', level: 1, controller: 'dm', abilities: { ...abilities, wis: 18 },
+      classSelections: { 'spell-prepared': ['cure-wounds'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const state = startDnd5eHeadlessCombat('chill-healing', [warlock, target, cleric])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('warlock', 'target')]: 30,
+      [dnd5eCombatantPairKey('target', 'cleric')]: 5,
+    }
+    const chilled = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'warlock', targetId: 'target', spellId: 'chill-touch', slotLevel: 0,
+      d20: 15, effectRolls: [4],
+    })
+    expect(chilled.ok).toBe(true)
+    if (!chilled.ok) return
+    expect(chilled.state.combatants.target.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:chill-touch:no-healing',
+      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-start' }),
+    }))
+    const targetTurn = resolveDnd5eHeadlessAction(chilled.state, { type: 'end-turn', actorId: 'warlock' })
+    expect(targetTurn.ok).toBe(true)
+    if (!targetTurn.ok) return
+    const clericTurn = resolveDnd5eHeadlessAction(targetTurn.state, { type: 'end-turn', actorId: 'target' })
+    expect(clericTurn.ok).toBe(true)
+    if (!clericTurn.ok) return
+    const hpBeforeHealing = clericTurn.state.combatants.target.currentHp
+    const healing = resolveDnd5eHeadlessAction(clericTurn.state, {
+      type: 'cast-spell', actorId: 'cleric', targetId: 'target', spellId: 'cure-wounds', slotLevel: 1,
+      effectRolls: [8],
+    })
+    expect(healing.ok).toBe(true)
+    if (!healing.ok) return
+    expect(healing.state.combatants.target.currentHp).toBe(hpBeforeHealing)
+    expect(healing.events).toContainEqual(expect.objectContaining({
+      type: 'healing-applied', targetId: 'target', amount: 0,
+    }))
+
+    const undead = fighter('undead', 10, { controller: 'dm', creatureType: 'undead', armorClass: 10 })
+    const undeadState = startDnd5eHeadlessCombat('chill-undead', [warlock, undead])
+    undeadState.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('warlock', 'undead')]: 30 }
+    const chilledUndead = resolveDnd5eHeadlessAction(undeadState, {
+      type: 'cast-spell', actorId: 'warlock', targetId: 'undead', spellId: 'chill-touch', slotLevel: 0,
+      d20: 15, effectRolls: [4],
+    })
+    expect(chilledUndead.ok).toBe(true)
+    if (!chilledUndead.ok) return
+    const undeadTurn = resolveDnd5eHeadlessAction(chilledUndead.state, { type: 'end-turn', actorId: 'warlock' })
+    expect(undeadTurn.ok).toBe(true)
+    if (!undeadTurn.ok) return
+    const attack = resolveDnd5eHeadlessAction(undeadTurn.state, {
+      type: 'attack', actorId: 'undead', targetId: 'warlock', attackModifier: 5,
+      d20: 20, d20Second: 1,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [4] },
+    })
+    expect(attack.ok).toBe(true)
+    if (!attack.ok) return
+    expect(attack.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved', actorId: 'undead', targetId: 'warlock', d20: 1, hit: false,
+    }))
   })
 
   it('ends normal Invisibility on a hostile spell but preserves Greater Invisibility', () => {
@@ -840,7 +950,6 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(noticed.state.combatants.a.classState.hiddenCheckTotal).toBeUndefined()
     expect(noticed.state.combatants.a.turn.actionAvailable).toBe(false)
 
-
     const readyState = startDnd5eHeadlessCombat('basic-ready', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
     const readied = resolveDnd5eHeadlessAction(readyState, {
       type: 'ready', actorId: 'a', trigger: '敌人进入门口时', actionKind: 'attack', targetId: 'b',
@@ -916,6 +1025,31 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!grappled.ok) return
     expect(grappled.state.combatants.b.conditions).toContain('grappled')
     expect(grappled.events).toContainEqual(expect.objectContaining({ type: 'contest-resolved', contest: 'grapple', success: true }))
+
+    grappled.state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 10 }
+    const separated = resolveDnd5eHeadlessAction(grappled.state, { type: 'end-turn', actorId: 'a' })
+    expect(separated.ok).toBe(true)
+    if (!separated.ok) return
+    expect(separated.state.combatants.b.conditions).not.toContain('grappled')
+    expect(separated.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', reason: 'out-of-range', targetId: 'b',
+    }))
+
+    const incapacitatedState = startDnd5eHeadlessCombat('grapple-incapacitated', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
+    incapacitatedState.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    const held = resolveDnd5eHeadlessAction(incapacitatedState, {
+      type: 'grapple', actorId: 'a', targetId: 'b', actorD20: 18, targetD20: 2, targetDefense: 'athletics',
+    })
+    expect(held.ok).toBe(true)
+    if (!held.ok) return
+    held.state.combatants.a.currentHp = 0
+    const incapacitated = resolveDnd5eHeadlessAction(held.state, { type: 'end-turn', actorId: 'a' })
+    expect(incapacitated.ok).toBe(true)
+    if (!incapacitated.ok) return
+    expect(incapacitated.state.combatants.b.conditions).not.toContain('grappled')
+    expect(incapacitated.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', reason: 'source-incapacitated', targetId: 'b',
+    }))
 
     const shoveState = startDnd5eHeadlessCombat('shove', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
     shoveState.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }

@@ -29,6 +29,13 @@ export type Dnd5eSpellEffectKind =
   | 'power-word-stun'
   | 'counterspell'
 
+export interface Dnd5eSpellDamageComponentDefinition {
+  dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
+  damageType: Dnd5eDamageType
+  /** 焰击术等法术只把升环伤害加到施法者本次选择的伤害类型。 */
+  higherSlotChoice?: boolean
+}
+
 export interface Dnd5eSrdSpellDefinition {
   id: string
   name: string
@@ -44,6 +51,18 @@ export interface Dnd5eSrdSpellDefinition {
   damageOnSuccessfulSave?: 'none' | 'half'
   dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
   damageType?: Dnd5eDamageType
+  /** 与主伤害骰池同时结算的其他伤害类型；一次伤害事件内分别应用抗性/易伤。 */
+  additionalDamageComponents?: readonly Dnd5eSpellDamageComponentDefinition[]
+  /** 主伤害骰池是否可承接“每升一环”的伤害类型选择。 */
+  primaryHigherSlotChoice?: boolean
+  /** 少数法术攻击即使未命中也会造成部分初始伤害。 */
+  spellAttackMissDamage?: 'half'
+  /** 命中后在目标下一回合结束时自动触发的后续伤害骰池。 */
+  delayedDamage?: {
+    dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
+    damageType: Dnd5eDamageType
+    timing: 'target-next-turn-end'
+  }
   cantripScaling?: boolean
   addSpellcastingModifier?: boolean
   bonusPerDie?: boolean
@@ -61,7 +80,7 @@ export interface Dnd5eSrdSpellDefinition {
   /** 每道射线单独攻击时的基础射线数。 */
   baseProjectiles?: number
   additionalProjectilesPerHigherSlot?: number
-  onHitEffect?: 'ray-of-frost' | 'shocking-grasp' | 'guiding-bolt'
+  onHitEffect?: 'ray-of-frost' | 'shocking-grasp' | 'guiding-bolt' | 'chill-touch'
   onFailedSaveEffect?:
     | 'vicious-mockery'
     | 'thunderwave-push'
@@ -148,6 +167,15 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '进行一次远程法术攻击。命中造成4d6光耀伤害；在你的下一回合结束前，下一次对该目标的攻击检定具有优势。每升一环增加1d6伤害。',
   },
   {
+    id: 'acid-arrow', name: '马友夫强酸箭', englishName: 'Acid Arrow', level: 2, school: '塑能',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'spell-attack',
+    dice: { count: 4, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', spellAttackMissDamage: 'half',
+    delayedDamage: {
+      dice: { count: 2, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', timing: 'target-next-turn-end',
+    },
+    description: '进行一次远程法术攻击。命中时立即造成4d4强酸伤害，并在目标下一回合结束时再造成2d4强酸伤害；未命中时只造成初始伤害的一半，且没有后续伤害。每升一环，初始与后续伤害各增加1d4。',
+  },
+  {
     id: 'hellish-rebuke', name: '炼狱叱喝', englishName: 'Hellish Rebuke', level: 1, school: '塑能',
     classes: ['warlock'], castingTime: 'reaction', rangeFeet: 60, target: 'hostile', effect: 'saving-throw', saveAbility: 'dex',
     dice: { count: 2, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'fire', damageOnSuccessfulSave: 'half',
@@ -186,6 +214,17 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     dice: { count: 3, sides: 8, bonus: 0, perHigherSlot: 1 }, addSpellcastingModifier: true, maximumTargets: 6,
     area: { shape: 'circle', origin: 'point', radiusFeet: 30, placeRangeFeet: 60 }, areaIncludesSelf: true,
     description: '在60尺内选择一点，并选择以该点为中心30尺半径内至多六名生物；每个目标恢复3d8＋施法属性调整值的生命。每升一环增加1d8治疗。对构装生物和亡灵无效。',
+  },
+  {
+    id: 'flame-strike', name: '焰击术', englishName: 'Flame Strike', level: 5, school: '塑能',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'saving-throw', saveAbility: 'dex',
+    dice: { count: 4, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'fire', primaryHigherSlotChoice: true,
+    additionalDamageComponents: [{
+      dice: { count: 4, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'radiant', higherSlotChoice: true,
+    }],
+    damageOnSuccessfulSave: 'half', maximumTargets: 100,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 60 },
+    description: '在60尺内一点降下一道半径10尺、高40尺的圣火柱。区域内生物进行敏捷豁免；失败受到4d6火焰伤害和4d6光耀伤害，成功则两种伤害均减半。使用6环或更高法术位时，每高一环可选择让火焰或光耀伤害增加1d6。',
   },
   {
     id: 'counterspell', name: '法术反制', englishName: 'Counterspell', level: 3, school: '防护',
@@ -263,7 +302,8 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     id: 'chill-touch', name: '冻寒之触', englishName: 'Chill Touch', level: 0, school: '死灵',
     classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'necrotic', cantripScaling: true,
-    description: '进行一次远程法术攻击；命中造成黯蚀伤害。伤害骰在5、11、17级增加。',
+    onHitEffect: 'chill-touch',
+    description: '进行一次远程法术攻击；命中造成黯蚀伤害，且目标在你的下一回合开始前无法恢复生命值。若目标为亡灵，其在此期间对你进行的攻击检定具有劣势。伤害骰在5、11、17级增加。',
   },
   {
     id: 'eldritch-blast', name: '魔能爆', englishName: 'Eldritch Blast', level: 0, school: '塑能',
@@ -479,6 +519,52 @@ export function dnd5eSpellDiceCount(spell: Dnd5eSrdSpellDefinition, casterLevel:
   return spell.dice.count + Math.max(0, slotLevel - spell.level) * (spell.dice.perHigherSlot ?? 0)
 }
 
+export function dnd5eSpellDamageDiceCounts(
+  spell: Dnd5eSrdSpellDefinition,
+  casterLevel: number,
+  slotLevel: number,
+  higherSlotDamageType?: Dnd5eDamageType,
+): readonly number[] {
+  const higherSlots = Math.max(0, slotLevel - spell.level)
+  const selectedChoice = higherSlots > 0 ? higherSlotDamageType : undefined
+  const primaryHigherDice = spell.primaryHigherSlotChoice
+    ? selectedChoice === spell.damageType ? higherSlots * (spell.dice.perHigherSlot ?? 0) : 0
+    : higherSlots * (spell.dice.perHigherSlot ?? 0)
+  const primary = spell.level === 0
+    ? spell.dice.count * dnd5eCantripDiceMultiplier(casterLevel)
+    : spell.dice.count + primaryHigherDice
+  return [
+    primary,
+    ...(spell.additionalDamageComponents ?? []).map((component) => component.dice.count + (
+      component.higherSlotChoice
+        ? selectedChoice === component.damageType ? higherSlots * (component.dice.perHigherSlot ?? 0) : 0
+        : higherSlots * (component.dice.perHigherSlot ?? 0)
+    )),
+  ]
+}
+
+export function dnd5eSpellHigherSlotDamageChoices(
+  spell: Dnd5eSrdSpellDefinition,
+  slotLevel: number,
+): readonly Dnd5eDamageType[] {
+  if (slotLevel <= spell.level) return []
+  return [
+    ...(spell.primaryHigherSlotChoice && spell.damageType ? [spell.damageType] : []),
+    ...(spell.additionalDamageComponents ?? []).flatMap((component) =>
+      component.higherSlotChoice ? [component.damageType] : [],
+    ),
+  ]
+}
+
+export function dnd5eSpellDelayedDamageDiceCount(
+  spell: Dnd5eSrdSpellDefinition,
+  slotLevel: number,
+): number {
+  const delayed = spell.delayedDamage
+  if (!delayed) return 0
+  return delayed.dice.count + Math.max(0, slotLevel - spell.level) * (delayed.dice.perHigherSlot ?? 0)
+}
+
 export function dnd5eSpellProjectileCount(
   spell: Dnd5eSrdSpellDefinition,
   casterLevel: number,
@@ -687,9 +773,10 @@ export function dnd5eMetamagicAvailableForSpell(
 }
 
 export function dnd5eCanEmpowerSpell(
-  spell: Pick<Dnd5eSrdSpellDefinition, 'damageType' | 'dice' | 'effect'>,
+  spell: Pick<Dnd5eSrdSpellDefinition, 'damageType' | 'dice' | 'effect' | 'additionalDamageComponents' | 'delayedDamage'>,
 ): boolean {
   return spell.damageType != null && spell.dice.count > 0 &&
+    (spell.additionalDamageComponents?.length ?? 0) === 0 && spell.delayedDamage == null &&
     (spell.effect === 'spell-attack' || spell.effect === 'saving-throw' || spell.effect === 'automatic-damage')
 }
 

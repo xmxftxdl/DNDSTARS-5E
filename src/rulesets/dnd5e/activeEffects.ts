@@ -234,6 +234,7 @@ const STACKING_POLICIES = new Set<Dnd5eActiveEffectStackingPolicy>(['reject', 'r
 const BREAK_TRIGGERS = new Set<Dnd5eActiveEffectBreakTrigger>(['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'casts-spell', 'moves'])
 const TURN_BOUNDARIES = new Set<Dnd5eActiveEffectTurnBoundary>(['source-turn-start', 'source-turn-end', 'target-turn-start', 'target-turn-end'])
 const ABILITIES = new Set<AbilityKey>(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+const MAX_ACTIVE_EFFECT_POTENCY = 1_000_000
 
 /** Rejects malformed remote/plugin values instead of trusting a TypeScript cast. */
 export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectInstance[] {
@@ -293,6 +294,12 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           onSuccess: 'remove' as const,
         }
       : undefined
+    const potency = typeof candidate.potency === 'number' &&
+      Number.isFinite(candidate.potency) &&
+      candidate.potency >= 0 &&
+      candidate.potency <= MAX_ACTIVE_EFFECT_POTENCY
+      ? candidate.potency
+      : undefined
     seen.add(candidate.id)
     const rawModifiers = candidate.modifiers
     const modifiers = isRecord(rawModifiers)
@@ -315,6 +322,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       source: { ...(candidate.source as unknown as Dnd5eActiveEffectSource) },
       duration: normalizedDuration,
       repeatSave,
+      potency,
       breakOn: Array.isArray(candidate.breakOn)
         ? [...new Set(candidate.breakOn.filter((entry): entry is Dnd5eActiveEffectBreakTrigger => BREAK_TRIGGERS.has(entry as Dnd5eActiveEffectBreakTrigger)))]
         : undefined,
@@ -347,6 +355,7 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     const effect = effects.find((candidate) => candidate.id === raw.id)
     if (!effect) continue
     if (raw.repeatSave != null && effect.repeatSave == null) issues.push(`activeEffects[${index}].repeatSave 损坏`)
+    if (raw.potency != null && effect.potency == null) issues.push(`activeEffects[${index}].potency 无效`)
     if (Array.isArray(raw.breakOn) && (effect.breakOn?.length ?? 0) !== new Set(raw.breakOn).size) {
       issues.push(`activeEffects[${index}].breakOn 含未知触发器`)
     }

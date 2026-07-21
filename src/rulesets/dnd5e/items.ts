@@ -18,6 +18,7 @@ import {
   type CombatTransaction,
 } from '../../lib/combatTransaction'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
+import { DND5E_SRD_MAGIC_ITEM_TEMPLATES } from './magicItems'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
@@ -244,6 +245,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
     cost: { amount: 50, currency: 'gp' },
     stackable: true,
     use: { economy: 'action', consumeQuantity: 1, effect: { kind: 'healing', dice: { count: 2, sides: 4, bonus: 2 } } },
+    magicItem: { kind: 'potion', rarity: 'common', attunement: 'none', automation: 'headless' },
     source: SRD_SOURCE,
   },
 ] as const
@@ -251,6 +253,7 @@ export const DND5E_SRD_GEAR_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[
 export const DND5E_SRD_ITEM_TEMPLATES: readonly Dnd5eInventoryItemTemplate[] = [
   ...DND5E_SRD_EQUIPMENT_ITEM_TEMPLATES,
   ...DND5E_SRD_GEAR_ITEM_TEMPLATES,
+  ...DND5E_SRD_MAGIC_ITEM_TEMPLATES,
 ]
 
 const ITEM_TEMPLATE_BY_ID = new Map(DND5E_SRD_ITEM_TEMPLATES.map((item) => [item.id, item]))
@@ -588,6 +591,7 @@ function cloneItemTemplate(item: Dnd5eInventoryItemTemplate): Dnd5eInventoryItem
       effects: item.equipment.effects ? { ...item.equipment.effects } : undefined,
       dnd5e: item.equipment.dnd5e ? structuredClone(item.equipment.dnd5e) : undefined,
     } : undefined,
+    magicItem: item.magicItem ? { ...item.magicItem } : undefined,
     resources: item.resources?.map((resource) => ({ ...resource })),
     headlessEffects: item.headlessEffects?.map((effect) => ({ ...effect })),
     use: item.use ? {

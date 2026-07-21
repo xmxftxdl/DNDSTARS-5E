@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   Map as MapIcon,
   Upload,
@@ -51,11 +51,14 @@ import Dnd5eClassCombatPanel from '../components/map/Dnd5eClassCombatPanel'
 import Dnd5eAbilityCheckPanel from '../components/map/Dnd5eAbilityCheckPanel'
 import Dnd5ePluginCombatPanel from '../components/map/Dnd5ePluginCombatPanel'
 import Dnd5eActiveEffectDetailsDialog from '../components/map/Dnd5eActiveEffectDetailsDialog'
+import D20RollConfirmationOverlay from '../components/map/D20RollConfirmationOverlay'
 import CombatSettlementPanel, { type ManualSettlementTarget } from '../components/map/CombatSettlementPanel'
+import CombatExperienceSettlementDialog from '../components/map/CombatExperienceSettlementDialog'
 import DiceRollOverlay from '../components/DiceRollOverlay'
 import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
 import DiceBoxRollOverlay from '../components/DiceBoxRollOverlay'
+import { DICE_TIMING } from '../lib/diceOverlayShared'
 import { characterHpTokenPatch, useMapStore } from '../store/maps'
 import { useFogStore } from '../store/fog'
 import { useMapGeometryStore } from '../store/mapGeometry'
@@ -94,6 +97,13 @@ import { mapExplorationPolygonFitsVisionRange, mapExplorationPolygonsForTokenPat
 import { findMapGeometryPath } from '../lib/mapPathfinding'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { formatDnd5eCombatLogDetails } from '../lib/combatLogDetails'
+import {
+  createCombatExperienceDraft,
+  createCombatExperienceSettlement,
+  type CombatExperienceAward,
+  type CombatExperienceDistributionMode,
+  type CombatExperienceDraft,
+} from '../lib/combatExperience'
 import { isMovementLocked, isTokenMovementLocked } from '../lib/combatStatus'
 import {
   canSubmitPlayerCombatAction,
@@ -120,6 +130,7 @@ import {
 import { resolveDmCombatInterruptSettlements } from '../lib/combatInterruptDmSettlement'
 import {
   answerSharedCombatInterrupt as persistAnswerSharedCombatInterrupt,
+  contributeSharedCombatInterrupt as persistContributeSharedCombatInterrupt,
   finishSharedCombatInterrupt as persistFinishSharedCombatInterrupt,
   publishSharedCombatInterrupt as persistPublishSharedCombatInterrupt,
   rollbackSharedCombatInterrupt as persistRollbackSharedCombatInterrupt,
@@ -160,9 +171,16 @@ import {
   type DmAdjudicationEffect,
   type DmAdjudicationInterruptPayload,
   type DmAdjudicationInterruptResponse,
+  type CombatInterruptByKind,
   defaultCombatInterruptResponse,
   isCombatInterruptKind,
 } from '../lib/combatInterruptProtocol'
+import {
+  createD20ReplacementContribution,
+  createD20RollConfirmationInterrupt,
+  resolvedD20Value,
+  settleD20RollConfirmation,
+} from '../lib/rollConfirmation'
 import {
   buildCombatInterruptPromptViews,
   resolveCombatInterruptPromptSelection,
@@ -950,10 +968,12 @@ export default function MapsPage() {
   const recordMapExploration = useMapExplorationStore((s) => s.record)
   const startCombatStatistics = useCombatStatisticsStore((s) => s.startCombat)
   const recordCombatStatistics = useCombatStatisticsStore((s) => s.record)
+  const settleCombatExperience = useCombatStatisticsStore((s) => s.settleExperience)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
   const applyAuthorityCharacterUpdate = useCharacterStore((s) => s.applyAuthorityUpdate)
+  const saveCharactersSharedNow = useCharacterStore((s) => s.saveSharedNow)
   const roomSession = useMemo(() => getRoomSession(), [])
   const [roomPlayerMemberIds, setRoomPlayerMemberIds] = useState<ReadonlySet<string> | undefined>()
 
@@ -991,6 +1011,8 @@ export default function MapsPage() {
   const mode = forcedMode ?? selectedMode
   const [combatActive, setCombatActive] = useState(false)
   const [combatEnding, setCombatEnding] = useState(false)
+  const [combatExperienceDraft, setCombatExperienceDraft] = useState<CombatExperienceDraft | null>(null)
+  const [combatExperienceBusy, setCombatExperienceBusy] = useState(false)
   const [settlementMode, setSettlementMode] = useState<CombatSettlementMode>('automatic')
   const settlementModeRef = useRef<CombatSettlementMode>('automatic')
   const [combatId, setCombatId] = useState('')
@@ -1073,6 +1095,7 @@ export default function MapsPage() {
     heightenedSelecting: boolean
     area?: SkillAoeTargeting
     conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
+    higherSlotDamageType?: Dnd5eDamageType
   } | null>(null)
   const [dnd5eItemAreaTargeting, setDnd5eItemAreaTargeting] = useState<{
     characterId: string
@@ -1151,7 +1174,7 @@ export default function MapsPage() {
     const timer = window.setTimeout(() => {
       setDiceBoxRoll((current) => (current?.id === request.id ? null : current))
       request.resolve(request.values)
-    }, 22000)
+    }, DICE_TIMING.ROLL_FAILSAFE_MS + 1000)
     return () => window.clearTimeout(timer)
   }, [diceBoxRoll])
 
@@ -1197,6 +1220,9 @@ export default function MapsPage() {
     useState<SharedPluginChoicePromptView | null>(null)
   const [sharedDmAdjudicationPrompt, setSharedDmAdjudicationPrompt] =
     useState<SharedDmAdjudicationPromptView | null>(null)
+  const [sharedRollConfirmationPrompt, setSharedRollConfirmationPrompt] =
+    useState<CombatInterruptByKind<'roll-confirmation'> | null>(null)
+  const [settlingRollConfirmation, setSettlingRollConfirmation] = useState(false)
   const [dmAdjudicationEffects, setDmAdjudicationEffects] = useState<DmAdjudicationEffectDraft[]>([])
   const [dmAdjudicationNote, setDmAdjudicationNote] = useState('')
   const [dmAdjudicationConcentrationRounds, setDmAdjudicationConcentrationRounds] = useState('')
@@ -1310,9 +1336,11 @@ export default function MapsPage() {
   }
   const [showMoveRange, setShowMoveRange] = useState(false)
   const [dnd5eCarefulMovement, setDnd5eCarefulMovement] = useState(false)
+  const [dnd5eStandFromProne, setDnd5eStandFromProne] = useState(true)
   const clearPlayerCombatUI = () => {
     setShowMoveRange(false)
     setDnd5eCarefulMovement(false)
+    setDnd5eStandFromProne(true)
     setDnd5eItemAreaTargeting(null)
     setDnd5eItemCreatureTargeting(null)
     setDnd5ePluginAreaTargeting(null)
@@ -1400,6 +1428,10 @@ export default function MapsPage() {
     actionId: string
     resolve: (response: DmAdjudicationInterruptResponse) => void
   } | null>(null)
+  const pendingD20ConfirmationsRef = useRef(new Map<string, {
+    originalValue: number
+    resolve: (value: number) => void
+  }>())
   const suppressedOpportunityAttackPromptIdsRef = useRef(new Set<string>())
   const suppressedProtectionPromptIdsRef = useRef(new Set<string>())
   const suppressedShieldSpellPromptIdsRef = useRef(new Set<string>())
@@ -1502,6 +1534,13 @@ export default function MapsPage() {
 
   useEffect(() => {
     combatActiveRef.current = combatActive
+    if (combatActive) return
+    for (const pending of pendingD20ConfirmationsRef.current.values()) {
+      pending.resolve(pending.originalValue)
+    }
+    pendingD20ConfirmationsRef.current.clear()
+    const timer = window.setTimeout(() => setSharedRollConfirmationPrompt(null), 0)
+    return () => window.clearTimeout(timer)
   }, [combatActive])
 
   useEffect(() => {
@@ -1552,6 +1591,20 @@ export default function MapsPage() {
         })
       void combatLogSaveQueueRef.current
     }
+  }
+  const contributeSharedCombatInterrupt = async (
+    id: string,
+    contribution: ReturnType<typeof createD20ReplacementContribution>,
+  ) => {
+    if (!activeMap) return
+    await persistContributeSharedCombatInterrupt({
+      loadSharedResource,
+      saveSharedResource,
+      mutateSharedCombatInterrupt,
+      mapId: activeMap.id,
+      id,
+      contribution,
+    })
   }
 
   const headlessCombatLogDetails = (
@@ -1610,7 +1663,42 @@ export default function MapsPage() {
     })
   }
 
-  const rollDiceBoxD20 = (label: string, targetName: string): Promise<number> => {
+  const confirmCombatD20 = (
+    rollId: string,
+    label: string,
+    targetName: string,
+    originalValue: number,
+    visibility: 'public' | 'dm-only' = 'public',
+  ): Promise<number> => {
+    if (!combatActiveRef.current || !activeMap) return Promise.resolve(originalValue)
+    const turnTokenId = initiativeOrderRef.current[initiativeIndexRef.current]?.tokenId
+    const turnToken = activeMap.tokens.find((token) => token.id === turnTokenId)
+    const rollerCharacterId = mode === 'player'
+      ? assignedCharacterId ?? playerChar?.id
+      : turnToken?.characterId
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: activeMap.id,
+      combatId: combatIdRef.current || undefined,
+      rollId,
+      label,
+      targetName,
+      originalValue,
+      rollerCharacterId,
+      visibility,
+      now: runtimeNow(),
+    })
+    return new Promise<number>((resolve) => {
+      pendingD20ConfirmationsRef.current.set(interrupt.id, { originalValue, resolve })
+      void publishCombatInterrupt(interrupt).catch(() => {
+        const pending = pendingD20ConfirmationsRef.current.get(interrupt.id)
+        if (!pending) return
+        pendingD20ConfirmationsRef.current.delete(interrupt.id)
+        pending.resolve(originalValue)
+      })
+    })
+  }
+
+  const rollDiceBoxD20 = async (label: string, targetName: string): Promise<number> => {
     const id = d20RequestCounterRef.current + 1
     d20RequestCounterRef.current = id
     const requestKey = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:d20:${runtimeNow()}:${id}:${label}:${targetName}`
@@ -1621,12 +1709,13 @@ export default function MapsPage() {
     const value = randomDieValue(20)
     const rollRequestId = `${mode ?? 'local'}:${activeMap?.id ?? 'map'}:rr-d20:${runtimeNow()}:${id}`
     publishRollRequest({ requestId: rollRequestId, kind: 'd20', count: 1, sides: 20, values: [value], label, targetName })
-    return new Promise((resolve) => {
+    const animatedValue = await new Promise<number>((resolve) => {
       setDiceBoxD20({ id, label, targetName, value, requestKey, flyIndex, resolve })
     })
+    return confirmCombatD20(rollRequestId, label, targetName, animatedValue)
   }
 
-  const rollDiceBoxValues = (
+  const rollDiceBoxValues = async (
     count: number,
     sides: number,
     label: string,
@@ -1645,9 +1734,21 @@ export default function MapsPage() {
     if (options.broadcast !== false) {
       publishRollRequest({ requestId: rollRequestId, kind: 'dice', count: safeCount, sides: safeSides, values, label, targetName })
     }
-    return new Promise((resolve) => {
+    const animatedValues = await new Promise<number[]>((resolve) => {
       setDiceBoxRoll({ id, count: safeCount, sides: safeSides, label, targetName, values, requestKey, flyIndex, resolve })
     })
+    if (safeSides !== 20 || !combatActiveRef.current) return animatedValues
+    const confirmedValues: number[] = []
+    for (const [index, originalValue] of animatedValues.entries()) {
+      confirmedValues.push(await confirmCombatD20(
+        `${rollRequestId}:${index}`,
+        safeCount > 1 ? `${label}（第 ${index + 1} 枚 d20）` : label,
+        targetName,
+        originalValue,
+        options.broadcast === false ? 'dm-only' : 'public',
+      ))
+    }
+    return confirmedValues
   }
 
   const publishSharedDiceRoll = (
@@ -1849,6 +1950,12 @@ export default function MapsPage() {
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
   const activeMapId = activeMap?.id
+  const applySharedCombatStateEvent = useEffectEvent((state: SharedCombatState | null) => {
+    applySharedCombatState(state)
+  })
+  const publishCombatStateEvent = useEffectEvent(() => {
+    void publishCombatState()
+  })
   useEffect(() => {
     if (!isDM || !activeMapId) return
     return setDnd5eHeadlessResolutionObserver((observation) => {
@@ -2045,12 +2152,12 @@ export default function MapsPage() {
   }
 
   useEffect(() => {
-    if (!activeMap) return
+    if (!activeMapId) return
     return subscribeSharedResourceInvalidation('maps', () => useMapStore.getState().loadShared())
-  }, [activeMap?.id])
+  }, [activeMapId])
 
   useEffect(() => {
-    if (!activeMap) return
+    if (!activeMapId) return
     if (mode === 'dm' && combatActive) return
     let cancelled = false
     const load = async () => {
@@ -2063,22 +2170,22 @@ export default function MapsPage() {
           updatedAt: runtimeNow(),
         })
       }
-      if (!cancelled) applySharedCombatState(migrated.state)
+      if (!cancelled) applySharedCombatStateEvent(migrated.state)
     }
     const unsubscribe = subscribeSharedResourceInvalidation('combat', load)
     return () => {
       cancelled = true
       unsubscribe()
     }
-  }, [activeMap?.id, mode, combatActive])
+  }, [activeMapId, mode, combatActive])
 
   useEffect(() => {
-    if (!activeMap || !combatActive || !combatIdRef.current) {
+    if (!activeMapId || !combatActive || !combatIdRef.current) {
       setDmAuthorityReady(null)
       return
     }
     let cancelled = false
-    const mapId = activeMap.id
+    const mapId = activeMapId
     const combatId = combatIdRef.current
 
     if (isDM) {
@@ -2114,19 +2221,19 @@ export default function MapsPage() {
       cancelled = true
       unsubscribe()
     }
-  }, [activeMap?.id, combatActive, isDM])
+  }, [activeMapId, combatActive, isDM])
 
   // subscribe to the result-broadcast channel and self-render
   // the decided @values locally.
   useEffect(() => {
-    if (!activeMap || !mode) return
+    if (!activeMapId || !mode) return
     const sourceMode = mode === 'dm' ? 'player' : 'dm'
     const unsubscribe = subscribeSharedEvent<SharedRollRequestEvent>(
       `dice-roll-request-${sourceMode}-to-${mode}`,
       (event) => {
         if (
           !event ||
-          event.mapId !== activeMap.id ||
+          event.mapId !== activeMapId ||
           event.sourceMode === mode ||
           runtimeNow() - event.updatedAt > 60000 ||
           seenRollRequestIdsRef.current.has(event.requestId)
@@ -2149,16 +2256,16 @@ export default function MapsPage() {
       },
     )
     return unsubscribe
-  }, [activeMap?.id, mode])
+  }, [activeMapId, mode])
 
   useEffect(() => {
-    if (!activeMap || !mode) return
+    if (!activeMapId || !mode) return
     let cancelled = false
     const applyDiceEvent = (state: SharedDiceState) => {
       if (cancelled) return
       const decision = resolveSharedDiceEventApply({
         state,
-        mapId: activeMap.id,
+        mapId: activeMapId,
         mode,
         now: runtimeNow(),
         seenIds: seenSharedDiceIdsRef.current,
@@ -2169,7 +2276,7 @@ export default function MapsPage() {
     }
     const load = async () => {
       const eventState = await loadSharedResource<SharedDiceEventsState>('dice-events')
-      if (!cancelled && eventState?.mapId === activeMap.id) {
+      if (!cancelled && eventState?.mapId === activeMapId) {
         for (const event of eventState.events ?? []) applyDiceEvent(event)
         return
       }
@@ -2181,14 +2288,14 @@ export default function MapsPage() {
       cancelled = true
       unsubscribe()
     }
-  }, [activeMap?.id, mode])
+  }, [activeMapId, mode])
 
   useEffect(() => {
-    if (!activeMap) return
+    if (!activeMapId) return
     let cancelled = false
     const load = async () => {
       const state = await loadSharedResource<SharedCombatLogState>('combat-log')
-      if (cancelled || !state || state.mapId !== activeMap.id) return
+      if (cancelled || !state || state.mapId !== activeMapId) return
       const normalizedEntries = (state.entries ?? []).map((entry) => ({
         ...entry,
         text: migrateLegacyApCombatLogText(entry.text),
@@ -2221,16 +2328,16 @@ export default function MapsPage() {
       cancelled = true
       unsubscribe()
     }
-  }, [activeMap?.id, mode])
+  }, [activeMapId, mode])
 
   useEffect(() => {
-    if (!activeMap || applyingSharedCombatRef.current) return
+    if (!activeMapId || applyingSharedCombatRef.current) return
     if (orderedCombatPublishRef.current) return
     if (mode !== 'dm') return
     if (!combatActive && initiativeOrder.length === 0) return
     if (combatActive && initiativeOrder.length === 0) return
-    publishCombatState()
-  }, [activeMap?.id, combatActive, round, initiativeIndex, initiativeOrder, dnd5eTurnEconomyByToken, settlementMode])
+    publishCombatStateEvent()
+  }, [activeMapId, combatActive, round, initiativeIndex, initiativeOrder, dnd5eTurnEconomyByToken, settlementMode, mode])
 
   // 任何地图切换都清空选中态：不仅 DM 下拉，也覆盖程序化 select()、
   // 远端/玩家跟随、removeMap 自动重选。监听 activeMap?.id 即可统一处理所有路径。
@@ -2285,11 +2392,10 @@ export default function MapsPage() {
 
   const linkedIds = new Set((activeMap?.tokens ?? []).map((t) => t.characterId).filter(Boolean) as string[])
   void playerAssignmentTick
-  const playerVisibleChars = playerViewCharacters(characters, {
+  const visibleChars = isDM ? [] : playerViewCharacters(characters, {
     slot: playerSlot,
     assignedCharacterId,
   })
-  const visibleChars = isDM ? [] : playerVisibleChars
   const railChars =
     visibleChars.filter((c) => linkedIds.has(c.id)).length > 0
       ? visibleChars.filter((c) => linkedIds.has(c.id))
@@ -2431,7 +2537,7 @@ export default function MapsPage() {
       }
       applyAuthorityCharacterUpdate(turnCharacter.id, refreshedTurnCharacter)
     }
-  }, [isDM, combatActive, combatId, round, initiativeIndex, currentInitiativeEntry?.slotId, currentInitiativeToken, turnCharacter, activeMap?.id])
+  }, [isDM, combatActive, combatId, round, initiativeIndex, currentInitiativeEntry?.slotId, currentInitiativeToken, turnCharacter, activeMap?.id, applyAuthorityCharacterUpdate])
 
   const playerChar =
     getPlayerCharacter(characters, {
@@ -2655,11 +2761,16 @@ export default function MapsPage() {
   const moveCircle = (() => {
     if (!showMoveRange || !activeMap || !myPlayerToken || !turnCharacter) return undefined
     const availableFeet = dnd5eTurnEconomyByToken[myPlayerToken.id]?.movement.current ?? dnd5eEffectiveWalkingSpeed(turnCharacter)
-    const feet = dnd5eCarefulMovement ? Math.floor(availableFeet / 2) : availableFeet
+    const isProne = turnCharacter.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+    const standFromProne = isProne && dnd5eStandFromProne
+    const standCost = standFromProne ? Math.floor(dnd5eEffectiveWalkingSpeed(turnCharacter) / 2) : 0
+    const traversalMultiplier = dnd5eCarefulMovement || (isProne && !standFromProne) ? 2 : 1
+    const feet = Math.floor(Math.max(0, availableFeet - standCost) / traversalMultiplier)
     return {
       centerX: myPlayerToken.x,
       centerY: myPlayerToken.y,
       radiusPx: movementRadiusPx(feet, activeMap),
+      feet,
     }
   })()
 
@@ -2674,10 +2785,10 @@ export default function MapsPage() {
     setActiveCharId(charId)
   }
 
+  const playerCharacterId = playerChar?.id
   useEffect(() => {
     if (isDM) return
-    const mine = playerChar
-    if (!mine) {
+    if (!playerCharacterId) {
       if (activeCharId) {
         const timer = window.setTimeout(() => {
           setActiveCharId(null)
@@ -2687,14 +2798,14 @@ export default function MapsPage() {
       }
       return
     }
-    if (activeCharId && activeCharId !== mine.id) {
+    if (activeCharId && activeCharId !== playerCharacterId) {
       const timer = window.setTimeout(() => {
         setActiveCharId(null)
         setCharPanel(null)
       }, 0)
       return () => window.clearTimeout(timer)
     }
-  }, [isDM, playerChar?.id, activeCharId])
+  }, [isDM, playerCharacterId, activeCharId])
 
   const onPanelClick = (charId: string, panel: CharDockPanel) => {
     if (activeCharId === charId && charPanel === panel) {
@@ -2719,15 +2830,11 @@ export default function MapsPage() {
     const h = tokenHp(t)
     if (h) hpByToken[t.id] = h
   }
-  const characterHpKey = characters.map((c) => `${c.id}:${c.currentHp}:${c.tempHp ?? 0}`).join('|')
-  const tokenHpKey = (activeMap?.tokens ?? []).map((t) => `${t.id}:${t.hp ?? ''}`).join('|')
-
-  const defeatedTokenIds = useMemo(() => {
-    if (!activeMap) return [] as string[]
-    return activeMap.tokens
-      .filter((t) => isTokenDefeated(t, characters, hpByToken[t.id]))
-      .map((t) => t.id)
-  }, [activeMap?.tokens, characterHpKey, tokenHpKey, characters])
+  const defeatedTokenIds = activeMap
+    ? activeMap.tokens
+        .filter((t) => isTokenDefeated(t, characters, hpByToken[t.id]))
+        .map((t) => t.id)
+    : []
 
   useEffect(() => {
     if (!isDM || !activeMap || (activeMap.dnd5ePluginAreas?.length ?? 0) === 0) return
@@ -3005,6 +3112,8 @@ export default function MapsPage() {
     measureMode,
     gridAdjustMode,
     showMoveRange,
+    removeToken,
+    updateToken,
   ])
 
   const tokenHoverLabels = (() => {
@@ -3698,11 +3807,13 @@ export default function MapsPage() {
       void showCombatNotice('路径受阻', '目标格无法通过合法路径抵达；墙、关闭的门、障碍物或其他 Token 可能阻挡了路线。', 'amber')
       return
     }
-    const standFromProne = turnCharacter.conditions.some((condition) =>
+    const isProne = turnCharacter.conditions.some((condition) =>
       ['prone', '倒地'].includes(condition.toLowerCase()),
     )
-    const movementCostFeet = path.movementCostFeet * (dnd5eCarefulMovement ? 2 : 1) +
-      (standFromProne ? Math.floor(turnCharacter.speed / 2) : 0)
+    const standFromProne = isProne && dnd5eStandFromProne
+    const traversalMultiplier = dnd5eCarefulMovement || (isProne && !standFromProne) ? 2 : 1
+    const movementCostFeet = path.movementCostFeet * traversalMultiplier +
+      (standFromProne ? Math.floor(dnd5eEffectiveWalkingSpeed(turnCharacter) / 2) : 0)
     if (movementCostFeet > remainingMovementFeet) {
       void showCombatNotice(
         '移动距离不足',
@@ -3713,7 +3824,7 @@ export default function MapsPage() {
     }
     const movedFeet = path.distanceFeet
     if (!isDM) {
-      if (!sendPlayerMoveRequest(pos, movedFeet)) {
+      if (!sendPlayerMoveRequest(pos, movedFeet, movementCostFeet)) {
         void showCombatNotice(
           pendingPlayerActionRef.current ? '等待 DM 确认' : '无法移动',
           pendingPlayerActionRef.current
@@ -3724,18 +3835,21 @@ export default function MapsPage() {
       }
       setShowMoveRange(false)
       setDnd5eCarefulMovement(false)
+      setDnd5eStandFromProne(true)
       return
     }
     if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({
       type: 'move-token',
       targetPosition: pos,
       dnd5eCarefulMovement,
+      dnd5eStandFromProne: standFromProne,
     }))) {
       void showCombatNotice('无法移动', '当前移动无法提交给 DM 结算。', 'amber')
       return
     }
     setShowMoveRange(false)
     setDnd5eCarefulMovement(false)
+    setDnd5eStandFromProne(true)
   }
 
   const handleDisengage = () => {
@@ -3982,6 +4096,7 @@ export default function MapsPage() {
         slotLevel: dnd5eSpellTargeting.slotLevel,
         targetTokenId: targetToken.id,
         conditionChoice: dnd5eSpellTargeting.conditionChoice,
+        higherSlotDamageType: dnd5eSpellTargeting.higherSlotDamageType,
         overchannel: dnd5eSpellTargeting.overchannel || undefined,
         empowered: dnd5eSpellTargeting.empowered || undefined,
         draconicResistance: dnd5eSpellTargeting.draconicResistance || undefined,
@@ -4094,6 +4209,7 @@ export default function MapsPage() {
     if (canControlPlayerTurn && tokenId === myPlayerToken?.id) {
       if (isDM) setActiveCharId(turnCharacter!.id)
       setShowMoveRange((v) => !v)
+      setDnd5eStandFromProne(true)
       setSelectedTokenId(isDM ? tokenId : null)
       if (!isDM) setSelectedCharacterTokenId(null)
       return
@@ -4268,6 +4384,8 @@ export default function MapsPage() {
     combatOutcomeNoticeCombatIdRef.current = ''
     combatEndingRef.current = false
     setCombatEnding(false)
+    setCombatExperienceDraft(null)
+    setCombatExperienceBusy(false)
     combatIdRef.current = nextCombatId
     setCombatId(nextCombatId)
     startCombatStatistics(nextCombatId, activeMap.id)
@@ -4370,6 +4488,18 @@ export default function MapsPage() {
 
   const endCombat = async () => {
     if (combatEndingRef.current || !combatActiveRef.current) return
+    const endingCombatId = combatIdRef.current
+    const latestEndingMap = activeMap
+      ? useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+      : undefined
+    const endingExperienceDraft = isDM && latestEndingMap
+      ? createCombatExperienceDraft({
+          combatId: endingCombatId,
+          map: latestEndingMap,
+          characters: useCharacterStore.getState().characters,
+          initiativeTokenIds: initiativeOrderRef.current.map((entry) => entry.tokenId),
+        })
+      : undefined
     combatEndingRef.current = true
     orderedCombatPublishRef.current = true
     setCombatEnding(true)
@@ -4412,6 +4542,60 @@ export default function MapsPage() {
       orderedCombatPublishRef.current = false
       combatEndingRef.current = false
       setCombatEnding(false)
+      if (endingExperienceDraft) {
+        const alreadySettled = useCombatStatisticsStore.getState().sessions
+          .some((session) => session.combatId === endingCombatId && !!session.experienceSettlement)
+        if (!alreadySettled) setCombatExperienceDraft(endingExperienceDraft)
+      }
+    }
+  }
+
+  const settleEndedCombatExperience = async (
+    mode: CombatExperienceDistributionMode,
+    awards: CombatExperienceAward[],
+  ) => {
+    const draft = combatExperienceDraft
+    if (!isDM || !draft || combatExperienceBusy) return
+    const settlement = createCombatExperienceSettlement({ draft, mode, awards })
+    if (!settlement) return
+    const alreadySettled = useCombatStatisticsStore.getState().sessions
+      .some((session) => session.combatId === draft.combatId && !!session.experienceSettlement)
+    if (alreadySettled) {
+      setCombatExperienceDraft(null)
+      return
+    }
+    setCombatExperienceBusy(true)
+    try {
+      if (mode !== 'none') {
+        const now = settlement.settledAt
+        for (const award of settlement.awards) {
+          const current = useCharacterStore.getState().characters.find((character) => character.id === award.characterId)
+          if (!current || current.dnd5eExperienceAwards?.some((receipt) => receipt.combatId === draft.combatId)) continue
+          applyAuthorityCharacterUpdate(current.id, {
+            experience: Math.min(999_999_999, Math.max(0, current.experience) + award.xp),
+            dnd5eExperienceAwards: [
+              ...(current.dnd5eExperienceAwards ?? []),
+              { combatId: draft.combatId, mapId: draft.mapId, xp: award.xp, awardedAt: now },
+            ].slice(-128),
+          })
+        }
+        await saveCharactersSharedNow()
+      }
+      const accepted = settleCombatExperience(settlement)
+      if (accepted) {
+        pushCombatLog(
+          mode === 'none'
+            ? `经验结算：本场 ${draft.totalXp.toLocaleString('zh-CN')} XP 未发放`
+            : `经验结算：${draft.totalXp.toLocaleString('zh-CN')} XP 已${mode === 'even' ? '平均' : '自由'}分配给 ${settlement.awards.length} 名角色`,
+          'system',
+          roundRef.current,
+        )
+      }
+      setCombatExperienceDraft(null)
+    } catch (error) {
+      console.error('战斗经验值写入失败，已保留结算窗口供 DM 重试。', error)
+    } finally {
+      setCombatExperienceBusy(false)
     }
   }
 
@@ -6374,13 +6558,52 @@ export default function MapsPage() {
     }
   }
 
+  const finishSharedCombatInterruptEvent = useEffectEvent(
+    (...args: Parameters<typeof finishSharedCombatInterrupt>) => finishSharedCombatInterrupt(...args),
+  )
+  const settleSharedCombatInterruptEvent = useEffectEvent(
+    (...args: Parameters<typeof settleSharedCombatInterrupt>) => settleSharedCombatInterrupt(...args),
+  )
+  const waitSharedCombatInterruptForDmEvent = useEffectEvent(
+    (...args: Parameters<typeof waitSharedCombatInterruptForDm>) => waitSharedCombatInterruptForDm(...args),
+  )
+
   useEffect(() => {
-    if (!activeMap) return
+    if (!activeMapId) return
     let cancelled = false
     const load = async () => {
       const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-      if (cancelled || !queue || queue.mapId !== activeMap.id) return
+      if (cancelled || !queue || queue.mapId !== activeMapId) return
+      const latestActiveMap = useMapStore.getState().maps.find((map) => map.id === activeMapId)
+      if (!latestActiveMap) return
       const now = runtimeNow()
+
+      for (const [interruptId, pending] of pendingD20ConfirmationsRef.current) {
+        const interrupt = queue.interrupts.find((candidate) =>
+          candidate.id === interruptId && isCombatInterruptKind(candidate, 'roll-confirmation'),
+        )
+        if (
+          !interrupt || !isCombatInterruptKind(interrupt, 'roll-confirmation') ||
+          (interrupt.status !== 'answered' && interrupt.status !== 'done' && interrupt.status !== 'rolled-back')
+        ) continue
+        pendingD20ConfirmationsRef.current.delete(interruptId)
+        pending.resolve(resolvedD20Value(interrupt.response, pending.originalValue))
+        if (isDM && interrupt.status === 'answered') {
+          await finishSharedCombatInterruptEvent(interrupt.id, interrupt.response)
+        }
+      }
+
+      const activeRollConfirmation = queue.interrupts
+        .filter((interrupt): interrupt is CombatInterruptByKind<'roll-confirmation'> =>
+          isCombatInterruptKind(interrupt, 'roll-confirmation') &&
+          (interrupt.status === 'pending' || interrupt.status === 'waiting-for-dm') &&
+          (isDM || interrupt.payload.visibility === 'public'),
+        )
+        .sort((left, right) => left.createdAt - right.createdAt)[0]
+      setSharedRollConfirmationPrompt((current) => {
+        if (!activeRollConfirmation) return current ? null : current
+        return activeRollConfirmation
+      })
 
       if (isDM) {
         for (const interrupt of queue.interrupts) {
@@ -6389,7 +6612,7 @@ export default function MapsPage() {
             loadSharedResource,
             saveSharedResource,
             mutateSharedCombatInterrupt,
-            mapId: activeMap.id,
+            mapId: activeMapId,
             id: interrupt.id,
             response: defaultCombatInterruptResponse(interrupt.kind) as Record<string, unknown>,
             reason: 'timeout',
@@ -6411,7 +6634,7 @@ export default function MapsPage() {
             pendingSharedPluginChoiceRef.current = null
             setSharedPluginChoicePrompt(null)
             if (interrupt.status === 'answered') {
-              await finishSharedCombatInterrupt(interrupt.id, { optionId })
+              await finishSharedCombatInterruptEvent(interrupt.id, { optionId })
             }
             pendingPluginChoice.resolve(optionId)
           }
@@ -6441,7 +6664,7 @@ export default function MapsPage() {
         )
         if (dmAdjudicationInterrupt && isCombatInterruptKind(dmAdjudicationInterrupt, 'dm-adjudication')) {
           if (shouldCombatInterruptWaitForDm(dmAdjudicationInterrupt, now)) {
-            await waitSharedCombatInterruptForDm(dmAdjudicationInterrupt.id)
+            await waitSharedCombatInterruptForDmEvent(dmAdjudicationInterrupt.id)
           }
           if (sharedDmAdjudicationPromptIdRef.current !== dmAdjudicationInterrupt.id) {
             sharedDmAdjudicationPromptIdRef.current = dmAdjudicationInterrupt.id
@@ -6480,7 +6703,7 @@ export default function MapsPage() {
         }
         const settlements = resolveDmCombatInterruptSettlements({
           queue,
-          mapId: activeMap.id,
+          mapId: activeMapId,
           now,
           pending: {
             opportunityAttack: pendingSharedOpportunityAttackRef.current?.id,
@@ -6505,7 +6728,7 @@ export default function MapsPage() {
               const pending = pendingSharedOpportunityAttackRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedOpportunityAttackRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useOpportunityAttack)
               break
             }
@@ -6513,7 +6736,7 @@ export default function MapsPage() {
               const pending = pendingSharedUncannyDodgeRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedUncannyDodgeRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useUncannyDodge)
               break
             }
@@ -6521,7 +6744,7 @@ export default function MapsPage() {
               const pending = pendingSharedDeflectMissilesRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedDeflectMissilesRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.accept)
               break
             }
@@ -6529,7 +6752,7 @@ export default function MapsPage() {
               const pending = pendingSharedProtectionRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedProtectionRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useProtection)
               break
             }
@@ -6537,7 +6760,7 @@ export default function MapsPage() {
               const pending = pendingSharedShieldSpellRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedShieldSpellRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useShieldSpell)
               break
             }
@@ -6545,7 +6768,7 @@ export default function MapsPage() {
               const pending = pendingSharedCounterspellRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedCounterspellRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useCounterspell)
               break
             }
@@ -6553,7 +6776,7 @@ export default function MapsPage() {
               const pending = pendingSharedSavingThrowRerollRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedSavingThrowRerollRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useSavingThrowReroll)
               break
             }
@@ -6561,7 +6784,7 @@ export default function MapsPage() {
               const pending = pendingSharedBardicInspirationRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedBardicInspirationRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useBardicInspiration)
               break
             }
@@ -6569,7 +6792,7 @@ export default function MapsPage() {
               const pending = pendingSharedCuttingWordsRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedCuttingWordsRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useCuttingWords)
               break
             }
@@ -6577,7 +6800,7 @@ export default function MapsPage() {
               const pending = pendingSharedDarkOnesOwnLuckRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedDarkOnesOwnLuckRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useDarkOnesOwnLuck)
               break
             }
@@ -6585,7 +6808,7 @@ export default function MapsPage() {
               const pending = pendingSharedStrokeOfLuckRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedStrokeOfLuckRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.useStrokeOfLuck)
               break
             }
@@ -6593,7 +6816,7 @@ export default function MapsPage() {
               const pending = pendingSharedEmpoweredSpellRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedEmpoweredSpellRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.rerollKeys)
               break
             }
@@ -6601,7 +6824,7 @@ export default function MapsPage() {
               const pending = pendingSharedStandAgainstTideRef.current
               if (!pending || pending.id !== settlement.id) break
               pendingSharedStandAgainstTideRef.current = null
-              await settleSharedCombatInterrupt(settlement.id, settlement.finishResponse, settlement.reason)
+              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
               pending.resolve(settlement.targetTokenId)
               break
             }
@@ -6621,14 +6844,17 @@ export default function MapsPage() {
 
       const answerContext = {
         characters,
-        visibleCharacters: visibleChars,
+        visibleCharacters: isDM ? [] : playerViewCharacters(characters, {
+          slot: playerSlot,
+          assignedCharacterId,
+        }),
         playerCharId: playerChar?.id,
         assignedCharacterId,
-        tokens: activeMap.tokens,
+        tokens: latestActiveMap.tokens,
       }
       const selection = resolveCombatInterruptPromptSelection({
         queue,
-        mapId: activeMap.id,
+        mapId: activeMapId,
         now,
         answerContext,
         suppressed: {
@@ -6661,10 +6887,12 @@ export default function MapsPage() {
       setNullablePromptView(setSharedCuttingWordsPrompt, views.cuttingWords)
       setNullablePromptView(setSharedDarkOnesOwnLuckPrompt, views.darkOnesOwnLuck)
       setNullablePromptView(setSharedStrokeOfLuckPrompt, views.strokeOfLuck)
-      setNullablePromptView(setSharedEmpoweredSpellPrompt, views.empoweredSpell)
+      setSharedEmpoweredSpellPrompt((current) => {
+        if (views.empoweredSpell?.id !== current?.id) setSharedEmpoweredSpellSelection([])
+        return views.empoweredSpell ?? null
+      })
       setNullablePromptView(setSharedStandAgainstTidePrompt, views.standAgainstTide)
       setNullablePromptView(setSharedPluginChoicePrompt, views.pluginChoice)
-      if (views.empoweredSpell?.id !== sharedEmpoweredSpellPrompt?.id) setSharedEmpoweredSpellSelection([])
     }
     const unsubscribe = subscribeSharedResourceInvalidation(COMBAT_INTERRUPT_RESOURCE, load, {
       // Interrupts expire after 15 seconds. Recover quickly enough to present the
@@ -6675,7 +6903,7 @@ export default function MapsPage() {
       cancelled = true
       unsubscribe()
     }
-  }, [activeMap?.id, assignedCharacterId, isDM, characters, playerChar?.id, visibleChars])
+  }, [activeMapId, assignedCharacterId, isDM, characters, playerChar?.id, playerSlot])
 
   const applyEnemyAttack = (result: EnemyTurnResult, onComplete: () => void) => {
     if (!activeMap || !result.attacked || !result.targetTokenId) {
@@ -6888,6 +7116,62 @@ export default function MapsPage() {
           effects: [],
           ...(dmAdjudicationNote.trim() ? { note: dmAdjudicationNote.trim().slice(0, 2_000) } : {}),
         } satisfies DmAdjudicationInterruptResponse)
+  }
+
+  const handleD20ReplacementContribution = async (input: {
+    featureLabel: string
+    replacementValue: number
+  }) => {
+    if (!sharedRollConfirmationPrompt || isDM || !playerChar) return
+    try {
+      await contributeSharedCombatInterrupt(
+        sharedRollConfirmationPrompt.id,
+        createD20ReplacementContribution({
+          interruptId: sharedRollConfirmationPrompt.id,
+          characterId: playerChar.id,
+          characterName: playerChar.name,
+          featureLabel: input.featureLabel,
+          replacementValue: input.replacementValue,
+          now: runtimeNow(),
+        }),
+      )
+    } catch {
+      await showCombatNotice('声明提交失败', '这次投掷可能已经由 DM 放行，请查看最新战斗记录。', 'amber')
+    }
+  }
+
+  const handleD20RollContinue = async (acceptedContributionId?: string) => {
+    if (!sharedRollConfirmationPrompt || !isDM || settlingRollConfirmation) return
+    const prompt = sharedRollConfirmationPrompt
+    setSettlingRollConfirmation(true)
+    try {
+      const response = settleD20RollConfirmation(prompt, acceptedContributionId, runtimeNow())
+      await answerSharedCombatInterrupt(prompt.id, response as Record<string, unknown>)
+      await finishSharedCombatInterrupt(prompt.id, response as Record<string, unknown>)
+      const accepted = response.acceptedContributionId
+        ? prompt.contributions?.find((entry) => entry.id === response.acceptedContributionId)
+        : undefined
+      pushCombatLog(
+        accepted
+          ? `${prompt.payload.label}：d20 ${prompt.payload.originalValue} 被 ${accepted.characterName} 的「${accepted.featureLabel}」替换为 ${response.finalValue}，DM 已确认继续。`
+          : `${prompt.payload.label}：保留 d20 ${response.finalValue}，DM 已确认继续。`,
+        'system',
+        roundRef.current,
+        accepted
+          ? [`原始结果：${prompt.payload.originalValue}`, `采用结果：${response.finalValue}`, `来源：${accepted.characterName} · ${accepted.featureLabel}`, '事务状态：已提交']
+          : [`原始结果：${prompt.payload.originalValue}`, '未采用玩家替换声明', '事务状态：已提交'],
+      )
+      const pending = pendingD20ConfirmationsRef.current.get(prompt.id)
+      if (pending) {
+        pendingD20ConfirmationsRef.current.delete(prompt.id)
+        pending.resolve(resolvedD20Value(response, pending.originalValue))
+      }
+      setSharedRollConfirmationPrompt(null)
+    } catch {
+      await showCombatNotice('无法继续结算', '确认事务未能提交，投掷仍保持暂停，请重试。', 'rose')
+    } finally {
+      setSettlingRollConfirmation(false)
+    }
   }
 
   const settleDnd5eMonsterEndTurn = async (enemy: Token): Promise<boolean> => {
@@ -8499,6 +8783,8 @@ export default function MapsPage() {
       const cuttingWordsReactionTokenIds = new Set<string>()
       const tranquilityPreventedTargetIds = new Set<string>()
       let effectRolls: number[]
+      let additionalEffectRolls: number[][] = []
+      let delayedEffectRolls: number[] = []
       const spellActorCombatant = spellCast.state.combatants[spellCast.actorToken.id]
       if (!spellActorCombatant) {
         acknowledgePlayerAction(action, 'rejected', 'combatant-missing')
@@ -8869,8 +9155,16 @@ export default function MapsPage() {
               ]),
             })
           : undefined
-        effectRolls = attackHit && !spellCast.overchannel
+        effectRolls = (attackHit || spellCast.spell.spellAttackMissDamage === 'half') && !spellCast.overchannel
           ? await rollDiceBoxValues(spellCast.diceCount * (preview.roll.naturalTwenty ? 2 : 1), spellCast.spell.dice.sides, `${spellCast.spell.name}效果`, spellCast.targetToken.label)
+          : []
+        delayedEffectRolls = attackHit && !spellCast.overchannel && spellCast.delayedDamageDiceCount > 0 && spellCast.spell.delayedDamage
+          ? await rollDiceBoxValues(
+              spellCast.delayedDamageDiceCount,
+              spellCast.spell.delayedDamage.dice.sides,
+              `${spellCast.spell.name}·后续伤害`,
+              spellCast.targetToken.label,
+            )
           : []
         hurlThroughHellDamageRolls = attackHit && spellActorCombatant.classState.hurlThroughHellReady
           ? await rollDiceBoxValues(10, 10, '坠入地狱·返回伤害', spellCast.targetToken.label)
@@ -9198,6 +9492,18 @@ export default function MapsPage() {
           ? []
           : await rollDiceBoxValues(spellCast.diceCount, spellCast.spell.dice.sides, `${spellCast.spell.name}效果`, spellCast.targetToken.label)
       }
+      if (effectRolls.length > 0 && (spellCast.spell.additionalDamageComponents?.length ?? 0) > 0) {
+        additionalEffectRolls = []
+        for (let index = 0; index < spellCast.spell.additionalDamageComponents!.length; index += 1) {
+          const component = spellCast.spell.additionalDamageComponents![index]
+          additionalEffectRolls.push(await rollDiceBoxValues(
+            spellCast.damageDiceCounts[index + 1],
+            component.dice.sides,
+            `${spellCast.spell.name}·${component.damageType}伤害`,
+            spellCast.targetTokens.map((target) => target.label).join('、') || spellCast.targetToken.label,
+          ))
+        }
+      }
       if (spellCast.empowered) {
         const damageGroups: Array<EmpoweredSpellInterruptPayload['groups'][number] & {
           group: Dnd5eEmpoweredSpellReroll['group']
@@ -9337,7 +9643,10 @@ export default function MapsPage() {
         : undefined
       if (cuttingWordsDamageCandidate) {
         const rawDamage = empoweredRollsFor('effect', effectRolls)
-          .reduce((sum, roll) => sum + roll, spellCast.effectBonus + spellClassDamageBonus)
+          .reduce((sum, roll) => sum + roll, spellCast.effectBonus + spellClassDamageBonus) +
+          additionalEffectRolls.reduce((sum, rolls, index) => sum +
+            rolls.reduce((componentSum, roll) => componentSum + roll, 0) +
+            (spellCast.spell.additionalDamageComponents?.[index]?.dice.bonus ?? 0), 0)
         cuttingWordsDamage = await requestDnd5eCuttingWordsRoll(cuttingWordsDamageCandidate, {
           attackerName: spellCast.actor.name,
           targetName: sharedDamageTarget?.label ?? spellCast.targetToken.label,
@@ -9386,6 +9695,8 @@ export default function MapsPage() {
         shieldSpellReactionTargetIds,
         tranquilitySave: tranquility.roll,
         effectRolls,
+        additionalEffectRolls,
+        delayedEffectRolls,
       })
       if (!initialResolved.result.ok) {
         acknowledgePlayerAction(action, 'rejected', initialResolved.result.reason)
@@ -12761,6 +13072,7 @@ export default function MapsPage() {
       areaTargetOrientation: dnd5eSpellTargeting.area?.shape === 'rect' && dnd5eSpellTargeting.area.rotatable
         ? aoeRectRotation as 0 | 1 | 2 | 3
         : undefined,
+      higherSlotDamageType: dnd5eSpellTargeting.higherSlotDamageType,
       conditionChoice: dnd5eSpellTargeting.conditionChoice,
       healingAllocations,
       projectileTargetIds: dnd5eSpellTargeting.allowDuplicateTargets
@@ -12816,17 +13128,21 @@ export default function MapsPage() {
       : current)
   }
 
-  const sendPlayerMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number) => {
+  const sendPlayerMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number, movementCostFeet: number) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
-    const movementCost = movedFeet * (dnd5eCarefulMovement ? 2 : 1)
-    if (currentDnd5eTurnEconomy(currentInitiativeToken.id).movement.current < movementCost) return false
+    if (currentDnd5eTurnEconomy(currentInitiativeToken.id).movement.current < movementCostFeet) return false
+    const isProne = turnCharacter.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
     const action = createPlayerActionRequest({
       type: 'move-token',
       targetPosition,
       dnd5eCarefulMovement,
+      dnd5eStandFromProne: isProne ? dnd5eStandFromProne : undefined,
     })
     if (!action) return false
-    return submitPlayerActionRequest(action, `${turnCharacter.name}${dnd5eCarefulMovement ? '以半速谨慎' : ''}移动 ${movedFeet} 尺`)
+    return submitPlayerActionRequest(
+      action,
+      `${turnCharacter.name}${isProne && !dnd5eStandFromProne ? '匍匐' : dnd5eCarefulMovement ? '以半速谨慎' : ''}移动 ${movedFeet} 尺`,
+    )
   }
 
   const sendPlayerDisengageRequest = () => {
@@ -12871,16 +13187,24 @@ export default function MapsPage() {
     })
   }
 
+  const handlePlayerActionRequestRef = useRef<(action: SharedPlayerActionState) => Promise<void>>(
+    async () => undefined,
+  )
+
   useEffect(() => {
-    if (!isDM || !activeMap) return
+    handlePlayerActionRequestRef.current = handlePlayerActionRequest
+  })
+
+  useEffect(() => {
+    if (!isDM || !activeMapId) return
     const unsubscribe = subscribeSharedEvent<SharedPlayerActionState>(
       'player-action-player-to-dm',
-      (action) => { void handlePlayerActionRequest(normalizeRemotePlayerActionForDm(action)) },
+      (action) => { void handlePlayerActionRequestRef.current(normalizeRemotePlayerActionForDm(action)) },
     )
     let cancelled = false
     const load = async () => {
       const batch = await loadDmPlayerActionBatch({
-        mapId: activeMap.id,
+        mapId: activeMapId,
         combatId: combatIdRef.current,
         currentProcessedActionIds: processedPlayerActionIdsRef.current,
         loadProcessed: () => loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed'),
@@ -12891,7 +13215,7 @@ export default function MapsPage() {
       if (batch.processedActionIds) processedPlayerActionIdsRef.current = batch.processedActionIds
       for (const action of batch.actions) {
         if (cancelled) return
-        await handlePlayerActionRequest(normalizeRemotePlayerActionForDm(action))
+        await handlePlayerActionRequestRef.current(normalizeRemotePlayerActionForDm(action))
       }
     }
     const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load)
@@ -12900,10 +13224,10 @@ export default function MapsPage() {
       unsubscribe()
       unsubscribeQueue()
     }
-  }, [isDM, activeMap?.id, combatActive, round, currentInitiativeToken?.id])
+  }, [isDM, activeMapId, combatActive, round, currentInitiativeToken?.id])
 
   useEffect(() => {
-    if (mode !== 'player' || !activeMap) return
+    if (mode !== 'player' || !activeMapId) return
     let cancelled = false
     const applyAck = (ack: SharedPlayerActionAckState | null) => {
       if (
@@ -12919,7 +13243,7 @@ export default function MapsPage() {
       }
       void consumePlayerActionAck({
         ack,
-        mapId: activeMap.id,
+        mapId: activeMapId,
         seenAckIds: seenPlayerActionAckIdsRef.current,
         getPendingAction: () => pendingPlayerActionRef.current,
         waitForAuthoritativeSync: waitForAuthoritativePlayerActionSync,
@@ -12942,19 +13266,34 @@ export default function MapsPage() {
       unsubscribe()
       unsubscribeAck()
     }
-  }, [mode, activeMap?.id, showCombatNotice])
+  }, [mode, activeMapId, showCombatNotice])
+
+  const requestAdvanceEvent = useEffectEvent(() => requestAdvance())
+  const pushCombatLogEvent = useEffectEvent(
+    (...args: Parameters<typeof pushCombatLog>) => pushCombatLog(...args),
+  )
+  const scheduleEnemyTurnEvent = useEffectEvent((enemy: Token) => scheduleEnemyTurn(enemy))
+  const clearPlayerCombatUIEvent = useEffectEvent(() => clearPlayerCombatUI())
+  const clearPlayerCombatEndUIEvent = useEffectEvent(() => clearPlayerCombatEndUI())
+  const tryEndCombatIfNeededEvent = useEffectEvent(() => tryEndCombatIfNeeded())
+  const initiativeOrderKey = initiativeOrder
+    .map((entry) => `${entry.slotId ?? entry.tokenId}:${entry.tokenId}`)
+    .join('|')
 
   useEffect(() => {
-    if (!combatActive || !activeMap || initiativeOrder.length === 0) return
+    if (!combatActive || !activeMapId || initiativeOrderRef.current.length === 0) return
     if (!isDM) return
 
-    const entry = initiativeOrder[initiativeIndex]
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMapId)
+    if (!latestMap) return
+    const latestOrder = initiativeOrderRef.current
+    const entry = latestOrder[initiativeIndexRef.current]
     if (!entry) {
-      requestAdvance()
+      requestAdvanceEvent()
       return
     }
 
-    const token = activeMap.tokens.find((t) => t.id === entry.tokenId)
+    const token = latestMap.tokens.find((t) => t.id === entry.tokenId)
     const chars = useCharacterStore.getState().characters
 
     // 槽位决策抽到纯函数 decideTurnAction（prune/skip/enemy/player）。effect 这里
@@ -12969,7 +13308,7 @@ export default function MapsPage() {
       initiativeOrderRef.current = pruned.order
       setInitiativeOrder(pruned.order)
       setInitiativeIndex(pruned.index)
-      const timer = window.setTimeout(() => requestAdvance(), 50)
+      const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
       return () => window.clearTimeout(timer)
     }
 
@@ -12979,7 +13318,7 @@ export default function MapsPage() {
       const skipToken = token!
       // 死亡 token：直接定时推进（无去重 key，与原死亡分支一致）。
       if (!isTokenAlive(skipToken, chars)) {
-        const timer = window.setTimeout(() => requestAdvance(), 50)
+        const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
         return () => window.clearTimeout(timer)
       }
 
@@ -12988,8 +13327,8 @@ export default function MapsPage() {
         const skipKey = `incapacitated-${round}-${initiativeIndex}-${skipToken.id}`
         if (incapacitatedSkippedKeysRef.current.has(skipKey)) return
         incapacitatedSkippedKeysRef.current.add(skipKey)
-        pushCombatLog(`${skipToken.label} 当前无法行动，跳过本回合。`, 'turn')
-        const timer = window.setTimeout(() => requestAdvance(), 50)
+        pushCombatLogEvent(`${skipToken.label} 当前无法行动，跳过本回合。`, 'turn')
+        const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
         return () => window.clearTimeout(timer)
       }
 
@@ -13001,26 +13340,26 @@ export default function MapsPage() {
       // player advances too. The dedupe key prevents stacking skip timers across re-renders.
       // AC4: never spin on an all-npc queue. If no alive player/enemy actor exists at
       // all, park the round instead of advancing forever (each round mints new keys).
-      if (!hasActionableActor(initiativeOrder, activeMap.tokens, chars)) return
+      if (!hasActionableActor(latestOrder, latestMap.tokens, chars)) return
       const skipKey = `nonactor-${round}-${initiativeIndex}-${skipToken.id}`
       if (nonActorSkippedKeysRef.current.has(skipKey)) return
       nonActorSkippedKeysRef.current.add(skipKey)
-      const timer = window.setTimeout(() => requestAdvance(), 50)
+      const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
       return () => window.clearTimeout(timer)
     }
 
-    if (!isDM || !isAutomatedEnemyTurn || !currentInitiativeToken || !usesAutomatedMonsterSettlement(settlementMode)) return
+    if (!isDM || !isAutomatedEnemyTurn || !token || !usesAutomatedMonsterSettlement(settlementMode)) return
 
-    const actKey = `${round}-${initiativeIndex}-${currentInitiativeToken.id}`
+    const actKey = `${round}-${initiativeIndex}-${token.id}`
     if (enemyAppliedKeysRef.current.has(actKey)) return
 
     enemyAppliedKeysRef.current.add(actKey)
-    scheduleEnemyTurn(currentInitiativeToken)
-  }, [combatActive, initiativeIndex, round, activeMap?.id, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn])
+    void scheduleEnemyTurnEvent(token)
+  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey])
 
   useEffect(() => {
     if (!canControlPlayerTurn) {
-      const timer = window.setTimeout(() => clearPlayerCombatUI(), 0)
+      const timer = window.setTimeout(() => clearPlayerCombatUIEvent(), 0)
       return () => window.clearTimeout(timer)
     }
     if (!turnCharacter?.id || currentInitiativeToken?.type !== 'player') return
@@ -13029,24 +13368,27 @@ export default function MapsPage() {
   }, [canControlPlayerTurn, turnCharacter?.id, currentInitiativeToken?.type])
 
   useEffect(() => {
-    if (!combatActive || !activeMap || !currentInitiativeToken) return
+    if (!combatActive || !activeMapId || !currentInitiativeToken?.id) return
     if (!isDM) return
-    if (tryEndCombatIfNeeded()) return
+    if (tryEndCombatIfNeededEvent()) return
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMapId)
+    const latestToken = latestMap?.tokens.find((token) => token.id === currentInitiativeToken.id)
+    if (!latestToken) return
     if (
-      !isTokenAlive(currentInitiativeToken, characters) &&
-      !(currentInitiativeToken.type === 'player' && turnCharacter && characterNeedsDeathSave(turnCharacter))
+      !isTokenAlive(latestToken, characters) &&
+      !(latestToken.type === 'player' && turnCharacter && characterNeedsDeathSave(turnCharacter))
     ) {
-      const timer = window.setTimeout(() => requestAdvance(), 50)
+      const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
       return () => window.clearTimeout(timer)
     }
-  }, [combatActive, activeMap?.id, currentInitiativeToken?.id, characters, defeatedTokenIds.length, isDM, turnCharacter])
+  }, [combatActive, activeMapId, currentInitiativeToken?.id, characters, defeatedTokenIds.length, isDM, turnCharacter])
 
   useEffect(() => {
     const wasActive = previousCombatActiveRef.current
     previousCombatActiveRef.current = combatActive
     if (isDM || combatActive || !wasActive) return
     setPlayerCombatEndedLocked(true)
-    clearPlayerCombatEndUI()
+    clearPlayerCombatEndUIEvent()
   }, [isDM, combatActive])
 
   const handlePlayerEndTurn = (event?: React.MouseEvent) => {
@@ -13524,7 +13866,7 @@ export default function MapsPage() {
           {showMoveRange && moveCircle && (
             <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-sky-400/40 bg-void-950/90 px-4 py-2 text-sm shadow-2xl backdrop-blur-sm">
               <span className="text-slate-200">
-                选择移动落点 · 可达 {Math.floor((currentInitiativeToken ? dnd5eTurnEconomyByToken[currentInitiativeToken.id]?.movement.current ?? 0 : 0) / (dnd5eCarefulMovement ? 2 : 1))} 尺
+                选择移动落点 · 可达 {moveCircle.feet} 尺
               </span>
               <button
                 type="button"
@@ -13534,9 +13876,19 @@ export default function MapsPage() {
               >
                 {dnd5eCarefulMovement ? '半速谨慎：开' : '半速谨慎：关'}
               </button>
+              {turnCharacter?.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) && (
+                <button
+                  type="button"
+                  onClick={() => setDnd5eStandFromProne((current) => !current)}
+                  className={`rounded-lg px-2 py-1 text-xs ${dnd5eStandFromProne ? 'bg-sky-500/25 text-sky-100' : 'bg-amber-500/20 text-amber-100'}`}
+                  title="起身消耗当前有效速度的一半；保持倒地时每移动 1 尺消耗 2 尺移动。"
+                >
+                  {dnd5eStandFromProne ? '移动方式：先起身' : '移动方式：匍匐'}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => { setShowMoveRange(false); setDnd5eCarefulMovement(false) }}
+                onClick={() => { setShowMoveRange(false); setDnd5eCarefulMovement(false); setDnd5eStandFromProne(true) }}
                 className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
               >
                 取消
@@ -14666,6 +15018,16 @@ export default function MapsPage() {
             </div>
           )}
 
+          {sharedRollConfirmationPrompt && (
+            <D20RollConfirmationOverlay
+              interrupt={sharedRollConfirmationPrompt}
+              isDM={isDM}
+              playerCharacter={!isDM && playerChar ? { id: playerChar.id, name: playerChar.name } : undefined}
+              busy={settlingRollConfirmation}
+              onContribute={handleD20ReplacementContribution}
+              onContinue={handleD20RollContinue}
+            />
+          )}
           {roll && <DiceRollOverlay roll={roll} onDone={handleRollDone} />}
           {diceBoxD20 && (
             <DiceBoxD20Overlay
@@ -15508,6 +15870,7 @@ export default function MapsPage() {
                       }
                       const spell = getDnd5eSrdCombatSpell(spellId)!
                       let conditionChoice: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease' | undefined
+                      let higherSlotDamageType: Dnd5eDamageType | undefined
                       if (spell.id === 'blindness-deafness') {
                         const selected = window.prompt('选择法术效果：输入 1 造成目盲，输入 2 造成耳聋。', '1')
                         if (selected == null) return
@@ -15530,6 +15893,15 @@ export default function MapsPage() {
                         }
                         conditionChoice = choices[selectedIndex]
                       }
+                      if (spell.id === 'flame-strike' && slotLevel > spell.level) {
+                        const selected = window.prompt('焰击术升环伤害加入哪一种类型？输入 1 选择火焰，输入 2 选择光耀。', '1')
+                        if (selected == null) return
+                        if (selected !== '1' && selected !== '2') {
+                          void showCombatNotice('法术选项无效', '焰击术升环必须选择火焰伤害或光耀伤害。', 'amber')
+                          return
+                        }
+                        higherSlotDamageType = selected === '1' ? 'fire' : 'radiant'
+                      }
                       const casterToken = activeMap?.tokens.find((token) => token.characterId === activeChar.id)
                       if (spell.rangeFeet === 0 && spell.target === 'ally' && casterToken) {
                         const payload: Dnd5eSpellCastPayload = {
@@ -15537,6 +15909,7 @@ export default function MapsPage() {
                           slotLevel,
                           targetTokenId: casterToken.id,
                           conditionChoice,
+                          higherSlotDamageType,
                           overchannel: options?.overchannel,
                           metamagic: options?.metamagic,
                           empowered: options?.empowered,
@@ -15590,6 +15963,7 @@ export default function MapsPage() {
                             heightenedSelecting: false,
                             area: spell.area,
                             conditionChoice,
+                            higherSlotDamageType,
                           })
                     }}
                   />
@@ -15699,6 +16073,14 @@ export default function MapsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {isDM && combatExperienceDraft && (
+        <CombatExperienceSettlementDialog
+          draft={combatExperienceDraft}
+          busy={combatExperienceBusy}
+          onSettle={settleEndedCombatExperience}
+        />
       )}
 
       {isDM && (

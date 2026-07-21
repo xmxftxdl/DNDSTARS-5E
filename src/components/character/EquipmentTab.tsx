@@ -25,6 +25,10 @@ import { EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
 import { formatEquipmentStatLine } from '../../lib/combatStats'
 import { submitDnd5eInventoryMutation } from '../../lib/inventoryAuthority'
 import { normalizeDnd5eInventory } from '../../rulesets/dnd5e/items'
+import {
+  DND5E_MAGIC_ITEM_KIND_LABELS,
+  DND5E_MAGIC_ITEM_RARITY_LABELS,
+} from '../../rulesets/dnd5e/magicItems'
 import type { Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
 import type { EquipmentSlot } from '../../types/equipment'
 
@@ -49,6 +53,11 @@ const ICONS: Record<Dnd5eInventoryIconId, ComponentType<{ className?: string }>>
   antitoxin: FlaskConical,
   poison: Skull,
   'healing-potion': FlaskConical,
+  'magic-ring': Gem,
+  'magic-wand': Sparkles,
+  'magic-staff': Sword,
+  'magic-scroll': PackageOpen,
+  'magic-wondrous': Sparkles,
   generic: PackageOpen,
 }
 
@@ -64,6 +73,7 @@ const DND5E_EQUIPMENT_SLOTS: EquipmentSlot[] = ['mainWeapon', 'offHand', 'armor'
 
 const CATEGORY_LABELS = {
   equipment: '装备',
+  'magic-item': '魔法物品',
   'adventuring-gear': '冒险用品',
   consumable: '消耗品',
   tool: '工具',
@@ -309,6 +319,11 @@ function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEnt
       {entry.equippedSlot && (
         <span className="absolute bottom-2 right-2 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-200">已装备</span>
       )}
+      {entry.item.magicItem && !entry.equippedSlot && (
+        <span className={`absolute bottom-2 right-2 rounded-md px-1.5 py-0.5 text-[9px] ${entry.item.magicItem.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-violet-500/15 text-violet-200'}`}>
+          {entry.item.magicItem.automation === 'headless' ? 'Headless' : 'DM 裁定'}
+        </span>
+      )}
       <ItemTooltip entry={entry} />
     </button>
   )
@@ -327,6 +342,9 @@ function ItemTooltip({ entry }: { entry: Dnd5eInventoryEntry }) {
       </span>
       <span className="mt-3 block text-xs leading-relaxed text-slate-300">{item.rulesText}</span>
       <span className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-500">
+        {item.magicItem && <span>{DND5E_MAGIC_ITEM_RARITY_LABELS[item.magicItem.rarity]} · {DND5E_MAGIC_ITEM_KIND_LABELS[item.magicItem.kind]}</span>}
+        {item.magicItem?.attunement === 'required' && <span>需要同调{item.magicItem.attunementRequirement ? `（${item.magicItem.attunementRequirement}）` : ''}</span>}
+        {item.magicItem && <span>{item.magicItem.automation === 'headless' ? 'Headless 已接入' : 'DM 裁定'}</span>}
         {item.weightLb != null && <span>{item.weightLb} 磅</span>}
         {item.cost && <span>{item.cost.amount} {item.cost.currency}</span>}
         {item.use && <span>{item.use.economy === 'action' ? '动作' : item.use.economy === 'bonusAction' ? '附赠动作' : '无需行动'}</span>}

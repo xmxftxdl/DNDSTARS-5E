@@ -2,6 +2,8 @@ import type { InitiativeEntry } from '../components/map/InitiativeTracker'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
 import { dnd5eAbilityCheckMode, resolveDnd5eInitiative } from '../rulesets/dnd5e/checks'
 import { dnd5eThiefReflexesInitiative } from '../rulesets/dnd5e/classes'
+import { abilityMod } from '../lib/dnd'
+import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type { RoomSession } from '../lib/roomSession'
@@ -21,7 +23,7 @@ export function placeableRoomCharacters(
     !!character.roomMemberId && roomPlayerMemberIds.has(character.roomMemberId))
 }
 
-export function rollInitiative(_token: Token, character?: Character): number {
+export function rollInitiative(token: Token, character?: Character): number {
   if (character) {
     const mode = dnd5eAbilityCheckMode(character, { initiative: true })
     const rollCount = mode === 'normal' ? 1 : 2
@@ -29,7 +31,8 @@ export function rollInitiative(_token: Token, character?: Character): number {
     return resolveDnd5eInitiative({ character, rolls }).roll.total
   }
   const d20 = 1 + Math.floor(Math.random() * 20)
-  return d20 + Math.floor(Math.random() * 5)
+  const monster = token.poolId ? getEnemyStatBlock(token.poolId) : undefined
+  return d20 + abilityMod(monster?.abilities.dex ?? 10)
 }
 
 /**

@@ -58,10 +58,9 @@ export interface EnemyStatBlock {
   conditionImmunities?: string[]
 }
 
-/** 据 DND 标准属性（8到20）映射为本应用属性分值（25到79，调整 ±0） */
+/** 兼容性怪物也保留 SRD 的标准 1–30 属性分值。 */
 export function dndAbility(standard: number): number {
-  const mod = Math.floor((standard - 10) / 2)
-  return 25 + mod * 5
+  return Math.max(1, Math.min(30, Math.floor(standard)))
 }
 
 const A = dndAbility

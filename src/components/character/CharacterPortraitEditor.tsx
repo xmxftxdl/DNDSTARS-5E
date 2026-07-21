@@ -7,6 +7,7 @@ interface CharacterPortraitEditorProps {
   avatar: string
   accent: string
   portrait?: string
+  editable?: boolean
   onChange: (portrait?: string) => void
 }
 
@@ -15,6 +16,7 @@ export default function CharacterPortraitEditor({
   avatar,
   accent,
   portrait,
+  editable = true,
   onChange,
 }: CharacterPortraitEditorProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -35,7 +37,7 @@ export default function CharacterPortraitEditor({
 
   return (
     <div className="w-full shrink-0 lg:w-56" data-testid="character-portrait-editor">
-      <input
+      {editable && <input
         ref={inputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp"
@@ -46,7 +48,7 @@ export default function CharacterPortraitEditor({
           if (file) void upload(file)
           event.currentTarget.value = ''
         }}
-      />
+      />}
       <div className="group relative aspect-[3/4] overflow-hidden rounded-2xl border border-white/10 bg-void-950/70 shadow-xl">
         {portrait ? (
           <img src={portrait} alt={`${name}的人物立绘`} className="h-full w-full object-cover" />
@@ -56,7 +58,7 @@ export default function CharacterPortraitEditor({
             <span className="mt-4 px-4 text-center text-sm font-semibold text-white/85">{name}</span>
           </div>
         )}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-12">
+        {editable && <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-12">
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
@@ -66,9 +68,9 @@ export default function CharacterPortraitEditor({
             <ImagePlus className="h-4 w-4" />
             {busy ? '正在处理…' : portrait ? '替换立绘' : '上传立绘'}
           </button>
-        </div>
+        </div>}
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      {editable && <div className="mt-2 grid grid-cols-2 gap-2">
         <button
           type="button"
           disabled
@@ -88,9 +90,9 @@ export default function CharacterPortraitEditor({
         >
           <Trash2 className="h-3.5 w-3.5" />移除
         </button>
-      </div>
+      </div>}
       <p className={`mt-2 text-[11px] leading-4 ${error ? 'text-rose-300' : 'text-slate-600'}`}>
-        {error || '自动居中裁切为 3:4 竖版，并压缩后随角色存档保存。'}
+        {error || (editable ? '自动居中裁切为 3:4 竖版，并压缩后随角色存档保存。' : '玩家同步到当前房间的人物立绘。')}
       </p>
     </div>
   )

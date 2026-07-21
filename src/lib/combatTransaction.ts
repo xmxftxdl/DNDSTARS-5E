@@ -13,6 +13,7 @@ export type RollLedgerKind = 'attack' | 'saving-throw' | 'damage' | 'healing' | 
 export type RollLedgerVisibility = 'public' | 'dm-only'
 
 export interface RollLedgerReroll {
+  method?: 'reroll' | 'replace'
   dieIndex: number
   previousValue: number
   replacementValue: number
@@ -139,6 +140,7 @@ export function rerollLedgerDie(
     replacementValue: number
     sourceId: string
     sourceLabel: string
+    method?: 'reroll' | 'replace'
     spentResource?: RollLedgerReroll['spentResource']
     now?: number
   },
@@ -160,6 +162,7 @@ export function rerollLedgerDie(
       ...entry,
       dice: { ...entry.dice, values },
       rerolls: [...entry.rerolls, {
+        method: input.method ?? 'reroll',
         dieIndex: input.dieIndex,
         previousValue,
         replacementValue: input.replacementValue,
@@ -172,6 +175,13 @@ export function rerollLedgerDie(
   })
   if (!found) throw new Error('roll-ledger-entry-not-found')
   return { ...transaction, rollLedger: { entries }, updatedAt: now }
+}
+
+export function replaceLedgerDie(
+  transaction: CombatTransaction,
+  input: Omit<Parameters<typeof rerollLedgerDie>[1], 'method'>,
+): CombatTransaction {
+  return rerollLedgerDie(transaction, { ...input, method: 'replace' })
 }
 
 export function rollLedgerTotal(entry: RollLedgerEntry): number {

@@ -1,12 +1,14 @@
 import {
   answerCombatInterrupt,
   COMBAT_INTERRUPT_RESOURCE,
+  contributeCombatInterrupt,
   emptyCombatInterruptQueue,
   finishCombatInterrupt,
   markCombatInterruptRolling,
   rollbackCombatInterrupt,
   upsertCombatInterrupt,
   waitCombatInterruptForDm,
+  type CombatInterruptContribution,
   type SharedCombatInterrupt,
   type SharedCombatInterruptQueueState,
 } from './combatInterruptQueue'
@@ -91,6 +93,27 @@ export async function finishSharedCombatInterrupt(
   }
   const queue = await loadQueueForMap(input)
   const next = finishCombatInterrupt(queue, input.id, input.response)
+  if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
+}
+
+export async function contributeSharedCombatInterrupt(
+  input: SharedCombatInterruptStore & {
+    mapId: string
+    id: string
+    contribution: CombatInterruptContribution
+  },
+): Promise<void> {
+  if (input.mutateSharedCombatInterrupt) {
+    await input.mutateSharedCombatInterrupt({
+      operation: 'contribute',
+      mapId: input.mapId,
+      id: input.id,
+      contribution: input.contribution,
+    })
+    return
+  }
+  const queue = await loadQueueForMap(input)
+  const next = contributeCombatInterrupt(queue, input.id, input.contribution)
   if (next) await input.saveSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE, next)
 }
 

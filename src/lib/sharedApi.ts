@@ -361,6 +361,7 @@ export function clearSharedResource(name: string): Promise<void> {
 
 export type SharedCombatInterruptMutation =
   | { operation: 'upsert'; mapId: string; interrupt: object }
+  | { operation: 'contribute'; mapId: string; id: string; contribution: object }
   | { operation: 'answer' | 'rolling' | 'finish' | 'wait'; mapId: string; id: string; response?: Record<string, unknown> }
   | { operation: 'rollback'; mapId: string; id: string; response?: Record<string, unknown>; rollbackReason: 'timeout' | 'dm-disconnected' | 'cancelled' | 'stale-transaction' }
 

@@ -1,14 +1,27 @@
 export const COMBAT_INTERRUPT_RESOURCE = 'combat-interrupts'
 export const COMBAT_INTERRUPT_QUEUE_LIMIT = 32
 
-export type CombatInterruptKind = 'dodge' | 'stable-mind' | 'gale-combo' | 'agile-leap' | 'opportunity-attack' | 'protection' | 'shield-spell' | 'counterspell' | 'uncanny-dodge' | 'deflect-missiles' | 'saving-throw-reroll' | 'legendary-resistance' | 'bardic-inspiration' | 'cutting-words' | 'dark-ones-own-luck' | 'stroke-of-luck' | 'empowered-spell' | 'stand-against-tide' | 'plugin-choice' | 'dm-adjudication'
+export type CombatInterruptKind = 'dodge' | 'stable-mind' | 'gale-combo' | 'agile-leap' | 'opportunity-attack' | 'protection' | 'shield-spell' | 'counterspell' | 'uncanny-dodge' | 'deflect-missiles' | 'saving-throw-reroll' | 'legendary-resistance' | 'bardic-inspiration' | 'cutting-words' | 'dark-ones-own-luck' | 'stroke-of-luck' | 'empowered-spell' | 'stand-against-tide' | 'plugin-choice' | 'dm-adjudication' | 'roll-confirmation'
 export type CombatInterruptStatus = 'pending' | 'waiting-for-dm' | 'rolling' | 'answered' | 'done' | 'rolled-back'
-export type CombatInterruptPhase = 'before-action' | 'before-hit' | 'before-damage' | 'after-save' | 'before-condition'
+export type CombatInterruptPhase = 'before-action' | 'after-roll' | 'before-hit' | 'before-damage' | 'after-save' | 'before-condition'
 export type CombatInterruptTimeoutPolicy = 'rollback' | 'wait-for-dm'
+
+export interface CombatInterruptContribution {
+  id: string
+  kind: 'replace-d20'
+  characterId: string
+  characterName: string
+  featureId?: string
+  featureLabel: string
+  dieIndex: number
+  replacementValue: number
+  createdAt: number
+}
 
 const TERMINAL_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>(['done', 'rolled-back'])
 
 export function defaultCombatInterruptPhase(kind: CombatInterruptKind): CombatInterruptPhase {
+  if (kind === 'roll-confirmation') return 'after-roll'
   if (kind === 'counterspell' || kind === 'plugin-choice' || kind === 'dm-adjudication') return 'before-action'
   if (kind === 'uncanny-dodge' || kind === 'deflect-missiles' || kind === 'empowered-spell') return 'before-damage'
   if (kind === 'saving-throw-reroll' || kind === 'legendary-resistance' || kind === 'bardic-inspiration' || kind === 'dark-ones-own-luck' || kind === 'stable-mind') return 'after-save'
@@ -32,6 +45,7 @@ export interface SharedCombatInterrupt<
   targetCharId?: string
   payload: Payload
   response?: Response
+  contributions?: CombatInterruptContribution[]
   expiresAt?: number
   waitingSince?: number
   rollbackReason?: 'timeout' | 'dm-disconnected' | 'cancelled' | 'stale-transaction'
@@ -75,7 +89,7 @@ export function createCombatInterrupt<
     status: 'pending',
     transactionId: input.transactionId ?? id,
     phase: input.phase ?? defaultCombatInterruptPhase(input.kind),
-    timeoutPolicy: input.timeoutPolicy ?? (input.kind === 'dm-adjudication' ? 'wait-for-dm' : 'rollback'),
+    timeoutPolicy: input.timeoutPolicy ?? (input.kind === 'dm-adjudication' || input.kind === 'roll-confirmation' ? 'wait-for-dm' : 'rollback'),
     actorCharId: input.actorCharId,
     targetCharId: input.targetCharId,
     payload: input.payload,
@@ -176,6 +190,37 @@ export function finishCombatInterrupt(
     }),
     now,
   )
+}
+
+export function contributeCombatInterrupt(
+  queue: SharedCombatInterruptQueueState | null | undefined,
+  id: string,
+  contribution: CombatInterruptContribution,
+  now = Date.now(),
+): SharedCombatInterruptQueueState | null {
+  if (
+    contribution.kind !== 'replace-d20' || !contribution.id || !contribution.characterId ||
+    !contribution.characterName.trim() || !contribution.featureLabel.trim() ||
+    contribution.dieIndex !== 0 || !Number.isInteger(contribution.replacementValue) ||
+    contribution.replacementValue < 1 || contribution.replacementValue > 20 ||
+    !Number.isFinite(contribution.createdAt)
+  ) return queue ?? null
+  return updateCombatInterrupt(queue, id, (interrupt) => {
+    if (
+      interrupt.kind !== 'roll-confirmation' ||
+      (interrupt.status !== 'pending' && interrupt.status !== 'waiting-for-dm')
+    ) return interrupt
+    const contributions = [
+      ...(interrupt.contributions ?? []).filter((entry) => entry.id !== contribution.id),
+      {
+        ...contribution,
+        characterName: contribution.characterName.trim().slice(0, 80),
+        featureId: contribution.featureId?.trim().slice(0, 160) || undefined,
+        featureLabel: contribution.featureLabel.trim().slice(0, 120),
+      },
+    ].sort((left, right) => left.createdAt - right.createdAt).slice(-32)
+    return { ...interrupt, contributions, updatedAt: now }
+  }, now)
 }
 
 export function waitCombatInterruptForDm(

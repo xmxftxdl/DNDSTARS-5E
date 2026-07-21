@@ -65,6 +65,30 @@ interface FeatureDraft {
   headless: HeadlessEffectEditorDraft
 }
 
+interface PersistentAreaTriggerEditorDraft {
+  id: string
+  label: string
+  timing: 'on-create' | 'on-enter' | 'turn-start' | 'turn-end'
+  oncePerRound: boolean
+  savingThrowEnabled: boolean
+  savingThrowAbility: AbilityKey
+  savingThrowDcMode: 'source-save-dc' | 'fixed'
+  savingThrowDc: number
+  savingThrowOnSuccess: 'none' | 'half'
+  damageEnabled: boolean
+  damageCount: number
+  damageSides: number
+  damageModifier: number
+  damageType: Dnd5eDamageType
+  conditionEnabled: boolean
+  condition: keyof typeof DND5E_STANDARD_CONDITIONS
+  conditionExpiresAt: HeadlessEffectEditorDraft['conditionExpiresAt']
+  conditionRounds: number
+  conditionSaveAbility: AbilityKey
+  conditionSaveDc: number
+  dmAdjustable: boolean
+}
+
 interface HeadlessEffectEditorDraft {
   enabled: boolean
   actionLabel: string
@@ -86,6 +110,7 @@ interface HeadlessEffectEditorDraft {
   persistentAreaConcentration: boolean
   persistentAreaVisualPreset: 'arcane' | 'toxic-cloud'
   persistentAreaVisualIntensity: 'subtle' | 'normal' | 'strong'
+  persistentAreaTriggers: PersistentAreaTriggerEditorDraft[]
   summonEnabled: boolean
   summonMonsterId: string
   summonLabel: string
@@ -214,6 +239,20 @@ const CONDITION_EXPIRATIONS = [
   ['target-turn-end', '目标回合结束'],
   ['target-turn-end-save', '目标回合结束重复豁免'],
 ] as const
+const PERSISTENT_AREA_TRIGGER_TIMINGS = [
+  ['on-create', '首次创建区域'],
+  ['on-enter', '进入区域'],
+  ['turn-start', '目标回合开始'],
+  ['turn-end', '目标回合结束'],
+] as const
+const PERSISTENT_AREA_SAVE_DC_MODES = [
+  ['source-save-dc', '来源角色法术 DC'],
+  ['fixed', '固定 DC'],
+] as const
+const PERSISTENT_AREA_SAVE_SUCCESS = [
+  ['none', '成功则无效'],
+  ['half', '成功则伤害减半'],
+] as const
 const DAMAGE_TYPE_LABELS: Record<Dnd5eDamageType, string> = {
   acid: '强酸', bludgeoning: '钝击', cold: '寒冷', fire: '火焰', force: '力场',
   lightning: '闪电', necrotic: '黯蚀', piercing: '穿刺', poison: '毒素', psychic: '心灵',
@@ -287,6 +326,7 @@ function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
       persistentAreaEnabled: false, persistentAreaLabel: '持续区域', persistentAreaColor: '#8b5cf6',
       persistentAreaDurationRounds: 10, persistentAreaConcentration: false,
       persistentAreaVisualPreset: 'arcane', persistentAreaVisualIntensity: 'normal',
+      persistentAreaTriggers: [],
       summonEnabled: false, summonMonsterId: 'srd-5.1:wolf', summonLabel: '',
       summonDurationRounds: 10, summonConcentration: true, summonSide: 'ally',
       damageEnabled: true, damageCount: 1, damageSides: 6, damageModifier: 0, damageType: 'force',
@@ -298,12 +338,49 @@ function newHeadlessEffectDraft(): HeadlessEffectEditorDraft {
   }
 }
 
+function newPersistentAreaTrigger(index: number): PersistentAreaTriggerEditorDraft {
+  return {
+    id: `area-trigger-${index}`,
+    label: '区域触发效果',
+    timing: 'on-enter',
+    oncePerRound: true,
+    savingThrowEnabled: true,
+    savingThrowAbility: 'con',
+    savingThrowDcMode: 'source-save-dc',
+    savingThrowDc: 12,
+    savingThrowOnSuccess: 'half',
+    damageEnabled: true,
+    damageCount: 2,
+    damageSides: 6,
+    damageModifier: 0,
+    damageType: 'poison',
+    conditionEnabled: false,
+    condition: 'poisoned',
+    conditionExpiresAt: 'target-turn-end',
+    conditionRounds: 1,
+    conditionSaveAbility: 'con',
+    conditionSaveDc: 12,
+    dmAdjustable: false,
+  }
+}
+
+function restoreHeadlessEffectDraft(value: Partial<HeadlessEffectEditorDraft> | undefined): HeadlessEffectEditorDraft {
+  const fallback = newHeadlessEffectDraft()
+  return {
+    ...fallback,
+    ...value,
+    persistentAreaTriggers: Array.isArray(value?.persistentAreaTriggers)
+      ? value.persistentAreaTriggers.map((trigger, index) => ({ ...newPersistentAreaTrigger(index + 1), ...trigger }))
+      : [],
+  }
+}
+
 function restoreFeatureDraft(value: Partial<FeatureDraft>, index: number): FeatureDraft {
   const fallback = newFeature(index + 1)
   return {
     ...fallback,
     ...value,
-    headless: { ...fallback.headless, ...(value.headless ?? {}) },
+    headless: restoreHeadlessEffectDraft(value.headless),
   }
 }
 
@@ -335,7 +412,7 @@ function newItem(index: number): ItemDraft {
 
 function restoreSpellDraft(value: Partial<SpellDraft>, index: number): SpellDraft {
   const fallback = newSpell(index + 1)
-  return { ...fallback, ...value, headless: { ...fallback.headless, ...(value.headless ?? {}) } }
+  return { ...fallback, ...value, headless: restoreHeadlessEffectDraft(value.headless) }
 }
 
 function restoreItemDraft(value: Partial<ItemDraft>, index: number): ItemDraft {
@@ -483,6 +560,45 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
             preset: feature.headless.persistentAreaVisualPreset,
             intensity: feature.headless.persistentAreaVisualIntensity,
           },
+          ...(feature.headless.persistentAreaTriggers.length > 0 ? {
+            triggers: feature.headless.persistentAreaTriggers.map((trigger) => ({
+              id: trigger.id.trim(),
+              label: trigger.label.trim(),
+              timing: trigger.timing,
+              oncePerRound: trigger.oncePerRound,
+              ...(trigger.savingThrowEnabled ? {
+                savingThrow: {
+                  ability: trigger.savingThrowAbility,
+                  dc: trigger.savingThrowDcMode === 'source-save-dc'
+                    ? 'source-save-dc' as const
+                    : trigger.savingThrowDc,
+                  onSuccess: trigger.savingThrowOnSuccess,
+                },
+              } : {}),
+              ...(trigger.damageEnabled ? {
+                damage: {
+                  count: trigger.damageCount,
+                  sides: trigger.damageSides,
+                  modifier: trigger.damageModifier,
+                  type: trigger.damageType,
+                },
+              } : {}),
+              ...(trigger.conditionEnabled ? {
+                condition: {
+                  condition: trigger.condition,
+                  duration: {
+                    expiresAt: trigger.conditionExpiresAt,
+                    remainingRounds: trigger.conditionRounds,
+                    ...(trigger.conditionExpiresAt === 'target-turn-end-save' ? {
+                      saveAbility: trigger.conditionSaveAbility,
+                      saveDc: trigger.conditionSaveDc,
+                    } : {}),
+                  },
+                },
+              } : {}),
+              dmAdjustable: trigger.dmAdjustable,
+            })),
+          } : {}),
         },
       } : {}),
       ...(feature.headless.summonEnabled && feature.headless.targetingKind === 'area' ? {
@@ -1082,6 +1198,20 @@ function HeadlessEffectEditor({
   mode?: 'feature' | 'spell'
 }) {
   const patch = (next: Partial<HeadlessEffectEditorDraft>) => onChange({ ...value, ...next })
+  const patchPersistentAreaTrigger = (index: number, next: Partial<PersistentAreaTriggerEditorDraft>) => {
+    patch({
+      persistentAreaTriggers: value.persistentAreaTriggers.map((trigger, triggerIndex) =>
+        triggerIndex === index ? { ...trigger, ...next } : trigger,
+      ),
+    })
+  }
+  const addPersistentAreaTrigger = () => {
+    if (value.persistentAreaTriggers.length >= 16) return
+    patch({ persistentAreaTriggers: [...value.persistentAreaTriggers, newPersistentAreaTrigger(value.persistentAreaTriggers.length + 1)] })
+  }
+  const removePersistentAreaTrigger = (index: number) => {
+    patch({ persistentAreaTriggers: value.persistentAreaTriggers.filter((_, triggerIndex) => triggerIndex !== index) })
+  }
   return (
     <section className="mt-4 rounded-2xl border border-violet-400/15 bg-violet-500/[0.045] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1132,14 +1262,25 @@ function HeadlessEffectEditor({
                   onClick={() => patch({
                     targetingKind: 'area', relation: 'any', includeSelf: true,
                     areaShape: 'circle', rangeFeet: 90, areaRadiusFeet: 20, maximumTargets: 64,
-                    persistentAreaEnabled: true, persistentAreaLabel: '臭云术区域示例',
+                    persistentAreaEnabled: true, persistentAreaLabel: '毒云伤害区域示例',
                     persistentAreaColor: '#65a30d', persistentAreaDurationRounds: 10,
                     persistentAreaConcentration: true, persistentAreaVisualPreset: 'toxic-cloud',
                     persistentAreaVisualIntensity: 'normal', summonEnabled: false,
                     damageEnabled: false, healingEnabled: false, conditionEnabled: false,
+                    persistentAreaTriggers: [{
+                      ...newPersistentAreaTrigger(1),
+                      id: 'toxic-entry',
+                      label: '进入毒云',
+                      timing: 'on-enter',
+                      damageCount: 3,
+                      damageSides: 6,
+                      damageType: 'poison',
+                      savingThrowAbility: 'con',
+                      savingThrowOnSuccess: 'half',
+                    }],
                   })}
                   className="rounded-lg border border-lime-300/25 bg-lime-400/10 px-2.5 py-1.5 text-xs text-lime-100"
-                >载入臭云术动画示例</button>
+                >载入毒云区域示例</button>
                 <Toggle
                   label={value.persistentAreaEnabled ? '已创建持续区域' : '创建持续区域'}
                   value={value.persistentAreaEnabled}
@@ -1154,6 +1295,83 @@ function HeadlessEffectEditor({
               <BuilderSelect label="动画预设" value={value.persistentAreaVisualPreset} options={[["arcane", "奥术边界"], ["toxic-cloud", "毒云漂移"]]} onChange={(persistentAreaVisualPreset) => patch({ persistentAreaVisualPreset: persistentAreaVisualPreset as HeadlessEffectEditorDraft['persistentAreaVisualPreset'] })} />
               <BuilderSelect label="动画强度" value={value.persistentAreaVisualIntensity} options={[["subtle", "轻微"], ["normal", "标准"], ["strong", "强烈"]]} onChange={(persistentAreaVisualIntensity) => patch({ persistentAreaVisualIntensity: persistentAreaVisualIntensity as HeadlessEffectEditorDraft['persistentAreaVisualIntensity'] })} />
               <div className="self-end pb-0.5"><Toggle label="需要专注" value={value.persistentAreaConcentration} onChange={(persistentAreaConcentration) => patch({ persistentAreaConcentration })} /></div>
+            </div>}
+            {value.persistentAreaEnabled && <div className="mt-4 border-t border-lime-300/10 pt-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h6 className="text-xs font-semibold text-lime-50">持续区域触发效果</h6>
+                  <p className="mt-1 text-[11px] leading-5 text-lime-100/55">每项触发都由 DM Host 检查目标占格、每轮凭据、豁免、抗性、状态免疫与 ActiveEffect 生命周期。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addPersistentAreaTrigger}
+                  disabled={value.persistentAreaTriggers.length >= 16}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-lime-300/25 bg-lime-400/10 px-2.5 py-1.5 text-xs text-lime-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Plus className="h-3.5 w-3.5" /> 添加触发效果
+                </button>
+              </div>
+              {value.persistentAreaTriggers.length === 0 ? (
+                <p className="mt-3 rounded-lg border border-white/8 bg-black/10 px-3 py-2 text-[11px] leading-5 text-slate-500">当前区域只有格子、持续时间和动画，不会自动造成伤害或施加状态。</p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {value.persistentAreaTriggers.map((trigger, index) => (
+                    <article key={`${trigger.id}:${index}`} className="rounded-xl border border-lime-300/15 bg-black/15 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <strong className="text-xs text-lime-50">触发效果 {index + 1}</strong>
+                        <button type="button" aria-label={`删除区域触发效果 ${index + 1}`} onClick={() => removePersistentAreaTrigger(index)} className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <BuilderInput label="触发 ID" value={trigger.id} onChange={(id) => patchPersistentAreaTrigger(index, { id })} />
+                        <BuilderInput label="触发名称" value={trigger.label} onChange={(label) => patchPersistentAreaTrigger(index, { label })} />
+                        <BuilderSelect label="触发时点" value={trigger.timing} options={PERSISTENT_AREA_TRIGGER_TIMINGS} onChange={(timing) => patchPersistentAreaTrigger(index, { timing: timing as PersistentAreaTriggerEditorDraft['timing'] })} />
+                        <div className="flex flex-wrap items-end gap-2 pb-0.5">
+                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound })} />
+                          <Toggle label="提交前由 DM 调整" value={trigger.dmAdjustable} onChange={(dmAdjustable) => patchPersistentAreaTrigger(index, { dmAdjustable })} />
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded-lg border border-sky-300/10 bg-sky-500/[0.025] p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-sky-100">触发豁免</span>
+                          <Toggle label={trigger.savingThrowEnabled ? '已启用豁免' : '不进行豁免'} value={trigger.savingThrowEnabled} onChange={(savingThrowEnabled) => patchPersistentAreaTrigger(index, { savingThrowEnabled })} />
+                        </div>
+                        {trigger.savingThrowEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <BuilderSelect label="豁免属性" value={trigger.savingThrowAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(savingThrowAbility) => patchPersistentAreaTrigger(index, { savingThrowAbility: savingThrowAbility as AbilityKey })} />
+                          <BuilderSelect label="豁免 DC" value={trigger.savingThrowDcMode} options={PERSISTENT_AREA_SAVE_DC_MODES} onChange={(savingThrowDcMode) => patchPersistentAreaTrigger(index, { savingThrowDcMode: savingThrowDcMode as PersistentAreaTriggerEditorDraft['savingThrowDcMode'] })} />
+                          {trigger.savingThrowDcMode === 'fixed' && <BuilderNumber label="固定 DC" value={trigger.savingThrowDc} min={1} max={40} onChange={(savingThrowDc) => patchPersistentAreaTrigger(index, { savingThrowDc })} />}
+                          <BuilderSelect label="豁免成功" value={trigger.savingThrowOnSuccess} options={PERSISTENT_AREA_SAVE_SUCCESS} onChange={(savingThrowOnSuccess) => patchPersistentAreaTrigger(index, { savingThrowOnSuccess: savingThrowOnSuccess as PersistentAreaTriggerEditorDraft['savingThrowOnSuccess'] })} />
+                        </div>}
+                      </div>
+
+                      <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                        <fieldset className={`rounded-lg border p-3 ${trigger.damageEnabled ? 'border-rose-300/15 bg-rose-500/[0.025]' : 'border-white/8 bg-black/10'}`}>
+                          <legend className="px-1"><Toggle label="触发伤害" value={trigger.damageEnabled} onChange={(damageEnabled) => patchPersistentAreaTrigger(index, { damageEnabled })} /></legend>
+                          {trigger.damageEnabled && <div className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                            <BuilderNumber label="骰子数量" value={trigger.damageCount} min={1} max={40} onChange={(damageCount) => patchPersistentAreaTrigger(index, { damageCount })} />
+                            <BuilderNumber label="骰面" value={trigger.damageSides} min={2} max={100} onChange={(damageSides) => patchPersistentAreaTrigger(index, { damageSides })} />
+                            <BuilderNumber label="调整值" value={trigger.damageModifier} min={-1000} max={1000} onChange={(damageModifier) => patchPersistentAreaTrigger(index, { damageModifier })} />
+                            <BuilderSelect label="伤害类型" value={trigger.damageType} options={HEADLESS_DAMAGE_TYPES} onChange={(damageType) => patchPersistentAreaTrigger(index, { damageType: damageType as Dnd5eDamageType })} />
+                          </div>}
+                        </fieldset>
+                        <fieldset className={`rounded-lg border p-3 ${trigger.conditionEnabled ? 'border-amber-300/15 bg-amber-500/[0.025]' : 'border-white/8 bg-black/10'}`}>
+                          <legend className="px-1"><Toggle label="触发状态" value={trigger.conditionEnabled} onChange={(conditionEnabled) => patchPersistentAreaTrigger(index, { conditionEnabled })} /></legend>
+                          {trigger.conditionEnabled && <div className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                            <BuilderSelect label="状态" value={trigger.condition} options={HEADLESS_CONDITIONS} onChange={(condition) => patchPersistentAreaTrigger(index, { condition: condition as PersistentAreaTriggerEditorDraft['condition'] })} />
+                            <BuilderSelect label="解除时点" value={trigger.conditionExpiresAt} options={CONDITION_EXPIRATIONS} onChange={(conditionExpiresAt) => patchPersistentAreaTrigger(index, { conditionExpiresAt: conditionExpiresAt as PersistentAreaTriggerEditorDraft['conditionExpiresAt'] })} />
+                            <BuilderNumber label="持续轮数" value={trigger.conditionRounds} min={1} max={14400} onChange={(conditionRounds) => patchPersistentAreaTrigger(index, { conditionRounds })} />
+                            {trigger.conditionExpiresAt === 'target-turn-end-save' && <>
+                              <BuilderSelect label="重复豁免属性" value={trigger.conditionSaveAbility} options={ABILITIES.map((ability) => [ability.key, ability.label] as const)} onChange={(conditionSaveAbility) => patchPersistentAreaTrigger(index, { conditionSaveAbility: conditionSaveAbility as AbilityKey })} />
+                              <BuilderNumber label="重复豁免 DC" value={trigger.conditionSaveDc} min={1} max={40} onChange={(conditionSaveDc) => patchPersistentAreaTrigger(index, { conditionSaveDc })} />
+                            </>}
+                          </div>}
+                        </fieldset>
+                      </div>
+                      {!trigger.damageEnabled && !trigger.conditionEnabled && <p className="mt-3 rounded-lg border border-rose-300/15 bg-rose-500/5 px-3 py-2 text-[11px] text-rose-100">触发效果至少需要伤害或标准状态。</p>}
+                    </article>
+                  ))}
+                </div>
+              )}
             </div>}
           </div>
           <div className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] p-3">

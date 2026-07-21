@@ -601,6 +601,21 @@ describe('P0 shared state boundary', () => {
       updatedAt: 2,
     }
     expect(validateSharedStateShape('combat-statistics', state)).toEqual({ ok: true })
+    const experienceSettlement = {
+      combatId: 'combat', mapId: 'map', mode: 'even', totalXp: 50, awardedXp: 50, settledAt: 3,
+      defeatedMonsters: [{ tokenId: 'goblin', name: '哥布林', monsterId: 'srd-5.1:goblin', challengeRating: '1/4', xp: 50 }],
+      awards: [{ characterId: 'fighter', characterName: '战士', xp: 50 }],
+    }
+    expect(validateSharedStateShape('combat-statistics', {
+      ...state,
+      schemaVersion: 2,
+      sessions: [{ ...state.sessions[0], experienceSettlement }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat-statistics', {
+      ...state,
+      schemaVersion: 2,
+      sessions: [{ ...state.sessions[0], experienceSettlement: { ...experienceSettlement, awardedXp: 49 } }],
+    })).toMatchObject({ ok: false, reason: 'invalid-combat-statistics' })
     expect(validateSharedStateShape('combat-statistics', {
       ...state,
       sessions: [{ ...state.sessions[0], combatants: { fighter: { ...combatant, damageDealt: -1 } } }],
@@ -723,7 +738,7 @@ describe('room isolation and access security', () => {
 
 const mutateCombatInterruptQueue = (
   sharedServerCore as unknown as {
-    mutateCombatInterruptQueue: (queue: unknown, mutation: unknown, now?: number) => {
+    mutateCombatInterruptQueue: (queue: unknown, mutation: unknown, now?: number, authorityRole?: 'open' | 'dm' | 'player') => {
       ok: boolean
       status?: number
       error?: string
@@ -783,6 +798,98 @@ describe('combat interrupt atomic mutation', () => {
         status: 'pending', phase: 'before-damage', timeoutPolicy: 'rollback', payload: {}, createdAt: 2, updatedAt: 2,
       },
     }, 200)).toMatchObject({ ok: false, status: 409, error: 'transaction-locked' })
+  })
+
+  it('atomically appends player roll contributions while the DM confirmation is open', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: { originalValue: 7 }, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    const result = mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+        featureLabel: '预兆', dieIndex: 0, replacementValue: 17, createdAt: 150,
+      },
+    }, 200)
+    expect(result).toMatchObject({ ok: true, changed: true, next: { revision: 2 } })
+    expect((result.next.interrupts[0] as { contributions?: unknown[] }).contributions).toEqual([
+      expect.objectContaining({ characterId: 'wizard', replacementValue: 17 }),
+    ])
+    expect(mutateCombatInterruptQueue({
+      ...result.next,
+      interrupts: result.next.interrupts.map((entry) => ({ ...entry, status: 'done' })),
+    }, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'late', kind: 'replace-d20', characterId: 'rogue', characterName: '游荡者',
+        featureLabel: '幸运', dieIndex: 0, replacementValue: 20, createdAt: 220,
+      },
+    }, 220)).toMatchObject({ ok: false, status: 409 })
+  })
+
+  it('requires DM authority to settle a roll confirmation', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: { originalValue: 7 }, createdAt: 1, updatedAt: 1,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response: { decision: 'continue', finalValue: 7 },
+    }, 200, 'player')).toMatchObject({ ok: false, status: 403, error: 'dm-authority-required' })
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response: { decision: 'continue', finalValue: 7 },
+    }, 200, 'dm')).toMatchObject({ ok: true, changed: true })
+  })
+
+  it('accepts only the original d20 or a contribution that exists in the open window', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation', status: 'pending',
+        phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: { originalValue: 4 }, createdAt: 1, updatedAt: 1,
+        contributions: [{
+          id: 'confirm:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+          featureLabel: '预兆', dieIndex: 0, replacementValue: 18, createdAt: 2,
+        }],
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response: {
+        decision: 'continue', finalValue: 20, acceptedContributionId: 'missing',
+      },
+    }, 200, 'dm')).toMatchObject({ ok: false, status: 409, error: 'roll-contribution-not-found' })
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response: {
+        decision: 'continue', finalValue: 4, acceptedContributionId: 'confirm:wizard',
+      },
+    }, 200, 'dm')).toMatchObject({ ok: false, status: 409, error: 'roll-confirmation-value-conflict' })
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'confirm', response: {
+        decision: 'continue', finalValue: 18, acceptedContributionId: 'confirm:wizard',
+      },
+    }, 200, 'dm')).toMatchObject({ ok: true, changed: true })
+  })
+
+  it('normalizes a newly published roll confirmation to an open DM-owned window', () => {
+    const result = mutateCombatInterruptQueue(null, {
+      operation: 'upsert', mapId: 'map-1', interrupt: {
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation', status: 'done',
+        phase: 'before-action', timeoutPolicy: 'rollback', response: { decision: 'continue', finalValue: 20 },
+        payload: {
+          rollId: 'roll-1', label: '攻击', originalValue: 8, visibility: 'public', transaction: { id: 'roll-1' },
+        },
+        createdAt: 1, updatedAt: 1,
+      },
+    }, 100, 'player')
+    expect(result).toMatchObject({ ok: true, changed: true })
+    expect(result.next.interrupts[0]).toMatchObject({
+      status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', contributions: [],
+    })
+    expect((result.next.interrupts[0] as { response?: unknown }).response).toBeUndefined()
   })
 })
 

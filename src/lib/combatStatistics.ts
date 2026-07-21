@@ -4,9 +4,10 @@ import type {
   Dnd5eCombatEvent,
   Dnd5eHeadlessCombatState,
 } from '../rulesets/dnd5e/headlessCombatEngine'
+import type { CombatExperienceSettlement } from './combatExperience'
 
 export const COMBAT_STATISTICS_RESOURCE = 'combat-statistics'
-export const COMBAT_STATISTICS_SCHEMA_VERSION = 1
+export const COMBAT_STATISTICS_SCHEMA_VERSION = 2
 export const COMBAT_STATISTICS_MAX_SESSIONS = 24
 export const COMBAT_STATISTICS_MAX_RECEIPTS = 4_096
 
@@ -49,6 +50,8 @@ export interface CombatStatisticsSession {
   lastRound: number
   combatants: Record<string, CombatantStatistics>
   receipts: string[]
+  /** DM 权威确认的本场经验结算；存在时同一 combatId 不得再次发奖。 */
+  experienceSettlement?: CombatExperienceSettlement
 }
 
 export interface SharedCombatStatisticsState {
@@ -304,6 +307,24 @@ export function applyDnd5eCombatStatisticsObservation(
   return session
 }
 
+export function applyCombatExperienceSettlement(
+  current: CombatStatisticsSession | undefined,
+  settlement: CombatExperienceSettlement,
+): CombatStatisticsSession | undefined {
+  if (current?.experienceSettlement || (current && current.mapId !== settlement.mapId)) return undefined
+  const base = current ?? createCombatStatisticsSession({
+    combatId: settlement.combatId,
+    mapId: settlement.mapId,
+    now: settlement.settledAt,
+  })
+  if (base.combatId !== settlement.combatId) return undefined
+  return {
+    ...base,
+    updatedAt: Math.max(base.updatedAt, settlement.settledAt),
+    experienceSettlement: structuredClone(settlement),
+  }
+}
+
 export function combatantContributionScore(stats: CombatantStatistics): number {
   return stats.damageDealt + stats.healingDone + stats.temporaryHpGranted + stats.damagePrevented +
     stats.hostileConditionsApplied * 5 + stats.kills * 10 + stats.alliesRescued * 10
@@ -311,6 +332,70 @@ export function combatantContributionScore(stats: CombatantStatistics): number {
 
 function finiteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function normalizedExperienceSettlement(
+  value: unknown,
+  combatId: string,
+  mapId: string,
+): CombatExperienceSettlement | undefined | null {
+  if (value == null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (
+    raw.combatId !== combatId || raw.mapId !== mapId ||
+    !['even', 'manual', 'none'].includes(String(raw.mode)) ||
+    !Number.isSafeInteger(raw.totalXp) || Number(raw.totalXp) < 0 ||
+    !Number.isSafeInteger(raw.awardedXp) || Number(raw.awardedXp) < 0 ||
+    Number(raw.awardedXp) > Number(raw.totalXp) ||
+    !finiteNonNegative(raw.settledAt) ||
+    !Array.isArray(raw.defeatedMonsters) || raw.defeatedMonsters.length > 512 ||
+    !Array.isArray(raw.awards) || raw.awards.length > 128
+  ) return null
+  const defeatedMonsters = raw.defeatedMonsters.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const monster = value as Record<string, unknown>
+    if (
+      typeof monster.tokenId !== 'string' || !monster.tokenId || monster.tokenId.length > 200 ||
+      typeof monster.name !== 'string' || !monster.name || monster.name.length > 240 ||
+      (monster.monsterId != null && (typeof monster.monsterId !== 'string' || monster.monsterId.length > 200)) ||
+      (monster.challengeRating != null && (typeof monster.challengeRating !== 'string' || monster.challengeRating.length > 16)) ||
+      !Number.isSafeInteger(monster.xp) || Number(monster.xp) < 0
+    ) return null
+    return {
+      tokenId: monster.tokenId,
+      name: monster.name,
+      ...(monster.monsterId ? { monsterId: monster.monsterId as string } : {}),
+      ...(monster.challengeRating ? { challengeRating: monster.challengeRating as string } : {}),
+      xp: Number(monster.xp),
+    }
+  })
+  if (defeatedMonsters.some((monster) => monster == null)) return null
+  const awards = raw.awards.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const award = value as Record<string, unknown>
+    if (
+      typeof award.characterId !== 'string' || !award.characterId || award.characterId.length > 200 ||
+      typeof award.characterName !== 'string' || !award.characterName || award.characterName.length > 240 ||
+      !Number.isSafeInteger(award.xp) || Number(award.xp) < 0
+    ) return null
+    return { characterId: award.characterId, characterName: award.characterName, xp: Number(award.xp) }
+  })
+  if (awards.some((award) => award == null)) return null
+  if (new Set(awards.map((award) => award!.characterId)).size !== awards.length) return null
+  const awardedXp = awards.reduce((total, award) => total + award!.xp, 0)
+  if (awardedXp !== Number(raw.awardedXp)) return null
+  if (raw.mode === 'none' ? awards.length > 0 || awardedXp !== 0 : awardedXp !== Number(raw.totalXp)) return null
+  return {
+    combatId,
+    mapId,
+    mode: raw.mode as CombatExperienceSettlement['mode'],
+    totalXp: Number(raw.totalXp),
+    awardedXp,
+    defeatedMonsters: defeatedMonsters as CombatExperienceSettlement['defeatedMonsters'],
+    awards: awards as CombatExperienceSettlement['awards'],
+    settledAt: Number(raw.settledAt),
+  }
 }
 
 const numericCombatantFields: Array<keyof CombatantStatistics> = [
@@ -323,7 +408,7 @@ const numericCombatantFields: Array<keyof CombatantStatistics> = [
 export function normalizeSharedCombatStatistics(value: unknown): SharedCombatStatisticsState | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
-  if (raw.schemaVersion !== COMBAT_STATISTICS_SCHEMA_VERSION || !Array.isArray(raw.sessions) ||
+  if (![1, COMBAT_STATISTICS_SCHEMA_VERSION].includes(Number(raw.schemaVersion)) || !Array.isArray(raw.sessions) ||
     raw.sessions.length > COMBAT_STATISTICS_MAX_SESSIONS || !finiteNonNegative(raw.updatedAt)) return undefined
   const sessions: CombatStatisticsSession[] = []
   for (const entry of raw.sessions) {
@@ -346,6 +431,12 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
       }
       combatants[id] = { ...stats }
     }
+    const experienceSettlement = normalizedExperienceSettlement(
+      session.experienceSettlement,
+      session.combatId,
+      session.mapId,
+    )
+    if (experienceSettlement === null) return undefined
     sessions.push({
       combatId: session.combatId,
       mapId: session.mapId,
@@ -354,6 +445,7 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
       lastRound: session.lastRound,
       combatants,
       receipts: [...session.receipts],
+      ...(experienceSettlement ? { experienceSettlement } : {}),
     })
   }
   if (new Set(sessions.map((session) => session.combatId)).size !== sessions.length) return undefined

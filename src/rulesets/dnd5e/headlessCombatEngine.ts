@@ -21,7 +21,7 @@ import {
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5eBardicInspirationDie, dnd5eClassDefinition, dnd5eMonkMartialArtsDie, dnd5ePactSlotLevel, dnd5eRogueSneakAttackDice, type Dnd5eClassId } from './classes'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDiceCount, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell } from './spells'
 import {
   dnd5eCanUseUncannyDodge,
   dnd5eCanThreatenRangedAttacker,
@@ -298,6 +298,11 @@ export function dnd5eTargetIsUnseenForAttack(
   const attacker = state.combatants[attackerId]
   const target = state.combatants[targetId]
   if (!attacker || !target) return false
+  const chillTouchDisadvantage = attacker.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:chill-touch:undead-disadvantage' &&
+    effect.source.actorId === target.id,
+  ) === true
+  if (chillTouchDisadvantage) return true
   if (dnd5eUnseenTargetImposesDisadvantage(attacker, target)) return true
   if (dnd5eCombatantCanSee(state, attackerId, targetId)) return false
   const feralSenses = attacker.classId === 'ranger' && attacker.level >= 18 &&
@@ -624,7 +629,7 @@ export type Dnd5eAction =
   | { type: 'monk-quivering-palm-release'; actorId: string; targetId: string; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; damageRolls: readonly number[] }
   | { type: 'monk-quivering-palm-end'; actorId: string }
   | { type: 'monk-deflect-missiles-return'; actorId: string; targetId: string; distanceFeet: number; decline?: boolean; d20: number; d20Second?: number; mode?: D20RollMode; damageRolls: readonly number[] }
-  | { type: 'cast-spell'; actorId: string; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; healingAllocations?: readonly { targetId: string; amount: number }[]; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[] }
+  | { type: 'cast-spell'; actorId: string; targetId: string; targetIds?: readonly string[]; projectileTargetIds?: readonly string[]; sculptedTargetIds?: readonly string[]; forcedMovements?: readonly Dnd5eSpellForcedMovement[]; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; empoweredRerolls?: readonly Dnd5eEmpoweredSpellReroll[]; draconicResistance?: boolean; repellingBlast?: boolean; counterspellReaction?: Dnd5eCounterspellReaction; shieldSpellReaction?: boolean; shieldSpellReactionTargetIds?: readonly string[]; legendaryResistanceTargetIds?: readonly string[]; spellId: string; slotLevel: number; higherSlotDamageType?: Dnd5eDamageType; conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'; healingAllocations?: readonly { targetId: string; amount: number }[]; d20?: number; d20Second?: number; attackBlessRoll?: number; attackBaneRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; targetAttacks?: readonly Dnd5eSpellTargetAttackRoll[]; protectionReactionActorId?: string; tranquilitySave?: Dnd5eTranquilitySaveRoll; targetTranquilitySaves?: readonly Dnd5eTargetTranquilitySaveRoll[]; savingThrowD20?: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; savingThrowRerollD20?: number; savingThrowRerollD20Second?: number; targetSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; overchannel?: boolean; overchannelSelfDamageRolls?: readonly number[]; uncannyDodge?: boolean; effectRolls: readonly number[]; additionalEffectRolls?: readonly (readonly number[])[]; delayedEffectRolls?: readonly number[] }
   | { type: 'hellish-rebuke'; actorId: string; targetId: string; slotLevel: number; triggerDamageAmount: number; savingThrowD20: number; savingThrowD20Second?: number; savingThrowBlessRoll?: number; savingThrowBaneRoll?: number; effectRolls: readonly number[] }
   | { type: 'adjudicated-spell'; actorId: string; spellId: string; spellName: string; spellLevel: number; slotLevel: number; castingTime: 'action' | 'bonus-action'; effects: readonly Dnd5eAdjudicatedSpellEffect[]; concentrationRounds?: number }
   | { type: 'paladin-sacred-weapon'; actorId: string }
@@ -703,7 +708,7 @@ export type Dnd5eCombatEvent =
   | { type: 'condition-ended'; targetId: string; condition: string }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-refreshed'; targetId: string; effectId: string; definitionId: string }
-  | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' }
+  | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' }
   | { type: 'active-effect-save-required'; targetId: string; effectId: string; ability: AbilityKey; dc: number; timing: 'target-turn-start' | 'target-turn-end' }
   | { type: 'active-effect-save-resolved'; targetId: string; effectId: string; ability: AbilityKey; dc: number; total: number; success: boolean }
   | { type: 'spell-cast'; actorId: string; targetId: string; spellId: string; slotLevel: number }
@@ -732,6 +737,7 @@ export type Dnd5eCombatEvent =
   | { type: 'death-save-failure'; targetId: string; failures: number }
   | { type: 'death-save-resolved'; actorId: string; d20: number; successes: number; failures: number; stable: boolean; dead: boolean; currentHp: number }
   | { type: 'creature-stabilized'; actorId: string; targetId: string }
+  | { type: 'delayed-spell-damage-triggered'; sourceId?: string; targetId: string; spellId: string; amount: number }
   | { type: 'concentration-resolved'; actorId: string; d20: number; total: number; dc: number; success: boolean }
   | { type: 'combat-ended' }
 
@@ -1297,6 +1303,39 @@ function advanceDnd5eActiveEffectsAtBoundary(input: {
   }
 }
 
+function triggerDnd5eDelayedSpellDamageAtTurnEnd(
+  state: Dnd5eHeadlessCombatState,
+  target: Dnd5eCombatant,
+  events: Dnd5eCombatEvent[],
+): void {
+  const boundaryTurnKey = classFeatureTurnKey(state, target.id)
+  const pending = reconciledDnd5eActiveEffects(target).filter((effect) =>
+    effect.definitionId === 'srd-5.1:spell:acid-arrow:delayed-damage' &&
+    effect.duration.type === 'until-turn-boundary' &&
+    effect.duration.boundary === 'target-turn-end' &&
+    effect.appliedTurnKey !== boundaryTurnKey,
+  )
+  for (const effect of pending) {
+    const source = effect.source.actorId ? state.combatants[effect.source.actorId] : undefined
+    const rawDamage = Math.max(0, Math.floor(effect.potency ?? 0))
+    const damage = adjustDamageForTarget(target, rawDamage, 'acid')
+    if (damage > 0 && !target.deathSaves.dead) {
+      applyDamage(target, damage, false, events, source, state, ['acid'])
+    }
+    events.push({
+      type: 'delayed-spell-damage-triggered',
+      sourceId: source?.id,
+      targetId: target.id,
+      spellId: 'acid-arrow',
+      amount: damage,
+    })
+  }
+  if (pending.length > 0) {
+    const pendingIds = new Set(pending.map((effect) => effect.id))
+    removeDnd5eEffectsByPredicate(target, (effect) => pendingIds.has(effect.id), 'expired', events)
+  }
+}
+
 function resolveDnd5eActiveEffectSaves(input: {
   state: Dnd5eHeadlessCombatState
   target: Dnd5eCombatant
@@ -1640,6 +1679,7 @@ function resolveHellishRebuke(
   const source = actor ? dnd5eHellishRebukeCastingSource(actor, action.slotLevel) : undefined
   if (
     !actor || !target || target.currentHp <= 0 || target.deathSaves.dead || !spell || !source || actor.controller === target.controller ||
+    actor.classState.bonusActionSpellTurnKey === classFeatureTurnKey(state, actor.id) ||
     !Number.isFinite(action.triggerDamageAmount) || action.triggerDamageAmount <= 0 ||
     dnd5eAttackDistanceFeet(state, actor.id, target.id) > spell.rangeFeet ||
     state.lineOfEffectBlockedByCombatantPair?.[dnd5eDirectedCombatantPairKey(actor.id, target.id)]
@@ -1672,6 +1712,7 @@ function resolveHellishRebuke(
     if (!spendReaction(actor, events) || !spendClassResource(actor, source.resourceKey, events)) {
       return fail(state, events, 'invalid-class-feature')
     }
+    actor.classState.leveledSpellTurnKey = classFeatureTurnKey(state, actor.id)
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'reaction' })
     emitDnd5eSpellCast(state, {
       type: 'spell-cast', actorId: actor.id, targetId: target.id,
@@ -1709,12 +1750,20 @@ function applyCounterspellReaction(input: {
   const reactor = input.state.combatants[input.reaction.actorId]
   const source = reactor ? dnd5eCounterspellCastingSource(reactor, input.reaction.slotLevel) : undefined
   const distance = reactor ? dnd5eAttackDistanceFeet(input.state, reactor.id, input.caster.id) : Number.POSITIVE_INFINITY
-  if (!reactor || reactor.controller === input.caster.controller || distance > 60 || !source) return undefined
+  if (
+    !reactor || reactor.controller === input.caster.controller || distance > 60 || !source ||
+    reactor.classState.bonusActionSpellTurnKey === classFeatureTurnKey(input.state, reactor.id)
+  ) return undefined
   const requiresCheck = source.level < input.spellLevel
   if (requiresCheck && !Number.isInteger(input.reaction.abilityCheckTotal)) return undefined
   if (!requiresCheck && input.reaction.abilityCheckTotal != null) return undefined
   if (!spendReaction(reactor, input.events) || !spendClassResource(reactor, source.resourceKey, input.events)) return undefined
+  reactor.classState.leveledSpellTurnKey = classFeatureTurnKey(input.state, reactor.id)
   input.events.push({ type: 'turn-resource-spent', actorId: reactor.id, resource: 'reaction' })
+  emitDnd5eSpellCast(input.state, {
+    type: 'spell-cast', actorId: reactor.id, targetId: input.caster.id,
+    spellId: 'counterspell', slotLevel: source.level,
+  }, input.events)
   const dc = requiresCheck ? 10 + input.spellLevel : undefined
   const success = !requiresCheck || input.reaction.abilityCheckTotal! >= dc!
   input.events.push({
@@ -1726,6 +1775,7 @@ function applyCounterspellReaction(input: {
 }
 
 function applyShieldSpellReaction(
+  state: Dnd5eHeadlessCombatState,
   target: Dnd5eCombatant,
   requested: boolean | undefined,
   triggeringHit: boolean,
@@ -1733,10 +1783,19 @@ function applyShieldSpellReaction(
 ): boolean | undefined {
   if (!requested) return false
   const castingSource = dnd5eShieldSpellCastingSource(target)
-  if (!triggeringHit || !castingSource || !spendReaction(target, events)) return undefined
+  if (
+    !triggeringHit || !castingSource ||
+    target.classState.bonusActionSpellTurnKey === classFeatureTurnKey(state, target.id) ||
+    !spendReaction(target, events)
+  ) return undefined
   if (castingSource.resourceKey && !spendClassResource(target, castingSource.resourceKey, events)) return undefined
+  target.classState.leveledSpellTurnKey = classFeatureTurnKey(state, target.id)
   target.classState.shieldSpellActive = true
   events.push({ type: 'turn-resource-spent', actorId: target.id, resource: 'reaction' })
+  emitDnd5eSpellCast(state, {
+    type: 'spell-cast', actorId: target.id, targetId: target.id,
+    spellId: 'shield', slotLevel: castingSource.level,
+  }, events)
   events.push({ type: 'class-state-changed', actorId: target.id, stateKey: 'shield-spell', active: true, value: castingSource.level })
   return true
 }
@@ -2152,7 +2211,10 @@ function applyZeroHitPointConditions(target: Dnd5eCombatant, events: Dnd5eCombat
 
 function applyHealing(target: Dnd5eCombatant, amount: number, events: Dnd5eCombatEvent[]): number {
   const hpBefore = target.currentHp
-  const effectiveAmount = target.deathSaves.dead ? 0 : Math.max(0, amount)
+  const healingPrevented = target.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:chill-touch:no-healing',
+  ) === true
+  const effectiveAmount = target.deathSaves.dead || healingPrevented ? 0 : Math.max(0, amount)
   target.currentHp = Math.min(target.maxHp, target.currentHp + effectiveAmount)
   if (target.classState.wildShapeFormId) target.classState.wildShapeCurrentHp = target.currentHp
   if (target.currentHp > 0) {
@@ -3270,7 +3332,7 @@ function resolveStandAgainstTideRepeat(input: {
     forceHit: use.strokeOfLuck === true,
   })
   let { hit, critical } = attackOutcome
-  const shieldSpellApplied = applyShieldSpellReaction(redirectTarget, use.shieldSpellReaction, hit, events)
+  const shieldSpellApplied = applyShieldSpellReaction(state, redirectTarget, use.shieldSpellReaction, hit, events)
   if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
   if (shieldSpellApplied) {
     targetArmorClass = dnd5eTargetArmorClassForAttack(state, attacker.id, redirectTarget.id)
@@ -3551,7 +3613,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     forceHit: action.strokeOfLuck === true,
   })
   let { hit, critical } = attackOutcome
-  const shieldSpellApplied = applyShieldSpellReaction(target, action.shieldSpellReaction, hit, events)
+  const shieldSpellApplied = applyShieldSpellReaction(state, target, action.shieldSpellReaction, hit, events)
   if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
   if (shieldSpellApplied) {
     targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -3951,8 +4013,9 @@ function resolveSpellCast(
     ? (overchannelUses + 1) * action.slotLevel
     : 0
   const overchannelSelfDamageRolls = action.overchannelSelfDamageRolls ?? []
+  const additionalEffectRolls = action.additionalEffectRolls ?? []
   if (
-    (overchannel && action.effectRolls.length > 0) ||
+    (overchannel && (action.effectRolls.length > 0 || additionalEffectRolls.length > 0)) ||
     (!overchannel && overchannelSelfDamageRolls.length > 0) ||
     overchannelSelfDamageRolls.length !== overchannelSelfDamageDiceCount ||
     overchannelSelfDamageRolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > 12)
@@ -4301,7 +4364,31 @@ function resolveSpellCast(
 
   const abilityModifier = rules.abilityModifier(actor.abilities[spellcasting.ability])
   const spellSaveDc = 8 + actor.proficiencyBonus + abilityModifier
-  const diceCount = dnd5eSpellDiceCount(spell, actor.level, action.slotLevel)
+  const higherSlotDamageChoices = dnd5eSpellHigherSlotDamageChoices(spell, action.slotLevel)
+  if (
+    (higherSlotDamageChoices.length > 0 && !action.higherSlotDamageType) ||
+    (action.higherSlotDamageType != null && !higherSlotDamageChoices.includes(action.higherSlotDamageType))
+  ) return fail(state, events, 'invalid-class-feature')
+  const damageDiceCounts = dnd5eSpellDamageDiceCounts(
+    spell,
+    actor.level,
+    action.slotLevel,
+    action.higherSlotDamageType,
+  )
+  const diceCount = damageDiceCounts[0]
+  const additionalDamageComponents = spell.additionalDamageComponents ?? []
+  const delayedDamageDiceCount = dnd5eSpellDelayedDamageDiceCount(spell, action.slotLevel)
+  const delayedEffectRolls = action.delayedEffectRolls ?? []
+  if (
+    additionalEffectRolls.length > 0 &&
+    (additionalEffectRolls.length !== additionalDamageComponents.length ||
+      additionalEffectRolls.some((rolls, index) => rolls.length !== damageDiceCounts[index + 1]))
+  ) return fail(state, events, 'invalid-dice')
+  if (
+    delayedEffectRolls.length > 0 &&
+    (!spell.delayedDamage || delayedEffectRolls.length !== delayedDamageDiceCount)
+  ) return fail(state, events, 'invalid-dice')
+  if (overchannel && delayedEffectRolls.length > 0) return fail(state, events, 'invalid-dice')
   const draconicAncestor = actor.classSelections['dragon-ancestor']?.[0]
   const draconicDamageType = draconicAncestor?.split('-').at(-1)
   const draconicAffinityBonus = actor.classId === 'sorcerer' && actor.subclassId === 'draconic' && actor.level >= 6 &&
@@ -4359,6 +4446,31 @@ function resolveSpellCast(
     const reduction = consumeSpellDamageCuttingWords(use)
     return reduction == null ? undefined : { ...damage, total: Math.max(0, damage.total - reduction) }
   }
+  const damageComponentsWithCuttingWords = (
+    use: Dnd5eCuttingWordsUse | undefined = action.cuttingWordsDamage,
+  ): Dnd5eDamageComponent[] | undefined => {
+    if (additionalDamageComponents.length < 1) return undefined
+    if (additionalEffectRolls.length !== additionalDamageComponents.length) throw new RangeError('missing spell damage component rolls')
+    const primary = damageOrHealing(false)
+    const components: Dnd5eDamageComponent[] = [{ total: primary.total, type: spell.damageType }]
+    for (let index = 0; index < additionalDamageComponents.length; index += 1) {
+      const definition = additionalDamageComponents[index]
+      const count = damageDiceCounts[index + 1]
+      const resolved = rules.resolveDamage({
+        count,
+        sides: definition.dice.sides,
+        bonus: definition.dice.bonus,
+        rolls: additionalEffectRolls[index],
+      })
+      components.push({ total: resolved.total, type: definition.damageType })
+    }
+    const reduction = consumeSpellDamageCuttingWords(use)
+    if (reduction == null) return undefined
+    return scaleDnd5eDamageComponents(
+      components,
+      Math.max(0, components.reduce((sum, component) => sum + component.total, 0) - reduction),
+    )
+  }
   const normalizedCreatureType = (combatant: Dnd5eCombatant) => (combatant.creatureType ?? '').trim().toLowerCase()
   const isPlantTarget = (combatant: Dnd5eCombatant) => {
     const type = normalizedCreatureType(combatant)
@@ -4372,7 +4484,12 @@ function resolveSpellCast(
     spell.id === 'blight' && isPlantTarget(combatant)
       ? diceCount * spell.dice.sides + baseEffectBonus + draconicAffinityBonus + empoweredEvocationBonus
       : rolledTotal
-  const applySpellDamage = (combatant: Dnd5eCombatant, amount: number, critical = false) => {
+  const applySpellDamage = (
+    combatant: Dnd5eCombatant,
+    amount: number,
+    critical = false,
+    damageTypes: readonly Dnd5eDamageType[] = spell.damageType ? [spell.damageType] : [],
+  ) => {
     const hpBefore = combatant.currentHp
     applyDamage(
       combatant,
@@ -4381,7 +4498,7 @@ function resolveSpellCast(
       events,
       actor,
       state,
-      spell.damageType ? [spell.damageType] : [],
+      damageTypes,
       spell.id === 'disintegrate',
     )
     if (spell.id !== 'disintegrate' || combatant.currentHp > 0) return
@@ -4434,7 +4551,67 @@ function resolveSpellCast(
         type: 'class-state-changed', actorId: actor.id, targetId: affectedTarget.id,
         stateKey: 'guiding-bolt', active: true,
       })
+    } else if (spell.onHitEffect === 'chill-touch') {
+      const duration: Dnd5eActiveEffectDuration = {
+        type: 'until-turn-boundary', boundary: 'source-turn-start',
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+      }
+      applyDnd5eMechanicalStatusEffect(affectedTarget, actor, {
+        definitionId: 'srd-5.1:spell:chill-touch:no-healing',
+        label: '冻寒之触：无法恢复生命值',
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        duration,
+      }, events)
+      const creatureType = (affectedTarget.creatureType ?? '').trim().toLowerCase()
+      if (creatureType === 'undead' || creatureType.includes('亡灵')) {
+        applyDnd5eMechanicalStatusEffect(affectedTarget, actor, {
+          definitionId: 'srd-5.1:spell:chill-touch:undead-disadvantage',
+          label: '冻寒之触：对施法者的攻击具有劣势',
+          appliedTurnKey: classFeatureTurnKey(state, actor.id),
+          duration,
+        }, events)
+      }
+      events.push({
+        type: 'class-state-changed', actorId: actor.id, targetId: affectedTarget.id,
+        stateKey: 'chill-touch', active: true,
+      })
     }
+  }
+  const queueDelayedSpellDamage = (affectedTarget: Dnd5eCombatant) => {
+    const delayed = spell.delayedDamage
+    if (!delayed) {
+      if (delayedEffectRolls.length > 0) throw new RangeError('unexpected delayed spell damage')
+      return
+    }
+    const damage = rules.resolveDamage({
+      count: delayedDamageDiceCount,
+      sides: delayed.dice.sides,
+      bonus: delayed.dice.bonus,
+      rolls: overchannel
+        ? Array.from({ length: delayedDamageDiceCount }, () => delayed.dice.sides)
+        : delayedEffectRolls,
+    })
+    const appliedTurnKey = classFeatureTurnKey(state, actor.id)
+    const definitionId = `srd-5.1:spell:${spell.id}:delayed-damage`
+    const incoming = createDnd5eMechanicalEffect({
+      id: dnd5eActiveEffectId(definitionId, actor.id, affectedTarget.id, appliedTurnKey),
+      definitionId,
+      label: `${spell.name}：后续伤害`,
+      kind: 'debuff',
+      source: { kind: 'spell', actorId: actor.id, actorName: actor.name, rulesId: spell.id },
+      targetId: affectedTarget.id,
+      duration: { type: 'until-turn-boundary', boundary: 'target-turn-end', appliedTurnKey },
+      appliedTurnKey,
+      stackingKey: `${definitionId}:${actor.id}:${appliedTurnKey}`,
+      stackingPolicy: 'stack',
+      potency: damage.total,
+    })
+    const mutation = applyDnd5eActiveEffect({ effects: reconciledDnd5eActiveEffects(affectedTarget), incoming })
+    commitDnd5eActiveEffects(affectedTarget, mutation.effects)
+    events.push({
+      type: 'active-effect-applied', targetId: affectedTarget.id,
+      effectId: incoming.id, definitionId: incoming.definitionId,
+    })
   }
   const applyFailedSaveSpellEffect = (affectedTarget: Dnd5eCombatant, dc: number) => {
     if (spell.onFailedSaveEffect === 'vicious-mockery') {
@@ -4645,7 +4822,7 @@ function resolveSpellCast(
         for (const shieldTargetId of shieldSpellReactionTargetIds) {
           if (!allowedHostileTargetIds.has(shieldTargetId)) continue
           const shieldTarget = state.combatants[shieldTargetId]
-          if (!shieldTarget || applyShieldSpellReaction(shieldTarget, true, true, events) !== true) {
+          if (!shieldTarget || applyShieldSpellReaction(state, shieldTarget, true, true, events) !== true) {
             return fail(state, events, 'invalid-class-feature')
           }
         }
@@ -4795,16 +4972,26 @@ function resolveSpellCast(
         const successfulSave = potentCantrip ? 'half' : spell.damageOnSuccessfulSave ?? 'none'
         const requiresDamageRolls = resolvedTargets.some(({ success, sculpted }) => !sculpted && (!success || successfulSave === 'half'))
         if (requiresDamageRolls) {
-          const damage = damageWithCuttingWords(false)
-          if (!damage) return fail(state, events, 'invalid-class-feature')
+          const damageComponents = additionalDamageComponents.length > 0
+            ? damageComponentsWithCuttingWords()
+            : undefined
+          const damage = additionalDamageComponents.length > 0 ? undefined : damageWithCuttingWords(false)
+          if ((!damage && !damageComponents) || (damage && damageComponents)) {
+            return fail(state, events, 'invalid-class-feature')
+          }
           for (const resolvedTarget of resolvedTargets) {
             if (resolvedTarget.sculpted) continue
             if (spell.id === 'blight' && isBlightImmuneTarget(resolvedTarget.target)) continue
-            const adjusted = adjustDamageForTarget(
-              resolvedTarget.target,
-              blightDamageTotal(resolvedTarget.target, damage.total),
-              spell.damageType,
-            )
+            const adjustedComponents = damageComponents
+              ? adjustDnd5eDamageComponents(resolvedTarget.target, damageComponents)
+              : undefined
+            const adjusted = adjustedComponents
+              ? adjustedComponents.reduce((sum, component) => sum + component.total, 0)
+              : adjustDamageForTarget(
+                  resolvedTarget.target,
+                  blightDamageTotal(resolvedTarget.target, damage!.total),
+                  spell.damageType,
+                )
             const finalDamage = dnd5eDamageAfterSavingThrow({
               creature: resolvedTarget.target,
               ability: spell.saveAbility!,
@@ -4812,9 +4999,18 @@ function resolveSpellCast(
               success: resolvedTarget.success,
               successfulSave,
             })
-            if (finalDamage > 0) applySpellDamage(resolvedTarget.target, finalDamage)
+            if (finalDamage > 0) {
+              applySpellDamage(
+                resolvedTarget.target,
+                finalDamage,
+                false,
+                adjustedComponents
+                  ? adjustedComponents.flatMap((component) => component.type ? [component.type] : [])
+                  : spell.damageType ? [spell.damageType] : [],
+              )
+            }
           }
-        } else if (action.effectRolls.length > 0) {
+        } else if (action.effectRolls.length > 0 || additionalEffectRolls.length > 0) {
           return fail(state, events, 'invalid-dice')
         }
         const failedEffectTargets = resolvedTargets.filter(({ success, sculpted }) => !success && !sculpted)
@@ -4875,11 +5071,21 @@ function resolveSpellCast(
       const successfulSave = potentCantrip ? 'half' : spell.damageOnSuccessfulSave ?? 'none'
       const requiresDamageRolls = !save.success || successfulSave === 'half'
       if (requiresDamageRolls) {
-        const damage = damageWithCuttingWords(false)
-        if (!damage) return fail(state, events, 'invalid-class-feature')
+        const damageComponents = additionalDamageComponents.length > 0
+          ? damageComponentsWithCuttingWords()
+          : undefined
+        const damage = additionalDamageComponents.length > 0 ? undefined : damageWithCuttingWords(false)
+        if ((!damage && !damageComponents) || (damage && damageComponents)) {
+          return fail(state, events, 'invalid-class-feature')
+        }
+        const adjustedComponents = damageComponents
+          ? adjustDnd5eDamageComponents(target, damageComponents)
+          : undefined
         const adjusted = spell.id === 'blight' && isBlightImmuneTarget(target)
           ? 0
-          : adjustDamageForTarget(target, blightDamageTotal(target, damage.total), spell.damageType)
+          : adjustedComponents
+            ? adjustedComponents.reduce((sum, component) => sum + component.total, 0)
+            : adjustDamageForTarget(target, blightDamageTotal(target, damage!.total), spell.damageType)
         const finalDamage = dnd5eDamageAfterSavingThrow({
           creature: target,
           ability: spell.saveAbility!,
@@ -4887,8 +5093,17 @@ function resolveSpellCast(
           success: save.success,
           successfulSave,
         })
-        if (finalDamage > 0) applySpellDamage(target, finalDamage)
-      } else if (action.effectRolls.length > 0) {
+        if (finalDamage > 0) {
+          applySpellDamage(
+            target,
+            finalDamage,
+            false,
+            adjustedComponents
+              ? adjustedComponents.flatMap((component) => component.type ? [component.type] : [])
+              : spell.damageType ? [spell.damageType] : [],
+          )
+        }
+      } else if (action.effectRolls.length > 0 || additionalEffectRolls.length > 0) {
         return fail(state, events, 'invalid-dice')
       }
       if (!save.success) {
@@ -4972,7 +5187,7 @@ function resolveSpellCast(
           automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, affectedTarget),
         })
         let { hit, critical } = attackOutcome
-        const shieldSpellApplied = applyShieldSpellReaction(affectedTarget, supplied.shieldSpellReaction, hit, events)
+        const shieldSpellApplied = applyShieldSpellReaction(state, affectedTarget, supplied.shieldSpellReaction, hit, events)
         if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
         if (shieldSpellApplied) {
           targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, affectedTarget.id)
@@ -5100,7 +5315,7 @@ function resolveSpellCast(
       automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, target),
     })
     let { hit, critical } = attackOutcome
-    const shieldSpellApplied = applyShieldSpellReaction(target, action.shieldSpellReaction, hit, events)
+    const shieldSpellApplied = applyShieldSpellReaction(state, target, action.shieldSpellReaction, hit, events)
     if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
     if (shieldSpellApplied) {
       targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -5117,7 +5332,9 @@ function resolveSpellCast(
     }, events)
     consumeDnd5eHelpAttack(state, actor, target, events)
     if (hit) recordHunterMultiattackDefenseHit(state, actor, target)
-    if (!hit && (action.uncannyDodge || action.cuttingWordsDamage)) return fail(state, events, 'invalid-class-feature')
+    if (!hit && (action.uncannyDodge || (action.cuttingWordsDamage && spell.spellAttackMissDamage !== 'half'))) {
+      return fail(state, events, 'invalid-class-feature')
+    }
     if (hit && action.standAgainstTide) return fail(state, events, 'invalid-class-feature')
     if (hit) {
       const damage = damageWithCuttingWords(critical)
@@ -5130,6 +5347,7 @@ function resolveSpellCast(
       )
       if (finalDamage == null) return fail(state, events, 'invalid-class-feature')
       applySpellDamage(target, adjustDamageForTarget(target, finalDamage, spell.damageType), critical)
+      queueDelayedSpellDamage(target)
       triggerHurlThroughHell({
         state,
         actor,
@@ -5139,9 +5357,18 @@ function resolveSpellCast(
       })
       applySpellOnHitEffect(target)
     } else {
-      if (action.effectRolls.length > 0 || (action.hurlThroughHellDamageRolls?.length ?? 0) > 0) {
+      if (spell.spellAttackMissDamage === 'half') {
+        if (delayedEffectRolls.length > 0) return fail(state, events, 'invalid-dice')
+        const splash = damageWithCuttingWords(false)
+        if (!splash) return fail(state, events, 'invalid-class-feature')
+        const halfDamage = Math.floor(splash.total / 2)
+        if (halfDamage > 0) {
+          applySpellDamage(target, adjustDamageForTarget(target, halfDamage, spell.damageType))
+        }
+      } else if (action.effectRolls.length > 0 || delayedEffectRolls.length > 0) {
         return fail(state, events, 'invalid-dice')
       }
+      if ((action.hurlThroughHellDamageRolls?.length ?? 0) > 0) return fail(state, events, 'invalid-dice')
       if (action.standAgainstTide) {
         if (spell.rangeFeet > 5) return fail(state, events, 'invalid-class-feature')
         const repeated = resolveStandAgainstTideRepeat({
@@ -5260,7 +5487,7 @@ function resolveMonsterAction(
       automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, target),
     })
     let { hit, critical } = attackOutcome
-    const shieldSpellApplied = applyShieldSpellReaction(target, supplied.shieldSpellReaction, hit, events)
+    const shieldSpellApplied = applyShieldSpellReaction(state, target, supplied.shieldSpellReaction, hit, events)
     if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
     if (shieldSpellApplied) {
       targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -5531,7 +5758,7 @@ function resolveMonkUnarmedBonus(
       automaticCritical: dnd5eHitIsAutomaticCritical(state, actor.id, target),
     })
     let { hit, critical } = attackOutcome
-    const shieldSpellApplied = applyShieldSpellReaction(target, supplied.shieldSpellReaction, hit, events)
+    const shieldSpellApplied = applyShieldSpellReaction(state, target, supplied.shieldSpellReaction, hit, events)
     if (shieldSpellApplied == null) return fail(state, events, 'invalid-class-feature')
     if (shieldSpellApplied) {
       targetArmorClass = dnd5eTargetArmorClassForAttack(state, actor.id, target.id)
@@ -8316,6 +8543,7 @@ function resolveDnd5eHeadlessActionInternal(
   }
 
   if (action.type === 'end-turn') {
+    triggerDnd5eDelayedSpellDamageAtTurnEnd(state, actor, events)
     advanceDnd5eActiveEffectsAtBoundary({ state, actor, point: 'end', events })
   }
 
@@ -8372,6 +8600,29 @@ function resolveDnd5eHeadlessActionInternal(
   return { ok: true, state, events }
 }
 
+function endInvalidDnd5eGrapples(
+  state: Dnd5eHeadlessCombatState,
+  events: Dnd5eCombatEvent[],
+): void {
+  for (const target of Object.values(state.combatants)) {
+    const grapples = reconciledDnd5eActiveEffects(target).filter((effect) =>
+      effect.standardCondition === 'grappled' && effect.source.rulesId === 'basic-action:grapple',
+    )
+    for (const grapple of grapples) {
+      const source = grapple.source.actorId ? state.combatants[grapple.source.actorId] : undefined
+      const sourceIncapacitated = !source || source.currentHp <= 0 || source.deathSaves.dead || dnd5eIsIncapacitated(source)
+      const outOfRange = !!source && dnd5eAttackDistanceFeet(state, source.id, target.id) > 5
+      if (!sourceIncapacitated && !outOfRange) continue
+      removeDnd5eEffectsByPredicate(
+        target,
+        (effect) => effect.id === grapple.id,
+        sourceIncapacitated ? 'source-incapacitated' : 'out-of-range',
+        events,
+      )
+    }
+  }
+}
+
 /**
  * 所有 Headless 行动的统一状态后置条件。2014 规则规定失能会立即结束专注；
  * 该检查位于事务边界，因此法术、职业、怪物、DM 与插件状态写入都无法绕过。
@@ -8397,6 +8648,7 @@ export function resolveDnd5eHeadlessAction(
           endDnd5eConcentration(result.state, combatant, events)
         }
       }
+      endInvalidDnd5eGrapples(result.state, events)
       finalResult = { ...result, events }
     }
   } finally {

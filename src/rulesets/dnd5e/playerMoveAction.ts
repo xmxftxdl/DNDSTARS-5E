@@ -6,7 +6,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
-import { resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { dnd5eEffectiveSpeed, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 
 export type Dnd5ePlayerMoveRejectReason =
@@ -55,12 +55,6 @@ export function prepareDnd5ePlayerMove(input: {
     geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
-  const distanceFeet = path.distanceFeet
-  const standFromProne = actor.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const movementCostFeet = path.movementCostFeet * (action.dnd5eCarefulMovement ? 2 : 1) +
-    (standFromProne ? Math.floor(actor.speed / 2) : 0)
-  if (movementCostFeet > input.turnEconomy.movement.current) return { ok: false, reason: 'insufficient-movement' }
-
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: action.combatId ?? `map-${input.map.id}`,
     round: action.round,
@@ -72,6 +66,13 @@ export function prepareDnd5ePlayerMove(input: {
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
+  const distanceFeet = path.distanceFeet
+  const isProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
+  const standFromProne = isProne && action.dnd5eStandFromProne !== false
+  const traversalMultiplier = action.dnd5eCarefulMovement || (isProne && !standFromProne) ? 2 : 1
+  const movementCostFeet = path.movementCostFeet * traversalMultiplier +
+    (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0)
+  if (movementCostFeet > input.turnEconomy.movement.current) return { ok: false, reason: 'insufficient-movement' }
   actorCombatant.turn = {
     actionAvailable: input.turnEconomy.action.current > 0,
     bonusActionAvailable: input.turnEconomy.bonusAction.current > 0,

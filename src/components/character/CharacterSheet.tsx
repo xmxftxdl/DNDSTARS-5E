@@ -42,13 +42,14 @@ import { parseBoundedNumberDraft, resolveBoundedNumberDraft } from './numberInpu
 interface CharacterSheetProps {
   id: string
   isDM: boolean
+  readOnly?: boolean
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.floor(value)))
 }
 
-export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
+export default function CharacterSheet({ id, isDM, readOnly = false }: CharacterSheetProps) {
   const [selectedTab, setSelectedTab] = useState<'sheet' | 'class' | 'inventory' | 'spellbook' | 'plugins'>('sheet')
   const [shortRestHitDice, setShortRestHitDice] = useState<Record<number, number>>({})
   const [useSongOfRest, setUseSongOfRest] = useState(false)
@@ -56,6 +57,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
   const characters = useCharacterStore((state) => state.characters)
   const character = useCharacterStore((state) => state.characters.find((item) => item.id === id))
   const update = useCharacterStore((state) => state.update)
+  const updateSheetHitPoints = useCharacterStore((state) => state.updateSheetHitPoints)
   useSyncExternalStore(
     subscribeDnd5eRulesPluginRegistry,
     dnd5eRulesPluginRegistrySnapshot,
@@ -69,7 +71,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
   }, [character])
 
   useEffect(() => {
-    if (!character || character.rulesetId === 'dnd5e-2014-srd-5.1') return
+    if (readOnly || !character || character.rulesetId === 'dnd5e-2014-srd-5.1') return
     const level = clamp(character.level, 1, 20)
     const sides = Number(character.hitDice.match(/d(\d+)/i)?.[1] ?? 8)
     update(character.id, {
@@ -86,10 +88,18 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
       inspiration: character.inspiration > 0 ? 1 : 0,
       exhaustionLevel: character.exhaustionLevel ?? 0,
     })
-  }, [character, update])
+  }, [character, readOnly, update])
 
   if (!character) return <p className="text-slate-400">未找到角色。</p>
   const c = character
+  const updateCharacter = (patch: Parameters<typeof update>[1]) => {
+    if (!readOnly) update(id, patch)
+  }
+  const updateCharacterHitPoints = (
+    patch: Parameters<typeof updateSheetHitPoints>[1],
+  ) => {
+    if (!readOnly) updateSheetHitPoints(id, patch)
+  }
   const pluginRaces = registeredDnd5ePluginRaces()
   const pluginBackgrounds = registeredDnd5ePluginBackgrounds()
   const raceOptions = [...DND5E_2014_RACE_OPTIONS, ...pluginRaces.map((race) => race.name)]
@@ -144,7 +154,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
         }
       : undefined
     const resolved = resolveDnd5eShortRestHitDice({ character: c, spends, songOfRest })
-    update(id, {
+    updateCharacterHitPoints({
       currentHp: resolved.character.currentHp,
       hitPointDice: resolved.character.hitPointDice,
     })
@@ -157,14 +167,14 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
   }
 
   const toggleSavingThrow = (key: AbilityKey) => {
-    update(id, {
+    updateCharacter({
       savingThrows: c.savingThrows.includes(key)
         ? c.savingThrows.filter((item) => item !== key)
         : [...c.savingThrows, key],
     })
   }
   const toggleSkill = (key: string) => {
-    update(id, {
+    updateCharacter({
       skills: c.skills.includes(key)
         ? c.skills.filter((item) => item !== key)
         : [...c.skills, key],
@@ -173,6 +183,12 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
 
   return (
     <div className="space-y-5">
+      {readOnly && (
+        <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-100">
+          DM 只读检视：这里展示玩家同步到房间的角色快照，任何字段都不能从此窗口修改。
+        </div>
+      )}
+      <fieldset disabled={readOnly} className="contents">
       <section className="glass rounded-2xl p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <CharacterPortraitEditor
@@ -180,10 +196,11 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
             avatar={c.avatar}
             accent={c.accent}
             portrait={c.portrait}
-            onChange={(portrait) => update(id, { portrait })}
+            editable={!readOnly}
+            onChange={(portrait) => updateCharacter({ portrait })}
           />
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
-            <Field label="角色名称" value={c.name} onChange={(value) => update(id, { name: value })} className="col-span-2" />
+            <Field label="角色名称" value={c.name} onChange={(value) => updateCharacter({ name: value })} className="col-span-2" />
             <SelectField
               label="职业"
               value={c.charClass}
@@ -191,21 +208,21 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
               onChange={(value) => {
                 const nextClass = dnd5eClassDefinition(value)
                 setSelectedTab('sheet')
-                update(id, {
+                updateCharacter({
                   charClass: value,
                   savingThrows: nextClass ? [...nextClass.savingThrows] : c.savingThrows,
                   equipment: defaultEquipmentForDnd5eCharacter({ charClass: value }),
                 })
               }}
             />
-            <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => update(id, { level: value })} />
+            <NumberField label="等级" value={c.level} min={1} max={20} onChange={(value) => updateCharacter({ level: value })} />
             <SelectField
               label="种族"
               value={c.race}
               options={raceOptions}
               onChange={(value) => {
                 const pluginRace = pluginRaces.find((race) => race.name === value)
-                update(id, {
+                updateCharacter({
                   race: value,
                   dnd5eRaceId: pluginRace?.id,
                   speed: dnd5eRaceSpeed(pluginRace?.id ?? value),
@@ -219,7 +236,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
               onChange={(value) => {
                 const pluginBackground = pluginBackgrounds.find((background) => background.name === value)
                 const previousBackgroundSkills = new Set(c.dnd5eBackgroundSkillProficiencies ?? [])
-                update(id, {
+                updateCharacter({
                   background: value,
                   dnd5eBackgroundId: pluginBackground?.id,
                   dnd5eBackgroundSkillProficiencies: pluginBackground ? [...pluginBackground.skillProficiencies] : [],
@@ -229,13 +246,14 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                 })
               }}
             />
-            <SelectField label="阵营" value={c.alignment ?? ''} options={DND5E_2014_ALIGNMENT_OPTIONS} onChange={(value) => update(id, { alignment: value })} />
-            <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => update(id, { experience: value })} />
-            <Field label="玩家" value={c.player} onChange={(value) => update(id, { player: value })} />
-            <NumberField label="激励骰数量" value={c.inspiration} min={0} max={99} onChange={(value) => update(id, { inspiration: value })} />
+            <SelectField label="阵营" value={c.alignment ?? ''} options={DND5E_2014_ALIGNMENT_OPTIONS} onChange={(value) => updateCharacter({ alignment: value })} />
+            <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => updateCharacter({ experience: value })} />
+            <Field label="玩家" value={c.player} onChange={(value) => updateCharacter({ player: value })} />
+            <NumberField label="激励骰数量" value={c.inspiration} min={0} max={99} onChange={(value) => updateCharacter({ inspiration: value })} />
           </div>
         </div>
       </section>
+      </fieldset>
 
       <nav className="glass flex gap-1 rounded-2xl p-1.5" aria-label="角色页面分页">
           <CharacterTab active={activeTab === 'sheet'} onClick={() => setSelectedTab('sheet')}>人物卡</CharacterTab>
@@ -245,6 +263,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
           {hasPluginTab && <CharacterTab active={activeTab === 'plugins'} onClick={() => setSelectedTab('plugins')}>扩展规则</CharacterTab>}
       </nav>
 
+      <fieldset disabled={readOnly} className="contents">
       {activeTab === 'sheet' && <>
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
         <Stat icon={Shield} label="护甲等级" value={`${dnd5eArmorClass(c)}`} />
@@ -283,7 +302,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                 savingThrowAdditionalBonus={savingThrowAuraBonus}
                 skillProficiencyRank={(skillKey) => dnd5eSkillCheckProficiencyRank(c, skillKey)}
                 skillCheckModifier={(skillKey) => dnd5eSkillCheckModifier(c, skillKey)}
-                onScoreChange={(score) => update(id, { abilities: { ...c.abilities, [ability.key]: score } })}
+                onScoreChange={(score) => updateCharacter({ abilities: { ...c.abilities, [ability.key]: score } })}
                 onToggleSavingThrow={() => toggleSavingThrow(ability.key)}
                 onToggleSkill={toggleSkill}
               />
@@ -297,9 +316,9 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
               current={c.currentHp}
               max={c.maxHp}
               temp={c.tempHp}
-              editable
-              maxEditable={hitPointMaximumMode === 'manual'}
-              onChange={(patch) => update(id, patch)}
+              editable={!readOnly}
+              maxEditable={!readOnly && hitPointMaximumMode === 'manual'}
+              onChange={updateCharacterHitPoints}
             />
             <div className="glass rounded-xl px-4 py-3 text-xs text-slate-400">
               <div className="flex items-center justify-between gap-3">
@@ -307,7 +326,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                 <select
                   id={`hp-mode-${id}`}
                   value={hitPointMaximumMode}
-                  onChange={(event) => update(id, { hitPointMaximumMode: event.target.value as 'fixed' | 'manual' })}
+                  onChange={(event) => updateCharacter({ hitPointMaximumMode: event.target.value as 'fixed' | 'manual' })}
                   className="rounded-lg border border-white/10 bg-void-900/80 px-2 py-1 text-slate-200 outline-none focus:border-arcane-500"
                 >
                   <option value="fixed">固定值（自动）</option>
@@ -325,11 +344,11 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
               <HeartPulse className="h-4 w-4 text-rose-300" />死亡豁免与专注
             </h3>
             <div className="space-y-3">
-              <Counter label="成功" value={c.deathSaveSuccesses ?? 0} max={3} tone="emerald" onChange={(value) => update(id, { deathSaveSuccesses: value, deathSaveStable: value >= 3 })} />
-              <Counter label="失败" value={c.deathSaveFailures ?? 0} max={3} tone="rose" onChange={(value) => update(id, { deathSaveFailures: value })} />
+              <Counter label="成功" value={c.deathSaveSuccesses ?? 0} max={3} tone="emerald" onChange={(value) => updateCharacter({ deathSaveSuccesses: value, deathSaveStable: value >= 3 })} />
+              <Counter label="失败" value={c.deathSaveFailures ?? 0} max={3} tone="rose" onChange={(value) => updateCharacter({ deathSaveFailures: value })} />
               <div className="grid grid-cols-2 gap-2">
-                <Toggle label="伤势稳定" active={!!c.deathSaveStable} onClick={() => update(id, { deathSaveStable: !c.deathSaveStable })} />
-                <Toggle label="保持专注" active={!!c.concentrating} onClick={() => update(id, { concentrating: !c.concentrating })} />
+                <Toggle label="伤势稳定" active={!!c.deathSaveStable} onClick={() => updateCharacter({ deathSaveStable: !c.deathSaveStable })} />
+                <Toggle label="保持专注" active={!!c.concentrating} onClick={() => updateCharacter({ concentrating: !c.concentrating })} />
               </div>
             </div>
           </section>
@@ -350,7 +369,7 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
                       const next = hitDice.map((item, itemIndex) => itemIndex === index
                         ? { ...item, current: clamp(Number(event.target.value) || 0, 0, item.max) }
                         : item)
-                      update(id, { hitPointDice: next })
+                      updateCharacter({ hitPointDice: next })
                     }}
                     className="w-14 rounded border border-white/10 bg-void-950/70 px-1 py-1 text-center text-sm"
                   />
@@ -402,11 +421,11 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
 
           <section className="glass rounded-2xl p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-200">角色笔记</h3>
-            <textarea aria-label="角色笔记" value={c.notes} onChange={(event) => update(id, { notes: event.target.value })} rows={5} className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200" />
+            <textarea aria-label="角色笔记" value={c.notes} onChange={(event) => updateCharacter({ notes: event.target.value })} rows={5} className="w-full resize-none rounded-lg border border-white/10 bg-void-900/60 p-3 text-sm text-slate-200" />
             {isDM && (
               <textarea
                 value={c.dmNotes}
-                onChange={(event) => update(id, { dmNotes: event.target.value })}
+                onChange={(event) => updateCharacter({ dmNotes: event.target.value })}
                 rows={3}
                 placeholder="仅 DM 可见的笔记"
                 className="mt-3 w-full resize-none rounded-lg border border-amber-500/20 bg-void-900/60 p-3 text-sm text-amber-100"
@@ -416,12 +435,13 @@ export default function CharacterSheet({ id, isDM }: CharacterSheetProps) {
         </div>
       </div>
       </>}
+      </fieldset>
 
-      {activeTab === 'class' && c.charClass === '战士' && <FighterProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
-      {activeTab === 'class' && c.charClass !== '战士' && <Dnd5eClassProgressionPanel character={c} onChange={(patch) => update(id, patch)} />}
-      {activeTab === 'inventory' && <EquipmentTab charId={c.id} />}
-      {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} onChange={(patch) => update(id, patch)} />}
-      {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={(patch) => update(id, patch)} />}
+      {activeTab === 'class' && c.charClass === '战士' && <FighterProgressionPanel character={c} onChange={updateCharacter} />}
+      {activeTab === 'class' && c.charClass !== '战士' && <Dnd5eClassProgressionPanel character={c} onChange={updateCharacter} />}
+      {activeTab === 'inventory' && <EquipmentTab charId={c.id} editable={!readOnly} />}
+      {activeTab === 'spellbook' && <Dnd5eSpellbookPanel character={c} onChange={updateCharacter} />}
+      {activeTab === 'plugins' && <Dnd5ePluginFeaturesPanel character={c} onChange={updateCharacter} />}
     </div>
   )
 }

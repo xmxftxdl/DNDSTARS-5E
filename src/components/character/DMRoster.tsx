@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Clock3, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { AlertTriangle, Clock3, Eye, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { playerSlotLabel } from '../../lib/appMode'
 import { roomCharactersOwnedByMembers } from '../../lib/playerView'
 import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../../lib/roomApi'
 import { getRoomSession } from '../../lib/roomSession'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
+import CharacterSheet from './CharacterSheet'
 
 export default function DMRoster() {
   const roomSession = useMemo(() => getRoomSession(), [])
@@ -13,6 +15,7 @@ export default function DMRoster() {
   const [players, setPlayers] = useState<RoomRosterMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [inspectedCharacterId, setInspectedCharacterId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!roomSession || roomSession.role !== 'dm') {
@@ -60,6 +63,9 @@ export default function DMRoster() {
     player.memberId,
     currentRoomCharacters.filter((character) => character.roomMemberId === player.memberId),
   ])), [currentPlayers, currentRoomCharacters])
+  const inspectedCharacter = inspectedCharacterId
+    ? currentRoomCharacters.find((character) => character.id === inspectedCharacterId) ?? null
+    : null
 
   const onlineCount = onlinePlayers.length
 
@@ -155,12 +161,16 @@ export default function DMRoster() {
                   {ownedCharacters.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {ownedCharacters.map((character) => (
-                        <span
+                        <button
+                          type="button"
                           key={character.id}
-                          className="rounded-lg border border-arcane-400/15 bg-arcane-500/[0.07] px-2.5 py-1.5 text-xs text-slate-300"
+                          onClick={() => setInspectedCharacterId(character.id)}
+                          aria-label={`查看角色卡：${character.name}`}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-arcane-400/15 bg-arcane-500/[0.07] px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-arcane-300/35 hover:bg-arcane-500/15 hover:text-white"
                         >
+                          <Eye className="h-3.5 w-3.5" />
                           {character.name}
-                        </span>
+                        </button>
                       ))}
                     </div>
                   ) : (
@@ -172,6 +182,64 @@ export default function DMRoster() {
           })}
         </div>
       )}
+      {inspectedCharacter && (
+        <DmCharacterInspector
+          characterId={inspectedCharacter.id}
+          characterName={inspectedCharacter.name}
+          onClose={() => setInspectedCharacterId(null)}
+        />
+      )}
     </section>
+  )
+}
+
+function DmCharacterInspector({
+  characterId,
+  characterName,
+  onClose,
+}: {
+  characterId: string
+  characterName: string
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/80 p-3 backdrop-blur-sm sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${characterName}的角色卡详情`}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div className="my-auto w-full max-w-7xl rounded-2xl border border-white/10 bg-void-950 shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-4 rounded-t-2xl border-b border-white/10 bg-void-950/95 px-5 py-4 backdrop-blur">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">DM 只读检视</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">{characterName}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭角色卡详情"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 text-slate-400 transition hover:bg-white/5 hover:text-white"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-4 sm:p-6">
+          <CharacterSheet id={characterId} isDM readOnly />
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }

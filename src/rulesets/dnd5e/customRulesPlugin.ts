@@ -10,6 +10,7 @@ import type {
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 import {
+  normalizeDnd5ePersistentAreaTriggerDeclaration,
   normalizeDnd5ePersistentAreaVisual,
   type Dnd5ePluginEffectDuration,
 } from './persistentAreaTypes'
@@ -142,12 +143,24 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
       ))
     )) errors.push(`特性 ${feature.name || feature.id} 的战斗行动或 Interrupt 无效。`)
     const persistentArea = feature.action?.persistentArea
+    const persistentAreaTriggers = persistentArea?.triggers
+    const persistentAreaTriggerIds = new Set<string>()
+    const invalidPersistentAreaTriggers = persistentAreaTriggers != null && (
+      !Array.isArray(persistentAreaTriggers) || persistentAreaTriggers.length < 1 ||
+      persistentAreaTriggers.length > 16 || persistentAreaTriggers.some((trigger) => {
+        const normalized = normalizeDnd5ePersistentAreaTriggerDeclaration(trigger)
+        if (!normalized || persistentAreaTriggerIds.has(normalized.id)) return true
+        persistentAreaTriggerIds.add(normalized.id)
+        return false
+      })
+    )
     if (persistentArea && (
       feature.action?.targeting.kind !== 'area' || !persistentArea.label.trim() ||
       !/^#[0-9a-f]{6}$/i.test(persistentArea.color ?? '#8b5cf6') ||
       !Number.isInteger(persistentArea.durationRounds) || persistentArea.durationRounds < 1 ||
       persistentArea.durationRounds > 14_400 ||
-      (persistentArea.visual != null && !normalizeDnd5ePersistentAreaVisual(persistentArea.visual))
+      (persistentArea.visual != null && !normalizeDnd5ePersistentAreaVisual(persistentArea.visual)) ||
+      invalidPersistentAreaTriggers
     )) errors.push(`特性 ${feature.name || feature.id} 的持续区域声明无效。`)
   }
   const headlessActionIds = new Set<string>()

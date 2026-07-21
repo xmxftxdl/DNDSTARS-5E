@@ -132,6 +132,30 @@ describe('D&D 5e player map movement', () => {
     expect(resolved.result.events).toContainEqual({ type: 'condition-ended', targetId: 'hero-token', condition: 'prone' })
   })
 
+  it('lets a prone player crawl without automatically standing', () => {
+    const hero = character()
+    const activeEffects = migrateLegacyDnd5eConditions({ targetId: hero.id, conditions: ['prone'] })
+    hero.conditions = dnd5eConditionsFromActiveEffects(activeEffects)
+    hero.dnd5eCombatState = { schemaVersion: 2, activeEffects }
+    const prepared = prepareDnd5ePlayerMove({
+      action: { ...action, targetPosition: { x: 15, y: 5 }, dnd5eStandFromProne: false },
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({ distanceFeet: 5, movementCostFeet: 10, standFromProne: false })
+    const resolved = resolvePreparedDnd5ePlayerMove({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.state.combatants['hero-token'].turn.movementRemaining).toBe(20)
+    expect(resolved.application?.characters[0].conditions).toContain('prone')
+  })
+
   it('persists the Dodge action marker into the character combat state', () => {
     const dodgeAction: SharedPlayerActionState = { ...action, id: 'dodge', type: 'dodge' }
     const resolved = resolveDnd5ePlayerDodge({

@@ -833,6 +833,14 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
   const originalEffectValidation = validateDnd5eActiveEffectsStrict(input.dnd5eCombatState?.activeEffects)
   const c = migrateLegacyCharacterFields(input)
   const d = combatDefaults()
+  const experienceAwards = Array.isArray(c.dnd5eExperienceAwards)
+    ? c.dnd5eExperienceAwards.filter((award) =>
+        award && typeof award.combatId === 'string' && award.combatId.length > 0 && award.combatId.length <= 200 &&
+        typeof award.mapId === 'string' && award.mapId.length > 0 && award.mapId.length <= 200 &&
+        Number.isSafeInteger(award.xp) && award.xp >= 0 &&
+        typeof award.awardedAt === 'number' && Number.isFinite(award.awardedAt) && award.awardedAt >= 0,
+      ).slice(-128).map((award) => ({ ...award }))
+    : undefined
   const normalized = {
     ...emptyCharacter(),
     ...c,
@@ -847,6 +855,7 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     skills: c.skills ?? [],
     conditions: c.conditions ?? [],
     experience: c.experience ?? 0,
+    dnd5eExperienceAwards: experienceAwards,
     reputation: c.reputation ?? 0,
     classResources: c.classResources,
     equipment: c.equipment ?? defaultEquipmentForDnd5eCharacter({ charClass: c.charClass ?? '战士' }),

@@ -215,7 +215,9 @@ export function prepareDnd5ePluginSpellCast(input: {
   const upcastDelta = Math.max(0, slotLevel - (spell.mechanics.upcast?.fromSlotLevel ?? spell.level))
   const upcastDice = spell.mechanics.upcast?.effects.reduce((total, effect) => effect.kind === 'damage-dice' ? total + effect.diceCountPerSlot * upcastDelta : total, 0) ?? 0
   const upcastFlat = spell.mechanics.upcast?.effects.reduce((total, effect) => effect.kind === 'flat-damage' ? total + effect.amountPerSlot * upcastDelta : total, 0) ?? 0
-  const cantripDice = damage?.cantripScaling ? (actor.level >= 17 ? 3 : actor.level >= 11 ? 2 : actor.level >= 5 ? 1 : 0) : 0
+  const cantripMultiplier = damage?.cantripScaling
+    ? actor.level >= 17 ? 4 : actor.level >= 11 ? 3 : actor.level >= 5 ? 2 : 1
+    : 1
   const castingModifier = damage?.addSpellcastingModifier
     ? rules.abilityModifier(actor.abilities[classDefinition.spellcasting.ability])
     : 0
@@ -271,7 +273,7 @@ export function prepareDnd5ePluginSpellCast(input: {
       saveMode,
       saveAutomaticallyFails: saveAbility ? dnd5eConditionSavingThrowAutomaticallyFails(targetCombatant, saveAbility) : false,
       targetArmorClass: dnd5eTargetArmorClassForAttack(snapshot.state, actorToken.id, targetToken.id),
-      damageDice: { count: Math.max(0, (damage?.dice.count ?? 0) + upcastDice + cantripDice), sides: damage?.dice.sides ?? 2, bonus: (damage?.dice.bonus ?? 0) + upcastFlat + castingModifier },
+      damageDice: { count: Math.max(0, (damage?.dice.count ?? 0) * cantripMultiplier + upcastDice), sides: damage?.dice.sides ?? 2, bonus: (damage?.dice.bonus ?? 0) + upcastFlat + castingModifier },
       concentrationRounds,
       transaction: createCombatTransaction({ id: input.action.id, mapId: input.map.id, combatId: input.action.combatId, actorId: actor.id, actionId: input.action.id, actionKind: 'plugin-spell', now }),
     },

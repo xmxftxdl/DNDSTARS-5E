@@ -16,7 +16,7 @@ export default function HpPanel({ current, max, temp, editable, maxEditable = ed
   const barColor =
     pct > 50 ? 'from-emerald-500 to-emerald-400' : pct > 25 ? 'from-amber-500 to-amber-400' : 'from-rose-600 to-rose-500'
 
-  const clamp = (v: number) => Math.max(0, Math.min(max + temp, v))
+  const clamp = (v: number) => Math.max(0, Math.min(max, v))
 
   return (
     <div className="glass rounded-2xl p-5">
@@ -37,6 +37,7 @@ export default function HpPanel({ current, max, temp, editable, maxEditable = ed
           <input
             type="number"
             value={current}
+            aria-label="当前生命值"
             onChange={(e) => onChange({ currentHp: clamp(Number(e.target.value) || 0) })}
             className="w-20 rounded-lg border border-white/10 bg-void-900/60 px-2 py-1 text-2xl font-bold text-slate-100 outline-none focus:border-rose-500"
           />
@@ -52,8 +53,11 @@ export default function HpPanel({ current, max, temp, editable, maxEditable = ed
 
       <div className="mt-4 flex items-center gap-2">
         <button
+          type="button"
           onClick={() => onChange({ currentHp: clamp(current - amount) })}
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-500/15 text-rose-300 transition-colors hover:bg-rose-500/25"
+          disabled={!editable}
+          aria-label="受到伤害"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-500/15 text-rose-300 transition-colors hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40"
           title="受伤"
         >
           <Minus className="h-4 w-4" />
@@ -61,12 +65,17 @@ export default function HpPanel({ current, max, temp, editable, maxEditable = ed
         <input
           type="number"
           value={amount}
+          aria-label="生命值变化量"
+          disabled={!editable}
           onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
           className="w-16 rounded-lg border border-white/10 bg-void-900/60 py-1.5 text-center text-sm font-semibold text-slate-200 outline-none focus:border-arcane-500"
         />
         <button
+          type="button"
           onClick={() => onChange({ currentHp: clamp(current + amount) })}
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300 transition-colors hover:bg-emerald-500/25"
+          disabled={!editable}
+          aria-label="恢复生命值"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
           title="治疗"
         >
           <Plus className="h-4 w-4" />

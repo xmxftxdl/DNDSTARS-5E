@@ -54,6 +54,8 @@ const REMOVAL_REASON_LABELS: Record<string, string> = {
   expired: '持续时间结束',
   'save-succeeded': '豁免成功',
   'concentration-ended': '专注结束',
+  'source-incapacitated': '擒抱者失能',
+  'out-of-range': '超出擒抱触及范围',
   'takes-damage': '受到伤害',
   'targeted-by-attack': '成为攻击目标',
   'hit-by-attack': '被攻击命中',
@@ -119,6 +121,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.actorId)}｜恢复${resourceLabel(event.resourceKey)}｜当前 ${event.current}/${event.max}`]
     case 'spell-cast':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜使用 ${event.slotLevel} 环法术位`]
+    case 'delayed-spell-damage-triggered':
+      return [`${event.sourceId ? resolveName(event.sourceId) : '法术来源'} → ${resolveName(event.targetId)}｜${event.spellId} 的延迟伤害触发｜造成 ${event.amount} 点伤害`]
     case 'condition-applied':
       return [`${resolveName(event.targetId)}｜获得状态：${dnd5eConditionLabel(event.condition)}｜来源：${resolveName(event.actorId)}`]
     case 'condition-ended':

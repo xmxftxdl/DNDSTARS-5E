@@ -177,11 +177,40 @@ describe('DM custom rules plugin builder', () => {
         persistentArea: {
           label: '臭云术区域示例', color: '#65a30d', durationRounds: 10, concentration: true,
           visual: { preset: 'toxic-cloud', intensity: 'normal' },
+          triggers: [{
+            id: 'cloud-entry', label: '进入毒云', timing: 'on-enter', oncePerRound: true,
+            savingThrow: { ability: 'con', dc: 'source-save-dc', onSuccess: 'half' },
+            damage: { count: 3, sides: 6, modifier: 0, type: 'poison' },
+            dmAdjustable: true,
+          }],
         },
       },
     }]
     value.headlessActions = [{ id: 'toxic-cloud-demo', label: '放置毒云', effects: [] }]
     expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
     expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"preset": "toxic-cloud"')
+    expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"timing": "on-enter"')
+  })
+
+  it('rejects invalid or duplicate persistent-area trigger declarations before export', () => {
+    const value = draft()
+    value.features = [{
+      id: 'hazard', name: '危险区域', summary: '测试。', description: '测试。', automation: 'full',
+      action: {
+        id: 'hazard', label: '放置', economy: 'action',
+        targeting: {
+          kind: 'area', template: { shape: 'circle', origin: 'point', radiusFeet: 10, placeRangeFeet: 60 },
+        },
+        persistentArea: {
+          label: '危险区域', durationRounds: 3,
+          triggers: [
+            { id: 'tick', label: '第一次', timing: 'turn-start', damage: { count: 2, sides: 6, type: 'fire' } },
+            { id: 'tick', label: '重复 ID', timing: 'turn-end', condition: { condition: 'blinded', duration: { expiresAt: 'target-turn-end' } } },
+          ],
+        },
+      },
+    }]
+    value.headlessActions = [{ id: 'hazard', label: '危险区域', effects: [] }]
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('特性 危险区域 的持续区域声明无效。')
   })
 })

@@ -175,3 +175,30 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
     dmAdjustable: trigger.dmAdjustable === true,
   }
 }
+
+/** Build-time boundary for plugin declarations whose save DC may come from the source. */
+export function normalizeDnd5ePersistentAreaTriggerDeclaration(
+  value: unknown,
+): Dnd5ePersistentAreaTriggerDeclaration | undefined {
+  const trigger = record(value)
+  if (!trigger) return undefined
+  const rawSave = record(trigger.savingThrow)
+  if (rawSave && rawSave.dc !== 'source-save-dc' && !integer(rawSave.dc, 1, 40)) return undefined
+  const normalized = normalizeDnd5ePersistentAreaTriggerSnapshot({
+    ...trigger,
+    savingThrow: rawSave
+      ? { ...rawSave, dc: rawSave.dc === 'source-save-dc' ? 10 : rawSave.dc }
+      : undefined,
+  })
+  if (!normalized) return undefined
+  return {
+    ...normalized,
+    savingThrow: normalized.savingThrow && rawSave
+      ? {
+          ability: normalized.savingThrow.ability,
+          dc: rawSave.dc === 'source-save-dc' ? 'source-save-dc' : normalized.savingThrow.dc,
+          onSuccess: normalized.savingThrow.onSuccess,
+        }
+      : undefined,
+  }
+}

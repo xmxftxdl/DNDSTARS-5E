@@ -7,6 +7,7 @@ import type {
 } from '../rulesets/dnd5e/headlessCombatEngine'
 import {
   applyDnd5eCombatStatisticsObservation,
+  applyCombatExperienceSettlement,
   combatantContributionScore,
   normalizeSharedCombatStatistics,
   type CombatStatisticsSide,
@@ -142,5 +143,38 @@ describe('Headless combat statistics', () => {
       ],
     }))
     expect(damagedMonster.combatants.fighter).toMatchObject({ knockouts: 1, kills: 1 })
+  })
+
+  it('migrates V1 statistics and validates persisted DM experience settlements', () => {
+    const session = applyDnd5eCombatStatisticsObservation(undefined, observe({
+      receiptId: 'xp', actorId: 'fighter', events: [],
+    }))
+    const settlement = {
+      combatId: session.combatId,
+      mapId: session.mapId,
+      mode: 'even' as const,
+      totalXp: 50,
+      awardedXp: 50,
+      defeatedMonsters: [{ tokenId: 'goblin', name: '哥布林', monsterId: 'srd-5.1:goblin', challengeRating: '1/4', xp: 50 }],
+      awards: [{ characterId: 'fighter', characterName: '战士', xp: 50 }],
+      settledAt: 20,
+    }
+    const migrated = normalizeSharedCombatStatistics({
+      schemaVersion: 1,
+      sessions: [{ ...session, experienceSettlement: settlement }],
+      updatedAt: 20,
+    })
+    expect(migrated).toMatchObject({
+      schemaVersion: 2,
+      sessions: [{ experienceSettlement: { totalXp: 50, awardedXp: 50 } }],
+    })
+    expect(normalizeSharedCombatStatistics({
+      schemaVersion: 2,
+      sessions: [{ ...session, experienceSettlement: { ...settlement, awardedXp: 49 } }],
+      updatedAt: 20,
+    })).toBeUndefined()
+    const recorded = applyCombatExperienceSettlement(session, settlement)
+    expect(recorded?.experienceSettlement?.awards[0].xp).toBe(50)
+    expect(applyCombatExperienceSettlement(recorded, settlement)).toBeUndefined()
   })
 })

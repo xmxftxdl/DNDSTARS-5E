@@ -121,10 +121,11 @@ export default function DiceBoxRollOverlay({
         sendRoll()
       }
     }, 900)
-    const fallback = window.setTimeout(() => finish(forcedValues), 22000)
+    const fallback = window.setTimeout(() => finish(forcedValues), DICE_TIMING.ROLL_FAILSAFE_MS)
+    const iframe = iframeRef.current
     return () => {
       if (!completedRef.current && sentRequestRef.current === requestId) sentRequestRef.current = null
-      if (iframeRef.current) iframeRef.current.src = 'about:blank'
+      if (iframe) iframe.src = 'about:blank'
       window.clearTimeout(retry)
       window.clearTimeout(fallback)
       window.removeEventListener('message', handleMessage)

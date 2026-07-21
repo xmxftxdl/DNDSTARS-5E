@@ -84,6 +84,19 @@ export function collectDnd5ePersistentAreaTriggers(input: {
   const areas = (input.map.dnd5ePluginAreas ?? []).filter((area) => !input.areaId || area.id === input.areaId)
   if (areas.length === 0) return []
   const out: Dnd5ePersistentAreaTriggerCandidate[] = []
+  const queuedOncePerRound = new Set<string>()
+  const mayQueue = (
+    area: Dnd5ePluginArea,
+    trigger: Dnd5ePersistentAreaTriggerSnapshot,
+    targetTokenId: string,
+  ) => {
+    if (alreadyTriggeredThisRound(area, trigger, targetTokenId, input.round)) return false
+    if (trigger.oncePerRound === false) return true
+    const key = `${area.id}\u0000${trigger.id}\u0000${targetTokenId}\u0000${input.round}`
+    if (queuedOncePerRound.has(key)) return false
+    queuedOncePerRound.add(key)
+    return true
+  }
 
   if (input.timing === 'on-enter') {
     const movement = input.movement
@@ -101,7 +114,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
         const nextInside = tokenIntersectsAreaAt(target, input.map, area, position)
         if (!inside && nextInside) {
           for (const trigger of area.triggers ?? []) {
-            if (trigger.timing !== 'on-enter' || alreadyTriggeredThisRound(area, trigger, target.id, input.round)) continue
+            if (trigger.timing !== 'on-enter' || !mayQueue(area, trigger, target.id)) continue
             out.push(candidate(area, trigger, target, input.round, `enter-${pathIndex}-${occurrence}`, path[pathIndex], pathIndex))
           }
           occurrence += 1
@@ -119,7 +132,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     for (const target of targets) {
       if (!areaAllowsTarget(area, target, input.map) || !tokenIntersectsAreaAt(target, input.map, area, target)) continue
       for (const trigger of area.triggers ?? []) {
-        if (trigger.timing !== input.timing || alreadyTriggeredThisRound(area, trigger, target.id, input.round)) continue
+        if (trigger.timing !== input.timing || !mayQueue(area, trigger, target.id)) continue
         out.push(candidate(area, trigger, target, input.round, input.timing))
       }
     }

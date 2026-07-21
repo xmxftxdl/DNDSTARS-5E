@@ -82,6 +82,14 @@ describe('D&D 5e ActiveEffectInstance', () => {
       ...effect,
       duration: { type: 'rounds', remainingRounds: 1, tickOn: 'target-turn-end', lastTickTurnKey: '' },
     }])).toMatchObject({ ok: false, issues: expect.arrayContaining([expect.stringContaining('lastTickTurnKey')]) })
+    expect(validateDnd5eActiveEffectsStrict([{ ...effect, potency: 'lots' }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('potency')]),
+    })
+    expect(validateDnd5eActiveEffectsStrict([{ ...effect, potency: Number.POSITIVE_INFINITY }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('potency')]),
+    })
   })
 
   it('migrates old timed mechanics once and then treats them as native active effects', () => {

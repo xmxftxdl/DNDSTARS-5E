@@ -2590,6 +2590,7 @@ function TokenNode({
   instantPosition?: boolean
 }) {
   const groupRef = useRef<Konva.Group>(null)
+  const [initialPosition] = useState(() => ({ x: token.x, y: token.y }))
   const draggingRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
   const prevGridSizeRef = useRef(gridSize)
@@ -2635,8 +2636,8 @@ function TokenNode({
   useLayoutEffect(() => {
     const node = groupRef.current
     if (!node) return
-    node.position({ x: token.x, y: token.y })
-  }, [token.id])
+    node.position({ x: initialPosition.x, y: initialPosition.y })
+  }, [initialPosition])
 
   useEffect(() => {
     const node = groupRef.current

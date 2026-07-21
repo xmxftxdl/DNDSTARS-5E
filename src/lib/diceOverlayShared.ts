@@ -83,6 +83,8 @@ export function parseDiceBoxMessage(event: MessageEvent): DiceBoxMessage | null 
 export const DICE_TIMING = {
   /** DiceBoxRollOverlay 伤害骰最小可见窗口。 */
   ROLL_MIN_VISIBLE_MS: 2600,
+  /** WebGL / iframe 不可用时的权威结果回退上限。 */
+  ROLL_FAILSAFE_MS: 9000,
   /** DiceBoxD20Overlay d20 最小可见窗口。 */
   D20_MIN_VISIBLE_MS: 2200,
   /** DiceRollOverlay 结果 HUD 卡自关闭时间。 */

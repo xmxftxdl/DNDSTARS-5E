@@ -2,6 +2,7 @@ import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type { EnemyTurnResult } from './enemyAi'
 import type { CombatInterruptKind, SharedCombatInterrupt } from './combatInterruptQueue'
+import type { CombatTransaction } from './combatTransaction'
 
 export type GaleComboDecision = 'accepted' | 'declined' | 'timeout'
 
@@ -248,6 +249,22 @@ export type DmAdjudicationInterruptResponse = Record<string, unknown> & {
   mapInteractionOverride?: 'roll' | 'success' | 'failure'
 }
 
+export type RollConfirmationInterruptPayload = Record<string, unknown> & {
+  rollId: string
+  label: string
+  targetName: string
+  originalValue: number
+  visibility: 'public' | 'dm-only'
+  transaction: CombatTransaction
+}
+
+export type RollConfirmationInterruptResponse = Record<string, unknown> & {
+  decision: 'continue' | 'cancelled'
+  finalValue?: number
+  acceptedContributionId?: string
+  transaction?: CombatTransaction
+}
+
 export interface CombatInterruptPayloadMap {
   dodge: DodgeInterruptPayload
   'stable-mind': StableMindInterruptPayload
@@ -269,6 +286,7 @@ export interface CombatInterruptPayloadMap {
   'stand-against-tide': StandAgainstTideInterruptPayload
   'plugin-choice': PluginChoiceInterruptPayload
   'dm-adjudication': DmAdjudicationInterruptPayload
+  'roll-confirmation': RollConfirmationInterruptPayload
 }
 
 export interface CombatInterruptResponseMap {
@@ -292,6 +310,7 @@ export interface CombatInterruptResponseMap {
   'stand-against-tide': StandAgainstTideInterruptResponse
   'plugin-choice': PluginChoiceInterruptResponse
   'dm-adjudication': DmAdjudicationInterruptResponse
+  'roll-confirmation': RollConfirmationInterruptResponse
 }
 
 export type CombatInterruptByKind<K extends CombatInterruptKind> =
@@ -358,6 +377,8 @@ export function defaultCombatInterruptResponse<K extends CombatInterruptKind>(
       return { optionId: '' } as CombatInterruptResponseMap[K]
     case 'dm-adjudication':
       return { decision: 'cancelled', effects: [] } as unknown as CombatInterruptResponseMap[K]
+    case 'roll-confirmation':
+      return { decision: 'cancelled' } as CombatInterruptResponseMap[K]
   }
 }
 
@@ -393,7 +414,7 @@ export function resolveCombatInterruptAnswerCandidate(
   // dm-adjudication is deliberately invisible to player prompt selection. Only
   // the DM-side authority loop may answer it.
   if (
-    interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance' ||
+    interrupt.kind === 'dm-adjudication' || interrupt.kind === 'roll-confirmation' || interrupt.kind === 'legendary-resistance' ||
     (interrupt.kind === 'plugin-choice' && interrupt.payload.audience === 'dm')
   ) return { character, canAnswer: false }
   if (!character || (character.currentHp <= 0 && interrupt.kind !== 'bardic-inspiration')) {

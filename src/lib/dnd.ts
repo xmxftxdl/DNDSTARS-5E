@@ -36,31 +36,21 @@ export const SKILLS: SkillDef[] = [
   { key: 'survival', label: '生存', ability: 'wis' },
 ]
 
-export const MAX_ABILITY_SCORE = 100
-export const ABILITY_BASELINE = 25
+export const MAX_ABILITY_SCORE = 30
+export const ABILITY_BASELINE = 10
 
-/**
- * 属性调整值（分段）：
- * 1–4 → -5，5–9 → -2，10–14 → -3，15–19 → -2，20–24 → -1，
- * 25–29 → 0，之后每 5 点 +1（30–34 → +1 … 100 → +15）
- */
+/** D&D 5e 2014 属性调整值：向下取整 (score - 10) / 2。 */
 export function abilityMod(score: number): number {
-  const s = clampAbilityScore(score)
-  if (s <= 4) return -5
-  if (s <= 9) return -2
-  if (s <= 14) return -3
-  if (s <= 19) return -2
-  if (s <= 24) return -1
-  return Math.floor((s - ABILITY_BASELINE) / 5)
+  return Math.floor((clampAbilityScore(score) - ABILITY_BASELINE) / 2)
 }
 
 export function clampAbilityScore(score: number): number {
   return Math.max(1, Math.min(MAX_ABILITY_SCORE, score))
 }
 
-/** 熟练加值：基础 +2；11 级起每 10 级额外 +1 */
+/** D&D 5e 2014 熟练加值：1/5/9/13/17 级时依次提升。 */
 export function proficiencyBonus(level: number): number {
-  return 2 + Math.floor((Math.max(1, level) - 1) / 10)
+  return 2 + Math.floor((Math.min(20, Math.max(1, level)) - 1) / 4)
 }
 
 /** 把调整值格式化为带正负号的字符串，如 +3 / -1 */

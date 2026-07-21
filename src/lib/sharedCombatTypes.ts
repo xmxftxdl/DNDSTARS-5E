@@ -174,6 +174,8 @@ export interface Dnd5eSpellCastPayload {
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   /** 群体医疗术的逐目标治疗分配；总和不得超过法术的治疗池。 */
   healingAllocations?: Array<{ targetTokenId: string; amount: number }>
+  /** 焰击术等法术升环时，由施法者选择额外伤害加入哪一种法术伤害类型。 */
+  higherSlotDamageType?: 'acid' | 'bludgeoning' | 'cold' | 'fire' | 'force' | 'lightning' | 'necrotic' | 'piercing' | 'poison' | 'psychic' | 'radiant' | 'slashing' | 'thunder'
 }
 
 /**
@@ -240,6 +242,8 @@ export interface SharedPlayerActionState {
   targetPosition?: { x: number; y: number }
   /** 穿过滚珠或铁蒺藜时声明半速谨慎移动；DM 按双倍移动消耗复核。 */
   dnd5eCarefulMovement?: boolean
+  /** 倒地移动时，true/省略表示先起身；false 表示保持倒地并以匍匐规则移动。 */
+  dnd5eStandFromProne?: boolean
   dnd5eFighterFeature?: 'second-wind' | 'action-surge'
   dnd5eClassFeature?: Dnd5eClassFeaturePayload
   dnd5ePluginAction?: Dnd5ePluginActionPayload

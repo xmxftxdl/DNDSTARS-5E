@@ -21,9 +21,44 @@ export type Dnd5eInventoryIconId =
   | 'antitoxin'
   | 'poison'
   | 'healing-potion'
+  | 'magic-ring'
+  | 'magic-wand'
+  | 'magic-staff'
+  | 'magic-scroll'
+  | 'magic-wondrous'
   | 'generic'
 
-export type Dnd5eInventoryCategory = 'equipment' | 'adventuring-gear' | 'consumable' | 'tool' | 'container'
+export type Dnd5eInventoryCategory = 'equipment' | 'magic-item' | 'adventuring-gear' | 'consumable' | 'tool' | 'container'
+
+export type Dnd5eMagicItemRarity =
+  | 'common'
+  | 'uncommon'
+  | 'rare'
+  | 'very-rare'
+  | 'legendary'
+  | 'artifact'
+  | 'varies'
+
+export type Dnd5eMagicItemKind =
+  | 'armor'
+  | 'weapon'
+  | 'ammunition'
+  | 'wondrous-item'
+  | 'potion'
+  | 'ring'
+  | 'rod'
+  | 'scroll'
+  | 'staff'
+  | 'wand'
+
+export interface Dnd5eMagicItemMetadata {
+  kind: Dnd5eMagicItemKind
+  rarity: Dnd5eMagicItemRarity
+  attunement: 'none' | 'required'
+  attunementRequirement?: string
+  /** headless 表示当前声明式效果已全部接入；其余物品不会伪装成已自动结算。 */
+  automation: 'headless' | 'dm-adjudication'
+}
 
 export const DND5E_INVENTORY_SCHEMA_VERSION = 2 as const
 
@@ -98,6 +133,8 @@ export interface Dnd5eInventoryItemTemplate {
   cost?: Dnd5eItemCost
   stackable: boolean
   equipment?: EquipmentItem
+  /** SRD 魔法物品的可检索规则元数据；普通装备不携带此字段。 */
+  magicItem?: Dnd5eMagicItemMetadata
   /** 可持久化的实例资源，例如充能。归零不会删除物品实例。 */
   resources?: readonly Dnd5eInventoryResourceDefinition[]
   /** 只能由 Host Headless 事务解释，插件不能直接执行这些效果。 */

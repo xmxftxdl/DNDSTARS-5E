@@ -35,7 +35,7 @@ import {
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDiceCount, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSelectedCombatSpellIds, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
@@ -70,6 +70,9 @@ export interface PreparedDnd5eSpellCast {
   spell: Dnd5eSrdSpellDefinition
   slotLevel: number
   diceCount: number
+  damageDiceCounts: readonly number[]
+  delayedDamageDiceCount: number
+  higherSlotDamageType?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['higherSlotDamageType']
   effectBonus: number
   attackMode?: 'normal' | 'advantage' | 'disadvantage'
   targetSpellAttacks?: readonly {
@@ -173,6 +176,11 @@ export function prepareDnd5eSpellCast(input: {
     : definition.spellcasting.kind === 'pact' && spell.level <= 5
       ? dnd5ePactSlotLevel(actor.level)
       : payload.slotLevel
+  const higherSlotDamageChoices = dnd5eSpellHigherSlotDamageChoices(spell, slotLevel)
+  if (
+    (higherSlotDamageChoices.length > 0 && !payload.higherSlotDamageType) ||
+    (payload.higherSlotDamageType != null && !higherSlotDamageChoices.includes(payload.higherSlotDamageType))
+  ) return { ok: false, reason: 'invalid-action' }
   if (spell.level > 0) {
     const resourceKey = definition.spellcasting.kind === 'pact' && spell.level <= 5 ? 'dnd5e-pact-slot' : `dnd5e-spell-slot-${slotLevel}`
     const slot = actor.classResources?.[resourceKey]
@@ -481,6 +489,12 @@ export function prepareDnd5eSpellCast(input: {
     }
   }
   const abilityModifier = rules.abilityModifier(actor.abilities[definition.spellcasting.ability])
+  const damageDiceCounts = dnd5eSpellDamageDiceCounts(
+    spell,
+    actor.level,
+    slotLevel,
+    payload.higherSlotDamageType,
+  )
   const rangedSpellThreatened = spell.effect === 'spell-attack' && spell.rangeFeet > 5 && input.map.tokens.some((candidate) => {
     const candidateCombatant = snapshot.state.combatants[candidate.id]
     return candidate.id !== actorToken.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(actorToken, candidate) &&
@@ -604,7 +618,10 @@ export function prepareDnd5eSpellCast(input: {
       projectileTargetIds,
       spell,
       slotLevel,
-      diceCount,
+      diceCount: damageDiceCounts[0],
+      damageDiceCounts,
+      delayedDamageDiceCount: dnd5eSpellDelayedDamageDiceCount(spell, slotLevel),
+      higherSlotDamageType: payload.higherSlotDamageType,
       effectBonus: spell.dice.bonus + (spell.bonusPerDie ? diceCount : 0) +
         (spell.addSpellcastingModifier ? abilityModifier : 0) +
         (spell.id === 'eldritch-blast' && invocations.includes('agonizing-blast') ? abilityModifier : 0),
@@ -743,6 +760,8 @@ export function resolvePreparedDnd5eSpellCast(input: {
   tranquilitySave?: Dnd5eTranquilitySaveRoll
   uncannyDodge?: boolean
   effectRolls: readonly number[]
+  additionalEffectRolls?: readonly (readonly number[])[]
+  delayedEffectRolls?: readonly number[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
   const result = resolveDnd5eHeadlessAction(prepared.state, {
@@ -762,6 +781,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     counterspellReaction: input.counterspellReaction,
     spellId: prepared.spell.id,
     slotLevel: prepared.slotLevel,
+    higherSlotDamageType: prepared.higherSlotDamageType,
     d20: input.d20,
     d20Second: input.d20Second,
     attackBlessRoll: input.attackBlessRoll,
@@ -792,6 +812,8 @@ export function resolvePreparedDnd5eSpellCast(input: {
       overchannelSelfDamageRolls: input.overchannelSelfDamageRolls,
       uncannyDodge: input.uncannyDodge,
     effectRolls: input.effectRolls,
+    additionalEffectRolls: input.additionalEffectRolls,
+    delayedEffectRolls: input.delayedEffectRolls,
   })
   if (!result.ok) return { result }
   return {

@@ -1,6 +1,7 @@
 import { useMemo, useState, useSyncExternalStore } from 'react'
 import { Gift, PackagePlus, Search } from 'lucide-react'
 import { DND5E_SRD_ITEM_TEMPLATES } from '../../rulesets/dnd5e/items'
+import { DND5E_MAGIC_ITEM_RARITY_LABELS } from '../../rulesets/dnd5e/magicItems'
 import {
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginItems,
@@ -11,6 +12,28 @@ import { getRoomSession } from '../../lib/roomSession'
 import { inventoryFailureMessage } from '../../lib/inventoryAuthority'
 import type { RoomRosterMember } from '../../lib/roomApi'
 import { roomCharactersOwnedByMembers } from '../../lib/playerView'
+import type { Dnd5eInventoryItemTemplate } from '../../types/inventory'
+
+const INVENTORY_CATEGORY_LABELS: Record<Dnd5eInventoryItemTemplate['category'], string> = {
+  equipment: '装备',
+  'magic-item': '魔法物品',
+  'adventuring-gear': '冒险装备',
+  consumable: '消耗品',
+  tool: '工具',
+  container: '容器',
+}
+
+const ITEM_USE_ECONOMY_LABELS = {
+  action: '动作',
+  bonusAction: '附赠动作',
+  none: '无需动作',
+} as const
+
+const ITEM_CURRENCY_LABELS = {
+  cp: '铜币',
+  sp: '银币',
+  gp: '金币',
+} as const
 
 export default function Dnd5eDmInventoryDistributor({
   players,
@@ -90,11 +113,14 @@ export default function Dnd5eDmInventoryDistributor({
           </div>
           <select value={templates.some((item) => item.id === templateId) ? templateId : ''} onChange={(event) => setTemplateId(event.target.value)} className="w-full rounded-lg border border-white/10 bg-void-900/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400/50">
             <option value="">选择物品…</option>
-            <optgroup label="装备">
-              {templates.filter((item) => item.category === 'equipment').map((item) => <option key={item.id} value={item.id}>{item.name} · {item.source.book}</option>)}
+            <optgroup label="魔法物品">
+              {templates.filter((item) => !!item.magicItem).map((item) => <option key={item.id} value={item.id}>{item.name} · {DND5E_MAGIC_ITEM_RARITY_LABELS[item.magicItem!.rarity]} · {item.magicItem!.automation === 'headless' ? 'Headless' : 'DM 裁定'}</option>)}
+            </optgroup>
+            <optgroup label="普通装备">
+              {templates.filter((item) => item.category === 'equipment' && !item.magicItem).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.source.book}</option>)}
             </optgroup>
             <optgroup label="道具">
-              {templates.filter((item) => item.category !== 'equipment').map((item) => <option key={item.id} value={item.id}>{item.name} · {item.source.book}</option>)}
+              {templates.filter((item) => item.category !== 'equipment' && !item.magicItem).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.source.book}</option>)}
             </optgroup>
           </select>
         </label>
@@ -111,9 +137,53 @@ export default function Dnd5eDmInventoryDistributor({
       </div>
 
       {selectedTemplate && (
-        <p className="mt-3 rounded-lg border border-white/6 bg-black/15 px-3 py-2 text-xs leading-relaxed text-slate-500">
-          <span className="font-semibold text-slate-300">{selectedTemplate.name}：</span>{selectedTemplate.rulesText}
-        </p>
+        <section className="mt-3 rounded-xl border border-white/8 bg-black/20 p-3" data-testid="dm-inventory-selected-item-details">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-100">{selectedTemplate.name}</p>
+              {selectedTemplate.englishName && <p className="mt-0.5 text-[11px] text-slate-500">{selectedTemplate.englishName}</p>}
+            </div>
+            <div className="flex flex-wrap justify-end gap-1.5 text-[10px]">
+              <span className="rounded-md border border-white/8 bg-white/[0.035] px-2 py-1 text-slate-400">
+                {INVENTORY_CATEGORY_LABELS[selectedTemplate.category]}
+              </span>
+              {selectedTemplate.magicItem && (
+                <>
+                  <span className="rounded-md border border-violet-300/15 bg-violet-500/10 px-2 py-1 text-violet-200">
+                    {DND5E_MAGIC_ITEM_RARITY_LABELS[selectedTemplate.magicItem.rarity]}
+                  </span>
+                  <span className="rounded-md border border-violet-300/15 bg-violet-500/10 px-2 py-1 text-violet-200">
+                    {selectedTemplate.magicItem.attunement === 'required' ? '需要同调' : '无需同调'}
+                  </span>
+                  <span className={`rounded-md border px-2 py-1 ${selectedTemplate.magicItem.automation === 'headless' ? 'border-emerald-300/15 bg-emerald-500/10 text-emerald-200' : 'border-amber-300/15 bg-amber-500/10 text-amber-200'}`}>
+                    {selectedTemplate.magicItem.automation === 'headless' ? 'Headless 已接入' : 'DM 裁定'}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-lg border border-white/6 bg-white/[0.02] p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">物品描述</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-300">{selectedTemplate.description}</p>
+            </div>
+            <div className="rounded-lg border border-white/6 bg-white/[0.02] p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">规则效果</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-slate-300">{selectedTemplate.rulesText}</p>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+            {selectedTemplate.weightLb != null && <span>重量：{selectedTemplate.weightLb} 磅</span>}
+            {selectedTemplate.cost && <span>价格：{selectedTemplate.cost.amount} {ITEM_CURRENCY_LABELS[selectedTemplate.cost.currency]}</span>}
+            {selectedTemplate.use && <span>使用：{ITEM_USE_ECONOMY_LABELS[selectedTemplate.use.economy]}</span>}
+            {selectedTemplate.resources?.map((resource) => (
+              <span key={resource.id}>{resource.label}：{resource.initial ?? resource.maximum}/{resource.maximum}（{resource.resetOn === 'dawn' ? '黎明恢复' : resource.resetOn === 'short-rest' ? '短休恢复' : resource.resetOn === 'long-rest' ? '长休恢复' : '不自动恢复'}）</span>
+            ))}
+            <span>来源：{selectedTemplate.source.book} · {selectedTemplate.source.license}</span>
+          </div>
+        </section>
       )}
       {notice && <p className="mt-3 text-xs text-emerald-300">{notice}</p>}
     </div>

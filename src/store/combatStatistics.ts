@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { canWriteSharedState } from '../lib/appMode'
 import {
   applyDnd5eCombatStatisticsObservation,
+  applyCombatExperienceSettlement,
   COMBAT_STATISTICS_MAX_SESSIONS,
   COMBAT_STATISTICS_RESOURCE,
   COMBAT_STATISTICS_SCHEMA_VERSION,
@@ -16,6 +17,7 @@ import {
 } from '../lib/combatStatistics'
 import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
 import type { Dnd5eHeadlessResolutionObservation } from '../rulesets/dnd5e/headlessCombatEngine'
+import type { CombatExperienceSettlement } from '../lib/combatExperience'
 
 interface CombatStatisticsStoreState {
   sessions: CombatStatisticsSession[]
@@ -26,6 +28,8 @@ interface CombatStatisticsStoreState {
     observation: Dnd5eHeadlessResolutionObservation,
     sideByCombatantId?: Readonly<Record<string, CombatStatisticsSide>>,
   ) => void
+  /** 同一 combatId 仅接受一次；返回 false 表示已经结算。 */
+  settleExperience: (settlement: CombatExperienceSettlement) => boolean
   clearCombat: (combatId: string) => void
 }
 
@@ -81,6 +85,23 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
           .slice(-COMBAT_STATISTICS_MAX_SESSIONS),
       }))
       queueMicrotask(() => publish(get().sessions))
+    },
+    settleExperience: (settlement) => {
+      let accepted = false
+      set((state) => {
+        const current = state.sessions.find((session) => session.combatId === settlement.combatId)
+        const next = applyCombatExperienceSettlement(current, settlement)
+        if (!next) return state
+        accepted = true
+        return {
+          sessions: [
+            ...state.sessions.filter((session) => session.combatId !== settlement.combatId),
+            next,
+          ].slice(-COMBAT_STATISTICS_MAX_SESSIONS),
+        }
+      })
+      if (accepted) queueMicrotask(() => publish(get().sessions))
+      return accepted
     },
     clearCombat: (combatId) => {
       set((state) => ({ sessions: state.sessions.filter((session) => session.combatId !== combatId) }))

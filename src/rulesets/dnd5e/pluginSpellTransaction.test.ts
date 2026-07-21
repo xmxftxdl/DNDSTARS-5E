@@ -22,6 +22,49 @@ function token(id: string, type: 'player' | 'enemy', x: number, characterId?: st
 }
 
 describe('plugin spell CombatTransaction', () => {
+  it('multiplies every base damage die when a plugin cantrip scales', () => {
+    let spellId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: { id: 'com.example.cantrip-scaling', name: 'Cantrip Scaling', version: '1.0.0', apiVersion: 2, rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Tests', license: 'CC0' },
+      setup(api) {
+        api.registerHeadlessAction({ id: 'twin-spark', resolve: ({ succeed }) => succeed() })
+        spellId = api.registerSpell({
+          id: 'twin-spark', name: '双重火花', level: 0, school: 'evocation', ritual: false,
+          castingTime: { value: 1, unit: 'action' }, range: { type: 'distance', feet: 60 },
+          components: { verbal: true, somatic: true, material: false },
+          duration: { type: 'instantaneous', concentration: false },
+          classes: ['wizard'], description: '原创测试戏法。',
+          mechanics: {
+            kind: 'damage', resolution: 'spell-attack',
+            damage: { dice: { count: 2, sides: 4, bonus: 0 }, type: 'fire', cantripScaling: true },
+          },
+          automation: { mode: 'headless-action', actionId: 'twin-spark' },
+        })
+      },
+    })
+    try {
+      const actor = wizard(spellId)
+      actor.dnd5eClassChoices = { classes: { wizard: { selections: { 'spell-cantrips': [spellId] } } } }
+      const actorToken = token('wizard-token', 'player', 25, actor.id)
+      const enemy = token('enemy-token', 'enemy', 125)
+      const map: BattleMap = { id: 'map', name: 'Map', width: 1000, height: 500, gridSize: 50, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [actorToken, enemy] }
+      const action: SharedPlayerActionState = {
+        id: 'cantrip-cast', mapId: map.id, combatId: 'combat', sourceMode: 'player', status: 'pending', type: 'dnd5e-spell-cast',
+        actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy.id,
+        dnd5eSpellCast: { spellId, slotLevel: 0, targetTokenId: enemy.id }, round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
+      }
+      const prepared = prepareDnd5ePluginSpellCast({
+        action, map, characters: [actor],
+        initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      expect(prepared.prepared.damageDice).toMatchObject({ count: 4, sides: 4 })
+    } finally {
+      dispose()
+    }
+  })
+
   it('validates the slot and components, applies upcast/save/concentration, and records the RollLedger', () => {
     let spellId = ''
     const dispose = registerDnd5eRulesPlugin({

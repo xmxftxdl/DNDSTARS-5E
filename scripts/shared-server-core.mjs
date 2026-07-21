@@ -740,7 +740,7 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
   })
 }
 
-export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
+export function mutateCombatInterruptQueue(queue, mutation, now = Date.now(), authorityRole = 'open') {
   const operation = mutation?.operation
   const mapId = String(mutation?.mapId ?? '')
   if (!mapId) return { ok: false, status: 400, error: 'invalid-map' }
@@ -753,8 +753,20 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
     if (!interrupt || interrupt.mapId !== mapId || !interrupt.id) {
       return { ok: false, status: 400, error: 'invalid-interrupt' }
     }
+    if (
+      interrupt.kind === 'roll-confirmation' && (
+        !plainObject(interrupt.payload) || typeof interrupt.payload.rollId !== 'string' || !interrupt.payload.rollId ||
+        typeof interrupt.payload.label !== 'string' || !interrupt.payload.label.trim() ||
+        !Number.isInteger(interrupt.payload.originalValue) || interrupt.payload.originalValue < 1 || interrupt.payload.originalValue > 20 ||
+        (interrupt.payload.visibility !== 'public' && interrupt.payload.visibility !== 'dm-only') ||
+        !plainObject(interrupt.payload.transaction)
+      )
+    ) return { ok: false, status: 400, error: 'invalid-roll-confirmation' }
     const existing = base.interrupts.find((item) => item.id === interrupt.id)
     if (existing && existing.status !== 'pending') {
+      return { ok: true, changed: false, next: base }
+    }
+    if (existing?.kind === 'roll-confirmation') {
       return { ok: true, changed: false, next: base }
     }
     const transactionId = String(interrupt.transactionId ?? interrupt.id)
@@ -767,10 +779,17 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
     const normalizedInterrupt = {
       ...interrupt,
       transactionId,
-      phase: ['before-action', 'before-hit', 'before-damage', 'after-save', 'before-condition'].includes(interrupt.phase)
+      phase: ['before-action', 'after-roll', 'before-hit', 'before-damage', 'after-save', 'before-condition'].includes(interrupt.phase)
         ? interrupt.phase
         : 'before-action',
       timeoutPolicy: interrupt.timeoutPolicy === 'wait-for-dm' ? 'wait-for-dm' : 'rollback',
+      ...(interrupt.kind === 'roll-confirmation' ? {
+        status: 'pending',
+        phase: 'after-roll',
+        timeoutPolicy: 'wait-for-dm',
+        response: undefined,
+        contributions: [],
+      } : {}),
     }
     const interrupts = [
       ...base.interrupts.filter((item) => item.id !== interrupt.id),
@@ -783,13 +802,78 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now()) {
     }
   }
 
-  if (!['answer', 'rolling', 'finish', 'wait', 'rollback'].includes(operation)) {
+  if (!['contribute', 'answer', 'rolling', 'finish', 'wait', 'rollback'].includes(operation)) {
     return { ok: false, status: 400, error: 'invalid-operation' }
   }
   const id = String(mutation?.id ?? '')
   const index = base.interrupts.findIndex((item) => item.id === id)
   if (index < 0) return { ok: false, status: 404, error: 'interrupt-not-found' }
   const current = base.interrupts[index]
+  if (current.kind === 'roll-confirmation' && authorityRole === 'player' && operation !== 'contribute') {
+    return { ok: false, status: 403, error: 'dm-authority-required' }
+  }
+  if (current.kind === 'roll-confirmation' && (operation === 'answer' || (operation === 'finish' && mutation?.response != null))) {
+    const response = mutation?.response
+    const originalValue = current.payload?.originalValue
+    if (
+      !response || response.decision !== 'continue' ||
+      !Number.isInteger(originalValue) || originalValue < 1 || originalValue > 20 ||
+      !Number.isInteger(response.finalValue) || response.finalValue < 1 || response.finalValue > 20 ||
+      (response.acceptedContributionId != null && typeof response.acceptedContributionId !== 'string')
+    ) return { ok: false, status: 400, error: 'invalid-roll-confirmation-response' }
+    const acceptedContribution = response.acceptedContributionId
+      ? (Array.isArray(current.contributions) ? current.contributions : [])
+        .find((entry) => entry?.id === response.acceptedContributionId)
+      : undefined
+    if (response.acceptedContributionId && !acceptedContribution) {
+      return { ok: false, status: 409, error: 'roll-contribution-not-found' }
+    }
+    const expectedValue = acceptedContribution?.replacementValue ?? originalValue
+    if (response.finalValue !== expectedValue) {
+      return { ok: false, status: 409, error: 'roll-confirmation-value-conflict' }
+    }
+  }
+  if (operation === 'contribute') {
+    if (
+      current.kind !== 'roll-confirmation' ||
+      (current.status !== 'pending' && current.status !== 'waiting-for-dm')
+    ) return { ok: false, status: 409, error: 'invalid-transition' }
+    const contribution = mutation?.contribution
+    if (
+      !contribution || contribution.kind !== 'replace-d20' ||
+      typeof contribution.id !== 'string' || !contribution.id ||
+      typeof contribution.characterId !== 'string' || !contribution.characterId ||
+      typeof contribution.characterName !== 'string' || !contribution.characterName.trim() ||
+      typeof contribution.featureLabel !== 'string' || !contribution.featureLabel.trim() ||
+      contribution.dieIndex !== 0 || !Number.isInteger(contribution.replacementValue) ||
+      contribution.replacementValue < 1 || contribution.replacementValue > 20 ||
+      !Number.isFinite(contribution.createdAt) ||
+      (contribution.featureId != null && typeof contribution.featureId !== 'string')
+    ) return { ok: false, status: 400, error: 'invalid-contribution' }
+    const normalizedContribution = {
+      id: contribution.id.slice(0, 240),
+      kind: 'replace-d20',
+      characterId: contribution.characterId.slice(0, 160),
+      characterName: contribution.characterName.trim().slice(0, 80),
+      ...(contribution.featureId?.trim() ? { featureId: contribution.featureId.trim().slice(0, 160) } : {}),
+      featureLabel: contribution.featureLabel.trim().slice(0, 120),
+      dieIndex: 0,
+      replacementValue: contribution.replacementValue,
+      createdAt: contribution.createdAt,
+    }
+    const contributions = [
+      ...(Array.isArray(current.contributions) ? current.contributions : [])
+        .filter((entry) => entry?.id !== normalizedContribution.id),
+      normalizedContribution,
+    ].sort((a, b) => Number(a.createdAt ?? 0) - Number(b.createdAt ?? 0)).slice(-32)
+    const interrupts = [...base.interrupts]
+    interrupts[index] = { ...current, contributions, updatedAt: now }
+    return {
+      ok: true,
+      changed: true,
+      next: { ...base, interrupts, updatedAt: now, revision: Number(base.revision ?? 0) + 1 },
+    }
+  }
   const allowed =
     (operation === 'answer' && (current.status === 'pending' || current.status === 'rolling')) ||
     (operation === 'rolling' && current.status === 'pending') ||
@@ -981,7 +1065,7 @@ const COMBAT_INTERRUPT_KINDS = new Set([
   'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'dm-adjudication',
 ])
 const COMBAT_INTERRUPT_STATUSES = new Set(['pending', 'waiting-for-dm', 'rolling', 'answered', 'done', 'rolled-back'])
-const COMBAT_INTERRUPT_PHASES = new Set(['before-action', 'before-hit', 'before-damage', 'after-save', 'before-condition'])
+const COMBAT_INTERRUPT_PHASES = new Set(['before-action', 'after-roll', 'before-hit', 'before-damage', 'after-save', 'before-condition'])
 
 function validateCombatInterruptState(value) {
   const ids = new Set()
@@ -1123,7 +1207,7 @@ const COMBAT_STATISTIC_NUMBER_FIELDS = [
 ]
 
 function validateCombatStatisticsState(value) {
-  if (value.schemaVersion !== 1 || !Array.isArray(value.sessions) || value.sessions.length > 24 ||
+  if (![1, 2].includes(value.schemaVersion) || !Array.isArray(value.sessions) || value.sessions.length > 24 ||
     !Number.isFinite(value.updatedAt) || value.updatedAt < 0) return 'invalid-combat-statistics'
   const combatIds = new Set()
   for (const session of value.sessions) {
@@ -1141,6 +1225,45 @@ function validateCombatStatisticsState(value) {
       if (!combatantId || combatantId.length > 160 || !plainObject(stats) || stats.combatantId !== combatantId ||
         typeof stats.name !== 'string' || stats.name.length > 240 || !['player', 'enemy', 'npc'].includes(stats.side) ||
         COMBAT_STATISTIC_NUMBER_FIELDS.some((field) => !Number.isFinite(stats[field]) || stats[field] < 0)) {
+        return 'invalid-combat-statistics'
+      }
+    }
+    const settlement = session.experienceSettlement
+    if (settlement != null) {
+      if (!plainObject(settlement) || settlement.combatId !== session.combatId || settlement.mapId !== session.mapId ||
+        !['even', 'manual', 'none'].includes(settlement.mode) ||
+        !Number.isSafeInteger(settlement.totalXp) || settlement.totalXp < 0 ||
+        !Number.isSafeInteger(settlement.awardedXp) || settlement.awardedXp < 0 || settlement.awardedXp > settlement.totalXp ||
+        !Number.isFinite(settlement.settledAt) || settlement.settledAt < 0 ||
+        !Array.isArray(settlement.defeatedMonsters) || settlement.defeatedMonsters.length > 512 ||
+        !Array.isArray(settlement.awards) || settlement.awards.length > 128) {
+        return 'invalid-combat-statistics'
+      }
+      for (const monster of settlement.defeatedMonsters) {
+        if (!plainObject(monster) || typeof monster.tokenId !== 'string' || !monster.tokenId || monster.tokenId.length > 200 ||
+          typeof monster.name !== 'string' || !monster.name || monster.name.length > 240 ||
+          (monster.monsterId != null && (typeof monster.monsterId !== 'string' || monster.monsterId.length > 200)) ||
+          (monster.challengeRating != null && (typeof monster.challengeRating !== 'string' || monster.challengeRating.length > 16)) ||
+          !Number.isSafeInteger(monster.xp) || monster.xp < 0) {
+          return 'invalid-combat-statistics'
+        }
+      }
+      const awardIds = new Set()
+      let awardedXp = 0
+      for (const award of settlement.awards) {
+        if (!plainObject(award) || typeof award.characterId !== 'string' || !award.characterId || award.characterId.length > 200 ||
+          awardIds.has(award.characterId) || typeof award.characterName !== 'string' || !award.characterName || award.characterName.length > 240 ||
+          !Number.isSafeInteger(award.xp) || award.xp < 0) {
+          return 'invalid-combat-statistics'
+        }
+        awardIds.add(award.characterId)
+        awardedXp += award.xp
+        if (!Number.isSafeInteger(awardedXp)) return 'invalid-combat-statistics'
+      }
+      if (awardedXp !== settlement.awardedXp ||
+        (settlement.mode === 'none'
+          ? settlement.awards.length > 0 || awardedXp !== 0
+          : awardedXp !== settlement.totalXp)) {
         return 'invalid-combat-statistics'
       }
     }
@@ -3441,7 +3564,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const mutation = JSON.parse(body.toString('utf8'))
       const filePath = path.join(ctx.stateRoot, 'combat-interrupts.json')
       const result = await atomicMutateJsonStateLocked(filePath, (queue) =>
-        mutateCombatInterruptQueue(queue, mutation, Date.now()),
+        mutateCombatInterruptQueue(queue, mutation, Date.now(), ctx.accessRole),
       )
       if (!result?.ok) {
         res.writeHead(result?.status ?? 400, { 'Content-Type': 'application/json; charset=utf-8' })

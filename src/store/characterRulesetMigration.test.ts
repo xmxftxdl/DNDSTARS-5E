@@ -43,4 +43,21 @@ describe('D&D 5e character save migration', () => {
     const snapshot = serializeDnd5eCharacterSnapshot(migrated)
     expect(JSON.stringify(snapshot)).not.toMatch(/actionPoints|currentAP|combatSkills|apCost/)
   })
+
+  it('persists valid combat XP receipts and drops malformed receipts', () => {
+    const migrated = normalizeCharacter({
+      id: 'fighter',
+      name: '战士',
+      experience: 150,
+      dnd5eExperienceAwards: [
+        { combatId: 'combat-1', mapId: 'map-1', xp: 50, awardedAt: 10 },
+        { combatId: '', mapId: 'map-1', xp: 100, awardedAt: 11 },
+        { combatId: 'combat-2', mapId: 'map-1', xp: -1, awardedAt: 12 },
+      ],
+    })
+    expect(migrated.dnd5eExperienceAwards).toEqual([
+      { combatId: 'combat-1', mapId: 'map-1', xp: 50, awardedAt: 10 },
+    ])
+    expect(serializeDnd5eCharacterSnapshot(migrated).dnd5eExperienceAwards).toEqual(migrated.dnd5eExperienceAwards)
+  })
 })

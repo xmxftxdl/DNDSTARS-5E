@@ -476,11 +476,12 @@ function finiteInteger(value: unknown, minimum: number, maximum: number): value 
   return typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
 }
 
-const INVENTORY_CATEGORIES = ['equipment', 'adventuring-gear', 'consumable', 'tool', 'container'] as const
+const INVENTORY_CATEGORIES = ['equipment', 'magic-item', 'adventuring-gear', 'consumable', 'tool', 'container'] as const
 const INVENTORY_ICONS = [
   'weapon', 'armor', 'shield', 'backpack', 'bedroll', 'rope', 'torch', 'tinderbox',
   'waterskin', 'rations', 'healers-kit', 'ball-bearings', 'caltrops', 'hunting-trap',
-  'acid', 'alchemists-fire', 'holy-water', 'antitoxin', 'poison', 'healing-potion', 'generic',
+  'acid', 'alchemists-fire', 'holy-water', 'antitoxin', 'poison', 'healing-potion',
+  'magic-ring', 'magic-wand', 'magic-staff', 'magic-scroll', 'magic-wondrous', 'generic',
 ] as const
 const EQUIPMENT_SLOTS = ['mainWeapon', 'offHand', 'armor', 'helmet', 'shoes', 'ring', 'necklace'] as const
 
@@ -516,6 +517,20 @@ function clonePluginItemDefinition(
     definition.cost.amount < 0 || definition.cost.amount > 1_000_000_000 ||
     !['cp', 'sp', 'gp'].includes(definition.cost.currency)
   )) throw new Error(`Invalid plugin item cost: ${itemId}`)
+
+  const magicItem = definition.magicItem
+  if (magicItem && (
+    !['armor', 'weapon', 'ammunition', 'wondrous-item', 'potion', 'ring', 'rod', 'scroll', 'staff', 'wand'].includes(magicItem.kind) ||
+    !['common', 'uncommon', 'rare', 'very-rare', 'legendary', 'artifact', 'varies'].includes(magicItem.rarity) ||
+    !['none', 'required'].includes(magicItem.attunement) ||
+    !['headless', 'dm-adjudication'].includes(magicItem.automation) ||
+    (magicItem.attunementRequirement != null && (
+      magicItem.attunement !== 'required' ||
+      typeof magicItem.attunementRequirement !== 'string' ||
+      !magicItem.attunementRequirement.trim() ||
+      magicItem.attunementRequirement.length > 240
+    ))
+  )) throw new Error(`Invalid plugin magic item metadata: ${itemId}`)
 
   let equipment: EquipmentItem | undefined
   if (definition.equipment) {
@@ -640,6 +655,7 @@ function clonePluginItemDefinition(
     ...(definition.cost ? { cost: { ...definition.cost } } : {}),
     stackable: definition.stackable,
     ...(equipment ? { equipment } : {}),
+    ...(magicItem ? { magicItem: { ...magicItem } } : {}),
     ...(resources?.length ? { resources } : {}),
     ...(headlessEffects?.length ? { headlessEffects } : {}),
     ...(use ? { use: structuredClone(use) } : {}),
@@ -1655,6 +1671,7 @@ function cloneRegisteredPluginItem(item: RegisteredDnd5ePluginItem): RegisteredD
     ...item,
     cost: item.cost ? { ...item.cost } : undefined,
     equipment: item.equipment ? structuredClone(item.equipment) : undefined,
+    magicItem: item.magicItem ? { ...item.magicItem } : undefined,
     use: item.use ? structuredClone(item.use) : undefined,
     source: { ...item.source },
   }

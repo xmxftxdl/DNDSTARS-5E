@@ -123,12 +123,15 @@ export default function CampaignCombatStatisticsPanel() {
   const viewLabel = selectedSession
     ? `${mapNames.get(selectedSession.mapId) ?? '未命名地图'} · 第 ${selectedSession.lastRound} 轮`
     : `战役累计 · ${sessions.length} 场战斗`
+  const experienceTotal = selectedSession?.experienceSettlement?.totalXp ??
+    orderedSessions.reduce((total, session) => total + (session.experienceSettlement?.totalXp ?? 0), 0)
 
   const metrics = [
     { label: '团队输出', value: sum(party, 'damageDealt'), tone: 'text-rose-200' },
     { label: '团队承伤', value: sum(party, 'damageTaken'), tone: 'text-slate-100' },
     { label: '团队治疗', value: sum(party, 'healingDone'), tone: 'text-emerald-200' },
     { label: '团队贡献', value: party.reduce((total, entry) => total + combatantContributionScore(entry), 0), tone: 'text-amber-200' },
+    { label: '怪物经验', value: experienceTotal, tone: 'text-violet-200' },
   ]
 
   return (
@@ -162,7 +165,7 @@ export default function CampaignCombatStatisticsPanel() {
         )}
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         {metrics.map((metric) => (
           <div key={metric.label} className="rounded-xl border border-white/5 bg-slate-950/35 px-3 py-3 text-center">
             <p className={`text-xl font-bold tabular-nums ${metric.tone}`}>{metric.value}</p>
@@ -170,6 +173,22 @@ export default function CampaignCombatStatisticsPanel() {
           </div>
         ))}
       </div>
+
+      {selectedSession?.experienceSettlement && (
+        <div className="mt-4 rounded-xl border border-violet-300/10 bg-violet-500/[0.05] px-4 py-3 text-xs text-slate-400">
+          <p>
+            经验结算：共 {selectedSession.experienceSettlement.totalXp.toLocaleString('zh-CN')} XP ·
+            {selectedSession.experienceSettlement.mode === 'none'
+              ? ' 本场未发放'
+              : ` ${selectedSession.experienceSettlement.mode === 'even' ? '平均分配' : '自由分配'}给 ${selectedSession.experienceSettlement.awards.length} 名角色`}
+          </p>
+          {selectedSession.experienceSettlement.awards.length > 0 && (
+            <p className="mt-1 text-slate-500">
+              {selectedSession.experienceSettlement.awards.map((award) => `${award.characterName} +${award.xp} XP`).join(' · ')}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="mt-5 space-y-4">
         {ranked.length === 0 ? (

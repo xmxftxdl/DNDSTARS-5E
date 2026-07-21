@@ -37,6 +37,13 @@ export interface Character {
   dnd5eBackgroundSkillProficiencies?: string[]
   alignment?: string // D&D 5e 2014 九大阵营
   experience: number // 经验值
+  /** DM 战斗结算收据；用于防止同一 combatId 因重试或断线恢复而重复发放经验。 */
+  dnd5eExperienceAwards?: Array<{
+    combatId: string
+    mapId: string
+    xp: number
+    awardedAt: number
+  }>
   reputation: number // 声望
 
   abilities: Abilities

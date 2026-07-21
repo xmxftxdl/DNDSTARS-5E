@@ -168,12 +168,13 @@ const COMBAT_INTERRUPT_KINDS = new Set<CombatInterruptKind>([
   'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
   'legendary-resistance', 'bardic-inspiration', 'cutting-words', 'dark-ones-own-luck',
   'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'plugin-choice', 'dm-adjudication',
+  'roll-confirmation',
 ])
 const COMBAT_INTERRUPT_STATUSES = new Set<CombatInterruptStatus>([
   'pending', 'waiting-for-dm', 'rolling', 'answered', 'done', 'rolled-back',
 ])
 const COMBAT_INTERRUPT_PHASES = new Set<CombatInterruptPhase>([
-  'before-action', 'before-hit', 'before-damage', 'after-save', 'before-condition',
+  'before-action', 'after-roll', 'before-hit', 'before-damage', 'after-save', 'before-condition',
 ])
 
 function migrateCombatInterruptEnvelope(input: Record<string, unknown>): {
@@ -198,6 +199,25 @@ function migrateCombatInterruptEnvelope(input: Record<string, unknown>): {
     if (!COMBAT_INTERRUPT_KINDS.has(kind)) issues.push(`${path}.kind 无效`)
     if (!COMBAT_INTERRUPT_STATUSES.has(raw.status as CombatInterruptStatus)) issues.push(`${path}.status 无效`)
     if (!isPlainObject(raw.payload)) issues.push(`${path}.payload 必须是对象`)
+    if (raw.contributions != null) {
+      if (!Array.isArray(raw.contributions) || raw.contributions.length > 32) {
+        issues.push(`${path}.contributions 无效`)
+      } else {
+        raw.contributions.forEach((entry, contributionIndex) => {
+          const contributionPath = `${path}.contributions[${contributionIndex}]`
+          if (
+            !isPlainObject(entry) || entry.kind !== 'replace-d20' ||
+            typeof entry.id !== 'string' || !entry.id ||
+            typeof entry.characterId !== 'string' || !entry.characterId ||
+            typeof entry.characterName !== 'string' || !entry.characterName.trim() ||
+            typeof entry.featureLabel !== 'string' || !entry.featureLabel.trim() ||
+            entry.dieIndex !== 0 || !Number.isInteger(entry.replacementValue) ||
+            Number(entry.replacementValue) < 1 || Number(entry.replacementValue) > 20 ||
+            !Number.isFinite(entry.createdAt)
+          ) issues.push(`${contributionPath} 无效`)
+        })
+      }
+    }
     if (!Number.isFinite(raw.createdAt) || !Number.isFinite(raw.updatedAt)) issues.push(`${path} 时间戳无效`)
     if (raw.expiresAt != null && !Number.isFinite(raw.expiresAt)) issues.push(`${path}.expiresAt 无效`)
     const transactionId = typeof raw.transactionId === 'string' && raw.transactionId ? raw.transactionId : raw.id
