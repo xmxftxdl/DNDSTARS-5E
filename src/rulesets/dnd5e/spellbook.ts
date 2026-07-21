@@ -3,6 +3,7 @@ import {
   DND5E_SRD_SPELL_DESCRIPTIONS_ZH,
   type Dnd5eSrdSpellDescriptionZh,
 } from './spellDescriptionsZh.generated'
+import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
 import { DND5E_SRD_COMBAT_SPELLS, type Dnd5eSrdSpellDefinition } from './spells'
 import { DND5E_SRD_SPELL_CATALOG } from './spellCatalog'
 import { parseDnd5eSpellMechanics, type Dnd5eSpellMechanicsDefinition } from './spellMechanics'
@@ -100,6 +101,7 @@ export interface Dnd5eSpellbookEntry {
   sourceKind: 'srd-core' | 'room-import'
   headless: boolean
   catalogOnly: boolean
+  translationStatus?: 'context-reviewed' | 'legacy-runtime'
   reference?: Dnd5eSrdSpellDescriptionZh
   imported?: Dnd5eImportedSpell
   combat?: Dnd5eSrdSpellDefinition
@@ -352,7 +354,8 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
   const combatById = new Map(DND5E_SRD_COMBAT_SPELLS.map((spell) => [spell.id, spell]))
   const core = DND5E_SRD_SPELL_CATALOG.map((catalog): Dnd5eSpellbookEntry => {
     const combat = combatById.get(catalog.id)
-    const reference = DND5E_SRD_SPELL_DESCRIPTIONS_ZH[catalog.id]
+    const reviewedReference = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED[catalog.id]
+    const reference = reviewedReference ?? DND5E_SRD_SPELL_DESCRIPTIONS_ZH[catalog.id]
     return {
       id: catalog.id,
       name: catalog.name,
@@ -362,6 +365,7 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
       sourceKind: 'srd-core',
       headless: !!combat,
       catalogOnly: !combat,
+      translationStatus: reviewedReference ? 'context-reviewed' : 'legacy-runtime',
       ...(reference ? { reference } : {}),
       ...(combat ? { combat } : {}),
     }

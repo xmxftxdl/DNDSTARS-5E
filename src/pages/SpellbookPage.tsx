@@ -24,6 +24,11 @@ import {
 } from '../rulesets/dnd5e/pluginApi'
 import { useSpellbookStore } from '../store/spellbook'
 import { dnd5eConditionLabel } from '../rulesets/dnd5e/conditions'
+import {
+  DND5E_SRD_5_1_LICENSE_URL,
+  DND5E_SRD_5_1_SOURCE_URL,
+  DND5E_SRD_5_1_TRANSLATION_NOTICE,
+} from '../rulesets/dnd5e/srdContent'
 
 type SourceFilter = 'all' | 'srd-core' | 'room-import'
 type AutomationFilter = 'all' | 'headless' | 'adjudication'
@@ -34,7 +39,7 @@ function levelLabel(level: number): string {
 
 function sourceLabel(entry: Dnd5eSpellbookEntry): string {
   if (entry.sourceKind === 'room-import') return '房间导入'
-  return 'SRD 5.1 · 中文正文'
+  return 'SRD 5.1 · 中文资料'
 }
 
 function castingTimeLabel(spell: Dnd5eImportedSpell): string {
@@ -141,6 +146,7 @@ export default function SpellbookPage() {
   }, [imported, pluginRevision])
   const headlessCount = entries.filter((entry) => entry.headless).length
   const adjudicationCount = entries.length - headlessCount
+  const reviewedTranslationCount = entries.filter((entry) => entry.translationStatus === 'context-reviewed').length
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
     return entries.filter((entry) => {
@@ -229,12 +235,12 @@ export default function SpellbookPage() {
         <Summary icon={BookOpen} label="SRD 5.1 法术目录" value="319" />
         <Summary icon={Bot} label="已接入 Headless" value={`${headlessCount}`} />
         <Summary icon={ShieldCheck} label="需要 DM 裁定" value={`${adjudicationCount}`} />
-        <Summary icon={FileJson} label="房间导入法术" value={`${imported.length}`} />
+        <Summary icon={FileJson} label="已完成语境审校" value={`${reviewedTranslationCount} / 319`} />
       </div>
 
       <div className="mb-4 rounded-2xl border border-sky-400/20 bg-sky-500/[0.06] px-4 py-3 text-sm leading-6 text-sky-100">
         <div className="flex items-start gap-2"><ShieldCheck className="mt-1 h-4 w-4 shrink-0" /><p>
-          319 个 SRD 5.1 核心法术均已附带中文版详细资料。规则正文完整不代表已自动结算：标有“Headless”的法术才能自动处理伤害、豁免和状态；其他法术仍由 DM 按正文裁定。DM 导入的 JSON 同样只提供资料，不执行 JavaScript，也不会自动获得 Headless 权限。
+          SRD 5.1 核心目录共 319 个法术；其中 {reviewedTranslationCount} 个已按英文 SRD 5.1 完成语境翻译与逐条复核，其余条目暂时保留旧版运行正文并明确标记。{DND5E_SRD_5_1_TRANSLATION_NOTICE}规则正文完整不代表已自动结算：标有“Headless”的法术才能自动处理伤害、豁免和状态；其他法术仍由 DM 按正文裁定。
         </p></div>
       </div>
       {notice ? <p className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-4 py-3 text-sm text-emerald-200">{notice}</p> : null}
@@ -299,6 +305,7 @@ function SpellDetails({ entry, isDM, busy, onRemove }: { entry?: Dnd5eSpellbookE
       <div><h2 className="text-2xl font-bold text-slate-50">{entry.name}</h2>{entry.englishName && entry.englishName !== entry.name ? <p className="mt-1 text-sm text-slate-500">{entry.englishName}</p> : null}</div>
       <div className="flex items-center gap-2">
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${entry.sourceKind === 'room-import' ? 'bg-sky-500/10 text-sky-200' : 'bg-slate-500/10 text-slate-400'}`}>{sourceLabel(entry)}</span>
+        {entry.sourceKind === 'srd-core' ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${entry.translationStatus === 'context-reviewed' ? 'bg-emerald-500/10 text-emerald-200' : 'bg-amber-500/10 text-amber-200'}`}>{entry.translationStatus === 'context-reviewed' ? '中文已审校' : '旧译文待迁移'}</span> : null}
         <AutomationBadge headless={entry.headless} />
         {isDM && imported ? <button type="button" disabled={busy} onClick={() => onRemove(imported)} title="移除房间法术" className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-200"><Trash2 className="h-4 w-4" /></button> : null}
       </div>
@@ -331,7 +338,7 @@ function SpellDetails({ entry, isDM, busy, onRemove }: { entry?: Dnd5eSpellbookE
     {(imported?.higherLevels ?? reference?.higherLevels) ? <RuleBlock title="升环效果" text={imported?.higherLevels ?? reference?.higherLevels ?? ''} /> : null}
     {imported && mechanicsLabel(imported) ? <RuleBlock title="结构化机械模板（不授予自动执行权限）" text={mechanicsLabel(imported) ?? ''} /> : null}
     {combat ? <RuleBlock title="Headless 结算说明" text={combat.description} /> : null}
-    {imported ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">来源：{imported.source.title} · 发布者：{imported.source.publisher} · 许可证：{imported.source.license}<br />ID：{imported.id}</div> : reference ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">中文资料条目：{reference.sourceName}（{reference.sourceEnglishName}）· PDF 第 {reference.sourcePage} 页<br />SRD ID：{entry.id} · 自动结算：{entry.headless ? '已接入 Headless' : '尚未接入，由 DM 裁定'}</div> : <div className="mt-5 text-xs text-slate-600">ID：{entry.id}</div>}
+    {imported ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">来源：{imported.source.title} · 发布者：{imported.source.publisher} · 许可证：{imported.source.license}<br />ID：{imported.id}</div> : reference ? <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">规则目录：<a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_SOURCE_URL} target="_blank" rel="noreferrer">英文 SRD 5.1</a> · <a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer">CC BY 4.0</a><br />中文条目：{entry.name}（{entry.englishName}）· SRD ID：{entry.id}<br />中文正文：{entry.translationStatus === 'context-reviewed' ? '已按英文 SRD 5.1 完成语境审校' : '旧版运行正文，待迁移审校'} · 自动结算：{entry.headless ? '已接入 Headless' : '尚未接入，由 DM 裁定'}</div> : <div className="mt-5 text-xs text-slate-600">ID：{entry.id}</div>}
   </section>
 }
 

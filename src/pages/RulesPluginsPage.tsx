@@ -28,6 +28,12 @@ import {
   setRoomRulesSnapshot,
   subscribeRoomRules,
 } from '../lib/roomRulesState'
+import {
+  DND5E_SRD_5_1_ATTRIBUTION,
+  DND5E_SRD_5_1_LICENSE_URL,
+  DND5E_SRD_5_1_SOURCE_URL,
+  DND5E_SRD_5_1_TRANSLATION_NOTICE,
+} from '../rulesets/dnd5e/srdContent'
 
 export default function RulesPluginsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -296,6 +302,15 @@ export default function RulesPluginsPage() {
       </nav>
 
       {settingsSection === 'plugins' && <div className="contents">
+      <section className="mb-5 rounded-2xl border border-white/8 bg-black/15 p-5">
+        <h2 className="font-semibold text-slate-100">SRD 5.1 来源与许可</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-400">{DND5E_SRD_5_1_TRANSLATION_NOTICE}</p>
+        <p className="mt-3 text-xs leading-5 text-slate-500">{DND5E_SRD_5_1_ATTRIBUTION}</p>
+        <div className="mt-3 flex flex-wrap gap-3 text-xs">
+          <a href={DND5E_SRD_5_1_SOURCE_URL} target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200">查看 SRD 5.1 来源</a>
+          <a href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200">查看 CC BY 4.0 许可证</a>
+        </div>
+      </section>
       {roomSession && (
         <section
           data-testid="room-rules-status"

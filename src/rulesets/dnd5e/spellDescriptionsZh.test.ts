@@ -4,8 +4,10 @@ import {
   DND5E_SRD_SPELL_DESCRIPTIONS_ZH,
   DND5E_SRD_SPELL_DESCRIPTIONS_ZH_SHA256,
 } from './spellDescriptionsZh.generated'
+import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
+import { dnd5eSpellbookEntries } from './spellbook'
 
-describe('Chinese PHB spell reference filtered through the SRD 5.1 catalog', () => {
+describe('legacy Chinese spell runtime data filtered through the SRD 5.1 catalog', () => {
   it('contains exactly the same 319 IDs as the SRD allow-list', () => {
     expect(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH).sort())
       .toEqual(DND5E_SRD_SPELL_CATALOG.map((spell) => spell.id).sort())
@@ -41,5 +43,24 @@ describe('Chinese PHB spell reference filtered through the SRD 5.1 catalog', () 
     expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH['magic-missile'].higherLevels).toContain('多制造出一支飞镖')
     expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH.wish.description).toContain('凡间生物所能施展的最强大法术')
     expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH['zone-of-truth'].description).toContain('不能故意说谎')
+  })
+
+  it('prefers context-reviewed SRD translations without mislabeling legacy fallbacks', () => {
+    expect(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED)).toHaveLength(11)
+    expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED.shield).toMatchObject({
+      sourcePage: 179,
+      sourceEnglishName: 'Shield',
+      castingTime: expect.stringContaining('反应'),
+    })
+    expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED.wish).toBeUndefined()
+
+    const entries = dnd5eSpellbookEntries([])
+    expect(entries.find((spell) => spell.id === 'shield')).toMatchObject({
+      translationStatus: 'context-reviewed',
+      reference: { sourcePage: 179 },
+    })
+    expect(entries.find((spell) => spell.id === 'wish')).toMatchObject({
+      translationStatus: 'legacy-runtime',
+    })
   })
 })

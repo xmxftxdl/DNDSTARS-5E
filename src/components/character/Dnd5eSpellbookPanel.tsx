@@ -23,6 +23,7 @@ import {
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
 import { useSpellbookStore } from '../../store/spellbook'
+import { DND5E_SRD_5_1_LICENSE_URL, DND5E_SRD_5_1_SOURCE_URL } from '../../rulesets/dnd5e/srdContent'
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
@@ -347,7 +348,7 @@ function SpellDetailsDialog({ spell, onClose }: { spell: Dnd5eSpellbookEntry; on
       {higherLevels ? <SpellRuleBlock title="升环效果" text={higherLevels} /> : null}
       {combat && (reference || imported) ? <SpellRuleBlock title="Headless 结算说明" text={combat.description} /> : null}
       <p className="mt-5 rounded-xl border border-white/8 bg-black/10 p-3 text-xs leading-5 text-slate-500">
-        {reference ? `中文资料条目：${reference.sourceName}（${reference.sourceEnglishName}）· PDF 第 ${reference.sourcePage} 页` : imported ? `房间导入：${imported.source.title} · ${imported.source.publisher} · ${imported.source.license}` : 'SRD 5.1 核心目录'}<br />ID：{spell.id}
+        {reference ? <>规则目录：<a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_SOURCE_URL} target="_blank" rel="noreferrer">英文 SRD 5.1</a> · <a className="text-violet-300 hover:text-violet-200" href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer">CC BY 4.0</a><br />中文条目：{spell.name}{spell.englishName ? `（${spell.englishName}）` : ''} · {spell.translationStatus === 'context-reviewed' ? '中文正文已完成语境审校' : '旧版运行正文，待迁移审校'}</> : imported ? `房间导入：${imported.source.title} · ${imported.source.publisher} · ${imported.source.license}` : 'SRD 5.1 核心目录'}<br />ID：{spell.id}
       </p>
     </section>
   </div>, document.body)
