@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import {
-  Map as MapIcon,
   Upload,
   Grid3x3,
   Trash2,
   Skull,
   User,
   X,
-  Crown,
   Swords,
   Play,
   Square,
@@ -28,7 +26,6 @@ import {
   Undo2,
   Redo2,
 } from 'lucide-react'
-import EmptyState from '../components/EmptyState'
 import MapCanvas from '../components/map/MapCanvas'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
 import MapGeometryToolbar from '../components/map/MapGeometryToolbar'
@@ -485,6 +482,15 @@ import {
   resolveMapsFogGeometryState,
 } from './maps/mapsFogGeometryController'
 import {
+  MapsEmptyMapPanel,
+  MapsModeSelectionPanel,
+  MapsModeToggle,
+} from './maps/MapsEntryPanels'
+import Dnd5eWeaponAttackConfirmationPanel, {
+  type Dnd5eWeaponAttackConfirmation,
+} from './maps/Dnd5eWeaponAttackConfirmationPanel'
+import { DND5E_COVER_LABELS } from './maps/dnd5eCoverPresentation'
+import {
   capturePlayerActionResultBaseline,
   type PlayerActionResultBaseline,
 } from '../lib/playerActionResult'
@@ -509,30 +515,6 @@ const runtimeId = (prefix?: string) =>
   prefix ? `${prefix}-${runtimeNow()}-${runtimeRandomSuffix()}` : `${runtimeNow()}-${runtimeRandomSuffix()}`
 const runtimeNumericId = () => runtimeNow() + Math.random()
 const randomDieValue = (sides: number) => 1 + Math.floor(Math.random() * sides)
-
-const DND5E_COVER_LABELS: Record<Dnd5eAttackCoverOverride, string> = {
-  none: '无掩护',
-  half: '半身掩护（+2 AC）',
-  'three-quarters': '四分之三掩护（+5 AC）',
-  total: '全身掩护（无法直接攻击）',
-}
-
-interface Dnd5eWeaponAttackConfirmation {
-  actorCharacterId: string
-  actorTokenId: string
-  actorName: string
-  targetTokenId: string
-  targetName: string
-  weaponName: string
-  options?: Dnd5eWeaponAttackOptions
-  automaticCover: Dnd5eAttackCoverOverride
-  automaticArmorClass: number
-  baseArmorClass: number
-  sourceLabel?: string
-  selectedCover: 'auto' | Dnd5eAttackCoverOverride
-  /** Present only on the DM host while a submitted player action is transaction-locked. */
-  authorityActionId?: string
-}
 
 interface SharedDmAdjudicationPromptView {
   id: string
@@ -13187,30 +13169,7 @@ export default function MapsPage() {
     }
   }
 
-  const ModeToggle = forcedMode ? null : (
-    <div className="flex items-center rounded-lg bg-void-900/60 p-0.5">
-      <button
-        onClick={() => chooseMode('player')}
-        className={[
-          'flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-          mode === 'player' ? 'bg-arcane-500/30 text-arcane-100' : 'text-slate-400 hover:text-slate-200',
-        ].join(' ')}
-      >
-        <User className="h-3.5 w-3.5" />
-        玩家
-      </button>
-      <button
-        onClick={() => chooseMode('dm')}
-        className={[
-          'flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-          mode === 'dm' ? 'bg-ember-500/30 text-ember-400' : 'text-slate-400 hover:text-slate-200',
-        ].join(' ')}
-      >
-        <Crown className="h-3.5 w-3.5" />
-        DM
-      </button>
-    </div>
-  )
+  const modeToggle = forcedMode || !mode ? null : <MapsModeToggle mode={mode} onChooseMode={chooseMode} />
   const playerWaitingForDm =
     mode === 'player' &&
     combatActive &&
@@ -13230,37 +13189,7 @@ export default function MapsPage() {
     : 0
 
   if (!mode) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-void-950 px-4">
-        <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-void-900/80 p-6 shadow-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-arcane-300">Stars Battle Map</p>
-          <h1 className="mt-3 text-2xl font-bold text-slate-100">选择进入模式</h1>
-          <p className="mt-2 text-sm text-slate-400">
-            DM 端负责地图、怪物、状态、血量和障碍物；玩家端只显示玩家可见的战斗信息和操作。
-          </p>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => chooseMode('dm')}
-              className="rounded-xl border border-ember-400/30 bg-ember-500/15 px-4 py-5 text-left hover:bg-ember-500/25"
-            >
-              <Crown className="mb-3 h-6 w-6 text-ember-300" />
-              <p className="font-bold text-ember-100">DM 界面</p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-400">管理地图、怪物详情、状态、血量、网格和障碍物。</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => chooseMode('player')}
-              className="rounded-xl border border-arcane-400/30 bg-arcane-500/15 px-4 py-5 text-left hover:bg-arcane-500/25"
-            >
-              <User className="mb-3 h-6 w-6 text-arcane-200" />
-              <p className="font-bold text-arcane-100">玩家界面</p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-400">只显示玩家操作、可见角色、战斗 Log 和可见怪物信息。</p>
-            </button>
-          </div>
-        </div>
-      </div>
-    )
+    return <MapsModeSelectionPanel onChooseMode={chooseMode} />
   }
 
   return (
@@ -13268,30 +13197,11 @@ export default function MapsPage() {
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
 
       {maps.length === 0 || !activeMap ? (
-        <div className="flex h-full flex-col">
-          <div className="mb-4">{ModeToggle}</div>
-          <div className="flex flex-1 items-center">
-            <div className="w-full">
-              <EmptyState
-                icon={MapIcon}
-                title="还没有地图"
-                description="上传一张图片作为战斗地图，之后可以叠加网格、放置 token、开始战斗。"
-                hint="支持 PNG / JPG · 图片本地存储，刷新不丢失"
-                action={
-                  isDM ? (
-                    <button
-                      onClick={() => fileRef.current?.click()}
-                      className="flex items-center gap-2 rounded-xl bg-arcane-500/20 px-4 py-2 text-sm font-semibold text-arcane-200 transition-colors hover:bg-arcane-500/30"
-                    >
-                      <Upload className="h-4 w-4" />
-                      选择图片上传
-                    </button>
-                  ) : undefined
-                }
-              />
-            </div>
-          </div>
-        </div>
+        <MapsEmptyMapPanel
+          modeToggle={modeToggle}
+          isDm={isDM}
+          onUpload={() => fileRef.current?.click()}
+        />
       ) : (
         /* 全屏地图框，所有控件作为浮层 */
         <div ref={frameRef} className="relative h-full w-full overflow-hidden rounded-2xl">
@@ -13411,133 +13321,38 @@ export default function MapsPage() {
             />
           </div>
           {dnd5eWeaponAttackConfirmation && previewCover ? (
-            <div
-              data-testid="dnd5e-cover-preview"
-              className="absolute inset-0 z-[80] flex items-center justify-center bg-void-950/55 p-4 backdrop-blur-[2px]"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) dismissDnd5eWeaponAttackConfirmation()
+            <Dnd5eWeaponAttackConfirmationPanel
+              confirmation={dnd5eWeaponAttackConfirmation}
+              previewCover={previewCover}
+              previewArmorClass={previewArmorClass}
+              isDm={isDM}
+              onDismiss={dismissDnd5eWeaponAttackConfirmation}
+              onCoverChange={(selectedCover) => setDnd5eWeaponAttackConfirmation((current) => current
+                ? { ...current, selectedCover }
+                : current)}
+              onConfirm={() => {
+                const confirmation = dnd5eWeaponAttackConfirmation
+                if (confirmation.authorityActionId) {
+                  settleDmCoverOverride(confirmation.selectedCover)
+                  return
+                }
+                const targetToken = activeMap.tokens.find((token) => token.id === confirmation.targetTokenId)
+                if (!targetToken) {
+                  dismissDnd5eWeaponAttackConfirmation()
+                  return
+                }
+                const options = { ...(confirmation.options ?? {}) }
+                if (isDM && confirmation.selectedCover !== 'auto') {
+                  options.coverOverride = confirmation.selectedCover
+                } else {
+                  delete options.coverOverride
+                }
+                const sent = isDM
+                  ? sendDmLocalDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
+                  : sendPlayerDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
+                if (sent) dismissDnd5eWeaponAttackConfirmation()
               }}
-            >
-              <div className="w-full max-w-md rounded-2xl border border-violet-300/25 bg-void-950/95 p-5 shadow-2xl">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">攻击前判定</p>
-                    <h2 className="mt-1 text-lg font-bold text-slate-100">掩护预览</h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={dismissDnd5eWeaponAttackConfirmation}
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-slate-100"
-                    aria-label={dnd5eWeaponAttackConfirmation.authorityActionId ? '采用自动掩护判定' : '取消攻击'}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm">
-                  <p className="font-semibold text-slate-100">
-                    {dnd5eWeaponAttackConfirmation.actorName}
-                    <span className="px-2 text-slate-500">→</span>
-                    {dnd5eWeaponAttackConfirmation.targetName}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">武器：{dnd5eWeaponAttackConfirmation.weaponName}</p>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <p className="text-[11px] text-slate-500">自动判定</p>
-                    <p className="mt-1 text-sm font-semibold text-violet-100">
-                      {DND5E_COVER_LABELS[dnd5eWeaponAttackConfirmation.automaticCover]}
-                    </p>
-                    {dnd5eWeaponAttackConfirmation.sourceLabel ? (
-                      <p className="mt-1 text-xs text-slate-400">来源：{dnd5eWeaponAttackConfirmation.sourceLabel}</p>
-                    ) : null}
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <p className="text-[11px] text-slate-500">本次攻击目标 AC</p>
-                    <p className="mt-1 text-lg font-bold text-amber-200">
-                      {previewCover === 'total' ? '无法攻击' : previewArmorClass}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">无掩护时 AC {dnd5eWeaponAttackConfirmation.baseArmorClass}</p>
-                  </div>
-                </div>
-
-                {isDM ? (
-                  <label className="mt-4 block text-xs font-semibold text-slate-300">
-                    DM 本次攻击覆盖
-                    <select
-                      data-testid="dnd5e-cover-override"
-                      value={dnd5eWeaponAttackConfirmation.selectedCover}
-                      onChange={(event) => setDnd5eWeaponAttackConfirmation((current) => current
-                        ? { ...current, selectedCover: event.target.value as 'auto' | Dnd5eAttackCoverOverride }
-                        : current)}
-                      className="mt-1.5 w-full rounded-xl border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-400/50"
-                    >
-                      <option value="auto">采用自动判定</option>
-                      <option value="none">无掩护</option>
-                      <option value="half">半身掩护（+2 AC）</option>
-                      <option value="three-quarters">四分之三掩护（+5 AC）</option>
-                      <option value="total">全身掩护（无法直接攻击）</option>
-                    </select>
-                    <span className="mt-1.5 block font-normal text-slate-500">
-                      覆盖只进入这一笔攻击事务，不会修改地图上的墙、门、窗或障碍物。
-                    </span>
-                  </label>
-                ) : (
-                  <p className="mt-4 rounded-lg bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
-                    掩护由地图与 Token 位置自动计算；如需调整，请由 DM 对本次攻击裁定。
-                  </p>
-                )}
-
-                {dnd5eWeaponAttackConfirmation.selectedCover !== 'auto' ? (
-                  <p className="mt-3 text-xs font-medium text-amber-200">
-                    本次采用 DM 裁定：{DND5E_COVER_LABELS[previewCover]}
-                  </p>
-                ) : null}
-
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={dismissDnd5eWeaponAttackConfirmation}
-                    className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5"
-                  >
-                    {dnd5eWeaponAttackConfirmation.authorityActionId ? '采用自动判定' : '取消'}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="dnd5e-cover-confirm"
-                    disabled={isDM && previewCover === 'total'}
-                    onClick={() => {
-                      const confirmation = dnd5eWeaponAttackConfirmation
-                      if (confirmation.authorityActionId) {
-                        settleDmCoverOverride(confirmation.selectedCover)
-                        return
-                      }
-                      const targetToken = activeMap.tokens.find((token) => token.id === confirmation.targetTokenId)
-                      if (!targetToken) {
-                        dismissDnd5eWeaponAttackConfirmation()
-                        return
-                      }
-                      const options = { ...(confirmation.options ?? {}) }
-                      if (isDM && confirmation.selectedCover !== 'auto') {
-                        options.coverOverride = confirmation.selectedCover
-                      } else {
-                        delete options.coverOverride
-                      }
-                      const sent = isDM
-                        ? sendDmLocalDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
-                        : sendPlayerDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
-                      if (sent) dismissDnd5eWeaponAttackConfirmation()
-                    }}
-                    className="rounded-xl bg-violet-500/25 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/35 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {dnd5eWeaponAttackConfirmation.authorityActionId
-                      ? '应用并继续结算'
-                      : !isDM && previewCover === 'total' ? '请求 DM 裁定' : '确认攻击'}
-                  </button>
-                </div>
-              </div>
-            </div>
+            />
           ) : null}
           {playerWaitingForDm && (
             <div
@@ -14902,7 +14717,7 @@ export default function MapsPage() {
           {showBar ? (
             <div className="absolute inset-x-2 top-2 z-30 flex flex-col items-center gap-2">
             <div className="glass flex w-full flex-wrap items-center gap-2 rounded-xl px-2 py-1.5 shadow-xl">
-              {ModeToggle}
+              {modeToggle}
 
               {/* 战斗状态 + 控制 */}
               <div
