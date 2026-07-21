@@ -49,7 +49,7 @@
 | H12 | 范围法术无几何校验+目标上限 | ⚠️ 部分修复（地图 UI 用 `cellsForAoe` 选目标；**权威端仍只查射程+两两间距**，`maximumTargets` 截断仍在，见 R6） |
 | H13 | 附赠动作施法不限制反应法术 | ❌ 仍存在，且范围扩大：护盾术、地狱斥责、法术反制三个反应法术都不检查（见 R7） |
 | H14 | 决斗风格双手也加 +2 | ✅ 已修复（要求近战、非双手持用、副手非武器；与大武器格斗互斥，有测试） |
-| H15 | 手动 HP 不随体质追溯 | ❌ 仍存在（`hitPoints.ts` 169–171，manual 模式冻结 `previousMaximum`） |
+| H15 | 手动 HP 不随体质追溯 | ✅ 已修复（manual 模式保存逐级 `hitPointRolls`，逐级应用当前体质调整值和最低 +1；旧最终值会确定性迁移为等值骰面） |
 | H16–19 | 群体战术/灵活逃脱/蛮劲冲锋/黑豹突袭 | ❌ 仍存在（`Dnd5eMonsterTrait.rule` 目前只支持 `undead-fortitude` 一种机器规则，见 R8） |
 | H20 | 旧敌人数据污染 | ⚠️ 部分修复（新放置全走 `srd-5.1:` 池；裸 id 仍回落旧数据，`enemyAi.ts`、`getEnemyTemplate` 仍引用旧池） |
 | H21 | 闪避动作在地图路径无效 | ❌ 仍存在（headless `dodge` 7730–7733 仍只设 `dodging` 不设 `dodgingTurnKey`，地图攻击准备层只查后者；闪避也仍缺敏捷豁免优势、失能/速度 0 终止；标准疾走/闪避仍不在共享玩家动作里，见 R9） |
@@ -77,7 +77,7 @@
 - **R9. 闪避动作断线**。headless `dodge` 不设 `dodgingTurnKey`，地图攻击层只查 `dodgingTurnKey`（武僧耐心防御两者都设所以能用）；闪避不给敏捷豁免优势、失能/速度 0 不终止；标准疾走/闪避不在 `SharedPlayerActionState` 中，玩家在自动结算里根本用不了。
 - **R10.（新）借机攻击可穿墙**。`findDnd5eOpportunityAttackersForMove`（`opportunityAttackAction.ts` 26–64）只按触及距离判定，不查 `mapGeometryCanSeeToken`/视线遮挡——新墙体系统下，隔墙的敌人也会触发借机。
 - **R11. 易伤先于抗性应用**。`adjustDamageForTarget`：先 ×2 再减半；SRD 顺序是先抗性后易伤，奇数伤害结果不同。
-- **R12. 手动/投骰 HP 不随体质调整值追溯更新**（`hitPoints.ts` 169–171）。
+- **R12（已修复）. 手动/投骰 HP 现在保存逐级生命骰结果**，体质调整值变化后会按全部角色等级追溯重算；负体质下仍逐级执行最低 +1。
 
 ### 中优先级
 

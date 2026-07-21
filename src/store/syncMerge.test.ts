@@ -268,6 +268,40 @@ describe('pending local character-sheet hit point edits', () => {
       1_001,
     )[0].currentHp).toBe(24)
   })
+
+  it('preserves a manual Hit Die plan until the room snapshot acknowledges it', () => {
+    const rolls = [10, 8, 4]
+    markPendingLocalCharacterHitPointEdit('hero', {
+      currentHp: 28,
+      maxHp: 28,
+      hitPointMaximumMode: 'manual',
+      hitPointRolls: rolls,
+    }, 1_000)
+    const stale = mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 24,
+      maxHp: 24,
+      hitPointMaximumMode: 'fixed',
+      hitPointRolls: undefined,
+    })], 1_001)[0]
+    expect(stale).toMatchObject({
+      currentHp: 28,
+      maxHp: 28,
+      hitPointMaximumMode: 'manual',
+      hitPointRolls: rolls,
+    })
+
+    const acknowledged = mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 28,
+      maxHp: 28,
+      hitPointMaximumMode: 'manual',
+      hitPointRolls: rolls,
+    })], 1_002)[0]
+    expect(acknowledged.hitPointRolls).toEqual(rolls)
+    expect(mergePendingLocalCharacterHitPointEdits([char({
+      hitPointMaximumMode: 'fixed',
+      hitPointRolls: undefined,
+    })], 1_003)[0].hitPointMaximumMode).toBe('fixed')
+  })
 })
 
 describe('pending local fighter choices', () => {

@@ -80,8 +80,10 @@ export interface Character {
   currentHp: number
   tempHp: number
   hitDice: string
-  /** 固定值会随职业、等级和体质自动重算；manual 用于逐级掷骰后手动填写总值。 */
+  /** 固定值会随职业、等级和体质自动重算；manual 保存逐级生命骰结果并自动应用体质调整值。 */
   hitPointMaximumMode?: 'fixed' | 'manual'
+  /** manual 模式下各角色等级的原始生命骰面；第 1 级始终规范化为职业生命骰满值。 */
+  hitPointRolls?: number[]
   /** D&D 5e 2014 Hit Dice pools. Legacy hitDice is retained only for save migration. */
   hitPointDice?: Array<{ sides: number; current: number; max: number }>
   deathSaveSuccesses?: number

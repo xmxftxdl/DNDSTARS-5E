@@ -42,7 +42,7 @@ export default function CharacterDetailPanel({
       currentHp: nextHp,
       maxHp,
       ...(manuallySetMaximum && character.rulesetId === 'dnd5e-2014-srd-5.1'
-        ? { hitPointMaximumMode: 'manual' as const }
+        ? { hitPointMaximumMode: 'manual' as const, hitPointRolls: undefined }
         : {}),
     })
     updateToken(mapId, token.id, { hp: nextHp, maxHp })

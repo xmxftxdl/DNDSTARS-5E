@@ -42,7 +42,10 @@ const pendingLocalCharacterLevelEdits = new Map<string, { level: number; updated
 let pendingLocalCharacterLevelEditsHydrated = false
 const LOCAL_CHARACTER_HIT_POINT_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY = 'stars-character-hit-point-edits-v1'
-type PendingLocalCharacterHitPointEdit = Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp'>> & {
+type PendingLocalCharacterHitPointEdit = Partial<Pick<
+  Character,
+  'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls'
+>> & {
   updatedAt: number
 }
 const pendingLocalCharacterHitPointEdits = new Map<string, PendingLocalCharacterHitPointEdit>()
@@ -189,7 +192,17 @@ function hydratePendingLocalCharacterHitPointEdits(): void {
       if (Number.isFinite(pending.currentHp)) normalized.currentHp = Math.max(0, Math.floor(pending.currentHp!))
       if (Number.isFinite(pending.maxHp)) normalized.maxHp = Math.max(1, Math.floor(pending.maxHp!))
       if (Number.isFinite(pending.tempHp)) normalized.tempHp = Math.max(0, Math.floor(pending.tempHp!))
-      if (normalized.currentHp == null && normalized.maxHp == null && normalized.tempHp == null) continue
+      if (pending.hitPointMaximumMode === 'fixed' || pending.hitPointMaximumMode === 'manual') {
+        normalized.hitPointMaximumMode = pending.hitPointMaximumMode
+      }
+      if (
+        Array.isArray(pending.hitPointRolls) && pending.hitPointRolls.length >= 1 && pending.hitPointRolls.length <= 20 &&
+        pending.hitPointRolls.every((roll) => Number.isFinite(roll))
+      ) normalized.hitPointRolls = pending.hitPointRolls.map((roll) => Math.max(1, Math.floor(roll)))
+      if (
+        normalized.currentHp == null && normalized.maxHp == null && normalized.tempHp == null &&
+        normalized.hitPointMaximumMode == null && normalized.hitPointRolls == null
+      ) continue
       pendingLocalCharacterHitPointEdits.set(id, normalized)
     }
   } catch {
@@ -215,7 +228,7 @@ function gcPendingLocalCharacterHitPointEdits(now: number = Date.now()): void {
 
 export function markPendingLocalCharacterHitPointEdit(
   id: string,
-  patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp'>>,
+  patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls'>>,
   now: number = Date.now(),
 ): void {
   hydratePendingLocalCharacterHitPointEdits()
@@ -223,7 +236,16 @@ export function markPendingLocalCharacterHitPointEdit(
   if (Number.isFinite(patch.currentHp)) pending.currentHp = Math.max(0, Math.floor(patch.currentHp!))
   if (Number.isFinite(patch.maxHp)) pending.maxHp = Math.max(1, Math.floor(patch.maxHp!))
   if (Number.isFinite(patch.tempHp)) pending.tempHp = Math.max(0, Math.floor(patch.tempHp!))
-  if (pending.currentHp == null && pending.maxHp == null && pending.tempHp == null) return
+  if (patch.hitPointMaximumMode === 'fixed' || patch.hitPointMaximumMode === 'manual') {
+    pending.hitPointMaximumMode = patch.hitPointMaximumMode
+  }
+  if (Array.isArray(patch.hitPointRolls) && patch.hitPointRolls.length >= 1 && patch.hitPointRolls.length <= 20) {
+    pending.hitPointRolls = patch.hitPointRolls.map((roll) => Math.max(1, Math.floor(Number(roll) || 1)))
+  }
+  if (
+    pending.currentHp == null && pending.maxHp == null && pending.tempHp == null &&
+    pending.hitPointMaximumMode == null && pending.hitPointRolls == null
+  ) return
   pendingLocalCharacterHitPointEdits.set(id, pending)
   persistPendingLocalCharacterHitPointEdits()
 }
@@ -260,7 +282,9 @@ export function mergePendingLocalCharacterHitPointEdits(
     const acknowledged =
       (pending.currentHp == null || character.currentHp === pending.currentHp) &&
       (pending.maxHp == null || character.maxHp === pending.maxHp) &&
-      (pending.tempHp == null || character.tempHp === pending.tempHp)
+      (pending.tempHp == null || character.tempHp === pending.tempHp) &&
+      (pending.hitPointMaximumMode == null || character.hitPointMaximumMode === pending.hitPointMaximumMode) &&
+      (pending.hitPointRolls == null || JSON.stringify(character.hitPointRolls ?? []) === JSON.stringify(pending.hitPointRolls))
     if (acknowledged) {
       clearPendingLocalCharacterHitPointEdit(character.id)
       return character
@@ -270,6 +294,8 @@ export function mergePendingLocalCharacterHitPointEdits(
       ...(pending.currentHp == null ? {} : { currentHp: pending.currentHp }),
       ...(pending.maxHp == null ? {} : { maxHp: pending.maxHp }),
       ...(pending.tempHp == null ? {} : { tempHp: pending.tempHp }),
+      ...(pending.hitPointMaximumMode == null ? {} : { hitPointMaximumMode: pending.hitPointMaximumMode }),
+      ...(pending.hitPointRolls == null ? {} : { hitPointRolls: [...pending.hitPointRolls] }),
     }
   })
 }
@@ -1055,7 +1081,9 @@ export const useCharacterStore = create<CharacterState>()(
               const incoming = sharedCharactersWithPendingPluginFeatures[index]
               return !!incoming && (
                 character.currentHp !== incoming.currentHp || character.maxHp !== incoming.maxHp ||
-                character.tempHp !== incoming.tempHp
+                character.tempHp !== incoming.tempHp ||
+                character.hitPointMaximumMode !== incoming.hitPointMaximumMode ||
+                JSON.stringify(character.hitPointRolls ?? []) !== JSON.stringify(incoming.hitPointRolls ?? [])
               )
             },
           )
@@ -1097,6 +1125,7 @@ export const useCharacterStore = create<CharacterState>()(
               character.currentHp !== incoming.currentHp ||
               character.hitDice !== incoming.hitDice ||
               character.hitPointMaximumMode !== incoming.hitPointMaximumMode ||
+              JSON.stringify(character.hitPointRolls ?? []) !== JSON.stringify(incoming.hitPointRolls ?? []) ||
               JSON.stringify(character.hitPointDice ?? []) !== JSON.stringify(incoming.hitPointDice ?? [])
           })
           const retiredFieldsMustBeRepublished = !isPlayerPort() && sharedCharactersWithAllPendingChoices.some(
@@ -1215,7 +1244,21 @@ export const useCharacterStore = create<CharacterState>()(
           if (patch.dnd5ePluginFeatureIds) {
             markPendingLocalPluginFeatures(id, patch.dnd5ePluginFeatureIds)
           }
-          updateChar(id, (c) => finalizeCharacter({ ...c, ...patch }))
+          const current = get().characters.find((character) => character.id === id)
+          if (!current) return
+          const next = finalizeCharacter({ ...current, ...patch })
+          const hitPointPlanChanged =
+            patch.level != null || patch.charClass != null || patch.hitPointMaximumMode != null ||
+            patch.hitPointRolls != null || (patch.abilities != null && patch.abilities.con !== current.abilities.con)
+          if (isPlayerPort() && hitPointPlanChanged) {
+            markPendingLocalCharacterHitPointEdit(id, {
+              ...(next.currentHp === current.currentHp ? {} : { currentHp: next.currentHp }),
+              maxHp: next.maxHp,
+              hitPointMaximumMode: next.hitPointMaximumMode,
+              ...(next.hitPointRolls ? { hitPointRolls: next.hitPointRolls } : {}),
+            })
+          }
+          updateChar(id, () => next)
         },
         updateSheetHitPoints: (id, patch) => {
           const current = get().characters.find((character) => character.id === id)

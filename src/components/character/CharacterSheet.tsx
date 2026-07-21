@@ -9,6 +9,7 @@ import {
   DND5E_2014_RACE_OPTIONS,
   dnd5eClassHitPointRule,
   dnd5eFixedMaxHp,
+  dnd5eManualHitPointRolls,
   dnd5e2014Adapter as rules,
   dnd5eArmorClass,
   dnd5eClassDefinition,
@@ -124,6 +125,8 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
   const hitPointRule = dnd5eClassHitPointRule(c)
   const fixedMaxHp = dnd5eFixedMaxHp(c)
   const hitPointMaximumMode = c.hitPointMaximumMode ?? 'fixed'
+  const manualHitPointRolls = dnd5eManualHitPointRolls(c)
+  const constitutionModifier = rules.abilityModifier(clamp(c.abilities.con, 1, 30))
   const songOfRestBard = characters
     .filter((candidate) => candidate.rulesetId === 'dnd5e-2014-srd-5.1' && candidate.charClass === '吟游诗人' && candidate.level >= 2)
     .map((candidate) => ({ character: candidate, dieSides: dnd5eBardSongOfRestDie(candidate.level) }))
@@ -317,7 +320,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
               max={c.maxHp}
               temp={c.tempHp}
               editable={!readOnly}
-              maxEditable={!readOnly && hitPointMaximumMode === 'manual'}
+              maxEditable={false}
               onChange={updateCharacterHitPoints}
             />
             <div className="glass rounded-xl px-4 py-3 text-xs text-slate-400">
@@ -326,16 +329,68 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
                 <select
                   id={`hp-mode-${id}`}
                   value={hitPointMaximumMode}
-                  onChange={(event) => updateCharacter({ hitPointMaximumMode: event.target.value as 'fixed' | 'manual' })}
+                  onChange={(event) => {
+                    const mode = event.target.value as 'fixed' | 'manual'
+                    updateCharacter({
+                      hitPointMaximumMode: mode,
+                      ...(mode === 'manual' ? { hitPointRolls: dnd5eManualHitPointRolls(c) } : {}),
+                    })
+                  }}
                   className="rounded-lg border border-white/10 bg-void-900/80 px-2 py-1 text-slate-200 outline-none focus:border-arcane-500"
                 >
                   <option value="fixed">固定值（自动）</option>
-                  <option value="manual">掷骰总值（手动）</option>
+                  <option value="manual">逐级掷骰（手动）</option>
                 </select>
               </div>
-              <p className="mt-2">
-                d{hitPointRule.hitDieSides}：1 级取满；之后每级固定 {hitPointRule.fixedHitPointsPerLevel}＋体质调整值，每级至少增加 1。当前固定上限为 {fixedMaxHp}。
-              </p>
+              {hitPointMaximumMode === 'fixed' ? (
+                <p className="mt-2">
+                  d{hitPointRule.hitDieSides}：1 级取满；之后每级固定 {hitPointRule.fixedHitPointsPerLevel}＋体质调整值，每级至少增加 1。当前固定上限为 {fixedMaxHp}。
+                </p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <p className="leading-5">
+                    第 1 级自动取 d{hitPointRule.hitDieSides} 满值；之后每一级分别记录原始骰面，再逐级加入体质调整值 {formatMod(constitutionModifier)}，且每级至少增加 1。体质豁免的熟练加值不参与生命值计算。
+                  </p>
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    <span className="rounded-md border border-white/8 bg-black/20 px-2 py-1 text-slate-300">
+                      原始骰面合计 {manualHitPointRolls.reduce((total, roll) => total + roll, 0)}
+                    </span>
+                    <span className="rounded-md border border-rose-300/10 bg-rose-500/[0.06] px-2 py-1 text-rose-100">
+                      当前生命上限 {c.maxHp}
+                    </span>
+                  </div>
+                  {manualHitPointRolls.length > 1 && (
+                    <details className="rounded-lg border border-white/8 bg-black/15 p-3" open={manualHitPointRolls.length <= 6}>
+                      <summary className="cursor-pointer select-none font-medium text-slate-300">
+                        各级生命骰结果（不含体质）
+                      </summary>
+                      <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                        {manualHitPointRolls.slice(1).map((roll, rollIndex) => {
+                          const levelIndex = rollIndex + 1
+                          return (
+                            <label key={levelIndex} className="space-y-1 text-[10px] text-slate-500">
+                              <span>{levelIndex + 1} 级 · d{hitPointRule.hitDieSides}</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={hitPointRule.hitDieSides}
+                                value={roll}
+                                aria-label={`${levelIndex + 1} 级生命骰结果`}
+                                onChange={(event) => {
+                                  const nextRolls = [...manualHitPointRolls]
+                                  nextRolls[levelIndex] = clamp(Number(event.target.value) || 1, 1, hitPointRule.hitDieSides)
+                                  updateCharacter({ hitPointRolls: nextRolls })
+                                }}
+                                className="w-full rounded-md border border-white/10 bg-void-900/70 px-2 py-1.5 text-center text-xs font-semibold text-slate-100 outline-none focus:border-rose-400/50"
+                              />
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

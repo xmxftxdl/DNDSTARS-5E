@@ -3,6 +3,7 @@ import type { Character } from '../../types/character'
 import {
   dnd5eFixedMaxHp,
   dnd5eHitPointMaximumMode,
+  dnd5eManualMaxHp,
   resolveDnd5eShortRestHitDice,
   syncDnd5eHitPoints,
   syncDnd5ePrimalChampion,
@@ -101,6 +102,46 @@ describe('D&D 5e 2014 character hit points', () => {
       currentHp: 19,
       hitPointMaximumMode: 'manual',
     })
+    expect(syncDnd5eHitPoints(character).hitPointRolls).toHaveLength(5)
+  })
+
+  it('applies Constitution to every recorded manual Hit Die result', () => {
+    const manual = fighter({
+      level: 5,
+      abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+      hitPointMaximumMode: 'manual',
+      hitPointRolls: [10, 3, 8, 1, 5],
+      maxHp: 1,
+      currentHp: 1,
+    })
+    expect(dnd5eManualMaxHp(manual)).toBe(37)
+    expect(syncDnd5eHitPoints(manual)).toMatchObject({ maxHp: 37, currentHp: 37 })
+  })
+
+  it('retroactively recalculates manual HP when the Constitution modifier changes', () => {
+    const before = syncDnd5eHitPoints(fighter({
+      level: 5,
+      abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+      hitPointMaximumMode: 'manual',
+      hitPointRolls: [10, 3, 8, 1, 5],
+      maxHp: 37,
+      currentHp: 20,
+    }))
+    const after = syncDnd5eHitPoints({
+      ...before,
+      abilities: { ...before.abilities, con: 16 },
+    })
+    expect(after).toMatchObject({ maxHp: 42, currentHp: 25 })
+  })
+
+  it('applies the minimum one HP gain separately to low rolls with negative Constitution', () => {
+    const sorcerer = fighter({
+      charClass: '术士', level: 3, hitDice: '3d6',
+      abilities: { str: 8, dex: 14, con: 6, int: 10, wis: 10, cha: 16 },
+      hitPointMaximumMode: 'manual',
+      hitPointRolls: [6, 1, 3],
+    })
+    expect(dnd5eManualMaxHp(sorcerer)).toBe(6)
   })
 
   it('does not revive a dead character while repairing its maximum', () => {

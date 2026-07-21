@@ -51,6 +51,16 @@ function abilityModifier(score: number): number {
   return Math.floor((Math.min(30, Math.max(1, Math.floor(Number(score) || 10))) - 10) / 2)
 }
 
+function draconicResilienceHitPoints(
+  character: Pick<Character, 'charClass' | 'dnd5eClassChoices'>,
+  level: number,
+): number {
+  return character.charClass === '术士' &&
+    character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
+    ? level
+    : 0
+}
+
 export function isDnd5e2014Character(character: Pick<Character, 'rulesetId'>): boolean {
   return character.rulesetId === DND5E_2014_RULESET_ID
 }
@@ -98,10 +108,7 @@ export function dnd5eFixedMaxHp(
   const constitutionModifier = abilityModifier(character.abilities.con)
   const firstLevel = Math.max(1, rule.hitDieSides + constitutionModifier)
   const laterLevel = Math.max(1, rule.fixedHitPointsPerLevel + constitutionModifier)
-  const draconicResilience = character.charClass === '术士' &&
-    character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
-    ? level
-    : 0
+  const draconicResilience = draconicResilienceHitPoints(character, level)
   return firstLevel + (level - 1) * laterLevel + draconicResilience
 }
 
@@ -112,14 +119,89 @@ export function dnd5eRolledMaxHpRange(
   const rule = dnd5eClassHitPointRule(character)
   const constitutionModifier = abilityModifier(character.abilities.con)
   const firstLevel = Math.max(1, rule.hitDieSides + constitutionModifier)
-  const draconicResilience = character.charClass === '术士' &&
-    character.dnd5eClassChoices?.classes?.sorcerer?.subclass === 'draconic'
-    ? level
-    : 0
+  const draconicResilience = draconicResilienceHitPoints(character, level)
   return {
     minimum: firstLevel + (level - 1) * Math.max(1, 1 + constitutionModifier) + draconicResilience,
     maximum: firstLevel + (level - 1) * Math.max(1, rule.hitDieSides + constitutionModifier) + draconicResilience,
   }
+}
+
+type ManualHitPointCharacter = Pick<
+  Character,
+  'charClass' | 'hitDice' | 'level' | 'abilities' | 'maxHp' | 'hitPointRolls' | 'dnd5eClassChoices'
+>
+
+function hitPointsForRoll(roll: number, constitutionModifier: number): number {
+  return Math.max(1, roll + constitutionModifier)
+}
+
+function defaultManualHitPointRolls(character: ManualHitPointCharacter): number[] {
+  const level = clampLevel(character.level)
+  const rule = dnd5eClassHitPointRule(character)
+  return [rule.hitDieSides, ...Array.from({ length: level - 1 }, () => rule.fixedHitPointsPerLevel)]
+}
+
+/**
+ * 旧存档只保存最终上限。若该数值位于合法掷骰范围内，将其确定性拆回一组
+ * 能产生相同上限的逐级骰面；否则回落到职业固定值，避免保留不可能的 HP。
+ */
+function reconstructManualHitPointRolls(character: ManualHitPointCharacter): number[] {
+  const level = clampLevel(character.level)
+  const rule = dnd5eClassHitPointRule(character)
+  if (level === 1) return [rule.hitDieSides]
+  const constitutionModifier = abilityModifier(character.abilities.con)
+  const firstLevel = hitPointsForRoll(rule.hitDieSides, constitutionModifier)
+  const targetLaterLevels = Math.floor(Number(character.maxHp) || 0) - firstLevel -
+    draconicResilienceHitPoints(character, level)
+  const laterLevelMinimum = hitPointsForRoll(1, constitutionModifier)
+  const laterLevelMaximum = hitPointsForRoll(rule.hitDieSides, constitutionModifier)
+  const laterLevelCount = level - 1
+  if (
+    targetLaterLevels < laterLevelMinimum * laterLevelCount ||
+    targetLaterLevels > laterLevelMaximum * laterLevelCount
+  ) return defaultManualHitPointRolls(character)
+
+  let remaining = targetLaterLevels
+  const rolls = [rule.hitDieSides]
+  for (let index = 0; index < laterLevelCount; index += 1) {
+    const remainingLevels = laterLevelCount - index - 1
+    const gain = Math.min(
+      laterLevelMaximum,
+      Math.max(laterLevelMinimum, remaining - laterLevelMinimum * remainingLevels),
+    )
+    const roll = Math.min(rule.hitDieSides, Math.max(1, gain - constitutionModifier))
+    rolls.push(roll)
+    remaining -= hitPointsForRoll(roll, constitutionModifier)
+  }
+  return remaining === 0 ? rolls : defaultManualHitPointRolls(character)
+}
+
+export function dnd5eManualHitPointRolls(character: ManualHitPointCharacter): number[] {
+  const level = clampLevel(character.level)
+  const rule = dnd5eClassHitPointRule(character)
+  if (!Array.isArray(character.hitPointRolls) || character.hitPointRolls.length === 0) {
+    return reconstructManualHitPointRolls(character)
+  }
+  const rolls = character.hitPointRolls
+    .slice(0, level)
+    .map((roll, index) => index === 0
+      ? rule.hitDieSides
+      : Math.min(rule.hitDieSides, Math.max(1, Math.floor(Number(roll) || rule.fixedHitPointsPerLevel))))
+  while (rolls.length < level) rolls.push(rule.fixedHitPointsPerLevel)
+  return rolls
+}
+
+/** 逐级应用体质调整值，因而负体质时也能正确处理“每级至少增加 1”。 */
+export function dnd5eManualMaxHp(
+  character: ManualHitPointCharacter,
+  rolls: readonly number[] = dnd5eManualHitPointRolls(character),
+): number {
+  const level = clampLevel(character.level)
+  const constitutionModifier = abilityModifier(character.abilities.con)
+  return rolls.slice(0, level).reduce(
+    (total, roll) => total + hitPointsForRoll(roll, constitutionModifier),
+    draconicResilienceHitPoints(character, level),
+  )
 }
 
 /**
@@ -166,9 +248,10 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
   const rule = dnd5eClassHitPointRule(character)
   const mode = dnd5eHitPointMaximumMode(character)
   const previousMaximum = Math.max(1, Math.floor(Number(character.maxHp) || 1))
+  const hitPointRolls = mode === 'manual' ? dnd5eManualHitPointRolls({ ...character, level }) : character.hitPointRolls
   const maxHp = mode === 'fixed'
     ? dnd5eFixedMaxHp({ ...character, level })
-    : previousMaximum
+    : dnd5eManualMaxHp({ ...character, level }, hitPointRolls)
   const previousCurrent = Math.max(0, Math.floor(Number(character.currentHp) || 0))
   const currentHp = previousCurrent > 0 && maxHp > previousMaximum
     ? Math.min(maxHp, previousCurrent + (maxHp - previousMaximum))
@@ -182,6 +265,7 @@ export function syncDnd5eHitPoints(inputCharacter: Character): Character {
     hitDice: `${level}d${rule.hitDieSides}`,
     hitPointDice: syncHitPointDice(character, rule.hitDieSides),
     hitPointMaximumMode: mode,
+    hitPointRolls,
   }
 }
 
