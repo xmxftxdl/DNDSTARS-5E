@@ -130,7 +130,7 @@ describe('观战席位与地图桌面事件权限', () => {
     expect(preview).toMatchObject({ playerCount: 1, spectatorCount: 1 })
 
     const roomQuery = `room=${created.roomId}`
-    const protocol = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '4' }
+    const protocol = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '5' }
     const spectatorWrite = await fetch(`${offServer.base}/api/state/characters?${roomQuery}`, {
       method: 'PUT',
       headers: { ...protocol, 'X-Stars-Member': spectator.body.member.memberId, 'X-Stars-Room-Token': spectator.body.member.roomToken },
@@ -206,7 +206,7 @@ describe('地图几何的房间权限与安全投影', () => {
       }],
     }
     const dmHeaders = {
-      'Content-Type': 'application/json', 'X-Stars-Protocol': '4', 'X-Stars-Expected-Revision': '0',
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '5', 'X-Stars-Expected-Revision': '0',
       'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken,
     }
     expect((await fetch(stateUrl('map-geometry'), {
@@ -758,8 +758,8 @@ describe('AC5/AC3/AC1 — 404 / 413 / 锁', () => {
     expect(await response.json()).toMatchObject({
       service: 'dndstars-5e-shared',
       rulesetId: 'dnd5e-2014-srd-5.1',
-      protocolVersion: 4,
-      minimumClientProtocol: 4,
+      protocolVersion: 5,
+      minimumClientProtocol: 5,
     })
   })
 
@@ -837,7 +837,7 @@ describe('P0 战役快照、完整导出与还原', () => {
     const created = await createResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const query = `?room=${created.roomId}`
     const memberHeaders = {
-      'X-Stars-Protocol': '4',
+      'X-Stars-Protocol': '5',
       'X-Stars-Member': created.member.memberId,
       'X-Stars-Room-Token': created.member.roomToken,
     }
@@ -897,7 +897,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'http://127.0.0.1:6173',
-        'X-Stars-Protocol': '4',
+        'X-Stars-Protocol': '5',
         'X-Stars-Writer': 'test-dm',
         'X-Stars-Expected-Revision': '0',
       },
@@ -909,7 +909,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
     const concurrentHeaders = {
       'Content-Type': 'application/json',
       Origin: 'http://127.0.0.1:6173',
-      'X-Stars-Protocol': '4',
+      'X-Stars-Protocol': '5',
       'X-Stars-Writer': 'test-client',
       'X-Stars-Expected-Revision': '1',
     }
@@ -933,7 +933,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       method: 'DELETE',
       headers: {
         Origin: 'http://127.0.0.1:6173',
-        'X-Stars-Protocol': '4',
+        'X-Stars-Protocol': '5',
         'X-Stars-Writer': 'test-dm',
         'X-Stars-Expected-Revision': '2',
       },
@@ -948,7 +948,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'http://127.0.0.1:6173',
-        'X-Stars-Protocol': '4',
+        'X-Stars-Protocol': '5',
         'X-Stars-Writer': 'stale-client',
         'X-Stars-Expected-Revision': '2',
       },
@@ -1015,7 +1015,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
     expect(kickedHeartbeat.status).toBe(403)
     expect(await kickedHeartbeat.json()).toEqual({ error: 'member-removed' })
     const kickedDataHeaders = {
-      'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '5',
       'X-Stars-Member': playerA.member.memberId, 'X-Stars-Room-Token': playerA.member.roomToken,
     }
     const kickedStateRead = await fetch(`${offServer.base}/api/state/characters?room=${created.roomId}`, {
@@ -1103,7 +1103,7 @@ describe('room session capability tokens', () => {
       member: { memberId: string; roomToken: string }
     }
     const stateUrl = `${offServer.base}/api/state/characters?room=${created.roomId}`
-    const protocolHeaders = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '4' }
+    const protocolHeaders = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '5' }
     const stateBody = JSON.stringify({ characters: [], updatedAt: Date.now() })
 
     const copiedMemberOnly = await fetch(stateUrl, {
@@ -1214,14 +1214,46 @@ describe('room privacy projections and event channel ACLs', () => {
     }
     const query = `?room=${created.roomId}`
     const dmHeaders = {
-      'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '5',
       'X-Stars-Expected-Revision': '0',
       'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken,
     }
     const playerHeaders = {
-      'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '5',
       'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken,
     }
+
+    const privateImageId = `private-handout-${Date.now()}`
+    const privateImageUrl = `${offServer.base}/api/images/${privateImageId}${query}`
+    expect((await fetch(privateImageUrl, {
+      method: 'PUT',
+      headers: { ...dmHeaders, 'Content-Type': 'image/png', 'X-Stars-Image-Purpose': 'handout' },
+      body: new Uint8Array([1, 2, 3]),
+    })).status).toBe(200)
+    expect((await fetch(privateImageUrl, { headers: playerHeaders })).status).toBe(403)
+    const addPrivateHandout = await fetch(`${offServer.base}/api/state/room-journal/mutation${query}`, {
+      method: 'PATCH', headers: dmHeaders,
+      body: JSON.stringify({
+        operation: 'add-handout', title: 'Private clue', imageId: privateImageId,
+        audience: [joined.member.memberId],
+      }),
+    })
+    expect(addPrivateHandout.status).toBe(200)
+    expect((await fetch(privateImageUrl, { headers: playerHeaders })).status).toBe(200)
+
+    const generalImageId = `general-image-${Date.now()}`
+    expect((await fetch(`${offServer.base}/api/images/${generalImageId}${query}`, {
+      method: 'PUT', headers: { ...dmHeaders, 'Content-Type': 'image/png' },
+      body: new Uint8Array([4, 5, 6]),
+    })).status).toBe(200)
+    const invalidHandout = await fetch(`${offServer.base}/api/state/room-journal/mutation${query}`, {
+      method: 'PATCH', headers: dmHeaders,
+      body: JSON.stringify({
+        operation: 'add-handout', title: 'Forged clue', imageId: generalImageId, audience: 'all',
+      }),
+    })
+    expect(invalidHandout.status).toBe(400)
+    expect(await invalidHandout.json()).toEqual({ error: 'invalid-handout-image' })
 
     const characterWrite = await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',

@@ -51,13 +51,13 @@ export function dnd5eTraversalMovementCost(input: {
   if (input.mode === 'climb') {
     const cost = input.profile.climbSpeed && input.profile.climbSpeed > 0
       ? baseMovementCostFeet * (input.profile.walkSpeed / input.profile.climbSpeed)
-      : baseMovementCostFeet * Math.max(1, input.profile.climbWithoutSpeedCostMultiplier ?? 2)
+      : baseMovementCostFeet + distanceFeet * (Math.max(1, input.profile.climbWithoutSpeedCostMultiplier ?? 2) - 1)
     return { ok: true, movementCostFeet: cost + elevationGainFeet }
   }
   if (input.mode === 'swim') {
     const cost = input.profile.swimSpeed && input.profile.swimSpeed > 0
       ? baseMovementCostFeet * (input.profile.walkSpeed / input.profile.swimSpeed)
-      : baseMovementCostFeet * 2
+      : baseMovementCostFeet + distanceFeet
     return { ok: true, movementCostFeet: cost + elevationGainFeet }
   }
   return { ok: true, movementCostFeet: baseMovementCostFeet + elevationGainFeet }

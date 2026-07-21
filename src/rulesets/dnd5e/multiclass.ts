@@ -137,4 +137,20 @@ export function addDnd5eMulticlassLevel(character: Character, classId: Dnd5eClas
   }
 }
 
+export function removeDnd5eMulticlassLevel(character: Character, classId: Dnd5eClassId): Character {
+  const levels = normalizeDnd5eClassLevels(character)
+  const current = levels[classId] ?? 0
+  const primaryClassId = dnd5eClassDefinition(character.charClass)?.id
+  if (current < 1 || dnd5eTotalCharacterLevel(character) <= 1 || (classId === primaryClassId && current <= 1)) {
+    return character
+  }
+  if (current === 1) delete levels[classId]
+  else levels[classId] = current - 1
+  return {
+    ...character,
+    level: dnd5eTotalCharacterLevel({ ...character, dnd5eClassLevels: levels }),
+    dnd5eClassLevels: levels,
+  }
+}
+
 export const DND5E_MULTICLASS_PREREQUISITES = MULTICLASS_PREREQUISITES

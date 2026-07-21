@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap } from '../../store/maps'
+import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import {
   createDnd5eCoreSpellArea,
   mergeDnd5eSpellEffectTokenDelta,
@@ -144,5 +145,42 @@ describe('core spell persistent area declarations', () => {
     })
     expect(merged.find((token) => token.id === effectToken.id)).toMatchObject({ x: 275, y: 225 })
     expect(merged).toContainEqual(concurrent)
+  })
+
+  it('stops Flaming Sphere at the first creature and never moves it through a wall', () => {
+    const base = map()
+    const effectToken = {
+      id: 'sphere-token', label: '炽焰法球', x: 125, y: 125, color: '#f97316', emoji: '🔥',
+      size: 1, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'flaming-sphere', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+        concentrationId: 'flaming-sphere',
+      },
+    }
+    const area = createDnd5eCoreSpellArea({
+      declaration: { ...declaration, spellId: 'flaming-sphere', anchorMode: 'effect-token' },
+      actionId: 'cast-sphere', sourceCharacterId: 'caster', sourceTokenId: 'caster-token',
+      slotLevel: 2, sourceSaveDc: 13, round: 1, cells: [{ col: 2, row: 2 }],
+      anchorCell: { col: 2, row: 2 }, anchorTokenId: effectToken.id,
+    })
+    const enemy = { id: 'enemy', label: 'enemy', x: 225, y: 125, color: '#fff', emoji: 'E', size: 1, type: 'enemy' as const }
+    const placed = { ...base, tokens: [...base.tokens, effectToken, enemy], dnd5ePluginAreas: [area] }
+    const collided = moveDnd5eCoreSpellArea({
+      map: placed, areaId: area.id, sourceTokenId: 'caster-token', targetCell: { col: 6, row: 2 },
+    })
+    expect(collided).toMatchObject({
+      ok: true, impactTargetId: 'enemy', distanceFeet: 10, area: { anchorCell: { col: 4, row: 2 } },
+    })
+
+    const geometry = createEmptyMapGeometry(base.id, 1)
+    geometry.walls.push({
+      id: 'wall', kind: 'wall', label: '石墙', points: [{ x: 150, y: 100 }, { x: 150, y: 150 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token', targetCell: { col: 6, row: 2 },
+    })).toMatchObject({ ok: false, reason: 'movement-blocked' })
   })
 })

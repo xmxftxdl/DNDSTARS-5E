@@ -53,6 +53,8 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
   }
   const dmHeaders = {
     'Content-Type': 'application/json',
+    'X-Stars-Protocol': '5',
+    'X-Stars-Expected-Revision': '0',
     'X-Stars-Member': created.member.memberId,
     'X-Stars-Room-Token': created.member.roomToken,
   }
@@ -73,7 +75,7 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
   })
 
   const denied = await request.put(`${PLAYER}/api/state/map-geometry?room=${created.roomId}`, {
-    headers: { ...playerHeaders, 'Content-Type': 'application/json' },
+    headers: { ...playerHeaders, 'Content-Type': 'application/json', 'X-Stars-Protocol': '5' },
     data: geometry,
   })
   expect(denied.status()).toBe(403)
@@ -81,7 +83,9 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
   geometry.maps[0].doors[0].state = 'open'
   geometry.updatedAt = 2
   geometry.maps[0].updatedAt = 2
-  expect((await request.put(resourceUrl, { headers: dmHeaders, data: geometry })).ok()).toBeTruthy()
+  expect((await request.put(resourceUrl, {
+    headers: { ...dmHeaders, 'X-Stars-Expected-Revision': '1' }, data: geometry,
+  })).ok()).toBeTruthy()
   await expect.poll(async () => {
     const response = await request.get(`${PLAYER}/api/state/map-geometry?room=${created.roomId}`, { headers: playerHeaders })
     const state = await response.json() as { maps: Array<{ doors: Array<{ state: string }> }> }

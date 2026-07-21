@@ -309,6 +309,16 @@ describe('room communications authority', () => {
       operation: 'add-shared-note', kind: 'task', title: '寻找钥匙', body: '',
     }, 2_100, player, context)
     expect(note).toMatchObject({ ok: true, next: { sharedNotes: [{ authorMemberId: 'player-a' }] } })
+    if (!note.ok) throw new Error('expected note mutation')
+    const noteId = (note.next as { sharedNotes: Array<{ id: string }> }).sharedNotes[0].id
+    expect(mutateRoomJournalState(note.next, {
+      operation: 'update-shared-note', id: noteId, title: '篡改',
+    }, 2_200, { ...player, memberId: 'player-b' }, context)).toMatchObject({
+      ok: false, status: 403, error: 'forbidden',
+    })
+    expect(mutateRoomJournalState(note.next, {
+      operation: 'update-shared-note', id: noteId, status: 'done',
+    }, 2_300, host, context)).toMatchObject({ ok: true })
   })
 })
 
@@ -506,13 +516,21 @@ describe('map geometry player projection', () => {
         dnd5ePluginAreas: [
           { id: 'shown-area', sourceTokenId: 'near' },
           { id: 'hidden-area', sourceTokenId: 'hidden' },
+          {
+            id: 'dm-hidden-area', sourceTokenId: 'near', sourceCharacterId: 'another-character',
+            hiddenFromPlayers: true,
+          },
+          {
+            id: 'own-hidden-area', sourceTokenId: 'hero', sourceCharacterId: 'character-1',
+            hiddenFromPlayers: true,
+          },
         ],
       }],
     }, geometry, 'character-1')
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
       .toEqual(['hero', 'near', 'always'])
     expect(projected.maps[0].dnd5ePluginAreas.map((area: { id: string }) => area.id))
-      .toEqual(['shown-area'])
+      .toEqual(['shown-area', 'own-hidden-area'])
   })
 
   it('recovers the player viewer from room ownership before presence catches up', () => {
@@ -774,6 +792,23 @@ describe('map geometry player projection', () => {
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
       .toEqual(['hero', 'noticed'])
     expect(JSON.stringify(projected)).not.toContain('assassin')
+  })
+
+  it('lets tremorsense locate a hidden grounded creature without exposing its identity', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20, tremorsenseRangeFeet: 30 },
+          { id: 'hidden', type: 'enemy', label: '潜伏怪物', poolId: 'secret', x: 30, y: 20, dnd5eCombatState: { hiddenCheckTotal: 30 } },
+        ],
+      }],
+    }, geometry, 'character-1', { characters: [{ id: 'character-1', passivePerception: 10 }] })
+    expect(projected.maps[0].tokens[1]).toMatchObject({
+      id: 'hidden', label: '未见生物', perceptionVisibility: 'detected-unseen',
+    })
+    expect(JSON.stringify(projected.maps[0].tokens[1])).not.toContain('潜伏怪物')
+    expect(JSON.stringify(projected.maps[0].tokens[1])).not.toContain('secret')
   })
 
   it('recomputes passive Perception from current abilities and proficiency instead of stale cache data', () => {

@@ -17,6 +17,7 @@ import {
   resolveTokenDropPosition,
   shouldSnapTokenOnDrop,
   snapToCellCenter,
+  tokenCenterForAnchorCell,
   tokenDisplayRadius,
   TOKEN_MOVE_DURATION_S,
   type GridCell,
@@ -198,6 +199,7 @@ interface MapCanvasProps {
   /** 由 5e Headless 快照得出的标准状态，显示在 Token 右上角。 */
   dnd5eConditionsByToken?: Record<string, readonly Dnd5eStandardConditionId[]>
   onDnd5eConditionClick?: (tokenId: string, condition?: Dnd5eStandardConditionId) => void
+  onDnd5ePluginAreaVisibilityToggle?: (areaId: string) => void
   tokenHoverLabels?: Record<string, string>
   projectiles?: MapProjectile[]
   /** Defeated tokens are dimmed. */
@@ -1202,12 +1204,36 @@ function Dnd5eCoreSpellAreaOverlay({ area, map }: { area: Dnd5ePluginArea; map: 
   )
 }
 
-function Dnd5ePluginAreaOverlays({ map }: { map: BattleMap }) {
+function Dnd5ePluginAreaOverlays({
+  map,
+  isDM,
+  onVisibilityToggle,
+}: {
+  map: BattleMap
+  isDM: boolean
+  onVisibilityToggle?: (areaId: string) => void
+}) {
   return <>{(map.dnd5ePluginAreas ?? []).map((area) => {
     const preset = area.visual?.preset ?? ''
-    if (preset === 'toxic-cloud') return <Dnd5eToxicCloudAreaOverlay key={area.id} area={area} map={map} />
-    if (CORE_AREA_VISUALS[preset]) return <Dnd5eCoreSpellAreaOverlay key={area.id} area={area} map={map} />
-    return <Dnd5eStaticPluginAreaOverlay key={area.id} area={area} map={map} />
+    const overlay = preset === 'toxic-cloud'
+      ? <Dnd5eToxicCloudAreaOverlay area={area} map={map} />
+      : CORE_AREA_VISUALS[preset]
+        ? <Dnd5eCoreSpellAreaOverlay area={area} map={map} />
+        : <Dnd5eStaticPluginAreaOverlay area={area} map={map} />
+    const anchor = area.anchorCell ?? area.cells[0]
+    const center = anchor ? tokenCenterForAnchorCell(anchor, { size: 1 } as Token, map) : undefined
+    return <Group key={area.id}>
+      {overlay}
+      {isDM && area.coreSpellId === 'spike-growth' && center && onVisibilityToggle && <Group
+        x={center.x}
+        y={center.y}
+        onClick={(event) => { event.cancelBubble = true; onVisibilityToggle(area.id) }}
+        onTap={(event) => { event.cancelBubble = true; onVisibilityToggle(area.id) }}
+      >
+        <Rect x={-34} y={-13} width={68} height={26} cornerRadius={8} fill="rgba(2,6,23,0.88)" stroke={area.hiddenFromPlayers ? '#f59e0b' : '#22c55e'} strokeWidth={1.5} />
+        <Text x={-31} y={-5} width={62} align="center" text={area.hiddenFromPlayers ? '仅 DM' : '已揭示'} fill="#f8fafc" fontSize={11} />
+      </Group>}
+    </Group>
   })}</>
 }
 
@@ -1231,6 +1257,7 @@ export default function MapCanvas({
   onAoeCancel,
   dnd5eConditionsByToken = {},
   onDnd5eConditionClick,
+  onDnd5ePluginAreaVisibilityToggle,
   tokenHoverLabels = {},
   projectiles = [],
   defeatedTokenIds = [],
@@ -2259,7 +2286,7 @@ export default function MapCanvas({
           {gridLines}
           {coordinateLabels}
           <Dnd5eItemAreaOverlays map={map} />
-          <Dnd5ePluginAreaOverlays map={map} />
+          <Dnd5ePluginAreaOverlays map={map} isDM={isDM} onVisibilityToggle={onDnd5ePluginAreaVisibilityToggle} />
           {aoeSelectMode && aoeHighlight?.areaCircle && (
             <Circle
               x={aoeHighlight.areaCircle.centerX}

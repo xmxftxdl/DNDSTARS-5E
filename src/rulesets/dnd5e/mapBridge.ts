@@ -296,6 +296,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       elevationFeet: token.elevationFeet ?? 0,
       airborne: !!monster?.speed.fly && (token.elevationFeet ?? 0) > 0,
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
+      shapechanger: monster?.capabilities?.shapechanger === true,
       concentrating: !!tokenClassState.concentrationSpellId,
       classState: {
         ...tokenClassState,

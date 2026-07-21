@@ -419,7 +419,7 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
     let imageId: string | undefined
     if (image) {
       imageId = `handout-image-${crypto.randomUUID()}`
-      if (!await putSharedImage(imageId, image)) throw new Error('讲义图片上传失败')
+      if (!await putSharedImage(imageId, image, 'handout')) throw new Error('讲义图片上传失败')
     }
     try {
       await onMutate({

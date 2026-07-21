@@ -77,9 +77,13 @@ describe('D&D 5e player basic action bridge', () => {
   })
 
   it('moves a successfully shoved target exactly one legal grid square', () => {
+    const elevatedMap = {
+      ...map,
+      tokens: map.tokens.map((token) => token.id === 'enemy' ? { ...token, elevationFeet: 20 } : token),
+    }
     const prepared = prepareDnd5ePlayerBasicAction({
       action: request({ kind: 'shove', targetTokenId: 'enemy', targetDefense: 'athletics', outcome: 'push' }),
-      map, characters: [hero],
+      map: elevatedMap, characters: [hero],
       initiativeOrder: [
         { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
         { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
@@ -89,11 +93,19 @@ describe('D&D 5e player basic action bridge', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared.pushTo).toEqual({ x: 25, y: 5 })
-    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared, actorD20: 18, targetD20: 2 })
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({
+      prepared: prepared.prepared, actorD20: 18, targetD20: 2,
+      pushToElevationFeet: 0, fallingDamageRolls: [2, 4],
+    })
     expect(resolved.result.ok).toBe(true)
-    expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')).toMatchObject({ x: 25, y: 5 })
+    expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')).toMatchObject({
+      x: 25, y: 5, elevationFeet: 0, hp: 4,
+    })
     expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'moved', actorId: 'enemy', distance: 5,
+    }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'falling-damage-resolved', actorId: 'enemy', distanceFeet: 20, damage: 6,
     }))
   })
 

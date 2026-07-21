@@ -609,13 +609,17 @@ export async function mutateSharedRoomResource<T>(
   throw new Error(lastError)
 }
 
-export async function putSharedImage(id: string, blob: Blob): Promise<boolean> {
+export async function putSharedImage(id: string, blob: Blob, purpose: 'general' | 'handout' = 'general'): Promise<boolean> {
   if (!canWriteSharedState()) return false
   for (const api of sharedApiCandidates()) {
     try {
       const res = await fetch(sharedSessionUrl(`${api}/images/${encodeURIComponent(id)}`), {
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'application/octet-stream', ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
+        headers: {
+          'Content-Type': blob.type || 'application/octet-stream',
+          'X-Stars-Image-Purpose': purpose,
+          ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders(),
+        },
         body: blob,
       })
       if (res.ok) return true

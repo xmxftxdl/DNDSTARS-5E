@@ -43,8 +43,8 @@ export const MAP_TABLETOP_CHANNEL = 'map-tabletop'
 export const MAP_PING_LIFETIME_MS = 3_200
 export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
-export const SHARED_PROTOCOL_VERSION = 4
-export const SHARED_MIN_CLIENT_PROTOCOL = 4
+export const SHARED_PROTOCOL_VERSION = 5
+export const SHARED_MIN_CLIENT_PROTOCOL = 5
 export const SHARED_STATE_SCHEMA_VERSION = 1
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 export const ACCOUNT_SESSION_LIMIT = 12
@@ -600,6 +600,13 @@ function roomMemberAccountAuthorized(member, account) {
   return !!account && member.accountId === account.accountId
 }
 
+function roomCommunicationPlayerMemberIds(room) {
+  return (Array.isArray(room?.players) ? room.players : [])
+    .filter((player) => player?.role !== 'spectator' && roomPlayerPresence(player) !== 'removed')
+    .map((player) => player.memberId)
+    .filter(Boolean)
+}
+
 function createRoomSessionToken() {
   return randomBytes(32).toString('base64url')
 }
@@ -832,7 +839,7 @@ export function extractSecret(req) {
 function applyCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
   res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
 }
 
@@ -1672,6 +1679,7 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
     const id = boundedText(mutation?.id, 120)
     const note = base.sharedNotes.find((entry) => entry?.id === id)
     if (!note) return { ok: false, status: 404, error: 'shared-note-not-found' }
+    if (!isDm && note.authorMemberId !== authorMemberId) return { ok: false, status: 403, error: 'forbidden' }
     const title = mutation?.title == null ? note.title : boundedText(mutation.title, 120)
     if (!title) return { ok: false, status: 400, error: 'invalid-shared-note' }
     const updated = {
@@ -2824,7 +2832,7 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         if (
           hiddenCheckTotal != null &&
           !observingViewers.some((viewer) => passivePerceptionForViewer(viewer, characterById) >= hiddenCheckTotal)
-        ) return []
+        ) return tremorsenseViewers.length > 0 ? [redactUnseenToken(token)] : []
         const specialSenseSeesInvisible = observingViewers.some((viewer) =>
           playerSpecialSenseRange(viewer, token, 'blindsight', map) ||
           playerSpecialSenseRange(viewer, token, 'truesight', map),
@@ -2836,7 +2844,10 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         ...map,
         tokens,
         dnd5ePluginAreas: Array.isArray(map.dnd5ePluginAreas)
-          ? map.dnd5ePluginAreas.filter((area) => !area?.sourceTokenId || visibleIds.has(area.sourceTokenId))
+          ? map.dnd5ePluginAreas.filter((area) =>
+              (!area?.sourceTokenId || visibleIds.has(area.sourceTokenId)) &&
+              (area?.hiddenFromPlayers !== true || area?.sourceCharacterId === resolvedActiveCharacterId),
+            )
           : map.dnd5ePluginAreas,
       }
     }),
@@ -4964,6 +4975,20 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         writeJson(res, 403, { error: 'forbidden' })
         return true
       }
+      const chatRate = consumeRateLimit(
+        ctx.rateLimits,
+        `room-chat:${roomId}:${authenticatedRoomMember.memberId}`,
+        Date.now(),
+        Math.max(5, Number(process.env.STARS_CHAT_RATE_LIMIT) || 20),
+        10_000,
+      )
+      if (!chatRate.ok) {
+        writeJson(res, 429, {
+          error: 'chat-rate-limit',
+          retryAfterMs: chatRate.retryAfterMs,
+        })
+        return true
+      }
       await mkdir(ctx.stateRoot, { recursive: true })
       const body = await readBody(req)
       const mutation = JSON.parse(body.toString('utf8'))
@@ -4981,7 +5006,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const result = await atomicMutateJsonStateLocked(filePath, (state) =>
         mutateRoomChatState(state, mutation, now, authenticatedRoomMember, {
           host: room.host,
-          playerMemberIds: (Array.isArray(room.players) ? room.players : []).map((player) => player.memberId),
+          playerMemberIds: roomCommunicationPlayerMemberIds(room),
           characters,
           maps,
         }),
@@ -5050,13 +5075,27 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       await maybeWriteAutoCampaignSnapshot(ctx)
       const body = await readBody(req)
       const mutation = JSON.parse(body.toString('utf8'))
+      if (mutation?.operation === 'add-handout' && mutation?.imageId) {
+        const imageId = boundedText(mutation.imageId, 160)
+        if (!/^[a-zA-Z0-9_-]+$/.test(imageId)) {
+          writeJson(res, 400, { error: 'invalid-handout-image' })
+          return true
+        }
+        try {
+          const metadata = JSON.parse(await readFile(path.join(ctx.imageRoot, `${imageId}.json`), 'utf8'))
+          if (metadata?.purpose !== 'handout') throw new Error('wrong-purpose')
+        } catch {
+          writeJson(res, 400, { error: 'invalid-handout-image' })
+          return true
+        }
+      }
       const room = await readRoomForCampaign(ctx)
       const now = Date.now()
       const filePath = path.join(ctx.stateRoot, 'room-journal.json')
       const result = await atomicMutateJsonStateLocked(filePath, (state) =>
         mutateRoomJournalState(state, mutation, now, authenticatedRoomMember, {
           host: room.host,
-          playerMemberIds: (Array.isArray(room.players) ? room.players : []).map((player) => player.memberId),
+          playerMemberIds: roomCommunicationPlayerMemberIds(room),
         }),
       )
       if (!result?.ok) {
@@ -5483,19 +5522,6 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const metaPath = path.join(ctx.imageRoot, `${id}.json`)
       if (req.method === 'GET') {
         try {
-          if ((ctx.accessRole === 'player' || ctx.accessRole === 'spectator') && id.startsWith('handout-image-')) {
-            let journal = null
-            try {
-              journal = JSON.parse(await readFile(path.join(ctx.stateRoot, 'room-journal.json'), 'utf8'))
-            } catch {
-              // Missing or damaged metadata denies access to a protected handout image.
-            }
-            const visible = projectRoomJournalForMember(journal, authenticatedRoomMember?.memberId ?? '', false)
-            if (!visible.handouts.some((handout) => handout?.imageId === id)) {
-              writeJson(res, 403, { error: 'forbidden' })
-              return true
-            }
-          }
           let sourcePath = filePath
           let sourceMetaPath = metaPath
           try {
@@ -5505,6 +5531,24 @@ export async function handleSharedApi(req, res, parsed, ctx) {
             sourceMetaPath = path.join(ctx.legacyImageRoot, `${id}.json`)
           }
           const meta = JSON.parse(await readFile(sourceMetaPath, 'utf8'))
+          if (ctx.accessRole === 'player' || ctx.accessRole === 'spectator') {
+            let journal = null
+            try {
+              journal = JSON.parse(await readFile(path.join(ctx.stateRoot, 'room-journal.json'), 'utf8'))
+            } catch {
+              // A missing journal means the image is not currently attached to a handout.
+            }
+            const attachedToHandout = (Array.isArray(journal?.handouts) ? journal.handouts : [])
+              .some((handout) => handout?.imageId === id)
+            const visible = projectRoomJournalForMember(journal, authenticatedRoomMember?.memberId ?? '', false)
+            if (
+              (attachedToHandout || meta?.purpose === 'handout') &&
+              !visible.handouts.some((handout) => handout?.imageId === id)
+            ) {
+              writeJson(res, 403, { error: 'forbidden' })
+              return true
+            }
+          }
           res.writeHead(200, { 'Content-Type': meta.type || 'application/octet-stream' })
           createReadStream(sourcePath).pipe(res)
         } catch {
@@ -5517,7 +5561,8 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         await mkdir(ctx.imageRoot, { recursive: true })
         await maybeWriteAutoCampaignSnapshot(ctx)
         const body = await readBody(req, IMAGE_MAX_BYTES)
-        const metaBody = JSON.stringify({ type: req.headers['content-type'] || 'application/octet-stream' })
+        const purpose = req.headers['x-stars-image-purpose'] === 'handout' ? 'handout' : 'general'
+        const metaBody = JSON.stringify({ type: req.headers['content-type'] || 'application/octet-stream', purpose })
         // blob+meta 在同一把锁内原子落盘。
         await atomicWriteImageLocked(filePath, metaPath, body, metaBody)
         // 写后即触发配额 GC（write-trigger，按 mtime 最旧优先淘汰）。

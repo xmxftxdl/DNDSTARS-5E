@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react'
+import { Minus, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { Character } from '../../types/character'
 import {
@@ -8,6 +8,7 @@ import {
   dnd5eClassDefinition,
   dnd5eMeetsMulticlassPrerequisite,
   normalizeDnd5eClassLevels,
+  removeDnd5eMulticlassLevel,
   validateDnd5eMulticlassLevelGain,
   type Dnd5eClassId,
 } from '../../rulesets/dnd5e'
@@ -56,6 +57,17 @@ export default function Dnd5eMulticlassPanel({
     onSelectClass(targetClassId)
   }
 
+  const removeLevel = (classId: Dnd5eClassId) => {
+    const next = removeDnd5eMulticlassLevel(character, classId)
+    if (next === character) return
+    onChange({ dnd5eClassLevels: next.dnd5eClassLevels, level: next.level })
+    const remaining = normalizeDnd5eClassLevels(next)
+    if (!remaining[selectedClassId ?? classId]) {
+      const fallback = (Object.keys(remaining) as Dnd5eClassId[])[0]
+      if (fallback) onSelectClass(fallback)
+    }
+  }
+
   return <section className="glass rounded-2xl border border-violet-400/15 p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -66,15 +78,24 @@ export default function Dnd5eMulticlassPanel({
     </div>
 
     <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-      {owned.map((definition) => <button
+      {owned.map((definition) => <div
         key={definition.id}
-        type="button"
-        onClick={() => onSelectClass(definition.id)}
-        className={`rounded-xl border px-3 py-3 text-left transition ${selectedClassId === definition.id ? 'border-violet-400/45 bg-violet-500/15' : 'border-white/8 bg-black/15 hover:border-white/15'}`}
+        className={`flex items-center gap-2 rounded-xl border px-3 py-3 transition ${selectedClassId === definition.id ? 'border-violet-400/45 bg-violet-500/15' : 'border-white/8 bg-black/15 hover:border-white/15'}`}
       >
-        <span className="block text-sm font-semibold text-slate-100">{definition.name} {levels[definition.id]}级</span>
-        <span className="mt-1 block text-[11px] text-slate-500">d{definition.hitDie} 生命骰 · 点击查看该职业特性</span>
-      </button>)}
+        <button type="button" onClick={() => onSelectClass(definition.id)} className="min-w-0 flex-1 text-left">
+          <span className="block text-sm font-semibold text-slate-100">{definition.name} {levels[definition.id]}级</span>
+          <span className="mt-1 block text-[11px] text-slate-500">d{definition.hitDie} 生命骰 · 点击查看该职业特性</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => removeLevel(definition.id)}
+          disabled={character.level <= 1 || (definition.name === character.charClass && levels[definition.id] === 1)}
+          className="rounded-lg border border-white/10 p-1.5 text-slate-500 hover:border-rose-400/30 hover:bg-rose-500/10 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-25"
+          title="撤销该职业最近增加的一级"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+      </div>)}
     </div>
 
     {character.level < 20 && <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-3">

@@ -46,7 +46,10 @@ async function putRoomState(
   value: unknown,
 ) {
   const response = await request.put(`${DM}/api/state/${resource}?room=${roomId}`, {
-    headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
+    headers: {
+      'X-Stars-Protocol': '5', 'X-Stars-Expected-Revision': '0',
+      'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken,
+    },
     data: value,
   })
   expect(response.ok()).toBeTruthy()

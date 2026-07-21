@@ -443,6 +443,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       } } } },
     })
     const enemy = token('enemy', 'enemy', 275)
+    enemy.elevationFeet = 30
     const input = fixture(warlock, 'eldritch-blast', 0, enemy)
     input.action.dnd5eSpellCast!.projectileTargetIds = [enemy.id, enemy.id]
     input.action.dnd5eSpellCast!.targetTokenIds = [enemy.id]
@@ -458,6 +459,7 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
         {
           targetId: enemy.id, d20: 10, effectRolls: [4],
           repellingBlastPushTo: { x: 375, y: 25 }, repellingBlastPushDistanceFeet: 10,
+          repellingBlastPushToElevationFeet: 0, repellingBlastFallingDamageRolls: [2, 3, 4],
         },
         {
           targetId: enemy.id, d20: 10, effectRolls: [4],
@@ -469,11 +471,15 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(resolved.result.ok).toBe(true)
     if (!resolved.result.ok) return
     expect(resolved.result.state.combatants[enemy.id]).toMatchObject({
-      currentHp: 16,
+      currentHp: 7,
       position: { x: 475, y: 25 },
+      elevationFeet: 0,
     })
     expect(resolved.result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(2)
     expect(resolved.result.events.filter((event) => event.type === 'moved')).toHaveLength(2)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'falling-damage-resolved', actorId: enemy.id, distanceFeet: 30, damage: 9,
+    }))
   })
 
   it('resolves every Scorching Ray separately and adds one ray per higher slot', () => {
@@ -2152,18 +2158,24 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 4 } },
     })
     const enemy = token('enemy', 'enemy', 75)
+    enemy.elevationFeet = 20
     const prepared = prepareDnd5eSpellCast(fixture(wizard, 'thunderwave', 1, enemy))
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     const cast = resolvePreparedDnd5eSpellCast({
       prepared: prepared.prepared,
       savingThrowD20: 1,
-      forcedMovements: [{ targetId: enemy.id, to: { x: 175, y: 25 }, distanceFeet: 10 }],
+      forcedMovements: [{
+        targetId: enemy.id, to: { x: 175, y: 25 }, distanceFeet: 10,
+        toElevationFeet: 0, fallingDamageRolls: [2, 4],
+      }],
       effectRolls: [5, 6],
     })
     expect(cast.result.ok).toBe(true)
     if (!cast.result.ok) return
-    expect(cast.result.state.combatants[enemy.id]).toMatchObject({ currentHp: 19, position: { x: 175, y: 25 } })
+    expect(cast.result.state.combatants[enemy.id]).toMatchObject({
+      currentHp: 13, position: { x: 175, y: 25 }, elevationFeet: 0,
+    })
     expect(cast.result.events).toContainEqual(expect.objectContaining({ type: 'moved', actorId: enemy.id, distance: 10 }))
   })
 

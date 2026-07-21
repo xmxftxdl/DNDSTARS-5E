@@ -48,7 +48,10 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
 
   const characterId = `portrait-${Date.now()}`
   const response = await request.put(`${DM}/api/state/characters?room=${created.roomId}`, {
-    headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
+    headers: {
+      'X-Stars-Protocol': '5', 'X-Stars-Expected-Revision': '0',
+      'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken,
+    },
     data: {
       characters: [{
         id: characterId,

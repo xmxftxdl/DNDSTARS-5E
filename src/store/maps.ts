@@ -321,6 +321,8 @@ export interface Dnd5ePluginArea {
   movementCostMultiplier?: number
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
+  /** 隐蔽区域只投影给来源角色与 DM，直到 DM 将其揭示。 */
+  hiddenFromPlayers?: boolean
   visual?: Dnd5ePersistentAreaVisual
   triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
@@ -602,6 +604,7 @@ function normalizeMap(raw: unknown): BattleMap {
             : undefined,
           relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
           includeSelf: area.includeSelf === true,
+          hiddenFromPlayers: area.hiddenFromPlayers === true,
           visual: area.visual ? normalizeDnd5ePersistentAreaVisual(area.visual) : undefined,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,

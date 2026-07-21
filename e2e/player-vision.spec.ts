@@ -27,6 +27,8 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   const now = Date.now()
   const dmHeaders = {
     'Content-Type': 'application/json',
+    'X-Stars-Protocol': '5',
+    'X-Stars-Expected-Revision': '0',
     'X-Stars-Member': created.member.memberId,
     'X-Stars-Room-Token': created.member.roomToken,
   }

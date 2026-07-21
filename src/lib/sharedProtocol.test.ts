@@ -24,6 +24,6 @@ describe('shared server protocol metadata', () => {
 
   it('rejects old or future-incompatible servers', () => {
     expect(sharedProtocolCompatible({ ...meta, protocolVersion: 1 })).toBe(false)
-    expect(sharedProtocolCompatible({ ...meta, protocolVersion: 5, minimumClientProtocol: 5 })).toBe(false)
+    expect(sharedProtocolCompatible({ ...meta, protocolVersion: 6, minimumClientProtocol: 6 })).toBe(false)
   })
 })

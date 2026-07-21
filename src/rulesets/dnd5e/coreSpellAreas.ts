@@ -2,8 +2,10 @@ import {
   DND_FEET_PER_CELL,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
+  tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
+import { mapGeometryMovementBlocked, type MapGeometryState } from '../../lib/mapGeometry'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type {
@@ -13,6 +15,7 @@ import type {
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
+import { dnd5eMovementPathCells } from './itemAreas'
 
 export interface Dnd5eCoreSpellAreaDamageDeclaration {
   count: number
@@ -41,6 +44,7 @@ export interface Dnd5eCoreSpellAreaDeclaration {
   movement?: Dnd5ePersistentAreaMovementDeclaration
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
+  hiddenFromPlayers?: boolean
   movementCostMultiplier?: number
   damageTypeBySourceAlignment?: { evil: Dnd5eCoreSpellAreaDamageDeclaration['type']; otherwise: Dnd5eCoreSpellAreaDamageDeclaration['type'] }
   color: string
@@ -93,6 +97,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     anchorMode: 'fixed',
     relation: 'any',
     includeSelf: true,
+    hiddenFromPlayers: true,
     movementCostMultiplier: 2,
     color: '#84cc16',
     visual: { preset: 'spike-growth', intensity: 'strong' },
@@ -148,13 +153,19 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     triggers: [
       {
         id: 'moonbeam-damage', label: '月华之光·进入光柱', timing: 'on-enter', oncePerTurn: true,
-        savingThrow: { ability: 'con', onSuccess: 'half' },
+        savingThrow: {
+          ability: 'con', onSuccess: 'half',
+          shapechangerDisadvantage: true, revertShapechangerOnFailure: true,
+        },
         damage: { count: 2, sides: 10, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
       },
       {
         id: 'moonbeam-damage', label: '月华之光·回合开始', timing: 'turn-start', oncePerTurn: true,
-        savingThrow: { ability: 'con', onSuccess: 'half' },
+        savingThrow: {
+          ability: 'con', onSuccess: 'half',
+          shapechangerDisadvantage: true, revertShapechangerOnFailure: true,
+        },
         damage: { count: 2, sides: 10, perHigherSlot: 1, type: 'radiant' },
         dmAdjustable: true,
       },
@@ -242,6 +253,7 @@ export function createDnd5eCoreSpellArea(input: {
     movementCostMultiplier: declaration.movementCostMultiplier,
     relation: declaration.relation ?? 'any',
     includeSelf: declaration.includeSelf === true,
+    hiddenFromPlayers: declaration.hiddenFromPlayers === true,
     visual: { ...declaration.visual },
     triggers: declaration.triggers.map((trigger) => resolvedTrigger(trigger, {
       slotLevel: input.slotLevel,
@@ -268,10 +280,17 @@ function shiftedCells(
 
 export function moveDnd5eCoreSpellArea(input: {
   map: BattleMap
+  geometry?: MapGeometryState
   areaId: string
   sourceTokenId: string
   targetCell: GridCell
-}): { ok: true; map: BattleMap; area: Dnd5ePluginArea; distanceFeet: number } | { ok: false; reason: string } {
+}): {
+  ok: true
+  map: BattleMap
+  area: Dnd5ePluginArea
+  distanceFeet: number
+  impactTargetId?: string
+} | { ok: false; reason: string } {
   const area = input.map.dnd5ePluginAreas?.find((candidate) => candidate.id === input.areaId)
   if (!area || area.sourceKind !== 'core-spell' || !area.movement) return { ok: false, reason: 'area-not-movable' }
   if (area.sourceTokenId !== input.sourceTokenId) return { ok: false, reason: 'invalid-source' }
@@ -279,18 +298,56 @@ export function moveDnd5eCoreSpellArea(input: {
   const cells = Math.max(Math.abs(input.targetCell.col - previous.col), Math.abs(input.targetCell.row - previous.row))
   const distanceFeet = cells * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   if (distanceFeet > area.movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
-  const nextArea = {
-    ...area,
-    cells: shiftedCells(area, input.targetCell, input.map),
-    anchorCell: { ...input.targetCell },
-  }
-  if (nextArea.cells.length !== area.cells.length) return { ok: false, reason: 'invalid-target' }
+  let resolvedTargetCell = { ...input.targetCell }
+  let impactTargetId: string | undefined
   const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
     ? input.map.tokens.find((token) => token.id === area.anchorTokenId)
     : undefined
+  if (area.coreSpellId === 'flaming-sphere' && anchorToken) {
+    const path = dnd5eMovementPathCells(previous, input.targetCell)
+    let lastCell = previous
+    for (const nextCell of path.slice(1)) {
+      const from = tokenCenterForAnchorCell(lastCell, anchorToken, input.map)
+      const to = tokenCenterForAnchorCell(nextCell, anchorToken, input.map)
+      if (mapGeometryMovementBlocked({
+        geometry: input.geometry,
+        map: input.map,
+        token: { ...anchorToken, ...from },
+        to,
+      }).blocked) {
+        if (lastCell.col === previous.col && lastCell.row === previous.row) {
+          return { ok: false, reason: 'movement-blocked' }
+        }
+        resolvedTargetCell = lastCell
+        break
+      }
+      lastCell = nextCell
+      resolvedTargetCell = nextCell
+      const impactTarget = input.map.tokens.find((token) =>
+        token.id !== anchorToken.id && token.type !== 'obstacle' &&
+        tokenOccupiedCellsAt(token, input.map, token).some((cell) =>
+          cell.col === nextCell.col && cell.row === nextCell.row,
+        ),
+      )
+      if (impactTarget) {
+        impactTargetId = impactTarget.id
+        break
+      }
+    }
+  }
+  const nextArea = {
+    ...area,
+    cells: shiftedCells(area, resolvedTargetCell, input.map),
+    anchorCell: { ...resolvedTargetCell },
+  }
+  if (nextArea.cells.length !== area.cells.length) return { ok: false, reason: 'invalid-target' }
   const anchorPosition = anchorToken
-    ? tokenCenterForAnchorCell(input.targetCell, anchorToken, input.map)
+    ? tokenCenterForAnchorCell(resolvedTargetCell, anchorToken, input.map)
     : undefined
+  const resolvedDistanceFeet = Math.max(
+    Math.abs(resolvedTargetCell.col - previous.col),
+    Math.abs(resolvedTargetCell.row - previous.row),
+  ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   return {
     ok: true,
     map: {
@@ -303,7 +360,8 @@ export function moveDnd5eCoreSpellArea(input: {
         : input.map.tokens,
     },
     area: nextArea,
-    distanceFeet,
+    distanceFeet: resolvedDistanceFeet,
+    impactTargetId,
   }
 }
 

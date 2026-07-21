@@ -58,6 +58,8 @@ export function prepareDnd5ePlayerMove(input: {
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
   const path = findMapGeometryPath({
     geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
+    canClimb: action.dnd5eTraversalMode === 'climb',
+    canSwim: action.dnd5eTraversalMode === 'swim',
     additionalDifficultTerrainMultiplier: (token, position) =>
       dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>

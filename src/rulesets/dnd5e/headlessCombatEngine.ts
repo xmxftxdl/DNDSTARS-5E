@@ -113,6 +113,7 @@ export interface Dnd5eCombatant {
   elevationFeet?: number
   airborne?: boolean
   specialSenses?: readonly Dnd5eSpecialSense[]
+  shapechanger?: boolean
   turn: TurnEconomy
   dodging: boolean
   disengaged: boolean
@@ -607,6 +608,8 @@ export interface Dnd5eSpellForcedMovement {
   targetId: string
   to: { x: number; y: number }
   distanceFeet: number
+  toElevationFeet?: number
+  fallingDamageRolls?: readonly number[]
 }
 
 export interface Dnd5eSpellTargetAttackRoll {
@@ -625,6 +628,8 @@ export interface Dnd5eSpellTargetAttackRoll {
   hurlThroughHellDamageRolls?: readonly number[]
   repellingBlastPushTo?: { x: number; y: number }
   repellingBlastPushDistanceFeet?: number
+  repellingBlastPushToElevationFeet?: number
+  repellingBlastFallingDamageRolls?: readonly number[]
   effectRolls: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
 }
@@ -669,7 +674,7 @@ export type Dnd5eAction =
   | { type: 'trigger-readied-action'; actorId: string }
   | { type: 'use-object'; actorId: string; interactionId: string }
   | { type: 'grapple'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; spendAction?: boolean }
-  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; pushTo?: { x: number; y: number }; spendAction?: boolean }
+  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; pushTo?: { x: number; y: number }; pushToElevationFeet?: number; fallingDamageRolls?: readonly number[]; spendAction?: boolean }
   | { type: 'escape-grapple'; actorId: string; grapplerId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number }
   | { type: 'disengage'; actorId: string }
   | { type: 'dodge'; actorId: string }
@@ -2347,6 +2352,46 @@ function applyHealing(target: Dnd5eCombatant, amount: number, events: Dnd5eComba
   }
   events.push({ type: 'healing-applied', targetId: target.id, amount: healed, hpBefore, hpAfter: target.currentHp })
   return healed
+}
+
+function applyDnd5eForcedMovementElevation(
+  state: Dnd5eHeadlessCombatState,
+  target: Dnd5eCombatant,
+  toElevationFeet: number | undefined,
+  fallingDamageRolls: readonly number[] | undefined,
+  events: Dnd5eCombatEvent[],
+): boolean {
+  if (toElevationFeet == null) return (fallingDamageRolls?.length ?? 0) === 0
+  const fromElevationFeet = target.elevationFeet ?? 0
+  if (
+    !Number.isFinite(toElevationFeet) || toElevationFeet < -1_000 || toElevationFeet > 10_000 ||
+    toElevationFeet > fromElevationFeet
+  ) return false
+  target.elevationFeet = toElevationFeet
+  if (toElevationFeet !== fromElevationFeet) {
+    events.push({ type: 'elevation-changed', actorId: target.id, fromElevationFeet, toElevationFeet, mode: 'fall' })
+  }
+  const fallDistanceFeet = Math.max(0, fromElevationFeet - toElevationFeet)
+  if (fallDistanceFeet < 10) return (fallingDamageRolls?.length ?? 0) === 0
+  const falling = resolveDnd5eFallingDamage(fallDistanceFeet, fallingDamageRolls ?? [])
+  if (!falling.ok) return false
+  const adjustedDamage = adjustDamageForTarget(target, falling.damage, 'bludgeoning')
+  applyDamage(target, adjustedDamage, false, events, undefined, state, ['bludgeoning'])
+  const landedProne = falling.landsProne && adjustedDamage > 0
+  if (landedProne && target.currentHp > 0) {
+    applyDnd5eStandardConditionEffect(target, undefined, {
+      definitionId: `srd-5.1:falling:prone:${target.id}`,
+      rulesId: 'srd-5.1:falling',
+      condition: 'prone',
+      duration: { type: 'permanent' },
+      sourceKind: 'system',
+    }, events)
+  }
+  events.push({
+    type: 'falling-damage-resolved', actorId: target.id, distanceFeet: fallDistanceFeet,
+    dice: falling.dice, damage: adjustedDamage, landedProne,
+  })
+  return true
 }
 
 function clearTurnUndead(target: Dnd5eCombatant, events: Dnd5eCombatEvent[]): void {
@@ -4755,7 +4800,7 @@ function resolveSpellCast(
       })
     } else if (spell.onHitEffect === 'chill-touch') {
       const duration: Dnd5eActiveEffectDuration = {
-        type: 'until-turn-boundary', boundary: 'source-turn-start',
+        type: 'until-turn-boundary', boundary: 'source-turn-end',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
       }
       applyDnd5eMechanicalStatusEffect(affectedTarget, actor, {
@@ -4930,6 +4975,13 @@ function resolveSpellCast(
         type: 'moved', actorId: affectedTarget.id, from, to: affectedTarget.position,
         distance: movement.distanceFeet,
       })
+      if (!applyDnd5eForcedMovementElevation(
+        state,
+        affectedTarget,
+        movement.toElevationFeet,
+        movement.fallingDamageRolls,
+        events,
+      )) return false
     }
     return true
   }
@@ -5434,8 +5486,15 @@ function resolveSpellCast(
           applySpellOnHitEffect(affectedTarget)
           const pushTo = supplied.repellingBlastPushTo
           const pushDistance = supplied.repellingBlastPushDistanceFeet
-          if (!repellingBlast && (pushTo || pushDistance != null)) return fail(state, events, 'invalid-class-feature')
+          if (!repellingBlast && (
+            pushTo || pushDistance != null || supplied.repellingBlastPushToElevationFeet != null ||
+            (supplied.repellingBlastFallingDamageRolls?.length ?? 0) > 0
+          )) return fail(state, events, 'invalid-class-feature')
           if ((pushTo == null) !== (pushDistance == null)) return fail(state, events, 'invalid-class-feature')
+          if (!pushTo && (
+            supplied.repellingBlastPushToElevationFeet != null ||
+            (supplied.repellingBlastFallingDamageRolls?.length ?? 0) > 0
+          )) return fail(state, events, 'invalid-class-feature')
           if (pushTo && pushDistance != null) {
             const from = { ...affectedTarget.position }
             const oldDistanceSquared = (from.x - actor.position.x) ** 2 + (from.y - actor.position.y) ** 2
@@ -5447,11 +5506,20 @@ function resolveSpellCast(
             ) return fail(state, events, 'invalid-class-feature')
             affectedTarget.position = { ...pushTo }
             events.push({ type: 'moved', actorId: affectedTarget.id, from, to: affectedTarget.position, distance: pushDistance })
+            if (!applyDnd5eForcedMovementElevation(
+              state,
+              affectedTarget,
+              supplied.repellingBlastPushToElevationFeet,
+              supplied.repellingBlastFallingDamageRolls,
+              events,
+            )) return fail(state, events, 'invalid-dice')
           }
         } else {
           if (
             supplied.effectRolls.length > 0 || (supplied.hurlThroughHellDamageRolls?.length ?? 0) > 0 ||
-            supplied.repellingBlastPushTo || supplied.repellingBlastPushDistanceFeet != null
+            supplied.repellingBlastPushTo || supplied.repellingBlastPushDistanceFeet != null ||
+            supplied.repellingBlastPushToElevationFeet != null ||
+            (supplied.repellingBlastFallingDamageRolls?.length ?? 0) > 0
           ) {
             return fail(state, events, 'invalid-dice')
           }
@@ -6768,16 +6836,20 @@ export function resolveDnd5ePersistentAreaTrigger(
   if (!state.active) return fail(state, events, 'combat-ended')
   const actor = state.combatants[input.sourceId]
   const target = state.combatants[input.targetId]
-  if (!actor || !target || target.currentHp <= 0) return fail(state, events, 'invalid-target')
+  if (!actor || !target || target.deathSaves.dead) return fail(state, events, 'invalid-target')
   if (!input.areaId || !input.trigger.id) return fail(state, events, 'invalid-plugin-action')
 
   let saveSuccess: boolean | undefined
+  let shapechangerMustRevert = false
   if (input.trigger.savingThrow) {
     if (!Number.isInteger(input.d20) || input.d20! < 1 || input.d20! > 20) {
       return fail(state, events, 'invalid-dice')
     }
     const { ability, dc } = input.trigger.savingThrow
-    const mode = dnd5eSavingThrowMode(target, ability, { effectVisible: true })
+    const baseMode = dnd5eSavingThrowMode(target, ability, { effectVisible: true })
+    const mode = input.trigger.savingThrow.shapechangerDisadvantage && target.shapechanger
+      ? imposeDnd5eDisadvantage(baseMode)
+      : baseMode
     const rolls = mode === 'normal' ? [input.d20!] : [input.d20!, input.d20Second ?? 0]
     if (mode !== 'normal' && (!Number.isInteger(input.d20Second) || input.d20Second! < 1 || input.d20Second! > 20)) {
       return fail(state, events, 'invalid-dice')
@@ -6799,6 +6871,8 @@ export function resolveDnd5ePersistentAreaTrigger(
       type: 'saving-throw-resolved', targetId: target.id, ability,
       d20: save.roll.d20, modifier, total: save.roll.total, dc, success: saveSuccess,
     })
+    shapechangerMustRevert = !saveSuccess &&
+      input.trigger.savingThrow.revertShapechangerOnFailure === true && target.shapechanger === true
   } else if (input.d20 != null || input.d20Second != null || input.blessRoll != null || input.baneRoll != null) {
     return fail(state, events, 'invalid-dice')
   }
@@ -6825,6 +6899,16 @@ export function resolveDnd5ePersistentAreaTrigger(
     applyDamage(target, appliedDamage, false, events, actor, state, [damage.type])
   } else if ((input.damageRolls?.length ?? 0) > 0 || input.dmAdjustment?.damage) {
     return fail(state, events, 'invalid-dice')
+  }
+
+  // Moonbeam deals its damage before the failed-save shapechanger rider is resolved.
+  // This preserves Wild Shape's own hit-point pool and only then restores the original form.
+  if (shapechangerMustRevert) {
+    if (target.classState.wildShapeFormId) revertDnd5eWildShape(target, 0, events)
+    events.push({
+      type: 'class-state-changed', actorId: target.id,
+      stateKey: 'shapechanger-reverted', active: false,
+    })
   }
 
   let conditionApplied: Dnd5eStandardConditionId | undefined
@@ -8664,7 +8748,17 @@ function resolveDnd5eHeadlessActionInternal(
       const from = { ...target.position }
       target.position = { ...action.pushTo }
       events.push({ type: 'moved', actorId: target.id, from, to: target.position, distance: 5 })
-    }
+      if (!applyDnd5eForcedMovementElevation(
+        state,
+        target,
+        action.pushToElevationFeet,
+        action.fallingDamageRolls,
+        events,
+      )) return fail(state, events, 'invalid-dice')
+    } else if (
+      action.type === 'shove' &&
+      (action.pushToElevationFeet != null || (action.fallingDamageRolls?.length ?? 0) > 0)
+    ) return fail(state, events, 'invalid-dice')
     return { ok: true, state, events }
   }
   if (action.type === 'disengage' || action.type === 'dodge') {

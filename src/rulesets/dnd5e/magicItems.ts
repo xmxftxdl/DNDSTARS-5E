@@ -187,7 +187,7 @@ const MAGIC_ITEM_ROWS: readonly CatalogRow[] = [
   ['oil-of-sharpness', '锐锋油', 'Oil of Sharpness', 'potion', 'very-rare'],
   ['oil-of-slipperiness', '滑溜油', 'Oil of Slipperiness', 'potion', 'uncommon'],
   ['pearl-of-power', '法力珍珠', 'Pearl of Power', 'wondrous-item', 'uncommon'],
-  ['periapt-of-health', '健康护符', 'Periapt of Health', 'wondrous-item', 'uncommon'],
+  ['periapt-of-health', '健康护符（疾病免疫）', 'Periapt of Health', 'wondrous-item', 'uncommon'],
   ['periapt-of-proof-against-poison', '防毒护符', 'Periapt of Proof against Poison', 'wondrous-item', 'rare'],
   ['periapt-of-wound-closure', '创伤闭合护符', 'Periapt of Wound Closure', 'wondrous-item', 'uncommon'],
   ['philter-of-love', '爱情灵药', 'Philter of Love', 'potion', 'uncommon'],

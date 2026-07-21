@@ -28,4 +28,41 @@ describe('D&D 5e custom monster workshop', () => {
     draft.actions[0].damageDice = 'lots'
     expect(() => buildDnd5eCustomMonster(draft)).toThrow('伤害骰格式无效')
   })
+
+  it('preserves imported advanced fields and mixed attack data across a form save', () => {
+    const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const imported = {
+      ...original,
+      savingThrows: { dex: 4 },
+      skills: [{ key: 'stealth', name: '隐匿', bonus: 6 }],
+      senses: [{ name: '黑暗视觉', distanceFeet: 60 }],
+      damageResistances: ['fire' as const],
+      reactions: [{ id: 'parry', name: '招架', description: 'AC 暂时提高 2。', kind: 'other' as const, automation: 'dm-adjudication' as const }],
+      actions: [
+        {
+          ...original.actions[0],
+          attack: {
+            ...original.actions[0].attack!,
+            damage: [
+              ...original.actions[0].attack!.damage,
+              { average: 3, count: 1, sides: 6, bonus: 0, type: 'fire' as const },
+            ],
+          },
+        },
+        { id: 'multiattack', name: '多重攻击', description: '先爪击，再爪击。', kind: 'multiattack' as const, sequence: [original.actions[0].id, original.actions[0].id], automation: 'headless' as const },
+      ],
+    }
+    const rebuilt = buildDnd5eCustomMonster(dnd5eCustomMonsterDraftFromStatBlock(imported))
+    expect(rebuilt).toMatchObject({
+      savingThrows: { dex: 4 },
+      skills: [{ key: 'stealth', bonus: 6 }],
+      senses: [{ name: '黑暗视觉', distanceFeet: 60 }],
+      damageResistances: ['fire'],
+      reactions: [{ id: 'parry' }],
+    })
+    expect(rebuilt.actions.find((action) => action.kind === 'weapon-attack')?.attack?.damage).toHaveLength(2)
+    expect(rebuilt.actions.find((action) => action.kind === 'multiattack')?.sequence).toEqual([
+      original.actions[0].id, original.actions[0].id,
+    ])
+  })
 })

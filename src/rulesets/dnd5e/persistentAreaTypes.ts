@@ -60,6 +60,10 @@ export interface Dnd5ePersistentAreaSaveDeclaration {
   ability: AbilityKey
   dc: number | 'source-save-dc'
   onSuccess: 'none' | 'half'
+  /** 核心规则扩展：变形生物进行此豁免时具有劣势。 */
+  shapechangerDisadvantage?: boolean
+  /** 核心规则扩展：变形生物豁免失败时恢复原形。 */
+  revertShapechangerOnFailure?: boolean
 }
 
 export interface Dnd5ePersistentAreaConditionDeclaration {
@@ -168,6 +172,8 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
         ability: rawSave.ability as AbilityKey,
         dc: rawSave.dc,
         onSuccess: rawSave.onSuccess as 'none' | 'half',
+        shapechangerDisadvantage: rawSave.shapechangerDisadvantage === true,
+        revertShapechangerOnFailure: rawSave.revertShapechangerOnFailure === true,
       }
     : undefined
 
@@ -234,6 +240,8 @@ export function normalizeDnd5ePersistentAreaTriggerDeclaration(
           ability: normalized.savingThrow.ability,
           dc: rawSave.dc === 'source-save-dc' ? 'source-save-dc' : normalized.savingThrow.dc,
           onSuccess: normalized.savingThrow.onSuccess,
+          shapechangerDisadvantage: normalized.savingThrow.shapechangerDisadvantage,
+          revertShapechangerOnFailure: normalized.savingThrow.revertShapechangerOnFailure,
         }
       : undefined,
   }

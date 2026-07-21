@@ -27,6 +27,8 @@ describe('D&D 5e 2014 traversal', () => {
     expect(dnd5eTraversalMovementCost({
       distanceFeet: 15, mode: 'climb', profile: { ...profile, climbWithoutSpeedCostMultiplier: 1 },
     })).toEqual({ ok: true, movementCostFeet: 15 })
+    expect(dnd5eTraversalMovementCost({ distanceFeet: 15, baseMovementCostFeet: 30, mode: 'climb', profile }))
+      .toEqual({ ok: true, movementCostFeet: 45 })
   })
 
   it('rejects jumps beyond the automatic distance', () => {

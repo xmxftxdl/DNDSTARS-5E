@@ -6,6 +6,7 @@ import {
   dnd5eMulticlassCasterLevel,
   dnd5eMulticlassPactSlots,
   dnd5eMulticlassSpellSlots,
+  removeDnd5eMulticlassLevel,
   validateDnd5eMulticlassLevelGain,
 } from './multiclass'
 
@@ -33,6 +34,15 @@ describe('D&D 5e 2014 multiclassing', () => {
   it('adds a class level while preserving the primary class', () => {
     const next = addDnd5eMulticlassLevel(character(), 'wizard')
     expect(next).toMatchObject({ charClass: '战士', level: 6, dnd5eClassLevels: { fighter: 5, wizard: 1 } })
+  })
+
+  it('undoes an accidentally added multiclass level without removing the starting class', () => {
+    const mixed = addDnd5eMulticlassLevel(character(), 'wizard')
+    expect(removeDnd5eMulticlassLevel(mixed, 'wizard')).toMatchObject({
+      level: 5, dnd5eClassLevels: { fighter: 5 },
+    })
+    expect(removeDnd5eMulticlassLevel(character({ level: 1, dnd5eClassLevels: { fighter: 1 } }), 'fighter'))
+      .toMatchObject({ level: 1, dnd5eClassLevels: { fighter: 1 } })
   })
 
   it('combines full and half caster levels and keeps pact magic separate', () => {

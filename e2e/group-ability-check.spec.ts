@@ -65,7 +65,10 @@ test('DM group check collects independent player rolls and projects only each pl
     inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true, equipment: {},
   })
   const stateResponse = await request.put(`${DM}/api/state/characters?room=${dm.roomId}`, {
-    headers: { 'X-Stars-Member': dm.member.memberId, 'X-Stars-Room-Token': dm.member.roomToken },
+    headers: {
+      'X-Stars-Protocol': '5', 'X-Stars-Expected-Revision': '0',
+      'X-Stars-Member': dm.member.memberId, 'X-Stars-Room-Token': dm.member.roomToken,
+    },
     data: {
       characters: [character('hero-a', '斥候甲', playerA, 14), character('hero-b', '斥候乙', playerB, 12)],
       selectedId: 'hero-a', updatedAt: Date.now(),

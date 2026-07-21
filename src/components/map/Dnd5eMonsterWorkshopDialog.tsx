@@ -40,6 +40,14 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
+  const preservesAdvancedFields = !!draft.preservedStatBlock && (
+    !!draft.preservedStatBlock.savingThrows || !!draft.preservedStatBlock.skills?.length ||
+    !!draft.preservedStatBlock.senses.length || !!draft.preservedStatBlock.damageResistances?.length ||
+    !!draft.preservedStatBlock.damageImmunities?.length || !!draft.preservedStatBlock.conditionImmunities?.length ||
+    !!draft.preservedStatBlock.reactions?.length || !!draft.preservedStatBlock.legendaryActions?.length ||
+    !!draft.preservedStatBlock.lairActions?.length || !!draft.preservedStatBlock.spellcasting ||
+    draft.preservedStatBlock.actions.some((action) => action.kind === 'multiattack' || (action.attack?.damage.length ?? 0) > 1)
+  )
 
   if (!open) return null
 
@@ -138,6 +146,11 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
           </header>
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+            {preservesAdvancedFields && (
+              <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
+                此怪物含表单未直接展示的高级字段（如豁免、技能、感官、抗性、多段伤害、反应、传奇动作或施法）。保存时这些字段会原样保留；如需修改，请导出 JSON 后编辑并重新导入。
+              </div>
+            )}
             <section>
               <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">基本资料</h3>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -2,6 +2,7 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
+import { imposeDnd5eRollDisadvantage } from './rollMode'
 import {
   dnd5eCombatantHasConcentrationEffect,
   resolveDnd5ePersistentAreaTrigger,
@@ -49,12 +50,17 @@ export function prepareDnd5ePersistentAreaTrigger(input: {
   })
   const source = snapshot.state.combatants[input.candidate.area.sourceTokenId]
   const target = snapshot.state.combatants[input.candidate.targetToken.id]
-  if (!source || !target || target.currentHp <= 0) return { ok: false, reason: 'combatant-missing' }
+  if (!source || !target || target.deathSaves.dead) return { ok: false, reason: 'combatant-missing' }
   const save = input.candidate.trigger.savingThrow
     ? {
         ability: input.candidate.trigger.savingThrow.ability,
         dc: input.candidate.trigger.savingThrow.dc,
-        mode: dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, { effectVisible: true }),
+        mode: input.candidate.trigger.savingThrow.shapechangerDisadvantage && target.shapechanger
+          ? imposeDnd5eRollDisadvantage(
+              dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, { effectVisible: true }),
+              'moonbeam-shapechanger',
+            ).mode
+          : dnd5eSavingThrowMode(target, input.candidate.trigger.savingThrow.ability, { effectVisible: true }),
         blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bless'),
         baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, target.id, 'bane'),
       }

@@ -391,7 +391,7 @@ import {
   dnd5eClimbingMovementCost,
   dnd5eRunningJumpBonusFeet,
 } from '../rulesets/dnd5e'
-import { dnd5eTraversalMovementCost, type Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
+import { dnd5eFallingDamageDice, dnd5eTraversalMovementCost, type Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import {
   clampGridSize,
   cellKey,
@@ -3508,6 +3508,8 @@ export default function MapsPage() {
       geometry: activeGeometry,
       token: myPlayerToken,
       to: pos,
+      canClimb: dnd5eTraversalMode === 'climb',
+      canSwim: dnd5eTraversalMode === 'swim',
       additionalDifficultTerrainMultiplier: (token, position) =>
         dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position }),
       additionalSpeedCostMultiplier: (token, position) =>
@@ -7799,13 +7801,40 @@ export default function MapsPage() {
       const targetD20Second = needsTargetRoll && prepared.prepared.targetRollMode !== 'normal'
         ? await rollDiceBoxD20(`${targetName}·优势／劣势第二枚`, targetName)
         : undefined
-      const resolved = resolvePreparedDnd5ePlayerBasicAction({
+      let resolved = resolvePreparedDnd5ePlayerBasicAction({
         prepared: prepared.prepared,
         actorD20,
         actorD20Second,
         targetD20,
         targetD20Second,
       })
+      const shovePushSucceeded = payload.kind === 'shove' && payload.outcome === 'push' &&
+        resolved.result.events.some((event) =>
+          event.type === 'contest-resolved' && event.contest === 'shove' && event.success,
+        )
+      if (shovePushSucceeded) {
+        const pushedToken = authorityMap.tokens.find((token) => token.id === payload.targetTokenId)
+        const fromElevationFeet = Math.max(0, Math.floor(pushedToken?.elevationFeet ?? 0))
+        if (pushedToken && fromElevationFeet >= 10 && await showCombatDialog({
+          title: '推撞与高台坠落',
+          message: `${pushedToken.label} 当前海拔为 ${fromElevationFeet} 尺。推离 5 尺后是否离开支撑面并坠落到 0 尺？`,
+          confirmText: '坠落并结算',
+          cancelText: '保持当前海拔',
+          tone: 'amber',
+        })) {
+          resolved = resolvePreparedDnd5ePlayerBasicAction({
+            prepared: prepared.prepared,
+            actorD20,
+            actorD20Second,
+            targetD20,
+            targetD20Second,
+            pushToElevationFeet: 0,
+            fallingDamageRolls: await rollDiceBoxValues(
+              dnd5eFallingDamageDice(fromElevationFeet), 6, '推撞·坠落伤害', pushedToken.label,
+            ),
+          })
+        }
+      }
       if (!resolved.result.ok || !resolved.application) {
         acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'invalid-basic-action' : resolved.result.reason)
         completePlayerActionRequest(action)
@@ -8552,6 +8581,7 @@ export default function MapsPage() {
         characters: useCharacterStore.getState().characters,
         initiativeOrder: initiativeOrderRef.current,
         turnEconomy: currentDnd5eTurnEconomy(action.actorTokenId, liveRound),
+        geometry: mapGeometryRuntimeForMap(authorityMap.id),
       })
       if (!prepared.ok) {
         acknowledgePlayerAction(action, 'rejected', prepared.reason)
@@ -8569,11 +8599,9 @@ export default function MapsPage() {
         area.id === action.dnd5ePersistentAreaMove?.areaId,
       )
       if (movedArea?.coreSpellId === 'flaming-sphere' && movedArea.anchorCell) {
-        const impactTarget = areaApplication.map.tokens.find((token) =>
-          token.type !== 'obstacle' &&
-          tokenOccupiedCellsAt(token, areaApplication.map, token)
-            .some((cell) => cellKey(cell) === cellKey(movedArea.anchorCell!)),
-        )
+        const impactTarget = prepared.prepared.impactTargetId
+          ? areaApplication.map.tokens.find((token) => token.id === prepared.prepared.impactTargetId)
+          : undefined
         if (impactTarget) {
           const impact = await settleDnd5ePersistentAreaCandidates({
             candidates: collectDnd5ePersistentAreaTriggers({
@@ -8802,6 +8830,25 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      const adjudicatedForcedFallTargetIds = new Set<string>()
+      const adjudicateForcedFall = async (targetToken: Token) => {
+        const fromElevationFeet = Math.max(0, Math.floor(targetToken.elevationFeet ?? 0))
+        if (fromElevationFeet < 10 || adjudicatedForcedFallTargetIds.has(targetToken.id)) return {}
+        adjudicatedForcedFallTargetIds.add(targetToken.id)
+        const falls = await showCombatDialog({
+          title: '强制位移与高台坠落',
+          message: `${targetToken.label} 当前海拔为 ${fromElevationFeet} 尺。这次强制位移是否使其离开支撑面并坠落到 0 尺？`,
+          confirmText: '坠落并结算',
+          cancelText: '保持当前海拔',
+          tone: 'amber',
+        })
+        if (!falls) return {}
+        const dice = dnd5eFallingDamageDice(fromElevationFeet)
+        return {
+          toElevationFeet: 0,
+          fallingDamageRolls: await rollDiceBoxValues(dice, 6, '强制位移·坠落伤害', targetToken.label),
+        }
+      }
       const counterspellCandidate = Object.values(spellCast.state.combatants).flatMap((combatant) => {
         if (combatant.controller === spellActorCombatant.controller || combatant.currentHp <= 0) return []
         const distance = spellCast.state.distanceFeetByCombatantPair?.[
@@ -9018,6 +9065,8 @@ export default function MapsPage() {
           if (targetHurlThroughHellDamageRolls) hurlThroughHellCommitted = true
           let repellingBlastPushTo: { x: number; y: number } | undefined
           let repellingBlastPushDistanceFeet: number | undefined
+          let repellingBlastPushToElevationFeet: number | undefined
+          let repellingBlastFallingDamageRolls: number[] | undefined
           if (attackHit && spellCast.repellingBlast) {
             const currentPosition = simulatedRepellingPositions.get(targetAttack.targetToken.id) ?? {
               x: targetAttack.targetToken.x,
@@ -9035,6 +9084,9 @@ export default function MapsPage() {
             if (push.distanceFeet > 0) {
               repellingBlastPushTo = push.to
               repellingBlastPushDistanceFeet = push.distanceFeet
+              const fall = await adjudicateForcedFall(targetAttack.targetToken)
+              repellingBlastPushToElevationFeet = fall.toElevationFeet
+              repellingBlastFallingDamageRolls = fall.fallingDamageRolls
               simulatedRepellingPositions.set(targetAttack.targetToken.id, push.to)
             }
           }
@@ -9054,6 +9106,8 @@ export default function MapsPage() {
             hurlThroughHellDamageRolls: targetHurlThroughHellDamageRolls,
             repellingBlastPushTo,
             repellingBlastPushDistanceFeet,
+            repellingBlastPushToElevationFeet,
+            repellingBlastFallingDamageRolls,
             effectRolls: attackHit && !spellCast.overchannel
               ? await rollDiceBoxValues(
                   attackDiceCount * (preview.roll.naturalTwenty ? 2 : 1),
@@ -9319,10 +9373,12 @@ export default function MapsPage() {
               targetSave.targetToken,
             )
             if (push.distanceFeet > 0) {
+              const fall = await adjudicateForcedFall(targetSave.targetToken)
               forcedMovements.push({
                 targetId: targetSave.targetToken.id,
                 to: push.to,
                 distanceFeet: push.distanceFeet,
+                ...fall,
               })
             }
           }
@@ -9458,10 +9514,12 @@ export default function MapsPage() {
             spellCast.targetToken,
           )
           if (push.distanceFeet > 0) {
+            const fall = await adjudicateForcedFall(spellCast.targetToken)
             forcedMovements.push({
               targetId: spellCast.targetToken.id,
               to: push.to,
               distanceFeet: push.distanceFeet,
+              ...fall,
             })
           }
         }
@@ -9741,7 +9799,11 @@ export default function MapsPage() {
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
       let spellApplication = resolved.application
-      for (const tokenId of new Set(forcedMovements.map((movement) => movement.targetId))) {
+      const forcedMovementTokenIds = new Set([
+        ...forcedMovements.map((movement) => movement.targetId),
+        ...(targetAttacks ?? []).flatMap((attack) => attack.repellingBlastPushTo ? [attack.targetId] : []),
+      ])
+      for (const tokenId of forcedMovementTokenIds) {
         const areaSettlement = await settleDnd5ePersistentAreasForForcedMovement({
           beforeMap: authorityMap,
           afterMap: spellApplication.map,
@@ -13403,7 +13465,7 @@ export default function MapsPage() {
 
     enemyAppliedKeysRef.current.add(actKey)
     void scheduleEnemyTurnEvent(token)
-  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey, resolveSurpriseForToken])
+  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey, resolveSurpriseForToken, tokenIsStillSurprised])
 
   useEffect(() => {
     if (!canControlPlayerTurn) {
@@ -13528,6 +13590,19 @@ export default function MapsPage() {
               dnd5eConditionsByToken={dnd5eConditionsByToken}
               onDnd5eConditionClick={(tokenId) => {
                 setEffectDetailTokenId(tokenId)
+              }}
+              onDnd5ePluginAreaVisibilityToggle={(areaId) => {
+                if (!isDM) return
+                const latest = useMapStore.getState().maps.find((map) => map.id === activeMap.id)
+                const area = latest?.dnd5ePluginAreas?.find((candidate) => candidate.id === areaId)
+                if (!latest || !area) return
+                applyAuthorityMapUpdate(latest.id, {
+                  dnd5ePluginAreas: latest.dnd5ePluginAreas?.map((candidate) =>
+                    candidate.id === areaId
+                      ? { ...candidate, hiddenFromPlayers: !candidate.hiddenFromPlayers }
+                      : candidate,
+                  ),
+                })
               }}
               tokenHoverLabels={tokenHoverLabels}
               defeatedTokenIds={defeatedTokenIds}

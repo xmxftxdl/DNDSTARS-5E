@@ -83,8 +83,17 @@ async function putRoomState(
   value: unknown,
   member: RoomMembershipResponse['member'],
 ) {
-  const response = await request.put(`${DM}/api/state/${name}?room=${roomId}`, {
+  const resourceUrl = `${DM}/api/state/${name}?room=${roomId}`
+  const current = await request.get(resourceUrl, {
     headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
+  })
+  const revision = Number(current.headers()['x-stars-state-revision'] ?? 0)
+  const response = await request.put(resourceUrl, {
+    headers: {
+      'X-Stars-Protocol': '5',
+      'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0),
+      'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken,
+    },
     data: value,
   })
   expect(response.ok()).toBeTruthy()

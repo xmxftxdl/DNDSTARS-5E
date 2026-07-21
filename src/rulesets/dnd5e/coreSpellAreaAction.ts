@@ -1,5 +1,6 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
+import type { MapGeometryState } from '../../lib/mapGeometry'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
@@ -15,6 +16,8 @@ export interface PreparedDnd5eCoreSpellAreaMove {
   areaId: string
   targetCell: { col: number; row: number }
   economy: 'action' | 'bonusAction'
+  geometry?: MapGeometryState
+  impactTargetId?: string
 }
 
 export function prepareDnd5eCoreSpellAreaMove(input: {
@@ -23,6 +26,7 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
   turnEconomy: Dnd5eTurnEconomyCounts
+  geometry?: MapGeometryState
 }): { ok: true; prepared: PreparedDnd5eCoreSpellAreaMove } | { ok: false; reason: string } {
   const payload = input.action.dnd5ePersistentAreaMove
   if (input.action.type !== 'dnd5e-persistent-area-move' || !payload) {
@@ -42,7 +46,8 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     return { ok: false, reason: 'concentration-ended' }
   }
   const moved = moveDnd5eCoreSpellArea({
-    map: input.map, areaId: area.id, sourceTokenId: actorToken.id, targetCell: payload.targetCell,
+    map: input.map, geometry: input.geometry,
+    areaId: area.id, sourceTokenId: actorToken.id, targetCell: payload.targetCell,
   })
   if (!moved.ok) return moved
   const snapshot = createDnd5eMapCombatSnapshot({
@@ -74,6 +79,8 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
       areaId: area.id,
       targetCell: { ...payload.targetCell },
       economy: area.movement.economy === 'action' ? 'action' : 'bonusAction',
+      geometry: input.geometry,
+      impactTargetId: moved.impactTargetId,
     },
   }
 }
@@ -84,6 +91,7 @@ export function resolvePreparedDnd5eCoreSpellAreaMove(input: {
   const { prepared } = input
   const moved = moveDnd5eCoreSpellArea({
     map: prepared.map,
+    geometry: prepared.geometry,
     areaId: prepared.areaId,
     sourceTokenId: prepared.action.actorTokenId,
     targetCell: prepared.targetCell,

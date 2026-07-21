@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
 import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { dnd5eAttackerIsUnseen, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
@@ -18,6 +18,59 @@ function fighter(id: string, initiative: number, patch = {}) {
 }
 
 describe('D&D 5e 2014 headless combat engine', () => {
+  it('applies persistent-area damage to dying creatures and Moonbeam disadvantage to shapechangers', () => {
+    const caster = fighter('caster', 20)
+    const dying = fighter('dying', 10, {
+      currentHp: 0, usesDeathSaves: true,
+      deathSaves: { successes: 0, failures: 0, stable: false, dead: false },
+    })
+    const dyingResult = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('area-dying', [caster, dying]),
+      {
+        areaId: 'spirit-guardians', sourceId: 'caster', targetId: 'dying',
+        trigger: {
+          id: 'damage', label: '区域伤害', timing: 'turn-start',
+          oncePerRound: true, damage: { count: 1, sides: 6, modifier: 0, type: 'radiant' },
+        },
+        damageRolls: [4],
+      },
+    )
+    expect(dyingResult.ok).toBe(true)
+    if (!dyingResult.ok) return
+    expect(dyingResult.state.combatants.dying.deathSaves.failures).toBe(1)
+
+    const shapechanger = fighter('shapechanger', 10, {
+      controller: 'dm', shapechanger: true, currentHp: 10, maxHp: 10,
+      classState: {
+        wildShapeFormId: 'wolf', wildShapeCurrentHp: 10,
+        wildShapeOriginalCurrentHp: 20, wildShapeOriginalMaxHp: 20,
+      },
+    })
+    const moonbeam = resolveDnd5ePersistentAreaTrigger(
+      startDnd5eHeadlessCombat('area-shapechanger', [caster, shapechanger]),
+      {
+        areaId: 'moonbeam', sourceId: 'caster', targetId: 'shapechanger',
+        trigger: {
+          id: 'moonbeam', label: '月华之光', timing: 'turn-start', oncePerTurn: true,
+          savingThrow: {
+            ability: 'con', dc: 12, onSuccess: 'half',
+            shapechangerDisadvantage: true, revertShapechangerOnFailure: true,
+          },
+          damage: { count: 1, sides: 10, modifier: 0, type: 'radiant' },
+        },
+        d20: 20, d20Second: 1, damageRolls: [5],
+      },
+    )
+    expect(moonbeam.ok).toBe(true)
+    expect(moonbeam.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved', targetId: 'shapechanger', d20: 1, success: false,
+    }))
+    expect(moonbeam.events).toContainEqual(expect.objectContaining({
+      type: 'class-state-changed', actorId: 'shapechanger', stateKey: 'shapechanger-reverted', active: false,
+    }))
+    expect(moonbeam.state.combatants.shapechanger).toMatchObject({ currentHp: 20, maxHp: 20 })
+  })
+
   it('resolves the first-batch non-damage spells through authoritative Headless state', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric', level: 9, abilities: { ...abilities, wis: 18 },
@@ -346,7 +399,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!chilled.ok) return
     expect(chilled.state.combatants.target.classState.activeEffects).toContainEqual(expect.objectContaining({
       definitionId: 'srd-5.1:spell:chill-touch:no-healing',
-      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-start' }),
+      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-end' }),
     }))
     const targetTurn = resolveDnd5eHeadlessAction(chilled.state, { type: 'end-turn', actorId: 'warlock' })
     expect(targetTurn.ok).toBe(true)

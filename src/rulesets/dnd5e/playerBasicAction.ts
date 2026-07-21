@@ -243,6 +243,8 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
   actorD20Second?: number
   targetD20?: number
   targetD20Second?: number
+  pushToElevationFeet?: number
+  fallingDamageRolls?: readonly number[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared, actorD20 = 0, actorD20Second, targetD20 = 0, targetD20Second } = input
   const payload = prepared.payload
@@ -264,6 +266,8 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       actorD20, actorD20Second, targetD20, targetD20Second,
       targetDefense: prepared.targetDefense ?? payload.targetDefense, outcome: payload.outcome,
       pushTo: prepared.pushTo,
+      pushToElevationFeet: input.pushToElevationFeet,
+      fallingDamageRolls: input.fallingDamageRolls,
       spendAction: prepared.spendsAction,
     }; break
     case 'escape-grapple': action = {

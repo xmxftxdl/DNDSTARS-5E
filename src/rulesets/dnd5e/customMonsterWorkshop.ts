@@ -32,6 +32,8 @@ export interface Dnd5eCustomMonsterActionDraft {
 }
 
 export interface Dnd5eCustomMonsterDraft {
+  /** 原始结构化数据；表单未覆盖的高级字段会在保存时原样透传。 */
+  preservedStatBlock?: Dnd5eMonsterStatBlock
   id?: string
   slug?: string
   name: string
@@ -173,10 +175,32 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
 
 export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMonsterStatBlock {
   const slug = draft.slug ?? `custom-${uid()}`
-  const baseActions = draft.actions.map(normalizedAction)
+  const preserved = draft.preservedStatBlock
+  const baseActions = draft.actions.map((draftAction) => {
+    const normalized = normalizedAction(draftAction)
+    const previous = preserved?.actions.find((action) => action.id === normalized.id && action.kind === normalized.kind)
+    if (!previous) return normalized
+    if (normalized.kind !== 'weapon-attack' || !normalized.attack || !previous.attack) {
+      return { ...previous, ...normalized }
+    }
+    return {
+      ...previous,
+      ...normalized,
+      attack: {
+        ...previous.attack,
+        ...normalized.attack,
+        damage: [normalized.attack.damage[0], ...previous.attack.damage.slice(1)],
+      },
+    }
+  })
   const repeated = draft.actions.filter((action) => action.kind === 'weapon-attack' && action.attacksPerAction > 1)
   const actions: Dnd5eMonsterAction[] = [...baseActions]
-  if (repeated.length > 0) {
+  const preservedMultiattacks = preserved?.actions.filter((action) =>
+    action.kind === 'multiattack' && action.sequence?.every((id) => baseActions.some((candidate) => candidate.id === id)),
+  ) ?? []
+  if (preservedMultiattacks.length > 0) {
+    actions.unshift(...preservedMultiattacks.map((action) => structuredClone(action)))
+  } else if (repeated.length > 0) {
     const sequence = repeated.flatMap((action) => Array.from({ length: Math.min(10, Math.max(2, Math.trunc(action.attacksPerAction))) }, () => action.id))
     const childrenHeadless = repeated.every((action) => action.automation === 'headless')
     actions.unshift({
@@ -188,7 +212,17 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       automation: childrenHeadless ? 'headless' : 'dm-adjudication',
     })
   }
+  const traits = draft.traits.filter((trait) => trait.name.trim() || trait.description.trim()).map((trait) => {
+    const previous = preserved?.traits.find((candidate) => candidate.name === trait.name.trim())
+    return {
+      ...previous,
+      name: trait.name.trim(),
+      description: trait.description.trim(),
+      automation: previous?.automation ?? ('dm-adjudication' as const),
+    }
+  })
   const monster: Dnd5eMonsterStatBlock = {
+    ...preserved,
     id: draft.id ?? `room-monster:${slug}`,
     slug,
     name: draft.name.trim(),
@@ -197,7 +231,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     size: draft.size,
     creatureType: draft.creatureType.trim(),
     alignment: draft.alignment.trim(),
-    armorClass: { value: Math.trunc(draft.armorClass) },
+    armorClass: { ...preserved?.armorClass, value: Math.trunc(draft.armorClass) },
     hitPoints: { average: Math.trunc(draft.hitPointsAverage), dice: draft.hitPointsDice.replace(/\s+/g, '') },
     speed: {
       walk: Math.trunc(draft.walk),
@@ -207,17 +241,14 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       ...(draft.burrow > 0 ? { burrow: Math.trunc(draft.burrow) } : {}),
     },
     abilities: Object.fromEntries(ABILITY_KEYS.map((key) => [key, Math.trunc(draft.abilities[key])])) as Record<AbilityKey, number>,
-    senses: [],
+    senses: preserved?.senses ? structuredClone(preserved.senses) : [],
     passivePerception: Math.trunc(draft.passivePerception),
     languages: draft.languages.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean),
     challenge: { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
-    traits: draft.traits.filter((trait) => trait.name.trim() || trait.description.trim()).map((trait) => ({
-      name: trait.name.trim(),
-      description: trait.description.trim(),
-      automation: 'dm-adjudication' as const,
-    })),
+    traits,
     actions,
     capabilities: {
+      ...preserved?.capabilities,
       swarm: draft.traits.some((trait) => /群集|swarm/i.test(trait.name)),
       shapechanger: draft.traits.some((trait) => /变形|shapechange/i.test(trait.name)),
       regeneration: draft.traits.some((trait) => /再生|regeneration/i.test(trait.name)),
@@ -235,6 +266,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
 
 export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBlock): Dnd5eCustomMonsterDraft {
   return {
+    preservedStatBlock: structuredClone(monster),
     id: monster.id,
     slug: monster.slug,
     name: monster.name,

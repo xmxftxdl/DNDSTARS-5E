@@ -37,7 +37,8 @@ export default function EnemyPoolPicker({
     [customMonsters],
   )
 
-  const results = useMemo(() => searchEnemyPool(query, pool), [pool, query])
+  const allResults = useMemo(() => searchEnemyPool(query, pool), [pool, query])
+  const results = query.trim() ? allResults : allResults.slice(0, 100)
 
   if (!open) return null
 
@@ -97,7 +98,8 @@ export default function EnemyPoolPicker({
             />
           </div>
           <p className="mt-2 text-xs text-slate-500">
-            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间自定义：{customMonsters.length} · 显示 {results.length} 项
+            SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间自定义：{customMonsters.length} · 显示 {results.length}/{allResults.length} 项
+            {!query.trim() && allResults.length > results.length ? '（输入名称可搜索全部）' : ''}
           </p>
         </div>
 
