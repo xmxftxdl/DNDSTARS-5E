@@ -82,7 +82,7 @@ import {
 } from '../lib/sharedApi'
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryTargeting } from '../types/inventory'
-import { createEmptyMapFog, type FogTool } from '../lib/fogOfWar'
+import type { FogTool } from '../lib/fogOfWar'
 import {
   createEmptyMapGeometry,
   MAP_GEOMETRY_CREATURE_COVER_PREFIX,
@@ -416,7 +416,6 @@ import {
   playerViewCharacters,
   PLAYER_ASSIGNMENT_EVENT,
 } from '../lib/playerView'
-import { resolvePlayerVisionSourceTokenIds } from '../lib/playerVision'
 import type {
   Dnd5eClassFeaturePayload,
   Dnd5eBasicActionPayload,
@@ -480,6 +479,11 @@ import {
 } from '../lib/playerActionSync'
 import { useMapsPlayerActionTransport } from './maps/useMapsPlayerActionTransport'
 import { settleDnd5eConcentrationChecks } from './maps/settleDnd5eCombatResult'
+import {
+  buildMapExplorationUpdates,
+  buildMapsFogGeometryProjection,
+  resolveMapsFogGeometryState,
+} from './maps/mapsFogGeometryController'
 import {
   capturePlayerActionResultBaseline,
   type PlayerActionResultBaseline,
@@ -1617,12 +1621,11 @@ export default function MapsPage() {
       recordCombatStatistics(activeMapId, observation, sideByCombatantId)
     })
   }, [activeMapId, isDM, recordCombatStatistics])
-  const activeFog = activeMap
-    ? fogMaps.find((fog) => fog.mapId === activeMap.id) ?? createEmptyMapFog(activeMap.id, 0)
+  const activeFogGeometry = activeMap
+    ? resolveMapsFogGeometryState({ map: activeMap, fogMaps, geometryMaps })
     : undefined
-  const activeGeometry = activeMap
-    ? geometryMaps.find((geometry) => geometry.mapId === activeMap.id) ?? createEmptyMapGeometry(activeMap.id, 0)
-    : undefined
+  const activeFog = activeFogGeometry?.fog
+  const activeGeometry = activeFogGeometry?.geometry
   const selectedGeometryEntity = activeGeometry
     ? [...activeGeometry.walls, ...activeGeometry.doors, ...(activeGeometry.windows ?? []), ...activeGeometry.obstacles, ...(activeGeometry.lights ?? [])]
         .find((entity) => entity.id === selectedGeometryEntityId)
@@ -2354,51 +2357,31 @@ export default function MapsPage() {
     activeMap && turnCharacter
       ? activeMap.tokens.find((t) => t.type === 'player' && t.characterId === turnCharacter.id)
       : undefined
-  const visionSourceTokenIds = activeMap
-    ? resolvePlayerVisionSourceTokenIds({
-        tokens: activeMap.tokens,
-        sharePartyVision: activeGeometry?.vision.sharePartyVision !== false,
+  const fogGeometryProjection = activeMap
+    ? buildMapsFogGeometryProjection({
+        map: activeMap,
+        fogMaps,
+        geometryMaps,
+        explorationMaps,
+        isDm: isDM,
+        roomMemberId: roomSession?.memberId,
         controlledCharacterIds: [assignedCharacterId, playerChar?.id, ...visibleChars.map((character) => character.id)],
       })
-    : []
-  const activeExploration = activeMap
-    ? explorationMaps.find((entry) => entry.mapId === activeMap.id)
     : undefined
-  const storedExploredVisionPolygons = isDM
-    ? Object.values(activeExploration?.byMemberId ?? {}).flatMap((entry) => entry.polygons)
-    : roomSession?.memberId
-      ? activeExploration?.byMemberId[roomSession.memberId]?.polygons ?? []
-      : []
-  // Exploration is historical evidence. A later blindness, darkvision loss,
-  // or shorter light source must not erase terrain that was already explored.
-  const exploredVisionPolygons = activeMap ? storedExploredVisionPolygons : []
-  const manualFogExplorationEnabled = activeFog?.filled === true
+  const visionSourceTokenIds = fogGeometryProjection?.visionSourceTokenIds ?? []
+  const exploredVisionPolygons = fogGeometryProjection?.exploredVisionPolygons ?? []
+  const manualFogExplorationEnabled = fogGeometryProjection?.manualFogExplorationEnabled ?? false
 
   useEffect(() => {
     if (!isDM || !activeMap || !activeGeometry ||
       (!activeGeometry.vision.enabled && !manualFogExplorationEnabled)) return
-    const views = activeMap.tokens.flatMap((token) => {
-      if (token.type !== 'player' || !token.characterId) return []
-      const character = characters.find((candidate) => candidate.id === token.characterId)
-      if (!character?.roomMemberId) return []
-      const polygons = mapExplorationPolygonsForTokenPath({
-        geometry: activeGeometry,
-        map: activeMap,
-        token,
-        path: [{ x: token.x, y: token.y }],
-        forceEnabled: manualFogExplorationEnabled,
-      })
-      return polygons.length > 0 ? [{ memberId: character.roomMemberId, polygons }] : []
+    const updates = buildMapExplorationUpdates({
+      map: activeMap,
+      geometry: activeGeometry,
+      characters,
+      forceEnabled: manualFogExplorationEnabled,
     })
-    if (views.length === 0) return
-    if (activeGeometry.vision.sharePartyVision) {
-      const polygons = views.flatMap((entry) => entry.polygons)
-      for (const memberId of new Set(views.map((entry) => entry.memberId))) {
-        recordMapExploration(activeMap.id, memberId, polygons)
-      }
-    } else {
-      for (const view of views) recordMapExploration(activeMap.id, view.memberId, view.polygons)
-    }
+    for (const update of updates) recordMapExploration(activeMap.id, update.memberId, update.polygons)
   }, [activeGeometry, activeMap, characters, isDM, manualFogExplorationEnabled, recordMapExploration])
 
   const moveCircle = (() => {
