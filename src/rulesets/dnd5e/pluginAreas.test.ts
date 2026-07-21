@@ -3,6 +3,7 @@ import type { Dnd5ePluginArea } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
   collectDnd5ePersistentAreaTriggers,
+  recordDnd5ePersistentAreaTrigger,
   reconcileDnd5ePluginAreas,
   reconcileDnd5ePluginAreasOnMap,
 } from './pluginAreas'
@@ -151,6 +152,44 @@ describe('D&D 5e plugin persistent areas', () => {
       .toMatchObject([{ trigger: { id: 'started' } }])
     expect(collectDnd5ePersistentAreaTriggers({ map, timing: 'turn-end', round: 2, targetTokenId: target.id }))
       .toMatchObject([{ trigger: { id: 'ended' } }])
+  })
+
+  it('supports first trigger per creature turn independently from once per round', () => {
+    const source = {
+      id: 'caster-token', label: 'caster', x: 25, y: 125, color: '#fff', emoji: 'C', size: 1,
+      type: 'player' as const, characterId: 'caster',
+    }
+    const target = {
+      id: 'target-token', label: 'target', x: 25, y: 25, color: '#fff', emoji: 'T', size: 1,
+      type: 'enemy' as const,
+    }
+    const turnArea = area({
+      cells: [{ col: 1, row: 0 }],
+      triggers: [{
+        id: 'entry', label: '每回合首次进入', timing: 'on-enter', oncePerRound: false, oncePerTurn: true,
+        damage: { count: 1, sides: 6, modifier: 0, type: 'radiant' },
+      }],
+    })
+    const baseMap = {
+      id: 'map', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [source, target], dnd5ePluginAreas: [turnArea],
+    }
+    const first = collectDnd5ePersistentAreaTriggers({
+      map: baseMap, timing: 'on-enter', round: 2, turnKey: '2:caster-token',
+      movement: { token: target, to: { x: 75, y: 25 } },
+    })[0]
+    expect(first).toBeDefined()
+    const recorded = recordDnd5ePersistentAreaTrigger(baseMap.dnd5ePluginAreas, first, 2)
+    const recordedMap = { ...baseMap, dnd5ePluginAreas: recorded, tokens: [source, { ...target, x: 25, y: 25 }] }
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: recordedMap, timing: 'on-enter', round: 2, turnKey: '2:caster-token',
+      movement: { token: target, to: { x: 75, y: 25 } },
+    })).toHaveLength(0)
+    expect(collectDnd5ePersistentAreaTriggers({
+      map: recordedMap, timing: 'on-enter', round: 2, turnKey: '2:enemy-token',
+      movement: { token: target, to: { x: 75, y: 25 } },
+    })).toHaveLength(1)
   })
 
   it('collects an explicit area-move impact and removes orphaned effect tokens', () => {

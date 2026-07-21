@@ -396,7 +396,7 @@ function PlayerVisibilityLayer({
 
 function LightingLayer({ map, geometry }: { map: BattleMap; geometry?: MapGeometryState }) {
   if (!geometry?.vision.enabled || geometry.vision.ambientLight === 'bright') return null
-  const opacity = geometry.vision.ambientLight === 'darkness' ? 0.72 : 0.3
+  const opacity = geometry.vision.ambientLight === 'darkness' ? 0.9 : 0.3
   const sources = [
     ...map.tokens.filter((token) => token.lightSource?.enabled).map((token) => ({
       id: `token:${token.id}`,

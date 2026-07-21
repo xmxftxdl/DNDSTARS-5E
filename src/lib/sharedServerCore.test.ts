@@ -9,6 +9,7 @@ import {
   EVENT_BACKLOG_LIMIT,
   EVENT_CHANNEL_LIMIT,
   EVENT_REPLAY_LIMIT,
+  CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH,
   IMAGE_COUNT_LIMIT,
   LockTimeoutError,
   ROOM_HOST_TTL_MS,
@@ -26,6 +27,7 @@ import {
   enforceImageQuota,
   extractSecret,
   migrateLegacyApCombatLogText,
+  mergePlayerCharactersStateForAuthority,
   normalizeDedicatedDnd5eSharedState,
   normalizeLobbyRoomCode,
   normalizeAccountRecoveryCode,
@@ -295,6 +297,41 @@ describe('map geometry player projection', () => {
     })
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
       .toEqual(['hero', 'at-35-feet'])
+  })
+
+  it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {
+    const darkGeometry = {
+      ...geometry,
+      maps: geometry.maps.map((entry) => ({
+        ...entry,
+        walls: [],
+        lights: [{
+          id: 'lamp', kind: 'light', label: 'Lamp', points: [{ x: 80, y: 20 }], enabled: true,
+          brightRadiusFeet: 5, dimRadiusFeet: 5, color: '#ffffff', elevationFeet: 5, createdAt: 1,
+        }],
+        vision: { ...entry.vision, enabled: true, ambientLight: 'darkness', defaultRangeFeet: 60 },
+      })),
+    }
+    const maps = {
+      maps: [{
+        id: 'map-1', width: 200, height: 120, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20 },
+          { id: 'lit', type: 'enemy', x: 80, y: 20 },
+          { id: 'unlit', type: 'enemy', x: 80, y: 80 },
+        ],
+      }],
+    }
+    expect(sharedServerCore.projectMapsForPlayer(maps, darkGeometry, 'character-1')
+      .maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'lit'])
+
+    const disabledGeometry = {
+      ...darkGeometry,
+      maps: darkGeometry.maps.map((entry) => ({ ...entry, vision: { ...entry.vision, enabled: false } })),
+    }
+    expect(sharedServerCore.projectMapsForPlayer(maps, disabledGeometry, 'character-1', null, null, {
+      maps: [{ mapId: 'map-1', filled: true, shapes: [] }],
+    }).maps[0].tokens.map((token: { id: string }) => token.id)).toEqual(['hero', 'lit', 'unlit'])
   })
 
   it('hides tokens under cover shapes even when the fog is not filled', () => {
@@ -800,6 +837,34 @@ describe('combat interrupt atomic mutation', () => {
     }, 200)).toMatchObject({ ok: false, status: 409, error: 'transaction-locked' })
   })
 
+  it('rejects oversized inline portrait aggregates at the server boundary', () => {
+    const portrait = `data:image/webp;base64,${'A'.repeat(580_000)}`
+    expect(CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH).toBeLessThan(STATE_MAX_BYTES)
+    expect(validateSharedStateShape('characters', {
+      characters: [{ id: 'hero', portrait }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('characters', {
+      characters: Array.from({ length: 7 }, (_, index) => ({ id: `hero-${index}`, portrait })),
+    })).toMatchObject({ ok: false, reason: 'character-portraits-too-large' })
+  })
+
+  it('rejects unbounded D&D 5e map lifecycles and labels at the server boundary', () => {
+    const summon = {
+      schemaVersion: 1, createdRound: 1, expiresAfterRound: 10, side: 'player',
+    }
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: summon }] }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 14_401 } }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-summon' })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        label: 'x'.repeat(121), createdRound: 1, expiresAfterRound: 2,
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
+  })
+
   it('atomically appends player roll contributions while the DM confirmation is open', () => {
     const queue = {
       mapId: 'map-1', revision: 1, updatedAt: 100,
@@ -827,6 +892,21 @@ describe('combat interrupt atomic mutation', () => {
         featureLabel: '幸运', dieIndex: 0, replacementValue: 20, createdAt: 220,
       },
     }, 220)).toMatchObject({ ok: false, status: 409 })
+  })
+
+  it('accepts plugin and roll-confirmation Interrupt kinds at the shared boundary', () => {
+    const interrupt = (kind: 'plugin-choice' | 'roll-confirmation') => ({
+      id: kind, transactionId: kind, mapId: 'map-1', kind,
+      status: 'pending', phase: kind === 'roll-confirmation' ? 'after-roll' : 'before-action',
+      timeoutPolicy: kind === 'roll-confirmation' ? 'wait-for-dm' : 'rollback',
+      payload: {}, createdAt: 1, updatedAt: 1,
+    })
+    expect(validateSharedStateShape('combat-interrupts', {
+      mapId: 'map-1', interrupts: [interrupt('plugin-choice')], updatedAt: 1,
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat-interrupts', {
+      mapId: 'map-1', interrupts: [interrupt('roll-confirmation')], updatedAt: 1,
+    })).toEqual({ ok: true })
   })
 
   it('requires DM authority to settle a roll confirmation', () => {
@@ -890,6 +970,83 @@ describe('combat interrupt atomic mutation', () => {
       status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', contributions: [],
     })
     expect((result.next.interrupts[0] as { response?: unknown }).response).toBeUndefined()
+  })
+})
+
+describe('player character aggregate authority', () => {
+  const activeEffect = {
+    schemaVersion: 1,
+    id: 'hold',
+    definitionId: 'spell:hold-person',
+    label: '麻痹',
+    kind: 'condition',
+    standardCondition: 'paralyzed',
+    source: { kind: 'spell', actorId: 'enemy', rulesId: 'hold-person' },
+    appliedAt: 10,
+    duration: { type: 'concentration', sourceActorId: 'enemy', concentrationId: 'hold-person' },
+    stackingKey: 'condition:paralyzed',
+    stackingPolicy: 'refresh-duration',
+  }
+  const current = {
+    selectedId: 'hero-a',
+    updatedAt: 10,
+    characters: [
+      {
+        id: 'hero-a', roomId: 'ROOM', roomMemberId: 'member-a', ownerAccountId: 'account-a',
+        name: 'Hero A', currentHp: 4, maxHp: 20, tempHp: 2, hitPointDice: [{ sides: 10, current: 1, max: 2 }],
+        conditions: ['paralyzed'], concentrating: true,
+        dnd5eCombatState: { schemaVersion: 2, activeEffects: [activeEffect], concentrationSpellId: 'bless' },
+        dnd5eInventory: { schemaVersion: 2, entries: [{ id: 'potion', templateId: 'potion', quantity: 1 }] },
+        classResources: { 'dnd5e-spell-slot-1': { current: 0, max: 2 } },
+        equipment: { armorId: 'chain-mail' }, dmNotes: 'secret', visibleToPlayers: true,
+      },
+      { id: 'hero-b', roomId: 'ROOM', roomMemberId: 'member-b', name: 'Hero B', currentHp: 12 },
+    ],
+  }
+
+  it('keeps other members and Headless-owned combat fields on a player upload', () => {
+    const forged = {
+      selectedId: 'hero-b',
+      updatedAt: 20,
+      characters: [{
+        ...current.characters[0],
+        name: 'Renamed Hero', ownerAccountId: 'forged-account', currentHp: 20, tempHp: 0,
+        hitPointDice: [{ sides: 10, current: 2, max: 2 }], conditions: [], concentrating: false,
+        dnd5eCombatState: undefined, dnd5eInventory: { schemaVersion: 2, entries: [] },
+        classResources: { 'dnd5e-spell-slot-1': { current: 2, max: 2 } }, equipment: undefined,
+        dmNotes: 'stolen', visibleToPlayers: false,
+      }],
+    }
+    const merged = mergePlayerCharactersStateForAuthority(current, forged, 'member-a', { combatActive: true })
+    expect(merged.characters).toHaveLength(2)
+    expect(merged.characters[0]).toMatchObject({
+      name: 'Renamed Hero', ownerAccountId: 'account-a', currentHp: 4, tempHp: 2,
+      conditions: ['paralyzed'], concentrating: true, dmNotes: 'secret', visibleToPlayers: true,
+      dnd5eCombatState: current.characters[0].dnd5eCombatState,
+      dnd5eInventory: current.characters[0].dnd5eInventory,
+      classResources: current.characters[0].classResources,
+      equipment: current.characters[0].equipment,
+    })
+    expect(merged.characters[1]).toEqual(current.characters[1])
+    expect(merged.selectedId).toBe('hero-a')
+  })
+
+  it('allows ordinary owned-sheet edits outside combat but still rejects forged Headless state', () => {
+    const incoming = {
+      selectedId: 'hero-a', updatedAt: 20,
+      characters: [{ ...current.characters[0], name: 'Renamed Hero', currentHp: 20, concentrating: false, dnd5eCombatState: undefined }],
+    }
+    const merged = mergePlayerCharactersStateForAuthority(current, incoming, 'member-a', { combatActive: false })
+    expect(merged.characters[0]).toMatchObject({ name: 'Renamed Hero', currentHp: 20, concentrating: true })
+    expect(merged.characters[0].dnd5eCombatState).toEqual(current.characters[0].dnd5eCombatState)
+  })
+
+  it('rejects new characters that claim a different room member', () => {
+    const merged = mergePlayerCharactersStateForAuthority(current, {
+      selectedId: 'forged', updatedAt: 20,
+      characters: [{ id: 'forged', roomMemberId: 'member-b', name: 'Forged' }],
+    }, 'member-a')
+    expect(merged.characters.map((character) => character.id)).toEqual(['hero-b'])
   })
 })
 

@@ -144,12 +144,15 @@ export function findMapGeometryPath(input: {
           { col: current.cell.col + direction.dc, row: current.cell.row },
           { col: current.cell.col, row: current.cell.row + direction.dr },
         ]
+        const occupiedCorners = cornerCells.map((cornerCell) => {
+          const cornerPosition = tokenCenterForAnchorCell(cornerCell, input.token, input.map)
+          const cornerToken = { ...input.token, ...cornerPosition }
+          return tokenOccupiedCellsAt(cornerToken, input.map, cornerToken).some((cell) => occupied.has(key(cell)))
+        })
+        if (occupiedCorners.every(Boolean)) continue directionLoop
         for (const cornerCell of cornerCells) {
           const cornerPosition = tokenCenterForAnchorCell(cornerCell, input.token, input.map)
           const cornerToken = { ...input.token, ...cornerPosition }
-          if (tokenOccupiedCellsAt(cornerToken, input.map, cornerToken).some((cell) => occupied.has(key(cell)))) {
-            continue directionLoop
-          }
           if (mapGeometryMovementBlocked({
             geometry: pathGeometry,
             map: input.map,

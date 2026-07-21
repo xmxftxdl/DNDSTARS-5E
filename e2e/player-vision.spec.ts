@@ -34,11 +34,14 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   await put('maps', {
     selectedId: 'vision-map', updatedAt: now,
     maps: [{
-      id: 'vision-map', name: '视野测试地图', width: 400, height: 400,
+      id: 'vision-map', name: '视野测试地图', width: 800, height: 800,
       gridSize: 40, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
       tokens: [{
         id: 'vision-hero', label: '视野角色', type: 'player', characterId: 'vision-character',
-        x: 200, y: 200, size: 1, color: '#34d399', emoji: '勇', hp: 10, maxHp: 10,
+        x: 400, y: 400, size: 1, color: '#34d399', emoji: '勇', hp: 10, maxHp: 10,
+      }, {
+        id: 'vision-hidden-enemy', label: '远处敌人', type: 'enemy',
+        x: 720, y: 400, size: 1, color: '#ef4444', emoji: '敌', hp: 10, maxHp: 10,
       }],
     }],
   })
@@ -56,7 +59,7 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
       mapId: 'vision-map', filled: true, color: '#05070f', opacity: 0.98,
       shapes: [{
         id: 'cover-current-view', operation: 'cover', kind: 'rect',
-        x: 0, y: 0, width: 400, height: 400, createdAt: now,
+        x: 0, y: 0, width: 800, height: 800, createdAt: now,
       }],
       updatedAt: now,
     }],
@@ -79,6 +82,14 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   await expect(canvas).toHaveAttribute('data-fog-filled', 'true')
   await expect(canvas).toHaveAttribute('data-vision-source-count', '1')
 
+  const projectedMaps = await request.get(`${PLAYER}/api/state/maps?room=${created.roomId}`, {
+    headers: { 'X-Stars-Member': joined.member.memberId },
+  })
+  expect(projectedMaps.ok()).toBeTruthy()
+  const projectedBody = await projectedMaps.json() as { maps: Array<{ tokens: Array<{ id: string }> }> }
+  expect(projectedBody.maps[0].tokens.map((token) => token.id)).toContain('vision-hero')
+  expect(projectedBody.maps[0].tokens.map((token) => token.id)).not.toContain('vision-hidden-enemy')
+
   await expect.poll(async () => canvas.evaluate((element) => {
     const layers = [...element.querySelectorAll('canvas')]
     if (layers.length === 0 || layers[0].width === 0 || layers[0].height === 0) return 0
@@ -94,5 +105,15 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
     }
     return visiblePixels
   })).toBeGreaterThan(100)
+  await expect.poll(async () => canvas.evaluate((element) => {
+    const points = [{ x: 400, y: 400 }, { x: 620, y: 400 }, { x: 660, y: 400 }]
+    return [...element.querySelectorAll('canvas')].some((layer) => {
+      if (layer.width < 700 || layer.height < 500) return false
+      const context2d = layer.getContext('2d')
+      if (!context2d) return false
+      const alpha = points.map((point) => context2d.getImageData(point.x, point.y, 1, 1).data[3])
+      return alpha[0] < 32 && alpha[1] < 32 && alpha[2] > 128
+    })
+  })).toBe(true)
   await context.close()
 })

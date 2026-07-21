@@ -22,6 +22,7 @@ export interface Dnd5ePersistentAreaTriggerCandidate {
   transactionId: string
   enteredAt?: GridCell
   pathIndex?: number
+  turnKey?: string
 }
 
 function tokenIntersectsAreaAt(
@@ -60,12 +61,19 @@ export function dnd5ePersistentAreaMovementCostMultiplierAt(input: {
   return multiplier
 }
 
-function alreadyTriggeredThisRound(
+function alreadyTriggered(
   area: Dnd5ePluginArea,
   trigger: Dnd5ePersistentAreaTriggerSnapshot,
   targetTokenId: string,
   round: number,
+  turnKey?: string,
 ): boolean {
+  if (trigger.oncePerTurn === true) {
+    if (!turnKey) return true
+    return (area.triggerReceipts ?? []).some((receipt) =>
+      receipt.triggerId === trigger.id && receipt.targetTokenId === targetTokenId && receipt.turnKey === turnKey,
+    )
+  }
   if (trigger.oncePerRound === false) return false
   return (area.triggerReceipts ?? []).some((receipt) =>
     receipt.triggerId === trigger.id && receipt.targetTokenId === targetTokenId && receipt.round === round,
@@ -80,14 +88,16 @@ function candidate(
   occurrence: string,
   enteredAt?: GridCell,
   pathIndex?: number,
+  turnKey?: string,
 ): Dnd5ePersistentAreaTriggerCandidate {
   return {
     area,
     trigger,
     targetToken,
-    transactionId: `area-trigger:${area.id}:${trigger.id}:${targetToken.id}:${round}:${occurrence}`,
+    transactionId: `area-trigger:${area.id}:${trigger.id}:${targetToken.id}:${round}:${turnKey ?? 'round'}:${occurrence}`,
     enteredAt,
     pathIndex,
+    turnKey,
   }
 }
 
@@ -97,6 +107,8 @@ export function collectDnd5ePersistentAreaTriggers(input: {
   round: number
   targetTokenId?: string
   areaId?: string
+  /** 当前权威回合标识；oncePerTurn 声明必须提供。 */
+  turnKey?: string
   movement?: {
     token: Token
     to: { x: number; y: number }
@@ -107,17 +119,18 @@ export function collectDnd5ePersistentAreaTriggers(input: {
   const areas = (input.map.dnd5ePluginAreas ?? []).filter((area) => !input.areaId || area.id === input.areaId)
   if (areas.length === 0) return []
   const out: Dnd5ePersistentAreaTriggerCandidate[] = []
-  const queuedOncePerRound = new Set<string>()
+  const queuedLimited = new Set<string>()
   const mayQueue = (
     area: Dnd5ePluginArea,
     trigger: Dnd5ePersistentAreaTriggerSnapshot,
     targetTokenId: string,
   ) => {
-    if (alreadyTriggeredThisRound(area, trigger, targetTokenId, input.round)) return false
-    if (trigger.oncePerRound === false) return true
-    const key = `${area.id}\u0000${trigger.id}\u0000${targetTokenId}\u0000${input.round}`
-    if (queuedOncePerRound.has(key)) return false
-    queuedOncePerRound.add(key)
+    if (alreadyTriggered(area, trigger, targetTokenId, input.round, input.turnKey)) return false
+    if (trigger.oncePerRound === false && trigger.oncePerTurn !== true) return true
+    const frequencyKey = trigger.oncePerTurn === true ? input.turnKey : input.round
+    const key = `${area.id}\u0000${trigger.id}\u0000${targetTokenId}\u0000${frequencyKey}`
+    if (queuedLimited.has(key)) return false
+    queuedLimited.add(key)
     return true
   }
 
@@ -147,7 +160,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
         if (input.timing === 'on-enter' && !inside && nextInside) {
           for (const trigger of area.triggers ?? []) {
             if (trigger.timing !== 'on-enter' || !mayQueue(area, trigger, target.id)) continue
-            out.push(candidate(area, trigger, target, input.round, `enter-${pathIndex}-${occurrence}`, path[pathIndex], pathIndex))
+            out.push(candidate(area, trigger, target, input.round, `enter-${pathIndex}-${occurrence}`, path[pathIndex], pathIndex, input.turnKey))
           }
           occurrence += 1
         }
@@ -172,6 +185,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
                   `move-${pathIndex}-${occurrence}`,
                   path[pathIndex],
                   pathIndex,
+                  input.turnKey,
                 ))
               }
               occurrence += 1
@@ -192,7 +206,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
       if (!areaAllowsTarget(area, target, input.map) || !tokenIntersectsAreaAt(target, input.map, area, target)) continue
       for (const trigger of area.triggers ?? []) {
         if (trigger.timing !== input.timing || !mayQueue(area, trigger, target.id)) continue
-        out.push(candidate(area, trigger, target, input.round, input.timing))
+        out.push(candidate(area, trigger, target, input.round, input.timing, undefined, undefined, input.turnKey))
       }
     }
   }
@@ -201,7 +215,7 @@ export function collectDnd5ePersistentAreaTriggers(input: {
 
 export function recordDnd5ePersistentAreaTrigger(
   areas: readonly Dnd5ePluginArea[] | undefined,
-  resolved: Pick<Dnd5ePersistentAreaTriggerCandidate, 'area' | 'trigger' | 'targetToken' | 'transactionId'>,
+  resolved: Pick<Dnd5ePersistentAreaTriggerCandidate, 'area' | 'trigger' | 'targetToken' | 'transactionId' | 'turnKey'>,
   round: number,
 ): Dnd5ePluginArea[] {
   return (areas ?? []).map((area) => {
@@ -211,6 +225,7 @@ export function recordDnd5ePersistentAreaTrigger(
       triggerId: resolved.trigger.id,
       targetTokenId: resolved.targetToken.id,
       round,
+      turnKey: resolved.turnKey,
       transactionId: resolved.transactionId,
     })
     return { ...area, triggerReceipts: receipts.slice(-2_048) }

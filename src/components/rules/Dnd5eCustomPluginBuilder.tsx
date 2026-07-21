@@ -70,6 +70,7 @@ interface PersistentAreaTriggerEditorDraft {
   label: string
   timing: 'on-create' | 'on-enter' | 'turn-start' | 'turn-end'
   oncePerRound: boolean
+  oncePerTurn: boolean
   savingThrowEnabled: boolean
   savingThrowAbility: AbilityKey
   savingThrowDcMode: 'source-save-dc' | 'fixed'
@@ -344,6 +345,7 @@ function newPersistentAreaTrigger(index: number): PersistentAreaTriggerEditorDra
     label: '区域触发效果',
     timing: 'on-enter',
     oncePerRound: true,
+    oncePerTurn: false,
     savingThrowEnabled: true,
     savingThrowAbility: 'con',
     savingThrowDcMode: 'source-save-dc',
@@ -565,7 +567,8 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
               id: trigger.id.trim(),
               label: trigger.label.trim(),
               timing: trigger.timing,
-              oncePerRound: trigger.oncePerRound,
+              oncePerRound: trigger.oncePerTurn ? false : trigger.oncePerRound,
+              oncePerTurn: trigger.oncePerTurn,
               ...(trigger.savingThrowEnabled ? {
                 savingThrow: {
                   ability: trigger.savingThrowAbility,
@@ -1300,7 +1303,7 @@ function HeadlessEffectEditor({
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h6 className="text-xs font-semibold text-lime-50">持续区域触发效果</h6>
-                  <p className="mt-1 text-[11px] leading-5 text-lime-100/55">每项触发都由 DM Host 检查目标占格、每轮凭据、豁免、抗性、状态免疫与 ActiveEffect 生命周期。</p>
+                  <p className="mt-1 text-[11px] leading-5 text-lime-100/55">每项触发都由 DM Host 检查目标占格、每轮／每回合凭据、豁免、抗性、状态免疫与 ActiveEffect 生命周期。</p>
                 </div>
                 <button
                   type="button"
@@ -1326,7 +1329,8 @@ function HeadlessEffectEditor({
                         <BuilderInput label="触发名称" value={trigger.label} onChange={(label) => patchPersistentAreaTrigger(index, { label })} />
                         <BuilderSelect label="触发时点" value={trigger.timing} options={PERSISTENT_AREA_TRIGGER_TIMINGS} onChange={(timing) => patchPersistentAreaTrigger(index, { timing: timing as PersistentAreaTriggerEditorDraft['timing'] })} />
                         <div className="flex flex-wrap items-end gap-2 pb-0.5">
-                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound })} />
+                          <Toggle label="同一目标每轮一次" value={trigger.oncePerRound} onChange={(oncePerRound) => patchPersistentAreaTrigger(index, { oncePerRound, oncePerTurn: oncePerRound ? false : trigger.oncePerTurn })} />
+                          <Toggle label="同一目标每回合一次" value={trigger.oncePerTurn} onChange={(oncePerTurn) => patchPersistentAreaTrigger(index, { oncePerTurn, oncePerRound: oncePerTurn ? false : trigger.oncePerRound })} />
                           <Toggle label="提交前由 DM 调整" value={trigger.dmAdjustable} onChange={(dmAdjustable) => patchPersistentAreaTrigger(index, { dmAdjustable })} />
                         </div>
                       </div>

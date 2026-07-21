@@ -61,6 +61,7 @@ export function resolveEnemyAttackTokens(
 }
 
 export function getTokenCombatSide(token: Token): 'ally' | 'enemy' | 'neutral' {
+  if (token.type === 'npc' && !token.dnd5eSummon) return 'ally'
   const side = dnd5eCombatTokenSide(token)
   return side === 'player' ? 'ally' : side ?? 'neutral'
 }

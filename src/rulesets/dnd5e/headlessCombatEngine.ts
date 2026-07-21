@@ -91,6 +91,8 @@ export interface Dnd5eCombatant {
   proficiencyBonus: number
   /** SRD monster challenge rating. Player characters and custom creatures may omit it. */
   challengeRating?: number
+  /** Tiny=0, Small=1, Medium=2, Large=3, Huge=4, Gargantuan=5. */
+  sizeRank: number
   armorClass: number
   currentHp: number
   maxHp: number
@@ -602,7 +604,8 @@ export type Dnd5eAction =
   | { type: 'trigger-readied-action'; actorId: string }
   | { type: 'use-object'; actorId: string; interactionId: string }
   | { type: 'grapple'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; spendAction?: boolean }
-  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; spendAction?: boolean }
+  | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; pushTo?: { x: number; y: number }; spendAction?: boolean }
+  | { type: 'escape-grapple'; actorId: string; grapplerId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number }
   | { type: 'disengage'; actorId: string }
   | { type: 'dodge'; actorId: string }
   | { type: 'interact-object'; actorId: string; interactionId: string; useAction?: boolean }
@@ -709,7 +712,7 @@ export type Dnd5eCombatEvent =
   | { type: 'condition-ended'; targetId: string; condition: string }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-refreshed'; targetId: string; effectId: string; definitionId: string }
-  | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' }
+  | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' | 'escaped' }
   | { type: 'active-effect-save-required'; targetId: string; effectId: string; ability: AbilityKey; dc: number; timing: 'target-turn-start' | 'target-turn-end' }
   | { type: 'active-effect-save-resolved'; targetId: string; effectId: string; ability: AbilityKey; dc: number; total: number; success: boolean }
   | { type: 'spell-cast'; actorId: string; targetId: string; spellId: string; slotLevel: number }
@@ -731,7 +734,7 @@ export type Dnd5eCombatEvent =
   | { type: 'help-granted'; actorId: string; targetId: string; helpKind: 'ability-check' | 'attack' }
   | { type: 'ready-declared'; actorId: string; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetId?: string }
   | { type: 'readied-action-triggered'; actorId: string; trigger: string; actionKind: 'attack' | 'move' | 'interact-object' | 'other'; targetId?: string }
-  | { type: 'contest-resolved'; actorId: string; targetId: string; contest: 'grapple' | 'shove'; actorTotal: number; targetTotal: number; success: boolean; outcome?: 'prone' | 'push' }
+  | { type: 'contest-resolved'; actorId: string; targetId: string; contest: 'grapple' | 'shove' | 'escape-grapple'; actorSkill?: 'athletics' | 'acrobatics'; targetDefense: 'athletics' | 'acrobatics'; actorTotal: number; targetTotal: number; success: boolean; outcome?: 'prone' | 'push' }
   | { type: 'concentration-check-required'; targetId: string; dc: number }
   | { type: 'relentless-rage-save-required'; targetId: string; dc: number }
   | { type: 'relentless-rage-resolved'; actorId: string; d20: number; total: number; dc: number; success: boolean }
@@ -874,8 +877,8 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
 }
 
 export function createDnd5eCombatant(
-  input: Omit<Dnd5eCombatant, 'turn' | 'dodging' | 'disengaged' | 'deathSaves' | 'level' | 'exhaustionLevel' | 'baseSavingThrowBonuses' | 'savingThrowBonuses' | 'savingThrowProficiencies' | 'skillProficiencies' | 'passivePerception' | 'classResources' | 'classSelections' | 'pluginFeatureIds' | 'classState' | 'wearingArmor' | 'wearingHeavyArmor' | 'wearingMetalArmor' | 'hasShield' | 'damageVulnerabilities' | 'damageResistances' | 'damageImmunities' | 'conditionImmunities' | 'conditions'> &
-    Partial<Pick<Dnd5eCombatant, 'level' | 'exhaustionLevel' | 'baseSavingThrowBonuses' | 'savingThrowBonuses' | 'savingThrowProficiencies' | 'skillProficiencies' | 'passivePerception' | 'classResources' | 'classSelections' | 'pluginFeatureIds' | 'classState' | 'wearingArmor' | 'wearingHeavyArmor' | 'wearingMetalArmor' | 'hasShield' | 'damageVulnerabilities' | 'damageResistances' | 'damageImmunities' | 'conditionImmunities' | 'conditions' | 'usesDeathSaves'>>,
+  input: Omit<Dnd5eCombatant, 'turn' | 'dodging' | 'disengaged' | 'deathSaves' | 'level' | 'sizeRank' | 'exhaustionLevel' | 'baseSavingThrowBonuses' | 'savingThrowBonuses' | 'savingThrowProficiencies' | 'skillProficiencies' | 'passivePerception' | 'classResources' | 'classSelections' | 'pluginFeatureIds' | 'classState' | 'wearingArmor' | 'wearingHeavyArmor' | 'wearingMetalArmor' | 'hasShield' | 'damageVulnerabilities' | 'damageResistances' | 'damageImmunities' | 'conditionImmunities' | 'conditions'> &
+    Partial<Pick<Dnd5eCombatant, 'level' | 'sizeRank' | 'exhaustionLevel' | 'baseSavingThrowBonuses' | 'savingThrowBonuses' | 'savingThrowProficiencies' | 'skillProficiencies' | 'passivePerception' | 'classResources' | 'classSelections' | 'pluginFeatureIds' | 'classState' | 'wearingArmor' | 'wearingHeavyArmor' | 'wearingMetalArmor' | 'hasShield' | 'damageVulnerabilities' | 'damageResistances' | 'damageImmunities' | 'conditionImmunities' | 'conditions' | 'usesDeathSaves'>>,
 ): Dnd5eCombatant {
   const baseSavingThrowBonuses = { ...(input.baseSavingThrowBonuses ?? input.savingThrowBonuses) }
   const activeEffects = normalizeDnd5eActiveEffects(input.classState?.activeEffects)
@@ -884,6 +887,7 @@ export function createDnd5eCombatant(
   return {
     ...input,
     level: Math.min(20, Math.max(1, Math.floor(input.level ?? 1))),
+    sizeRank: Math.min(5, Math.max(0, Math.floor(input.sizeRank ?? 2))),
     exhaustionLevel: Math.min(6, Math.max(0, Math.floor(input.exhaustionLevel ?? 0))),
     baseSavingThrowBonuses,
     savingThrowBonuses: { ...baseSavingThrowBonuses, ...input.savingThrowBonuses },
@@ -2853,6 +2857,19 @@ function abilityCheckProficiencyRank(actor: Dnd5eCombatant, skill: string | unde
     (skill === 'deception' || skill === 'persuasion')
   if (actor.skillProficiencies.includes(skill) || actor.classSelections['lore-bonus-skills']?.includes(skill) || beguilingInfluence) return 1
   return 0
+}
+
+export function dnd5eBestGrappleDefense(target: Dnd5eCombatant): {
+  skill: 'athletics' | 'acrobatics'
+  modifier: number
+} {
+  const athletics = rules.abilityModifier(target.abilities.str) +
+    target.proficiencyBonus * abilityCheckProficiencyRank(target, 'athletics')
+  const acrobatics = rules.abilityModifier(target.abilities.dex) +
+    target.proficiencyBonus * abilityCheckProficiencyRank(target, 'acrobatics')
+  return acrobatics > athletics
+    ? { skill: 'acrobatics', modifier: acrobatics }
+    : { skill: 'athletics', modifier: athletics }
 }
 
 function unproficientAbilityCheckBonus(actor: Dnd5eCombatant, ability: AbilityKey): number {
@@ -8291,11 +8308,67 @@ function resolveDnd5eHeadlessActionInternal(
     events.push({ type: 'object-action-taken', actorId: actor.id, action: 'use-object', interactionId: action.interactionId.trim() })
     return { ok: true, state, events }
   }
+  if (action.type === 'escape-grapple') {
+    const grappler = state.combatants[action.grapplerId]
+    const grappleEffect = grappler && reconciledDnd5eActiveEffects(actor).find((effect) =>
+      effect.standardCondition === 'grappled' && effect.source.actorId === grappler.id)
+    if (!grappler || !grappleEffect || grappler.currentHp <= 0 || grappler.deathSaves.dead) {
+      return fail(state, events, 'invalid-target')
+    }
+    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    const actorDefense = dnd5eBestGrappleDefense(actor)
+    const actorMode = resolveDnd5eRollMode({
+      advantage: [{ active: actorDefense.skill === 'athletics' && actor.classState.raging === true, reason: 'rage-strength-check' }],
+      disadvantage: [{ active: actor.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(actor), reason: 'contest-disadvantage' }],
+    }).mode
+    const targetMode = resolveDnd5eRollMode({
+      advantage: [{ active: grappler.classState.raging === true, reason: 'rage-strength-check' }],
+      disadvantage: [{ active: grappler.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(grappler), reason: 'contest-disadvantage' }],
+    }).mode
+    let actorCheck
+    let targetCheck
+    try {
+      actorCheck = rules.resolveD20({
+        rolls: actorMode === 'normal' ? [action.actorD20] : [action.actorD20, action.actorD20Second ?? 0],
+        mode: actorMode,
+        modifier: actorDefense.modifier,
+      })
+      targetCheck = rules.resolveD20({
+        rolls: targetMode === 'normal' ? [action.targetD20] : [action.targetD20, action.targetD20Second ?? 0],
+        mode: targetMode,
+        modifier: rules.abilityModifier(grappler.abilities.str) +
+          grappler.proficiencyBonus * abilityCheckProficiencyRank(grappler, 'athletics'),
+      })
+    } catch {
+      return fail(state, events, 'invalid-dice')
+    }
+    const success = actorCheck.total > targetCheck.total
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({
+      type: 'contest-resolved', actorId: actor.id, targetId: grappler.id,
+      contest: 'escape-grapple', actorSkill: actorDefense.skill, targetDefense: 'athletics',
+      actorTotal: actorCheck.total, targetTotal: targetCheck.total, success,
+    })
+    if (success) {
+      removeDnd5eEffectsByPredicate(
+        actor,
+        (effect) => effect.id === grappleEffect.id,
+        'escaped',
+        events,
+      )
+    }
+    return { ok: true, state, events }
+  }
   if (action.type === 'grapple' || action.type === 'shove') {
     const target = state.combatants[action.targetId]
     if (
       !target || target.controller === actor.controller || target.currentHp <= 0 || target.deathSaves.dead ||
-      dnd5eAttackDistanceFeet(state, actor.id, target.id) > 5
+      target.sizeRank > actor.sizeRank + 1 || dnd5eAttackDistanceFeet(state, actor.id, target.id) > 5 ||
+      (action.type === 'shove' && action.outcome === 'push' && (
+        !action.pushTo || !Number.isFinite(action.pushTo.x) || !Number.isFinite(action.pushTo.y) ||
+        (action.pushTo.x - actor.position.x) ** 2 + (action.pushTo.y - actor.position.y) ** 2 <=
+          (target.position.x - actor.position.x) ** 2 + (target.position.y - actor.position.y) ** 2
+      ))
     ) return fail(state, events, 'invalid-target')
     if (action.spendAction !== false && !spend(actor, 'action')) return fail(state, events, 'action-unavailable')
     const actorMode = resolveDnd5eRollMode({
@@ -8305,7 +8378,8 @@ function resolveDnd5eHeadlessActionInternal(
     const targetMode = resolveDnd5eRollMode({
       disadvantage: [{ active: target.exhaustionLevel >= 1 || dnd5eConditionAbilityCheckDisadvantage(target), reason: 'contest-disadvantage' }],
     }).mode
-    const defenseAbility: AbilityKey = action.targetDefense === 'athletics' ? 'str' : 'dex'
+    const targetDefense = dnd5eBestGrappleDefense(target).skill
+    const defenseAbility: AbilityKey = targetDefense === 'athletics' ? 'str' : 'dex'
     let actorCheck
     let targetCheck
     try {
@@ -8318,7 +8392,7 @@ function resolveDnd5eHeadlessActionInternal(
         rolls: targetMode === 'normal' ? [action.targetD20] : [action.targetD20, action.targetD20Second ?? 0],
         mode: targetMode,
         modifier: rules.abilityModifier(target.abilities[defenseAbility]) +
-          target.proficiencyBonus * abilityCheckProficiencyRank(target, action.targetDefense),
+          target.proficiencyBonus * abilityCheckProficiencyRank(target, targetDefense),
       })
     } catch {
       return fail(state, events, 'invalid-dice')
@@ -8327,7 +8401,7 @@ function resolveDnd5eHeadlessActionInternal(
     if (action.spendAction !== false) events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
     events.push({
       type: 'contest-resolved', actorId: actor.id, targetId: target.id, contest: action.type,
-      actorTotal: actorCheck.total, targetTotal: targetCheck.total, success,
+      targetDefense, actorTotal: actorCheck.total, targetTotal: targetCheck.total, success,
       outcome: action.type === 'shove' ? action.outcome : undefined,
     })
     if (success && action.type === 'grapple') {
@@ -8341,6 +8415,11 @@ function resolveDnd5eHeadlessActionInternal(
         id: dnd5eActiveEffectId('basic-action:shove-prone', actor.id, target.id),
         rulesId: 'basic-action:shove-prone', condition: 'prone', duration: { type: 'permanent' }, sourceKind: 'feature',
       }, events)
+    }
+    if (success && action.type === 'shove' && action.outcome === 'push' && action.pushTo) {
+      const from = { ...target.position }
+      target.position = { ...action.pushTo }
+      events.push({ type: 'moved', actorId: target.id, from, to: target.position, distance: 5 })
     }
     return { ok: true, state, events }
   }
@@ -8592,6 +8671,7 @@ function resolveDnd5eHeadlessActionInternal(
     }
     next.turn = rules.createTurn(dnd5eEffectiveSpeed(next))
     next.dodging = false
+    next.classState.dodgingTurnKey = undefined
     next.disengaged = false
     events.push({ type: 'turn-started', actorId: next.id, round: state.round })
     const holyNimbusSource = next.holyNimbusSourceIds?.map((sourceId) => state.combatants[sourceId])

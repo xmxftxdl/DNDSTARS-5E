@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
-import { characterNeedsDeathSave, checkCombatOutcome, decideTurnAction, isTokenAlive } from './combatTokens'
+import { characterNeedsDeathSave, checkCombatOutcome, decideTurnAction, getTokenCombatSide, isTokenAlive } from './combatTokens'
 
 function token(patch: Partial<Token>): Token {
   return {
@@ -58,5 +58,12 @@ describe('combat token liveness', () => {
     })
     const defeatedEnemy = token({ id: 'enemy', type: 'enemy', hp: 0, maxHp: 7 })
     expect(checkCombatOutcome([summon, defeatedEnemy], [])).toMatchObject({ ended: true, winner: 'ally' })
+  })
+
+  it('treats ordinary NPC tokens as allies instead of neutral by default', () => {
+    const npc = token({ id: 'guide', type: 'npc', hp: 8, maxHp: 8 })
+    const defeatedEnemy = token({ id: 'enemy', type: 'enemy', hp: 0, maxHp: 7 })
+    expect(getTokenCombatSide(npc)).toBe('ally')
+    expect(checkCombatOutcome([npc, defeatedEnemy], [])).toMatchObject({ ended: true, winner: 'ally' })
   })
 })

@@ -45,7 +45,7 @@ const LOCAL_CHARACTER_HIT_POINT_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_CHARACTER_HIT_POINT_EDITS_STORAGE_KEY = 'stars-character-hit-point-edits-v1'
 type PendingLocalCharacterHitPointEdit = Partial<Pick<
   Character,
-  'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls'
+  'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls' | 'hitPointDice'
 >> & {
   updatedAt: number
 }
@@ -201,8 +201,16 @@ function hydratePendingLocalCharacterHitPointEdits(): void {
         pending.hitPointRolls.every((roll) => Number.isFinite(roll))
       ) normalized.hitPointRolls = pending.hitPointRolls.map((roll) => Math.max(1, Math.floor(roll)))
       if (
+        Array.isArray(pending.hitPointDice) && pending.hitPointDice.length <= 20 &&
+        pending.hitPointDice.every((pool) => Number.isFinite(pool?.sides) && Number.isFinite(pool?.current) && Number.isFinite(pool?.max))
+      ) normalized.hitPointDice = pending.hitPointDice.map((pool) => ({
+        sides: Math.max(2, Math.floor(pool.sides)),
+        current: Math.max(0, Math.min(Math.floor(pool.max), Math.floor(pool.current))),
+        max: Math.max(0, Math.floor(pool.max)),
+      }))
+      if (
         normalized.currentHp == null && normalized.maxHp == null && normalized.tempHp == null &&
-        normalized.hitPointMaximumMode == null && normalized.hitPointRolls == null
+        normalized.hitPointMaximumMode == null && normalized.hitPointRolls == null && normalized.hitPointDice == null
       ) continue
       pendingLocalCharacterHitPointEdits.set(id, normalized)
     }
@@ -229,7 +237,7 @@ function gcPendingLocalCharacterHitPointEdits(now: number = Date.now()): void {
 
 export function markPendingLocalCharacterHitPointEdit(
   id: string,
-  patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls'>>,
+  patch: Partial<Pick<Character, 'currentHp' | 'maxHp' | 'tempHp' | 'hitPointMaximumMode' | 'hitPointRolls' | 'hitPointDice'>>,
   now: number = Date.now(),
 ): void {
   hydratePendingLocalCharacterHitPointEdits()
@@ -243,9 +251,12 @@ export function markPendingLocalCharacterHitPointEdit(
   if (Array.isArray(patch.hitPointRolls) && patch.hitPointRolls.length >= 1 && patch.hitPointRolls.length <= 20) {
     pending.hitPointRolls = patch.hitPointRolls.map((roll) => Math.max(1, Math.floor(Number(roll) || 1)))
   }
+  if (Array.isArray(patch.hitPointDice) && patch.hitPointDice.length <= 20) {
+    pending.hitPointDice = patch.hitPointDice.map((pool) => ({ ...pool }))
+  }
   if (
     pending.currentHp == null && pending.maxHp == null && pending.tempHp == null &&
-    pending.hitPointMaximumMode == null && pending.hitPointRolls == null
+    pending.hitPointMaximumMode == null && pending.hitPointRolls == null && pending.hitPointDice == null
   ) return
   pendingLocalCharacterHitPointEdits.set(id, pending)
   persistPendingLocalCharacterHitPointEdits()
@@ -285,7 +296,8 @@ export function mergePendingLocalCharacterHitPointEdits(
       (pending.maxHp == null || character.maxHp === pending.maxHp) &&
       (pending.tempHp == null || character.tempHp === pending.tempHp) &&
       (pending.hitPointMaximumMode == null || character.hitPointMaximumMode === pending.hitPointMaximumMode) &&
-      (pending.hitPointRolls == null || JSON.stringify(character.hitPointRolls ?? []) === JSON.stringify(pending.hitPointRolls))
+      (pending.hitPointRolls == null || JSON.stringify(character.hitPointRolls ?? []) === JSON.stringify(pending.hitPointRolls)) &&
+      (pending.hitPointDice == null || JSON.stringify(character.hitPointDice ?? []) === JSON.stringify(pending.hitPointDice))
     if (acknowledged) {
       clearPendingLocalCharacterHitPointEdit(character.id)
       return character
@@ -297,6 +309,7 @@ export function mergePendingLocalCharacterHitPointEdits(
       ...(pending.tempHp == null ? {} : { tempHp: pending.tempHp }),
       ...(pending.hitPointMaximumMode == null ? {} : { hitPointMaximumMode: pending.hitPointMaximumMode }),
       ...(pending.hitPointRolls == null ? {} : { hitPointRolls: [...pending.hitPointRolls] }),
+      ...(pending.hitPointDice == null ? {} : { hitPointDice: pending.hitPointDice.map((pool) => ({ ...pool })) }),
     }
   })
 }
@@ -1087,7 +1100,8 @@ export const useCharacterStore = create<CharacterState>()(
                 character.currentHp !== incoming.currentHp || character.maxHp !== incoming.maxHp ||
                 character.tempHp !== incoming.tempHp ||
                 character.hitPointMaximumMode !== incoming.hitPointMaximumMode ||
-                JSON.stringify(character.hitPointRolls ?? []) !== JSON.stringify(incoming.hitPointRolls ?? [])
+                JSON.stringify(character.hitPointRolls ?? []) !== JSON.stringify(incoming.hitPointRolls ?? []) ||
+                JSON.stringify(character.hitPointDice ?? []) !== JSON.stringify(incoming.hitPointDice ?? [])
               )
             },
           )
@@ -1273,6 +1287,7 @@ export const useCharacterStore = create<CharacterState>()(
               ...(patch.currentHp == null && next.currentHp === current.currentHp ? {} : { currentHp: next.currentHp }),
               ...(patch.maxHp == null && next.maxHp === current.maxHp ? {} : { maxHp: next.maxHp }),
               ...(patch.tempHp == null && next.tempHp === current.tempHp ? {} : { tempHp: next.tempHp }),
+              ...(patch.hitPointDice == null ? {} : { hitPointDice: next.hitPointDice?.map((pool) => ({ ...pool })) }),
             })
           }
           updateChar(id, () => next)

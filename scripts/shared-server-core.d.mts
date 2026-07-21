@@ -1,5 +1,7 @@
 // shared-server-core.mjs 的类型声明（供 src/ 下 vitest 测试 import）。
 export const STATE_MAX_BYTES: number
+export const CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH: number
+export const CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH: number
 export const IMAGE_MAX_BYTES: number
 export const EVENT_BACKLOG_LIMIT: number
 export const EVENT_REPLAY_LIMIT: number
@@ -60,11 +62,22 @@ export function atomicWriteJsonStateFreshLocked(
 export function atomicWriteJsonStateCasLocked(
   filePath: string,
   incoming: Record<string, unknown>,
-  options?: { expectedRevision?: number | null; writerId?: string },
+  options?: {
+    expectedRevision?: number | null
+    writerId?: string
+    mergeIncoming?: (current: unknown, incoming: Record<string, unknown>) => Record<string, unknown>
+    validateIncoming?: (incoming: Record<string, unknown>) => { ok: boolean; reason?: string }
+  },
 ): Promise<
   | { ok: true; revision: number; value: Record<string, unknown>; writtenAt: number }
-  | { ok: false; conflict?: boolean; stale?: boolean; currentRevision: number; current: unknown }
+  | { ok: false; conflict?: boolean; stale?: boolean; invalid?: boolean; reason?: string; currentRevision: number; current: unknown }
 >
+export function mergePlayerCharactersStateForAuthority(
+  currentState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null } | null,
+  incomingState: { characters?: Array<Record<string, unknown>>; selectedId?: string | null; [key: string]: unknown },
+  memberId: string,
+  options?: { combatActive?: boolean },
+): { characters: Array<Record<string, unknown>>; selectedId: string | null; [key: string]: unknown }
 export function atomicDeleteJsonStateCasLocked(
   filePath: string,
   options?: { expectedRevision?: number | null; writerId?: string },

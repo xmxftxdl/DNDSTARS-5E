@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import {
   Map as MapIcon,
   Upload,
@@ -69,7 +69,7 @@ import { useCharacterStore } from '../store/characters'
 import { useSpellbookStore } from '../store/spellbook'
 import { getRoomSession } from '../lib/roomSession'
 import { loadRoomRoster } from '../lib/roomApi'
-import { getRoomRulesSnapshot } from '../lib/roomRulesState'
+import { getRoomRulesSnapshot, subscribeRoomRules } from '../lib/roomRulesState'
 import {
   clearSharedEventBacklog,
   clearSharedResource,
@@ -85,7 +85,6 @@ import type { Dnd5eInventoryTargeting } from '../types/inventory'
 import { createEmptyMapFog, type FogTool } from '../lib/fogOfWar'
 import {
   createEmptyMapGeometry,
-  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   MAP_GEOMETRY_CREATURE_COVER_PREFIX,
   mapGeometryCoverBetween,
   mapGeometryLineOfEffectBlocked,
@@ -93,7 +92,7 @@ import {
   type MapGeometryTool,
   type MapGeometryWallMaterial,
 } from '../lib/mapGeometry'
-import { mapExplorationPolygonFitsVisionRange, mapExplorationPolygonsForTokenPath } from '../lib/mapExploration'
+import { mapExplorationPolygonsForTokenPath } from '../lib/mapExploration'
 import { findMapGeometryPath } from '../lib/mapPathfinding'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { formatDnd5eCombatLogDetails } from '../lib/combatLogDetails'
@@ -350,6 +349,7 @@ import {
   resolvePreparedDnd5eOpportunityAttack,
   resolvePreparedDnd5ePlayerMove,
   resolvePreparedDnd5ePlayerBasicAction,
+  triggerDnd5eReadiedAction,
   resolvePreparedDnd5eSpellCast,
   resolvePreparedDnd5eCoreSpellAreaMove,
   resolvePreparedDnd5eAdjudicatedSpell,
@@ -981,6 +981,11 @@ export default function MapsPage() {
   const applyAuthorityCharacterUpdate = useCharacterStore((s) => s.applyAuthorityUpdate)
   const saveCharactersSharedNow = useCharacterStore((s) => s.saveSharedNow)
   const roomSession = useMemo(() => getRoomSession(), [])
+  const roomRulesSnapshot = useSyncExternalStore(
+    subscribeRoomRules,
+    getRoomRulesSnapshot,
+    getRoomRulesSnapshot,
+  )
   const [roomPlayerMemberIds, setRoomPlayerMemberIds] = useState<ReadonlySet<string> | undefined>()
 
   useEffect(() => {
@@ -2216,6 +2221,17 @@ export default function MapsPage() {
 
     if (isDM) {
       const publishReady = async () => {
+        if (roomSession && roomRulesSnapshot?.member.ready !== true) {
+          const state: DmAuthorityReadyState = {
+            mapId,
+            combatId,
+            ready: false,
+            updatedAt: runtimeNow(),
+          }
+          setDmAuthorityReady(state)
+          await saveSharedResource(DM_AUTHORITY_READY_RESOURCE, state)
+          return
+        }
         await Promise.all([
           useMapStore.getState().loadShared(),
           useCharacterStore.getState().loadShared(),
@@ -2247,7 +2263,7 @@ export default function MapsPage() {
       cancelled = true
       unsubscribe()
     }
-  }, [activeMapId, combatActive, isDM])
+  }, [activeMapId, combatActive, isDM, roomRulesSnapshot, roomSession])
 
   // subscribe to the result-broadcast channel and self-render
   // the decided @values locally.
@@ -2735,26 +2751,9 @@ export default function MapsPage() {
     : roomSession?.memberId
       ? activeExploration?.byMemberId[roomSession.memberId]?.polygons ?? []
       : []
-  const maximumExplorationRangeFeet = activeMap
-    ? Math.max(0, ...activeMap.tokens
-        .filter((token) => visionSourceTokenIds.includes(token.id))
-        .map((token) => Math.max(
-          Number.isFinite(token.visionRangeFeet)
-            ? Math.max(0, token.visionRangeFeet!)
-            : activeGeometry?.vision.defaultRangeFeet ?? DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
-          Number.isFinite(token.darkvisionRangeFeet) ? Math.max(0, token.darkvisionRangeFeet!) : 0,
-          token.lightSource?.enabled
-            ? token.lightSource.brightRadiusFeet + token.lightSource.dimRadiusFeet
-            : 0,
-        )))
-    : DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET
-  const exploredVisionPolygons = activeMap
-    ? storedExploredVisionPolygons.filter((polygon) => mapExplorationPolygonFitsVisionRange({
-        polygon,
-        map: activeMap,
-        rangeFeet: maximumExplorationRangeFeet,
-      }))
-    : []
+  // Exploration is historical evidence. A later blindness, darkvision loss,
+  // or shorter light source must not erase terrain that was already explored.
+  const exploredVisionPolygons = activeMap ? storedExploredVisionPolygons : []
   const manualFogExplorationEnabled = activeFog?.filled === true
 
   useEffect(() => {
@@ -3354,12 +3353,14 @@ export default function MapsPage() {
       map: baseApplication.map,
       timing: 'on-enter',
       round: roundRef.current,
+      turnKey: `${roundRef.current}:${currentInitiativeToken?.id ?? input.token.id}`,
       movement: { token: input.token, to: finalPosition, path: input.path },
     })
     const movementDistanceCandidates = collectDnd5ePersistentAreaTriggers({
       map: baseApplication.map,
       timing: 'on-move-distance',
       round: roundRef.current,
+      turnKey: `${roundRef.current}:${currentInitiativeToken?.id ?? input.token.id}`,
       movement: { token: input.token, to: finalPosition, path: input.path },
     })
     const pluginAreas = await settleDnd5ePersistentAreaCandidates({
@@ -5682,6 +5683,7 @@ export default function MapsPage() {
           timing: boundary.timing,
           round: boundary.round,
           targetTokenId: boundary.tokenId,
+          turnKey: `${boundary.round}:${boundary.tokenId}`,
         })
         const settled = await settleDnd5ePersistentAreaCandidates({
           candidates,
@@ -7595,6 +7597,51 @@ export default function MapsPage() {
     }
   }
 
+  const handleTriggerReadiedAction = (characterId: string) => {
+    if (!isDM || !combatActive || !activeMap) return
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const actorToken = latestMap.tokens.find((token) => token.characterId === characterId)
+    const actor = useCharacterStore.getState().characters.find((character) => character.id === characterId)
+    if (!actorToken || !actor?.dnd5eCombatState?.readiedAction) return
+    const resolved = triggerDnd5eReadiedAction({
+      combatId: combatIdRef.current,
+      round: roundRef.current,
+      map: latestMap,
+      characters: useCharacterStore.getState().characters,
+      initiativeOrder: initiativeOrderRef.current,
+      actorTokenId: actorToken.id,
+      turnEconomy: currentDnd5eTurnEconomy(actorToken.id, roundRef.current),
+    })
+    if (!resolved.ok) {
+      void showCombatNotice(
+        '无法触发准备动作',
+        resolved.reason === 'reaction-unavailable'
+          ? '该角色已经没有可用反应。'
+          : '准备动作已失效，或角色当前无法行动。',
+        'amber',
+      )
+      return
+    }
+    for (const changedCharacterId of resolved.application.changedCharacterIds) {
+      const next = resolved.application.characters.find((character) => character.id === changedCharacterId)
+      if (next) applyAuthorityCharacterUpdate(changedCharacterId, next)
+    }
+    for (const changedTokenId of resolved.application.changedTokenIds) {
+      const next = resolved.application.map.tokens.find((token) => token.id === changedTokenId)
+      if (next) updateToken(latestMap.id, changedTokenId, next)
+    }
+    updateDnd5eTurnEconomy(
+      actorToken.id,
+      (economy) => spendDnd5eTurnResource(economy, 'reaction').economy,
+      roundRef.current,
+    )
+    pushHeadlessCombatLog(
+      `${actor.name} 的准备动作已由 DM 触发，并消耗反应。`,
+      'turn',
+      resolved.result.events,
+    )
+  }
+
   const requestDmWeaponCoverOverride = (
     attack: PreparedDnd5eEquipmentAttack,
   ): Promise<'auto' | Dnd5eAttackCoverOverride> => {
@@ -7950,10 +7997,12 @@ export default function MapsPage() {
         return
       }
       const payload = action.dnd5eBasicAction
-      const needsActorRoll = payload.kind === 'hide' || payload.kind === 'grapple' || payload.kind === 'shove'
-      const needsTargetRoll = payload.kind === 'grapple' || payload.kind === 'shove'
+      const needsActorRoll = payload.kind === 'hide' || payload.kind === 'grapple' || payload.kind === 'shove' || payload.kind === 'escape-grapple'
+      const needsTargetRoll = payload.kind === 'grapple' || payload.kind === 'shove' || payload.kind === 'escape-grapple'
       const actorD20 = needsActorRoll
-        ? await rollDiceBoxD20(`${dnd5eActionActor.name}·${payload.kind === 'hide' ? '躲藏检定' : '力量（运动）对抗检定'}`, dnd5eActionActor.name)
+        ? await rollDiceBoxD20(`${dnd5eActionActor.name}·${payload.kind === 'hide'
+            ? '躲藏检定'
+            : prepared.prepared.actorContestSkill === 'acrobatics' ? '敏捷（体操）对抗检定' : '力量（运动）对抗检定'}`, dnd5eActionActor.name)
         : undefined
       const actorD20Second = needsActorRoll && prepared.prepared.actorRollMode !== 'normal'
         ? await rollDiceBoxD20(`${dnd5eActionActor.name}·优势／劣势第二枚`, dnd5eActionActor.name)
@@ -7963,7 +8012,7 @@ export default function MapsPage() {
         ? authorityMap.tokens.find((token) => token.id === targetTokenId)?.label ?? '目标'
         : '目标'
       const targetD20 = needsTargetRoll
-        ? await rollDiceBoxD20(`${targetName}·${payload.targetDefense === 'acrobatics' ? '敏捷（体操）' : '力量（运动）'}对抗检定`, targetName)
+        ? await rollDiceBoxD20(`${targetName}·${prepared.prepared.targetDefense === 'acrobatics' ? '敏捷（体操）' : '力量（运动）'}对抗检定`, targetName)
         : undefined
       const targetD20Second = needsTargetRoll && prepared.prepared.targetRollMode !== 'normal'
         ? await rollDiceBoxD20(`${targetName}·优势／劣势第二枚`, targetName)
@@ -8020,7 +8069,8 @@ export default function MapsPage() {
             : payload.kind === 'ready' ? `准备动作：${payload.trigger}`
               : payload.kind === 'use-object' ? '使用物件'
                 : payload.kind === 'grapple' ? '擒抱'
-                  : `推撞（${payload.outcome === 'prone' ? '击倒' : '推开'}）`
+                  : payload.kind === 'shove' ? `推撞（${payload.outcome === 'prone' ? '击倒' : '推开'}）`
+                    : '挣脱擒抱'
       pushHeadlessCombatLog(`${dnd5eActionActor.name} 执行${label}。`, 'turn', resolved.result.events)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
@@ -8721,6 +8771,7 @@ export default function MapsPage() {
               round: liveRound,
               targetTokenId: impactTarget.id,
               areaId: movedArea.id,
+              turnKey: `${liveRound}:${currentInitiativeToken?.id ?? impactTarget.id}`,
             }),
             map: areaApplication.map,
             characters: areaApplication.characters,
@@ -8791,7 +8842,7 @@ export default function MapsPage() {
           initiativeOrder: initiativeOrderRef.current,
           turnEconomy,
           turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
-          roomRequiredPlugins: getRoomSession() ? (getRoomRulesSnapshot()?.requiredPlugins ?? []) : undefined,
+          roomRequiredPlugins: roomSession ? roomRulesSnapshot?.requiredPlugins : undefined,
           now: runtimeNow(),
         })
         if (!preparedPluginSpell.ok) {
@@ -10028,7 +10079,7 @@ export default function MapsPage() {
         characters: useCharacterStore.getState().characters,
         initiativeOrder: initiativeOrderRef.current,
         turnEconomy,
-        roomRequiredPlugins: getRoomSession() ? (getRoomRulesSnapshot()?.requiredPlugins ?? []) : undefined,
+        roomRequiredPlugins: roomSession ? roomRulesSnapshot?.requiredPlugins : undefined,
       })
       if (!prepared.ok) {
         acknowledgePlayerAction(action, 'rejected', prepared.reason)
@@ -10097,6 +10148,7 @@ export default function MapsPage() {
           timing: 'on-create',
           round: liveRound,
           areaId: createdAreaId,
+          turnKey: `${liveRound}:${currentInitiativeToken?.id ?? action.actorTokenId}`,
         })
         const createdSettled = await settleDnd5ePersistentAreaCandidates({
           candidates: createdCandidates,
@@ -16204,6 +16256,24 @@ export default function MapsPage() {
                   />
                 )}
                 {charPanel === 'skills' && <div className="space-y-3">
+                  {isDM && combatActive && activeChar.dnd5eCombatState?.readiedAction && (
+                    <section className="rounded-xl border border-amber-400/25 bg-amber-500/10 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-amber-200">待触发的准备动作</p>
+                      <p className="mt-2 text-sm text-slate-100">{activeChar.dnd5eCombatState.readiedAction.trigger}</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        内容：{activeChar.dnd5eCombatState.readiedAction.actionKind === 'attack' ? '攻击'
+                          : activeChar.dnd5eCombatState.readiedAction.actionKind === 'move' ? '移动'
+                            : activeChar.dnd5eCombatState.readiedAction.actionKind === 'interact-object' ? '物件交互' : '其他（DM 裁定）'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleTriggerReadiedAction(activeChar.id)}
+                        className="mt-3 w-full rounded-lg border border-amber-300/25 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-400/25"
+                      >
+                        条件已发生：触发并消耗反应
+                      </button>
+                    </section>
+                  )}
                   <Dnd5eAbilityCheckPanel
                     character={activeChar}
                     canAct={canControlPlayerTurn && activeChar.id === turnCharacter?.id}

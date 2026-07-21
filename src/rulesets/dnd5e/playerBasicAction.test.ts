@@ -3,7 +3,11 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
-import { prepareDnd5ePlayerBasicAction, resolvePreparedDnd5ePlayerBasicAction } from './playerBasicAction'
+import {
+  prepareDnd5ePlayerBasicAction,
+  resolvePreparedDnd5ePlayerBasicAction,
+  triggerDnd5eReadiedAction,
+} from './playerBasicAction'
 
 const hero: Character = {
   id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '人类', charClass: '战士', level: 3,
@@ -72,6 +76,27 @@ describe('D&D 5e player basic action bridge', () => {
     expect(resolved.result.events).not.toContainEqual(expect.objectContaining({ type: 'turn-resource-spent', resource: 'action' }))
   })
 
+  it('moves a successfully shoved target exactly one legal grid square', () => {
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'shove', targetTokenId: 'enemy', targetDefense: 'athletics', outcome: 'push' }),
+      map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.pushTo).toEqual({ x: 25, y: 5 })
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared, actorD20: 18, targetD20: 2 })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')).toMatchObject({ x: 25, y: 5 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'moved', actorId: 'enemy', distance: 5,
+    }))
+  })
+
   it('asks the Host for the second d20 required by contest disadvantage', () => {
     const prepared = prepareDnd5ePlayerBasicAction({
       action: request({ kind: 'grapple', targetTokenId: 'enemy', targetDefense: 'athletics' }),
@@ -95,5 +120,37 @@ describe('D&D 5e player basic action bridge', () => {
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((token) => token.id === 'enemy')?.dnd5eCombatState?.activeEffects ?? [])
       .not.toContainEqual(expect.objectContaining({ standardCondition: 'grappled' }))
+  })
+
+  it('gives the DM a production path to trigger a readied action off-turn', () => {
+    const readiedHero: Character = {
+      ...hero,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [],
+        readiedAction: {
+          trigger: '敌人进入门口时', actionKind: 'attack', targetId: 'enemy',
+          preparedTurnKey: 'combat:1:hero-token',
+        },
+      },
+    }
+    const result = triggerDnd5eReadiedAction({
+      combatId: 'combat',
+      round: 1,
+      map,
+      characters: [readiedHero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: 'hero-token',
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.result.events).toContainEqual(expect.objectContaining({
+      type: 'readied-action-triggered', actorId: 'hero-token', actionKind: 'attack', targetId: 'enemy',
+    }))
+    expect(result.application.characters[0].dnd5eCombatState?.readiedAction).toBeUndefined()
   })
 })

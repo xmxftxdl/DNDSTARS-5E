@@ -8,6 +8,12 @@ import {
   type GridCell,
 } from '../../lib/gridCombat'
 import { dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
+import {
+  mapGeometryLineOfEffectBlocked,
+  mapGeometryPlacementBlocked,
+  mapGeometryRuntimeForMap,
+  type MapGeometryState,
+} from '../../lib/mapGeometry'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
@@ -59,6 +65,7 @@ export function planDnd5eSummonedCreature(input: {
   targetCell: GridCell
   initiativeD20: number
   summon: NonNullable<Dnd5ePluginFeatureAction['summon']>
+  geometry?: MapGeometryState
 }): { ok: true; plan: Dnd5eSummonPlan } | { ok: false; reason: Dnd5eSummonPlanFailure } {
   const monster = getDnd5eSrdMonster(input.summon.monsterId)
   const template = DND5E_SRD_ENEMY_POOL.find((candidate) => candidate.id === input.summon.monsterId)
@@ -81,9 +88,24 @@ export function planDnd5eSummonedCreature(input: {
   )
   const position = tokenCenterForAnchorCell(input.targetCell, tokenBase, input.map)
   const footprint = tokenOccupiedCellsAt(tokenBase, input.map, position)
+  const geometry = input.geometry ?? mapGeometryRuntimeForMap(input.map.id)
+  const placementToken = {
+    ...input.actorToken,
+    ...tokenBase,
+    ...position,
+    elevationFeet: input.actorToken.elevationFeet,
+  }
   if (
     footprint.some((cell) => cell.col < 0 || cell.row < 0 || cell.col >= cols || cell.row >= rows) ||
-    footprint.some((cell) => occupied.has(cellKey(cell)))
+    footprint.some((cell) => occupied.has(cellKey(cell))) ||
+    mapGeometryPlacementBlocked({ geometry, map: input.map, token: placementToken, at: position }).blocked ||
+    mapGeometryLineOfEffectBlocked({
+      geometry,
+      from: input.actorToken,
+      to: position,
+      fromElevationFeet: input.actorToken.elevationFeet,
+      toElevationFeet: input.actorToken.elevationFeet,
+    })
   ) return { ok: false, reason: 'summon-position-blocked' }
 
   const side = summonSide(input.actorToken, input.summon.side)

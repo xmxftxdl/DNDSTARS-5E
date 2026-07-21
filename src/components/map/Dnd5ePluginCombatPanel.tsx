@@ -22,6 +22,7 @@ import {
   roomAllowsPlugin,
   subscribeRoomRules,
 } from '../../lib/roomRulesState'
+import { getRoomSession } from '../../lib/roomSession'
 
 function economyAvailable(
   economy: 'action' | 'bonusAction' | 'reaction' | 'none',
@@ -68,6 +69,7 @@ export default function Dnd5ePluginCombatPanel({
     getRoomRulesSnapshot,
     getRoomRulesSnapshot,
   )
+  const hasRoomSession = getRoomSession() != null
   void pluginRevision
   const features = registeredDnd5ePluginFeatures().flatMap((feature) => {
     return dnd5eCharacterHasPluginFeature(character, feature.id) &&
@@ -111,8 +113,10 @@ export default function Dnd5ePluginCombatPanel({
             : targeting.kind === 'area'
               ? '__area__'
               : targetsByFeature[feature.id] ?? targetOptions[0]?.id ?? ''
-          const allowedForRoom = roomAllowsPlugin(feature.ownerPluginId, roomRules)
-          const roomReady = roomRules?.member.ready ?? true
+          const allowedForRoom = !hasRoomSession || (
+            roomRules != null && roomAllowsPlugin(feature.ownerPluginId, roomRules)
+          )
+          const roomReady = !hasRoomSession || roomRules?.member.ready === true
           const disabled = pending || !canAct || !roomReady || !allowedForRoom ||
             !economyAvailable(featureAction.economy, turnEconomy) || !selectedTargetId
           return (

@@ -927,6 +927,28 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(reaction.state.combatants.b.turn.reactionAvailable).toBe(false)
   })
 
+  it('expires the persisted Dodge marker when the dodging creature starts its next turn', () => {
+    const state = startDnd5eHeadlessCombat('dodge-expiry', [
+      fighter('b', 20), fighter('a', 10, { controller: 'dm' }),
+    ])
+    const dodged = resolveDnd5eHeadlessAction(state, { type: 'dodge', actorId: 'b' })
+    expect(dodged.ok).toBe(true)
+    if (!dodged.ok) return
+    expect(dodged.state.combatants.b.classState.dodgingTurnKey).toBe('dodge-expiry:1:b')
+
+    const firstEnd = resolveDnd5eHeadlessAction(dodged.state, { type: 'end-turn', actorId: 'b' })
+    expect(firstEnd.ok).toBe(true)
+    if (!firstEnd.ok) return
+    expect(firstEnd.state.combatants.b.classState.dodgingTurnKey).toBe('dodge-expiry:1:b')
+
+    const secondEnd = resolveDnd5eHeadlessAction(firstEnd.state, { type: 'end-turn', actorId: 'a' })
+    expect(secondEnd.ok).toBe(true)
+    if (!secondEnd.ok) return
+    expect(secondEnd.state.initiativeOrder[secondEnd.state.initiativeIndex]).toBe('b')
+    expect(secondEnd.state.combatants.b.classState.dodgingTurnKey).toBeUndefined()
+    expect(secondEnd.state.combatants.b.dodging).toBe(false)
+  })
+
   it('resolves Dash, Hide, Ready, and Use an Object as authoritative basic actions', () => {
     const hiddenState = startDnd5eHeadlessCombat('basic-hide', [fighter('a', 20), fighter('b', 10, { controller: 'dm' })])
     hiddenState.lineOfSightBlockedByCombatantPair = {
@@ -1060,6 +1082,74 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(shoved.ok).toBe(true)
     if (!shoved.ok) return
     expect(shoved.state.combatants.b.conditions).toContain('prone')
+  })
+
+  it('uses the defender stronger Athletics or Acrobatics modifier for grapple and shove', () => {
+    const defender = fighter('b', 10, {
+      controller: 'dm',
+      abilities: { ...abilities, str: 8, dex: 18 },
+      skillProficiencies: ['acrobatics'],
+    })
+    const state = startDnd5eHeadlessCombat('stronger-defense', [fighter('a', 20), defender])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    const grappled = resolveDnd5eHeadlessAction(state, {
+      type: 'grapple', actorId: 'a', targetId: 'b', actorD20: 10, targetD20: 10,
+      targetDefense: 'athletics',
+    })
+    expect(grappled.ok).toBe(true)
+    if (!grappled.ok) return
+    expect(grappled.events).toContainEqual(expect.objectContaining({
+      type: 'contest-resolved', targetDefense: 'acrobatics', actorTotal: 13, targetTotal: 16, success: false,
+    }))
+    expect(grappled.state.combatants.b.conditions).not.toContain('grappled')
+  })
+
+  it('rejects grapple and shove targets more than one size larger than the actor', () => {
+    const oversized = startDnd5eHeadlessCombat('size-limit', [
+      fighter('a', 20, { sizeRank: 2 }),
+      fighter('b', 10, { controller: 'dm', sizeRank: 4 }),
+    ])
+    oversized.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    expect(resolveDnd5eHeadlessAction(oversized, {
+      type: 'grapple', actorId: 'a', targetId: 'b', actorD20: 20, targetD20: 1,
+      targetDefense: 'athletics',
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const legal = startDnd5eHeadlessCombat('size-limit-legal', [
+      fighter('a', 20, { sizeRank: 2 }),
+      fighter('b', 10, { controller: 'dm', sizeRank: 3 }),
+    ])
+    legal.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    expect(resolveDnd5eHeadlessAction(legal, {
+      type: 'shove', actorId: 'a', targetId: 'b', actorD20: 20, targetD20: 1,
+      targetDefense: 'athletics', outcome: 'prone',
+    })).toMatchObject({ ok: true })
+  })
+
+  it('lets a grappled creature spend its action to escape the grappler contest', () => {
+    const state = startDnd5eHeadlessCombat('escape-grapple', [
+      fighter('a', 20), fighter('b', 10, { controller: 'dm' }),
+    ])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    const grappled = resolveDnd5eHeadlessAction(state, {
+      type: 'grapple', actorId: 'a', targetId: 'b', actorD20: 20, targetD20: 1,
+      targetDefense: 'athletics',
+    })
+    expect(grappled.ok).toBe(true)
+    if (!grappled.ok) return
+    const nextTurn = resolveDnd5eHeadlessAction(grappled.state, { type: 'end-turn', actorId: 'a' })
+    expect(nextTurn.ok).toBe(true)
+    if (!nextTurn.ok) return
+    const escaped = resolveDnd5eHeadlessAction(nextTurn.state, {
+      type: 'escape-grapple', actorId: 'b', grapplerId: 'a', actorD20: 20, targetD20: 1,
+    })
+    expect(escaped.ok).toBe(true)
+    if (!escaped.ok) return
+    expect(escaped.events).toContainEqual(expect.objectContaining({
+      type: 'contest-resolved', contest: 'escape-grapple', success: true,
+    }))
+    expect(escaped.state.combatants.b.conditions).not.toContain('grappled')
+    expect(escaped.state.combatants.b.turn.actionAvailable).toBe(false)
   })
 
   it('rejects an opportunity attack when the reactor cannot see the moving target', () => {

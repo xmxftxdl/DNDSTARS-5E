@@ -39,6 +39,19 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
   })
 
+  it('bounds inline character portraits before the aggregate can exceed shared-state capacity', () => {
+    const portrait = `data:image/webp;base64,${'A'.repeat(580_000)}`
+    expect(validateAndMigrateSharedResource('characters', {
+      characters: [{ id: 'hero', portrait }],
+    }).status).toBe('valid')
+    expect(validateAndMigrateSharedResource('characters', {
+      characters: Array.from({ length: 7 }, (_, index) => ({ id: `hero-${index}`, portrait })),
+    })).toMatchObject({
+      status: 'invalid',
+      reasons: expect.arrayContaining([expect.stringContaining('人物立绘总量超过房间同步上限')]),
+    })
+  })
+
   it('physically migrates the retired enemy AP ledger', () => {
     const result = validateAndMigrateSharedResource('combat', {
       active: true,
@@ -112,6 +125,12 @@ describe('shared resource runtime validation', () => {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'toxic-cloud', intensity: 'normal' } }] }],
     }).status).toBe('valid')
     expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, label: 'x'.repeat(121) }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, expiresAfterRound: 14_401 }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{ ...validArea, visual: { preset: 'remote-script' } }] }],
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
@@ -159,6 +178,9 @@ describe('shared resource runtime validation', () => {
     }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 0 } }] }],
+    }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 14_401 } }] }],
     }).status).toBe('invalid')
   })
 

@@ -234,6 +234,8 @@ test('player2 port 6175 sends a 5e weapon attack to DM and receives the red-drag
     player2.goto(`${PLAYER2}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
   await waitForCombatReady(dm, 'player2-token')
+  // 固定本用例的骰面，避免天然 1 让“命中后伤害同步”断言出现 5% 随机失败。
+  await dm.evaluate(() => { Math.random = () => 0.75 })
 
   await expect
     .poll(
@@ -262,6 +264,13 @@ test('player2 port 6175 sends a 5e weapon attack to DM and receives the red-drag
     updatedAt: now,
   }
   await sendPlayer2Action(player2, action)
+
+  // DM 先确认本次攻击的权威掩护预览。
+  await expect(dm.getByText('掩护预览', { exact: true })).toBeVisible({ timeout: 20_000 })
+  await dm.getByRole('button', { name: '应用并继续结算' }).click()
+  // 战斗中的每一枚 d20 都由 DM 确认后才继续权威事务。
+  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toBeVisible({ timeout: 20_000 })
+  await dm.getByRole('button', { name: /并继续结算$/ }).click()
 
   await expect
     .poll(

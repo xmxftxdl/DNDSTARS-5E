@@ -2,6 +2,9 @@ import type { AbilityKey } from '../../lib/dnd'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
 
+export const DND5E_DECLARATIVE_LABEL_MAX_LENGTH = 120
+export const DND5E_DECLARATIVE_DURATION_MAX_ROUNDS = 14_400
+
 export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'arcane',
   'toxic-cloud',
@@ -73,6 +76,8 @@ export interface Dnd5ePersistentAreaTriggerDeclaration {
   label: string
   timing: Dnd5ePersistentAreaTriggerTiming
   oncePerRound?: boolean
+  /** 同一目标在每个生物回合内最多触发一次；用于“每回合首次进入/开始”语义。 */
+  oncePerTurn?: boolean
   /** `on-move-distance` 每累计多少尺触发一次；由 Host 根据完整移动路径计数。 */
   movementIntervalFeet?: number
   savingThrow?: Dnd5ePersistentAreaSaveDeclaration
@@ -90,6 +95,8 @@ export interface Dnd5ePersistentAreaTriggerReceipt {
   triggerId: string
   targetTokenId: string
   round: number
+  /** `${round}:${activeTokenId}`；旧存档可缺省并按 once-per-round 兼容。 */
+  turnKey?: string
   transactionId: string
 }
 
@@ -138,7 +145,7 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
   const timing = trigger.timing as Dnd5ePersistentAreaTriggerTiming
   if (
     typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(id) ||
-    typeof label !== 'string' || !label.trim() || label.length > 120 ||
+    typeof label !== 'string' || !label.trim() || label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
     !TIMINGS.includes(timing)
   ) return undefined
 
@@ -167,7 +174,7 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
   const rawCondition = record(trigger.condition)
   const rawDuration = record(rawCondition?.duration)
   const duration = rawDuration && EXPIRATIONS.includes(rawDuration.expiresAt as Dnd5ePluginEffectDuration['expiresAt']) &&
-    (rawDuration.remainingRounds == null || integer(rawDuration.remainingRounds, 1, 14_400)) &&
+    (rawDuration.remainingRounds == null || integer(rawDuration.remainingRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS)) &&
     (rawDuration.saveAbility == null || ABILITIES.includes(rawDuration.saveAbility as AbilityKey)) &&
     (rawDuration.saveDc == null || integer(rawDuration.saveDc, 1, 40))
     ? {
@@ -195,7 +202,8 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
     id,
     label: label.trim(),
     timing,
-    oncePerRound: trigger.oncePerRound !== false,
+    oncePerRound: trigger.oncePerTurn === true ? false : trigger.oncePerRound !== false,
+    oncePerTurn: trigger.oncePerTurn === true,
     movementIntervalFeet,
     savingThrow,
     damage,

@@ -221,6 +221,24 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(true)
   })
 
+  it('keeps the normal terrain envelope in darkness while creature visibility still requires light', () => {
+    const g = geometry()
+    g.walls = []
+    g.vision.ambientLight = 'darkness'
+    g.vision.defaultRangeFeet = 10
+    const viewer = token('viewer', 250, 250)
+    const polygon = mapGeometryVisibilityPolygon({ geometry: g, map, viewer })
+    expect(polygon.length).toBeGreaterThan(90)
+    expect(Math.max(...polygon.map((point) => Math.hypot(point.x - viewer.x, point.y - viewer.y))))
+      .toBeLessThanOrEqual(100.001)
+    expect(mapGeometryCanSeeToken({
+      geometry: g,
+      map: { ...map, tokens: [viewer] },
+      viewer,
+      target: token('unlit', 300, 250, { type: 'enemy' }),
+    })).toBe(false)
+  })
+
   it('supports independent scene lights with wall shadows and legacy geometry migration', () => {
     const g = geometry()
     g.vision.ambientLight = 'darkness'

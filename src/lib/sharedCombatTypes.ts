@@ -214,6 +214,7 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'use-object'; interactionId: string }
   | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
   | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
+  | { kind: 'escape-grapple'; targetTokenId: string }
 
 export interface SharedPlayerActionState {
   id: string

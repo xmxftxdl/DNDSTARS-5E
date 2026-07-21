@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
+import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import {
   planDnd5eSummonedCreature,
   rebaseDnd5eSummonedCreatureTokens,
@@ -59,6 +60,29 @@ describe('D&D 5e summoned creature lifecycle', () => {
       summon: { monsterId: 'srd-5.1:wolf', durationRounds: 1 },
     })
     expect(result).toEqual({ ok: false, reason: 'summon-position-blocked' })
+  })
+
+  it('rejects a placement inside blocking geometry or behind a line-of-effect wall', () => {
+    const geometry = createEmptyMapGeometry('map-1', 1)
+    geometry.walls.push({
+      id: 'wall', kind: 'wall', label: '墙', points: [{ x: 75, y: 0 }, { x: 75, y: 150 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    expect(planDnd5eSummonedCreature({
+      map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'com.example:wolf', pluginId: 'com.example', actionId: 'blocked', round: 1,
+      targetCell: { col: 2, row: 0 }, initiativeD20: 10, geometry,
+      summon: { monsterId: 'srd-5.1:wolf', durationRounds: 1 },
+    })).toEqual({ ok: false, reason: 'summon-position-blocked' })
+
+    geometry.walls[0] = { ...geometry.walls[0], blocksLineOfEffect: false }
+    expect(planDnd5eSummonedCreature({
+      map: map([actor]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'com.example:wolf', pluginId: 'com.example', actionId: 'inside', round: 1,
+      targetCell: { col: 1, row: 0 }, initiativeD20: 10, geometry,
+      summon: { monsterId: 'srd-5.1:wolf', durationRounds: 1 },
+    })).toEqual({ ok: false, reason: 'summon-position-blocked' })
   })
 
   it('rebases summon commits without rolling back unrelated token changes', () => {

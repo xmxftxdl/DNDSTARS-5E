@@ -232,7 +232,13 @@ export function createDnd5eMapCombatSnapshot(input: {
         initiativeD20: Math.max(1, Math.min(20, initiative - migrated.initiativeBonus)),
         position: { x: token.x, y: token.y },
       })
-      return [{ ...combatant, id: token.id, name: token.label, initiative }]
+      return [{
+        ...combatant,
+        id: token.id,
+        name: token.label,
+        initiative,
+        sizeRank: ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? '中型'],
+      }]
     }
     const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
     const maxHp = Math.max(1, token.maxHp ?? monster?.hitPoints.average ?? token.hp ?? 1)
@@ -253,6 +259,7 @@ export function createDnd5eMapCombatSnapshot(input: {
         rules.abilityModifier(monster?.abilities.wis ?? DEFAULT_ABILITIES.wis)),
       proficiencyBonus: monster ? dnd5eMonsterProficiencyBonus(monster.challenge.rating) : 2,
       challengeRating: monster ? dnd5eChallengeRatingValue(monster.challenge.rating) : undefined,
+      sizeRank: ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? monster?.size ?? '中型'],
       armorClass: monster?.armorClass.value ?? getTokenTargetAc(token) ?? 10,
       currentHp: Math.max(0, Math.min(maxHp, token.hp ?? maxHp)),
       maxHp,

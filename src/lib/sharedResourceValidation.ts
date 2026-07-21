@@ -1,11 +1,17 @@
 import { getRoomSession } from './roomSession'
 import {
+  CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH,
+  isCharacterPortraitDataUrl,
+} from './characterPortrait'
+import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   dnd5eConditionsFromActiveEffects,
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
+  DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
+  DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   normalizeDnd5ePersistentAreaVisual,
 } from '../rulesets/dnd5e/persistentAreaTypes'
@@ -86,10 +92,14 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     for (const key of ['pluginId', 'featureId', 'label', 'sourceCharacterId', 'sourceTokenId'] as const) {
       if (typeof raw[key] !== 'string' || !raw[key]) issues.push(`${areaPath}.${key} 无效`)
     }
+    if (typeof raw.label === 'string' && raw.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH) {
+      issues.push(`${areaPath}.label 过长`)
+    }
     if (typeof raw.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(raw.color)) issues.push(`${areaPath}.color 无效`)
     if (
       !Number.isInteger(raw.createdRound) || Number(raw.createdRound) < 0 ||
-      !Number.isInteger(raw.expiresAfterRound) || Number(raw.expiresAfterRound) < Number(raw.createdRound)
+      !Number.isInteger(raw.expiresAfterRound) || Number(raw.expiresAfterRound) < Number(raw.createdRound) ||
+      Number(raw.expiresAfterRound) - Number(raw.createdRound) + 1 > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS
     ) issues.push(`${areaPath} 轮数无效`)
     if (raw.concentrationId != null && (typeof raw.concentrationId !== 'string' || !raw.concentrationId)) {
       issues.push(`${areaPath}.concentrationId 无效`)
@@ -127,6 +137,7 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
             !isPlainObject(receipt) || !triggerIds.has(String(receipt.triggerId)) ||
             typeof receipt.targetTokenId !== 'string' || !receipt.targetTokenId ||
             !Number.isInteger(receipt.round) || Number(receipt.round) < 0 ||
+            (receipt.turnKey != null && (typeof receipt.turnKey !== 'string' || !receipt.turnKey || receipt.turnKey.length > 160)) ||
             typeof receipt.transactionId !== 'string' || !receipt.transactionId ||
             transactionIds.has(receipt.transactionId)
           ) issues.push(`${receiptPath} 无效或重复`)
@@ -154,7 +165,8 @@ function validateDnd5eSummon(value: unknown, path: string): string[] {
   }
   if (
     !Number.isInteger(value.createdRound) || Number(value.createdRound) < 0 ||
-    !Number.isInteger(value.expiresAfterRound) || Number(value.expiresAfterRound) < Number(value.createdRound)
+    !Number.isInteger(value.expiresAfterRound) || Number(value.expiresAfterRound) < Number(value.createdRound) ||
+    Number(value.expiresAfterRound) - Number(value.createdRound) + 1 > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS
   ) issues.push(`${path} 轮数无效`)
   if (value.concentrationId != null && (typeof value.concentrationId !== 'string' || !value.concentrationId)) {
     issues.push(`${path}.concentrationId 无效`)
@@ -173,7 +185,8 @@ function validateDnd5eSpellEffect(value: unknown, path: string): string[] {
   }
   if (
     !Number.isInteger(value.createdRound) || Number(value.createdRound) < 0 ||
-    !Number.isInteger(value.expiresAfterRound) || Number(value.expiresAfterRound) < Number(value.createdRound)
+    !Number.isInteger(value.expiresAfterRound) || Number(value.expiresAfterRound) < Number(value.createdRound) ||
+    Number(value.expiresAfterRound) - Number(value.createdRound) + 1 > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS
   ) issues.push(`${path} 轮数无效`)
   if (value.concentrationId != null && (typeof value.concentrationId !== 'string' || !value.concentrationId)) {
     issues.push(`${path}.concentrationId 无效`)
@@ -349,9 +362,22 @@ function migrateDnd5eStateEnvelope(
   }
 
   if (name === 'characters') {
+    let portraitLength = 0
     const characters = (input.characters as unknown[]).map((entry, index) =>
-      isPlainObject(entry) ? migrateEntity(entry, `characters[${index}]`, true) : entry,
+      isPlainObject(entry)
+        ? (() => {
+            if (entry.portrait != null) {
+              if (!isCharacterPortraitDataUrl(entry.portrait)) {
+                issues.push(`characters[${index}].portrait 不是有效且受限的人物立绘`)
+              } else portraitLength += entry.portrait.length
+            }
+            return migrateEntity(entry, `characters[${index}]`, true)
+          })()
+        : entry,
     )
+    if (portraitLength > CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH) {
+      issues.push('人物立绘总量超过房间同步上限，请移除部分立绘或重新压缩')
+    }
     return { value: { ...input, characters }, issues, migrations }
   }
   const maps = (input.maps as unknown[]).map((entry, mapIndex) => {

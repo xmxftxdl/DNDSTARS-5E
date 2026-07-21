@@ -166,6 +166,8 @@ test('DM 同步三种结算模式，明骰公开、暗骰保密，并可手动�
   await expect(dm.getByTestId('manual-roll-visibility')).toHaveText('暗骰')
   await dm.getByLabel('投骰名称').fill('DM 秘密检定')
   await dm.getByTestId('manual-roll-submit').click()
+  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toBeVisible({ timeout: 15_000 })
+  await dm.getByRole('button', { name: /并继续结算$/ }).click()
   await expect(dm.getByTestId('manual-roll-submit')).toBeEnabled({ timeout: 15_000 })
   await dm.waitForTimeout(500)
   expect((await getState<{ events: unknown[] }>(request, 'dice-events')).events).toHaveLength(publicDiceCount)

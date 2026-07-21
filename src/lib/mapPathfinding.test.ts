@@ -105,6 +105,20 @@ describe('map geometry pathfinding', () => {
       .toBeUndefined()
   })
 
+  it('allows a diagonal step when only one orthogonal corner contains a creature', () => {
+    const map = battleMap({
+      width: 100,
+      height: 100,
+      tokens: [
+        token(),
+        token({ id: 'east-blocker', type: 'enemy', characterId: undefined, x: 75, y: 25 }),
+      ],
+    })
+
+    expect(findMapGeometryPath({ map, geometry: geometry(), token: map.tokens[0], to: { x: 75, y: 75 } }))
+      .toMatchObject({ distanceFeet: 5, movementCostFeet: 5 })
+  })
+
   it('does not overshoot an axis and zigzag when an equal-cost direct route exists', () => {
     const hero = token({ x: 225, y: 225 })
     const map = battleMap({ width: 300, height: 300, tokens: [hero] })

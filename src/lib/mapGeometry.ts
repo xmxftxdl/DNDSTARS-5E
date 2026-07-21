@@ -744,6 +744,41 @@ export function mapGeometryMovementBlocked(input: {
   return { blocked: false }
 }
 
+function pointToSegmentDistance(point: MapGeometryPoint, a: MapGeometryPoint, b: MapGeometryPoint): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared <= 1e-8) return Math.hypot(point.x - a.x, point.y - a.y)
+  const projection = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared))
+  return Math.hypot(point.x - (a.x + projection * dx), point.y - (a.y + projection * dy))
+}
+
+/** 检查 Token 的完整占位圆是否与阻挡移动的墙、门、窗或障碍物相交。 */
+export function mapGeometryPlacementBlocked(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  token: Token
+  at: MapGeometryPoint
+}): { blocked: boolean; entityId?: string } {
+  const { geometry, token, at } = input
+  if (!geometry) return { blocked: false }
+  const radius = Math.max(1, input.map.gridSize * Math.max(1, token.size) * 0.42)
+  const elevation = tokenElevation(token)
+  for (const segment of mapGeometrySegments(geometry)) {
+    if (
+      segment.blocksMovement && overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation) &&
+      pointToSegmentDistance(at, segment.a, segment.b) <= radius
+    ) return { blocked: true, entityId: segment.entityId }
+  }
+  for (const obstacle of geometry.obstacles) {
+    if (
+      obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, elevation) &&
+      mapGeometryPointInPolygon(at, obstacle.points)
+    ) return { blocked: true, entityId: obstacle.id }
+  }
+  return { blocked: false }
+}
+
 function rayBlocked(input: {
   geometry?: MapGeometryState
   from: MapGeometryPoint
@@ -1087,12 +1122,9 @@ export function mapGeometryVisibilityPolygon(input: {
   const lightRangeFeet = input.viewer.lightSource?.enabled
     ? input.viewer.lightSource.brightRadiusFeet + input.viewer.lightSource.dimRadiusFeet
     : 0
-  // 环境黑暗中没有光照的区域只能靠暗视觉或自带光源看见；与服务端
-  // playerCanSeeToken 的口径保持一致（场景光源的照亮由 LightingLayer 展示）。
-  const ambientDarkness = geometry?.vision.enabled === true && geometry.vision.ambientLight === 'darkness'
-  const rangeFeet = ambientDarkness
-    ? Math.max(darkvisionRangeFeet, lightRangeFeet)
-    : Math.max(normalRangeFeet, darkvisionRangeFeet, lightRangeFeet)
+  // 地形遮罩使用正常视距；暗光、黑暗和场景光源在 LightingLayer 内表现。
+  // 服务端仍会单独过滤未被照亮的生物，因此不会因地形可见而泄露隐藏 Token。
+  const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, lightRangeFeet)
   if (rangeFeet <= 0) return []
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = tokenElevation(input.viewer)

@@ -129,7 +129,7 @@ export default function Dnd5eFighterCombatPanel({ character, canAct, targeting, 
         {character.level >= 9 && <p className="mt-3 text-xs text-slate-500">不屈会在豁免失败后提示重掷；重掷必须采用新结果，次数于长休恢复。</p>}
       </div>
       <Dnd5eBasicActionsPanel
-        canAct={canAct && turnEconomy.action.current > 0}
+        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction)}
         pending={pending}
         targets={basicActionTargets}
         onAction={onBasicAction}

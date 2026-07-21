@@ -302,6 +302,27 @@ describe('pending local character-sheet hit point edits', () => {
       hitPointRolls: undefined,
     })], 1_003)[0].hitPointMaximumMode).toBe('fixed')
   })
+
+  it('preserves spent Hit Dice until the room snapshot acknowledges the short rest', () => {
+    const spent = [{ sides: 10, current: 1, max: 3 }]
+    markPendingLocalCharacterHitPointEdit('hero', { currentHp: 18, hitPointDice: spent }, 1_000)
+
+    const stale = mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 10,
+      hitPointDice: [{ sides: 10, current: 3, max: 3 }],
+    })], 1_001)[0]
+    expect(stale.currentHp).toBe(18)
+    expect(stale.hitPointDice).toEqual(spent)
+
+    const acknowledged = mergePendingLocalCharacterHitPointEdits([char({
+      currentHp: 18,
+      hitPointDice: spent,
+    })], 1_002)[0]
+    expect(acknowledged.hitPointDice).toEqual(spent)
+    expect(mergePendingLocalCharacterHitPointEdits([char({
+      hitPointDice: [{ sides: 10, current: 3, max: 3 }],
+    })], 1_003)[0].hitPointDice).toEqual([{ sides: 10, current: 3, max: 3 }])
+  })
 })
 
 describe('pending local fighter choices', () => {

@@ -351,6 +351,7 @@ function normalizeToken(raw: unknown): Token {
     typeof rawSummon.sourceTokenId === 'string' && !!rawSummon.sourceTokenId &&
     Number.isInteger(rawSummon.createdRound) && Number(rawSummon.createdRound) >= 0 &&
     Number.isInteger(rawSummon.expiresAfterRound) && Number(rawSummon.expiresAfterRound) >= Number(rawSummon.createdRound) &&
+    Number(rawSummon.expiresAfterRound) - Number(rawSummon.createdRound) + 1 <= 14_400 &&
     (rawSummon.concentrationId == null || (typeof rawSummon.concentrationId === 'string' && !!rawSummon.concentrationId)) &&
     (rawSummon.side === 'player' || rawSummon.side === 'enemy')
     ? {
@@ -375,6 +376,7 @@ function normalizeToken(raw: unknown): Token {
     Number.isInteger(rawSpellEffect.createdRound) && Number(rawSpellEffect.createdRound) >= 0 &&
     Number.isInteger(rawSpellEffect.expiresAfterRound) &&
     Number(rawSpellEffect.expiresAfterRound) >= Number(rawSpellEffect.createdRound) &&
+    Number(rawSpellEffect.expiresAfterRound) - Number(rawSpellEffect.createdRound) + 1 <= 14_400 &&
     (rawSpellEffect.concentrationId == null ||
       (typeof rawSpellEffect.concentrationId === 'string' && !!rawSpellEffect.concentrationId))
     ? {
@@ -495,7 +497,9 @@ function normalizeMap(raw: unknown): BattleMap {
         if (
           typeof area.id !== 'string' || !area.id || typeof area.pluginId !== 'string' || !area.pluginId ||
           typeof area.featureId !== 'string' || !area.featureId || cells.length < 1 ||
-          !Number.isInteger(area.createdRound) || !Number.isInteger(area.expiresAfterRound)
+          !Number.isInteger(area.createdRound) || !Number.isInteger(area.expiresAfterRound) ||
+          area.createdRound! < 0 || area.expiresAfterRound! < area.createdRound! ||
+          area.expiresAfterRound! - area.createdRound! + 1 > 14_400
         ) return []
         const triggers = Array.isArray(area.triggers)
           ? area.triggers.flatMap((trigger) => {
@@ -508,11 +512,13 @@ function normalizeMap(raw: unknown): BattleMap {
           ? area.triggerReceipts.flatMap((receipt) =>
               receipt && triggerIds.has(receipt.triggerId) && typeof receipt.targetTokenId === 'string' &&
               receipt.targetTokenId && Number.isInteger(receipt.round) && receipt.round >= 0 &&
+              (receipt.turnKey == null || (typeof receipt.turnKey === 'string' && !!receipt.turnKey && receipt.turnKey.length <= 160)) &&
               typeof receipt.transactionId === 'string' && receipt.transactionId
                 ? [{
                     triggerId: receipt.triggerId,
                     targetTokenId: receipt.targetTokenId,
                     round: receipt.round,
+                    turnKey: receipt.turnKey,
                     transactionId: receipt.transactionId,
                   }]
                 : [],
@@ -549,7 +555,7 @@ function normalizeMap(raw: unknown): BattleMap {
           slotLevel: Number.isInteger(area.slotLevel) && Number(area.slotLevel) >= 0 && Number(area.slotLevel) <= 9
             ? Number(area.slotLevel)
             : undefined,
-          label: typeof area.label === 'string' && area.label ? area.label : '扩展规则区域',
+          label: typeof area.label === 'string' && area.label && area.label.length <= 120 ? area.label : '扩展规则区域',
           color: typeof area.color === 'string' && /^#[0-9a-f]{6}$/i.test(area.color) ? area.color : '#8b5cf6',
           sourceCharacterId: typeof area.sourceCharacterId === 'string' ? area.sourceCharacterId : '',
           sourceTokenId: typeof area.sourceTokenId === 'string' ? area.sourceTokenId : '',

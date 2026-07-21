@@ -2,6 +2,8 @@ export const CHARACTER_PORTRAIT_WIDTH = 480
 export const CHARACTER_PORTRAIT_HEIGHT = 640
 export const CHARACTER_PORTRAIT_MAX_SOURCE_BYTES = 12 * 1024 * 1024
 export const CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH = 600_000
+/** Keeps the complete characters resource below the shared-state 8 MiB boundary. */
+export const CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH = 4_000_000
 
 const SUPPORTED_CHARACTER_PORTRAIT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 

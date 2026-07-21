@@ -79,7 +79,8 @@ export function dnd5eSavingThrowMode(
   const holyNimbus = creature.classId === 'paladin' && creature.subclassId === 'devotion' && creature.level >= 20 &&
     (creature.classState.holyNimbusRoundsRemaining ?? 0) > 0 && context.sourceIsSpell === true &&
     (sourceType === 'fiend' || sourceType.includes('邪魔') || sourceType === 'undead' || sourceType.includes('亡灵'))
-  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || poisonProtection
+  const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
+  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || poisonProtection || dodgeDexterity
   const disadvantage = creature.exhaustionLevel >= 3 || dnd5eConditionSavingThrowDisadvantage(creature, ability)
   return resolveDnd5eRollMode({
     advantage: [{ active: advantage, reason: 'saving-throw-advantage' }],

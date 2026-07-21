@@ -9,6 +9,8 @@ import path from 'node:path'
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
 export const STATE_MAX_BYTES = 8 * 1024 * 1024
+export const CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH = 600_000
+export const CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH = 4_000_000
 // 单张图片上限（24 MiB）。
 export const IMAGE_MAX_BYTES = 24 * 1024 * 1024
 // 事件 backlog 总容量（环形缓冲，保持与历史一致）。
@@ -332,9 +334,24 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
         return { ok: false, stale: true, currentRevision, current }
       }
     }
+    const candidate = typeof options.mergeIncoming === 'function'
+      ? options.mergeIncoming(current, incoming)
+      : incoming
+    const candidateValidation = typeof options.validateIncoming === 'function'
+      ? options.validateIncoming(candidate)
+      : { ok: true }
+    if (!candidateValidation?.ok) {
+      return {
+        ok: false,
+        invalid: true,
+        reason: candidateValidation?.reason ?? 'invalid-state',
+        currentRevision,
+        current,
+      }
+    }
     const writtenAt = Date.now()
     const next = {
-      ...incoming,
+      ...candidate,
       _sync: {
         schemaVersion: SHARED_STATE_SCHEMA_VERSION,
         revision: currentRevision + 1,
@@ -345,6 +362,107 @@ export async function atomicWriteJsonStateCasLocked(filePath, incoming, options 
     await atomicRename(filePath, JSON.stringify(next))
     return { ok: true, revision: currentRevision + 1, value: next, writtenAt }
   })
+}
+
+const PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS = Object.freeze([
+  'conditions',
+  'concentrating',
+  'dnd5eCombatState',
+  'dnd5eInventory',
+  'dnd5eExperienceAwards',
+  'dmNotes',
+  'visibleToPlayers',
+])
+
+const PLAYER_COMBAT_SERVER_AUTHORITY_CHARACTER_FIELDS = Object.freeze([
+  'currentHp',
+  'maxHp',
+  'tempHp',
+  'hitPointDice',
+  'deathSaveSuccesses',
+  'deathSaveFailures',
+  'deathSaveStable',
+  'exhaustionLevel',
+  'classResources',
+  'equipment',
+])
+
+function preserveCharacterFields(target, source, fields) {
+  for (const field of fields) target[field] = source?.[field]
+  return target
+}
+
+/**
+ * A player writes the shared character aggregate only as a transport detail.
+ * The server keeps other members' records and all Headless-owned fields; a
+ * modified browser therefore cannot forge concentration, inventory, HP, or
+ * another player's character while combat is active.
+ */
+export function mergePlayerCharactersStateForAuthority(
+  currentState,
+  incomingState,
+  memberId,
+  options = {},
+) {
+  const currentCharacters = Array.isArray(currentState?.characters) ? currentState.characters : []
+  const incomingCharacters = Array.isArray(incomingState?.characters) ? incomingState.characters : []
+  const currentById = new Map(currentCharacters
+    .filter((character) => plainObject(character) && typeof character.id === 'string' && character.id)
+    .map((character) => [character.id, character]))
+  const merged = []
+  const includedIds = new Set()
+
+  for (const incoming of incomingCharacters) {
+    if (!plainObject(incoming) || typeof incoming.id !== 'string' || !incoming.id || includedIds.has(incoming.id)) continue
+    const current = currentById.get(incoming.id)
+    if (!current) {
+      if (incoming.roomMemberId !== memberId) continue
+      merged.push({ ...incoming, roomMemberId: memberId })
+      includedIds.add(incoming.id)
+      continue
+    }
+    if (current.roomMemberId !== memberId) continue
+    const next = { ...incoming, roomId: current.roomId, roomMemberId: current.roomMemberId }
+    if (current.ownerAccountId) next.ownerAccountId = current.ownerAccountId
+    preserveCharacterFields(next, current, PLAYER_ALWAYS_SERVER_AUTHORITY_CHARACTER_FIELDS)
+    if (options.combatActive === true) {
+      preserveCharacterFields(next, current, PLAYER_COMBAT_SERVER_AUTHORITY_CHARACTER_FIELDS)
+    }
+    merged.push(next)
+    includedIds.add(next.id)
+  }
+
+  for (const current of currentCharacters) {
+    if (!plainObject(current) || typeof current.id !== 'string' || !current.id || includedIds.has(current.id)) continue
+    if (current.roomMemberId === memberId) continue
+    merged.push(current)
+    includedIds.add(current.id)
+  }
+
+  const requestedSelectedId = typeof incomingState?.selectedId === 'string' ? incomingState.selectedId : null
+  const selectedId = requestedSelectedId && merged.some((character) =>
+    character.id === requestedSelectedId && character.roomMemberId === memberId)
+    ? requestedSelectedId
+    : (typeof currentState?.selectedId === 'string' && merged.some((character) =>
+        character.id === currentState.selectedId && character.roomMemberId === memberId)
+        ? currentState.selectedId
+        : (merged.find((character) => character.roomMemberId === memberId)?.id ?? null))
+  return { ...incomingState, characters: merged, selectedId }
+}
+
+async function sharedCombatIsActiveForAuthority(ctx) {
+  for (const root of [ctx.stateRoot, ctx.legacyStateRoot]) {
+    if (!root) continue
+    try {
+      const value = JSON.parse(await readFile(path.join(root, 'combat.json'), 'utf8'))
+      return value?._deleted === true ? false : value?.active === true
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      // A damaged combat snapshot must not relax player write authority.
+      return true
+    }
+  }
+  return false
 }
 
 /**
@@ -1034,13 +1152,29 @@ function validTokenMovementAnimation(animation) {
     Number.isFinite(animation.issuedAt) && animation.issuedAt >= 0
 }
 
+function validDnd5eRoundLifecycle(value) {
+  return plainObject(value) && Number.isInteger(value.createdRound) && value.createdRound >= 0 &&
+    Number.isInteger(value.expiresAfterRound) && value.expiresAfterRound >= value.createdRound &&
+    value.expiresAfterRound - value.createdRound + 1 <= 14_400
+}
+
 function validateDnd5eResourceStates(name, value) {
   if (name === 'characters') {
+    let portraitLength = 0
     for (const character of value.characters ?? []) {
       if (!plainObject(character)) continue
+      if (character.portrait != null) {
+        if (
+          typeof character.portrait !== 'string' ||
+          character.portrait.length > CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH ||
+          !/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=\r\n]+$/i.test(character.portrait)
+        ) return 'invalid-character-portrait'
+        portraitLength += character.portrait.length
+      }
       const reason = validateActiveEffectState(character.dnd5eCombatState, character.conditions ?? [])
       if (reason) return reason
     }
+    if (portraitLength > CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH) return 'character-portraits-too-large'
   }
   if (name === 'maps') {
     for (const map of value.maps ?? []) {
@@ -1052,6 +1186,23 @@ function validateDnd5eResourceStates(name, value) {
         }
         const reason = validateActiveEffectState(token.dnd5eCombatState, token.dnd5eCombatState?.conditions ?? [])
         if (reason) return reason
+        if (token.dnd5eSummon != null && (
+          !validDnd5eRoundLifecycle(token.dnd5eSummon) || token.dnd5eSummon.schemaVersion !== 1 ||
+          !['player', 'enemy'].includes(token.dnd5eSummon.side)
+        )) return 'invalid-dnd5e-summon'
+        if (token.dnd5eSpellEffect != null && (
+          !validDnd5eRoundLifecycle(token.dnd5eSpellEffect) || token.dnd5eSpellEffect.schemaVersion !== 1
+        )) return 'invalid-dnd5e-spell-effect'
+      }
+      if (map.dnd5ePluginAreas != null) {
+        if (!Array.isArray(map.dnd5ePluginAreas) || map.dnd5ePluginAreas.length > 1_024) {
+          return 'invalid-dnd5e-plugin-areas'
+        }
+        for (const area of map.dnd5ePluginAreas) {
+          if (
+            !validDnd5eRoundLifecycle(area) || typeof area.label !== 'string' || !area.label || area.label.length > 120
+          ) return 'invalid-dnd5e-plugin-area'
+        }
       }
     }
   }
@@ -1062,7 +1213,8 @@ const COMBAT_INTERRUPT_KINDS = new Set([
   'dodge', 'stable-mind', 'gale-combo', 'agile-leap', 'opportunity-attack', 'protection',
   'shield-spell', 'counterspell', 'uncanny-dodge', 'deflect-missiles', 'saving-throw-reroll',
   'legendary-resistance', 'bardic-inspiration', 'cutting-words', 'dark-ones-own-luck',
-  'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'dm-adjudication',
+  'stroke-of-luck', 'empowered-spell', 'stand-against-tide', 'plugin-choice', 'dm-adjudication',
+  'roll-confirmation',
 ])
 const COMBAT_INTERRUPT_STATUSES = new Set(['pending', 'waiting-for-dm', 'rolling', 'answered', 'done', 'rolled-back'])
 const COMBAT_INTERRUPT_PHASES = new Set(['before-action', 'after-roll', 'before-hit', 'before-damage', 'after-save', 'before-condition'])
@@ -1373,7 +1525,7 @@ export function fogPointState(fog, x, y) {
   return state
 }
 
-function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null) {
+function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
   const normalRangeFeet = Number.isFinite(viewer.visionRangeFeet)
@@ -1401,7 +1553,7 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
     return rayHeight >= segment.baseHeightFeet && rayHeight < segment.baseHeightFeet + segment.heightFeet
   })
   if (lineBlocked(viewer, target, fromElevation, toElevation)) return false
-  const ambient = geometry?.vision?.ambientLight ?? 'bright'
+  const ambient = lightingEnabled ? geometry?.vision?.ambientLight ?? 'bright' : 'bright'
   if (ambient !== 'bright') {
     let illuminated = ambient === 'dim'
     for (const source of map.tokens ?? []) {
@@ -1412,6 +1564,22 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
       if (distanceFeet <= lightRange && !lineBlocked(source, target, tokenElevationFeet(source), toElevation)) {
         illuminated = true
         break
+      }
+    }
+    if (!illuminated) {
+      for (const source of geometry?.lights ?? []) {
+        if (!source?.enabled || !Array.isArray(source.points) || !source.points[0]) continue
+        const point = source.points[0]
+        const distanceFeet = Math.hypot(target.x - point.x, target.y - point.y) / gridSize * feetPerCell
+        const lightRange = Math.max(0, Number(source.brightRadiusFeet) || 0) +
+          Math.max(0, Number(source.dimRadiusFeet) || 0)
+        if (
+          distanceFeet <= lightRange &&
+          !lineBlocked(point, target, Number(source.elevationFeet) || 0, toElevation)
+        ) {
+          illuminated = true
+          break
+        }
       }
     }
     const distanceFeet = distancePx / gridSize * feetPerCell
@@ -1526,7 +1694,14 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         const needVision = fogState === 'covered' || (dynamicVision && fogState !== 'revealed')
         const observingViewers = viewers.filter((viewer) =>
           !needVision ||
-          playerCanSeeToken(map, geometry, viewer, token, dynamicVision ? null : manualFallbackRangeFeet),
+          playerCanSeeToken(
+            map,
+            geometry,
+            viewer,
+            token,
+            dynamicVision ? null : manualFallbackRangeFeet,
+            dynamicVision,
+          ),
         )
         if (observingViewers.length === 0) return []
         const hiddenCheckTotal = tokenHiddenCheckTotal(token)
@@ -3722,9 +3897,20 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 400, { error: 'invalid-expected-revision', name })
           return true
         }
+        const playerCharacterWrite = name === 'characters' && ctx.accessRole === 'player' && authenticatedRoomMember
+        const combatActive = playerCharacterWrite ? await sharedCombatIsActiveForAuthority(ctx) : false
         const writeResult = await atomicWriteJsonStateCasLocked(filePath, parsedBody, {
           expectedRevision,
           writerId: req?.headers?.['x-stars-writer'],
+          mergeIncoming: playerCharacterWrite
+            ? (current, incoming) => mergePlayerCharactersStateForAuthority(
+                current,
+                incoming,
+                authenticatedRoomMember.memberId,
+                { combatActive },
+              )
+            : undefined,
+          validateIncoming: (candidate) => validateSharedStateShape(name, candidate),
         })
         if (writeResult.conflict) {
           res.writeHead(409, {
@@ -3741,6 +3927,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         }
         if (writeResult.stale) {
           writeJson(res, 200, { ok: true, applied: false, reason: 'stale', revision: writeResult.currentRevision })
+          return true
+        }
+        if (writeResult.invalid) {
+          writeJson(res, 422, { error: 'invalid-state', name, reason: writeResult.reason })
           return true
         }
         const updatedAt = Number(parsedBody?.updatedAt)

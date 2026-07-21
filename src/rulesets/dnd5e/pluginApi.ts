@@ -26,7 +26,11 @@ import type {
   Dnd5ePersistentAreaTriggerDeclaration,
   Dnd5ePluginEffectDuration,
 } from './persistentAreaTypes'
-import { normalizeDnd5ePersistentAreaVisual } from './persistentAreaTypes'
+import {
+  DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
+  DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
+  normalizeDnd5ePersistentAreaVisual,
+} from './persistentAreaTypes'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
 import {
@@ -765,7 +769,8 @@ function clonePersistentAreaTriggers(
   return triggers.map((trigger) => {
     if (
       !validId(trigger.id) || seen.has(trigger.id) ||
-      typeof trigger.label !== 'string' || !trigger.label.trim() || trigger.label.length > 120 ||
+      typeof trigger.label !== 'string' || !trigger.label.trim() ||
+      trigger.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
       !['on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end'].includes(trigger.timing) ||
       (trigger.timing === 'on-move-distance' && !finiteInteger(trigger.movementIntervalFeet, 1, 1_000)) ||
       (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) ||
@@ -790,7 +795,7 @@ function clonePersistentAreaTriggers(
       if (
         !(DND5E_STANDARD_CONDITION_IDS as readonly string[]).includes(condition.condition) ||
         !['source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save'].includes(duration.expiresAt) ||
-        (duration.remainingRounds != null && !finiteInteger(duration.remainingRounds, 1, 14_400)) ||
+        (duration.remainingRounds != null && !finiteInteger(duration.remainingRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS)) ||
         (duration.saveAbility != null && !ABILITY_KEYS.includes(duration.saveAbility)) ||
         (duration.saveDc != null && !finiteInteger(duration.saveDc, 1, 40)) ||
         (duration.expiresAt === 'target-turn-end-save' && (!duration.saveAbility || !duration.saveDc))
@@ -799,7 +804,8 @@ function clonePersistentAreaTriggers(
     return {
       ...trigger,
       label: trigger.label.trim(),
-      oncePerRound: trigger.oncePerRound !== false,
+      oncePerRound: trigger.oncePerTurn === true ? false : trigger.oncePerRound !== false,
+      oncePerTurn: trigger.oncePerTurn === true,
       damage: damage ? { ...damage, modifier: damage.modifier ?? 0 } : undefined,
       savingThrow: savingThrow ? { ...savingThrow } : undefined,
       condition: condition ? { ...condition, duration: { ...condition.duration } } : undefined,
@@ -989,7 +995,8 @@ export function registerDnd5eRulesPlugin(
         const area = definition.action.persistentArea
         if (area && (
           definition.action.targeting.kind !== 'area' || typeof area.label !== 'string' || !area.label.trim() ||
-          !finiteInteger(area.durationRounds, 1, 14_400) ||
+          area.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
+          !finiteInteger(area.durationRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS) ||
           (area.color != null && !/^#[0-9a-f]{6}$/i.test(area.color)) ||
           (area.visual != null && !normalizeDnd5ePersistentAreaVisual(area.visual))
         )) throw new Error(`Invalid plugin persistent area: ${featureId}`)
@@ -999,8 +1006,11 @@ export function registerDnd5eRulesPlugin(
           definition.action.targeting.kind !== 'area' ||
           !/^srd-5\.1:[a-z0-9][a-z0-9-]*$/.test(summon.monsterId) ||
           !getDnd5eSrdMonster(summon.monsterId) ||
-          !finiteInteger(summon.durationRounds, 1, 14_400) ||
-          (summon.label != null && (typeof summon.label !== 'string' || !summon.label.trim())) ||
+          !finiteInteger(summon.durationRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS) ||
+          (summon.label != null && (
+            typeof summon.label !== 'string' || !summon.label.trim() ||
+            summon.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH
+          )) ||
           (summon.side != null && summon.side !== 'ally' && summon.side !== 'enemy') ||
           !!area
         )) throw new Error(`Invalid plugin summon: ${featureId}`)

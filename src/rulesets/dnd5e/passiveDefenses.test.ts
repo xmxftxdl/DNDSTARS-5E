@@ -36,6 +36,13 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode({ ...barbarian, exhaustionLevel: 3 }, 'str')).toBe('normal')
   })
 
+  it('grants a dodging creature advantage on Dexterity saving throws', () => {
+    const dodging = creature({ classState: { dodgingTurnKey: 'combat:2:hero' } })
+    expect(dnd5eSavingThrowMode(dodging, 'dex')).toBe('advantage')
+    expect(dnd5eSavingThrowMode(dodging, 'con')).toBe('normal')
+    expect(dnd5eSavingThrowMode({ ...dodging, exhaustionLevel: 3 }, 'dex')).toBe('normal')
+  })
+
   it('applies Hunter Steel Will only against being frightened', () => {
     const hunter = creature({
       classId: 'ranger', subclassId: 'hunter', level: 7,

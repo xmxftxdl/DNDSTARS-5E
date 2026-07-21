@@ -15,6 +15,7 @@ import {
 } from './sharedSyncHealth'
 
 const SHARED_CLIENT_PROTOCOL_VERSION = 3
+export const SHARED_STATE_CLIENT_MAX_BYTES = 8 * 1024 * 1024
 const sharedResourceRevisions = new Map<string, number>()
 const sharedResourceWriteChains = new Map<string, Promise<void>>()
 
@@ -229,6 +230,20 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
     reportSharedIntegrityIssue({ resource: name, reason: `已阻止写入：${validation.reasons.join('；')}`, value: data })
     return
   }
+  let serializedBody: string
+  try {
+    serializedBody = JSON.stringify(validation.value)
+  } catch {
+    reportSharedIntegrityIssue({ resource: name, reason: '已阻止写入：共享状态无法序列化', value: data })
+    return
+  }
+  if (new TextEncoder().encode(serializedBody).byteLength > SHARED_STATE_CLIENT_MAX_BYTES) {
+    reportSharedIntegrityIssue({
+      resource: name,
+      reason: '已阻止写入：共享状态超过 8 MiB 上限；请移除或压缩人物立绘等大型内容',
+    })
+    return
+  }
   if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
   const expectedRevision = sharedResourceRevisions.get(name) ?? 0
   for (const api of sharedWriteApiCandidates()) {
@@ -243,7 +258,7 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
           ...sharedProtocolHeaders(),
           'X-Stars-Expected-Revision': String(expectedRevision),
         },
-        body: JSON.stringify(validation.value),
+        body: serializedBody,
       })
       const currentRevision = Number(response.headers.get('X-Stars-State-Revision'))
       if (response.status === 409) {
@@ -254,6 +269,14 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
         recordSharedConflict(name, expectedRevision, revision)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
+        return
+      }
+      if (response.status === 413) {
+        reportSharedIntegrityIssue({
+          resource: name,
+          reason: '服务端拒绝了超过容量上限的共享状态；请移除或压缩人物立绘等大型内容',
+          source: 'server',
+        })
         return
       }
       if (!response.ok) continue

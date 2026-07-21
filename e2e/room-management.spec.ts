@@ -90,10 +90,15 @@ test('DM can manage room capacity, membership and transfer authority from the da
     return value.role
   }, SESSION_KEY)).toBe('player')
 
-  const successorHeartbeat = await request.post(`${DM}/api/rooms/${created.roomId}/heartbeat`, {
-    data: { memberId: playerA.member.memberId, activePlugins: [] },
-  })
-  expect(successorHeartbeat.ok()).toBeTruthy()
-  expect(await successorHeartbeat.json()).toMatchObject({ member: { role: 'dm' } })
+  // 转让后的旧 DM 页面会立即发送一次身份降级心跳；等待同一房间写锁释放，
+  // 再确认继任者已经成为权威 DM。
+  await expect.poll(async () => {
+    const heartbeat = await request.post(`${DM}/api/rooms/${created.roomId}/heartbeat`, {
+      data: { memberId: playerA.member.memberId, activePlugins: [] },
+    })
+    if (!heartbeat.ok()) return `http-${heartbeat.status()}`
+    const body = await heartbeat.json() as { member?: { role?: string } }
+    return body.member?.role
+  }, { timeout: 20_000 }).toBe('dm')
   await context.close()
 })

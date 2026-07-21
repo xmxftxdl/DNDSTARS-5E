@@ -265,7 +265,7 @@ export default function Dnd5eClassCombatPanel({ character, canAct, targeting, pe
       />
 
       <Dnd5eBasicActionsPanel
-        canAct={canAct && turnEconomy.action.current > 0}
+        canAct={canAct && (turnEconomy.action.current > 0 || canContinueAttackAction)}
         pending={pending}
         targets={featureTargets}
         onAction={onBasicAction}

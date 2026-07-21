@@ -8,8 +8,10 @@ import type {
   Dnd5eRulesPluginManifest,
 } from './pluginApi'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
-import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './monsters'
+import { DND5E_DAMAGE_TYPES, getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
 import {
+  DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
+  DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaTriggerDeclaration,
   normalizeDnd5ePersistentAreaVisual,
   type Dnd5ePluginEffectDuration,
@@ -156,12 +158,25 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     )
     if (persistentArea && (
       feature.action?.targeting.kind !== 'area' || !persistentArea.label.trim() ||
+      persistentArea.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH ||
       !/^#[0-9a-f]{6}$/i.test(persistentArea.color ?? '#8b5cf6') ||
       !Number.isInteger(persistentArea.durationRounds) || persistentArea.durationRounds < 1 ||
-      persistentArea.durationRounds > 14_400 ||
+      persistentArea.durationRounds > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS ||
       (persistentArea.visual != null && !normalizeDnd5ePersistentAreaVisual(persistentArea.visual)) ||
       invalidPersistentAreaTriggers
     )) errors.push(`特性 ${feature.name || feature.id} 的持续区域声明无效。`)
+    const summon = feature.action?.summon
+    if (summon && (
+      feature.action?.economy === 'none' ||
+      feature.action?.targeting.kind !== 'area' ||
+      !/^srd-5\.1:[a-z0-9][a-z0-9-]*$/.test(summon.monsterId) ||
+      !getDnd5eSrdMonster(summon.monsterId) ||
+      !Number.isInteger(summon.durationRounds) || summon.durationRounds < 1 ||
+      summon.durationRounds > DND5E_DECLARATIVE_DURATION_MAX_ROUNDS ||
+      (summon.label != null && (!summon.label.trim() || summon.label.length > DND5E_DECLARATIVE_LABEL_MAX_LENGTH)) ||
+      (summon.side != null && summon.side !== 'ally' && summon.side !== 'enemy') ||
+      !!persistentArea
+    )) errors.push(`特性 ${feature.name || feature.id} 的召唤声明无效。`)
   }
   const headlessActionIds = new Set<string>()
   const effectlessMapActionIds = new Set(

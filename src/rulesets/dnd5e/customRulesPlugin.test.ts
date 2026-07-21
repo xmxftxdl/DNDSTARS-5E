@@ -192,6 +192,25 @@ describe('DM custom rules plugin builder', () => {
     expect(buildDnd5eCustomRulesPluginSource(value)).toContain('"timing": "on-enter"')
   })
 
+  it('validates summon declarations before exporting the plugin file', () => {
+    const value = draft()
+    value.features = [{
+      id: 'wolf-call', name: '唤狼', summary: '召唤测试。', description: '召唤一只狼。', automation: 'full',
+      action: {
+        id: 'wolf-call', label: '唤狼', economy: 'action',
+        targeting: { kind: 'area', template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 30 } },
+        summon: { monsterId: 'srd-5.1:wolf', durationRounds: 10, concentration: true },
+      },
+    }]
+    value.headlessActions = [{ id: 'wolf-call', label: '唤狼', effects: [] }]
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toEqual([])
+
+    value.features[0].action!.summon!.durationRounds = 0
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('特性 唤狼 的召唤声明无效。')
+    value.features[0].action!.summon = { monsterId: 'srd-5.1:not-a-monster', durationRounds: 10 }
+    expect(validateDnd5eCustomRulesPluginDraft(value)).toContain('特性 唤狼 的召唤声明无效。')
+  })
+
   it('rejects invalid or duplicate persistent-area trigger declarations before export', () => {
     const value = draft()
     value.features = [{
