@@ -38,6 +38,7 @@ export type SharedPlayerActionPatch = Pick<SharedPlayerActionState, 'type'> &
 export interface BuildSharedPlayerActionInput {
   mapId: string
   combatId?: string
+  roomMemberId?: string
   sourceMode: SharedPlayerActionState['sourceMode']
   actorTokenId: string
   characterId: string
@@ -54,6 +55,7 @@ export function buildSharedPlayerAction(input: BuildSharedPlayerActionInput): Sh
     id: `${input.mapId}:${prefix}:${input.now}:${input.seq}`,
     mapId: input.mapId,
     combatId: input.combatId,
+    ...(input.roomMemberId ? { roomMemberId: input.roomMemberId } : {}),
     sourceMode: input.sourceMode,
     status: 'pending',
     actorTokenId: input.actorTokenId,
@@ -87,6 +89,7 @@ export function normalizeRemotePlayerActionForDm(action: SharedPlayerActionState
 export function createSharedPlayerActionEnvelope(input: {
   mapId?: string
   combatId?: string
+  roomMemberId?: string
   sourceMode: SharedPlayerActionState['sourceMode']
   actorTokenId?: string
   characterId?: string
@@ -100,6 +103,7 @@ export function createSharedPlayerActionEnvelope(input: {
   return buildSharedPlayerAction({
     mapId: input.mapId,
     combatId: input.combatId,
+    roomMemberId: input.roomMemberId,
     sourceMode: input.sourceMode,
     actorTokenId: input.actorTokenId,
     characterId: input.characterId,
@@ -144,6 +148,7 @@ export function createDmLocalPlayerActionEnvelope(input: {
 export function createPlayerActionEnvelope(input: {
   mapId?: string
   combatId?: string
+  roomMemberId?: string
   turnCharacter?: Character | null
   currentInitiativeToken?: Token | null
   actorOverride?: { tokenId: string; characterId: string }
@@ -158,6 +163,7 @@ export function createPlayerActionEnvelope(input: {
   return createSharedPlayerActionEnvelope({
     mapId: input.mapId,
     combatId: input.combatId,
+    roomMemberId: input.roomMemberId,
     sourceMode: 'player',
     actorTokenId,
     characterId,

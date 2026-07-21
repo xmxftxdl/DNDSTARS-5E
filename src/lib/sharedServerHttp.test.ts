@@ -1144,3 +1144,87 @@ describe('room session capability tokens', () => {
     expect(rotatedToken.status).toBe(200)
   })
 })
+
+describe('room privacy projections and event channel ACLs', () => {
+  it('projects private state at the server boundary and rejects reversed event channels', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: 'Privacy boundary', displayName: 'DM', rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'privacy-dm-client', activePlugins: [],
+      }),
+    })
+    const created = await createdResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Player', clientId: 'privacy-player-client', activePlugins: [] }),
+    })
+    const joined = await joinedResponse.json() as {
+      member: { memberId: string; roomToken: string }
+    }
+    const query = `?room=${created.roomId}`
+    const dmHeaders = {
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken,
+    }
+    const playerHeaders = {
+      'Content-Type': 'application/json', 'X-Stars-Protocol': '4',
+      'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken,
+    }
+
+    const characterWrite = await fetch(`${offServer.base}/api/state/characters${query}`, {
+      method: 'PUT',
+      headers: dmHeaders,
+      body: JSON.stringify({
+        characters: [
+          {
+            id: 'owned', roomMemberId: joined.member.memberId, name: 'Owned', visibleToPlayers: true,
+            notes: 'own note', backstory: 'own story', dmNotes: 'dm secret', equipment: { armor: 'secret' },
+          },
+          {
+            id: 'party', roomMemberId: 'another-member', name: 'Party', visibleToPlayers: true,
+            notes: 'party private', backstory: 'party story', dmNotes: 'party dm secret',
+            equipment: { weapon: 'private blade' }, classResources: { spellSlot: { current: 1, max: 1 } },
+          },
+          { id: 'hidden', name: 'Hidden', visibleToPlayers: false, dmNotes: 'hidden secret' },
+        ],
+        updatedAt: Date.now(),
+      }),
+    })
+    expect(characterWrite.status).toBe(200)
+    const projectedCharacters = await (await fetch(
+      `${offServer.base}/api/state/characters${query}`,
+      { headers: playerHeaders },
+    )).json() as { characters: Array<Record<string, unknown>> }
+    expect(projectedCharacters.characters.map((character) => character.id)).toEqual(['owned', 'party'])
+    expect(projectedCharacters.characters[0]).toMatchObject({ notes: 'own note', backstory: 'own story' })
+    expect(projectedCharacters.characters[0]).not.toHaveProperty('dmNotes')
+    expect(projectedCharacters.characters[1]).not.toHaveProperty('notes')
+    expect(projectedCharacters.characters[1]).not.toHaveProperty('backstory')
+    expect(projectedCharacters.characters[1]).not.toHaveProperty('equipment')
+    expect(projectedCharacters.characters[1]).not.toHaveProperty('classResources')
+
+    expect((await fetch(`${offServer.base}/api/state/dice${query}`, {
+      method: 'PUT', headers: dmHeaders,
+      body: JSON.stringify({ id: 'dark-roll', mapId: 'map', sourceMode: 'dm', visibility: 'dm', values: [20], updatedAt: Date.now() }),
+    })).status).toBe(200)
+    const darkRoll = await fetch(`${offServer.base}/api/state/dice${query}`, { headers: playerHeaders })
+    expect(darkRoll.status).toBe(200)
+    expect(await darkRoll.json()).toBeNull()
+
+    const eventUrl = (channel: string) => `${offServer.base}/api/events/${channel}${query}`
+    const post = (channel: string, headers: Record<string, string>, body: object) => fetch(eventUrl(channel), {
+      method: 'POST', headers, body: JSON.stringify(body),
+    })
+    expect((await post('player-action-dm-to-player', playerHeaders, { id: 'forged-ack' })).status).toBe(403)
+    expect((await post('player-action-player-to-dm', dmHeaders, { id: 'forged-request' })).status).toBe(403)
+    expect((await post('shared-state-changed', playerHeaders, { name: 'maps' })).status).toBe(403)
+    expect((await post('unregistered-private-channel', dmHeaders, { secret: true })).status).toBe(404)
+    expect((await post('player-action-player-to-dm', playerHeaders, { id: 'valid-request', sourceMode: 'dm' })).status).toBe(200)
+  })
+})

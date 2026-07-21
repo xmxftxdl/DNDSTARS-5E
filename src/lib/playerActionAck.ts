@@ -35,6 +35,7 @@ export function buildPlayerActionAck(input: BuildPlayerActionAckInput): SharedPl
     mapId: input.mapId,
     combatId: input.combatId,
     actionId: input.action.id,
+    ...(input.action.roomMemberId ? { recipientMemberId: input.action.roomMemberId } : {}),
     status: input.status,
     reason: input.reason,
     acceptedPosition: input.acceptedPosition,

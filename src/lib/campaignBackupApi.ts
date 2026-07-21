@@ -54,7 +54,10 @@ async function campaignRequest(path: string, init?: RequestInit): Promise<Respon
         ...init,
         headers: {
           ...(init?.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }),
-          ...(session ? { 'X-Stars-Member': session.memberId } : {}),
+          ...(session ? {
+            'X-Stars-Member': session.memberId,
+            'X-Stars-Room-Token': session.roomToken,
+          } : {}),
           ...(accessToken ? { 'X-Stars-Token': accessToken } : {}),
           ...(init?.headers ?? {}),
         },

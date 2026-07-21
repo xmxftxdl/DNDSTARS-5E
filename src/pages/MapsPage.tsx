@@ -12810,6 +12810,7 @@ export default function MapsPage() {
     return createPlayerActionEnvelope({
       mapId: activeMap?.id,
       combatId: combatIdRef.current,
+      roomMemberId: roomSession?.memberId,
       turnCharacter,
       currentInitiativeToken,
       actorOverride,

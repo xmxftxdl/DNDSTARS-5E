@@ -226,6 +226,8 @@ export interface SharedPlayerActionState {
   id: string
   mapId: string
   combatId?: string
+  /** Server-stamped room membership used only for private transport routing. */
+  roomMemberId?: string
   sourceMode: 'player' | 'dm'
   status: 'pending' | 'done'
   type:
@@ -296,6 +298,8 @@ export interface SharedPlayerActionAckState {
   mapId: string
   combatId?: string
   actionId: string
+  /** Only this room member may receive the acknowledgement projection. */
+  recipientMemberId?: string
   status: 'accepted' | 'rejected'
   reason?: string
   acceptedPosition?: { x: number; y: number }

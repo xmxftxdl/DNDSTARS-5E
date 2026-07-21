@@ -41,6 +41,13 @@ import {
   parseRoomChatRollCommand,
   projectRoomChatForMember,
   projectRoomJournalForMember,
+  projectCharactersForRoomMember,
+  projectDiceForRoomMember,
+  projectDiceEventsForRoomMember,
+  projectCombatInterruptsForRoomMember,
+  projectCustomMonstersForRoomMember,
+  eventChannelOperationAllowed,
+  projectEventPayloadForViewer,
   projectGroupAbilityChecksForMember,
   pushBacklog,
   replaySlice,
@@ -50,6 +57,76 @@ import {
   withWriteLock,
   validateSharedStateShape,
 } from '../../scripts/shared-server-core.mjs'
+
+describe('member-specific shared state projections', () => {
+  const member = { memberId: 'player-a', accountId: 'ACCOUNTOWNER1' }
+  const characters = {
+    characters: [
+      { id: 'own', roomMemberId: 'player-a', visibleToPlayers: true, notes: 'own', dmNotes: 'dm' },
+      { id: 'account-own', ownerAccountId: 'ACCOUNTOWNER1', visibleToPlayers: true, dmNotes: 'dm' },
+      { id: 'party', roomMemberId: 'player-b', visibleToPlayers: true, notes: 'private', backstory: 'private', equipment: {}, dmNotes: 'dm' },
+      { id: 'hidden', visibleToPlayers: false, dmNotes: 'dm' },
+    ],
+    updatedAt: 1,
+  }
+
+  it('keeps owned sheets useful while removing DM and other-player private fields', () => {
+    const projected = projectCharactersForRoomMember(characters, member)
+    expect(projected.characters.map((character) => character.id)).toEqual(['own', 'account-own', 'party'])
+    expect(projected.characters[0]).toMatchObject({ notes: 'own' })
+    expect(projected.characters[0]).not.toHaveProperty('dmNotes')
+    expect(projected.characters[2]).not.toHaveProperty('notes')
+    expect(projected.characters[2]).not.toHaveProperty('backstory')
+    expect(projected.characters[2]).not.toHaveProperty('equipment')
+  })
+
+  it('removes dark rolls and routes only public or owned interrupt windows', () => {
+    expect(projectDiceForRoomMember({ visibility: 'dm', values: [20] })).toBeNull()
+    expect(projectDiceEventsForRoomMember({ events: [
+      { id: 'public', visibility: 'public' },
+      { id: 'dark', visibility: 'dm' },
+    ] }).events).toEqual([{ id: 'public', visibility: 'public' }])
+    const queue = {
+      interrupts: [
+        { id: 'dm', kind: 'dm-adjudication', actorCharId: 'own', payload: {} },
+        { id: 'legendary', kind: 'legendary-resistance', targetCharId: 'own', payload: {} },
+        { id: 'plugin-dm', kind: 'plugin-choice', actorCharId: 'own', payload: { audience: 'dm' } },
+        { id: 'public-roll', kind: 'roll-confirmation', payload: { visibility: 'public' } },
+        { id: 'dark-roll', kind: 'roll-confirmation', payload: { visibility: 'dm-only' } },
+        { id: 'own', kind: 'shield-spell', targetCharId: 'own', payload: {} },
+        { id: 'other', kind: 'shield-spell', targetCharId: 'party', payload: {} },
+      ],
+    }
+    expect(projectCombatInterruptsForRoomMember(queue, member, characters).interrupts.map((entry) => entry.id))
+      .toEqual(['public-roll', 'own'])
+    expect(projectCombatInterruptsForRoomMember(queue, member, characters, true).interrupts).toEqual([])
+  })
+
+  it('does not distribute the DM custom-monster source catalogue', () => {
+    expect(projectCustomMonstersForRoomMember({ schemaVersion: 1, monsters: [{ id: 'secret' }] }).monsters).toEqual([])
+  })
+
+  it('keeps private SSE traffic sequenced without exposing its payload', () => {
+    const playerRequest = {
+      channel: 'player-action-player-to-dm', payload: { id: 'private-action', secret: 'hidden' },
+      sequence: 17, streamId: 'stream', emittedAt: 1,
+    }
+    expect(projectEventPayloadForViewer('_all', playerRequest, { role: 'dm', memberId: 'dm' }))
+      .toEqual(playerRequest)
+    expect(projectEventPayloadForViewer('_all', playerRequest, { role: 'player', memberId: 'player-b' }))
+      .toEqual({ ...playerRequest, channel: '_private', payload: null })
+    const targetedAck = {
+      channel: 'player-action-dm-to-player', payload: { recipientMemberId: 'player-a', actionId: 'action' },
+      sequence: 18, streamId: 'stream', emittedAt: 2,
+    }
+    expect(projectEventPayloadForViewer('_all', targetedAck, { role: 'player', memberId: 'player-a' }))
+      .toEqual(targetedAck)
+    expect(projectEventPayloadForViewer('_all', targetedAck, { role: 'player', memberId: 'player-b' }))
+      .toEqual({ ...targetedAck, channel: '_private', payload: null })
+    expect(eventChannelOperationAllowed('shared-state-changed', 'publish', 'dm')).toBe(false)
+    expect(eventChannelOperationAllowed('unregistered', 'subscribe', 'dm')).toBe(false)
+  })
+})
 
 describe('authoritative campaign time', () => {
   const host = { role: 'dm', memberId: 'dm-member', displayName: '主持人' }

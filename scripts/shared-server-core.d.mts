@@ -91,6 +91,23 @@ export function projectRoomJournalForMember(
   campaignEntries: Array<Record<string, unknown>>
   sharedNotes: Array<Record<string, unknown>>
 }
+export function projectCharactersForRoomMember(
+  value: Record<string, unknown>,
+  member: Record<string, unknown>,
+): Record<string, unknown> & { characters: Array<Record<string, unknown>> }
+export function projectDiceForRoomMember(value: Record<string, unknown>): Record<string, unknown> | null
+export function projectDiceEventsForRoomMember(
+  value: Record<string, unknown>,
+): Record<string, unknown> & { events: Array<Record<string, unknown>> }
+export function projectCombatInterruptsForRoomMember(
+  value: Record<string, unknown>,
+  member: Record<string, unknown>,
+  characterState: Record<string, unknown> | null,
+  spectator?: boolean,
+): Record<string, unknown> & { interrupts: Array<Record<string, unknown>> }
+export function projectCustomMonstersForRoomMember(
+  value: Record<string, unknown>,
+): Record<string, unknown> & { monsters: Array<Record<string, unknown>> }
 export function mutateGroupAbilityChecksState(
   current: unknown,
   mutation: Record<string, unknown>,
@@ -116,6 +133,16 @@ export function capEventChannels<T>(
   limit?: number,
   protectedChannels?: Set<string> | null,
 ): string[]
+export function eventChannelOperationAllowed(
+  channel: string,
+  operation: 'publish' | 'subscribe',
+  role: 'open' | 'dm' | 'player' | 'spectator',
+): boolean
+export function projectEventPayloadForViewer(
+  channel: string,
+  payload: unknown,
+  viewer: { role: 'open' | 'dm' | 'player' | 'spectator'; memberId?: string },
+): unknown
 
 export class LockTimeoutError extends Error {
   code: 'ELOCKTIMEOUT'

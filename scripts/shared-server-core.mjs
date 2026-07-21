@@ -21,6 +21,15 @@ export const EVENT_REPLAY_LIMIT = 100
 // Map 插入序淘汰最旧者（确定性 COUNT-CAP，非 TTL）。有活跃订阅者的 channel 受保护不被淘汰。
 export const EVENT_CHANNEL_LIMIT = 256
 export const SHARED_STATE_CHANGED_CHANNEL = 'shared-state-changed'
+const EVENT_CHANNEL_POLICIES = Object.freeze({
+  [SHARED_STATE_CHANGED_CHANNEL]: { publish: [], subscribe: ['dm', 'player', 'spectator'] },
+  'player-action-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
+  'player-action-dm-to-player': { publish: ['dm'], subscribe: ['player'] },
+  'dice-roll-request-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
+  'dice-roll-request-dm-to-player': { publish: ['dm'], subscribe: ['player', 'spectator'] },
+  'dnd5e-inventory-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
+  'map-tabletop': { publish: ['dm', 'player'], subscribe: ['dm', 'player', 'spectator'] },
+})
 // Browser background tabs can throttle a 5-second interval to roughly one
 // minute. Presence therefore needs enough grace to distinguish throttling or a
 // brief network hand-off from a genuinely abandoned room. Explicit DM leave
@@ -823,7 +832,7 @@ export function extractSecret(req) {
 function applyCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
   res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
 }
 
@@ -854,6 +863,46 @@ function browserProtocolIsCurrent(req) {
 
 function eventStorageKey(ctx, channel) {
   return `${ctx.roomId ?? 'default'}::${channel}`
+}
+
+function normalizedEventRole(role) {
+  return role === 'open' ? 'dm' : role
+}
+
+export function eventChannelOperationAllowed(channel, operation, role) {
+  if (channel === '_all') return operation === 'subscribe'
+  const policy = EVENT_CHANNEL_POLICIES[channel]
+  if (!policy) return false
+  return policy[operation].includes(normalizedEventRole(role))
+}
+
+function stampClientEvent(channel, payload, member) {
+  if (!plainObject(payload)) return payload
+  if (channel === 'player-action-player-to-dm') {
+    return { ...payload, sourceMode: 'player', roomMemberId: member?.memberId }
+  }
+  if (channel === 'dnd5e-inventory-player-to-dm') {
+    return { ...payload, sourceMode: 'player', memberId: member?.memberId }
+  }
+  return payload
+}
+
+function eventPayloadVisibleToViewer(channel, payload, viewer) {
+  const role = normalizedEventRole(viewer?.role)
+  if (!eventChannelOperationAllowed(channel, 'subscribe', role)) return false
+  if (channel === 'player-action-dm-to-player') {
+    return typeof payload?.recipientMemberId === 'string' && payload.recipientMemberId === viewer?.memberId
+  }
+  return true
+}
+
+export function projectEventPayloadForViewer(channel, payload, viewer) {
+  if (channel !== '_all') {
+    return eventPayloadVisibleToViewer(channel, payload, viewer) ? payload : undefined
+  }
+  if (!plainObject(payload) || typeof payload.channel !== 'string') return undefined
+  if (eventPayloadVisibleToViewer(payload.channel, payload.payload, viewer)) return payload
+  return { ...payload, channel: '_private', payload: null }
 }
 
 function nextRoomEventSequence(ctx) {
@@ -1446,6 +1495,86 @@ export function projectRoomJournalForMember(value, memberId, isDm = false) {
     updatedAt: Number(value?.updatedAt) || 0,
     ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
   }
+}
+
+function characterOwnedByRoomMember(character, member) {
+  return character?.roomMemberId === member?.memberId || (
+    typeof member?.accountId === 'string' && member.accountId && character?.ownerAccountId === member.accountId
+  )
+}
+
+export function projectCharactersForRoomMember(value, member) {
+  const characters = Array.isArray(value?.characters) ? value.characters : []
+  return {
+    ...value,
+    characters: characters
+      .filter((character) => characterOwnedByRoomMember(character, member) || character?.visibleToPlayers !== false)
+      .map((character) => {
+        const projected = { ...character }
+        delete projected.dmNotes
+        if (!characterOwnedByRoomMember(character, member)) {
+          delete projected.notes
+          delete projected.backstory
+          delete projected.dnd5eInventory
+          delete projected.equipment
+          delete projected.classResources
+          delete projected.dnd5eAbilityGeneration
+          delete projected.dnd5eCreationRecommendation
+        }
+        return projected
+      }),
+  }
+}
+
+export function projectDiceForRoomMember(value) {
+  return value?.visibility === 'dm' ? null : value
+}
+
+export function projectDiceEventsForRoomMember(value) {
+  return {
+    ...value,
+    events: (Array.isArray(value?.events) ? value.events : []).filter((event) => event?.visibility !== 'dm'),
+  }
+}
+
+export function projectCombatInterruptsForRoomMember(value, member, characterState, spectator = false) {
+  const characters = Array.isArray(characterState?.characters) ? characterState.characters : []
+  const ownedCharacterIds = new Set(characters
+    .filter((character) => characterOwnedByRoomMember(character, member))
+    .map((character) => character.id))
+  const visible = (Array.isArray(value?.interrupts) ? value.interrupts : []).filter((interrupt) => {
+    if (spectator || !plainObject(interrupt)) return false
+    if (interrupt.kind === 'dm-adjudication' || interrupt.kind === 'legendary-resistance') return false
+    if (interrupt.kind === 'plugin-choice' && interrupt.payload?.audience === 'dm') return false
+    if (interrupt.kind === 'roll-confirmation') return interrupt.payload?.visibility === 'public'
+    return ownedCharacterIds.has(interrupt.actorCharId) || ownedCharacterIds.has(interrupt.targetCharId)
+  })
+  return { ...value, interrupts: visible }
+}
+
+function projectPlayerActionResourceForRoomMember(name, value, member) {
+  if (name === 'player-action' || name === 'player-action-processed') return null
+  if (name === 'player-action-requests') return { ...value, requests: [] }
+  if (name === 'player-action-ack') {
+    return value?.recipientMemberId === member?.memberId ? value : null
+  }
+  return value
+}
+
+function stampPlayerActionStateForRoomMember(name, value, member) {
+  if (!member?.memberId || !plainObject(value)) return value
+  const stamp = (action) => plainObject(action)
+    ? { ...action, sourceMode: 'player', roomMemberId: member.memberId }
+    : action
+  if (name === 'player-action') return stamp(value)
+  if (name === 'player-action-requests') {
+    return { ...value, requests: (Array.isArray(value.requests) ? value.requests : []).map(stamp) }
+  }
+  return value
+}
+
+export function projectCustomMonstersForRoomMember(value) {
+  return { ...value, monsters: [] }
 }
 
 export function mutateRoomJournalState(current, mutation, now, member, context = {}) {
@@ -4521,9 +4650,10 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
   return true
 }
 
-function addEventClient(ctx, channel, res) {
+function addEventClient(ctx, channel, res, viewer) {
   const storageKey = eventStorageKey(ctx, channel)
   const clients = ctx.eventClients.get(storageKey) ?? new Set()
+  res._starsEventViewer = viewer
   clients.add(res)
   ctx.eventClients.set(storageKey, clients)
   res.writeHead(200, {
@@ -4540,9 +4670,11 @@ function addEventClient(ctx, channel, res) {
   // 只回放最近 EVENT_REPLAY_LIMIT 条，而非整 backlog。
   const backlog = replaySlice(ctx.eventBacklog.get(storageKey) ?? [])
   for (const payload of backlog) {
-    res.write(`event: message\ndata: ${JSON.stringify(payload)}\n\n`)
+    const projected = projectEventPayloadForViewer(channel, payload, viewer)
+    if (projected !== undefined) res.write(`event: message\ndata: ${JSON.stringify(projected)}\n\n`)
   }
   return () => {
+    delete res._starsEventViewer
     clients.delete(res)
     if (clients.size === 0) ctx.eventClients.delete(storageKey)
   }
@@ -4558,8 +4690,10 @@ function publishEventToChannel(ctx, channel, payload) {
   capEventChannels(ctx.eventBacklog, EVENT_CHANNEL_LIMIT, new Set(ctx.eventClients.keys()))
   const clients = ctx.eventClients.get(storageKey)
   if (!clients) return
-  const text = `event: message\ndata: ${JSON.stringify(payload)}\n\n`
-  for (const client of clients) client.write(text)
+  for (const client of clients) {
+    const projected = projectEventPayloadForViewer(channel, payload, client._starsEventViewer)
+    if (projected !== undefined) client.write(`event: message\ndata: ${JSON.stringify(projected)}\n\n`)
+  }
 }
 
 function publishEvent(ctx, channel, payload) {
@@ -4765,7 +4899,15 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     const eventMatch = parsed.pathname.match(/^\/api\/events\/([a-zA-Z0-9_-]+)$/)
     if (eventMatch) {
       const channel = safeName(eventMatch[1])
+      const viewer = {
+        role: normalizedEventRole(ctx.accessRole),
+        memberId: authenticatedRoomMember?.memberId,
+      }
       if (req.method === 'DELETE') {
+        if (channel !== '_all' && !EVENT_CHANNEL_POLICIES[channel]) {
+          writeJson(res, 404, { error: 'forbidden' })
+          return true
+        }
         if (channel === '_all') {
           const prefix = `${roomId}::`
           for (const key of [...ctx.eventBacklog.keys()]) {
@@ -4777,11 +4919,19 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (req.method === 'GET') {
-        const remove = addEventClient(ctx, channel, res)
+        if (!eventChannelOperationAllowed(channel, 'subscribe', viewer.role)) {
+          writeJson(res, EVENT_CHANNEL_POLICIES[channel] || channel === '_all' ? 403 : 404, { error: 'forbidden' })
+          return true
+        }
+        const remove = addEventClient(ctx, channel, res, viewer)
         req.on('close', remove)
         return true
       }
       if (req.method === 'POST') {
+        if (!eventChannelOperationAllowed(channel, 'publish', viewer.role)) {
+          writeJson(res, EVENT_CHANNEL_POLICIES[channel] ? 403 : 404, { error: 'forbidden' })
+          return true
+        }
         const body = await readBody(req)
         let payload = JSON.parse(body.toString('utf8'))
         if (channel === MAP_TABLETOP_CHANNEL) {
@@ -4796,6 +4946,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           }
           payload = normalized.event
         }
+        payload = stampClientEvent(channel, payload, authenticatedRoomMember)
         publishEvent(ctx, channel, payload)
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end('{"ok":true}')
@@ -5094,6 +5245,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 422, { error: 'state-corrupted', name, reason: validation.reason, quarantineId })
           return true
         }
+        const storedRevision = sharedStateRevision(value)
         let roomMember = authenticatedRoomMember
         let playerRead = ctx.accessRole === 'player' || ctx.accessRole === 'spectator'
         if ((ctx.roomId ?? 'default') !== 'default' && !roomMember) {
@@ -5110,6 +5262,22 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'group-ability-checks') value = projectGroupAbilityChecksForMember(value, roomMember?.memberId ?? '', false)
+        if (playerRead && name === 'characters') value = projectCharactersForRoomMember(value, roomMember)
+        if (playerRead && name === 'dice') value = projectDiceForRoomMember(value)
+        if (playerRead && name === 'dice-events') value = projectDiceEventsForRoomMember(value)
+        if (playerRead && name === 'combat-interrupts') {
+          const characters = await readCharactersForProjection(ctx)
+          value = projectCombatInterruptsForRoomMember(
+            value,
+            roomMember,
+            characters.corrupted ? null : characters.value,
+            ctx.accessRole === 'spectator',
+          )
+        }
+        if (playerRead && name === 'custom-monsters') value = projectCustomMonstersForRoomMember(value)
+        if (playerRead && ['player-action', 'player-action-requests', 'player-action-processed', 'player-action-ack'].includes(name)) {
+          value = projectPlayerActionResourceForRoomMember(name, value, roomMember)
+        }
         if (playerRead && name === 'maps') {
           const geometry = await readMapGeometryForProjection(ctx)
           const fog = await readMapFogForProjection(ctx)
@@ -5134,6 +5302,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
               campaignTime.worldMinute,
             )
           }
+        }
+        if (value == null) {
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Stars-State-Revision': String(storedRevision),
+          })
+          res.end('null')
+          return true
         }
         try {
           const revision = sharedStateRevision(value)
@@ -5175,6 +5351,9 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           const quarantineId = await quarantineSharedState(ctx, name, body.toString('utf8'), 'invalid-json-upload')
           writeJson(res, 400, { error: 'invalid-json', name, quarantineId })
           return true
+        }
+        if (ctx.accessRole === 'player' && authenticatedRoomMember) {
+          parsedBody = stampPlayerActionStateForRoomMember(name, parsedBody, authenticatedRoomMember)
         }
         if (parsedBody?._deleted === true) {
           writeJson(res, 422, { error: 'reserved-state-marker', name })
