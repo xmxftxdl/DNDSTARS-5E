@@ -32,6 +32,7 @@ describe('D&D 5e map helpers', () => {
       roomName: '测试房间',
       rulesetId: 'dnd5e-2014-srd-5.1',
       memberId: 'dm-member',
+      roomToken: 'room-token-abcdefghijklmnopqrstuvwxyz-1234567890',
       clientId: 'dm-client-id',
       role: 'dm',
       displayName: 'DM',

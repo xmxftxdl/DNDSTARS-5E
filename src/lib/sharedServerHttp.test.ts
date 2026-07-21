@@ -108,12 +108,12 @@ describe('观战席位与地图桌面事件权限', () => {
         clientId: 'tabletop-dm-client', activePlugins: [], maxPlayers: 1,
       }),
     })
-    const created = await createdResponse.json() as { roomId: string; member: { memberId: string } }
+    const created = await createdResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const join = async (body: Record<string, unknown>) => {
       const response = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
-      return { response, body: await response.json() as { member: { memberId: string; role: string; slot?: string } } }
+      return { response, body: await response.json() as { member: { memberId: string; roomToken: string; role: string; slot?: string } } }
     }
     const spectator = await join({
       displayName: '观战者', clientId: 'tabletop-spectator-client', activePlugins: [], role: 'spectator',
@@ -130,27 +130,27 @@ describe('观战席位与地图桌面事件权限', () => {
     expect(preview).toMatchObject({ playerCount: 1, spectatorCount: 1 })
 
     const roomQuery = `room=${created.roomId}`
-    const protocol = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '3' }
+    const protocol = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '4' }
     const spectatorWrite = await fetch(`${offServer.base}/api/state/characters?${roomQuery}`, {
       method: 'PUT',
-      headers: { ...protocol, 'X-Stars-Member': spectator.body.member.memberId },
+      headers: { ...protocol, 'X-Stars-Member': spectator.body.member.memberId, 'X-Stars-Room-Token': spectator.body.member.roomToken },
       body: JSON.stringify({ characters: [], updatedAt: Date.now() }),
     })
     expect(spectatorWrite.status).toBe(403)
 
     const eventUrl = `${offServer.base}/api/events/map-tabletop?${roomQuery}`
     const playerPing = await fetch(eventUrl, {
-      method: 'POST', headers: { ...protocol, 'X-Stars-Member': player.body.member.memberId },
+      method: 'POST', headers: { ...protocol, 'X-Stars-Member': player.body.member.memberId, 'X-Stars-Room-Token': player.body.member.roomToken },
       body: JSON.stringify({ type: 'ping', mapId: 'map-1', point: { x: 10, y: 20 } }),
     })
     expect(playerPing.status).toBe(200)
     const playerFocus = await fetch(eventUrl, {
-      method: 'POST', headers: { ...protocol, 'X-Stars-Member': player.body.member.memberId },
+      method: 'POST', headers: { ...protocol, 'X-Stars-Member': player.body.member.memberId, 'X-Stars-Room-Token': player.body.member.roomToken },
       body: JSON.stringify({ type: 'focus', mapId: 'map-1', point: { x: 10, y: 20 } }),
     })
     expect(playerFocus.status).toBe(403)
     const dmFocus = await fetch(eventUrl, {
-      method: 'POST', headers: { ...protocol, 'X-Stars-Member': created.member.memberId },
+      method: 'POST', headers: { ...protocol, 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
       body: JSON.stringify({ type: 'focus', mapId: 'map-1', point: { x: 10, y: 20 } }),
     })
     expect(dmFocus.status).toBe(200)
@@ -168,14 +168,14 @@ describe('地图几何的房间权限与安全投影', () => {
       }),
     })
     expect(createdResponse.status).toBe(201)
-    const created = await createdResponse.json() as { roomId: string; member: { memberId: string } }
+    const created = await createdResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ displayName: '侦察者', clientId: 'geometry-player-client', activePlugins: [] }),
     })
     expect(joinedResponse.status).toBe(200)
-    const joined = await joinedResponse.json() as { member: { memberId: string } }
+    const joined = await joinedResponse.json() as { member: { memberId: string; roomToken: string } }
     const stateUrl = (name: string) => `${offServer.base}/api/state/${name}?room=${created.roomId}`
     const common = {
       label: '石制结构', blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
@@ -205,7 +205,7 @@ describe('地图几何的房间权限与安全投影', () => {
         ],
       }],
     }
-    const dmHeaders = { 'Content-Type': 'application/json', 'X-Stars-Member': created.member.memberId }
+    const dmHeaders = { 'Content-Type': 'application/json', 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken }
     expect((await fetch(stateUrl('map-geometry'), {
       method: 'PUT', headers: dmHeaders, body: JSON.stringify(geometry),
     })).status).toBe(200)
@@ -214,7 +214,7 @@ describe('地图几何的房间权限与安全投影', () => {
     })).status).toBe(200)
     expect((await fetch(stateUrl('maps'))).status).toBe(403)
 
-    const playerHeaders = { 'X-Stars-Member': joined.member.memberId }
+    const playerHeaders = { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken }
     expect((await fetch(stateUrl('maps'), {
       method: 'PUT', headers: { ...playerHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(maps),
     })).status).toBe(403)
@@ -231,7 +231,7 @@ describe('地图几何的房间权限与安全投影', () => {
     expect(playerGeometryText).toContain('"kind":"wall"')
 
     const dmMaps = await (await fetch(stateUrl('maps'), {
-      headers: { 'X-Stars-Member': created.member.memberId },
+      headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     })).json() as { maps: Array<{ tokens: Array<{ id: string }> }> }
     expect(dmMaps.maps[0].tokens.map((token) => token.id)).toEqual(['hero', 'seen', 'hidden'])
   })
@@ -263,7 +263,7 @@ describe('账号恢复与账号角色库协议', () => {
       }),
     })
     expect(roomResponse.status).toBe(201)
-    const room = await roomResponse.json() as { roomId: string; member: { memberId: string } }
+    const room = await roomResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
 
     const joinResponse = await fetch(`${offServer.base}/api/rooms/${room.roomId}/join`, {
       method: 'POST',
@@ -274,7 +274,7 @@ describe('账号恢复与账号角色库协议', () => {
       }),
     })
     expect(joinResponse.status).toBe(200)
-    const joined = await joinResponse.json() as { member: { memberId: string } }
+    const joined = await joinResponse.json() as { member: { memberId: string; roomToken: string } }
 
     const character = {
       id: 'cloud-character-1', name: '云端勇士', rulesetId: 'dnd5e-2014-srd-5.1',
@@ -300,7 +300,10 @@ describe('账号恢复与账号角色库协议', () => {
 
     const leave = await fetch(`${offServer.base}/api/rooms/${room.roomId}/leave`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Stars-Account-Token': player.session.sessionToken },
+      headers: {
+        'Content-Type': 'application/json', 'X-Stars-Account-Token': player.session.sessionToken,
+        'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken,
+      },
       body: JSON.stringify({ memberId: joined.member.memberId }),
     })
     expect(leave.status).toBe(200)
@@ -352,7 +355,7 @@ describe('P2 — 房间规则包原子升级', () => {
     expect(createResponse.status).toBe(201)
     const created = await createResponse.json() as {
       roomId: string
-      member: { memberId: string }
+      member: { memberId: string; roomToken: string }
     }
     const pluginId = 'com.example.atomic-upgrade'
 
@@ -365,6 +368,7 @@ describe('P2 — 房间规则包原子升级', () => {
           headers: {
             'Content-Type': 'text/javascript',
             'X-Stars-Member': created.member.memberId,
+            'X-Stars-Room-Token': created.member.roomToken,
             'X-Stars-Plugin-Version': version,
             'X-Stars-Plugin-State-Schema': String(stateSchemaVersion),
             'X-Stars-Plugin-Integrity': integrity,
@@ -386,7 +390,7 @@ describe('P2 — 房间规则包原子升级', () => {
 
     const initialStateResponse = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}/migration-state`,
-      { headers: { 'X-Stars-Member': created.member.memberId } },
+      { headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken } },
     )
     expect(initialStateResponse.status).toBe(200)
     const initialState = await initialStateResponse.json() as { rulesRevision: number; installed: boolean; hasState: boolean }
@@ -396,7 +400,11 @@ describe('P2 — 房间规则包原子升级', () => {
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}/activate`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Member': created.member.memberId,
+          'X-Stars-Room-Token': created.member.roomToken,
+        },
         body: JSON.stringify({
           memberId: created.member.memberId,
           expectedRulesRevision: 1,
@@ -422,7 +430,11 @@ describe('P2 — 房间规则包原子升级', () => {
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}/activate`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Member': created.member.memberId,
+          'X-Stars-Room-Token': created.member.roomToken,
+        },
         body: JSON.stringify({
           memberId: created.member.memberId,
           expectedRulesRevision: 1,
@@ -438,7 +450,7 @@ describe('P2 — 房间规则包原子升级', () => {
     expect(await staleActivation.json()).toMatchObject({ error: 'rules-revision-conflict' })
 
     const afterConflict = await fetch(`${offServer.base}/api/rooms/${created.roomId}/rules`, {
-      headers: { 'X-Stars-Member': created.member.memberId },
+      headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     })
     expect(await afterConflict.json()).toMatchObject({
       revision: 2,
@@ -447,7 +459,7 @@ describe('P2 — 房间规则包原子升级', () => {
 
     const migrationResponse = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}/migration-state`,
-      { headers: { 'X-Stars-Member': created.member.memberId } },
+      { headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken } },
     )
     const migration = await migrationResponse.json() as {
       rulesRevision: number
@@ -460,7 +472,11 @@ describe('P2 — 房间规则包原子升级', () => {
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}/activate`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Member': created.member.memberId,
+          'X-Stars-Room-Token': created.member.roomToken,
+        },
         body: JSON.stringify({
           memberId: created.member.memberId,
           expectedRulesRevision: migration.rulesRevision,
@@ -480,7 +496,7 @@ describe('P2 — 房间规则包原子升级', () => {
 
     const download = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}`,
-      { headers: { 'X-Stars-Member': created.member.memberId } },
+      { headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken } },
     )
     expect(download.status).toBe(200)
     expect(download.headers.get('x-stars-plugin-state-schema')).toBe('2')
@@ -499,7 +515,7 @@ describe('房间大厅协议', () => {
       }),
     })
     expect(createResponse.status).toBe(201)
-    const created = await createResponse.json() as { roomId: string; member: { memberId: string } }
+    const created = await createResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const roomPath = `${offServer.base}/api/rooms/${created.roomId}`
     const clientId = `resume-player-${Date.now()}`
     const joinedResponse = await fetch(`${roomPath}/join`, {
@@ -507,15 +523,19 @@ describe('房间大厅协议', () => {
       body: JSON.stringify({ displayName: '重连玩家', clientId }),
     })
     expect(joinedResponse.status).toBe(200)
-    const joined = await joinedResponse.json() as { member: { memberId: string; slot: string } }
+    const joined = await joinedResponse.json() as { member: { memberId: string; roomToken: string; slot: string } }
 
     const roster = () => fetch(`${roomPath}/roster`, {
-      headers: { 'X-Stars-Member': created.member.memberId },
+      headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     }).then((response) => response.json()) as Promise<{ players: Array<{ memberId: string }> }>
     expect((await roster()).players.map((player) => player.memberId)).toEqual([joined.member.memberId])
 
     expect((await fetch(`${roomPath}/leave`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': joined.member.roomToken,
+      },
       body: JSON.stringify({ memberId: joined.member.memberId }),
     })).status).toBe(200)
     expect((await roster()).players).toEqual([
@@ -556,7 +576,7 @@ describe('房间大厅协议', () => {
     expect(createResponse.status).toBe(201)
     const created = await createResponse.json() as {
       roomId: string
-      member: { memberId: string; role: string }
+      member: { memberId: string; roomToken: string; role: string }
       rules: { requiredPlugins: unknown[]; member: { ready: boolean } }
     }
     expect(created.member.role).toBe('dm')
@@ -588,6 +608,7 @@ describe('房间大厅协议', () => {
         headers: {
           'Content-Type': 'text/javascript',
           'X-Stars-Member': created.member.memberId,
+          'X-Stars-Room-Token': created.member.roomToken,
           'X-Stars-Plugin-Version': roomPlugin.version,
           'X-Stars-Plugin-Integrity': roomPlugin.integrity,
           'X-Stars-Plugin-Filename': encodeURIComponent('room-rules.dndstars5e'),
@@ -627,7 +648,7 @@ describe('房间大厅协议', () => {
     ))
     expect(joins.map((response) => response.status).sort()).toEqual([200, 200, 200, 409])
     const successful = await Promise.all(joins.filter((response) => response.ok).map((response) => response.json())) as Array<{
-      member: { memberId: string; role: string; slot: string }
+      member: { memberId: string; roomToken: string; role: string; slot: string }
       rules: { member: { ready: boolean } }
     }>
     expect(successful.map((result) => result.member.slot).sort()).toEqual(['player1', 'player2', 'player3'])
@@ -636,27 +657,31 @@ describe('房间大厅协议', () => {
 
     const downloadResponse = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${roomPlugin.id}`,
-      { headers: { 'X-Stars-Member': successful[0].member.memberId } },
+      { headers: { 'X-Stars-Member': successful[0].member.memberId, 'X-Stars-Room-Token': successful[0].member.roomToken } },
     )
     expect(downloadResponse.status).toBe(200)
     expect(Buffer.from(await downloadResponse.arrayBuffer())).toEqual(pluginBytes)
     expect(downloadResponse.headers.get('x-stars-plugin-integrity')).toBe(roomPlugin.integrity)
 
     const rulesResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/rules`, {
-      headers: { 'X-Stars-Member': successful[0].member.memberId },
+      headers: { 'X-Stars-Member': successful[0].member.memberId, 'X-Stars-Room-Token': successful[0].member.roomToken },
     })
     expect(rulesResponse.status).toBe(200)
     expect(await rulesResponse.json()).toMatchObject({ requiredPlugins: [roomPlugin] })
 
     const forbiddenRulesUpdate = await fetch(`${offServer.base}/api/rooms/${created.roomId}/rules`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': successful[0].member.memberId,
+        'X-Stars-Room-Token': successful[0].member.roomToken,
+      },
       body: JSON.stringify({ memberId: successful[0].member.memberId, requiredPlugins: [] }),
     })
     expect(forbiddenRulesUpdate.status).toBe(403)
 
     const rosterResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/roster`, {
-      headers: { 'X-Stars-Member': created.member.memberId },
+      headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },
     })
     expect(rosterResponse.status).toBe(200)
     const roster = await rosterResponse.json() as {
@@ -671,25 +696,29 @@ describe('房间大厅协议', () => {
 
     const deletePluginResponse = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${roomPlugin.id}`,
-      { method: 'DELETE', headers: { 'X-Stars-Member': created.member.memberId } },
+      { method: 'DELETE', headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken } },
     )
     expect(deletePluginResponse.status).toBe(200)
     expect(await deletePluginResponse.json()).toMatchObject({ requiredPlugins: [] })
     const pluginSafetySnapshots = await fetch(
       `${offServer.base}/api/campaign/snapshots?room=${created.roomId}`,
-      { headers: { 'X-Stars-Member': created.member.memberId } },
+      { headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken } },
     )
     expect(pluginSafetySnapshots.status).toBe(200)
     expect((await pluginSafetySnapshots.json() as { snapshots: Array<{ kind: string }> }).snapshots
       .filter((snapshot) => snapshot.kind === 'pre-plugin-change')).toHaveLength(2)
     expect((await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${roomPlugin.id}`,
-      { headers: { 'X-Stars-Member': successful[0].member.memberId } },
+      { headers: { 'X-Stars-Member': successful[0].member.memberId, 'X-Stars-Room-Token': successful[0].member.roomToken } },
     )).status).toBe(404)
 
     const closeResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/leave`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': created.member.memberId,
+        'X-Stars-Room-Token': created.member.roomToken,
+      },
       body: JSON.stringify({ memberId: created.member.memberId }),
     })
     expect(closeResponse.status).toBe(200)
@@ -726,8 +755,8 @@ describe('AC5/AC3/AC1 — 404 / 413 / 锁', () => {
     expect(await response.json()).toMatchObject({
       service: 'dndstars-5e-shared',
       rulesetId: 'dnd5e-2014-srd-5.1',
-      protocolVersion: 3,
-      minimumClientProtocol: 3,
+      protocolVersion: 4,
+      minimumClientProtocol: 4,
     })
   })
 
@@ -802,9 +831,9 @@ describe('P0 战役快照、完整导出与还原', () => {
         activePlugins: [],
       }),
     })
-    const created = await createResponse.json() as { roomId: string; member: { memberId: string } }
+    const created = await createResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const query = `?room=${created.roomId}`
-    const memberHeaders = { 'X-Stars-Member': created.member.memberId }
+    const memberHeaders = { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken }
 
     expect((await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',
@@ -861,7 +890,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'http://127.0.0.1:6173',
-        'X-Stars-Protocol': '3',
+        'X-Stars-Protocol': '4',
         'X-Stars-Writer': 'test-dm',
         'X-Stars-Expected-Revision': '0',
       },
@@ -873,7 +902,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
     const concurrentHeaders = {
       'Content-Type': 'application/json',
       Origin: 'http://127.0.0.1:6173',
-      'X-Stars-Protocol': '3',
+      'X-Stars-Protocol': '4',
       'X-Stars-Writer': 'test-client',
       'X-Stars-Expected-Revision': '1',
     }
@@ -897,7 +926,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       method: 'DELETE',
       headers: {
         Origin: 'http://127.0.0.1:6173',
-        'X-Stars-Protocol': '3',
+        'X-Stars-Protocol': '4',
         'X-Stars-Writer': 'test-dm',
         'X-Stars-Expected-Revision': '2',
       },
@@ -912,7 +941,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       headers: {
         'Content-Type': 'application/json',
         Origin: 'http://127.0.0.1:6173',
-        'X-Stars-Protocol': '3',
+        'X-Stars-Protocol': '4',
         'X-Stars-Writer': 'stale-client',
         'X-Stars-Expected-Revision': '2',
       },
@@ -936,7 +965,7 @@ describe('P1 房间管理与共享状态 CAS', () => {
       }),
     })
     expect(createdResponse.status).toBe(201)
-    const created = await createdResponse.json() as { roomId: string; member: { memberId: string } }
+    const created = await createdResponse.json() as { roomId: string; member: { memberId: string; roomToken: string } }
     const roomPath = `${offServer.base}/api/rooms/${created.roomId}`
     const preview = await (await fetch(`${roomPath}/preview`)).json()
     expect(preview).toMatchObject({ passwordRequired: true, locked: false, maxPlayers: 4, playerCount: 0 })
@@ -949,13 +978,17 @@ describe('P1 房间管理与共享状态 CAS', () => {
     expect((await join('p1-wrong-password-client', '错误密码', 'wrong')).status).toBe(403)
     const playerAResponse = await join('p1-player-a-client', '玩家甲')
     const playerBResponse = await join('p1-player-b-client', '玩家乙')
-    const playerA = await playerAResponse.json() as { member: { memberId: string; slot: string } }
-    const playerB = await playerBResponse.json() as { member: { memberId: string; slot: string } }
+    const playerA = await playerAResponse.json() as { member: { memberId: string; roomToken: string; slot: string } }
+    const playerB = await playerBResponse.json() as { member: { memberId: string; roomToken: string; slot: string } }
     expect([playerA.member.slot, playerB.member.slot]).toEqual(['player1', 'player2'])
 
     const admin = (body: Record<string, unknown>) => fetch(`${roomPath}/admin`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': created.member.memberId,
+        'X-Stars-Room-Token': created.member.roomToken,
+      },
       body: JSON.stringify({ memberId: created.member.memberId, ...body }),
     })
     expect((await admin({ operation: 'set-lock', locked: true })).status).toBe(200)
@@ -965,7 +998,11 @@ describe('P1 房间管理与共享状态 CAS', () => {
 
     expect((await admin({ operation: 'kick', targetMemberId: playerA.member.memberId })).status).toBe(200)
     const kickedHeartbeat = await fetch(`${roomPath}/heartbeat`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': playerA.member.memberId,
+        'X-Stars-Room-Token': playerA.member.roomToken,
+      },
       body: JSON.stringify({ memberId: playerA.member.memberId, activePlugins: [] }),
     })
     expect(kickedHeartbeat.status).toBe(403)
@@ -975,7 +1012,11 @@ describe('P1 房间管理与共享状态 CAS', () => {
     expect(transfer.status).toBe(200)
     expect(await transfer.json()).toMatchObject({ member: { role: 'player', slot: 'player2' } })
     const newDmHeartbeat = await fetch(`${roomPath}/heartbeat`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': playerB.member.memberId,
+        'X-Stars-Room-Token': playerB.member.roomToken,
+      },
       body: JSON.stringify({ memberId: playerB.member.memberId, activePlugins: [] }),
     })
     expect(newDmHeartbeat.status).toBe(200)
@@ -1007,5 +1048,99 @@ describe('AC3/AC4 — 并发图片 PUT 不撕裂、blob/meta 同源', () => {
     // meta 类型必须与字节同源（同一次 PUT，不交叉配对）。
     if (isA) expect(type).toBe('image/png')
     if (isB) expect(type).toBe('image/webp')
+  })
+})
+
+describe('room session capability tokens', () => {
+  it('rejects a copied member id and rotates the token when a player resumes', async () => {
+    const createdResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: 'Token security',
+        displayName: 'DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'token-security-dm',
+        activePlugins: [],
+      }),
+    })
+    const created = await createdResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const joinedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Player',
+        clientId: 'token-security-player',
+        activePlugins: [],
+      }),
+    })
+    const joined = await joinedResponse.json() as {
+      member: { memberId: string; roomToken: string }
+    }
+    const stateUrl = `${offServer.base}/api/state/characters?room=${created.roomId}`
+    const protocolHeaders = { 'Content-Type': 'application/json', 'X-Stars-Protocol': '4' }
+    const stateBody = JSON.stringify({ characters: [], updatedAt: Date.now() })
+
+    const copiedMemberOnly = await fetch(stateUrl, {
+      method: 'PUT',
+      headers: { ...protocolHeaders, 'X-Stars-Member': joined.member.memberId },
+      body: stateBody,
+    })
+    expect(copiedMemberOnly.status).toBe(403)
+    const wrongToken = await fetch(stateUrl, {
+      method: 'PUT',
+      headers: {
+        ...protocolHeaders,
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': created.member.roomToken,
+      },
+      body: stateBody,
+    })
+    expect(wrongToken.status).toBe(403)
+    const validToken = await fetch(stateUrl, {
+      method: 'PUT',
+      headers: {
+        ...protocolHeaders,
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': joined.member.roomToken,
+      },
+      body: stateBody,
+    })
+    expect(validToken.status).toBe(200)
+
+    const resumedResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Player',
+        clientId: 'token-security-player',
+        resumeMemberId: joined.member.memberId,
+        activePlugins: [],
+      }),
+    })
+    expect(resumedResponse.status).toBe(200)
+    const resumed = await resumedResponse.json() as {
+      member: { memberId: string; roomToken: string }
+    }
+    expect(resumed.member.memberId).toBe(joined.member.memberId)
+    expect(resumed.member.roomToken).not.toBe(joined.member.roomToken)
+
+    const staleToken = await fetch(stateUrl, {
+      headers: {
+        'X-Stars-Member': joined.member.memberId,
+        'X-Stars-Room-Token': joined.member.roomToken,
+      },
+    })
+    expect(staleToken.status).toBe(403)
+    const rotatedToken = await fetch(stateUrl, {
+      headers: {
+        'X-Stars-Member': resumed.member.memberId,
+        'X-Stars-Room-Token': resumed.member.roomToken,
+      },
+    })
+    expect(rotatedToken.status).toBe(200)
   })
 })

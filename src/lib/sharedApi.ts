@@ -1,5 +1,6 @@
 import { canWriteSharedState } from './appMode'
 import { getRoomClientId, getRoomSession } from './roomSession'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocol'
 import {
   reportSharedIntegrityIssue,
   validateAndMigrateSharedResource,
@@ -14,7 +15,7 @@ import {
   settleSharedRecovery,
 } from './sharedSyncHealth'
 
-const SHARED_CLIENT_PROTOCOL_VERSION = 3
+const SHARED_CLIENT_PROTOCOL_VERSION = CLIENT_SHARED_PROTOCOL_VERSION
 export const SHARED_STATE_CLIENT_MAX_BYTES = 8 * 1024 * 1024
 const sharedResourceRevisions = new Map<string, number>()
 const sharedResourceWriteChains = new Map<string, Promise<void>>()
@@ -40,6 +41,7 @@ function sharedSessionUrl(url: string, includeToken = false): string {
   if (room) parsed.searchParams.set('room', room)
   if (includeToken && token) parsed.searchParams.set('token', token)
   if (includeToken && session?.memberId) parsed.searchParams.set('member', session.memberId)
+  if (includeToken && session?.roomToken) parsed.searchParams.set('roomToken', session.roomToken)
   return parsed.toString()
 }
 
@@ -76,8 +78,10 @@ function sharedApiCandidates(): string[] {
 }
 
 function sharedMemberHeaders(): Record<string, string> {
-  const memberId = getRoomSession()?.memberId
-  return memberId ? { 'X-Stars-Member': memberId } : {}
+  const session = getRoomSession()
+  return session?.memberId && session.roomToken
+    ? { 'X-Stars-Member': session.memberId, 'X-Stars-Room-Token': session.roomToken }
+    : {}
 }
 
 function sharedProtocolHeaders(): Record<string, string> {

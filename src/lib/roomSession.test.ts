@@ -29,7 +29,7 @@ describe('room player resume identity', () => {
     vi.stubGlobal('window', { localStorage, dispatchEvent: vi.fn() })
     const session: RoomSession = {
       roomId: 'ABC234', roomName: '测试房间', rulesetId: 'dnd5e-2014-srd-5.1',
-      memberId: 'member-stable-123', clientId: 'stable-browser-client', role: 'player',
+      memberId: 'member-stable-123', roomToken: 'room-token-abcdefghijklmnopqrstuvwxyz-1234567890', clientId: 'stable-browser-client', role: 'player',
       slot: 'player1', displayName: '玩家甲', createdAt: 1,
     }
 
@@ -58,7 +58,7 @@ describe('room player resume identity', () => {
     expect(getRoomPlayerResumeIdentity('ABC234')).toBeNull()
   })
 
-  it('migrates an existing active player session into the durable resume store on read', () => {
+  it('rejects a legacy active session without an unforgeable room token', () => {
     const localStorage = localStorageDouble()
     localStorage.setItem(ROOM_CLIENT_ID_STORAGE_KEY, 'existing-browser-client')
     localStorage.setItem(ROOM_SESSION_STORAGE_KEY, JSON.stringify({
@@ -68,8 +68,8 @@ describe('room player resume identity', () => {
     }))
     vi.stubGlobal('window', { localStorage, dispatchEvent: vi.fn() })
 
-    expect(getRoomSession()).toMatchObject({ memberId: 'existing-member-123' })
-    expect(getRoomPlayerResumeIdentity('ABC234')).toMatchObject({ memberId: 'existing-member-123' })
+    expect(getRoomSession()).toBeNull()
+    expect(getRoomPlayerResumeIdentity('ABC234')).toBeNull()
   })
 
   it('persists a spectator identity without assigning a player slot', () => {
@@ -78,7 +78,7 @@ describe('room player resume identity', () => {
     vi.stubGlobal('window', { localStorage, dispatchEvent: vi.fn() })
     saveRoomSession({
       roomId: 'ABC234', roomName: '观战房间', rulesetId: 'dnd5e-2014-srd-5.1',
-      memberId: 'spectator-member-123', clientId: 'spectator-browser-client', role: 'spectator',
+      memberId: 'spectator-member-123', roomToken: 'room-token-abcdefghijklmnopqrstuvwxyz-1234567890', clientId: 'spectator-browser-client', role: 'spectator',
       displayName: '观战者', createdAt: 1,
     })
     expect(getRoomSession()).toMatchObject({ role: 'spectator' })

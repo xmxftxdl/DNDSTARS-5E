@@ -104,7 +104,7 @@ describe('player view assignment', () => {
     }
     values.set(ROOM_SESSION_STORAGE_KEY, JSON.stringify({
       roomId: 'ABC234', roomName: '测试房间', rulesetId: 'dnd5e-2014-srd-5.1',
-      memberId: 'member-stable-123', clientId: 'client-stable-123', role: 'player',
+      memberId: 'member-stable-123', roomToken: 'room-token-abcdefghijklmnopqrstuvwxyz-1234567890', clientId: 'client-stable-123', role: 'player',
       slot: 'player1', displayName: '玩家甲', createdAt: 1,
     }))
     values.set('stars-player-character-id:ABC234:player1', 'hero-character')

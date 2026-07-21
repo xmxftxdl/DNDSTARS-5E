@@ -43,6 +43,8 @@ export interface RoomSession {
   roomName: string
   rulesetId: typeof DND5E_2014_RULESET_ID
   memberId: string
+  /** Opaque bearer credential for this room membership. Never use memberId as authority. */
+  roomToken: string
   /** Stable account owner. Room membership remains replaceable and room-scoped. */
   accountId?: string
   clientId: string
@@ -81,6 +83,7 @@ export function isRoomSession(value: unknown): value is RoomSession {
     session.rulesetId !== DND5E_2014_RULESET_ID ||
     (session.role !== 'dm' && session.role !== 'player' && session.role !== 'spectator') ||
     typeof session.memberId !== 'string' ||
+    typeof session.roomToken !== 'string' || session.roomToken.length < 32 || session.roomToken.length > 256 ||
     (session.accountId != null && !/^[A-HJ-NP-Z2-9]{12}$/.test(session.accountId)) ||
     typeof session.clientId !== 'string' ||
     typeof session.displayName !== 'string' ||

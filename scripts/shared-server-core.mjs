@@ -34,8 +34,8 @@ export const MAP_TABLETOP_CHANNEL = 'map-tabletop'
 export const MAP_PING_LIFETIME_MS = 3_200
 export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
-export const SHARED_PROTOCOL_VERSION = 3
-export const SHARED_MIN_CLIENT_PROTOCOL = 3
+export const SHARED_PROTOCOL_VERSION = 4
+export const SHARED_MIN_CLIENT_PROTOCOL = 4
 export const SHARED_STATE_SCHEMA_VERSION = 1
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 export const ACCOUNT_SESSION_LIMIT = 12
@@ -591,6 +591,21 @@ function roomMemberAccountAuthorized(member, account) {
   return !!account && member.accountId === account.accountId
 }
 
+function createRoomSessionToken() {
+  return randomBytes(32).toString('base64url')
+}
+
+function roomSessionTokenHash(token) {
+  return createHash('sha256').update(String(token ?? '')).digest('hex')
+}
+
+function roomMemberSessionAuthorized(member, token) {
+  if (typeof member?.roomTokenHash !== 'string' || member.roomTokenHash.length !== 64) return false
+  if (typeof token !== 'string' || token.length < 32 || token.length > 256) return false
+  const actual = roomSessionTokenHash(token)
+  return timingSafeEqual(Buffer.from(member.roomTokenHash), Buffer.from(actual))
+}
+
 /**
  * 在房间文件写锁内调用的纯席位分配器。同一个浏览器 clientId／恢复成员 ID
  * 会保留原成员身份；离线历史不占席位，但不会被删除，确保角色归属可在重连后恢复。
@@ -637,6 +652,7 @@ export function assignRoomPlayer(room, input, now = Date.now()) {
       slot,
       activePlugins: input.activePlugins ?? resumed.activePlugins ?? [],
       lastSeenAt: now,
+      ...(input.roomTokenHash ? { roomTokenHash: input.roomTokenHash } : {}),
     }
     delete member.leftAt
     delete member.removedAt
@@ -674,6 +690,7 @@ export function assignRoomPlayer(room, input, now = Date.now()) {
     activePlugins: input.activePlugins ?? [],
     joinedAt: now,
     lastSeenAt: now,
+    roomTokenHash: input.roomTokenHash,
   }
   return {
     ok: true,
@@ -1232,6 +1249,7 @@ export function assignRoomSpectator(room, input, now = Date.now()) {
     activePlugins: input.activePlugins ?? resumed?.activePlugins ?? [],
     joinedAt: resumed?.joinedAt ?? now,
     lastSeenAt: now,
+    ...(input.roomTokenHash ? { roomTokenHash: input.roomTokenHash } : {}),
   }
   delete member.slot
   delete member.leftAt
@@ -3541,7 +3559,7 @@ function samePluginRequirement(left, right) {
     (left.stateSchemaVersion ?? 1) === (right.stateSchemaVersion ?? 1)
 }
 
-function roomMemberResponse(room, member, role) {
+function roomMemberResponse(room, member, role, roomToken = undefined) {
   return {
     roomId: room.id,
     roomName: room.name,
@@ -3554,6 +3572,7 @@ function roomMemberResponse(room, member, role) {
     rules: roomRulesResponse(room, member),
     member: {
       memberId: member.memberId,
+      ...(roomToken ? { roomToken } : {}),
       ...(member.accountId ? { accountId: member.accountId } : {}),
       clientId: member.clientId,
       role,
@@ -3584,6 +3603,7 @@ async function createLobbyRoom(ctx, payload, account = null, now = Date.now()) {
   await mkdir(lobbyRoot(ctx), { recursive: true })
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const roomId = generatedRoomCode()
+    const roomToken = createRoomSessionToken()
     const member = {
       memberId: randomUUID(),
       ...(account ? { accountId: account.accountId } : {}),
@@ -3592,6 +3612,7 @@ async function createLobbyRoom(ctx, payload, account = null, now = Date.now()) {
       activePlugins,
       joinedAt: now,
       lastSeenAt: now,
+      roomTokenHash: roomSessionTokenHash(roomToken),
     }
     const room = {
       version: 1,
@@ -3611,7 +3632,7 @@ async function createLobbyRoom(ctx, payload, account = null, now = Date.now()) {
     }
     try {
       await writeFile(roomLobbyFile(ctx, roomId), JSON.stringify(room), { flag: 'wx' })
-      return { room, member }
+      return { room, member, roomToken }
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error
     }
@@ -3758,8 +3779,8 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     if (payload?.accountId != null && account?.accountId !== payload.accountId) {
       throw new RoomProtocolError(401, 'invalid-account-session')
     }
-    const { room, member } = await createLobbyRoom(ctx, payload, account)
-    writeJson(res, 201, roomMemberResponse(room, member, 'dm'))
+    const { room, member, roomToken } = await createLobbyRoom(ctx, payload, account)
+    writeJson(res, 201, roomMemberResponse(room, member, 'dm', roomToken))
     return true
   }
 
@@ -3792,6 +3813,26 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       plugins: rules.plugins,
     })
     return true
+  }
+
+  const protectedRoomMatch = parsed.pathname.match(/^\/api\/rooms\/([^/]+)\/(.+)$/)
+  if (protectedRoomMatch && !['join', 'preview'].includes(protectedRoomMatch[2])) {
+    const rawRoomId = String(protectedRoomMatch[1] ?? '').toUpperCase()
+    const protectedRoomId = normalizeLobbyRoomCode(rawRoomId)
+    if (protectedRoomId !== rawRoomId || protectedRoomId.length !== 6) {
+      throw new RoomProtocolError(400, 'invalid-room-code')
+    }
+    let protectedRoom
+    try {
+      protectedRoom = JSON.parse(await readFile(roomLobbyFile(ctx, protectedRoomId), 'utf8'))
+    } catch (error) {
+      if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'room-not-found')
+      throw error
+    }
+    const requestMember = lobbyRoomMember(protectedRoom, req?.headers?.['x-stars-member'])
+    if (!requestMember || !roomMemberSessionAuthorized(requestMember, req?.headers?.['x-stars-room-token'])) {
+      throw new RoomProtocolError(403, 'forbidden')
+    }
   }
 
   const stagedPluginMatch = parsed.pathname.match(
@@ -4355,6 +4396,8 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
     const requestedRole = payload?.role === 'spectator' ? 'spectator' : 'player'
     const account = await authenticateAccount(req, ctx, true)
+    const roomToken = createRoomSessionToken()
+    const roomTokenHash = roomSessionTokenHash(roomToken)
     if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
     if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
     if (resumeMemberId != null && (typeof resumeMemberId !== 'string' || resumeMemberId.length < 8 || resumeMemberId.length > 128)) {
@@ -4371,6 +4414,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           displayName,
           activePlugins,
           lastSeenAt: now,
+          roomTokenHash,
         }
         return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
       }
@@ -4382,9 +4426,10 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         memberId: resumeMemberId ?? randomUUID(),
         accountId: account?.accountId,
         activePlugins,
+        roomTokenHash,
       })
     })
-    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role ?? requestedRole))
+    writeJson(res, 200, roomMemberResponse(result.room, result.member, result.role ?? requestedRole, roomToken))
     return true
   }
 
@@ -4654,8 +4699,9 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     try {
       const room = await readRoomForCampaign(ctx)
       const requestMemberId = req?.headers?.['x-stars-member'] ?? parsed.searchParams.get('member')
+      const requestRoomToken = req?.headers?.['x-stars-room-token'] ?? parsed.searchParams.get('roomToken')
       authenticatedRoomMember = lobbyRoomMember(room, requestMemberId)
-      if (!authenticatedRoomMember) {
+      if (!authenticatedRoomMember || !roomMemberSessionAuthorized(authenticatedRoomMember, requestRoomToken)) {
         writeJson(res, 403, { error: 'forbidden' })
         return true
       }
