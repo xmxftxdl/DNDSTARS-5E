@@ -96,6 +96,7 @@ export default function MapGeometryToolbar({
   const removeEntity = useMapGeometryStore((state) => state.removeEntity)
   const setDoorState = useMapGeometryStore((state) => state.setDoorState)
   const setVision = useMapGeometryStore((state) => state.setVision)
+  const setEnvironment = useMapGeometryStore((state) => state.setEnvironment)
   const clearMap = useMapGeometryStore((state) => state.clearMap)
   const duplicateEntity = useMapGeometryStore((state) => state.duplicateEntity)
   const replaceMap = useMapGeometryStore((state) => state.replaceMap)
@@ -183,6 +184,15 @@ export default function MapGeometryToolbar({
             <option value="bright">明亮光照</option>
             <option value="dim">微光</option>
             <option value="darkness">黑暗</option>
+          </select>
+          <select
+            value={geometry.environment ?? 'normal'}
+            onChange={(event) => setEnvironment(mapId, event.target.value as 'normal' | 'underwater')}
+            className="rounded-md border border-white/10 bg-void-900 px-1.5 py-1 text-[11px] text-slate-200 outline-none"
+            title="水下环境会自动应用 SRD 水下武器攻击限制"
+          >
+            <option value="normal">普通环境</option>
+            <option value="underwater">水下环境</option>
           </select>
           <label className="flex items-center gap-1 text-[10px] text-slate-300" title="玩家共享所有队友的视野；关闭后只使用当前控制角色">
             <input
@@ -511,6 +521,18 @@ export default function MapGeometryToolbar({
                 <option value="climb">攀爬</option>
                 <option value="swim">游泳</option>
               </select>
+              <label className="flex items-center gap-0.5 text-[10px] text-violet-200" title="区域压制普通光源；黑暗视觉不能看穿，魔鬼视界、盲视与真视可以">
+                <input
+                  type="checkbox"
+                  checked={selectedEntity.magicalDarkness === true}
+                  onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                    magicalDarkness: event.target.checked,
+                    darknessSpellLevel: event.target.checked ? selectedEntity.darknessSpellLevel ?? 2 : undefined,
+                  })}
+                />
+                魔法黑暗
+              </label>
+              {selectedEntity.magicalDarkness && <NumberField label="环级" min={0} value={selectedEntity.darknessSpellLevel ?? 2} onChange={(darknessSpellLevel) => updateEntity(mapId, selectedEntity.id, { darknessSpellLevel: Math.min(9, darknessSpellLevel) })} />}
             </>
           )}
           {selectedEntity.kind === 'light' && (
@@ -612,6 +634,10 @@ export default function MapGeometryToolbar({
               <NumberField label="盲视" min={0} value={selectedToken.blindsightRangeFeet ?? 0} onChange={(blindsightRangeFeet) => updateToken(mapId, selectedToken.id, { blindsightRangeFeet })} />
               <NumberField label="震颤" min={0} value={selectedToken.tremorsenseRangeFeet ?? 0} onChange={(tremorsenseRangeFeet) => updateToken(mapId, selectedToken.id, { tremorsenseRangeFeet })} />
               <NumberField label="真视" min={0} value={selectedToken.truesightRangeFeet ?? 0} onChange={(truesightRangeFeet) => updateToken(mapId, selectedToken.id, { truesightRangeFeet })} />
+              <label className="flex items-center gap-0.5 text-[10px] text-violet-200">
+                <input type="checkbox" checked={selectedToken.canSeeMagicalDarkness === true} onChange={(event) => updateToken(mapId, selectedToken.id, { canSeeMagicalDarkness: event.target.checked || undefined })} />
+                魔法黑暗视界
+              </label>
             </>
           )}
           <label className="flex items-center gap-0.5 text-[10px] text-slate-300">

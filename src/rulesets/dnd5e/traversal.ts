@@ -1,4 +1,4 @@
-export type Dnd5eTraversalMode = 'walk' | 'climb' | 'swim' | 'long-jump-running' | 'long-jump-standing' | 'fall'
+export type Dnd5eTraversalMode = 'walk' | 'climb' | 'swim' | 'fly' | 'long-jump-running' | 'long-jump-standing' | 'fall'
 
 export interface Dnd5eTraversalProfile {
   strengthScore: number
@@ -6,6 +6,7 @@ export interface Dnd5eTraversalProfile {
   walkSpeed: number
   climbSpeed?: number
   swimSpeed?: number
+  flySpeed?: number
   climbWithoutSpeedCostMultiplier?: number
   runningLongJumpBonusFeet?: number
 }
@@ -27,7 +28,7 @@ export function dnd5eTraversalMovementCost(input: {
   elevationGainFeet?: number
   mode: Dnd5eTraversalMode
   profile: Dnd5eTraversalProfile
-}): { ok: true; movementCostFeet: number } | { ok: false; reason: 'jump-too-far' | 'jump-too-high' } {
+}): { ok: true; movementCostFeet: number } | { ok: false; reason: 'jump-too-far' | 'jump-too-high' | 'cannot-fly' } {
   const distanceFeet = Math.max(0, input.distanceFeet)
   const baseMovementCostFeet = Math.max(distanceFeet, input.baseMovementCostFeet ?? distanceFeet)
   const elevationGainFeet = Math.max(0, input.elevationGainFeet ?? 0)
@@ -59,6 +60,13 @@ export function dnd5eTraversalMovementCost(input: {
       ? baseMovementCostFeet * (input.profile.walkSpeed / input.profile.swimSpeed)
       : baseMovementCostFeet + distanceFeet
     return { ok: true, movementCostFeet: cost + elevationGainFeet }
+  }
+  if (input.mode === 'fly') {
+    if (!input.profile.flySpeed || input.profile.flySpeed <= 0) return { ok: false, reason: 'cannot-fly' }
+    return {
+      ok: true,
+      movementCostFeet: (baseMovementCostFeet + elevationGainFeet) * (input.profile.walkSpeed / input.profile.flySpeed),
+    }
   }
   return { ok: true, movementCostFeet: baseMovementCostFeet + elevationGainFeet }
 }

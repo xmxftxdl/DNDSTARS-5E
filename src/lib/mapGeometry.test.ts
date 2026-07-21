@@ -257,6 +257,23 @@ describe('map geometry', () => {
     })).toBe(false)
   })
 
+  it('suppresses ordinary light and darkvision inside magical darkness', () => {
+    const g = geometry()
+    g.walls = []
+    g.obstacles = [{
+      id: 'darkness', kind: 'obstacle', label: '黑暗术', magicalDarkness: true, darknessSpellLevel: 2,
+      points: [{ x: 50, y: 0 }, { x: 150, y: 0 }, { x: 150, y: 100 }, { x: 50, y: 100 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 20, createdAt: 1,
+    }]
+    const viewer = token('viewer', 25, 50, { darkvisionRangeFeet: 60 })
+    const target = token('target', 100, 50, { type: 'enemy', lightSource: { enabled: true, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fff' } })
+    const litMap = { ...map, tokens: [viewer, target] }
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map: litMap, point: target })).toBe('magical-darkness')
+    expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer, target })).toBe(false)
+    expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer: { ...viewer, canSeeMagicalDarkness: true }, target })).toBe(true)
+  })
+
   it('supports independent scene lights with wall shadows and legacy geometry migration', () => {
     const g = geometry()
     g.vision.ambientLight = 'darkness'

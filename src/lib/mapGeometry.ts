@@ -1,5 +1,6 @@
 import type { BattleMap, Token } from '../store/maps'
 import { campaignLightIsActive, type CampaignLightSourceKind } from './campaignTime'
+import type { Dnd5eMapEnvironment } from '../rulesets/dnd5e/environmentRules'
 
 export const MAP_GEOMETRY_RESOURCE = 'map-geometry'
 export const MAP_GEOMETRY_SCHEMA_VERSION = 2
@@ -89,6 +90,9 @@ export interface MapGeometryObstacle extends MapGeometryHeight, MapGeometryBlock
   cover: MapGeometryCover
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
+  /** 多边形内部压制非魔法光源；普通黑暗视觉无法看穿。 */
+  magicalDarkness?: boolean
+  darknessSpellLevel?: number
   createdAt: number
 }
 
@@ -126,6 +130,8 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   cover?: MapGeometryCover
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
+  magicalDarkness?: boolean
+  darknessSpellLevel?: number
   enabled?: boolean
   brightRadiusFeet?: number
   dimRadiusFeet?: number
@@ -154,6 +160,7 @@ export interface MapGeometryState {
   obstacles: MapGeometryObstacle[]
   lights?: MapGeometryLight[]
   vision: MapGeometryVisionSettings
+  environment?: Dnd5eMapEnvironment
   updatedAt: number
 }
 
@@ -364,11 +371,15 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
     const points = normalizePoints(raw.points, 3)
     if (!points || !['none', 'half', 'three-quarters', 'total'].includes(String(raw.cover)) ||
       (raw.terrainCostMultiplier != null && !finite(raw.terrainCostMultiplier, 1, 10)) ||
-      (raw.traversal != null && !['ground', 'climb', 'swim'].includes(String(raw.traversal)))) return undefined
+      (raw.traversal != null && !['ground', 'climb', 'swim'].includes(String(raw.traversal))) ||
+      (raw.magicalDarkness != null && typeof raw.magicalDarkness !== 'boolean') ||
+      (raw.darknessSpellLevel != null && !finite(raw.darknessSpellLevel, 0, 9))) return undefined
     return {
       ...common, kind: 'obstacle', points, cover: raw.cover as MapGeometryCover,
       ...(raw.terrainCostMultiplier != null ? { terrainCostMultiplier: raw.terrainCostMultiplier as number } : {}),
       ...(raw.traversal != null ? { traversal: raw.traversal as MapGeometryObstacle['traversal'] } : {}),
+      ...(raw.magicalDarkness === true ? { magicalDarkness: true } : {}),
+      ...(raw.darknessSpellLevel != null ? { darknessSpellLevel: raw.darknessSpellLevel as number } : {}),
     }
   }
   return undefined
@@ -419,6 +430,7 @@ export function normalizeMapGeometry(value: unknown): MapGeometryState | undefin
       sharePartyVision: vision.sharePartyVision,
       ambientLight: (vision.ambientLight as MapGeometryVisionSettings['ambientLight'] | undefined) ?? 'bright',
     },
+    environment: raw.environment === 'underwater' ? 'underwater' : 'normal',
     updatedAt: raw.updatedAt,
   }
 }
@@ -1035,7 +1047,10 @@ export function mapGeometryCanSeeToken(input: {
     worldMinute: input.worldMinute,
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
-  if (illumination === 'darkness' && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
+  if (illumination === 'magical-darkness') {
+    const magicalRange = input.viewer.canSeeMagicalDarkness ? normalRangeFeet : 0
+    if (distanceFeet > Math.max(magicalRange, blindsightRangeFeet, truesightRangeFeet)) return false
+  } else if (illumination === 'darkness' && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
   return !rayBlocked({
     geometry,
     from: input.viewer,
@@ -1046,7 +1061,7 @@ export function mapGeometryCanSeeToken(input: {
   })
 }
 
-export type MapGeometryIllumination = 'bright' | 'dim' | 'darkness'
+export type MapGeometryIllumination = 'bright' | 'dim' | 'darkness' | 'magical-darkness'
 
 export function mapGeometryIlluminationAtPoint(input: {
   geometry?: MapGeometryState
@@ -1056,6 +1071,9 @@ export function mapGeometryIlluminationAtPoint(input: {
   worldMinute?: number
 }): MapGeometryIllumination {
   const ambient = input.geometry?.vision.ambientLight ?? 'bright'
+  if (input.geometry?.obstacles.some((obstacle) =>
+    obstacle.magicalDarkness === true && mapGeometryPointInPolygon(input.point, obstacle.points),
+  )) return 'magical-darkness'
   if (ambient === 'bright') return 'bright'
   let result: MapGeometryIllumination = ambient
   const gridSize = Math.max(1, input.map.gridSize)

@@ -44,6 +44,8 @@ import {
 } from './mapBridge'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { consumeDnd5eWeaponAmmunition } from './items'
+import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -132,6 +134,15 @@ export function prepareDnd5eEquipmentAttack(input: {
   ) return { ok: false, reason: 'off-hand-attack-unavailable' }
   const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   if (distanceFeet > dnd5eWeaponRangeFeet(profile)) return { ok: false, reason: 'target-out-of-range' }
+  const underwater = dnd5eUnderwaterWeaponAttack({
+    environment: mapGeometryRuntimeForMap(input.map.id)?.environment,
+    weaponId: profile.weaponId,
+    mode: profile.mode,
+    distanceFeet,
+    normalRangeFeet: profile.rangeFeet?.normal,
+    hasSwimmingSpeed: (actor.dnd5eMovementSpeeds?.swim ?? 0) > 0,
+  })
+  if (underwater.automaticMiss) return { ok: false, reason: 'target-out-of-range' }
   const divineSmiteSlotLevel = action.dnd5eWeaponAttackOptions?.divineSmiteSlotLevel
   if (divineSmiteSlotLevel != null) {
     const slot = actor.classResources?.[`dnd5e-spell-slot-${divineSmiteSlotLevel}`]
@@ -268,7 +279,7 @@ export function prepareDnd5eEquipmentAttack(input: {
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
-  const attackerHasDisadvantage = (actor.exhaustionLevel ?? 0) >= 3 ||
+  const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
     dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
     (profile.mode === 'ranged' && (

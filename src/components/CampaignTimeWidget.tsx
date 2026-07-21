@@ -10,6 +10,7 @@ import {
 import type { AppMode } from '../lib/appMode'
 import { useCampaignTimeStore } from '../store/campaignTime'
 import { useCharacterStore } from '../store/characters'
+import { planDnd5eTravel, type Dnd5eTravelPace } from '../rulesets/dnd5e/travel'
 
 export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const [open, setOpen] = useState(false)
@@ -22,6 +23,9 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const [timerUnit, setTimerUnit] = useState<'minute' | 'hour'>('minute')
   const [timerKind, setTimerKind] = useState<CampaignTimerKind>('reminder')
   const [timerCharacterId, setTimerCharacterId] = useState('')
+  const [travelPace, setTravelPace] = useState<Dnd5eTravelPace>('normal')
+  const [travelHours, setTravelHours] = useState(8)
+  const [travelDifficultTerrain, setTravelDifficultTerrain] = useState(false)
   const clock = useCampaignTimeStore((state) => state.state)
   const mutate = useCampaignTimeStore((state) => state.mutate)
   const characters = useCharacterStore((state) => state.characters)
@@ -34,6 +38,11 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
   const eligibleLongRests = dndCharacters.filter((character) =>
     canBenefitFromLongRest(character.dnd5eLastLongRestWorldMinute, longRestCompletion),
   ).length
+  const travel = useMemo(() => planDnd5eTravel({
+    pace: travelPace,
+    hours: travelHours,
+    difficultTerrain: travelDifficultTerrain,
+  }), [travelDifficultTerrain, travelHours, travelPace])
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true)
@@ -123,6 +132,24 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
                     <select value={timerUnit} onChange={(event) => setTimerUnit(event.target.value as typeof timerUnit)} className="rounded-xl border border-white/10 bg-slate-900 px-2 text-xs text-slate-200"><option value="minute">分钟</option><option value="hour">小时</option></select>
                     <button type="button" disabled={busy || !timerLabel.trim()} onClick={createTimer} className="rounded-xl bg-amber-400/15 px-3 text-xs font-semibold text-amber-200 disabled:opacity-40">创建</button>
                   </div>
+                </section>
+
+                <section className="rounded-2xl border border-emerald-300/10 bg-emerald-500/[0.025] p-4 md:col-span-2">
+                  <h3 className="text-sm font-semibold text-slate-200">队伍旅行</h3>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-[160px_120px_auto_auto]">
+                    <select value={travelPace} onChange={(event) => setTravelPace(event.target.value as Dnd5eTravelPace)} className="rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-xs text-slate-200">
+                      <option value="fast">快速（感知 -5）</option>
+                      <option value="normal">正常</option>
+                      <option value="slow">慢速（可隐匿）</option>
+                    </select>
+                    <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+                      <input type="number" min={0.25} max={24} step={0.25} value={travelHours} onChange={(event) => setTravelHours(Math.max(0.25, Math.min(24, Number(event.target.value) || 0.25)))} className="w-14 bg-transparent text-slate-100 outline-none" />小时
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={travelDifficultTerrain} onChange={(event) => setTravelDifficultTerrain(event.target.checked)} />困难地形</label>
+                    <button type="button" disabled={busy} onClick={() => void advance(travel.elapsedMinutes, `${travelPace === 'fast' ? '快速' : travelPace === 'slow' ? '慢速' : '正常'}旅行 ${travel.hours} 小时`)} className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-200 disabled:opacity-50">推进旅行</button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-400">预计前进 {travel.distanceMiles.toFixed(1)} 英里 · 用时 {formatCampaignDuration(travel.elapsedMinutes)}{travel.canStealth ? ' · 可在旅行中隐匿' : ''}{travel.passivePerceptionModifier ? ` · 被动察觉 ${travel.passivePerceptionModifier}` : ''}</p>
+                  {travel.forcedMarchChecks.length > 0 && <p className="mt-1 text-[11px] text-amber-300">强行军：每名角色依次进行 {travel.forcedMarchChecks.map((check) => `DC ${check.constitutionSaveDc}`).join('、')} 体质豁免；每次失败获得 1 级力竭。掷骰与力竭仍由 DM 在推进前确认。</p>}
                 </section>
               </div>
             )}

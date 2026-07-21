@@ -252,6 +252,8 @@ export interface Character {
 
   ac: number
   speed: number
+  /** 非步行移动速度；由种族、形态、法术或 DM 权威效果提供。 */
+  dnd5eMovementSpeeds?: { climb?: number; swim?: number; fly?: number; hover?: boolean }
   initiativeBonus: number // 额外先攻加值（不含敏捷）
 
   saveDC: number // 豁免 DC

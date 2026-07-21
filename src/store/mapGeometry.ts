@@ -22,6 +22,7 @@ import {
 } from '../lib/mapGeometry'
 import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
 import { campaignLightIsActive } from '../lib/campaignTime'
+import type { Dnd5eMapEnvironment } from '../rulesets/dnd5e/environmentRules'
 
 interface MapGeometryStoreState {
   maps: MapGeometryState[]
@@ -36,6 +37,7 @@ interface MapGeometryStoreState {
   removeEntity: (mapId: string, entityId: string) => void
   setDoorState: (mapId: string, doorId: string, state: MapGeometryDoorState) => void
   setVision: (mapId: string, patch: Partial<MapGeometryVisionSettings>) => void
+  setEnvironment: (mapId: string, environment: Dnd5eMapEnvironment) => void
   clearMap: (mapId: string) => void
   duplicateEntity: (mapId: string, entityId: string, offset?: number) => string | undefined
   replaceMap: (mapId: string, geometry: MapGeometryState) => boolean
@@ -275,6 +277,15 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
         set((state) => {
           const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
           const maps = mutateMap(state.maps, mapId, (map) => ({ ...map, vision: { ...map.vision, ...patch } }))
+          setMapGeometryRuntime(maps)
+          return { maps, ...pushHistory(state, mapId, current) }
+        })
+        publish(get())
+      },
+      setEnvironment: (mapId, environment) => {
+        set((state) => {
+          const current = state.maps.find((map) => map.mapId === mapId) ?? createEmptyMapGeometry(mapId)
+          const maps = mutateMap(state.maps, mapId, (map) => ({ ...map, environment }))
           setMapGeometryRuntime(maps)
           return { maps, ...pushHistory(state, mapId, current) }
         })

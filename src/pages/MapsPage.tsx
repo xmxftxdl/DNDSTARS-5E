@@ -3510,7 +3510,7 @@ export default function MapsPage() {
       geometry: activeGeometry,
       token: myPlayerToken,
       to: pos,
-      canClimb: dnd5eTraversalMode === 'climb',
+      canClimb: dnd5eTraversalMode === 'climb' || dnd5eTraversalMode === 'fly',
       canSwim: dnd5eTraversalMode === 'swim',
       additionalDifficultTerrainMultiplier: (token, position) =>
         dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position }),
@@ -3536,6 +3536,9 @@ export default function MapsPage() {
         strengthModifier: Math.floor((turnCharacter.abilities.str - 10) / 2),
         walkSpeed: dnd5eEffectiveWalkingSpeed(turnCharacter),
         climbWithoutSpeedCostMultiplier: dnd5eClimbingMovementCost(turnCharacter, 1),
+        climbSpeed: turnCharacter.dnd5eMovementSpeeds?.climb,
+        swimSpeed: turnCharacter.dnd5eMovementSpeeds?.swim,
+        flySpeed: turnCharacter.dnd5eMovementSpeeds?.fly,
         runningLongJumpBonusFeet: dnd5eRunningJumpBonusFeet(turnCharacter),
       },
     })
@@ -13944,6 +13947,7 @@ export default function MapsPage() {
                 <option value="walk">步行</option>
                 <option value="climb">攀爬（通常半速）</option>
                 <option value="swim">游泳（通常半速）</option>
+                <option value="fly">飞行（需要飞行速度）</option>
                 <option value="long-jump-running">助跑跳远</option>
                 <option value="long-jump-standing">立定跳远</option>
                 <option value="fall">坠落（按海拔差结算）</option>

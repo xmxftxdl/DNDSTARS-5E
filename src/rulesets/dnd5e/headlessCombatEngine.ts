@@ -8822,6 +8822,7 @@ function resolveDnd5eHeadlessActionInternal(
         walkSpeed: actor.movementSpeeds?.walk ?? actor.speed,
         climbSpeed: actor.movementSpeeds?.climb,
         swimSpeed: actor.movementSpeeds?.swim,
+        flySpeed: actor.movementSpeeds?.fly,
         climbWithoutSpeedCostMultiplier: dnd5eCombatantClassLevel(actor, 'rogue') >= 3 &&
           dnd5eCombatantHasSubclass(actor, 'rogue', 'thief') ? 1 : 2,
         runningLongJumpBonusFeet: dnd5eCombatantClassLevel(actor, 'rogue') >= 3 &&
@@ -8845,6 +8846,7 @@ function resolveDnd5eHeadlessActionInternal(
     const from = { ...actor.position }
     actor.position = { ...action.to }
     actor.elevationFeet = toElevationFeet
+    actor.airborne = traversalMode === 'fly' && toElevationFeet > 0
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'movement', amount: movementCost })
     events.push({ type: 'moved', actorId: actor.id, from, to: actor.position, distance: action.distance })
     if (toElevationFeet !== fromElevationFeet) {

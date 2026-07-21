@@ -39,6 +39,7 @@ export interface Dnd5eCharacter {
   temporaryHp: number
   exhaustionLevel: number
   speed: number
+  movementSpeeds?: { walk: number; climb?: number; swim?: number; fly?: number }
   initiativeBonus: number
   hitPointDice: readonly { sides: number; current: number; max: number }[]
   deathSaves: Dnd5eDeathSaves
@@ -166,6 +167,12 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     temporaryHp: Math.max(0, Math.floor(character.tempHp)),
     exhaustionLevel,
     speed: dnd5eWalkingSpeed(character),
+    movementSpeeds: {
+      walk: dnd5eWalkingSpeed(character),
+      climb: character.dnd5eMovementSpeeds?.climb,
+      swim: character.dnd5eMovementSpeeds?.swim,
+      fly: character.dnd5eMovementSpeeds?.fly,
+    },
     initiativeBonus: Math.floor(character.initiativeBonus),
     hitPointDice: character.hitPointDice?.length
       ? character.hitPointDice.map((pool) => ({ ...pool }))
@@ -233,6 +240,7 @@ export function createCombatantFromDnd5eCharacter(input: {
     temporaryHp: character.temporaryHp,
     exhaustionLevel: character.exhaustionLevel,
     speed: character.speed,
+    movementSpeeds: character.movementSpeeds ? { ...character.movementSpeeds } : undefined,
     position: { ...input.position },
     concentrating: character.concentrating,
     creatureType: '类人生物',

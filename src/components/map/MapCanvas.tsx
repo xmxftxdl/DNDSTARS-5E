@@ -417,9 +417,24 @@ function PlayerVisibilityLayer({
   )
 }
 
-function LightingLayer({ map, geometry, worldMinute }: { map: BattleMap; geometry?: MapGeometryState; worldMinute: number }) {
-  if (!geometry?.vision.enabled || geometry.vision.ambientLight === 'bright') return null
+function LightingLayer({
+  map,
+  geometry,
+  worldMinute,
+  isDM,
+  visionSourceTokenIds,
+}: {
+  map: BattleMap
+  geometry?: MapGeometryState
+  worldMinute: number
+  isDM: boolean
+  visionSourceTokenIds: readonly string[]
+}) {
+  if (!geometry) return null
+  const magicalDarkness = geometry.obstacles.filter((obstacle) => obstacle.magicalDarkness === true)
+  if ((!geometry.vision.enabled || geometry.vision.ambientLight === 'bright') && magicalDarkness.length === 0) return null
   const opacity = geometry.vision.ambientLight === 'darkness' ? 0.9 : 0.3
+  const seesMagicalDarkness = visionSourceTokenIds.some((id) => map.tokens.find((token) => token.id === id)?.canSeeMagicalDarkness)
   const sources = [
     ...map.tokens.filter((token) => campaignLightIsActive(token.lightSource, worldMinute)).map((token) => ({
       id: `token:${token.id}`,
@@ -438,8 +453,8 @@ function LightingLayer({ map, geometry, worldMinute }: { map: BattleMap; geometr
   ]
   return (
     <Layer listening={false}>
-      <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" opacity={opacity} listening={false} />
-      {sources.flatMap((source) => {
+      {geometry.vision.enabled && geometry.vision.ambientLight !== 'bright' && <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" opacity={opacity} listening={false} />}
+      {geometry.vision.enabled && geometry.vision.ambientLight !== 'bright' && sources.flatMap((source) => {
         const brightPolygon = mapGeometryLightPolygon({
           geometry, map, source: source.point, radiusFeet: source.brightRadiusFeet,
           elevationFeet: source.elevationFeet,
@@ -454,6 +469,18 @@ function LightingLayer({ map, geometry, worldMinute }: { map: BattleMap; geometr
           brightPolygon.length >= 3 ? <Line key={`light-bright:${source.id}`} points={brightPolygon.flatMap((point) => [point.x, point.y])} closed fill="#000" globalCompositeOperation="destination-out" listening={false} /> : null,
         ]
       })}
+      {magicalDarkness.map((zone) => (
+        <Line
+          key={`magical-darkness:${zone.id}`}
+          points={zone.points.flatMap((point) => [point.x, point.y])}
+          closed
+          fill="#010108"
+          stroke="rgba(139,92,246,0.7)"
+          strokeWidth={isDM ? 2 : 0}
+          opacity={isDM ? 0.22 : seesMagicalDarkness ? 0.08 : 0.97}
+          listening={false}
+        />
+      ))}
     </Layer>
   )
 }
@@ -598,7 +625,7 @@ function MapGeometryLayer({
               ? '#f87171'
               : '#fbbf24'
           : entity.kind === 'obstacle'
-            ? '#fb923c'
+            ? entity.magicalDarkness ? '#8b5cf6' : '#fb923c'
             : entity.kind === 'light'
               ? entity.color
               : entity.kind === 'window'
@@ -749,7 +776,9 @@ function MapGeometryLayer({
           <Line
             {...common}
             closed
-            fill={selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
+            fill={entity.kind === 'obstacle' && entity.magicalDarkness
+              ? selected ? 'rgba(76,29,149,0.38)' : 'rgba(15,7,32,0.32)'
+              : selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
           />
         )
       })}
@@ -2624,7 +2653,7 @@ export default function MapCanvas({
         )}
         {(!isDM || geometryPreviewAsPlayer || fogPreviewAsPlayer) && (
           <>
-            <LightingLayer map={map} geometry={geometry} worldMinute={worldMinute} />
+            <LightingLayer map={map} geometry={geometry} worldMinute={worldMinute} isDM={isDM} visionSourceTokenIds={visionSourceTokenIds} />
             <PlayerVisibilityLayer
               map={map}
               geometry={geometry}

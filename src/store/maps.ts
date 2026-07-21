@@ -225,6 +225,8 @@ export interface Token {
   blindsightRangeFeet?: number
   tremorsenseRangeFeet?: number
   truesightRangeFeet?: number
+  /** 魔鬼视界等明确能力；普通黑暗视觉不会设置此字段。 */
+  canSeeMagicalDarkness?: boolean
   /** Token 携带的火把、法术或物品光源。 */
   lightSource?: {
     enabled: boolean
@@ -451,6 +453,7 @@ function normalizeToken(raw: unknown): Token {
     blindsightRangeFeet: Number.isFinite(t.blindsightRangeFeet) ? Math.max(0, Math.min(10_000, t.blindsightRangeFeet as number)) : undefined,
     tremorsenseRangeFeet: Number.isFinite(t.tremorsenseRangeFeet) ? Math.max(0, Math.min(10_000, t.tremorsenseRangeFeet as number)) : undefined,
     truesightRangeFeet: Number.isFinite(t.truesightRangeFeet) ? Math.max(0, Math.min(10_000, t.truesightRangeFeet as number)) : undefined,
+    canSeeMagicalDarkness: t.canSeeMagicalDarkness === true ? true : undefined,
     lightSource: t.lightSource && typeof t.lightSource === 'object' &&
       Number.isFinite(t.lightSource.brightRadiusFeet) && Number.isFinite(t.lightSource.dimRadiusFeet) &&
       typeof t.lightSource.enabled === 'boolean' && typeof t.lightSource.color === 'string'
