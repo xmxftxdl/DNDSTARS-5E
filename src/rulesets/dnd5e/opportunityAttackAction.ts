@@ -27,6 +27,7 @@ import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5e
 import { getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eReactionsPrevented, dnd5eTargetGrantsAttackAdvantage } from './passiveDefenses'
 import { resolveDnd5eRollMode } from './rollMode'
+import { dnd5eMonsterActionAutomation } from './monsterSchema'
 
 export function findDnd5eOpportunityAttackersForMove(input: {
   map: BattleMap
@@ -57,7 +58,7 @@ export function findDnd5eOpportunityAttackersForMove(input: {
       : undefined
     const monster = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
     const monsterReach = monster?.actions
-      .filter((action) => action.attack && (action.attack.mode === 'melee' || action.attack.mode === 'melee-or-ranged'))
+      .filter((action) => dnd5eMonsterActionAutomation(action) === 'headless' && action.attack && (action.attack.mode === 'melee' || action.attack.mode === 'melee-or-ranged'))
       .reduce((maximum, action) => Math.max(maximum, action.attack?.reachFeet ?? 5), 0)
     const reachFeet = playerProfile?.mode === 'melee' ? (playerProfile.reachFeet ?? 5) : (monsterReach ?? 0)
     if (reachFeet <= 0) return false
@@ -141,7 +142,7 @@ export function prepareDnd5eOpportunityAttack(input: {
   const playerProfile = actor?.rulesetId === 'dnd5e-2014-srd-5.1' ? dnd5eWeaponAttackProfile(actor) : undefined
   const monster = actorToken.poolId ? getDnd5eSrdMonster(actorToken.poolId) : undefined
   const monsterAction = monster?.actions.find((action) =>
-    action.kind === 'weapon-attack' && action.attack && (action.attack.mode === 'melee' || action.attack.mode === 'melee-or-ranged'),
+    dnd5eMonsterActionAutomation(action) === 'headless' && action.kind === 'weapon-attack' && action.attack && (action.attack.mode === 'melee' || action.attack.mode === 'melee-or-ranged'),
   )
   const monsterDamage = monsterAction?.attack?.damage[0]
   const isPlayerMelee = playerProfile?.mode === 'melee'

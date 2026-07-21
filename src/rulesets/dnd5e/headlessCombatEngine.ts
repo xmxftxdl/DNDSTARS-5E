@@ -20,6 +20,7 @@ import {
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
+import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eBardicInspirationDie, dnd5eClassDefinition, dnd5eMonkMartialArtsDie, dnd5ePactSlotLevel, dnd5eRogueSneakAttackDice, type Dnd5eClassId } from './classes'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell } from './spells'
 import {
@@ -5430,9 +5431,13 @@ function monsterWeaponSequence(
   monsterAction: Dnd5eMonsterAction,
   actions: readonly Dnd5eMonsterAction[],
 ): readonly Dnd5eMonsterWeaponAttack[] | undefined {
+  if (dnd5eMonsterActionAutomation(monsterAction) !== 'headless') return undefined
   if (monsterAction.kind === 'weapon-attack' && monsterAction.attack) return [monsterAction.attack]
   if (monsterAction.kind !== 'multiattack' || !monsterAction.sequence) return undefined
-  const sequence = monsterAction.sequence.map((actionId) => actions.find((candidate) => candidate.id === actionId)?.attack)
+  const sequence = monsterAction.sequence.map((actionId) => {
+    const child = actions.find((candidate) => candidate.id === actionId)
+    return child && dnd5eMonsterActionAutomation(child) === 'headless' ? child.attack : undefined
+  })
   return sequence.every((attack): attack is Dnd5eMonsterWeaponAttack => !!attack) ? sequence : undefined
 }
 

@@ -6,10 +6,12 @@ import {
   getDnd5eSrdMonster,
   type Dnd5eMonsterStatBlock,
 } from '../rulesets/dnd5e/monsters'
+import { dnd5eMonsterActionAutomation } from '../rulesets/dnd5e/monsterSchema'
 
 export interface MonsterTrait {
   name: string
   description: string
+  automation?: 'headless' | 'dm-adjudication'
 }
 
 export interface MonsterAction {
@@ -27,6 +29,7 @@ export interface MonsterAction {
   kind?: 'melee' | 'ranged' | 'aoe'
   /** 范围攻击的豁免（吐息），T7 消费 */
   save?: { ability: AbilityKey; dc: number }
+  automation?: 'headless' | 'dm-adjudication' | 'invalid'
 }
 
 export interface MonsterSkillNote {
@@ -48,6 +51,10 @@ export interface EnemyStatBlock {
   languages?: string
   traits: MonsterTrait[]
   actions: MonsterAction[]
+  reactions?: MonsterAction[]
+  legendaryActions?: MonsterAction[]
+  lairActions?: MonsterAction[]
+  spellcasting?: string
   source?: string
   sourcePage?: number
   alignment?: string
@@ -906,6 +913,20 @@ const DAMAGE_TYPE_LABELS: Record<string, string> = {
 }
 
 function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBlock {
+  const convertAction = (action: Dnd5eMonsterStatBlock['actions'][number]): MonsterAction => {
+    const attack = action.attack
+    const primaryDamage = attack?.damage[0]
+    return {
+      name: action.name,
+      description: action.description,
+      toHit: attack?.toHit,
+      damageDice: primaryDamage ? dnd5eMonsterDamageDice(primaryDamage) : undefined,
+      damageType: primaryDamage?.type,
+      range: attack?.rangeFeet?.normal ?? attack?.reachFeet,
+      kind: attack ? (attack.mode === 'ranged' ? 'ranged' : 'melee') : undefined,
+      automation: dnd5eMonsterActionAutomation(action),
+    }
+  }
   return {
     cr: monster.challenge.rating,
     ac: monster.armorClass.value,
@@ -919,19 +940,11 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
     ].join('，'),
     languages: monster.languages.length > 0 ? monster.languages.join('、') : '—',
     traits: monster.traits.map((trait) => ({ ...trait })),
-    actions: monster.actions.map((action) => {
-      const attack = action.attack
-      const primaryDamage = attack?.damage[0]
-      return {
-        name: action.name,
-        description: action.description,
-        toHit: attack?.toHit,
-        damageDice: primaryDamage ? dnd5eMonsterDamageDice(primaryDamage) : undefined,
-        damageType: primaryDamage?.type,
-        range: attack?.rangeFeet?.normal ?? attack?.reachFeet,
-        kind: attack ? (attack.mode === 'ranged' ? 'ranged' : 'melee') : undefined,
-      }
-    }),
+    actions: monster.actions.map(convertAction),
+    reactions: monster.reactions?.map(convertAction),
+    legendaryActions: monster.legendaryActions?.map(convertAction),
+    lairActions: monster.lairActions?.map(convertAction),
+    spellcasting: monster.spellcasting?.description,
     source: monster.source,
     sourcePage: monster.sourcePage,
     alignment: monster.alignment,

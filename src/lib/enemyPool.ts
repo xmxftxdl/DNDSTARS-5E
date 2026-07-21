@@ -6,7 +6,11 @@ import {
   type CreatureSize,
   type CreatureType,
 } from './monsterTypes'
-import { DND5E_SRD_MONSTERS } from '../rulesets/dnd5e/monsters'
+import {
+  DND5E_SRD_MONSTERS,
+  getDnd5eSrdMonster,
+  type Dnd5eMonsterStatBlock,
+} from '../rulesets/dnd5e/monsters'
 
 /** 怪物池模板（用于 DM 快速放置敌人 token） */
 export interface EnemyTemplate {
@@ -43,13 +47,26 @@ const SRD_MONSTER_PRESENTATION: Record<string, { emoji: string; color: string }>
 
 function srdCreatureTypes(type: string): CreatureType[] {
   if (type === '野兽') return ['动物']
+  if (type === '龙') return ['龙']
+  if (type === '精类') return ['精类']
+  if (type === '元素生物') return ['元素']
+  if (type === '构装体') return ['机械']
+  if (type === '植物') return ['植物']
   if (type === '类人生物' || type === '巨人') return ['人类']
   return ['魔物']
 }
 
-/** D&D 5e 2014 地图使用的 SRD 5.1 怪物池；旧自定义模板不会混入此目录。 */
-export const DND5E_SRD_ENEMY_POOL: EnemyTemplate[] = DND5E_SRD_MONSTERS.map((monster) => {
+export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): EnemyTemplate {
   const presentation = SRD_MONSTER_PRESENTATION[monster.slug] ?? { emoji: '👾', color: '#f87171' }
+  const capabilityTags = [
+    monster.capabilities?.spellcaster ? '施法者' : null,
+    monster.capabilities?.legendary ? '传奇动作' : null,
+    monster.capabilities?.swarm ? '群集' : null,
+    monster.capabilities?.shapechanger ? '变形生物' : null,
+    monster.capabilities?.regeneration ? '再生' : null,
+    monster.speed.fly != null ? '飞行' : null,
+    monster.speed.swim != null ? '游泳' : null,
+  ].filter((value): value is string => !!value)
   return {
     id: monster.id,
     name: monster.name,
@@ -58,14 +75,19 @@ export const DND5E_SRD_ENEMY_POOL: EnemyTemplate[] = DND5E_SRD_MONSTERS.map((mon
     maxHp: monster.hitPoints.average,
     creatureTypes: srdCreatureTypes(monster.creatureType),
     creatureSize: monster.size,
-    tags: [monster.source, `CR ${monster.challenge.rating}`, monster.creatureType, monster.size, ...monster.subtypes ?? []],
-    description: `${monster.englishName} · ${monster.description}`,
+    tags: [monster.source, `CR ${monster.challenge.rating}`, monster.creatureType, monster.size, ...monster.subtypes ?? [], ...capabilityTags],
+    description: monster.name === monster.englishName
+      ? monster.description
+      : `${monster.englishName} · ${monster.description}`,
     armorClass: monster.armorClass.value,
     challengeRating: monster.challenge.rating,
     hitDice: monster.hitPoints.dice,
     source: monster.source,
   }
-})
+}
+
+/** D&D 5e 2014 地图使用的完整 SRD 5.1 怪物池；旧演示模板不会混入此目录。 */
+export const DND5E_SRD_ENEMY_POOL: EnemyTemplate[] = DND5E_SRD_MONSTERS.map(dnd5eMonsterToEnemyTemplate)
 
 export const ENEMY_POOL: EnemyTemplate[] = [
   {
@@ -308,12 +330,13 @@ export const ENEMY_POOL: EnemyTemplate[] = [
 ]
 
 export function getEnemyTemplate(id: string): EnemyTemplate | undefined {
-  return ENEMY_POOL.find((e) => e.id === id)
+  const monster = getDnd5eSrdMonster(id)
+  return monster ? dnd5eMonsterToEnemyTemplate(monster) : ENEMY_POOL.find((e) => e.id === id)
 }
 
-export function searchEnemyPool(query: string, pool: EnemyTemplate[] = ENEMY_POOL): EnemyTemplate[] {
+export function searchEnemyPool(query: string, pool: readonly EnemyTemplate[] = ENEMY_POOL): EnemyTemplate[] {
   const q = query.trim().toLowerCase()
-  if (!q) return pool
+  if (!q) return [...pool]
   return pool.filter(
     (e) =>
       e.name.toLowerCase().includes(q) ||

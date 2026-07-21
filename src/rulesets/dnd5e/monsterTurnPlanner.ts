@@ -9,6 +9,7 @@ import {
 } from '../../lib/gridCombat'
 import { dnd5eMonsterMapSpeed, getDnd5eSrdMonster, type Dnd5eMonsterAction } from './monsters'
 import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { dnd5eMonsterActionAutomation } from './monsterSchema'
 
 function monsterTraversalGeometry(mapId: string) {
   const geometry = mapGeometryRuntimeForMap(mapId)
@@ -152,13 +153,13 @@ function selectAction(monsterId: string, distanceFeet: number): { action: Dnd5eM
   const monster = getDnd5eSrdMonster(monsterId)
   if (!monster) return undefined
   const rangedIndex = monster.actions.findIndex((action) =>
-    action.kind === 'weapon-attack' && action.attack?.rangeFeet && distanceFeet <= action.attack.rangeFeet.normal,
+    dnd5eMonsterActionAutomation(action) === 'headless' && action.kind === 'weapon-attack' && action.attack?.rangeFeet && distanceFeet <= action.attack.rangeFeet.normal,
   )
   if (distanceFeet > 5 && rangedIndex >= 0) return { action: monster.actions[rangedIndex], index: rangedIndex }
-  const multiattackIndex = monster.actions.findIndex((action) => action.kind === 'multiattack' && distanceFeet <= attackRangeFeet(action))
+  const multiattackIndex = monster.actions.findIndex((action) => dnd5eMonsterActionAutomation(action) === 'headless' && action.kind === 'multiattack' && distanceFeet <= attackRangeFeet(action))
   if (multiattackIndex >= 0) return { action: monster.actions[multiattackIndex], index: multiattackIndex }
   const meleeIndex = monster.actions.findIndex((action) =>
-    action.kind === 'weapon-attack' && (action.attack?.reachFeet ?? 0) >= distanceFeet,
+    dnd5eMonsterActionAutomation(action) === 'headless' && action.kind === 'weapon-attack' && (action.attack?.reachFeet ?? 0) >= distanceFeet,
   )
   if (meleeIndex >= 0) return { action: monster.actions[meleeIndex], index: meleeIndex }
   if (rangedIndex >= 0) return { action: monster.actions[rangedIndex], index: rangedIndex }

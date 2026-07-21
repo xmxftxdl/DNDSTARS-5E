@@ -1,4 +1,5 @@
 import type { AbilityKey } from '../../lib/dnd'
+import generatedSrdMonsterCatalog from './generated/srdMonsters.generated.json'
 
 export const DND5E_DAMAGE_TYPES = [
   'acid',
@@ -18,6 +19,7 @@ export const DND5E_DAMAGE_TYPES = [
 
 export type Dnd5eDamageType = (typeof DND5E_DAMAGE_TYPES)[number]
 export type Dnd5eMonsterSize = '微型' | '小型' | '中型' | '大型' | '超大型' | '巨型'
+export type Dnd5eMonsterAutomation = 'headless' | 'dm-adjudication'
 
 export interface Dnd5eMonsterDamage {
   average: number
@@ -46,6 +48,7 @@ export interface Dnd5eMonsterWeaponAttack {
 export interface Dnd5eMonsterTrait {
   name: string
   description: string
+  automation?: Dnd5eMonsterAutomation
   rule?: {
     kind: 'undead-fortitude'
     dcBase: number
@@ -59,17 +62,37 @@ export interface Dnd5eMonsterAction {
   name: string
   description: string
   kind: 'weapon-attack' | 'multiattack' | 'other'
+  automation?: Dnd5eMonsterAutomation
   attack?: Dnd5eMonsterWeaponAttack
   sequence?: readonly string[]
 }
 
+export interface Dnd5eMonsterSpellcasting {
+  description: string
+  casterLevel?: number
+  ability?: AbilityKey
+  saveDc?: number
+  attackBonus?: number
+  automation: 'dm-adjudication'
+}
+
+export interface Dnd5eMonsterCapabilities {
+  swarm: boolean
+  shapechanger: boolean
+  regeneration: boolean
+  spellcaster: boolean
+  legendary: boolean
+  hasFlySpeed: boolean
+  hasSwimSpeed: boolean
+}
+
 export interface Dnd5eMonsterStatBlock {
-  id: `srd-5.1:${string}`
+  id: string
   slug: string
   name: string
   englishName: string
-  source: 'SRD 5.1'
-  sourcePage: number
+  source: 'SRD 5.1' | 'DM 自定义'
+  sourcePage?: number
   size: Dnd5eMonsterSize
   creatureType: string
   subtypes?: readonly string[]
@@ -91,6 +114,11 @@ export interface Dnd5eMonsterStatBlock {
   legendaryResistanceUses?: number
   traits: readonly Dnd5eMonsterTrait[]
   actions: readonly Dnd5eMonsterAction[]
+  reactions?: readonly Dnd5eMonsterAction[]
+  legendaryActions?: readonly Dnd5eMonsterAction[]
+  lairActions?: readonly Dnd5eMonsterAction[]
+  spellcasting?: Dnd5eMonsterSpellcasting
+  capabilities?: Dnd5eMonsterCapabilities
   description: string
 }
 
@@ -109,7 +137,7 @@ const damage = (
   type: Dnd5eDamageType,
 ): Dnd5eMonsterDamage => ({ average, count, sides, bonus, type })
 
-export const DND5E_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] = [
+const DND5E_CURATED_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] = [
   {
     id: 'srd-5.1:ape', slug: 'ape', name: '猿', englishName: 'Ape', source: 'SRD 5.1', sourcePage: 366,
     size: '中型', creatureType: '野兽', alignment: '无阵营', armorClass: { value: 12 },
@@ -585,11 +613,41 @@ export const DND5E_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] = [
   },
 ] as const
 
+interface GeneratedDnd5eMonsterCatalog {
+  schemaVersion: 1
+  count: number
+  source: {
+    rules: string
+    rulesUrl: string
+    license: string
+    transcription: string
+    transcriptionCommit: string
+    transcriptionUrl: string
+  }
+  monsters: readonly Dnd5eMonsterStatBlock[]
+}
+
+export const DND5E_SRD_MONSTER_CATALOG_METADATA = generatedSrdMonsterCatalog as unknown as GeneratedDnd5eMonsterCatalog
+const CURATED_MONSTERS_BY_SLUG = new Map(DND5E_CURATED_SRD_MONSTERS.map((monster) => [monster.slug, monster]))
+
+/**
+ * Complete SRD 5.1 catalog. The hand-reviewed Chinese entries override the
+ * generated transcription by slug; the remaining entries retain the exact
+ * English SRD prose and explicit automation boundaries.
+ */
+export const DND5E_SRD_MONSTERS: readonly Dnd5eMonsterStatBlock[] =
+  DND5E_SRD_MONSTER_CATALOG_METADATA.monsters.map((monster) => CURATED_MONSTERS_BY_SLUG.get(monster.slug) ?? monster)
+
 const MONSTERS_BY_ID = new Map(DND5E_SRD_MONSTERS.map((monster) => [monster.id, monster]))
 const MONSTERS_BY_SLUG = new Map(DND5E_SRD_MONSTERS.map((monster) => [monster.slug, monster]))
+let roomMonstersById = new Map<string, Dnd5eMonsterStatBlock>()
+
+export function setDnd5eRoomMonsterCatalog(monsters: readonly Dnd5eMonsterStatBlock[]): void {
+  roomMonstersById = new Map(monsters.map((monster) => [monster.id, monster]))
+}
 
 export function getDnd5eSrdMonster(id: string): Dnd5eMonsterStatBlock | undefined {
-  return MONSTERS_BY_ID.get(id as Dnd5eMonsterStatBlock['id'])
+  return roomMonstersById.get(id) ?? MONSTERS_BY_ID.get(id)
 }
 
 export function getDnd5eSrdMonsterBySlug(slug: string): Dnd5eMonsterStatBlock | undefined {

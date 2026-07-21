@@ -8,7 +8,7 @@ describe('D&D 5e monster action schema', () => {
   })
 
   it('rejects an on-hit rule that exists only as prose', () => {
-    const monster = structuredClone(DND5E_SRD_MONSTERS[0])
+    const monster = structuredClone(DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'goblin')!)
     const weapon = monster.actions.find((action) => action.kind === 'weapon-attack')!
     weapon.attack!.onHit = '目标倒地。'
     weapon.attack!.onHitRule = undefined

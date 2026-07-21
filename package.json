@@ -24,6 +24,7 @@
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
     "e2e:report": "playwright show-report",
+    "generate:srd-monsters": "node scripts/generate-srd-monsters.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -39,8 +39,8 @@ function combatant(
 
 describe('SRD 5.1 monster catalog', () => {
   it('contains the namespaced SRD monster and Wild Shape foundation without legacy custom templates', () => {
-    expect(DND5E_SRD_MONSTERS).toHaveLength(19)
-    expect(new Set(DND5E_SRD_MONSTERS.map((monster) => monster.id)).size).toBe(19)
+    expect(DND5E_SRD_MONSTERS).toHaveLength(334)
+    expect(new Set(DND5E_SRD_MONSTERS.map((monster) => monster.id)).size).toBe(334)
     expect(DND5E_SRD_MONSTERS.every((monster) => monster.id.startsWith('srd-5.1:'))).toBe(true)
     expect(DND5E_SRD_MONSTERS.every((monster) => monster.source === 'SRD 5.1')).toBe(true)
     expect(DND5E_SRD_MONSTERS.some((monster) => monster.slug === 'slime')).toBe(false)
@@ -74,7 +74,7 @@ describe('SRD 5.1 monster catalog', () => {
   it('supports Chinese, English and type search plus CR proficiency', () => {
     expect(searchDnd5eSrdMonsters('哥布林').map((monster) => monster.slug)).toEqual(['goblin'])
     expect(searchDnd5eSrdMonsters('dire wolf').map((monster) => monster.slug)).toEqual(['dire-wolf'])
-    expect(searchDnd5eSrdMonsters('亡灵').map((monster) => monster.slug).sort()).toEqual(['skeleton', 'zombie'])
+    expect(searchDnd5eSrdMonsters('亡灵').map((monster) => monster.slug)).toEqual(expect.arrayContaining(['skeleton', 'zombie', 'lich']))
     expect(dnd5eMonsterProficiencyBonus('1/8')).toBe(2)
     expect(dnd5eMonsterProficiencyBonus('17')).toBe(6)
   })
@@ -159,5 +159,26 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
       rolls: [{ targetId: 'hero', d20: 10, damageRolls: [[5]] }],
     })
     expect(result).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+  })
+
+  it('runs generated plain attacks but refuses actions explicitly assigned to DM adjudication', () => {
+    const acolyte = startDnd5eHeadlessCombat('generated', [
+      combatant('monster', 20, { statBlockId: 'srd-5.1:acolyte' }),
+      combatant('hero', 10, { currentHp: 20, maxHp: 20 }),
+    ])
+    const club = resolveDnd5eHeadlessAction(acolyte, {
+      type: 'monster-action', actorId: 'monster', actionId: 'club',
+      rolls: [{ targetId: 'hero', d20: 13, damageRolls: [[4]] }],
+    })
+    expect(club.ok && club.state.combatants.hero.currentHp).toBe(16)
+
+    const aboleth = startDnd5eHeadlessCombat('adjudication', [
+      combatant('monster', 20, { statBlockId: 'srd-5.1:aboleth' }),
+      combatant('hero', 10),
+    ])
+    expect(resolveDnd5eHeadlessAction(aboleth, {
+      type: 'monster-action', actorId: 'monster', actionId: 'tentacle',
+      rolls: [{ targetId: 'hero', d20: 12, damageRolls: [[3, 3], [6]] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
   })
 })

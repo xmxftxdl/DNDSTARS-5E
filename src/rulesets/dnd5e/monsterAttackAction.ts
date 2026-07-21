@@ -28,6 +28,7 @@ import {
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
+import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 
@@ -89,13 +90,16 @@ export function prepareDnd5eMonsterAttack(input: {
     ?? monster.actions.find((action) => action.kind === 'weapon-attack')
   if (!indexedAction) return { ok: false, reason: 'invalid-action' }
   const multiattack = indexedAction.kind === 'weapon-attack'
-    ? monster.actions.find((action) => action.kind === 'multiattack' && action.sequence?.includes(indexedAction.id))
+    ? monster.actions.find((action) => action.kind === 'multiattack' && action.sequence?.includes(indexedAction.id) && dnd5eMonsterActionAutomation(action) === 'headless')
     : undefined
   const action = multiattack ?? indexedAction
+  if (dnd5eMonsterActionAutomation(action) !== 'headless') return { ok: false, reason: 'invalid-action' }
   const attackIds = action.kind === 'multiattack' ? action.sequence ?? [] : [action.id]
   const attacks = attackIds.flatMap((actionId) => {
     const definition = monster.actions.find((candidate) => candidate.id === actionId)
-    return definition?.attack ? [{ id: definition.id, name: definition.name, attack: definition.attack }] : []
+    return definition?.attack && dnd5eMonsterActionAutomation(definition) === 'headless'
+      ? [{ id: definition.id, name: definition.name, attack: definition.attack }]
+      : []
   })
   if (attacks.length !== attackIds.length || attacks.length === 0) return { ok: false, reason: 'invalid-action' }
   const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map)

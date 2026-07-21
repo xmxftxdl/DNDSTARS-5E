@@ -57,7 +57,7 @@ export default function EnemyDetailPanel({
 }) {
   const { template, stats } = resolveEnemyDetail(token)
   const derived = token.poolId ? getEnemyDerivedCombatStats(token.poolId) : undefined
-  const isSrd5eMonster = stats?.source === 'SRD 5.1'
+  const isStructured5eMonster = stats?.source === 'SRD 5.1' || stats?.source === 'DM 自定义'
   const maxHp = token.maxHp ?? derived?.maxHp ?? template?.maxHp ?? 20
   const curHp = token.hp ?? maxHp
   const hpPct = maxHp > 0 ? Math.max(0, Math.min(100, (curHp / maxHp) * 100)) : 0
@@ -298,7 +298,7 @@ export default function EnemyDetailPanel({
                 <Shield className="h-4 w-4 text-sky-400" />
                 <div>
                   <p className="text-[10px] text-slate-500">AC</p>
-                  <p className="text-sm font-semibold text-slate-100">{isSrd5eMonster ? stats.ac : derived?.ac ?? stats.ac}</p>
+                  <p className="text-sm font-semibold text-slate-100">{isStructured5eMonster ? stats.ac : derived?.ac ?? stats.ac}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
@@ -310,7 +310,7 @@ export default function EnemyDetailPanel({
               </div>
             </div>
 
-            {isSrd5eMonster && (
+            {isStructured5eMonster && (
               <section className="mb-4 space-y-1.5 rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-3 py-2 text-xs text-slate-300">
                 {stats.hitDice && <p><span className="text-slate-500">生命骰 · </span>{stats.hitDice}</p>}
                 {stats.alignment && <p><span className="text-slate-500">阵营 · </span>{stats.alignment}</p>}
@@ -420,7 +420,7 @@ export default function EnemyDetailPanel({
                 <ul className="space-y-2">
                   {stats.traits.map((t) => (
                     <li key={t.name} className="rounded-xl bg-violet-500/10 px-3 py-2">
-                      <p className="text-sm font-medium text-violet-200">{t.name}</p>
+                      <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-violet-200">{t.name}</p>{t.automation === 'dm-adjudication' && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">DM 裁定</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{t.description}</p>
                     </li>
                   ))}
@@ -438,13 +438,29 @@ export default function EnemyDetailPanel({
                 <ul className="space-y-2">
                   {stats.actions.map((a) => (
                     <li key={a.name} className="rounded-xl bg-rose-500/10 px-3 py-2">
-                      <p className="text-sm font-medium text-rose-200">{a.name}</p>
+                      <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-rose-200">{a.name}</p>{a.automation && <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${a.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{a.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{a.description}</p>
                     </li>
                   ))}
                 </ul>
               </section>
             )}
+            {stats.spellcasting && (
+              <section className="mb-4 rounded-xl bg-sky-500/10 px-3 py-2">
+                <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-medium text-sky-200">施法</h3><span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">DM 裁定</span></div>
+                <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-slate-400">{stats.spellcasting}</p>
+              </section>
+            )}
+            {([
+              ['反应', stats.reactions, 'bg-cyan-500/10', 'text-cyan-200'],
+              ['传奇动作', stats.legendaryActions, 'bg-amber-500/10', 'text-amber-200'],
+              ['巢穴动作', stats.lairActions, 'bg-fuchsia-500/10', 'text-fuchsia-200'],
+            ] as const).map(([label, actions, background, text]) => actions?.length ? (
+              <section key={label} className="mb-4">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</h3>
+                <ul className="space-y-2">{actions.map((action) => <li key={action.name} className={`rounded-xl ${background} px-3 py-2`}><div className="flex items-center justify-between gap-2"><p className={`text-sm font-medium ${text}`}>{action.name}</p><span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">DM 裁定</span></div><p className="mt-0.5 text-xs leading-relaxed text-slate-400">{action.description}</p></li>)}</ul>
+              </section>
+            ) : null)}
           </>
         )}
 
