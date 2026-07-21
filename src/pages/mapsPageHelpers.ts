@@ -66,8 +66,8 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
       const normal: InitiativeEntry = {
         slotId: `${token.id}:normal`,
         tokenId: token.id,
-        label: token.label,
-        emoji: token.emoji,
+        label: ch?.name || token.label,
+        emoji: ch?.avatar || token.emoji,
         color: token.color,
         accent: ch?.accent,
         roll,

@@ -59,7 +59,7 @@ import type { DiceRoll } from '../components/DiceRollOverlay'
 import DiceBoxD20Overlay from '../components/DiceBoxD20Overlay'
 import DiceBoxRollOverlay from '../components/DiceBoxRollOverlay'
 import { DICE_TIMING } from '../lib/diceOverlayShared'
-import { characterHpTokenPatch, useMapStore } from '../store/maps'
+import { characterHpTokenPatch, projectCharacterTokenPresentations, useMapStore } from '../store/maps'
 import { useFogStore } from '../store/fog'
 import { useMapGeometryStore } from '../store/mapGeometry'
 import { useMapExplorationStore } from '../store/mapExploration'
@@ -1961,6 +1961,20 @@ export default function MapsPage() {
   const playerSlot = currentPlayerSlot()
   const assignedCharacterId = isDM ? null : getAssignedPlayerCharacterId(playerSlot)
   const activeMap = maps.find((m) => m.id === selectedId) ?? maps[0] ?? null
+  const displayActiveMapTokens = activeMap
+    ? projectCharacterTokenPresentations(activeMap.tokens, characters)
+    : undefined
+  const displayActiveMap = activeMap && displayActiveMapTokens
+    ? displayActiveMapTokens === activeMap.tokens
+      ? activeMap
+      : { ...activeMap, tokens: displayActiveMapTokens }
+    : null
+  const displayTokensById = new Map((displayActiveMap?.tokens ?? []).map((token) => [token.id, token]))
+  const displayInitiativeOrder = initiativeOrder.map((entry) => {
+    const token = displayTokensById.get(entry.tokenId)
+    if (!token || (token.emoji === entry.emoji && token.label === entry.label)) return entry
+    return { ...entry, emoji: token.emoji, label: token.label }
+  })
   const activeMapId = activeMap?.id
   const applySharedCombatStateEvent = useEffectEvent((state: SharedCombatState | null) => {
     applySharedCombatState(state)
@@ -13704,7 +13718,7 @@ export default function MapsPage() {
           {/* 地图本体铺满 */}
           <div className="absolute inset-0">
             <MapCanvas
-              map={activeMap}
+              map={displayActiveMap ?? activeMap}
               selectedTokenId={selectedTokenId}
               onSelectToken={handleSelectToken}
               targetSelectTokenIds={[]}
@@ -15292,7 +15306,7 @@ export default function MapsPage() {
           {combatActive && initiativeOrder.length > 0 && !showBar && (
             <div className="absolute inset-x-0 top-2 z-30 flex justify-center px-2">
               <InitiativeTracker
-                entries={initiativeOrder}
+                entries={displayInitiativeOrder}
                 activeIndex={initiativeIndex}
                 scrollOffset={initiativeScroll}
                 round={round}
@@ -15831,7 +15845,7 @@ export default function MapsPage() {
             </div>
             {combatActive && initiativeOrder.length > 0 && (
               <InitiativeTracker
-                entries={initiativeOrder}
+                entries={displayInitiativeOrder}
                 activeIndex={initiativeIndex}
                 scrollOffset={initiativeScroll}
                 round={round}

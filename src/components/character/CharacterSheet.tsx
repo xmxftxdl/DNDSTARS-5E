@@ -201,6 +201,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
             portrait={c.portrait}
             editable={!readOnly}
             onChange={(portrait) => updateCharacter({ portrait })}
+            onAvatarChange={(avatar) => updateCharacter({ avatar })}
           />
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="角色名称" value={c.name} onChange={(value) => updateCharacter({ name: value })} className="col-span-2" />

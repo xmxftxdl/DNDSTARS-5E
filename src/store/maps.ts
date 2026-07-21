@@ -625,6 +625,32 @@ export function characterHpTokenPatch(char: {
   return { hp: char.currentHp, maxHp: char.maxHp }
 }
 
+type CharacterTokenPresentation = {
+  id: string
+  name: string
+  avatar: string
+}
+
+/** 角色是人物 Token 名称与头像的单一真相来源；未关联角色的 Token 保持原样。 */
+export function projectCharacterTokenPresentations(
+  tokens: Token[],
+  characters: readonly CharacterTokenPresentation[],
+): Token[] {
+  const charactersById = new Map(characters.map((character) => [character.id, character]))
+  let changed = false
+  const projected = tokens.map((token) => {
+    if (!token.characterId) return token
+    const character = charactersById.get(token.characterId)
+    if (!character) return token
+    const emoji = character.avatar || token.emoji
+    const label = character.name || token.label
+    if (emoji === token.emoji && label === token.label) return token
+    changed = true
+    return { ...token, emoji, label }
+  })
+  return changed ? projected : tokens
+}
+
 const TOKEN_PRESETS = {
   player: { color: '#34d399', emoji: '🛡️' },
   enemy: { color: '#f87171', emoji: '👹' },

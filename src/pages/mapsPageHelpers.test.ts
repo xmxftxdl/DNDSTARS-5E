@@ -81,8 +81,8 @@ describe('D&D 5e map helpers', () => {
     } as never
     vi.spyOn(Math, 'random').mockReturnValue(0.45) // d20 10 + DEX 4
     expect(buildInitiativeOrder([token], [thief])).toMatchObject([
-      { tokenId: 'thief-token', slotId: 'thief-token:normal', roll: 14 },
-      { tokenId: 'thief-token', slotId: 'thief-token:thief-reflexes', turnKind: 'thief-reflexes', roll: 4 },
+      { tokenId: 'thief-token', slotId: 'thief-token:normal', label: '盗贼', emoji: '🗡️', roll: 14 },
+      { tokenId: 'thief-token', slotId: 'thief-token:thief-reflexes', turnKind: 'thief-reflexes', label: '盗贼', emoji: '🗡️', roll: 4 },
     ])
     expect(buildInitiativeOrder([token], [{ ...thief, conditions: ['受突袭'] }])).toHaveLength(1)
   })
