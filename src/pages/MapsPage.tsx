@@ -474,15 +474,12 @@ import { buildCombatMessageQueueReset } from '../lib/sharedCombatReset'
 import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
-  consumePlayerActionAck,
   createDmLocalPlayerActionEnvelope,
   createPlayerActionEnvelope,
-  normalizeRemotePlayerActionForDm,
-  loadDmPlayerActionBatch,
   submitPlayerActionRequestWithLock,
-  syncAuthoritativePlayerActionState,
   type SharedPlayerActionPatch,
 } from '../lib/playerActionSync'
+import { useMapsPlayerActionTransport } from './maps/useMapsPlayerActionTransport'
 import {
   capturePlayerActionResultBaseline,
   type PlayerActionResultBaseline,
@@ -13422,98 +13419,25 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${turnCharacter.name} 请求执行${label}`)
   }
 
-  const waitForAuthoritativePlayerActionSync = async (appliedAt?: number) => {
-    await syncAuthoritativePlayerActionState({
-      appliedAt,
-      loadMapsUpdatedAt: async () => (await loadSharedResource<{ updatedAt?: number }>('maps'))?.updatedAt,
-      loadCharactersUpdatedAt: async () =>
-        (await loadSharedResource<{ updatedAt?: number }>('characters'))?.updatedAt,
-      sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
-      loadMaps: () => useMapStore.getState().loadShared(),
-      loadCharacters: () => useCharacterStore.getState().loadShared(),
-    })
-  }
-
-  const handlePlayerActionRequestRef = useRef<(action: SharedPlayerActionState) => Promise<void>>(
-    async () => undefined,
-  )
-
-  useEffect(() => {
-    handlePlayerActionRequestRef.current = handlePlayerActionRequest
+  useMapsPlayerActionTransport({
+    isDm: isDM,
+    mode,
+    activeMapId,
+    dmRefreshKey: `${combatActive}:${round}:${currentInitiativeToken?.id ?? ''}`,
+    getCombatId: () => combatIdRef.current,
+    processedActionIdsRef: processedPlayerActionIdsRef,
+    seenAckIdsRef: seenPlayerActionAckIdsRef,
+    pendingActionRef: pendingPlayerActionRef,
+    onAction: handlePlayerActionRequest,
+    clearPendingAction: () => setPendingPlayerActionLocked(null),
+    onTargetOutOfRange: () => {
+      void showCombatNotice(
+        '距离不足',
+        '目标已经超出所选攻击的有效距离。近战攻击请先移动到武器触及范围内，再重新选择目标。',
+        'amber',
+      )
+    },
   })
-
-  useEffect(() => {
-    if (!isDM || !activeMapId) return
-    const unsubscribe = subscribeSharedEvent<SharedPlayerActionState>(
-      'player-action-player-to-dm',
-      (action) => { void handlePlayerActionRequestRef.current(normalizeRemotePlayerActionForDm(action)) },
-    )
-    let cancelled = false
-    const load = async () => {
-      const batch = await loadDmPlayerActionBatch({
-        mapId: activeMapId,
-        combatId: combatIdRef.current,
-        currentProcessedActionIds: processedPlayerActionIdsRef.current,
-        loadProcessed: () => loadSharedResource<SharedPlayerActionProcessedState>('player-action-processed'),
-        loadQueue: () => loadSharedResource<SharedPlayerActionRequestQueueState>('player-action-requests'),
-        loadLatestAction: () => loadSharedResource<SharedPlayerActionState>('player-action'),
-      })
-      if (cancelled) return
-      if (batch.processedActionIds) processedPlayerActionIdsRef.current = batch.processedActionIds
-      for (const action of batch.actions) {
-        if (cancelled) return
-        await handlePlayerActionRequestRef.current(normalizeRemotePlayerActionForDm(action))
-      }
-    }
-    const unsubscribeQueue = subscribeSharedResourceInvalidation('player-action-requests', load)
-    return () => {
-      cancelled = true
-      unsubscribe()
-      unsubscribeQueue()
-    }
-  }, [isDM, activeMapId, combatActive, round, currentInitiativeToken?.id])
-
-  useEffect(() => {
-    if (mode !== 'player' || !activeMapId) return
-    let cancelled = false
-    const applyAck = (ack: SharedPlayerActionAckState | null) => {
-      if (
-        ack?.status === 'rejected' && ack.reason === 'target-out-of-range' &&
-        pendingPlayerActionRef.current?.id === ack.actionId &&
-        !seenPlayerActionAckIdsRef.current.has(ack.id)
-      ) {
-        void showCombatNotice(
-          '距离不足',
-          '目标已经超出所选攻击的有效距离。近战攻击请先移动到武器触及范围内，再重新选择目标。',
-          'amber',
-        )
-      }
-      void consumePlayerActionAck({
-        ack,
-        mapId: activeMapId,
-        seenAckIds: seenPlayerActionAckIdsRef.current,
-        getPendingAction: () => pendingPlayerActionRef.current,
-        waitForAuthoritativeSync: waitForAuthoritativePlayerActionSync,
-        sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
-        clearPendingAction: () => setPendingPlayerActionLocked(null),
-        isCancelled: () => cancelled,
-      })
-    }
-    const unsubscribe = subscribeSharedEvent<SharedPlayerActionAckState>(
-      'player-action-dm-to-player',
-      applyAck,
-    )
-    const load = async () => {
-      const ack = await loadSharedResource<SharedPlayerActionAckState>('player-action-ack')
-      if (!cancelled) applyAck(ack)
-    }
-    const unsubscribeAck = subscribeSharedResourceInvalidation('player-action-ack', load)
-    return () => {
-      cancelled = true
-      unsubscribe()
-      unsubscribeAck()
-    }
-  }, [mode, activeMapId, showCombatNotice])
 
   const requestAdvanceEvent = useEffectEvent(() => requestAdvance())
   const pushCombatLogEvent = useEffectEvent(
