@@ -54,17 +54,28 @@ function validateDamage(raw: unknown): boolean {
     typeof raw.type === 'string' && DAMAGE_TYPE_VALUES.has(raw.type)
 }
 
+function validateDamageList(raw: unknown): boolean {
+  return Array.isArray(raw) && raw.length >= 1 && raw.length <= 16 && raw.every(validateDamage)
+}
+
 function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   if (!isRecord(action) || !requiredText(action.id, 120) || !requiredText(action.name, 240) ||
     !requiredText(action.description) || typeof action.kind !== 'string' || !ACTION_KINDS.has(action.kind)) return false
   if (action.automation != null && action.automation !== 'headless' && action.automation !== 'dm-adjudication') return false
   if (action.sequence != null && (!Array.isArray(action.sequence) || action.sequence.some((entry) => !requiredText(entry, 120)))) return false
+  if (action.usage != null && (
+    !isRecord(action.usage) || action.usage.kind !== 'recharge' ||
+    !finiteInteger(action.usage.dieSides, 2, 100) ||
+    !finiteInteger(action.usage.minimum, 1, Number(action.usage.dieSides))
+  )) return false
+  if (action.legendaryCost != null && !finiteInteger(action.legendaryCost, 1, 10)) return false
+  if (action.referencedActionId != null && !requiredText(action.referencedActionId, 120)) return false
   if (action.attack == null) return true
   const attack = action.attack
   if (!isRecord(attack) || typeof attack.mode !== 'string' || !ATTACK_MODES.has(attack.mode) ||
     !finiteInteger(attack.toHit, -100, 100) || !requiredText(attack.target, 500) ||
-    !Array.isArray(attack.damage) || attack.damage.length < 1 || attack.damage.length > 16 ||
-    !attack.damage.every(validateDamage)) return false
+    !validateDamageList(attack.damage)) return false
+  if (attack.damageAtHalfHp != null && !validateDamageList(attack.damageAtHalfHp)) return false
   if (attack.reachFeet != null && !finiteInteger(attack.reachFeet, 0, 10_000)) return false
   if (attack.rangeFeet != null && (!isRecord(attack.rangeFeet) ||
     !finiteInteger(attack.rangeFeet.normal, 0, 100_000) || !finiteInteger(attack.rangeFeet.long, 0, 100_000) ||
@@ -76,6 +87,27 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
       !finiteInteger(attack.onHitRule.dc, 1, 100) || attack.onHitRule.condition !== 'prone') return false
   }
   return true
+}
+
+function traitShapeIsValid(raw: unknown): boolean {
+  if (!isRecord(raw) || !requiredText(raw.name, 240) || !requiredText(raw.description)) return false
+  if (raw.automation != null && raw.automation !== 'headless' && raw.automation !== 'dm-adjudication') return false
+  if (raw.rule == null) return true
+  if (!isRecord(raw.rule) || typeof raw.rule.kind !== 'string') return false
+  if (raw.rule.kind === 'undead-fortitude') {
+    return finiteInteger(raw.rule.dcBase, 1, 100) &&
+      Array.isArray(raw.rule.excludedDamageTypes) && raw.rule.excludedDamageTypes.every((type) => DAMAGE_TYPE_VALUES.has(String(type))) &&
+      typeof raw.rule.excludedOnCritical === 'boolean'
+  }
+  if (raw.rule.kind === 'regeneration') {
+    return finiteInteger(raw.rule.amount, 1, 1_000_000) && typeof raw.rule.requiresPositiveHp === 'boolean' &&
+      Array.isArray(raw.rule.suppressedByDamageTypes) && raw.rule.suppressedByDamageTypes.every((type) => DAMAGE_TYPE_VALUES.has(String(type))) &&
+      typeof raw.rule.diesAtZeroWhenSuppressed === 'boolean'
+  }
+  if (raw.rule.kind === 'swarm') {
+    return raw.rule.cannotRegainHitPoints === true && raw.rule.cannotGainTemporaryHitPoints === true
+  }
+  return false
 }
 
 export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eMonsterActionAutomation {
@@ -164,12 +196,38 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (!finiteInteger(raw.passivePerception, 0, 100)) issues.push(issue(monsterId, '被动察觉无效'))
   if (!Array.isArray(raw.languages) || raw.languages.length > 64 || raw.languages.some((language) => !requiredText(language, 500))) issues.push(issue(monsterId, '语言数据无效'))
   if (!isRecord(raw.challenge) || !requiredText(raw.challenge.rating, 16) || !finiteInteger(raw.challenge.xp, 0, 100_000_000)) issues.push(issue(monsterId, '挑战等级或经验值无效'))
-  if (!Array.isArray(raw.traits) || raw.traits.length > 128 || raw.traits.some((trait) => !isRecord(trait) || !requiredText(trait.name, 240) || !requiredText(trait.description))) issues.push(issue(monsterId, '特性数据无效'))
+  if (!Array.isArray(raw.traits) || raw.traits.length > 128 || raw.traits.some((trait) => !traitShapeIsValid(trait))) issues.push(issue(monsterId, '特性数据无效'))
   if (!Array.isArray(raw.actions) || raw.actions.length > 128) issues.push(issue(monsterId, '动作列表无效'))
   for (const [key, label] of [['reactions', '反应'], ['legendaryActions', '传奇动作'], ['lairActions', '巢穴动作']] as const) {
     if (raw[key] != null && (!Array.isArray(raw[key]) || raw[key].length > 128)) issues.push(issue(monsterId, `${label}列表无效`))
   }
-  if (raw.spellcasting != null && (!isRecord(raw.spellcasting) || !requiredText(raw.spellcasting.description) || raw.spellcasting.automation !== 'dm-adjudication')) issues.push(issue(monsterId, '施法数据无效'))
+  if (raw.spellcasting != null) {
+    const spellcasting = isRecord(raw.spellcasting) ? raw.spellcasting : null
+    const slots = isRecord(spellcasting?.slots) ? spellcasting.slots : null
+    const spells = Array.isArray(spellcasting?.spells) ? spellcasting.spells : null
+    if (
+      !spellcasting || !requiredText(spellcasting.description) ||
+      (spellcasting.automation !== 'headless' && spellcasting.automation !== 'dm-adjudication') ||
+      (spellcasting.casterLevel != null && !finiteInteger(spellcasting.casterLevel, 1, 30)) ||
+      (spellcasting.ability != null && !ABILITY_KEYS.includes(spellcasting.ability as typeof ABILITY_KEYS[number])) ||
+      (spellcasting.saveDc != null && !finiteInteger(spellcasting.saveDc, 1, 100)) ||
+      (spellcasting.attackBonus != null && !finiteInteger(spellcasting.attackBonus, -100, 100)) ||
+      (spellcasting.componentsRequired != null && (
+        !Array.isArray(spellcasting.componentsRequired) ||
+        spellcasting.componentsRequired.some((entry) => !['V', 'S', 'M'].includes(String(entry)))
+      )) ||
+      (spellcasting.slots != null && (!slots || Object.entries(slots).some(([level, count]) =>
+        !/^[1-9]$/.test(level) || !finiteInteger(count, 0, 99)
+      ))) ||
+      (spellcasting.spells != null && (!spells || spells.some((spell) =>
+        !isRecord(spell) || !requiredText(spell.id, 120) || !requiredText(spell.name, 240) ||
+        !finiteInteger(spell.level, 0, 9) || (spell.usage != null && (
+          !isRecord(spell.usage) ||
+          (spell.usage.kind !== 'at-will' && !(spell.usage.kind === 'per-day' && finiteInteger(spell.usage.max, 1, 99)))
+        ))
+      )))
+    ) issues.push(issue(monsterId, '施法数据无效'))
+  }
   if (!requiredText(raw.description)) issues.push(issue(monsterId, '怪物简介无效'))
   for (const key of ['damageVulnerabilities', 'damageResistances', 'damageImmunities'] as const) {
     if (raw[key] != null && (!Array.isArray(raw[key]) || raw[key].some((entry) => typeof entry !== 'string' || !DAMAGE_TYPE_VALUES.has(entry)))) {
@@ -192,6 +250,16 @@ export function validateDnd5eMonsterSchema(monster: Dnd5eMonsterStatBlock): Dnd5
     ['巢穴动作', monster.lairActions],
   ] as const) {
     if (Array.isArray(actions)) issues.push(...validateActionList(monster, actions, label))
+  }
+  for (const action of monster.legendaryActions ?? []) {
+    if (action.referencedActionId && !monster.actions.some((candidate) => candidate.id === action.referencedActionId)) {
+      issues.push({
+        monsterId: monster.id,
+        actionId: action.id,
+        code: 'invalid-stat-block',
+        message: `传奇动作引用了不存在的普通动作：${action.referencedActionId}`,
+      })
+    }
   }
   return issues
 }

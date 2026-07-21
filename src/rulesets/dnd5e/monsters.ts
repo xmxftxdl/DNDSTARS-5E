@@ -36,6 +36,8 @@ export interface Dnd5eMonsterWeaponAttack {
   rangeFeet?: { normal: number; long: number }
   target: string
   damage: readonly Dnd5eMonsterDamage[]
+  /** 群集在生命值不高于一半时使用的替代伤害。 */
+  damageAtHalfHp?: readonly Dnd5eMonsterDamage[]
   onHit?: string
   onHitRule?: {
     kind: 'saving-throw-condition'
@@ -54,7 +56,23 @@ export interface Dnd5eMonsterTrait {
     dcBase: number
     excludedDamageTypes: readonly Dnd5eDamageType[]
     excludedOnCritical: boolean
+  } | {
+    kind: 'regeneration'
+    amount: number
+    requiresPositiveHp: boolean
+    suppressedByDamageTypes: readonly Dnd5eDamageType[]
+    diesAtZeroWhenSuppressed: boolean
+  } | {
+    kind: 'swarm'
+    cannotRegainHitPoints: true
+    cannotGainTemporaryHitPoints: true
   }
+}
+
+export interface Dnd5eMonsterActionUsage {
+  kind: 'recharge'
+  dieSides: number
+  minimum: number
 }
 
 export interface Dnd5eMonsterAction {
@@ -65,6 +83,10 @@ export interface Dnd5eMonsterAction {
   automation?: Dnd5eMonsterAutomation
   attack?: Dnd5eMonsterWeaponAttack
   sequence?: readonly string[]
+  usage?: Dnd5eMonsterActionUsage
+  legendaryCost?: number
+  /** 传奇动作直接调用普通武器动作时指向其 ID。 */
+  referencedActionId?: string
 }
 
 export interface Dnd5eMonsterSpellcasting {
@@ -73,7 +95,16 @@ export interface Dnd5eMonsterSpellcasting {
   ability?: AbilityKey
   saveDc?: number
   attackBonus?: number
-  automation: 'dm-adjudication'
+  school?: string
+  componentsRequired?: readonly ('V' | 'S' | 'M')[]
+  slots?: Readonly<Record<string, number>>
+  spells?: readonly {
+    id: string
+    name: string
+    level: number
+    usage?: { kind: 'at-will' } | { kind: 'per-day'; max: number }
+  }[]
+  automation: Dnd5eMonsterAutomation
 }
 
 export interface Dnd5eMonsterCapabilities {

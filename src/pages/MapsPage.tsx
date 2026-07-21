@@ -7029,6 +7029,16 @@ export default function MapsPage() {
         const baneRoll = requirement.baned ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', requirement.targetName))[0] : undefined
         turnStartActiveEffectSavingThrows.push({ effectId: requirement.effect.id, d20, d20Second, blessRoll, baneRoll })
       }
+      const nextMonsterRechargeRolls = [] as Array<{ actorId: string; actionId: string; roll: number }>
+      for (const requirement of prepared.prepared.nextMonsterRechargeRolls) {
+        const roll = (await rollDiceBoxValues(
+          1,
+          requirement.dieSides,
+          `${requirement.actionName}·充能（${requirement.minimum}–${requirement.dieSides}）`,
+          requirement.actorName,
+        ))[0]
+        nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
+      }
       const resolved = resolveDnd5ePlayerEndTurn({
         action,
         map: latestMap,
@@ -7036,6 +7046,7 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        nextMonsterRechargeRolls,
       })
       if (!resolved.ok || !resolved.result.ok) return false
       const settled = await settleDnd5eConcentrationChecks({
@@ -7960,6 +7971,16 @@ export default function MapsPage() {
           : undefined
         turnStartActiveEffectSavingThrows.push({ effectId: requirement.effect.id, d20, d20Second, blessRoll, baneRoll })
       }
+      const nextMonsterRechargeRolls = [] as Array<{ actorId: string; actionId: string; roll: number }>
+      for (const requirement of preparedTurn.prepared.nextMonsterRechargeRolls) {
+        const roll = (await rollDiceBoxValues(
+          1,
+          requirement.dieSides,
+          `${requirement.actionName}·充能（${requirement.minimum}–${requirement.dieSides}）`,
+          requirement.actorName,
+        ))[0]
+        nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
+      }
       const actorCombatant = preparedTurn.prepared.state.combatants[dnd5eActionActorToken.id]
       const deathSaveD20 = await rollDiceBoxD20('死亡豁免', dnd5eActionActor.name)
       const blessRoll = actorCombatant && dnd5eCombatantHasConcentrationEffect(
@@ -7980,6 +8001,7 @@ export default function MapsPage() {
         baneRoll,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        nextMonsterRechargeRolls,
       }, { transactionId: action.id, mapId: authorityMap.id })
       if (!result.ok) {
         acknowledgePlayerAction(action, 'rejected', result.reason)
@@ -8080,6 +8102,16 @@ export default function MapsPage() {
           : undefined
         turnStartActiveEffectSavingThrows.push({ effectId: requirement.effect.id, d20, d20Second, blessRoll, baneRoll })
       }
+      const nextMonsterRechargeRolls = [] as Array<{ actorId: string; actionId: string; roll: number }>
+      for (const requirement of preparedEndTurn.prepared.nextMonsterRechargeRolls) {
+        const roll = (await rollDiceBoxValues(
+          1,
+          requirement.dieSides,
+          `${requirement.actionName}·充能（${requirement.minimum}–${requirement.dieSides}）`,
+          requirement.actorName,
+        ))[0]
+        nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
+      }
       const dnd5eEndTurn = resolveDnd5ePlayerEndTurn({
         action,
         map: authorityMap,
@@ -8087,6 +8119,7 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        nextMonsterRechargeRolls,
       })
       if (!dnd5eEndTurn.ok) {
         acknowledgePlayerAction(action, 'rejected', dnd5eEndTurn.reason)

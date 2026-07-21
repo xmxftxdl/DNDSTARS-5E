@@ -127,6 +127,23 @@ function normalizedDamage(entries = []) {
   })
 }
 
+function normalizedRechargeUsage(usage) {
+  if (usage?.type !== 'recharge on roll') return undefined
+  const parsed = dice(usage.dice)
+  const minimum = Number(usage.min_value)
+  if (!parsed || parsed.count !== 1 || !Number.isInteger(minimum) || minimum < 1 || minimum > parsed.sides) return undefined
+  return { kind: 'recharge', dieSides: parsed.sides, minimum }
+}
+
+function normalizedHalfHpDamage(action) {
+  const description = String(action?.desc ?? '')
+  const match = description.match(/or\s+\d+\s*\((\d+d\d+(?:\s*[+\-−]\s*\d+)?)\)\s+([a-z]+)\s+damage\s+if\s+the\s+swarm\s+has\s+half/i)
+  const parsed = match ? dice(match[1]) : null
+  const type = match?.[2]?.toLowerCase()
+  if (!parsed || !DAMAGE_TYPES.has(type)) return undefined
+  return [{ average: damageAverage(parsed), ...parsed, type }]
+}
+
 function attackMode(description) {
   const text = String(description ?? '')
   if (/Melee or Ranged (?:Weapon|Spell) Attack/i.test(text)) return 'melee-or-ranged'
@@ -161,10 +178,12 @@ function damageStructureIsComplete(action, attack) {
   return attack.damage.length >= 1 + proseAdditionalSegments
 }
 
-function safelyAutomatedWeapon(action, attack) {
+function safelyAutomatedWeapon(action, attack, hasStructuredHalfHpDamage = false) {
   if (!damageStructureIsComplete(action, attack) || action.dc || action.usage || action.options) return false
   const text = String(action.desc ?? '')
-  return !/(saving throw|must succeed|is grappled|escape dc|knocked prone|restrained|poisoned|paralyzed|unconscious|swallow|regains? hit points|reduces? (?:its|the target)|teleport|recharge|until the|at the (?:start|end)|each creature|cone|line that is|radius|area|half of its hit points|damage, or|\bif the\b|if it is|attaches to|is cursed|catches fire|while enlarged|with shillelagh|in (?:small|medium|large|huge|gargantuan) form|one prone creature)/i.test(text)
+  const unsafe = /(saving throw|must succeed|is grappled|escape dc|knocked prone|restrained|poisoned|paralyzed|unconscious|swallow|regains? hit points|reduces? (?:its|the target)|teleport|recharge|until the|at the (?:start|end)|each creature|cone|line that is|radius|area|attaches to|is cursed|catches fire|while enlarged|with shillelagh|in (?:small|medium|large|huge|gargantuan) form|one prone creature)/i
+  if (unsafe.test(text)) return false
+  return hasStructuredHalfHpDamage || !/(half of its hit points|damage, or|\bif the\b|if it is)/i.test(text)
 }
 
 function safelyAutomatedMultiattack(description) {
@@ -187,12 +206,18 @@ function normalizedActions(rawActions = [], forcedDmAdjudication = false) {
     }
     const attack = normalizedAttack(action)
     if (attack) {
+      const damageAtHalfHp = normalizedHalfHpDamage(action)
       return {
-        id, name, description, kind: 'weapon-attack', attack,
-        automation: !forcedDmAdjudication && safelyAutomatedWeapon(action, attack) ? 'headless' : 'dm-adjudication',
+        id, name, description, kind: 'weapon-attack',
+        attack: { ...attack, ...(damageAtHalfHp ? { damageAtHalfHp } : {}) },
+        ...(normalizedRechargeUsage(action.usage) ? { usage: normalizedRechargeUsage(action.usage) } : {}),
+        automation: !forcedDmAdjudication && safelyAutomatedWeapon(action, attack, !!damageAtHalfHp) ? 'headless' : 'dm-adjudication',
       }
     }
-    return { id, name, description, kind: 'other', automation: 'dm-adjudication' }
+    return {
+      id, name, description, kind: 'other', automation: 'dm-adjudication',
+      ...(normalizedRechargeUsage(action.usage) ? { usage: normalizedRechargeUsage(action.usage) } : {}),
+    }
   })
   for (const action of actions) {
     if (action.kind !== 'multiattack' || action.sequence.length === 0) continue
@@ -202,6 +227,29 @@ function normalizedActions(rawActions = [], forcedDmAdjudication = false) {
     }
   }
   return actions
+}
+
+function normalizedLegendaryActions(rawActions = [], regularActions = []) {
+  const actions = normalizedActions(rawActions, true)
+  return actions.map((action) => {
+    const rawName = String(action.name)
+    const legendaryCost = Number(rawName.match(/costs?\s+(\d+)\s+actions?/i)?.[1] ?? 1)
+    const referenceName = String(action.description).match(/makes?\s+(?:one|a)\s+([a-z '-]+?)\s+attack/i)?.[1]?.trim().toLowerCase()
+    const referenced = referenceName
+      ? regularActions.find((candidate) => candidate.name.toLowerCase() === referenceName || candidate.id === slug(referenceName))
+      : undefined
+    if (referenced?.kind === 'weapon-attack' && referenced.attack && referenced.automation === 'headless') {
+      return {
+        ...action,
+        kind: 'weapon-attack',
+        attack: referenced.attack,
+        referencedActionId: referenced.id,
+        legendaryCost,
+        automation: 'headless',
+      }
+    }
+    return { ...action, legendaryCost, automation: 'dm-adjudication' }
+  })
 }
 
 function normalizedProficiencies(proficiencies = []) {
@@ -264,18 +312,69 @@ function normalizedSpellcasting(abilities = []) {
   const spellcasting = abilities.find((ability) => /spellcasting/i.test(String(ability?.name ?? '')))
   if (!spellcasting) return undefined
   const description = String(spellcasting.desc ?? '')
+  const structured = spellcasting.spellcasting
   const level = description.match(/(\d+)(?:st|nd|rd|th)-level spellcaster/i)
   const ability = description.match(/spellcasting ability is (Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)/i)
   const saveDc = description.match(/spell save DC\s*(\d+)/i)
   const attackBonus = description.match(/([+-]\d+) to hit with spell attacks/i)
   return {
     description,
-    ...(level ? { casterLevel: Number(level[1]) } : {}),
-    ...(ability ? { ability: ABILITY_KEYS[ability[1].toLowerCase()] } : {}),
-    ...(saveDc ? { saveDc: Number(saveDc[1]) } : {}),
-    ...(attackBonus ? { attackBonus: Number(attackBonus[1]) } : {}),
-    automation: 'dm-adjudication',
+    ...(Number.isInteger(structured?.level) ? { casterLevel: structured.level } : level ? { casterLevel: Number(level[1]) } : {}),
+    ...(structured?.ability?.index && ABILITY_KEYS[structured.ability.index]
+      ? { ability: ABILITY_KEYS[structured.ability.index] }
+      : ability ? { ability: ABILITY_KEYS[ability[1].toLowerCase()] } : {}),
+    ...(Number.isInteger(structured?.dc) ? { saveDc: structured.dc } : saveDc ? { saveDc: Number(saveDc[1]) } : {}),
+    ...(Number.isInteger(structured?.modifier) ? { attackBonus: structured.modifier } : attackBonus ? { attackBonus: Number(attackBonus[1]) } : {}),
+    ...(structured?.school ? { school: String(structured.school) } : {}),
+    ...(Array.isArray(structured?.components_required)
+      ? { componentsRequired: structured.components_required.filter((entry) => ['V', 'S', 'M'].includes(entry)) }
+      : {}),
+    ...(structured?.slots && typeof structured.slots === 'object' ? { slots: structured.slots } : {}),
+    ...(Array.isArray(structured?.spells) ? { spells: structured.spells.flatMap((entry) => {
+      const id = String(entry?.url ?? '').split('/').filter(Boolean).at(-1)
+      return id && Number.isInteger(entry?.level)
+        ? [{
+            id, name: String(entry.name ?? id), level: entry.level,
+            ...(entry?.usage?.type === 'at will'
+              ? { usage: { kind: 'at-will' } }
+              : entry?.usage?.type === 'per day' && Number.isInteger(entry?.usage?.times)
+                ? { usage: { kind: 'per-day', max: entry.usage.times } }
+                : {}),
+          }]
+        : []
+    }) } : {}),
+    automation: Array.isArray(structured?.spells) && structured.spells.length > 0 ? 'headless' : 'dm-adjudication',
   }
+}
+
+function normalizedTrait(trait) {
+  const name = String(trait.name ?? 'Unnamed trait')
+  const description = String(trait.desc ?? '')
+  if (/^regeneration$/i.test(name)) {
+    const amount = Number(description.match(/regains?\s+(\d+)\s+hit points/i)?.[1])
+    const suppressed = description.match(/takes?\s+([^.;]+?)\s+damage,?\s+this trait doesn't function/i)?.[1]
+    const suppressedByDamageTypes = suppressed
+      ? [...DAMAGE_TYPES].filter((type) => new RegExp(`\\b${type}\\b`, 'i').test(suppressed))
+      : []
+    if (Number.isInteger(amount) && amount > 0) {
+      return {
+        name, description, automation: 'headless',
+        rule: {
+          kind: 'regeneration', amount,
+          requiresPositiveHp: /if (?:it|the [^.]+) has at least 1 hit point/i.test(description),
+          suppressedByDamageTypes,
+          diesAtZeroWhenSuppressed: /dies only if it starts its turn with 0 hit points and doesn't regenerate/i.test(description),
+        },
+      }
+    }
+  }
+  if (/^swarm$/i.test(name) && /can't regain hit points or gain temporary hit points/i.test(description)) {
+    return {
+      name, description, automation: 'headless',
+      rule: { kind: 'swarm', cannotRegainHitPoints: true, cannotGainTemporaryHitPoints: true },
+    }
+  }
+  return { name, description, automation: 'dm-adjudication' }
 }
 
 function normalizedMonster(raw) {
@@ -283,11 +382,7 @@ function normalizedMonster(raw) {
   const swarm = /^swarm of /i.test(type)
   const baseType = swarm ? 'beast' : type.toLowerCase()
   const subtypes = [raw.subtype, swarm ? '群集' : null].filter(Boolean).map(String)
-  const traits = (raw.special_abilities ?? []).map((trait) => ({
-    name: String(trait.name ?? 'Unnamed trait'),
-    description: String(trait.desc ?? ''),
-    automation: 'dm-adjudication',
-  }))
+  const traits = (raw.special_abilities ?? []).map(normalizedTrait)
   const rawLegendaryResistance = (raw.special_abilities ?? [])
     .find((trait) => /legendary resistance/i.test(String(trait?.name ?? '')))
   const legendaryUses = Number(
@@ -296,6 +391,7 @@ function normalizedMonster(raw) {
   )
   const rating = challengeRating(raw.challenge_rating)
   const canonicalXp = CHALLENGE_RATING_XP[rating]
+  const actions = normalizedActions(raw.actions)
   return {
     id: `srd-5.1:${raw.index}`,
     slug: String(raw.index),
@@ -324,12 +420,12 @@ function normalizedMonster(raw) {
     challenge: { rating, xp: (canonicalXp ?? Number(raw.xp)) || 0 },
     ...(Number.isFinite(legendaryUses) ? { legendaryResistanceUses: legendaryUses } : {}),
     traits,
-    actions: normalizedActions(raw.actions),
+    actions,
     ...(Array.isArray(raw.reactions) && raw.reactions.length > 0
       ? { reactions: normalizedActions(raw.reactions, true) }
       : {}),
     ...(Array.isArray(raw.legendary_actions) && raw.legendary_actions.length > 0
-      ? { legendaryActions: normalizedActions(raw.legendary_actions, true) }
+      ? { legendaryActions: normalizedLegendaryActions(raw.legendary_actions, actions) }
       : {}),
     ...(normalizedSpellcasting(raw.special_abilities) ? { spellcasting: normalizedSpellcasting(raw.special_abilities) } : {}),
     capabilities: {

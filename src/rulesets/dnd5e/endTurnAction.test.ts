@@ -72,6 +72,61 @@ describe('D&D 5e map end-turn authority bridge', () => {
     expect(resolveDnd5ePlayerEndTurn(fixture(actor))).toMatchObject({ ok: true })
   })
 
+  it('resolves monster regeneration and recharge at the next turn boundary', () => {
+    const input = fixture(barbarian(false))
+    const troll = input.map.tokens[1]
+    troll.poolId = 'srd-5.1:troll'
+    troll.hp = 20
+    troll.maxHp = 84
+
+    const regenerated = resolveDnd5ePlayerEndTurn(input)
+    expect(regenerated.ok).toBe(true)
+    if (!regenerated.ok) return
+    expect(regenerated.application.map.tokens.find((token) => token.id === troll.id)?.hp).toBe(30)
+    expect(regenerated.result.events).toContainEqual({
+      type: 'monster-regenerated', actorId: troll.id, amount: 10, hpAfter: 30,
+    })
+
+    troll.poolId = 'srd-5.1:adult-black-dragon'
+    troll.hp = 195
+    troll.maxHp = 195
+    troll.dnd5eCombatState = { monsterRechargeReadyByActionId: { 'acid-breath': false } }
+    const prepared = prepareDnd5ePlayerEndTurn(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.nextMonsterRechargeRolls).toEqual([expect.objectContaining({
+      actorId: troll.id, actionId: 'acid-breath', dieSides: 6, minimum: 5,
+    })])
+    const recharged = resolveDnd5ePlayerEndTurn({
+      ...input,
+      nextMonsterRechargeRolls: [{ actorId: troll.id, actionId: 'acid-breath', roll: 5 }],
+    })
+    expect(recharged.ok).toBe(true)
+    if (!recharged.ok) return
+    expect(recharged.application.map.tokens.find((token) => token.id === troll.id)?.dnd5eCombatState)
+      .toMatchObject({ monsterRechargeReadyByActionId: { 'acid-breath': true } })
+    expect(recharged.result.events).toContainEqual({
+      type: 'monster-recharge-resolved', actorId: troll.id, actionId: 'acid-breath', roll: 5, ready: true,
+    })
+  })
+
+  it('suppresses troll regeneration after acid or fire damage state', () => {
+    const input = fixture(barbarian(false))
+    const troll = input.map.tokens[1]
+    troll.poolId = 'srd-5.1:troll'
+    troll.hp = 20
+    troll.maxHp = 84
+    troll.dnd5eCombatState = { monsterRegenerationSuppressedDamageTypes: ['fire'] }
+
+    const resolved = resolveDnd5ePlayerEndTurn(input)
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.application.map.tokens.find((token) => token.id === troll.id)?.hp).toBe(20)
+    expect(resolved.result.events).toContainEqual({
+      type: 'monster-regeneration-suppressed', actorId: troll.id, damageTypes: ['fire'], died: false,
+    })
+  })
+
   it('ends Stunning Strike on the Monk\'s next turn end and persists the cleared token state', () => {
     const actor = barbarian(false)
     actor.id = 'monk'

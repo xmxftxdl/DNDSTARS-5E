@@ -169,21 +169,40 @@
           "name": "Detect",
           "description": "The aboleth makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-swipe",
           "name": "Tail Swipe",
           "description": "The aboleth makes one tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 9,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 15,
+                "count": 3,
+                "sides": 6,
+                "bonus": 5,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 10
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "psychic-drain-costs-2-actions",
           "name": "Psychic Drain (Costs 2 Actions)",
           "description": "One creature charmed by the aboleth takes 10 (3d6) psychic damage, and the aboleth regains hit points equal to the damage the creature takes.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -289,7 +308,48 @@
         "ability": "wis",
         "saveDc": 12,
         "attackBonus": 4,
-        "automation": "dm-adjudication"
+        "school": "cleric",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 3
+        },
+        "spells": [
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0
+          },
+          {
+            "id": "sacred-flame",
+            "name": "Sacred Flame",
+            "level": 0
+          },
+          {
+            "id": "thaumaturgy",
+            "name": "Thaumaturgy",
+            "level": 0
+          },
+          {
+            "id": "bless",
+            "name": "Bless",
+            "level": 1
+          },
+          {
+            "id": "cure-wounds",
+            "name": "Cure Wounds",
+            "level": 1
+          },
+          {
+            "id": "sanctuary",
+            "name": "Sanctuary",
+            "level": 1
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -486,7 +546,12 @@
           "name": "Acid Breath",
           "description": "The dragon exhales acid in a 60-foot line that is 5 feet wide. Each creature in that line must make a DC 18 Dexterity saving throw, taking 54 (12d8) acid damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -495,21 +560,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 11,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 15,
+                "count": 2,
+                "sides": 8,
+                "bonus": 6,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 19 Dexterity saving throw or take 13 (2d6 + 6) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -702,7 +786,12 @@
           "name": "Lightning Breath",
           "description": "The dragon exhales lightning in a 90-foot line that is 5 ft. wide. Each creature in that line must make a DC 19 Dexterity saving throw, taking 66 (12d10) lightning damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -711,21 +800,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 12,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 16,
+                "count": 2,
+                "sides": 8,
+                "bonus": 7,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 20 Dexterity saving throw or take 14 (2d6 + 7) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -921,7 +1029,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in an 60-foot line that is 5 feet wide. Each creature in that line must make a DC 18 Dexterity saving throw, taking 45 (13d6) fire damage on a failed save, or half as much damage on a successful one.\nSleep Breath. The dragon exhales sleep gas in a 60-foot cone. Each creature in that area must succeed on a DC 18 Constitution saving throw or fall unconscious for 10 minutes. This effect ends for a creature if the creature takes damage or someone uses an action to wake it.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -930,21 +1043,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 11,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 15,
+                "count": 2,
+                "sides": 8,
+                "bonus": 6,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 19 Dexterity saving throw or take 13 (2d6 + 6) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -1140,7 +1272,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nLightning Breath. The dragon exhales lightning in a 90-foot line that is 5 feet wide. Each creature in that line must make a DC 19 Dexterity saving throw, taking 66 (12d10) lightning damage on a failed save, or half as much damage on a successful one.\nRepulsion Breath. The dragon exhales repulsion energy in a 30-foot cone. Each creature in that area must succeed on a DC 19 Strength saving throw. On a failed save, the creature is pushed 60 feet away from the dragon.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -1149,21 +1286,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 12,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 16,
+                "count": 2,
+                "sides": 8,
+                "bonus": 7,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 20 Dexterity saving throw or take 14 (2d6 + 7) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -1354,7 +1510,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nAcid Breath. The dragon exhales acid in an 60-foot line that is 5 feet wide. Each creature in that line must make a DC 18 Dexterity saving throw, taking 54 (12d8) acid damage on a failed save, or half as much damage on a successful one.\nSlowing Breath. The dragon exhales gas in a 60-foot cone. Each creature in that area must succeed on a DC 18 Constitution saving throw. On a failed save, the creature can't use reactions, its speed is halved, and it can't make more than one attack on its turn. In addition, the creature can use either an action or a bonus action on its turn, but not both. These effects last for 1 minute. The creature can repeat the saving throw at the end of each of its turns, ending the effect on itself with a successful save.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -1363,21 +1524,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 11,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 15,
+                "count": 2,
+                "sides": 8,
+                "bonus": 6,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 19 Dexterity saving throw or take 13 (2d6 + 6) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -1578,7 +1758,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in a 60-foot cone. Each creature in that area must make a DC 21 Dexterity saving throw, taking 66 (12d10) fire damage on a failed save, or half as much damage on a successful one.\nWeakening Breath. The dragon exhales gas in a 60-foot cone. Each creature in that area must succeed on a DC 21 Strength saving throw or have disadvantage on Strength-based attack rolls, Strength checks, and Strength saving throws for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -1587,21 +1772,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 14,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 22 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -1816,7 +2020,12 @@
           "name": "Poison Breath",
           "description": "The dragon exhales poisonous gas in a 60-foot cone. Each creature in that area must make a DC 18 Constitution saving throw, taking 56 (16d6) poison damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -1825,21 +2034,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 11,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 15,
+                "count": 2,
+                "sides": 8,
+                "bonus": 6,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 19 Dexterity saving throw or take 13 (2d6 + 6) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -2032,7 +2260,12 @@
           "name": "Fire Breath",
           "description": "The dragon exhales fire in a 60-foot cone. Each creature in that area must make a DC 21 Dexterity saving throw, taking 63 (18d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -2041,21 +2274,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 14,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 22 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -2250,7 +2502,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nCold Breath. The dragon exhales an icy blast in a 60-foot cone. Each creature in that area must make a DC 20 Constitution saving throw, taking 58 (13d8) cold damage on a failed save, or half as much damage on a successful one.\nParalyzing Breath. The dragon exhales paralyzing gas in a 60-foot cone. Each creature in that area must succeed on a DC 20 Constitution saving throw or be paralyzed for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -2259,21 +2516,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 13,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 22 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -2472,7 +2748,12 @@
           "name": "Cold Breath",
           "description": "The dragon exhales an icy blast in a 60-foot cone. Each creature in that area must make a DC 19 Constitution saving throw, taking 54 (12d8) cold damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -2481,21 +2762,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 11,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 15,
+                "count": 2,
+                "sides": 8,
+                "bonus": 6,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 10 ft. of the dragon must succeed on a DC 19 Dexterity saving throw or take 13 (2d6 + 6) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -2615,7 +2915,12 @@
           "name": "Whirlwind",
           "description": "Each creature in the elemental's space must make a DC 13 Strength saving throw. On a failure, a target takes 15 (3d8 + 2) bludgeoning damage and is flung up 20 feet away from the elemental in a random direction and knocked prone. If a thrown target strikes an object, such as a wall or floor, the target takes 3 (1d6) bludgeoning damage for every 10 feet it was thrown. If the target is thrown at another creature, that creature must succeed on a DC 13 Dexterity saving throw or take the same damage and be knocked prone.\nIf the saving throw is successful, the target takes half the bludgeoning damage and isn't flung away or knocked prone.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 4
+          }
         }
       ],
       "capabilities": {
@@ -2813,7 +3118,12 @@
           "name": "Acid Breath",
           "description": "The dragon exhales acid in a 90-foot line that is 10 feet wide. Each creature in that line must make a DC 22 Dexterity saving throw, taking 67 (15d8) acid damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -2822,21 +3132,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 15,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 23 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -3029,7 +3358,12 @@
           "name": "Lightning Breath",
           "description": "The dragon exhales lightning in a 120-foot line that is 10 feet wide. Each creature in that line must make a DC 23 Dexterity saving throw, taking 88 (16d10) lightning damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -3038,21 +3372,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 16,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 18,
+                "count": 2,
+                "sides": 8,
+                "bonus": 9,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 24 Dexterity saving throw or take 16 (2d6 + 9) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -3248,7 +3601,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons:\nFire Breath. The dragon exhales fire in an 90-foot line that is 10 feet wide. Each creature in that line must make a DC 21 Dexterity saving throw, taking 56 (16d6) fire damage on a failed save, or half as much damage on a successful one.\nSleep Breath. The dragon exhales sleep gas in a 90-foot cone. Each creature in that area must succeed on a DC 21 Constitution saving throw or fall unconscious for 10 minutes. This effect ends for a creature if the creature takes damage or someone uses an action to wake it.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "change-shape",
@@ -3264,21 +3622,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 14,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 22 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -3474,7 +3851,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nLightning Breath. The dragon exhales lightning in a 120-foot line that is 10 feet wide. Each creature in that line must make a DC 23 Dexterity saving throw, taking 88 (16d10) lightning damage on a failed save, or half as much damage on a successful one.\nRepulsion Breath. The dragon exhales repulsion energy in a 30-foot cone. Each creature in that area must succeed on a DC 23 Strength saving throw. On a failed save, the creature is pushed 60 feet away from the dragon.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "change-shape",
@@ -3490,21 +3872,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 16,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 18,
+                "count": 2,
+                "sides": 8,
+                "bonus": 9,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 24 Dexterity saving throw or take 16 (2d6 + 9) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -3695,7 +4096,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nAcid Breath. The dragon exhales acid in an 90-foot line that is 10 feet wide. Each creature in that line must make a DC 22 Dexterity saving throw, taking 63 (14d8) acid damage on a failed save, or half as much damage on a successful one.\nSlowing Breath. The dragon exhales gas in a 90-foot cone. Each creature in that area must succeed on a DC 22 Constitution saving throw. On a failed save, the creature can't use reactions, its speed is halved, and it can't make more than one attack on its turn. In addition, the creature can use either an action or a bonus action on its turn, but not both. These effects last for 1 minute. The creature can repeat the saving throw at the end of each of its turns, ending the effect on itself with a successful save.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "change-shape",
@@ -3711,21 +4117,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 15,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 23 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -3926,7 +4351,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in a 90-foot cone. Each creature in that area must make a DC 24 Dexterity saving throw, taking 71 (13d10) fire damage on a failed save, or half as much damage on a successful one.\nWeakening Breath. The dragon exhales gas in a 90-foot cone. Each creature in that area must succeed on a DC 24 Strength saving throw or have disadvantage on Strength-based attack rolls, Strength checks, and Strength saving throws for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "change-shape",
@@ -3942,21 +4372,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 17,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 19,
+                "count": 2,
+                "sides": 8,
+                "bonus": 10,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 25 Dexterity saving throw or take 17 (2d6 + 10) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -4171,7 +4620,12 @@
           "name": "Poison Breath",
           "description": "The dragon exhales poisonous gas in a 90-foot cone. Each creature in that area must make a DC 22 Constitution saving throw, taking 77 (22d6) poison damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -4180,21 +4634,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 15,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 23 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -4387,7 +4860,12 @@
           "name": "Fire Breath",
           "description": "The dragon exhales fire in a 90-foot cone. Each creature in that area must make a DC 24 Dexterity saving throw, taking 91 (26d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -4396,21 +4874,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 17,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 19,
+                "count": 2,
+                "sides": 8,
+                "bonus": 10,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 25 Dexterity saving throw or take 17 (2d6 + 10) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -4605,7 +5102,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nCold Breath. The dragon exhales an icy blast in a 90-foot cone. Each creature in that area must make a DC 24 Constitution saving throw, taking 67 (15d8) cold damage on a failed save, or half as much damage on a successful one.\nParalyzing Breath. The dragon exhales paralyzing gas in a 90-foot cone. Each creature in that area must succeed on a DC 24 Constitution saving throw or be paralyzed for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "change-shape",
@@ -4621,21 +5123,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 17,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 19,
+                "count": 2,
+                "sides": 8,
+                "bonus": 10,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 25 Dexterity saving throw or take 17 (2d6 + 10) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -4834,7 +5355,12 @@
           "name": "Cold Breath",
           "description": "The dragon exhales an icy blast in a 90-foot cone. Each creature in that area must make a DC 22 Constitution saving throw, taking 72 (16d8) cold damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "legendaryActions": [
@@ -4843,21 +5369,40 @@
           "name": "Detect",
           "description": "The dragon makes a Wisdom (Perception) check.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "tail-attack",
           "name": "Tail Attack",
           "description": "The dragon makes a tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 14,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 8,
+                "bonus": 8,
+                "type": "bludgeoning"
+              }
+            ],
+            "reachFeet": 20
+          },
+          "referencedActionId": "tail",
+          "legendaryCost": 1
         },
         {
           "id": "wing-attack-costs-2-actions",
           "name": "Wing Attack (Costs 2 Actions)",
           "description": "The dragon beats its wings. Each creature within 15 ft. of the dragon must succeed on a DC 22 Dexterity saving throw or take 15 (2d6 + 8) bludgeoning damage and be knocked prone. The dragon can then fly up to half its flying speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -5010,22 +5555,41 @@
           "id": "claw-attack",
           "name": "Claw Attack",
           "description": "The sphinx makes one claw attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 12,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 17,
+                "count": 2,
+                "sides": 10,
+                "bonus": 6,
+                "type": "slashing"
+              }
+            ],
+            "reachFeet": 5
+          },
+          "referencedActionId": "claw",
+          "legendaryCost": 1
         },
         {
           "id": "teleport-costs-2-actions",
           "name": "Teleport (Costs 2 Actions)",
           "description": "The sphinx magically teleports, along with any equipment it is wearing or carrying, up to 120 feet to an unoccupied space it can see.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "cast-a-spell-costs-3-actions",
           "name": "Cast a Spell (Costs 3 Actions)",
           "description": "The sphinx casts a spell from its list of prepared spells, using a spell slot as normal.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 3
         }
       ],
       "spellcasting": {
@@ -5034,7 +5598,97 @@
         "ability": "wis",
         "saveDc": 18,
         "attackBonus": 10,
-        "automation": "dm-adjudication"
+        "school": "cleric",
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 2,
+          "6": 1
+        },
+        "spells": [
+          {
+            "id": "sacred-flame",
+            "name": "Sacred Flame",
+            "level": 0
+          },
+          {
+            "id": "spare-the-dying",
+            "name": "Spare the Dying",
+            "level": 0
+          },
+          {
+            "id": "thaumaturgy",
+            "name": "Thaumaturgy",
+            "level": 0
+          },
+          {
+            "id": "command",
+            "name": "Command",
+            "level": 1
+          },
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1
+          },
+          {
+            "id": "lesser-restoration",
+            "name": "Lesser Restoration",
+            "level": 2
+          },
+          {
+            "id": "zone-of-truth",
+            "name": "Zone of Truth",
+            "level": 2
+          },
+          {
+            "id": "dispel-magic",
+            "name": "Dispel Magic",
+            "level": 3
+          },
+          {
+            "id": "tongues",
+            "name": "Tongues",
+            "level": 3
+          },
+          {
+            "id": "banishment",
+            "name": "Banishment",
+            "level": 4
+          },
+          {
+            "id": "freedom-of-movement",
+            "name": "Freedom of Movement",
+            "level": 4
+          },
+          {
+            "id": "flame-strike",
+            "name": "Flame Strike",
+            "level": 5
+          },
+          {
+            "id": "greater-restoration",
+            "name": "Greater Restoration",
+            "level": 5
+          },
+          {
+            "id": "heroes-feast",
+            "name": "Heroes' Feast",
+            "level": 6
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -5244,7 +5898,12 @@
           "name": "Acid Spray",
           "description": "The ankheg spits acid in a line that is 30 ft. long and 5 ft. wide, provided that it has no creature grappled. Each creature in that line must make a DC 13 Dexterity saving throw, taking 10 (3d6) acid damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         }
       ],
       "capabilities": {
@@ -5487,7 +6146,167 @@
         "ability": "int",
         "saveDc": 17,
         "attackBonus": 9,
-        "automation": "dm-adjudication"
+        "school": "wizard",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 3,
+          "6": 1,
+          "7": 1,
+          "8": 1,
+          "9": 1
+        },
+        "spells": [
+          {
+            "id": "disguise-self",
+            "name": "Disguise Self",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "fire-bolt",
+            "name": "Fire Bolt",
+            "level": 0
+          },
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0
+          },
+          {
+            "id": "mage-hand",
+            "name": "Mage Hand",
+            "level": 0
+          },
+          {
+            "id": "prestidigitation",
+            "name": "Prestidigitation",
+            "level": 0
+          },
+          {
+            "id": "shocking-grasp",
+            "name": "Shocking Grasp",
+            "level": 0
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1
+          },
+          {
+            "id": "identify",
+            "name": "Identify",
+            "level": 1
+          },
+          {
+            "id": "mage-armor",
+            "name": "Mage Armor",
+            "level": 1
+          },
+          {
+            "id": "magic-missile",
+            "name": "Magic Missile",
+            "level": 1
+          },
+          {
+            "id": "detect-thoughts",
+            "name": "Detect Thoughts",
+            "level": 2
+          },
+          {
+            "id": "mirror-image",
+            "name": "Mirror Image",
+            "level": 2
+          },
+          {
+            "id": "misty-step",
+            "name": "Misty Step",
+            "level": 2
+          },
+          {
+            "id": "counterspell",
+            "name": "Counterspell",
+            "level": 3
+          },
+          {
+            "id": "fly",
+            "name": "Fly",
+            "level": 3
+          },
+          {
+            "id": "lightning-bolt",
+            "name": "Lightning Bolt",
+            "level": 3
+          },
+          {
+            "id": "banishment",
+            "name": "Banishment",
+            "level": 4
+          },
+          {
+            "id": "fire-shield",
+            "name": "Fire Shield",
+            "level": 4
+          },
+          {
+            "id": "stoneskin",
+            "name": "Stoneskin",
+            "level": 4
+          },
+          {
+            "id": "cone-of-cold",
+            "name": "Cone of Cold",
+            "level": 5
+          },
+          {
+            "id": "scrying",
+            "name": "Scrying",
+            "level": 5
+          },
+          {
+            "id": "wall-of-force",
+            "name": "Wall of Force",
+            "level": 5
+          },
+          {
+            "id": "globe-of-invulnerability",
+            "name": "Globe of Invulnerability",
+            "level": 6
+          },
+          {
+            "id": "teleport",
+            "name": "Teleport",
+            "level": 7
+          },
+          {
+            "id": "mind-blank",
+            "name": "Mind Blank",
+            "level": 8
+          },
+          {
+            "id": "time-stop",
+            "name": "Time Stop",
+            "level": 9
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -7228,7 +8047,12 @@
           "name": "Lightning Breath",
           "description": "The behir exhales a line of lightning that is 20 ft. long and 5 ft. wide. Each creature in that line must make a DC 16 Dexterity saving throw, taking 66 (12d10) lightning damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "swallow",
@@ -7562,7 +8386,12 @@
           "name": "Acid Breath",
           "description": "The dragon exhales acid in a 15-foot line that is 5 feet wide. Each creature in that line must make a DC 11 Dexterity saving throw, taking 22 (5d8) acid damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -7787,7 +8616,12 @@
           "name": "Teleport",
           "description": "The dog magically teleports, along with any equipment it is wearing or carrying, up to 40 ft. to an unoccupied space it can see. Before or after teleporting, the dog can make one bite attack.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 4
+          }
         }
       ],
       "capabilities": {
@@ -8001,7 +8835,12 @@
           "name": "Lightning Breath",
           "description": "The dragon exhales lightning in a 30-foot line that is 5 feet wide. Each creature in that line must make a DC 12 Dexterity saving throw, taking 22 (4d10) lightning damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -8362,7 +9201,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in an 20-foot line that is 5 feet wide. Each creature in that line must make a DC 11 Dexterity saving throw, taking 14 (4d6) fire damage on a failed save, or half as much damage on a successful one.\nSleep Breath. The dragon exhales sleep gas in a 15-foot cone. Each creature in that area must succeed on a DC 11 Constitution saving throw or fall unconscious for 1 minute. This effect ends for a creature if the creature takes damage or someone uses an action to wake it.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -8482,7 +9326,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nLightning Breath. The dragon exhales lightning in a 40-foot line that is 5 feet wide. Each creature in that line must make a DC 12 Dexterity saving throw, taking 16 (3d10) lightning damage on a failed save, or half as much damage on a successful one.\nRepulsion Breath. The dragon exhales repulsion energy in a 30-foot cone. Each creature in that area must succeed on a DC 12 Strength saving throw. On a failed save, the creature is pushed 30 feet away from the dragon.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -9430,7 +10279,12 @@
           "name": "Fire Breath",
           "description": "The dragon head exhales fire in a 15-foot cone. Each creature in that area must make a DC 15 Dexterity saving throw, taking 31 (7d8) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -9684,7 +10538,12 @@
           "name": "Haste",
           "description": "Until the end of its next turn, the golem magically gains a +2 bonus to its AC, has advantage on Dexterity saving throws, and can use its slam attack as a bonus action.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -9984,7 +10843,91 @@
       "spellcasting": {
         "description": "The giant's innate spellcasting ability is Charisma. It can innately cast the following spells, requiring no material components:\n\nAt will: detect magic, fog cloud, light\n3/day each: feather fall, fly, misty step, telekinesis\n1/day each: control weather, gaseous form",
         "ability": "cha",
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "fog-cloud",
+            "name": "Fog Cloud",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "feather-fall",
+            "name": "Feather Fall",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "fly",
+            "name": "Fly",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "misty-step",
+            "name": "Misty Step",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "telekinesis",
+            "name": "Telekinesis",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "control-weather",
+            "name": "Control Weather",
+            "level": 8,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "gaseous-form",
+            "name": "Gaseous Form",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -10358,7 +11301,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nAcid Breath. The dragon exhales acid in an 20-foot line that is 5 feet wide. Each creature in that line must make a DC 11 Dexterity saving throw, taking 18 (4d8) acid damage on a failed save, or half as much damage on a successful one.\nSlowing Breath. The dragon exhales gas in a 15-foot cone. Each creature in that area must succeed on a DC 11 Constitution saving throw. On a failed save, the creature can't use reactions, its speed is halved, and it can't make more than one attack on its turn. In addition, the creature can use either an action or a bonus action on its turn, but not both. These effects last for 1 minute. The creature can repeat the saving throw at the end of each of its turns, ending the effect on itself with a successful save.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -10502,7 +11450,126 @@
         "description": "The couatl's spellcasting ability is Charisma (spell save DC 14). It can innately cast the following spells, requiring only verbal components:\n\nAt will: detect evil and good, detect magic, detect thoughts\n3/day each: bless, create food and water, cure wounds, lesser restoration, protection from poison, sanctuary, shield\n1/day each: dream, greater restoration, scrying",
         "ability": "cha",
         "saveDc": 14,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V"
+        ],
+        "spells": [
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "detect-thoughts",
+            "name": "Detect Thoughts",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "bless",
+            "name": "Bless",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "create-food-and-water",
+            "name": "Create Food and Water",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "cure-wounds",
+            "name": "Cure Wounds",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "lesser-restoration",
+            "name": "Lesser Restoration",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "protection-from-poison",
+            "name": "Protection from Poison",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "sanctuary",
+            "name": "Sanctuary",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "shield",
+            "name": "Shield",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "dream",
+            "name": "Dream",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "greater-restoration",
+            "name": "Greater Restoration",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "scrying",
+            "name": "Scrying",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -10796,9 +11863,62 @@
       "spellcasting": {
         "description": "The fanatic is a 4th-level spellcaster. Its spell casting ability is Wisdom (spell save DC 11, +3 to hit with spell attacks). The fanatic has the following cleric spells prepared:\n\nCantrips (at will): light, sacred flame, thaumaturgy\n- 1st level (4 slots): command, inflict wounds, shield of faith\n- 2nd level (3 slots): hold person, spiritual weapon",
         "casterLevel": 4,
+        "ability": "wis",
         "saveDc": 11,
         "attackBonus": 3,
-        "automation": "dm-adjudication"
+        "school": "cleric",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3
+        },
+        "spells": [
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0
+          },
+          {
+            "id": "sacred-flame",
+            "name": "Sacred Flame",
+            "level": 0
+          },
+          {
+            "id": "thaumaturgy",
+            "name": "Thaumaturgy",
+            "level": 0
+          },
+          {
+            "id": "command",
+            "name": "Command",
+            "level": 1
+          },
+          {
+            "id": "inflict-wounds",
+            "name": "Inflict Wounds",
+            "level": 1
+          },
+          {
+            "id": "shield-of-faith",
+            "name": "Shield of Faith",
+            "level": 1
+          },
+          {
+            "id": "hold-person",
+            "name": "Hold Person",
+            "level": 2
+          },
+          {
+            "id": "spiritual-weapon",
+            "name": "Spiritual Weapon",
+            "level": 2
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -11260,7 +12380,48 @@
         "description": "The gnome's innate spellcasting ability is Intelligence (spell save DC 11). It can innately cast the following spells, requiring no material components:\nAt will: nondetection (self only)\n1/day each: blindness/deafness, blur, disguise self",
         "ability": "int",
         "saveDc": 11,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "nondetection",
+            "name": "Nondetection",
+            "level": 3,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "blindness-deafness",
+            "name": "Blindness/Deafness",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "blur",
+            "name": "Blur",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "disguise-self",
+            "name": "Disguise Self",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -11493,7 +12654,38 @@
         "description": "The deva's spellcasting ability is Charisma (spell save DC 17). The deva can innately cast the following spells, requiring only verbal components:\nAt will: detect evil and good\n1/day each: commune, raise dead",
         "ability": "cha",
         "saveDc": 17,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V"
+        ],
+        "spells": [
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "commune",
+            "name": "Commune",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "raise-dead",
+            "name": "Raise Dead",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -11717,7 +12909,118 @@
         "ability": "cha",
         "saveDc": 17,
         "attackBonus": 9,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "thunderwave",
+            "name": "Thunderwave",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "create-food-and-water",
+            "name": "Create Food and Water",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "tongues",
+            "name": "Tongues",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "wind-walk",
+            "name": "Wind Walk",
+            "level": 6,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "conjure-elemental",
+            "name": "Conjure Elemental",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "creation",
+            "name": "Creation",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "gaseous-form",
+            "name": "Gaseous Form",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "major-image",
+            "name": "Major Image",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "plane-shift",
+            "name": "Plane Shift",
+            "level": 7,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -12076,7 +13379,12 @@
           "name": "Steam Breath",
           "description": "The dragon turtle exhales scalding steam in a 60-foot cone. Each creature in that area must make a DC 18 Constitution saving throw, taking 52 (15d6) fire damage on a failed save, or half as much damage on a successful one. Being underwater doesn't grant resistance against this damage.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -12390,7 +13698,39 @@
         "description": "The drider's innate spellcasting ability is Wisdom (spell save DC 13). The drider can innately cast the following spells, requiring no material components:\nAt will: dancing lights\n1/day each: darkness, faerie fire",
         "ability": "wis",
         "saveDc": 13,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "dancing-lights",
+            "name": "Dancing Lights",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "darkness",
+            "name": "Darkness",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "faerie-fire",
+            "name": "Faerie Fire",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -12535,7 +13875,40 @@
         "description": "The drow's spellcasting ability is Charisma (spell save DC 11). It can innately cast the following spells, requiring no material components:\nAt will: dancing lights\n1/day each: darkness, faerie fire",
         "ability": "cha",
         "saveDc": 11,
-        "automation": "dm-adjudication"
+        "attackBonus": 0,
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "dancing-lights",
+            "name": "Dancing Lights",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "darkness",
+            "name": "Darkness",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "faerie-fire",
+            "name": "Faerie Fire",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -12631,7 +14004,64 @@
         "ability": "wis",
         "saveDc": 12,
         "attackBonus": 4,
-        "automation": "dm-adjudication"
+        "school": "druid",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3
+        },
+        "spells": [
+          {
+            "id": "druidcraft",
+            "name": "Druidcraft",
+            "level": 0
+          },
+          {
+            "id": "produce-flame",
+            "name": "Produce Flame",
+            "level": 0
+          },
+          {
+            "id": "shillelagh",
+            "name": "Shillelagh",
+            "level": 0
+          },
+          {
+            "id": "entangle",
+            "name": "Entangle",
+            "level": 1
+          },
+          {
+            "id": "longstrider",
+            "name": "Longstrider",
+            "level": 1
+          },
+          {
+            "id": "speak-with-animals",
+            "name": "Speak with Animals",
+            "level": 1
+          },
+          {
+            "id": "thunderwave",
+            "name": "Thunderwave",
+            "level": 1
+          },
+          {
+            "id": "animal-messenger",
+            "name": "Animal Messenger",
+            "level": 2
+          },
+          {
+            "id": "barkskin",
+            "name": "Barkskin",
+            "level": 2
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -12760,7 +14190,66 @@
         "description": "The dryad's innate spellcasting ability is Charisma (spell save DC 14). The dryad can innately cast the following spells, requiring no material components:\n\nAt will: druidcraft\n3/day each: entangle, goodberry\n1/day each: barkskin, pass without trace, shillelagh",
         "ability": "cha",
         "saveDc": 14,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "druidcraft",
+            "name": "Druidcraft",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "entangle",
+            "name": "Entangle",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "goodberry",
+            "name": "Goodberry",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "barkskin",
+            "name": "Barkskin",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "pass-without-trace",
+            "name": "Pass Without Trace",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "shillelagh",
+            "name": "Shillelagh",
+            "level": 0,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -13017,13 +14506,34 @@
           "name": "Blinding Breath",
           "description": "The mephit exhales a 15-foot cone of blinding dust. Each creature in that area must succeed on a DC 10 Dexterity saving throw or be blinded for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         }
       ],
       "spellcasting": {
         "description": "The mephit can innately cast sleep, requiring no material components. Its innate spellcasting ability is Charisma.",
         "ability": "cha",
-        "automation": "dm-adjudication"
+        "saveDc": 10,
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "sleep",
+            "name": "Sleep",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -13372,9 +14882,96 @@
       ],
       "spellcasting": {
         "description": "The efreeti's innate spell casting ability is Charisma (spell save DC 15, +7 to hit with spell attacks). It can innately cast the following spells, requiring no material components:\n\nAt will: detect magic\n3/day: enlarge/reduce, tongues\n1/day each: conjure elemental (fire elemental only), gaseous form, invisibility, major image, plane shift, wall of fire",
+        "ability": "cha",
         "saveDc": 15,
         "attackBonus": 7,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "enlarge-reduce",
+            "name": "Enlarge/Reduce",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "tongues",
+            "name": "Tongues",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "conjure-elemental",
+            "name": "Conjure Elemental",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "gaseous-form",
+            "name": "Gaseous Form",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "major-image",
+            "name": "Major Image",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "plane-shift",
+            "name": "Plane Shift",
+            "level": 7,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "wall-of-fire",
+            "name": "Wall of Fire",
+            "level": 4,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -13896,7 +15493,12 @@
           "name": "Web",
           "description": "Ranged Weapon Attack: +4 to hit, range 30/60 ft., one Large or smaller creature. Hit: The creature is restrained by webbing. As an action, the restrained creature can make a DC 11 Strength check, escaping from the webbing on a success. The effect ends if the webbing is destroyed. The webbing has AC 10, 5 hit points, is vulnerable to fire damage and immune to bludgeoning damage.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -15303,7 +16905,12 @@
           "name": "Possession",
           "description": "One humanoid that the ghost can see within 5 ft. of it must succeed on a DC 13 Charisma saving throw or be possessed by the ghost; the ghost then disappears, and the target is incapacitated and loses control of its body. The ghost now controls the body but doesn't deprive the target of awareness. The ghost can't be targeted by any attack, spell, or other effect, except ones that turn undead, and it retains its alignment, Intelligence, Wisdom, Charisma, and immunity to being charmed and frightened. It otherwise uses the possessed target's statistics, but doesn't gain access to the target's knowledge, class features, or proficiencies.\nThe possession lasts until the body drops to 0 hit points, the ghost ends it as a bonus action, or the ghost is turned or forced out by an effect like the dispel evil and good spell. When the possession ends, the ghost reappears in an unoccupied space within 5 ft. of the body. The target is immune to this ghost's Possession for 24 hours after succeeding on the saving throw or after the possession ends.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         }
       ],
       "capabilities": {
@@ -17819,7 +19426,12 @@
           "name": "Web",
           "description": "Ranged Weapon Attack: +5 to hit, range 30/60 ft., one creature. Hit: The target is restrained by webbing. As an action, the restrained target can make a DC 12 Strength check, bursting the webbing on a success. The webbing can also be attacked and destroyed (AC 10; hp 5; vulnerability to fire damage; immunity to bludgeoning, poison, and psychic damage).",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -18448,7 +20060,12 @@
           "name": "Blinding Spittle",
           "description": "The mouther spits a chemical glob at a point it can see within 15 feet of it. The glob explodes in a blinding flash of light on impact. Each creature within 5 feet of the flash must succeed on a DC 13 Dexterity saving throw or be blinded until the end of the mouther's next turn.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -18594,7 +20211,64 @@
         "description": "The glabrezu's spellcasting ability is Intelligence (spell save DC 16). The glabrezu can innately cast the following spells, requiring no material components:\nAt will: darkness, detect magic, dispel magic\n1/day each: confusion, fly, power word stun",
         "ability": "int",
         "saveDc": 16,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "darkness",
+            "name": "Darkness",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "dispel-magic",
+            "name": "Dispel Magic",
+            "level": 3,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "confusion",
+            "name": "Confusion",
+            "level": 4,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "fly",
+            "name": "Fly",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "power-word-stun",
+            "name": "Power Word Stun",
+            "level": 8,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -19176,7 +20850,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in a 15-foot cone. Each creature in that area must make a DC 13 Dexterity saving throw, taking 22 (4d10) fire damage on a failed save, or half as much damage on a successful one.\nWeakening Breath. The dragon exhales gas in a 15-foot cone. Each creature in that area must succeed on a DC 13 Strength saving throw or have disadvantage on Strength-based attack rolls, Strength checks, and Strength saving throws for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -19299,7 +20978,12 @@
           "name": "Petrifying Breath",
           "description": "The gorgon exhales petrifying gas in a 30-foot cone. Each creature in that area must succeed on a DC 13 Constitution saving throw. On a failed save, a target begins to turn to stone and is restrained. The restrained target must repeat the saving throw at the end of its next turn. On a success, the effect ends on the target. On a failure, the target is petrified until freed by the greater restoration spell or other magic.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -19549,7 +21233,12 @@
           "name": "Poison Breath",
           "description": "The dragon exhales poisonous gas in a 15-foot cone. Each creature in that area must make a DC 11 Constitution saving throw, taking 21 (6d6) poison damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -19691,7 +21380,37 @@
         "description": "The hag's innate spellcasting ability is Charisma (spell save DC 12). She can innately cast the following spells, requiring no material components:\n\nAt will: dancing lights, minor illusion, vicious mockery",
         "ability": "cha",
         "saveDc": 12,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "dancing-lights",
+            "name": "Dancing Lights",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "minor-illusion",
+            "name": "Minor Illusion",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "vicious-mockery",
+            "name": "Vicious Mockery",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -20254,7 +21973,96 @@
         "ability": "wis",
         "saveDc": 16,
         "attackBonus": 8,
-        "automation": "dm-adjudication"
+        "school": "cleric",
+        "componentsRequired": [
+          "V"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 2,
+          "6": 1
+        },
+        "spells": [
+          {
+            "id": "mending",
+            "name": "Mending",
+            "level": 0
+          },
+          {
+            "id": "sacred-flame",
+            "name": "Sacred Flame",
+            "level": 0
+          },
+          {
+            "id": "thaumaturgy",
+            "name": "Thaumaturgy",
+            "level": 0
+          },
+          {
+            "id": "command",
+            "name": "Command",
+            "level": 1
+          },
+          {
+            "id": "cure-wounds",
+            "name": "Cure Wounds",
+            "level": 1
+          },
+          {
+            "id": "shield-of-faith",
+            "name": "Shield of Faith",
+            "level": 1
+          },
+          {
+            "id": "calm-emotions",
+            "name": "Calm Emotions",
+            "level": 2
+          },
+          {
+            "id": "hold-person",
+            "name": "Hold Person",
+            "level": 2
+          },
+          {
+            "id": "bestow-curse",
+            "name": "Bestow Curse",
+            "level": 3
+          },
+          {
+            "id": "clairvoyance",
+            "name": "Clairvoyance",
+            "level": 3
+          },
+          {
+            "id": "banishment",
+            "name": "Banishment",
+            "level": 4
+          },
+          {
+            "id": "freedom-of-movement",
+            "name": "Freedom of Movement",
+            "level": 4
+          },
+          {
+            "id": "flame-strike",
+            "name": "Flame Strike",
+            "level": 5
+          },
+          {
+            "id": "geas",
+            "name": "Geas",
+            "level": 5
+          },
+          {
+            "id": "true-seeing",
+            "name": "True Seeing",
+            "level": 6
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -20398,22 +22206,41 @@
           "id": "claw-attack",
           "name": "Claw Attack",
           "description": "The sphinx makes one claw attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 9,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 13,
+                "count": 2,
+                "sides": 8,
+                "bonus": 4,
+                "type": "slashing"
+              }
+            ],
+            "reachFeet": 5
+          },
+          "referencedActionId": "claw",
+          "legendaryCost": 1
         },
         {
           "id": "teleport-costs-2-actions",
           "name": "Teleport (Costs 2 Actions)",
           "description": "The sphinx magically teleports, along with any equipment it is wearing or carrying, up to 120 feet to an unoccupied space it can see.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "cast-a-spell-costs-3-actions",
           "name": "Cast a Spell (Costs 3 Actions)",
           "description": "The sphinx casts a spell from its list of prepared spells, using a spell slot as normal.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 3
         }
       ],
       "spellcasting": {
@@ -20422,7 +22249,96 @@
         "ability": "int",
         "saveDc": 16,
         "attackBonus": 8,
-        "automation": "dm-adjudication"
+        "school": "wizard",
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 1
+        },
+        "spells": [
+          {
+            "id": "mage-hand",
+            "name": "Mage Hand",
+            "level": 0
+          },
+          {
+            "id": "minor-illusion",
+            "name": "Minor Illusion",
+            "level": 0
+          },
+          {
+            "id": "prestidigitation",
+            "name": "Prestidigitation",
+            "level": 0
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1
+          },
+          {
+            "id": "identify",
+            "name": "Identify",
+            "level": 1
+          },
+          {
+            "id": "shield",
+            "name": "Shield",
+            "level": 1
+          },
+          {
+            "id": "darkness",
+            "name": "Darkness",
+            "level": 2
+          },
+          {
+            "id": "locate-object",
+            "name": "Locate Object",
+            "level": 2
+          },
+          {
+            "id": "suggestion",
+            "name": "Suggestion",
+            "level": 2
+          },
+          {
+            "id": "dispel-magic",
+            "name": "Dispel Magic",
+            "level": 3
+          },
+          {
+            "id": "remove-curse",
+            "name": "Remove Curse",
+            "level": 3
+          },
+          {
+            "id": "tongues",
+            "name": "Tongues",
+            "level": 3
+          },
+          {
+            "id": "banishment",
+            "name": "Banishment",
+            "level": 4
+          },
+          {
+            "id": "greater-invisibility",
+            "name": "Greater Invisibility",
+            "level": 4
+          },
+          {
+            "id": "legend-lore",
+            "name": "Legend Lore",
+            "level": 5
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -20564,7 +22480,12 @@
           "name": "Fire Breath",
           "description": "The veteran exhales fire in a 15-foot cone. Each creature in that area must make a DC 15 Dexterity saving throw, taking 24 (7d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -20869,7 +22790,12 @@
           "name": "Fire Breath",
           "description": "The hound exhales fire in a 15-foot cone. Each creature in that area must make a DC 12 Dexterity saving throw, taking 21 (6d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -22225,13 +24151,33 @@
           "name": "Frost Breath",
           "description": "The mephit exhales a 15-foot cone of cold air. Each creature in that area must succeed on a DC 10 Dexterity saving throw, taking 5 (2d4) cold damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         }
       ],
       "spellcasting": {
         "description": "The mephit can innately cast fog cloud, requiring no material components. Its innate spellcasting ability is Charisma.",
         "ability": "cha",
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "fog-cloud",
+            "name": "Fog Cloud",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -22645,7 +24591,12 @@
           "name": "Poison Breath",
           "description": "The golem exhales poisonous gas in a 15-foot cone. Each creature in that area must make a DC 19 Constitution saving throw, taking 45 (10d8) poison damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -23272,21 +25223,24 @@
           "name": "Tentacle Attack or Fling",
           "description": "The kraken makes one tentacle attack or uses its Fling.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "lightning-storm-costs-2-actions",
           "name": "Lightning Storm (Costs 2 Actions)",
           "description": "The kraken uses Lightning Storm.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "ink-cloud-costs-3-actions",
           "name": "Ink Cloud (Costs 3 Actions)",
           "description": "While underwater, the kraken expels an ink cloud in a 60-foot radius. The cloud spreads around corners, and that area is heavily obscured to creatures other than the kraken. Each creature other than the kraken that ends its turn there must succeed on a DC 23 Constitution saving throw, taking 16 (3d10) poison damage on a failed save, or half as much damage on a successful one. A strong current disperses the cloud, which otherwise disappears at the end of the kraken's next turn.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 3
         }
       ],
       "capabilities": {
@@ -23434,7 +25388,74 @@
         "description": "The lamia's innate spellcasting ability is Charisma (spell save DC 13). It can innately cast the following spells, requiring no material components. At will: disguise self (any humanoid form), major image 3/day each: charm person, mirror image, scrying, suggestion 1/day: geas",
         "ability": "cha",
         "saveDc": 13,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "disguise-self",
+            "name": "Disguise Self",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "major-image",
+            "name": "Major Image",
+            "level": 3,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "charm-person",
+            "name": "Charm Person",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "mirror-image",
+            "name": "Mirror Image",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "scrying",
+            "name": "Scrying",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "suggestion",
+            "name": "Suggestion",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "geas",
+            "name": "Geas",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -23688,28 +25709,32 @@
           "name": "Cantrip",
           "description": "The lich casts a cantrip.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "paralyzing-touch-costs-2-actions",
           "name": "Paralyzing Touch (Costs 2 Actions)",
           "description": "The lich uses its Paralyzing Touch.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "frightening-gaze-costs-2-actions",
           "name": "Frightening Gaze (Costs 2 Actions)",
           "description": "The lich fixes its gaze on one creature it can see within 10 feet of it. The target must succeed on a DC 18 Wisdom saving throw against this magic or become frightened for 1 minute. The frightened target can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success. If a target's saving throw is successful or the effect ends for it, the target is immune to the lich's gaze for the next 24 hours.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "disrupt-life-costs-3-actions",
           "name": "Disrupt Life (Costs 3 Actions)",
           "description": "Each living creature within 20 feet of the lich must make a DC 18 Constitution saving throw against this magic, taking 21 (6d6) necrotic damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 3
         }
       ],
       "spellcasting": {
@@ -23718,7 +25743,156 @@
         "ability": "int",
         "saveDc": 20,
         "attackBonus": 12,
-        "automation": "dm-adjudication"
+        "school": "wizard",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 3,
+          "6": 1,
+          "7": 1,
+          "8": 1,
+          "9": 1
+        },
+        "spells": [
+          {
+            "id": "mage-hand",
+            "name": "Mage Hand",
+            "level": 0
+          },
+          {
+            "id": "prestidigitation",
+            "name": "Prestidigitation",
+            "level": 0
+          },
+          {
+            "id": "ray-of-frost",
+            "name": "Ray of Frost",
+            "level": 0
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1
+          },
+          {
+            "id": "magic-missile",
+            "name": "Magic Missile",
+            "level": 1
+          },
+          {
+            "id": "shield",
+            "name": "Shield",
+            "level": 1
+          },
+          {
+            "id": "thunderwave",
+            "name": "Thunderwave",
+            "level": 1
+          },
+          {
+            "id": "acid-arrow",
+            "name": "Acid Arrow",
+            "level": 2
+          },
+          {
+            "id": "detect-thoughts",
+            "name": "Detect Thoughts",
+            "level": 2
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2
+          },
+          {
+            "id": "mirror-image",
+            "name": "Mirror Image",
+            "level": 2
+          },
+          {
+            "id": "animate-dead",
+            "name": "Animate Dead",
+            "level": 3
+          },
+          {
+            "id": "counterspell",
+            "name": "Counterspell",
+            "level": 3
+          },
+          {
+            "id": "dispel-magic",
+            "name": "Dispel Magic",
+            "level": 3
+          },
+          {
+            "id": "fireball",
+            "name": "Fireball",
+            "level": 3
+          },
+          {
+            "id": "blight",
+            "name": "Blight",
+            "level": 4
+          },
+          {
+            "id": "dimension-door",
+            "name": "Dimension Door",
+            "level": 4
+          },
+          {
+            "id": "cloudkill",
+            "name": "Cloudkill",
+            "level": 5
+          },
+          {
+            "id": "scrying",
+            "name": "Scrying",
+            "level": 5
+          },
+          {
+            "id": "disintegrate",
+            "name": "Disintegrate",
+            "level": 6
+          },
+          {
+            "id": "globe-of-invulnerability",
+            "name": "Globe of Invulnerability",
+            "level": 6
+          },
+          {
+            "id": "finger-of-death",
+            "name": "Finger of Death",
+            "level": 7
+          },
+          {
+            "id": "plane-shift",
+            "name": "Plane Shift",
+            "level": 7
+          },
+          {
+            "id": "dominate-monster",
+            "name": "Dominate Monster",
+            "level": 8
+          },
+          {
+            "id": "power-word-stun",
+            "name": "Power Word Stun",
+            "level": 8
+          },
+          {
+            "id": "power-word-kill",
+            "name": "Power Word Kill",
+            "level": 9
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -24207,7 +26381,102 @@
         "ability": "int",
         "saveDc": 14,
         "attackBonus": 6,
-        "automation": "dm-adjudication"
+        "school": "wizard",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 1
+        },
+        "spells": [
+          {
+            "id": "fire-bolt",
+            "name": "Fire Bolt",
+            "level": 0
+          },
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0
+          },
+          {
+            "id": "mage-hand",
+            "name": "Mage Hand",
+            "level": 0
+          },
+          {
+            "id": "prestidigitation",
+            "name": "Prestidigitation",
+            "level": 0
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1
+          },
+          {
+            "id": "mage-armor",
+            "name": "Mage Armor",
+            "level": 1
+          },
+          {
+            "id": "magic-missile",
+            "name": "Magic Missile",
+            "level": 1
+          },
+          {
+            "id": "shield",
+            "name": "Shield",
+            "level": 1
+          },
+          {
+            "id": "misty-step",
+            "name": "Misty Step",
+            "level": 2
+          },
+          {
+            "id": "suggestion",
+            "name": "Suggestion",
+            "level": 2
+          },
+          {
+            "id": "counterspell",
+            "name": "Counterspell",
+            "level": 3
+          },
+          {
+            "id": "fireball",
+            "name": "Fireball",
+            "level": 3
+          },
+          {
+            "id": "fly",
+            "name": "Fly",
+            "level": 3
+          },
+          {
+            "id": "greater-invisibility",
+            "name": "Greater Invisibility",
+            "level": 4
+          },
+          {
+            "id": "ice-storm",
+            "name": "Ice Storm",
+            "level": 4
+          },
+          {
+            "id": "cone-of-cold",
+            "name": "Cone of Cold",
+            "level": 5
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -24333,14 +26602,34 @@
           "name": "Fire Breath",
           "description": "The mephit exhales a 15-foot cone of fire. Each creature in that area must make a DC 11 Dexterity saving throw, taking 7 (2d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         }
       ],
       "spellcasting": {
         "description": "The mephit can innately cast heat metal (spell save DC 10), requiring no material components. Its innate spellcasting ability is Charisma.",
         "ability": "cha",
         "saveDc": 10,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "heat-metal",
+            "name": "Heat Metal",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -26081,35 +28370,40 @@
           "name": "Attack",
           "description": "The mummy lord makes one attack with its rotting fist or uses its Dreadful Glare.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "blinding-dust",
           "name": "Blinding Dust",
           "description": "Blinding dust and sand swirls magically around the mummy lord. Each creature within 5 feet of the mummy lord must succeed on a DC 16 Constitution saving throw or be blinded until the end of the creature's next turn.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "blasphemous-word-costs-2-actions",
           "name": "Blasphemous Word (Costs 2 Actions)",
           "description": "The mummy lord utters a blasphemous word. Each non-undead creature within 10 feet of the mummy lord that can hear the magical utterance must succeed on a DC 16 Constitution saving throw or be stunned until the end of the mummy lord's next turn.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "channel-negative-energy-costs-2-actions",
           "name": "Channel Negative Energy (Costs 2 Actions)",
           "description": "The mummy lord magically unleashes negative energy. Creatures within 60 feet of the mummy lord, including ones behind barriers and around corners, can't regain hit points until the end of the mummy lord's next turn.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "whirlwind-of-sand-costs-2-actions",
           "name": "Whirlwind of Sand (Costs 2 Actions)",
           "description": "The mummy lord magically transforms into a whirlwind of sand, moves up to 60 feet, and reverts to its normal form. While in whirlwind form, the mummy lord is immune to all damage, and it can't be grappled, petrified, knocked prone, restrained, or stunned. Equipment worn or carried by the mummy lord remain in its possession.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "spellcasting": {
@@ -26118,7 +28412,98 @@
         "ability": "wis",
         "saveDc": 17,
         "attackBonus": 9,
-        "automation": "dm-adjudication"
+        "school": "cleric",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 2,
+          "6": 1
+        },
+        "spells": [
+          {
+            "id": "sacred-flame",
+            "name": "Sacred Flame",
+            "level": 0
+          },
+          {
+            "id": "thaumaturgy",
+            "name": "Thaumaturgy",
+            "level": 0
+          },
+          {
+            "id": "command",
+            "name": "Command",
+            "level": 1
+          },
+          {
+            "id": "guiding-bolt",
+            "name": "Guiding Bolt",
+            "level": 1
+          },
+          {
+            "id": "shield-of-faith",
+            "name": "Shield of Faith",
+            "level": 1
+          },
+          {
+            "id": "hold-person",
+            "name": "Hold Person",
+            "level": 2
+          },
+          {
+            "id": "silence",
+            "name": "Silence",
+            "level": 2
+          },
+          {
+            "id": "spiritual-weapon",
+            "name": "Spiritual Weapon",
+            "level": 2
+          },
+          {
+            "id": "animate-dead",
+            "name": "Animate Dead",
+            "level": 3
+          },
+          {
+            "id": "dispel-magic",
+            "name": "Dispel Magic",
+            "level": 3
+          },
+          {
+            "id": "divination",
+            "name": "Divination",
+            "level": 4
+          },
+          {
+            "id": "guardian-of-faith",
+            "name": "Guardian of Faith",
+            "level": 4
+          },
+          {
+            "id": "contagion",
+            "name": "Contagion",
+            "level": 5
+          },
+          {
+            "id": "insect-plague",
+            "name": "Insect Plague",
+            "level": 5
+          },
+          {
+            "id": "harm",
+            "name": "Harm",
+            "level": 6
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -26265,7 +28650,12 @@
           "name": "Horror Nimbus",
           "description": "The nalfeshnee magically emits scintillating, multicolored light. Each creature within 15 feet of the nalfeshnee that can see the light must succeed on a DC 15 Wisdom saving throw or be frightened for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success. If a creature's saving throw is successful or the effect ends for it, the creature is immune to the nalfeshnee's Horror Nimbus for the next 24 hours.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         },
         {
           "id": "teleport",
@@ -26428,7 +28818,56 @@
         "ability": "cha",
         "saveDc": 14,
         "attackBonus": 6,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "magic-missile",
+            "name": "Magic Missile",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "plane-shift",
+            "name": "Plane Shift",
+            "level": 7,
+            "usage": {
+              "kind": "per-day",
+              "max": 2
+            }
+          },
+          {
+            "id": "ray-of-enfeeblement",
+            "name": "Ray of Enfeeblement",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 2
+            }
+          },
+          {
+            "id": "sleep",
+            "name": "Sleep",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 2
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -27160,7 +29599,14 @@
         {
           "name": "Regeneration",
           "description": "The oni regains 10 hit points at the start of its turn if it has at least 1 hit point.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 10,
+            "requiresPositiveHp": true,
+            "suppressedByDamageTypes": [],
+            "diesAtZeroWhenSuppressed": false
+          }
         }
       ],
       "actions": [
@@ -27227,7 +29673,65 @@
         "description": "The oni's innate spellcasting ability is Charisma (spell save DC 13). The oni can innately cast the following spells, requiring no material components:\n\nAt will: darkness, invisibility\n1/day each: charm person, cone of cold, gaseous form, sleep",
         "ability": "cha",
         "saveDc": 13,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "darkness",
+            "name": "Darkness",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "charm-person",
+            "name": "Charm Person",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "cone-of-cold",
+            "name": "Cone of Cold",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "gaseous-form",
+            "name": "Gaseous Form",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "sleep",
+            "name": "Sleep",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -28222,7 +30726,47 @@
         "description": "The pit fiend's spellcasting ability is Charisma (spell save DC 21). The pit fiend can innately cast the following spells, requiring no material components:\nAt will: detect magic, fireball\n3/day each: hold monster, wall of fire",
         "ability": "cha",
         "saveDc": 21,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "fireball",
+            "name": "Fireball",
+            "level": 3,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "hold-monster",
+            "name": "Hold Monster",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "wall-of-fire",
+            "name": "Wall of Fire",
+            "level": 4,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -28375,7 +30919,92 @@
         "description": "The planetar's spellcasting ability is Charisma (spell save DC 20). The planetar can innately cast the following spells, requiring no material components:\nAt will: detect evil and good, invisibility (self only)\n3/day each: blade barrier, dispel evil and good, flame strike, raise dead\n1/day each: commune, control weather, insect plague",
         "ability": "cha",
         "saveDc": 20,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "blade-barrier",
+            "name": "Blade Barrier",
+            "level": 6,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "dispel-evil-and-good",
+            "name": "Dispel Evil and Good",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "flame-strike",
+            "name": "Flame Strike",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "raise-dead",
+            "name": "Raise Dead",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "commune",
+            "name": "Commune",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "control-weather",
+            "name": "Control Weather",
+            "level": 8,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "insect-plague",
+            "name": "Insect Plague",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -28844,7 +31473,70 @@
         "ability": "wis",
         "saveDc": 13,
         "attackBonus": 5,
-        "automation": "dm-adjudication"
+        "school": "cleric",
+        "componentsRequired": [
+          "V",
+          "S",
+          "M"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 2
+        },
+        "spells": [
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0
+          },
+          {
+            "id": "sacred-flame",
+            "name": "Sacred Flame",
+            "level": 0
+          },
+          {
+            "id": "thaumaturgy",
+            "name": "Thaumaturgy",
+            "level": 0
+          },
+          {
+            "id": "cure-wounds",
+            "name": "Cure Wounds",
+            "level": 1
+          },
+          {
+            "id": "guiding-bolt",
+            "name": "Guiding Bolt",
+            "level": 1
+          },
+          {
+            "id": "sanctuary",
+            "name": "Sanctuary",
+            "level": 1
+          },
+          {
+            "id": "lesser-restoration",
+            "name": "Lesser Restoration",
+            "level": 2
+          },
+          {
+            "id": "spiritual-weapon",
+            "name": "Spiritual Weapon",
+            "level": 2
+          },
+          {
+            "id": "dispel-magic",
+            "name": "Dispel Magic",
+            "level": 3
+          },
+          {
+            "id": "spirit-guardians",
+            "name": "Spirit Guardians",
+            "level": 3
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -29431,7 +32123,126 @@
         "ability": "cha",
         "saveDc": 18,
         "attackBonus": 10,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-thoughts",
+            "name": "Detect Thoughts",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "disguise-self",
+            "name": "Disguise Self",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "mage-hand",
+            "name": "Mage Hand",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "minor-illusion",
+            "name": "Minor Illusion",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "charm-person",
+            "name": "Charm Person",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "major-image",
+            "name": "Major Image",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "suggestion",
+            "name": "Suggestion",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "dominate-person",
+            "name": "Dominate Person",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "fly",
+            "name": "Fly",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "plane-shift",
+            "name": "Plane Shift",
+            "level": 7,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "true-seeing",
+            "name": "True Seeing",
+            "level": 6,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -29694,7 +32505,12 @@
           "name": "Fire Breath",
           "description": "The dragon exhales fire in a 15-foot cone. Each creature in that area must make a DC 13 Dexterity saving throw, taking 24 (7d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -31751,7 +34567,14 @@
         {
           "name": "Regeneration",
           "description": "The shield guardian regains 10 hit points at the start of its turn if it has at least 1 hit. point.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 10,
+            "requiresPositiveHp": false,
+            "suppressedByDamageTypes": [],
+            "diesAtZeroWhenSuppressed": false
+          }
         },
         {
           "name": "Spell Storing",
@@ -31988,7 +34811,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nCold Breath. The dragon exhales an icy blast in a 15-foot cone. Each creature in that area must make a DC 13 Constitution saving throw, taking 18 (4d8) cold damage on a failed save, or half as much damage on a successful one.\nParalyzing Breath. The dragon exhales paralyzing gas in a 15-foot cone. Each creature in that area must succeed on a DC 13 Constitution saving throw or be paralyzed for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -32300,27 +35128,98 @@
           "name": "Teleport",
           "description": "The solar magically teleports, along with any equipment it is wearing or carrying, up to 120 ft. to an unoccupied space it can see.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "searing-burst-costs-2-actions",
           "name": "Searing Burst (Costs 2 Actions)",
           "description": "The solar emits magical, divine energy. Each creature of its choice in a 10-foot radius must make a DC 23 Dexterity saving throw, taking 14 (4d6) fire damage plus 14 (4d6) radiant damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "blinding-gaze-costs-3-actions",
           "name": "Blinding Gaze (Costs 3 Actions)",
           "description": "The solar targets one creature it can see within 30 ft. of it. If the target can see it, the target must succeed on a DC 15 Constitution saving throw or be blinded until magic such as the lesser restoration spell removes the blindness.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 3
         }
       ],
       "spellcasting": {
         "description": "The solar's spell casting ability is Charisma (spell save DC 25). It can innately cast the following spells, requiring no material components:\nAt will: detect evil and good, invisibility (self only)\n3/day each: blade barrier, dispel evil and good, resurrection\n1/day each: commune, control weather",
+        "ability": "cha",
         "saveDc": 25,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "invisibility",
+            "name": "Invisibility",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "blade-barrier",
+            "name": "Blade Barrier",
+            "level": 6,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "dispel-evil-and-good",
+            "name": "Dispel Evil and Good",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "resurrection",
+            "name": "Resurrection",
+            "level": 7,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "commune",
+            "name": "Commune",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "control-weather",
+            "name": "Control Weather",
+            "level": 8,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -32632,7 +35531,85 @@
         "ability": "int",
         "saveDc": 14,
         "attackBonus": 6,
-        "automation": "dm-adjudication"
+        "school": "wizard",
+        "componentsRequired": [
+          "V"
+        ],
+        "slots": {
+          "1": 4,
+          "2": 3,
+          "3": 3,
+          "4": 3,
+          "5": 2
+        },
+        "spells": [
+          {
+            "id": "mage-hand",
+            "name": "Mage Hand",
+            "level": 0
+          },
+          {
+            "id": "minor-illusion",
+            "name": "Minor Illusion",
+            "level": 0
+          },
+          {
+            "id": "ray-of-frost",
+            "name": "Ray of Frost",
+            "level": 0
+          },
+          {
+            "id": "charm-person",
+            "name": "Charm Person",
+            "level": 1
+          },
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1
+          },
+          {
+            "id": "sleep",
+            "name": "Sleep",
+            "level": 1
+          },
+          {
+            "id": "detect-thoughts",
+            "name": "Detect Thoughts",
+            "level": 2
+          },
+          {
+            "id": "hold-person",
+            "name": "Hold Person",
+            "level": 2
+          },
+          {
+            "id": "lightning-bolt",
+            "name": "Lightning Bolt",
+            "level": 3
+          },
+          {
+            "id": "water-breathing",
+            "name": "Water Breathing",
+            "level": 3
+          },
+          {
+            "id": "blight",
+            "name": "Blight",
+            "level": 4
+          },
+          {
+            "id": "dimension-door",
+            "name": "Dimension Door",
+            "level": 4
+          },
+          {
+            "id": "dominate-person",
+            "name": "Dominate Person",
+            "level": 5
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -33000,13 +35977,34 @@
           "name": "Steam Breath",
           "description": "The mephit exhales a 15-foot cone of scalding steam. Each creature in that area must succeed on a DC 10 Dexterity saving throw, taking 4 (1d8) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         }
       ],
       "spellcasting": {
         "description": "The mephit can innately cast blur, requiring no material components. Its innate spellcasting ability is Charisma.",
         "ability": "cha",
-        "automation": "dm-adjudication"
+        "saveDc": 11,
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "blur",
+            "name": "Blur",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -33359,7 +36357,12 @@
           "name": "Slow",
           "description": "The golem targets one or more creatures it can see within 10 ft. of it. Each target must make a DC 17 Wisdom saving throw against this magic. On a failed save, a target can't use reactions, its speed is halved, and it can't make more than one attack on its turn. In addition, the target can take either an action or a bonus action on its turn, not both. These effects last for 1 minute. A target can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -33525,14 +36528,75 @@
           "name": "Lightning Strike",
           "description": "The giant hurls a magical lightning bolt at a point it can see within 500 feet of it. Each creature within 10 feet of that point must make a DC 17 Dexterity saving throw, taking 54 (12d8) lightning damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "spellcasting": {
         "description": "The giant's innate spellcasting ability is Charisma (spell save DC 17). It can innately cast the following spells, requiring no material components:\n\nAt will: detect magic, feather fall, levitate, light\n3/day each: control weather, water breathing",
         "ability": "cha",
         "saveDc": 17,
-        "automation": "dm-adjudication"
+        "componentsRequired": [
+          "V",
+          "S"
+        ],
+        "spells": [
+          {
+            "id": "detect-magic",
+            "name": "Detect Magic",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "feather-fall",
+            "name": "Feather Fall",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "levitate",
+            "name": "Levitate",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "light",
+            "name": "Light",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "control-weather",
+            "name": "Control Weather",
+            "level": 8,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          },
+          {
+            "id": "water-breathing",
+            "name": "Water Breathing",
+            "level": 3,
+            "usage": {
+              "kind": "per-day",
+              "max": 3
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -33771,7 +36835,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny bat. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -33793,9 +36862,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 2,
+                "count": 1,
+                "sides": 4,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -33874,7 +36952,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny insect. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -33896,9 +36979,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 5,
+                "count": 2,
+                "sides": 4,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -33976,7 +37068,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny insect. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -33998,7 +37095,16 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 5,
+                "count": 2,
+                "sides": 4,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
           "automation": "dm-adjudication"
         }
@@ -34078,7 +37184,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny insect. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -34100,9 +37211,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 5,
+                "count": 2,
+                "sides": 4,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -34180,7 +37300,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny snake. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -34202,7 +37327,16 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 3,
+                "count": 1,
+                "sides": 6,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
           "automation": "dm-adjudication"
         }
@@ -34287,7 +37421,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny quipper. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         },
         {
           "name": "Water Breathing",
@@ -34314,9 +37453,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 7,
+                "count": 2,
+                "sides": 6,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -34398,7 +37546,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny rat. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -34420,9 +37573,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 3,
+                "count": 1,
+                "sides": 6,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -34495,7 +37657,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny raven. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -34517,9 +37684,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 5
+            "reachFeet": 5,
+            "damageAtHalfHp": [
+              {
+                "average": 3,
+                "count": 1,
+                "sides": 6,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -34596,7 +37772,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny insect. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         },
         {
           "name": "Spider Climb",
@@ -34633,9 +37814,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 5,
+                "count": 2,
+                "sides": 4,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -34713,7 +37903,12 @@
         {
           "name": "Swarm",
           "description": "The swarm can occupy another creature's space and vice versa, and the swarm can move through any opening large enough for a Tiny insect. The swarm can't regain hit points or gain temporary hit points.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "swarm",
+            "cannotRegainHitPoints": true,
+            "cannotGainTemporaryHitPoints": true
+          }
         }
       ],
       "actions": [
@@ -34735,9 +37930,18 @@
                 "type": "piercing"
               }
             ],
-            "reachFeet": 0
+            "reachFeet": 0,
+            "damageAtHalfHp": [
+              {
+                "average": 5,
+                "count": 2,
+                "sides": 4,
+                "bonus": 0,
+                "type": "piercing"
+              }
+            ]
           },
-          "automation": "dm-adjudication"
+          "automation": "headless"
         }
       ],
       "capabilities": {
@@ -34949,22 +38153,41 @@
           "id": "attack",
           "name": "Attack",
           "description": "The tarrasque makes one claw attack or tail attack.",
-          "kind": "other",
-          "automation": "dm-adjudication"
+          "kind": "weapon-attack",
+          "automation": "headless",
+          "attack": {
+            "mode": "melee",
+            "toHit": 19,
+            "target": "one target",
+            "damage": [
+              {
+                "average": 28,
+                "count": 4,
+                "sides": 8,
+                "bonus": 10,
+                "type": "slashing"
+              }
+            ],
+            "reachFeet": 15
+          },
+          "referencedActionId": "claw",
+          "legendaryCost": 1
         },
         {
           "id": "move",
           "name": "Move",
           "description": "The tarrasque moves up to half its speed.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "chomp-costs-2-actions",
           "name": "Chomp (Costs 2 Actions)",
           "description": "The tarrasque makes one bite attack or uses its Swallow.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -35603,7 +38826,17 @@
         {
           "name": "Regeneration",
           "description": "The troll regains 10 hit points at the start of its turn. If the troll takes acid or fire damage, this trait doesn't function at the start of the troll's next turn. The troll dies only if it starts its turn with 0 hit points and doesn't regenerate.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 10,
+            "requiresPositiveHp": false,
+            "suppressedByDamageTypes": [
+              "acid",
+              "fire"
+            ],
+            "diesAtZeroWhenSuppressed": true
+          }
         }
       ],
       "actions": [
@@ -35942,28 +39175,85 @@
           "name": "Hooves",
           "description": "The unicorn makes one attack with its hooves.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "shimmering-shield-costs-2-actions",
           "name": "Shimmering Shield (Costs 2 Actions)",
           "description": "The unicorn creates a shimmering, magical field around itself or another creature it can see within 60 ft. of it. The target gains a +2 bonus to AC until the end of the unicorn's next turn.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         },
         {
           "id": "heal-self-costs-3-actions",
           "name": "Heal Self (Costs 3 Actions)",
           "description": "The unicorn magically regains 11 (2d8 + 2) hit points.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 3
         }
       ],
       "spellcasting": {
         "description": "The unicorn's innate spellcasting ability is Charisma (spell save DC 14). The unicorn can innately cast the following spells, requiring no components:\n\nAt will: detect evil and good, druidcraft, pass without trace\n1/day each: calm emotions, dispel evil and good, entangle",
         "ability": "cha",
         "saveDc": 14,
-        "automation": "dm-adjudication"
+        "componentsRequired": [],
+        "spells": [
+          {
+            "id": "detect-evil-and-good",
+            "name": "Detect Evil and Good",
+            "level": 1,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "druidcraft",
+            "name": "Druidcraft",
+            "level": 0,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "pass-without-trace",
+            "name": "Pass Without Trace",
+            "level": 2,
+            "usage": {
+              "kind": "at-will"
+            }
+          },
+          {
+            "id": "calm-emotions",
+            "name": "Calm Emotions",
+            "level": 2,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "dispel-evil-and-good",
+            "name": "Dispel Evil and Good",
+            "level": 5,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          },
+          {
+            "id": "entangle",
+            "name": "Entangle",
+            "level": 1,
+            "usage": {
+              "kind": "per-day",
+              "max": 1
+            }
+          }
+        ],
+        "automation": "headless"
       },
       "capabilities": {
         "swarm": false,
@@ -36043,7 +39333,14 @@
         {
           "name": "Regeneration",
           "description": "The vampire regains 10 hit points at the start of its turn if it has at least 1 hit point and isn't in sunlight or running water. If the vampire takes radiant damage or damage from holy water, this trait doesn't function at the start of the vampire's next turn.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 10,
+            "requiresPositiveHp": true,
+            "suppressedByDamageTypes": [],
+            "diesAtZeroWhenSuppressed": false
+          }
         },
         {
           "name": "Spider Climb",
@@ -36215,7 +39512,14 @@
         {
           "name": "Regeneration",
           "description": "The vampire regains 20 hit points at the start of its turn if it has at least 1 hit point and isn't in sunlight or running water. If the vampire takes radiant damage or damage from holy water, this trait doesn't function at the start of the vampire's next turn.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 20,
+            "requiresPositiveHp": true,
+            "suppressedByDamageTypes": [],
+            "diesAtZeroWhenSuppressed": false
+          }
         },
         {
           "name": "Spider Climb",
@@ -36279,21 +39583,24 @@
           "name": "Move",
           "description": "The vampire moves up to its speed without provoking opportunity attacks.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "unarmed-strike",
           "name": "Unarmed Strike",
           "description": "The vampire makes one unarmed strike.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "bite-costs-2-actions",
           "name": "Bite (Costs 2 Actions)",
           "description": "The vampire makes one bite attack.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -36395,7 +39702,14 @@
         {
           "name": "Regeneration",
           "description": "The vampire regains 20 hit points at the start of its turn if it has at least 1 hit point and isn't in sunlight or running water. If the vampire takes radiant damage or damage from holy water, this trait doesn't function at the start of the vampire's next turn.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 20,
+            "requiresPositiveHp": true,
+            "suppressedByDamageTypes": [],
+            "diesAtZeroWhenSuppressed": false
+          }
         },
         {
           "name": "Spider Climb",
@@ -36415,21 +39729,24 @@
           "name": "Move",
           "description": "The vampire moves up to its speed without provoking opportunity attacks.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "unarmed-strike",
           "name": "Unarmed Strike",
           "description": "The vampire makes one unarmed strike.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "bite-costs-2-actions",
           "name": "Bite (Costs 2 Actions)",
           "description": "The vampire makes one bite attack.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -36530,7 +39847,14 @@
         {
           "name": "Regeneration",
           "description": "The vampire regains 20 hit points at the start of its turn if it has at least 1 hit point and isn't in sunlight or running water. If the vampire takes radiant damage or damage from holy water, this trait doesn't function at the start of the vampire's next turn.",
-          "automation": "dm-adjudication"
+          "automation": "headless",
+          "rule": {
+            "kind": "regeneration",
+            "amount": 20,
+            "requiresPositiveHp": true,
+            "suppressedByDamageTypes": [],
+            "diesAtZeroWhenSuppressed": false
+          }
         },
         {
           "name": "Spider Climb",
@@ -36623,21 +39947,24 @@
           "name": "Move",
           "description": "The vampire moves up to its speed without provoking opportunity attacks.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "unarmed-strike",
           "name": "Unarmed Strike",
           "description": "The vampire makes one unarmed strike.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 1
         },
         {
           "id": "bite-costs-2-actions",
           "name": "Bite (Costs 2 Actions)",
           "description": "The vampire makes one bite attack.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "legendaryCost": 2
         }
       ],
       "capabilities": {
@@ -37016,7 +40343,12 @@
           "name": "Spores",
           "description": "A 15-foot-radius cloud of toxic spores extends out from the vrock. The spores spread around corners. Each creature in that area must succeed on a DC 14 Constitution saving throw or become poisoned. While poisoned in this way, a target takes 5 (1d10) poison damage at the start of each of its turns. A target can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success. Emptying a vial of holy water on the target also ends the effect on it.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 6
+          }
         },
         {
           "id": "stunning-screech",
@@ -37406,7 +40738,12 @@
           "name": "Whelm",
           "description": "Each creature in the elemental's space must make a DC 15 Strength saving throw. On a failure, a target takes 13 (2d8 + 4) bludgeoning damage. If it is Large or smaller, it is also grappled (escape DC 14). Until this grapple ends, the target is restrained and unable to breathe unless it can breathe water. If the saving throw is successful, the target is pushed out of the elemental's space.\nThe elemental can grapple one Large creature or up to two Medium or smaller creatures at one time. At the start of each of the elemental's turns, each target grappled by it takes 13 (2d8 + 4) bludgeoning damage. A creature within 5 feet of the elemental can pull a creature or object out of it by taking an action to make a DC 14 Strength and succeeding.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 4
+          }
         }
       ],
       "capabilities": {
@@ -39502,7 +42839,12 @@
           "name": "Cold Breath",
           "description": "The dragon exhales an icy blast of hail in a 15-foot cone. Each creature in that area must make a DC 12 Constitution saving throw, taking 22 (5d8) cold damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -39890,7 +43232,12 @@
           "name": "Cold Breath",
           "description": "The wolf exhales a blast of freezing wind in a 15-foot cone. Each creature in that area must make a DC 12 Dexterity saving throw, taking 18 (4d8) cold damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -40649,7 +43996,12 @@
           "name": "Acid Breath",
           "description": "The dragon exhales acid in a 30-foot line that is 5 feet wide. Each creature in that line must make a DC 14 Dexterity saving throw, taking 49 (11d8) acid damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -40805,7 +44157,12 @@
           "name": "Lightning Breath",
           "description": "The dragon exhales lightning in a 60-foot line that is 5 feet wide. Each creature in that line must make a DC 16 Dexterity saving throw, taking 55 (10d10) lightning damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -40959,7 +44316,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in a 40-foot line that is 5 feet wide. Each creature in that line must make a DC 14 Dexterity saving throw, taking 42 (12d6) fire damage on a failed save, or half as much damage on a successful one.\nSleep Breath. The dragon exhales sleep gas in a 30-foot cone. Each creature in that area must succeed on a DC 14 Constitution saving throw or fall unconscious for 5 minutes. This effect ends for a creature if the creature takes damage or someone uses an action to wake it.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -41119,7 +44481,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nLightning Breath. The dragon exhales lightning in a 60-foot line that is 5 feet wide. Each creature in that line must make a DC 15 Dexterity saving throw, taking 55 (10d10) lightning damage on a failed save, or half as much damage on a successful one.\nRepulsion Breath. The dragon exhales repulsion energy in a 30-foot cone. Each creature in that area must succeed on a DC 15 Strength saving throw. On a failed save, the creature is pushed 40 feet away from the dragon.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -41273,7 +44640,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nAcid Breath. The dragon exhales acid in an 40-foot line that is 5 feet wide. Each creature in that line must make a DC 14 Dexterity saving throw, taking 40 (9d8) acid damage on a failed save, or half as much damage on a successful one.\nSlowing Breath. The dragon exhales gas in a 30-foot cone. Each creature in that area must succeed on a DC 14 Constitution saving throw. On a failed save, the creature can't use reactions, its speed is halved, and it can't make more than one attack on its turn. In addition, the creature can use either an action or a bonus action on its turn, but not both. These effects last for 1 minute. The creature can repeat the saving throw at the end of each of its turns, ending the effect on itself with a successful save.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -41438,7 +44810,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nFire Breath. The dragon exhales fire in a 30-foot cone. Each creature in that area must make a DC 17 Dexterity saving throw, taking 55 (10d10) fire damage on a failed save, or half as much damage on a successful one.\nWeakening Breath. The dragon exhales gas in a 30-foot cone. Each creature in that area must succeed on a DC 17 Strength saving throw or have disadvantage on Strength-based attack rolls, Strength checks, and Strength saving throws for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -41607,7 +44984,12 @@
           "name": "Poison Breath",
           "description": "The dragon exhales poisonous gas in a 30-foot cone. Each creature in that area must make a DC 14 Constitution saving throw, taking 42 (12d6) poison damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -41763,7 +45145,12 @@
           "name": "Fire Breath",
           "description": "The dragon exhales fire in a 30-foot cone. Each creature in that area must make a DC 17 Dexterity saving throw, taking 56 (16d6) fire damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -41921,7 +45308,12 @@
           "name": "Breath Weapons",
           "description": "The dragon uses one of the following breath weapons.\nCold Breath. The dragon exhales an icy blast in a 30-foot cone. Each creature in that area must make a DC 17 Constitution saving throw, taking 54 (12d8) cold damage on a failed save, or half as much damage on a successful one.\nParalyzing Breath. The dragon exhales paralyzing gas in a 30-foot cone. Each creature in that area must succeed on a DC 17 Constitution saving throw or be paralyzed for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {
@@ -42084,7 +45476,12 @@
           "name": "Cold Breath",
           "description": "The dragon exhales an icy blast in a 30-foot cone. Each creature in that area must make a DC 15 Constitution saving throw, taking 45 (10d8) cold damage on a failed save, or half as much damage on a successful one.",
           "kind": "other",
-          "automation": "dm-adjudication"
+          "automation": "dm-adjudication",
+          "usage": {
+            "kind": "recharge",
+            "dieSides": 6,
+            "minimum": 5
+          }
         }
       ],
       "capabilities": {

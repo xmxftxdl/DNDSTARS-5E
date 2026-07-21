@@ -1,4 +1,10 @@
-import type { Dnd5eMonsterStatBlock } from './monsters'
+import type {
+  Dnd5eDamageType,
+  Dnd5eMonsterAction,
+  Dnd5eMonsterStatBlock,
+  Dnd5eMonsterTrait,
+  Dnd5eMonsterWeaponAttack,
+} from './monsters'
 
 export type Dnd5eMonsterGenericAbilityId =
   | 'pack-tactics'
@@ -20,11 +26,11 @@ const DEFINITIONS: Record<Dnd5eMonsterGenericAbilityId, Omit<Dnd5eMonsterGeneric
   'pack-tactics': { name: '集群战术', automation: 'headless' },
   multiattack: { name: '多重攻击', automation: 'headless' },
   'legendary-resistance': { name: '传奇抗性', automation: 'headless' },
-  'legendary-actions': { name: '传奇动作', automation: 'dm-adjudication' },
-  regeneration: { name: '再生', automation: 'dm-adjudication' },
-  swarm: { name: '群集', automation: 'dm-adjudication' },
-  recharge: { name: '充能能力', automation: 'dm-adjudication' },
-  spellcasting: { name: '施法', automation: 'dm-adjudication' },
+  'legendary-actions': { name: '传奇动作', automation: 'headless' },
+  regeneration: { name: '再生', automation: 'headless' },
+  swarm: { name: '群集', automation: 'headless' },
+  recharge: { name: '充能能力', automation: 'headless' },
+  spellcasting: { name: '施法', automation: 'headless' },
 }
 
 function traitMatches(monster: Dnd5eMonsterStatBlock, pattern: RegExp): boolean {
@@ -54,4 +60,39 @@ export function dnd5eMonsterGenericAbilities(monster: Dnd5eMonsterStatBlock): re
   return (Object.keys(DEFINITIONS) as Dnd5eMonsterGenericAbilityId[])
     .filter((id) => dnd5eMonsterHasGenericAbility(monster, id))
     .map((id) => ({ id, ...DEFINITIONS[id] }))
+}
+
+export function dnd5eMonsterRegenerationRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined {
+  return monster?.traits.find((trait) => trait.rule?.kind === 'regeneration')?.rule as
+    Extract<NonNullable<Dnd5eMonsterTrait['rule']>, { kind: 'regeneration' }> | undefined
+}
+
+export function dnd5eMonsterIsSwarm(monster: Dnd5eMonsterStatBlock | undefined): boolean {
+  return monster?.traits.some((trait) => trait.rule?.kind === 'swarm') === true
+}
+
+export function dnd5eMonsterEffectiveWeaponAttack(
+  attack: Dnd5eMonsterWeaponAttack,
+  currentHp: number,
+  maxHp: number,
+): Dnd5eMonsterWeaponAttack {
+  return attack.damageAtHalfHp && currentHp <= maxHp / 2
+    ? { ...attack, damage: attack.damageAtHalfHp }
+    : attack
+}
+
+export function dnd5eMonsterRechargeActions(monster: Dnd5eMonsterStatBlock | undefined): readonly Dnd5eMonsterAction[] {
+  if (!monster) return []
+  return [...monster.actions, ...monster.legendaryActions ?? [], ...monster.lairActions ?? []]
+    .filter((action) => action.usage?.kind === 'recharge')
+}
+
+export function dnd5eMonsterRegenerationSuppressed(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  damageTypes: readonly Dnd5eDamageType[] | undefined,
+): boolean {
+  const rule = dnd5eMonsterRegenerationRule(monster)
+  return !!rule && (damageTypes ?? []).some((type) => rule.suppressedByDamageTypes.includes(type))
 }

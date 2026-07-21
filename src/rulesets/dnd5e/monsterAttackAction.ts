@@ -31,7 +31,7 @@ import {
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
-import { dnd5eMonsterHasGenericAbility } from './monsterGenericAbilities'
+import { dnd5eMonsterEffectiveWeaponAttack, dnd5eMonsterHasGenericAbility } from './monsterGenericAbilities'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 
@@ -102,7 +102,15 @@ export function prepareDnd5eMonsterAttack(input: {
   const attacks = attackIds.flatMap((actionId) => {
     const definition = monster.actions.find((candidate) => candidate.id === actionId)
     return definition?.attack && dnd5eMonsterActionAutomation(definition) === 'headless'
-      ? [{ id: definition.id, name: definition.name, attack: definition.attack }]
+      ? [{
+          id: definition.id,
+          name: definition.name,
+          attack: dnd5eMonsterEffectiveWeaponAttack(
+            definition.attack,
+            Math.max(0, actorToken.hp ?? monster.hitPoints.average),
+            Math.max(1, actorToken.maxHp ?? monster.hitPoints.average),
+          ),
+        }]
       : []
   })
   if (attacks.length !== attackIds.length || attacks.length === 0) return { ok: false, reason: 'invalid-action' }

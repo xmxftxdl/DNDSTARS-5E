@@ -301,6 +301,19 @@ export function createDnd5eMapCombatSnapshot(input: {
       classState: {
         ...tokenClassState,
         legendaryResistanceUses: tokenClassState.legendaryResistanceUses ?? monster?.legendaryResistanceUses,
+        monsterLegendaryActionPoints: tokenClassState.monsterLegendaryActionPoints ??
+          ((monster?.legendaryActions?.length ?? 0) > 0 ? 3 : undefined),
+        monsterSpellSlots: tokenClassState.monsterSpellSlots ?? (monster?.spellcasting?.slots
+          ? Object.fromEntries(Object.entries(monster.spellcasting.slots).map(([level, maximum]) => [
+              level,
+              { current: maximum, max: maximum },
+            ]))
+          : undefined),
+        monsterSpellUsesBySpellId: tokenClassState.monsterSpellUsesBySpellId ?? (monster?.spellcasting?.spells
+          ? Object.fromEntries(monster.spellcasting.spells.flatMap((spell) => spell.usage?.kind === 'per-day'
+            ? [[spell.id, { current: spell.usage.max, max: spell.usage.max }]]
+            : []))
+          : undefined),
       },
       wearingArmor: !!monster?.armorClass.note && !monster.armorClass.note.includes('天生护甲'),
       wearingMetalArmor: !!monster?.armorClass.note && [
@@ -427,6 +440,13 @@ export function planDnd5eMapResultApplication(input: {
             helpedAttackSourceId: combatant.classState.helpedAttackSourceId,
             helpedAttackSourceTurnKey: combatant.classState.helpedAttackSourceTurnKey,
             shieldSpellActive: combatant.classState.shieldSpellActive,
+            legendaryResistanceUses: combatant.classState.legendaryResistanceUses,
+            monsterLegendaryActionPoints: combatant.classState.monsterLegendaryActionPoints,
+            monsterRechargeReadyByActionId: combatant.classState.monsterRechargeReadyByActionId,
+            monsterSpellSlots: combatant.classState.monsterSpellSlots,
+            monsterSpellUsesBySpellId: combatant.classState.monsterSpellUsesBySpellId,
+            monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
+            monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
             hurlThroughHellSourceId: combatant.classState.hurlThroughHellSourceId,
             hurlThroughHellDamage: combatant.classState.hurlThroughHellDamage,
             hurlThroughHellAppliedTurnKey: combatant.classState.hurlThroughHellAppliedTurnKey,

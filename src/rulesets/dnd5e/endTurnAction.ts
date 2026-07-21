@@ -4,7 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { dnd5eClassDefinitionForCharacter } from './classes'
-import { dnd5eCombatantHasConcentrationEffect, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { dnd5eCombatantHasConcentrationEffect, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState, type Dnd5eMonsterRechargeRoll } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
@@ -15,6 +15,7 @@ import {
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
 import { getDnd5eSrdMonster } from './monsters'
+import { dnd5eMonsterRechargeActions } from './monsterGenericAbilities'
 
 export type Dnd5eEndTurnRejectReason = 'invalid-action' | 'invalid-actor' | 'combatant-missing'
 
@@ -41,6 +42,14 @@ export interface PreparedDnd5ePlayerEndTurn {
     mode: 'normal' | 'advantage' | 'disadvantage'
     blessed: boolean
     baned: boolean
+  }[]
+  nextMonsterRechargeRolls: readonly {
+    actorId: string
+    actorName: string
+    actionId: string
+    actionName: string
+    dieSides: number
+    minimum: number
   }[]
 }
 
@@ -113,6 +122,19 @@ export function prepareDnd5ePlayerEndTurn(input: {
   })
   const nextCombatantId = snapshot.state.initiativeOrder[(actorIndex + 1) % snapshot.state.initiativeOrder.length]
   const nextCombatant = snapshot.state.combatants[nextCombatantId]
+  const nextMonster = nextCombatant?.statBlockId ? getDnd5eSrdMonster(nextCombatant.statBlockId) : undefined
+  const nextMonsterRechargeRolls = nextCombatant ? dnd5eMonsterRechargeActions(nextMonster).flatMap((monsterAction) => {
+    const usage = monsterAction.usage
+    if (usage?.kind !== 'recharge' || nextCombatant.classState.monsterRechargeReadyByActionId?.[monsterAction.id] !== false) return []
+    return [{
+      actorId: nextCombatant.id,
+      actorName: nextCombatant.name,
+      actionId: monsterAction.id,
+      actionName: monsterAction.name,
+      dieSides: usage.dieSides,
+      minimum: usage.minimum,
+    }]
+  }) : []
   const turnStartActiveEffectSavingThrows = (nextCombatant?.classState.activeEffects ?? []).flatMap((effect) => {
     if (effect.repeatSave?.timing !== 'target-turn-start') return []
     const repeatSave = effect.repeatSave
@@ -143,6 +165,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows,
+      nextMonsterRechargeRolls,
     },
   }
 }
@@ -154,6 +177,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
   initiativeOrder: readonly InitiativeEntry[]
   activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
+  nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
 }): {
   ok: true
   actor?: Character
@@ -171,6 +195,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
       type: 'end-turn', actorId: actorToken.id,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
+      nextMonsterRechargeRolls: input.nextMonsterRechargeRolls,
     },
   )
   if (!result.ok) return { ok: false, reason: 'invalid-action' }

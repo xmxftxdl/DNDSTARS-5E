@@ -10,6 +10,7 @@ import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eDamageType } from '../rulesets/dnd5e/monsters'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   validateDnd5eActiveEffectsStrict,
@@ -203,6 +204,12 @@ export interface Token {
     helpedAttackSourceTurnKey?: string
     shieldSpellActive?: boolean
     legendaryResistanceUses?: number
+    monsterLegendaryActionPoints?: number
+    monsterRechargeReadyByActionId?: Record<string, boolean>
+    monsterSpellSlots?: Record<string, { current: number; max: number }>
+    monsterSpellUsesBySpellId?: Record<string, { current: number; max: number }>
+    monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
+    monsterRegenerationPendingAtZero?: boolean
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number
     hurlThroughHellAppliedTurnKey?: string
