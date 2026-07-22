@@ -670,7 +670,19 @@ describe('房间大厅协议', () => {
       headers: { 'X-Stars-Member': successful[0].member.memberId, 'X-Stars-Room-Token': successful[0].member.roomToken },
     })
     expect(rulesResponse.status).toBe(200)
-    expect(await rulesResponse.json()).toMatchObject({ requiredPlugins: [roomPlugin] })
+    const playerRules = await rulesResponse.json() as {
+      schemaVersion: number
+      revision: number
+      hash: string
+      houseRules: { declarativeAbilityDamageMultiplier: number }
+      requiredPlugins: unknown[]
+    }
+    expect(playerRules).toMatchObject({
+      schemaVersion: 1,
+      houseRules: { declarativeAbilityDamageMultiplier: 1 },
+      requiredPlugins: [roomPlugin],
+    })
+    expect(playerRules.hash).toMatch(/^sha256-/)
 
     const forbiddenRulesUpdate = await fetch(`${offServer.base}/api/rooms/${created.roomId}/rules`, {
       method: 'PUT',
@@ -682,6 +694,29 @@ describe('房间大厅协议', () => {
       body: JSON.stringify({ memberId: successful[0].member.memberId, requiredPlugins: [] }),
     })
     expect(forbiddenRulesUpdate.status).toBe(403)
+
+    const dmRulesUpdate = await fetch(`${offServer.base}/api/rooms/${created.roomId}/rules`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Member': created.member.memberId,
+        'X-Stars-Room-Token': created.member.roomToken,
+      },
+      body: JSON.stringify({
+        memberId: created.member.memberId,
+        requiredPlugins: [roomPlugin],
+        houseRules: { declarativeAbilityDamageMultiplier: 2 },
+      }),
+    })
+    expect(dmRulesUpdate.status).toBe(200)
+    const updatedRules = await dmRulesUpdate.json() as typeof playerRules
+    expect(updatedRules).toMatchObject({
+      schemaVersion: 1,
+      revision: playerRules.revision + 1,
+      houseRules: { declarativeAbilityDamageMultiplier: 2 },
+      requiredPlugins: [roomPlugin],
+    })
+    expect(updatedRules.hash).not.toBe(playerRules.hash)
 
     const rosterResponse = await fetch(`${offServer.base}/api/rooms/${created.roomId}/roster`, {
       headers: { 'X-Stars-Member': created.member.memberId, 'X-Stars-Room-Token': created.member.roomToken },

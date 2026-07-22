@@ -3028,6 +3028,17 @@ export function projectMapExplorationForPlayer(value, memberId = null) {
   }
 }
 
+function validDnd5eEffectiveRulesContext(value) {
+  if (!plainObject(value) || value.schemaVersion !== 1 || !Number.isInteger(value.revision) || value.revision < 1 ||
+    typeof value.hash !== 'string' || value.hash.length < 1 || !plainObject(value.houseRules) ||
+    !Array.isArray(value.sourceOrder) || !Array.isArray(value.requiredPlugins)) return false
+  return value.requiredPlugins.every((plugin) => plainObject(plugin) &&
+    typeof plugin.id === 'string' && plugin.id.length > 0 &&
+    typeof plugin.version === 'string' && plugin.version.length > 0 &&
+    (plugin.integrity == null || typeof plugin.integrity === 'string') &&
+    (plugin.stateSchemaVersion == null || Number.isInteger(plugin.stateSchemaVersion)))
+}
+
 /**
  * Persistence-boundary validation. The browser performs more detailed
  * migrations, while this deliberately conservative shape check prevents a
@@ -3066,6 +3077,9 @@ export function validateSharedStateShape(name, value) {
   }
   if (name === 'combat' && value.active != null && typeof value.active !== 'boolean') {
     return { ok: false, reason: 'invalid-combat-active' }
+  }
+  if (name === 'combat' && value.effectiveRules != null && !validDnd5eEffectiveRulesContext(value.effectiveRules)) {
+    return { ok: false, reason: 'invalid-effective-rules' }
   }
   if (name === 'dm-authority-ready' && typeof value.ready !== 'boolean') {
     return { ok: false, reason: 'invalid-ready-state' }
@@ -3743,13 +3757,39 @@ async function readJsonRequest(req, maxBytes = 64 * 1024) {
   }
 }
 
+function normalizeDnd5eHouseRules(value) {
+  const source = plainObject(value) ? value : {}
+  const multiplier = Number(source.declarativeAbilityDamageMultiplier)
+  const shortRestMinutes = Number(source.shortRestMinutes)
+  const longRestHours = Number(source.longRestHours)
+  return {
+    declarativeAbilityDamageMultiplier: Number.isFinite(multiplier) && multiplier >= 0 && multiplier <= 10 ? multiplier : 1,
+    criticalHitMode: source.criticalHitMode === 'maximum-extra-die' ? 'maximum-extra-die' : 'double-dice',
+    advantageMode: source.advantageMode === 'stacking-cancel' ? 'stacking-cancel' : 'standard',
+    shortRestMinutes: Number.isInteger(shortRestMinutes) && shortRestMinutes >= 1 && shortRestMinutes <= 1440 ? shortRestMinutes : 60,
+    longRestHours: Number.isInteger(longRestHours) && longRestHours >= 1 && longRestHours <= 24 ? longRestHours : 8,
+  }
+}
+
 function roomRulesResponse(room, member) {
   const requiredPlugins = Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []
+  const revision = Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1
+  const houseRules = normalizeDnd5eHouseRules(room.dnd5eHouseRules)
+  const hash = `sha256-${createHash('sha256').update(JSON.stringify({
+    schemaVersion: 1,
+    rulesetId: room.rulesetId,
+    revision,
+    houseRules,
+    requiredPlugins,
+  })).digest('base64')}`
   return {
+    schemaVersion: 1,
     roomId: room.id,
     rulesetId: room.rulesetId,
-    revision: Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1,
+    revision,
+    hash,
     updatedAt: room.rulesUpdatedAt ?? room.updatedAt ?? room.createdAt,
+    houseRules,
     requiredPlugins,
     plugins: requiredPlugins.map((requirement) => {
       const hosted = room.pluginFiles?.[requirement.id] ?? {}
@@ -4570,6 +4610,9 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
       const requiredPlugins = normalizeRoomPluginRequirements(payload?.requiredPlugins)
       if (!requiredPlugins) return { ok: false, status: 400, error: 'invalid-plugin-manifest' }
+      const houseRules = payload?.houseRules == null
+        ? normalizeDnd5eHouseRules(room.dnd5eHouseRules)
+        : normalizeDnd5eHouseRules(payload.houseRules)
       const hosted = room.pluginFiles ?? {}
       if (requiredPlugins.some((plugin) =>
         hosted[plugin.id]?.version !== plugin.version || hosted[plugin.id]?.integrity !== plugin.integrity)) {
@@ -4584,6 +4627,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           ...room,
           host,
           requiredPlugins,
+          dnd5eHouseRules: houseRules,
           rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
           rulesUpdatedAt: now,
           updatedAt: now,

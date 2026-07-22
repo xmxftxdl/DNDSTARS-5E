@@ -15,6 +15,13 @@ import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditi
 import { dnd5eChallengeRatingValue } from './wildShape'
 import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 import { normalizeDnd5eSpecialSenses, type Dnd5eSpecialSense } from './specialSenses'
+import { getRoomRulesSnapshot } from '../../lib/roomRulesState'
+import { getRoomSession } from '../../lib/roomSession'
+import {
+  dnd5eEffectiveRulesContextForCombat,
+  restoreDnd5eEffectiveRulesContextForCombat,
+  type Dnd5eEffectiveRulesContextV1,
+} from './effectiveRulesContext'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -222,6 +229,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   combatId: string
   round?: number
   turnSlotId?: string
+  effectiveRules?: Dnd5eEffectiveRulesContextV1
   map: BattleMap
   characters: readonly Character[]
   initiativeOrder: readonly InitiativeEntry[]
@@ -336,6 +344,12 @@ export function createDnd5eMapCombatSnapshot(input: {
   applyDraconicPresenceSources(input.map, combatants)
   const state = startDnd5eHeadlessCombat(input.combatId, combatants)
   state.mapId = input.map.id
+  const roomRules = getRoomRulesSnapshot()
+  state.effectiveRules = input.effectiveRules
+    ? restoreDnd5eEffectiveRulesContextForCombat(input.combatId, input.effectiveRules) ?? undefined
+    : getRoomSession() && !roomRules
+      ? undefined
+      : dnd5eEffectiveRulesContextForCombat(input.combatId, roomRules)
   const combatantTokens = input.map.tokens.filter((token) => state.combatants[token.id])
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   state.distanceFeetByCombatantPair = {}
@@ -432,6 +446,8 @@ export function planDnd5eMapResultApplication(input: {
             stunnedByActorId: combatant.classState.stunnedByActorId,
             stunnedAppliedTurnKey: combatant.classState.stunnedAppliedTurnKey,
             openHandNoReactionsAppliedTurnKeysBySource: combatant.classState.openHandNoReactionsAppliedTurnKeysBySource,
+            declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
+            declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
             concentrationSpellId: combatant.classState.concentrationSpellId,
             concentrationTargetIds: combatant.classState.concentrationTargetIds,
             concentrationRoundsRemaining: combatant.classState.concentrationRoundsRemaining,

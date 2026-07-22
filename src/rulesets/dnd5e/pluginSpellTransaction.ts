@@ -32,6 +32,7 @@ export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'plugin-missing'
+  | 'room-rules-unavailable'
   | 'plugin-not-enabled-for-room'
   | 'plugin-version-mismatch'
   | 'spell-unavailable'
@@ -128,7 +129,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   initiativeOrder: readonly InitiativeEntry[]
   turnEconomy?: Dnd5eTurnEconomyCounts
   turnEconomyByToken?: Readonly<Record<string, Dnd5eTurnEconomyCounts>>
-  roomRequiredPlugins?: readonly { id: string; version: string; integrity?: string }[]
+  roomRequiredPlugins?: readonly { id: string; version: string; integrity?: string }[] | null
   now?: number
 }): { ok: true; prepared: PreparedDnd5ePluginSpellCast } | { ok: false; reason: Dnd5ePluginSpellRejectReason } {
   const payload = input.action.dnd5eSpellCast
@@ -136,6 +137,7 @@ export function prepareDnd5ePluginSpellCast(input: {
   const spell = dnd5ePluginSpellDefinition(payload.spellId)
   if (!spell) return { ok: false, reason: 'plugin-missing' }
   if (!dnd5ePluginSpellAutomationSupported(spell)) return { ok: false, reason: 'spell-not-headless' }
+  if (input.roomRequiredPlugins === null) return { ok: false, reason: 'room-rules-unavailable' }
   if (input.roomRequiredPlugins) {
     const requirement = input.roomRequiredPlugins.find((plugin) => plugin.id === spell.ownerPluginId)
     if (!requirement) return { ok: false, reason: 'plugin-not-enabled-for-room' }

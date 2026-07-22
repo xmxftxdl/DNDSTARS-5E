@@ -24,7 +24,8 @@ function record(overrides: Partial<AccountCharacterRecord['compatibility']> = {}
 
 function rules(requiredPlugins = [plugin]): RoomRulesSnapshot {
   return {
-    roomId: 'ABC234', rulesetId: 'dnd5e-2014-srd-5.1', revision: 1, updatedAt: 1,
+    schemaVersion: 1, roomId: 'ABC234', rulesetId: 'dnd5e-2014-srd-5.1', revision: 1,
+    hash: 'sha256-test', updatedAt: 1, houseRules: {},
     requiredPlugins, plugins: [], member: { ready: true, missing: [], mismatched: [] },
   }
 }

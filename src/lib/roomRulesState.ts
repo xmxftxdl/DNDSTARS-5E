@@ -1,4 +1,4 @@
-import type { RoomPluginRequirement, RoomRulesSnapshot } from './roomSession'
+import { getRoomSession, type RoomPluginRequirement, type RoomRulesSnapshot } from './roomSession'
 
 let snapshot: RoomRulesSnapshot | null = null
 let pluginSyncError: string | null = null
@@ -33,7 +33,9 @@ export function roomAllowsPlugin(
   pluginId: string,
   rules: RoomRulesSnapshot | null = snapshot,
 ): boolean {
-  if (!rules) return true
+  // Local/offline play has no room contract. Inside a room, a missing snapshot
+  // means synchronization has not completed and must never enable a package.
+  if (!rules) return getRoomSession() == null
   return rules.requiredPlugins.some((plugin) => plugin.id === pluginId)
 }
 

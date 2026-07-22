@@ -403,6 +403,7 @@ export async function loadRoomRules(session: RoomSession): Promise<RoomRulesSnap
 export async function updateRoomRules(
   session: RoomSession,
   requiredPlugins: readonly { id: string; version: string; integrity?: string; stateSchemaVersion?: number }[],
+  houseRules?: import('../rulesets/dnd5e/effectiveRulesContext').Dnd5eHouseRulesV1,
 ): Promise<RoomRulesSnapshot> {
   if (session.role !== 'dm') throw new RoomApiError('forbidden', 403)
   return roomRequest<RoomRulesSnapshot>(`/rooms/${encodeURIComponent(session.roomId)}/rules`, {
@@ -410,6 +411,7 @@ export async function updateRoomRules(
     body: JSON.stringify({
       memberId: session.memberId,
       requiredPlugins: exactRoomPluginRequirements(requiredPlugins),
+      ...(houseRules ? { houseRules } : {}),
     }),
   })
 }

@@ -28,6 +28,7 @@ import {
 } from './combatInterruptQueue'
 import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
 import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
+import { isDnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -472,6 +473,9 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === 'combat' && input.active != null && typeof input.active !== 'boolean') {
     reasons.push('combat.active 不是布尔值')
+  }
+  if (name === 'combat' && input.effectiveRules != null && !isDnd5eEffectiveRulesContextV1(input.effectiveRules)) {
+    reasons.push('combat.effectiveRules 规则快照损坏')
   }
   if (name === 'dm-authority-ready' && typeof input.ready !== 'boolean') {
     reasons.push('dm-authority-ready.ready 不是布尔值')

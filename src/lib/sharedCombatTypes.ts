@@ -7,6 +7,7 @@ import type { CombatSettlementMode } from './combatSettlementMode'
 import type { Dnd5eMapInteractionPayload } from '../rulesets/dnd5e/mapInteraction'
 import type { Dnd5eTraversalMode } from '../rulesets/dnd5e/traversal'
 import type { Dnd5eClassId } from '../rulesets/dnd5e/classes'
+import type { Dnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
 
 // Shared DM/player state contracts transported through sharedApi.
 // Keep these runtime-free so UI, sync helpers, and headless services can depend
@@ -211,6 +212,8 @@ export interface SharedCombatState {
   /** DM 权威的结算策略；旧快照缺失时按 automatic 处理。 */
   settlementMode?: CombatSettlementMode
   dnd5eTurnEconomyByToken?: Dnd5eTurnEconomyByToken
+  /** DM-pinned rules and exact plugin set; active room combat rejects plugin actions when absent. */
+  effectiveRules?: Dnd5eEffectiveRulesContextV1
   updatedAt: number
 }
 

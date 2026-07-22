@@ -29,10 +29,13 @@ export interface RoomPluginReadiness {
 }
 
 export interface RoomRulesSnapshot {
+  schemaVersion: 1
   roomId: string
   rulesetId: typeof DND5E_2014_RULESET_ID
   revision: number
+  hash: string
   updatedAt: number
+  houseRules: import('../rulesets/dnd5e/effectiveRulesContext').Dnd5eHouseRulesV1
   requiredPlugins: RoomPluginRequirement[]
   plugins: RoomPluginMetadata[]
   member: RoomPluginReadiness

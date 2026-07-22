@@ -931,6 +931,7 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
       ...state.effectiveRules,
       sourceOrder: [...state.effectiveRules.sourceOrder],
       houseRules: { ...state.effectiveRules.houseRules },
+      requiredPlugins: state.effectiveRules.requiredPlugins.map((plugin) => ({ ...plugin })),
     } : undefined,
     initiativeOrder: [...state.initiativeOrder],
     distanceFeetByCombatantPair: state.distanceFeetByCombatantPair

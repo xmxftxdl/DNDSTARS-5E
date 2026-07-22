@@ -252,6 +252,7 @@ import {
   type Dnd5ePluginTargeting,
   type Dnd5ePersistentAreaDmAdjustment,
   type Dnd5ePersistentAreaTriggerCandidate,
+  type Dnd5eEffectiveRulesContextV1,
   type PreparedDnd5ePersistentAreaTrigger,
   type PreparedDnd5eEquipmentAttack,
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
@@ -262,6 +263,7 @@ import {
   applyDnd5eInitiativeResourceFeatures,
   createDnd5eTurnEconomyCounts,
   createDnd5eMapCombatSnapshot,
+  restoreDnd5eEffectiveRulesContextForCombat,
   applyDnd5eAttackCoverOverride,
   dnd5eAttackCoverForPair,
   dnd5eClassDefinition,
@@ -1136,6 +1138,7 @@ export default function MapsPage() {
   const seenSharedLogIdsRef = useRef(new Set<number>())
   const combatPublishSeqRef = useRef(0)
   const combatIdRef = useRef('')
+  const effectiveRulesRef = useRef<Dnd5eEffectiveRulesContextV1 | null>(null)
   const lastSharedCombatSnapshotRef = useRef('')
   const lastAppliedCombatUpdatedAtRef = useRef(0)
   const lastAppliedCombatIdRef = useRef('')
@@ -1468,6 +1471,7 @@ export default function MapsPage() {
       initiativeOrder: initiativeOrderRef.current,
       settlementMode: settlementModeRef.current,
       dnd5eTurnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
+      effectiveRules: effectiveRulesRef.current ?? undefined,
       updatedAt: runtimeNow(),
       ...patch,
     }
@@ -1547,6 +1551,10 @@ export default function MapsPage() {
     lastAppliedCombatUpdatedAtRef.current = decision.incomingUpdatedAt
     applyingSharedCombatRef.current = true
     combatIdRef.current = decision.incomingCombatId
+    effectiveRulesRef.current = restoreDnd5eEffectiveRulesContextForCombat(
+      decision.incomingCombatId,
+      state.effectiveRules,
+    )
     setCombatId(decision.incomingCombatId)
     if (decision.shouldResetPlayerActionState) {
       setPendingPlayerActionLocked(null)
@@ -4280,6 +4288,7 @@ export default function MapsPage() {
       characters: recoveredCharacters,
       initiativeOrder: order,
     })
+    effectiveRulesRef.current = started.state.effectiveRules ?? null
     combatActiveRef.current = true
     roundRef.current = started.state.round
     initiativeIndexRef.current = started.state.initiativeIndex
@@ -8650,7 +8659,7 @@ export default function MapsPage() {
           initiativeOrder: initiativeOrderRef.current,
           turnEconomy,
           turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
-          roomRequiredPlugins: roomSession ? roomRulesSnapshot?.requiredPlugins : undefined,
+          roomRequiredPlugins: roomSession ? effectiveRulesRef.current?.requiredPlugins ?? null : undefined,
           now: runtimeNow(),
         })
         if (!preparedPluginSpell.ok) {
@@ -9989,7 +9998,7 @@ export default function MapsPage() {
         characters: useCharacterStore.getState().characters,
         initiativeOrder: initiativeOrderRef.current,
         turnEconomy,
-        roomRequiredPlugins: roomSession ? roomRulesSnapshot?.requiredPlugins : undefined,
+        roomRequiredPlugins: roomSession ? effectiveRulesRef.current?.requiredPlugins ?? null : undefined,
       })
       if (!prepared.ok) {
         acknowledgePlayerAction(action, 'rejected', prepared.reason)

@@ -204,6 +204,8 @@ export interface Character {
     quiveringPalmTargetId?: string
     /** 散打宗 11 级：长休后获得的庇护术效果，攻击或对敌施法后结束。 */
     tranquilityActive?: boolean
+    declarativeUsedTurnKeys?: Record<string, string>
+    declarativeTransactionIds?: string[]
     /** 成功躲藏后的检定结果；进行攻击时由 Headless 清除。 */
     hiddenCheckTotal?: number
     /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */

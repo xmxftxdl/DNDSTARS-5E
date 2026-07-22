@@ -193,6 +193,8 @@ export interface Token {
     openHandNoReactionsAppliedTurnKeysBySource?: Record<string, string>
     quiveringPalmTargetId?: string
     tranquilityActive?: boolean
+    declarativeUsedTurnKeys?: Record<string, string>
+    declarativeTransactionIds?: string[]
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
     concentrationSpellId?: string

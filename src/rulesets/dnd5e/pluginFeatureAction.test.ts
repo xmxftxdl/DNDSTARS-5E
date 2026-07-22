@@ -327,6 +327,13 @@ describe('D&D 5e plugin feature authority action', () => {
         initiativeOrder,
         roomRequiredPlugins: [],
       })).toEqual({ ok: false, reason: 'plugin-not-enabled-for-room' })
+      expect(prepareDnd5ePluginFeatureAction({
+        action: action(featureId),
+        map,
+        characters: [hero, ally, enemy],
+        initiativeOrder,
+        roomRequiredPlugins: null,
+      })).toEqual({ ok: false, reason: 'room-rules-unavailable' })
     } finally {
       dispose()
     }

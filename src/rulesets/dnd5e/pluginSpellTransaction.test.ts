@@ -53,6 +53,13 @@ describe('plugin spell CombatTransaction', () => {
         actorTokenId: actorToken.id, characterId: actor.id, targetTokenId: enemy.id,
         dnd5eSpellCast: { spellId, slotLevel: 0, targetTokenId: enemy.id }, round: 1, initiativeIndex: 0, seq: 1, updatedAt: 1,
       }
+      expect(prepareDnd5ePluginSpellCast({
+        action,
+        map,
+        characters: [actor],
+        initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+        roomRequiredPlugins: null,
+      })).toEqual({ ok: false, reason: 'room-rules-unavailable' })
       const prepared = prepareDnd5ePluginSpellCast({
         action, map, characters: [actor],
         initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),

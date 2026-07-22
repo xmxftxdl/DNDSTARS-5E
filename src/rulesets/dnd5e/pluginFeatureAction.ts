@@ -40,6 +40,7 @@ export type Dnd5ePluginFeatureActionRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'plugin-missing'
+  | 'room-rules-unavailable'
   | 'plugin-not-enabled-for-room'
   | 'plugin-version-mismatch'
   | 'feature-not-selected'
@@ -90,7 +91,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
     id: string
     version: string
     integrity?: string
-  }[]
+  }[] | null
 }): { ok: true; prepared: PreparedDnd5ePluginFeatureAction } | {
   ok: false
   reason: Dnd5ePluginFeatureActionRejectReason
@@ -102,6 +103,7 @@ export function prepareDnd5ePluginFeatureAction(input: {
   }
   const feature = dnd5ePluginFeatureDefinition(payload.featureId)
   if (!feature) return { ok: false, reason: 'plugin-missing' }
+  if (input.roomRequiredPlugins === null) return { ok: false, reason: 'room-rules-unavailable' }
   if (input.roomRequiredPlugins) {
     const roomRequirement = input.roomRequiredPlugins.find((plugin) => plugin.id === feature.ownerPluginId)
     if (!roomRequirement) return { ok: false, reason: 'plugin-not-enabled-for-room' }
