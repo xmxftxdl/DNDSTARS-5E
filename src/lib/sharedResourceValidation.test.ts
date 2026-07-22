@@ -14,7 +14,7 @@ describe('shared resource runtime validation', () => {
       'room-chat': { schemaVersion: 1, messages: [], updatedAt: 1 },
       'room-journal': { schemaVersion: 1, handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 1 },
       'group-ability-checks': { schemaVersion: 1, checks: [], updatedAt: 1 },
-      'campaign-time': { schemaVersion: 1, worldMinute: 480, timers: [], advances: [], updatedAt: 1 },
+      'campaign-time': { schemaVersion: 2, worldMinute: 480, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], advances: [], updatedAt: 1 },
       'dice-events': { events: [], updatedAt: 1 },
       'combat-interrupts': { interrupts: [], updatedAt: 1 },
       'player-action-requests': { requests: [], updatedAt: 1 },
@@ -70,6 +70,25 @@ describe('shared resource runtime validation', () => {
     expect(result.status).toBe('migrated')
     if (result.status !== 'migrated') throw new Error('expected migration')
     expect(result.value.enemyApByToken).toBeUndefined()
+  })
+
+  it('migrates the legacy campaign-day clock to the configurable V2 display', () => {
+    const result = validateAndMigrateSharedResource('campaign-time', {
+      schemaVersion: 1,
+      worldMinute: 600,
+      timers: [],
+      advances: [],
+      updatedAt: 1,
+    })
+    expect(result).toMatchObject({
+      status: 'migrated',
+      value: {
+        schemaVersion: 2,
+        worldMinute: 600,
+        displayMode: 'campaign-day',
+        displayMinuteOffset: 0,
+      },
+    })
   })
 
   it('migrates legacy condition/timed state into schema v2 at the shared boundary', () => {

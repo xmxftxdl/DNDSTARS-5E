@@ -1915,6 +1915,7 @@ export function projectGroupAbilityChecksForMember(value, memberId, isDm = false
 }
 
 const CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE = 8 * 60
+const CAMPAIGN_TIME_SCHEMA_VERSION = 2
 const CAMPAIGN_TIME_TIMER_LIMIT = 256
 const CAMPAIGN_TIME_ADVANCE_LIMIT = 512
 const CAMPAIGN_TIME_MAX_ADVANCE_MINUTES = 365 * 24 * 60
@@ -1925,13 +1926,33 @@ function campaignDawnsCrossed(fromWorldMinute, toWorldMinute) {
   return Math.max(0, Math.floor((to - 360) / 1_440) - Math.floor((from - 360) / 1_440))
 }
 
+function campaignGregorianDayNumber(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''))
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return null
+  const date = new Date(0)
+  date.setUTCHours(0, 0, 0, 0)
+  date.setUTCFullYear(year, month - 1, day)
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
+  return Math.floor(date.getTime() / 86_400_000)
+}
+
 function validateCampaignTimeState(value) {
   if (
-    value?.schemaVersion !== 1 || !Number.isSafeInteger(value.worldMinute) || value.worldMinute < 0 ||
+    ![1, CAMPAIGN_TIME_SCHEMA_VERSION].includes(value?.schemaVersion) || !Number.isSafeInteger(value.worldMinute) || value.worldMinute < 0 ||
     !Array.isArray(value.timers) || value.timers.length > CAMPAIGN_TIME_TIMER_LIMIT ||
     !Array.isArray(value.advances) || value.advances.length > CAMPAIGN_TIME_ADVANCE_LIMIT ||
     !Number.isFinite(value.updatedAt) || value.updatedAt < 0
   ) return 'invalid-campaign-time-envelope'
+  if (value.schemaVersion === CAMPAIGN_TIME_SCHEMA_VERSION && (
+    !['campaign-day', 'gregorian'].includes(value.displayMode) ||
+    !Number.isSafeInteger(value.displayMinuteOffset) || value.worldMinute + value.displayMinuteOffset < 0 ||
+    (value.calendarEpochDate != null && campaignGregorianDayNumber(value.calendarEpochDate) == null) ||
+    (value.displayMode === 'gregorian' && campaignGregorianDayNumber(value.calendarEpochDate) == null)
+  )) return 'invalid-campaign-time-display'
   const timerIds = new Set()
   for (const timer of value.timers) {
     if (
@@ -1969,51 +1990,132 @@ function validateCampaignTimeState(value) {
   return null
 }
 
+function normalizeCampaignTimeState(value) {
+  if (validateCampaignTimeState(value) != null) {
+    return {
+      schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
+      worldMinute: CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE,
+      displayMode: 'campaign-day',
+      displayMinuteOffset: 0,
+      timers: [],
+      advances: [],
+      updatedAt: 0,
+    }
+  }
+  if (value.schemaVersion === CAMPAIGN_TIME_SCHEMA_VERSION) return value
+  return {
+    ...value,
+    schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
+    displayMode: 'campaign-day',
+    displayMinuteOffset: 0,
+  }
+}
+
+function advanceCampaignTimeState(base, minutes, reason, kind, now) {
+  const fromWorldMinute = base.worldMinute
+  const toWorldMinute = fromWorldMinute + minutes
+  if (!Number.isSafeInteger(toWorldMinute)) return null
+  const expiredTimerIds = []
+  const timers = base.timers.map((timer) => {
+    if (timer.status !== 'active' || timer.expiresAtWorldMinute > toWorldMinute) return timer
+    expiredTimerIds.push(timer.id)
+    return { ...timer, status: 'expired', expiredAtWorldMinute: timer.expiresAtWorldMinute }
+  })
+  const advance = {
+    id: `campaign-time-${randomUUID()}`,
+    kind,
+    fromWorldMinute,
+    toWorldMinute,
+    minutes,
+    reason,
+    dawnsCrossed: campaignDawnsCrossed(fromWorldMinute, toWorldMinute),
+    expiredTimerIds,
+    createdAt: now,
+  }
+  return {
+    next: {
+      ...base,
+      schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
+      worldMinute: toWorldMinute,
+      timers,
+      advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
+      updatedAt: now,
+    },
+    advance,
+  }
+}
+
 export function mutateCampaignTimeState(current, mutation, now, member, context = {}) {
   const isDm = member?.memberId === context.host?.memberId || member?.role === 'dm'
   if (!isDm) return { ok: false, status: 403, error: 'dm-authority-required' }
-  const base = validateCampaignTimeState(current) == null
-    ? current
-    : { schemaVersion: 1, worldMinute: CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE, timers: [], advances: [], updatedAt: 0 }
+  const base = normalizeCampaignTimeState(current)
   if (mutation?.operation === 'advance' || mutation?.operation === 'long-rest') {
     const minutes = mutation.operation === 'long-rest' ? 8 * 60 : Number(mutation.minutes)
     if (!Number.isSafeInteger(minutes) || minutes < 1 || minutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES) {
       return { ok: false, status: 400, error: 'invalid-campaign-time-advance' }
     }
-    const fromWorldMinute = base.worldMinute
-    const toWorldMinute = fromWorldMinute + minutes
-    if (!Number.isSafeInteger(toWorldMinute)) return { ok: false, status: 400, error: 'campaign-time-overflow' }
-    const expiredTimerIds = []
-    const timers = base.timers.map((timer) => {
-      if (timer.status !== 'active' || timer.expiresAtWorldMinute > toWorldMinute) return timer
-      expiredTimerIds.push(timer.id)
-      return { ...timer, status: 'expired', expiredAtWorldMinute: timer.expiresAtWorldMinute }
-    })
     const kind = mutation.operation === 'long-rest' ? 'long-rest' : 'advance'
     const reason = boundedText(mutation.reason, 160) || (kind === 'long-rest' ? '完成长休' : '推进时间')
-    const advance = {
-      id: `campaign-time-${randomUUID()}`,
-      kind,
-      fromWorldMinute,
-      toWorldMinute,
-      minutes,
-      reason,
-      dawnsCrossed: campaignDawnsCrossed(fromWorldMinute, toWorldMinute),
-      expiredTimerIds,
-      createdAt: now,
-    }
+    const advanced = advanceCampaignTimeState(base, minutes, reason, kind, now)
+    if (!advanced) return { ok: false, status: 400, error: 'campaign-time-overflow' }
     return {
       ok: true,
       changed: true,
-      next: {
-        schemaVersion: 1,
-        worldMinute: toWorldMinute,
-        timers,
-        advances: [...base.advances, advance].slice(-CAMPAIGN_TIME_ADVANCE_LIMIT),
-        updatedAt: now,
-      },
-      advance,
+      ...advanced,
     }
+  }
+  if (mutation?.operation === 'set-time') {
+    const displayMode = mutation.displayMode
+    const hour = Number(mutation.hour)
+    const minute = Number(mutation.minute)
+    if (!['campaign-day', 'gregorian'].includes(displayMode) || !Number.isSafeInteger(hour) || hour < 0 || hour > 23 || !Number.isSafeInteger(minute) || minute < 0 || minute > 59) {
+      return { ok: false, status: 400, error: 'invalid-campaign-time-input' }
+    }
+    const minuteOfDay = hour * 60 + minute
+    let targetDisplayMinute
+    let calendarEpochDate = base.calendarEpochDate
+    let comparable = base.displayMode === displayMode
+    if (displayMode === 'campaign-day') {
+      const day = Number(mutation.day)
+      if (!Number.isSafeInteger(day) || day < 1 || day > 999_999) return { ok: false, status: 400, error: 'invalid-campaign-day' }
+      targetDisplayMinute = (day - 1) * 1_440 + minuteOfDay
+    } else {
+      const date = boundedText(mutation.date, 10)
+      const requestedDay = campaignGregorianDayNumber(date)
+      const currentEpochDay = campaignGregorianDayNumber(base.calendarEpochDate)
+      if (requestedDay == null) return { ok: false, status: 400, error: 'invalid-campaign-date' }
+      if (comparable && currentEpochDay != null && requestedDay >= currentEpochDay) {
+        targetDisplayMinute = (requestedDay - currentEpochDay) * 1_440 + minuteOfDay
+      } else {
+        calendarEpochDate = date
+        targetDisplayMinute = minuteOfDay
+        comparable = false
+      }
+    }
+    const currentDisplayMinute = base.worldMinute + base.displayMinuteOffset
+    const advanceMinutes = comparable && targetDisplayMinute > currentDisplayMinute
+      ? targetDisplayMinute - currentDisplayMinute
+      : 0
+    if (advanceMinutes > CAMPAIGN_TIME_MAX_ADVANCE_MINUTES) {
+      return { ok: false, status: 400, error: 'campaign-time-advance-too-large' }
+    }
+    const reason = boundedText(mutation.reason, 160) || 'DM 手动设定战役时间'
+    const advanced = advanceMinutes > 0
+      ? advanceCampaignTimeState(base, advanceMinutes, reason, 'advance', now)
+      : null
+    if (advanceMinutes > 0 && !advanced) return { ok: false, status: 400, error: 'campaign-time-overflow' }
+    const nextBase = advanced?.next ?? base
+    const next = {
+      ...nextBase,
+      schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
+      displayMode,
+      displayMinuteOffset: targetDisplayMinute - nextBase.worldMinute,
+      ...(calendarEpochDate ? { calendarEpochDate } : {}),
+      updatedAt: now,
+    }
+    const changed = advanceMinutes > 0 || base.displayMode !== next.displayMode ||
+      base.displayMinuteOffset !== next.displayMinuteOffset || base.calendarEpochDate !== next.calendarEpochDate
+    return { ok: true, changed, next, ...(advanced ? { advance: advanced.advance } : {}) }
   }
   if (mutation?.operation === 'create-timer') {
     if (base.timers.length >= CAMPAIGN_TIME_TIMER_LIMIT) return { ok: false, status: 409, error: 'campaign-timer-limit-reached' }

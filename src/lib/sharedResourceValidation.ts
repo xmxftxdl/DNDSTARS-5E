@@ -27,7 +27,7 @@ import {
   type CombatInterruptStatus,
 } from './combatInterruptQueue'
 import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
-import { CAMPAIGN_TIME_RESOURCE, validateSharedCampaignTime } from './campaignTime'
+import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -501,6 +501,11 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   if (dnd5e.issues.length > 0) return { status: 'invalid', reasons: dnd5e.issues }
   let value = dnd5e.value
   const migrationReasons = [...dnd5e.migrations]
+
+  if (name === CAMPAIGN_TIME_RESOURCE && input.schemaVersion === 1) {
+    value = normalizeSharedCampaignTime(input) as unknown as Record<string, unknown>
+    migrationReasons.push('战役时间已迁移至可配置历法 V2')
+  }
 
   if (name === 'combat' && Object.hasOwn(value, 'enemyApByToken')) {
     const migrated = { ...value }

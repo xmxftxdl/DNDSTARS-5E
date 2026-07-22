@@ -1,5 +1,5 @@
 export const CAMPAIGN_TIME_RESOURCE = 'campaign-time'
-export const CAMPAIGN_TIME_SCHEMA_VERSION = 1
+export const CAMPAIGN_TIME_SCHEMA_VERSION = 2
 export const CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE = 8 * 60
 export const CAMPAIGN_TIME_TIMER_LIMIT = 256
 export const CAMPAIGN_TIME_ADVANCE_LIMIT = 512
@@ -7,6 +7,7 @@ export const CAMPAIGN_TIME_MAX_ADVANCE_MINUTES = 365 * 24 * 60
 
 export type CampaignTimerKind = 'reminder' | 'concentration'
 export type CampaignTimerStatus = 'active' | 'expired' | 'dismissed' | 'cancelled'
+export type CampaignTimeDisplayMode = 'campaign-day' | 'gregorian'
 
 export interface CampaignTimer {
   id: string
@@ -39,6 +40,9 @@ export interface CampaignTimeAdvance {
 export interface SharedCampaignTimeState {
   schemaVersion: typeof CAMPAIGN_TIME_SCHEMA_VERSION
   worldMinute: number
+  displayMode: CampaignTimeDisplayMode
+  displayMinuteOffset: number
+  calendarEpochDate?: string
   timers: CampaignTimer[]
   advances: CampaignTimeAdvance[]
   updatedAt: number
@@ -47,6 +51,15 @@ export interface SharedCampaignTimeState {
 export type CampaignTimeMutation =
   | { operation: 'advance'; minutes: number; reason?: string }
   | { operation: 'long-rest'; reason?: string }
+  | {
+      operation: 'set-time'
+      displayMode: CampaignTimeDisplayMode
+      day?: number
+      date?: string
+      hour: number
+      minute: number
+      reason?: string
+    }
   | {
       operation: 'create-timer'
       kind: CampaignTimerKind
@@ -97,6 +110,33 @@ function bounded(value: unknown, length: number): string {
 function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): number | undefined {
   const number = Number(value)
   return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : undefined
+}
+
+function signedInteger(value: unknown): number | undefined {
+  const number = Number(value)
+  return Number.isSafeInteger(number) ? number : undefined
+}
+
+export function campaignGregorianDayNumber(value: string): number | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return undefined
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return undefined
+  const date = new Date(0)
+  date.setUTCHours(0, 0, 0, 0)
+  date.setUTCFullYear(year, month - 1, day)
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return undefined
+  return Math.floor(date.getTime() / 86_400_000)
+}
+
+function gregorianDateFromDayNumber(dayNumber: number): string | undefined {
+  const date = new Date(dayNumber * 86_400_000)
+  if (!Number.isFinite(date.getTime())) return undefined
+  const year = date.getUTCFullYear()
+  if (year < 1 || year > 9_999) return undefined
+  return `${year.toString().padStart(4, '0')}-${(date.getUTCMonth() + 1).toString().padStart(2, '0')}-${date.getUTCDate().toString().padStart(2, '0')}`
 }
 
 function normalizeTimer(value: unknown): CampaignTimer | null {
@@ -164,9 +204,18 @@ function normalizeAdvance(value: unknown): CampaignTimeAdvance | null {
 export function normalizeSharedCampaignTime(value: unknown): SharedCampaignTimeState {
   const source = object(value) ? value : {}
   const worldMinute = integer(source.worldMinute) ?? CAMPAIGN_TIME_DEFAULT_WORLD_MINUTE
+  const displayMinuteOffset = signedInteger(source.displayMinuteOffset) ?? 0
+  const safeDisplayMinuteOffset = worldMinute + displayMinuteOffset >= 0 ? displayMinuteOffset : 0
+  const calendarEpochDate = bounded(source.calendarEpochDate, 10)
+  const displayMode = source.displayMode === 'gregorian' && campaignGregorianDayNumber(calendarEpochDate) != null
+    ? 'gregorian'
+    : 'campaign-day'
   return {
     schemaVersion: CAMPAIGN_TIME_SCHEMA_VERSION,
     worldMinute,
+    displayMode,
+    displayMinuteOffset: safeDisplayMinuteOffset,
+    calendarEpochDate: campaignGregorianDayNumber(calendarEpochDate) == null ? undefined : calendarEpochDate,
     timers: (Array.isArray(source.timers) ? source.timers : [])
       .map(normalizeTimer)
       .filter((entry): entry is CampaignTimer => entry !== null)
@@ -180,9 +229,16 @@ export function normalizeSharedCampaignTime(value: unknown): SharedCampaignTimeS
 }
 
 export function validateSharedCampaignTime(value: unknown): boolean {
-  if (!object(value) || value.schemaVersion !== CAMPAIGN_TIME_SCHEMA_VERSION || !Array.isArray(value.timers) || !Array.isArray(value.advances)) return false
+  if (!object(value) || ![1, CAMPAIGN_TIME_SCHEMA_VERSION].includes(Number(value.schemaVersion)) || !Array.isArray(value.timers) || !Array.isArray(value.advances)) return false
   if (value.timers.length > CAMPAIGN_TIME_TIMER_LIMIT || value.advances.length > CAMPAIGN_TIME_ADVANCE_LIMIT) return false
   if (integer(value.worldMinute) == null || integer(value.updatedAt) == null) return false
+  if (value.schemaVersion === CAMPAIGN_TIME_SCHEMA_VERSION) {
+    const offset = signedInteger(value.displayMinuteOffset)
+    const validMode = value.displayMode === 'campaign-day' || value.displayMode === 'gregorian'
+    const validEpoch = value.calendarEpochDate == null || campaignGregorianDayNumber(String(value.calendarEpochDate)) != null
+    if (!validMode || offset == null || Number(value.worldMinute) + offset < 0 || !validEpoch) return false
+    if (value.displayMode === 'gregorian' && value.calendarEpochDate == null) return false
+  }
   const normalized = normalizeSharedCampaignTime(value)
   if (normalized.timers.length !== value.timers.length || normalized.advances.length !== value.advances.length) return false
   if (new Set(normalized.timers.map((entry) => entry.id)).size !== normalized.timers.length) return false
@@ -201,11 +257,30 @@ export function campaignMinuteOfDay(worldMinute: number): number {
   return Math.max(0, Math.floor(worldMinute)) % 1_440
 }
 
-export function formatCampaignTime(worldMinute: number): string {
-  const minuteOfDay = campaignMinuteOfDay(worldMinute)
+export function campaignDisplayMinute(clock: number | Pick<SharedCampaignTimeState, 'worldMinute' | 'displayMinuteOffset'>): number {
+  if (typeof clock === 'number') return Math.max(0, Math.floor(clock))
+  return Math.max(0, Math.floor(clock.worldMinute + clock.displayMinuteOffset))
+}
+
+export function campaignGregorianDate(clock: Pick<SharedCampaignTimeState, 'worldMinute' | 'displayMinuteOffset' | 'calendarEpochDate'>): string | undefined {
+  const epochDay = clock.calendarEpochDate == null ? undefined : campaignGregorianDayNumber(clock.calendarEpochDate)
+  if (epochDay == null) return undefined
+  return gregorianDateFromDayNumber(epochDay + Math.floor(campaignDisplayMinute(clock) / 1_440))
+}
+
+export function formatCampaignTime(clock: number | Pick<SharedCampaignTimeState, 'worldMinute' | 'displayMode' | 'displayMinuteOffset' | 'calendarEpochDate'>): string {
+  const displayMinute = campaignDisplayMinute(clock)
+  const minuteOfDay = campaignMinuteOfDay(displayMinute)
   const hour = Math.floor(minuteOfDay / 60).toString().padStart(2, '0')
   const minute = (minuteOfDay % 60).toString().padStart(2, '0')
-  return `第 ${campaignDay(worldMinute)} 日 ${hour}:${minute}`
+  if (typeof clock !== 'number' && clock.displayMode === 'gregorian') {
+    const date = campaignGregorianDate(clock)
+    if (date) {
+      const [year, month, day] = date.split('-').map(Number)
+      return `${year}年${month}月${day}日 ${hour}:${minute}`
+    }
+  }
+  return `第 ${campaignDay(displayMinute)} 日 ${hour}:${minute}`
 }
 
 export function formatCampaignDuration(minutes: number): string {

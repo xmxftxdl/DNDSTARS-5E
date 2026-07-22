@@ -17,7 +17,7 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 function clock(worldMinute: number, advances: SharedCampaignTimeState['advances']): SharedCampaignTimeState {
-  return { schemaVersion: 1, worldMinute, timers: [], advances, updatedAt: 1 }
+  return { schemaVersion: 2, worldMinute, displayMode: 'campaign-day', displayMinuteOffset: 0, timers: [], advances, updatedAt: 1 }
 }
 
 describe('D&D 5e campaign-time reconciliation', () => {

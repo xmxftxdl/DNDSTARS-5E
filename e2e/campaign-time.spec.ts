@@ -56,6 +56,14 @@ test('DM campaign clock, timers and expiry synchronize to the player port', asyn
   await expect(dmPage.getByText('第 1 日 08:10', { exact: true }).first()).toBeVisible()
   await expect(playerPage.getByRole('button', { name: /战役时间.*第 1 日 08:10/ })).toBeVisible()
 
+  const manualTimeSection = dmPage.locator('section').filter({ hasText: '手动设定当前时间' })
+  await manualTimeSection.getByRole('button', { name: '公历日期', exact: true }).click()
+  await manualTimeSection.locator('input[type="date"]').fill('1992-10-10')
+  await manualTimeSection.locator('input[type="time"]').fill('14:30')
+  await manualTimeSection.getByRole('button', { name: '应用时间', exact: true }).click()
+  await expect(dmPage.getByText('1992年10月10日 14:30', { exact: true }).first()).toBeVisible()
+  await expect(playerPage.getByRole('button', { name: /战役时间.*1992年10月10日 14:30/ })).toBeVisible()
+
   const timerSection = dmPage.locator('section').filter({ hasText: '新建分钟级提醒' })
   await timerSection.getByPlaceholder('例如：隐形术专注到期').fill('侦测魔法专注到期')
   await timerSection.getByRole('spinbutton').fill('1')

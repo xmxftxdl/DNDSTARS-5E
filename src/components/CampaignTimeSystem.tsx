@@ -45,7 +45,7 @@ export default function CampaignTimeSystem({ isDm }: { isDm: boolean }) {
             {notification.kind === 'concentration' ? '非战斗专注到期' : '战役提醒到期'}
           </p>
           <p className="mt-1 break-words text-sm text-slate-300">{notification.label}</p>
-          <p className="mt-2 text-[11px] text-slate-500">{formatCampaignTime(clock.worldMinute)}</p>
+          <p className="mt-2 text-[11px] text-slate-500">{formatCampaignTime(clock)}</p>
           {isDm && (
             <button
               type="button"

@@ -136,6 +136,9 @@ describe('authoritative campaign time', () => {
   it('allows only the DM to advance the monotonic room clock', () => {
     expect(mutateCampaignTimeState(null, { operation: 'advance', minutes: 10 }, 1, player, context))
       .toMatchObject({ ok: false, error: 'dm-authority-required' })
+    expect(mutateCampaignTimeState(null, {
+      operation: 'set-time', displayMode: 'campaign-day', day: 2, hour: 8, minute: 0,
+    }, 1, player, context)).toMatchObject({ ok: false, error: 'dm-authority-required' })
     const result = mutateCampaignTimeState(null, { operation: 'advance', minutes: 60, reason: '旅行' }, 2, host, context)
     expect(result).toMatchObject({
       ok: true,
@@ -157,6 +160,40 @@ describe('authoritative campaign time', () => {
         advances: [{ kind: 'long-rest', minutes: 480, expiredTimerIds: [expect.any(String)] }],
       },
     })
+  })
+
+  it('sets either a campaign day or Gregorian date while keeping the rules clock monotonic', () => {
+    const gregorian = mutateCampaignTimeState(null, {
+      operation: 'set-time', displayMode: 'gregorian', date: '1992-10-10', hour: 14, minute: 30,
+    }, 10, host, context)
+    expect(gregorian).toMatchObject({
+      ok: true,
+      next: {
+        schemaVersion: 2,
+        worldMinute: 480,
+        displayMode: 'gregorian',
+        displayMinuteOffset: 390,
+        calendarEpochDate: '1992-10-10',
+      },
+    })
+    if (!gregorian.ok) throw new Error('expected Gregorian clock setup')
+    const nextDay = mutateCampaignTimeState(gregorian.next, {
+      operation: 'set-time', displayMode: 'gregorian', date: '1992-10-11', hour: 14, minute: 30,
+    }, 20, host, context)
+    expect(nextDay).toMatchObject({
+      ok: true,
+      next: { worldMinute: 1_920, displayMinuteOffset: 390, advances: [{ minutes: 1_440 }] },
+    })
+    if (!nextDay.ok) throw new Error('expected Gregorian clock advance')
+    expect(mutateCampaignTimeState(nextDay.next, {
+      operation: 'set-time', displayMode: 'campaign-day', day: 1, hour: 2, minute: 0,
+    }, 30, host, context)).toMatchObject({
+      ok: true,
+      next: { worldMinute: 1_920, displayMode: 'campaign-day', displayMinuteOffset: -1_800 },
+    })
+    expect(mutateCampaignTimeState(null, {
+      operation: 'set-time', displayMode: 'gregorian', date: '1992-02-30', hour: 8, minute: 0,
+    }, 40, host, context)).toMatchObject({ ok: false, error: 'invalid-campaign-date' })
   })
 })
 
