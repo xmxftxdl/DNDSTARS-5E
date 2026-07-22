@@ -74,6 +74,7 @@ export default function Dnd5ePluginCombatPanel({
   const features = registeredDnd5ePluginFeatures().flatMap((feature) => {
     return dnd5eCharacterHasPluginFeature(character, feature.id) &&
       feature.action &&
+      (!feature.action.trigger || feature.action.trigger.kind === 'active-use') &&
       feature.automation !== 'manual' &&
       dnd5ePluginFeatureAvailableForCharacter(feature, character)
       ? [dnd5ePluginFeatureDefinition(feature.id)!]

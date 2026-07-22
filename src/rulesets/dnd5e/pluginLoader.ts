@@ -4,6 +4,7 @@ import {
   registeredDnd5eRulesPlugins,
   unregisterDnd5eRulesPlugin,
   type JsonValue,
+  type Dnd5eRulesPlugin,
   type Dnd5eRulesPluginManifest,
 } from './pluginApi'
 import {
@@ -12,6 +13,10 @@ import {
   terminateDnd5ePluginSandbox,
   type Dnd5ePluginSandboxSession,
 } from './pluginSandbox'
+import {
+  parseDnd5eDeclarativeRulesPackageV1,
+  type Dnd5eDeclarativeRulesPackageV1,
+} from './declarativeSubclassAbility'
 
 const STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v2'
 const LEGACY_STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v1'
@@ -235,17 +240,17 @@ export async function sha256Integrity(bytes: ArrayBuffer): Promise<string> {
 async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string) {
   if (bytes.byteLength < 1) throw new Error('插件文件为空')
   const integrity = await sha256Integrity(bytes)
-  const sandbox = await createDnd5ePluginSandbox(bytes)
+  const artifact = await loadPluginArtifact(bytes)
   try {
-    assertPluginId(sandbox.manifest.id)
+    assertPluginId(artifact.manifest.id)
     return {
-      manifest: { ...sandbox.manifest },
+      manifest: { ...artifact.manifest },
       fileName,
       integrity,
       bytes,
     }
   } finally {
-    sandbox.terminate()
+    terminatePluginArtifact(artifact)
   }
 }
 
@@ -261,7 +266,32 @@ async function descriptorBytes(descriptor: InstalledDnd5eRulesPlugin): Promise<A
   return response.arrayBuffer()
 }
 
-async function importPinnedPlugin(descriptor: InstalledDnd5eRulesPlugin): Promise<Dnd5ePluginSandboxSession> {
+type LoadedDnd5ePluginArtifact =
+  | { kind: 'worker'; manifest: Dnd5eRulesPluginManifest; session: Dnd5ePluginSandboxSession }
+  | {
+      kind: 'declarative-v1'
+      manifest: Dnd5eRulesPluginManifest
+      package: Dnd5eDeclarativeRulesPackageV1
+      plugin: Dnd5eRulesPlugin
+    }
+
+async function loadPluginArtifact(bytes: ArrayBuffer): Promise<LoadedDnd5ePluginArtifact> {
+  const declaration = parseDnd5eDeclarativeRulesPackageV1(bytes)
+  if (declaration) {
+    // Constructing the Host plugin performs the existing v2 contribution validation too.
+    const { dnd5eRulesPluginFromDeclarativePackageV1 } = await import('./declarativePluginPackage')
+    const plugin = dnd5eRulesPluginFromDeclarativePackageV1(declaration)
+    return { kind: 'declarative-v1', manifest: { ...declaration.manifest }, package: declaration, plugin }
+  }
+  const session = await createDnd5ePluginSandbox(bytes)
+  return { kind: 'worker', manifest: { ...session.manifest }, session }
+}
+
+function terminatePluginArtifact(artifact: LoadedDnd5ePluginArtifact): void {
+  if (artifact.kind === 'worker') artifact.session.terminate()
+}
+
+async function importPinnedPlugin(descriptor: InstalledDnd5eRulesPlugin): Promise<LoadedDnd5ePluginArtifact> {
   assertPluginId(descriptor.id)
   assertIntegrity(descriptor.integrity, descriptor.id)
   const bytes = await descriptorBytes(descriptor)
@@ -269,21 +299,23 @@ async function importPinnedPlugin(descriptor: InstalledDnd5eRulesPlugin): Promis
   if (actualIntegrity !== descriptor.integrity) {
     throw new Error(`完整性校验失败；期望 ${descriptor.integrity}，实际 ${actualIntegrity}`)
   }
-  const sandbox = await createDnd5ePluginSandbox(bytes)
-  if (sandbox.manifest.id !== descriptor.id) {
-    sandbox.terminate()
-    throw new Error(`清单 ID 不匹配：${sandbox.manifest.id}`)
+  const artifact = await loadPluginArtifact(bytes)
+  if (artifact.manifest.id !== descriptor.id) {
+    terminatePluginArtifact(artifact)
+    throw new Error(`清单 ID 不匹配：${artifact.manifest.id}`)
   }
-  return sandbox
+  return artifact
 }
 
-function activatePlugin(sandbox: Dnd5ePluginSandboxSession, integrity: string): void {
-  unregisterDnd5eRulesPlugin(sandbox.manifest.id)
-  const plugin = activateDnd5ePluginSandbox(sandbox)
+function activatePlugin(artifact: LoadedDnd5ePluginArtifact, integrity: string): void {
+  unregisterDnd5eRulesPlugin(artifact.manifest.id)
+  const plugin = artifact.kind === 'worker'
+    ? activateDnd5ePluginSandbox(artifact.session)
+    : artifact.plugin
   try {
     registerDnd5eRulesPlugin(plugin, { integrity })
   } catch (error) {
-    terminateDnd5ePluginSandbox(sandbox.manifest.id)
+    if (artifact.kind === 'worker') terminateDnd5ePluginSandbox(artifact.manifest.id)
     throw error
   }
 }
@@ -300,26 +332,26 @@ async function installFileBytes(input: {
   if (input.expectedIntegrity && integrity !== input.expectedIntegrity) {
     throw new Error(`完整性校验失败；期望 ${input.expectedIntegrity}，实际 ${integrity}`)
   }
-  const sandbox = await createDnd5ePluginSandbox(input.bytes)
-  assertPluginId(sandbox.manifest.id)
-  if (input.expectedId && sandbox.manifest.id !== input.expectedId) {
-    sandbox.terminate()
-    throw new Error(`清单 ID 不匹配：期望 ${input.expectedId}，实际 ${sandbox.manifest.id}`)
+  const artifact = await loadPluginArtifact(input.bytes)
+  assertPluginId(artifact.manifest.id)
+  if (input.expectedId && artifact.manifest.id !== input.expectedId) {
+    terminatePluginArtifact(artifact)
+    throw new Error(`清单 ID 不匹配：期望 ${input.expectedId}，实际 ${artifact.manifest.id}`)
   }
-  if (input.expectedVersion && sandbox.manifest.version !== input.expectedVersion) {
-    sandbox.terminate()
-    throw new Error(`清单版本不匹配：期望 ${input.expectedVersion}，实际 ${sandbox.manifest.version}`)
+  if (input.expectedVersion && artifact.manifest.version !== input.expectedVersion) {
+    terminatePluginArtifact(artifact)
+    throw new Error(`清单版本不匹配：期望 ${input.expectedVersion}，实际 ${artifact.manifest.version}`)
   }
-  const previousDescriptor = installedDnd5eRulesPlugins().find((item) => item.id === sandbox.manifest.id)
+  const previousDescriptor = installedDnd5eRulesPlugins().find((item) => item.id === artifact.manifest.id)
   let previousBytes: ArrayBuffer | undefined
   try {
     previousBytes = previousDescriptor ? await descriptorBytes(previousDescriptor) : undefined
   } catch (error) {
-    sandbox.terminate()
+    terminatePluginArtifact(artifact)
     throw error
   }
   const descriptor: InstalledDnd5eRulesPlugin = {
-    id: sandbox.manifest.id,
+    id: artifact.manifest.id,
     source: 'file',
     fileName: input.fileName,
     integrity,
@@ -327,20 +359,20 @@ async function installFileBytes(input: {
   }
   const next = installedDnd5eRulesPlugins().filter((item) => item.id !== descriptor.id)
   try {
-    activatePlugin(sandbox, integrity)
-    await storeModuleBytes(sandbox.manifest.id, input.bytes)
+    activatePlugin(artifact, integrity)
+    await storeModuleBytes(artifact.manifest.id, input.bytes)
     persistInstalled([...next, descriptor])
   } catch (error) {
-    unregisterDnd5eRulesPlugin(sandbox.manifest.id)
-    terminateDnd5ePluginSandbox(sandbox.manifest.id)
+    unregisterDnd5eRulesPlugin(artifact.manifest.id)
+    if (artifact.kind === 'worker') terminateDnd5ePluginSandbox(artifact.manifest.id)
     let rollbackError: unknown
     try {
       if (previousDescriptor && previousBytes) {
-        const previousSandbox = await createDnd5ePluginSandbox(previousBytes)
-        activatePlugin(previousSandbox, previousDescriptor.integrity)
+        const previousArtifact = await loadPluginArtifact(previousBytes)
+        activatePlugin(previousArtifact, previousDescriptor.integrity)
         if (previousDescriptor.source === 'file') await storeModuleBytes(previousDescriptor.id, previousBytes)
       } else {
-        await deleteModuleBytes(sandbox.manifest.id)
+        await deleteModuleBytes(artifact.manifest.id)
       }
     } catch (reason) {
       rollbackError = reason
@@ -373,8 +405,8 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
     apiVersion: DND5E_RULES_PLUGIN_API_VERSION,
     async install(descriptor) {
       const candidate = cloneDescriptor({ ...descriptor, enabled: true })
-      const sandbox = await importPinnedPlugin(candidate)
-      activatePlugin(sandbox, candidate.integrity)
+      const artifact = await importPinnedPlugin(candidate)
+      activatePlugin(artifact, candidate.integrity)
       const next = installedDnd5eRulesPlugins().filter((item) => item.id !== candidate.id)
       persistInstalled([...next, candidate])
     },
@@ -394,11 +426,16 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
       return inspectPluginBytes(await file.arrayBuffer(), file.name)
     },
     async migrateState(input) {
-      const sandbox = await createDnd5ePluginSandbox(input.bytes)
+      const artifact = await loadPluginArtifact(input.bytes)
       try {
-        return await sandbox.migrateState(input.fromVersion, input.state)
+        if (artifact.kind === 'declarative-v1') {
+          const target = artifact.manifest.stateSchemaVersion ?? 1
+          if (input.fromVersion !== target) throw new Error('声明式 V1 包不包含可执行状态迁移；请保持 stateSchemaVersion 不变')
+          return { state: input.state, fromVersion: input.fromVersion, toVersion: target }
+        }
+        return await artifact.session.migrateState(input.fromVersion, input.state)
       } finally {
-        sandbox.terminate()
+        terminatePluginArtifact(artifact)
       }
     },
     async readBytes(pluginId) {

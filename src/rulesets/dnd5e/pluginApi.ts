@@ -31,13 +31,25 @@ import {
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
   normalizeDnd5ePersistentAreaVisual,
 } from './persistentAreaTypes'
-import { dnd5eClassDefinitionForCharacter, type Dnd5eClassId } from './classes'
+import type { Dnd5eClassId } from './classes'
+import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 import {
   DND5E_SPELL_IMPORT_FORMAT,
   DND5E_SPELL_IMPORT_SCHEMA_VERSION,
   parseDnd5eSpellImport,
   type Dnd5eImportedSpell,
 } from './spellbook'
+import {
+  declarativeAbilityCompatibilityV1,
+  validateDeclarativeSubclassAbilityV1,
+  validateDeclarativeSubclassDefinitionV1,
+  type DeclarativeDiceFormulaV1,
+  type DeclarativeEffectTargetV1,
+  type DeclarativeSubclassAbilityV1,
+  type DeclarativeSubclassDefinitionV1,
+  type DeclarativeSubclassDurationV1,
+  type DeclarativeValueFormulaV1,
+} from './declarativeSubclassAbility'
 
 export const DND5E_RULES_PLUGIN_API_VERSION = 2 as const
 export const DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS = [1, 2] as const
@@ -225,6 +237,8 @@ export interface Dnd5ePluginFeatureAction {
   description?: string
   economy: Dnd5ePluginActionEconomy
   targeting: Dnd5ePluginTargeting
+  /** Non-active declarations are consumed by the generic Host trigger scheduler, not rendered as buttons. */
+  trigger?: DeclarativeSubclassAbilityV1['trigger']
   /** 在 action 真正进入 Worker resolver 前，由共享 Interrupt Queue 主动询问。 */
   interrupt?: Dnd5ePluginInterruptDeclaration
   /** 成功结算后由 Host 在地图上创建的持续区域；仅适用于 area targeting。 */
@@ -262,6 +276,9 @@ export interface Dnd5ePluginFeatureDefinition {
   sourceClassId?: Dnd5eClassId
   sourceSubclassId?: string
   grantedBySubclass?: boolean
+  /** Set only by the Host compiler for pure declarative packages. */
+  declarativeAbility?: DeclarativeSubclassAbilityV1
+  automationReasons?: readonly string[]
 }
 
 export interface RegisteredDnd5ePluginFeature extends Omit<Dnd5ePluginFeatureDefinition, 'id' | 'action'> {
@@ -270,6 +287,8 @@ export interface RegisteredDnd5ePluginFeature extends Omit<Dnd5ePluginFeatureDef
   ownerPluginName: string
   ownerPluginLicense: string
   action?: Dnd5ePluginFeatureAction
+  declarativeAbility?: DeclarativeSubclassAbilityV1
+  automationReasons?: readonly string[]
 }
 
 export interface Dnd5ePluginResourceDefinition {
@@ -290,6 +309,8 @@ export interface RegisteredDnd5ePluginResource extends Omit<Dnd5ePluginResourceD
   ownerPluginId: string
   ownerPluginName: string
   ownerPluginLicense: string
+  /** Host-only formula compiled from DeclarativeSubclassAbilityV1. */
+  declarativeMaximum?: DeclarativeValueFormulaV1
 }
 
 export interface Dnd5ePluginSubclassChoiceGroup {
@@ -308,6 +329,8 @@ export interface Dnd5ePluginSubclassFeature {
   description: string
   automation?: Dnd5ePluginAutomationLevel
   action?: Dnd5ePluginFeatureAction
+  declarativeAbility?: DeclarativeSubclassAbilityV1
+  automationReasons?: readonly string[]
 }
 
 export interface Dnd5ePluginSubclassDefinition {
@@ -424,6 +447,8 @@ export interface Dnd5eRulesPluginApi {
   registerFeature(definition: Dnd5ePluginFeatureDefinition): string
   registerResource(definition: Dnd5ePluginResourceDefinition): string
   registerSubclass(definition: Dnd5ePluginSubclassDefinition): string
+  /** Host-only pure-data compiler. Imported JSON never supplies executable code. */
+  registerDeclarativeSubclass(definition: DeclarativeSubclassDefinitionV1): string
   registerHeadlessAction(definition: Dnd5ePluginHeadlessActionDefinition): string
   registerRace(definition: Dnd5ePluginRaceDefinition): string
   registerBackground(definition: Dnd5ePluginBackgroundDefinition): string
@@ -888,6 +913,245 @@ function namespacedId(pluginId: string, localId: string): string {
   return `${pluginId}:${localId}`
 }
 
+function declarativeFormulaValue(
+  formula: DeclarativeValueFormulaV1,
+  creature: Pick<Dnd5eCombatant, 'level' | 'classId' | 'classLevels' | 'abilities' | 'proficiencyBonus'>,
+  adapter: RulesetAdapter,
+): number {
+  let value: number
+  if (formula.kind === 'fixed') return formula.value
+  else if (formula.kind === 'proficiency-bonus') value = creature.proficiencyBonus
+  else if (formula.kind === 'ability-modifier') value = adapter.abilityModifier(creature.abilities[formula.ability])
+  else {
+    const classLevel = creature.classLevels?.[formula.classId] ?? (creature.classId === formula.classId ? creature.level : 0)
+    value = Math.floor(classLevel / (formula.divisor ?? 1))
+  }
+  return Math.max(formula.minimum ?? Number.NEGATIVE_INFINITY, Math.floor(value * (formula.multiplier ?? 1)))
+}
+
+function declarativeResourceMaximumByLevel(formula: DeclarativeValueFormulaV1, classId: Dnd5eClassId): number[] {
+  return Array.from({ length: 20 }, (_, index) => {
+    const level = index + 1
+    if (formula.kind === 'fixed') return Math.max(0, formula.value)
+    if (formula.kind === 'proficiency-bonus') {
+      const base = 2 + Math.floor((level - 1) / 4)
+      return Math.max(0, formula.minimum ?? 0, Math.floor(base * (formula.multiplier ?? 1)))
+    }
+    if (formula.kind === 'class-level') {
+      if (formula.classId !== classId) return Math.max(0, formula.minimum ?? 0)
+      return Math.max(formula.minimum ?? 0, Math.floor((level / (formula.divisor ?? 1)) * (formula.multiplier ?? 1)))
+    }
+    // Ability-based maxima cannot be represented by the legacy static resource table.
+    return Math.max(0, formula.minimum ?? 0)
+  })
+}
+
+function declarativeResourceMaximumForCharacter(
+  formula: DeclarativeValueFormulaV1,
+  character: Character,
+): number {
+  let value: number
+  if (formula.kind === 'fixed') return Math.max(0, formula.value)
+  if (formula.kind === 'proficiency-bonus') value = 2 + Math.floor((Math.max(1, character.level) - 1) / 4)
+  else if (formula.kind === 'ability-modifier') value = Math.floor((character.abilities[formula.ability] - 10) / 2)
+  else value = Math.floor(dnd5eCharacterClassLevel(character, formula.classId) / (formula.divisor ?? 1))
+  return Math.max(0, formula.minimum ?? Number.NEGATIVE_INFINITY, Math.floor(value * (formula.multiplier ?? 1)))
+}
+
+function declarativeDurationToCapability(duration: DeclarativeSubclassDurationV1): Dnd5ePluginEffectDuration | undefined {
+  if (duration.kind === 'until-source-turn-start') return { expiresAt: 'source-next-turn-start' }
+  if (duration.kind === 'until-target-turn-start') return { expiresAt: 'target-next-turn-start' }
+  if (duration.kind === 'until-target-turn-end') return { expiresAt: 'target-turn-end', remainingRounds: duration.rounds ?? 1 }
+  if (duration.kind === 'fixed-rounds') return duration.repeatSave
+    ? {
+        expiresAt: 'target-turn-end-save',
+        remainingRounds: duration.rounds,
+        saveAbility: duration.repeatSave.ability,
+        saveDc: duration.repeatSave.dc,
+      }
+    : { expiresAt: 'target-turn-end', remainingRounds: duration.rounds }
+  return undefined
+}
+
+function declarativeTargeting(targeting: DeclarativeSubclassAbilityV1['targeting']): Dnd5ePluginTargeting {
+  if (targeting.kind === 'self') return { kind: 'self' }
+  if (targeting.kind === 'single-creature' || targeting.kind === 'multiple-creatures') return {
+    kind: 'single-creature',
+    relation: targeting.relation,
+    rangeFeet: targeting.rangeFeet,
+    includeSelf: targeting.includeSelf,
+  }
+  const common = {
+    kind: 'area' as const,
+    relation: targeting.relation,
+    includeSelf: targeting.includeSelf,
+    maximumTargets: targeting.maximumTargets ?? 64,
+  }
+  if (targeting.shape === 'circle') return {
+    ...common,
+    template: { shape: 'circle', origin: 'point', radiusFeet: targeting.radiusFeet ?? 5, placeRangeFeet: targeting.rangeFeet },
+  }
+  if (targeting.shape === 'cone') return {
+    ...common,
+    template: { shape: 'cone', origin: 'self', lengthFeet: targeting.lengthFeet ?? 15, aimRangeFeet: targeting.rangeFeet },
+  }
+  if (targeting.shape === 'line') return {
+    ...common,
+    template: { shape: 'line', origin: 'self', widthFeet: targeting.widthFeet ?? 5, lengthFeet: targeting.lengthFeet ?? 30, aimRangeFeet: targeting.rangeFeet },
+  }
+  return {
+    ...common,
+    template: { shape: 'rect', origin: 'point', widthFeet: targeting.widthFeet ?? 10, heightFeet: targeting.heightFeet ?? 10, placeRangeFeet: targeting.rangeFeet, rotatable: true },
+  }
+}
+
+function declarativeEffectTargets(
+  target: DeclarativeEffectTargetV1,
+  context: Dnd5ePluginHeadlessActionContext,
+): readonly Dnd5eCombatant[] {
+  if (target === 'actor') return [context.actor]
+  if (target === 'target') return context.target ? [context.target] : []
+  return context.targets
+}
+
+function declarativeDiceCount(dice: DeclarativeDiceFormulaV1): number {
+  // Level-dependent extra dice are preserved and reported as partial in V1. The safe
+  // active slice rolls the invariant base dice only until dynamic host roll recipes land.
+  return dice.count
+}
+
+function declarativeFeatureResolver(input: {
+  pluginId: string
+  subclassId: string
+  classId: Dnd5eClassId
+  ability: DeclarativeSubclassAbilityV1
+  featureId: string
+  usesResourceId?: string
+  automation: Dnd5ePluginAutomationLevel
+}): Dnd5ePluginHeadlessActionDefinition['resolve'] {
+  return (context) => {
+    const { actor, action, state } = context
+    const { ability } = input
+    if (input.automation === 'partial' && action.interruptChoiceId !== 'dm-apply') {
+      return context.fail('invalid-plugin-action')
+    }
+    if (!action.transactionId || actor.classState.declarativeTransactionIds?.includes(action.transactionId)) {
+      return context.fail('invalid-plugin-action')
+    }
+    const classLevel = actor.classLevels?.[input.classId] ?? (actor.classId === input.classId ? actor.level : 0)
+    const selectedSubclass = actor.subclassIds?.[input.classId] ?? (actor.classId === input.classId ? actor.subclassId : undefined)
+    if (classLevel < ability.level || selectedSubclass !== input.subclassId || !actor.pluginFeatureIds.includes(input.featureId)) {
+      return context.fail('invalid-class-feature')
+    }
+    const predicates = ability.predicates
+    if (predicates?.minimumLevel != null && actor.level < predicates.minimumLevel) return context.fail('invalid-class-feature')
+    if (predicates?.classId && (actor.classLevels?.[predicates.classId] ?? (actor.classId === predicates.classId ? actor.level : 0)) < 1) return context.fail('invalid-class-feature')
+    if (predicates?.subclassId && selectedSubclass !== `${input.pluginId}:${predicates.subclassId}` && selectedSubclass !== predicates.subclassId) return context.fail('invalid-class-feature')
+    const primaryTarget = context.target
+    const pairKey = primaryTarget
+      ? (actor.id < primaryTarget.id ? `${actor.id}\u0000${primaryTarget.id}` : `${primaryTarget.id}\u0000${actor.id}`)
+      : undefined
+    const authoritativeDistance = primaryTarget?.id === actor.id
+      ? 0
+      : pairKey == null
+        ? Number.POSITIVE_INFINITY
+        : state.distanceFeetByCombatantPair?.[pairKey] ?? Number.POSITIVE_INFINITY
+    if (!Number.isFinite(authoritativeDistance) || authoritativeDistance < 0) return context.fail('invalid-target')
+    if (
+      (ability.targeting.kind === 'single-creature' || ability.targeting.kind === 'multiple-creatures') &&
+      ability.targeting.rangeFeet != null && authoritativeDistance > ability.targeting.rangeFeet
+    ) return context.fail('invalid-target')
+    if (predicates?.minimumDistanceFeet != null && authoritativeDistance < predicates.minimumDistanceFeet) return context.fail('invalid-target')
+    if (predicates?.maximumDistanceFeet != null && authoritativeDistance > predicates.maximumDistanceFeet) return context.fail('invalid-target')
+    if (predicates?.actorHasConditions?.some((condition) => !actor.conditions.includes(condition))) return context.fail('invalid-class-feature')
+    if (predicates?.actorLacksConditions?.some((condition) => actor.conditions.includes(condition))) return context.fail('invalid-class-feature')
+    if (context.targets.some((target) => predicates?.targetHasConditions?.some((condition) => !target.conditions.includes(condition)))) return context.fail('invalid-target')
+    if (context.targets.some((target) => predicates?.targetLacksConditions?.some((condition) => target.conditions.includes(condition)))) return context.fail('invalid-target')
+    if (predicates?.targetRelation) {
+      for (const target of context.targets) {
+        const allied = target.controller === actor.controller
+        if (predicates.targetRelation === 'self' && target.id !== actor.id) return context.fail('invalid-target')
+        if (predicates.targetRelation === 'ally' && !allied) return context.fail('invalid-target')
+        if (predicates.targetRelation === 'enemy' && allied) return context.fail('invalid-target')
+      }
+    }
+    for (const requirement of predicates?.resources ?? []) {
+      const resourceId = namespacedId(input.pluginId, requirement.resourceId)
+      if ((actor.classResources[resourceId]?.current ?? -1) < requirement.minimum) return context.fail('class-resource-unavailable')
+    }
+    const turnKey = `${state.combatId}:${state.round}:${state.turnSlotId ?? actor.id}`
+    const oncePerTurn = predicates?.oncePerTurn === true || ability.limits?.oncePerTurn === true
+    if (oncePerTurn && actor.classState.declarativeUsedTurnKeys?.[input.featureId] === turnKey) return context.fail('feature-already-used')
+    const costs = [
+      ...(ability.cost?.resources ?? []).map((cost) => ({ resourceId: namespacedId(input.pluginId, cost.resourceId), amount: cost.amount })),
+      ...(input.usesResourceId && (ability.cost?.uses ?? 1) > 0 ? [{ resourceId: input.usesResourceId, amount: ability.cost?.uses ?? 1 }] : []),
+    ]
+    if (costs.some((cost) => !actor.classResources[cost.resourceId] || actor.classResources[cost.resourceId].current < cost.amount)) {
+      return context.fail('class-resource-unavailable')
+    }
+    const operationCount = costs.length + ability.effects.reduce((total, effect) => {
+      if (effect.kind === 'move') return total
+      if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') return total + 1
+      return total + ('target' in effect ? declarativeEffectTargets(effect.target, context).length : 0)
+    }, 0)
+    if (operationCount > 64) return context.fail('invalid-plugin-action')
+    for (const effect of ability.effects) {
+      if (effect.kind === 'move') continue
+      if ((effect.kind === 'damage' || effect.kind === 'healing') && !context.rolls[effect.rollId]) {
+        const roll = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
+        if (!roll || (roll.kind !== 'damage' && roll.kind !== 'healing') || roll.dice.count > 0) return context.fail('invalid-dice')
+      }
+      if ((effect.kind === 'standard-condition') && !declarativeDurationToCapability(effect.duration)) continue
+      if ((effect.kind === 'spend-resource' || effect.kind === 'restore-resource') && declarativeFormulaValue(effect.amount, actor, context.rules) <= 0) return context.fail('invalid-plugin-action')
+    }
+    for (const cost of costs) if (!context.spendResource(cost.resourceId, cost.amount)) return context.fail('class-resource-unavailable')
+
+    for (const effect of ability.effects) {
+      if (effect.kind === 'move') continue
+      if (effect.kind === 'spend-resource' || effect.kind === 'restore-resource') {
+        const amount = declarativeFormulaValue(effect.amount, actor, context.rules)
+        const resourceId = namespacedId(input.pluginId, effect.resourceId)
+        const ok = effect.kind === 'spend-resource'
+          ? context.spendResource(resourceId, amount)
+          : context.restoreResource(resourceId, amount)
+        if (!ok) return context.fail('class-resource-unavailable')
+        continue
+      }
+      if (!('target' in effect)) return context.fail('invalid-plugin-action')
+      for (const target of declarativeEffectTargets(effect.target, context)) {
+        if (effect.kind === 'damage' || effect.kind === 'healing') {
+          const declaration = ability.rolls?.find((candidate) => candidate.id === effect.rollId)
+          if (!declaration || (declaration.kind !== 'damage' && declaration.kind !== 'healing')) return context.fail('invalid-dice')
+          const supplied = context.rolls[effect.rollId]
+          const rolled = (supplied?.values.reduce((total, value) => total + value, 0) ?? 0) +
+            declarativeFormulaValue(declaration.dice.modifier ?? { kind: 'fixed', value: 0 }, actor, context.rules)
+          if (effect.kind === 'damage') {
+            const multiplier = state.effectiveRules?.houseRules.declarativeAbilityDamageMultiplier ?? 1
+            context.dealDamage(target.id, Math.max(0, Math.floor(rolled * multiplier)), declaration.kind === 'damage' ? declaration.damageType : 'force')
+          } else context.heal(target.id, Math.max(0, rolled))
+        } else if (effect.kind === 'temporary-hit-points') {
+          context.grantTemporaryHitPoints(target.id, Math.max(0, declarativeFormulaValue(effect.amount, actor, context.rules)))
+        } else if (effect.kind === 'standard-condition') {
+          const duration = declarativeDurationToCapability(effect.duration)
+          if (duration) context.applyStandardCondition(target.id, effect.condition, duration)
+        }
+      }
+    }
+    if (oncePerTurn) {
+      actor.classState.declarativeUsedTurnKeys = { ...actor.classState.declarativeUsedTurnKeys, [input.featureId]: turnKey }
+    }
+    actor.classState.declarativeTransactionIds = [...(actor.classState.declarativeTransactionIds ?? []), action.transactionId].slice(-128)
+    context.events.push({
+      type: 'declarative-subclass-ability-resolved',
+      actorId: actor.id,
+      abilityId: input.featureId,
+      trigger: ability.trigger.kind,
+      targetIds: context.targets.map((target) => target.id),
+    })
+    return context.succeed()
+  }
+}
+
 function toFighterSubclassDefinition(
   manifest: Dnd5eRulesPluginManifest,
   input: Dnd5ePluginFighterSubclass,
@@ -980,6 +1244,9 @@ export function registerDnd5eRulesPlugin(
       if (definition.sourceLabel != null && typeof definition.sourceLabel !== 'string') {
         throw new Error(`Invalid plugin feature source label: ${featureId}`)
       }
+      if (definition.declarativeAbility) {
+        validateDeclarativeSubclassAbilityV1(definition.declarativeAbility, `Plugin feature ${featureId}`)
+      }
       if (definition.action) {
         if (!validId(definition.action.id)) throw new Error(`Invalid plugin feature action id: ${definition.action.id}`)
         if (typeof definition.action.label !== 'string' || !definition.action.label.trim()) {
@@ -990,6 +1257,9 @@ export function registerDnd5eRulesPlugin(
         }
         if (!['action', 'bonusAction', 'reaction', 'none'].includes(definition.action.economy)) {
           throw new Error(`Invalid plugin feature action economy: ${featureId}`)
+        }
+        if (definition.action.trigger && definition.declarativeAbility?.trigger.kind !== definition.action.trigger.kind) {
+          throw new Error(`Plugin feature trigger mismatch: ${featureId}`)
         }
         const area = definition.action.persistentArea
         if (area && (
@@ -1048,6 +1318,8 @@ export function registerDnd5eRulesPlugin(
         id: featureId,
         minimumLevel,
         action,
+        declarativeAbility: definition.declarativeAbility ? structuredClone(definition.declarativeAbility) : undefined,
+        automationReasons: definition.automationReasons ? [...definition.automationReasons] : undefined,
         ownerPluginId: id,
         ownerPluginName: plugin.manifest.name,
         ownerPluginLicense: plugin.manifest.license,
@@ -1169,6 +1441,8 @@ export function registerDnd5eRulesPlugin(
           sourceClassId: definition.classId,
           sourceSubclassId: subclassId,
           grantedBySubclass: true,
+          declarativeAbility: feature.declarativeAbility,
+          automationReasons: feature.automationReasons,
         })
         return { ...feature, id: `${subclassId}:${feature.id}`, featureId }
       })
@@ -1200,6 +1474,119 @@ export function registerDnd5eRulesPlugin(
         }))
       }
       return subclassId
+    },
+    registerDeclarativeSubclass(definition) {
+      assertAcceptingContributions()
+      validateDeclarativeSubclassDefinitionV1(definition, `Declarative subclass ${definition?.id ?? ''}`)
+      const subclassId = namespacedId(id, definition.id)
+      const features: Dnd5ePluginSubclassFeature[] = []
+      const useResources: Array<{ definition: Dnd5ePluginResourceDefinition; formula: DeclarativeValueFormulaV1 }> = []
+      for (const ability of definition.abilities) {
+        const compatibility = declarativeAbilityCompatibilityV1(ability)
+        const actionLocalId = `decl.${definition.id}.${ability.id}`
+        const featureId = namespacedId(id, `${definition.id}.${ability.id}`)
+        let usesResourceId: string | undefined
+        if (ability.limits?.uses && ability.limits.reset && ability.limits.reset !== 'none') {
+          const localResourceId = `decl-${definition.id}-${ability.id}-uses`
+          usesResourceId = namespacedId(id, localResourceId)
+          useResources.push({
+            definition: {
+              id: localResourceId,
+              label: `${ability.name}次数`,
+              classId: definition.classId,
+              subclassId: definition.id,
+              minimumLevel: ability.level,
+              maximum: declarativeResourceMaximumByLevel(ability.limits.uses, definition.classId),
+              resetOn: ability.limits.reset,
+            },
+            formula: ability.limits.uses,
+          })
+        }
+        const action = compatibility.effective === 'manual' ? undefined : {
+          id: actionLocalId,
+          label: ability.name,
+          description: ability.description,
+          economy: ability.cost?.economy ?? 'none',
+          targeting: declarativeTargeting(ability.targeting),
+          trigger: { ...ability.trigger },
+          ...(compatibility.effective === 'partial' ? {
+            interrupt: {
+              prompt: `“${ability.name}”包含尚未完全机械化的声明，是否按当前安全子集结算？`,
+              audience: 'dm' as const,
+              options: [
+                { id: 'dm-apply', label: '按安全子集结算' },
+                { id: 'dm-cancel', label: '取消并手动裁定' },
+              ],
+              defaultOptionId: 'dm-cancel',
+              cancelOptionId: 'dm-cancel',
+            },
+          } : {}),
+        } satisfies Dnd5ePluginFeatureAction
+        if (action) {
+          const rollDeclarations = (ability.rolls ?? []).flatMap((roll) => {
+            if ((roll.kind !== 'damage' && roll.kind !== 'healing') || declarativeDiceCount(roll.dice) < 1) return []
+            return [{
+              id: roll.id,
+              label: roll.label,
+              count: declarativeDiceCount(roll.dice),
+              sides: roll.dice.sides,
+              modifier: 0,
+              visibility: 'public' as const,
+            }]
+          })
+          api.registerHeadlessAction({
+            id: actionLocalId,
+            execution: 'trusted',
+            allowOffTurn: ability.trigger.kind !== 'active-use',
+            rolls: rollDeclarations,
+            resolve: declarativeFeatureResolver({
+              pluginId: id,
+              subclassId,
+              classId: definition.classId,
+              ability,
+              featureId,
+              usesResourceId,
+              automation: compatibility.effective,
+            }),
+          })
+        }
+        features.push({
+          id: ability.id,
+          level: ability.level,
+          name: ability.name,
+          description: ability.description,
+          automation: compatibility.effective,
+          action,
+          declarativeAbility: structuredClone(ability),
+          automationReasons: [...compatibility.reasons],
+        })
+      }
+      const registeredSubclassId = api.registerSubclass({
+        id: definition.id,
+        classId: definition.classId,
+        name: definition.name,
+        summary: definition.summary,
+        features,
+      })
+      for (const resource of definition.resources ?? []) {
+        const resourceId = api.registerResource({
+          id: resource.id,
+          label: resource.label,
+          classId: definition.classId,
+          subclassId: definition.id,
+          minimumLevel: resource.minimumLevel ?? 1,
+          maximum: declarativeResourceMaximumByLevel(resource.maximum, definition.classId),
+          resetOn: resource.resetOn,
+        })
+        const registered = pluginResources.get(resourceId)
+        if (registered) registered.declarativeMaximum = structuredClone(resource.maximum)
+      }
+      for (const resource of useResources) {
+        const resourceId = api.registerResource(resource.definition)
+        const registered = pluginResources.get(resourceId)
+        if (registered) registered.declarativeMaximum = structuredClone(resource.formula)
+      }
+      return registeredSubclassId
     },
     registerHeadlessAction(definition) {
       assertAcceptingContributions()
@@ -1538,6 +1925,8 @@ export function registeredDnd5ePluginFeatures(): readonly RegisteredDnd5ePluginF
     .map((feature) => ({
       ...feature,
       action: clonePluginFeatureAction(feature.action),
+      declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
+      automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
 }
@@ -1547,6 +1936,7 @@ export function registeredDnd5ePluginResources(): readonly RegisteredDnd5ePlugin
     .map((resource) => ({
       ...resource,
       maximum: Array.isArray(resource.maximum) ? [...resource.maximum] : resource.maximum,
+      declarativeMaximum: resource.declarativeMaximum ? structuredClone(resource.declarativeMaximum) : undefined,
     }))
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
 }
@@ -1556,7 +1946,12 @@ export function registeredDnd5ePluginSubclasses(classId?: Dnd5eClassId): readonl
     .filter((subclass) => !classId || subclass.classId === classId)
     .map((subclass) => ({
       ...subclass,
-      features: subclass.features.map((feature) => ({ ...feature, action: clonePluginFeatureAction(feature.action) })),
+      features: subclass.features.map((feature) => ({
+        ...feature,
+        action: clonePluginFeatureAction(feature.action),
+        declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
+        automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
+      })),
       choiceGroups: subclass.choiceGroups?.map((group) => ({
         ...group,
         options: group.options.map((option) => ({ ...option })),
@@ -1580,21 +1975,22 @@ function selectedDnd5eSubclassId(character: Character, classId: Dnd5eClassId): s
 }
 
 export function dnd5ePluginClassResourceDefinitions(character: Character): readonly ClassResourceDefinition[] {
-  const classId = dnd5eClassDefinitionForCharacter(character)?.id
-  if (!classId) return []
+  const classLevels = normalizeDnd5eClassLevels(character)
   return registeredDnd5ePluginResources()
-    .filter((resource) => resource.classId === classId)
+    .filter((resource) => (classLevels[resource.classId] ?? 0) > 0)
     .map((resource) => ({
       key: resource.id,
       label: resource.label,
       shortLabel: resource.shortLabel,
       resetOn: resource.resetOn,
       isAvailable: (candidate: Character) =>
-        candidate.level >= (resource.minimumLevel ?? 1) &&
+        dnd5eCharacterClassLevel(candidate, resource.classId) >= (resource.minimumLevel ?? 1) &&
         (!resource.subclassId || selectedDnd5eSubclassId(candidate, resource.classId) === resource.subclassId),
       max: (candidate: Character) => {
+        if (resource.declarativeMaximum) return declarativeResourceMaximumForCharacter(resource.declarativeMaximum, candidate)
         if (!Array.isArray(resource.maximum)) return resource.maximum
-        return resource.maximum[Math.min(resource.maximum.length, Math.max(1, candidate.level)) - 1] ?? 0
+        const classLevel = dnd5eCharacterClassLevel(candidate, resource.classId)
+        return resource.maximum[Math.min(resource.maximum.length, Math.max(1, classLevel)) - 1] ?? 0
       },
     }))
 }
@@ -1711,6 +2107,8 @@ export function dnd5ePluginFeatureDefinition(featureId: string): RegisteredDnd5e
   return feature ? {
     ...feature,
     action: clonePluginFeatureAction(feature.action),
+    declarativeAbility: feature.declarativeAbility ? structuredClone(feature.declarativeAbility) : undefined,
+    automationReasons: feature.automationReasons ? [...feature.automationReasons] : undefined,
   } : undefined
 }
 
@@ -1719,14 +2117,16 @@ export function dnd5ePluginFeatureAvailableForCharacter(
   character: Character,
 ): boolean {
   if (feature.sourceClassId) {
-    const classId = dnd5eClassDefinitionForCharacter(character)?.id
-    if (classId !== feature.sourceClassId) return false
+    const classLevel = dnd5eCharacterClassLevel(character, feature.sourceClassId)
+    if (classLevel < (feature.minimumLevel ?? 1)) return false
     if (
       feature.sourceSubclassId &&
       selectedDnd5eSubclassId(character, feature.sourceClassId) !== feature.sourceSubclassId
     ) return false
   }
-  return character.level >= (feature.minimumLevel ?? 1) && (feature.isAvailable?.(character) ?? true)
+  return (!feature.sourceClassId && character.level < (feature.minimumLevel ?? 1))
+    ? false
+    : (feature.isAvailable?.(character) ?? true)
 }
 
 export function dnd5ePluginFeaturesAvailableForCharacter(
@@ -1742,6 +2142,38 @@ export function dnd5eCharacterHasPluginFeature(character: Character, featureId: 
   return !!feature &&
     (feature.grantedBySubclass === true || character.dnd5ePluginFeatureIds?.includes(featureId) === true) &&
     dnd5ePluginFeatureAvailableForCharacter(feature, character)
+}
+
+/** Builds only deterministic, Host-owned automatic trigger actions from authoritative events. */
+export function dnd5eDeclarativeTriggeredActions(
+  state: Dnd5eHeadlessCombatState,
+  event: Dnd5eCombatEvent,
+  eventIndex: number,
+): Dnd5ePluginAction[] {
+  if (event.type !== 'attack-resolved' || !event.hit) return []
+  const actor = state.combatants[event.actorId]
+  const target = state.combatants[event.targetId]
+  if (!actor || !target) return []
+  const pairKey = actor.id < target.id ? `${actor.id}\u0000${target.id}` : `${target.id}\u0000${actor.id}`
+  return [...pluginFeatures.values()].flatMap((feature) => {
+    const ability = feature.declarativeAbility
+    if (
+      !ability || feature.automation !== 'full' || ability.trigger.kind !== 'after-attack-hit' ||
+      !feature.action || !actor.pluginFeatureIds.includes(feature.id)
+    ) return []
+    return [{
+      type: 'plugin' as const,
+      pluginId: feature.ownerPluginId,
+      actionId: feature.action.id,
+      featureId: feature.id,
+      transactionId: `decl-trigger:${state.combatId}:${state.round}:${eventIndex}:${feature.id}:${actor.id}:${target.id}`,
+      actorId: actor.id,
+      targetId: target.id,
+      targetIds: [target.id],
+      distanceFeet: state.distanceFeetByCombatantPair?.[pairKey] ?? 0,
+      rolls: {},
+    }]
+  })
 }
 
 export function subscribeDnd5eRulesPluginRegistry(listener: () => void): () => void {

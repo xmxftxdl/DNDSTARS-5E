@@ -7,6 +7,15 @@ import type {
   Dnd5ePluginSpellDefinition,
   Dnd5eRulesPluginManifest,
 } from './pluginApi'
+import {
+  DND5E_DECLARATIVE_PACKAGE_FORMAT,
+  DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION,
+  declarativeSubclassCompatibilityReportV1,
+  validateDeclarativeSubclassDefinitionV1,
+  type DeclarativeAbilityCompatibilityReportV1,
+  type DeclarativeSubclassDefinitionV1,
+  type Dnd5eDeclarativeRulesPackageV1,
+} from './declarativeSubclassAbility'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, getDnd5eSrdMonster, type Dnd5eDamageType } from './monsters'
 import {
@@ -59,6 +68,7 @@ export interface Dnd5eCustomRulesPluginDraft {
   items: Dnd5ePluginItemDefinition[]
   abilityGenerationMethods: Dnd5ePluginAbilityGenerationDefinition[]
   headlessActions?: Dnd5eCustomHeadlessActionDraft[]
+  subclasses?: DeclarativeSubclassDefinitionV1[]
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
@@ -73,8 +83,19 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
   if (!manifest.license.trim()) errors.push('请填写许可证。')
   if (
     draft.races.length + draft.backgrounds.length + draft.features.length + draft.spells.length +
-    draft.items.length + draft.abilityGenerationMethods.length === 0
+    draft.items.length + draft.abilityGenerationMethods.length + (draft.subclasses?.length ?? 0) === 0
   ) errors.push('请至少添加一种规则内容。')
+
+  const subclassIds = new Set<string>()
+  for (const subclass of draft.subclasses ?? []) {
+    try {
+      validateDeclarativeSubclassDefinitionV1(subclass, `子职 ${subclass.name || subclass.id}`)
+      if (subclassIds.has(subclass.id)) errors.push(`子职 ID 重复：${subclass.id}`)
+      subclassIds.add(subclass.id)
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   const localIds = new Set<string>()
   const claimId = (id: string, label: string) => {
@@ -336,6 +357,31 @@ const plugin = {
 
 export default plugin;
 `
+}
+
+/** New builder output: pure JSON. The Host compiles it without evaluating imported code. */
+export function buildDnd5eCustomRulesPluginPackageV1(draft: Dnd5eCustomRulesPluginDraft): string {
+  const errors = validateDnd5eCustomRulesPluginDraft(draft)
+  if (errors.length > 0) throw new Error(errors.join('\n'))
+  const legacy: Dnd5eCustomRulesPluginDraft = { ...draft, subclasses: undefined }
+  const value: Dnd5eDeclarativeRulesPackageV1 = {
+    format: DND5E_DECLARATIVE_PACKAGE_FORMAT,
+    schemaVersion: DND5E_DECLARATIVE_SUBCLASS_SCHEMA_VERSION,
+    manifest: {
+      ...draft.manifest,
+      apiVersion: 2,
+      rulesetId: 'dnd5e-2014-srd-5.1',
+    },
+    subclasses: draft.subclasses ?? [],
+    legacy,
+  }
+  return JSON.stringify(value, null, 2)
+}
+
+export function dnd5eCustomPluginAutomationReportV1(
+  draft: Pick<Dnd5eCustomRulesPluginDraft, 'subclasses'>,
+): DeclarativeAbilityCompatibilityReportV1 {
+  return declarativeSubclassCompatibilityReportV1(draft.subclasses ?? [])
 }
 
 export function dnd5eCustomRulesPluginFileName(pluginId: string): string {

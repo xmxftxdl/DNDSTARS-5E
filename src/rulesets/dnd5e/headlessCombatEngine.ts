@@ -8,6 +8,7 @@ import {
   dnd5ePluginFeatureDefinition,
   dnd5ePluginHeadlessActionDefinition,
   dnd5ePluginResourceDefinition,
+  dnd5eDeclarativeTriggeredActions,
   type Dnd5ePluginAction,
 } from './pluginApi'
 import type { Dnd5eSandboxCapabilityOperation } from './pluginSandbox'
@@ -92,6 +93,7 @@ import {
   type Dnd5eSpecialSense,
 } from './specialSenses'
 import { dnd5eTraversalMovementCost, resolveDnd5eFallingDamage, type Dnd5eTraversalMode } from './traversal'
+import type { Dnd5eEffectiveRulesContextV1 } from './effectiveRulesContext'
 
 export interface Dnd5eCombatant {
   id: string
@@ -211,6 +213,9 @@ export interface Dnd5eCombatant {
     openHandNoReactionsAppliedTurnKeysBySource?: Record<string, string>
     quiveringPalmTargetId?: string
     tranquilityActive?: boolean
+    /** Host-owned replay protection and per-turn usage ledger for declarative abilities. */
+    declarativeUsedTurnKeys?: Record<string, string>
+    declarativeTransactionIds?: string[]
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
     bonusActionSpellTurnKey?: string
@@ -308,6 +313,8 @@ export interface Dnd5eHeadlessCombatState {
   physicalLineOfSightBlockedByCombatantPair?: Record<string, true>
   /** Optional map-scheduler slot identity for creatures with multiple turns. */
   turnSlotId?: string
+  /** Pinned at combat start; room rule edits apply to the next combat id. */
+  effectiveRules?: Dnd5eEffectiveRulesContextV1
   combatants: Record<string, Dnd5eCombatant>
 }
 
@@ -839,6 +846,7 @@ export type Dnd5eCombatEvent =
   | { type: 'monster-spell-cast'; actorId: string; spellId: string; slotLevel: number; remainingSlots?: number }
   | { type: 'condition-applied'; actorId: string; targetId: string; condition: string }
   | { type: 'condition-ended'; targetId: string; condition: string }
+  | { type: 'declarative-subclass-ability-resolved'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[] }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-refreshed'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' | 'escaped' }
@@ -919,6 +927,11 @@ export function setDnd5eHeadlessResolutionObserver(
 function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
   return {
     ...state,
+    effectiveRules: state.effectiveRules ? {
+      ...state.effectiveRules,
+      sourceOrder: [...state.effectiveRules.sourceOrder],
+      houseRules: { ...state.effectiveRules.houseRules },
+    } : undefined,
     initiativeOrder: [...state.initiativeOrder],
     distanceFeetByCombatantPair: state.distanceFeetByCombatantPair
       ? { ...state.distanceFeetByCombatantPair }
@@ -953,6 +966,12 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
       draconicPresenceSourceIds: combatant.draconicPresenceSourceIds ? [...combatant.draconicPresenceSourceIds] : undefined,
       classState: {
         ...combatant.classState,
+        declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys
+          ? { ...combatant.classState.declarativeUsedTurnKeys }
+          : undefined,
+        declarativeTransactionIds: combatant.classState.declarativeTransactionIds
+          ? [...combatant.classState.declarativeTransactionIds]
+          : undefined,
         activeEffects: combatant.classState.activeEffects
           ? combatant.classState.activeEffects.map((effect) => ({
               ...effect,
@@ -9478,7 +9497,20 @@ export function resolveDnd5eHeadlessAction(
   headlessResolutionDepth += 1
   let finalResult: Dnd5eActionResult
   try {
-    const result = resolveDnd5eHeadlessActionInternal(source, action)
+    let result = resolveDnd5eHeadlessActionInternal(source, action)
+    if (result.ok) {
+      let triggeredState = result.state
+      const triggeredEvents = [...result.events]
+      for (const [eventIndex, event] of result.events.entries()) {
+        for (const triggeredAction of dnd5eDeclarativeTriggeredActions(triggeredState, event, eventIndex)) {
+          const triggered = resolveDnd5eHeadlessActionInternal(triggeredState, triggeredAction, { skipTurnStartBoundary: true })
+          if (!triggered.ok) continue
+          triggeredState = triggered.state
+          triggeredEvents.push(...triggered.events)
+        }
+      }
+      result = { ...result, state: triggeredState, events: triggeredEvents }
+    }
     if (!result.ok) finalResult = result
     else {
       const events = [...result.events]

@@ -112,6 +112,9 @@ export function prepareDnd5ePluginFeatureAction(input: {
   if (!feature.action || feature.automation === 'manual') {
     return { ok: false, reason: 'feature-unavailable' }
   }
+  if (feature.action.trigger && feature.action.trigger.kind !== 'active-use') {
+    return { ok: false, reason: 'feature-unavailable' }
+  }
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) =>
     token.id === action.actorTokenId && token.characterId === action.characterId,

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildDnd5eCustomRulesPluginPackageV1,
   buildDnd5eCustomRulesPluginSource,
   validateDnd5eCustomRulesPluginDraft,
   type Dnd5eCustomRulesPluginDraft,
 } from './customRulesPlugin'
+import { parseDnd5eDeclarativeRulesPackageV1 } from './declarativeSubclassAbility'
+import { dnd5eRulesPluginFromDeclarativePackageV1 } from './declarativePluginPackage'
+import { dnd5ePluginSubclassDefinition, registerDnd5eRulesPlugin } from './pluginApi'
 
 function draft(): Dnd5eCustomRulesPluginDraft {
   return {
@@ -38,6 +42,41 @@ function draft(): Dnd5eCustomRulesPluginDraft {
 }
 
 describe('DM custom rules plugin builder', () => {
+  it('exports new packages as validated pure JSON without executable source', () => {
+    const value = draft()
+    value.subclasses = [{
+      schemaVersion: 1,
+      id: 'arc-guard',
+      classId: 'fighter',
+      name: '奥能卫士',
+      summary: '声明式测试子职。',
+      abilities: [{
+        schemaVersion: 1,
+        id: 'arc-strike',
+        name: '奥能打击',
+        description: '造成力场伤害。',
+        level: 3,
+        trigger: { kind: 'active-use' },
+        cost: { economy: 'action' },
+        targeting: { kind: 'single-creature', relation: 'enemy', rangeFeet: 30 },
+        rolls: [{ id: 'damage', kind: 'damage', label: '伤害', dice: { count: 1, sides: 6 }, damageType: 'force' }],
+        effects: [{ kind: 'damage', target: 'target', rollId: 'damage' }],
+        automation: 'full',
+      }],
+    }]
+    const source = buildDnd5eCustomRulesPluginPackageV1(value)
+    expect(source).not.toMatch(/\b(?:eval|Function)\s*\(/)
+    const parsed = parseDnd5eDeclarativeRulesPackageV1(new TextEncoder().encode(source).buffer as ArrayBuffer)
+    expect(parsed).toMatchObject({ format: 'dndstars5e-declarative', schemaVersion: 1 })
+    expect(parsed?.subclasses[0].abilities[0].id).toBe('arc-strike')
+    const dispose = registerDnd5eRulesPlugin(dnd5eRulesPluginFromDeclarativePackageV1(parsed!))
+    try {
+      expect(dnd5ePluginSubclassDefinition('local.dm.character-rules:arc-guard')?.features[0]).toMatchObject({
+        name: '奥能打击', automation: 'full',
+      })
+    } finally { dispose() }
+  })
+
   it('emits a self-contained sandbox-compatible module', () => {
     const source = buildDnd5eCustomRulesPluginSource(draft())
     expect(source).toContain('api.registerRace(race)')

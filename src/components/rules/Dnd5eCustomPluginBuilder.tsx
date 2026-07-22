@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Download, FolderOpen, Plus, Save, Trash2 } from 'lucide-react'
 import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
-  buildDnd5eCustomRulesPluginSource,
+  buildDnd5eCustomRulesPluginPackageV1,
   DND5E_DAMAGE_TYPES,
   DND5E_SRD_MONSTERS,
   DND5E_STANDARD_CONDITIONS,
@@ -17,7 +17,9 @@ import {
   type Dnd5ePluginItemDefinition,
   type Dnd5ePluginRaceDefinition,
   type Dnd5ePluginSpellDefinition,
+  type DeclarativeSubclassDefinitionV1,
 } from '../../rulesets/dnd5e'
+import Dnd5eDeclarativeSubclassEditor from './Dnd5eDeclarativeSubclassEditor'
 
 interface RaceDraft {
   id: string
@@ -202,7 +204,7 @@ interface ItemDraft {
   attackRerollResetOn: 'none' | 'short-rest' | 'long-rest' | 'dawn'
 }
 
-type BuilderSection = 'races' | 'backgrounds' | 'features' | 'spells' | 'items' | 'methods'
+type BuilderSection = 'races' | 'backgrounds' | 'features' | 'subclasses' | 'spells' | 'items' | 'methods'
 
 interface SavedBuilderDraft {
   metadata: { id: string; name: string; version: string; publisher: string; license: string; description: string }
@@ -212,6 +214,7 @@ interface SavedBuilderDraft {
   spells: SpellDraft[]
   items: ItemDraft[]
   methods: MethodDraft[]
+  subclasses: DeclarativeSubclassDefinitionV1[]
 }
 
 const DRAFT_STORAGE_KEY = 'dndstars5e:custom-rules-workshop:v1'
@@ -799,6 +802,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
   const [spells, setSpells] = useState<SpellDraft[]>([])
   const [items, setItems] = useState<ItemDraft[]>([])
   const [methods, setMethods] = useState<MethodDraft[]>([])
+  const [subclasses, setSubclasses] = useState<DeclarativeSubclassDefinitionV1[]>([])
   const [localError, setLocalError] = useState<string | null>(null)
   const [localNotice, setLocalNotice] = useState<string | null>(null)
 
@@ -825,9 +829,10 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
         return action ? [action] : []
       }),
     ],
-  }), [backgrounds, features, items, metadata, methods, races, spells])
+    subclasses,
+  }), [backgrounds, features, items, metadata, methods, races, spells, subclasses])
 
-  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods })
+  const savedDraft = (): SavedBuilderDraft => ({ metadata, races, backgrounds, features, spells, items, methods, subclasses })
 
   const saveDraft = () => {
     try {
@@ -856,6 +861,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
       setSpells(Array.isArray(saved.spells) ? saved.spells.map((spell, index) => restoreSpellDraft(spell, index)) : [])
       setItems(Array.isArray(saved.items) ? saved.items.map((item, index) => restoreItemDraft(item, index)) : [])
       setMethods(saved.methods)
+      setSubclasses(Array.isArray(saved.subclasses) ? saved.subclasses : [])
       setLocalError(null)
       setLocalNotice('已载入当前浏览器保存的草稿。')
     } catch {
@@ -871,8 +877,8 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
       return null
     }
     setLocalError(null)
-    const source = buildDnd5eCustomRulesPluginSource(draft)
-    return new File([source], dnd5eCustomRulesPluginFileName(draft.manifest.id), { type: 'text/javascript' })
+    const source = buildDnd5eCustomRulesPluginPackageV1(draft)
+    return new File([source], dnd5eCustomRulesPluginFileName(draft.manifest.id), { type: 'application/json' })
   }
 
   const download = () => {
@@ -914,7 +920,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
         <div>
           <h2 className="font-semibold text-slate-100">DM 规则包工作室</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-            用表单创建装备、特性、法术、种族、背景与加点规则。生成内容仍在 Worker 沙箱中运行，可保存草稿、下载文件或发布到当前房间。
+            用表单创建子职、装备、特性、法术、种族、背景与加点规则。新文件是纯 JSON，由 Host 编译为白名单 Headless 事务；不会执行导入包中的 JavaScript。
           </p>
         </div>
         <button type="button" onClick={() => setOpen((value) => !value)} className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200">
@@ -945,6 +951,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
             {([
               ['races', '种族', races.length], ['backgrounds', '背景', backgrounds.length],
               ['features', '特性', features.length], ['spells', '法术', spells.length],
+              ['subclasses', '声明式子职', subclasses.length],
               ['items', '装备／物品', items.length], ['methods', '加点规则', methods.length],
             ] as const).map(([section, label, count]) => (
               <button
@@ -958,6 +965,8 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
               </button>
             ))}
           </nav>
+
+          {activeSection === 'subclasses' && <Dnd5eDeclarativeSubclassEditor value={subclasses} onChange={setSubclasses} />}
 
           {activeSection === 'races' && <div>
             <div className="mb-3 flex items-center justify-between gap-3">
