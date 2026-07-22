@@ -4961,15 +4961,15 @@ function resolveSpellCast(
         stateKey: 'guiding-bolt', active: true,
       })
     } else if (spell.onHitEffect === 'chill-touch') {
-      const duration: Dnd5eActiveEffectDuration = {
-        type: 'until-turn-boundary', boundary: 'source-turn-end',
+      const noHealingDuration: Dnd5eActiveEffectDuration = {
+        type: 'until-turn-boundary', boundary: 'source-turn-start',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
       }
       applyDnd5eMechanicalStatusEffect(affectedTarget, actor, {
         definitionId: 'srd-5.1:spell:chill-touch:no-healing',
         label: '冻寒之触：无法恢复生命值',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
-        duration,
+        duration: noHealingDuration,
       }, events)
       const creatureType = (affectedTarget.creatureType ?? '').trim().toLowerCase()
       if (creatureType === 'undead' || creatureType.includes('亡灵')) {
@@ -4977,7 +4977,10 @@ function resolveSpellCast(
           definitionId: 'srd-5.1:spell:chill-touch:undead-disadvantage',
           label: '冻寒之触：对施法者的攻击具有劣势',
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
-          duration,
+          duration: {
+            type: 'until-turn-boundary', boundary: 'source-turn-end',
+            appliedTurnKey: classFeatureTurnKey(state, actor.id),
+          },
         }, events)
       }
       events.push({

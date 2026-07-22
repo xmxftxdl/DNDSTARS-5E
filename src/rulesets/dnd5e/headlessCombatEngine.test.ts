@@ -375,7 +375,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(dnd5eUnseenTargetImposesDisadvantage(bard, outlined)).toBe(false)
   })
 
-  it('applies every Chill Touch rider until the caster next turn', () => {
+  it('expires Chill Touch healing prevention at the caster next turn start and its undead rider at turn end', () => {
     const warlock = fighter('warlock', 20, {
       classId: 'warlock', level: 1, controller: 'player', abilities: { ...abilities, cha: 18 },
       classSelections: { 'spell-cantrips': ['chill-touch'] },
@@ -399,7 +399,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!chilled.ok) return
     expect(chilled.state.combatants.target.classState.activeEffects).toContainEqual(expect.objectContaining({
       definitionId: 'srd-5.1:spell:chill-touch:no-healing',
-      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-end' }),
+      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-start' }),
     }))
     const targetTurn = resolveDnd5eHeadlessAction(chilled.state, { type: 'end-turn', actorId: 'warlock' })
     expect(targetTurn.ok).toBe(true)
@@ -417,6 +417,12 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(healing.state.combatants.target.currentHp).toBe(hpBeforeHealing)
     expect(healing.events).toContainEqual(expect.objectContaining({
       type: 'healing-applied', targetId: 'target', amount: 0,
+    }))
+    const nextWarlockTurn = resolveDnd5eHeadlessAction(healing.state, { type: 'end-turn', actorId: 'cleric' })
+    expect(nextWarlockTurn.ok).toBe(true)
+    if (!nextWarlockTurn.ok) return
+    expect(nextWarlockTurn.state.combatants.target.classState.activeEffects ?? []).not.toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:chill-touch:no-healing',
     }))
 
     const undead = fighter('undead', 10, { controller: 'dm', creatureType: 'undead', armorClass: 10 })
@@ -440,6 +446,19 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!attack.ok) return
     expect(attack.events).toContainEqual(expect.objectContaining({
       type: 'attack-resolved', actorId: 'undead', targetId: 'warlock', d20: 1, hit: false,
+    }))
+    const nextWarlockTurnAgainstUndead = resolveDnd5eHeadlessAction(attack.state, { type: 'end-turn', actorId: 'undead' })
+    expect(nextWarlockTurnAgainstUndead.ok).toBe(true)
+    if (!nextWarlockTurnAgainstUndead.ok) return
+    expect(nextWarlockTurnAgainstUndead.state.combatants.undead.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:chill-touch:undead-disadvantage',
+      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-end' }),
+    }))
+    const undeadTurnAfterExpiry = resolveDnd5eHeadlessAction(nextWarlockTurnAgainstUndead.state, { type: 'end-turn', actorId: 'warlock' })
+    expect(undeadTurnAfterExpiry.ok).toBe(true)
+    if (!undeadTurnAfterExpiry.ok) return
+    expect(undeadTurnAfterExpiry.state.combatants.undead.classState.activeEffects ?? []).not.toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:chill-touch:undead-disadvantage',
     }))
   })
 
