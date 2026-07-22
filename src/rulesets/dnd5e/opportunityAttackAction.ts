@@ -9,6 +9,7 @@ import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eWeaponAttackProfile } from './equipment'
 import {
+  dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantCanSee,
@@ -206,6 +207,7 @@ export function prepareDnd5eOpportunityAttack(input: {
         const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
           dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
           dnd5eTargetIsDodging(targetCombatant) ||
+          dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
           dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
           actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())) ||
           (targetCombatant.classId === 'ranger' && targetCombatant.subclassId === 'hunter' &&

@@ -6,6 +6,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import {
+  dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
@@ -181,6 +182,7 @@ export function prepareDnd5eMonsterAttack(input: {
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
       dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || (targetProne && distanceFeet <= 5) || packTactics)
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
+    dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
     dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
   const targetAttackMode = resolveDnd5eRollMode({

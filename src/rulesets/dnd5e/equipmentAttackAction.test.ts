@@ -11,6 +11,7 @@ import {
 } from './equipmentAttackAction'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 import { applyDnd5eInventoryMutation } from './items'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function fighter(): Character {
   const base: Character = {
@@ -138,6 +139,26 @@ describe('D&D 5e equipment attack authority', () => {
     const input = fixture(775)
     input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
     input.map.tokens.push(token({ id: 'adjacent-enemy', type: 'enemy', x: 75, y: 25 }))
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attackMode).toBe('disadvantage')
+  })
+
+  it('prepares the second d20 required when Blur imposes attack disadvantage', () => {
+    const input = fixture()
+    input.targetToken.dnd5eCombatState = {
+      schemaVersion: 2,
+      activeEffects: [createDnd5eMechanicalEffect({
+        definitionId: 'srd-5.1:spell:blur',
+        label: '朦胧术：依赖视觉的攻击具有劣势',
+        kind: 'buff',
+        source: { kind: 'spell', actorId: input.targetToken.id, rulesId: 'blur' },
+        targetId: input.targetToken.id,
+        duration: { type: 'concentration', sourceActorId: input.targetToken.id, concentrationId: 'blur' },
+      })],
+      conditions: [],
+    }
     const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return

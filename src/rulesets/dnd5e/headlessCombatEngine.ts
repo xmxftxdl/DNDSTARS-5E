@@ -403,6 +403,25 @@ function dnd5eAttackDistanceFeet(
   return Number.isFinite(fallback) && fallback! >= 0 ? fallback! : Number.POSITIVE_INFINITY
 }
 
+/**
+ * 朦胧术只影响依赖视觉的攻击者。盲视与真实视觉仅在各自感官范围内忽略该效果；
+ * 震颤感知并非视觉，不能看穿幻象。
+ */
+export function dnd5eBlurImposesAttackDisadvantage(
+  state: Dnd5eHeadlessCombatState,
+  attackerId: string,
+  targetId: string,
+): boolean {
+  const attacker = state.combatants[attackerId]
+  const target = state.combatants[targetId]
+  if (!attacker || !target || !target.classState.activeEffects?.some((effect) =>
+    effect.definitionId === 'srd-5.1:spell:blur'
+  )) return false
+  const distanceFeet = dnd5eAttackDistanceFeet(state, attackerId, targetId)
+  return !dnd5eHasSpecialSenseInRange(attacker.specialSenses, 'blindsight', distanceFeet) &&
+    !dnd5eHasSpecialSenseInRange(attacker.specialSenses, 'truesight', distanceFeet)
+}
+
 function dnd5eHostileWithinFiveFeet(state: Dnd5eHeadlessCombatState, actor: Dnd5eCombatant): boolean {
   return Object.values(state.combatants).some((candidate) =>
     candidate.id !== actor.id && candidate.currentHp > 0 && !candidate.deathSaves.dead &&
@@ -3363,7 +3382,8 @@ export function dnd5eRepeatedMeleeAttackMode(
       !!target.classState.stunnedByActorId || targetProne || dnd5eAttackerIsUnseenForAttack(state, attacker.id, target.id) ||
       dnd5eHelpAttackApplies(state, attacker, target))
   const hasDisadvantage = requestedMode === 'disadvantage' || attackerProne || dnd5eFrightenedAttackDisadvantage(state, attacker) ||
-    dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, attacker.id, target.id)
+    dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, attacker.id, target.id) ||
+    dnd5eTargetIsUnseenForAttack(state, attacker.id, target.id)
   return resolveDnd5eRollMode({
     advantage: [{ active: hasAdvantage, reason: 'melee-attack-advantage' }],
     disadvantage: [{ active: hasDisadvantage, reason: 'melee-attack-disadvantage' }],
@@ -3848,7 +3868,8 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       dnd5eHelpAttackApplies(state, actor, target))
   const hasDisadvantage = requestedMode === 'disadvantage' || rangedDisadvantage || viciousMockeryDisadvantage || escapeTheHorde ||
     (action.type === 'attack' && action.protectionReactionActorId != null) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
-    dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
+    dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
+    dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
   const mode = resolveDnd5eRollMode({
     advantage: [{ active: hasAdvantage, reason: 'attack-advantage' }],
     disadvantage: [{ active: hasDisadvantage, reason: 'attack-disadvantage' }],
@@ -4206,7 +4227,7 @@ function resolveSpellCast(
     return type === 'undead' || type.includes('亡灵') || type === 'construct' || type.includes('构装')
   }
   if (
-    (spell.id === 'false-life' && target.id !== actor.id) ||
+    ((spell.id === 'false-life' || spell.id === 'blur') && target.id !== actor.id) ||
     (spell.id === 'spare-the-dying' && (
       target.currentHp !== 0 || target.deathSaves.dead || isUndeadOrConstructForSpell(target)
     )) ||
@@ -4747,6 +4768,7 @@ function resolveSpellCast(
           removeDnd5eConditionEffects(affected, ['poisoned', '中毒'], 'healed', events)
         }
         const labels = {
+          blur: '朦胧术：依赖视觉的攻击具有劣势',
           barkskin: '树肤术：AC不低于16',
           'protection-from-poison': '防护毒素：毒素抗性',
           'death-ward': '防死结界',
@@ -5571,6 +5593,7 @@ function resolveSpellCast(
           (spell.rangeFeet > 5 && dnd5eHostileWithinFiveFeet(state, actor)) ||
           (attackIndex === 0 && viciousMockeryDisadvantage) || actor.exhaustionLevel >= 3 ||
           dnd5eFrightenedAttackDisadvantage(state, actor) || dnd5eTargetIsDodging(affectedTarget) ||
+          dnd5eBlurImposesAttackDisadvantage(state, actor.id, affectedTarget.id) ||
           dnd5eTargetIsUnseenForAttack(state, actor.id, affectedTarget.id)
         const mode = resolveDnd5eRollMode({
           advantage: [{ active: targetGrantsAdvantage, reason: 'spell-attack-advantage' }],
@@ -5718,6 +5741,7 @@ function resolveSpellCast(
       (spell.rangeFeet > 5 && dnd5eHostileWithinFiveFeet(state, actor)) ||
       viciousMockeryDisadvantage || actor.exhaustionLevel >= 3 ||
       dnd5eFrightenedAttackDisadvantage(state, actor) || dnd5eTargetIsDodging(target) ||
+      dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
       dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: targetGrantsAdvantage, reason: 'spell-attack-advantage' }],
@@ -5924,7 +5948,8 @@ function resolveMonsterAction(
     )
     const hasDisadvantage = requestedMode === 'disadvantage' || supplied.protectionReactionActorId != null ||
       rangedDisadvantage || viciousMockeryDisadvantage || dnd5eFrightenedAttackDisadvantage(state, actor) ||
-      dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
+      dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
+      dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: hasAdvantage, reason: 'monster-attack-advantage' }],
       disadvantage: [{ active: hasDisadvantage, reason: 'monster-attack-disadvantage' }],
@@ -6315,7 +6340,8 @@ function resolveMonkUnarmedBonus(
         dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) || targetProne ||
         dnd5eHelpAttackApplies(state, actor, target))
     const viciousMockeryDisadvantage = consumeViciousMockeryAttackDisadvantage(actor, events)
-    const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || viciousMockeryDisadvantage ||
+    const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
+      dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) || viciousMockeryDisadvantage ||
       actor.exhaustionLevel >= 3 || dnd5eFrightenedAttackDisadvantage(state, actor) ||
       dnd5eTargetIsUnseenForAttack(state, actor.id, target.id) || actorProne
     const mode = resolveDnd5eRollMode({
@@ -6591,7 +6617,8 @@ function resolveMonkDeflectMissilesReturn(
       dnd5eAttackerIsUnseenForAttack(state, actor.id, target.id) || dnd5eHelpAttackApplies(state, actor, target))
   const actorHasDisadvantage = requestedMode === 'disadvantage' || action.distanceFeet > 20 || actor.exhaustionLevel >= 3 ||
     dnd5eHasViciousMockeryAttackDisadvantage(actor) || dnd5eFrightenedAttackDisadvantage(state, actor) ||
-    dnd5eTargetIsDodging(target) || dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
+    dnd5eTargetIsDodging(target) || dnd5eBlurImposesAttackDisadvantage(state, actor.id, target.id) ||
+    dnd5eTargetIsUnseenForAttack(state, actor.id, target.id)
   const mode = resolveDnd5eRollMode({
     advantage: [{ active: targetGrantsAdvantage, reason: 'returned-missile-advantage' }],
     disadvantage: [{ active: actorHasDisadvantage, reason: 'returned-missile-disadvantage' }],

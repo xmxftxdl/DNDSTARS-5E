@@ -12,6 +12,7 @@ import { dnd5eAttackModeWithProtection } from './equipmentAttackAction'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eMonkMartialArtsEligible, dnd5eWeaponAttackProfile, dnd5eWeaponRangeFeet, type Dnd5eWeaponAttackProfile } from './equipment'
 import {
+  dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eFrightenedAttackDisadvantage,
@@ -170,7 +171,8 @@ export function prepareDnd5eHunterMultiattack(input: {
         dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, token.id) ||
         (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target)) ||
         (targetProne && targetDistance <= 5))
-    const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || actorCombatant.exhaustionLevel >= 3 ||
+    const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
+      dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, token.id) || actorCombatant.exhaustionLevel >= 3 ||
       dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
       dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne || (targetProne && targetDistance > 5) ||

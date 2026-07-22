@@ -2152,6 +2152,58 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(targetTurn.state.combatants[enemy.id].turn.reactionAvailable).toBe(true)
   })
 
+  it('applies Blur to the caster and lets blindsight or truesight ignore its attack disadvantage', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['blur'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 3 } },
+    })
+    const enemy = token('enemy', 'enemy', 75)
+    const input = fixture(wizard, 'blur', 2, enemy)
+    input.action.targetTokenId = input.action.actorTokenId
+    input.action.dnd5eSpellCast = {
+      spellId: 'blur', slotLevel: 2, targetTokenId: input.action.actorTokenId,
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(cast.result.ok).toBe(true)
+    if (!cast.result.ok) return
+    expect(cast.result.state.combatants[input.action.actorTokenId].classState.activeEffects).toContainEqual(
+      expect.objectContaining({ definitionId: 'srd-5.1:spell:blur' }),
+    )
+
+    const enemyTurn = {
+      ...cast.result.state,
+      initiativeIndex: cast.result.state.initiativeOrder.indexOf(enemy.id),
+    }
+    const attack = (state: typeof enemyTurn) => resolveDnd5eHeadlessAction(state, {
+      type: 'attack', actorId: enemy.id, targetId: input.action.actorTokenId,
+      attackModifier: 5, d20: 18, d20Second: 2, mode: 'normal',
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
+    })
+    const blurred = attack(enemyTurn)
+    expect(blurred.ok).toBe(true)
+    if (!blurred.ok) return
+    expect(blurred.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', hit: false, d20: 2 }))
+
+    const truesightState = structuredClone(enemyTurn)
+    truesightState.combatants[enemy.id].specialSenses = [{ kind: 'truesight', rangeFeet: 30 }]
+    const seen = attack(truesightState)
+    expect(seen.ok).toBe(true)
+    if (!seen.ok) return
+    expect(seen.events).toContainEqual(expect.objectContaining({ type: 'attack-resolved', hit: true, d20: 18 }))
+  })
+
+  it('rejects casting Blur on another creature', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['blur'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 3 } },
+    })
+    expect(prepareDnd5eSpellCast(fixture(wizard, 'blur', 2, token('enemy', 'enemy', 75))))
+      .toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
   it('pushes only Thunderwave targets that fail their Constitution save', () => {
     const wizard = character('wizard', '法师', {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['thunderwave'] } } } },

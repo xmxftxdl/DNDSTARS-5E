@@ -14,6 +14,7 @@ import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from '.
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import {
+  dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
@@ -292,7 +293,8 @@ export function prepareDnd5eEquipmentAttack(input: {
           tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
       })
     ))
-  const targetImposesDisadvantage = dnd5eTargetIsDodging(target) || attackerHasDisadvantage ||
+  const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
+    dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || attackerHasDisadvantage ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id)
   const attackMode = resolveDnd5eRollMode({
     advantage: [{ active: attackerHasAdvantage, reason: 'equipment-attack-advantage' }],

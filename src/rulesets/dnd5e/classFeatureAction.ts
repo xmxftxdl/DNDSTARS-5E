@@ -20,6 +20,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonkUnarmedStrikeProfile, type Dnd5eUnarmedStrikeProfile } from './equipment'
 import {
   dnd5eAttackerIsUnseenForAttack,
+  dnd5eBlurImposesAttackDisadvantage,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantClassLevel,
   dnd5eCombatantHasSubclass,
@@ -620,7 +621,8 @@ export function prepareDnd5eClassFeature(input: {
           !!targetCombatant.classState.recklessAttackTurnKey || !!targetCombatant.classState.stunnedByActorId ||
           dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
           (targetIndex === 0 && dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant)) || targetProne)
-      const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) || (actor.exhaustionLevel ?? 0) >= 3 ||
+      const targetImposesDisadvantage = dnd5eTargetIsDodging(targetCombatant) ||
+        dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || (actor.exhaustionLevel ?? 0) >= 3 ||
         dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
         (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
         dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne

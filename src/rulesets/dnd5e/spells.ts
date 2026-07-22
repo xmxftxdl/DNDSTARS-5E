@@ -96,6 +96,7 @@ export interface Dnd5eSrdSpellDefinition {
   appliedEffect?:
     | 'invisibility'
     | 'greater-invisibility'
+    | 'blur'
     | 'barkskin'
     | 'protection-from-poison'
     | 'death-ward'
@@ -180,6 +181,13 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
     appliedEffect: 'greater-invisibility',
     description: '触碰一个生物，使其及其随身着装与携带物隐形。攻击或施法不会终止此效果。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'blur', name: '朦胧术', englishName: 'Blur', level: 2, school: '幻术',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    appliedEffect: 'blur',
+    description: '你的身影变得模糊并闪烁不定。法术持续期间，依赖视觉的生物对你发动攻击时具有劣势；拥有盲视或真实视觉且目标处于其感官范围内的攻击者不受影响。需要专注，持续至多1分钟。',
   },
   {
     id: 'barkskin', name: '树肤术', englishName: 'Barkskin', level: 2, school: '变化',

@@ -17,6 +17,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eClassDefinition, dnd5ePactSlotLevel, type Dnd5eClassId } from './classes'
 import {
   dnd5eAttackerIsUnseenForAttack,
+  dnd5eBlurImposesAttackDisadvantage,
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
@@ -455,7 +456,7 @@ export function prepareDnd5eSpellCast(input: {
   const isUndeadOrConstruct = (creatureType: string | undefined) =>
     ['构装体', 'construct', '亡灵', 'undead'].includes((creatureType ?? '').toLowerCase())
   if (
-    (spell.id === 'false-life' && targetToken.id !== actorToken.id) ||
+    ((spell.id === 'false-life' || spell.id === 'blur') && targetToken.id !== actorToken.id) ||
     (spell.id === 'spare-the-dying' && (
       targetCombatant.currentHp !== 0 || targetCombatant.deathSaves.dead || isUndeadOrConstruct(targetCombatant.creatureType)
     )) ||
@@ -550,6 +551,7 @@ export function prepareDnd5eSpellCast(input: {
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
       dnd5eHelpAttackApplies(snapshot.state, actorCombatant, targetCombatant) || (targetProne && distanceFeet <= 5))
   const disadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) || dnd5eTargetIsDodging(targetCombatant) ||
+    dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||
     dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
     dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorProne || (targetProne && distanceFeet > 5)
   const attackMode = spell.effect === 'spell-attack' && metamagic?.kind !== 'twinned' && spell.id !== 'eldritch-blast'
@@ -576,6 +578,7 @@ export function prepareDnd5eSpellCast(input: {
             dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) ||
             (currentTargetProne && currentDistanceFeet <= 5))
         const currentDisadvantage = rangedSpellThreatened || actorCombatant.exhaustionLevel >= 3 || dnd5eTargetIsDodging(currentTarget) ||
+          dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, currentTarget.id) ||
           (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
           dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, currentTarget.id) || actorProne ||
           (currentTargetProne && currentDistanceFeet > 5)
