@@ -196,6 +196,9 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (!finiteInteger(raw.passivePerception, 0, 100)) issues.push(issue(monsterId, '被动察觉无效'))
   if (!Array.isArray(raw.languages) || raw.languages.length > 64 || raw.languages.some((language) => !requiredText(language, 500))) issues.push(issue(monsterId, '语言数据无效'))
   if (!isRecord(raw.challenge) || !requiredText(raw.challenge.rating, 16) || !finiteInteger(raw.challenge.xp, 0, 100_000_000)) issues.push(issue(monsterId, '挑战等级或经验值无效'))
+  if (raw.legendaryResistanceUses != null && !finiteInteger(raw.legendaryResistanceUses, 0, 99)) {
+    issues.push(issue(monsterId, '传奇抗性次数无效'))
+  }
   if (!Array.isArray(raw.traits) || raw.traits.length > 128 || raw.traits.some((trait) => !traitShapeIsValid(trait))) issues.push(issue(monsterId, '特性数据无效'))
   if (!Array.isArray(raw.actions) || raw.actions.length > 128) issues.push(issue(monsterId, '动作列表无效'))
   for (const [key, label] of [['reactions', '反应'], ['legendaryActions', '传奇动作'], ['lairActions', '巢穴动作']] as const) {
@@ -236,6 +239,14 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   }
   if (raw.conditionImmunities != null && (!Array.isArray(raw.conditionImmunities) || raw.conditionImmunities.some((entry) => !requiredText(entry, 120)))) {
     issues.push(issue(monsterId, '状态免疫数据无效'))
+  }
+  if (raw.capabilities != null) {
+    const capabilities = isRecord(raw.capabilities) ? raw.capabilities : null
+    if (!capabilities || [
+      'swarm', 'shapechanger', 'regeneration', 'spellcaster', 'legendary', 'hasFlySpeed', 'hasSwimSpeed',
+    ].some((key) => typeof capabilities[key] !== 'boolean')) {
+      issues.push(issue(monsterId, '能力标签数据无效'))
+    }
   }
   return issues
 }

@@ -221,6 +221,18 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       automation: previous?.automation ?? ('dm-adjudication' as const),
     }
   })
+  const traitNameIncludes = (pattern: RegExp) => traits.some((trait) => pattern.test(trait.name))
+  const capabilities = {
+    swarm: traitNameIncludes(/群集|swarm/i),
+    shapechanger: traitNameIncludes(/变形|shapechange/i),
+    regeneration: traitNameIncludes(/再生|regeneration/i),
+    spellcaster: preserved?.spellcasting != null || traitNameIncludes(/施法|spellcasting/i),
+    legendary: preserved?.capabilities?.legendary === true ||
+      (preserved?.legendaryResistanceUses ?? 0) > 0 ||
+      (preserved?.legendaryActions?.length ?? 0) > 0,
+    hasFlySpeed: draft.fly > 0,
+    hasSwimSpeed: draft.swim > 0,
+  }
   const monster: Dnd5eMonsterStatBlock = {
     ...preserved,
     id: draft.id ?? `room-monster:${slug}`,
@@ -247,16 +259,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     challenge: { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
     traits,
     actions,
-    capabilities: {
-      ...preserved?.capabilities,
-      swarm: draft.traits.some((trait) => /群集|swarm/i.test(trait.name)),
-      shapechanger: draft.traits.some((trait) => /变形|shapechange/i.test(trait.name)),
-      regeneration: draft.traits.some((trait) => /再生|regeneration/i.test(trait.name)),
-      spellcaster: draft.traits.some((trait) => /施法|spellcasting/i.test(trait.name)),
-      legendary: false,
-      hasFlySpeed: draft.fly > 0,
-      hasSwimSpeed: draft.swim > 0,
-    },
+    capabilities,
     description: draft.description.trim(),
   }
   const parsed = parseDnd5eMonsterStatBlock(monster)

@@ -65,4 +65,47 @@ describe('D&D 5e custom monster workshop', () => {
       original.actions[0].id, original.actions[0].id,
     ])
   })
+
+  it('preserves legendary, lair and spellcasting capabilities across a form save', () => {
+    const original = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const imported = {
+      ...original,
+      legendaryResistanceUses: 3,
+      legendaryActions: [{
+        id: 'legendary-step', name: '传奇步伐', description: '移动至多一半速度。',
+        kind: 'other' as const, legendaryCost: 1, automation: 'dm-adjudication' as const,
+      }],
+      lairActions: [{
+        id: 'lair-tremor', name: '巢穴震动', description: '巢穴地面发生震动。',
+        kind: 'other' as const, automation: 'dm-adjudication' as const,
+      }],
+      spellcasting: {
+        description: '该怪物是一名 5 级施法者。', casterLevel: 5, ability: 'int' as const,
+        saveDc: 14, attackBonus: 6, slots: { '3': 1 },
+        spells: [{ id: 'fireball', name: '火球术', level: 3 }],
+        automation: 'headless' as const,
+      },
+      capabilities: {
+        ...original.capabilities!, legendary: true, spellcaster: true,
+      },
+    }
+
+    const rebuilt = buildDnd5eCustomMonster(dnd5eCustomMonsterDraftFromStatBlock(imported))
+    expect(rebuilt).toMatchObject({
+      legendaryResistanceUses: 3,
+      legendaryActions: [{ id: 'legendary-step', legendaryCost: 1 }],
+      lairActions: [{ id: 'lair-tremor' }],
+      spellcasting: { casterLevel: 5, ability: 'int', saveDc: 14 },
+      capabilities: { legendary: true, spellcaster: true },
+    })
+  })
+
+  it('rejects malformed capability metadata at the schema boundary', () => {
+    const monster = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    expect(parseDnd5eMonsterStatBlock({
+      ...monster,
+      capabilities: { ...monster.capabilities, legendary: 'yes' },
+    }).ok).toBe(false)
+    expect(parseDnd5eMonsterStatBlock({ ...monster, legendaryResistanceUses: -1 }).ok).toBe(false)
+  })
 })
