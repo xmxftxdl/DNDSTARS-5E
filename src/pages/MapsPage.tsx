@@ -138,6 +138,7 @@ import {
 } from '../lib/combatInterruptQueue'
 import { resolveDmCombatInterruptSettlements } from '../lib/combatInterruptDmSettlement'
 import { applyDmCombatInterruptSettlements } from '../lib/combatInterruptSettlementRuntime'
+import { requestAndWaitForCombatInterrupt } from '../lib/combatInterruptRequestRuntime'
 import {
   answerSharedCombatInterrupt as persistAnswerSharedCombatInterrupt,
   contributeSharedCombatInterrupt as persistContributeSharedCombatInterrupt,
@@ -908,6 +909,12 @@ export default function MapsPage() {
   )
   const publishCombatInterrupt = async (interrupt: SharedCombatInterrupt) => {
     await persistPublishSharedCombatInterrupt({ loadSharedResource, saveSharedResource, mutateSharedCombatInterrupt, interrupt })
+  }
+  const loadCombatInterrupt = async (mapId: string, id: string) => {
+    const queue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
+    return queue?.mapId === mapId
+      ? queue.interrupts.find((interrupt) => interrupt.id === id)
+      : undefined
   }
   const answerSharedCombatInterrupt = async (id: string, response: Record<string, unknown>) => {
     if (!activeMap) return
@@ -4486,26 +4493,26 @@ export default function MapsPage() {
   ): Promise<DmAdjudicationInterruptResponse> => {
     if (!activeMap || !isDM) return { decision: 'cancelled', effects: [] }
     const id = `dm-adjudication:${prepared.action.id}`
-    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const existing = existingQueue?.mapId === activeMap.id
-      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
-      : undefined
-    if (
-      existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
-      (existing.status === 'answered' || existing.status === 'done')
-    ) {
-      const response = existing.response as DmAdjudicationInterruptResponse | undefined
-      return response?.decision === 'approved'
-        ? { ...response, effects: Array.isArray(response.effects) ? response.effects : [] }
-        : { decision: 'cancelled', effects: [], ...(response?.note ? { note: response.note } : {}) }
-    }
-    return new Promise((resolve) => {
-      pendingSharedDmAdjudicationRef.current = { id, actionId: prepared.action.id, resolve }
-      if (
-        existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
-        (existing.status === 'pending' || existing.status === 'waiting-for-dm')
-      ) return
-      const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedDmAdjudicationRef,
+      metadata: { actionId: prepared.action.id },
+      loadExisting: () => loadCombatInterrupt(activeMap.id, id),
+      decideExisting: (existing) => {
+        if (!existing || !isCombatInterruptKind(existing, 'dm-adjudication')) return { type: 'publish' }
+        if (existing.status === 'pending' || existing.status === 'waiting-for-dm') return { type: 'wait' }
+        if (existing.status !== 'answered' && existing.status !== 'done') {
+          return { type: 'resolve', value: { decision: 'cancelled', effects: [] } }
+        }
+        const response = existing.response as DmAdjudicationInterruptResponse | undefined
+        return {
+          type: 'resolve',
+          value: response?.decision === 'approved'
+            ? { ...response, effects: Array.isArray(response.effects) ? response.effects : [] }
+            : { decision: 'cancelled', effects: [], ...(response?.note ? { note: response.note } : {}) },
+        }
+      },
+      create: () => createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? prepared.action.id,
         mapId: activeMap.id,
@@ -4525,8 +4532,8 @@ export default function MapsPage() {
         },
         // 裁定允许 DM 阅读规则并掷骰；超时只取消，不消费任何资源。
         expiresAt: runtimeNow() + 10 * 60 * 1000,
-      })
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4537,25 +4544,28 @@ export default function MapsPage() {
   ): Promise<DmAdjudicationInterruptResponse> => {
     if (!activeMap || !isDM) return { decision: 'cancelled', effects: [] }
     const id = `dm-adjudication:${action.id}`
-    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const existing = existingQueue?.mapId === activeMap.id
-      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
-      : undefined
-    if (existing && isCombatInterruptKind(existing, 'dm-adjudication')) {
-      if (existing.status === 'answered' || existing.status === 'done') {
-        const response = existing.response as DmAdjudicationInterruptResponse | undefined
-        return response?.decision === 'approved'
-          ? { ...response, effects: [] }
-          : { decision: 'cancelled', effects: [] }
-      }
-      if (existing.status === 'rolled-back') return { decision: 'cancelled', effects: [] }
-    }
-    return new Promise((resolve) => {
-      pendingSharedDmAdjudicationRef.current = { id, actionId: action.id, resolve }
-      if (existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
-        (existing.status === 'pending' || existing.status === 'waiting-for-dm')) return
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedDmAdjudicationRef,
+      metadata: { actionId: action.id },
+      loadExisting: () => loadCombatInterrupt(activeMap.id, id),
+      decideExisting: (existing) => {
+        if (!existing || !isCombatInterruptKind(existing, 'dm-adjudication')) return { type: 'publish' }
+        if (existing.status === 'pending' || existing.status === 'waiting-for-dm') return { type: 'wait' }
+        if (existing.status === 'answered' || existing.status === 'done') {
+          const response = existing.response as DmAdjudicationInterruptResponse | undefined
+          return {
+            type: 'resolve',
+            value: response?.decision === 'approved'
+              ? { ...response, effects: [] }
+              : { decision: 'cancelled', effects: [] },
+          }
+        }
+        return { type: 'resolve', value: { decision: 'cancelled', effects: [] } }
+      },
+      create: () => {
       const operationLabels = { open: '开门', close: '关门', unlock: '开锁', break: '破门', inspect: '检查暗门', search: '搜索暗门' } as const
-      const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
+        return createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
         id,
         transactionId: action.id,
         mapId: activeMap.id,
@@ -4580,7 +4590,8 @@ export default function MapsPage() {
         },
         expiresAt: runtimeNow() + 10 * 60 * 1000,
       })
-      void publishCombatInterrupt(interrupt)
+      },
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4593,31 +4604,28 @@ export default function MapsPage() {
     if (!activeMap || !isDM) return { decision: 'cancelled', effects: [] }
     const { prepared } = input
     const id = `dm-adjudication:${prepared.candidate.transactionId}`
-    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const existing = existingQueue?.mapId === activeMap.id
-      ? existingQueue.interrupts.find((interrupt) => interrupt.id === id)
-      : undefined
-    if (existing && isCombatInterruptKind(existing, 'dm-adjudication')) {
-      if (existing.status === 'answered' || existing.status === 'done') {
-        const response = existing.response as DmAdjudicationInterruptResponse | undefined
-        return response?.decision === 'approved'
-          ? { ...response, effects: Array.isArray(response.effects) ? response.effects : [] }
-          : { decision: 'cancelled', effects: [] }
-      }
-      if (existing.status === 'rolled-back') return { decision: 'cancelled', effects: [] }
-    }
-    return new Promise((resolve) => {
-      pendingSharedDmAdjudicationRef.current = {
-        id,
-        actionId: prepared.candidate.transactionId,
-        resolve,
-      }
-      if (
-        existing && isCombatInterruptKind(existing, 'dm-adjudication') &&
-        (existing.status === 'pending' || existing.status === 'waiting-for-dm')
-      ) return
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedDmAdjudicationRef,
+      metadata: { actionId: prepared.candidate.transactionId },
+      loadExisting: () => loadCombatInterrupt(activeMap.id, id),
+      decideExisting: (existing) => {
+        if (!existing || !isCombatInterruptKind(existing, 'dm-adjudication')) return { type: 'publish' }
+        if (existing.status === 'pending' || existing.status === 'waiting-for-dm') return { type: 'wait' }
+        if (existing.status === 'answered' || existing.status === 'done') {
+          const response = existing.response as DmAdjudicationInterruptResponse | undefined
+          return {
+            type: 'resolve',
+            value: response?.decision === 'approved'
+              ? { ...response, effects: Array.isArray(response.effects) ? response.effects : [] }
+              : { decision: 'cancelled', effects: [] },
+          }
+        }
+        return { type: 'resolve', value: { decision: 'cancelled', effects: [] } }
+      },
+      create: () => {
       const sourceName = prepared.state.combatants[prepared.candidate.area.sourceTokenId]?.name ?? '区域来源'
-      const interrupt = createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
+        return createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
         id,
         transactionId: prepared.candidate.transactionId,
         mapId: activeMap.id,
@@ -4643,7 +4651,8 @@ export default function MapsPage() {
         },
         expiresAt: runtimeNow() + 10 * 60 * 1000,
       })
-      void publishCombatInterrupt(interrupt)
+      },
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4669,20 +4678,20 @@ export default function MapsPage() {
       response?.optionId && validOptionIds.has(response.optionId)
         ? response.optionId
         : input.defaultOptionId
-    const existingQueue = await loadSharedResource<SharedCombatInterruptQueueState>(COMBAT_INTERRUPT_RESOURCE)
-    const existing = existingQueue?.mapId === activeMap.id
-      ? existingQueue.interrupts.find((interrupt) => interrupt.id === input.id)
-      : undefined
-    if (existing && isCombatInterruptKind(existing, 'plugin-choice')) {
-      if (existing.status === 'answered' || existing.status === 'done') {
-        return readChoice(existing.response)
-      }
-      if (existing.status === 'rolled-back') return input.defaultOptionId
-    }
-    return new Promise((resolve) => {
-      pendingSharedPluginChoiceRef.current = { id: input.id, actionId: input.transactionId, resolve }
-      if (existing && isCombatInterruptKind(existing, 'plugin-choice') && existing.status === 'pending') return
-      const interrupt = createCombatInterrupt<PluginChoiceInterruptPayload, PluginChoiceInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id: input.id,
+      channel: pendingSharedPluginChoiceRef,
+      metadata: { actionId: input.transactionId },
+      loadExisting: () => loadCombatInterrupt(activeMap.id, input.id),
+      decideExisting: (existing) => {
+        if (!existing || !isCombatInterruptKind(existing, 'plugin-choice')) return { type: 'publish' }
+        if (existing.status === 'pending') return { type: 'wait' }
+        if (existing.status === 'answered' || existing.status === 'done') {
+          return { type: 'resolve', value: readChoice(existing.response) }
+        }
+        return { type: 'resolve', value: input.defaultOptionId }
+      },
+      create: () => createCombatInterrupt<PluginChoiceInterruptPayload, PluginChoiceInterruptResponse>({
         id: input.id,
         transactionId: input.transactionId,
         mapId: activeMap.id,
@@ -4701,8 +4710,8 @@ export default function MapsPage() {
           ...input.context,
         },
         expiresAt: runtimeNow() + (input.timeoutMs ?? 30_000),
-      })
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4779,8 +4788,11 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<OpportunityAttackInterruptPayload, OpportunityAttackInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedOpportunityAttackRef,
+      metadata: { attackerCharId: attacker.id },
+      create: () => createCombatInterrupt<OpportunityAttackInterruptPayload, OpportunityAttackInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -4794,13 +4806,8 @@ export default function MapsPage() {
           trigger: params.trigger ?? 'movement',
         },
         expiresAt,
-      })
-      pendingSharedOpportunityAttackRef.current = {
-        id: interrupt.id,
-        attackerCharId: attacker.id,
-        resolve,
-      }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4908,8 +4915,11 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<ProtectionInterruptPayload, ProtectionInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedProtectionRef,
+      metadata: { protectorCharId: protector.id },
+      create: () => createCombatInterrupt<ProtectionInterruptPayload, ProtectionInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -4922,9 +4932,8 @@ export default function MapsPage() {
           attackName: params.attackName,
         },
         expiresAt,
-      })
-      pendingSharedProtectionRef.current = { id: interrupt.id, protectorCharId: protector.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4952,8 +4961,11 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<ShieldSpellInterruptPayload, ShieldSpellInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedShieldSpellRef,
+      metadata: { targetCharId: target.id },
+      create: () => createCombatInterrupt<ShieldSpellInterruptPayload, ShieldSpellInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -4968,9 +4980,8 @@ export default function MapsPage() {
           magicMissile: params.magicMissile,
         },
         expiresAt,
-      })
-      pendingSharedShieldSpellRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -4993,8 +5004,11 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<CounterspellInterruptPayload, CounterspellInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedCounterspellRef,
+      metadata: { actorCharId: reactor.id },
+      create: () => createCombatInterrupt<CounterspellInterruptPayload, CounterspellInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5010,9 +5024,8 @@ export default function MapsPage() {
           abilityCheckDc: params.abilityCheckDc,
         },
         expiresAt,
-      })
-      pendingSharedCounterspellRef.current = { id, actorCharId: reactor.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5071,8 +5084,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<UncannyDodgeInterruptPayload, UncannyDodgeInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedUncannyDodgeRef, metadata: { targetCharId: target.id },
+      create: () => createCombatInterrupt<UncannyDodgeInterruptPayload, UncannyDodgeInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5084,9 +5098,8 @@ export default function MapsPage() {
           attackName: params.attackName,
         },
         expiresAt,
-      })
-      pendingSharedUncannyDodgeRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5113,8 +5126,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<DeflectMissilesInterruptPayload, DeflectMissilesInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedDeflectMissilesRef, metadata: { targetCharId: target.id },
+      create: () => createCombatInterrupt<DeflectMissilesInterruptPayload, DeflectMissilesInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5128,9 +5142,8 @@ export default function MapsPage() {
           kiCurrent: params.kiCurrent,
         },
         expiresAt,
-      })
-      pendingSharedDeflectMissilesRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5149,8 +5162,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<SavingThrowRerollInterruptPayload, SavingThrowRerollInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedSavingThrowRerollRef, metadata: { targetCharId: target.id },
+      create: () => createCombatInterrupt<SavingThrowRerollInterruptPayload, SavingThrowRerollInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5163,9 +5177,8 @@ export default function MapsPage() {
           dc: params.dc,
         },
         expiresAt,
-      })
-      pendingSharedSavingThrowRerollRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5213,8 +5226,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<BardicInspirationInterruptPayload, BardicInspirationInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedBardicInspirationRef, metadata: { targetCharId: target.id },
+      create: () => createCombatInterrupt<BardicInspirationInterruptPayload, BardicInspirationInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5229,9 +5243,8 @@ export default function MapsPage() {
           source: params.source,
         },
         expiresAt,
-      })
-      pendingSharedBardicInspirationRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5304,8 +5317,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<CuttingWordsInterruptPayload, CuttingWordsInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedCuttingWordsRef, metadata: { bardCharId: bard.id },
+      create: () => createCombatInterrupt<CuttingWordsInterruptPayload, CuttingWordsInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5322,9 +5336,8 @@ export default function MapsPage() {
           targetNumber: params.targetNumber,
         },
         expiresAt,
-      })
-      pendingSharedCuttingWordsRef.current = { id: interrupt.id, bardCharId: bard.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5363,8 +5376,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<DarkOnesOwnLuckInterruptPayload, DarkOnesOwnLuckInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedDarkOnesOwnLuckRef, metadata: { targetCharId: target.id },
+      create: () => createCombatInterrupt<DarkOnesOwnLuckInterruptPayload, DarkOnesOwnLuckInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5377,9 +5391,8 @@ export default function MapsPage() {
           targetNumber: params.targetNumber,
         },
         expiresAt,
-      })
-      pendingSharedDarkOnesOwnLuckRef.current = { id: interrupt.id, targetCharId: target.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5570,8 +5583,9 @@ export default function MapsPage() {
     }
     const id = runtimeId()
     const expiresAt = runtimeNow() + 15000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<StrokeOfLuckInterruptPayload, StrokeOfLuckInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedStrokeOfLuckRef, metadata: { actorCharId: actor.id },
+      create: () => createCombatInterrupt<StrokeOfLuckInterruptPayload, StrokeOfLuckInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5585,9 +5599,8 @@ export default function MapsPage() {
           rollType: params.rollType,
         },
         expiresAt,
-      })
-      pendingSharedStrokeOfLuckRef.current = { id: interrupt.id, actorCharId: actor.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5598,8 +5611,9 @@ export default function MapsPage() {
     if (!activeMap || !isDM || params.groups.length === 0) return Promise.resolve([])
     const id = runtimeId()
     const expiresAt = runtimeNow() + 30000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<EmpoweredSpellInterruptPayload, EmpoweredSpellInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedEmpoweredSpellRef, metadata: { actorCharId: actor.id },
+      create: () => createCombatInterrupt<EmpoweredSpellInterruptPayload, EmpoweredSpellInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5612,9 +5626,8 @@ export default function MapsPage() {
           groups: params.groups,
         },
         expiresAt,
-      })
-      pendingSharedEmpoweredSpellRef.current = { id: interrupt.id, actorCharId: actor.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
@@ -5629,8 +5642,9 @@ export default function MapsPage() {
     if (!activeMap || !isDM || params.candidates.length === 0) return Promise.resolve(undefined)
     const id = runtimeId()
     const expiresAt = runtimeNow() + 20000
-    return new Promise((resolve) => {
-      const interrupt = createCombatInterrupt<StandAgainstTideInterruptPayload, StandAgainstTideInterruptResponse>({
+    return requestAndWaitForCombatInterrupt({
+      id, channel: pendingSharedStandAgainstTideRef, metadata: { hunterCharId: hunter.id },
+      create: () => createCombatInterrupt<StandAgainstTideInterruptPayload, StandAgainstTideInterruptResponse>({
         id,
         transactionId: activeInterruptTransactionIdRef.current ?? id,
         mapId: activeMap.id,
@@ -5641,9 +5655,8 @@ export default function MapsPage() {
           ...params,
         },
         expiresAt,
-      })
-      pendingSharedStandAgainstTideRef.current = { id: interrupt.id, hunterCharId: hunter.id, resolve }
-      void publishCombatInterrupt(interrupt)
+      }),
+      publish: publishCombatInterrupt,
     })
   }
 
