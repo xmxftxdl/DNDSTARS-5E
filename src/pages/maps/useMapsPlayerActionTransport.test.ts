@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
-import { drainDmPlayerActionQueue } from './useMapsPlayerActionTransport'
+import { drainDmPlayerActionQueue, playerActionRejectionNotice } from './useMapsPlayerActionTransport'
 
 function action(id: string): SharedPlayerActionState {
   return {
@@ -65,5 +65,21 @@ describe('DM player action drain', () => {
     expect(handled).toBe(1)
     expect(onAction).toHaveBeenCalledTimes(1)
     expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'first', sourceMode: 'player' }))
+  })
+})
+
+describe('player action rejection notice', () => {
+  it('explains ammunition rejection without hiding the authoritative result', () => {
+    expect(playerActionRejectionNotice('ammunition-unavailable')).toEqual({
+      title: '弹药不足',
+      message: '当前武器没有可用弹药，本次攻击未结算。',
+    })
+  })
+
+  it('keeps unknown rejection reasons visible for diagnosis', () => {
+    expect(playerActionRejectionNotice('future-authority-rule')).toEqual({
+      title: '行动被拒绝',
+      message: 'DM 权威结算拒绝了这次行动（future-authority-rule），本次行动未结算。',
+    })
   })
 })

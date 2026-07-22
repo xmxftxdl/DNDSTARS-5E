@@ -8,6 +8,34 @@ async function putState(request: APIRequestContext, name: string, payload: unkno
   expect(response.ok()).toBeTruthy()
 }
 
+function arrowInventory(quantity = 20) {
+  return {
+    schemaVersion: 3,
+    entries: [{
+      instanceId: 'cover-preview-arrows',
+      templateId: 'srd-5.1:item:arrows',
+      item: {
+        id: 'srd-5.1:item:arrows',
+        name: '箭',
+        englishName: 'Arrows',
+        category: 'adventuring-gear',
+        icon: 'generic',
+        description: 'SRD 5.1 冒险装备。',
+        rulesText: '短弓和长弓使用的弹药。',
+        weightLb: 0.05,
+        cost: { amount: 5, currency: 'cp' },
+        ammunitionKind: 'arrow',
+        stackable: true,
+        source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+      },
+      quantity,
+      identified: true,
+      acquiredAt: 0,
+    }],
+    currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+  }
+}
+
 test('weapon targeting previews creature cover and lets DM override this attack only', async ({ browser, request }) => {
   const now = Date.now()
   const mapId = `cover-preview-${now}`
@@ -32,6 +60,7 @@ test('weapon targeting previews creature cover and lets DM override this attack 
         },
       },
     },
+    dnd5eInventory: arrowInventory(),
   }
   const playerToken = {
     id: 'cover-archer-token', label: character.name, x: 105, y: 350,
@@ -46,7 +75,11 @@ test('weapon targeting previews creature cover and lets DM override this attack 
     color: '#f87171', emoji: '👺', size: 1, type: 'enemy', hp: 20, maxHp: 20, poolId: 'goblin',
   }
   await request.delete(`${DM}/api/events/_all`)
-  await putState(request, 'characters', { characters: [character], selectedId: character.id, updatedAt: now })
+  const characterWithoutAmmunition = {
+    ...character,
+    dnd5eInventory: { ...arrowInventory(), entries: [] },
+  }
+  await putState(request, 'characters', { characters: [characterWithoutAmmunition], selectedId: character.id, updatedAt: now })
   await putState(request, 'maps', {
     selectedId: mapId, updatedAt: now,
     maps: [{
@@ -74,6 +107,20 @@ test('weapon targeting previews creature cover and lets DM override this attack 
   await player.getByTitle('技能').click()
   await player.getByRole('button', { name: '选择目标并攻击' }).click()
   await player.getByTestId('map-canvas').click({ position: { x: targetToken.x, y: targetToken.y } })
+  await player.getByTestId('dnd5e-cover-preview').getByTestId('dnd5e-cover-confirm').click()
+
+  await expect(player.getByText('弹药不足', { exact: true })).toBeVisible({ timeout: 20_000 })
+  await expect(player.getByText('当前武器没有可用弹药，本次攻击未结算。')).toBeVisible()
+  await player.getByRole('button', { name: '知道了' }).click()
+
+  await putState(request, 'characters', { characters: [character], selectedId: character.id, updatedAt: Date.now() + 1 })
+  await Promise.all([
+    dm.reload({ waitUntil: 'domcontentloaded' }),
+    player.reload({ waitUntil: 'domcontentloaded' }),
+  ])
+  await player.getByTitle('技能').click()
+  await player.getByRole('button', { name: '选择目标并攻击' }).click()
+  await player.getByTestId('map-canvas').click({ position: { x: targetToken.x, y: targetToken.y } })
 
   const playerPreview = player.getByTestId('dnd5e-cover-preview')
   await expect(playerPreview).toBeVisible()
@@ -87,7 +134,7 @@ test('weapon targeting previews creature cover and lets DM override this attack 
   await expect(dmPreview).toContainText('来源：中间盟友')
   await dmPreview.getByTestId('dnd5e-cover-override').selectOption('three-quarters')
   await expect(dmPreview).toContainText('本次采用 DM 裁定：四分之三掩护（+5 AC）')
-  await expect(dmPreview.getByText('19', { exact: true })).toBeVisible()
+  await expect(dmPreview.getByText('20', { exact: true })).toBeVisible()
   await dmPreview.getByRole('button', { name: '应用并继续结算' }).click()
   await expect(dmPreview).toHaveCount(0)
   await context.close()

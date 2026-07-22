@@ -11,6 +11,34 @@ function center(col: number, row: number, gridSize = 70) {
   }
 }
 
+function arrowInventory(quantity = 20) {
+  return {
+    schemaVersion: 3,
+    entries: [{
+      instanceId: 'player2-red-dragon-arrows',
+      templateId: 'srd-5.1:item:arrows',
+      item: {
+        id: 'srd-5.1:item:arrows',
+        name: '箭',
+        englishName: 'Arrows',
+        category: 'adventuring-gear',
+        icon: 'generic',
+        description: 'SRD 5.1 冒险装备。',
+        rulesText: '短弓和长弓使用的弹药。',
+        weightLb: 0.05,
+        cost: { amount: 5, currency: 'cp' },
+        ammunitionKind: 'arrow',
+        stackable: true,
+        source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+      },
+      quantity,
+      identified: true,
+      acquiredAt: 0,
+    }],
+    currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+  }
+}
+
 function player2Character() {
   return {
     id: 'player2-red-dragon-hero',
@@ -62,6 +90,7 @@ function player2Character() {
         dnd5e: { kind: 'armor', category: 'light', baseArmorClass: 11, dexterityBonus: 'full' },
       },
     },
+    dnd5eInventory: arrowInventory(),
     conditions: [],
     notes: '',
     dmNotes: '',

@@ -508,7 +508,10 @@ import {
   submitPlayerActionRequestWithLock,
   type SharedPlayerActionPatch,
 } from '../lib/playerActionSync'
-import { useMapsPlayerActionTransport } from './maps/useMapsPlayerActionTransport'
+import {
+  playerActionRejectionNotice,
+  useMapsPlayerActionTransport,
+} from './maps/useMapsPlayerActionTransport'
 import { settleDnd5eConcentrationChecks } from './maps/settleDnd5eCombatResult'
 import {
   applyDnd5eCombatResultApplication as applyCoordinatedDnd5eCombatResult,
@@ -13317,12 +13320,9 @@ export default function MapsPage() {
     pendingActionRef: pendingPlayerActionRef,
     onAction: handlePlayerActionRequest,
     clearPendingAction: () => setPendingPlayerActionLocked(null),
-    onTargetOutOfRange: () => {
-      void showCombatNotice(
-        '距离不足',
-        '目标已经超出所选攻击的有效距离。近战攻击请先移动到武器触及范围内，再重新选择目标。',
-        'amber',
-      )
+    onActionRejected: (reason) => {
+      const notice = playerActionRejectionNotice(reason)
+      void showCombatNotice(notice.title, notice.message, 'amber')
     },
   })
 
