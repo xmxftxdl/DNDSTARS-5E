@@ -239,7 +239,7 @@ function buildEnemyAttack(
 /**
  * 数据驱动的吐息分支：任何怪物只要其 stat block 含一个
  * `kind:'aoe'` 且带 `save` 的结构化动作，就在第一回合默认使用该吐息，
- * 不再针对 'wyrmling-red' 做字符串特判。红/绿龙皆由数据驱动。
+ * 不按旧自定义怪物 ID 做字符串特判；只有 SRD／房间怪物中的结构化动作可自动执行。
  */
 function buildBreathAttack(
   enemy: Token,

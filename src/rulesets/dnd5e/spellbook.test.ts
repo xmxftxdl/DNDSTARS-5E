@@ -85,9 +85,10 @@ describe('D&D 5e room spellbook import', () => {
       name: '奥术之手',
       sourceKind: 'srd-core',
       headless: false,
-      reference: { sourceName: '奥术之手', sourceEnglishName: 'Arcane Hand' },
+      translationStatus: 'pending-srd-translation',
     })
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core').every((entry) => !!entry.reference)).toBe(true)
+    expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference).toBeUndefined()
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference)).toHaveLength(11)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(66)
     expect(entries.find((entry) => entry.id === 'test-pack:ember-lance')).toMatchObject({ sourceKind: 'room-import', headless: false })
   })

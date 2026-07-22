@@ -233,22 +233,6 @@ export default function RulesPluginsPage() {
         description="管理规则插件、房间权限、战役备份与高级数据诊断。"
         actions={settingsSection === 'plugins' ? (
           <div className="flex flex-wrap gap-2">
-            <a
-              href="/plugin-templates/phb-2014-compat-template.dndstars5e"
-              download
-              className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 transition-colors hover:border-arcane-400/60 hover:text-white"
-            >
-              <Download className="h-4 w-4" />
-              下载兼容模板
-            </a>
-            <a
-              href="/plugin-templates/custom-equipment-pack-template.dndstars5e"
-              download
-              className="glass flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-200 transition-colors hover:border-amber-400/60 hover:text-white"
-            >
-              <Download className="h-4 w-4" />
-              下载装备模板
-            </a>
             {roomSession?.role !== 'player' && (
               <>
                 <input
@@ -425,7 +409,7 @@ export default function RulesPluginsPage() {
           <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
             {roomSession?.role === 'player'
               ? '等待 DM 向房间上传规则包；上传后本页会自动下载、校验并激活。'
-              : '先下载不含 PHB 文本的兼容模板。模板自带一个原创演示特性，可验证人物卡选择、地图目标和 DM Headless 同步链路。'}
+              : '可在下方使用规则包工作室创建自己的内容，或上传你有权使用和分发的规则插件。核心包不会附带非 SRD 规则模板。'}
           </p>
         </div>
       ) : (

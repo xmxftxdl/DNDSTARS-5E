@@ -1,22 +1,21 @@
 /*
- * DNDSTARS 5E · PHB 2014 compatibility template
+ * DNDSTARS 5E · Rules Plugin API V2 E2E fixture
  *
- * This file deliberately contains no Player's Handbook rules text, names, tables,
- * artwork, or other non-SRD content. Replace the demo content only with material
- * you are authorized to use. Keep the bundle self-contained: do not load external modules.
+ * This test-only fixture verifies the sandbox and multiplayer plugin protocol. It is
+ * never copied into the application build or offered as bundled game content.
  */
 
 const plugin = {
   manifest: {
-    id: 'local.example.phb-2014-template',
-    name: 'PHB 2014 兼容模板（演示）',
+    id: 'local.example.rules-api-v2-e2e',
+    name: 'Rules API V2 E2E',
     version: '0.1.0',
     apiVersion: 2,
     rulesetId: 'dnd5e-2014-srd-5.1',
     stateSchemaVersion: 1,
     publisher: '本地用户',
     license: 'CC0-1.0（仅模板与原创演示内容）',
-    description: '不含 PHB 原文的 Rules Plugin API V2 纵向切片模板。',
+    description: '仅用于自动化测试的 Rules Plugin API V2 纵向切片。',
   },
 
   setup(api) {
@@ -192,3 +191,5 @@ const plugin = {
 }
 
 export default plugin
+
+

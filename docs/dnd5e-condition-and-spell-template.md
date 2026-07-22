@@ -52,4 +52,4 @@ Worker 插件可调用 `registerSpell` 注册同一套法术字段，并用 `aut
 
 插件仍不能访问 DOM、网络、浏览器存储或内部 Store。玩家提交的伤害值、目标和骰子结果仍必须先经过 DM 权威 preflight；`registerSpell` 只声明法术结构，不允许 resolver 绕过法术位、施法动作、射程、目标和骰子校验。
 
-完整原创示例位于 `public/plugin-templates/phb-2014-compat-template.dndstars5e`。
+核心包不附带非 SRD 演示规则；可在规则包工作室中生成模板，并只加入你有权使用和分发的内容。

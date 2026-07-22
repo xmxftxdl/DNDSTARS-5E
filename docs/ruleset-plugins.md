@@ -101,10 +101,6 @@ export default plugin
 
 应用的“规则插件”页面支持选择 `.dndstars5e`、`.mjs` 或 `.js` 单文件插件。平台加载器把文件字节保存在当前浏览器 IndexedDB，把安装描述与 SHA-256 保存在 localStorage；这些持久化接口不暴露给规则包。刷新时会重新校验原始字节，再创建新的隔离 Worker。
 
-仓库附带一个不含 PHB 内容的模板：
-
-`public/plugin-templates/phb-2014-compat-template.dndstars5e`
-
 运行时也在 `window.DNDSTARS_5E_RULES_PLUGINS` 暴露安装入口。URL 安装必须同时提供预期插件 ID、模块 URL 和固定的 SHA-256：
 
 ```js

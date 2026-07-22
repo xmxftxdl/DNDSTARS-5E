@@ -113,28 +113,6 @@ describe('[T7/AC2] AI 目标集合包含 npc/友方', () => {
   })
 })
 
-describe('[T7/AC3] 红/绿龙吐息均由数据驱动（kind:aoe + save）', () => {
-  it('绿龙第一回合从数据投出 6d6 毒气吐息（DC11）', () => {
-    const enemy = token({ id: 'e', type: 'enemy', poolId: 'wyrmling-green', x: 25, y: 25 })
-    const player = token({ id: 'p', type: 'player', x: 75, y: 25 })
-    const result = planEnemyTurn(makeMap([enemy, player]), enemy, undefined, 2, { round: 1 })
-    expect(result.damageType).toBe('aoe')
-    expect(result.saveDC).toBe(11)
-    expect(result.attack!.label).toContain('6d6')
-    expect(result.attack!.sides).toBe(6)
-  })
-
-  it('红龙第一回合从数据投出 4d6 火焰吐息（DC12）', () => {
-    const enemy = token({ id: 'e', type: 'enemy', poolId: 'wyrmling-red', x: 25, y: 25 })
-    const player = token({ id: 'p', type: 'player', x: 75, y: 25 })
-    const result = planEnemyTurn(makeMap([enemy, player]), enemy, undefined, 2, { round: 1 })
-    expect(result.damageType).toBe('aoe')
-    expect(result.saveDC).toBe(12)
-    expect(result.attack!.label).toContain('4d6')
-    expect(result.attack!.sides).toBe(6)
-  })
-})
-
 describe('[T7/AC6] 陈旧/缺失 poolId 回退仅按 token id 告警一次', () => {
   it('同一无 poolId token 多回合只 warn 一次；清空后可再 warn', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

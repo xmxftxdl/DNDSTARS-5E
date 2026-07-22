@@ -1,11 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
 import {
   DND5E_SRD_5_1_ATTRIBUTION,
   DND5E_SRD_5_1_LICENSE_URL,
   DND5E_SRD_5_1_SOURCE_URL,
-  normalizeDnd5eSrdSpellNamesInText,
 } from './srdContent'
 
 describe('SRD 5.1 content provenance', () => {
@@ -18,8 +17,9 @@ describe('SRD 5.1 content provenance', () => {
 
   it('uses one canonical Chinese name table for all 319 core spells', () => {
     expect(Object.keys(DND5E_SRD_SPELL_NAMES_ZH)).toHaveLength(319)
-    expect(normalizeDnd5eSrdSpellNamesInText('施放位面移动法术、愿望咒语和识别咒语。'))
-      .toBe('施放异界传送、祈愿术和鉴定术。')
+    expect(DND5E_SRD_SPELL_NAMES_ZH['plane-shift']).toBe('异界传送')
+    expect(DND5E_SRD_SPELL_NAMES_ZH.wish).toBe('祈愿术')
+    expect(DND5E_SRD_SPELL_NAMES_ZH.identify).toBe('鉴定术')
   })
 
   it('does not allow translation-service clients back into either review generator', () => {
@@ -32,5 +32,21 @@ describe('SRD 5.1 content provenance', () => {
       expect(source).toContain('reviewedBy')
       expect(source).toContain('--emit')
     }
+  })
+
+  it('keeps retired non-release content out of the runtime and public build', () => {
+    for (const relativePath of [
+      './spellDescriptionsZh.generated.ts',
+      './magicItemRulesZh.generated.ts',
+      '../../../public/plugin-templates/phb-2014-compat-template.dndstars5e',
+      '../../../public/plugin-templates/custom-equipment-pack-template.dndstars5e',
+    ]) {
+      expect(existsSync(new URL(relativePath, import.meta.url)), relativePath).toBe(false)
+    }
+
+    const spellbook = readFileSync(new URL('./spellbook.ts', import.meta.url), 'utf8')
+    const magicItems = readFileSync(new URL('./magicItems.ts', import.meta.url), 'utf8')
+    expect(spellbook).not.toMatch(/legacy-runtime|spellDescriptionsZh\.generated/)
+    expect(magicItems).not.toMatch(/magicItemRulesZh\.generated|LEGACY_MAGIC_ITEM/)
   })
 })

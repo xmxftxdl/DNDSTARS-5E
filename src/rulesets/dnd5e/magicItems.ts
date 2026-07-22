@@ -6,9 +6,7 @@ import type {
   Dnd5eMagicItemRarity,
 } from '../../types/inventory'
 import { DND5E_SRD_EQUIPMENT_CATALOG } from './equipment'
-import { DND5E_SRD_MAGIC_ITEM_RULES_ZH } from './magicItemRulesZh.generated'
 import { DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED } from './magicItemRulesZh.reviewed.generated'
-import { normalizeDnd5eSrdSpellNamesInText } from './srdContent'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 
@@ -16,8 +14,7 @@ type CatalogRuleOverride = Pick<Dnd5eInventoryItemTemplate, 'description' | 'rul
 
 /**
  * 需要声明式 Headless 行为或已完成语境审校的目录条目覆盖。
- * 其余物品正文目前仍来自待迁移的旧运行数据；发布前必须由新的
- * SRD 5.1 人工审校工作流替换，不能把目录完整误认为译文已审校。
+ * 未完成人工审校的条目只保留 SRD 目录元数据，不装载旧机器译文。
  */
 const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
   'amulet-of-the-planes': {
@@ -410,10 +407,6 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
   const kind = DND5E_MAGIC_ITEM_KIND_LABELS[entry.kind]
   const rules = CATALOG_RULE_OVERRIDES[entry.id]
   const srdRules = DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED[entry.id]
-    ?? DND5E_SRD_MAGIC_ITEM_RULES_ZH[entry.id]
-  if (!srdRules) {
-    throw new Error(`SRD 5.1 magic item rule text is missing: ${entry.id}`)
-  }
   return {
     id: `srd-5.1:magic-item:${entry.id}`,
     name: entry.name,
@@ -421,7 +414,7 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     category: entry.kind === 'potion' ? 'consumable' : 'magic-item',
     icon: iconForKind(entry.kind),
     description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
-    rulesText: normalizeDnd5eSrdSpellNamesInText(rules?.rulesText ?? srdRules.rulesText),
+    rulesText: rules?.rulesText ?? srdRules?.rulesText ?? '该条目属于 SRD 5.1 魔法物品目录；中文规则正文尚未完成基于英文 SRD 5.1 的语境翻译与人工审校。当前仅保留目录信息，具体效果须由 DM 依据英文 SRD 5.1 裁定。',
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
     ...(rules?.use ? { use: rules.use } : {}),
     magicItem: {

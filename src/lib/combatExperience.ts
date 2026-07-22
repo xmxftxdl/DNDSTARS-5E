@@ -1,7 +1,6 @@
-import { getDnd5eSrdMonster } from '../rulesets/dnd5e/monsters'
+import { getDnd5eSrdMonster, getDnd5eSrdMonsterBySlug } from '../rulesets/dnd5e/monsters'
 import type { BattleMap, Token } from '../store/maps'
 import type { Character } from '../types/character'
-import { getEnemyStatBlock } from './enemyStatBlocks'
 import { getTokenCombatSide, isTokenDefeated } from './combatTokens'
 
 export type CombatExperienceDistributionMode = 'even' | 'manual' | 'none'
@@ -45,7 +44,7 @@ export interface CombatExperienceSettlement {
   settledAt: number
 }
 
-/** SRD 5.1「Challenge Rating」表；仅供没有结构化 XP 的旧怪物模板回退。 */
+/** SRD 5.1「Challenge Rating」经验值表。 */
 export const DND5E_CHALLENGE_RATING_XP: Readonly<Record<string, number>> = {
   '0': 10,
   '1/8': 25,
@@ -90,9 +89,8 @@ function nonNegativeInteger(value: unknown): number {
 }
 
 function defeatedMonster(token: Token): CombatExperienceDefeatedMonster {
-  const srd = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
-  const legacy = !srd && token.poolId ? getEnemyStatBlock(token.poolId) : undefined
-  const challengeRating = srd?.challenge.rating ?? legacy?.cr
+  const srd = token.poolId ? getDnd5eSrdMonster(token.poolId) ?? getDnd5eSrdMonsterBySlug(token.poolId) : undefined
+  const challengeRating = srd?.challenge.rating
   const xp = srd?.challenge.xp ?? (challengeRating ? DND5E_CHALLENGE_RATING_XP[challengeRating] : 0) ?? 0
   return {
     tokenId: token.id,

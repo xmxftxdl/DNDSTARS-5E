@@ -1,9 +1,6 @@
 import type { Dnd5eClassId } from './classes'
-import {
-  DND5E_SRD_SPELL_DESCRIPTIONS_ZH,
-  type Dnd5eSrdSpellDescriptionZh,
-} from './spellDescriptionsZh.generated'
 import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
+import type { Dnd5eSrdSpellDescriptionZh } from './spellDescriptionTypes'
 import { DND5E_SRD_COMBAT_SPELLS, type Dnd5eSrdSpellDefinition } from './spells'
 import { DND5E_SRD_SPELL_CATALOG } from './spellCatalog'
 import { parseDnd5eSpellMechanics, type Dnd5eSpellMechanicsDefinition } from './spellMechanics'
@@ -101,7 +98,7 @@ export interface Dnd5eSpellbookEntry {
   sourceKind: 'srd-core' | 'room-import'
   headless: boolean
   catalogOnly: boolean
-  translationStatus?: 'context-reviewed' | 'legacy-runtime'
+  translationStatus?: 'context-reviewed' | 'pending-srd-translation'
   reference?: Dnd5eSrdSpellDescriptionZh
   imported?: Dnd5eImportedSpell
   combat?: Dnd5eSrdSpellDefinition
@@ -355,12 +352,9 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
   const core = DND5E_SRD_SPELL_CATALOG.map((catalog): Dnd5eSpellbookEntry => {
     const combat = combatById.get(catalog.id)
     const reviewedReference = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED[catalog.id]
-    const sourceReference = reviewedReference ?? DND5E_SRD_SPELL_DESCRIPTIONS_ZH[catalog.id]
-    // 旧运行正文可能保留了非 SRD 的专有法术名。正文迁移完成前，展示层仍以
-    // SRD 5.1 目录为唯一名称来源，避免法术书、Headless 与物品引用出现三套名称。
-    const reference = sourceReference
+    const reference = reviewedReference
       ? {
-          ...sourceReference,
+          ...reviewedReference,
           sourceName: catalog.name,
           sourceEnglishName: catalog.englishName,
         }
@@ -374,7 +368,7 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
       sourceKind: 'srd-core',
       headless: !!combat,
       catalogOnly: !combat,
-      translationStatus: reviewedReference ? 'context-reviewed' : 'legacy-runtime',
+      translationStatus: reviewedReference ? 'context-reviewed' : 'pending-srd-translation',
       ...(reference ? { reference } : {}),
       ...(combat ? { combat } : {}),
     }

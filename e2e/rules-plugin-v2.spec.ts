@@ -7,8 +7,8 @@ const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
 const PLAYER2 = 'http://127.0.0.1:6175'
 const SESSION_KEY = 'stars-room-session:v1'
-const TEMPLATE_PATH = path.resolve('public/plugin-templates/phb-2014-compat-template.dndstars5e')
-const PLUGIN_ID = 'local.example.phb-2014-template'
+const TEMPLATE_PATH = path.resolve('e2e/fixtures/rules-plugin-v2.dndstars5e')
+const PLUGIN_ID = 'local.example.rules-api-v2-e2e'
 const FEATURE_ID = `${PLUGIN_ID}:guardian-spark`
 const SUBCLASS_ID = `${PLUGIN_ID}:astral-school`
 const RESOURCE_ID = `${PLUGIN_ID}:star-charges`
@@ -52,7 +52,7 @@ function character(id: string, name: string, roomId: string, memberId: string) {
     charClass: '战士',
     dnd5eClassId: 'fighter',
     level: 3,
-    background: '士兵',
+    background: '侍僧',
     experience: 900,
     reputation: 0,
     abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
@@ -218,8 +218,8 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
     return rules.requiredPlugins
   }, { timeout: 20_000 }).toEqual([requirement])
   await Promise.all([
-    expect(player.getByRole('heading', { name: 'PHB 2014 兼容模板（演示）' })).toBeVisible({ timeout: 25_000 }),
-    expect(player2.getByRole('heading', { name: 'PHB 2014 兼容模板（演示）' })).toBeVisible({ timeout: 25_000 }),
+    expect(player.getByRole('heading', { name: 'Rules API V2 E2E' })).toBeVisible({ timeout: 25_000 }),
+    expect(player2.getByRole('heading', { name: 'Rules API V2 E2E' })).toBeVisible({ timeout: 25_000 }),
   ])
   await Promise.all([
     expect(player.getByTestId('room-rules-status').getByText('本机已就绪')).toBeVisible({ timeout: 20_000 }),

@@ -1,10 +1,8 @@
-import { DND5E_SRD_MAGIC_ITEM_RULES_ZH } from './magicItemRulesZh.generated'
 import { DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED } from './magicItemRulesZh.reviewed.generated'
 import {
   DND5E_SRD_MAGIC_ITEM_CATALOG,
   DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES,
 } from './magicItems'
-import { DND5E_SRD_LEGACY_MAGIC_ITEM_SPELL_ALIASES } from './srdContent'
 import { DND5E_SRD_SPELL_CATALOG } from './spellCatalog'
 import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
@@ -18,7 +16,7 @@ export type Dnd5eSrdContentAuditIssueCode =
   | 'spell-classes'
   | 'spell-reference'
   | 'magic-item-reference'
-  | 'magic-item-spell-alias'
+  | 'unreviewed-runtime-body'
 
 export interface Dnd5eSrdContentAuditIssue {
   code: Dnd5eSrdContentAuditIssueCode
@@ -57,9 +55,10 @@ export function auditDnd5eSrdContentConsistency(): Dnd5eSrdContentAuditReport {
     }
 
     const runtime = spellbookById.get(catalog.id)
-    if (!runtime?.reference) {
-      issues.push({ code: 'spell-reference', id: catalog.id, message: '法术书缺少可显示的规则正文' })
-    } else {
+    if (runtime?.reference) {
+      if (runtime.translationStatus !== 'context-reviewed') {
+        issues.push({ code: 'unreviewed-runtime-body', id: catalog.id, message: '未审校法术正文进入了核心运行时' })
+      }
       if (runtime.reference.sourceName !== catalog.name) {
         issues.push({ code: 'spell-name', id: catalog.id, message: `正文名称“${runtime.reference.sourceName}”与目录名称不一致` })
       }
@@ -69,6 +68,8 @@ export function auditDnd5eSrdContentConsistency(): Dnd5eSrdContentAuditReport {
       if (runtime.reference.level !== catalog.level) {
         issues.push({ code: 'spell-level', id: catalog.id, message: `正文环级 ${runtime.reference.level} 与目录环级 ${catalog.level} 不一致` })
       }
+    } else if (runtime?.translationStatus !== 'pending-srd-translation') {
+      issues.push({ code: 'spell-reference', id: catalog.id, message: '待翻译法术没有明确标记为仅目录条目' })
     }
   }
 
@@ -117,8 +118,8 @@ export function auditDnd5eSrdContentConsistency(): Dnd5eSrdContentAuditReport {
   for (const template of DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES) {
     const id = template.id.replace(/^srd-5\.1:magic-item:/, '')
     const catalog = itemCatalogById.get(id)
-    if (!catalog || !DND5E_SRD_MAGIC_ITEM_RULES_ZH[id]) {
-      issues.push({ code: 'magic-item-reference', id, message: '发布模板、目录或规则正文之间缺少对应条目' })
+    if (!catalog) {
+      issues.push({ code: 'magic-item-reference', id, message: '发布模板没有对应的 SRD 5.1 目录条目' })
       continue
     }
     if (template.name !== catalog.name || template.englishName !== catalog.englishName) {
@@ -130,11 +131,9 @@ export function auditDnd5eSrdContentConsistency(): Dnd5eSrdContentAuditReport {
     if (template.source.book !== 'SRD 5.1' || template.source.license !== 'CC BY 4.0') {
       issues.push({ code: 'magic-item-reference', id, message: '发布模板缺少 SRD 5.1 / CC BY 4.0 来源标记' })
     }
-    const publishedText = `${template.rulesText}\n${JSON.stringify(template.use ?? {})}`
-    for (const alias of Object.keys(DND5E_SRD_LEGACY_MAGIC_ITEM_SPELL_ALIASES)) {
-      if (publishedText.includes(alias)) {
-        issues.push({ code: 'magic-item-spell-alias', id, message: `装备正文仍使用旧法术名“${alias}”` })
-      }
+    const reviewed = DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED[id]
+    if (reviewed && template.rulesText.includes('中文规则正文尚未完成')) {
+      issues.push({ code: 'magic-item-reference', id, message: '已审校魔法物品正文没有进入发布模板' })
     }
   }
 

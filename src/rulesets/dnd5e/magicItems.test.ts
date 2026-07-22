@@ -8,9 +8,7 @@ import {
   DND5E_SRD_MAGIC_SHIELD_TEMPLATES,
   DND5E_SRD_MAGIC_WEAPON_TEMPLATES,
 } from './magicItems'
-import { DND5E_SRD_MAGIC_ITEM_RULES_ZH } from './magicItemRulesZh.generated'
 import { DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED } from './magicItemRulesZh.reviewed.generated'
-import { DND5E_SRD_LEGACY_MAGIC_ITEM_SPELL_ALIASES } from './srdContent'
 
 describe('SRD 5.1 magic items', () => {
   it('publishes the complete base catalog, including the shield family missing from common API mirrors', () => {
@@ -24,21 +22,15 @@ describe('SRD 5.1 magic items', () => {
     expect(new Set(DND5E_SRD_MAGIC_ITEM_CATALOG.map((item) => item.id)).size).toBe(240)
   })
 
-  it('keeps a runtime rule body for every base catalog item while reviewed translations are migrated', () => {
-    expect(Object.keys(DND5E_SRD_MAGIC_ITEM_RULES_ZH)).toHaveLength(240)
+  it('keeps every catalog item distributable without loading unreviewed legacy prose', () => {
     expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES).toHaveLength(240)
     for (const template of DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES) {
       expect(template.rulesText.length, template.id).toBeGreaterThan(10)
-      expect(template.rulesText, template.id).not.toContain('该物品已收录于 SRD 5.1 魔法物品目录')
     }
-  })
-
-  it('shows the full Ring of Feather Falling rule instead of the catalog placeholder', () => {
-    const ring = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(
-      (item) => item.id === 'srd-5.1:magic-item:ring-of-feather-falling',
+    const pending = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:holy-avenger',
     )
-    expect(ring?.rulesText).toBe('佩戴此戒指时，如果你坠落，你会以每轮 60 尺的速度下降，并且不会因坠落受到伤害。')
-    expect(DND5E_SRD_MAGIC_ITEM_RULES_ZH['ring-of-feather-falling']?.sourcePage).toBeGreaterThan(200)
+    expect(pending?.rulesText).toContain('中文规则正文尚未完成')
   })
 
   it('uses reviewed SRD translations as an explicit partial overlay', () => {
@@ -51,25 +43,11 @@ describe('SRD 5.1 magic items', () => {
       .toContain('每天黎明时恢复 1d6 + 1 点')
   })
 
-  it('uses the established Chinese spell names in magic-item rules', () => {
-    const boots = DND5E_SRD_MAGIC_ITEM_RULES_ZH['boots-of-levitation']?.rulesText
-    const crystalBall = DND5E_SRD_MAGIC_ITEM_RULES_ZH['crystal-ball']?.rulesText
-
+  it('uses established Chinese spell names in reviewed magic-item rules', () => {
+    const boots = DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED['boots-of-levitation']?.rulesText
     expect(boots).toContain('浮空术')
     expect(boots).not.toContain('悬浮法术')
-    expect(crystalBall).toContain('施放暗示术（豁免 DC 17）')
-    expect(Object.values(DND5E_SRD_MAGIC_ITEM_RULES_ZH).map((entry) => entry.rulesText).join('\n')).not.toMatch(/暗示咒语|悬浮法术/)
-  })
-
-  it('normalizes legacy magic-item spell aliases through the canonical SRD spell-name table', () => {
-    const published = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.map((entry) => entry.rulesText).join('\n')
-    for (const alias of Object.keys(DND5E_SRD_LEGACY_MAGIC_ITEM_SPELL_ALIASES)) {
-      expect(published, alias).not.toContain(alias)
-    }
-    expect(published).toContain('鉴定术')
-    expect(published).toContain('异界传送')
-    expect(published).toContain('祈愿术')
-    expect(published).toContain('召唤元素生物')
+    expect(Object.values(DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED).flatMap((entry) => entry ? [entry.rulesText] : []).join('\n')).not.toMatch(/暗示咒语|悬浮法术/)
   })
 
   it('keeps rarity, attunement and automation metadata on distributable templates', () => {
