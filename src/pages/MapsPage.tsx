@@ -508,6 +508,10 @@ import {
 import { useMapsPlayerActionTransport } from './maps/useMapsPlayerActionTransport'
 import { settleDnd5eConcentrationChecks } from './maps/settleDnd5eCombatResult'
 import {
+  applyDnd5eCombatResultApplication as applyCoordinatedDnd5eCombatResult,
+  commitDnd5eCombatResult as commitCoordinatedDnd5eCombatResult,
+} from './maps/commitDnd5eCombatResult'
+import {
   buildMapExplorationUpdates,
   buildMapsFogGeometryProjection,
   resolveMapsFogGeometryState,
@@ -596,6 +600,25 @@ export default function MapsPage() {
   const updateChar = useCharacterStore((s) => s.update)
   const applyAuthorityCharacterUpdate = useCharacterStore((s) => s.applyAuthorityUpdate)
   const saveCharactersSharedNow = useCharacterStore((s) => s.saveSharedNow)
+  const applyDnd5eCombatApplication = (application: Dnd5eMapResultPlan) =>
+    applyCoordinatedDnd5eCombatResult({
+      application,
+      mapId: application.map.id,
+      applyCharacter: applyAuthorityCharacterUpdate,
+      applyToken: applyAuthorityTokenUpdate,
+    })
+  const commitDnd5eCombatApplication = (
+    application: Dnd5eMapResultPlan,
+    options: { forceSaveMap?: boolean; forceSaveCharacters?: boolean } = {},
+  ) => commitCoordinatedDnd5eCombatResult({
+    application,
+    mapId: application.map.id,
+    applyCharacter: applyAuthorityCharacterUpdate,
+    applyToken: applyAuthorityTokenUpdate,
+    saveCharacters: () => useCharacterStore.getState().saveSharedNow(),
+    saveMap: () => useMapStore.getState().saveSharedNow(),
+    ...options,
+  })
   const roomSession = useMemo(() => getRoomSession(), [])
   const isSpectator = roomSession?.role === 'spectator'
   const roomRulesSnapshot = useSyncExternalStore(
@@ -3122,26 +3145,32 @@ export default function MapsPage() {
     if (JSON.stringify(hazards.map.dnd5ePluginAreas ?? []) !== JSON.stringify(latestMap.dnd5ePluginAreas ?? [])) {
       updateMap(latestMap.id, { dnd5ePluginAreas: hazards.map.dnd5ePluginAreas })
     }
-    for (const tokenId of hazards.application.changedTokenIds) {
-      const next = hazards.application.map.tokens.find((token) => token.id === tokenId)
-      // This monster action is not wrapped in the player-action snapshot transaction.
-      // Publish the authoritative Headless result so player clients see it and a later
-      // shared-state refresh cannot snap the DM token back to its previous position.
-      if (next) {
-        const movementAnimation = tokenId === enemy.id
-          ? createTokenMovementAnimation({
+    const monsterMovementApplication = {
+      ...hazards.application,
+      map: {
+        ...hazards.application.map,
+        tokens: hazards.application.map.tokens.map((token) => {
+          if (token.id !== enemy.id || !hazards.application.changedTokenIds.includes(token.id)) return token
+          return {
+            ...token,
+            movementAnimation: createTokenMovementAnimation({
               id: `monster-move:${combatIdRef.current}:${roundRef.current}:${enemy.id}:${runtimeNow()}`,
               path: truncateTokenMovementPath(resolved.path, hazards.finalPosition),
               finalPosition: hazards.finalPosition,
               issuedAt: runtimeNow() + 100,
-            })
-          : undefined
-        updateToken(latestMap.id, tokenId, {
-          ...next,
-          ...(movementAnimation ? { movementAnimation } : {}),
-        })
-      }
+            }),
+          }
+        }),
+      },
     }
+    // Monster movement is outside the player-action snapshot transaction, so the
+    // coordinator intentionally uses the publishing store port for token changes.
+    applyCoordinatedDnd5eCombatResult({
+      application: monsterMovementApplication,
+      mapId: latestMap.id,
+      applyCharacter: applyAuthorityCharacterUpdate,
+      applyToken: updateToken,
+    })
     for (const log of hazards.logs) pushCombatLog(log, 'system')
     pushHeadlessCombatLog(
       `${enemy.label} 移动 ${resolved.distanceFeet ?? 0} 尺。`,
@@ -3354,14 +3383,7 @@ export default function MapsPage() {
       requestBardicInspiration: requestDnd5eBardicInspirationRoll,
       requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
     })
-    for (const characterId of resolved.application.changedCharacterIds) {
-      const next = resolved.application.characters.find((character) => character.id === characterId)
-      if (next) applyAuthorityCharacterUpdate(characterId, next)
-    }
-    for (const tokenId of resolved.application.changedTokenIds) {
-      const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-      if (next) applyAuthorityTokenUpdate(latestMap.id, tokenId, next)
-    }
+    applyDnd5eCombatApplication(resolved.application)
     for (const tokenId of new Set(resolved.result.events.flatMap((event) =>
       event.type === 'turn-resource-spent' && event.resource === 'reaction' ? [event.actorId] : [],
     ))) {
@@ -6218,14 +6240,7 @@ export default function MapsPage() {
       ))) {
         updateDnd5eTurnEconomy(tokenId, (economy) => spendDnd5eTurnResource(economy, 'reaction').economy)
       }
-      for (const characterId of application.changedCharacterIds) {
-        const next = application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of application.changedTokenIds) {
-        const next = application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(latestMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication(application)
       await resolveDnd5eBerserkerRetaliations(resolved.result, latestMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, latestMap.id)
       if (uncannyDodgeUsed) {
@@ -6293,14 +6308,7 @@ export default function MapsPage() {
             requestBardicInspiration: requestDnd5eBardicInspirationRoll,
             requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
           })
-          for (const characterId of returnedSettled.application.changedCharacterIds) {
-            const next = returnedSettled.application.characters.find((character) => character.id === characterId)
-            if (next) applyAuthorityCharacterUpdate(characterId, next)
-          }
-          for (const tokenId of returnedSettled.application.changedTokenIds) {
-            const next = returnedSettled.application.map.tokens.find((token) => token.id === tokenId)
-            if (next) applyAuthorityTokenUpdate(latestMap.id, tokenId, next)
-          }
+          applyDnd5eCombatApplication(returnedSettled.application)
           if (returnAccepted) {
             const returnAttack = returnedSettled.result.events.find((event) => event.type === 'attack-resolved')
             const returnDamage = returnedSettled.result.events.find((event) => event.type === 'damage-applied')
@@ -7032,14 +7040,7 @@ export default function MapsPage() {
         requestBardicInspiration: requestDnd5eBardicInspirationRoll,
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const characterId of settled.application.changedCharacterIds) {
-        const next = settled.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of settled.application.changedTokenIds) {
-        const next = settled.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(latestMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication(settled.application)
       applyDnd5eTurnAdvance(settled.result.state, roundRef.current)
       for (const save of settled.result.events.filter((event) => event.type === 'saving-throw-resolved')) {
         if (save.type !== 'saving-throw-resolved') continue
@@ -7382,14 +7383,12 @@ export default function MapsPage() {
       )
       return
     }
-    for (const changedCharacterId of resolved.application.changedCharacterIds) {
-      const next = resolved.application.characters.find((character) => character.id === changedCharacterId)
-      if (next) applyAuthorityCharacterUpdate(changedCharacterId, next)
-    }
-    for (const changedTokenId of resolved.application.changedTokenIds) {
-      const next = resolved.application.map.tokens.find((token) => token.id === changedTokenId)
-      if (next) updateToken(latestMap.id, changedTokenId, next)
-    }
+    applyCoordinatedDnd5eCombatResult({
+      application: resolved.application,
+      mapId: latestMap.id,
+      applyCharacter: applyAuthorityCharacterUpdate,
+      applyToken: updateToken,
+    })
     updateDnd5eTurnEconomy(
       actorToken.id,
       (economy) => spendDnd5eTurnResource(economy, 'reaction').economy,
@@ -7645,14 +7644,7 @@ export default function MapsPage() {
           characters: useCharacterStore.getState().characters,
           characterIdByCombatantId: snapshot.characterIdByCombatantId,
         })
-        for (const characterId of application.changedCharacterIds) {
-          const next = application.characters.find((character) => character.id === characterId)
-          if (next) applyAuthorityCharacterUpdate(characterId, next)
-        }
-        for (const tokenId of application.changedTokenIds) {
-          const next = application.map.tokens.find((token) => token.id === tokenId)
-          if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-        }
+        applyDnd5eCombatApplication(application)
         updateDnd5eTurnEconomy(
           action.actorTokenId,
           (current) => spendDnd5eTurnResource(
@@ -7727,14 +7719,12 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) updateToken(authorityMap.id, tokenId, next)
-      }
+      applyCoordinatedDnd5eCombatResult({
+        application: resolved.application,
+        mapId: authorityMap.id,
+        applyCharacter: applyAuthorityCharacterUpdate,
+        applyToken: updateToken,
+      })
       updateDnd5eTurnEconomy(
         action.actorTokenId,
         (economy) => spendDnd5eTurnResource(economy, 'action').economy,
@@ -7843,14 +7833,12 @@ export default function MapsPage() {
           }),
         }
       }
-      for (const characterId of basicApplication.changedCharacterIds) {
-        const next = basicApplication.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of basicApplication.changedTokenIds) {
-        const next = basicApplication.map.tokens.find((token) => token.id === tokenId)
-        if (next) updateToken(authorityMap.id, tokenId, next)
-      }
+      applyCoordinatedDnd5eCombatResult({
+        application: basicApplication,
+        mapId: authorityMap.id,
+        applyCharacter: applyAuthorityCharacterUpdate,
+        applyToken: updateToken,
+      })
       if (JSON.stringify(basicApplication.map.dnd5ePluginAreas ?? []) !== JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])) {
         applyAuthorityMapUpdate(authorityMap.id, { dnd5ePluginAreas: basicApplication.map.dnd5ePluginAreas ?? [] })
       }
@@ -7989,14 +7977,7 @@ export default function MapsPage() {
         requestBardicInspiration: requestDnd5eBardicInspirationRoll,
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const characterId of settled.application.changedCharacterIds) {
-        const next = settled.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of settled.application.changedTokenIds) {
-        const next = settled.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication(settled.application)
       const deathSave = settled.result.events.find((event) => event.type === 'death-save-resolved')
       if (deathSave?.type === 'death-save-resolved') {
         const outcome = deathSave.currentHp > 0
@@ -8114,14 +8095,7 @@ export default function MapsPage() {
         requestBardicInspiration: requestDnd5eBardicInspirationRoll,
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const characterId of settledEndTurn.application.changedCharacterIds) {
-        const next = settledEndTurn.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of settledEndTurn.application.changedTokenIds) {
-        const next = settledEndTurn.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication(settledEndTurn.application)
       if (settledEndTurn.result.events.some((event) =>
         event.type === 'class-state-changed' && event.stateKey === 'rage' && !event.active,
       )) pushCombatLog(`${dnd5eEndTurn.actorName} 的狂暴结束。`, 'system')
@@ -8406,14 +8380,7 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication(resolved.application)
       if (check.payload.spendAction) {
         updateDnd5eTurnEconomy(
           check.actorToken.id,
@@ -8529,18 +8496,10 @@ export default function MapsPage() {
         requestBardicInspiration: requestDnd5eBardicInspirationRoll,
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(latestMap.id, tokenId, next)
-      }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      await Promise.all([
-        useMapStore.getState().saveSharedNow(),
-        useCharacterStore.getState().saveSharedNow(),
-      ])
+      await commitDnd5eCombatApplication(resolved.application, {
+        forceSaveMap: true,
+        forceSaveCharacters: true,
+      })
       const spentTurnResource = resolved.result.events.find((event) =>
         event.type === 'turn-resource-spent' && (event.resource === 'action' || event.resource === 'bonusAction'),
       )
@@ -8636,14 +8595,12 @@ export default function MapsPage() {
           }
         }
       }
-      for (const characterId of areaApplication.changedCharacterIds) {
-        const next = areaApplication.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of areaApplication.changedTokenIds) {
-        const next = areaApplication.map.tokens.find((token) => token.id === tokenId)
-        if (next && !next.dnd5eSpellEffect) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication({
+        ...areaApplication,
+        changedTokenIds: areaApplication.changedTokenIds.filter((tokenId) =>
+          !areaApplication.map.tokens.find((token) => token.id === tokenId)?.dnd5eSpellEffect,
+        ),
+      })
       const latestMap = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
       applyAuthorityMapUpdate(authorityMap.id, {
         dnd5ePluginAreas: areaApplication.map.dnd5ePluginAreas ?? [],
@@ -8741,14 +8698,7 @@ export default function MapsPage() {
           requestBardicInspiration: requestDnd5eBardicInspirationRoll,
           requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
         })
-        for (const characterId of settledPluginSpell.application.changedCharacterIds) {
-          const next = settledPluginSpell.application.characters.find((character) => character.id === characterId)
-          if (next) applyAuthorityCharacterUpdate(characterId, next)
-        }
-        for (const tokenId of settledPluginSpell.application.changedTokenIds) {
-          const next = settledPluginSpell.application.map.tokens.find((token) => token.id === tokenId)
-          if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-        }
+        applyDnd5eCombatApplication(settledPluginSpell.application)
         const spentTurnResource = settledPluginSpell.result.events.find((event) =>
           event.type === 'turn-resource-spent' && (event.resource === 'action' || event.resource === 'bonusAction'),
         )
@@ -9877,14 +9827,7 @@ export default function MapsPage() {
           }),
         }
       }
-      for (const tokenId of spellApplication.changedTokenIds) {
-        const next = spellApplication.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
-      for (const characterId of spellApplication.changedCharacterIds) {
-        const next = spellApplication.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
+      applyDnd5eCombatApplication(spellApplication)
       const areasChanged = JSON.stringify(spellApplication.map.dnd5ePluginAreas ?? []) !==
         JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
       const effectTokensChanged = JSON.stringify(spellApplication.map.tokens.filter((token) => token.dnd5eSpellEffect)) !==
@@ -10174,14 +10117,15 @@ export default function MapsPage() {
         }
         summonedInitiativeEntries = [latestSummonPlan.plan.initiativeEntry]
       }
-      for (const characterId of pluginApplication.changedCharacterIds) {
-        const next = pluginApplication.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
       const latestMapBeforeCommit = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
       const addedTokens = pluginApplication.map.tokens.filter((token) =>
         !latestMapBeforeCommit.tokens.some((existing) => existing.id === token.id),
       )
+      const addedTokenIds = new Set(addedTokens.map((token) => token.id))
+      applyDnd5eCombatApplication({
+        ...pluginApplication,
+        changedTokenIds: pluginApplication.changedTokenIds.filter((tokenId) => !addedTokenIds.has(tokenId)),
+      })
       if (addedTokens.length > 0) {
         updateMap(authorityMap.id, {
           tokens: [
@@ -10190,12 +10134,6 @@ export default function MapsPage() {
               !latestMapBeforeCommit.tokens.some((existing) => existing.id === token.id)),
           ],
         })
-      }
-      for (const tokenId of pluginApplication.changedTokenIds) {
-        const next = pluginApplication.map.tokens.find((token) => token.id === tokenId)
-        if (next && !addedTokens.some((token) => token.id === tokenId)) {
-          applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-        }
       }
       if (
         JSON.stringify(pluginApplication.map.dnd5ePluginAreas ?? []) !==
@@ -10977,14 +10915,7 @@ export default function MapsPage() {
         requestBardicInspiration: requestDnd5eBardicInspirationRoll,
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
+      applyDnd5eCombatApplication(resolved.application)
       await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
       for (const tokenId of new Set(resolved.result.events.flatMap((event) =>
@@ -11231,14 +11162,7 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      for (const characterId of resolved.application.changedCharacterIds) {
-        const next = resolved.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication(resolved.application)
       if (feature.feature === 'action-surge') {
         dnd5eActionSurgeTurnKeysRef.current.add(turnKey)
         updateDnd5eTurnEconomy(action.actorTokenId, grantDnd5eActionSurge, liveRound)
@@ -11577,14 +11501,7 @@ export default function MapsPage() {
           requestBardicInspiration: requestDnd5eBardicInspirationRoll,
           requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
         })
-        for (const characterId of resolved.application.changedCharacterIds) {
-          const next = resolved.application.characters.find((character) => character.id === characterId)
-          if (next) applyAuthorityCharacterUpdate(characterId, next)
-        }
-        for (const tokenId of resolved.application.changedTokenIds) {
-          const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-          if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-        }
+        applyDnd5eCombatApplication(resolved.application)
         await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
         await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
         for (const tokenId of new Set(resolved.result.events.flatMap((event) =>
@@ -11671,14 +11588,7 @@ export default function MapsPage() {
           returnState = returnedSettled.result.state
           returnMap = returnedSettled.application.map
           returnCharacters = returnedSettled.application.characters
-          for (const characterId of returnedSettled.application.changedCharacterIds) {
-            const next = returnCharacters.find((character) => character.id === characterId)
-            if (next) applyAuthorityCharacterUpdate(characterId, next)
-          }
-          for (const tokenId of returnedSettled.application.changedTokenIds) {
-            const next = returnMap.tokens.find((token) => token.id === tokenId)
-            if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-          }
+          applyDnd5eCombatApplication(returnedSettled.application)
           if (returnAccepted) {
             const returnAttack = returnedSettled.result.events.find((event) => event.type === 'attack-resolved')
             const returnDamage = returnedSettled.result.events.find((event) => event.type === 'damage-applied')
@@ -11972,14 +11882,7 @@ export default function MapsPage() {
           requestBardicInspiration: requestDnd5eBardicInspirationRoll,
           requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
         })
-        for (const characterId of resolved.application.changedCharacterIds) {
-          const next = resolved.application.characters.find((character) => character.id === characterId)
-          if (next) applyAuthorityCharacterUpdate(characterId, next)
-        }
-        for (const tokenId of resolved.application.changedTokenIds) {
-          const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-          if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-        }
+        applyDnd5eCombatApplication(resolved.application)
         await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
         await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
         for (const tokenId of new Set(resolved.result.events.flatMap((event) =>
@@ -12522,17 +12425,15 @@ export default function MapsPage() {
       })
       const changedCharacterIds = new Set(resolved.application.changedCharacterIds)
       if (resourceSpentActor) changedCharacterIds.add(resourceSpentActor.id)
-      for (const characterId of changedCharacterIds) {
-        let next = resolved.application.characters.find((character) => character.id === characterId)
-        if (next && resourceSpentActor?.id === characterId) {
-          next = { ...next, dnd5eInventory: resourceSpentActor.dnd5eInventory }
-        }
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
-      for (const tokenId of resolved.application.changedTokenIds) {
-        const next = resolved.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-      }
+      applyDnd5eCombatApplication({
+        ...resolved.application,
+        changedCharacterIds: [...changedCharacterIds],
+        characters: resolved.application.characters.map((character) =>
+          resourceSpentActor?.id === character.id
+            ? { ...character, dnd5eInventory: resourceSpentActor.dnd5eInventory }
+            : character,
+        ),
+      })
       await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
       for (const tokenId of new Set(resolved.result.events.flatMap((event) =>
@@ -12622,14 +12523,7 @@ export default function MapsPage() {
             requestBardicInspiration: requestDnd5eBardicInspirationRoll,
             requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
           })
-          for (const characterId of returnedSettled.application.changedCharacterIds) {
-            const next = returnedSettled.application.characters.find((character) => character.id === characterId)
-            if (next) applyAuthorityCharacterUpdate(characterId, next)
-          }
-          for (const tokenId of returnedSettled.application.changedTokenIds) {
-            const next = returnedSettled.application.map.tokens.find((token) => token.id === tokenId)
-            if (next) applyAuthorityTokenUpdate(authorityMap.id, tokenId, next)
-          }
+          applyDnd5eCombatApplication(returnedSettled.application)
           if (returnAccepted) {
             const returnAttack = returnedSettled.result.events.find((event) => event.type === 'attack-resolved')
             const returnDamage = returnedSettled.result.events.find((event) => event.type === 'damage-applied')
@@ -12781,28 +12675,27 @@ export default function MapsPage() {
       if (JSON.stringify(hazards.map.dnd5ePluginAreas ?? []) !== JSON.stringify(latestMap.dnd5ePluginAreas ?? [])) {
         applyAuthorityMapUpdate(latestMap.id, { dnd5ePluginAreas: hazards.map.dnd5ePluginAreas })
       }
-      for (const characterId of hazards.application.changedCharacterIds) {
-        const next = hazards.application.characters.find((character) => character.id === characterId)
-        if (next) applyAuthorityCharacterUpdate(characterId, next)
-      }
       const traversedPath = truncateTokenMovementPath(finalMove.path, hazards.finalPosition)
-      for (const tokenId of hazards.application.changedTokenIds) {
-        const next = hazards.application.map.tokens.find((token) => token.id === tokenId)
-        if (next) {
-          const movementAnimation = tokenId === finalMove.actorToken.id
-            ? createTokenMovementAnimation({
+      applyDnd5eCombatApplication({
+        ...hazards.application,
+        map: {
+          ...hazards.application.map,
+          tokens: hazards.application.map.tokens.map((token) => {
+            if (token.id !== finalMove.actorToken.id || !hazards.application.changedTokenIds.includes(token.id)) {
+              return token
+            }
+            return {
+              ...token,
+              movementAnimation: createTokenMovementAnimation({
                 id: `player-move:${action.id}`,
                 path: traversedPath,
                 finalPosition: hazards.finalPosition,
                 issuedAt: runtimeNow() + 100,
-              })
-            : undefined
-          applyAuthorityTokenUpdate(latestMap.id, tokenId, {
-            ...next,
-            ...(movementAnimation ? { movementAnimation } : {}),
-          })
-        }
-      }
+              }),
+            }
+          }),
+        },
+      })
       const explorationFog = useFogStore.getState().maps.find((fog) => fog.mapId === latestMap.id)
       const explorationGeometry = useMapGeometryStore.getState().maps.find((geometry) => geometry.mapId === latestMap.id) ??
         createEmptyMapGeometry(latestMap.id, 0)
