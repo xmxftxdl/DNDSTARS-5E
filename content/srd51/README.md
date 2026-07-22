@@ -26,3 +26,13 @@ python scripts/generate-srd-spell-translations.py path\to\SRD_CC_v5.1.pdf
 审校结果保存为 `content/srd51/spells.zh.reviewed.json`。审校批次可追加 `--emit-reviewed` 生成运行时覆盖层；全部 319 项完成后才可追加 `--emit` 生成完整发布数据。旧的 PHB PDF 提取器已从仓库移除，不能再用于核心包。
 
 当前覆盖进度由工作表和运行时测试共同核对；不能用旧译文补齐 `reviewedBy`，也不能把“已有中文正文”误报成“已完成 SRD 语境审校”。
+
+运行发布数据一致性审计：
+
+```powershell
+npm run audit:srd-content
+```
+
+该审计会同时核对法术目录、法术书展示正文、Headless 法术定义、魔法物品发布模板和装备正文中的法术专名。未完成语境审校的条目会计入待办数量，但不会被误判为已审校；目录缺项、环级/职业归属分叉、正文标题分叉和旧法术名重新进入发布模板则会直接失败。
+
+截至 2026-07-21，运行时目录包含 319 个 SRD 法术（其中 65 个已接入 Headless、11 个中文正文已完成语境审校）与 240 件 SRD 魔法物品（其中 5 件中文正文已完成语境审校）。其余条目仍明确使用 `legacy-runtime`/待审校路径，不属于商业发布完成状态。

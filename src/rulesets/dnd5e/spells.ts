@@ -235,7 +235,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '进行一次远程法术攻击。命中造成4d6光耀伤害；在你的下一回合结束前，下一次对该目标的攻击检定具有优势。每升一环增加1d6伤害。',
   },
   {
-    id: 'acid-arrow', name: '马友夫强酸箭', englishName: 'Acid Arrow', level: 2, school: '塑能',
+    id: 'acid-arrow', name: '强酸箭', englishName: 'Acid Arrow', level: 2, school: '塑能',
     classes: ['wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'spell-attack',
     dice: { count: 4, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', spellAttackMissDamage: 'half',
     delayedDamage: {

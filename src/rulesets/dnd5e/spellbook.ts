@@ -355,7 +355,16 @@ export function dnd5eSpellbookEntries(imported: readonly Dnd5eImportedSpell[]): 
   const core = DND5E_SRD_SPELL_CATALOG.map((catalog): Dnd5eSpellbookEntry => {
     const combat = combatById.get(catalog.id)
     const reviewedReference = DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED[catalog.id]
-    const reference = reviewedReference ?? DND5E_SRD_SPELL_DESCRIPTIONS_ZH[catalog.id]
+    const sourceReference = reviewedReference ?? DND5E_SRD_SPELL_DESCRIPTIONS_ZH[catalog.id]
+    // 旧运行正文可能保留了非 SRD 的专有法术名。正文迁移完成前，展示层仍以
+    // SRD 5.1 目录为唯一名称来源，避免法术书、Headless 与物品引用出现三套名称。
+    const reference = sourceReference
+      ? {
+          ...sourceReference,
+          sourceName: catalog.name,
+          sourceEnglishName: catalog.englishName,
+        }
+      : undefined
     return {
       id: catalog.id,
       name: catalog.name,

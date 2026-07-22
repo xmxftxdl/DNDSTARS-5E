@@ -27,7 +27,7 @@ const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
       '',
       '检定：进行一次 DC 15 智力检定。',
       '',
-      '成功：你通过护符施展“异界传送术”。',
+      '成功：你通过护符施展“异界传送”。',
       '',
       '失败：你、距你 15 尺内的每个生物和每件物件一同前往随机目的地。掷 1d100：',
       '• 01–60：抵达你所指定位面上的一个随机地点。',
@@ -38,7 +38,7 @@ const CATALOG_RULE_OVERRIDES: Readonly<Record<string, CatalogRuleOverride>> = {
       consumeQuantity: 0,
       effect: {
         kind: 'dm-adjudication',
-        adjudication: '位面护符：先处理 DC 15 智力检定。成功时按“异界传送术”裁定；失败时掷 1d100，并处理佩戴者周围 15 尺内所有生物、物件及随机目的地。',
+        adjudication: '位面护符：先处理 DC 15 智力检定。成功时按“异界传送”裁定；失败时掷 1d100，并处理佩戴者周围 15 尺内所有生物、物件及随机目的地。',
       },
     },
   },

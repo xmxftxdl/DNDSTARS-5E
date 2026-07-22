@@ -17,6 +17,7 @@ const LEGACY_MAGIC_ITEM_SPELL_ALIASES: Readonly<Record<string, string>> = {
   '位面移动法术': 'plane-shift',
   '平面移动咒语': 'plane-shift',
   '位面转移法术': 'plane-shift',
+  '异界传送术': 'plane-shift',
   '门咒语': 'gate',
   '识别咒语': 'identify',
   '移除诅咒法术': 'remove-curse',
