@@ -28,6 +28,8 @@ export function resolveDnd5eMonsterMapMove(input: {
     allowOpenUnlockedDoors: true,
     canClimb: (monster.speed.climb ?? 0) > 0,
     canSwim: (monster.speed.swim ?? 0) > 0,
+    canFly: (monster.speed.fly ?? 0) > 0 && (actorToken.elevationFeet ?? 0) > 0,
+    targetElevationFeet: (actorToken.elevationFeet ?? 0) > 0 ? actorToken.elevationFeet : undefined,
     additionalDifficultTerrainMultiplier: (token, position) =>
       dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>
@@ -79,6 +81,7 @@ export function resolveDnd5eMonsterMapMove(input: {
     actionState,
     {
       type: 'move', actorId: actorToken.id, to: input.to, distance: distanceFeet, movementCost: path.movementCostFeet,
+      toElevationFeet: path.elevationsFeet.at(-1) ?? actorToken.elevationFeet ?? 0,
       standFromProne: actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())),
     },
   )

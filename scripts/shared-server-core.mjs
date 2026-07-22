@@ -2371,7 +2371,10 @@ function validGeometryEntity(entity, kind) {
   return entity.points.length >= 3 && entity.points.length <= 2_048 &&
     ['none', 'half', 'three-quarters', 'total'].includes(entity.cover) &&
     (entity.terrainCostMultiplier == null || (Number.isFinite(entity.terrainCostMultiplier) && entity.terrainCostMultiplier >= 1 && entity.terrainCostMultiplier <= 10)) &&
-    (entity.traversal == null || ['ground', 'climb', 'swim'].includes(entity.traversal))
+    (entity.traversal == null || ['ground', 'climb', 'swim'].includes(entity.traversal)) &&
+    (entity.terrainElevationFeet == null || (
+      Number.isFinite(entity.terrainElevationFeet) && entity.terrainElevationFeet >= -1_000 && entity.terrainElevationFeet <= 10_000
+    ))
 }
 
 function validGeometryLight(entity) {

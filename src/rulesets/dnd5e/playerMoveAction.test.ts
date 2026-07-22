@@ -88,6 +88,36 @@ describe('D&D 5e player map movement', () => {
     })).toEqual({ ok: false, reason: 'insufficient-movement' })
   })
 
+  it('recomputes ground elevation from DM geometry and blocks forged steps above 10 feet', () => {
+    const terrain = {
+      mapId: map.id,
+      walls: [], doors: [], windows: [], lights: [],
+      obstacles: [{
+        id: 'ledge', kind: 'obstacle' as const, label: '高台',
+        points: [{ x: 10, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 }, { x: 10, y: 10 }],
+        blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none' as const,
+        baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 15, createdAt: 1,
+      }],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' as const },
+      updatedAt: 1,
+    }
+    setMapGeometryRuntime([terrain])
+    const input = {
+      action: { ...action, targetElevationFeet: 999 },
+      map,
+      characters: [character()],
+      initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 }],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    }
+    expect(prepareDnd5ePlayerMove(input)).toEqual({ ok: false, reason: 'movement-blocked' })
+    terrain.obstacles[0].terrainElevationFeet = 10
+    setMapGeometryRuntime([terrain])
+    const prepared = prepareDnd5ePlayerMove(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.toElevationFeet).toBe(10)
+  })
+
   it('half-speed careful movement consumes twice the traversed distance in Headless', () => {
     const prepared = prepareDnd5ePlayerMove({
       action: { ...action, dnd5eCarefulMovement: true },

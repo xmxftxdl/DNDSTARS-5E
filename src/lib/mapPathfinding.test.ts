@@ -62,6 +62,69 @@ describe('map geometry pathfinding', () => {
       .toMatchObject({ distanceFeet: 10, movementCostFeet: 10 })
   })
 
+  it('does not charge ground difficult terrain to a creature flying above its height interval', () => {
+    const flyer = token({ elevationFeet: 50 })
+    const map = battleMap({ height: 50, tokens: [flyer] })
+    const state = geometry()
+    state.obstacles.push({
+      id: 'mud', kind: 'obstacle', label: '泥泞',
+      points: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 0,
+      terrainCostMultiplier: 2, traversal: 'ground', createdAt: 1,
+    })
+    expect(findMapGeometryPath({
+      map,
+      geometry: state,
+      token: flyer,
+      to: { x: 125, y: 25 },
+      canFly: true,
+      targetElevationFeet: 50,
+    })).toMatchObject({ distanceFeet: 10, movementCostFeet: 10 })
+  })
+
+  it('tracks terrain elevation per path node and rejects non-flying steps above 10 feet', () => {
+    const map = battleMap({ height: 50 })
+    const state = geometry()
+    state.obstacles.push({
+      id: 'ledge', kind: 'obstacle', label: '高台',
+      points: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 0, terrainElevationFeet: 15, createdAt: 1,
+    })
+    expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 } }))
+      .toBeUndefined()
+    state.obstacles[0].terrainElevationFeet = 10
+    expect(findMapGeometryPath({ map, geometry: state, token: map.tokens[0], to: { x: 125, y: 25 } }))
+      .toMatchObject({ elevationsFeet: [0, 10, 0] })
+  })
+
+  it('uses the declared target elevation along a three-dimensional flight path', () => {
+    const map = battleMap({ height: 50 })
+    const state = geometry()
+    state.walls.push({
+      id: 'wall', kind: 'wall', label: '墙', points: [{ x: 75, y: 0 }, { x: 75, y: 50 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    expect(findMapGeometryPath({
+      map,
+      geometry: state,
+      token: map.tokens[0],
+      to: { x: 125, y: 25 },
+      canFly: true,
+      targetElevationFeet: 40,
+    })).toMatchObject({ elevationsFeet: [0, 20, 40] })
+    expect(findMapGeometryPath({
+      map,
+      geometry: state,
+      token: map.tokens[0],
+      to: { x: 125, y: 25 },
+      canFly: true,
+      targetElevationFeet: 5,
+    })).toBeUndefined()
+  })
+
   it('lets authoritative monster movement plan through closed unlocked doors but never locked doors', () => {
     const map = battleMap({ height: 50 })
     const state = geometry()

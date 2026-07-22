@@ -10,6 +10,7 @@ import {
   mapGeometryMovementBlocked,
   mapGeometrySegments,
   mapGeometryVisibilityPolygon,
+  mapGeometryVisibleTargets,
   normalizeSharedMapGeometry,
   type MapGeometryState,
 } from './mapGeometry'
@@ -55,6 +56,23 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({
       geometry: g, map, viewer: token('a', 50, 50), target: token('low', 150, 50, { elevationFeet: 10 }),
     })).toBe(false)
+  })
+
+  it('keeps elevated authoritative targets visible even when the ground-plane mask stops at a wall', () => {
+    const g = geometry()
+    const viewer = token('viewer', 50, 50)
+    const groundTarget = token('ground', 150, 50, { type: 'enemy' })
+    const flyingTarget = token('flying', 150, 50, { type: 'enemy', elevationFeet: 20 })
+    const visible = mapGeometryVisibleTargets({
+      geometry: g,
+      map: { ...map, tokens: [viewer, groundTarget, flyingTarget] },
+      viewers: [viewer],
+    })
+    expect(visible.map((target) => target.id)).toContain('flying')
+    expect(visible.map((target) => target.id)).not.toContain('ground')
+    const polygon = mapGeometryVisibilityPolygon({ geometry: g, map, viewer })
+    expect(Math.max(...polygon.filter((point) => Math.abs(point.y - viewer.y) < 1).map((point) => point.x)))
+      .toBeLessThanOrEqual(100.001)
   })
 
   it('treats open doors as passable and closed or locked doors as blocking', () => {
@@ -274,6 +292,41 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer: { ...viewer, canSeeMagicalDarkness: true }, target })).toBe(true)
   })
 
+  it('applies light blockers and magical darkness only across matching height intervals', () => {
+    const g = geometry()
+    g.vision.ambientLight = 'darkness'
+    const highTorch = token('high-torch', 50, 50, {
+      elevationFeet: 20,
+      lightSource: { enabled: true, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fff' },
+    })
+    const highTarget = token('high-target', 150, 50, { type: 'enemy', elevationFeet: 20 })
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g,
+      map: { ...map, tokens: [highTorch, highTarget] },
+      point: highTarget,
+      elevationFeet: 20,
+    })).toBe('bright')
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g,
+      map: { ...map, tokens: [{ ...highTorch, elevationFeet: 0 }, highTarget] },
+      point: { x: highTarget.x, y: highTarget.y },
+      elevationFeet: 0,
+    })).toBe('darkness')
+
+    g.vision.ambientLight = 'bright'
+    g.walls = []
+    g.obstacles = [{
+      id: 'ground-darkness', kind: 'obstacle', label: '地面黑暗', magicalDarkness: true,
+      points: [{ x: 100, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 100, y: 100 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 20, createdAt: 1,
+    }]
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map, point: highTarget, elevationFeet: 0 }))
+      .toBe('magical-darkness')
+    expect(mapGeometryIlluminationAtPoint({ geometry: g, map, point: highTarget, elevationFeet: 50 }))
+      .toBe('bright')
+  })
+
   it('supports independent scene lights with wall shadows and legacy geometry migration', () => {
     const g = geometry()
     g.vision.ambientLight = 'darkness'
@@ -296,6 +349,7 @@ describe('map geometry', () => {
 
   it('migrates V1 openings to explicit wall attachments and always emits Schema V2', () => {
     const g = geometry()
+    g.obstacles[0].terrainElevationFeet = 15
     g.doors = [{
       id: 'legacy-door', kind: 'door', label: '旧门', points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
       state: 'closed', secret: false, blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
@@ -308,6 +362,12 @@ describe('map geometry', () => {
       parentWallSegmentIndex: 0,
       points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
     })
+    expect(normalized?.maps[0].obstacles[0].terrainElevationFeet).toBe(15)
+    expect(normalizeSharedMapGeometry({
+      schemaVersion: 2,
+      maps: [{ ...g, obstacles: [{ ...g.obstacles[0], terrainElevationFeet: 20_000 }] }],
+      updatedAt: 2,
+    })).toBeUndefined()
     expect(normalizeSharedMapGeometry({ schemaVersion: '1', maps: [g], updatedAt: 2 })).toBeUndefined()
     expect(normalizeSharedMapGeometry({ schemaVersion: 3, maps: [g], updatedAt: 2 })).toBeUndefined()
   })

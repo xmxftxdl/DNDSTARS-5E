@@ -91,6 +91,7 @@ export function mapExplorationPolygonsForTokenPath(input: {
   geometry: MapGeometryState
   token: Token
   path: readonly MapGeometryPoint[]
+  elevationsFeet?: readonly number[]
   forceEnabled?: boolean
   fallbackRangeFeet?: number
 }): MapGeometryPoint[][] {
@@ -98,11 +99,16 @@ export function mapExplorationPolygonsForTokenPath(input: {
     ? input.path
     : [{ x: input.token.x, y: input.token.y }]
   const signatures = new Set<string>()
-  return positions.flatMap((position) => {
+  return positions.flatMap((position, index) => {
     const polygon = mapGeometryVisibilityPolygon({
       geometry: input.geometry,
       map: input.map,
-      viewer: { ...input.token, x: position.x, y: position.y },
+      viewer: {
+        ...input.token,
+        x: position.x,
+        y: position.y,
+        elevationFeet: input.elevationsFeet?.[index] ?? input.token.elevationFeet,
+      },
       forceEnabled: input.forceEnabled,
       fallbackRangeFeet: input.fallbackRangeFeet,
     })

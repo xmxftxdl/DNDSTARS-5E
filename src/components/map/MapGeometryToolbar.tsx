@@ -37,7 +37,7 @@ const TOOL_LABELS: Record<MapGeometryTool, string> = {
   wall: '墙',
   door: '门',
   window: '窗户',
-  obstacle: '障碍物',
+  obstacle: '区域/障碍',
   light: '光源',
   delete: '删除',
 }
@@ -507,6 +507,13 @@ export default function MapGeometryToolbar({
                 value={selectedEntity.terrainCostMultiplier ?? 1}
                 onChange={(terrainCostMultiplier) => updateEntity(mapId, selectedEntity.id, {
                   terrainCostMultiplier: Math.max(1, terrainCostMultiplier),
+                })}
+              />
+              <NumberField
+                label="地形标高"
+                value={selectedEntity.terrainElevationFeet ?? 0}
+                onChange={(terrainElevationFeet) => updateEntity(mapId, selectedEntity.id, {
+                  terrainElevationFeet: Math.max(-1_000, Math.min(10_000, terrainElevationFeet)),
                 })}
               />
               <select

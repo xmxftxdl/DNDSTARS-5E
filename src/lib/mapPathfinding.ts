@@ -6,15 +6,19 @@ import {
   type GridCell,
 } from './gridCombat'
 import {
+  mapGeometryObstacleAffectsElevation,
   mapGeometryMovementBlocked,
+  mapGeometryPlacementBlocked,
   mapGeometryPointInPolygon,
   mapGeometrySegmentsIntersect,
+  mapGeometryTerrainElevationAtPoint,
   type MapGeometryState,
 } from './mapGeometry'
 import type { BattleMap, Token } from '../store/maps'
 
 export interface MapPathResult {
   points: Array<{ x: number; y: number }>
+  elevationsFeet: number[]
   cells: GridCell[]
   distanceFeet: number
   movementCostFeet: number
@@ -25,6 +29,7 @@ interface PathNode {
   cell: GridCell
   cost: number
   estimate: number
+  elevationFeet: number
   previous?: string
 }
 
@@ -39,11 +44,12 @@ function key(cell: GridCell) {
 function terrainMultiplierAtPoint(
   geometry: MapGeometryState | undefined,
   point: { x: number; y: number },
-  options: { canClimb?: boolean; canSwim?: boolean },
+  options: { canClimb?: boolean; canSwim?: boolean; elevationFeet: number; tokenHeightFeet: number },
 ): number {
   let multiplier = 1
   for (const obstacle of geometry?.obstacles ?? []) {
     if (!mapGeometryPointInPolygon(point, obstacle.points)) continue
+    if (!mapGeometryObstacleAffectsElevation(obstacle, options.elevationFeet, options.tokenHeightFeet)) continue
     const terrainMultiplier = Math.max(1, obstacle.terrainCostMultiplier ?? 1)
     const traversalMultiplier = obstacle.traversal === 'climb' && !options.canClimb
       ? 2
@@ -62,6 +68,9 @@ export function findMapGeometryPath(input: {
   to: { x: number; y: number }
   canClimb?: boolean
   canSwim?: boolean
+  canFly?: boolean
+  targetElevationFeet?: number
+  maximumTerrainStepFeet?: number
   allowOpenUnlockedDoors?: boolean
   ignoreTokens?: boolean
   allowOccupiedDestination?: boolean
@@ -79,16 +88,39 @@ export function findMapGeometryPath(input: {
   const rows = Math.max(1, Math.ceil(input.map.height / gridSize))
   const start = tokenAnchorCellFromPixel(input.token.x, input.token.y, input.token, input.map)
   const destination = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
+  const startElevation = Number.isFinite(input.token.elevationFeet) ? input.token.elevationFeet! : 0
+  const targetElevation = Number.isFinite(input.targetElevationFeet)
+    ? Math.max(-1_000, Math.min(10_000, input.targetElevationFeet!))
+    : input.canFly ? startElevation : undefined
+  const maximumTerrainStepFeet = Math.max(0, input.maximumTerrainStepFeet ?? 10)
+  const tokenHeightFeet = Math.max(5, Math.max(1, input.token.size) * 5)
   const pathGeometry = input.allowOpenUnlockedDoors && input.geometry
     ? {
         ...input.geometry,
         doors: input.geometry.doors.map((door) => door.state === 'closed' ? { ...door, state: 'open' as const } : door),
       }
     : input.geometry
+  const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
+  const destinationPosition = tokenCenterForAnchorCell(destination, input.token, input.map)
+  const routeDx = destinationPosition.x - startPosition.x
+  const routeDy = destinationPosition.y - startPosition.y
+  const routeLengthSquared = routeDx * routeDx + routeDy * routeDy
+  const elevationAtPosition = (position: { x: number; y: number }, isDestination = false) => {
+    if (input.canFly && targetElevation != null) {
+      const progress = routeLengthSquared <= 1e-6
+        ? 1
+        : Math.max(0, Math.min(1, (
+            (position.x - startPosition.x) * routeDx + (position.y - startPosition.y) * routeDy
+          ) / routeLengthSquared))
+      return startElevation + (targetElevation - startElevation) * progress
+    }
+    const terrainElevation = mapGeometryTerrainElevationAtPoint(pathGeometry, position)
+    return isDestination && targetElevation != null ? targetElevation : terrainElevation
+  }
   const occupied = input.ignoreTokens ? new Set<string>() : occupiedCells(input.map.tokens, input.map, input.token.id)
   const nodes = new Map<string, PathNode>()
   const open = new Set<string>([key(start)])
-  nodes.set(key(start), { cell: start, cost: 0, estimate: 0 })
+  nodes.set(key(start), { cell: start, cost: 0, estimate: 0, elevationFeet: startElevation })
   const maximumVisited = Math.max(100, input.maximumVisited ?? 20_000)
   let visited = 0
 
@@ -107,12 +139,27 @@ export function findMapGeometryPath(input: {
     const current = nodes.get(currentKey)!
     if (current.cell.col === destination.col && current.cell.row === destination.row) {
       const cells: GridCell[] = []
+      const elevationsFeet: number[] = []
       let cursor: PathNode | undefined = current
       while (cursor) {
         cells.push(cursor.cell)
+        elevationsFeet.push(cursor.elevationFeet)
         cursor = cursor.previous ? nodes.get(cursor.previous) : undefined
       }
       cells.reverse()
+      elevationsFeet.reverse()
+      if (cells.length === 1) {
+        const finalElevation = elevationAtPosition(destinationPosition, true)
+        if (!input.canFly && Math.abs(finalElevation - startElevation) > maximumTerrainStepFeet) return undefined
+        if (mapGeometryPlacementBlocked({
+          geometry: pathGeometry,
+          map: input.map,
+          token: input.token,
+          at: destinationPosition,
+          elevationFeet: finalElevation,
+        }).blocked) return undefined
+        elevationsFeet[0] = finalElevation
+      }
       const points = cells.map((cell) => tokenCenterForAnchorCell(cell, input.token, input.map))
       let distanceFeet = 0
       const doorsToOpen = new Set<string>()
@@ -126,7 +173,7 @@ export function findMapGeometryPath(input: {
           }
         }
       }
-      return { points, cells, distanceFeet, movementCostFeet: Math.ceil(current.cost), doorsToOpen: [...doorsToOpen] }
+      return { points, elevationsFeet, cells, distanceFeet, movementCostFeet: Math.ceil(current.cost), doorsToOpen: [...doorsToOpen] }
     }
 
     const currentPosition = tokenCenterForAnchorCell(current.cell, input.token, input.map)
@@ -136,10 +183,24 @@ export function findMapGeometryPath(input: {
       const position = tokenCenterForAnchorCell(next, input.token, input.map)
       const placed = { ...input.token, ...position }
       const isDestination = next.col === destination.col && next.row === destination.row
+      const nextElevation = elevationAtPosition(position, isDestination)
+      if (!input.canFly && Math.abs(nextElevation - current.elevationFeet) > maximumTerrainStepFeet) continue
       if ((!isDestination || !input.allowOccupiedDestination) &&
         tokenOccupiedCellsAt(placed, input.map, placed).some((cell) => occupied.has(key(cell)))) continue
       if (mapGeometryMovementBlocked({
-        geometry: pathGeometry, map: input.map, token: { ...input.token, ...currentPosition }, to: position,
+        geometry: pathGeometry,
+        map: input.map,
+        token: { ...input.token, ...currentPosition, elevationFeet: current.elevationFeet },
+        to: position,
+        fromElevationFeet: current.elevationFeet,
+        toElevationFeet: nextElevation,
+      }).blocked) continue
+      if (isDestination && mapGeometryPlacementBlocked({
+        geometry: pathGeometry,
+        map: input.map,
+        token: placed,
+        at: position,
+        elevationFeet: nextElevation,
       }).blocked) continue
       if (direction.dc !== 0 && direction.dr !== 0) {
         // A diagonal may not squeeze through the corner between two occupied
@@ -157,17 +218,26 @@ export function findMapGeometryPath(input: {
         if (occupiedCorners.every(Boolean)) continue directionLoop
         for (const cornerCell of cornerCells) {
           const cornerPosition = tokenCenterForAnchorCell(cornerCell, input.token, input.map)
-          const cornerToken = { ...input.token, ...cornerPosition }
+          const cornerElevation = elevationAtPosition(cornerPosition)
+          if (!input.canFly && (
+            Math.abs(cornerElevation - current.elevationFeet) > maximumTerrainStepFeet ||
+            Math.abs(nextElevation - cornerElevation) > maximumTerrainStepFeet
+          )) continue directionLoop
+          const cornerToken = { ...input.token, ...cornerPosition, elevationFeet: cornerElevation }
           if (mapGeometryMovementBlocked({
             geometry: pathGeometry,
             map: input.map,
-            token: { ...input.token, ...currentPosition },
+            token: { ...input.token, ...currentPosition, elevationFeet: current.elevationFeet },
             to: cornerPosition,
+            fromElevationFeet: current.elevationFeet,
+            toElevationFeet: cornerElevation,
           }).blocked || mapGeometryMovementBlocked({
             geometry: pathGeometry,
             map: input.map,
             token: cornerToken,
             to: position,
+            fromElevationFeet: cornerElevation,
+            toElevationFeet: nextElevation,
           }).blocked) {
             continue directionLoop
           }
@@ -175,7 +245,11 @@ export function findMapGeometryPath(input: {
       }
       const stepDistanceFeet = feetPerCell
       const difficultTerrainMultiplier = Math.max(
-        terrainMultiplierAtPoint(pathGeometry, position, input),
+        terrainMultiplierAtPoint(pathGeometry, position, {
+          ...input,
+          elevationFeet: nextElevation,
+          tokenHeightFeet,
+        }),
         input.additionalDifficultTerrainMultiplier?.(input.token, position) ?? 1,
       )
       const speedCostMultiplier = Math.max(
@@ -194,6 +268,7 @@ export function findMapGeometryPath(input: {
         // Eight-direction grid movement costs one square per step in this ruleset,
         // so Chebyshev distance is the admissible A* heuristic.
         estimate: Math.max(Math.abs(destination.col - next.col), Math.abs(destination.row - next.row)) * feetPerCell,
+        elevationFeet: nextElevation,
         previous: currentKey,
       })
       open.add(nextKey)

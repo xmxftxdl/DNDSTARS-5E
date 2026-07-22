@@ -4,7 +4,7 @@ import { snapTokenToGridCenter } from '../../lib/gridCombat'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import { mapGeometryRuntimeForMap, mapGeometryTerrainElevationAtPoint } from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import { dnd5eEffectiveSpeed, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
@@ -32,6 +32,7 @@ export interface PreparedDnd5ePlayerMove {
   toElevationFeet: number
   fallingDamageDice: number
   path: Array<{ x: number; y: number }>
+  pathElevationsFeet: number[]
   standFromProne: boolean
   state: Dnd5eHeadlessCombatState
   characterIdByCombatantId: Record<string, string>
@@ -56,10 +57,21 @@ export function prepareDnd5ePlayerMove(input: {
   if (isMovementLocked(actor.conditions)) return { ok: false, reason: 'movement-locked' }
 
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const traversalMode = action.dnd5eTraversalMode ?? 'walk'
+  const requestedElevationFeet = Number.isFinite(action.targetElevationFeet)
+    ? Math.max(-1_000, Math.min(10_000, Math.floor(action.targetElevationFeet!)))
+    : actorToken.elevationFeet ?? 0
+  const toElevationFeet = traversalMode === 'walk' || traversalMode === 'swim'
+    ? mapGeometryTerrainElevationAtPoint(geometry, to)
+    : requestedElevationFeet
   const path = findMapGeometryPath({
-    geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to,
-    canClimb: action.dnd5eTraversalMode === 'climb' || action.dnd5eTraversalMode === 'fly',
-    canSwim: action.dnd5eTraversalMode === 'swim',
+    geometry, map: input.map, token: actorToken, to,
+    canClimb: traversalMode === 'climb' || traversalMode === 'fly',
+    canSwim: traversalMode === 'swim',
+    canFly: traversalMode === 'fly',
+    targetElevationFeet: toElevationFeet,
+    maximumTerrainStepFeet: traversalMode === 'fall' ? 10_000 : 10,
     additionalDifficultTerrainMultiplier: (token, position) =>
       dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>
@@ -80,14 +92,11 @@ export function prepareDnd5ePlayerMove(input: {
   const distanceFeet = path.distanceFeet
   const isProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const standFromProne = isProne && action.dnd5eStandFromProne !== false
-  const toElevationFeet = Number.isFinite(action.targetElevationFeet)
-    ? Math.max(-1_000, Math.min(10_000, Math.floor(action.targetElevationFeet!)))
-    : actorToken.elevationFeet ?? 0
   const traversal = dnd5eTraversalMovementCost({
     distanceFeet: path.distanceFeet,
     baseMovementCostFeet: path.movementCostFeet,
     elevationGainFeet: Math.max(0, toElevationFeet - (actorToken.elevationFeet ?? 0)),
-    mode: action.dnd5eTraversalMode ?? 'walk',
+    mode: traversalMode,
     profile: {
       strengthScore: actorCombatant.abilities.str,
       strengthModifier: Math.floor((actorCombatant.abilities.str - 10) / 2),
@@ -123,10 +132,11 @@ export function prepareDnd5ePlayerMove(input: {
       distanceFeet,
       movementCostFeet,
       toElevationFeet,
-      fallingDamageDice: action.dnd5eTraversalMode === 'fall'
+      fallingDamageDice: traversalMode === 'fall'
         ? dnd5eFallingDamageDice(Math.max(0, (actorToken.elevationFeet ?? 0) - toElevationFeet))
         : 0,
       path: path.points,
+      pathElevationsFeet: path.elevationsFeet,
       standFromProne,
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       characterIdByCombatantId: snapshot.characterIdByCombatantId,

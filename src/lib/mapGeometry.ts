@@ -90,6 +90,8 @@ export interface MapGeometryObstacle extends MapGeometryHeight, MapGeometryBlock
   cover: MapGeometryCover
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
+  /** 多边形区域内可站立地面的绝对标高；与障碍物阻挡体积的底高分开。 */
+  terrainElevationFeet?: number
   /** 多边形内部压制非魔法光源；普通黑暗视觉无法看穿。 */
   magicalDarkness?: boolean
   darknessSpellLevel?: number
@@ -130,6 +132,7 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   cover?: MapGeometryCover
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
+  terrainElevationFeet?: number
   magicalDarkness?: boolean
   darknessSpellLevel?: number
   enabled?: boolean
@@ -372,12 +375,14 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
     if (!points || !['none', 'half', 'three-quarters', 'total'].includes(String(raw.cover)) ||
       (raw.terrainCostMultiplier != null && !finite(raw.terrainCostMultiplier, 1, 10)) ||
       (raw.traversal != null && !['ground', 'climb', 'swim'].includes(String(raw.traversal))) ||
+      (raw.terrainElevationFeet != null && !finite(raw.terrainElevationFeet, -1_000, 10_000)) ||
       (raw.magicalDarkness != null && typeof raw.magicalDarkness !== 'boolean') ||
       (raw.darknessSpellLevel != null && !finite(raw.darknessSpellLevel, 0, 9))) return undefined
     return {
       ...common, kind: 'obstacle', points, cover: raw.cover as MapGeometryCover,
       ...(raw.terrainCostMultiplier != null ? { terrainCostMultiplier: raw.terrainCostMultiplier as number } : {}),
       ...(raw.traversal != null ? { traversal: raw.traversal as MapGeometryObstacle['traversal'] } : {}),
+      ...(raw.terrainElevationFeet != null ? { terrainElevationFeet: raw.terrainElevationFeet as number } : {}),
       ...(raw.magicalDarkness === true ? { magicalDarkness: true } : {}),
       ...(raw.darknessSpellLevel != null ? { darknessSpellLevel: raw.darknessSpellLevel as number } : {}),
     }
@@ -748,11 +753,37 @@ export function mapGeometryPointInPolygon(point: MapGeometryPoint, polygon: read
 
 function overlapsHeight(baseHeightFeet: number, heightFeet: number, elevationFeet: number, creatureHeightFeet = 5): boolean {
   const top = baseHeightFeet + heightFeet
-  return elevationFeet < top && elevationFeet + creatureHeightFeet > baseHeightFeet
+  return elevationFeet < top - 1e-7 && elevationFeet + creatureHeightFeet > baseHeightFeet + 1e-7
 }
 
 function tokenElevation(token: Token): number {
   return Number.isFinite(token.elevationFeet) ? Math.max(-1_000, token.elevationFeet!) : 0
+}
+
+/** 后绘制的区域覆盖先绘制的区域，便于 DM 用较小多边形修正局部标高。 */
+export function mapGeometryTerrainElevationAtPoint(
+  geometry: MapGeometryState | undefined,
+  point: MapGeometryPoint,
+  fallbackElevationFeet = 0,
+): number {
+  let elevation = fallbackElevationFeet
+  for (const obstacle of geometry?.obstacles ?? []) {
+    if (obstacle.terrainElevationFeet == null || !mapGeometryPointInPolygon(point, obstacle.points)) continue
+    elevation = obstacle.terrainElevationFeet
+  }
+  return elevation
+}
+
+export function mapGeometryObstacleAffectsElevation(
+  obstacle: MapGeometryObstacle,
+  elevationFeet: number,
+  creatureHeightFeet = 5,
+): boolean {
+  if (obstacle.heightFeet > 0) {
+    return overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, elevationFeet, creatureHeightFeet)
+  }
+  const surfaceElevation = obstacle.terrainElevationFeet ?? obstacle.baseHeightFeet
+  return Math.abs(elevationFeet - surfaceElevation) <= 1e-4
 }
 
 export function mapGeometryMovementBlocked(input: {
@@ -760,6 +791,8 @@ export function mapGeometryMovementBlocked(input: {
   map: BattleMap
   token: Token
   to: MapGeometryPoint
+  fromElevationFeet?: number
+  toElevationFeet?: number
 }): { blocked: boolean; entityId?: string } {
   const { geometry, token, to } = input
   if (!geometry) return { blocked: false }
@@ -768,22 +801,29 @@ export function mapGeometryMovementBlocked(input: {
   const offsets = radius > 0
     ? [{ x: 0, y: 0 }, { x: radius, y: 0 }, { x: -radius, y: 0 }, { x: 0, y: radius }, { x: 0, y: -radius }]
     : [{ x: 0, y: 0 }]
-  const elevation = tokenElevation(token)
+  const fromElevation = input.fromElevationFeet ?? tokenElevation(token)
+  const toElevation = input.toElevationFeet ?? fromElevation
+  const creatureHeight = Math.max(5, Math.max(1, token.size) * 5)
   for (const obstacle of geometry.obstacles) {
     if (
-      obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, elevation) &&
+      obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, toElevation, creatureHeight) &&
       mapGeometryPointInPolygon(to, obstacle.points)
     ) return { blocked: true, entityId: obstacle.id }
   }
   for (const segment of mapGeometrySegments(geometry)) {
-    if (!segment.blocksMovement || !overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation)) continue
-    if (offsets.some((offset) => mapGeometrySegmentsIntersect(
-      { x: from.x + offset.x, y: from.y + offset.y },
-      { x: to.x + offset.x, y: to.y + offset.y },
-      segment.a,
-      segment.b,
-      true,
-    ))) return { blocked: true, entityId: segment.entityId }
+    if (!segment.blocksMovement) continue
+    const blocked = offsets.some((offset) => {
+      const t = intersectionParameter(
+        { x: from.x + offset.x, y: from.y + offset.y },
+        { x: to.x + offset.x, y: to.y + offset.y },
+        segment.a,
+        segment.b,
+      )
+      if (t == null || t <= 1e-5) return false
+      const elevation = fromElevation + (toElevation - fromElevation) * t
+      return overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation, creatureHeight)
+    })
+    if (blocked) return { blocked: true, entityId: segment.entityId }
   }
   return { blocked: false }
 }
@@ -803,20 +843,22 @@ export function mapGeometryPlacementBlocked(input: {
   map: BattleMap
   token: Token
   at: MapGeometryPoint
+  elevationFeet?: number
 }): { blocked: boolean; entityId?: string } {
   const { geometry, token, at } = input
   if (!geometry) return { blocked: false }
   const radius = Math.max(1, input.map.gridSize * Math.max(1, token.size) * 0.42)
-  const elevation = tokenElevation(token)
+  const elevation = input.elevationFeet ?? tokenElevation(token)
+  const creatureHeight = Math.max(5, Math.max(1, token.size) * 5)
   for (const segment of mapGeometrySegments(geometry)) {
     if (
-      segment.blocksMovement && overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation) &&
+      segment.blocksMovement && overlapsHeight(segment.baseHeightFeet, segment.heightFeet, elevation, creatureHeight) &&
       pointToSegmentDistance(at, segment.a, segment.b) <= radius
     ) return { blocked: true, entityId: segment.entityId }
   }
   for (const obstacle of geometry.obstacles) {
     if (
-      obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, elevation) &&
+      obstacle.blocksMovement && overlapsHeight(obstacle.baseHeightFeet, obstacle.heightFeet, elevation, creatureHeight) &&
       mapGeometryPointInPolygon(at, obstacle.points)
     ) return { blocked: true, entityId: obstacle.id }
   }
@@ -1015,14 +1057,16 @@ export function mapGeometryCanSeeToken(input: {
   map: BattleMap
   viewer: Token
   target: Token
+  forceEnabled?: boolean
+  fallbackRangeFeet?: number
   worldMinute?: number
 }): boolean {
   const geometry = input.geometry
-  if (!geometry?.vision.enabled) return true
+  if (!geometry?.vision.enabled && !input.forceEnabled) return true
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
   const normalRangeFeet = Number.isFinite(input.viewer.visionRangeFeet)
     ? Math.max(0, input.viewer.visionRangeFeet!)
-    : geometry.vision.defaultRangeFeet
+    : input.fallbackRangeFeet ?? geometry?.vision.defaultRangeFeet ?? DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET
   const darkvisionRangeFeet = Number.isFinite(input.viewer.darkvisionRangeFeet)
     ? Math.max(0, input.viewer.darkvisionRangeFeet!)
     : 0
@@ -1044,6 +1088,7 @@ export function mapGeometryCanSeeToken(input: {
     map: input.map,
     tokens: input.map.tokens,
     point: input.target,
+    elevationFeet: tokenElevation(input.target),
     worldMinute: input.worldMinute,
   })
   const distanceFeet = distancePx / Math.max(1, input.map.gridSize) * feetPerCell
@@ -1061,6 +1106,29 @@ export function mapGeometryCanSeeToken(input: {
   })
 }
 
+export function mapGeometryVisibleTargets(input: {
+  geometry?: MapGeometryState
+  map: BattleMap
+  viewers: readonly Token[]
+  forceEnabled?: boolean
+  fallbackRangeFeet?: number
+  worldMinute?: number
+}): Token[] {
+  return input.map.tokens.filter((target) => {
+    if (target.visibilityMode === 'dm-only' || target.perceptionVisibility === 'detected-unseen') return false
+    if (target.visibilityMode === 'always') return true
+    return input.viewers.some((viewer) => mapGeometryCanSeeToken({
+      geometry: input.geometry,
+      map: input.map,
+      viewer,
+      target,
+      forceEnabled: input.forceEnabled,
+      fallbackRangeFeet: input.fallbackRangeFeet,
+      worldMinute: input.worldMinute,
+    }))
+  })
+}
+
 export type MapGeometryIllumination = 'bright' | 'dim' | 'darkness' | 'magical-darkness'
 
 export function mapGeometryIlluminationAtPoint(input: {
@@ -1068,11 +1136,14 @@ export function mapGeometryIlluminationAtPoint(input: {
   map: BattleMap
   tokens?: readonly Token[]
   point: MapGeometryPoint
+  elevationFeet?: number
   worldMinute?: number
 }): MapGeometryIllumination {
   const ambient = input.geometry?.vision.ambientLight ?? 'bright'
+  const pointElevation = input.elevationFeet ?? mapGeometryTerrainElevationAtPoint(input.geometry, input.point)
   if (input.geometry?.obstacles.some((obstacle) =>
-    obstacle.magicalDarkness === true && mapGeometryPointInPolygon(input.point, obstacle.points),
+    obstacle.magicalDarkness === true && mapGeometryPointInPolygon(input.point, obstacle.points) &&
+      mapGeometryObstacleAffectsElevation(obstacle, pointElevation),
   )) return 'magical-darkness'
   if (ambient === 'bright') return 'bright'
   let result: MapGeometryIllumination = ambient
@@ -1085,7 +1156,14 @@ export function mapGeometryIlluminationAtPoint(input: {
     const brightRadius = Math.max(0, light?.brightRadiusFeet ?? 0)
     const dimRadius = brightRadius + Math.max(0, light?.dimRadiusFeet ?? 0)
     if (distanceFeet > dimRadius) continue
-    if (rayBlocked({ geometry: input.geometry, from: source, to: input.point, purpose: 'vision' })) continue
+    if (rayBlocked({
+      geometry: input.geometry,
+      from: source,
+      to: input.point,
+      fromElevationFeet: tokenElevation(source),
+      toElevationFeet: pointElevation,
+      purpose: 'vision',
+    })) continue
     if (distanceFeet <= brightRadius) return 'bright'
     result = 'dim'
   }
@@ -1100,7 +1178,7 @@ export function mapGeometryIlluminationAtPoint(input: {
       from: point,
       to: input.point,
       fromElevationFeet: source.elevationFeet,
-      toElevationFeet: 0,
+      toElevationFeet: pointElevation,
       purpose: 'vision',
     })) continue
     if (distanceFeet <= source.brightRadiusFeet) return 'bright'
@@ -1114,13 +1192,19 @@ function nearestRayPoint(
   angle: number,
   radius: number,
   segments: readonly MapGeometrySegment[],
+  fromElevationFeet: number,
+  toElevationFeet: number,
 ): MapGeometryPoint {
   const far = { x: origin.x + Math.cos(angle) * radius, y: origin.y + Math.sin(angle) * radius }
   let nearestT = 1
   for (const segment of segments) {
     if (!segment.blocksVision) continue
     const t = intersectionParameter(origin, far, segment.a, segment.b)
-    if (t != null && t > 1e-5 && t < nearestT) nearestT = t
+    if (t == null || t <= 1e-5 || t >= nearestT) continue
+    const rayHeight = fromElevationFeet + 2.5 + (toElevationFeet - fromElevationFeet) * t
+    if (rayHeight >= segment.baseHeightFeet && rayHeight < segment.baseHeightFeet + segment.heightFeet) {
+      nearestT = t
+    }
   }
   return { x: origin.x + (far.x - origin.x) * nearestT, y: origin.y + (far.y - origin.y) * nearestT }
 }
@@ -1136,9 +1220,7 @@ export function mapGeometryLightPolygon(input: {
   const radius = Math.max(0, input.radiusFeet) / feetPerCell * Math.max(1, input.map.gridSize)
   if (radius <= 0) return []
   const elevation = input.elevationFeet ?? 0
-  const blockers = mapGeometrySegments(input.geometry).filter((segment) =>
-    segment.blocksVision && elevation >= segment.baseHeightFeet && elevation < segment.baseHeightFeet + segment.heightFeet,
-  )
+  const blockers = mapGeometrySegments(input.geometry).filter((segment) => segment.blocksVision)
   const angles = new Set<number>()
   for (let index = 0; index < 96; index += 1) angles.add(index / 96 * Math.PI * 2)
   for (const segment of blockers) {
@@ -1152,7 +1234,17 @@ export function mapGeometryLightPolygon(input: {
   }
   return [...angles]
     .sort((left, right) => left - right)
-    .map((angle) => nearestRayPoint(input.source, angle, radius, blockers))
+    .map((angle) => {
+      const far = { x: input.source.x + Math.cos(angle) * radius, y: input.source.y + Math.sin(angle) * radius }
+      return nearestRayPoint(
+        input.source,
+        angle,
+        radius,
+        blockers,
+        elevation,
+        mapGeometryTerrainElevationAtPoint(input.geometry, far),
+      )
+    })
     .map((point) => ({
       x: Math.max(0, Math.min(input.map.width, point.x)),
       y: Math.max(0, Math.min(input.map.height, point.y)),
@@ -1194,10 +1286,7 @@ export function mapGeometryVisibilityPolygon(input: {
   if (rangeFeet <= 0) return []
   const radius = Math.max(1, rangeFeet / feetPerCell * Math.max(1, input.map.gridSize))
   const elevation = tokenElevation(input.viewer)
-  const blockers = (geometry ? mapGeometrySegments(geometry) : []).filter((segment) =>
-    segment.blocksVision && elevation + 2.5 >= segment.baseHeightFeet &&
-      elevation + 2.5 < segment.baseHeightFeet + segment.heightFeet,
-  )
+  const blockers = (geometry ? mapGeometrySegments(geometry) : []).filter((segment) => segment.blocksVision)
   const bounds: MapGeometrySegment[] = [
     [{ x: 0, y: 0 }, { x: input.map.width, y: 0 }],
     [{ x: input.map.width, y: 0 }, { x: input.map.width, y: input.map.height }],
@@ -1220,7 +1309,17 @@ export function mapGeometryVisibilityPolygon(input: {
   }
   return [...angles]
     .sort((left, right) => left - right)
-    .map((angle) => nearestRayPoint(origin, angle, radius, [...blockers, ...bounds]))
+    .map((angle) => {
+      const far = { x: origin.x + Math.cos(angle) * radius, y: origin.y + Math.sin(angle) * radius }
+      return nearestRayPoint(
+        origin,
+        angle,
+        radius,
+        [...blockers, ...bounds],
+        elevation,
+        mapGeometryTerrainElevationAtPoint(geometry, far),
+      )
+    })
 }
 
 let runtimeGeometryByMapId = new Map<string, MapGeometryState>()

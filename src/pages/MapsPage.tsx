@@ -87,6 +87,7 @@ import {
   mapGeometryCoverBetween,
   mapGeometryLineOfEffectBlocked,
   mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
   type MapGeometryTool,
   type MapGeometryWallMaterial,
 } from '../lib/mapGeometry'
@@ -3534,6 +3535,10 @@ export default function MapsPage() {
     }
     const remainingMovementFeet = currentDnd5eTurnEconomy(myPlayerToken.id).movement.current
     const pos = snapTokenToGridCenter(point.x, point.y, myPlayerToken, activeMap)
+    const requestedElevationFeet = Math.max(-1_000, Math.min(10_000, Math.floor(dnd5eTargetElevationFeet)))
+    const targetElevationFeet = dnd5eTraversalMode === 'walk' || dnd5eTraversalMode === 'swim'
+      ? mapGeometryTerrainElevationAtPoint(activeGeometry, pos)
+      : requestedElevationFeet
     const path = findMapGeometryPath({
       map: activeMap,
       geometry: activeGeometry,
@@ -3541,20 +3546,22 @@ export default function MapsPage() {
       to: pos,
       canClimb: dnd5eTraversalMode === 'climb' || dnd5eTraversalMode === 'fly',
       canSwim: dnd5eTraversalMode === 'swim',
+      canFly: dnd5eTraversalMode === 'fly',
+      targetElevationFeet,
+      maximumTerrainStepFeet: dnd5eTraversalMode === 'fall' ? 10_000 : 10,
       additionalDifficultTerrainMultiplier: (token, position) =>
         dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position }),
       additionalSpeedCostMultiplier: (token, position) =>
         dnd5ePersistentAreaSpeedCostMultiplierAt({ map: activeMap, token, position }),
     })
     if (!path) {
-      void showCombatNotice('路径受阻', '目标格无法通过合法路径抵达；墙、关闭的门、障碍物或其他 Token 可能阻挡了路线。', 'amber')
+      void showCombatNotice('路径受阻', '目标格无法通过合法路径抵达；墙、关闭的门、障碍物、其他 Token，或超过 10 尺的地形落差可能阻挡了路线。', 'amber')
       return
     }
     const isProne = turnCharacter.conditions.some((condition) =>
       ['prone', '倒地'].includes(condition.toLowerCase()),
     )
     const standFromProne = isProne && dnd5eStandFromProne
-    const targetElevationFeet = Math.max(-1_000, Math.min(10_000, Math.floor(dnd5eTargetElevationFeet)))
     const traversal = dnd5eTraversalMovementCost({
       distanceFeet: path.distanceFeet,
       baseMovementCostFeet: path.movementCostFeet,
@@ -12706,6 +12713,7 @@ export default function MapsPage() {
           geometry: explorationGeometry,
           token: finalMove.actorToken,
           path: traversedPath,
+          elevationsFeet: finalMove.pathElevationsFeet.slice(0, traversedPath.length),
           forceEnabled: forceExplorationVision,
         })
         const actorMemberId = finalMove.actor.roomMemberId
@@ -13558,6 +13566,8 @@ export default function MapsPage() {
               moveSelectMode={!playerCombatLocked && inMoveSelectMode && !!activeMoveCircle && !activeAoeTargeting && !dnd5eItemAreaTargeting}
               moveCircle={activeMoveCircle}
               onMoveSelect={handleMoveSelect}
+              moveTraversalMode={dnd5eTraversalMode}
+              moveTargetElevationFeet={dnd5eTargetElevationFeet}
               difficultTerrainMultiplierAtPosition={(token, position) =>
                 dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position })}
               speedCostMultiplierAtPosition={(token, position) =>

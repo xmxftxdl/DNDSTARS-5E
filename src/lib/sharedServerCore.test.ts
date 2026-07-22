@@ -932,7 +932,15 @@ describe('map geometry player projection', () => {
     const v2 = {
       ...geometry,
       schemaVersion: 2,
-      maps: [{ ...geometry.maps[0], lights: [] }],
+      maps: [{
+        ...geometry.maps[0],
+        lights: [],
+        obstacles: [{
+          ...common,
+          id: 'ledge', kind: 'obstacle', cover: 'none', terrainElevationFeet: 15,
+          points: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }],
+        }],
+      }],
     }
     expect(validateSharedStateShape('map-geometry', v2)).toEqual({ ok: true })
     expect(validateSharedStateShape('map-geometry', {
@@ -945,6 +953,13 @@ describe('map geometry player projection', () => {
         ...common, id: 'window-v2', kind: 'window', windowType: 'glass', windowState: 'teleported',
         points: [{ x: 50, y: 20 }, { x: 50, y: 40 }],
       }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
+    expect(validateSharedStateShape('map-geometry', {
+      ...v2,
+      maps: [{
+        ...v2.maps[0],
+        obstacles: [{ ...v2.maps[0].obstacles[0], terrainElevationFeet: 20_000 }],
+      }],
     })).toMatchObject({ ok: false, reason: 'invalid-map-geometry' })
   })
 })

@@ -107,6 +107,7 @@ function usePrefersReducedMotion() {
 import { useMapStore } from '../../store/maps'
 import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type { Dnd5eStandardConditionId } from '../../rulesets/dnd5e/conditions'
+import type { Dnd5eTraversalMode } from '../../rulesets/dnd5e/traversal'
 import { DND5E_CONDITION_MARKERS } from './dnd5eConditionMarkers'
 import {
   fogOperationForTool,
@@ -116,12 +117,15 @@ import {
   type MapFogState,
 } from '../../lib/fogOfWar'
 import {
+  DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   mapGeometryMovementBlocked,
+  mapGeometryObstacleAffectsElevation,
   mapGeometryAttachOpeningToWall,
   mapGeometryOpeningOverlaps,
   mapGeometryLightPolygon,
   mapGeometryWallRenderSegments,
   mapGeometryVisibilityPolygon,
+  mapGeometryVisibleTargets,
   type MapGeometryEntity,
   type MapGeometryState,
   type MapGeometryTool,
@@ -187,6 +191,8 @@ interface MapCanvasProps {
   moveSelectMode?: boolean
   moveCircle?: MoveCircle
   onMoveSelect?: (point: { x: number; y: number }) => void
+  moveTraversalMode?: Dnd5eTraversalMode
+  moveTargetElevationFeet?: number
   difficultTerrainMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
   speedCostMultiplierAtPosition?: (token: Token, position: { x: number; y: number }) => number
   /** Circular AOE selection: highlighted cells plus click confirm. */
@@ -367,6 +373,14 @@ function PlayerVisibilityLayer({
   if (!manualFogEnabled) return null
   const sourceIds = new Set(sourceTokenIds)
   const viewers = map.tokens.filter((token) => sourceIds.has(token.id))
+  const visibleTargets = mapGeometryVisibleTargets({
+    geometry,
+    map,
+    viewers,
+    forceEnabled: true,
+    fallbackRangeFeet: DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
+    worldMinute,
+  })
   const fullCover = fog?.filled === true
   const coverColor = fog?.color ?? '#05070f'
   return (
@@ -413,6 +427,18 @@ function PlayerVisibilityLayer({
           />
         ) : null
       })}
+      {/* 二维地面遮罩无法表达不同目标海拔；对权威判定可见的 Token 单独开孔。 */}
+      {visibleTargets.map((target) => (
+        <Circle
+          key={`visible-token:${target.id}`}
+          x={target.x}
+          y={target.y}
+          radius={Math.max(6, map.gridSize * Math.max(1, target.size) * 0.54)}
+          fill="#000"
+          globalCompositeOperation="destination-out"
+          listening={false}
+        />
+      ))}
     </Layer>
   )
 }
@@ -431,10 +457,27 @@ function LightingLayer({
   visionSourceTokenIds: readonly string[]
 }) {
   if (!geometry) return null
-  const magicalDarkness = geometry.obstacles.filter((obstacle) => obstacle.magicalDarkness === true)
+  const visionSourceIds = new Set(visionSourceTokenIds)
+  const viewers = map.tokens.filter((token) => visionSourceIds.has(token.id))
+  const magicalDarkness = geometry.obstacles.filter((obstacle) =>
+    obstacle.magicalDarkness === true && (
+      viewers.length === 0 || viewers.some((viewer) => mapGeometryObstacleAffectsElevation(
+        obstacle,
+        viewer.elevationFeet ?? 0,
+        Math.max(5, Math.max(1, viewer.size) * 5),
+      ))
+    ),
+  )
   if ((!geometry.vision.enabled || geometry.vision.ambientLight === 'bright') && magicalDarkness.length === 0) return null
   const opacity = geometry.vision.ambientLight === 'darkness' ? 0.9 : 0.3
   const seesMagicalDarkness = visionSourceTokenIds.some((id) => map.tokens.find((token) => token.id === id)?.canSeeMagicalDarkness)
+  const visibleTargets = mapGeometryVisibleTargets({
+    geometry,
+    map,
+    viewers,
+    forceEnabled: true,
+    worldMinute,
+  })
   const sources = [
     ...map.tokens.filter((token) => campaignLightIsActive(token.lightSource, worldMinute)).map((token) => ({
       id: `token:${token.id}`,
@@ -478,6 +521,17 @@ function LightingLayer({
           stroke="rgba(139,92,246,0.7)"
           strokeWidth={isDM ? 2 : 0}
           opacity={isDM ? 0.22 : seesMagicalDarkness ? 0.08 : 0.97}
+          listening={false}
+        />
+      ))}
+      {visibleTargets.map((target) => (
+        <Circle
+          key={`lighting-visible-token:${target.id}`}
+          x={target.x}
+          y={target.y}
+          radius={Math.max(6, map.gridSize * Math.max(1, target.size) * 0.54)}
+          fill="#000"
+          globalCompositeOperation="destination-out"
           listening={false}
         />
       ))}
@@ -1276,6 +1330,8 @@ export default function MapCanvas({
   moveSelectMode = false,
   moveCircle,
   onMoveSelect,
+  moveTraversalMode = 'walk',
+  moveTargetElevationFeet,
   difficultTerrainMultiplierAtPosition,
   speedCostMultiplierAtPosition,
   aoeSelectMode = false,
@@ -1621,10 +1677,17 @@ export default function MapCanvas({
     if (!movingToken) return undefined
     return findMapGeometryPath({
       map, geometry, token: movingToken, to: cursor, maximumVisited: 5_000,
+      canClimb: moveTraversalMode === 'climb' || moveTraversalMode === 'fly',
+      canSwim: moveTraversalMode === 'swim',
+      canFly: moveTraversalMode === 'fly',
+      targetElevationFeet: moveTraversalMode === 'walk' || moveTraversalMode === 'swim'
+        ? undefined
+        : moveTargetElevationFeet,
+      maximumTerrainStepFeet: moveTraversalMode === 'fall' ? 10_000 : 10,
       additionalDifficultTerrainMultiplier: difficultTerrainMultiplierAtPosition,
       additionalSpeedCostMultiplier: speedCostMultiplierAtPosition,
     })
-  }, [cursor, difficultTerrainMultiplierAtPosition, geometry, map, moveCircle, moveSelectMode, selectedTokenId, speedCostMultiplierAtPosition])
+  }, [cursor, difficultTerrainMultiplierAtPosition, geometry, map, moveCircle, moveSelectMode, moveTargetElevationFeet, moveTraversalMode, selectedTokenId, speedCostMultiplierAtPosition])
 
   const handleFogMouseMove = (stage: Konva.Stage | null): boolean => {
     if (!fogEditMode || !fogDragStartRef.current) return false
@@ -1699,7 +1762,7 @@ export default function MapCanvas({
     if (!drag || geometryTool === 'select' || geometryTool === 'delete') return null
     const common = {
       id: drag.id,
-      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : '障碍物',
+      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : '区域地形',
       createdAt: drag.createdAt,
       baseHeightFeet: 0,
       heightFeet: geometryTool === 'obstacle' ? 5 : 10,
@@ -1756,6 +1819,7 @@ export default function MapCanvas({
       ...common,
       kind: 'obstacle',
       cover: 'half',
+      terrainElevationFeet: 0,
       points: [
         { x: rect.x, y: rect.y },
         { x: rect.x + rect.width, y: rect.y },
