@@ -137,6 +137,7 @@ import {
   type SharedCombatInterruptQueueState,
 } from '../lib/combatInterruptQueue'
 import { resolveDmCombatInterruptSettlements } from '../lib/combatInterruptDmSettlement'
+import { applyDmCombatInterruptSettlements } from '../lib/combatInterruptSettlementRuntime'
 import {
   answerSharedCombatInterrupt as persistAnswerSharedCombatInterrupt,
   contributeSharedCombatInterrupt as persistContributeSharedCombatInterrupt,
@@ -6563,123 +6564,34 @@ export default function MapsPage() {
             dmAdjudication: pendingSharedDmAdjudicationRef.current?.id,
           },
         })
-        for (const settlement of settlements) {
-          switch (settlement.kind) {
-            case 'opportunity-attack': {
-              const pending = pendingSharedOpportunityAttackRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedOpportunityAttackRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useOpportunityAttack)
-              break
-            }
-            case 'uncanny-dodge': {
-              const pending = pendingSharedUncannyDodgeRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedUncannyDodgeRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useUncannyDodge)
-              break
-            }
-            case 'deflect-missiles': {
-              const pending = pendingSharedDeflectMissilesRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedDeflectMissilesRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.accept)
-              break
-            }
-            case 'protection': {
-              const pending = pendingSharedProtectionRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedProtectionRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useProtection)
-              break
-            }
-            case 'shield-spell': {
-              const pending = pendingSharedShieldSpellRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedShieldSpellRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useShieldSpell)
-              break
-            }
-            case 'counterspell': {
-              const pending = pendingSharedCounterspellRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedCounterspellRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useCounterspell)
-              break
-            }
-            case 'saving-throw-reroll': {
-              const pending = pendingSharedSavingThrowRerollRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedSavingThrowRerollRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useSavingThrowReroll)
-              break
-            }
-            case 'bardic-inspiration': {
-              const pending = pendingSharedBardicInspirationRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedBardicInspirationRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useBardicInspiration)
-              break
-            }
-            case 'cutting-words': {
-              const pending = pendingSharedCuttingWordsRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedCuttingWordsRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useCuttingWords)
-              break
-            }
-            case 'dark-ones-own-luck': {
-              const pending = pendingSharedDarkOnesOwnLuckRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedDarkOnesOwnLuckRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useDarkOnesOwnLuck)
-              break
-            }
-            case 'stroke-of-luck': {
-              const pending = pendingSharedStrokeOfLuckRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedStrokeOfLuckRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.useStrokeOfLuck)
-              break
-            }
-            case 'empowered-spell': {
-              const pending = pendingSharedEmpoweredSpellRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedEmpoweredSpellRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.rerollKeys)
-              break
-            }
-            case 'stand-against-tide': {
-              const pending = pendingSharedStandAgainstTideRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedStandAgainstTideRef.current = null
-              await settleSharedCombatInterruptEvent(settlement.id, settlement.finishResponse, settlement.reason)
-              pending.resolve(settlement.targetTokenId)
-              break
-            }
-            case 'dm-adjudication': {
-              const pending = pendingSharedDmAdjudicationRef.current
-              if (!pending || pending.id !== settlement.id) break
-              pendingSharedDmAdjudicationRef.current = null
-              sharedDmAdjudicationPromptIdRef.current = null
-              setSharedDmAdjudicationPrompt(null)
-              pending.resolve(settlement.response)
-              break
-            }
-          }
-        }
+        await applyDmCombatInterruptSettlements({
+          settlements,
+          channels: {
+            opportunityAttack: pendingSharedOpportunityAttackRef,
+            protection: pendingSharedProtectionRef,
+            shieldSpell: pendingSharedShieldSpellRef,
+            counterspell: pendingSharedCounterspellRef,
+            uncannyDodge: pendingSharedUncannyDodgeRef,
+            deflectMissiles: pendingSharedDeflectMissilesRef,
+            savingThrowReroll: pendingSharedSavingThrowRerollRef,
+            bardicInspiration: pendingSharedBardicInspirationRef,
+            cuttingWords: pendingSharedCuttingWordsRef,
+            darkOnesOwnLuck: pendingSharedDarkOnesOwnLuckRef,
+            strokeOfLuck: pendingSharedStrokeOfLuckRef,
+            empoweredSpell: pendingSharedEmpoweredSpellRef,
+            standAgainstTide: pendingSharedStandAgainstTideRef,
+            dmAdjudication: pendingSharedDmAdjudicationRef,
+          },
+          settle: (settlement) => settleSharedCombatInterruptEvent(
+            settlement.id,
+            settlement.finishResponse,
+            settlement.reason,
+          ),
+          clearDmAdjudicationPrompt: () => {
+            sharedDmAdjudicationPromptIdRef.current = null
+            setSharedDmAdjudicationPrompt(null)
+          },
+        })
         return
       }
 
