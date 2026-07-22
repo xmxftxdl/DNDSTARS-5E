@@ -183,7 +183,6 @@ import {
   type CombatInterruptByKind,
   defaultCombatInterruptResponse,
   isCombatInterruptKind,
-  resolveCombatInterruptCharacter,
 } from '../lib/combatInterruptProtocol'
 import {
   createD20ReplacementContribution,
@@ -192,6 +191,7 @@ import {
   settleD20RollConfirmation,
 } from '../lib/rollConfirmation'
 import {
+  buildDmControlledCombatInterruptPromptViews,
   buildCombatInterruptPromptViews,
   resolveCombatInterruptPromptSelection,
   type SharedOpportunityAttackPromptView,
@@ -6504,28 +6504,12 @@ export default function MapsPage() {
           sharedDmAdjudicationPromptIdRef.current = null
           setSharedDmAdjudicationPrompt(null)
         }
-        const dmControlledCharacterIds = new Set(
-          latestActiveMap.tokens.flatMap((token) =>
-            token.type === 'enemy' && token.characterId ? [token.characterId] : [],
-          ),
-        )
-        const dmControlledCharacters = characters.filter((character) => dmControlledCharacterIds.has(character.id))
-        const dmReactionSelection = resolveCombatInterruptPromptSelection({
-          queue: {
-            ...queue,
-            interrupts: queue.interrupts.filter((interrupt) => {
-              const character = resolveCombatInterruptCharacter(interrupt, characters)
-              return !!character && dmControlledCharacterIds.has(character.id)
-            }),
-          },
+        const dmReactionViews = buildDmControlledCombatInterruptPromptViews({
+          queue,
           mapId: activeMapId,
           now,
-          answerContext: {
-            characters,
-            visibleCharacters: dmControlledCharacters,
-            tokens: latestActiveMap.tokens,
-            authority: 'dm',
-          },
+          characters,
+          tokens: latestActiveMap.tokens,
           suppressed: {
             'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
             protection: suppressedProtectionPromptIdsRef.current,
@@ -6542,7 +6526,6 @@ export default function MapsPage() {
             'stand-against-tide': suppressedStandAgainstTidePromptIdsRef.current,
           },
         })
-        const dmReactionViews = buildCombatInterruptPromptViews(dmReactionSelection)
         setNullablePromptView(setSharedOpportunityAttackPrompt, dmReactionViews.opportunityAttack)
         setNullablePromptView(setSharedProtectionPrompt, dmReactionViews.protection)
         setNullablePromptView(setSharedShieldSpellPrompt, dmReactionViews.shieldSpell)

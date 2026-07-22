@@ -8,7 +8,10 @@ type ResourceCharacter = {
   currentHp: number
   concentrating?: boolean
   classResources?: Record<string, { current: number; max: number }>
-  dnd5eCombatState?: { concentrationSpellId?: string }
+  dnd5eCombatState?: {
+    concentrationSpellId?: string
+    activeEffects?: Array<{ definitionId?: string; source?: { rulesId?: string } }>
+  }
 }
 
 type ResourceMap = {
@@ -88,9 +91,10 @@ async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
   }, action)
 }
 
-async function confirmNextD20(dm: Page) {
+async function confirmNextD20(dm: Page, expectedLabel?: string | RegExp) {
   const dialog = dm.getByRole('dialog', { name: 'd20 投掷确认' })
   await expect(dialog).toBeVisible({ timeout: 20_000 })
+  if (expectedLabel) await expect(dialog).toContainText(expectedLabel)
   await dialog.getByRole('button', { name: /并继续结算$/ }).click()
 }
 
@@ -195,6 +199,57 @@ async function seedCombat(
     updatedAt: now,
   })
   return { character, actorToken, enemyToken }
+}
+
+async function linkDmWizardToEnemy(
+  request: APIRequestContext,
+  mapId: string,
+  seeded: Awaited<ReturnType<typeof seedCombat>>,
+  options: {
+    name: string
+    spellIds: string[]
+    classResources: Record<string, { current: number; max: number }>
+    caster?: ReturnType<typeof spellcaster>
+  },
+) {
+  const reactor = {
+    ...spellcaster(`${mapId}:reactor`, options.spellIds, 'wizard'),
+    name: options.name,
+    player: 'DM',
+    classResources: options.classResources,
+  }
+  const mapsState = await getState<{
+    maps: Array<Record<string, unknown> & {
+      id: string
+      tokens: Array<Record<string, unknown> & { id: string }>
+    }>
+  }>(request, 'maps')
+  const seededMap = mapsState.maps.find((map) => map.id === mapId)!
+  await putState(request, 'characters', {
+    characters: [options.caster ?? seeded.character, reactor],
+    selectedId: seeded.character.id,
+    updatedAt: Date.now(),
+  })
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: Date.now(),
+    maps: [{
+      ...seededMap,
+      tokens: seededMap.tokens.map((token) => token.id === seeded.enemyToken.id
+        ? {
+            ...token,
+            label: reactor.name,
+            x: 455,
+            size: 1,
+            characterId: reactor.id,
+            poolId: undefined,
+            hp: undefined,
+            maxHp: undefined,
+          }
+        : token),
+    }],
+  })
+  return reactor
 }
 
 test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准后原子同步', async ({ browser, request }) => {
@@ -386,38 +441,13 @@ test('法术反制通过共享 Interrupt 消耗双方资源并阻止原法术效
   test.setTimeout(90_000)
   const mapId = `spell-counterspell-${Date.now()}`
   const seeded = await seedCombat(request, mapId, ['acid-arrow'])
-  const reactor = {
-    ...spellcaster(`${mapId}:reactor`, ['counterspell'], 'wizard'),
+  const reactor = await linkDmWizardToEnemy(request, mapId, seeded, {
     name: '反制法师',
-    player: 'DM',
+    spellIds: ['counterspell'],
     classResources: {
       'dnd5e-spell-slot-2': { current: 0, max: 3 },
       'dnd5e-spell-slot-3': { current: 1, max: 2 },
     },
-  }
-  const mapsState = await getState<{ maps: Array<Record<string, unknown> & { id: string; tokens: Array<Record<string, unknown> & { id: string }> }> }>(request, 'maps')
-  const seededMap = mapsState.maps.find((map) => map.id === mapId)!
-  await putState(request, 'characters', {
-    characters: [seeded.character, reactor], selectedId: seeded.character.id, updatedAt: Date.now(),
-  })
-  await putState(request, 'maps', {
-    selectedId: mapId,
-    updatedAt: Date.now(),
-    maps: [{
-      ...seededMap,
-      tokens: seededMap.tokens.map((token) => token.id === seeded.enemyToken.id
-        ? {
-            ...token,
-            label: reactor.name,
-            x: 455,
-            size: 1,
-            characterId: reactor.id,
-            poolId: undefined,
-            hp: undefined,
-            maxHp: undefined,
-          }
-        : token),
-    }],
   })
 
   const context = await browser.newContext()
@@ -472,6 +502,163 @@ test('法术反制通过共享 Interrupt 消耗双方资源并阻止原法术效
   ])
   const finalMaps = await getState<{ maps: ResourceMap[] }>(request, 'maps')
   expect(finalMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(32)
+  await context.close()
+})
+
+test('低环法术反制检定失败后继续原法术，并仍消耗双方已承诺的法术位', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-counterspell-failed-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['acid-arrow'])
+  const caster = {
+    ...seeded.character,
+    level: 7,
+    dnd5eClassLevels: { wizard: 7 },
+    classResources: {
+      ...seeded.character.classResources,
+      'dnd5e-spell-slot-4': { current: 1, max: 1 },
+    },
+  }
+  const reactor = await linkDmWizardToEnemy(request, mapId, seeded, {
+    name: '低环反制法师',
+    spellIds: ['counterspell'],
+    caster,
+    classResources: {
+      'dnd5e-spell-slot-2': { current: 0, max: 3 },
+      'dnd5e-spell-slot-3': { current: 1, max: 2 },
+    },
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  await dm.evaluate(() => { Math.random = () => 0 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:failed-counterspell:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    dnd5eSpellCast: {
+      spellId: 'acid-arrow', castingClassId: 'wizard', slotLevel: 4,
+      targetTokenId: seeded.enemyToken.id,
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await submitPlayerAction(player, action)
+  await expect(dm.getByTestId('shared-counterspell-use')).toBeVisible({ timeout: 20_000 })
+  await dm.getByTestId('shared-counterspell-use').click()
+  await confirmNextD20(dm, '法术反制·施法属性检定')
+  await confirmNextD20(dm, /强酸箭·法术攻击/)
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? ack.status : ''
+  }, { timeout: 30_000 }).toBe('accepted')
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters.map((character) => ({
+      id: character.id,
+      slot3: character.classResources?.['dnd5e-spell-slot-3']?.current,
+      slot4: character.classResources?.['dnd5e-spell-slot-4']?.current,
+    }))
+  }).toEqual([
+    { id: seeded.character.id, slot3: 3, slot4: 0 },
+    { id: reactor.id, slot3: 0, slot4: undefined },
+  ])
+  const finalMaps = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+  expect(finalMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(29)
+  const interrupts = await getState<{
+    interrupts: Array<{ kind: string; status: string; payload?: { label?: string } }>
+  }>(request, 'combat-interrupts')
+  expect(interrupts.interrupts.filter((interrupt) => interrupt.kind === 'roll-confirmation')).toEqual([
+    expect.objectContaining({ status: 'done', payload: expect.objectContaining({ label: '法术反制·施法属性检定' }) }),
+    expect.objectContaining({ status: 'done', payload: expect.objectContaining({ label: expect.stringMatching(/强酸箭·法术攻击/) }) }),
+  ])
+  await context.close()
+})
+
+test('DM 控制角色施放护盾术后重新判定命中，消耗反应与最低可用法术位', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-shield-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['acid-arrow'])
+  const reactor = await linkDmWizardToEnemy(request, mapId, seeded, {
+    name: '护盾法师',
+    spellIds: ['shield'],
+    classResources: {
+      'dnd5e-spell-slot-1': { current: 1, max: 4 },
+      'dnd5e-spell-slot-2': { current: 0, max: 3 },
+    },
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  await dm.evaluate(() => { Math.random = () => 0.45 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:shielded-acid-arrow:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    dnd5eSpellCast: {
+      spellId: 'acid-arrow', castingClassId: 'wizard', slotLevel: 2,
+      targetTokenId: seeded.enemyToken.id,
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await submitPlayerAction(player, action)
+  await confirmNextD20(dm, /强酸箭·法术攻击/)
+  await expect(dm.getByTestId('shared-shield-spell-use')).toBeVisible({ timeout: 20_000 })
+  await expect(player.getByTestId('shared-shield-spell-use')).toHaveCount(0)
+  await dm.getByTestId('shared-shield-spell-use').click()
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? ack.status : ''
+  }, { timeout: 30_000 }).toBe('accepted')
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters.map((character) => ({
+      id: character.id,
+      hp: character.currentHp,
+      slot1: character.classResources?.['dnd5e-spell-slot-1']?.current,
+      slot2: character.classResources?.['dnd5e-spell-slot-2']?.current,
+      acidArrowDelayedEffects: character.dnd5eCombatState?.activeEffects?.filter(
+        (effect) => effect.definitionId === 'srd-5.1:spell:acid-arrow:delayed-damage',
+      ).length ?? 0,
+    }))
+  }).toEqual([
+    { id: seeded.character.id, hp: 32, slot1: 4, slot2: 1, acidArrowDelayedEffects: 0 },
+    { id: reactor.id, hp: 28, slot1: 0, slot2: 0, acidArrowDelayedEffects: 0 },
+  ])
   await context.close()
 })
 

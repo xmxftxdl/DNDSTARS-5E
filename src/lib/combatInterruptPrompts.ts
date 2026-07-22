@@ -1,3 +1,4 @@
+import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import {
   isCombatInterruptExpired,
@@ -8,6 +9,7 @@ import {
 import {
   isCombatInterruptKind,
   resolveCombatInterruptAnswerCandidate,
+  resolveCombatInterruptCharacter,
   type CombatInterruptAnswerContext,
   type CombatInterruptByKind,
 } from './combatInterruptProtocol'
@@ -369,6 +371,45 @@ export function resolveCombatInterruptPromptSelection(input: {
       input.answerContext,
     ),
   }
+}
+
+export function buildDmControlledCombatInterruptPromptViews(input: {
+  queue: SharedCombatInterruptQueueState | null | undefined
+  mapId: string
+  now: number
+  characters: Character[]
+  tokens: readonly Token[]
+  suppressed: CombatInterruptSuppression
+}): CombatInterruptPromptViews {
+  const dmControlledCharacterIds = new Set(
+    input.tokens.flatMap((token) =>
+      token.type === 'enemy' && token.characterId ? [token.characterId] : [],
+    ),
+  )
+  const dmControlledCharacters = input.characters.filter((character) =>
+    dmControlledCharacterIds.has(character.id),
+  )
+  const dmQueue = input.queue
+    ? {
+        ...input.queue,
+        interrupts: input.queue.interrupts.filter((interrupt) => {
+          const character = resolveCombatInterruptCharacter(interrupt, input.characters)
+          return !!character && dmControlledCharacterIds.has(character.id)
+        }),
+      }
+    : input.queue
+  return buildCombatInterruptPromptViews(resolveCombatInterruptPromptSelection({
+    queue: dmQueue,
+    mapId: input.mapId,
+    now: input.now,
+    answerContext: {
+      characters: input.characters,
+      visibleCharacters: dmControlledCharacters,
+      tokens: [...input.tokens],
+      authority: 'dm',
+    },
+    suppressed: input.suppressed,
+  }))
 }
 
 export function buildCombatInterruptPromptViews(

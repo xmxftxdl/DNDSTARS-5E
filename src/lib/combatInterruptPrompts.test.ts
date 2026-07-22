@@ -23,6 +23,7 @@ import type {
   StandAgainstTideInterruptPayload,
 } from './combatInterruptProtocol'
 import {
+  buildDmControlledCombatInterruptPromptViews,
   buildCombatInterruptPromptViews,
   resolveCombatInterruptPromptSelection,
 } from './combatInterruptPrompts'
@@ -104,6 +105,17 @@ describe('combat interrupt prompt selection', () => {
 
     expect(playerSelection.protection).toBeUndefined()
     expect(dmSelection.protection?.character.id).toBe(enemyWizard.id)
+    expect(buildDmControlledCombatInterruptPromptViews({
+      queue: base.queue,
+      mapId: base.mapId,
+      now: base.now,
+      characters: [enemyWizard],
+      tokens,
+      suppressed: {},
+    }).protection).toMatchObject({
+      id: interrupt.id,
+      protectorChar: enemyWizard,
+    })
   })
 
   it('selects an answerable dodge prompt for the current map', () => {
