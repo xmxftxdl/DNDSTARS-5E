@@ -847,6 +847,7 @@ export type Dnd5eCombatEvent =
   | { type: 'condition-applied'; actorId: string; targetId: string; condition: string }
   | { type: 'condition-ended'; targetId: string; condition: string }
   | { type: 'declarative-subclass-ability-resolved'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[] }
+  | { type: 'declarative-subclass-trigger-rejected'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[]; reason: Dnd5eActionFailure }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-refreshed'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' | 'escaped' }
@@ -9505,7 +9506,17 @@ export function resolveDnd5eHeadlessAction(
       for (const [eventIndex, event] of result.events.entries()) {
         for (const triggeredAction of dnd5eDeclarativeTriggeredActions(triggeredState, event, eventIndex)) {
           const triggered = resolveDnd5eHeadlessActionInternal(triggeredState, triggeredAction, { skipTurnStartBoundary: true })
-          if (!triggered.ok) continue
+          if (!triggered.ok) {
+            triggeredEvents.push({
+              type: 'declarative-subclass-trigger-rejected',
+              actorId: triggeredAction.actorId,
+              abilityId: triggeredAction.featureId ?? triggeredAction.actionId,
+              trigger: 'after-attack-hit',
+              targetIds: triggeredAction.targetIds ?? (triggeredAction.targetId ? [triggeredAction.targetId] : []),
+              reason: triggered.reason,
+            })
+            continue
+          }
           triggeredState = triggered.state
           triggeredEvents.push(...triggered.events)
         }

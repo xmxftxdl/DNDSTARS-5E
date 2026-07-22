@@ -189,6 +189,62 @@ describe('DeclarativeSubclassAbilityV1', () => {
     } finally { dispose() }
   })
 
+  it('uses the actor as the authoritative target for self-targeted after-hit abilities', () => {
+    const pluginId = 'com.example.on-hit-self'
+    const onHit = ability({
+      trigger: { kind: 'after-attack-hit' },
+      targeting: { kind: 'self' },
+      rolls: [{ id: 'healing', kind: 'healing', label: '战斗活力', dice: { count: 0, sides: 6, modifier: { kind: 'fixed', value: 3 } } }],
+      effects: [{ kind: 'healing', target: 'target', rollId: 'healing' }],
+      cost: { economy: 'none' },
+    })
+    const { dispose } = register(pluginId, subclass([onHit]))
+    try {
+      const state = stateFor(pluginId)
+      state.combatants.hero.currentHp = 10
+      const result = resolveDnd5eHeadlessAction(state, {
+        type: 'attack', actorId: 'hero', targetId: 'target', attackModifier: 5, d20: 15,
+        damage: { count: 1, sides: 4, bonus: 0, rolls: [1], type: 'slashing' },
+      })
+      expect(result.ok).toBe(true)
+      expect(result.state.combatants.hero.currentHp).toBe(13)
+      expect(result.state.combatants.target.currentHp).toBe(19)
+      expect(result.events).toContainEqual(expect.objectContaining({
+        type: 'declarative-subclass-ability-resolved',
+        targetIds: ['hero'],
+      }))
+    } finally { dispose() }
+  })
+
+  it('records an explicit rejection event when an automatic trigger cannot pay its cost', () => {
+    const pluginId = 'com.example.on-hit-rejected'
+    const onHit = ability({
+      trigger: { kind: 'after-attack-hit' },
+      rolls: [{ id: 'damage', kind: 'damage', label: '追加伤害', dice: { count: 0, sides: 6, modifier: { kind: 'fixed', value: 3 } }, damageType: 'force' }],
+      cost: { economy: 'none', resources: [{ resourceId: 'focus', amount: 1 }] },
+    })
+    const { dispose, featureId } = register(pluginId, subclass([onHit]))
+    try {
+      const result = resolveDnd5eHeadlessAction(stateFor(pluginId), {
+        type: 'attack', actorId: 'hero', targetId: 'target', attackModifier: 5, d20: 15,
+        damage: { count: 1, sides: 4, bonus: 0, rolls: [1], type: 'slashing' },
+      })
+      expect(result.ok).toBe(true)
+      expect(result.state.combatants.target.currentHp).toBe(19)
+      expect(result.events).toContainEqual({
+        type: 'declarative-subclass-trigger-rejected',
+        actorId: 'hero',
+        abilityId: featureId,
+        trigger: 'after-attack-hit',
+        targetIds: ['target'],
+        reason: 'class-resource-unavailable',
+      })
+      expect(result.events).not.toContainEqual(expect.objectContaining({
+        type: 'declarative-subclass-ability-resolved', abilityId: featureId,
+      }))
+    } finally { dispose() }
+  })
+
   it('enforces once-per-turn and rejects duplicate transaction ids', () => {
     const pluginId = 'com.example.limit'
     const { dispose, featureId } = register(pluginId, subclass([ability({ limits: { oncePerTurn: true } })]))

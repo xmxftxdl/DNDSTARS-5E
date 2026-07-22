@@ -2161,6 +2161,7 @@ export function dnd5eDeclarativeTriggeredActions(
       !ability || feature.automation !== 'full' || ability.trigger.kind !== 'after-attack-hit' ||
       !feature.action || !actor.pluginFeatureIds.includes(feature.id)
     ) return []
+    const triggerTarget = feature.action.targeting.kind === 'self' ? actor : target
     return [{
       type: 'plugin' as const,
       pluginId: feature.ownerPluginId,
@@ -2168,9 +2169,9 @@ export function dnd5eDeclarativeTriggeredActions(
       featureId: feature.id,
       transactionId: `decl-trigger:${state.combatId}:${state.round}:${eventIndex}:${feature.id}:${actor.id}:${target.id}`,
       actorId: actor.id,
-      targetId: target.id,
-      targetIds: [target.id],
-      distanceFeet: state.distanceFeetByCombatantPair?.[pairKey] ?? 0,
+      targetId: triggerTarget.id,
+      targetIds: [triggerTarget.id],
+      distanceFeet: triggerTarget.id === actor.id ? 0 : state.distanceFeetByCombatantPair?.[pairKey] ?? 0,
       rolls: {},
     }]
   })
