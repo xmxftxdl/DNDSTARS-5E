@@ -183,6 +183,7 @@ import {
   type CombatInterruptByKind,
   defaultCombatInterruptResponse,
   isCombatInterruptKind,
+  resolveCombatInterruptCharacter,
 } from '../lib/combatInterruptProtocol'
 import {
   createD20ReplacementContribution,
@@ -6503,6 +6504,61 @@ export default function MapsPage() {
           sharedDmAdjudicationPromptIdRef.current = null
           setSharedDmAdjudicationPrompt(null)
         }
+        const dmControlledCharacterIds = new Set(
+          latestActiveMap.tokens.flatMap((token) =>
+            token.type === 'enemy' && token.characterId ? [token.characterId] : [],
+          ),
+        )
+        const dmControlledCharacters = characters.filter((character) => dmControlledCharacterIds.has(character.id))
+        const dmReactionSelection = resolveCombatInterruptPromptSelection({
+          queue: {
+            ...queue,
+            interrupts: queue.interrupts.filter((interrupt) => {
+              const character = resolveCombatInterruptCharacter(interrupt, characters)
+              return !!character && dmControlledCharacterIds.has(character.id)
+            }),
+          },
+          mapId: activeMapId,
+          now,
+          answerContext: {
+            characters,
+            visibleCharacters: dmControlledCharacters,
+            tokens: latestActiveMap.tokens,
+            authority: 'dm',
+          },
+          suppressed: {
+            'opportunity-attack': suppressedOpportunityAttackPromptIdsRef.current,
+            protection: suppressedProtectionPromptIdsRef.current,
+            'shield-spell': suppressedShieldSpellPromptIdsRef.current,
+            counterspell: suppressedCounterspellPromptIdsRef.current,
+            'uncanny-dodge': suppressedUncannyDodgePromptIdsRef.current,
+            'deflect-missiles': suppressedDeflectMissilesPromptIdsRef.current,
+            'saving-throw-reroll': suppressedSavingThrowRerollPromptIdsRef.current,
+            'bardic-inspiration': suppressedBardicInspirationPromptIdsRef.current,
+            'cutting-words': suppressedCuttingWordsPromptIdsRef.current,
+            'dark-ones-own-luck': suppressedDarkOnesOwnLuckPromptIdsRef.current,
+            'stroke-of-luck': suppressedStrokeOfLuckPromptIdsRef.current,
+            'empowered-spell': suppressedEmpoweredSpellPromptIdsRef.current,
+            'stand-against-tide': suppressedStandAgainstTidePromptIdsRef.current,
+          },
+        })
+        const dmReactionViews = buildCombatInterruptPromptViews(dmReactionSelection)
+        setNullablePromptView(setSharedOpportunityAttackPrompt, dmReactionViews.opportunityAttack)
+        setNullablePromptView(setSharedProtectionPrompt, dmReactionViews.protection)
+        setNullablePromptView(setSharedShieldSpellPrompt, dmReactionViews.shieldSpell)
+        setNullablePromptView(setSharedCounterspellPrompt, dmReactionViews.counterspell)
+        setNullablePromptView(setSharedUncannyDodgePrompt, dmReactionViews.uncannyDodge)
+        setNullablePromptView(setSharedDeflectMissilesPrompt, dmReactionViews.deflectMissiles)
+        setNullablePromptView(setSharedSavingThrowRerollPrompt, dmReactionViews.savingThrowReroll)
+        setNullablePromptView(setSharedBardicInspirationPrompt, dmReactionViews.bardicInspiration)
+        setNullablePromptView(setSharedCuttingWordsPrompt, dmReactionViews.cuttingWords)
+        setNullablePromptView(setSharedDarkOnesOwnLuckPrompt, dmReactionViews.darkOnesOwnLuck)
+        setNullablePromptView(setSharedStrokeOfLuckPrompt, dmReactionViews.strokeOfLuck)
+        setSharedEmpoweredSpellPrompt((current) => {
+          if (dmReactionViews.empoweredSpell?.id !== current?.id) setSharedEmpoweredSpellSelection([])
+          return dmReactionViews.empoweredSpell ?? null
+        })
+        setNullablePromptView(setSharedStandAgainstTidePrompt, dmReactionViews.standAgainstTide)
         const settlements = resolveDmCombatInterruptSettlements({
           queue,
           mapId: activeMapId,
@@ -6653,6 +6709,7 @@ export default function MapsPage() {
         playerCharId: playerChar?.id,
         assignedCharacterId,
         tokens: latestActiveMap.tokens,
+        authority: 'player' as const,
       }
       const selection = resolveCombatInterruptPromptSelection({
         queue,
@@ -8969,17 +9026,24 @@ export default function MapsPage() {
           }
         }
       }
-      const tranquility = await rollDnd5eTranquilityWard({
-        ward: spellCast.tranquilityWard,
-        attacker: spellActorCombatant,
-        attackerCharacter: spellCast.actor,
-        attackerName: spellCast.actor.name,
-      })
+      const counterspellSucceeded = !!counterspellReaction && (
+        counterspellReaction.slotLevel >= spellCast.slotLevel ||
+        (counterspellReaction.abilityCheckTotal ?? Number.NEGATIVE_INFINITY) >= 10 + spellCast.slotLevel
+      )
+      const spellResolutionContinues = !counterspellSucceeded
+      const tranquility: { passed: boolean; roll?: Dnd5eTranquilitySaveRoll } = spellResolutionContinues
+        ? await rollDnd5eTranquilityWard({
+            ward: spellCast.tranquilityWard,
+            attacker: spellActorCombatant,
+            attackerCharacter: spellCast.actor,
+            attackerName: spellCast.actor.name,
+          })
+        : { passed: true }
       let tranquilityBardicInspirationCommitted = tranquility.roll?.bardicInspirationRoll != null
       let tranquilityRerollCommitted = tranquility.roll?.rerollD20 != null
       let tranquilityDarkOnesOwnLuckCommitted = tranquility.roll?.darkOnesOwnLuckRoll != null
       if (!tranquility.passed) tranquilityPreventedTargetIds.add(spellCast.targetToken.id)
-      for (const targetWard of spellCast.targetTranquilityWards ?? []) {
+      for (const targetWard of spellResolutionContinues ? spellCast.targetTranquilityWards ?? [] : []) {
         const targetTranquility = await rollDnd5eTranquilityWard({
           ward: targetWard.ward,
           attacker: spellActorCombatant,
@@ -8997,7 +9061,7 @@ export default function MapsPage() {
         }
         if (!targetTranquility.passed) tranquilityPreventedTargetIds.add(targetWard.targetToken.id)
       }
-      if (!tranquility.passed) {
+      if (!spellResolutionContinues || !tranquility.passed) {
         effectRolls = []
       } else if (spellCast.targetSpellAttacks != null) {
         targetAttacks = []

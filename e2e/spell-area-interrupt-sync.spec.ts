@@ -20,7 +20,13 @@ type ResourceMap = {
     anchorCell?: { col: number; row: number }
     concentrationId?: string
   }>
-  tokens: Array<{ id: string; hp?: number }>
+  tokens: Array<{
+    id: string
+    hp?: number
+    dnd5eCombatState?: {
+      activeEffects?: Array<{ definitionId?: string; source?: { spellId?: string } }>
+    }
+  }>
 }
 
 async function putState(request: APIRequestContext, name: string, payload: unknown) {
@@ -82,7 +88,18 @@ async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
   }, action)
 }
 
-function spellcaster(id: string, spellIds: string[], classId: 'wizard' | 'druid') {
+async function confirmNextD20(dm: Page) {
+  const dialog = dm.getByRole('dialog', { name: 'd20 投掷确认' })
+  await expect(dialog).toBeVisible({ timeout: 20_000 })
+  await dialog.getByRole('button', { name: /并继续结算$/ }).click()
+}
+
+function spellcaster(
+  id: string,
+  spellIds: string[],
+  classId: 'wizard' | 'druid',
+  cantripIds: string[] = [],
+) {
   const isWizard = classId === 'wizard'
   return {
     id,
@@ -118,7 +135,14 @@ function spellcaster(id: string, spellIds: string[], classId: 'wizard' | 'druid'
     visibleToPlayers: true,
     equipment: {},
     dnd5eClassChoices: {
-      classes: { [classId]: { selections: { 'spell-prepared': spellIds } } },
+      classes: {
+        [classId]: {
+          selections: {
+            'spell-prepared': spellIds,
+            'spell-cantrips': cantripIds,
+          },
+        },
+      },
     },
     classResources: { 'dnd5e-spell-slot-2': { current: 2, max: 3 } },
   }
@@ -129,9 +153,10 @@ async function seedCombat(
   mapId: string,
   spellIds: string[],
   classId: 'wizard' | 'druid' = 'wizard',
+  cantripIds: string[] = [],
 ) {
   const now = Date.now()
-  const character = spellcaster(`${mapId}:spellcaster`, spellIds, classId)
+  const character = spellcaster(`${mapId}:spellcaster`, spellIds, classId, cantripIds)
   const actorToken = {
     id: `${mapId}:wizard-token`, label: character.name, x: 175, y: 175,
     color: '#8b5cf6', emoji: '🧙', size: 1, type: 'player', characterId: character.id,
@@ -177,7 +202,7 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
   const mapId = `spell-interrupt-${Date.now()}`
   const seeded = await seedCombat(request, mapId, ['suggestion'])
   const context = await browser.newContext()
-  const dm = await context.newPage()
+  let dm = await context.newPage()
   const player = await context.newPage()
   await Promise.all([
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
@@ -203,12 +228,21 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
   }
   await submitPlayerAction(player, action)
 
-  const dialog = dm.getByTestId('dm-adjudication-dialog')
+  let dialog = dm.getByTestId('dm-adjudication-dialog')
   await expect(dialog).toBeVisible({ timeout: 20_000 })
   await expect(dialog).toContainText('DM 裁定 · 暗示术')
   await expect(player.getByTestId('dm-adjudication-dialog')).toHaveCount(0)
   const before = await getState<{ characters: ResourceCharacter[]; _sync?: unknown }>(request, 'characters')
   expect(before.characters[0].classResources?.['dnd5e-spell-slot-2']?.current).toBe(2)
+
+  // 未完成的权威事务不能只存在于 DM 页面的内存里。关闭并重新打开 DM 端后，
+  // 同一个裁定窗口应从共享资源恢复，并继续原来的 actionId。
+  await dm.close()
+  dm = await context.newPage()
+  await dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' })
+  dialog = dm.getByTestId('dm-adjudication-dialog')
+  await expect(dialog).toBeVisible({ timeout: 20_000 })
+  await expect(dialog).toContainText('DM 裁定 · 暗示术')
 
   await dialog.getByRole('button', { name: '＋ 添加目标效果' }).click()
   await dialog.getByLabel('目标').selectOption(seeded.enemyToken.id)
@@ -222,6 +256,7 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
     const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
     return ack.actionId === action.id ? ack.status : ''
   }, { timeout: 30_000 }).toBe('accepted')
+  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toHaveCount(0)
   await expect.poll(async () => {
     const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
     return state.characters[0].classResources?.['dnd5e-spell-slot-2']?.current
@@ -240,6 +275,203 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
   }))
   const playerMaps = await loadPlayerState<{ maps: ResourceMap[] }>(player, 'maps')
   expect(playerMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(33)
+  await context.close()
+})
+
+test('普通法术攻击只结算一次：并发重复请求不会重复扣法术位或造成双倍伤害', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-attack-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['acid-arrow'])
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  await dm.evaluate(() => { Math.random = () => 0.5 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:acid-arrow:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    dnd5eSpellCast: {
+      spellId: 'acid-arrow', castingClassId: 'wizard', slotLevel: 2,
+      targetTokenId: seeded.enemyToken.id,
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+
+  await Promise.all([submitPlayerAction(player, action), submitPlayerAction(player, action)])
+  await confirmNextD20(dm)
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? ack.status : ''
+  }, { timeout: 30_000 }).toBe('accepted')
+  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toHaveCount(0)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters[0].classResources?.['dnd5e-spell-slot-2']?.current
+  }).toBe(1)
+  await expect.poll(async () => {
+    const state = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+    return state.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp
+  }).toBe(28)
+  const processed = await getState<{ actionIds: string[] }>(request, 'player-action-processed')
+  expect(processed.actionIds.filter((id) => id === action.id)).toHaveLength(1)
+  await context.close()
+})
+
+test('普通豁免法术由 DM 确认 d20 后在 Headless 中结算并同步伤害', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-save-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, [], 'wizard', ['acid-splash'])
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+  await dm.evaluate(() => { Math.random = () => 0 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:acid-splash:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    dnd5eSpellCast: {
+      spellId: 'acid-splash', castingClassId: 'wizard', slotLevel: 0,
+      targetTokenId: seeded.enemyToken.id, targetTokenIds: [seeded.enemyToken.id],
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await submitPlayerAction(player, action)
+  await confirmNextD20(dm)
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? `${ack.status}:${ack.reason ?? ''}` : ''
+  }, { timeout: 30_000 }).toBe('accepted:')
+  await expect.poll(async () => {
+    const state = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+    return state.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp
+  }).toBe(38)
+  await context.close()
+})
+
+test('法术反制通过共享 Interrupt 消耗双方资源并阻止原法术效果', async ({ browser, request }) => {
+  test.setTimeout(90_000)
+  const mapId = `spell-counterspell-${Date.now()}`
+  const seeded = await seedCombat(request, mapId, ['acid-arrow'])
+  const reactor = {
+    ...spellcaster(`${mapId}:reactor`, ['counterspell'], 'wizard'),
+    name: '反制法师',
+    player: 'DM',
+    classResources: {
+      'dnd5e-spell-slot-2': { current: 0, max: 3 },
+      'dnd5e-spell-slot-3': { current: 1, max: 2 },
+    },
+  }
+  const mapsState = await getState<{ maps: Array<Record<string, unknown> & { id: string; tokens: Array<Record<string, unknown> & { id: string }> }> }>(request, 'maps')
+  const seededMap = mapsState.maps.find((map) => map.id === mapId)!
+  await putState(request, 'characters', {
+    characters: [seeded.character, reactor], selectedId: seeded.character.id, updatedAt: Date.now(),
+  })
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: Date.now(),
+    maps: [{
+      ...seededMap,
+      tokens: seededMap.tokens.map((token) => token.id === seeded.enemyToken.id
+        ? {
+            ...token,
+            label: reactor.name,
+            x: 455,
+            size: 1,
+            characterId: reactor.id,
+            poolId: undefined,
+            hp: undefined,
+            maxHp: undefined,
+          }
+        : token),
+    }],
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
+
+  const now = Date.now()
+  const action = {
+    id: `${mapId}:countered-acid-arrow:${now}`,
+    mapId,
+    combatId: `${mapId}:combat`,
+    sourceMode: 'player',
+    status: 'pending',
+    type: 'dnd5e-spell-cast',
+    actorTokenId: seeded.actorToken.id,
+    characterId: seeded.character.id,
+    targetTokenId: seeded.enemyToken.id,
+    dnd5eSpellCast: {
+      spellId: 'acid-arrow', castingClassId: 'wizard', slotLevel: 2,
+      targetTokenId: seeded.enemyToken.id,
+    },
+    round: 1,
+    initiativeIndex: 0,
+    seq: 1,
+    updatedAt: now,
+  }
+  await submitPlayerAction(player, action)
+  await expect(dm.getByTestId('shared-counterspell-use')).toBeVisible({ timeout: 20_000 })
+  await expect(player.getByTestId('shared-counterspell-use')).toHaveCount(0)
+  await dm.getByTestId('shared-counterspell-use').click()
+
+  await expect.poll(async () => {
+    const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
+    return ack.actionId === action.id ? ack.status : ''
+  }, { timeout: 30_000 }).toBe('accepted')
+  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toHaveCount(0)
+  await expect.poll(async () => {
+    const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
+    return state.characters.map((character) => ({
+      id: character.id,
+      slot2: character.classResources?.['dnd5e-spell-slot-2']?.current,
+      slot3: character.classResources?.['dnd5e-spell-slot-3']?.current,
+    }))
+  }).toEqual([
+    { id: seeded.character.id, slot2: 1, slot3: 2 },
+    { id: reactor.id, slot2: 0, slot3: 0 },
+  ])
+  const finalMaps = await getState<{ maps: ResourceMap[] }>(request, 'maps')
+  expect(finalMaps.maps.find((map) => map.id === mapId)?.tokens.find((token) => token.id === seeded.enemyToken.id)?.hp).toBe(32)
   await context.close()
 })
 

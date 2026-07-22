@@ -326,6 +326,7 @@ export interface CombatInterruptAnswerContext {
   playerCharId?: string
   assignedCharacterId?: string | null
   tokens?: Token[]
+  authority?: 'player' | 'dm'
 }
 
 export interface CombatInterruptAnswerCandidate {
@@ -418,6 +419,13 @@ export function resolveCombatInterruptAnswerCandidate(
     (interrupt.kind === 'plugin-choice' && interrupt.payload.audience === 'dm')
   ) return { character, canAnswer: false }
   if (!character || (character.currentHp <= 0 && interrupt.kind !== 'bardic-inspiration')) {
+    return { character, canAnswer: false }
+  }
+
+  const isDmControlledCharacter = context.tokens?.some(
+    (token) => token.type === 'enemy' && token.characterId === character.id,
+  ) ?? false
+  if (isDmControlledCharacter && context.authority !== 'dm') {
     return { character, canAnswer: false }
   }
 

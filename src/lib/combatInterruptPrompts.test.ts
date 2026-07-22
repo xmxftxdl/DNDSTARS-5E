@@ -46,11 +46,66 @@ function token(id: string, characterId: string): Token {
   } as Token
 }
 
+function enemyToken(id: string, characterId: string): Token {
+  return {
+    id,
+    type: 'enemy',
+    label: id,
+    characterId,
+  } as Token
+}
+
 function queue(interrupts: SharedCombatInterrupt[], mapId = 'map-1'): SharedCombatInterruptQueueState {
   return { mapId, interrupts, updatedAt: 100 }
 }
 
 describe('combat interrupt prompt selection', () => {
+  it('routes a reaction from an enemy-linked character to DM authority only', () => {
+    const enemyWizard = character('enemy-wizard')
+    const interrupt = createCombatInterrupt<ProtectionInterruptPayload>({
+      id: 'enemy-reaction',
+      mapId: 'map-1',
+      kind: 'protection',
+      actorCharId: enemyWizard.id,
+      payload: {
+        protectorName: enemyWizard.name,
+        attackerName: 'hero',
+        targetName: 'enemy ally',
+        attackName: 'sword',
+      },
+      now: 100,
+    })
+    const tokens = [enemyToken('enemy-token', enemyWizard.id)]
+    const base = {
+      queue: queue([interrupt]),
+      mapId: 'map-1',
+      now: 1000,
+      suppressed: {},
+    }
+
+    const playerSelection = resolveCombatInterruptPromptSelection({
+      ...base,
+      answerContext: {
+        characters: [enemyWizard],
+        visibleCharacters: [enemyWizard],
+        tokens,
+        authority: 'player',
+      },
+    })
+    const dmSelection = resolveCombatInterruptPromptSelection({
+      ...base,
+      answerContext: {
+        characters: [enemyWizard],
+        visibleCharacters: [enemyWizard],
+        tokens,
+        authority: 'dm',
+      },
+    })
+
+    expect(playerSelection.protection).toBeUndefined()
+    expect(dmSelection.protection?.character.id).toBe(enemyWizard.id)
+  })
+
   it('selects an answerable dodge prompt for the current map', () => {
     const hero = character('hero')
     const interrupt = createCombatInterrupt<DodgeInterruptPayload>({
