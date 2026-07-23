@@ -347,6 +347,153 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }))
   })
 
+  it('resolves Color Spray by current HP and expires blindness at the caster next turn end', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 3,
+      classSelections: { 'spell-prepared': ['color-spray'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const low = fighter('low', 15, { controller: 'dm', currentHp: 4, maxHp: 20 })
+    const middle = fighter('middle', 14, { controller: 'dm', currentHp: 7, maxHp: 20 })
+    const high = fighter('high', 13, { controller: 'dm', currentHp: 8, maxHp: 20 })
+    const alreadyBlind = fighter('already-blind', 12, {
+      controller: 'dm', currentHp: 1, maxHp: 20, conditions: ['blinded'],
+    })
+    const blindImmune = fighter('blind-immune', 11, {
+      controller: 'dm', currentHp: 2, maxHp: 20, conditionImmunities: ['blinded'],
+    })
+    const state = startDnd5eHeadlessCombat('color-spray', [
+      wizard, low, middle, high, alreadyBlind, blindImmune,
+    ])
+    const cast = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'low',
+      targetIds: ['low', 'middle', 'high', 'already-blind', 'blind-immune'],
+      spellId: 'color-spray', slotLevel: 1, effectRolls: [2, 2, 2, 2, 2, 2],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.low.conditions).toContain('blinded')
+    expect(cast.state.combatants.middle.conditions).toContain('blinded')
+    expect(cast.state.combatants.high.conditions).not.toContain('blinded')
+    expect(cast.state.combatants['blind-immune'].conditions).not.toContain('blinded')
+    expect(cast.events).toContainEqual({
+      type: 'color-spray-resolved', actorId: 'wizard', spellId: 'color-spray',
+      hitPointPool: 12, remainingHitPoints: 1, affectedTargetIds: ['low', 'middle'],
+    })
+    expect(cast.state.combatants.low.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'condition:blinded',
+      stackingKey: 'srd-5.1:spell:color-spray:blinded',
+      source: expect.objectContaining({ rulesId: 'color-spray' }),
+      duration: expect.objectContaining({ type: 'until-turn-boundary', boundary: 'source-turn-end' }),
+    }))
+
+    let advanced = resolveDnd5eHeadlessAction(cast.state, { type: 'end-turn', actorId: 'wizard' })
+    expect(advanced.ok).toBe(true)
+    for (const actorId of ['low', 'middle', 'high', 'already-blind', 'blind-immune']) {
+      if (!advanced.ok) return
+      advanced = resolveDnd5eHeadlessAction(advanced.state, { type: 'end-turn', actorId })
+      expect(advanced.ok).toBe(true)
+    }
+    if (!advanced.ok) return
+    expect(advanced.state.combatants.low.conditions).toContain('blinded')
+    const expired = resolveDnd5eHeadlessAction(advanced.state, { type: 'end-turn', actorId: 'wizard' })
+    expect(expired.ok).toBe(true)
+    if (!expired.ok) return
+    expect(expired.state.combatants.low.conditions).not.toContain('blinded')
+    expect(expired.state.combatants.middle.conditions).not.toContain('blinded')
+  })
+
+  it('adds Divine Favor radiant damage to authoritative weapon hits', () => {
+    const paladin = fighter('paladin', 20, {
+      classId: 'paladin', level: 2, abilities: { ...abilities, cha: 16 },
+      classSelections: { 'spell-prepared': ['divine-favor'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const target = fighter('target', 10, { controller: 'dm', armorClass: 12 })
+    const secondTarget = fighter('second-target', 5, { controller: 'dm', armorClass: 12 })
+    const cast = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('divine-favor', [paladin, target, secondTarget]), {
+      type: 'cast-spell', actorId: 'paladin', targetId: 'paladin',
+      spellId: 'divine-favor', slotLevel: 1, effectRolls: [],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.paladin.turn.bonusActionAvailable).toBe(false)
+    expect(cast.state.combatants.paladin).toMatchObject({
+      concentrating: true,
+      classState: { concentrationSpellId: 'divine-favor' },
+    })
+    expect(dnd5eWeaponClassDamageDefinitions({
+      state: cast.state,
+      actorId: 'paladin',
+      targetId: 'target',
+      context: {
+        mode: 'melee', finesse: false, strengthBased: true, weaponDamageSides: 8,
+        damageType: 'slashing', adjacentEnemyOfTarget: false,
+      },
+      critical: false,
+    })).toContainEqual({
+      source: 'divine-favor', count: 1, sides: 4, type: 'radiant', doubleOnCritical: true,
+    })
+
+    const attack = resolveDnd5eHeadlessAction(cast.state, {
+      type: 'attack', actorId: 'paladin', targetId: 'target', attackModifier: 5, d20: 15,
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+      classDamageContext: {
+        mode: 'melee', finesse: false, strengthBased: true, weaponDamageSides: 8,
+        damageType: 'slashing', adjacentEnemyOfTarget: false,
+      },
+      classDamageRolls: [{ source: 'divine-favor', rolls: [4] }],
+    })
+    expect(attack.ok).toBe(true)
+    if (!attack.ok) return
+    expect(attack.state.combatants.target.currentHp).toBe(8)
+    expect(attack.events).toContainEqual({
+      type: 'class-damage-applied', actorId: 'paladin', targetId: 'target',
+      source: 'divine-favor', amount: 4,
+    })
+
+    const forgedOpportunitySmite = resolveDnd5eHeadlessAction(attack.state, {
+      type: 'opportunity-attack', actorId: 'paladin', targetId: 'second-target',
+      attackModifier: 5, d20: 15,
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+      classDamageContext: {
+        mode: 'melee', finesse: false, strengthBased: true, weaponDamageSides: 8,
+        damageType: 'slashing', adjacentEnemyOfTarget: false, divineSmiteSlotLevel: 1,
+      },
+      classDamageRolls: [],
+    })
+    expect(forgedOpportunitySmite).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+    const forgedOpportunityCritical = resolveDnd5eHeadlessAction(attack.state, {
+      type: 'opportunity-attack', actorId: 'paladin', targetId: 'second-target',
+      attackModifier: 5, criticalThreshold: 18, d20: 18,
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+      classDamageContext: {
+        mode: 'melee', finesse: false, strengthBased: true, weaponDamageSides: 8,
+        damageType: 'slashing', adjacentEnemyOfTarget: false,
+      },
+      classDamageRolls: [],
+    })
+    expect(forgedOpportunityCritical).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+
+    const opportunityAttack = resolveDnd5eHeadlessAction(attack.state, {
+      type: 'opportunity-attack', actorId: 'paladin', targetId: 'second-target',
+      attackModifier: 5, criticalThreshold: 20, d20: 15,
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5], type: 'slashing' },
+      classDamageContext: {
+        mode: 'melee', finesse: false, strengthBased: true, weaponDamageSides: 8,
+        damageType: 'slashing', adjacentEnemyOfTarget: false,
+      },
+      classDamageRolls: [{ source: 'divine-favor', rolls: [4] }],
+    })
+    expect(opportunityAttack.ok).toBe(true)
+    if (!opportunityAttack.ok) return
+    expect(opportunityAttack.state.combatants['second-target'].currentHp).toBe(8)
+    expect(opportunityAttack.events).toContainEqual({
+      type: 'class-damage-applied', actorId: 'paladin', targetId: 'second-target',
+      source: 'divine-favor', amount: 4,
+    })
+  })
+
   it('resolves Guiding Bolt, fixed healing, healing pools, and Power Word Stun', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric', level: 17, proficiencyBonus: 6, abilities: { ...abilities, wis: 20 },

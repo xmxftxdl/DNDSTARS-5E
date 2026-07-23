@@ -519,6 +519,7 @@ export type Dnd5eClassDamageSource =
   | 'improved-divine-smite'
   | 'divine-smite'
   | 'hunters-mark'
+  | 'divine-favor'
   | 'divine-strike'
   | 'lifedrinker'
   | 'foe-slayer'
@@ -810,7 +811,7 @@ export type Dnd5eAction =
   | { type: 'warlock-hurl-through-hell-ready'; actorId: string; active: boolean }
   | Dnd5ePluginAction
   | { type: 'end-turn'; actorId: string; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]; nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[] }
-  | { type: 'opportunity-attack'; actorId: string; targetId: string; attackModifier: number; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; shieldSpellReaction?: boolean; uncannyDodge?: boolean; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; reactionFeature?: 'berserker-retaliation' | 'hunter-giant-killer'; tranquilitySave?: Dnd5eTranquilitySaveRoll; hurlThroughHellDamageRolls?: readonly number[]; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType } }
+  | { type: 'opportunity-attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; shieldSpellReaction?: boolean; uncannyDodge?: boolean; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; reactionFeature?: 'berserker-retaliation' | 'hunter-giant-killer'; tranquilitySave?: Dnd5eTranquilitySaveRoll; hurlThroughHellDamageRolls?: readonly number[]; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType }; classDamageContext?: Dnd5eWeaponClassDamageContext; classDamageRolls?: readonly Dnd5eClassDamageRolls[] }
 
 export interface Dnd5eMonsterActionRoll {
   targetId: string
@@ -888,6 +889,7 @@ export type Dnd5eCombatEvent =
   | { type: 'condition-applied'; actorId: string; targetId: string; condition: string }
   | { type: 'condition-ended'; targetId: string; condition: string }
   | { type: 'sleep-resolved'; actorId: string; spellId: 'sleep'; hitPointPool: number; remainingHitPoints: number; affectedTargetIds: readonly string[] }
+  | { type: 'color-spray-resolved'; actorId: string; spellId: 'color-spray'; hitPointPool: number; remainingHitPoints: number; affectedTargetIds: readonly string[] }
   | { type: 'sleeping-creature-awakened'; actorId: string; targetId: string; spellId: 'sleep' }
   | { type: 'declarative-subclass-ability-resolved'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[] }
   | { type: 'declarative-subclass-trigger-rejected'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[]; reason: Dnd5eActionFailure }
@@ -3550,6 +3552,10 @@ export function dnd5eWeaponClassDamageDefinitions(input: {
     definitions.push({ source: 'hunters-mark', count: 1, sides: 6, type: context.damageType, doubleOnCritical: true })
   }
 
+  if (dnd5eCombatantHasConcentrationEffect(input.state, actor.id, 'divine-favor')) {
+    definitions.push({ source: 'divine-favor', count: 1, sides: 4, type: 'radiant', doubleOnCritical: true })
+  }
+
   const brutalDice = barbarianLevel >= 17 ? 3 : barbarianLevel >= 13 ? 2 : barbarianLevel >= 9 ? 1 : 0
   if (barbarianLevel >= 1 && context.mode === 'melee' && input.critical && brutalDice > 0) {
     definitions.push({ source: 'brutal-critical', count: brutalDice, sides: context.weaponDamageSides, type: context.damageType, doubleOnCritical: false })
@@ -3848,6 +3854,28 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   if (!actor || actor.currentHp <= 0 || dnd5eCombatantIsBanished(actor)) return fail(state, events, 'invalid-actor')
   if (!target || target.deathSaves.dead || dnd5eCombatantIsBanished(target)) return fail(state, events, 'invalid-target')
   if (dnd5eCannotAttackSource(actor, target.id)) return fail(state, events, 'invalid-target')
+  if (action.type === 'opportunity-attack') {
+    const expectedCriticalThreshold = dnd5eCombatantClassLevel(actor, 'fighter') >= 15 &&
+      dnd5eCombatantHasSubclass(actor, 'fighter', 'champion')
+      ? 18
+      : dnd5eCombatantClassLevel(actor, 'fighter') >= 3 &&
+          dnd5eCombatantHasSubclass(actor, 'fighter', 'champion')
+        ? 19
+        : 20
+    if (
+      (action.criticalThreshold != null && action.criticalThreshold !== expectedCriticalThreshold) ||
+      (action.classDamageContext && (
+        action.classDamageContext.divineSmiteSlotLevel != null ||
+        action.classDamageContext.recklessAttack ||
+        action.classDamageContext.frenzyAttack ||
+        action.classDamageContext.twoWeaponBonusAttack ||
+        action.classDamageContext.hordeBreakerEligible ||
+        action.classDamageContext.hordeBreakerAttack ||
+        action.classDamageContext.stunningStrike ||
+        action.classDamageContext.foeSlayer != null
+      ))
+    ) return fail(state, events, 'invalid-class-feature')
+  }
   if (action.type === 'attack' && actor.classState.wildShapeFormId) {
     return fail(state, events, 'invalid-class-feature')
   }
@@ -4004,7 +4032,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     return fail(state, events, 'invalid-dice')
   }
   if (!attack) return fail(state, events, 'invalid-class-feature')
-  const criticalThreshold = action.type === 'attack' ? Math.min(20, Math.max(18, action.criticalThreshold ?? 20)) : 20
+  const criticalThreshold = Math.min(20, Math.max(18, action.criticalThreshold ?? 20))
   let attackOutcome = resolveDnd5eAttackOutcome({
     attack,
     targetArmorClass,
@@ -4075,7 +4103,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
       }],
       use: action.standAgainstTide,
       events,
-      classDamageContext: action.type === 'attack' ? action.classDamageContext : undefined,
+      classDamageContext: action.classDamageContext,
     })
   }
   if (hit) {
@@ -4083,7 +4111,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     try {
       const damage = rules.resolveDamage({ ...action.damage, critical })
       const resolvedClassDamage: Array<{ definition: Dnd5eClassDamageDefinition; total: number }> = []
-      if (action.type === 'attack') {
+      if (action.classDamageContext) {
         const definitions = dnd5eWeaponClassDamageDefinitions({
           state,
           actorId: actor.id,
@@ -4243,7 +4271,9 @@ function resolveSpellCast(
   if (
     !actor || actor.currentHp <= 0 || dnd5eCombatantIsBanished(actor) || !target ||
     targets.some((candidate) => !candidate ||
-      (candidate.deathSaves.dead && spell?.effect !== 'sleep-hit-point-pool') ||
+      (candidate.deathSaves.dead &&
+        spell?.effect !== 'sleep-hit-point-pool' &&
+        spell?.effect !== 'color-spray-hit-point-pool') ||
       dnd5eCombatantIsBanished(candidate)) ||
     !spell || (!persistentArea && requestedTargetIds.length < 1) ||
     requestedTargetIds.length > (metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, action.slotLevel, actor.level)) ||
@@ -4334,7 +4364,7 @@ function resolveSpellCast(
     return type === 'undead' || type.includes('亡灵') || type === 'construct' || type.includes('构装')
   }
   if (
-    ((spell.id === 'false-life' || spell.id === 'blur') && target.id !== actor.id) ||
+    ((spell.id === 'false-life' || spell.id === 'blur' || spell.id === 'divine-favor') && target.id !== actor.id) ||
     (spell.id === 'spare-the-dying' && (
       target.currentHp !== 0 || target.deathSaves.dead || isUndeadOrConstructForSpell(target)
     )) ||
@@ -4888,6 +4918,7 @@ function resolveSpellCast(
           'protection-from-energy': `防护能量伤害：${action.effectDamageType ?? ''}抗性`,
           longstrider: '大步奔行：速度+10尺',
           'mage-armor': '法师护甲：基础 AC 为 13＋敏捷调整值',
+          'divine-favor': '神恩：武器命中额外造成1d4光耀伤害',
         } as const
         applyDnd5eMechanicalStatusEffect(affected, actor, {
           definitionId: `srd-5.1:spell:${spell.appliedEffect}`,
@@ -4906,7 +4937,7 @@ function resolveSpellCast(
     return finishSpellCast()
   }
 
-  if (spell.effect === 'sleep-hit-point-pool') {
+  if (spell.effect === 'sleep-hit-point-pool' || spell.effect === 'color-spray-hit-point-pool') {
     const diceCount = dnd5eSpellDiceCount(spell, actor.level, action.slotLevel)
     if (
       action.effectRolls.length !== diceCount ||
@@ -4919,10 +4950,27 @@ function resolveSpellCast(
     const hitPointPool = action.effectRolls.reduce((sum, roll) => sum + roll, spell.dice.bonus)
     let remainingHitPoints = hitPointPool
     const initiativeRank = new Map(state.initiativeOrder.map((id, index) => [id, index]))
+    const canSeeColorSpray = (candidate: Dnd5eCombatant) => {
+      if (dnd5eHasStandardCondition(candidate, 'blinded')) return false
+      const pairKey = dnd5eDirectedCombatantPairKey(candidate.id, actor.id)
+      if (state.physicalLineOfSightBlockedByCombatantPair?.[pairKey] === true) return false
+      const distanceFeet = dnd5eAttackDistanceFeet(state, candidate.id, actor.id)
+      return dnd5eHasSpecialSenseInRange(candidate.specialSenses, 'blindsight', distanceFeet) ||
+        dnd5eHasSpecialSenseInRange(candidate.specialSenses, 'truesight', distanceFeet) ||
+        state.lineOfSightBlockedByCombatantPair?.[pairKey] !== true
+    }
     const eligibleTargets = targets
       .filter((candidate): candidate is Dnd5eCombatant => {
         if (!candidate || candidate.currentHp <= 0 || candidate.deathSaves.dead) return false
         if (dnd5eHasStandardCondition(candidate, 'unconscious')) return false
+        if (spell.effect === 'color-spray-hit-point-pool') {
+          if (
+            dnd5eHasStandardCondition(candidate, 'blinded') ||
+            candidate.conditionImmunities.some((condition) => dnd5eStandardConditionId(condition) === 'blinded') ||
+            !canSeeColorSpray(candidate)
+          ) return false
+          return true
+        }
         const creatureType = normalizedCreatureTypeForSpell(candidate)
         if (creatureType === 'undead' || creatureType.includes('亡灵')) return false
         return !candidate.conditionImmunities.some((condition) =>
@@ -4937,36 +4985,59 @@ function resolveSpellCast(
         left.id.localeCompare(right.id),
       )
     const affectedTargetIds: string[] = []
-    const durationRounds = metamagic?.kind === 'extended'
-      ? Math.min(14_400, Math.max(1, spell.effectDurationRounds ?? 10) * 2)
-      : Math.max(1, spell.effectDurationRounds ?? 10)
+    const sleepDurationRounds = spell.effect === 'sleep-hit-point-pool'
+      ? metamagic?.kind === 'extended'
+        ? Math.min(14_400, Math.max(1, spell.effectDurationRounds ?? 10) * 2)
+        : Math.max(1, spell.effectDurationRounds ?? 10)
+      : 0
     for (const affected of eligibleTargets) {
       if (affected.currentHp > remainingHitPoints) break
-      const applied = applyDnd5eStandardConditionEffect(affected, actor, {
-        id: dnd5eActiveEffectId('srd-5.1:spell:sleep:unconscious', actor.id, affected.id),
-        definitionId: 'srd-5.1:spell:sleep:unconscious',
-        rulesId: 'sleep',
-        condition: 'unconscious',
-        duration: { type: 'rounds', remainingRounds: durationRounds, tickOn: 'target-turn-end' },
-        appliedTurnKey: classFeatureTurnKey(state, actor.id),
-        breakOn: ['takes-damage'],
-      }, events)
+      const appliedTurnKey = classFeatureTurnKey(state, actor.id)
+      const applied = spell.effect === 'sleep-hit-point-pool'
+        ? applyDnd5eStandardConditionEffect(affected, actor, {
+            id: dnd5eActiveEffectId('srd-5.1:spell:sleep:unconscious', actor.id, affected.id),
+            definitionId: 'srd-5.1:spell:sleep:unconscious',
+            rulesId: 'sleep',
+            condition: 'unconscious',
+            duration: { type: 'rounds', remainingRounds: sleepDurationRounds, tickOn: 'target-turn-end' },
+            appliedTurnKey,
+            breakOn: ['takes-damage'],
+          }, events)
+        : applyDnd5eStandardConditionEffect(affected, actor, {
+            id: dnd5eActiveEffectId('srd-5.1:spell:color-spray:blinded', actor.id, affected.id),
+            definitionId: 'srd-5.1:spell:color-spray:blinded',
+            rulesId: 'color-spray',
+            condition: 'blinded',
+            duration: {
+              type: 'until-turn-boundary',
+              boundary: 'source-turn-end',
+              appliedTurnKey,
+            },
+            appliedTurnKey,
+          }, events)
       if (!applied) continue
-      applyDnd5eStandardConditionEffect(affected, actor, {
-        id: dnd5eActiveEffectId('srd-5.1:spell:sleep:fall-prone', actor.id, affected.id),
-        definitionId: 'srd-5.1:spell:sleep:fall-prone',
-        rulesId: 'sleep-fall-prone',
-        condition: 'prone',
-        duration: { type: 'permanent' },
-        appliedTurnKey: classFeatureTurnKey(state, actor.id),
-      }, events)
+      if (spell.effect === 'sleep-hit-point-pool') {
+        applyDnd5eStandardConditionEffect(affected, actor, {
+          id: dnd5eActiveEffectId('srd-5.1:spell:sleep:fall-prone', actor.id, affected.id),
+          definitionId: 'srd-5.1:spell:sleep:fall-prone',
+          rulesId: 'sleep-fall-prone',
+          condition: 'prone',
+          duration: { type: 'permanent' },
+          appliedTurnKey,
+        }, events)
+      }
       remainingHitPoints -= affected.currentHp
       affectedTargetIds.push(affected.id)
     }
-    events.push({
-      type: 'sleep-resolved', actorId: actor.id, spellId: 'sleep',
-      hitPointPool, remainingHitPoints, affectedTargetIds,
-    })
+    events.push(spell.effect === 'sleep-hit-point-pool'
+      ? {
+          type: 'sleep-resolved', actorId: actor.id, spellId: 'sleep',
+          hitPointPool, remainingHitPoints, affectedTargetIds,
+        }
+      : {
+          type: 'color-spray-resolved', actorId: actor.id, spellId: 'color-spray',
+          hitPointPool, remainingHitPoints, affectedTargetIds,
+        })
     return finishSpellCast()
   }
 

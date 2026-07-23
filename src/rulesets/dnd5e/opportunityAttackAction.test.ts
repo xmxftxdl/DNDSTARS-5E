@@ -6,6 +6,7 @@ import { DND5E_FIGHTER_STARTING_EQUIPMENT } from './equipment'
 import { createDnd5eConditionEffect } from './activeEffects'
 import {
   findDnd5eOpportunityAttackersForMove,
+  dnd5eOpportunityAttackClassDamageDefinitions,
   prepareDnd5eOpportunityAttack,
   previewDnd5eOpportunityAttack,
   resolvePreparedDnd5eOpportunityAttack,
@@ -179,5 +180,46 @@ describe('D&D 5e opportunity attack bridge', () => {
       reactionFeature: 'hunter-giant-killer',
     })
     expect(invalid).toEqual({ ok: false, reason: 'invalid-actor' })
+  })
+
+  it('carries Divine Favor through the player opportunity-attack authority bridge', () => {
+    const { character, map, initiativeOrder } = fixture()
+    const paladin: Character = {
+      ...character,
+      charClass: '圣武士',
+      level: 2,
+      equipment: DND5E_FIGHTER_STARTING_EQUIPMENT,
+      dnd5eClassChoices: {
+        classes: { paladin: { selections: { 'spell-prepared': ['divine-favor'] } } },
+      },
+      concentrating: true,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        concentrationSpellId: 'divine-favor',
+        concentrationTargetIds: ['hero-token'],
+        concentrationEffectsBySource: { 'hero-token': 'divine-favor' },
+      },
+    }
+    const prepared = prepareDnd5eOpportunityAttack({
+      combatId: 'combat', map, characters: [paladin], initiativeOrder,
+      actorTokenId: 'hero-token', targetTokenId: 'kobold',
+      turnEconomy: createDnd5eTurnEconomyCounts('paladin-turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(dnd5eOpportunityAttackClassDamageDefinitions(prepared.prepared, false)).toContainEqual({
+      source: 'divine-favor', count: 1, sides: 4, type: 'radiant', doubleOnCritical: true,
+    })
+    const resolved = resolvePreparedDnd5eOpportunityAttack({
+      prepared: prepared.prepared,
+      d20: 15,
+      damageRolls: [1],
+      classDamageRolls: [{ source: 'divine-favor', rolls: [4] }],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual({
+      type: 'class-damage-applied', actorId: 'hero-token', targetId: 'kobold',
+      source: 'divine-favor', amount: 4,
+    })
   })
 })

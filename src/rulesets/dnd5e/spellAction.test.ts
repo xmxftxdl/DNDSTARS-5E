@@ -92,6 +92,31 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(prepareDnd5eSpellCast(omittedCaster)).toMatchObject({ ok: false, reason: 'invalid-target' })
   })
 
+  it('prepares the complete Color Spray cone and rolls its Headless HP pool', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['color-spray'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(wizard, 'color-spray', 1, enemy)
+    input.action.dnd5eSpellCast!.targetTokenIds = [enemy.id]
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      diceCount: 6,
+      spell: { id: 'color-spray', effect: 'color-spray-hit-point-pool' },
+    })
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      effectRolls: [10, 10, 10, 10, 10, 10],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'color-spray-resolved', hitPointPool: 60, affectedTargetIds: [enemy.id],
+    }))
+  })
+
   it('creates Grease as difficult terrain and resolves its initial Dexterity save through Headless', () => {
     const wizard = character('wizard', dnd5eClassDefinition('wizard')!.name, {
       dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['grease'] } } } },

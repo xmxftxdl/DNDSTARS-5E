@@ -19,6 +19,7 @@ export type Dnd5eSpellEffectKind =
   | 'fixed-healing'
   | 'healing-pool'
   | 'sleep-hit-point-pool'
+  | 'color-spray-hit-point-pool'
   | 'temporary-hit-points'
   | 'stabilize'
   | 'remove-condition'
@@ -105,6 +106,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'protection-from-energy'
     | 'longstrider'
     | 'mage-armor'
+    | 'divine-favor'
   effectDamageTypeOptions?: readonly Dnd5eDamageType[]
   effectDurationRounds?: number
   conditionOptions?: readonly ('blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease')[]
@@ -209,6 +211,15 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     effectDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
     area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 90 },
     description: '掷5d8决定可影响的当前生命值总数。以射程内一点为中心，20尺半径内的生物按当前生命值从低到高依次处理；忽略已经昏迷的生物。当前生命值不高于剩余总值的生物陷入昏迷，直到1分钟结束、受到伤害，或有人用一个动作将其摇醒或拍醒。亡灵和免疫魅惑的生物不受影响。每使用高于1环一环的法术位，额外掷2d8。',
+  },
+  {
+    id: 'color-spray', name: '七彩喷射', englishName: 'Color Spray', level: 1, school: '幻术',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 15,
+    target: 'area', effect: 'color-spray-hit-point-pool',
+    dice: { count: 6, sides: 10, bonus: 0, perHigherSlot: 2 },
+    maximumTargets: 20,
+    area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
+    description: '从自身喷出15尺锥状彩光。掷6d10决定可影响的当前生命值总数；区域内能看见彩光且未昏迷的生物按当前生命值从低到高处理。当前生命值不高于剩余总值的生物陷入目盲，直到你的下一回合结束。每使用高于1环一环的法术位，额外掷2d10。',
   },
   {
     id: 'invisibility', name: '隐形术', englishName: 'Invisibility', level: 2, school: '幻术',
@@ -485,6 +496,13 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     classes: ['cleric', 'paladin'], castingTime: 'bonus-action', rangeFeet: 60, target: 'ally', effect: 'armor-class-buff',
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 100,
     description: '以附赠动作使射程内一个生物获得 +2 AC。法术需要专注，持续至多 10 分钟。',
+  },
+  {
+    id: 'divine-favor', name: '神恩', englishName: 'Divine Favor', level: 1, school: '塑能',
+    classes: ['paladin'], castingTime: 'bonus-action', rangeFeet: 0, target: 'ally', effect: 'active-effect',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    appliedEffect: 'divine-favor',
+    description: '以附赠动作施放并保持专注，持续至多1分钟。法术持续期间，你的武器攻击命中时额外造成1d4光耀伤害。',
   },
   {
     id: 'inflict-wounds', name: '致伤术', englishName: 'Inflict Wounds', level: 1, school: '死灵',

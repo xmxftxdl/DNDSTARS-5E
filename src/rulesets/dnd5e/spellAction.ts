@@ -457,7 +457,7 @@ export function prepareDnd5eSpellCast(input: {
   const isUndeadOrConstruct = (creatureType: string | undefined) =>
     ['构装体', 'construct', '亡灵', 'undead'].includes((creatureType ?? '').toLowerCase())
   if (
-    ((spell.id === 'false-life' || spell.id === 'blur') && targetToken.id !== actorToken.id) ||
+    ((spell.id === 'false-life' || spell.id === 'blur' || spell.id === 'divine-favor') && targetToken.id !== actorToken.id) ||
     (spell.id === 'spare-the-dying' && (
       targetCombatant.currentHp !== 0 || targetCombatant.deathSaves.dead || isUndeadOrConstruct(targetCombatant.creatureType)
     )) ||

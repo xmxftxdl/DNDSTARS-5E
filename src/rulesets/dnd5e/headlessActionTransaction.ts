@@ -89,7 +89,12 @@ function actionRollLedgerEntries(state: Dnd5eHeadlessCombatState, action: Dnd5eA
   if (action.type === 'cast-spell') {
     const spell = getDnd5eSrdCombatSpell(action.spellId)
     if (spell && action.effectRolls.length > 0) {
-      add({ id: `${actionKey}:effect`, kind: spell.effect === 'healing' ? 'healing' : 'damage', label: spell.name, sides: spell.dice.sides, values: action.effectRolls, sourceId: action.actorId, targetId: action.targetId })
+      const kind: RollLedgerKind = spell.effect === 'healing'
+        ? 'healing'
+        : spell.effect === 'sleep-hit-point-pool' || spell.effect === 'color-spray-hit-point-pool'
+          ? 'other'
+          : 'damage'
+      add({ id: `${actionKey}:effect`, kind, label: spell.name, sides: spell.dice.sides, values: action.effectRolls, sourceId: action.actorId, targetId: action.targetId })
     }
     for (const [index, attack] of (action.targetAttacks ?? []).entries()) {
       if (spell && attack.effectRolls.length > 0) add({ id: `${actionKey}:target-attacks:${index}:effect`, kind: 'damage', label: spell.name, sides: spell.dice.sides, values: attack.effectRolls, sourceId: action.actorId, targetId: attack.targetId })

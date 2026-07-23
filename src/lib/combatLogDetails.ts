@@ -45,6 +45,7 @@ const CLASS_DAMAGE_LABELS: Record<string, string> = {
   'divine-smite': '神圣斩击',
   huntersMark: '猎人印记',
   'hunters-mark': '猎人印记',
+  'divine-favor': '神恩',
   'divine-strike': '神圣打击',
   lifedrinker: '饮命者',
   'foe-slayer': '屠灭众敌',
@@ -124,6 +125,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜使用 ${event.slotLevel} 环法术位`]
     case 'sleep-resolved':
       return [`${resolveName(event.actorId)}｜睡眠术生命值池 ${event.hitPointPool}｜影响 ${event.affectedTargetIds.length > 0 ? event.affectedTargetIds.map(resolveName).join('、') : '无'}｜剩余 ${event.remainingHitPoints}`]
+    case 'color-spray-resolved':
+      return [`${resolveName(event.actorId)}｜七彩喷射生命值池 ${event.hitPointPool}｜目盲 ${event.affectedTargetIds.length > 0 ? event.affectedTargetIds.map(resolveName).join('、') : '无'}｜剩余 ${event.remainingHitPoints}`]
     case 'sleeping-creature-awakened':
       return [`${resolveName(event.actorId)}｜使用动作唤醒 ${resolveName(event.targetId)}`]
     case 'delayed-spell-damage-triggered':

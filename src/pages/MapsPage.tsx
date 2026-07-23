@@ -346,6 +346,7 @@ import {
   previewDnd5eHunterMultiattack,
   dnd5eAttackModeWithProtection,
   dnd5eMonsterAttackModeWithProtection,
+  dnd5eOpportunityAttackClassDamageDefinitions,
   dnd5eMetamagicCost,
   dnd5eMetamagicLabel,
   dnd5ePreparedMonsterAttackMode,
@@ -3402,6 +3403,7 @@ export default function MapsPage() {
           attackModifier: attack.attackModifier,
           reachFeet: attack.reachFeet,
           damage: [attack.damage],
+          classDamageContext: attack.classDamageContext,
           bardicInspirationAlreadyUsed: bardicInspirationRoll != null || tranquility.roll?.bardicInspirationRoll != null,
           excludedReactionTokenIds: new Set([
             attackerToken.id,
@@ -3424,8 +3426,42 @@ export default function MapsPage() {
           attack.targetName,
         )
       : []
+    const classDamageDefinitions = attackHit
+      ? dnd5eOpportunityAttackClassDamageDefinitions(attack, preview.critical)
+      : []
+    const classDamageLabels = {
+      'sneak-attack': '偷袭',
+      'colossus-slayer': '巨像杀手',
+      'brutal-critical': '凶蛮重击',
+      'improved-divine-smite': '精通至圣斩',
+      'divine-smite': '至圣斩',
+      'hunters-mark': '猎人印记',
+      'divine-favor': '神恩',
+      'divine-strike': '神圣打击',
+      'lifedrinker': '饮命者',
+      'foe-slayer': '屠灭众敌',
+    } as const
+    const classDamageRolls: Dnd5eClassDamageRolls[] = []
+    for (const definition of classDamageDefinitions) {
+      const count = definition.count * (preview.critical && definition.doubleOnCritical ? 2 : 1)
+      classDamageRolls.push({
+        source: definition.source,
+        rolls: count > 0
+          ? await rollDiceBoxValues(
+              count,
+              definition.sides,
+              `${classDamageLabels[definition.source]}·借机伤害`,
+              attack.targetName,
+            )
+          : [],
+      })
+    }
     const opportunityDamageTotal = attackHit
-      ? Math.max(0, damageRolls.reduce((total, value) => total + value, 0) + attack.damage.bonus)
+      ? Math.max(0, damageRolls.reduce((total, value) => total + value, 0) + attack.damage.bonus) +
+        classDamageDefinitions.reduce((total, definition) => {
+          const rolls = classDamageRolls.find((entry) => entry.source === definition.source)?.rolls ?? []
+          return total + Math.max(0, rolls.reduce((sum, value) => sum + value, 0) + (definition.bonus ?? 0))
+        }, 0)
       : 0
     const cuttingWordsDamageCandidate = attackHit && opportunityDamageTotal > 0 && !cuttingWords
       ? findDnd5eCuttingWordsCandidate(
@@ -3451,7 +3487,8 @@ export default function MapsPage() {
     const initialResolved = resolvePreparedDnd5eOpportunityAttack({
       prepared: attack, d20, d20Second, blessRoll, baneRoll, bardicInspirationRoll, cuttingWords, cuttingWordsDamage, strokeOfLuck,
       shieldSpellReaction, uncannyDodge,
-      tranquilitySave: tranquility.roll, damageRolls, hurlThroughHellDamageRolls, standAgainstTide,
+      tranquilitySave: tranquility.roll, damageRolls, classDamageRolls,
+      hurlThroughHellDamageRolls, standAgainstTide,
     })
     if (!initialResolved.result.ok) return false
     const resolved = await settleDnd5eConcentrationChecks({
@@ -5975,6 +6012,7 @@ export default function MapsPage() {
     const classDamageLabels = {
       'sneak-attack': '偷袭', 'colossus-slayer': '巨像杀手', 'brutal-critical': '凶蛮重击',
       'improved-divine-smite': '精通至圣斩', 'divine-smite': '至圣斩', 'hunters-mark': '猎人印记',
+      'divine-favor': '神恩',
       'divine-strike': '神圣打击', 'lifedrinker': '饮命者', 'foe-slayer': '屠灭众敌',
     } as const
     const classDamageRolls: Dnd5eClassDamageRolls[] = []
@@ -10151,6 +10189,15 @@ export default function MapsPage() {
                 )
                 return `生命值池 ${sleep.hitPointPool}；${affectedNames.length > 0 ? `${affectedNames.join('、')}陷入魔法睡眠` : '没有生物受到影响'}；剩余 ${sleep.remainingHitPoints}`
               })()
+          : spellCast.spell.effect === 'color-spray-hit-point-pool'
+            ? (() => {
+                const colorSpray = resolved.result.events.find((event) => event.type === 'color-spray-resolved')
+                if (!colorSpray || colorSpray.type !== 'color-spray-resolved') return '七彩喷射生命值池已结算'
+                const affectedNames = colorSpray.affectedTargetIds.map((targetId) =>
+                  spellCast.targetTokens.find((candidate) => candidate.id === targetId)?.label ?? targetId,
+                )
+                return `生命值池 ${colorSpray.hitPointPool}；${affectedNames.length > 0 ? `${affectedNames.join('、')}陷入目盲` : '没有生物受到影响'}；剩余 ${colorSpray.remainingHitPoints}`
+              })()
           : '未产生生命值变化'
       pushHeadlessCombatLog(
         `${spellCast.actor.name} 施放${spellCast.spell.name}（${spellCast.slotLevel === 0 ? '戏法' : `${spellCast.slotLevel}环`}），${tranquilityPrevented ? '未通过宁静心境的感知豁免，法术未能指定目标' : damage > 0 ? `造成 ${damage} 点伤害` : healing > 0 ? `恢复 ${healing} 点生命` : nonHpEffect}${saveDetail}${sculptedDetail}${metamagicDetail}${empoweredDetail}${draconicResistanceDetail}${cuttingWordsDamageDetail}${overchannelDetail}。`,
@@ -11415,6 +11462,7 @@ export default function MapsPage() {
           'improved-divine-smite': '精通至圣斩',
           'divine-smite': '至圣斩',
           'hunters-mark': '猎人印记',
+          'divine-favor': '神恩',
           'divine-strike': '神圣打击',
           'lifedrinker': '饮命者',
           'foe-slayer': '屠灭众敌',
@@ -12522,6 +12570,7 @@ export default function MapsPage() {
         'improved-divine-smite': '精通至圣斩',
         'divine-smite': '至圣斩',
         'hunters-mark': '猎人印记',
+        'divine-favor': '神恩',
         'divine-strike': '神圣打击',
         'lifedrinker': '饮命者',
         'foe-slayer': '屠灭众敌',
