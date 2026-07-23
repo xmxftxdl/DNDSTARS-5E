@@ -8,10 +8,13 @@ export const DND5E_DECLARATIVE_DURATION_MAX_ROUNDS = 14_400
 export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'arcane',
   'toxic-cloud',
+  'daylight',
+  'darkness',
   'moonbeam',
   'spirit-guardians',
   'spike-growth',
   'flaming-sphere',
+  'grease',
 ] as const
 
 export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]
@@ -26,8 +29,28 @@ export interface Dnd5ePersistentAreaVisual {
   intensity?: Dnd5ePersistentAreaVisualIntensity
 }
 
+/**
+ * 地图光照只接受 Host 白名单声明。法术区域不能携带渲染回调；画布和
+ * 权威视线判定会读取同一份半径、环级与压制规则。
+ */
+export type Dnd5ePersistentAreaLighting =
+  | {
+      kind: 'light'
+      brightRadiusFeet: number
+      dimRadiusFeet: number
+      color: string
+      spellLevel: number
+      suppressesMagicalDarknessThroughLevel?: number
+    }
+  | {
+      kind: 'magical-darkness'
+      radiusFeet: number
+      spellLevel: number
+      suppressesMagicalLightThroughLevel?: number
+    }
+
 export interface Dnd5ePluginEffectDuration {
-  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
+  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save' | 'permanent'
   remainingRounds?: number
   saveAbility?: AbilityKey
   saveDc?: number
@@ -111,7 +134,7 @@ const TIMINGS: readonly Dnd5ePersistentAreaTriggerTiming[] = [
   'on-create', 'on-enter', 'on-move-distance', 'on-area-move-impact', 'turn-start', 'turn-end',
 ]
 const EXPIRATIONS: readonly Dnd5ePluginEffectDuration['expiresAt'][] = [
-  'source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save',
+  'source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save', 'permanent',
 ]
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -137,6 +160,49 @@ export function normalizeDnd5ePersistentAreaVisual(
   return {
     preset: visual.preset as Dnd5ePersistentAreaVisualPreset,
     intensity: (visual.intensity as Dnd5ePersistentAreaVisualIntensity | undefined) ?? 'normal',
+  }
+}
+
+export function normalizeDnd5ePersistentAreaLighting(
+  value: unknown,
+): Dnd5ePersistentAreaLighting | undefined {
+  const lighting = record(value)
+  if (!lighting || !integer(lighting.spellLevel, 0, 9)) return undefined
+  if (lighting.kind === 'light') {
+    const allowed = new Set([
+      'kind', 'brightRadiusFeet', 'dimRadiusFeet', 'color', 'spellLevel',
+      'suppressesMagicalDarknessThroughLevel',
+    ])
+    if (
+      Object.keys(lighting).some((key) => !allowed.has(key)) ||
+      !integer(lighting.brightRadiusFeet, 0, 1_000) ||
+      !integer(lighting.dimRadiusFeet, 0, 1_000) ||
+      Number(lighting.brightRadiusFeet) + Number(lighting.dimRadiusFeet) < 1 ||
+      typeof lighting.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(lighting.color) ||
+      (lighting.suppressesMagicalDarknessThroughLevel != null &&
+        !integer(lighting.suppressesMagicalDarknessThroughLevel, 0, 9))
+    ) return undefined
+    return {
+      kind: 'light',
+      brightRadiusFeet: Number(lighting.brightRadiusFeet),
+      dimRadiusFeet: Number(lighting.dimRadiusFeet),
+      color: lighting.color,
+      spellLevel: Number(lighting.spellLevel),
+      suppressesMagicalDarknessThroughLevel:
+        lighting.suppressesMagicalDarknessThroughLevel as number | undefined,
+    }
+  }
+  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel'])
+  if (Object.keys(lighting).some((key) => !allowed.has(key)) ||
+    lighting.kind !== 'magical-darkness' || !integer(lighting.radiusFeet, 1, 1_000) ||
+    (lighting.suppressesMagicalLightThroughLevel != null &&
+      !integer(lighting.suppressesMagicalLightThroughLevel, 0, 9))) return undefined
+  return {
+    kind: 'magical-darkness',
+    radiusFeet: Number(lighting.radiusFeet),
+    spellLevel: Number(lighting.spellLevel),
+    suppressesMagicalLightThroughLevel:
+      lighting.suppressesMagicalLightThroughLevel as number | undefined,
   }
 }
 

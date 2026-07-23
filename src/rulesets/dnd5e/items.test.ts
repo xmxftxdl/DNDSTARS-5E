@@ -185,7 +185,7 @@ describe('SRD 5.1 inventory', () => {
     const holyAvenger = inventoryEntry(granted.characters[0], 'srd-5.1:magic-item:holy-avenger')
     expect(applyDnd5eInventoryMutation(granted.characters, {
       type: 'prepare-attunement', characterId: fighter.id, instanceId: holyAvenger.instanceId,
-      prerequisiteConfirmed: true,
+      dmPrerequisiteConfirmed: true,
     })).toMatchObject({ ok: false, reason: 'attunement-prerequisite' })
 
     const thief = normalizeCharacter({

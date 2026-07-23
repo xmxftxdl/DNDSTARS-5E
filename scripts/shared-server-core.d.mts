@@ -13,8 +13,10 @@ export const ROOM_PRESENCE_ONLINE_MS: number
 export const ROOM_PLAYER_SLOTS: readonly ['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8']
 export const ROOM_SPECTATOR_LIMIT: number
 export const MAP_TABLETOP_CHANNEL: 'map-tabletop'
+export const COMBAT_PRESENTATION_CHANNEL: 'combat-presentation'
 export const MAP_PING_LIFETIME_MS: number
 export const MAP_ANNOTATION_LIFETIME_MS: number
+export const COMBAT_PRESENTATION_LIFETIME_MS: number
 export const DND5E_2014_RULESET_ID: 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION: number
 export const SHARED_MIN_CLIENT_PROTOCOL: number
@@ -29,6 +31,13 @@ export const CAMPAIGN_IMPORT_MAX_BYTES: number
 export const CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS: number
 
 export function migrateLegacyApCombatLogText(text: unknown): string
+export function normalizeCombatPresentationEvent(
+  payload: unknown,
+  actor: Record<string, unknown>,
+  now?: number,
+):
+  | { ok: false; status: number; error: string }
+  | { ok: true; event: Record<string, unknown> }
 export function normalizeDedicatedDnd5eSharedState<T>(name: string, value: T): T
 export function validateSharedStateShape(
   name: string,
@@ -120,7 +129,20 @@ export function projectGroupAbilityChecksForMember(
   memberId: string,
   isDm?: boolean,
 ): Record<string, unknown> & { checks: Array<Record<string, unknown>> }
+export function projectSceneOrchestrationForPlayer(value: unknown): {
+  schemaVersion: 1
+  scenes: []
+  runtime: { paused: false; pendingRuns: []; receipts: []; history: [] }
+  updatedAt: number
+}
 export function mutateCampaignTimeState(
+  current: unknown,
+  mutation: Record<string, unknown>,
+  now: number,
+  member: Record<string, unknown>,
+  context?: Record<string, unknown>,
+): RoomCommunicationMutationResult
+export function mutateSceneAudioPlaybackState(
   current: unknown,
   mutation: Record<string, unknown>,
   now: number,
@@ -136,6 +158,10 @@ export function capEventChannels<T>(
 export function eventChannelOperationAllowed(
   channel: string,
   operation: 'publish' | 'subscribe',
+  role: 'open' | 'dm' | 'player' | 'spectator',
+): boolean
+export function stateResourceWriteAllowedForRole(
+  resourceName: string,
   role: 'open' | 'dm' | 'player' | 'spectator',
 ): boolean
 export function projectEventPayloadForViewer(

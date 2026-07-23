@@ -16,6 +16,20 @@ describe('persistent area visual declarations', () => {
     })
   })
 
+  it('accepts the bounded Grease visual and permanent prone declaration', () => {
+    expect(normalizeDnd5ePersistentAreaVisual({ preset: 'grease' })).toEqual({
+      preset: 'grease', intensity: 'normal',
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      id: 'grease-enter', label: '油腻术·进入区域', timing: 'on-enter', oncePerRound: false,
+      savingThrow: { ability: 'dex', dc: 14, onSuccess: 'none' },
+      condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+    })).toMatchObject({
+      timing: 'on-enter', savingThrow: { ability: 'dex', dc: 14 },
+      condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+    })
+  })
+
   it('fails closed on arbitrary renderers and unbounded values', () => {
     expect(normalizeDnd5ePersistentAreaVisual({ preset: 'custom-shader', sksl: 'while(true){}' })).toBeUndefined()
     expect(normalizeDnd5ePersistentAreaVisual({ preset: 'toxic-cloud', intensity: 999 })).toBeUndefined()

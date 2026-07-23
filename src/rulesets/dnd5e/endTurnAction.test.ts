@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eConditionEffect } from './activeEffects'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
 import { prepareDnd5ePlayerEndTurn, resolveDnd5ePlayerEndTurn } from './endTurnAction'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
 
 function barbarian(sustained: boolean): Character {
   return {
@@ -33,6 +35,8 @@ function fixture(actor: Character) {
 }
 
 describe('D&D 5e map end-turn authority bridge', () => {
+  afterEach(() => setDnd5eRoomMonsterCatalog([]))
+
   it('persists a sustained Rage countdown through the map application', () => {
     const resolved = resolveDnd5ePlayerEndTurn(fixture(barbarian(true)))
     expect(resolved.ok).toBe(true)
@@ -107,6 +111,168 @@ describe('D&D 5e map end-turn authority bridge', () => {
       .toMatchObject({ monsterRechargeReadyByActionId: { 'acid-breath': true } })
     expect(recharged.result.events).toContainEqual({
       type: 'monster-recharge-resolved', actorId: troll.id, actionId: 'acid-breath', roll: 5, ready: true,
+    })
+  })
+
+  it('rolls and applies an eligible custom monster healing mechanism exactly once per combat', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '浴血守卫'
+    draft.hitPointsAverage = 30
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'bloodied-recovery',
+      name: '浴血恢复',
+      hpPercentageAtOrBelow: 50,
+      healingDice: '2d6',
+      limit: 'once-per-combat',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const input = fixture(barbarian(false))
+    const monsterToken = input.map.tokens[1]
+    monsterToken.poolId = monster.id
+    monsterToken.hp = 10
+    monsterToken.maxHp = 30
+
+    const prepared = prepareDnd5ePlayerEndTurn(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.nextMonsterMechanicRolls).toEqual([{
+      actorId: monsterToken.id,
+      actorName: monsterToken.label,
+      mechanicId: 'bloodied-recovery',
+      mechanicName: '浴血恢复',
+      effects: [{ effectId: 'effect-0', effectName: '治疗', count: 2, sides: 6, bonus: 0 }],
+    }])
+    expect(resolveDnd5ePlayerEndTurn(input)).toEqual({ ok: false, reason: 'invalid-action' })
+
+    const resolved = resolveDnd5ePlayerEndTurn({
+      ...input,
+      nextMonsterMechanicRolls: [{
+        actorId: monsterToken.id,
+        mechanicId: 'bloodied-recovery',
+        effectRolls: [{ effectId: 'effect-0', rolls: [3, 4] }],
+      }],
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.application.map.tokens.find((token) => token.id === monsterToken.id)?.hp).toBe(17)
+    expect(resolved.result.events).toContainEqual({
+      type: 'monster-mechanic-v2-triggered',
+      actorId: monsterToken.id,
+      mechanicId: 'bloodied-recovery',
+      mechanicName: '浴血恢复',
+      trigger: 'turn-start',
+      outcomes: [{ effectId: 'effect-0', kind: 'healing', targetId: monsterToken.id, amount: 7 }],
+    })
+
+    const nextInput = {
+      ...input,
+      map: resolved.application.map,
+      action: { ...input.action, round: input.action.round + 1, seq: input.action.seq + 1 },
+    }
+    const preparedAgain = prepareDnd5ePlayerEndTurn(nextInput)
+    expect(preparedAgain.ok).toBe(true)
+    if (!preparedAgain.ok) return
+    expect(preparedAgain.prepared.nextMonsterMechanicRolls).toEqual([])
+  })
+
+  it('applies V2 temporary hit points and a standard condition at the monster turn end', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '暮影守卫'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'shadow-ward',
+      name: '暮影护持',
+      trigger: 'turn-end',
+      effectKind: 'temporary-hit-points',
+      healingDice: '1d8+2',
+      hpPercentageAtOrBelow: 100,
+      limit: 'once-per-turn',
+      preservedEffects: [
+        { id: 'effect-0', kind: 'temporary-hit-points', target: 'self', dice: { count: 1, sides: 8, bonus: 2 } },
+        { id: 'warded', kind: 'standard-condition', target: 'self', condition: 'invisible', duration: { kind: 'until-source-turn-start' } },
+      ],
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const input = fixture(barbarian(false))
+    const monsterToken = input.map.tokens[1]
+    monsterToken.poolId = monster.id
+    monsterToken.hp = monster.hitPoints.average
+    monsterToken.maxHp = monster.hitPoints.average
+    input.initiativeOrder = [input.initiativeOrder[1], input.initiativeOrder[0]]
+    input.action = {
+      ...input.action,
+      id: 'monster-end',
+      sourceMode: 'dm',
+      actorTokenId: monsterToken.id,
+      characterId: '',
+      initiativeIndex: 0,
+    }
+
+    const prepared = prepareDnd5ePlayerEndTurn(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.currentMonsterMechanicRolls).toEqual([expect.objectContaining({
+      actorId: monsterToken.id,
+      mechanicId: 'shadow-ward',
+      effects: [{ effectId: 'effect-0', effectName: '临时生命', count: 1, sides: 8, bonus: 2 }],
+    })])
+    const resolved = resolveDnd5ePlayerEndTurn({
+      ...input,
+      currentMonsterMechanicRolls: [{
+        actorId: monsterToken.id,
+        mechanicId: 'shadow-ward',
+        effectRolls: [{ effectId: 'effect-0', rolls: [6] }],
+      }],
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    const settledMonster = resolved.application.map.tokens.find((entry) => entry.id === monsterToken.id)
+    expect(settledMonster?.dnd5eCombatState?.temporaryHp).toBe(8)
+    expect(settledMonster?.dnd5eCombatState?.activeEffects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ standardCondition: 'invisible' }),
+    ]))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-mechanic-v2-triggered', mechanicId: 'shadow-ward', trigger: 'turn-end',
+    }))
+  })
+
+  it('keeps V1 monster healing mechanisms executable with their legacy roll payload', () => {
+    const base = buildDnd5eCustomMonster(createDnd5eCustomMonsterDraft())
+    const monster = {
+      ...base,
+      headlessMechanics: [{
+        schemaVersion: 1 as const,
+        id: 'legacy-recovery',
+        name: '旧版恢复',
+        event: 'turn-start' as const,
+        predicates: { hpPercentageAtOrBelow: 100, requiresPositiveHp: true },
+        effect: { kind: 'healing' as const, dice: { count: 1, sides: 6, bonus: 0 } },
+        limit: 'once-per-combat' as const,
+        automation: 'headless' as const,
+      }],
+    }
+    setDnd5eRoomMonsterCatalog([monster])
+    const input = fixture(barbarian(false))
+    const monsterToken = input.map.tokens[1]
+    monsterToken.poolId = monster.id
+    monsterToken.hp = 4
+    monsterToken.maxHp = monster.hitPoints.average
+    const resolved = resolveDnd5ePlayerEndTurn({
+      ...input,
+      nextMonsterMechanicRolls: [{
+        actorId: monsterToken.id,
+        mechanicId: 'legacy-recovery',
+        rolls: [5],
+      }],
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.result.events).toContainEqual({
+      type: 'monster-mechanic-triggered', actorId: monsterToken.id,
+      mechanicId: 'legacy-recovery', mechanicName: '旧版恢复', amount: 5, hpAfter: 9,
     })
   })
 

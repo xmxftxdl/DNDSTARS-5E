@@ -17,6 +17,10 @@ import { GROUP_ABILITY_CHECK_RESOURCE } from './groupAbilityChecks'
 import { useGroupAbilityChecksStore } from '../store/groupAbilityChecks'
 import { CAMPAIGN_TIME_RESOURCE } from './campaignTime'
 import { useCampaignTimeStore } from '../store/campaignTime'
+import { SCENE_ORCHESTRATION_RESOURCE } from './sceneOrchestration'
+import { useSceneOrchestrationStore } from '../store/sceneOrchestration'
+import { SCENE_AUDIO_LIBRARY_RESOURCE, SCENE_AUDIO_PLAYBACK_RESOURCE } from './sceneAudioLibrary'
+import { useSceneAudioStore } from '../store/sceneAudio'
 
 /**
  * Starts room-wide resource hydration after a room is actually entered.
@@ -36,6 +40,9 @@ export function startRoomSharedStateSync(): () => void {
   const loadSharedRoomJournal = useRoomCommunicationsStore.getState().loadJournal
   const loadSharedGroupAbilityChecks = useGroupAbilityChecksStore.getState().loadShared
   const loadSharedCampaignTime = useCampaignTimeStore.getState().loadShared
+  const loadSharedSceneOrchestration = useSceneOrchestrationStore.getState().loadShared
+  const loadSharedSceneAudioLibrary = useSceneAudioStore.getState().loadLibrary
+  const loadSharedSceneAudioPlayback = useSceneAudioStore.getState().loadPlayback
 
   void Promise.all([
     loadSharedMaps(),
@@ -50,6 +57,9 @@ export function startRoomSharedStateSync(): () => void {
     loadSharedRoomJournal(),
     loadSharedGroupAbilityChecks(),
     loadSharedCampaignTime(),
+    loadSharedSceneOrchestration(),
+    loadSharedSceneAudioLibrary(),
+    loadSharedSceneAudioPlayback(),
   ])
 
   const stopMaps = subscribeSharedResourceInvalidation('maps', loadSharedMaps)
@@ -67,6 +77,9 @@ export function startRoomSharedStateSync(): () => void {
   const stopRoomJournal = subscribeSharedResourceInvalidation(ROOM_JOURNAL_RESOURCE, loadSharedRoomJournal)
   const stopGroupAbilityChecks = subscribeSharedResourceInvalidation(GROUP_ABILITY_CHECK_RESOURCE, loadSharedGroupAbilityChecks)
   const stopCampaignTime = subscribeSharedResourceInvalidation(CAMPAIGN_TIME_RESOURCE, loadSharedCampaignTime)
+  const stopSceneOrchestration = subscribeSharedResourceInvalidation(SCENE_ORCHESTRATION_RESOURCE, loadSharedSceneOrchestration)
+  const stopSceneAudioLibrary = subscribeSharedResourceInvalidation(SCENE_AUDIO_LIBRARY_RESOURCE, loadSharedSceneAudioLibrary)
+  const stopSceneAudioPlayback = subscribeSharedResourceInvalidation(SCENE_AUDIO_PLAYBACK_RESOURCE, loadSharedSceneAudioPlayback)
 
   return () => {
     stopMaps()
@@ -81,5 +94,8 @@ export function startRoomSharedStateSync(): () => void {
     stopRoomJournal()
     stopGroupAbilityChecks()
     stopCampaignTime()
+    stopSceneOrchestration()
+    stopSceneAudioLibrary()
+    stopSceneAudioPlayback()
   }
 }

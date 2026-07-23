@@ -345,8 +345,12 @@ export async function heartbeatRoom(
     body: JSON.stringify({
       memberId: session.memberId,
       activePlugins: exactRoomPluginRequirements(activePlugins),
-      activeCharacterId: presence?.activeCharacterId ?? null,
-      activeCharacterName: presence?.activeCharacterName ?? null,
+      ...(presence
+        ? {
+            activeCharacterId: presence.activeCharacterId ?? null,
+            activeCharacterName: presence.activeCharacterName ?? null,
+          }
+        : {}),
     }),
   })
   if (response.member.role !== session.role || response.member.slot !== session.slot) {

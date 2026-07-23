@@ -12,7 +12,7 @@ const participant = (memberId: string) => ({
 
 const check = {
   id: 'group-check-1', status: 'open' as const, label: '全队察觉检定', ability: 'wis' as const,
-  skill: 'perception', dc: 15, requestedMode: 'normal' as const, allowPassiveFallback: true,
+  skill: 'perception', rollKind: 'ability-check' as const, dc: 15, requestedMode: 'normal' as const, allowPassiveFallback: true,
   participants: [participant('a'), participant('b'), participant('c')], results: [],
   createdByMemberId: 'dm', createdByName: 'DM', createdAt: 1, expiresAt: 601, updatedAt: 1,
 }

@@ -3,6 +3,7 @@ import {
   type Dnd5eMonsterStatBlock,
 } from './monsters'
 import { DND5E_DAMAGE_TYPES } from './damageTypes'
+import { DND5E_STANDARD_CONDITION_IDS } from './conditions'
 
 export interface Dnd5eMonsterSchemaIssue {
   monsterId: string
@@ -26,6 +27,12 @@ const DAMAGE_TYPE_VALUES = new Set<string>(DND5E_DAMAGE_TYPES)
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
 const ACTION_KINDS = new Set(['weapon-attack', 'multiattack', 'other'])
 const ATTACK_MODES = new Set(['melee', 'ranged', 'melee-or-ranged'])
+const TARGET_PRIORITIES = new Set(['nearest', 'lowest-current-hp', 'lowest-hp-percentage', 'lowest-armor-class', 'highest-threat'])
+const MECHANIC_LIMITS = new Set(['once-per-turn', 'once-per-combat', 'unlimited'])
+const MECHANIC_EVENTS = new Set(['turn-start', 'turn-end', 'after-hit', 'after-damaged', 'phase-transition'])
+const MECHANIC_AUTOMATION = new Set(['full', 'partial', 'manual'])
+const MECHANIC_TARGETS = new Set(['self', 'trigger-target', 'damage-source'])
+const STANDARD_CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 const ID_PATTERN = /^(?:srd-5\.1|room-monster):[a-z0-9][a-z0-9-]{0,95}$/
 const DICE_PATTERN = /^\d+d\d+(?:\s*[+\-−]\s*\d+)?$/i
 
@@ -108,6 +115,63 @@ function traitShapeIsValid(raw: unknown): boolean {
     return raw.rule.cannotRegainHitPoints === true && raw.rule.cannotGainTemporaryHitPoints === true
   }
   return false
+}
+
+function mechanicDiceIsValid(raw: unknown): boolean {
+  return isRecord(raw) && finiteInteger(raw.count, 1, 100) && finiteInteger(raw.sides, 2, 1_000) &&
+    finiteInteger(raw.bonus, -1_000_000, 1_000_000)
+}
+
+function mechanicEffectV2IsValid(raw: unknown): boolean {
+  if (!isRecord(raw) || !requiredText(raw.id, 96) || !/^[a-z][a-z0-9-]*$/.test(String(raw.id)) || typeof raw.kind !== 'string') return false
+  if (raw.kind === 'healing' || raw.kind === 'temporary-hit-points') {
+    return raw.target === 'self' && mechanicDiceIsValid(raw.dice)
+  }
+  if (raw.kind === 'damage') {
+    return MECHANIC_TARGETS.has(String(raw.target)) && mechanicDiceIsValid(raw.dice) && DAMAGE_TYPE_VALUES.has(String(raw.damageType))
+  }
+  if (raw.kind === 'standard-condition') {
+    const duration = isRecord(raw.duration) ? raw.duration : null
+    return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition)) && !!duration &&
+      ['permanent', 'until-target-turn-start', 'until-source-turn-start', 'rounds'].includes(String(duration.kind)) &&
+      (duration.kind !== 'rounds' || finiteInteger(duration.rounds, 1, 10_000))
+  }
+  if (raw.kind === 'summon') {
+    return requiredText(raw.monsterId, 120) && ID_PATTERN.test(String(raw.monsterId)) &&
+      finiteInteger(raw.count, 1, 20) && finiteInteger(raw.durationRounds, 1, 10_000)
+  }
+  if (raw.kind === 'area-attack') {
+    return ['circle', 'cone', 'line'].includes(String(raw.shape)) &&
+      finiteInteger(raw.rangeFeet, 0, 100_000) && finiteInteger(raw.sizeFeet, 5, 100_000) &&
+      mechanicDiceIsValid(raw.dice) && DAMAGE_TYPE_VALUES.has(String(raw.damageType))
+  }
+  return false
+}
+
+function mechanicShapeIsValid(raw: unknown): boolean {
+  if (!isRecord(raw) || !requiredText(raw.id, 96) || !/^[a-z][a-z0-9-]*$/.test(String(raw.id)) ||
+    !requiredText(raw.name, 240) || typeof raw.limit !== 'string' || !MECHANIC_LIMITS.has(raw.limit)) return false
+  if (raw.schemaVersion === 2) {
+    const trigger = isRecord(raw.trigger) ? raw.trigger : null
+    const predicates = isRecord(raw.predicates) ? raw.predicates : null
+    if (!trigger || !MECHANIC_EVENTS.has(String(trigger.event)) || !predicates ||
+      typeof predicates.requiresPositiveHp !== 'boolean' || !MECHANIC_AUTOMATION.has(String(raw.automation))) return false
+    for (const threshold of ['hpPercentageAtOrBelow', 'hpPercentageAtOrAbove'] as const) {
+      if (predicates[threshold] != null && (!Number.isFinite(predicates[threshold]) || Number(predicates[threshold]) < 0 || Number(predicates[threshold]) > 100)) return false
+    }
+    if (!Array.isArray(raw.effects) || raw.effects.length < 1 || raw.effects.length > 16 ||
+      raw.effects.some((effect) => !mechanicEffectV2IsValid(effect))) return false
+    const effectIds = raw.effects.map((effect) => String((effect as Record<string, unknown>).id))
+    return new Set(effectIds).size === effectIds.length
+  }
+  if (raw.schemaVersion !== 1 || raw.event !== 'turn-start' || raw.automation !== 'headless') return false
+  const predicates = isRecord(raw.predicates) ? raw.predicates : null
+  if (!predicates || !Number.isFinite(predicates.hpPercentageAtOrBelow) ||
+    Number(predicates.hpPercentageAtOrBelow) < 0 || Number(predicates.hpPercentageAtOrBelow) > 100 ||
+    typeof predicates.requiresPositiveHp !== 'boolean') return false
+  const effect = isRecord(raw.effect) ? raw.effect : null
+  const dice = isRecord(effect?.dice) ? effect.dice : null
+  return !!effect && effect.kind === 'healing' && !!dice && mechanicDiceIsValid(dice)
 }
 
 export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eMonsterActionAutomation {
@@ -246,6 +310,22 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
       'swarm', 'shapechanger', 'regeneration', 'spellcaster', 'legendary', 'hasFlySpeed', 'hasSwimSpeed',
     ].some((key) => typeof capabilities[key] !== 'boolean')) {
       issues.push(issue(monsterId, '能力标签数据无效'))
+    }
+  }
+  if (raw.targetingPreference != null) {
+    const preference = isRecord(raw.targetingPreference) ? raw.targetingPreference : null
+    if (!preference || preference.schemaVersion !== 1 ||
+      typeof preference.priority !== 'string' || !TARGET_PRIORITIES.has(preference.priority)) {
+      issues.push(issue(monsterId, '自动攻击目标偏好无效'))
+    }
+  }
+  if (raw.headlessMechanics != null) {
+    if (!Array.isArray(raw.headlessMechanics) || raw.headlessMechanics.length > 32 ||
+      raw.headlessMechanics.some((mechanic) => !mechanicShapeIsValid(mechanic))) {
+      issues.push(issue(monsterId, '声明式怪物机制无效'))
+    } else {
+      const ids = raw.headlessMechanics.map((mechanic) => String((mechanic as Record<string, unknown>).id))
+      if (new Set(ids).size !== ids.length) issues.push(issue(monsterId, '声明式怪物机制 ID 重复'))
     }
   }
   return issues

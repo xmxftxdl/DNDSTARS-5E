@@ -9,12 +9,16 @@ export type PlayerActionAuthorityRejectReason =
   | 'stale-combat'
   | 'combat-ended'
   | 'stale-turn'
+  | 'invalid-action-origin'
+  | 'character-owner-mismatch'
   | 'duplicate-action'
 
 export interface PlayerActionAuthorityAction {
   id: string
   mapId: string
   combatId?: string
+  roomMemberId?: string
+  sourceMode: 'dm' | 'player'
   status: 'pending' | 'done'
   type: string
   actorTokenId: string
@@ -31,6 +35,7 @@ export interface PlayerActionAuthorityPreflightContext {
   round: number
   initiativeIndex: number
   currentTokenId?: string
+  characters: readonly Pick<Character, 'id' | 'roomMemberId'>[]
   processedActionIds: ReadonlySet<string>
   seenActionIds: ReadonlySet<string>
 }
@@ -49,15 +54,26 @@ export function preflightPlayerActionAuthority(
     return { status: 'ignored' }
   }
 
+  if (action.sourceMode !== 'player') {
+    return { status: 'rejected', reason: 'invalid-action-origin' }
+  }
+
+  const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
+  if (
+    !actorToken || actorToken.type !== 'player' || !actorToken.characterId ||
+    actorToken.characterId !== action.characterId
+  ) return { status: 'rejected', reason: 'stale-turn' }
+
+  const actorCharacter = context.characters.find((character) => character.id === action.characterId)
+  if (!actorCharacter) return { status: 'rejected', reason: 'stale-turn' }
+  if (actorCharacter.roomMemberId && action.roomMemberId !== actorCharacter.roomMemberId) {
+    return { status: 'rejected', reason: 'character-owner-mismatch' }
+  }
+
   if (action.type === 'dnd5e-map-interaction') {
     if (context.processedActionIds.has(action.id) || context.seenActionIds.has(action.id)) {
       return { status: 'ignored' }
     }
-    const actorToken = map.tokens.find((token) => token.id === action.actorTokenId)
-    if (
-      !actorToken || actorToken.type !== 'player' || !actorToken.characterId ||
-      actorToken.characterId !== action.characterId
-    ) return { status: 'rejected', reason: 'stale-turn' }
     if (context.combatActive && actorToken.id !== context.currentTokenId) {
       return { status: 'rejected', reason: 'stale-turn' }
     }

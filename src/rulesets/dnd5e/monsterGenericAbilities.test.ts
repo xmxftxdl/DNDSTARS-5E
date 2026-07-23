@@ -44,7 +44,7 @@ describe('D&D 5e monster generic abilities', () => {
     expect(mage.spellcasting).toMatchObject({
       ability: 'int', saveDc: 14, attackBonus: 6, slots: { 1: 4, 5: 1 }, automation: 'headless',
     })
-    expect(mage.spellcasting?.spells).toContainEqual({ id: 'fireball', name: 'Fireball', level: 3 })
+    expect(mage.spellcasting?.spells).toContainEqual({ id: 'fireball', name: '火球术', level: 3 })
 
     const swarm = getDnd5eSrdMonster('srd-5.1:swarm-of-rats')!
     const bite = swarm.actions.find((action) => action.id === 'bites')?.attack

@@ -66,6 +66,8 @@ export interface Dnd5eActiveEffectRepeatSave {
   ability: AbilityKey
   dc: number
   timing: 'target-turn-start' | 'target-turn-end'
+  /** 受到伤害后额外触发一次豁免；由 Headless 记录待结算项，客户端不能自行伪造。 */
+  onDamage?: { mode: 'normal' | 'advantage' }
   onSuccess: 'remove'
 }
 
@@ -289,11 +291,19 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
     const repeatSave = isRecord(rawRepeatSave) &&
       ABILITIES.has(rawRepeatSave.ability as AbilityKey) &&
       typeof rawRepeatSave.dc === 'number' && Number.isInteger(rawRepeatSave.dc) && rawRepeatSave.dc > 0 &&
-      (rawRepeatSave.timing === 'target-turn-start' || rawRepeatSave.timing === 'target-turn-end')
+      (rawRepeatSave.timing === 'target-turn-start' || rawRepeatSave.timing === 'target-turn-end') &&
+      (rawRepeatSave.onDamage == null || (
+        isRecord(rawRepeatSave.onDamage) &&
+        (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
+      ))
       ? {
           ability: rawRepeatSave.ability as AbilityKey,
           dc: rawRepeatSave.dc,
           timing: rawRepeatSave.timing as 'target-turn-start' | 'target-turn-end',
+          onDamage: isRecord(rawRepeatSave.onDamage) &&
+            (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
+            ? { mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage' }
+            : undefined,
           onSuccess: 'remove' as const,
         }
       : undefined

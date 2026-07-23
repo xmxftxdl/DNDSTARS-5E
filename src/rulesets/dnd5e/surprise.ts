@@ -26,6 +26,7 @@ export function dnd5eActionAllowedWhileSurprised(
     'barbarian-relentless-rage-save',
     'monster-undead-fortitude-save',
     'monster-on-hit-save',
+    'active-effect-damage-save',
   ].includes(action.type)) return true
   return action.type === 'barbarian-rage' && !action.end && dnd5eCanUseFeralInstinctWhileSurprised(combatant)
 }

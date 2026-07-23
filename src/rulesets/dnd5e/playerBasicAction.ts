@@ -274,6 +274,9 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
       type: 'escape-grapple', actorId: prepared.actorTokenId, grapplerId: payload.targetTokenId,
       actorD20, actorD20Second, targetD20, targetD20Second,
     }; break
+    case 'wake': action = {
+      type: 'wake-sleeping-creature', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,
+    }; break
   }
   const result = resolveDnd5eHeadlessAction(prepared.state, action)
   if (!result.ok) return { result }

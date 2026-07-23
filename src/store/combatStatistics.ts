@@ -15,7 +15,8 @@ import {
   type Dnd5eCombatStatisticsObservation,
   type SharedCombatStatisticsState,
 } from '../lib/combatStatistics'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 import type { Dnd5eHeadlessResolutionObservation } from '../rulesets/dnd5e/headlessCombatEngine'
 import type { CombatExperienceSettlement } from '../lib/combatExperience'
 
@@ -33,18 +34,20 @@ interface CombatStatisticsStoreState {
   clearCombat: (combatId: string) => void
 }
 
-let lastSharedUpdatedAt = 0
+const sharedWriteWatermark = createSharedWriteWatermark()
 
 function publish(sessions: CombatStatisticsSession[]) {
   if (!canWriteSharedState()) return
-  const updatedAt = Math.max(Date.now(), lastSharedUpdatedAt + 1)
+  const ticket = sharedWriteWatermark.begin()
+  const updatedAt = ticket.updatedAt
   const payload: SharedCombatStatisticsState = {
     schemaVersion: COMBAT_STATISTICS_SCHEMA_VERSION,
     sessions: sessions.slice(-COMBAT_STATISTICS_MAX_SESSIONS),
     updatedAt,
   }
-  lastSharedUpdatedAt = updatedAt
-  void saveSharedResource(COMBAT_STATISTICS_RESOURCE, payload)
+  void saveSharedResourceWithResult(COMBAT_STATISTICS_RESOURCE, payload).then((result) => {
+    sharedWriteWatermark.settle(ticket, result.status === 'saved')
+  })
 }
 
 export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
@@ -52,8 +55,8 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
     sessions: [],
     loadShared: async () => {
       const shared = normalizeSharedCombatStatistics(await loadSharedResource(COMBAT_STATISTICS_RESOURCE))
-      if (!shared || shared.updatedAt < lastSharedUpdatedAt) return
-      lastSharedUpdatedAt = shared.updatedAt
+      if (!shared || !sharedWriteWatermark.shouldApplyRemote(shared.updatedAt)) return
+      sharedWriteWatermark.acceptRemote(shared.updatedAt)
       set({ sessions: shared.sessions })
     },
     startCombat: (combatId, mapId) => {

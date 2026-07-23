@@ -1,5 +1,6 @@
 import {
   DND_FEET_PER_CELL,
+  cellKey,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
   tokenOccupiedCellsAt,
@@ -11,6 +12,7 @@ import type { BattleMap, Dnd5ePluginArea, Token } from '../../store/maps'
 import type {
   Dnd5ePersistentAreaAnchorMode,
   Dnd5ePersistentAreaMovementDeclaration,
+  Dnd5ePersistentAreaLighting,
   Dnd5ePersistentAreaTriggerDeclaration,
   Dnd5ePersistentAreaTriggerSnapshot,
   Dnd5ePersistentAreaVisual,
@@ -45,6 +47,7 @@ export interface Dnd5eCoreSpellAreaDeclaration {
   relation?: 'any' | 'ally' | 'enemy'
   includeSelf?: boolean
   hiddenFromPlayers?: boolean
+  lighting?: Dnd5ePersistentAreaLighting
   movementCostMultiplier?: number
   damageTypeBySourceAlignment?: { evil: Dnd5eCoreSpellAreaDamageDeclaration['type']; otherwise: Dnd5eCoreSpellAreaDamageDeclaration['type'] }
   color: string
@@ -58,6 +61,76 @@ export interface Dnd5eCoreSpellAreaDeclaration {
  */
 export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDeclaration[] = [
   {
+    spellId: 'darkness',
+    label: '黑暗术',
+    minimumSlotLevel: 2,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 15, placeRangeFeet: 60 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    lighting: {
+      kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2,
+      suppressesMagicalLightThroughLevel: 2,
+    },
+    color: '#312e81',
+    visual: { preset: 'darkness', intensity: 'strong' },
+    triggers: [],
+  },
+  {
+    spellId: 'daylight',
+    label: '昼明术',
+    minimumSlotLevel: 3,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 120, placeRangeFeet: 60 },
+    durationRounds: 600,
+    concentration: false,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    lighting: {
+      kind: 'light', brightRadiusFeet: 60, dimRadiusFeet: 60, color: '#fef3c7', spellLevel: 3,
+      suppressesMagicalDarknessThroughLevel: 3,
+    },
+    color: '#fde68a',
+    visual: { preset: 'daylight', intensity: 'subtle' },
+    triggers: [],
+  },
+  {
+    spellId: 'grease',
+    label: '油腻术',
+    minimumSlotLevel: 1,
+    template: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60 },
+    durationRounds: 10,
+    concentration: false,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#d6a84b',
+    visual: { preset: 'grease', intensity: 'normal' },
+    triggers: [
+      {
+        id: 'grease-create', label: '油腻术·油脂出现', timing: 'on-create',
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+        dmAdjustable: true,
+      },
+      {
+        id: 'grease-enter', label: '油腻术·进入区域', timing: 'on-enter', oncePerRound: false,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+        dmAdjustable: true,
+      },
+      {
+        id: 'grease-turn-end', label: '油腻术·回合结束', timing: 'turn-end', oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        condition: { condition: 'prone', duration: { expiresAt: 'permanent' } },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
     spellId: 'flaming-sphere',
     label: '炽焰法球',
     minimumSlotLevel: 2,
@@ -70,6 +143,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     includeSelf: true,
     color: '#f97316',
     visual: { preset: 'flaming-sphere', intensity: 'strong' },
+    lighting: { kind: 'light', brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fb923c', spellLevel: 2 },
     triggers: [
       {
         id: 'flaming-sphere-impact', label: '炽焰法球·撞击', timing: 'on-area-move-impact',
@@ -152,6 +226,7 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     includeSelf: true,
     color: '#dbeafe',
     visual: { preset: 'moonbeam', intensity: 'strong' },
+    lighting: { kind: 'light', brightRadiusFeet: 0, dimRadiusFeet: 5, color: '#dbeafe', spellLevel: 2 },
     triggers: [
       {
         id: 'moonbeam-enter', frequencyGroupId: 'moonbeam-damage',
@@ -259,12 +334,65 @@ export function createDnd5eCoreSpellArea(input: {
     relation: declaration.relation ?? 'any',
     includeSelf: declaration.includeSelf === true,
     hiddenFromPlayers: declaration.hiddenFromPlayers === true,
+    lighting: declaration.lighting
+      ? { ...declaration.lighting, spellLevel: input.slotLevel }
+      : undefined,
     visual: { ...declaration.visual },
     triggers: declaration.triggers.map((trigger) => resolvedTrigger(trigger, {
       slotLevel: input.slotLevel,
       minimumSlotLevel: declaration.minimumSlotLevel,
       sourceSaveDc: input.sourceSaveDc,
     }, alignmentDamageType)),
+  }
+}
+
+export interface Dnd5eCoreSpellLightingConflictResult {
+  areas: Dnd5ePluginArea[]
+  applied: boolean
+  removedAreas: Dnd5ePluginArea[]
+}
+
+function persistentAreasOverlap(left: Dnd5ePluginArea, right: Dnd5ePluginArea): boolean {
+  const leftCells = new Set(left.cells.map(cellKey))
+  return right.cells.some((cell) => leftCells.has(cellKey(cell)))
+}
+
+/**
+ * 处理 SRD Darkness/Daylight 的“重叠即解除来源法术”，而不只在画布上
+ * 临时盖住光。调用方仍负责通过 Headless concentration lifecycle 结束
+ * 被解除的专注，避免地图和角色状态分叉。
+ */
+export function resolveDnd5eCoreSpellLightingConflicts(
+  existingAreas: readonly Dnd5ePluginArea[],
+  incoming: Dnd5ePluginArea,
+): Dnd5eCoreSpellLightingConflictResult {
+  const incomingLighting = incoming.lighting
+  if (!incomingLighting) return { areas: [...existingAreas, incoming], applied: true, removedAreas: [] }
+  const overlapping = existingAreas.filter((area) =>
+    !!area.lighting && area.lighting.kind !== incomingLighting.kind && persistentAreasOverlap(area, incoming),
+  )
+  const incomingSuppressed = overlapping.some((area) => {
+    const lighting = area.lighting!
+    return incomingLighting.kind === 'light'
+      ? lighting.kind === 'magical-darkness' &&
+          (lighting.suppressesMagicalLightThroughLevel ?? -1) >= incomingLighting.spellLevel
+      : lighting.kind === 'light' &&
+          (lighting.suppressesMagicalDarknessThroughLevel ?? -1) >= incomingLighting.spellLevel
+  })
+  if (incomingSuppressed) return { areas: [...existingAreas], applied: false, removedAreas: [] }
+  const removedAreas = overlapping.filter((area) => {
+    const lighting = area.lighting!
+    return incomingLighting.kind === 'light'
+      ? lighting.kind === 'magical-darkness' &&
+          (incomingLighting.suppressesMagicalDarknessThroughLevel ?? -1) >= lighting.spellLevel
+      : lighting.kind === 'light' &&
+          (incomingLighting.suppressesMagicalLightThroughLevel ?? -1) >= lighting.spellLevel
+  })
+  const removedIds = new Set(removedAreas.map((area) => area.id))
+  return {
+    areas: [...existingAreas.filter((area) => !removedIds.has(area.id)), incoming],
+    applied: true,
+    removedAreas,
   }
 }
 

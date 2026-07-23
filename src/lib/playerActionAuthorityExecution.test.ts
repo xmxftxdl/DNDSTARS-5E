@@ -60,6 +60,7 @@ function preflight() {
     round: 1,
     initiativeIndex: 0,
     currentTokenId: 'hero-token',
+    characters: [{ id: 'hero' }],
     processedActionIds: new Set<string>(),
     seenActionIds: new Set<string>(),
   }

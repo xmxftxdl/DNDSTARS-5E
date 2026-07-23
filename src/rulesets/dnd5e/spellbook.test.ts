@@ -7,6 +7,7 @@ import {
   parseDnd5eSpellImport,
   parseDnd5eSharedSpellCollection,
 } from './spellbook'
+import { DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED } from './spellDescriptionsZh.reviewed.generated'
 
 function spell(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,11 +86,12 @@ describe('D&D 5e room spellbook import', () => {
       name: '奥术之手',
       sourceKind: 'srd-core',
       headless: false,
-      translationStatus: 'pending-srd-translation',
+      translationStatus: 'context-reviewed',
     })
-    expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference).toBeUndefined()
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference)).toHaveLength(11)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(66)
+    expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference?.sourcePage).toBe(118)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
+      .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(71)
     expect(entries.find((entry) => entry.id === 'test-pack:ember-lance')).toMatchObject({ sourceKind: 'room-import', headless: false })
   })
 

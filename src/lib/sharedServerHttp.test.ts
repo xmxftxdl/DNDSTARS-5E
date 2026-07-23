@@ -1290,6 +1290,41 @@ describe('room privacy projections and event channel ACLs', () => {
     expect(invalidHandout.status).toBe(400)
     expect(await invalidHandout.json()).toEqual({ error: 'invalid-handout-image' })
 
+    const audioId = `scene-audio-${Date.now()}`
+    const audioUrl = `${offServer.base}/api/images/${audioId}${query}`
+    expect((await fetch(audioUrl, {
+      method: 'PUT',
+      headers: { ...dmHeaders, 'Content-Type': 'audio/ogg', 'X-Stars-Image-Purpose': 'scene-audio' },
+      body: new Uint8Array([7, 8, 9]),
+    })).status).toBe(200)
+    expect((await fetch(audioUrl, { headers: playerHeaders })).status).toBe(403)
+    const audioCatalogWrite = await fetch(`${offServer.base}/api/state/scene-audio-library${query}`, {
+      method: 'PUT', headers: dmHeaders,
+      body: JSON.stringify({
+        schemaVersion: 1,
+        assets: [{
+          id: audioId, name: 'Rain', fileName: 'rain.ogg', mimeType: 'audio/ogg',
+          sizeBytes: 3, durationSeconds: 60, kind: 'ambience', createdAt: Date.now(),
+        }],
+        updatedAt: Date.now(),
+      }),
+    })
+    expect(audioCatalogWrite.status).toBe(200)
+    expect((await fetch(audioUrl, { headers: playerHeaders })).status).toBe(200)
+    expect((await fetch(`${offServer.base}/api/state/scene-audio/playback${query}`, {
+      method: 'PATCH', headers: playerHeaders,
+      body: JSON.stringify({ operation: 'play', assetId: audioId, loop: true, volume: 0.7 }),
+    })).status).toBe(403)
+    const audioPlay = await fetch(`${offServer.base}/api/state/scene-audio/playback${query}`, {
+      method: 'PATCH', headers: dmHeaders,
+      body: JSON.stringify({ operation: 'play', assetId: audioId, loop: true, volume: 0.7 }),
+    })
+    expect(audioPlay.status).toBe(200)
+    const audioPlayback = await audioPlay.json() as { status: string; assetId: string; anchorServerMs: number; updatedAt: number }
+    expect(audioPlayback).toMatchObject({ status: 'playing', assetId: audioId })
+    expect(audioPlayback.anchorServerMs).toBeGreaterThan(audioPlayback.updatedAt)
+    expect((await (await fetch(`${offServer.base}/api/time${query}`, { headers: playerHeaders })).json() as { serverNow: number }).serverNow).toBeGreaterThan(0)
+
     const characterWrite = await fetch(`${offServer.base}/api/state/characters${query}`, {
       method: 'PUT',
       headers: dmHeaders,
@@ -1337,6 +1372,18 @@ describe('room privacy projections and event channel ACLs', () => {
     expect((await post('player-action-dm-to-player', playerHeaders, { id: 'forged-ack' })).status).toBe(403)
     expect((await post('player-action-player-to-dm', dmHeaders, { id: 'forged-request' })).status).toBe(403)
     expect((await post('shared-state-changed', playerHeaders, { name: 'maps' })).status).toBe(403)
+    expect((await post('combat-presentation', playerHeaders, { id: 'forged-animation' })).status).toBe(403)
+    expect((await post('combat-presentation', dmHeaders, {
+      schemaVersion: 1,
+      id: 'fire-bolt-animation-1',
+      type: 'spell-projectile',
+      mapId: 'map',
+      transactionId: 'transaction-1',
+      spellId: 'fire-bolt',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'goblin',
+      outcome: 'hit',
+    })).status).toBe(200)
     expect((await post('unregistered-private-channel', dmHeaders, { secret: true })).status).toBe(404)
     expect((await post('player-action-player-to-dm', playerHeaders, { id: 'valid-request', sourceMode: 'dm' })).status).toBe(200)
   })

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   configuredApiBases,
+  saveSharedResourceWithResult,
   sharedEventApiCandidates,
   sharedWriteApiCandidates,
 } from './sharedApi'
@@ -12,6 +13,7 @@ import {
 describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology)', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
   })
 
   it('configuredApiBases dedups, trims, and drops empty entries (order preserved)', () => {
@@ -38,5 +40,40 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     // writes fan out to 3, events collapse to 1 — the C2 divergence fix.
     expect(sharedWriteApiCandidates()).toHaveLength(3)
     expect(sharedEventApiCandidates()).toEqual(['http://h:6173/api'])
+  })
+
+  it('returns a saved ACK only after the authoritative PUT succeeds', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 404,
+        headers: { 'X-Stars-State-Revision': '0' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '1' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(saveSharedResourceWithResult('test-save-ack', { updatedAt: 1 })).resolves.toEqual({
+      status: 'saved', revision: 1,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a CAS conflict instead of treating the rejected snapshot as saved', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', {
+        status: 404,
+        headers: { 'X-Stars-State-Revision': '0' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ currentRevision: 4 }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json', 'X-Stars-State-Revision': '4' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(saveSharedResourceWithResult('test-save-conflict', { updatedAt: 2 })).resolves.toEqual({
+      status: 'conflict', expectedRevision: 0, currentRevision: 4,
+    })
   })
 })

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useCharacterStore } from '../../store/characters'
 import { useSpellbookStore } from '../../store/spellbook'
 import type { Dnd5eMetamagicId, Dnd5eSpellMetamagicPayload } from '../../lib/sharedCombatTypes'
+import Dnd5eActionIcon from './Dnd5eActionIcon'
+import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
 import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_SRD_CLASS_DEFINITIONS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, normalizeDnd5eClassLevels, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
@@ -38,6 +40,7 @@ interface MapSpellsPanelProps {
     maximumFeet: number
   }[]
   movingPersistentAreaId?: string
+  requestedFocusedSpellId?: string
   onCastSpell?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId, options?: { overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
   onRequestAdjudication?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId) => void
   onConfirmSpellTargets?: () => void
@@ -46,6 +49,7 @@ interface MapSpellsPanelProps {
   onToggleCarefulSpellTargets?: () => void
   onToggleHeightenedSpellTarget?: () => void
   onMovePersistentArea?: (areaId: string) => void
+  onFocusedSpellChange?: (spellId: string) => void
 }
 
 /** 地图战斗 · 法术栏（施法职业显示法术型技能） */
@@ -59,9 +63,10 @@ export default function MapSpellsPanel({
   targetingCarefulSelecting = false,
   targetingCanHeightened = false, targetingHeightenedSelected = false, targetingHeightenedSelecting = false,
   movablePersistentAreas = [], movingPersistentAreaId,
+  requestedFocusedSpellId,
   onCastSpell, onRequestAdjudication, onConfirmSpellTargets, onUndoSpellTarget, onToggleSculptSpellTargets,
   onToggleCarefulSpellTargets, onToggleHeightenedSpellTarget,
-  onMovePersistentArea,
+  onMovePersistentArea, onFocusedSpellChange,
 }: MapSpellsPanelProps) {
   const c = useCharacterStore((s) => s.characters.find((x) => x.id === charId))
   const importedSpells = useSpellbookStore((s) => s.spells)
@@ -72,6 +77,7 @@ export default function MapSpellsPanel({
   const [draconicResistanceBySpell, setDraconicResistanceBySpell] = useState<Record<string, boolean>>({})
   const [repellingBlastBySpell, setRepellingBlastBySpell] = useState<Record<string, boolean>>({})
   const [selectedCastingClassId, setSelectedCastingClassId] = useState<Dnd5eClassId | undefined>()
+  const [localFocusedSpellId, setLocalFocusedSpellId] = useState<string | undefined>()
 
   if (!c) return null
 
@@ -107,6 +113,49 @@ export default function MapSpellsPanel({
     const adjudicatedSpells = selectedSpellbookEntries.filter((entry) =>
       !entry.headless || (entry.sourceKind === 'room-import' && !dnd5ePluginSpellAutomationSupported(dnd5ePluginSpellDefinition(entry.id))),
     )
+    const combatSpellChoices = [
+      ...selectedSpells.map((spell) => ({
+        id: spell.id,
+        name: spell.name,
+        englishName: spell.englishName,
+        level: spell.level,
+        school: spell.school,
+        effect: spell.effect,
+        damageType: spell.damageType,
+        automation: 'headless' as const,
+        economy: spell.castingTime,
+      })),
+      ...pluginHeadlessSpells.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        englishName: entry.englishName,
+        level: entry.level,
+        school: entry.imported?.school,
+        effect: entry.imported?.mechanics?.resolution,
+        damageType: entry.imported?.mechanics?.damage?.type,
+        tags: entry.imported?.tags,
+        automation: 'headless' as const,
+        economy: entry.imported?.castingTime.unit ?? 'action',
+      })),
+      ...adjudicatedSpells.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        englishName: entry.englishName,
+        level: entry.level,
+        school: entry.imported?.school ?? entry.reference?.school,
+        tags: entry.imported?.tags,
+        automation: 'manual' as const,
+        economy: dnd5eSpellbookEntryCastingTime(entry),
+      })),
+    ]
+    const combatSpellIds = new Set(combatSpellChoices.map((spell) => spell.id))
+    const currentFocusedSpellId = targetingSpellId && combatSpellIds.has(targetingSpellId)
+      ? targetingSpellId
+      : requestedFocusedSpellId && combatSpellIds.has(requestedFocusedSpellId)
+        ? requestedFocusedSpellId
+        : localFocusedSpellId && combatSpellIds.has(localFocusedSpellId)
+          ? localFocusedSpellId
+        : combatSpellChoices[0]?.id
     const wildShapeBlocksSpellcasting = !!c.dnd5eCombatState?.wildShapeFormId &&
       (definition.id !== 'druid' || classLevel < 18)
     return (
@@ -138,6 +187,42 @@ export default function MapSpellsPanel({
             </div>
           ))}
         </div>
+        {combatSpellChoices.length > 0 ? <section className="rounded-2xl border border-violet-300/15 bg-black/20 p-3 shadow-inner">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-semibold text-violet-100">战斗法术快捷栏</h4>
+              <p className="mt-1 text-[11px] text-slate-500">先选择法术图标；需要升环或超魔法时在下方确认，然后直接到地图选择目标或范围。</p>
+            </div>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] text-slate-400">{combatSpellChoices.length} 个可选法术</span>
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-11">
+            {combatSpellChoices.map((spell) => {
+              const active = currentFocusedSpellId === spell.id
+              const reaction = spell.economy === 'reaction'
+              const unsupported = spell.economy === 'unsupported' || spell.economy === 'minute' || spell.economy === 'hour'
+              return <button
+                key={spell.id}
+                type="button"
+                onClick={() => {
+                  setLocalFocusedSpellId(spell.id)
+                  onFocusedSpellChange?.(spell.id)
+                }}
+                title={`${spell.name}${spell.englishName ? ` / ${spell.englishName}` : ''}\n${spell.level === 0 ? '戏法' : `${spell.level}环`} · ${spell.automation === 'headless' ? 'Headless' : 'DM 裁定'}${reaction ? '\n反应法术会在触发时询问' : unsupported ? '\n不能作为战斗动作主动施放' : '\n选择后在下方确认施放'}`}
+                className={`group rounded-xl border p-1.5 text-center transition ${active ? 'border-amber-300/60 bg-amber-400/10 shadow-[0_0_22px_rgba(251,191,36,0.15)]' : 'border-white/8 bg-white/[0.025] hover:-translate-y-0.5 hover:border-violet-300/30 hover:bg-violet-500/[0.07]'}`}
+              >
+                <Dnd5eActionIcon
+                  spec={dnd5eSpellActionIcon(spell)}
+                  level={spell.level}
+                  active={active}
+                  disabled={wildShapeBlocksSpellcasting || unsupported}
+                  className="mx-auto h-14 w-14"
+                />
+                <span className={`mt-1.5 block truncate text-[10px] font-semibold ${active ? 'text-amber-100' : 'text-slate-300'}`}>{spell.name}</span>
+                <span className={`mt-0.5 block text-[9px] ${spell.automation === 'headless' ? 'text-emerald-300/75' : 'text-amber-300/75'}`}>{spell.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span>
+              </button>
+            })}
+          </div>
+        </section> : null}
         {movablePersistentAreas.length > 0 ? <div className="space-y-2 rounded-xl border border-sky-300/20 bg-sky-400/[0.04] p-3">
           <div className="text-xs font-semibold text-sky-100">场上持续法术</div>
           {movablePersistentAreas.map((area) => <button
@@ -152,7 +237,7 @@ export default function MapSpellsPanel({
           </button>)}
         </div> : null}
         {selectedSpells.length > 0 ? <div className="grid gap-2">
-          {selectedSpells.map((spell) => {
+          {selectedSpells.filter((spell) => spell.id === currentFocusedSpellId).map((spell) => {
             const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
             const freeBaseCast = spell.level > 0 ? dnd5eFreeSpellCastSource({
               classId: definition.id,
@@ -390,7 +475,7 @@ export default function MapSpellsPanel({
             <h4 className="text-sm font-semibold text-cyan-100">插件 Headless 法术</h4>
             <p className="mt-1 text-xs leading-5 text-cyan-100/60">使用与核心法术相同的 DM 权威事务：校验成分和法术位，Host 掷命中／豁免／伤害骰，并处理升环与专注。</p>
           </div>
-          {pluginHeadlessSpells.map((entry) => {
+          {pluginHeadlessSpells.filter((entry) => entry.id === currentFocusedSpellId).map((entry) => {
             const spell = entry.imported!
             const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
             const availableLevels = spell.level === 0 ? [0] : pactLevel != null && spell.level <= 5
@@ -421,7 +506,7 @@ export default function MapSpellsPanel({
             </p>
           </div>
           <div className="grid gap-2">
-            {adjudicatedSpells.map((spell) => {
+            {adjudicatedSpells.filter((spell) => spell.id === currentFocusedSpellId).map((spell) => {
               const castingTime = dnd5eSpellbookEntryCastingTime(spell)
               const pactLevel = definition.spellcasting!.kind === 'pact' ? dnd5ePactSlotLevel(classLevel) : undefined
               const freeBaseCast = spell.level > 0 ? dnd5eFreeSpellCastSource({

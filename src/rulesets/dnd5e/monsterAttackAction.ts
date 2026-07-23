@@ -18,6 +18,7 @@ import {
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterActionRoll,
+  type Dnd5eMonsterMechanicRoll,
 } from './headlessCombatEngine'
 import {
   createDnd5eMapCombatSnapshot,
@@ -32,6 +33,7 @@ import {
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
+import { dnd5eEligibleMonsterMechanics, dnd5eMonsterMechanicDiceRequirements } from './monsterAutomation'
 import { dnd5eMonsterEffectiveWeaponAttack, dnd5eMonsterHasGenericAbility } from './monsterGenericAbilities'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
@@ -263,15 +265,41 @@ export function dnd5ePreparedMonsterAttackMode(
   return imposeDnd5eRollDisadvantage(baseMode, 'vicious-mockery').mode
 }
 
+export function prepareDnd5eMonsterAfterHitMechanics(
+  prepared: PreparedDnd5eMonsterAttack,
+  hit: boolean,
+) {
+  if (!hit) return []
+  const actor = prepared.state.combatants[prepared.actorToken.id]
+  if (!actor) return []
+  return dnd5eEligibleMonsterMechanics(prepared.monster, 'after-hit', {
+    combatId: prepared.state.combatId,
+    round: prepared.state.round,
+    actorId: actor.id,
+    currentHp: actor.currentHp,
+    maxHp: actor.maxHp,
+    usedKeys: actor.classState.declarativeUsedTurnKeys,
+  }).map((mechanic) => ({
+    actorId: actor.id,
+    actorName: actor.name,
+    mechanicId: mechanic.id,
+    mechanicName: mechanic.name,
+    targetId: prepared.targetToken.id,
+    effects: dnd5eMonsterMechanicDiceRequirements(mechanic),
+  }))
+}
+
 export function resolvePreparedDnd5eMonsterAttack(input: {
   prepared: PreparedDnd5eMonsterAttack
   rolls: readonly Omit<Dnd5eMonsterActionRoll, 'targetId'>[]
+  mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
   const result = resolveDnd5eHeadlessAction(prepared.state, {
     type: 'monster-action',
     actorId: prepared.actorToken.id,
     actionId: prepared.action.id,
+    mechanicRolls: input.mechanicRolls,
     rolls: input.rolls.map((roll, attackIndex) => ({
       ...roll,
       mode: dnd5ePreparedMonsterAttackMode(prepared, attackIndex),

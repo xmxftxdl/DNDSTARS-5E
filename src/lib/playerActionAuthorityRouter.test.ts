@@ -42,6 +42,7 @@ function makeAction(patch: Partial<PlayerActionAuthorityAction> = {}): PlayerAct
     id: 'action-1',
     mapId: 'map-1',
     combatId: 'combat-1',
+    sourceMode: 'player',
     status: 'pending',
     type: 'move-token',
     actorTokenId: 'hero-token',
@@ -69,6 +70,7 @@ function makeContext(patch: Partial<Parameters<typeof preflightPlayerActionAutho
     round: 1,
     initiativeIndex: 0,
     currentTokenId: 'hero-token',
+    characters: [makeCharacter()],
     processedActionIds: new Set<string>(),
     seenActionIds: new Set<string>(),
     ...patch,
@@ -121,6 +123,19 @@ describe('player action authority router', () => {
     )
 
     expect(result).toEqual({ status: 'rejected', reason: 'stale-turn' })
+  })
+
+  it('rejects DM-authored player actions and actions for another member character', () => {
+    expect(
+      preflightPlayerActionAuthority(makeAction({ sourceMode: 'dm' }), makeContext()),
+    ).toEqual({ status: 'rejected', reason: 'invalid-action-origin' })
+
+    expect(
+      preflightPlayerActionAuthority(
+        makeAction({ roomMemberId: 'member-b' }),
+        makeContext({ characters: [makeCharacter({ roomMemberId: 'member-a' })] }),
+      ),
+    ).toEqual({ status: 'rejected', reason: 'character-owner-mismatch' })
   })
 
   it('ignores already processed or seen actions', () => {

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { ABILITIES, abilityMod, formatMod } from '../../lib/dnd'
@@ -16,9 +17,33 @@ import {
   type CreatureSize,
   type CreatureType,
 } from '../../lib/monsterTypes'
-import { X, Shield, Footprints, Sparkles, Swords, Backpack } from 'lucide-react'
+import { X, Shield, Footprints, Sparkles, Swords, Backpack, ImagePlus } from 'lucide-react'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
+import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
+import { deleteImage, getImage, putImage } from '../../lib/imageStore'
+import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { getDnd5eSrdMonster, type Dnd5eMonsterTargetPriority } from '../../rulesets/dnd5e/monsters'
+import { DND5E_MONSTER_TARGET_PRIORITY_OPTIONS } from '../../rulesets/dnd5e/monsterAutomation'
+
+function SharedMonsterPortrait({ imageId, name }: { imageId: string; name: string }) {
+  const [loaded, setLoaded] = useState<{ imageId: string; src: string }>()
+  useEffect(() => {
+    let disposed = false
+    let objectUrl: string | undefined
+    void getImage(imageId).then((blob) => {
+      if (!blob || disposed) return
+      objectUrl = URL.createObjectURL(blob)
+      setLoaded({ imageId, src: objectUrl })
+    })
+    return () => {
+      disposed = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [imageId])
+  const src = loaded?.imageId === imageId ? loaded.src : undefined
+  return src ? <img src={src} alt={`${name}的完整立绘`} className="h-full w-full object-cover" /> : null
+}
 
 function resolveEnemyDetail(token: Token): {
   template: EnemyTemplate | undefined
@@ -35,6 +60,7 @@ export default function EnemyDetailPanel({
   isDM = false,
   mapId,
   characters = [],
+  tokens = [],
   updateToken,
   updateChar,
   removeToken,
@@ -48,6 +74,7 @@ export default function EnemyDetailPanel({
   isDM?: boolean
   mapId?: string
   characters?: Character[]
+  tokens?: readonly Token[]
   updateToken?: (mapId: string, tokenId: string, patch: Partial<Token>) => void
   updateChar?: (charId: string, patch: Partial<Character>) => void
   removeToken?: (mapId: string, tokenId: string) => void
@@ -55,6 +82,9 @@ export default function EnemyDetailPanel({
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
   conditionSourceOptions?: readonly { id: string; label: string }[]
 }) {
+  const portraitInputRef = useRef<HTMLInputElement>(null)
+  const [portraitBusy, setPortraitBusy] = useState(false)
+  const [portraitError, setPortraitError] = useState('')
   const { template, stats } = resolveEnemyDetail(token)
   const derived = token.poolId ? getEnemyDerivedCombatStats(token.poolId) : undefined
   const isStructured5eMonster = stats?.source === 'SRD 5.1' || stats?.source === 'DM 自定义'
@@ -79,15 +109,45 @@ export default function EnemyDetailPanel({
   const linked = token.characterId ? characters.find((c) => c.id === token.characterId) : undefined
   const canEdit = isDM && !!mapId && !!updateToken
   const standardConditions = linked?.conditions ?? token.dnd5eCombatState?.conditions ?? []
+  const monsterDefinition = token.poolId ? getDnd5eSrdMonster(token.poolId) : undefined
+  const defaultTargetPriority = monsterDefinition?.targetingPreference?.priority ?? 'nearest'
+  const targetPriority = token.dnd5eTargetingPreference?.priority ?? defaultTargetPriority
+  const hostileTargets = tokens.filter((candidate) =>
+    candidate.id !== token.id && candidate.type !== 'obstacle' && areOpposedCombatTokens(token, candidate),
+  )
+
+  const uploadPortrait = async (file: File) => {
+    if (!canEdit) return
+    setPortraitBusy(true)
+    setPortraitError('')
+    try {
+      const dataUrl = await createCharacterPortraitDataUrl(file)
+      const blob = await (await fetch(dataUrl)).blob()
+      const safeTokenId = token.id.replace(/[^a-z0-9_-]/gi, '_').slice(0, 80)
+      const nextId = `token_portrait_${safeTokenId}_${Date.now()}`
+      const shared = await putImage(nextId, blob)
+      if (!shared) {
+        await deleteImage(nextId)
+        throw new Error('怪物立绘未能上传到房间，请确认 DM 主机在线后重试。')
+      }
+      const previousId = token.portraitImageId
+      updateToken!(mapId!, token.id, { portraitImageId: nextId })
+      if (previousId) void deleteImage(previousId)
+    } catch (cause) {
+      setPortraitError(cause instanceof Error ? cause.message : '怪物立绘上传失败。')
+    } finally {
+      setPortraitBusy(false)
+    }
+  }
 
   return (
     <div className="glass absolute bottom-3 right-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 bg-void-900 text-2xl"
+          className={`flex shrink-0 items-center justify-center overflow-hidden border-2 bg-void-900 text-2xl ${token.portraitImageId ? 'h-16 w-12 rounded-lg' : 'h-12 w-12 rounded-full'}`}
           style={{ borderColor: color }}
         >
-          {emoji}
+          {token.portraitImageId ? <SharedMonsterPortrait imageId={token.portraitImageId} name={name} /> : emoji}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -123,6 +183,18 @@ export default function EnemyDetailPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {canEdit && (
           <section className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+            <input
+              ref={portraitInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              aria-label="上传怪物立绘"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0]
+                if (file) void uploadPortrait(file)
+                event.currentTarget.value = ''
+              }}
+            />
             <div className="grid grid-cols-[auto,1fr] items-center gap-2">
               <span className="text-xs text-slate-500">名称</span>
               <input
@@ -215,6 +287,28 @@ export default function EnemyDetailPanel({
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={portraitBusy}
+                onClick={() => portraitInputRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-lg bg-violet-500/15 px-2 py-1 text-xs font-semibold text-violet-200 hover:bg-violet-500/25 disabled:opacity-40"
+              >
+                <ImagePlus className="h-3.5 w-3.5" />
+                {portraitBusy ? '处理中…' : token.portraitImageId ? '替换怪物立绘' : '上传怪物立绘'}
+              </button>
+              {token.portraitImageId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const imageId = token.portraitImageId
+                    updateToken!(mapId!, token.id, { portraitImageId: undefined })
+                    if (imageId) void deleteImage(imageId)
+                  }}
+                  className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-200"
+                >
+                  移除立绘
+                </button>
+              )}
               <label className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300">
                 <input
                   type="checkbox"
@@ -246,6 +340,44 @@ export default function EnemyDetailPanel({
                 </button>
               )}
             </div>
+            {isStructured5eMonster && token.type === 'enemy' && (
+              <div className="mt-3 border-t border-white/10 pt-3">
+                <label className="block text-xs text-slate-500">
+                  自动攻击偏好
+                  <select
+                    value={token.dnd5eTargetingPreference ? targetPriority : 'template-default'}
+                    onChange={(event) => updateToken!(mapId!, token.id, {
+                      dnd5eTargetingPreference: event.target.value === 'template-default'
+                        ? undefined
+                        : { schemaVersion: 1, priority: event.target.value as Dnd5eMonsterTargetPriority },
+                    })}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-arcane-500"
+                  >
+                    <option value="template-default">使用模板默认（{DND5E_MONSTER_TARGET_PRIORITY_OPTIONS.find((entry) => entry.value === defaultTargetPriority)?.label}）</option>
+                    {DND5E_MONSTER_TARGET_PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">{DND5E_MONSTER_TARGET_PRIORITY_OPTIONS.find((entry) => entry.value === targetPriority)?.description}</p>
+                {targetPriority === 'highest-threat' && hostileTargets.length > 0 && (
+                  <div className="mt-2 space-y-1.5 rounded-lg border border-white/10 bg-black/15 p-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">仇恨值调整</p>
+                    {hostileTargets.map((target) => <label key={target.id} className="flex items-center gap-2 text-xs text-slate-400"><span className="min-w-0 flex-1 truncate">{target.label}</span><input type="number" min={0} max={1_000_000_000} value={token.dnd5eCombatState?.monsterThreatByTargetId?.[target.id] ?? 0} onChange={(event) => {
+                      const value = Math.max(0, Math.min(1_000_000_000, Math.floor(Number(event.target.value) || 0)))
+                      updateToken!(mapId!, token.id, {
+                        dnd5eCombatState: {
+                          ...token.dnd5eCombatState,
+                          monsterThreatByTargetId: {
+                            ...token.dnd5eCombatState?.monsterThreatByTargetId,
+                            [target.id]: value,
+                          },
+                        },
+                      })
+                    }} className="w-20 rounded border border-white/10 bg-void-950/70 px-1.5 py-1 text-right tabular-nums text-slate-100 outline-none focus:border-arcane-500" /></label>)}
+                  </div>
+                )}
+              </div>
+            )}
+            {portraitError && <p className="mt-2 text-xs text-rose-300">{portraitError}</p>}
           </section>
         )}
         {canManageConditions && onConditionsChange ? (

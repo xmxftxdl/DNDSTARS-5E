@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DND5E_SRD_ENEMY_POOL, enemyTemplateToTokenPatch } from '../../lib/enemyPool'
 import { getEnemyStatBlock } from '../../lib/enemyStatBlocks'
+import reviewedMonsterTranslations from './generated/srdMonsterTranslationsZh.reviewed.generated.json'
 import {
   createDnd5eCombatant,
   resolveDnd5eHeadlessAction,
@@ -38,6 +39,33 @@ function combatant(
 }
 
 describe('SRD 5.1 monster catalog', () => {
+  it('仅发布通过上下文复核且无英文正文残留的怪物译文', () => {
+    expect(Object.keys(reviewedMonsterTranslations)).toHaveLength(334)
+    type ReviewedMonsterTranslation = {
+      spellcastingDescription: string
+      traits: Array<{ description: string }>
+      actions: Array<{ description: string }>
+      reactions: Array<{ description: string }>
+      legendaryActions: Array<{ description: string }>
+      lairActions: Array<{ description: string }>
+    }
+    const reviewed = Object.values(reviewedMonsterTranslations) as ReviewedMonsterTranslation[]
+    const descriptions = reviewed.flatMap((monster) => [
+      monster.spellcastingDescription,
+      ...monster.traits.map((entry) => entry.description),
+      ...monster.actions.map((entry) => entry.description),
+      ...monster.reactions.map((entry) => entry.description),
+      ...monster.legendaryActions.map((entry) => entry.description),
+      ...monster.lairActions.map((entry) => entry.description),
+    ])
+    const englishResidual = descriptions
+      .join('\n')
+      .replace(/\b(?:AC|DC|SRD|d\d+)\b/g, '')
+      .match(/[A-Za-z]{2,}/g)
+    expect(englishResidual).toBeNull()
+    expect(reviewedMonsterTranslations.archmage.spellcastingDescription).toContain('法术反制')
+  })
+
   it('contains the namespaced SRD monster and Wild Shape foundation without legacy custom templates', () => {
     expect(DND5E_SRD_MONSTERS).toHaveLength(334)
     expect(new Set(DND5E_SRD_MONSTERS.map((monster) => monster.id)).size).toBe(334)
@@ -91,7 +119,7 @@ describe('SRD 5.1 monster catalog', () => {
   })
 
   it('supports Chinese, English and type search plus CR proficiency', () => {
-    expect(searchDnd5eSrdMonsters('哥布林').map((monster) => monster.slug)).toEqual(['goblin'])
+    expect(searchDnd5eSrdMonsters('地精').map((monster) => monster.slug)).toEqual(['bugbear', 'goblin', 'hobgoblin'])
     expect(searchDnd5eSrdMonsters('dire wolf').map((monster) => monster.slug)).toEqual(['dire-wolf'])
     expect(searchDnd5eSrdMonsters('亡灵').map((monster) => monster.slug)).toEqual(expect.arrayContaining(['skeleton', 'zombie', 'lich']))
     expect(dnd5eMonsterProficiencyBonus('1/8')).toBe(2)
@@ -101,7 +129,7 @@ describe('SRD 5.1 monster catalog', () => {
   it('drives the visible map pool and the compatibility detail block from the same SRD source', () => {
     expect(DND5E_SRD_ENEMY_POOL).toHaveLength(DND5E_SRD_MONSTERS.length)
     const template = DND5E_SRD_ENEMY_POOL.find((entry) => entry.id === 'srd-5.1:goblin')!
-    expect(template).toMatchObject({ name: '哥布林', maxHp: 7, armorClass: 15, challengeRating: '1/4' })
+    expect(template).toMatchObject({ name: '地精', maxHp: 7, armorClass: 15, challengeRating: '1/4' })
     expect(enemyTemplateToTokenPatch(template)).toMatchObject({ maxHp: 7, hp: 7, poolId: 'srd-5.1:goblin' })
     expect(getEnemyStatBlock(template.id)).toMatchObject({ ac: 15, maxHp: 7, hitDice: '2d6', source: 'SRD 5.1' })
   })

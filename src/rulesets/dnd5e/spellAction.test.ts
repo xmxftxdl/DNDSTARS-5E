@@ -14,7 +14,8 @@ import {
 import { dnd5eClassDefinition } from './classes'
 import { setMapGeometryRuntime } from '../../lib/mapGeometry'
 import { prepareDnd5eCoreSpellAreaMove, resolvePreparedDnd5eCoreSpellAreaMove } from './coreSpellAreaAction'
-import { collectDnd5ePersistentAreaTriggers } from './pluginAreas'
+import { collectDnd5ePersistentAreaTriggers, dnd5ePersistentAreaDifficultTerrainMultiplierAt } from './pluginAreas'
+import { prepareDnd5ePersistentAreaTrigger, resolvePreparedDnd5ePersistentAreaTrigger } from './pluginAreaTransactions'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
@@ -59,6 +60,89 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
+
+  it('rejects Hideous Laughter targets with Intelligence 4 or lower before rolling', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['hideous-laughter'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const wolf = token('wolf', 'enemy', 125)
+    wolf.poolId = 'srd-5.1:wolf'
+    const prepared = prepareDnd5eSpellCast(fixture(wizard, 'hideous-laughter', 1, wolf))
+    expect(prepared).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('requires the authoritative complete 20-foot Sleep area target set', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['sleep'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(wizard, 'sleep', 1, enemy)
+    input.action.dnd5eSpellCast!.targetTokenIds = [input.action.actorTokenId, enemy.id]
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.targetTokens.map((entry) => entry.id)).toEqual([input.action.actorTokenId, enemy.id])
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [8, 8, 8, 8, 8] })
+    expect(resolved.result.ok).toBe(true)
+
+    const omittedCaster = fixture(wizard, 'sleep', 1, enemy)
+    omittedCaster.action.dnd5eSpellCast!.targetTokenIds = [enemy.id]
+    expect(prepareDnd5eSpellCast(omittedCaster)).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('creates Grease as difficult terrain and resolves its initial Dexterity save through Headless', () => {
+    const wizard = character('wizard', dnd5eClassDefinition('wizard')!.name, {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['grease'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(wizard, 'grease', 1, enemy)
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(cast.result.ok).toBe(true)
+    expect(cast.application).toBeDefined()
+    if (!cast.application) return
+    const area = cast.application.map.dnd5ePluginAreas?.[0]
+    expect(area).toMatchObject({
+      coreSpellId: 'grease', concentrationId: undefined, expiresAfterRound: 11,
+      movementCostMultiplier: 2,
+      triggers: [
+        { id: 'grease-create', timing: 'on-create', savingThrow: { ability: 'dex', dc: 14 } },
+        { id: 'grease-enter', timing: 'on-enter', oncePerRound: false },
+        { id: 'grease-turn-end', timing: 'turn-end', oncePerTurn: true },
+      ],
+    })
+    expect(dnd5ePersistentAreaDifficultTerrainMultiplierAt({
+      map: cast.application.map, token: enemy, position: enemy,
+    })).toBe(2)
+    if (!area) return
+    const candidate = collectDnd5ePersistentAreaTriggers({
+      map: cast.application.map, timing: 'on-create', round: 1, areaId: area.id, turnKey: '1:wizard-token',
+    }).find((entry) => entry.targetToken.id === enemy.id)
+    expect(candidate).toBeDefined()
+    if (!candidate) return
+    const trigger = prepareDnd5ePersistentAreaTrigger({
+      combatId: 'combat', round: 1, map: cast.application.map,
+      characters: cast.application.characters, initiativeOrder: input.initiativeOrder, candidate,
+    })
+    expect(trigger.ok).toBe(true)
+    if (!trigger.ok) return
+    const failedSave = resolvePreparedDnd5ePersistentAreaTrigger({ prepared: trigger.prepared, d20: 1 })
+    expect(failedSave.result.ok).toBe(true)
+    expect(failedSave.result.state.combatants[enemy.id].conditions).toContain('prone')
+    expect(failedSave.result.state.combatants[enemy.id].classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'prone', duration: { type: 'permanent' },
+      source: expect.objectContaining({ kind: 'spell', rulesId: 'grease' }),
+    }))
+    expect(failedSave.result.events).toContainEqual(expect.objectContaining({
+      type: 'persistent-area-triggered', triggerId: 'grease-create', saveSuccess: false,
+      conditionApplied: 'prone',
+    }))
+  })
 
   it('casts a secondary class spell with that class ability and class level', () => {
     const multiclass = character('multiclass', dnd5eClassDefinition('fighter')!.name, {
@@ -136,6 +220,80 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       type: 'turn-resource-spent', actorId: input.action.actorTokenId, resource: 'action',
     }))
     expect(moved.application?.map.dnd5ePluginAreas?.[0].anchorCell).toEqual({ col: 8, row: 2 })
+  })
+
+  it('casts Darkness as a concentration-linked magical-darkness map effect', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['darkness'] } } } },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const input = fixture(wizard, 'darkness', 2, token('enemy', 'enemy', 575))
+    input.action.dnd5eSpellCast = {
+      spellId: 'darkness', slotLevel: 2, targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [], areaTargetCell: { col: 4, row: 2 },
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters.find((candidate) => candidate.id === wizard.id)).toMatchObject({
+      concentrating: true,
+      dnd5eCombatState: { concentrationSpellId: 'darkness' },
+      classResources: { 'dnd5e-spell-slot-2': { current: 0, max: 1 } },
+    })
+    expect(resolved.application?.map.dnd5ePluginAreas?.[0]).toMatchObject({
+      coreSpellId: 'darkness', concentrationId: 'darkness',
+      lighting: {
+        kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2,
+        suppressesMagicalLightThroughLevel: 2,
+      },
+    })
+  })
+
+  it('casts Daylight for one hour without incorrectly starting concentration', () => {
+    const cleric = character('cleric', '牧师', {
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['daylight'] } } } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const input = fixture(cleric, 'daylight', 3, token('enemy', 'enemy', 575))
+    input.action.dnd5eSpellCast = {
+      spellId: 'daylight', slotLevel: 3, targetTokenId: input.action.actorTokenId,
+      targetTokenIds: [], areaTargetCell: { col: 4, row: 2 },
+    }
+    const darknessSource = input.map.tokens.find((candidate) => candidate.id === 'enemy')!
+    darknessSource.dnd5eCombatState = { schemaVersion: 2, concentrationSpellId: 'darkness' }
+    input.map.dnd5ePluginAreas = [{
+      id: 'old-darkness', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:darkness',
+      sourceKind: 'core-spell', coreSpellId: 'darkness', slotLevel: 2, label: '黑暗术', color: '#312e81',
+      sourceCharacterId: '', sourceTokenId: darknessSource.id, cells: [{ col: 4, row: 2 }],
+      anchorCell: { col: 4, row: 2 }, createdRound: 1, expiresAfterRound: 101,
+      concentrationId: 'darkness',
+      lighting: {
+        kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2,
+        suppressesMagicalLightThroughLevel: 2,
+      },
+    }]
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.areaDurationRounds).toBe(600)
+    const resolved = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters.find((candidate) => candidate.id === cleric.id)).toMatchObject({
+      concentrating: false,
+      classResources: { 'dnd5e-spell-slot-3': { current: 0, max: 1 } },
+    })
+    expect(resolved.application?.map.dnd5ePluginAreas).toHaveLength(1)
+    expect(resolved.application?.map.dnd5ePluginAreas?.[0]).toMatchObject({
+      coreSpellId: 'daylight', concentrationId: undefined, expiresAfterRound: 601,
+      lighting: {
+        kind: 'light', brightRadiusFeet: 60, dimRadiusFeet: 60, spellLevel: 3,
+        suppressesMagicalDarknessThroughLevel: 3,
+      },
+    })
+    expect(resolved.application?.map.tokens.find((candidate) => candidate.id === darknessSource.id)
+      ?.dnd5eCombatState?.concentrationSpellId).toBeUndefined()
   })
 
   it('rejects a persistent-area anchor behind a line-of-effect wall', () => {

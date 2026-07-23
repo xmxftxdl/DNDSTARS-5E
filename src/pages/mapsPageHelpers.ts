@@ -68,6 +68,8 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         tokenId: token.id,
         label: ch?.name || token.label,
         emoji: ch?.avatar || token.emoji,
+        portrait: ch?.initiativePortrait ?? ch?.portrait ?? token.portrait,
+        portraitImageId: token.portraitImageId,
         color: token.color,
         accent: ch?.accent,
         roll,

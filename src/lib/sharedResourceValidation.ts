@@ -12,6 +12,7 @@ import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEf
 import {
   DND5E_DECLARATIVE_DURATION_MAX_ROUNDS,
   DND5E_DECLARATIVE_LABEL_MAX_LENGTH,
+  normalizeDnd5ePersistentAreaLighting,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   normalizeDnd5ePersistentAreaVisual,
 } from '../rulesets/dnd5e/persistentAreaTypes'
@@ -29,6 +30,16 @@ import {
 import { GROUP_ABILITY_CHECK_RESOURCE, validateSharedGroupAbilityChecks } from './groupAbilityChecks'
 import { CAMPAIGN_TIME_RESOURCE, normalizeSharedCampaignTime, validateSharedCampaignTime } from './campaignTime'
 import { isDnd5eEffectiveRulesContextV1 } from '../rulesets/dnd5e/effectiveRulesContext'
+import {
+  SCENE_ORCHESTRATION_RESOURCE,
+  validateSharedSceneOrchestration,
+} from './sceneOrchestration'
+import {
+  SCENE_AUDIO_LIBRARY_RESOURCE,
+  SCENE_AUDIO_PLAYBACK_RESOURCE,
+  validateSharedSceneAudioLibrary,
+  validateSharedSceneAudioPlayback,
+} from './sceneAudioLibrary'
 
 export const SHARED_RESOURCE_QUARANTINE_KEY = 'dndstars5e-shared-quarantine:v1'
 export const SHARED_INTEGRITY_EVENT = 'dndstars5e-shared-integrity'
@@ -66,6 +77,8 @@ const REQUIRED_ARRAYS: Readonly<Record<string, string>> = {
   [MAP_GEOMETRY_RESOURCE]: 'maps',
   [MAP_EXPLORATION_RESOURCE]: 'maps',
   [COMBAT_STATISTICS_RESOURCE]: 'sessions',
+  [SCENE_ORCHESTRATION_RESOURCE]: 'scenes',
+  [SCENE_AUDIO_LIBRARY_RESOURCE]: 'assets',
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -133,6 +146,9 @@ function validateDnd5ePluginAreas(value: unknown, path: string): string[] {
     }
     if (raw.visual != null && !normalizeDnd5ePersistentAreaVisual(raw.visual)) {
       issues.push(`${areaPath}.visual 无效`)
+    }
+    if (raw.lighting != null && !normalizeDnd5ePersistentAreaLighting(raw.lighting)) {
+      issues.push(`${areaPath}.lighting 无效`)
     }
     const triggerIds = new Set<string>()
     const receiptTriggerIds = new Set<string>()
@@ -397,6 +413,16 @@ function migrateDnd5eStateEnvelope(
                 issues.push(`characters[${index}].portrait 不是有效且受限的人物立绘`)
               } else portraitLength += entry.portrait.length
             }
+            if (entry.initiativePortrait != null) {
+              if (!isCharacterPortraitDataUrl(entry.initiativePortrait)) {
+                issues.push(`characters[${index}].initiativePortrait 不是有效且受限的先攻立绘`)
+              } else portraitLength += entry.initiativePortrait.length
+            }
+            if (entry.tokenPortrait != null) {
+              if (!isCharacterPortraitDataUrl(entry.tokenPortrait)) {
+                issues.push(`characters[${index}].tokenPortrait 不是有效且受限的地图 Token 图片`)
+              } else portraitLength += entry.tokenPortrait.length
+            }
             return migrateEntity(entry, `characters[${index}]`, true)
           })()
         : entry,
@@ -460,6 +486,15 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === CAMPAIGN_TIME_RESOURCE && !validateSharedCampaignTime(input)) {
     reasons.push('战役时间资源结构损坏')
+  }
+  if (name === SCENE_ORCHESTRATION_RESOURCE && !validateSharedSceneOrchestration(input)) {
+    reasons.push('场景编排资源结构损坏')
+  }
+  if (name === SCENE_AUDIO_LIBRARY_RESOURCE && !validateSharedSceneAudioLibrary(input)) {
+    reasons.push('场景音频目录结构损坏')
+  }
+  if (name === SCENE_AUDIO_PLAYBACK_RESOURCE && !validateSharedSceneAudioPlayback(input)) {
+    reasons.push('场景音频播放状态损坏')
   }
   const requiredArray = REQUIRED_ARRAYS[name]
   if (requiredArray && !validEntityArray(input[requiredArray], name)) {

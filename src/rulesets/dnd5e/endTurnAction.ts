@@ -4,7 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { dnd5eClassDefinitionForCharacter } from './classes'
-import { dnd5eCombatantHasConcentrationEffect, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState, type Dnd5eMonsterRechargeRoll } from './headlessCombatEngine'
+import { dnd5eCombatantHasConcentrationEffect, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState, type Dnd5eMonsterMechanicRoll, type Dnd5eMonsterRechargeRoll } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
@@ -16,8 +16,22 @@ import {
 } from './activeEffects'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5eMonsterRechargeActions } from './monsterGenericAbilities'
+import {
+  dnd5eEligibleMonsterMechanics,
+  dnd5eMonsterMechanicDiceRequirements,
+  type Dnd5eMonsterMechanicDiceRequirement,
+} from './monsterAutomation'
 
 export type Dnd5eEndTurnRejectReason = 'invalid-action' | 'invalid-actor' | 'combatant-missing'
+
+export interface PreparedDnd5eMonsterMechanicRoll {
+  actorId: string
+  actorName: string
+  mechanicId: string
+  mechanicName: string
+  targetId?: string
+  effects: readonly Dnd5eMonsterMechanicDiceRequirement[]
+}
 
 export interface PreparedDnd5ePlayerEndTurn {
   actor?: Character
@@ -51,6 +65,8 @@ export interface PreparedDnd5ePlayerEndTurn {
     dieSides: number
     minimum: number
   }[]
+  currentMonsterMechanicRolls: readonly PreparedDnd5eMonsterMechanicRoll[]
+  nextMonsterMechanicRolls: readonly PreparedDnd5eMonsterMechanicRoll[]
 }
 
 export function prepareDnd5ePlayerEndTurn(input: {
@@ -135,6 +151,34 @@ export function prepareDnd5ePlayerEndTurn(input: {
       minimum: usage.minimum,
     }]
   }) : []
+  const currentMonsterMechanicRolls = dnd5eEligibleMonsterMechanics(monster, 'turn-end', {
+    combatId: snapshot.state.combatId,
+    round: snapshot.state.round,
+    actorId: actorCombatant.id,
+    currentHp: actorCombatant.currentHp,
+    maxHp: actorCombatant.maxHp,
+    usedKeys: actorCombatant.classState.declarativeUsedTurnKeys,
+  }).map((mechanic) => ({
+    actorId: actorCombatant.id,
+    actorName: actorCombatant.name,
+    mechanicId: mechanic.id,
+    mechanicName: mechanic.name,
+    effects: dnd5eMonsterMechanicDiceRequirements(mechanic),
+  }))
+  const nextMonsterMechanicRolls = nextCombatant ? dnd5eEligibleMonsterMechanics(nextMonster, 'turn-start', {
+    combatId: snapshot.state.combatId,
+    round: actorIndex + 1 >= snapshot.state.initiativeOrder.length ? snapshot.state.round + 1 : snapshot.state.round,
+    actorId: nextCombatant.id,
+    currentHp: nextCombatant.currentHp,
+    maxHp: nextCombatant.maxHp,
+    usedKeys: nextCombatant.classState.declarativeUsedTurnKeys,
+  }).map((mechanic) => ({
+    actorId: nextCombatant.id,
+    actorName: nextCombatant.name,
+    mechanicId: mechanic.id,
+    mechanicName: mechanic.name,
+    effects: dnd5eMonsterMechanicDiceRequirements(mechanic),
+  })) : []
   const turnStartActiveEffectSavingThrows = (nextCombatant?.classState.activeEffects ?? []).flatMap((effect) => {
     if (effect.repeatSave?.timing !== 'target-turn-start') return []
     const repeatSave = effect.repeatSave
@@ -166,6 +210,8 @@ export function prepareDnd5ePlayerEndTurn(input: {
       activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows,
       nextMonsterRechargeRolls,
+      currentMonsterMechanicRolls,
+      nextMonsterMechanicRolls,
     },
   }
 }
@@ -178,6 +224,8 @@ export function resolveDnd5ePlayerEndTurn(input: {
   activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
+  currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
+  nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
 }): {
   ok: true
   actor?: Character
@@ -195,7 +243,9 @@ export function resolveDnd5ePlayerEndTurn(input: {
       type: 'end-turn', actorId: actorToken.id,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
+      currentMonsterMechanicRolls: input.currentMonsterMechanicRolls,
       nextMonsterRechargeRolls: input.nextMonsterRechargeRolls,
+      nextMonsterMechanicRolls: input.nextMonsterMechanicRolls,
     },
   )
   if (!result.ok) return { ok: false, reason: 'invalid-action' }

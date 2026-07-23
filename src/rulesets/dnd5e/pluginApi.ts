@@ -818,7 +818,7 @@ function clonePersistentAreaTriggers(
       const duration = condition.duration
       if (
         !(DND5E_STANDARD_CONDITION_IDS as readonly string[]).includes(condition.condition) ||
-        !['source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save'].includes(duration.expiresAt) ||
+        !['source-next-turn-start', 'target-next-turn-start', 'target-turn-end', 'target-turn-end-save', 'permanent'].includes(duration.expiresAt) ||
         (duration.remainingRounds != null && !finiteInteger(duration.remainingRounds, 1, DND5E_DECLARATIVE_DURATION_MAX_ROUNDS)) ||
         (duration.saveAbility != null && !ABILITY_KEYS.includes(duration.saveAbility)) ||
         (duration.saveDc != null && !finiteInteger(duration.saveDc, 1, 40)) ||

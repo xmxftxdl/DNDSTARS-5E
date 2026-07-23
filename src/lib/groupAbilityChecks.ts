@@ -50,6 +50,7 @@ export interface GroupAbilityCheckTransaction {
   label: string
   ability: AbilityKey
   skill?: string
+  rollKind: 'ability-check' | 'saving-throw'
   dc: number
   requestedMode: GroupAbilityCheckMode
   allowPassiveFallback: boolean
@@ -76,7 +77,7 @@ export type GroupAbilityCheckMutation =
   | {
       operation: 'create'
       label: string
-      selection: `ability:${AbilityKey}` | `skill:${string}`
+      selection: `ability:${AbilityKey}` | `skill:${string}` | `save:${AbilityKey}`
       dc: number
       mode: GroupAbilityCheckMode
       allowPassiveFallback: boolean
@@ -186,12 +187,15 @@ function normalizeCheck(value: unknown): GroupAbilityCheckTransaction | null {
     .filter((entry, index, all) => participantIds.has(entry.memberId) && all.findIndex((candidate) => candidate.memberId === entry.memberId) === index)
   const skill = bounded(value.skill, 80) || undefined
   if (skill && !SKILLS.some((entry) => entry.key === skill && entry.ability === value.ability)) return null
+  const rollKind = value.rollKind === 'saving-throw' ? 'saving-throw' : 'ability-check'
+  if (rollKind === 'saving-throw' && skill) return null
   return {
     id,
     status,
     label,
     ability: value.ability,
     skill,
+    rollKind,
     dc: Math.min(100, Math.max(0, Math.floor(Number(value.dc) || 0))),
     requestedMode: value.requestedMode,
     allowPassiveFallback: value.allowPassiveFallback === true,
@@ -251,8 +255,9 @@ export function normalizeSharedGroupAbilityChecks(value: unknown): SharedGroupAb
   }
 }
 
-export function groupAbilityCheckName(check: Pick<GroupAbilityCheckTransaction, 'ability' | 'skill'>): string {
+export function groupAbilityCheckName(check: Pick<GroupAbilityCheckTransaction, 'ability' | 'skill' | 'rollKind'>): string {
   const ability = ABILITIES.find((entry) => entry.key === check.ability)?.label ?? check.ability
+  if (check.rollKind === 'saving-throw') return `${ability}豁免`
   const skill = check.skill ? SKILLS.find((entry) => entry.key === check.skill)?.label : undefined
   return skill ? `${ability}（${skill}）检定` : `${ability}检定`
 }

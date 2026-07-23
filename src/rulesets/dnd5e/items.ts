@@ -627,7 +627,7 @@ function applyDnd5eInventoryMutationInternal(
     if (source.dnd5eInventory!.entries.filter((candidate) => candidate.attuned).length >= 3) {
       return failed(characters, 'attunement-limit')
     }
-    if (!dnd5eAttunementRequirementMet(source, entry, mutation.prerequisiteConfirmed === true)) {
+    if (!dnd5eAttunementRequirementMet(source, entry, mutation.dmPrerequisiteConfirmed === true)) {
       return failed(characters, 'attunement-prerequisite')
     }
     const entries = source.dnd5eInventory!.entries.map((candidate) => ({
@@ -865,32 +865,41 @@ function removeItem(character: Character, entry: Dnd5eInventoryEntry, quantity: 
   return { ...next, dnd5eInventory: inventoryWithEntries(inventory, entries) }
 }
 
-function dnd5eAttunementRequirementMet(
+export type Dnd5eAttunementRequirementDecision = 'met' | 'unmet' | 'dm-confirmation-required'
+
+export function dnd5eAttunementRequirementDecision(
   character: Character,
   entry: Dnd5eInventoryEntry,
-  prerequisiteConfirmed: boolean,
-): boolean {
+): Dnd5eAttunementRequirementDecision {
   const requirement = entry.item.magicItem?.attunementRequirement
-  if (!requirement) return true
-  if (dnd5eIgnoresMagicItemRequirements(character)) return true
-  if (requirement.includes('仅限矮人')) return character.race.includes('矮人')
-  if (requirement.includes('善良阵营')) return character.alignment?.includes('善良') === true
-  if (requirement.includes('邪恶阵营')) return character.alignment?.includes('邪恶') === true
+  if (!requirement || dnd5eIgnoresMagicItemRequirements(character)) return 'met'
+  if (requirement.includes('仅限矮人')) return character.race.includes('矮人') ? 'met' : 'unmet'
+  if (requirement.includes('善良阵营')) return character.alignment?.includes('善良') === true ? 'met' : 'unmet'
+  if (requirement.includes('邪恶阵营')) return character.alignment?.includes('邪恶') === true ? 'met' : 'unmet'
   const levels = normalizeDnd5eClassLevels(character)
   if (requirement.includes('仅限施法者')) {
     return Object.entries(levels).some(([classId, level]) => {
       const definition = dnd5eClassDefinition(classId)
       if (!definition?.spellcasting) return false
       return !['half-known', 'half-prepared'].includes(definition.spellcasting.kind) || (level ?? 0) >= 2
-    })
+    }) ? 'met' : 'unmet'
   }
   const requiredClassIds = DND5E_SRD_CLASS_DEFINITIONS
     .filter((definition) => requirement.includes(definition.name))
     .map((definition) => definition.id)
   if (requiredClassIds.length > 0) {
-    return requiredClassIds.some((classId) => dnd5eCharacterClassLevel(character, classId) > 0)
+    return requiredClassIds.some((classId) => dnd5eCharacterClassLevel(character, classId) > 0) ? 'met' : 'unmet'
   }
-  return prerequisiteConfirmed
+  return 'dm-confirmation-required'
+}
+
+function dnd5eAttunementRequirementMet(
+  character: Character,
+  entry: Dnd5eInventoryEntry,
+  dmPrerequisiteConfirmed: boolean,
+): boolean {
+  const decision = dnd5eAttunementRequirementDecision(character, entry)
+  return decision === 'met' || (decision === 'dm-confirmation-required' && dmPrerequisiteConfirmed)
 }
 
 function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character {

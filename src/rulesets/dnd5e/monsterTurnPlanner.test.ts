@@ -14,8 +14,8 @@ function map(tokens: Token[]): BattleMap {
   return { id: 'map', name: 'Map', width: 200, height: 100, gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens }
 }
 
-function character(): Character {
-  return { id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d8', ac: 14, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
+function character(patch: Partial<Character> = {}): Character {
+  return { id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d8', ac: 14, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true, ...patch }
 }
 
 describe('SRD monster 5e turn planner', () => {
@@ -36,6 +36,58 @@ describe('SRD monster 5e turn planner', () => {
     expect(plan.attacked).toBe(true)
     expect(plan.newPosition?.x).toBe(85)
     expect(plan.moveApSpent).toBeUndefined()
+  })
+
+  it.each([
+    {
+      label: '当前生命值最低',
+      priority: 'lowest-current-hp' as const,
+      nearCharacter: character({ id: 'near-character', currentHp: 18, maxHp: 20, ac: 12 }),
+      farCharacter: character({ id: 'far-character', currentHp: 4, maxHp: 20, ac: 18 }),
+      threat: {} as Record<string, number>,
+      expected: 'far-token',
+    },
+    {
+      label: '生命值百分比最低',
+      priority: 'lowest-hp-percentage' as const,
+      nearCharacter: character({ id: 'near-character', currentHp: 5, maxHp: 10, ac: 12 }),
+      farCharacter: character({ id: 'far-character', currentHp: 20, maxHp: 100, ac: 18 }),
+      threat: {} as Record<string, number>,
+      expected: 'far-token',
+    },
+    {
+      label: 'AC 最低',
+      priority: 'lowest-armor-class' as const,
+      nearCharacter: character({ id: 'near-character', currentHp: 18, maxHp: 20, ac: 19 }),
+      farCharacter: character({ id: 'far-character', currentHp: 18, maxHp: 20, ac: 11 }),
+      threat: {} as Record<string, number>,
+      expected: 'far-token',
+    },
+    {
+      label: '仇恨最高',
+      priority: 'highest-threat' as const,
+      nearCharacter: character({ id: 'near-character', currentHp: 18, maxHp: 20, ac: 12 }),
+      farCharacter: character({ id: 'far-character', currentHp: 18, maxHp: 20, ac: 18 }),
+      threat: { 'near-token': 3, 'far-token': 21 },
+      expected: 'far-token',
+    },
+  ])('honors the DM target priority: $label', ({ priority, nearCharacter, farCharacter, threat, expected }) => {
+    const goblin = token({
+      id: 'goblin', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7,
+      dnd5eTargetingPreference: { schemaVersion: 1, priority },
+      dnd5eCombatState: { monsterThreatByTargetId: threat },
+    })
+    const near = token({
+      id: 'near-token', type: 'player', characterId: nearCharacter.id,
+      x: 20, hp: nearCharacter.currentHp, maxHp: nearCharacter.maxHp,
+    })
+    const far = token({
+      id: 'far-token', type: 'player', characterId: farCharacter.id,
+      x: 50, hp: farCharacter.currentHp, maxHp: farCharacter.maxHp,
+    })
+
+    expect(planDnd5eMonsterTurn(map([goblin, near, far]), goblin, [nearCharacter, farCharacter]).targetTokenId)
+      .toBe(expected)
   })
 
   it('uses a flying monster\'s fly speed on the two-dimensional battle map', () => {

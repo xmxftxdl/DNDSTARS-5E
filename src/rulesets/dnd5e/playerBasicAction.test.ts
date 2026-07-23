@@ -3,6 +3,7 @@ import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
+import { createDnd5eConditionEffect } from './activeEffects'
 import {
   prepareDnd5ePlayerBasicAction,
   resolvePreparedDnd5ePlayerBasicAction,
@@ -164,5 +165,56 @@ describe('D&D 5e player basic action bridge', () => {
       type: 'readied-action-triggered', actorId: 'hero-token', actionKind: 'attack', targetId: 'enemy',
     }))
     expect(result.application.characters[0].dnd5eCombatState?.readiedAction).toBeUndefined()
+  })
+
+  it('routes waking a Sleep target through the authoritative basic-action bridge', () => {
+    const sleepingMap: BattleMap = {
+      ...map,
+      tokens: map.tokens.map((entry) => entry.id === 'enemy'
+        ? {
+            ...entry,
+            dnd5eCombatState: {
+              schemaVersion: 2,
+              conditions: ['unconscious', 'prone'],
+              activeEffects: [
+                createDnd5eConditionEffect({
+                  condition: 'unconscious',
+                  source: { kind: 'spell', actorId: 'wizard', rulesId: 'sleep' },
+                  targetId: 'enemy',
+                  duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+                  breakOn: ['takes-damage'],
+                }),
+                createDnd5eConditionEffect({
+                  condition: 'prone',
+                  source: { kind: 'spell', actorId: 'wizard', rulesId: 'sleep-fall-prone' },
+                  targetId: 'enemy',
+                  duration: { type: 'permanent' },
+                }),
+              ],
+            },
+          }
+        : entry),
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'wake', targetTokenId: 'enemy' }),
+      map: sleepingMap,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({ prepared: prepared.prepared })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === 'enemy')?.dnd5eCombatState?.conditions)
+      .not.toContain('unconscious')
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === 'enemy')?.dnd5eCombatState?.conditions)
+      .toContain('prone')
+    expect(resolved.result.events).toContainEqual({
+      type: 'sleeping-creature-awakened', actorId: 'hero-token', targetId: 'enemy', spellId: 'sleep',
+    })
   })
 })

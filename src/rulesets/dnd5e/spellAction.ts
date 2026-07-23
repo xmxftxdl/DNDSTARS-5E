@@ -21,6 +21,7 @@ import {
   dnd5eTargetArmorClassForAttack,
   dnd5eTargetIsUnseenForAttack,
   dnd5eCombatantHasConcentrationEffect,
+  endDnd5eConcentration,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
   dnd5eTranquilityWardCheck,
@@ -49,7 +50,7 @@ import {
   mapGeometryMovementBlocked,
   mapGeometryRuntimeForMap,
 } from '../../lib/mapGeometry'
-import { createDnd5eCoreSpellArea, getDnd5eCoreSpellAreaDeclaration } from './coreSpellAreas'
+import { createDnd5eCoreSpellArea, getDnd5eCoreSpellAreaDeclaration, resolveDnd5eCoreSpellLightingConflicts } from './coreSpellAreas'
 import { dnd5eCharacterClassLevel } from './multiclass'
 
 export type Dnd5eSpellCastRejectReason =
@@ -464,6 +465,7 @@ export function prepareDnd5eSpellCast(input: {
       const type = (combatant.creatureType ?? '').toLowerCase()
       return type !== 'humanoid' && !type.includes('类人')
     })) ||
+    (spell.id === 'hideous-laughter' && targetCombatants.some((combatant) => combatant.abilities.int <= 4)) ||
     (spell.id === 'hold-monster' && targetCombatants.some((combatant) => ['亡灵', 'undead'].includes((combatant.creatureType ?? '').toLowerCase())))
   ) return { ok: false, reason: 'invalid-target' }
   const healingAllocations = payload.healingAllocations?.map((allocation) => ({
@@ -704,7 +706,12 @@ export function prepareDnd5eSpellCast(input: {
             14_400,
             dnd5eSpellConcentrationDurationRounds(spell, slotLevel) * (metamagic?.kind === 'extended' ? 2 : 1),
           )
-        : undefined,
+        : spell.effect === 'persistent-area'
+          ? Math.min(
+              14_400,
+              (spell.effectDurationRounds ?? 0) * (metamagic?.kind === 'extended' ? 2 : 1),
+            )
+          : undefined,
     },
   }
 }
@@ -823,7 +830,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
   delayedEffectRolls?: readonly number[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
-  const result = resolveDnd5eHeadlessAction(prepared.state, {
+  let result = resolveDnd5eHeadlessAction(prepared.state, {
     type: 'cast-spell',
     actorId: prepared.actorToken.id,
     castingClassId: prepared.castingClassId,
@@ -878,7 +885,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     delayedEffectRolls: input.delayedEffectRolls,
   })
   if (!result.ok) return { result }
-  const application = planDnd5eMapResultApplication({
+  let application = planDnd5eMapResultApplication({
       state: result.state,
       map: prepared.map,
       characters: prepared.characters,
@@ -930,21 +937,45 @@ export function resolvePreparedDnd5eSpellCast(input: {
             },
           }
         : undefined
+      const existingAreas = (application.map.dnd5ePluginAreas ?? []).filter((candidate) =>
+        candidate.sourceTokenId !== prepared.actorToken.id || !candidate.concentrationId,
+      )
+      const lightingConflict = resolveDnd5eCoreSpellLightingConflicts(existingAreas, area)
+      const endedConcentrationSources = [
+        ...lightingConflict.removedAreas,
+        ...(!lightingConflict.applied && area.concentrationId ? [area] : []),
+      ]
+      if (endedConcentrationSources.length > 0) {
+        const events = [...result.events]
+        for (const endedArea of endedConcentrationSources) {
+          if (!endedArea.concentrationId) continue
+          const source = result.state.combatants[endedArea.sourceTokenId]
+          if (source?.classState.concentrationSpellId === endedArea.concentrationId) {
+            endDnd5eConcentration(result.state, source, events)
+          }
+        }
+        result = { ...result, events }
+        application = planDnd5eMapResultApplication({
+          state: result.state,
+          map: prepared.map,
+          characters: prepared.characters,
+          characterIdByCombatantId: prepared.characterIdByCombatantId,
+        })
+      }
+      const liveEffectTokenIds = new Set(lightingConflict.areas.flatMap((candidate) =>
+        candidate.anchorMode === 'effect-token' && candidate.anchorTokenId ? [candidate.anchorTokenId] : [],
+      ))
       application.map = {
         ...application.map,
         tokens: [
           ...application.map.tokens.filter((candidate) =>
-            candidate.dnd5eSpellEffect?.sourceTokenId !== prepared.actorToken.id ||
-            !candidate.dnd5eSpellEffect.concentrationId,
+            (!candidate.dnd5eSpellEffect || liveEffectTokenIds.has(candidate.id)) &&
+            (candidate.dnd5eSpellEffect?.sourceTokenId !== prepared.actorToken.id ||
+              !candidate.dnd5eSpellEffect.concentrationId),
           ),
-          ...(effectToken ? [effectToken] : []),
+          ...(effectToken && lightingConflict.applied ? [effectToken] : []),
         ],
-        dnd5ePluginAreas: [
-          ...(application.map.dnd5ePluginAreas ?? []).filter((candidate) =>
-            candidate.sourceTokenId !== prepared.actorToken.id || !candidate.concentrationId,
-          ),
-          area,
-        ],
+        dnd5ePluginAreas: lightingConflict.areas,
       }
     }
   }

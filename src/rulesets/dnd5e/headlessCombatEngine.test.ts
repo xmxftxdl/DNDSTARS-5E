@@ -150,6 +150,203 @@ describe('D&D 5e 2014 headless combat engine', () => {
     expect(restored.state.combatants.restored.conditions).not.toContain('blinded')
   })
 
+  it('fully resolves Hideous Laughter, including damage saves, crawling, and concentration cleanup', () => {
+    const wizard = fighter('wizard', 30, {
+      classId: 'wizard', level: 3, abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-prepared': ['hideous-laughter'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const attacker = fighter('attacker', 20)
+    const target = fighter('target', 10, { controller: 'dm' })
+    const cast = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('hideous-laughter', [wizard, attacker, target]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'target', spellId: 'hideous-laughter', slotLevel: 1,
+      savingThrowD20: 1, effectRolls: [],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.target.conditions).toEqual(expect.arrayContaining(['prone', 'incapacitated']))
+    expect(cast.state.combatants.target.classState.activeEffects).toContainEqual(expect.objectContaining({
+      definitionId: 'srd-5.1:spell:hideous-laughter:repeat-save',
+      repeatSave: expect.objectContaining({
+        ability: 'wis', timing: 'target-turn-end', onDamage: { mode: 'advantage' },
+      }),
+    }))
+
+    const targetTurn = {
+      ...cast.state,
+      initiativeIndex: cast.state.initiativeOrder.indexOf('target'),
+    }
+    const cannotStand = resolveDnd5eHeadlessAction(targetTurn, {
+      type: 'move', actorId: 'target', to: { x: 5, y: 0 }, distance: 5,
+      standFromProne: true,
+    })
+    expect(cannotStand).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+    const crawled = resolveDnd5eHeadlessAction(targetTurn, {
+      type: 'move', actorId: 'target', to: { x: 5, y: 0 }, distance: 5,
+      standFromProne: false,
+    })
+    expect(crawled.ok).toBe(true)
+
+    const attackerTurn = {
+      ...cast.state,
+      initiativeIndex: cast.state.initiativeOrder.indexOf('attacker'),
+    }
+    const damaged = resolveDnd5eHeadlessAction(attackerTurn, {
+      type: 'attack', actorId: 'attacker', targetId: 'target', attackModifier: 5, d20: 15,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [3], type: 'slashing' },
+    })
+    expect(damaged.ok).toBe(true)
+    if (!damaged.ok) return
+    const repeatEffect = damaged.state.combatants.target.classState.activeEffects?.find((effect) =>
+      effect.source.rulesId === 'hideous-laughter' && effect.repeatSave?.onDamage,
+    )
+    expect(repeatEffect).toBeDefined()
+    expect(damaged.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-save-required', targetId: 'target', effectId: repeatEffect!.id,
+      timing: 'takes-damage', mode: 'advantage',
+    }))
+
+    const failedDamageSave = resolveDnd5eHeadlessAction(damaged.state, {
+      type: 'active-effect-damage-save', actorId: 'target', effectId: repeatEffect!.id,
+      d20: 1, d20Second: 2,
+    })
+    expect(failedDamageSave.ok).toBe(true)
+    if (!failedDamageSave.ok) return
+    expect(failedDamageSave.state.combatants.target.conditions).toEqual(expect.arrayContaining(['prone', 'incapacitated']))
+    expect(failedDamageSave.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-save-resolved', effectId: repeatEffect!.id, success: false,
+    }))
+
+    const secondDamage = resolveDnd5eHeadlessAction(attackerTurn, {
+      type: 'attack', actorId: 'attacker', targetId: 'target', attackModifier: 5, d20: 15,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [2], type: 'slashing' },
+    })
+    expect(secondDamage.ok).toBe(true)
+    if (!secondDamage.ok) return
+    const escaped = resolveDnd5eHeadlessAction(secondDamage.state, {
+      type: 'active-effect-damage-save', actorId: 'target', effectId: repeatEffect!.id,
+      d20: 20, d20Second: 1,
+    })
+    expect(escaped.ok).toBe(true)
+    if (!escaped.ok) return
+    expect(escaped.state.combatants.target.conditions).not.toEqual(expect.arrayContaining(['prone', 'incapacitated']))
+    expect(escaped.state.combatants.wizard.concentrating).toBe(false)
+
+    const lowIntTarget = fighter('low-int', 10, {
+      controller: 'dm', abilities: { ...abilities, int: 4 },
+    })
+    const immune = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('hideous-laughter-immune', [wizard, lowIntTarget]), {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'low-int', spellId: 'hideous-laughter', slotLevel: 1,
+      savingThrowD20: 1, effectRolls: [],
+    })
+    expect(immune).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('resolves Sleep by current HP, excludes immune creatures, and supports both wake conditions', () => {
+    const wizard = fighter('wizard', 30, {
+      classId: 'wizard', level: 3, abilities: { ...abilities, int: 16 },
+      classSelections: { 'spell-prepared': ['sleep'] },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const helper = fighter('helper', 25)
+    const low = fighter('low', 20, { controller: 'dm', currentHp: 4, maxHp: 20 })
+    const middle = fighter('middle', 15, { controller: 'dm', currentHp: 7, maxHp: 20 })
+    const high = fighter('high', 10, { controller: 'dm', currentHp: 12, maxHp: 20 })
+    const undead = fighter('undead', 8, { controller: 'dm', currentHp: 1, creatureType: '亡灵' })
+    const charmImmune = fighter('charm-immune', 7, {
+      controller: 'dm', currentHp: 2, conditionImmunities: ['魅惑'],
+    })
+    const magicalSleepImmune = fighter('magical-sleep-immune', 6, {
+      controller: 'dm', currentHp: 2, conditionImmunities: ['magical-sleep'],
+    })
+    const alreadyUnconscious = fighter('already-unconscious', 6, {
+      controller: 'dm', currentHp: 3, conditions: ['unconscious', 'prone'],
+    })
+    const state = startDnd5eHeadlessCombat('sleep', [
+      wizard, helper, low, middle, high, undead, charmImmune, magicalSleepImmune, alreadyUnconscious,
+    ])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('helper', 'low')]: 5,
+      [dnd5eCombatantPairKey('helper', 'middle')]: 5,
+    }
+    const cast = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'low',
+      targetIds: ['low', 'middle', 'high', 'undead', 'charm-immune', 'magical-sleep-immune', 'already-unconscious'],
+      spellId: 'sleep', slotLevel: 1, effectRolls: [4, 4, 4, 4, 4],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.low.conditions).toEqual(expect.arrayContaining(['unconscious', 'prone']))
+    expect(cast.state.combatants.middle.conditions).toEqual(expect.arrayContaining(['unconscious', 'prone']))
+    expect(cast.state.combatants.high.conditions).not.toContain('unconscious')
+    expect(cast.state.combatants.undead.conditions).not.toContain('unconscious')
+    expect(cast.state.combatants['charm-immune'].conditions).not.toContain('unconscious')
+    expect(cast.state.combatants['magical-sleep-immune'].conditions).not.toContain('unconscious')
+    expect(cast.state.combatants['already-unconscious'].classState.activeEffects)
+      .not.toContainEqual(expect.objectContaining({ source: expect.objectContaining({ rulesId: 'sleep' }) }))
+    expect(cast.state.combatants.low.classState.activeEffects).toContainEqual(expect.objectContaining({
+      standardCondition: 'unconscious', source: expect.objectContaining({ rulesId: 'sleep' }),
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      breakOn: ['takes-damage'],
+    }))
+    expect(cast.events).toContainEqual({
+      type: 'sleep-resolved', actorId: 'wizard', spellId: 'sleep',
+      hitPointPool: 20, remainingHitPoints: 9, affectedTargetIds: ['low', 'middle'],
+    })
+    expect(cast.state.combatants.wizard.classResources['dnd5e-spell-slot-1'].current).toBe(0)
+
+    const helperTurn = { ...cast.state, initiativeIndex: cast.state.initiativeOrder.indexOf('helper') }
+    const awakened = resolveDnd5eHeadlessAction(helperTurn, {
+      type: 'wake-sleeping-creature', actorId: 'helper', targetId: 'middle',
+    })
+    expect(awakened.ok).toBe(true)
+    if (!awakened.ok) return
+    expect(awakened.state.combatants.middle.conditions).not.toContain('unconscious')
+    expect(awakened.state.combatants.middle.conditions).toContain('prone')
+    expect(awakened.state.combatants.helper.turn.actionAvailable).toBe(false)
+    expect(awakened.events).toContainEqual({
+      type: 'sleeping-creature-awakened', actorId: 'helper', targetId: 'middle', spellId: 'sleep',
+    })
+
+    const helperAttackTurn = { ...cast.state, initiativeIndex: cast.state.initiativeOrder.indexOf('helper') }
+    const damaged = resolveDnd5eHeadlessAction(helperAttackTurn, {
+      type: 'attack', actorId: 'helper', targetId: 'low', attackModifier: 20,
+      d20: 10, d20Second: 15,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [1, 1], type: 'bludgeoning' },
+    })
+    expect(damaged.ok).toBe(true)
+    if (!damaged.ok) return
+    expect(damaged.state.combatants.low.conditions).not.toContain('unconscious')
+    expect(damaged.state.combatants.low.conditions).toContain('prone')
+    expect(damaged.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed', targetId: 'low', reason: 'takes-damage',
+    }))
+  })
+
+  it('adds two Sleep pool dice per higher slot and rejects forged dice', () => {
+    const wizard = fighter('wizard', 20, {
+      classId: 'wizard', level: 3,
+      classSelections: { 'spell-prepared': ['sleep'] },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const target = fighter('target', 10, { controller: 'dm', currentHp: 21, maxHp: 21 })
+    const state = startDnd5eHeadlessCombat('sleep-upcast', [wizard, target])
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'target', spellId: 'sleep', slotLevel: 2,
+      effectRolls: [3, 3, 3, 3, 3, 3],
+    })).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    const cast = resolveDnd5eHeadlessAction(state, {
+      type: 'cast-spell', actorId: 'wizard', targetId: 'target', spellId: 'sleep', slotLevel: 2,
+      effectRolls: [3, 3, 3, 3, 3, 3, 3],
+    })
+    expect(cast.ok).toBe(true)
+    if (!cast.ok) return
+    expect(cast.state.combatants.target.conditions).toContain('unconscious')
+    expect(cast.events).toContainEqual(expect.objectContaining({
+      type: 'sleep-resolved', hitPointPool: 21, remainingHitPoints: 0,
+    }))
+  })
+
   it('resolves Guiding Bolt, fixed healing, healing pools, and Power Word Stun', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric', level: 17, proficiencyBonus: 6, abilities: { ...abilities, wis: 20 },
@@ -803,6 +1000,22 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     expect(result.state.combatants.a.turn.actionAvailable).toBe(false)
     expect(result.state.combatants.b.currentHp).toBe(7)
+  })
+
+  it('records effective hostile damage as monster threat for later target selection', () => {
+    const hero = fighter('hero', 20)
+    const monster = fighter('monster', 10, {
+      controller: 'dm', statBlockId: 'srd-5.1:goblin', armorClass: 10,
+      currentHp: 20, maxHp: 20, temporaryHp: 2,
+    })
+    const result = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('threat', [hero, monster]), {
+      type: 'attack', actorId: hero.id, targetId: monster.id,
+      attackModifier: 5, d20: 15,
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [5] },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[monster.id].classState.monsterThreatByTargetId).toEqual({ hero: 8 })
   })
 
   it('authoritatively reduces a ranged weapon hit with Deflect Missiles and spends the Monk reaction', () => {

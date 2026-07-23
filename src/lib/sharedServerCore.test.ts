@@ -34,9 +34,11 @@ import {
   normalizeAccountRecoveryCode,
   normalizeRoomPluginRequirements,
   normalizeMapTabletopEvent,
+  normalizeCombatPresentationEvent,
   mutateRoomChatState,
   mutateRoomJournalState,
   mutateGroupAbilityChecksState,
+  mutateSceneAudioPlaybackState,
   mutateCampaignTimeState,
   parseRoomChatRollCommand,
   projectRoomChatForMember,
@@ -49,6 +51,8 @@ import {
   eventChannelOperationAllowed,
   projectEventPayloadForViewer,
   projectGroupAbilityChecksForMember,
+  projectSceneOrchestrationForPlayer,
+  stateResourceWriteAllowedForRole,
   pushBacklog,
   replaySlice,
   safeName,
@@ -78,6 +82,21 @@ describe('member-specific shared state projections', () => {
     expect(projected.characters[2]).not.toHaveProperty('notes')
     expect(projected.characters[2]).not.toHaveProperty('backstory')
     expect(projected.characters[2]).not.toHaveProperty('equipment')
+  })
+
+  it('never projects hidden scene triggers or queued DM actions to a player', () => {
+    const projected = projectSceneOrchestrationForPlayer({
+      schemaVersion: 1,
+      scenes: [{ id: 'scene', mapId: 'map', triggers: [{ id: 'ambush', actions: [{ kind: 'whisper', text: 'secret' }] }] }],
+      runtime: { paused: true, pendingRuns: [{ id: 'run' }], receipts: ['secret'], history: [{ summary: 'secret' }] },
+      updatedAt: 9,
+    })
+    expect(projected).toEqual({
+      schemaVersion: 1,
+      scenes: [],
+      runtime: { paused: false, pendingRuns: [], receipts: [], history: [] },
+      updatedAt: 9,
+    })
   })
 
   it('removes dark rolls and routes only public or owned interrupt windows', () => {
@@ -125,6 +144,22 @@ describe('member-specific shared state projections', () => {
       .toEqual({ ...targetedAck, channel: '_private', payload: null })
     expect(eventChannelOperationAllowed('shared-state-changed', 'publish', 'dm')).toBe(false)
     expect(eventChannelOperationAllowed('unregistered', 'subscribe', 'dm')).toBe(false)
+    expect(eventChannelOperationAllowed('scene-presentation', 'publish', 'dm')).toBe(true)
+    expect(eventChannelOperationAllowed('scene-presentation', 'publish', 'player')).toBe(false)
+    expect(eventChannelOperationAllowed('scene-presentation', 'subscribe', 'spectator')).toBe(true)
+    expect(eventChannelOperationAllowed('combat-presentation', 'publish', 'dm')).toBe(true)
+    expect(eventChannelOperationAllowed('combat-presentation', 'publish', 'player')).toBe(false)
+    expect(eventChannelOperationAllowed('combat-presentation', 'subscribe', 'spectator')).toBe(true)
+    expect(stateResourceWriteAllowedForRole('scene-orchestration', 'dm')).toBe(true)
+    expect(stateResourceWriteAllowedForRole('scene-orchestration', 'player')).toBe(false)
+    expect(stateResourceWriteAllowedForRole('maps', 'player')).toBe(true)
+    expect(stateResourceWriteAllowedForRole('player-action', 'dm')).toBe(false)
+    expect(stateResourceWriteAllowedForRole('player-action-requests', 'dm')).toBe(false)
+    expect(stateResourceWriteAllowedForRole('player-action', 'player')).toBe(true)
+    expect(stateResourceWriteAllowedForRole('player-action-requests', 'player')).toBe(true)
+    expect(stateResourceWriteAllowedForRole('player-action-processed', 'player')).toBe(false)
+    expect(stateResourceWriteAllowedForRole('player-action-ack', 'player')).toBe(false)
+    expect(stateResourceWriteAllowedForRole('player-action', 'spectator')).toBe(false)
   })
 })
 
@@ -271,6 +306,32 @@ describe('authoritative group ability checks', () => {
     })
   })
 
+  it('resolves group saving throws with save proficiency and no passive fallback', () => {
+    const savingContext = {
+      ...context,
+      characters: {
+        characters: context.characters.characters.map((character) => character.id === 'hero-a'
+          ? { ...character, savingThrows: ['dex'] }
+          : character),
+      },
+    }
+    const created = mutateGroupAbilityChecksState(null, {
+      operation: 'create', label: 'Dexterity saves', selection: 'save:dex', dc: 15,
+      mode: 'normal', allowPassiveFallback: true, participantCharacterIds: ['hero-a'],
+    }, 2_500, host, savingContext)
+    if (!created.ok) throw new Error('expected saving throw creation')
+    expect(created).toMatchObject({ check: { rollKind: 'saving-throw', ability: 'dex', allowPassiveFallback: false } })
+    const checkId = String((created as unknown as { check: { id: string } }).check.id)
+    const rolled = mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 2_600, playerA, {
+      ...savingContext,
+      rollDie: () => 10,
+    })
+    expect(rolled).toMatchObject({
+      ok: true,
+      result: { d20: 10, modifier: 7, finalTotal: 17, proficiencyRank: 1, reliableTalentApplied: false, success: true },
+    })
+  })
+
   it('rejects forged participants, late rolls and non-participant responses', () => {
     expect(createCheck(3_000, { participantCharacterIds: ['hero-a', 'missing'] })).toMatchObject({ ok: false, error: 'invalid-group-check-participant' })
     const created = createCheck(3_000)
@@ -278,6 +339,44 @@ describe('authoritative group ability checks', () => {
     const checkId = String((created as unknown as { check: { id: string } }).check.id)
     expect(mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 3_100, { role: 'player', memberId: 'outsider' }, context)).toMatchObject({ ok: false, error: 'not-a-group-check-participant' })
     expect(mutateGroupAbilityChecksState(created.next, { operation: 'roll', checkId }, 3_000 + 10 * 60 * 1_000, playerA, context)).toMatchObject({ ok: false, error: 'group-check-expired' })
+  })
+})
+
+describe('authoritative synchronized scene audio', () => {
+  const host = { role: 'dm', memberId: 'dm-member', displayName: 'DM' }
+  const player = { role: 'player', memberId: 'player-member', displayName: 'Player' }
+  const asset = {
+    id: 'scene-audio-rain', name: 'Rain', fileName: 'rain.ogg', mimeType: 'audio/ogg',
+    sizeBytes: 1_024, durationSeconds: 90, kind: 'ambience', createdAt: 1,
+  }
+  const context = { host, library: { schemaVersion: 1, assets: [asset], updatedAt: 1 } }
+
+  it('lets only the DM start a catalogued track and stamps a future server anchor', () => {
+    expect(mutateSceneAudioPlaybackState(null, {
+      operation: 'play', assetId: asset.id, loop: true, volume: 0.6,
+    }, 10_000, player, context)).toMatchObject({ ok: false, error: 'dm-authority-required' })
+    expect(mutateSceneAudioPlaybackState(null, {
+      operation: 'play', assetId: asset.id, loop: true, volume: 0.6,
+    }, 10_000, host, context)).toMatchObject({
+      ok: true,
+      next: { status: 'playing', assetId: asset.id, anchorServerMs: 10_600, volume: 0.6, loop: true },
+    })
+    expect(mutateSceneAudioPlaybackState(null, {
+      operation: 'play', assetId: 'missing', loop: false, volume: 0.5,
+    }, 10_000, host, context)).toMatchObject({ ok: false, error: 'invalid-scene-audio-play' })
+  })
+
+  it('preserves the authoritative position across pause and resume', () => {
+    const playing = mutateSceneAudioPlaybackState(null, {
+      operation: 'play', assetId: asset.id, loop: true, volume: 0.7,
+    }, 1_000, host, context)
+    if (!playing.ok) throw new Error('expected play')
+    const paused = mutateSceneAudioPlaybackState(playing.next, { operation: 'pause' }, 11_600, host, context)
+    expect(paused).toMatchObject({ ok: true, next: { status: 'paused', positionSeconds: 10, anchorServerMs: 11_600 } })
+    if (!paused.ok) throw new Error('expected pause')
+    expect(mutateSceneAudioPlaybackState(paused.next, { operation: 'resume' }, 20_000, host, context)).toMatchObject({
+      ok: true, next: { status: 'playing', positionSeconds: 10, anchorServerMs: 20_600 },
+    })
   })
 })
 
@@ -585,6 +684,29 @@ describe('map geometry player projection', () => {
     }, { memberId: 'member-1' })
     expect(projected.maps[0].tokens.map((token: { id: string }) => token.id))
       .toEqual(['hero', 'near'])
+    expect(projected.maps[0].tokens[0]).toMatchObject({ id: 'hero', viewerControlled: true })
+  })
+
+  it('projects the controlled player token even when the client character store has not loaded yet', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero-a', type: 'player', characterId: 'character-a', x: 10, y: 20 },
+          { id: 'hero-b', type: 'player', characterId: 'character-b', x: 80, y: 20 },
+        ],
+      }],
+    }, geometry, null, {
+      characters: [
+        { id: 'character-a', roomMemberId: 'member-a', name: '甲' },
+        { id: 'character-b', roomMemberId: 'member-b', name: '乙' },
+      ],
+    }, { memberId: 'member-b', activeCharacterName: '乙' })
+
+    expect(projected.maps[0].tokens).toEqual([
+      expect.objectContaining({ id: 'hero-a', viewerControlled: false }),
+      expect.objectContaining({ id: 'hero-b', viewerControlled: true }),
+    ])
   })
 
   it('uses a 30-foot player view when filled fog is active without any geometry state', () => {
@@ -664,6 +786,30 @@ describe('map geometry player projection', () => {
       { role: 'dm', memberId: 'dm', displayName: 'DM' },
       timestamp,
     )).toMatchObject({ ok: true, event: { type: 'annotation', role: 'dm', shape: 'arrow' } })
+  })
+
+  it('authors bounded Fire Bolt presentation events with the server clock', () => {
+    const timestamp = 24_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'fire-bolt-transaction-1',
+      type: 'spell-projectile',
+      mapId: 'map-1',
+      transactionId: 'transaction-1',
+      spellId: 'fire-bolt',
+      sourceTokenId: 'wizard',
+      targetTokenId: 'goblin',
+      outcome: 'hit',
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    expect(normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp))
+      .toMatchObject({
+        ok: true,
+        event: { ...payload, createdAt: timestamp, expiresAt: timestamp + 1_600 },
+      })
+    expect(normalizeCombatPresentationEvent({ ...payload, spellId: 'unknown' }, { role: 'dm' }, timestamp))
+      .toMatchObject({ ok: false, status: 400 })
   })
 
   it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {
@@ -1029,6 +1175,11 @@ describe('P0 shared state boundary', () => {
     expect(validateSharedStateShape('characters', { characters: [] })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('spellbook', { spells: [] })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('custom-monsters', { schemaVersion: 1, monsters: [] })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('scene-audio-library', { schemaVersion: 1, assets: [], updatedAt: 1 })).toMatchObject({ ok: true })
+    expect(validateSharedStateShape('scene-audio-playback', {
+      schemaVersion: 1, status: 'stopped', positionSeconds: 0, anchorServerMs: 0,
+      loop: false, volume: 0.7, fadeMs: 0, updatedAt: 1,
+    })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('spellbook', { spells: 'broken' })).toMatchObject({ ok: false })
     expect(validateSharedStateShape('custom-monsters', { monsters: 'broken' })).toMatchObject({ ok: false })
     expect(validateSharedStateShape('custom-monsters', { schemaVersion: 1, monsters: [{ id: 'forged' }] })).toMatchObject({
@@ -1048,6 +1199,29 @@ describe('P0 shared state boundary', () => {
       } }] }],
     })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('plugin-owned-state', { payload: {} })).toMatchObject({ ok: true })
+  })
+
+  it('validates scene declarations at the server boundary', () => {
+    const state = {
+      schemaVersion: 1,
+      scenes: [{
+        id: 'scene', mapId: 'map', name: 'Gate', description: '', environmentLabel: 'ruins',
+        backgroundCue: 'mystery', boundHandoutIds: [], boundJournalEntryIds: [], createdAt: 1, updatedAt: 1,
+        triggers: [{
+          id: 'zone', name: 'Entry', enabled: true,
+          region: { kind: 'circle', x: 10, y: 10, radius: 20 },
+          events: ['enter'], tokenFilter: 'player', repeat: 'per-token',
+          actions: [{ id: 'action', kind: 'light', enabled: true, ambientLight: 'dim' }],
+        }],
+      }],
+      runtime: { paused: false, pendingRuns: [], receipts: [], history: [] },
+      updatedAt: 1,
+    }
+    expect(validateSharedStateShape('scene-orchestration', state)).toEqual({ ok: true })
+    expect(validateSharedStateShape('scene-orchestration', {
+      ...state,
+      scenes: [{ ...state.scenes[0], triggers: [{ ...state.scenes[0].triggers[0], actions: [{ id: 'action', kind: 'network-request', enabled: true }] }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-scene-trigger' })
   })
 
   it('fails closed for damaged combat statistics', () => {
@@ -1275,6 +1449,9 @@ describe('combat interrupt atomic mutation', () => {
       characters: [{ id: 'hero', portrait }],
     })).toEqual({ ok: true })
     expect(validateSharedStateShape('characters', {
+      characters: [{ id: 'hero', portrait, initiativePortrait: portrait, tokenPortrait: portrait }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('characters', {
       characters: Array.from({ length: 7 }, (_, index) => ({ id: `hero-${index}`, portrait })),
     })).toMatchObject({ ok: false, reason: 'character-portraits-too-large' })
   })
@@ -1287,11 +1464,26 @@ describe('combat interrupt atomic mutation', () => {
       maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: summon }] }],
     })).toEqual({ ok: true })
     expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'monster', portraitImageId: '../private' }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-token-portrait-image' })
+    expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 14_401 } }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-summon' })
     expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
         label: 'x'.repeat(121), createdRound: 1, expiresAfterRound: 2,
+      }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        label: '黑暗术', createdRound: 1, expiresAfterRound: 2,
+        lighting: { kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2 },
+      }] }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [], dnd5ePluginAreas: [{
+        label: '非法光照', createdRound: 1, expiresAfterRound: 2,
+        lighting: { kind: 'javascript', code: 'fetch("/")' },
       }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-plugin-area' })
   })

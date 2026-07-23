@@ -12,13 +12,15 @@ import {
   type Dnd5ePluginAction,
 } from './pluginApi'
 import type { Dnd5eSandboxCapabilityOperation } from './pluginSandbox'
-import type { Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
+import type { Dnd5ePersistentAreaSourceKind, Dnd5ePersistentAreaTriggerSnapshot } from './persistentAreaTypes'
 import { validateDnd5ePluginDiceRolls } from './pluginDice'
 import {
   DND5E_DAMAGE_TYPES,
   getDnd5eSrdMonster,
   type Dnd5eDamageType,
   type Dnd5eMonsterAction,
+  type Dnd5eMonsterMechanicDurationV2,
+  type Dnd5eMonsterMechanicTriggerEventV2,
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
@@ -29,6 +31,13 @@ import {
   dnd5eMonsterRechargeActions,
   dnd5eMonsterRegenerationRule,
 } from './monsterGenericAbilities'
+import {
+  dnd5eEligibleMonsterMechanics,
+  dnd5eMonsterMechanicDiceRequirements,
+  dnd5eMonsterMechanicEffects,
+  dnd5eMonsterMechanicLedgerKey,
+  dnd5eMonsterMechanicUsageValue,
+} from './monsterAutomation'
 import { dnd5eBardicInspirationDie, dnd5eClassDefinition, dnd5eMonkMartialArtsDie, dnd5ePactSlotLevel, dnd5eRogueSneakAttackDice, type Dnd5eClassId } from './classes'
 import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, getDnd5eSrdCombatSpell } from './spells'
 import { getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
@@ -167,6 +176,8 @@ export interface Dnd5eCombatant {
       dc: number
       condition: Dnd5eStandardConditionId
     }
+    /** Host 写入的受伤触发状态豁免；只有列入这里的 effectId 才能提交离回合豁免。 */
+    activeEffectDamageSavePendingIds?: string[]
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>
@@ -237,6 +248,7 @@ export interface Dnd5eCombatant {
     monsterSpellUsesBySpellId?: Record<string, { current: number; max: number }>
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
+    monsterThreatByTargetId?: Record<string, number>
     overchannelUsesSinceLongRest?: number
     draconicResistanceType?: Extract<Dnd5eDamageType, 'acid' | 'cold' | 'fire' | 'lightning' | 'poison'>
     draconicResistanceRoundsRemaining?: number
@@ -700,6 +712,17 @@ export interface Dnd5eMonsterRechargeRoll {
   roll: number
 }
 
+export interface Dnd5eMonsterMechanicRoll {
+  actorId: string
+  mechanicId: string
+  /** V1 单效果兼容字段。 */
+  rolls?: readonly number[]
+  /** V2 按效果 ID 提供的权威骰值。 */
+  effectRolls?: readonly { effectId: string; rolls: readonly number[] }[]
+  /** 命中后机制必须绑定 Headless 实际命中的目标。 */
+  targetId?: string
+}
+
 export interface Dnd5eDispelMagicCheck {
   effectId: string
   d20: number
@@ -714,12 +737,13 @@ export interface Dnd5eTargetTranquilitySaveRoll {
 
 export type Dnd5eAction =
   | { type: 'attack'; actorId: string; targetId: string; attackModifier: number; criticalThreshold?: number; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; mode?: D20RollMode; spendAction?: boolean; spendBonusAction?: boolean; protectionReactionActorId?: string; shieldSpellReaction?: boolean; uncannyDodge?: boolean; deflectMissilesD10?: number; tranquilitySave?: Dnd5eTranquilitySaveRoll; stunningStrikeSaveD20?: number; stunningStrikeSaveD20Second?: number; stunningStrikeSaveBlessRoll?: number; stunningStrikeSaveBaneRoll?: number; stunningStrikeSaveRerollD20?: number; stunningStrikeSaveRerollD20Second?: number; stunningStrikeBardicInspirationRoll?: number; stunningStrikeDarkOnesOwnLuckRoll?: number; hurlThroughHellDamageRolls?: readonly number[]; standAgainstTide?: Dnd5eStandAgainstTideUse; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType }; classDamageContext?: Dnd5eWeaponClassDamageContext; classDamageRolls?: readonly Dnd5eClassDamageRolls[] }
-  | { type: 'monster-action'; actorId: string; actionId: string; rolls: readonly Dnd5eMonsterActionRoll[] }
-  | { type: 'monster-legendary-action'; actorId: string; actionId: string; rolls: readonly Dnd5eMonsterActionRoll[] }
+  | { type: 'monster-action'; actorId: string; actionId: string; rolls: readonly Dnd5eMonsterActionRoll[]; mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[] }
+  | { type: 'monster-legendary-action'; actorId: string; actionId: string; rolls: readonly Dnd5eMonsterActionRoll[]; mechanicRolls?: readonly Dnd5eMonsterMechanicRoll[] }
   | { type: 'monster-adjudicated-action'; actorId: string; actionId: string; legendary?: boolean; effects: readonly Dnd5eMonsterAdjudicatedEffect[] }
   | { type: 'monster-spell'; actorId: string; spellId: string; slotLevel: number; effects: readonly Dnd5eMonsterAdjudicatedEffect[] }
   | { type: 'monster-undead-fortitude-save'; actorId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number }
   | { type: 'monster-on-hit-save'; actorId: string; sourceId: string; actionId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
+  | { type: 'active-effect-damage-save'; actorId: string; effectId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
   | { type: 'ranger-hunter-multiattack'; actorId: string; feature: 'volley' | 'whirlwind-attack'; weaponMode: 'melee' | 'ranged'; attackModifier: number; criticalThreshold?: number; damage: { count: number; sides: number; bonus: number; type?: Dnd5eDamageType }; attacks: readonly Dnd5eHunterMultiattackRoll[] }
   | { type: 'move'; actorId: string; to: { x: number; y: number }; distance: number; movementCost?: number; standFromProne?: boolean; carefulMovement?: boolean; traversalMode?: Dnd5eTraversalMode; toElevationFeet?: number; fallingDamageRolls?: readonly number[] }
   | { type: 'move-persistent-area'; actorId: string; areaId: string; economy: 'action' | 'bonusAction' }
@@ -733,12 +757,13 @@ export type Dnd5eAction =
   | { type: 'grapple'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; spendAction?: boolean }
   | { type: 'shove'; actorId: string; targetId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push'; pushTo?: { x: number; y: number }; pushToElevationFeet?: number; fallingDamageRolls?: readonly number[]; spendAction?: boolean }
   | { type: 'escape-grapple'; actorId: string; grapplerId: string; actorD20: number; actorD20Second?: number; targetD20: number; targetD20Second?: number }
+  | { type: 'wake-sleeping-creature'; actorId: string; targetId: string }
   | { type: 'disengage'; actorId: string }
   | { type: 'dodge'; actorId: string }
   | { type: 'interact-object'; actorId: string; interactionId: string; useAction?: boolean }
   | { type: 'ability-check'; actorId: string; ability: AbilityKey; skill?: string; d20: number; d20Second?: number; mode?: D20RollMode; dc?: number; spendAction?: boolean; bardicInspirationRoll?: number; peerlessSkillRoll?: number; darkOnesOwnLuckRoll?: number; cuttingWords?: Dnd5eCuttingWordsUse; strokeOfLuck?: boolean }
   | { type: 'death-save'; actorId: string; d20: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number }
-  | { type: 'death-save-turn'; actorId: string; d20: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[] }
+  | { type: 'death-save-turn'; actorId: string; d20: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]; nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[] }
   | { type: 'concentration-save'; actorId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; rerollD20?: number; rerollD20Second?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; dc: number }
   | { type: 'barbarian-relentless-rage-save'; actorId: string; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; darkOnesOwnLuckRoll?: number; dc: number }
   | { type: 'fighter-second-wind'; actorId: string; resourceKey: string; d10: number }
@@ -784,7 +809,7 @@ export type Dnd5eAction =
   | { type: 'druid-end-wild-shape'; actorId: string }
   | { type: 'warlock-hurl-through-hell-ready'; actorId: string; active: boolean }
   | Dnd5ePluginAction
-  | { type: 'end-turn'; actorId: string; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[] }
+  | { type: 'end-turn'; actorId: string; activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]; currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]; nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]; nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[] }
   | { type: 'opportunity-attack'; actorId: string; targetId: string; attackModifier: number; d20: number; d20Second?: number; blessRoll?: number; baneRoll?: number; bardicInspirationRoll?: number; strokeOfLuck?: boolean; cuttingWords?: Dnd5eCuttingWordsUse; cuttingWordsDamage?: Dnd5eCuttingWordsUse; shieldSpellReaction?: boolean; uncannyDodge?: boolean; standAgainstTide?: Dnd5eStandAgainstTideUse; mode?: D20RollMode; reactionFeature?: 'berserker-retaliation' | 'hunter-giant-killer'; tranquilitySave?: Dnd5eTranquilitySaveRoll; hurlThroughHellDamageRolls?: readonly number[]; damage: { count: number; sides: number; bonus: number; rolls: readonly number[]; type?: Dnd5eDamageType } }
 
 export interface Dnd5eMonsterActionRoll {
@@ -840,18 +865,36 @@ export type Dnd5eCombatEvent =
   | { type: 'monster-regenerated'; actorId: string; amount: number; hpAfter: number }
   | { type: 'monster-regeneration-suppressed'; actorId: string; damageTypes: readonly Dnd5eDamageType[]; died: boolean }
   | { type: 'monster-recharge-resolved'; actorId: string; actionId: string; roll: number; ready: boolean }
+  | { type: 'monster-mechanic-triggered'; actorId: string; mechanicId: string; mechanicName: string; amount: number; hpAfter: number }
+  | {
+      type: 'monster-mechanic-v2-triggered'
+      actorId: string
+      mechanicId: string
+      mechanicName: string
+      trigger: Dnd5eMonsterMechanicTriggerEventV2
+      outcomes: readonly {
+        effectId: string
+        kind: 'healing' | 'temporary-hit-points' | 'damage' | 'standard-condition'
+        targetId: string
+        amount?: number
+        condition?: Dnd5eStandardConditionId
+        applied?: boolean
+      }[]
+    }
   | { type: 'monster-legendary-actions-restored'; actorId: string; points: number }
   | { type: 'monster-legendary-action-used'; actorId: string; actionId: string; cost: number; remaining: number }
   | { type: 'monster-adjudicated-action-resolved'; actorId: string; actionId: string; legendary: boolean; effectCount: number }
   | { type: 'monster-spell-cast'; actorId: string; spellId: string; slotLevel: number; remainingSlots?: number }
   | { type: 'condition-applied'; actorId: string; targetId: string; condition: string }
   | { type: 'condition-ended'; targetId: string; condition: string }
+  | { type: 'sleep-resolved'; actorId: string; spellId: 'sleep'; hitPointPool: number; remainingHitPoints: number; affectedTargetIds: readonly string[] }
+  | { type: 'sleeping-creature-awakened'; actorId: string; targetId: string; spellId: 'sleep' }
   | { type: 'declarative-subclass-ability-resolved'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[] }
   | { type: 'declarative-subclass-trigger-rejected'; actorId: string; abilityId: string; trigger: string; targetIds: readonly string[]; reason: Dnd5eActionFailure }
   | { type: 'active-effect-applied'; targetId: string; effectId: string; definitionId: string }
   | { type: 'active-effect-refreshed'; targetId: string; effectId: string; definitionId: string }
-  | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' | 'escaped' }
-  | { type: 'active-effect-save-required'; targetId: string; effectId: string; ability: AbilityKey; dc: number; timing: 'target-turn-start' | 'target-turn-end' }
+  | { type: 'active-effect-removed'; targetId: string; effectId: string; definitionId: string; reason: 'expired' | 'save-succeeded' | 'concentration-ended' | 'source-incapacitated' | 'out-of-range' | Dnd5eActiveEffectBreakTrigger | 'dm' | 'healed' | 'death' | 'escaped' | 'awakened' }
+  | { type: 'active-effect-save-required'; targetId: string; effectId: string; ability: AbilityKey; dc: number; timing: 'target-turn-start' | 'target-turn-end' | 'takes-damage'; mode?: D20RollMode }
   | { type: 'active-effect-save-resolved'; targetId: string; effectId: string; ability: AbilityKey; dc: number; total: number; success: boolean }
   | { type: 'spell-cast'; actorId: string; targetId: string; spellId: string; slotLevel: number }
   | { type: 'counterspell-resolved'; actorId: string; casterId: string; spellId: string; spellLevel: number; slotLevel: number; dc?: number; abilityCheckTotal?: number; success: boolean }
@@ -992,6 +1035,9 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
         monsterRechargeReadyByActionId: combatant.classState.monsterRechargeReadyByActionId
           ? { ...combatant.classState.monsterRechargeReadyByActionId }
           : undefined,
+        monsterThreatByTargetId: combatant.classState.monsterThreatByTargetId
+          ? { ...combatant.classState.monsterThreatByTargetId }
+          : undefined,
         monsterSpellSlots: combatant.classState.monsterSpellSlots
           ? Object.fromEntries(Object.entries(combatant.classState.monsterSpellSlots).map(([level, resource]) => [level, { ...resource }]))
           : undefined,
@@ -1030,6 +1076,9 @@ function clone(state: Dnd5eHeadlessCombatState): Dnd5eHeadlessCombatState {
           : undefined,
         monsterOnHitSavePending: combatant.classState.monsterOnHitSavePending
           ? { ...combatant.classState.monsterOnHitSavePending }
+          : undefined,
+        activeEffectDamageSavePendingIds: combatant.classState.activeEffectDamageSavePendingIds
+          ? [...combatant.classState.activeEffectDamageSavePendingIds]
           : undefined,
       },
       position: { ...combatant.position },
@@ -1202,8 +1251,10 @@ function applyDnd5eMechanicalStatusEffect(
   source: Dnd5eCombatant,
   input: {
     definitionId: string
+    rulesId?: string
     label: string
     duration: Dnd5eActiveEffectDuration
+    repeatSave?: Dnd5eActiveEffectRepeatSave
     appliedTurnKey?: string
     speedPenaltyFeet?: number
     speedBonusFeet?: number
@@ -1217,9 +1268,10 @@ function applyDnd5eMechanicalStatusEffect(
     id: dnd5eActiveEffectId(input.definitionId, source.id, target.id),
     definitionId: input.definitionId,
     label: input.label,
-    source: { kind: 'spell', actorId: source.id, actorName: source.name, rulesId: input.definitionId },
+    source: { kind: 'spell', actorId: source.id, actorName: source.name, rulesId: input.rulesId ?? input.definitionId },
     targetId: target.id,
     duration: input.duration,
+    repeatSave: input.repeatSave,
     appliedTurnKey: input.appliedTurnKey,
     modifiers: {
       speedPenaltyFeet: input.speedPenaltyFeet,
@@ -1242,9 +1294,10 @@ function applyDnd5eMechanicalStatusEffect(
 }
 
 function dnd5eCapabilityDuration(input: {
-  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save'
+  expiresAt: 'source-next-turn-start' | 'target-next-turn-start' | 'target-turn-end' | 'target-turn-end-save' | 'permanent'
   remainingRounds?: number
 }): Dnd5eActiveEffectDuration {
+  if (input.expiresAt === 'permanent') return { type: 'permanent' }
   if (input.expiresAt === 'source-next-turn-start') {
     return { type: 'until-turn-boundary', boundary: 'source-turn-start' }
   }
@@ -1581,7 +1634,15 @@ function resolveDnd5eActiveEffectSaves(input: {
         ability: repeatSave.ability, dc: repeatSave.dc, total: save.roll.total, success: save.success,
       })
       if (save.success) {
-        removeDnd5eEffectsByPredicate(input.target, (current) => current.id === effect.id, 'save-succeeded', input.events)
+        const sourceActor = effect.duration.type === 'concentration'
+          ? input.state.combatants[effect.duration.sourceActorId]
+          : undefined
+        const spellId = effect.duration.type === 'concentration'
+          ? effect.duration.concentrationId ?? effect.source.rulesId
+          : undefined
+        if (!sourceActor || !spellId || !endDnd5eSpellEffectOnTarget(input.state, sourceActor, input.target, spellId, input.events)) {
+          removeDnd5eEffectsByPredicate(input.target, (current) => current.id === effect.id, 'save-succeeded', input.events)
+        }
         continue
       }
       if (effect.duration.type !== 'rounds') continue
@@ -2598,7 +2659,30 @@ function applyDamage(
   if (amount > 0 && target.classState.raging) target.classState.rageSustainedThisTurn = true
   if (amount > 0) clearTurnUndead(target, events)
   if (amount > 0) triggerDnd5eActiveEffectBreak(target, 'takes-damage', events, state)
+  if (amount > 0 && target.currentHp > 0 && !target.deathSaves.dead) {
+    const damageSaves = reconciledDnd5eActiveEffects(target).filter((effect) => effect.repeatSave?.onDamage)
+    if (damageSaves.length > 0) {
+      target.classState.activeEffectDamageSavePendingIds = [...new Set([
+        ...(target.classState.activeEffectDamageSavePendingIds ?? []),
+        ...damageSaves.map((effect) => effect.id),
+      ])]
+      for (const effect of damageSaves) {
+        events.push({
+          type: 'active-effect-save-required', targetId: target.id, effectId: effect.id,
+          ability: effect.repeatSave!.ability, dc: effect.repeatSave!.dc,
+          timing: 'takes-damage', mode: effect.repeatSave!.onDamage!.mode,
+        })
+      }
+    }
+  }
   events.push({ type: 'damage-applied', sourceId: source?.id, targetId: target.id, amount, hpBefore, hpAfter: target.currentHp, temporaryHpBefore, temporaryHpAfter: target.temporaryHp })
+  const effectiveDamage = absorbed + Math.max(0, hpBefore - target.currentHp)
+  if (source && source.id !== target.id && source.controller !== target.controller && target.statBlockId && effectiveDamage > 0) {
+    target.classState.monsterThreatByTargetId = {
+      ...target.classState.monsterThreatByTargetId,
+      [source.id]: Math.min(1_000_000_000, (target.classState.monsterThreatByTargetId?.[source.id] ?? 0) + effectiveDamage),
+    }
+  }
   const massiveDamage = target.currentHp === 0 && remainingDamageAfterZero >= target.maxHp
   const undeadFortitudeRule = dnd5eUndeadFortitudeRule(target)
   const undeadFortitudeRequired = target.currentHp === 0 && hpBefore > 0 && amount > 0 && !massiveDamage &&
@@ -2716,7 +2800,7 @@ function reduceHitPointsToZero(
   }
 }
 
-function endDnd5eConcentration(
+export function endDnd5eConcentration(
   state: Dnd5eHeadlessCombatState,
   actor: Dnd5eCombatant,
   events: Dnd5eCombatEvent[],
@@ -4158,7 +4242,9 @@ function resolveSpellCast(
     : {}
   if (
     !actor || actor.currentHp <= 0 || dnd5eCombatantIsBanished(actor) || !target ||
-    targets.some((candidate) => !candidate || candidate.deathSaves.dead || dnd5eCombatantIsBanished(candidate)) ||
+    targets.some((candidate) => !candidate ||
+      (candidate.deathSaves.dead && spell?.effect !== 'sleep-hit-point-pool') ||
+      dnd5eCombatantIsBanished(candidate)) ||
     !spell || (!persistentArea && requestedTargetIds.length < 1) ||
     requestedTargetIds.length > (metamagic?.kind === 'twinned' ? 2 : dnd5eSpellMaximumTargets(spell, action.slotLevel, actor.level)) ||
     (metamagic?.kind === 'twinned' && requestedTargetIds.length !== 2) ||
@@ -4255,6 +4341,7 @@ function resolveSpellCast(
     (spell.id === 'hold-person' && targets.some((candidate) => !(
       normalizedCreatureTypeForSpell(candidate!) === 'humanoid' || normalizedCreatureTypeForSpell(candidate!).includes('类人')
     ))) ||
+    (spell.id === 'hideous-laughter' && targets.some((candidate) => candidate!.abilities.int <= 4)) ||
     (spell.id === 'hold-monster' && targets.some((candidate) => {
       const type = normalizedCreatureTypeForSpell(candidate!)
       return type === 'undead' || type.includes('亡灵')
@@ -4535,10 +4622,12 @@ function resolveSpellCast(
     : baseConcentrationDurationRounds
 
   if (spell.effect === 'persistent-area') {
-    if (!spell.concentration || action.effectRolls.length > 0 || requestedTargetIds.length > 0) {
+    if (action.effectRolls.length > 0 || requestedTargetIds.length > 0) {
       return fail(state, events, 'invalid-dice')
     }
-    beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events)
+    if (spell.concentration) {
+      beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events)
+    }
     events.push({
       type: 'class-state-changed', actorId: actor.id,
       stateKey: `persistent-area:${spell.id}`, active: true,
@@ -4772,7 +4861,10 @@ function resolveSpellCast(
             concentrationId: spell.id, remainingRounds: concentrationDurationRounds,
           }
         : {
-            type: 'rounds', remainingRounds: Math.max(1, spell.effectDurationRounds ?? 1),
+            type: 'rounds',
+            remainingRounds: metamagic?.kind === 'extended'
+              ? Math.min(14_400, Math.max(1, spell.effectDurationRounds ?? 1) * 2)
+              : Math.max(1, spell.effectDurationRounds ?? 1),
             tickOn: 'target-turn-end',
           }
       if (spell.appliedEffect === 'invisibility' || spell.appliedEffect === 'greater-invisibility') {
@@ -4811,6 +4903,70 @@ function resolveSpellCast(
         stateKey: spell.id, active: true,
       })
     }
+    return finishSpellCast()
+  }
+
+  if (spell.effect === 'sleep-hit-point-pool') {
+    const diceCount = dnd5eSpellDiceCount(spell, actor.level, action.slotLevel)
+    if (
+      action.effectRolls.length !== diceCount ||
+      action.effectRolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > spell.dice.sides) ||
+      additionalEffectRolls.length > 0 || (action.delayedEffectRolls?.length ?? 0) > 0 ||
+      action.d20 != null || action.d20Second != null || action.savingThrowD20 != null ||
+      action.savingThrowD20Second != null || (action.targetSavingThrows?.length ?? 0) > 0
+    ) return fail(state, events, 'invalid-dice')
+
+    const hitPointPool = action.effectRolls.reduce((sum, roll) => sum + roll, spell.dice.bonus)
+    let remainingHitPoints = hitPointPool
+    const initiativeRank = new Map(state.initiativeOrder.map((id, index) => [id, index]))
+    const eligibleTargets = targets
+      .filter((candidate): candidate is Dnd5eCombatant => {
+        if (!candidate || candidate.currentHp <= 0 || candidate.deathSaves.dead) return false
+        if (dnd5eHasStandardCondition(candidate, 'unconscious')) return false
+        const creatureType = normalizedCreatureTypeForSpell(candidate)
+        if (creatureType === 'undead' || creatureType.includes('亡灵')) return false
+        return !candidate.conditionImmunities.some((condition) =>
+          dnd5eStandardConditionId(condition) === 'charmed' ||
+          ['magical-sleep', '魔法睡眠'].includes(condition.trim().toLowerCase()),
+        )
+      })
+      .sort((left, right) =>
+        left.currentHp - right.currentHp ||
+        (initiativeRank.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+          (initiativeRank.get(right.id) ?? Number.MAX_SAFE_INTEGER) ||
+        left.id.localeCompare(right.id),
+      )
+    const affectedTargetIds: string[] = []
+    const durationRounds = metamagic?.kind === 'extended'
+      ? Math.min(14_400, Math.max(1, spell.effectDurationRounds ?? 10) * 2)
+      : Math.max(1, spell.effectDurationRounds ?? 10)
+    for (const affected of eligibleTargets) {
+      if (affected.currentHp > remainingHitPoints) break
+      const applied = applyDnd5eStandardConditionEffect(affected, actor, {
+        id: dnd5eActiveEffectId('srd-5.1:spell:sleep:unconscious', actor.id, affected.id),
+        definitionId: 'srd-5.1:spell:sleep:unconscious',
+        rulesId: 'sleep',
+        condition: 'unconscious',
+        duration: { type: 'rounds', remainingRounds: durationRounds, tickOn: 'target-turn-end' },
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        breakOn: ['takes-damage'],
+      }, events)
+      if (!applied) continue
+      applyDnd5eStandardConditionEffect(affected, actor, {
+        id: dnd5eActiveEffectId('srd-5.1:spell:sleep:fall-prone', actor.id, affected.id),
+        definitionId: 'srd-5.1:spell:sleep:fall-prone',
+        rulesId: 'sleep-fall-prone',
+        condition: 'prone',
+        duration: { type: 'permanent' },
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+      }, events)
+      remainingHitPoints -= affected.currentHp
+      affectedTargetIds.push(affected.id)
+    }
+    events.push({
+      type: 'sleep-resolved', actorId: actor.id, spellId: 'sleep',
+      hitPointPool, remainingHitPoints, affectedTargetIds,
+    })
     return finishSpellCast()
   }
 
@@ -5098,6 +5254,38 @@ function resolveSpellCast(
         condition,
         duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
         repeatSave: { ability: 'con', dc, timing: 'target-turn-end', onSuccess: 'remove' },
+      }, events)
+      return
+    }
+    if (spell.onFailedSaveEffect === 'hideous-laughter') {
+      const duration: Dnd5eActiveEffectDuration = {
+        type: 'concentration', sourceActorId: actor.id,
+        concentrationId: spell.id, remainingRounds: concentrationDurationRounds,
+      }
+      applyDnd5eStandardConditionEffect(affectedTarget, actor, {
+        id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:prone`, actor.id, affectedTarget.id),
+        rulesId: spell.id,
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        condition: 'prone',
+        duration,
+      }, events)
+      applyDnd5eStandardConditionEffect(affectedTarget, actor, {
+        id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:incapacitated`, actor.id, affectedTarget.id),
+        rulesId: spell.id,
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        condition: 'incapacitated',
+        duration,
+      }, events)
+      applyDnd5eMechanicalStatusEffect(affectedTarget, actor, {
+        definitionId: `srd-5.1:spell:${spell.id}:repeat-save`,
+        rulesId: spell.id,
+        label: '狂笑术：重复豁免',
+        appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        duration,
+        repeatSave: {
+          ability: 'wis', dc, timing: 'target-turn-end', onSuccess: 'remove',
+          onDamage: { mode: 'advantage' },
+        },
       }, events)
       return
     }
@@ -5890,6 +6078,153 @@ function monsterWeaponSequence(
   return sequence.every((attack): attack is Dnd5eMonsterWeaponAttack => !!attack) ? sequence : undefined
 }
 
+function dnd5eMonsterMechanicDuration(
+  duration: Dnd5eMonsterMechanicDurationV2,
+  state: Dnd5eHeadlessCombatState,
+  target: Dnd5eCombatant,
+): Dnd5eActiveEffectDuration {
+  if (duration.kind === 'permanent') return { type: 'permanent' }
+  if (duration.kind === 'until-target-turn-start') {
+    return { type: 'until-turn-boundary', boundary: 'target-turn-start' }
+  }
+  if (duration.kind === 'until-source-turn-start') {
+    return { type: 'until-turn-boundary', boundary: 'source-turn-start' }
+  }
+  return {
+    type: 'rounds',
+    remainingRounds: Math.max(1, Math.floor(duration.rounds)),
+    tickOn: 'target-turn-end',
+    ...(currentActorId(state) === target.id ? { lastTickTurnKey: classFeatureTurnKey(state, target.id) } : {}),
+  }
+}
+
+function resolveDnd5eMonsterMechanics(input: {
+  state: Dnd5eHeadlessCombatState
+  actor: Dnd5eCombatant
+  monster: Dnd5eMonsterStatBlock | undefined
+  event: Dnd5eMonsterMechanicTriggerEventV2
+  supplied?: readonly Dnd5eMonsterMechanicRoll[]
+  triggerTarget?: Dnd5eCombatant
+  events: Dnd5eCombatEvent[]
+}): boolean {
+  const supplied = input.supplied ?? []
+  if (!input.monster) return supplied.length === 0
+  if (input.event === 'after-hit' && !input.triggerTarget) return supplied.length === 0
+  const context = {
+    combatId: input.state.combatId,
+    round: input.state.round,
+    actorId: input.actor.id,
+    currentHp: input.actor.currentHp,
+    maxHp: input.actor.maxHp,
+    usedKeys: input.actor.classState.declarativeUsedTurnKeys,
+  }
+  const eligible = dnd5eEligibleMonsterMechanics(input.monster, input.event, context)
+  if (
+    supplied.length !== eligible.length ||
+    supplied.some((roll) => roll.actorId !== input.actor.id) ||
+    new Set(supplied.map((roll) => roll.mechanicId)).size !== supplied.length
+  ) return false
+
+  const resolvedTotals = new Map<string, ReadonlyMap<string, number>>()
+  for (const mechanic of eligible) {
+    const mechanicRoll = supplied.find((entry) => entry.mechanicId === mechanic.id)
+    if (!mechanicRoll) return false
+    if (input.event === 'after-hit') {
+      if (!input.triggerTarget || mechanicRoll.targetId !== input.triggerTarget.id) return false
+    } else if (mechanicRoll.targetId != null) {
+      return false
+    }
+    const requirements = dnd5eMonsterMechanicDiceRequirements(mechanic)
+    const provided = mechanic.schemaVersion === 1 && mechanicRoll.rolls
+      ? [{ effectId: 'effect-0', rolls: mechanicRoll.rolls }]
+      : mechanicRoll.effectRolls ?? []
+    if (
+      provided.length !== requirements.length ||
+      new Set(provided.map((entry) => entry.effectId)).size !== provided.length
+    ) return false
+    const totals = new Map<string, number>()
+    for (const requirement of requirements) {
+      const effectRoll = provided.find((entry) => entry.effectId === requirement.effectId)
+      if (
+        !effectRoll || effectRoll.rolls.length !== requirement.count ||
+        effectRoll.rolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > requirement.sides)
+      ) return false
+      try {
+        totals.set(requirement.effectId, rules.resolveDamage({
+          count: requirement.count,
+          sides: requirement.sides,
+          bonus: requirement.bonus,
+          rolls: effectRoll.rolls,
+          critical: false,
+        }).total)
+      } catch {
+        return false
+      }
+    }
+    resolvedTotals.set(mechanic.id, totals)
+  }
+
+  for (const mechanic of eligible) {
+    const outcomes: Extract<Dnd5eCombatEvent, { type: 'monster-mechanic-v2-triggered' }>['outcomes'][number][] = []
+    const totals = resolvedTotals.get(mechanic.id) ?? new Map<string, number>()
+    for (const effect of dnd5eMonsterMechanicEffects(mechanic)) {
+      if (effect.kind === 'summon' || effect.kind === 'area-attack') return false
+      const target = effect.kind === 'healing' || effect.kind === 'temporary-hit-points' || effect.target === 'self'
+        ? input.actor
+        : effect.target === 'trigger-target'
+          ? input.triggerTarget
+          : undefined
+      if (!target) return false
+      if (effect.kind === 'healing') {
+        outcomes.push({ effectId: effect.id, kind: effect.kind, targetId: target.id, amount: applyHealing(target, totals.get(effect.id) ?? 0, input.events) })
+      } else if (effect.kind === 'temporary-hit-points') {
+        outcomes.push({ effectId: effect.id, kind: effect.kind, targetId: target.id, amount: applyTemporaryHitPoints(target, totals.get(effect.id) ?? 0, input.events) })
+      } else if (effect.kind === 'damage') {
+        const amount = adjustDamageForTarget(target, totals.get(effect.id) ?? 0, effect.damageType)
+        applyDamage(target, amount, false, input.events, input.actor, input.state, [effect.damageType])
+        outcomes.push({ effectId: effect.id, kind: effect.kind, targetId: target.id, amount })
+      } else {
+        const relevantBoundaryActorId = effect.duration.kind === 'until-target-turn-start'
+          ? target.id
+          : effect.duration.kind === 'until-source-turn-start'
+            ? input.actor.id
+            : undefined
+        const appliedTurnKey = relevantBoundaryActorId && currentActorId(input.state) === relevantBoundaryActorId
+          ? classFeatureTurnKey(input.state, relevantBoundaryActorId)
+          : undefined
+        const applied = applyDnd5eRulesCondition(target, input.actor, {
+          condition: effect.condition,
+          rulesId: `monster-mechanic:${input.monster.id}:${mechanic.id}:${effect.id}`,
+          sourceKind: 'monster',
+          duration: dnd5eMonsterMechanicDuration(effect.duration, input.state, target),
+          appliedTurnKey,
+        }, input.events)
+        outcomes.push({ effectId: effect.id, kind: effect.kind, targetId: target.id, condition: effect.condition, applied })
+      }
+    }
+    if (mechanic.limit !== 'unlimited') {
+      input.actor.classState.declarativeUsedTurnKeys = {
+        ...input.actor.classState.declarativeUsedTurnKeys,
+        [dnd5eMonsterMechanicLedgerKey(mechanic.id)]: dnd5eMonsterMechanicUsageValue(mechanic, context),
+      }
+    }
+    if (mechanic.schemaVersion === 1) {
+      const outcome = outcomes[0]
+      input.events.push({
+        type: 'monster-mechanic-triggered', actorId: input.actor.id,
+        mechanicId: mechanic.id, mechanicName: mechanic.name,
+        amount: outcome?.amount ?? 0, hpAfter: input.actor.currentHp,
+      })
+    } else {
+      input.events.push({
+        type: 'monster-mechanic-v2-triggered', actorId: input.actor.id,
+        mechanicId: mechanic.id, mechanicName: mechanic.name, trigger: input.event, outcomes,
+      })
+    }
+  }
+  return true
+}
+
 function resolveMonsterAction(
   state: Dnd5eHeadlessCombatState,
   action: Extract<Dnd5eAction, { type: 'monster-action' | 'monster-legendary-action' }>,
@@ -5910,6 +6245,7 @@ function resolveMonsterAction(
   if (!actor || actor.currentHp <= 0 || !monster || !resourceDefinition || !actionDefinition || !sequence || sequence.length !== action.rolls.length) {
     return fail(state, events, 'invalid-monster-action')
   }
+  if (legendary && (action.mechanicRolls?.length ?? 0) > 0) return fail(state, events, 'invalid-monster-action')
   if (legendary) {
     if (state.initiativeOrder[state.initiativeIndex] === actor.id) return fail(state, events, 'invalid-monster-action')
     const cost = Math.max(1, resourceDefinition.legendaryCost ?? 1)
@@ -5934,6 +6270,7 @@ function resolveMonsterAction(
     }
   }
 
+  let afterHitMechanicResolved = false
   for (let index = 0; index < sequence.length; index += 1) {
     const attackDefinition = sequence[index]
     const supplied = action.rolls[index]
@@ -6128,7 +6465,27 @@ function resolveMonsterAction(
         condition: onHitRule.condition,
       })
     }
+    if (!legendary && !afterHitMechanicResolved) {
+      if (!resolveDnd5eMonsterMechanics({
+        state,
+        actor,
+        monster,
+        event: 'after-hit',
+        supplied: action.mechanicRolls,
+        triggerTarget: target,
+        events,
+      })) return fail(state, events, 'invalid-dice')
+      afterHitMechanicResolved = true
+    }
   }
+  if (!legendary && !afterHitMechanicResolved && !resolveDnd5eMonsterMechanics({
+    state,
+    actor,
+    monster,
+    event: 'after-hit',
+    supplied: action.mechanicRolls,
+    events,
+  })) return fail(state, events, 'invalid-dice')
   return { ok: true, state, events }
 }
 
@@ -7169,6 +7526,8 @@ export function resolveDnd5ePersistentAreaTrigger(
   source: Dnd5eHeadlessCombatState,
   input: {
     areaId: string
+    areaSourceKind?: Dnd5ePersistentAreaSourceKind
+    coreSpellId?: string
     sourceId: string
     targetId: string
     trigger: Dnd5ePersistentAreaTriggerSnapshot
@@ -7187,6 +7546,12 @@ export function resolveDnd5ePersistentAreaTrigger(
   const target = state.combatants[input.targetId]
   if (!actor || !target || target.deathSaves.dead) return fail(state, events, 'invalid-target')
   if (!input.areaId || !input.trigger.id) return fail(state, events, 'invalid-plugin-action')
+  const coreSpell = input.areaSourceKind === 'core-spell' && input.coreSpellId
+    ? getDnd5eSrdCombatSpell(input.coreSpellId)
+    : undefined
+  if (input.areaSourceKind === 'core-spell' && coreSpell?.effect !== 'persistent-area') {
+    return fail(state, events, 'invalid-plugin-action')
+  }
 
   let saveSuccess: boolean | undefined
   let shapechangerMustRevert = false
@@ -7268,12 +7633,12 @@ export function resolveDnd5ePersistentAreaTrigger(
   ) {
     const applied = applyDnd5eStandardConditionEffect(target, actor, {
       id: dnd5eActiveEffectId(
-        `plugin-area:${input.areaId}:${input.trigger.id}`,
+        coreSpell ? `srd-5.1:spell:${coreSpell.id}:${input.trigger.id}` : `plugin-area:${input.areaId}:${input.trigger.id}`,
         actor.id,
         target.id,
         condition.condition,
       ),
-      rulesId: `plugin-area:${input.areaId}:${input.trigger.id}`,
+      rulesId: coreSpell?.id ?? `plugin-area:${input.areaId}:${input.trigger.id}`,
       appliedTurnKey: classFeatureTurnKey(state, target.id),
       condition: condition.condition,
       duration: dnd5eCapabilityDuration(condition.duration),
@@ -7285,7 +7650,7 @@ export function resolveDnd5ePersistentAreaTrigger(
             onSuccess: 'remove',
           }
         : undefined,
-      sourceKind: 'plugin',
+      sourceKind: coreSpell ? 'spell' : 'plugin',
     }, events)
     if (applied) conditionApplied = condition.condition
   }
@@ -7304,7 +7669,19 @@ function resolveDnd5eMonsterTurnStartLifecycle(input: {
   events: Dnd5eCombatEvent[]
 }): boolean {
   const monster = input.actor.statBlockId ? getDnd5eSrdMonster(input.actor.statBlockId) : undefined
-  if (!monster) return (input.action.nextMonsterRechargeRolls?.length ?? 0) === 0
+  if (!monster) {
+    return (input.action.nextMonsterRechargeRolls?.length ?? 0) === 0 &&
+      (input.action.nextMonsterMechanicRolls?.length ?? 0) === 0
+  }
+
+  if (!resolveDnd5eMonsterMechanics({
+    state: input.state,
+    actor: input.actor,
+    monster,
+    event: 'turn-start',
+    supplied: input.action.nextMonsterMechanicRolls,
+    events: input.events,
+  })) return false
 
   const regeneration = dnd5eMonsterRegenerationRule(monster)
   if (regeneration) {
@@ -7385,6 +7762,7 @@ function resolveDnd5eHeadlessActionInternal(
     )
   ) return fail(state, events, 'invalid-plugin-action')
   const offTurn = action.type === 'opportunity-attack' || action.type === 'hellish-rebuke' || action.type === 'concentration-save' ||
+    action.type === 'active-effect-damage-save' ||
     action.type === 'barbarian-relentless-rage-save' || action.type === 'monk-deflect-missiles-return' ||
     action.type === 'monster-undead-fortitude-save' || action.type === 'monster-on-hit-save' ||
     action.type === 'monster-legendary-action' ||
@@ -7399,13 +7777,15 @@ function resolveDnd5eHeadlessActionInternal(
   )) return fail(state, events, 'invalid-actor')
   if (
     dnd5eIsIncapacitated(actor) &&
-    action.type !== 'end-turn' && action.type !== 'death-save' && action.type !== 'death-save-turn' && action.type !== 'concentration-save' &&
-    action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save'
+    action.type !== 'move' && action.type !== 'end-turn' && action.type !== 'death-save' && action.type !== 'death-save-turn' && action.type !== 'concentration-save' &&
+    action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save' &&
+    action.type !== 'active-effect-damage-save'
   ) return fail(state, events, 'invalid-actor')
   if (
     dnd5eCombatantIsBanished(actor) &&
     action.type !== 'end-turn' && action.type !== 'death-save' && action.type !== 'death-save-turn' &&
-    action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save'
+    action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save' &&
+    action.type !== 'active-effect-damage-save'
   ) return fail(state, events, 'invalid-actor')
   if (!dnd5eActionAllowedWhileSurprised(actor, state.combatId, action)) {
     return fail(state, events, action.type === 'opportunity-attack' || action.type === 'hellish-rebuke'
@@ -7441,7 +7821,8 @@ function resolveDnd5eHeadlessActionInternal(
     actor.classState.turnedByClericId &&
     action.type !== 'move' && action.type !== 'dash' && action.type !== 'dodge' &&
     action.type !== 'end-turn' && action.type !== 'death-save' && action.type !== 'death-save-turn' && action.type !== 'concentration-save' &&
-    action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save'
+    action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save' &&
+    action.type !== 'active-effect-damage-save'
   ) return fail(state, events, 'invalid-actor')
 
   // 地图层按动作重建 Headless 快照，因此回合开始效果也必须能在本回合首个事务中幂等清理；
@@ -7456,7 +7837,7 @@ function resolveDnd5eHeadlessActionInternal(
   const preservesHideInPlainSight = action.type === 'ranger-hide-in-plain-sight' || usesHideInPlainSight ||
     action.type === 'end-turn' || action.type === 'death-save' || action.type === 'death-save-turn' || action.type === 'concentration-save' ||
     action.type === 'barbarian-relentless-rage-save' || action.type === 'monster-undead-fortitude-save' ||
-    action.type === 'monster-on-hit-save'
+    action.type === 'monster-on-hit-save' || action.type === 'active-effect-damage-save'
   if (actor.classState.hideInPlainSightPrepared && !preservesHideInPlainSight) {
     actor.classState.hideInPlainSightPrepared = undefined
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'hide-in-plain-sight', active: false })
@@ -7668,7 +8049,7 @@ function resolveDnd5eHeadlessActionInternal(
     const dc = action.areaKind === 'ball-bearings' ? 10 : action.areaKind === 'caltrops' ? 15 : 13
     const mode = dnd5eSavingThrowMode(actor, 'dex', { effectVisible: true })
     const rolls = mode === 'normal' ? [action.d20] : [action.d20, action.d20Second ?? 0]
-    let save
+    let save: SavingThrowResolution
     try {
       save = resolveSavingThrowWithClassReroll({
         combatant: actor,
@@ -7733,6 +8114,68 @@ function resolveDnd5eHeadlessActionInternal(
       return fail(state, events, 'invalid-dice')
     }
     return resolved ? { ok: true, state, events } : fail(state, events, 'invalid-class-feature')
+  }
+
+  if (action.type === 'active-effect-damage-save') {
+    const pendingIds = actor.classState.activeEffectDamageSavePendingIds ?? []
+    const effect = reconciledDnd5eActiveEffects(actor).find((candidate) => candidate.id === action.effectId)
+    const repeatSave = effect?.repeatSave
+    if (!pendingIds.includes(action.effectId) || !effect || !repeatSave?.onDamage) {
+      return fail(state, events, 'invalid-class-feature')
+    }
+    const sourceActor = effect.source.actorId ? state.combatants[effect.source.actorId] : undefined
+    const baseMode = dnd5eSavingThrowMode(actor, repeatSave.ability, {
+      effectVisible: effect.visibility !== 'dm-only',
+      sourceCreatureType: sourceActor?.creatureType,
+      sourceIsSpell: effect.source.kind === 'spell',
+    })
+    const mode = repeatSave.onDamage.mode === 'advantage'
+      ? resolveDnd5eRollMode({
+          requestedMode: baseMode,
+          advantage: [{ active: true, reason: 'active-effect-damage-save' }],
+        }).mode
+      : baseMode
+    let save: SavingThrowResolution
+    try {
+      const modifier = (actor.savingThrowBonuses[repeatSave.ability] ?? rules.abilityModifier(actor.abilities[repeatSave.ability])) +
+        resolveDnd5eBlessRoll(state, actor, action.blessRoll) -
+        resolveDnd5eBaneRoll(state, actor, action.baneRoll)
+      save = resolveSavingThrowWithClassReroll({
+        combatant: actor,
+        ability: repeatSave.ability,
+        rolls: mode === 'normal' ? [action.d20] : [action.d20, action.d20Second ?? 0],
+        rerollD20: action.rerollD20,
+        rerollD20Second: action.rerollD20Second,
+        bardicInspirationRoll: action.bardicInspirationRoll,
+        darkOnesOwnLuckRoll: action.darkOnesOwnLuckRoll,
+        mode,
+        modifier,
+        dc: repeatSave.dc,
+        events,
+      })
+    } catch {
+      return fail(state, events, 'invalid-dice')
+    }
+    const remainingPendingIds = pendingIds.filter((effectId) => effectId !== action.effectId)
+    actor.classState.activeEffectDamageSavePendingIds = remainingPendingIds.length > 0 ? remainingPendingIds : undefined
+    events.push({
+      type: 'saving-throw-resolved', targetId: actor.id, ability: repeatSave.ability,
+      d20: save.roll.d20, modifier: save.roll.modifier, total: save.roll.total,
+      dc: repeatSave.dc, success: save.success,
+    })
+    events.push({
+      type: 'active-effect-save-resolved', targetId: actor.id, effectId: effect.id,
+      ability: repeatSave.ability, dc: repeatSave.dc, total: save.roll.total, success: save.success,
+    })
+    if (save.success) {
+      const spellId = effect.duration.type === 'concentration'
+        ? effect.duration.concentrationId ?? effect.source.rulesId
+        : undefined
+      if (!sourceActor || !spellId || !endDnd5eSpellEffectOnTarget(state, sourceActor, actor, spellId, events)) {
+        removeDnd5eEffectsByPredicate(actor, (candidate) => candidate.id === effect.id, 'save-succeeded', events)
+      }
+    }
+    return { ok: true, state, events }
   }
 
   if (action.type === 'monster-action' || action.type === 'monster-legendary-action') return resolveMonsterAction(state, action, events)
@@ -7870,6 +8313,7 @@ function resolveDnd5eHeadlessActionInternal(
       activeEffectSavingThrows: action.activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows: action.turnStartActiveEffectSavingThrows,
       nextMonsterRechargeRolls: action.nextMonsterRechargeRolls,
+      nextMonsterMechanicRolls: action.nextMonsterMechanicRolls,
     }, { skipTurnStartBoundary: true })
     return { ...ended, events: [...events, ...saved.events, ...ended.events] }
   }
@@ -8856,6 +9300,10 @@ function resolveDnd5eHeadlessActionInternal(
     }
     const isProne = actor.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
     if (action.standFromProne && !isProne) return fail(state, events, 'invalid-class-feature')
+    if (
+      action.standFromProne &&
+      reconciledDnd5eActiveEffects(actor).some((effect) => effect.source.kind === 'spell' && effect.source.rulesId === 'hideous-laughter')
+    ) return fail(state, events, 'invalid-class-feature')
     const effectiveSpeed = dnd5eEffectiveSpeed(actor)
     if (action.standFromProne && effectiveSpeed <= 0) return fail(state, events, 'invalid-class-feature')
     const standCost = action.standFromProne ? Math.floor(effectiveSpeed / 2) : 0
@@ -9004,6 +9452,29 @@ function resolveDnd5eHeadlessActionInternal(
     }
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
     events.push({ type: 'help-granted', actorId: actor.id, targetId: target.id, helpKind: action.helpKind })
+    return { ok: true, state, events }
+  }
+  if (action.type === 'wake-sleeping-creature') {
+    const target = state.combatants[action.targetId]
+    const sleepEffects = target?.classState.activeEffects?.filter((effect) =>
+      effect.standardCondition === 'unconscious' &&
+      effect.source.kind === 'spell' && effect.source.rulesId === 'sleep',
+    ) ?? []
+    if (
+      !target || target.id === actor.id || target.currentHp <= 0 || target.deathSaves.dead ||
+      sleepEffects.length < 1 || dnd5eAttackDistanceFeet(state, actor.id, target.id) > 5 ||
+      state.lineOfEffectBlockedByCombatantPair?.[dnd5eDirectedCombatantPairKey(actor.id, target.id)]
+    ) return fail(state, events, 'invalid-target')
+    if (!spend(actor, 'action')) return fail(state, events, 'action-unavailable')
+    const sleepEffectIds = new Set(sleepEffects.map((effect) => effect.id))
+    removeDnd5eEffectsByPredicate(
+      target,
+      (effect) => sleepEffectIds.has(effect.id),
+      'awakened',
+      events,
+    )
+    events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'action' })
+    events.push({ type: 'sleeping-creature-awakened', actorId: actor.id, targetId: target.id, spellId: 'sleep' })
     return { ok: true, state, events }
   }
   if (action.type === 'ready') {
@@ -9194,6 +9665,15 @@ function resolveDnd5eHeadlessActionInternal(
     actor.classState.surpriseResolvedCombatId = state.combatId
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'surprise', active: false })
   }
+
+  if (action.type === 'end-turn' && !resolveDnd5eMonsterMechanics({
+    state,
+    actor,
+    monster: actor.statBlockId ? getDnd5eSrdMonster(actor.statBlockId) : undefined,
+    event: 'turn-end',
+    supplied: action.currentMonsterMechanicRolls,
+    events,
+  })) return fail(state, events, 'invalid-dice')
 
   if (action.type === 'end-turn' && !resolveDnd5eActiveEffectSaves({
     state,

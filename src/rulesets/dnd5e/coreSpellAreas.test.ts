@@ -6,6 +6,7 @@ import {
   mergeDnd5eSpellEffectTokenDelta,
   moveDnd5eCoreSpellArea,
   reconcileDnd5ePersistentAreaAnchors,
+  resolveDnd5eCoreSpellLightingConflicts,
   type Dnd5eCoreSpellAreaDeclaration,
 } from './coreSpellAreas'
 
@@ -41,6 +42,52 @@ function map(): BattleMap {
 }
 
 describe('core spell persistent area declarations', () => {
+  it('resolves Darkness and Daylight overlap by spell level instead of render order', () => {
+    const base = {
+      ...createDnd5eCoreSpellArea({
+        declaration,
+        actionId: 'base',
+        sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token',
+        slotLevel: 2,
+        sourceSaveDc: 13,
+        round: 1,
+        cells: [{ col: 2, row: 2 }],
+        anchorCell: { col: 2, row: 2 },
+      }),
+      lighting: {
+        kind: 'magical-darkness' as const,
+        radiusFeet: 15,
+        spellLevel: 2,
+        suppressesMagicalLightThroughLevel: 2,
+      },
+    }
+    const lowLight = {
+      ...base,
+      id: 'low-light',
+      lighting: { kind: 'light' as const, brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fff000', spellLevel: 2 },
+    }
+    expect(resolveDnd5eCoreSpellLightingConflicts([base], lowLight)).toMatchObject({
+      applied: false,
+      areas: [{ id: base.id }],
+    })
+
+    const daylight = {
+      ...lowLight,
+      id: 'daylight',
+      lighting: {
+        ...lowLight.lighting,
+        spellLevel: 3,
+        suppressesMagicalDarknessThroughLevel: 3,
+      },
+    }
+    expect(resolveDnd5eCoreSpellLightingConflicts([base], daylight)).toMatchObject({
+      applied: true,
+      removedAreas: [{ id: base.id }],
+      areas: [{ id: 'daylight' }],
+    })
+  })
+
   it('resolves save DC and higher-slot damage into a safe runtime snapshot', () => {
     const area = createDnd5eCoreSpellArea({
       declaration,

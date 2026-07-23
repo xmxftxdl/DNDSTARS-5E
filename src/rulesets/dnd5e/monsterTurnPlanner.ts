@@ -1,4 +1,5 @@
 import type { BattleMap, Token } from '../../store/maps'
+import type { Character } from '../../types/character'
 import {
   occupiedCells,
   tokenAnchorCellFromPixel,
@@ -10,6 +11,7 @@ import {
 import { dnd5eMonsterMapSpeed, getDnd5eSrdMonster, type Dnd5eMonsterAction } from './monsters'
 import { mapGeometryMovementBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
+import { selectDnd5eMonsterPreferredTarget } from './monsterAutomation'
 
 function monsterTraversalGeometry(mapId: string) {
   const geometry = mapGeometryRuntimeForMap(mapId)
@@ -41,15 +43,6 @@ export interface Dnd5eMonsterTurnPlan {
   targetCharacterId?: string
   damage?: number
   message: string
-}
-
-function nearestTarget(enemy: Token, targets: readonly Token[], map: BattleMap): Token | undefined {
-  return targets.reduce<Token | undefined>((nearest, target) => {
-    if (!nearest) return target
-    return tokenFootprintDistanceCells(enemy, target, map) < tokenFootprintDistanceCells(enemy, nearest, map)
-      ? target
-      : nearest
-  }, undefined)
 }
 
 function moveToward(
@@ -196,7 +189,11 @@ function attackPreview(action: Dnd5eMonsterAction, monsterId: string, target: To
 }
 
 /** 只规划 SRD 怪物的 5e 回合：移动不消耗动作，每回合至多执行一个动作。 */
-export function planDnd5eMonsterTurn(map: BattleMap, enemy: Token): Dnd5eMonsterTurnPlan {
+export function planDnd5eMonsterTurn(
+  map: BattleMap,
+  enemy: Token,
+  characters: readonly Character[] = [],
+): Dnd5eMonsterTurnPlan {
   const monster = enemy.poolId ? getDnd5eSrdMonster(enemy.poolId) : undefined
   if (!monster) return { moved: false, attacked: false, message: `${enemy.label} 缺少 SRD 5.1 stat block。` }
   if (enemy.dnd5eCombatState?.turnedByClericId) {
@@ -222,10 +219,7 @@ export function planDnd5eMonsterTurn(map: BattleMap, enemy: Token): Dnd5eMonster
         : `${enemy.label} 无法继续远离 ${source.label}，本回合采取防御且不能进行反应。`,
     }
   }
-  const targets = map.tokens.filter((token) =>
-    token.id !== enemy.id && token.type !== 'enemy' && token.type !== 'obstacle' && (token.hp ?? 1) > 0,
-  )
-  const target = nearestTarget(enemy, targets, map)
+  const target = selectDnd5eMonsterPreferredTarget({ map, enemy, monster, characters })
   if (!target) return { moved: false, attacked: false, message: `${enemy.label} 找不到可攻击目标。` }
 
   const feetPerCell = Math.max(1, map.feetPerCell ?? 5)

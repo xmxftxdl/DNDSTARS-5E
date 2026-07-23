@@ -48,6 +48,8 @@ const PLAYER_ACTION_REJECTION_NOTICES: Readonly<Record<string, PlayerActionRejec
   'feature-already-used': { title: '特性已使用', message: '该特性已达到当前回合或休息周期的使用上限。' },
   'stale-turn': { title: '回合已更新', message: '行动到达 DM 端时回合已经变更，请核对当前先攻后重试。' },
   'stale-combat': { title: '战斗已更新', message: '行动到达 DM 端时战斗状态已经变更，请重试。' },
+  'invalid-action-origin': { title: '行动身份无效', message: 'DM 不能代替玩家角色发起行动，本次行动已被拒绝。' },
+  'character-owner-mismatch': { title: '角色归属不匹配', message: '该角色不属于当前玩家，不能代替其他玩家进行操作。' },
   'room-rules-unavailable': { title: '房间规则未就绪', message: '尚未获得可验证的房规快照，为避免错误结算，已拒绝本次行动。' },
   'plugin-not-allowed': { title: '插件未授权', message: '当前房间规则未授权该插件能力，本次行动未结算。' },
 }

@@ -18,7 +18,15 @@ import {
 const SHARED_CLIENT_PROTOCOL_VERSION = CLIENT_SHARED_PROTOCOL_VERSION
 export const SHARED_STATE_CLIENT_MAX_BYTES = 8 * 1024 * 1024
 const sharedResourceRevisions = new Map<string, number>()
-const sharedResourceWriteChains = new Map<string, Promise<void>>()
+const sharedResourceWriteChains = new Map<string, Promise<unknown>>()
+
+export type SharedResourceSaveResult =
+  | { status: 'saved'; revision?: number }
+  | { status: 'skipped'; reason: 'spectator' | 'forbidden' | 'combat-active' }
+  | { status: 'invalid'; reason: 'schema' | 'serialization' }
+  | { status: 'too-large' }
+  | { status: 'conflict'; expectedRevision: number; currentRevision: number }
+  | { status: 'failed' }
 
 // DM 写共享态时附带的鉴权 secret。永远从环境读取，绝不硬编码/提交。
 // 服务端 STARS_SHARED_SECRET 未设时此 header 被忽略（鉴权关闭，零回归）。
@@ -212,8 +220,8 @@ async function sharedCombatIsActive(): Promise<boolean> {
   return !!combat?.active
 }
 
-async function performSharedResourceSave<T>(name: string, data: T): Promise<void> {
-  if (getRoomSession()?.role === 'spectator') return
+async function performSharedResourceSave<T>(name: string, data: T): Promise<SharedResourceSaveResult> {
+  if (getRoomSession()?.role === 'spectator') return { status: 'skipped', reason: 'spectator' }
   if (!canWriteSharedState()) {
     if (
       name !== 'characters' &&
@@ -227,27 +235,29 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
       name !== 'dice' &&
       name !== 'dice-events' &&
       name !== 'combat-log'
-    ) return
-    if (name === 'characters' && (await sharedCombatIsActive())) return
+    ) return { status: 'skipped', reason: 'forbidden' }
+    if (name === 'characters' && (await sharedCombatIsActive())) {
+      return { status: 'skipped', reason: 'combat-active' }
+    }
   }
   const validation = validateAndMigrateSharedResource(name, data)
   if (validation.status === 'invalid') {
     reportSharedIntegrityIssue({ resource: name, reason: `已阻止写入：${validation.reasons.join('；')}`, value: data })
-    return
+    return { status: 'invalid', reason: 'schema' }
   }
   let serializedBody: string
   try {
     serializedBody = JSON.stringify(validation.value)
   } catch {
     reportSharedIntegrityIssue({ resource: name, reason: '已阻止写入：共享状态无法序列化', value: data })
-    return
+    return { status: 'invalid', reason: 'serialization' }
   }
   if (new TextEncoder().encode(serializedBody).byteLength > SHARED_STATE_CLIENT_MAX_BYTES) {
     reportSharedIntegrityIssue({
       resource: name,
       reason: '已阻止写入：共享状态超过 8 MiB 上限；请移除或压缩人物立绘等大型内容',
     })
-    return
+    return { status: 'too-large' }
   }
   if (!sharedResourceRevisions.has(name)) await requestJson(`/state/${name}`, undefined, name)
   const expectedRevision = sharedResourceRevisions.get(name) ?? 0
@@ -274,7 +284,7 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
         recordSharedConflict(name, expectedRevision, revision)
         const event = { id: `conflict:${name}:${Date.now()}`, name, updatedAt: Date.now() }
         for (const listener of [...sharedStateChangedListeners]) listener(event)
-        return
+        return { status: 'conflict', expectedRevision, currentRevision: revision }
       }
       if (response.status === 413) {
         reportSharedIntegrityIssue({
@@ -282,7 +292,7 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
           reason: '服务端拒绝了超过容量上限的共享状态；请移除或压缩人物立绘等大型内容',
           source: 'server',
         })
-        return
+        return { status: 'too-large' }
       }
       if (!response.ok) continue
       const body = await response.json().catch(() => ({})) as { revision?: number }
@@ -291,11 +301,15 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
         sharedResourceRevisions.set(name, revision)
         recordSharedWrite(name, revision)
       }
-      return
+      return {
+        status: 'saved',
+        ...(Number.isInteger(revision) && revision >= 0 ? { revision } : {}),
+      }
     } catch {
       // Try the next configured endpoint only when the canonical endpoint is unavailable.
     }
   }
+  return { status: 'failed' }
 }
 
 /**
@@ -303,7 +317,7 @@ async function performSharedResourceSave<T>(name: string, data: T): Promise<void
  * rapid local saves would legitimately share the same expected revision and
  * turn the second local edit into an avoidable CAS conflict.
  */
-function enqueueSharedResourceWrite(name: string, operation: () => Promise<void>): Promise<void> {
+function enqueueSharedResourceWrite<T>(name: string, operation: () => Promise<T>): Promise<T> {
   const previous = sharedResourceWriteChains.get(name) ?? Promise.resolve()
   const current = previous
     .catch(() => {})
@@ -315,6 +329,16 @@ function enqueueSharedResourceWrite(name: string, operation: () => Promise<void>
 }
 
 export function saveSharedResource<T>(name: string, data: T): Promise<void> {
+  return saveSharedResourceWithResult(name, data).then(() => undefined)
+}
+
+/**
+ * Saves a shared resource and exposes whether the authoritative server actually
+ * accepted it. Stores that maintain monotonic snapshots must use this variant;
+ * advancing a local ACK watermark before a successful response can hide the
+ * server's conflict recovery snapshot.
+ */
+export function saveSharedResourceWithResult<T>(name: string, data: T): Promise<SharedResourceSaveResult> {
   return enqueueSharedResourceWrite(name, () => performSharedResourceSave(name, data))
 }
 
@@ -609,7 +633,11 @@ export async function mutateSharedRoomResource<T>(
   throw new Error(lastError)
 }
 
-export async function putSharedImage(id: string, blob: Blob, purpose: 'general' | 'handout' = 'general'): Promise<boolean> {
+export async function putSharedImage(
+  id: string,
+  blob: Blob,
+  purpose: 'general' | 'handout' | 'scene-audio' = 'general',
+): Promise<boolean> {
   if (!canWriteSharedState()) return false
   for (const api of sharedApiCandidates()) {
     try {
@@ -628,6 +656,40 @@ export async function putSharedImage(id: string, blob: Blob, purpose: 'general' 
     }
   }
   return false
+}
+
+export interface SharedServerClockSample {
+  offsetMs: number
+  roundTripMs: number
+  sampledAt: number
+}
+
+/** Uses the lowest-latency sample so synchronized media is independent of client wall-clock skew. */
+export async function sampleSharedServerClock(attempts = 3): Promise<SharedServerClockSample | null> {
+  const api = sharedEventApiCandidates()[0]
+  if (!api) return null
+  let best: SharedServerClockSample | null = null
+  for (let attempt = 0; attempt < Math.max(1, Math.min(5, attempts)); attempt += 1) {
+    const sentAt = Date.now()
+    try {
+      const response = await fetch(sharedSessionUrl(`${api}/time`), {
+        cache: 'no-store',
+        headers: { ...sharedAccessHeaders(), ...sharedMemberHeaders(), ...sharedProtocolHeaders() },
+      })
+      const receivedAt = Date.now()
+      const body = await response.json().catch(() => ({})) as { serverNow?: number }
+      if (!response.ok || !Number.isFinite(body.serverNow)) continue
+      const sample = {
+        offsetMs: Number(body.serverNow) - (sentAt + receivedAt) / 2,
+        roundTripMs: Math.max(0, receivedAt - sentAt),
+        sampledAt: receivedAt,
+      }
+      if (!best || sample.roundTripMs < best.roundTripMs) best = sample
+    } catch {
+      // A later sample or normal shared-state recovery can retry after a server restart.
+    }
+  }
+  return best
 }
 
 export async function getSharedImage(id: string): Promise<Blob | undefined> {

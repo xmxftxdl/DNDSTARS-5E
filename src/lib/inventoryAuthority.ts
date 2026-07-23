@@ -49,7 +49,7 @@ export function submitDnd5eInventoryMutation(
     roomId: session?.roomId,
     memberId: session?.memberId,
     sourceMode: 'player',
-    mutation: stripPlayerRolls(mutation),
+    mutation: sanitizeDnd5ePlayerInventoryMutation(mutation),
     updatedAt: Date.now(),
   }
   void publishSharedEvent(DND5E_INVENTORY_PLAYER_TO_DM_CHANNEL, request)
@@ -68,7 +68,7 @@ export function startDnd5eInventoryAuthoritySync(): () => void {
       seenRequestIds.add(request.id)
       if (seenRequestIds.size > 500) seenRequestIds.clear()
       const state = useCharacterStore.getState()
-      const mutation = request.mutation
+      const mutation = sanitizeDnd5ePlayerInventoryMutation(request.mutation)
       const source = state.characters.find((character) => character.id === mutation.characterId)
       if (!source || (request.memberId && source.roomMemberId !== request.memberId)) return
       if (request.roomId && source.roomId && source.roomId !== request.roomId) return
@@ -126,10 +126,12 @@ function withAuthorityHealingRolls(
   return { ...mutation, healingRolls: item ? rollDnd5eInventoryHealing(item) : [] }
 }
 
-function stripPlayerRolls(
+export function sanitizeDnd5ePlayerInventoryMutation(
   mutation: Exclude<Dnd5eInventoryMutation, { type: 'grant' }>,
 ): Exclude<Dnd5eInventoryMutation, { type: 'grant' }> {
-  return mutation.type === 'use' ? { ...mutation, healingRolls: undefined } : mutation
+  if (mutation.type === 'use') return { ...mutation, healingRolls: undefined }
+  if (mutation.type === 'prepare-attunement') return { ...mutation, dmPrerequisiteConfirmed: undefined }
+  return mutation
 }
 
 function validRequest(request: Dnd5eInventoryAuthorityRequest, dmRoomId?: string): boolean {

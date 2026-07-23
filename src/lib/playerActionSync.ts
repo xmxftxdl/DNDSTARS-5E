@@ -115,36 +115,6 @@ export function createSharedPlayerActionEnvelope(input: {
   })
 }
 
-export function createDmLocalPlayerActionEnvelope(input: {
-  isDm: boolean
-  mapId?: string
-  combatId?: string
-  turnCharacter?: Character | null
-  currentInitiativeToken?: Token | null
-  round: number
-  initiativeIndex: number
-  nextSeq: () => number
-  now?: () => number
-  patch: SharedPlayerActionPatch
-}): SharedPlayerActionState | null {
-  const token = input.currentInitiativeToken
-  const character = input.turnCharacter
-  if (!input.isDm || !input.mapId || !token || !character) return null
-  if (token.type !== 'player' || token.characterId !== character.id) return null
-  return createSharedPlayerActionEnvelope({
-    mapId: input.mapId,
-    combatId: input.combatId,
-    sourceMode: 'dm',
-    actorTokenId: token.id,
-    characterId: character.id,
-    round: input.round,
-    initiativeIndex: input.initiativeIndex,
-    nextSeq: input.nextSeq,
-    now: input.now,
-    patch: input.patch,
-  })
-}
-
 export function createPlayerActionEnvelope(input: {
   mapId?: string
   combatId?: string

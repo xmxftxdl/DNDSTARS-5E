@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  createDnd5eConditionEffect,
   createDnd5eCombatant,
+  dnd5eConditionsFromActiveEffects,
   startDnd5eHeadlessCombat,
   type Dnd5eActionResult,
 } from '../../rulesets/dnd5e'
@@ -115,6 +117,59 @@ describe('地图战斗结果结算器', () => {
       type: 'concentration-resolved',
       actorId: 'hero',
       success: false,
+    }))
+  })
+
+  it('自动掷出受伤触发的优势豁免并解除狂笑术', async () => {
+    const caster = combatant('hero', 20, true)
+    caster.classState.concentrationSpellId = 'hideous-laughter'
+    caster.classState.concentrationTargetIds = ['enemy']
+    caster.classState.concentrationRoundsRemaining = 10
+    const target = combatant('enemy', 10)
+    const effect = createDnd5eConditionEffect({
+      condition: 'incapacitated',
+      source: { kind: 'spell', actorId: caster.id, rulesId: 'hideous-laughter' },
+      targetId: target.id,
+      duration: {
+        type: 'concentration', sourceActorId: caster.id,
+        concentrationId: 'hideous-laughter', remainingRounds: 10,
+      },
+      repeatSave: {
+        ability: 'wis', dc: 10, timing: 'target-turn-end', onSuccess: 'remove',
+        onDamage: { mode: 'advantage' },
+      },
+    })
+    target.classState.activeEffects = [effect]
+    target.classState.activeEffectDamageSavePendingIds = [effect.id]
+    target.classState.concentrationEffectsBySource = { [caster.id]: 'hideous-laughter' }
+    target.conditions = dnd5eConditionsFromActiveEffects([effect])
+    const state = startDnd5eHeadlessCombat('combat', [caster, target])
+    const result: Extract<Dnd5eActionResult, { ok: true }> = {
+      ok: true,
+      state,
+      events: [{
+        type: 'active-effect-save-required', targetId: target.id, effectId: effect.id,
+        ability: 'wis', dc: 10, timing: 'takes-damage', mode: 'advantage',
+      }],
+    }
+    const rolls = [5, 15]
+    const rollD20 = vi.fn(async () => rolls.shift() ?? 1)
+
+    const settled = await settleDnd5eConcentrationChecks({
+      result,
+      map: map(),
+      characters: [],
+      characterIdByCombatantId: {},
+      rollD20,
+      rollD4: unusedRoll,
+      rollDice: async () => [],
+    })
+
+    expect(rollD20).toHaveBeenCalledTimes(2)
+    expect(settled.result.state.combatants.enemy.conditions).not.toContain('incapacitated')
+    expect(settled.result.state.combatants.hero.concentrating).toBe(false)
+    expect(settled.result.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-save-resolved', targetId: 'enemy', success: true,
     }))
   })
 })

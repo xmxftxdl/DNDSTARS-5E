@@ -3,9 +3,16 @@ import {
   DND5E_DAMAGE_TYPES,
   type Dnd5eDamageType,
   type Dnd5eMonsterAction,
+  type Dnd5eMonsterMechanicEffectV2,
+  type Dnd5eMonsterMechanicEffectTargetV2,
+  type Dnd5eMonsterMechanicTrigger,
+  type Dnd5eMonsterMechanicTriggerEventV2,
+  type Dnd5eMonsterMechanicTriggerV2,
   type Dnd5eMonsterSize,
   type Dnd5eMonsterStatBlock,
+  type Dnd5eMonsterTargetPriority,
 } from './monsters'
+import type { Dnd5eStandardConditionId } from './conditions'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
@@ -29,6 +36,32 @@ export interface Dnd5eCustomMonsterActionDraft {
   damageDice: string
   damageType: Dnd5eDamageType
   attacksPerAction: number
+}
+
+export interface Dnd5eCustomMonsterMechanicDraft {
+  id: string
+  name: string
+  trigger: Dnd5eMonsterMechanicTriggerEventV2
+  hpPercentageAtOrBelow?: number
+  hpPercentageAtOrAbove?: number
+  requiresPositiveHp: boolean
+  effectKind: 'healing' | 'temporary-hit-points' | 'damage' | 'standard-condition' | 'summon' | 'area-attack'
+  effectTarget: Dnd5eMonsterMechanicEffectTargetV2
+  healingDice: string
+  damageType: Dnd5eDamageType
+  condition: Dnd5eStandardConditionId
+  durationKind: 'permanent' | 'until-target-turn-start' | 'until-source-turn-start' | 'rounds'
+  durationRounds: number
+  summonMonsterId: string
+  summonCount: number
+  summonDurationRounds: number
+  areaShape: 'circle' | 'cone' | 'line'
+  areaRangeFeet: number
+  areaSizeFeet: number
+  limit: Dnd5eMonsterMechanicTrigger['limit']
+  automation: 'full' | 'partial' | 'manual'
+  /** 表单编辑首个效果；高级 JSON 中的其余效果必须无损保留。 */
+  preservedEffects?: readonly Dnd5eMonsterMechanicEffectV2[]
 }
 
 export interface Dnd5eCustomMonsterDraft {
@@ -56,6 +89,8 @@ export interface Dnd5eCustomMonsterDraft {
   challengeRating: string
   xp: number
   description: string
+  targetingPriority: Dnd5eMonsterTargetPriority
+  headlessMechanics: Dnd5eCustomMonsterMechanicDraft[]
   traits: Dnd5eCustomMonsterTraitDraft[]
   actions: Dnd5eCustomMonsterActionDraft[]
 }
@@ -84,6 +119,32 @@ export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionD
   }
 }
 
+export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMechanicDraft {
+  return {
+    id: `mechanic-${uid().slice(0, 8)}`,
+    name: '低生命恢复',
+    trigger: 'turn-start',
+    hpPercentageAtOrBelow: 50,
+    hpPercentageAtOrAbove: undefined,
+    requiresPositiveHp: true,
+    effectKind: 'healing',
+    effectTarget: 'self',
+    healingDice: '2d6',
+    damageType: 'necrotic',
+    condition: 'frightened',
+    durationKind: 'rounds',
+    durationRounds: 1,
+    summonMonsterId: 'srd-5.1:wolf',
+    summonCount: 1,
+    summonDurationRounds: 10,
+    areaShape: 'circle',
+    areaRangeFeet: 60,
+    areaSizeFeet: 15,
+    limit: 'once-per-combat',
+    automation: 'full',
+  }
+}
+
 export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
   return {
     name: '自定义怪物',
@@ -106,6 +167,8 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
     challengeRating: '1/4',
     xp: 50,
     description: '由 DM 创建的房间怪物。',
+    targetingPriority: 'nearest',
+    headlessMechanics: [],
     traits: [],
     actions: [createDnd5eCustomMonsterActionDraft()],
   }
@@ -233,6 +296,54 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     hasFlySpeed: draft.fly > 0,
     hasSwimSpeed: draft.swim > 0,
   }
+  const headlessMechanics: Dnd5eMonsterMechanicTriggerV2[] = (draft.headlessMechanics ?? []).map((mechanic) => {
+    if (!mechanic.name.trim()) throw new Error('怪物机制名称不能为空')
+    const dice = ['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind)
+      ? parseDice(mechanic.healingDice)
+      : undefined
+    const effect = mechanic.effectKind === 'healing' || mechanic.effectKind === 'temporary-hit-points'
+      ? { id: 'effect-0', kind: mechanic.effectKind, target: 'self' as const, dice: dice! }
+      : mechanic.effectKind === 'damage'
+        ? { id: 'effect-0', kind: 'damage' as const, target: mechanic.effectTarget, dice: dice!, damageType: mechanic.damageType }
+        : mechanic.effectKind === 'standard-condition'
+          ? {
+              id: 'effect-0', kind: 'standard-condition' as const, target: mechanic.effectTarget,
+              condition: mechanic.condition,
+              duration: mechanic.durationKind === 'rounds'
+                ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
+                : { kind: mechanic.durationKind },
+            }
+          : mechanic.effectKind === 'summon'
+            ? {
+                id: 'effect-0', kind: 'summon' as const, monsterId: mechanic.summonMonsterId,
+                count: Math.max(1, Math.trunc(mechanic.summonCount)),
+                durationRounds: Math.max(1, Math.trunc(mechanic.summonDurationRounds)),
+              }
+            : {
+                id: 'effect-0', kind: 'area-attack' as const, shape: mechanic.areaShape,
+                rangeFeet: Math.max(0, Math.trunc(mechanic.areaRangeFeet)),
+                sizeFeet: Math.max(5, Math.trunc(mechanic.areaSizeFeet)),
+                dice: dice!, damageType: mechanic.damageType,
+              }
+    return {
+      schemaVersion: 2,
+      id: mechanic.id,
+      name: mechanic.name.trim(),
+      trigger: { event: mechanic.trigger },
+      predicates: {
+        ...(Number.isFinite(mechanic.hpPercentageAtOrBelow)
+          ? { hpPercentageAtOrBelow: Math.max(0, Math.min(100, Number(mechanic.hpPercentageAtOrBelow))) }
+          : {}),
+        ...(Number.isFinite(mechanic.hpPercentageAtOrAbove)
+          ? { hpPercentageAtOrAbove: Math.max(0, Math.min(100, Number(mechanic.hpPercentageAtOrAbove))) }
+          : {}),
+        requiresPositiveHp: mechanic.requiresPositiveHp,
+      },
+      effects: [effect, ...(mechanic.preservedEffects?.slice(1).map((entry) => structuredClone(entry)) ?? [])],
+      limit: mechanic.limit,
+      automation: mechanic.automation,
+    }
+  })
   const monster: Dnd5eMonsterStatBlock = {
     ...preserved,
     id: draft.id ?? `room-monster:${slug}`,
@@ -260,6 +371,8 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     traits,
     actions,
     capabilities,
+    targetingPreference: { schemaVersion: 1, priority: draft.targetingPriority ?? 'nearest' },
+    headlessMechanics,
     description: draft.description.trim(),
   }
   const parsed = parseDnd5eMonsterStatBlock(monster)
@@ -292,6 +405,40 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     challengeRating: monster.challenge.rating,
     xp: monster.challenge.xp,
     description: monster.description,
+    targetingPriority: monster.targetingPreference?.priority ?? 'nearest',
+    headlessMechanics: (monster.headlessMechanics ?? []).map((mechanic) => {
+      const effect = mechanic.schemaVersion === 1
+        ? { id: 'effect-0', kind: 'healing' as const, target: 'self' as const, dice: mechanic.effect.dice }
+        : mechanic.effects[0]
+      const dice = effect && 'dice' in effect ? effect.dice : { count: 2, sides: 6, bonus: 0 }
+      const duration = effect?.kind === 'standard-condition' ? effect.duration : { kind: 'rounds' as const, rounds: 1 }
+      return {
+        id: mechanic.id,
+        name: mechanic.name,
+        trigger: mechanic.schemaVersion === 1 ? mechanic.event : mechanic.trigger.event,
+        hpPercentageAtOrBelow: mechanic.predicates.hpPercentageAtOrBelow,
+        hpPercentageAtOrAbove: mechanic.schemaVersion === 2 ? mechanic.predicates.hpPercentageAtOrAbove : undefined,
+        requiresPositiveHp: mechanic.predicates.requiresPositiveHp,
+        effectKind: effect?.kind ?? 'healing',
+        effectTarget: effect && 'target' in effect ? effect.target : 'self',
+        healingDice: `${dice.count}d${dice.sides}${dice.bonus === 0 ? '' : dice.bonus > 0 ? `+${dice.bonus}` : dice.bonus}`,
+        damageType: effect && 'damageType' in effect ? effect.damageType : 'necrotic',
+        condition: effect?.kind === 'standard-condition' ? effect.condition : 'frightened',
+        durationKind: duration.kind,
+        durationRounds: duration.kind === 'rounds' ? duration.rounds : 1,
+        summonMonsterId: effect?.kind === 'summon' ? effect.monsterId : 'srd-5.1:wolf',
+        summonCount: effect?.kind === 'summon' ? effect.count : 1,
+        summonDurationRounds: effect?.kind === 'summon' ? effect.durationRounds : 10,
+        areaShape: effect?.kind === 'area-attack' ? effect.shape : 'circle',
+        areaRangeFeet: effect?.kind === 'area-attack' ? effect.rangeFeet : 60,
+        areaSizeFeet: effect?.kind === 'area-attack' ? effect.sizeFeet : 15,
+        limit: mechanic.limit,
+        automation: mechanic.schemaVersion === 1 ? 'full' : mechanic.automation,
+        preservedEffects: mechanic.schemaVersion === 1
+          ? undefined
+          : mechanic.effects.map((entry) => structuredClone(entry)),
+      }
+    }),
     traits: monster.traits.map((trait) => ({ name: trait.name, description: trait.description })),
     actions: monster.actions.filter((action) => action.kind !== 'multiattack').map((action) => {
       const damage = action.attack?.damage[0]

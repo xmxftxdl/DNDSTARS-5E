@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { DND5E_SHIELD } from './equipment'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
 import {
+  prepareDnd5eMonsterAfterHitMechanics,
   prepareDnd5eMonsterAttack,
   previewDnd5eMonsterAttack,
   resolvePreparedDnd5eMonsterAttack,
@@ -17,6 +20,8 @@ function token(patch: Partial<Token>): Token {
 }
 
 describe('SRD monster map action adapter', () => {
+  afterEach(() => setDnd5eRoomMonsterCatalog([]))
+
   it('applies Pack Tactics only while a conscious ally is within 5 feet of the target', () => {
     const hero = character()
     const wolf = token({ id: 'wolf', x: 0, poolId: 'srd-5.1:wolf' })
@@ -73,6 +78,81 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(17)
     expect(resolved.application?.changedCharacterIds).toEqual([hero.id])
     expect(resolved.application?.changedTokenIds).toEqual(['owlbear', heroToken.id])
+  })
+
+  it('executes a V2 after-hit damage and condition mechanism through the authoritative attack transaction', () => {
+    const hero = character()
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.name = '烬爪'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'burning-strike',
+      name: '灼热追击',
+      trigger: 'after-hit',
+      effectKind: 'damage',
+      effectTarget: 'trigger-target',
+      healingDice: '1d6',
+      damageType: 'fire',
+      hpPercentageAtOrBelow: 100,
+      limit: 'once-per-turn',
+      preservedEffects: [
+        { id: 'effect-0', kind: 'damage', target: 'trigger-target', dice: { count: 1, sides: 6, bonus: 0 }, damageType: 'fire' },
+        { id: 'frighten', kind: 'standard-condition', target: 'trigger-target', condition: 'frightened', duration: { kind: 'rounds', rounds: 1 } },
+      ],
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const enemy = token({ id: 'ember-claw', label: monster.name, poolId: monster.id, hp: monster.hitPoints.average, maxHp: monster.hitPoints.average })
+    const heroToken = token({ id: 'hero-token', label: hero.name, type: 'player', characterId: hero.id, hp: 40, maxHp: 40 })
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [enemy, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: enemy.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepareDnd5eMonsterAfterHitMechanics(prepared.prepared, true)).toEqual([expect.objectContaining({
+      mechanicId: 'burning-strike', targetId: heroToken.id,
+      effects: [{ effectId: 'effect-0', effectName: '额外伤害', count: 1, sides: 6, bonus: 0 }],
+    })])
+    expect(resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 15, damageRolls: [[4]] }],
+    }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    expect(resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 15, damageRolls: [[4]] }],
+      mechanicRolls: [{
+        actorId: enemy.id,
+        mechanicId: 'burning-strike',
+        targetId: enemy.id,
+        effectRolls: [{ effectId: 'effect-0', rolls: [5] }],
+      }],
+    }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 15, damageRolls: [[4]] }],
+      mechanicRolls: [{
+        actorId: enemy.id,
+        mechanicId: 'burning-strike',
+        targetId: heroToken.id,
+        effectRolls: [{ effectId: 'effect-0', rolls: [5] }],
+      }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0].currentHp).toBe(30)
+    expect(resolved.application?.characters[0].conditions).toContain('frightened')
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-mechanic-v2-triggered', actorId: enemy.id, mechanicId: 'burning-strike', trigger: 'after-hit',
+    }))
   })
 
   it('uses one target reaction to halve one attack in a monster Multiattack', () => {

@@ -5,7 +5,6 @@ import {
   buildPlayerActionRequestQueueState,
   buildSharedPlayerAction,
   consumePlayerActionAck,
-  createDmLocalPlayerActionEnvelope,
   createPlayerActionEnvelope,
   createSharedPlayerActionEnvelope,
   hydratedProcessedPlayerActionIdsForDm,
@@ -154,50 +153,6 @@ describe('player action sync barrier', () => {
       }),
     ).toBeNull()
     expect(nextSeq).not.toHaveBeenCalled()
-  })
-
-  it('creates DM local player actions only for the current player token', () => {
-    let seq = 0
-    const nextSeq = () => {
-      seq += 1
-      return seq
-    }
-
-    expect(
-      createDmLocalPlayerActionEnvelope({
-        isDm: true,
-        mapId: 'map-1',
-        combatId: 'combat-1',
-        turnCharacter: hero,
-        currentInitiativeToken: heroToken,
-        round: 1,
-        initiativeIndex: 0,
-        nextSeq,
-        now: () => 1000,
-        patch: { type: 'end-turn' },
-      }),
-    ).toMatchObject({
-      id: 'map-1:dm-action:1000:1',
-      sourceMode: 'dm',
-      actorTokenId: 'hero-token',
-      characterId: 'hero',
-      type: 'end-turn',
-    })
-
-    expect(
-      createDmLocalPlayerActionEnvelope({
-        isDm: true,
-        mapId: 'map-1',
-        turnCharacter: hero,
-        currentInitiativeToken: { ...heroToken, type: 'enemy' } as unknown as Token,
-        round: 1,
-        initiativeIndex: 0,
-        nextSeq,
-        now: () => 1001,
-        patch: { type: 'end-turn' },
-      }),
-    ).toBeNull()
-    expect(seq).toBe(1)
   })
 
   it('creates player actions from current initiative or an explicit actor override', () => {

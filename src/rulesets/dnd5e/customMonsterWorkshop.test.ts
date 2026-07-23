@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDnd5eCustomMonster,
   createDnd5eCustomMonsterDraft,
+  createDnd5eCustomMonsterMechanicDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
 } from './customMonsterWorkshop'
 import { dnd5eMonsterActionAutomation, parseDnd5eMonsterStatBlock } from './monsterSchema'
@@ -15,12 +16,65 @@ describe('D&D 5e custom monster workshop', () => {
     expect(dnd5eMonsterActionAutomation(monster.actions[0])).toBe('headless')
   })
 
+  it('round-trips target priority and a low-hit-point Headless healing mechanism', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.targetingPriority = 'highest-threat'
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'bloodied-recovery',
+      name: '浴血恢复',
+      hpPercentageAtOrBelow: 50,
+      healingDice: '2d6',
+      limit: 'once-per-combat',
+    }]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.targetingPreference).toEqual({ schemaVersion: 1, priority: 'highest-threat' })
+    expect(monster.headlessMechanics).toEqual([expect.objectContaining({
+      schemaVersion: 2,
+      id: 'bloodied-recovery',
+      trigger: { event: 'turn-start' },
+      predicates: { hpPercentageAtOrBelow: 50, requiresPositiveHp: true },
+      effects: [{ id: 'effect-0', kind: 'healing', target: 'self', dice: { count: 2, sides: 6, bonus: 0 } }],
+      limit: 'once-per-combat',
+      automation: 'full',
+    })])
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster)).toMatchObject({
+      targetingPriority: 'highest-threat',
+      headlessMechanics: [{ id: 'bloodied-recovery', healingDice: '2d6' }],
+    })
+  })
+
   it('round-trips an edited monster and generates a multiattack declaration', () => {
     const draft = createDnd5eCustomMonsterDraft()
     draft.actions[0].attacksPerAction = 2
     const monster = buildDnd5eCustomMonster(draft)
     expect(monster.actions[0]).toMatchObject({ kind: 'multiattack', sequence: [draft.actions[0].id, draft.actions[0].id] })
     expect(buildDnd5eCustomMonster(dnd5eCustomMonsterDraftFromStatBlock(monster))).toMatchObject({ id: monster.id, slug: monster.slug })
+  })
+
+  it('preserves additional V2 effects imported through advanced JSON when the form edits the first effect', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'paired-effect',
+      preservedEffects: [
+        { id: 'effect-0', kind: 'healing', target: 'self', dice: { count: 2, sides: 6, bonus: 0 } },
+        { id: 'hidden-condition', kind: 'standard-condition', target: 'self', condition: 'invisible', duration: { kind: 'rounds', rounds: 1 } },
+      ],
+    }]
+    const original = buildDnd5eCustomMonster(draft)
+    const form = dnd5eCustomMonsterDraftFromStatBlock(original)
+    form.headlessMechanics[0].healingDice = '1d8+2'
+    const rebuilt = buildDnd5eCustomMonster(form)
+    expect(rebuilt.headlessMechanics?.[0]).toMatchObject({
+      schemaVersion: 2,
+      effects: [
+        { id: 'effect-0', kind: 'healing', dice: { count: 1, sides: 8, bonus: 2 } },
+        { id: 'hidden-condition', kind: 'standard-condition', condition: 'invisible' },
+      ],
+    })
   })
 
   it('rejects invalid dice instead of saving an unresolvable attack', () => {

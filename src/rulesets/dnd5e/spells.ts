@@ -18,6 +18,7 @@ export type Dnd5eSpellEffectKind =
   | 'healing'
   | 'fixed-healing'
   | 'healing-pool'
+  | 'sleep-hit-point-pool'
   | 'temporary-hit-points'
   | 'stabilize'
   | 'remove-condition'
@@ -89,6 +90,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'thunderwave-push'
     | 'sunburst-blindness'
     | 'blindness-deafness'
+    | 'hideous-laughter'
     | 'hold-person'
     | 'hold-monster'
     | 'banishment'
@@ -115,10 +117,34 @@ export interface Dnd5eSrdSpellDefinition {
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
+    id: 'darkness', name: '黑暗术', englishName: 'Darkness', level: 2, school: '塑能',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 15, placeRangeFeet: 60 },
+    description: '魔法黑暗从射程内一点扩散，充满15尺半径球状区域。黑暗会绕过转角；黑暗视觉无法看穿，非魔法光也无法照亮。需要专注，持续至多10分钟。与2环或更低环法术创造的光照区域重叠时，创造该光照的法术会被解除。',
+  },
+  {
+    id: 'daylight', name: '昼明术', englishName: 'Daylight', level: 3, school: '塑能',
+    classes: ['cleric', 'druid', 'paladin', 'ranger', 'sorcerer'], castingTime: 'action', rangeFeet: 60,
+    target: 'area', effect: 'persistent-area', dice: { count: 0, sides: 4, bonus: 0 },
+    effectDurationRounds: 600, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 120, placeRangeFeet: 60 },
+    description: '光线从射程内一点扩散：60尺半径内为明亮光照，并在其外60尺提供微光光照，持续1小时。与3环或更低环法术创造的黑暗区域重叠时，创造该黑暗的法术会被解除。',
+  },
+  {
     id: 'mage-armor', name: '法师护甲', englishName: 'Mage Armor', level: 1, school: '防护',
     classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'ally', effect: 'active-effect',
     dice: { count: 0, sides: 4, bonus: 0 }, appliedEffect: 'mage-armor', effectDurationRounds: 4_800,
     description: '触碰一名未穿护甲的自愿生物。法术持续期间，其基础护甲等级为13＋敏捷调整值；穿上护甲时效果提前结束。持续8小时。',
+  },
+  {
+    id: 'grease', name: '油腻术', englishName: 'Grease', level: 1, school: '咒法',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 4, bonus: 0 }, effectDurationRounds: 10,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60 },
+    description: '滑腻油脂覆盖射程内一点为中心的10尺方形地面，持续1分钟。区域成为困难地形。油脂出现时，站在区域内的每个生物必须进行敏捷豁免，失败则倒地。生物进入区域或在其中结束回合时，也必须进行同样的豁免。',
   },
   {
     id: 'dispel-magic', name: '解除魔法', englishName: 'Dispel Magic', level: 3, school: '防护',
@@ -167,6 +193,22 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
     onFailedSaveEffect: 'faerie-fire',
     description: '指定60尺内一处20尺立方区域。区域内生物进行敏捷豁免；失败者被光包围，无法受益于隐形，且能看见它的攻击者对其攻击具有优势。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'hideous-laughter', name: '狂笑术', englishName: 'Hideous Laughter', level: 1, school: '附魔',
+    classes: ['bard', 'wizard'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 1, onFailedSaveEffect: 'hideous-laughter',
+    description: '一名智力高于4的可见生物进行感知豁免；失败则倒地、陷入失能且无法站起。目标在每个回合结束时，以及每次受到伤害后重复豁免；受伤触发的豁免具有优势。豁免成功时法术结束。需要专注，至多1分钟。',
+  },
+  {
+    id: 'sleep', name: '睡眠术', englishName: 'Sleep', level: 1, school: '附魔',
+    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 90,
+    target: 'area', effect: 'sleep-hit-point-pool',
+    dice: { count: 5, sides: 8, bonus: 0, perHigherSlot: 2 },
+    effectDurationRounds: 10, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 20, placeRangeFeet: 90 },
+    description: '掷5d8决定可影响的当前生命值总数。以射程内一点为中心，20尺半径内的生物按当前生命值从低到高依次处理；忽略已经昏迷的生物。当前生命值不高于剩余总值的生物陷入昏迷，直到1分钟结束、受到伤害，或有人用一个动作将其摇醒或拍醒。亡灵和免疫魅惑的生物不受影响。每使用高于1环一环的法术位，额外掷2d8。',
   },
   {
     id: 'invisibility', name: '隐形术', englishName: 'Invisibility', level: 2, school: '幻术',
@@ -880,7 +922,10 @@ export function dnd5eMetamagicAvailableForSpell(
   if (kind === 'careful') return spell.effect === 'saving-throw'
   if (kind === 'distant') return spell.rangeFeet > 0
   if (kind === 'extended') {
-    return spell.concentration === true && dnd5eSpellConcentrationDurationRounds(spell, spell.level) >= 10
+    const durationRounds = spell.concentration
+      ? dnd5eSpellConcentrationDurationRounds(spell, spell.level)
+      : spell.effectDurationRounds ?? 0
+    return durationRounds >= 10
   }
   if (kind === 'heightened') return spell.effect === 'saving-throw' || spell.effect === 'attack-save-debuff'
   if (kind === 'quickened') return spell.castingTime === 'action'

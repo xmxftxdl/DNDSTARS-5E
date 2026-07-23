@@ -21,7 +21,6 @@ import {
   RefreshCw,
   Move,
   Magnet,
-  Eye,
   LocateFixed,
   ArrowUpRight,
   Circle as CircleIcon,
@@ -29,6 +28,7 @@ import {
 } from 'lucide-react'
 import MapCanvas from '../components/map/MapCanvas'
 import type { DeleteSelectionRect } from '../components/map/MapCanvas'
+import SceneOrchestrationSystem, { type SceneDrawTarget } from '../components/map/SceneOrchestrationSystem'
 import MapGeometryToolbar from '../components/map/MapGeometryToolbar'
 import InitiativeTracker, {
   INITIATIVE_VISIBLE_MAX,
@@ -39,6 +39,8 @@ import { CHAR_PANEL_TITLES, type CharDockPanel } from '../components/map/charact
 import ClassResourceIndicators from '../components/map/ClassResourceIndicators'
 import MapInventoryPanel from '../components/map/MapInventoryPanel'
 import MapSpellsPanel from '../components/map/MapSpellsPanel'
+import PlayerCombatHotbar from '../components/map/PlayerCombatHotbar'
+import MapDiceRoller, { type MapFreeDiceRollRequest } from '../components/map/MapDiceRoller'
 import EnemyPoolPicker from '../components/map/EnemyPoolPicker'
 import EnemyDetailPanel from '../components/map/EnemyDetailPanel'
 import { canShowEnemyDetail } from '../components/map/enemyDetailPanelUtils'
@@ -46,7 +48,6 @@ import { shouldClearSelectedMapToken } from '../components/map/mapTokenSelection
 import CharacterDetailPanel from '../components/map/CharacterDetailPanel'
 import Dnd5eFighterCombatPanel from '../components/map/Dnd5eFighterCombatPanel'
 import Dnd5eClassCombatPanel from '../components/map/Dnd5eClassCombatPanel'
-import Dnd5eAbilityCheckPanel from '../components/map/Dnd5eAbilityCheckPanel'
 import Dnd5ePluginCombatPanel from '../components/map/Dnd5ePluginCombatPanel'
 import Dnd5eActiveEffectDetailsDialog from '../components/map/Dnd5eActiveEffectDetailsDialog'
 import D20RollConfirmationOverlay from '../components/map/D20RollConfirmationOverlay'
@@ -62,6 +63,7 @@ import { useFogStore } from '../store/fog'
 import { useMapGeometryStore } from '../store/mapGeometry'
 import { useMapExplorationStore } from '../store/mapExploration'
 import { useCombatStatisticsStore } from '../store/combatStatistics'
+import { useSceneOrchestrationStore } from '../store/sceneOrchestration'
 import type { BattleMap, Token } from '../store/maps'
 import { useCharacterStore } from '../store/characters'
 import { useSpellbookStore } from '../store/spellbook'
@@ -80,6 +82,7 @@ import {
 } from '../lib/sharedApi'
 import type { Character } from '../types/character'
 import type { Dnd5eInventoryTargeting } from '../types/inventory'
+import type { Dnd5eCombatActionCommand, Dnd5eCombatActionDescriptorV1 } from '../lib/dnd5eCombatActionDescriptors'
 import type { FogTool } from '../lib/fogOfWar'
 import {
   createEmptyMapGeometry,
@@ -104,7 +107,17 @@ import {
   type MapTabletopState,
   type MapTabletopTool,
 } from '../lib/mapTabletop'
+import {
+  publishFireBoltPresentation,
+} from '../lib/combatPresentation'
 import { findMapGeometryPath } from '../lib/mapPathfinding'
+import { useCombatPresentationCoordinator } from './maps/useCombatPresentationCoordinator'
+import { usePlayerMovementController } from './maps/usePlayerMovementController'
+import {
+  fireBoltPresentationForSettlement,
+  spellSettlementMapLayerChanges,
+  spellSettlementSpentTurnResource,
+} from './maps/spellSettlementCoordinator'
 import { ABILITIES, SKILLS } from '../lib/dnd'
 import { formatDnd5eCombatLogDetails } from '../lib/combatLogDetails'
 import {
@@ -230,6 +243,7 @@ import {
   type Dnd5eHunterMultiattackResolutionRoll,
   type Dnd5eMonkBonusAttackRoll,
   type Dnd5eActionResult,
+  type Dnd5eCombatEvent,
   type Dnd5eMapResultPlan,
   type Dnd5eCombatant,
   type Dnd5eHeadlessCombatState,
@@ -317,6 +331,7 @@ import {
   prepareDnd5eFighterFeature,
   prepareDnd5eHunterMultiattack,
   prepareDnd5eMonsterAttack,
+  prepareDnd5eMonsterAfterHitMechanics,
   prepareDnd5eOpportunityAttack,
   prepareDnd5ePlayerEndTurn,
   prepareDnd5ePlayerMove,
@@ -503,7 +518,6 @@ import { buildCombatMessageQueueReset } from '../lib/sharedCombatReset'
 import { mergeSharedCombatLogEntries } from '../lib/sharedCombatLogSync'
 import { resolveSharedDiceEventApply } from '../lib/sharedDiceSync'
 import {
-  createDmLocalPlayerActionEnvelope,
   createPlayerActionEnvelope,
   submitPlayerActionRequestWithLock,
   type SharedPlayerActionPatch,
@@ -601,6 +615,8 @@ export default function MapsPage() {
   const startCombatStatistics = useCombatStatisticsStore((s) => s.startCombat)
   const recordCombatStatistics = useCombatStatisticsStore((s) => s.record)
   const settleCombatExperience = useCombatStatisticsStore((s) => s.settleExperience)
+  const sceneOrchestration = useSceneOrchestrationStore((s) => s.shared)
+  const setSceneTriggerRegion = useSceneOrchestrationStore((s) => s.setTriggerRegion)
 
   const characters = useCharacterStore((s) => s.characters)
   const updateChar = useCharacterStore((s) => s.update)
@@ -690,6 +706,8 @@ export default function MapsPage() {
   const [effectDetailTokenId, setEffectDetailTokenId] = useState<string | null>(null)
   const [activeCharId, setActiveCharId] = useState<string | null>(null)
   const [charPanel, setCharPanel] = useState<CharDockPanel | null>(null)
+  const [combatHotbarSpellFocusId, setCombatHotbarSpellFocusId] = useState<string | undefined>()
+  const [combatHotbarSelectionId, setCombatHotbarSelectionId] = useState<string | undefined>()
   const [playerAssignmentTick, setPlayerAssignmentTick] = useState(0)
   const [measureMode, setMeasureMode] = useState(false)
   const [deleteSelectMode, setDeleteSelectMode] = useState(false)
@@ -706,6 +724,8 @@ export default function MapsPage() {
   const [geometryPreviewAsPlayer, setGeometryPreviewAsPlayer] = useState(false)
   const [geometrySnapToGrid, setGeometrySnapToGrid] = useState(true)
   const [mapTabletopTool, setMapTabletopTool] = useState<MapTabletopTool>('none')
+  const [sceneDrawTarget, setSceneDrawTarget] = useState<SceneDrawTarget | null>(null)
+  const [sceneEditorVisible, setSceneEditorVisible] = useState(false)
   const [mapTabletopState, setMapTabletopState] = useState<MapTabletopState>(EMPTY_MAP_TABLETOP_STATE)
   const [panelWidth, setPanelWidth] = useState(720)
   const [panelHeight, setPanelHeight] = useState(300)
@@ -893,7 +913,6 @@ export default function MapsPage() {
   const [dmAdjudicationDc, setDmAdjudicationDc] = useState('')
   const [dmAdjudicationMapOverride, setDmAdjudicationMapOverride] = useState<'roll' | 'success' | 'failure'>('roll')
   const [selectedDoorInteractionId, setSelectedDoorInteractionId] = useState<string | null>(null)
-  const [dnd5eSecretSearchMethod, setDnd5eSecretSearchMethod] = useState<'perception' | 'investigation' | null>(null)
   const combatDialogRef = useRef<{
     id: number
     title: string
@@ -1003,16 +1022,20 @@ export default function MapsPage() {
     pendingPlayerActionRef.current = next
     setPendingPlayerAction(next)
   }
-  const [showMoveRange, setShowMoveRange] = useState(false)
-  const [dnd5eCarefulMovement, setDnd5eCarefulMovement] = useState(false)
-  const [dnd5eStandFromProne, setDnd5eStandFromProne] = useState(true)
-  const [dnd5eTraversalMode, setDnd5eTraversalMode] = useState<Dnd5eTraversalMode>('walk')
-  const [dnd5eTargetElevationFeet, setDnd5eTargetElevationFeet] = useState(0)
+  const playerMovement = usePlayerMovementController()
+  const {
+    showMoveRange,
+    setShowMoveRange,
+    dnd5eCarefulMovement,
+    setDnd5eCarefulMovement,
+    dnd5eStandFromProne,
+    setDnd5eStandFromProne,
+    dnd5eTraversalMode,
+    setDnd5eTraversalMode,
+    dnd5eFlightTargetElevationFeet,
+  } = playerMovement
   const clearPlayerCombatUI = () => {
-    setShowMoveRange(false)
-    setDnd5eCarefulMovement(false)
-    setDnd5eStandFromProne(true)
-    setDnd5eTraversalMode('walk')
+    playerMovement.clear()
     setDnd5eItemAreaTargeting(null)
     setDnd5eItemCreatureTargeting(null)
     setDnd5ePluginAreaTargeting(null)
@@ -1222,6 +1245,12 @@ export default function MapsPage() {
     const timer = window.setTimeout(() => setSharedRollConfirmationPrompt(null), 0)
     return () => window.clearTimeout(timer)
   }, [combatActive])
+
+  useEffect(() => {
+    if (!combatActive || geometryTool !== 'elevation') return
+    const timer = window.setTimeout(() => setGeometryTool('select'), 0)
+    return () => window.clearTimeout(timer)
+  }, [combatActive, geometryTool])
 
   useEffect(() => {
     settlementModeRef.current = settlementMode
@@ -1643,15 +1672,41 @@ export default function MapsPage() {
       : { ...activeMap, tokens: displayActiveMapTokens }
     : null
   const displayTokensById = new Map((displayActiveMap?.tokens ?? []).map((token) => [token.id, token]))
+  const displayCharactersById = new Map(characters.map((character) => [character.id, character]))
   const displayInitiativeOrder = initiativeOrder.map((entry) => {
     const token = displayTokensById.get(entry.tokenId)
-    if (!token || (token.emoji === entry.emoji && token.label === entry.label)) return entry
-    return { ...entry, emoji: token.emoji, label: token.label }
+    const character = token?.characterId ? displayCharactersById.get(token.characterId) : undefined
+    const initiativePortrait = character?.initiativePortrait ?? token?.portrait
+    if (!token || (
+      token.emoji === entry.emoji &&
+      token.label === entry.label &&
+      initiativePortrait === entry.portrait &&
+      token.portraitImageId === entry.portraitImageId
+    )) return entry
+    return {
+      ...entry,
+      emoji: token.emoji,
+      label: token.label,
+      portrait: initiativePortrait,
+      portraitImageId: token.portraitImageId,
+    }
   })
   const activeMapId = activeMap?.id
   const activeMapTabletop = activeMapId
     ? mapTabletopForMap(mapTabletopState, activeMapId)
     : { pings: [], annotations: [], focus: null }
+  const { projectiles: activeCombatProjectiles } = useCombatPresentationCoordinator(displayActiveMap)
+  const sceneTriggerZones = activeMapId
+    ? sceneOrchestration.scenes
+        .filter((scene) => scene.mapId === activeMapId)
+        .flatMap((scene) => scene.triggers.map((trigger) => ({
+          sceneId: scene.id,
+          triggerId: trigger.id,
+          name: trigger.name,
+          enabled: trigger.enabled,
+          region: trigger.region,
+        })))
+    : []
 
   useEffect(() => subscribeSharedEvent(MAP_TABLETOP_CHANNEL, (event) => {
     setMapTabletopState((current) => reduceMapTabletopState(current, event))
@@ -1835,6 +1890,9 @@ export default function MapsPage() {
       maxHp,
       creatureType: linked ? '类人生物' : token.poolId ? getDnd5eSrdMonster(token.poolId)?.creatureType : undefined,
       conditions: linked?.conditions ?? token.dnd5eCombatState?.conditions ?? [],
+      sleepingBySpell: targetCombatState?.activeEffects?.some((effect) =>
+        effect.standardCondition === 'unconscious' && effect.source.kind === 'spell' && effect.source.rulesId === 'sleep',
+      ) === true,
       ongoingSpellEffects,
       distanceFeet: activeCharToken && activeMap
         ? tokenFootprintDistanceCells(activeCharToken, token, activeMap) * Math.max(1, activeMap.feetPerCell ?? 5)
@@ -2276,6 +2334,8 @@ export default function MapsPage() {
   })
 
   const canControlPlayerTurn =
+    !isDM &&
+    !isSpectator &&
     combatActive &&
     playerAuthorityReadyForCurrentCombat &&
     usesAutomatedPlayerSettlement(settlementMode) &&
@@ -2284,16 +2344,20 @@ export default function MapsPage() {
     turnCharacter.currentHp > 0 &&
     !!currentInitiativeToken &&
     isTokenAlive(currentInitiativeToken, characters) &&
-    (isDM || (!pendingPlayerAction && turnCharacter.id === playerChar?.id))
+    !pendingPlayerAction &&
+    turnCharacter.id === playerChar?.id
 
   const canControlDeathSaveTurn =
+    !isDM &&
+    !isSpectator &&
     combatActive &&
     playerAuthorityReadyForCurrentCombat &&
     usesAutomatedPlayerSettlement(settlementMode) &&
     currentInitiativeToken?.type === 'player' &&
     !!turnCharacter &&
     characterNeedsDeathSave(turnCharacter) &&
-    (isDM || (!pendingPlayerAction && turnCharacter.id === playerChar?.id))
+    !pendingPlayerAction &&
+    turnCharacter.id === playerChar?.id
 
   const playerCombatLocked = !isDM && playerCombatEndedLocked && !combatActive
 
@@ -2330,15 +2394,19 @@ export default function MapsPage() {
   const manualDiceRollerName = isDM
     ? getRoomSession()?.displayName || 'DM'
     : playerChar?.name || getRoomSession()?.displayName || '玩家'
+  const mapDiceCharacter = activeChar ?? turnCharacter ?? playerChar
+  const mapDiceTurnEconomy = currentInitiativeToken && mapDiceCharacter && mapDiceCharacter.id === turnCharacter?.id
+    ? normalizeDnd5eTurnEconomyCounts(
+        dnd5eTurnEconomyByToken[currentInitiativeToken.id]
+          ?? createDnd5eTurnEconomyCounts(
+            `${combatId}:${round}:${currentInitiativeToken.id}`,
+            dnd5eEffectiveWalkingSpeed(mapDiceCharacter),
+          ),
+        dnd5eEffectiveWalkingSpeed(mapDiceCharacter),
+      )
+    : activeCharDnd5eTurnEconomy
 
-  const handleManualDiceRoll = async (input: {
-    count: number
-    sides: number
-    bonus: number
-    label: string
-    visibility: 'public' | 'dm'
-  }) => {
-    if (!supportsManualDice(settlementModeRef.current, isDM ? 'dm' : 'player')) return
+  const handleMapFreeDiceRoll = async (input: MapFreeDiceRollRequest) => {
     const isPrivate = isDM && input.visibility === 'dm'
     const values = await rollDiceBoxValues(
       input.count,
@@ -2369,6 +2437,11 @@ export default function MapsPage() {
         `骰面：${values.join('、')}｜最终结果 ${total}｜公开明骰`,
       ],
     )
+  }
+
+  const handleManualDiceRoll = async (input: MapFreeDiceRollRequest) => {
+    if (!supportsManualDice(settlementModeRef.current, isDM ? 'dm' : 'player')) return
+    await handleMapFreeDiceRoll(input)
   }
 
   const handleManualSettlement = (
@@ -2502,14 +2575,13 @@ export default function MapsPage() {
     }
   }, [isDM, playerCharacterId, activeCharId])
 
-  const onPanelClick = (charId: string, panel: CharDockPanel) => {
-    if (activeCharId === charId && charPanel === panel) {
-      closeCharDock()
-      return
-    }
-    setActiveCharId(charId)
-    setCharPanel(panel)
-  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCombatHotbarSpellFocusId(undefined)
+      setCombatHotbarSelectionId(undefined)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeCharId])
 
   // 每个 token 的生命值（角色取关联角色 HP，否则取 token 自身 HP）
   const tokenHp = (t: Token): { hp: number; max: number; temp?: number } | undefined => {
@@ -3546,10 +3618,11 @@ export default function MapsPage() {
     }
     const remainingMovementFeet = currentDnd5eTurnEconomy(myPlayerToken.id).movement.current
     const pos = snapTokenToGridCenter(point.x, point.y, myPlayerToken, activeMap)
-    const requestedElevationFeet = Math.max(-1_000, Math.min(10_000, Math.floor(dnd5eTargetElevationFeet)))
-    const targetElevationFeet = dnd5eTraversalMode === 'walk' || dnd5eTraversalMode === 'swim'
-      ? mapGeometryTerrainElevationAtPoint(activeGeometry, pos)
-      : requestedElevationFeet
+    const targetTerrainElevationFeet = mapGeometryTerrainElevationAtPoint(activeGeometry, pos)
+    const targetElevationFeet = playerMovement.targetElevationFeet(
+      targetTerrainElevationFeet,
+      myPlayerToken.elevationFeet ?? targetTerrainElevationFeet,
+    )
     const path = findMapGeometryPath({
       map: activeMap,
       geometry: activeGeometry,
@@ -3606,31 +3679,14 @@ export default function MapsPage() {
       return
     }
     const movedFeet = path.distanceFeet
-    if (!isDM) {
-      if (!sendPlayerMoveRequest(pos, movedFeet, movementCostFeet)) {
-        void showCombatNotice(
-          pendingPlayerActionRef.current ? '等待 DM 确认' : '无法移动',
-          pendingPlayerActionRef.current
-            ? '正在等待 DM 确认上一动作。'
-            : '本回合剩余移动尺数不足。',
-          'amber',
-        )
-      }
-      setShowMoveRange(false)
-      setDnd5eCarefulMovement(false)
-      setDnd5eStandFromProne(true)
-      return
-    }
-    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({
-      type: 'move-token',
-      targetPosition: pos,
-      dnd5eCarefulMovement,
-      dnd5eStandFromProne: standFromProne,
-      dnd5eTraversalMode,
-      targetElevationFeet,
-    }))) {
-      void showCombatNotice('无法移动', '当前移动无法提交给 DM 结算。', 'amber')
-      return
+    if (!sendPlayerMoveRequest(pos, movedFeet, movementCostFeet, targetElevationFeet)) {
+      void showCombatNotice(
+        pendingPlayerActionRef.current ? '等待 DM 确认' : '无法移动',
+        pendingPlayerActionRef.current
+          ? '正在等待 DM 确认上一动作。'
+          : '本回合剩余移动尺数不足。',
+        'amber',
+      )
     }
     setShowMoveRange(false)
     setDnd5eCarefulMovement(false)
@@ -3640,20 +3696,14 @@ export default function MapsPage() {
   const handleDisengage = () => {
     if (!canControlPlayerTurn || !turnCharacter) return
     if (disengagedCharIds.has(turnCharacter.id)) return
-    if (!isDM) {
-      if (!sendPlayerDisengageRequest()) {
-        void showCombatNotice(
-          pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
-          pendingPlayerActionRef.current
-            ? '正在等待 DM 确认上一动作。'
-            : '撤离需要消耗一个动作。',
-          'amber',
-        )
-      }
-      return
-    }
-    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'disengage' }))) {
-      void showCombatNotice('无法撤离', '当前撤离无法提交给 DM 结算。', 'amber')
+    if (!sendPlayerDisengageRequest()) {
+      void showCombatNotice(
+        pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
+        pendingPlayerActionRef.current
+          ? '正在等待 DM 确认上一动作。'
+          : '撤离需要消耗一个动作。',
+        'amber',
+      )
     }
   }
 
@@ -3717,9 +3767,7 @@ export default function MapsPage() {
     if (dnd5eCoreAreaMoveTargeting) {
       if (!aoeHighlight?.valid) return
       const payload = { areaId: dnd5eCoreAreaMoveTargeting.areaId, targetCell: cell }
-      const submitted = isDM
-        ? sendDmLocalDnd5ePersistentAreaMoveRequest(payload)
-        : sendPlayerDnd5ePersistentAreaMoveRequest(payload)
+      const submitted = sendPlayerDnd5ePersistentAreaMoveRequest(payload)
       if (submitted) {
         setDnd5eCoreAreaMoveTargeting(null)
         setAoePreviewCell(null)
@@ -3732,9 +3780,7 @@ export default function MapsPage() {
         instanceId: dnd5eItemAreaTargeting.instanceId,
         targetCell: cell,
       }
-      const submitted = isDM
-        ? sendDmLocalDnd5eItemUseRequest(payload)
-        : sendPlayerDnd5eItemUseRequest(payload)
+      const submitted = sendPlayerDnd5eItemUseRequest(payload)
       if (submitted) {
         setDnd5eItemAreaTargeting(null)
         setAoePreviewCell(null)
@@ -3773,9 +3819,11 @@ export default function MapsPage() {
         targetCell: cell,
         targetOrientation: aoeRectRotation as 0 | 1 | 2 | 3,
       }
-      const submitted = isDM
-        ? sendDmLocalDnd5ePluginActionRequest({ featureId: dnd5ePluginAreaTargeting.featureId }, undefined, target)
-        : sendPlayerDnd5ePluginActionRequest({ featureId: dnd5ePluginAreaTargeting.featureId }, undefined, target)
+      const submitted = sendPlayerDnd5ePluginActionRequest(
+        { featureId: dnd5ePluginAreaTargeting.featureId },
+        undefined,
+        target,
+      )
       if (submitted) {
         setDnd5ePluginAreaTargeting(null)
         setAoePreviewCell(null)
@@ -3808,9 +3856,7 @@ export default function MapsPage() {
         instanceId: dnd5eItemCreatureTargeting.instanceId,
         targetTokenId: targetToken.id,
       }
-      const submitted = isDM
-        ? sendDmLocalDnd5eItemUseRequest(payload)
-        : sendPlayerDnd5eItemUseRequest(payload)
+      const submitted = sendPlayerDnd5eItemUseRequest(payload)
       if (submitted) setDnd5eItemCreatureTargeting(null)
       return
     }
@@ -3915,9 +3961,7 @@ export default function MapsPage() {
             }
           : undefined,
       }
-      const sent = isDM
-        ? sendDmLocalDnd5eSpellCastRequest(payload)
-        : sendPlayerDnd5eSpellCastRequest(payload)
+      const sent = sendPlayerDnd5eSpellCastRequest(payload)
       if (sent) setDnd5eSpellTargeting(null)
       return
     }
@@ -3995,9 +4039,7 @@ export default function MapsPage() {
           return
         }
       }
-      const sent = isDM
-        ? sendDmLocalDnd5eWeaponAttackRequest(targetToken, dnd5eWeaponAttackOptions)
-        : sendPlayerDnd5eWeaponAttackRequest(targetToken, dnd5eWeaponAttackOptions)
+      const sent = sendPlayerDnd5eWeaponAttackRequest(targetToken, dnd5eWeaponAttackOptions)
       if (sent) {
         setDnd5eWeaponTargeting(null)
         setDnd5eWeaponAttackOptions(undefined)
@@ -4005,12 +4047,10 @@ export default function MapsPage() {
       return
     }
 
-    if (canControlPlayerTurn && tokenId === myPlayerToken?.id) {
-      if (isDM) setActiveCharId(turnCharacter!.id)
+    if (!isDM && canControlPlayerTurn && tokenId === myPlayerToken?.id) {
       setShowMoveRange((v) => !v)
       setDnd5eStandFromProne(true)
       setDnd5eTraversalMode('walk')
-      setDnd5eTargetElevationFeet(myPlayerToken.elevationFeet ?? 0)
       setSelectedTokenId(isDM ? tokenId : null)
       if (!isDM) setSelectedCharacterTokenId(null)
       return
@@ -4022,7 +4062,13 @@ export default function MapsPage() {
       return
     }
     if (tok?.characterId) {
-      setActiveCharId(tok.characterId)
+      if (isDM) {
+        setActiveCharId(null)
+        setCharPanel(null)
+        setCombatHotbarSelectionId(undefined)
+      } else {
+        setActiveCharId(tok.characterId)
+      }
       setSelectedCharacterTokenId(tokenId)
     }
     if (tok?.type === 'enemy') {
@@ -4071,17 +4117,26 @@ export default function MapsPage() {
     const img = new Image()
     img.onload = () => {
       void (async () => {
-        const gridDetect = await detectImageGrid(img)
-        await addMap({
-          name: file.name.replace(/\.[^.]+$/, ''),
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-          blob: file,
-          gridDetect,
-        })
-        URL.revokeObjectURL(objectUrl)
-        setSelectedTokenId(null)
+        try {
+          const gridDetect = await detectImageGrid(img)
+          await addMap({
+            name: file.name.replace(/\.[^.]+$/, ''),
+            width: img.naturalWidth,
+            height: img.naturalHeight,
+            blob: file,
+            gridDetect,
+          })
+          setSelectedTokenId(null)
+        } catch (cause) {
+          window.alert(cause instanceof Error ? cause.message : '地图上传失败，请稍后重试。')
+        } finally {
+          URL.revokeObjectURL(objectUrl)
+        }
       })()
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      window.alert('无法读取这张地图图片，请检查文件格式是否受支持。')
     }
     img.src = objectUrl
     e.target.value = ''
@@ -4178,11 +4233,15 @@ export default function MapsPage() {
     await Promise.all(writes)
   }
 
-  const startCombat = async (surprisedTokenIds: readonly string[] = []) => {
+  const startCombat = async (
+    surprisedTokenIds: readonly string[] = [],
+    options?: { clearStatuses?: boolean },
+  ) => {
     if (!activeMap) return
+    const combatMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     setShowSurpriseSetup(false)
     const surprisedSet = new Set(surprisedTokenIds)
-    const nextCombatId = runtimeId(`${activeMap.id}:combat`)
+    const nextCombatId = runtimeId(`${combatMap.id}:combat`)
     locallyEndedCombatIdRef.current = ''
     combatOutcomeNoticeCombatIdRef.current = ''
     combatEndingRef.current = false
@@ -4191,12 +4250,12 @@ export default function MapsPage() {
     setCombatExperienceBusy(false)
     combatIdRef.current = nextCombatId
     setCombatId(nextCombatId)
-    startCombatStatistics(nextCombatId, activeMap.id)
+    startCombatStatistics(nextCombatId, combatMap.id)
     clearEnemyTurnTimers()
     setCombatLog([])
     setCombatLogOpen(true)
     setPlayerCombatEndedLocked(false)
-    await clearCombatMessageQueues(activeMap.id, { clearCombatLog: true, combatId: nextCombatId })
+    await clearCombatMessageQueues(combatMap.id, { clearCombatLog: true, combatId: nextCombatId })
     enemyAppliedKeysRef.current.clear()
     dnd5eAttackUsageRef.current.clear()
     dnd5eActionSurgeTurnKeysRef.current.clear()
@@ -4209,7 +4268,7 @@ export default function MapsPage() {
     clearPlayerCombatUI()
     let recoveredCharacters = useCharacterStore.getState().characters.map(applyDnd5eInitiativeResourceFeatures)
     recoveredCharacters = recoveredCharacters.map((character) => {
-      const token = activeMap.tokens.find((candidate) => candidate.characterId === character.id)
+      const token = combatMap.tokens.find((candidate) => candidate.characterId === character.id)
       if (!token || (token.type !== 'player' && token.type !== 'enemy')) return character
       return {
         ...character,
@@ -4224,9 +4283,9 @@ export default function MapsPage() {
       const current = useCharacterStore.getState().characters.find((character) => character.id === recovered.id)
       if (current && current !== recovered) applyAuthorityCharacterUpdate(recovered.id, recovered)
     }
-    const order = buildInitiativeOrder(activeMap.tokens, recoveredCharacters)
+    const order = buildInitiativeOrder(combatMap.tokens, recoveredCharacters)
     const shouldClearStatuses =
-      isDM && window.confirm('开始战斗前是否清除当前地图所有参战单位的状态？')
+      isDM && (options?.clearStatuses ?? window.confirm('开始战斗前是否清除当前地图所有参战单位的状态？'))
     setInitiativeScroll(0)
     if (shouldClearStatuses) {
       recoveredCharacters = recoveredCharacters.map((character) => ({
@@ -4246,7 +4305,7 @@ export default function MapsPage() {
       }))
       for (const recovered of recoveredCharacters) applyAuthorityCharacterUpdate(recovered.id, recovered)
     }
-    const storedMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const storedMap = useMapStore.getState().maps.find((map) => map.id === combatMap.id) ?? combatMap
     const statusPreparedMap = shouldClearStatuses
       ? {
           ...storedMap,
@@ -6031,6 +6090,7 @@ export default function MapsPage() {
       let deflectMissilesUsed = false
       let shieldSpellUsed = false
       let standAgainstTideUsed = false
+      let didHit = false
       const protectionReactionTokenIds = new Set<string>()
       const cuttingWordsReactionTokenIds = new Set<string>()
       for (let index = 0; index < monsterAttack.attacks.length; index += 1) {
@@ -6127,6 +6187,7 @@ export default function MapsPage() {
           shieldSpellUsed = true
           if (!preview.critical) attackHit = attackTotal >= monsterAttack.targetArmorClass + 5
         }
+        if (attackHit) didHit = true
         const standAgainstTide = !attackHit && !shieldSpellReaction && !standAgainstTideUsed && tranquility.passed &&
           attackEntry.attack.mode !== 'ranged' && attackEntry.attack.reachFeet
           ? await buildDnd5eStandAgainstTideUse({
@@ -6226,7 +6287,14 @@ export default function MapsPage() {
         })
       }
 
-      const initialResolved = resolvePreparedDnd5eMonsterAttack({ prepared: monsterAttack, rolls: actionRolls })
+      const mechanicRolls = await rollDnd5eMonsterMechanics(
+        prepareDnd5eMonsterAfterHitMechanics(monsterAttack, didHit),
+      )
+      const initialResolved = resolvePreparedDnd5eMonsterAttack({
+        prepared: monsterAttack,
+        rolls: actionRolls,
+        mechanicRolls,
+      })
       if (!initialResolved.result.ok) return false
       const resolved = await settleDnd5eConcentrationChecks({
         result: initialResolved.result,
@@ -6968,6 +7036,62 @@ export default function MapsPage() {
     }
   }
 
+  const rollDnd5eMonsterMechanics = async (requirements: readonly {
+    actorId: string
+    actorName: string
+    mechanicId: string
+    mechanicName: string
+    targetId?: string
+    effects: readonly { effectId: string; effectName: string; count: number; sides: number; bonus: number }[]
+  }[]) => {
+    const results: Array<{
+      actorId: string
+      mechanicId: string
+      targetId?: string
+      effectRolls: { effectId: string; rolls: number[] }[]
+    }> = []
+    for (const requirement of requirements) {
+      const effectRolls: { effectId: string; rolls: number[] }[] = []
+      for (const effect of requirement.effects) {
+        const bonus = effect.bonus === 0 ? '' : effect.bonus > 0 ? `+${effect.bonus}` : String(effect.bonus)
+        const rolls = await rollDiceBoxValues(
+          effect.count,
+          effect.sides,
+          `${requirement.mechanicName}·${effect.effectName} ${effect.count}d${effect.sides}${bonus}`,
+          requirement.actorName,
+        )
+        effectRolls.push({ effectId: effect.effectId, rolls })
+      }
+      results.push({
+        actorId: requirement.actorId,
+        mechanicId: requirement.mechanicId,
+        targetId: requirement.targetId,
+        effectRolls,
+      })
+    }
+    return results
+  }
+
+  const logDnd5eMonsterMechanics = (events: readonly Dnd5eCombatEvent[]) => {
+    for (const event of events) {
+      if (event.type === 'monster-mechanic-triggered') {
+        const actorName = useMapStore.getState().maps
+          .find((map) => map.id === activeMap?.id)?.tokens.find((token) => token.id === event.actorId)?.label ?? '怪物'
+        pushCombatLog(`${actorName} 触发“${event.mechanicName}”，恢复 ${event.amount} 点生命值（当前 ${event.hpAfter}）。`, 'system')
+      } else if (event.type === 'monster-mechanic-v2-triggered') {
+        const actorName = useMapStore.getState().maps
+          .find((map) => map.id === activeMap?.id)?.tokens.find((token) => token.id === event.actorId)?.label ?? '怪物'
+        const details = event.outcomes.map((outcome) => {
+          if (outcome.kind === 'healing') return `恢复 ${outcome.amount ?? 0} 点生命值`
+          if (outcome.kind === 'temporary-hit-points') return `获得 ${outcome.amount ?? 0} 点临时生命值`
+          if (outcome.kind === 'damage') return `造成 ${outcome.amount ?? 0} 点伤害`
+          return `${outcome.applied ? '施加' : '未能施加'}状态 ${outcome.condition ?? ''}`
+        }).join('，')
+        pushCombatLog(`${actorName} 触发“${event.mechanicName}”${details ? `：${details}` : ''}。`, 'system')
+      }
+    }
+  }
+
   const settleDnd5eMonsterEndTurn = async (enemy: Token): Promise<boolean> => {
     if (!activeMap || dnd5eMonsterEndTurnSettlingRef.current) return false
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
@@ -7034,6 +7158,8 @@ export default function MapsPage() {
         ))[0]
         nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
       }
+      const currentMonsterMechanicRolls = await rollDnd5eMonsterMechanics(prepared.prepared.currentMonsterMechanicRolls)
+      const nextMonsterMechanicRolls = await rollDnd5eMonsterMechanics(prepared.prepared.nextMonsterMechanicRolls)
       const resolved = resolveDnd5ePlayerEndTurn({
         action,
         map: latestMap,
@@ -7041,7 +7167,9 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        currentMonsterMechanicRolls,
         nextMonsterRechargeRolls,
+        nextMonsterMechanicRolls,
       })
       if (!resolved.ok || !resolved.result.ok) return false
       const settled = await settleDnd5eConcentrationChecks({
@@ -7060,6 +7188,7 @@ export default function MapsPage() {
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
       applyDnd5eCombatApplication(settled.application)
+      logDnd5eMonsterMechanics(settled.result.events)
       applyDnd5eTurnAdvance(settled.result.state, roundRef.current)
       for (const save of settled.result.events.filter((event) => event.type === 'saving-throw-resolved')) {
         if (save.type !== 'saving-throw-resolved') continue
@@ -7122,7 +7251,7 @@ export default function MapsPage() {
       enemyTurnTimersRef.current.add(id)
       return
     }
-    const result = planDnd5eMonsterTurn(activeMap, enemy)
+    const result = planDnd5eMonsterTurn(activeMap, enemy, chars)
     if (result.newPosition && !isTokenMovementLocked(enemy)) {
       // a restrained/no-move enemy may still attack but cannot reposition.
       if (!isStillEnemyTurn()) return
@@ -7345,35 +7474,23 @@ export default function MapsPage() {
 
   const handleDodge = () => {
     if (!canControlPlayerTurn || !turnCharacter) return
-    if (!isDM) {
-      if (!sendPlayerDodgeRequest()) {
-        void showCombatNotice(
-          pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
-          pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '闪避需要消耗一个动作。',
-          'amber',
-        )
-      }
-      return
-    }
-    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'dodge' }))) {
-      void showCombatNotice('无法闪避', '当前闪避无法提交给 DM 结算。', 'amber')
+    if (!sendPlayerDodgeRequest()) {
+      void showCombatNotice(
+        pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
+        pendingPlayerActionRef.current ? '正在等待 DM 确认上一动作。' : '闪避需要消耗一个动作。',
+        'amber',
+      )
     }
   }
 
   const handleDnd5eBasicAction = (payload: Dnd5eBasicActionPayload) => {
     if (!canControlPlayerTurn || !turnCharacter) return
-    if (!isDM) {
-      if (!sendPlayerBasicActionRequest(payload)) {
-        void showCombatNotice(
-          pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
-          pendingPlayerActionRef.current ? '正在等待 DM 结算上一动作。' : '该基础动作需要一个可用动作和合法目标。',
-          'amber',
-        )
-      }
-      return
-    }
-    if (!submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'dnd5e-basic-action', dnd5eBasicAction: payload }))) {
-      void showCombatNotice('无法执行基础动作', '当前动作无法提交给 DM 权威结算。', 'amber')
+    if (!sendPlayerBasicActionRequest(payload)) {
+      void showCombatNotice(
+        pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
+        pendingPlayerActionRef.current ? '正在等待 DM 结算上一动作。' : '该基础动作需要一个可用动作和合法目标。',
+        'amber',
+      )
     }
   }
 
@@ -7502,6 +7619,7 @@ export default function MapsPage() {
         round: liveRound,
         initiativeIndex: liveIndex,
         currentTokenId: current?.tokenId,
+        characters: useCharacterStore.getState().characters,
         processedActionIds: processedPlayerActionIdsRef.current,
         seenActionIds: seenPlayerActionIdsRef.current,
       },
@@ -7894,7 +8012,8 @@ export default function MapsPage() {
               : payload.kind === 'use-object' ? '使用物件'
                 : payload.kind === 'grapple' ? '擒抱'
                   : payload.kind === 'shove' ? `推撞（${payload.outcome === 'prone' ? '击倒' : '推开'}）`
-                    : '挣脱擒抱'
+                    : payload.kind === 'escape-grapple' ? '挣脱擒抱'
+                      : '唤醒睡眠生物'
       pushHeadlessCombatLog(`${dnd5eActionActor.name} 执行${label}。`, 'turn', resolved.result.events)
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
@@ -7956,6 +8075,7 @@ export default function MapsPage() {
         ))[0]
         nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
       }
+      const nextMonsterMechanicRolls = await rollDnd5eMonsterMechanics(preparedTurn.prepared.nextMonsterMechanicRolls)
       const actorCombatant = preparedTurn.prepared.state.combatants[dnd5eActionActorToken.id]
       const deathSaveD20 = await rollDiceBoxD20('死亡豁免', dnd5eActionActor.name)
       const blessRoll = actorCombatant && dnd5eCombatantHasConcentrationEffect(
@@ -7977,6 +8097,7 @@ export default function MapsPage() {
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
         nextMonsterRechargeRolls,
+        nextMonsterMechanicRolls,
       }, { transactionId: action.id, mapId: authorityMap.id })
       if (!result.ok) {
         acknowledgePlayerAction(action, 'rejected', result.reason)
@@ -7997,6 +8118,7 @@ export default function MapsPage() {
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
       applyDnd5eCombatApplication(settled.application)
+      logDnd5eMonsterMechanics(settled.result.events)
       const deathSave = settled.result.events.find((event) => event.type === 'death-save-resolved')
       if (deathSave?.type === 'death-save-resolved') {
         const outcome = deathSave.currentHp > 0
@@ -8080,6 +8202,8 @@ export default function MapsPage() {
         ))[0]
         nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
       }
+      const currentMonsterMechanicRolls = await rollDnd5eMonsterMechanics(preparedEndTurn.prepared.currentMonsterMechanicRolls)
+      const nextMonsterMechanicRolls = await rollDnd5eMonsterMechanics(preparedEndTurn.prepared.nextMonsterMechanicRolls)
       const dnd5eEndTurn = resolveDnd5ePlayerEndTurn({
         action,
         map: authorityMap,
@@ -8087,7 +8211,9 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        currentMonsterMechanicRolls,
         nextMonsterRechargeRolls,
+        nextMonsterMechanicRolls,
       })
       if (!dnd5eEndTurn.ok) {
         acknowledgePlayerAction(action, 'rejected', dnd5eEndTurn.reason)
@@ -8115,6 +8241,7 @@ export default function MapsPage() {
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
       applyDnd5eCombatApplication(settledEndTurn.application)
+      logDnd5eMonsterMechanics(settledEndTurn.result.events)
       if (settledEndTurn.result.events.some((event) =>
         event.type === 'class-state-changed' && event.stateKey === 'rage' && !event.active,
       )) pushCombatLog(`${dnd5eEndTurn.actorName} 的狂暴结束。`, 'system')
@@ -9721,7 +9848,8 @@ export default function MapsPage() {
           cuttingWordsReactionTokenIds.add(cuttingWordsDamageCandidate.token.id)
         }
       }
-      const sharedDamageTarget = effectRolls.length > 0 && spellCast.spell.effect !== 'healing'
+      const sharedDamageTarget = effectRolls.length > 0 &&
+        spellCast.spell.effect !== 'healing' && spellCast.spell.effect !== 'sleep-hit-point-pool'
         ? spellCast.targetTokens.find((targetToken) =>
             !tranquilityPreventedTargetIds.has(targetToken.id) &&
             (spellCast.spell.id !== 'magic-missile' || !shieldSpellReactionTargetIds.includes(targetToken.id)),
@@ -9819,6 +9947,35 @@ export default function MapsPage() {
         requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
       let spellApplication = resolved.application
+      const createdCoreAreaId = `core-spell-area:${action.id}`
+      if (spellApplication.map.dnd5ePluginAreas?.some((area) => area.id === createdCoreAreaId)) {
+        const createdCandidates = collectDnd5ePersistentAreaTriggers({
+          map: spellApplication.map,
+          timing: 'on-create',
+          round: liveRound,
+          areaId: createdCoreAreaId,
+          turnKey: `${liveRound}:${currentInitiativeToken?.id ?? action.actorTokenId}`,
+        })
+        const createdSettled = await settleDnd5ePersistentAreaCandidates({
+          candidates: createdCandidates,
+          map: spellApplication.map,
+          characters: spellApplication.characters,
+          round: liveRound,
+        })
+        for (const log of createdSettled.logs) pushCombatLog(log, 'system')
+        spellApplication = {
+          map: createdSettled.map,
+          characters: createdSettled.characters,
+          changedCharacterIds: createdSettled.characters.flatMap((character) => {
+            const before = useCharacterStore.getState().characters.find((candidate) => candidate.id === character.id)
+            return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+          }),
+          changedTokenIds: createdSettled.map.tokens.flatMap((token) => {
+            const before = authorityMap.tokens.find((candidate) => candidate.id === token.id)
+            return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+          }),
+        }
+      }
       const forcedMovementTokenIds = new Set([
         ...forcedMovements.map((movement) => movement.targetId),
         ...(targetAttacks ?? []).flatMap((attack) => attack.repellingBlastPushTo ? [attack.targetId] : []),
@@ -9846,11 +10003,17 @@ export default function MapsPage() {
           }),
         }
       }
+      const fireBoltPresentation = fireBoltPresentationForSettlement({
+        spellId: spellCast.spell.id,
+        transactionId: action.id,
+        mapId: authorityMap.id,
+        actorTokenId: spellCast.actorToken.id,
+        events: resolved.result.events,
+      })
+      if (fireBoltPresentation) await publishFireBoltPresentation(fireBoltPresentation)
       applyDnd5eCombatApplication(spellApplication)
-      const areasChanged = JSON.stringify(spellApplication.map.dnd5ePluginAreas ?? []) !==
-        JSON.stringify(authorityMap.dnd5ePluginAreas ?? [])
-      const effectTokensChanged = JSON.stringify(spellApplication.map.tokens.filter((token) => token.dnd5eSpellEffect)) !==
-        JSON.stringify(authorityMap.tokens.filter((token) => token.dnd5eSpellEffect))
+      const { areasChanged, effectTokensChanged } =
+        spellSettlementMapLayerChanges(authorityMap, spellApplication.map)
       if (areasChanged || effectTokensChanged) {
         const latestMap = useMapStore.getState().maps.find((map) => map.id === authorityMap.id) ?? authorityMap
         applyAuthorityMapUpdate(authorityMap.id, {
@@ -9896,13 +10059,11 @@ export default function MapsPage() {
           (economy) => spendDnd5eTurnResource(economy, 'reaction').economy,
         )
       }
-      const spentTurnResource = resolved.result.events.find(
-        (event) => event.type === 'turn-resource-spent' && (event.resource === 'action' || event.resource === 'bonusAction'),
-      )
-      if (spentTurnResource?.type === 'turn-resource-spent' && (spentTurnResource.resource === 'action' || spentTurnResource.resource === 'bonusAction')) {
+      const spentTurnResource = spellSettlementSpentTurnResource(resolved.result.events)
+      if (spentTurnResource) {
         updateDnd5eTurnEconomy(
           action.actorTokenId,
-          (economy) => spendDnd5eTurnResource(economy, spentTurnResource.resource as 'action' | 'bonusAction').economy,
+          (economy) => spendDnd5eTurnResource(economy, spentTurnResource).economy,
           liveRound,
         )
       }
@@ -9981,6 +10142,15 @@ export default function MapsPage() {
               : `${spellCast.targetToken.label} 当前生命值高于100，法术未产生效果`
           : spellCast.spell.effect === 'active-effect'
             ? `${spellCast.targetTokens.map((target) => target.label).join('、')} 获得${spellCast.spell.name}效果`
+          : spellCast.spell.effect === 'sleep-hit-point-pool'
+            ? (() => {
+                const sleep = resolved.result.events.find((event) => event.type === 'sleep-resolved')
+                if (!sleep || sleep.type !== 'sleep-resolved') return '睡眠生命值池已结算'
+                const affectedNames = sleep.affectedTargetIds.map((targetId) =>
+                  spellCast.targetTokens.find((candidate) => candidate.id === targetId)?.label ?? targetId,
+                )
+                return `生命值池 ${sleep.hitPointPool}；${affectedNames.length > 0 ? `${affectedNames.join('、')}陷入魔法睡眠` : '没有生物受到影响'}；剩余 ${sleep.remainingHitPoints}`
+              })()
           : '未产生生命值变化'
       pushHeadlessCombatLog(
         `${spellCast.actor.name} 施放${spellCast.spell.name}（${spellCast.slotLevel === 0 ? '戏法' : `${spellCast.slotLevel}环`}），${tranquilityPrevented ? '未通过宁静心境的感知豁免，法术未能指定目标' : damage > 0 ? `造成 ${damage} 点伤害` : healing > 0 ? `恢复 ${healing} 点生命` : nonHpEffect}${saveDetail}${sculptedDetail}${metamagicDetail}${empoweredDetail}${draconicResistanceDetail}${cuttingWordsDamageDetail}${overchannelDetail}。`,
@@ -12849,116 +13019,6 @@ export default function MapsPage() {
     return true
   }
 
-  const createDmLocalPlayerAction = (
-    patch: SharedPlayerActionPatch,
-  ): SharedPlayerActionState | null => {
-    return createDmLocalPlayerActionEnvelope({
-      isDm: isDM,
-      mapId: activeMap?.id,
-      combatId,
-      turnCharacter,
-      currentInitiativeToken,
-      round: roundRef.current,
-      initiativeIndex: initiativeIndexRef.current,
-      nextSeq: () => {
-        playerActionSeqRef.current += 1
-        return playerActionSeqRef.current
-      },
-      patch,
-    })
-  }
-
-  const submitDmLocalPlayerAction = (action: SharedPlayerActionState | null) => {
-    if (!action) return false
-    void handlePlayerActionRequest(action)
-    return true
-  }
-
-  const sendDmLocalDnd5eWeaponAttackRequest = (targetToken: Token, options?: Dnd5eWeaponAttackOptions) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-weapon-attack',
-        targetTokenId: targetToken.id,
-        dnd5eWeaponAttackOptions: options,
-      }),
-    )
-
-  const sendDmLocalDnd5eFighterFeatureRequest = (feature: Dnd5eFighterFeatureId) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-fighter-feature',
-        dnd5eFighterFeature: feature,
-      }),
-    )
-
-  const sendDmLocalDnd5eClassFeatureRequest = (payload: Dnd5eClassFeaturePayload) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-class-feature',
-        dnd5eClassFeature: payload,
-      }),
-    )
-
-  const sendDmLocalDnd5ePluginActionRequest = (
-    payload: Dnd5ePluginActionPayload,
-    targetTokenId?: string,
-    area?: { targetTokenIds: string[]; targetCell: GridCell; targetOrientation?: 0 | 1 | 2 | 3 },
-  ) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-plugin-action',
-        targetTokenId,
-        targetTokenIds: area?.targetTokenIds,
-        targetCell: area?.targetCell,
-        targetOrientation: area?.targetOrientation,
-        dnd5ePluginAction: payload,
-      }),
-    )
-
-  const sendDmLocalDnd5eItemUseRequest = (payload: Dnd5eItemUsePayload) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-item-use',
-        dnd5eItemUse: payload,
-      }),
-    )
-
-  const sendDmLocalDnd5eAbilityCheckRequest = (payload: Dnd5eAbilityCheckPayload) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-ability-check',
-        dnd5eAbilityCheck: payload,
-      }),
-    )
-
-  const sendDmLocalDnd5eSpellCastRequest = (payload: Dnd5eSpellCastPayload) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-spell-cast',
-        targetTokenId: payload.targetTokenId,
-        targetTokenIds: payload.targetTokenIds,
-        targetCell: payload.areaTargetCell,
-        dnd5eSpellCast: payload,
-      }),
-    )
-
-  const sendDmLocalDnd5ePersistentAreaMoveRequest = (payload: Dnd5ePersistentAreaMovePayload) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-persistent-area-move',
-        targetCell: payload.targetCell,
-        dnd5ePersistentAreaMove: payload,
-      }),
-    )
-
-  const sendDmLocalDnd5eAdjudicatedSpellRequest = (payload: Dnd5eAdjudicatedSpellPayload) =>
-    submitDmLocalPlayerAction(
-      createDmLocalPlayerAction({
-        type: 'dnd5e-adjudicated-spell',
-        dnd5eAdjudicatedSpell: payload,
-      }),
-    )
-
   const createPlayerActionRequest = (
     patch: SharedPlayerActionPatch,
     actorOverride?: { tokenId: string; characterId: string },
@@ -12989,13 +13049,9 @@ export default function MapsPage() {
 
   const sendDnd5eDeathSaveRequest = () => {
     if (!canControlDeathSaveTurn || !turnCharacter || !activeMap || !currentInitiativeToken) return false
-    const action = isDM
-      ? createDmLocalPlayerAction({ type: 'dnd5e-death-save' })
-      : createPlayerActionRequest({ type: 'dnd5e-death-save' })
+    const action = createPlayerActionRequest({ type: 'dnd5e-death-save' })
     if (!action) return false
-    return isDM
-      ? submitDmLocalPlayerAction(action)
-      : submitPlayerActionRequest(action, `${turnCharacter.name} 进行死亡豁免`)
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 进行死亡豁免`)
   }
 
   const sendPlayerDnd5eWeaponAttackRequest = (targetToken: Token, options?: Dnd5eWeaponAttackOptions) => {
@@ -13086,7 +13142,7 @@ export default function MapsPage() {
       return true
     }
     const payload: Dnd5eItemUsePayload = { instanceId }
-    return isDM ? sendDmLocalDnd5eItemUseRequest(payload) : sendPlayerDnd5eItemUseRequest(payload)
+    return sendPlayerDnd5eItemUseRequest(payload)
   }
 
   const sendPlayerDnd5eAbilityCheckRequest = (payload: Dnd5eAbilityCheckPayload) => {
@@ -13228,9 +13284,7 @@ export default function MapsPage() {
           }
         : undefined,
     }
-    const sent = isDM
-      ? sendDmLocalDnd5eSpellCastRequest(payload)
-      : sendPlayerDnd5eSpellCastRequest(payload)
+    const sent = sendPlayerDnd5eSpellCastRequest(payload)
     if (sent) setDnd5eSpellTargeting(null)
     return sent
   }
@@ -13259,7 +13313,12 @@ export default function MapsPage() {
       : current)
   }
 
-  const sendPlayerMoveRequest = (targetPosition: { x: number; y: number }, movedFeet: number, movementCostFeet: number) => {
+  const sendPlayerMoveRequest = (
+    targetPosition: { x: number; y: number },
+    movedFeet: number,
+    movementCostFeet: number,
+    targetElevationFeet: number,
+  ) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken || !myPlayerToken) return false
     if (currentDnd5eTurnEconomy(currentInitiativeToken.id).movement.current < movementCostFeet) return false
     const isProne = turnCharacter.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
@@ -13269,7 +13328,7 @@ export default function MapsPage() {
       dnd5eCarefulMovement,
       dnd5eStandFromProne: isProne ? dnd5eStandFromProne : undefined,
       dnd5eTraversalMode,
-      targetElevationFeet: dnd5eTargetElevationFeet,
+      targetElevationFeet,
     })
     if (!action) return false
     return submitPlayerActionRequest(
@@ -13433,6 +13492,7 @@ export default function MapsPage() {
   }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey, resolveSurpriseForToken, tokenIsStillSurprised])
 
   useEffect(() => {
+    if (isDM) return
     if (!canControlPlayerTurn) {
       const timer = window.setTimeout(() => clearPlayerCombatUIEvent(), 0)
       return () => window.clearTimeout(timer)
@@ -13440,7 +13500,7 @@ export default function MapsPage() {
     if (!turnCharacter?.id || currentInitiativeToken?.type !== 'player') return
     const timer = window.setTimeout(() => setActiveCharId(turnCharacter.id), 0)
     return () => window.clearTimeout(timer)
-  }, [canControlPlayerTurn, turnCharacter?.id, currentInitiativeToken?.type])
+  }, [canControlPlayerTurn, currentInitiativeToken?.type, isDM, turnCharacter?.id])
 
   useEffect(() => {
     if (!combatActive || !activeMapId || !currentInitiativeToken?.id) return
@@ -13478,14 +13538,72 @@ export default function MapsPage() {
     if (combatActive && canControlPlayerTurn && turnCharacter) {
       multiStrikeHitsRef.current = clearCharacterScopedRecord(multiStrikeHitsRef.current, turnCharacter.id)
       setDisengagedCharIds((prev) => removeDisengagedCharacterId(prev, turnCharacter.id))
-      if (isDM) {
-        submitDmLocalPlayerAction(createDmLocalPlayerAction({ type: 'end-turn' }))
-      } else {
-        sendPlayerEndTurnRequest()
-      }
+      sendPlayerEndTurnRequest()
       return
     }
   }
+
+  const handleCombatHotbarCommand = (
+    command: Dnd5eCombatActionCommand,
+    descriptor: Dnd5eCombatActionDescriptorV1,
+  ) => {
+    if (!activeChar) return
+    setCombatHotbarSelectionId(descriptor.id)
+    if (command.kind === 'select-move') {
+      setDnd5eWeaponTargeting(null)
+      setDnd5eWeaponAttackOptions(undefined)
+      setDnd5eSpellTargeting(null)
+      setDnd5eItemAreaTargeting(null)
+      setDnd5eItemCreatureTargeting(null)
+      playerMovement.begin(myPlayerToken?.elevationFeet ?? 0)
+      return
+    }
+    if (command.kind === 'select-weapon-target') {
+      setShowMoveRange(false)
+      setDnd5eSpellTargeting(null)
+      setDnd5eItemAreaTargeting(null)
+      setDnd5eItemCreatureTargeting(null)
+      setDnd5eWeaponAttackOptions(undefined)
+      setDnd5eWeaponTargeting(activeChar.id)
+      return
+    }
+    if (command.kind === 'basic-action') {
+      handleDnd5eBasicAction({ kind: command.action })
+      return
+    }
+    if (command.kind === 'dodge') {
+      handleDodge()
+      return
+    }
+    if (command.kind === 'disengage') {
+      handleDisengage()
+      return
+    }
+    if (command.kind === 'open-panel') {
+      setActiveCharId(activeChar.id)
+      setCharPanel(command.panel)
+      if (command.panel === 'spells' && command.focusId) setCombatHotbarSpellFocusId(command.focusId)
+      return
+    }
+    if (command.kind === 'use-item') {
+      sendDnd5eItemUseRequest(command.instanceId)
+      return
+    }
+    handlePlayerEndTurn()
+  }
+
+  let combatHotbarActiveActionId = combatHotbarSelectionId
+  if (dnd5eSpellTargeting && dnd5eSpellTargeting.characterId === activeChar?.id) {
+    combatHotbarActiveActionId = `spell:${dnd5eSpellTargeting.castingClassId}:${dnd5eSpellTargeting.spellId}`
+  }
+  if (dnd5eItemCreatureTargeting && dnd5eItemCreatureTargeting.characterId === activeChar?.id) {
+    combatHotbarActiveActionId = `item:${dnd5eItemCreatureTargeting.instanceId}`
+  }
+  if (dnd5eItemAreaTargeting && dnd5eItemAreaTargeting.characterId === activeChar?.id) {
+    combatHotbarActiveActionId = `item:${dnd5eItemAreaTargeting.instanceId}`
+  }
+  if (showMoveRange && canControlPlayerTurn) combatHotbarActiveActionId = 'system:move'
+  if (dnd5eWeaponTargeting === activeChar?.id) combatHotbarActiveActionId = 'system:weapon-attack'
 
   const modeToggle = forcedMode || !mode ? null : <MapsModeToggle mode={mode} onChooseMode={chooseMode} />
   const playerWaitingForDm =
@@ -13532,14 +13650,15 @@ export default function MapsPage() {
               targetSelectTokenIds={[]}
               isDM={isDM}
               tabletopTool={
-                isDM && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode
+                isDM && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget
                   ? mapTabletopTool
                   : 'none'
               }
               tabletopPings={activeMapTabletop.pings}
               tabletopAnnotations={activeMapTabletop.annotations}
               tabletopFocus={activeMapTabletop.focus}
-              pingEnabled={!isSpectator && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
+              projectiles={activeCombatProjectiles}
+              pingEnabled={!isSpectator && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               onMapPing={(point) => void publishMapTabletopPing(activeMap.id, point)}
               onTabletopPoint={(point) => {
                 if (!isDM) return
@@ -13550,7 +13669,7 @@ export default function MapsPage() {
                 if (!isDM) return
                 void publishMapTabletopAnnotation({ mapId: activeMap.id, shape, from, to })
               }}
-              measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode}
+              measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               hpByToken={hpByToken}
               dnd5eConditionsByToken={dnd5eConditionsByToken}
               onDnd5eConditionClick={(tokenId) => {
@@ -13576,7 +13695,7 @@ export default function MapsPage() {
               moveCircle={activeMoveCircle}
               onMoveSelect={handleMoveSelect}
               moveTraversalMode={dnd5eTraversalMode}
-              moveTargetElevationFeet={dnd5eTargetElevationFeet}
+              moveTargetElevationFeet={dnd5eFlightTargetElevationFeet ?? undefined}
               difficultTerrainMultiplierAtPosition={(token, position) =>
                 dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position })}
               speedCostMultiplierAtPosition={(token, position) =>
@@ -13593,7 +13712,7 @@ export default function MapsPage() {
                 setDnd5ePluginAreaTargeting(null)
                 setAoePreviewCell(null)
               }}
-              deleteSelectMode={isDM && deleteSelectMode && !showMoveRange && !gridAdjustMode && !measureMode && !fogEditMode && !geometryEditMode}
+              deleteSelectMode={isDM && deleteSelectMode && !showMoveRange && !gridAdjustMode && !measureMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               onDeleteBoxConfirm={handleDeleteBoxConfirm}
               onDeleteCancel={() => setDeleteSelectMode(false)}
               fog={activeFog}
@@ -13614,31 +13733,50 @@ export default function MapsPage() {
               selectedGeometryEntityId={selectedGeometryEntityId}
               geometryPreviewAsPlayer={geometryPreviewAsPlayer}
               geometrySnapToGrid={geometrySnapToGrid}
+              geometryTerrainEditingLocked={combatActive}
               visionSourceTokenIds={visionSourceTokenIds}
               exploredVisionPolygons={exploredVisionPolygons}
               onGeometryEntityCommit={(entity) => {
-                if (isDM) addGeometryEntity(activeMap.id, entity)
+                if (!isDM || (combatActive && entity.kind === 'obstacle' && entity.terrainRegion)) return
+                addGeometryEntity(activeMap.id, entity)
               }}
               onGeometryEntitySelect={selectGeometryEntity}
-              onGeometryEntityDelete={(entityId) => removeGeometryEntity(activeMap.id, entityId)}
+              onGeometryEntityDelete={(entityId) => {
+                const entity = [
+                  ...(activeGeometry?.walls ?? []),
+                  ...(activeGeometry?.doors ?? []),
+                  ...(activeGeometry?.windows ?? []),
+                  ...(activeGeometry?.obstacles ?? []),
+                  ...(activeGeometry?.lights ?? []),
+                ].find((candidate) => candidate.id === entityId)
+                if (combatActive && entity?.kind === 'obstacle' && (
+                  entity.terrainRegion || (entity.terrainElevationFeet ?? 0) !== 0
+                )) return
+                removeGeometryEntity(activeMap.id, entityId)
+              }}
               onGeometryEntityPointsChange={(entityId, points) => {
-                if (isDM) setGeometryEntityPoints(activeMap.id, entityId, points)
+                const entity = activeGeometry?.obstacles.find((candidate) => candidate.id === entityId)
+                if (isDM && !(combatActive && entity && (
+                  entity.terrainRegion || (entity.terrainElevationFeet ?? 0) !== 0
+                ))) {
+                  setGeometryEntityPoints(activeMap.id, entityId, points)
+                }
               }}
               onGeometryDoorInteract={!isDM && !isSpectator ? setSelectedDoorInteractionId : undefined}
-              geometrySearchMode={!isDM && !isSpectator && !!dnd5eSecretSearchMethod}
-              onGeometrySearch={!isDM && !isSpectator && dnd5eSecretSearchMethod ? (point) => {
-                sendPlayerDnd5eMapInteractionRequest({
-                  operation: 'search',
-                  point,
-                  method: dnd5eSecretSearchMethod,
-                })
-                setDnd5eSecretSearchMethod(null)
-              } : undefined}
               onGeometryEditCancel={() => {
                 setGeometryEditMode(false)
                 setGeometryPreviewAsPlayer(false)
                 selectGeometryEntity(null)
               }}
+              sceneTriggerZones={sceneEditorVisible ? sceneTriggerZones : []}
+              sceneEditMode={isDM && !!sceneDrawTarget}
+              sceneRegionKind={sceneDrawTarget?.kind}
+              onSceneRegionCommit={(region) => {
+                if (!sceneDrawTarget) return
+                setSceneTriggerRegion(sceneDrawTarget.sceneId, sceneDrawTarget.triggerId, region)
+                setSceneDrawTarget(null)
+              }}
+              onSceneEditCancel={() => setSceneDrawTarget(null)}
               onTokenMoveBlocked={() => {
                 pushCombatLog('移动被地图墙体、关闭的门或障碍物阻挡。', 'system')
               }}
@@ -13656,15 +13794,19 @@ export default function MapsPage() {
                 setCharPanel(null)
               }}
               lockDragTokenIds={
-                (activeAoeTargeting || dnd5eItemAreaTargeting) && activeAoeCasterId
-                    ? (activeMap.tokens
-                        .filter((t) => t.characterId === activeAoeCasterId)
-                        .map((t) => t.id) ?? [])
-                    : myPlayerToken && canControlPlayerTurn
-                      ? [myPlayerToken.id]
-                      : []
+                [...new Set([
+                  ...(isDM && combatActive
+                    ? activeMap.tokens.filter((token) => token.type === 'player').map((token) => token.id)
+                    : []),
+                  ...((activeAoeTargeting || dnd5eItemAreaTargeting) && activeAoeCasterId
+                    ? activeMap.tokens
+                        .filter((token) => token.characterId === activeAoeCasterId)
+                        .map((token) => token.id)
+                    : []),
+                  ...(myPlayerToken && canControlPlayerTurn ? [myPlayerToken.id] : []),
+                ])]
               }
-              gridAdjustMode={isDM && gridAdjustMode && !fogEditMode && !geometryEditMode}
+              gridAdjustMode={isDM && gridAdjustMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               onGridOffsetChange={(offsetX, offsetY) =>
                 updateMap(activeMap.id, { gridOffsetX: offsetX, gridOffsetY: offsetY })
               }
@@ -13674,6 +13816,25 @@ export default function MapsPage() {
               }
             />
           </div>
+          <SceneOrchestrationSystem
+            map={activeMap}
+            isDm={isDM}
+            drawing={sceneDrawTarget}
+            onBeginDraw={(target) => {
+              setSceneDrawTarget(target)
+              setMeasureMode(false)
+              setDeleteSelectMode(false)
+              setGridAdjustMode(false)
+              setFogEditMode(false)
+              setFogPreviewAsPlayer(false)
+              setGeometryEditMode(false)
+              setGeometryPreviewAsPlayer(false)
+              setMapTabletopTool('none')
+            }}
+            onCancelDraw={() => setSceneDrawTarget(null)}
+            onStartCombat={() => startCombat([], { clearStatuses: false })}
+            onEditorVisibilityChange={setSceneEditorVisible}
+          />
           {!isDM && (
             <div className="pointer-events-none absolute right-4 top-4 z-20 rounded-lg border border-white/10 bg-void-950/78 px-3 py-2 text-[11px] font-medium text-slate-300 shadow-lg backdrop-blur-sm">
               {isSpectator ? '只读观战 · 使用玩家安全视野' : '双击地图可发送 Ping 标记'}
@@ -13706,9 +13867,10 @@ export default function MapsPage() {
                 } else {
                   delete options.coverOverride
                 }
-                const sent = isDM
-                  ? sendDmLocalDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
-                  : sendPlayerDnd5eWeaponAttackRequest(targetToken, Object.keys(options).length > 0 ? options : undefined)
+                const sent = sendPlayerDnd5eWeaponAttackRequest(
+                  targetToken,
+                  Object.keys(options).length > 0 ? options : undefined,
+                )
                 if (sent) dismissDnd5eWeaponAttackConfirmation()
               }}
             />
@@ -13722,41 +13884,6 @@ export default function MapsPage() {
               正在等待 DM 同步战斗状态
             </div>
           )}
-          {!isDM && !isSpectator && (
-            <div className="absolute bottom-24 left-1/2 z-[58] -translate-x-1/2 rounded-xl border border-violet-300/25 bg-void-950/92 p-2 shadow-xl backdrop-blur-md">
-              {dnd5eSecretSearchMethod ? (
-                <div className="flex items-center gap-2">
-                  <span className="px-2 text-xs font-semibold text-violet-100">
-                    点击附近地图搜索暗门 · {dnd5eSecretSearchMethod === 'perception' ? '感知' : '调查'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setDnd5eSecretSearchMethod(
-                      dnd5eSecretSearchMethod === 'perception' ? 'investigation' : 'perception',
-                    )}
-                    className="rounded-lg border border-violet-300/20 px-2.5 py-1.5 text-xs text-violet-100 hover:bg-violet-500/15"
-                  >
-                    切换为{dnd5eSecretSearchMethod === 'perception' ? '调查' : '感知'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDnd5eSecretSearchMethod(null)}
-                    className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/5"
-                  >取消</button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setDnd5eSecretSearchMethod('perception')}
-                  className="flex items-center gap-2 rounded-lg bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/25"
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                  搜索暗门
-                </button>
-              )}
-            </div>
-          )}
-
           {isDM && (activeMap.dnd5eItemAreas?.length ?? 0) > 0 && (
             <div className="absolute right-4 top-16 z-30 w-52 rounded-xl border border-white/10 bg-void-950/88 p-2 text-xs shadow-xl backdrop-blur-sm">
               <p className="px-1 pb-1.5 font-semibold text-slate-300">地图物品区域</p>
@@ -13823,7 +13950,10 @@ export default function MapsPage() {
               <select
                 aria-label="移动方式"
                 value={dnd5eTraversalMode}
-                onChange={(event) => setDnd5eTraversalMode(event.target.value as Dnd5eTraversalMode)}
+                onChange={(event) => playerMovement.selectTraversalMode(
+                  event.target.value as Dnd5eTraversalMode,
+                  myPlayerToken?.elevationFeet ?? 0,
+                )}
                 className="rounded-lg border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-200"
               >
                 <option value="walk">步行</option>
@@ -13834,18 +13964,32 @@ export default function MapsPage() {
                 <option value="long-jump-standing">立定跳远</option>
                 <option value="fall">坠落（按海拔差结算）</option>
               </select>
-              <label className="flex items-center gap-1 text-xs text-slate-300">
-                目标海拔
-                <input
-                  aria-label="目标海拔"
-                  type="number"
-                  step={5}
-                  value={dnd5eTargetElevationFeet}
-                  onChange={(event) => setDnd5eTargetElevationFeet(Number(event.target.value) || 0)}
-                  className="w-16 rounded-lg border border-white/10 bg-void-900 px-2 py-1 text-xs text-slate-100"
-                />
-                尺
-              </label>
+              {dnd5eTraversalMode === 'fly' && (
+                <div className="flex items-center gap-1 rounded-lg border border-sky-300/15 bg-sky-950/30 p-0.5">
+                  <button
+                    type="button"
+                    aria-label="飞行高度降低 5 尺"
+                    onClick={() => playerMovement.adjustFlightElevation(-5, myPlayerToken?.elevationFeet ?? 0)}
+                    className="rounded px-2 py-1 text-xs text-sky-100 hover:bg-white/10"
+                  >
+                    −5
+                  </button>
+                  <output
+                    aria-label="飞行目标高度"
+                    className="min-w-20 text-center text-xs font-semibold tabular-nums text-sky-100"
+                  >
+                    高度 {dnd5eFlightTargetElevationFeet ?? myPlayerToken?.elevationFeet ?? 0} 尺
+                  </output>
+                  <button
+                    type="button"
+                    aria-label="飞行高度升高 5 尺"
+                    onClick={() => playerMovement.adjustFlightElevation(5, myPlayerToken?.elevationFeet ?? 0)}
+                    className="rounded px-2 py-1 text-xs text-sky-100 hover:bg-white/10"
+                  >
+                    +5
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => setDnd5eCarefulMovement((current) => !current)}
@@ -14027,6 +14171,22 @@ export default function MapsPage() {
                 </div>
               </div>
             </div>
+          )}
+          {!isSpectator && (
+            <MapDiceRoller
+              key={mapDiceCharacter?.id ?? 'no-character'}
+              isDm={isDM}
+              character={mapDiceCharacter ?? undefined}
+              canCheck={canControlPlayerTurn && mapDiceCharacter?.id === turnCharacter?.id}
+              pending={!!pendingPlayerAction}
+              turnEconomy={mapDiceTurnEconomy}
+              onRoll={handleMapFreeDiceRoll}
+              onCheck={(payload) => {
+                setDnd5eWeaponTargeting(null)
+                setDnd5eWeaponAttackOptions(undefined)
+                sendPlayerDnd5eAbilityCheckRequest(payload)
+              }}
+            />
           )}
           {!isDM && selectedDoorInteraction && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
@@ -14655,6 +14815,7 @@ export default function MapsPage() {
                       wallMaterial={geometryWallMaterial}
                       previewAsPlayer={geometryPreviewAsPlayer}
                       snapToGrid={geometrySnapToGrid}
+                      terrainEditingLocked={combatActive}
                       onEditModeChange={(enabled) => {
                         setGeometryEditMode(enabled)
                         if (enabled) {
@@ -14670,6 +14831,10 @@ export default function MapsPage() {
                         }
                       }}
                       onToolChange={(nextTool) => {
+                        if (combatActive && nextTool === 'elevation') {
+                          void showCombatNotice('高度区域已锁定', '只能在战斗开始前绘制或修改地图高度区域。', 'amber')
+                          return
+                        }
                         setGeometryTool(nextTool)
                         selectGeometryEntity(null)
                       }}
@@ -14853,6 +15018,7 @@ export default function MapsPage() {
               isDM={isDM}
               mapId={activeMap.id}
               characters={characters}
+              tokens={activeMap.tokens}
               updateToken={updateToken}
               updateChar={updateChar}
               removeToken={removeToken}
@@ -14889,7 +15055,7 @@ export default function MapsPage() {
             />
           ) : null}
 
-          {/* 左侧角色轨：圆形头像 + 物品/特性/法术/技能图标 */}
+          {/* 左侧只保留角色选择；所有战斗操作统一进入底部快捷栏。 */}
           {railChars.length > 0 && (
             <div className="absolute bottom-3 left-3 z-30 flex flex-col-reverse gap-3">
               {railChars.map((c) => (
@@ -14897,23 +15063,34 @@ export default function MapsPage() {
                   key={c.id}
                   character={c}
                   isActive={c.id === activeCharId}
-                  activePanel={c.id === activeCharId ? charPanel : null}
                   onAvatarClick={() => {
                     if (playerCombatLocked) return
                     onAvatarClick(c.id)
-                  }}
-                  onPanelClick={(panel) => {
-                    if (playerCombatLocked) return
-                    onPanelClick(c.id, panel)
                   }}
                 />
               ))}
             </div>
           )}
 
+          {!isDM && combatActive && activeChar && !playerCombatLocked && !charPanel && (
+            <div className="pointer-events-none absolute bottom-3 left-28 right-3 z-40 flex justify-center">
+              <PlayerCombatHotbar
+                key={activeChar.id}
+                character={activeChar}
+                canAct={canControlPlayerTurn && activeChar.id === turnCharacter?.id}
+                pending={!!pendingPlayerAction}
+                turnEconomy={activeCharDnd5eTurnEconomy}
+                activeActionId={combatHotbarActiveActionId}
+                onCommand={handleCombatHotbarCommand}
+                onUnavailable={(descriptor) => void showCombatNotice('当前不能使用', descriptor.disabledReason ?? '该操作目前不可用。', 'amber')}
+              />
+            </div>
+          )}
+
           {/* 底部浮层：按图标打开物品/特性/法术/技能栏 */}
-          {activeChar && charPanel && !playerCombatLocked && (
+          {!isDM && activeChar && charPanel && !playerCombatLocked && (
             <div
+              data-testid="character-action-panel"
               className={[
                 'absolute bottom-2 left-24 z-20 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-void-900/40 p-2 pr-4 pt-3 shadow-2xl backdrop-blur-sm',
                 panelFull ? 'right-2' : '',
@@ -14921,7 +15098,7 @@ export default function MapsPage() {
               style={
                 panelFull
                   ? { top: '18%', bottom: 8, left: 96, right: 8 }
-                  : { width: panelWidth, height: panelHeight }
+                  : { width: panelWidth, height: panelHeight, bottom: 8 }
               }
             >
               <div
@@ -15016,6 +15193,8 @@ export default function MapsPage() {
                     movingPersistentAreaId={dnd5eCoreAreaMoveTargeting?.characterId === activeChar.id
                       ? dnd5eCoreAreaMoveTargeting.areaId
                       : undefined}
+                    requestedFocusedSpellId={combatHotbarSpellFocusId}
+                    onFocusedSpellChange={setCombatHotbarSpellFocusId}
                     onMovePersistentArea={(areaId) => {
                       const area = activeMap?.dnd5ePluginAreas?.find((candidate) => candidate.id === areaId)
                       const declaration = area?.coreSpellId
@@ -15048,8 +15227,7 @@ export default function MapsPage() {
                       setDnd5eWeaponTargeting(null)
                       setDnd5eWeaponAttackOptions(undefined)
                       const payload: Dnd5eAdjudicatedSpellPayload = { spellId, slotLevel, castingClassId }
-                      if (isDM) sendDmLocalDnd5eAdjudicatedSpellRequest(payload)
-                      else sendPlayerDnd5eAdjudicatedSpellRequest(payload)
+                      sendPlayerDnd5eAdjudicatedSpellRequest(payload)
                     }}
                     onCastSpell={(spellId, slotLevel, castingClassId, options) => {
                       setDnd5eWeaponTargeting(null)
@@ -15060,8 +15238,7 @@ export default function MapsPage() {
                         const casterToken = activeMap?.tokens.find((token) => token.characterId === activeChar.id)
                         if (pluginSpell.range.type === 'self' && casterToken) {
                           const payload: Dnd5eSpellCastPayload = { spellId, slotLevel, castingClassId, targetTokenId: casterToken.id }
-                          if (isDM) sendDmLocalDnd5eSpellCastRequest(payload)
-                          else sendPlayerDnd5eSpellCastRequest(payload)
+                          sendPlayerDnd5eSpellCastRequest(payload)
                           setDnd5eSpellTargeting(null)
                           return
                         }
@@ -15142,8 +15319,7 @@ export default function MapsPage() {
                           draconicResistance: options?.draconicResistance,
                           repellingBlast: options?.repellingBlast,
                         }
-                        if (isDM) sendDmLocalDnd5eSpellCastRequest(payload)
-                        else sendPlayerDnd5eSpellCastRequest(payload)
+                        sendPlayerDnd5eSpellCastRequest(payload)
                         setDnd5eSpellTargeting(null)
                         return
                       }
@@ -15216,18 +15392,6 @@ export default function MapsPage() {
                       </button>
                     </section>
                   )}
-                  <Dnd5eAbilityCheckPanel
-                    character={activeChar}
-                    canAct={canControlPlayerTurn && activeChar.id === turnCharacter?.id}
-                    pending={!!pendingPlayerAction}
-                    turnEconomy={activeCharDnd5eTurnEconomy}
-                    onCheck={(payload) => {
-                      setDnd5eWeaponTargeting(null)
-                      setDnd5eWeaponAttackOptions(undefined)
-                      if (isDM) sendDmLocalDnd5eAbilityCheckRequest(payload)
-                      else sendPlayerDnd5eAbilityCheckRequest(payload)
-                    }}
-                  />
                   {activeChar.charClass === '战士' ? (
                     <Dnd5eFighterCombatPanel
                       character={activeChar}
@@ -15247,8 +15411,7 @@ export default function MapsPage() {
                       onFeature={(feature) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)
-                        if (isDM) sendDmLocalDnd5eFighterFeatureRequest(feature)
-                        else sendPlayerDnd5eFighterFeatureRequest(feature)
+                        sendPlayerDnd5eFighterFeatureRequest(feature)
                       }}
                     />
                   ) : (
@@ -15270,8 +15433,7 @@ export default function MapsPage() {
                       onFeature={(payload) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)
-                        if (isDM) sendDmLocalDnd5eClassFeatureRequest(payload)
-                        else sendPlayerDnd5eClassFeatureRequest(payload)
+                        sendPlayerDnd5eClassFeatureRequest(payload)
                       }}
                     />
                   )}
@@ -15286,8 +15448,7 @@ export default function MapsPage() {
                       onAction={({ payload, targetTokenId }) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)
-                        if (isDM) sendDmLocalDnd5ePluginActionRequest(payload, targetTokenId)
-                        else sendPlayerDnd5ePluginActionRequest(payload, targetTokenId)
+                        sendPlayerDnd5ePluginActionRequest(payload, targetTokenId)
                       }}
                       onBeginAreaTargeting={({ featureId, featureName, targeting }) => {
                         setDnd5eWeaponTargeting(null)

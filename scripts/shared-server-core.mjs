@@ -29,6 +29,8 @@ const EVENT_CHANNEL_POLICIES = Object.freeze({
   'dice-roll-request-dm-to-player': { publish: ['dm'], subscribe: ['player', 'spectator'] },
   'dnd5e-inventory-player-to-dm': { publish: ['player'], subscribe: ['dm'] },
   'map-tabletop': { publish: ['dm', 'player'], subscribe: ['dm', 'player', 'spectator'] },
+  'combat-presentation': { publish: ['dm'], subscribe: ['dm', 'player', 'spectator'] },
+  'scene-presentation': { publish: ['dm'], subscribe: ['dm', 'player', 'spectator'] },
 })
 // Browser background tabs can throttle a 5-second interval to roughly one
 // minute. Presence therefore needs enough grace to distinguish throttling or a
@@ -40,8 +42,10 @@ export const ROOM_PRESENCE_ONLINE_MS = Math.max(10_000, Number(process.env.STARS
 export const ROOM_PLAYER_SLOTS = Object.freeze(['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8'])
 export const ROOM_SPECTATOR_LIMIT = 16
 export const MAP_TABLETOP_CHANNEL = 'map-tabletop'
+export const COMBAT_PRESENTATION_CHANNEL = 'combat-presentation'
 export const MAP_PING_LIFETIME_MS = 3_200
 export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
+export const COMBAT_PRESENTATION_LIFETIME_MS = 1_600
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION = 5
 export const SHARED_MIN_CLIENT_PROTOCOL = 5
@@ -757,6 +761,27 @@ export function authorizeStateWrite(resourceName, providedSecret) {
   return { ok: true }
 }
 
+/** Scene declarations contain DM-only secrets and may never be replaced by a player or spectator client. */
+export function stateResourceWriteAllowedForRole(resourceName, role) {
+  if (resourceName === 'scene-orchestration' && (role === 'player' || role === 'spectator')) return false
+  if (role === 'dm' && (resourceName === 'player-action' || resourceName === 'player-action-requests')) {
+    return false
+  }
+  if (
+    (role === 'player' || role === 'spectator') &&
+    (resourceName === 'player-action-processed' || resourceName === 'player-action-ack')
+  ) {
+    return false
+  }
+  if (
+    role === 'spectator' &&
+    (resourceName === 'player-action' || resourceName === 'player-action-requests')
+  ) {
+    return false
+  }
+  return true
+}
+
 // ── AC4：图片配额 GC ────────────────────────────────────────────────────────
 /**
  * 图片配额触发器（DOCUMENTED）：每次 PUT 写入新图片成功后触发一次 GC（write-trigger）。
@@ -1390,6 +1415,36 @@ export function normalizeMapTabletopEvent(payload, actor, now = Date.now()) {
   return { ok: false, status: 400, error: 'invalid-map-tabletop-event' }
 }
 
+/** Author transient combat visuals without allowing them to mutate combat state. */
+export function normalizeCombatPresentationEvent(payload, actor, now = Date.now()) {
+  if (actor?.role !== 'dm') return { ok: false, status: 403, error: 'forbidden' }
+  const event = {
+    schemaVersion: payload?.schemaVersion,
+    id: normalizedLabel(payload?.id, 200),
+    type: payload?.type,
+    mapId: normalizedLabel(payload?.mapId, 160),
+    transactionId: normalizedLabel(payload?.transactionId, 200),
+    spellId: normalizedLabel(payload?.spellId, 80),
+    sourceTokenId: normalizedLabel(payload?.sourceTokenId, 160),
+    targetTokenId: normalizedLabel(payload?.targetTokenId, 160),
+    outcome: payload?.outcome,
+  }
+  if (
+    event.schemaVersion !== 1 || event.type !== 'spell-projectile' ||
+    !event.id || !event.mapId || !event.transactionId || event.spellId !== 'fire-bolt' ||
+    !event.sourceTokenId || !event.targetTokenId ||
+    (event.outcome !== 'hit' && event.outcome !== 'miss')
+  ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+  return {
+    ok: true,
+    event: {
+      ...event,
+      createdAt: now,
+      expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+    },
+  }
+}
+
 function communicationPersona(member, context, npcTokenId) {
   if (member?.role === 'dm' || member?.memberId === context?.host?.memberId) {
     if (npcTokenId) {
@@ -1745,11 +1800,18 @@ function groupCheckProficiencyRank(character, skill) {
   return [...(bard.expertise ?? []), ...(rogue.expertise ?? [])].includes(skill) ? 2 : 1
 }
 
-function groupCheckModifier(character, ability, skill) {
+function groupCheckModifier(character, ability, skill, rollKind = 'ability-check') {
   const level = Math.min(20, Math.max(1, Math.floor(Number(character?.level) || 1)))
   const score = Math.min(30, Math.max(1, Math.floor(Number(character?.abilities?.[ability]) || 10)))
   const abilityModifier = Math.floor((score - 10) / 2)
   const proficiencyBonus = 2 + Math.floor((level - 1) / 4)
+  if (rollKind === 'saving-throw') {
+    const classLevels = character?.dnd5eClassLevels ?? {}
+    const allSavingThrows = Number(classLevels.monk) >= 14
+    const slipperyMind = ability === 'wis' && Number(classLevels.rogue) >= 15
+    const proficient = allSavingThrows || slipperyMind || (Array.isArray(character?.savingThrows) && character.savingThrows.includes(ability))
+    return { modifier: abilityModifier + (proficient ? proficiencyBonus : 0), rank: proficient ? 1 : 0, score }
+  }
   const rank = groupCheckProficiencyRank(character, skill)
   if (rank > 0) return { modifier: abilityModifier + proficiencyBonus * rank, rank, score }
   const bardBonus = groupCheckClassLevel(character, 'bard') >= 2 ? Math.floor(proficiencyBonus / 2) : 0
@@ -1760,10 +1822,10 @@ function groupCheckModifier(character, ability, skill) {
   return { modifier: abilityModifier + Math.max(bardBonus, championBonus), rank: 0, score }
 }
 
-function groupCheckEffectiveMode(requestedMode, character) {
+function groupCheckEffectiveMode(requestedMode, character, rollKind = 'ability-check') {
   const requestedAdvantage = requestedMode === 'advantage'
   const requestedDisadvantage = requestedMode === 'disadvantage'
-  const exhaustionDisadvantage = Number(character?.exhaustionLevel) >= 1
+  const exhaustionDisadvantage = Number(character?.exhaustionLevel) >= (rollKind === 'saving-throw' ? 3 : 1)
   const disadvantage = requestedDisadvantage || exhaustionDisadvantage
   if (requestedAdvantage && disadvantage) return 'normal'
   if (requestedAdvantage) return 'advantage'
@@ -1772,8 +1834,9 @@ function groupCheckEffectiveMode(requestedMode, character) {
 }
 
 function groupCheckResult(character, check, now, options = {}) {
-  const { modifier, rank, score } = groupCheckModifier(character, check.ability, check.skill)
-  const mode = groupCheckEffectiveMode(check.requestedMode, character)
+  const rollKind = check.rollKind === 'saving-throw' ? 'saving-throw' : 'ability-check'
+  const { modifier, rank, score } = groupCheckModifier(character, check.ability, check.skill, rollKind)
+  const mode = groupCheckEffectiveMode(check.requestedMode, character, rollKind)
   const passiveTotal = 10 + modifier + (mode === 'advantage' ? 5 : mode === 'disadvantage' ? -5 : 0)
   if (options.passiveOnly) {
     return {
@@ -1788,11 +1851,11 @@ function groupCheckResult(character, check, now, options = {}) {
   }
   const rollDie = options.rollDie ?? (() => randomInt(1, 21))
   const rolls = Array.from({ length: mode === 'normal' ? 1 : 2 }, () => rollDie())
-  const reliableTalent = groupCheckClassLevel(character, 'rogue') >= 11 && rank > 0
+  const reliableTalent = rollKind === 'ability-check' && groupCheckClassLevel(character, 'rogue') >= 11 && rank > 0
   const effectiveRolls = reliableTalent ? rolls.map((roll) => Math.max(10, roll)) : [...rolls]
   const d20 = mode === 'advantage' ? Math.max(...effectiveRolls) : mode === 'disadvantage' ? Math.min(...effectiveRolls) : effectiveRolls[0]
   const rawTotal = d20 + modifier
-  const indomitableMight = groupCheckClassLevel(character, 'barbarian') >= 18 && check.ability === 'str' && rawTotal < score
+  const indomitableMight = rollKind === 'ability-check' && groupCheckClassLevel(character, 'barbarian') >= 18 && check.ability === 'str' && rawTotal < score
   const rolledTotal = indomitableMight ? score : rawTotal
   const usePassive = check.allowPassiveFallback && passiveTotal > rolledTotal
   const finalTotal = usePassive ? passiveTotal : rolledTotal
@@ -1842,6 +1905,8 @@ function validateGroupAbilityCheckState(value) {
       !['open', 'completed', 'cancelled'].includes(check.status) ||
       typeof check.label !== 'string' || !check.label.trim() || check.label.length > 160 ||
       !GROUP_ABILITY_KEYS.has(check.ability) ||
+      !['ability-check', 'saving-throw'].includes(check.rollKind ?? 'ability-check') ||
+      (check.rollKind === 'saving-throw' && check.skill != null) ||
       (check.skill != null && GROUP_ABILITY_CHECK_SKILLS[check.skill] !== check.ability) ||
       !Number.isInteger(check.dc) || check.dc < 0 || check.dc > 100 ||
       !['normal', 'advantage', 'disadvantage'].includes(check.requestedMode) ||
@@ -1911,6 +1976,16 @@ export function projectGroupAbilityChecksForMember(value, memberId, isDm = false
     }),
     updatedAt: Number(value?.updatedAt) || 0,
     ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
+  }
+}
+
+/** Hidden trigger geometry, encounter presets, and queued DM actions never cross to players. */
+export function projectSceneOrchestrationForPlayer(value) {
+  return {
+    schemaVersion: 1,
+    scenes: [],
+    runtime: { paused: false, pendingRuns: [], receipts: [], history: [] },
+    updatedAt: Number.isFinite(value?.updatedAt) ? value.updatedAt : 0,
   }
 }
 
@@ -2167,9 +2242,10 @@ export function mutateGroupAbilityChecksState(current, mutation, now, member, co
     if (checks.some((check) => check?.status === 'open')) return { ok: false, status: 409, error: 'group-check-already-open' }
     const selection = boundedText(mutation?.selection, 100)
     const abilityMatch = selection.match(/^ability:(str|dex|con|int|wis|cha)$/)
+    const saveMatch = selection.match(/^save:(str|dex|con|int|wis|cha)$/)
     const skillMatch = selection.match(/^skill:([a-zA-Z]+)$/)
     const skill = skillMatch?.[1]
-    const ability = abilityMatch?.[1] ?? GROUP_ABILITY_CHECK_SKILLS[skill]
+    const ability = abilityMatch?.[1] ?? saveMatch?.[1] ?? GROUP_ABILITY_CHECK_SKILLS[skill]
     if (!GROUP_ABILITY_KEYS.has(ability) || (skill && !GROUP_ABILITY_CHECK_SKILLS[skill])) {
       return { ok: false, status: 400, error: 'invalid-group-check-selection' }
     }
@@ -2210,10 +2286,11 @@ export function mutateGroupAbilityChecksState(current, mutation, now, member, co
       status: 'open',
       label,
       ability,
+      rollKind: saveMatch ? 'saving-throw' : 'ability-check',
       ...(skill ? { skill } : {}),
       dc,
       requestedMode: mode,
-      allowPassiveFallback: mutation?.allowPassiveFallback === true,
+      allowPassiveFallback: !saveMatch && mutation?.allowPassiveFallback === true,
       ...(boundedText(mutation?.mapId, 160) ? { mapId: boundedText(mutation.mapId, 160) } : {}),
       participants,
       results: [],
@@ -2286,6 +2363,30 @@ function validDnd5eRoundLifecycle(value) {
     value.expiresAfterRound - value.createdRound + 1 <= 14_400
 }
 
+function validDnd5ePersistentAreaLighting(value) {
+  if (value == null) return true
+  if (!plainObject(value) || !Number.isInteger(value.spellLevel) || value.spellLevel < 0 || value.spellLevel > 9) return false
+  if (value.kind === 'light') {
+    const allowed = new Set(['kind', 'brightRadiusFeet', 'dimRadiusFeet', 'color', 'spellLevel', 'suppressesMagicalDarknessThroughLevel'])
+    return Object.keys(value).every((key) => allowed.has(key)) &&
+      Number.isInteger(value.brightRadiusFeet) && value.brightRadiusFeet >= 0 && value.brightRadiusFeet <= 1_000 &&
+      Number.isInteger(value.dimRadiusFeet) && value.dimRadiusFeet >= 0 && value.dimRadiusFeet <= 1_000 &&
+      value.brightRadiusFeet + value.dimRadiusFeet > 0 && typeof value.color === 'string' && /^#[0-9a-f]{6}$/i.test(value.color) &&
+      (value.suppressesMagicalDarknessThroughLevel == null || (
+        Number.isInteger(value.suppressesMagicalDarknessThroughLevel) &&
+        value.suppressesMagicalDarknessThroughLevel >= 0 && value.suppressesMagicalDarknessThroughLevel <= 9
+      ))
+  }
+  const allowed = new Set(['kind', 'radiusFeet', 'spellLevel', 'suppressesMagicalLightThroughLevel'])
+  return Object.keys(value).every((key) => allowed.has(key)) &&
+    value.kind === 'magical-darkness' && Number.isInteger(value.radiusFeet) &&
+    value.radiusFeet >= 1 && value.radiusFeet <= 1_000 &&
+    (value.suppressesMagicalLightThroughLevel == null || (
+      Number.isInteger(value.suppressesMagicalLightThroughLevel) &&
+      value.suppressesMagicalLightThroughLevel >= 0 && value.suppressesMagicalLightThroughLevel <= 9
+    ))
+}
+
 function validTimedLightState(light) {
   if (!plainObject(light) || typeof light.enabled !== 'boolean' ||
     !Number.isFinite(light.brightRadiusFeet) || light.brightRadiusFeet < 0 || light.brightRadiusFeet > 10_000 ||
@@ -2341,20 +2442,206 @@ function validateCustomMonsterState(value) {
   return null
 }
 
+const SCENE_ACTION_KINDS = new Set([
+  'reveal-handout', 'whisper', 'group-roll', 'door', 'light', 'fog', 'encounter',
+  'sound', 'audio', 'teleport', 'task', 'journal',
+])
+
+function validSceneId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 180
+}
+
+function validSceneRegion(region) {
+  if (!plainObject(region) || !Number.isFinite(region.x) || !Number.isFinite(region.y)) return false
+  if (region.kind === 'circle') return Number.isFinite(region.radius) && region.radius >= 4 && region.radius <= 100_000
+  return region.kind === 'rect' && Number.isFinite(region.width) && Number.isFinite(region.height) &&
+    region.width >= 4 && region.width <= 100_000 && region.height >= 4 && region.height <= 100_000
+}
+
+function validSceneAction(action) {
+  if (!plainObject(action) || !validSceneId(action.id) || !SCENE_ACTION_KINDS.has(action.kind) ||
+    typeof action.enabled !== 'boolean' ||
+    (action.delayMs != null && (!Number.isInteger(action.delayMs) || action.delayMs < 0 || action.delayMs > 30_000))) return false
+  if (action.kind === 'reveal-handout') return validSceneId(action.handoutId) && ['all', 'triggering-player'].includes(action.audience)
+  if (action.kind === 'whisper') return typeof action.text === 'string' && action.text.length > 0 && action.text.length <= 2_000
+  if (action.kind === 'group-roll') return typeof action.label === 'string' && action.label.length > 0 && action.label.length <= 160 &&
+    /^(?:ability|save):(str|dex|con|int|wis|cha)$|^skill:[a-zA-Z]+$/.test(action.selection) &&
+    Number.isInteger(action.dc) && action.dc >= 0 && action.dc <= 100 &&
+    ['normal', 'advantage', 'disadvantage'].includes(action.mode) && typeof action.allowPassiveFallback === 'boolean'
+  if (action.kind === 'door') return validSceneId(action.doorId) && ['open', 'closed', 'locked'].includes(action.state)
+  if (action.kind === 'light') return ['bright', 'dim', 'darkness'].includes(action.ambientLight)
+  if (action.kind === 'fog') return ['fill', 'clear'].includes(action.operation)
+  if (action.kind === 'encounter') return typeof action.startInitiative === 'boolean' && Array.isArray(action.entries) &&
+    action.entries.length > 0 && action.entries.length <= 30 && action.entries.every((entry) =>
+      plainObject(entry) && validSceneId(entry.monsterId) && Number.isInteger(entry.quantity) && entry.quantity >= 1 && entry.quantity <= 50)
+  if (action.kind === 'sound') return ['discovery', 'danger', 'door', 'mystery', 'victory'].includes(action.cue)
+  if (action.kind === 'audio') return ['play', 'stop'].includes(action.operation) && typeof action.loop === 'boolean' &&
+    Number.isFinite(action.volume) && action.volume >= 0 && action.volume <= 1 &&
+    (action.operation === 'stop' || (typeof action.assetId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(action.assetId)))
+  if (action.kind === 'teleport') return validSceneId(action.targetMapId) && Number.isFinite(action.x) && Number.isFinite(action.y) && typeof action.moveTriggeringToken === 'boolean'
+  return typeof action.title === 'string' && action.title.length > 0 && action.title.length <= 160 && typeof action.body === 'string' && action.body.length <= 4_000
+}
+
+function validateSceneOrchestrationState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.scenes) || value.scenes.length > 80 || !plainObject(value.runtime) ||
+    !Array.isArray(value.runtime.pendingRuns) || value.runtime.pendingRuns.length > 50 ||
+    !Array.isArray(value.runtime.receipts) || value.runtime.receipts.length > 2_000 ||
+    !Array.isArray(value.runtime.history) || value.runtime.history.length > 240 ||
+    typeof value.runtime.paused !== 'boolean') return 'invalid-scene-orchestration'
+  const sceneIds = new Set()
+  for (const scene of value.scenes) {
+    if (!plainObject(scene) || !validSceneId(scene.id) || sceneIds.has(scene.id) || !validSceneId(scene.mapId) ||
+      typeof scene.name !== 'string' || !scene.name || scene.name.length > 160 ||
+      typeof scene.description !== 'string' || scene.description.length > 2_000 ||
+      typeof scene.environmentLabel !== 'string' || scene.environmentLabel.length > 300 ||
+      !['none', 'discovery', 'danger', 'door', 'mystery', 'victory'].includes(scene.backgroundCue) ||
+      (scene.backgroundAudioId != null && (typeof scene.backgroundAudioId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(scene.backgroundAudioId))) ||
+      (scene.backgroundAudioLoop != null && typeof scene.backgroundAudioLoop !== 'boolean') ||
+      (scene.backgroundAudioVolume != null && (!Number.isFinite(scene.backgroundAudioVolume) || scene.backgroundAudioVolume < 0 || scene.backgroundAudioVolume > 1)) ||
+      !Array.isArray(scene.boundHandoutIds) || scene.boundHandoutIds.length > 100 || !scene.boundHandoutIds.every(validSceneId) ||
+      !Array.isArray(scene.boundJournalEntryIds) || scene.boundJournalEntryIds.length > 100 || !scene.boundJournalEntryIds.every(validSceneId) ||
+      !Array.isArray(scene.triggers) || scene.triggers.length > 120 || !Number.isFinite(scene.createdAt) || !Number.isFinite(scene.updatedAt)) {
+      return 'invalid-scene'
+    }
+    sceneIds.add(scene.id)
+    const triggerIds = new Set()
+    for (const trigger of scene.triggers) {
+      if (!plainObject(trigger) || !validSceneId(trigger.id) || triggerIds.has(trigger.id) ||
+        typeof trigger.name !== 'string' || !trigger.name || trigger.name.length > 160 || typeof trigger.enabled !== 'boolean' ||
+        !validSceneRegion(trigger.region) || !Array.isArray(trigger.events) || trigger.events.length < 1 ||
+        !trigger.events.every((event) => ['enter', 'leave', 'manual'].includes(event)) ||
+        !['any', 'player', 'enemy'].includes(trigger.tokenFilter) || !['always', 'per-token', 'once'].includes(trigger.repeat) ||
+        !Array.isArray(trigger.actions) || trigger.actions.length > 40 || !trigger.actions.every(validSceneAction)) return 'invalid-scene-trigger'
+      triggerIds.add(trigger.id)
+      if (new Set(trigger.actions.map((action) => action.id)).size !== trigger.actions.length) return 'duplicate-scene-action'
+    }
+  }
+  if (value.runtime.receipts.some((receipt) => typeof receipt !== 'string' || !receipt || receipt.length > 300)) return 'invalid-scene-receipt'
+  if (value.runtime.pendingRuns.some((run) => !plainObject(run) || !validSceneId(run.id) || !sceneIds.has(run.sceneId) ||
+    !validSceneId(run.triggerId) || !validSceneId(run.mapId) || !['enter', 'leave', 'manual'].includes(run.event) ||
+    !Number.isInteger(run.nextActionIndex) || run.nextActionIndex < 0 || !Number.isFinite(run.createdAt))) return 'invalid-scene-run'
+  if (value.runtime.history.some((entry) => !plainObject(entry) || !validSceneId(entry.id) || !validSceneId(entry.runId) ||
+    !validSceneId(entry.sceneId) || !validSceneId(entry.triggerId) || !validSceneId(entry.actionId) ||
+    typeof entry.summary !== 'string' || entry.summary.length > 500 || !Number.isFinite(entry.executedAt) ||
+    typeof entry.reversible !== 'boolean')) return 'invalid-scene-history'
+  return null
+}
+
+function validSceneAudioAsset(asset) {
+  return plainObject(asset) && typeof asset.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(asset.id) &&
+    typeof asset.name === 'string' && asset.name.trim().length > 0 && asset.name.length <= 160 &&
+    typeof asset.fileName === 'string' && asset.fileName.trim().length > 0 && asset.fileName.length <= 240 &&
+    typeof asset.mimeType === 'string' && /^audio\/[a-zA-Z0-9.+-]{1,80}$/.test(asset.mimeType) &&
+    Number.isSafeInteger(asset.sizeBytes) && asset.sizeBytes >= 1 && asset.sizeBytes <= IMAGE_MAX_BYTES &&
+    Number.isFinite(asset.durationSeconds) && asset.durationSeconds > 0 && asset.durationSeconds <= 24 * 60 * 60 &&
+    ['music', 'ambience', 'sfx'].includes(asset.kind) && Number.isFinite(asset.createdAt)
+}
+
+function validateSceneAudioLibraryState(value) {
+  if (value.schemaVersion !== 1 || !Array.isArray(value.assets) || value.assets.length > 80) return 'invalid-scene-audio-library'
+  if (!value.assets.every(validSceneAudioAsset) || new Set(value.assets.map((asset) => asset.id)).size !== value.assets.length) {
+    return 'invalid-scene-audio-asset'
+  }
+  return null
+}
+
+function validateSceneAudioPlaybackState(value) {
+  if (value.schemaVersion !== 1 || !['stopped', 'playing', 'paused'].includes(value.status) ||
+    !Number.isFinite(value.positionSeconds) || value.positionSeconds < 0 ||
+    !Number.isFinite(value.anchorServerMs) || typeof value.loop !== 'boolean' ||
+    !Number.isFinite(value.volume) || value.volume < 0 || value.volume > 1 ||
+    !Number.isInteger(value.fadeMs) || value.fadeMs < 0 || value.fadeMs > 10_000 ||
+    !Number.isFinite(value.updatedAt)) return 'invalid-scene-audio-playback'
+  if (value.status !== 'stopped' && (
+    typeof value.assetId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(value.assetId) ||
+    typeof value.assetName !== 'string' || !value.assetName.trim() || value.assetName.length > 160
+  )) return 'invalid-scene-audio-playback-asset'
+  return null
+}
+
+function sceneAudioPlaybackPosition(state, now, durationSeconds) {
+  const elapsed = state.status === 'playing' ? Math.max(0, now - state.anchorServerMs) / 1_000 : 0
+  const position = Math.max(0, state.positionSeconds + elapsed)
+  return state.loop ? position % durationSeconds : Math.min(durationSeconds, position)
+}
+
+export function mutateSceneAudioPlaybackState(current, mutation, now, member, context = {}) {
+  if (member?.memberId !== context.host?.memberId) return { ok: false, status: 403, error: 'dm-authority-required' }
+  const assets = Array.isArray(context.library?.assets) ? context.library.assets : []
+  const base = validateSceneAudioPlaybackState(current ?? {}) == null ? current : {
+    schemaVersion: 1, status: 'stopped', positionSeconds: 0, anchorServerMs: 0,
+    loop: false, volume: 0.7, fadeMs: 0, updatedAt: 0,
+  }
+  const operation = mutation?.operation
+  const currentAsset = assets.find((asset) => asset?.id === base.assetId)
+  if (operation === 'play') {
+    const asset = assets.find((candidate) => candidate?.id === mutation?.assetId && validSceneAudioAsset(candidate))
+    const volume = Number(mutation?.volume)
+    const positionSeconds = Number(mutation?.positionSeconds ?? 0)
+    const fadeMs = Number(mutation?.fadeMs ?? 0)
+    if (!asset || !Number.isFinite(volume) || volume < 0 || volume > 1 || !Number.isFinite(positionSeconds) || positionSeconds < 0 ||
+      positionSeconds > asset.durationSeconds || !Number.isInteger(fadeMs) || fadeMs < 0 || fadeMs > 10_000) {
+      return { ok: false, status: 400, error: 'invalid-scene-audio-play' }
+    }
+    const next = {
+      schemaVersion: 1, status: 'playing', assetId: asset.id, assetName: asset.name,
+      positionSeconds, anchorServerMs: now + 600, loop: mutation?.loop === true,
+      volume, fadeMs, updatedAt: now,
+    }
+    return { ok: true, changed: true, next }
+  }
+  if (operation === 'stop') {
+    if (base.status === 'stopped') return { ok: true, changed: false, next: base }
+    return { ok: true, changed: true, next: {
+      schemaVersion: 1, status: 'stopped', positionSeconds: 0, anchorServerMs: now,
+      loop: false, volume: base.volume, fadeMs: 0, updatedAt: now,
+    } }
+  }
+  if (!currentAsset || base.status === 'stopped') return { ok: false, status: 409, error: 'scene-audio-not-active' }
+  const currentPosition = sceneAudioPlaybackPosition(base, now, currentAsset.durationSeconds)
+  if (operation === 'pause') {
+    if (base.status === 'paused') return { ok: true, changed: false, next: base }
+    return { ok: true, changed: true, next: { ...base, status: 'paused', positionSeconds: currentPosition, anchorServerMs: now, updatedAt: now } }
+  }
+  if (operation === 'resume') {
+    if (base.status === 'playing') return { ok: true, changed: false, next: base }
+    return { ok: true, changed: true, next: { ...base, status: 'playing', anchorServerMs: now + 600, updatedAt: now } }
+  }
+  if (operation === 'seek') {
+    const positionSeconds = Number(mutation?.positionSeconds)
+    if (!Number.isFinite(positionSeconds) || positionSeconds < 0 || positionSeconds > currentAsset.durationSeconds) {
+      return { ok: false, status: 400, error: 'invalid-scene-audio-position' }
+    }
+    return { ok: true, changed: true, next: {
+      ...base, positionSeconds, anchorServerMs: base.status === 'playing' ? now + 300 : now, updatedAt: now,
+    } }
+  }
+  if (operation === 'set-volume') {
+    const volume = Number(mutation?.volume)
+    if (!Number.isFinite(volume) || volume < 0 || volume > 1) return { ok: false, status: 400, error: 'invalid-scene-audio-volume' }
+    return { ok: true, changed: volume !== base.volume, next: { ...base, volume, updatedAt: now } }
+  }
+  return { ok: false, status: 400, error: 'invalid-scene-audio-operation' }
+}
+
 function validateDnd5eResourceStates(name, value) {
   if (name === 'custom-monsters') return validateCustomMonsterState(value)
   if (name === 'group-ability-checks') return validateGroupAbilityCheckState(value)
+  if (name === 'scene-orchestration') return validateSceneOrchestrationState(value)
+  if (name === 'scene-audio-library') return validateSceneAudioLibraryState(value)
+  if (name === 'scene-audio-playback') return validateSceneAudioPlaybackState(value)
   if (name === 'characters') {
     let portraitLength = 0
     for (const character of value.characters ?? []) {
       if (!plainObject(character)) continue
-      if (character.portrait != null) {
+      for (const field of ['portrait', 'tokenPortrait']) {
+        if (character[field] == null) continue
         if (
-          typeof character.portrait !== 'string' ||
-          character.portrait.length > CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH ||
-          !/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=\r\n]+$/i.test(character.portrait)
+          typeof character[field] !== 'string' ||
+          character[field].length > CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH ||
+          !/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=\r\n]+$/i.test(character[field])
         ) return 'invalid-character-portrait'
-        portraitLength += character.portrait.length
+        portraitLength += character[field].length
       }
       const reason = validateActiveEffectState(character.dnd5eCombatState, character.conditions ?? [])
       if (reason) return reason
@@ -2366,6 +2653,10 @@ function validateDnd5eResourceStates(name, value) {
       if (!plainObject(map) || !Array.isArray(map.tokens)) continue
       for (const token of map.tokens) {
         if (!plainObject(token)) continue
+        if (token.portraitImageId != null && (
+          typeof token.portraitImageId !== 'string' ||
+          !/^[a-z0-9_-]{1,160}$/i.test(token.portraitImageId)
+        )) return 'invalid-token-portrait-image'
         if (token.lightSource != null && !validTimedLightState(token.lightSource)) return 'invalid-token-light-source'
         if (token.movementAnimation != null && !validTokenMovementAnimation(token.movementAnimation)) {
           return 'invalid-token-movement-animation'
@@ -2386,7 +2677,8 @@ function validateDnd5eResourceStates(name, value) {
         }
         for (const area of map.dnd5ePluginAreas) {
           if (
-            !validDnd5eRoundLifecycle(area) || typeof area.label !== 'string' || !area.label || area.label.length > 120
+            !validDnd5eRoundLifecycle(area) || typeof area.label !== 'string' || !area.label || area.label.length > 120 ||
+            !validDnd5ePersistentAreaLighting(area.lighting)
           ) return 'invalid-dnd5e-plugin-area'
         }
       }
@@ -2474,6 +2766,7 @@ function validGeometryEntity(entity, kind) {
     ['none', 'half', 'three-quarters', 'total'].includes(entity.cover) &&
     (entity.terrainCostMultiplier == null || (Number.isFinite(entity.terrainCostMultiplier) && entity.terrainCostMultiplier >= 1 && entity.terrainCostMultiplier <= 10)) &&
     (entity.traversal == null || ['ground', 'climb', 'swim'].includes(entity.traversal)) &&
+    (entity.terrainRegion == null || typeof entity.terrainRegion === 'boolean') &&
     (entity.terrainElevationFeet == null || (
       Number.isFinite(entity.terrainElevationFeet) && entity.terrainElevationFeet >= -1_000 && entity.terrainElevationFeet <= 10_000
     ))
@@ -2874,6 +3167,9 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
     : [...characterById.values()].find((character) =>
         (typeof viewerIdentity?.memberId === 'string' && character.roomMemberId === viewerIdentity.memberId) ||
         (typeof viewerIdentity?.accountId === 'string' && character.ownerAccountId === viewerIdentity.accountId),
+      )?.id ?? [...characterById.values()].find((character) =>
+        typeof viewerIdentity?.activeCharacterName === 'string' &&
+        character.name === viewerIdentity.activeCharacterName,
       )?.id ?? null
   return {
     ...value,
@@ -2909,7 +3205,13 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         : players
       const tokens = effectiveMap.tokens.flatMap((token) => {
         if (!plainObject(token)) return []
-        if (token.type === 'player' || token.visibilityMode === 'always') return [token]
+        if (token.type === 'player') {
+          return [{
+            ...token,
+            viewerControlled: resolvedActiveCharacterId != null && token.characterId === resolvedActiveCharacterId,
+          }]
+        }
+        if (token.visibilityMode === 'always') return [token]
         if (token.visibilityMode === 'dm-only') return []
         // Owlbear 语义：手动迷雾覆盖处的 Token 必须靠实际视野才可见；DM 明确
         // reveal 的区域即使开着动态视野也直接放行；两者都不命中时，动态视野
@@ -3064,6 +3366,8 @@ export function validateSharedStateShape(name, value) {
     'map-geometry': 'maps',
     'map-exploration': 'maps',
     'combat-statistics': 'sessions',
+    'scene-orchestration': 'scenes',
+    'scene-audio-library': 'assets',
   }
   const arrayField = requiredArrays[name]
   if (arrayField && !Array.isArray(value[arrayField])) {
@@ -4730,6 +5034,17 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     const now = Date.now()
     const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
     if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+    const characterPresenceProvided = Object.prototype.hasOwnProperty.call(payload ?? {}, 'activeCharacterId') ||
+      Object.prototype.hasOwnProperty.call(payload ?? {}, 'activeCharacterName')
+    const presencePatch = (member) => characterPresenceProvided
+      ? {
+          activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
+          activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+        }
+      : {
+          activeCharacterId: member?.activeCharacterId ?? null,
+          activeCharacterName: member?.activeCharacterName ?? null,
+        }
     const result = await mutateLobbyRoom(ctx, roomId, (room) => {
       if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
       if (room.host?.memberId === memberId) {
@@ -4738,8 +5053,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
           ...room.host,
           activePlugins,
           lastSeenAt: now,
-          activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
-          activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+          ...presencePatch(room.host),
         }
         return { ok: true, member, role: 'dm', next: { ...room, host: member, updatedAt: now } }
       }
@@ -4761,8 +5075,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       if (!resumed.ok) return resumed
       const refreshed = {
         ...resumed.member,
-        activeCharacterId: normalizedLabel(payload?.activeCharacterId, 128) || null,
-        activeCharacterName: normalizedLabel(payload?.activeCharacterName, 80) || null,
+        ...presencePatch(member),
       }
       return {
         ok: true,
@@ -5061,6 +5374,11 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   try {
     if (await handleCampaignApi(req, res, parsed, ctx)) return true
 
+    if (parsed.pathname === '/api/time' && req.method === 'GET') {
+      writeJson(res, 200, { serverNow: Date.now() })
+      return true
+    }
+
     const eventMatch = parsed.pathname.match(/^\/api\/events\/([a-zA-Z0-9_-]+)$/)
     if (eventMatch) {
       const channel = safeName(eventMatch[1])
@@ -5101,6 +5419,18 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         let payload = JSON.parse(body.toString('utf8'))
         if (channel === MAP_TABLETOP_CHANNEL) {
           const normalized = normalizeMapTabletopEvent(payload, {
+            role: ctx.accessRole === 'open' ? 'dm' : ctx.accessRole,
+            memberId: authenticatedRoomMember?.memberId,
+            displayName: authenticatedRoomMember?.displayName,
+          })
+          if (!normalized.ok) {
+            writeJson(res, normalized.status, { error: normalized.error })
+            return true
+          }
+          payload = normalized.event
+        }
+        if (channel === COMBAT_PRESENTATION_CHANNEL) {
+          const normalized = normalizeCombatPresentationEvent(payload, {
             role: ctx.accessRole === 'open' ? 'dm' : ctx.accessRole,
             memberId: authenticatedRoomMember?.memberId,
             displayName: authenticatedRoomMember?.displayName,
@@ -5358,6 +5688,52 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       return true
     }
 
+    if (parsed.pathname === '/api/state/scene-audio/playback' && req.method === 'PATCH') {
+      if (!authenticatedRoomMember || ctx.accessRole !== 'dm') {
+        writeJson(res, 403, { error: 'dm-authority-required' })
+        return true
+      }
+      await mkdir(ctx.stateRoot, { recursive: true })
+      await maybeWriteAutoCampaignSnapshot(ctx)
+      const body = await readBody(req)
+      let mutation
+      try {
+        mutation = JSON.parse(body.toString('utf8'))
+      } catch {
+        writeJson(res, 400, { error: 'invalid-json' })
+        return true
+      }
+      const room = await readRoomForCampaign(ctx)
+      let library = null
+      try {
+        library = JSON.parse(await readFile(path.join(ctx.stateRoot, 'scene-audio-library.json'), 'utf8'))
+      } catch {
+        // Missing or damaged catalog makes every play request fail closed.
+      }
+      const now = Date.now()
+      const filePath = path.join(ctx.stateRoot, 'scene-audio-playback.json')
+      const result = await atomicMutateJsonStateLocked(filePath, (state) =>
+        mutateSceneAudioPlaybackState(state, mutation, now, authenticatedRoomMember, { host: room.host, library }),
+      )
+      if (!result?.ok) {
+        writeJson(res, result?.status ?? 400, { error: result?.error ?? 'mutation-failed' })
+        return true
+      }
+      if (result.changed) {
+        publishEvent(ctx, SHARED_STATE_CHANGED_CHANNEL, {
+          id: `scene-audio-playback:${now}:${Math.random().toString(36).slice(2)}`,
+          name: 'scene-audio-playback',
+          updatedAt: now,
+        })
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Stars-State-Revision': String(sharedStateRevision(result.next)),
+      })
+      res.end(JSON.stringify(result.next))
+      return true
+    }
+
     if (parsed.pathname === '/api/state/combat-interrupts/interrupt' && req.method === 'PATCH') {
       const auth = authorizeStateWrite('combat-interrupts', extractSecret(req))
       if (!auth.ok) {
@@ -5455,6 +5831,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         if (playerRead && name === 'room-chat') value = projectRoomChatForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'room-journal') value = projectRoomJournalForMember(value, roomMember?.memberId ?? '', false)
         if (playerRead && name === 'group-ability-checks') value = projectGroupAbilityChecksForMember(value, roomMember?.memberId ?? '', false)
+        if (playerRead && name === 'scene-orchestration') value = projectSceneOrchestrationForPlayer(value)
         if (playerRead && name === 'characters') value = projectCharactersForRoomMember(value, roomMember)
         if (playerRead && name === 'dice') value = projectDiceForRoomMember(value)
         if (playerRead && name === 'dice-events') value = projectDiceEventsForRoomMember(value)
@@ -5529,6 +5906,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (req.method === 'PUT') {
+        if (name === 'scene-audio-playback') {
+          writeJson(res, 405, { error: 'authoritative-mutation-required', name })
+          return true
+        }
+        if (!stateResourceWriteAllowedForRole(name, ctx.accessRole)) {
+          writeJson(res, 403, { error: 'dm-authority-required', name })
+          return true
+        }
         const auth = authorizeStateWrite(name, extractSecret(req))
         if (!auth.ok) {
           res.writeHead(auth.status, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -5557,6 +5942,28 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           const quarantineId = await quarantineSharedState(ctx, name, parsedBody, validation.reason)
           writeJson(res, 422, { error: 'invalid-state', name, reason: validation.reason, quarantineId })
           return true
+        }
+        if (name === 'scene-audio-library') {
+          let backingFilesValid = true
+          for (const asset of parsedBody.assets) {
+            try {
+              const [metadata, fileInfo] = await Promise.all([
+                readFile(path.join(ctx.imageRoot, `${asset.id}.json`), 'utf8').then(JSON.parse),
+                stat(path.join(ctx.imageRoot, asset.id)),
+              ])
+              if (metadata?.purpose !== 'scene-audio' || metadata?.type !== asset.mimeType || fileInfo.size !== asset.sizeBytes) {
+                backingFilesValid = false
+                break
+              }
+            } catch {
+              backingFilesValid = false
+              break
+            }
+          }
+          if (!backingFilesValid) {
+            writeJson(res, 422, { error: 'invalid-state', name, reason: 'invalid-scene-audio-backing-file' })
+            return true
+          }
         }
         await maybeWriteAutoCampaignSnapshot(ctx)
         const expectedHeader = req?.headers?.['x-stars-expected-revision']
@@ -5681,6 +6088,18 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           }
           const meta = JSON.parse(await readFile(sourceMetaPath, 'utf8'))
           if (ctx.accessRole === 'player' || ctx.accessRole === 'spectator') {
+            if (meta?.purpose === 'scene-audio') {
+              let library = null
+              try {
+                library = JSON.parse(await readFile(path.join(ctx.stateRoot, 'scene-audio-library.json'), 'utf8'))
+              } catch {
+                // Missing catalog means the media is not authorized for room playback.
+              }
+              if (!(Array.isArray(library?.assets) && library.assets.some((asset) => asset?.id === id))) {
+                writeJson(res, 403, { error: 'forbidden' })
+                return true
+              }
+            }
             let journal = null
             try {
               journal = JSON.parse(await readFile(path.join(ctx.stateRoot, 'room-journal.json'), 'utf8'))
@@ -5710,8 +6129,14 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         await mkdir(ctx.imageRoot, { recursive: true })
         await maybeWriteAutoCampaignSnapshot(ctx)
         const body = await readBody(req, IMAGE_MAX_BYTES)
-        const purpose = req.headers['x-stars-image-purpose'] === 'handout' ? 'handout' : 'general'
-        const metaBody = JSON.stringify({ type: req.headers['content-type'] || 'application/octet-stream', purpose })
+        const requestedPurpose = req.headers['x-stars-image-purpose']
+        const purpose = requestedPurpose === 'handout' || requestedPurpose === 'scene-audio' ? requestedPurpose : 'general'
+        const contentType = req.headers['content-type'] || 'application/octet-stream'
+        if (purpose === 'scene-audio' && !String(contentType).toLowerCase().startsWith('audio/')) {
+          writeJson(res, 415, { error: 'invalid-scene-audio-type' })
+          return true
+        }
+        const metaBody = JSON.stringify({ type: contentType, purpose })
         // blob+meta 在同一把锁内原子落盘。
         await atomicWriteImageLocked(filePath, metaPath, body, metaBody)
         // 写后即触发配额 GC（write-trigger，按 mtime 最旧优先淘汰）。

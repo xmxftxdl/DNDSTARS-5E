@@ -91,6 +91,20 @@ describe('D&D 5e map helpers', () => {
     }])).toHaveLength(1)
   })
 
+  it('uses the cropped initiative portrait and falls back to the full portrait', () => {
+    const token = {
+      id: 'hero-token', label: '勇士', emoji: '🛡️', color: '#fff', type: 'player',
+      characterId: 'champion', x: 0, y: 0, size: 1,
+    } as never
+    vi.spyOn(Math, 'random').mockReturnValue(0.45)
+    expect(buildInitiativeOrder([token], [{
+      ...champion(), portrait: 'full-portrait', initiativePortrait: 'initiative-portrait',
+    }])[0].portrait).toBe('initiative-portrait')
+    expect(buildInitiativeOrder([token], [{
+      ...champion(), portrait: 'full-portrait', initiativePortrait: undefined,
+    }])[0].portrait).toBe('full-portrait')
+  })
+
   it('inserts a summoned initiative slot without changing the active turn', () => {
     const current = [
       { slotId: 'hero:normal', tokenId: 'hero', label: '英雄', emoji: 'H', color: '#fff', roll: 15 },

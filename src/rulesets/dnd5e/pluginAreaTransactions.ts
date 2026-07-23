@@ -91,6 +91,8 @@ export function resolvePreparedDnd5ePersistentAreaTrigger(input: {
   const { prepared } = input
   const result = resolveDnd5ePersistentAreaTrigger(prepared.state, {
     areaId: prepared.candidate.area.id,
+    areaSourceKind: prepared.candidate.area.sourceKind,
+    coreSpellId: prepared.candidate.area.coreSpellId,
     sourceId: prepared.candidate.area.sourceTokenId,
     targetId: prepared.candidate.targetToken.id,
     trigger: prepared.candidate.trigger,

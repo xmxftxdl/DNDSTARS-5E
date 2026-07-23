@@ -15,6 +15,7 @@ import {
   type Dnd5eActionResult,
   type Dnd5eMapResultPlan,
 } from '../../rulesets/dnd5e'
+import { resolveDnd5eRollMode } from '../../rulesets/dnd5e/rollMode'
 
 export async function settleDnd5eConcentrationChecks(input: {
   result: Extract<Dnd5eActionResult, { ok: true }>
@@ -252,6 +253,83 @@ export async function settleDnd5eConcentrationChecks(input: {
     state = resolved.state
     events.push(...resolved.events)
   }
+  const pendingDamageEffectSaves = input.result.events.filter((event) =>
+    event.type === 'active-effect-save-required' && event.timing === 'takes-damage',
+  )
+  for (const check of pendingDamageEffectSaves) {
+    if (check.type !== 'active-effect-save-required') continue
+    const combatant = state.combatants[check.targetId]
+    const effect = combatant?.classState.activeEffects?.find((candidate) => candidate.id === check.effectId)
+    if (
+      !combatant || !effect?.repeatSave?.onDamage ||
+      !combatant.classState.activeEffectDamageSavePendingIds?.includes(check.effectId)
+    ) continue
+    const source = effect.source.actorId ? state.combatants[effect.source.actorId] : undefined
+    const baseMode = dnd5eSavingThrowMode(combatant, check.ability, {
+      effectVisible: effect.visibility !== 'dm-only',
+      sourceCreatureType: source?.creatureType,
+      sourceIsSpell: effect.source.kind === 'spell',
+    })
+    const mode = check.mode === 'advantage'
+      ? resolveDnd5eRollMode({
+          requestedMode: baseMode,
+          advantage: [{ active: true, reason: 'active-effect-damage-save' }],
+        }).mode
+      : baseMode
+    const targetName = input.map.tokens.find((token) => token.id === check.targetId)?.label ?? combatant.name
+    const d20 = await input.rollD20(`受伤触发·${check.ability.toUpperCase()} 豁免 DC ${check.dc}`, targetName)
+    const d20Second = mode !== 'normal'
+      ? await input.rollD20(`受伤触发豁免（${mode === 'advantage' ? '优势' : '劣势'}）`, targetName)
+      : undefined
+    const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
+      ? await input.rollD4('祝福术·受伤触发豁免加值', targetName)
+      : undefined
+    const baneRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bane')
+      ? await input.rollD4('灾祸术·受伤触发豁免减值', targetName)
+      : undefined
+    const modifier = combatant.savingThrowBonuses[check.ability] ??
+      Math.floor((combatant.abilities[check.ability] - 10) / 2)
+    const initial = previewDnd5eSavingThrowRoll({
+      rolls: mode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      mode,
+      modifier: modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
+      dc: check.dc,
+    })
+    const characterId = input.characterIdByCombatantId[check.targetId]
+    const target = characterId ? input.characters.find((character) => character.id === characterId) : undefined
+    const inspirationDie = dnd5eHeldBardicInspirationDie(combatant)
+    const bardicInspirationRoll = !initial.success && inspirationDie && input.requestBardicInspiration
+      ? await input.requestBardicInspiration({
+          target, targetName, dieSides: inspirationDie, rollType: '豁免',
+          total: initial.roll.total, targetNumber: check.dc,
+        })
+      : undefined
+    const afterInspirationSuccess = initial.success || initial.roll.total + (bardicInspirationRoll ?? 0) >= check.dc
+    const darkOnesOwnLuckRoll = !afterInspirationSuccess && dnd5eDarkOnesOwnLuckAvailable(combatant) && input.requestDarkOnesOwnLuck
+      ? await input.requestDarkOnesOwnLuck({
+          target, targetName, rollType: '豁免',
+          total: initial.roll.total + (bardicInspirationRoll ?? 0), targetNumber: check.dc,
+        })
+      : undefined
+    const afterLuckSuccess = afterInspirationSuccess ||
+      initial.roll.total + (bardicInspirationRoll ?? 0) + (darkOnesOwnLuckRoll ?? 0) >= check.dc
+    const rerollFeature = dnd5eSavingThrowRerollFeature(combatant)
+    const reroll = !afterLuckSuccess && rerollFeature && target && input.requestSavingThrowReroll
+      ? await input.requestSavingThrowReroll({
+          target, targetName, featureName: rerollFeature.name,
+          total: initial.roll.total, dc: check.dc, mode,
+        })
+      : undefined
+    const resolved = resolveDnd5eHeadlessAction(state, {
+      type: 'active-effect-damage-save', actorId: combatant.id, effectId: check.effectId,
+      d20, d20Second, blessRoll, baneRoll,
+      rerollD20: reroll?.d20, rerollD20Second: reroll?.d20Second,
+      bardicInspirationRoll, darkOnesOwnLuckRoll,
+    })
+    if (!resolved.ok) continue
+    state = resolved.state
+    events.push(...resolved.events)
+  }
   const pending = input.result.events.filter((event) => event.type === 'concentration-check-required')
   for (const check of pending) {
     const combatant = state.combatants[check.targetId]
@@ -406,4 +484,3 @@ export async function settleDnd5eConcentrationChecks(input: {
     },
   }
 }
-

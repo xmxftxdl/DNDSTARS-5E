@@ -65,6 +65,7 @@ const REMOVAL_REASON_LABELS: Record<string, string> = {
   dm: 'DM 移除',
   healed: '获得治疗',
   death: '目标死亡',
+  awakened: '被动作唤醒',
 }
 
 function signed(value: number): string {
@@ -121,6 +122,10 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.actorId)}｜恢复${resourceLabel(event.resourceKey)}｜当前 ${event.current}/${event.max}`]
     case 'spell-cast':
       return [`${resolveName(event.actorId)} → ${resolveName(event.targetId)}｜施放 ${event.spellId}｜使用 ${event.slotLevel} 环法术位`]
+    case 'sleep-resolved':
+      return [`${resolveName(event.actorId)}｜睡眠术生命值池 ${event.hitPointPool}｜影响 ${event.affectedTargetIds.length > 0 ? event.affectedTargetIds.map(resolveName).join('、') : '无'}｜剩余 ${event.remainingHitPoints}`]
+    case 'sleeping-creature-awakened':
+      return [`${resolveName(event.actorId)}｜使用动作唤醒 ${resolveName(event.targetId)}`]
     case 'delayed-spell-damage-triggered':
       return [`${event.sourceId ? resolveName(event.sourceId) : '法术来源'} → ${resolveName(event.targetId)}｜${event.spellId} 的延迟伤害触发｜造成 ${event.amount} 点伤害`]
     case 'condition-applied':
@@ -134,7 +139,7 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
     case 'active-effect-removed':
       return [`${resolveName(event.targetId)}｜效果结束：${effectDefinitionLabel(event.definitionId)}｜${REMOVAL_REASON_LABELS[event.reason] ?? event.reason}`]
     case 'active-effect-save-required':
-      return [`${resolveName(event.targetId)}｜需进行${ABILITY_LABELS[event.ability]}豁免 DC ${event.dc}（${event.timing === 'target-turn-start' ? '回合开始' : '回合结束'}）`]
+      return [`${resolveName(event.targetId)}｜需进行${ABILITY_LABELS[event.ability]}豁免 DC ${event.dc}（${event.timing === 'target-turn-start' ? '回合开始' : event.timing === 'target-turn-end' ? '回合结束' : '受到伤害'}${event.mode === 'advantage' ? '，优势' : event.mode === 'disadvantage' ? '，劣势' : ''}）`]
     case 'active-effect-save-resolved':
       return [`${resolveName(event.targetId)}｜持续效果${ABILITY_LABELS[event.ability]}豁免 ${event.total} vs DC ${event.dc}｜${event.success ? '成功' : '失败'}`]
     case 'concentration-check-required':
