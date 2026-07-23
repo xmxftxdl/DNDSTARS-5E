@@ -27,6 +27,7 @@ const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
 const GroupAbilityCheckSystem = lazy(() => import('./components/GroupAbilityCheckSystem'))
 const CampaignTimeSystem = lazy(() => import('./components/CampaignTimeSystem'))
+const SceneAudioPlaybackSystem = lazy(() => import('./components/SceneAudioPlaybackSystem'))
 
 function PageLoadingFallback() {
   return (
@@ -75,10 +76,13 @@ export default function App() {
           : roomSession.role === 'dm' && assignedCharacterId
             ? characterState.characters.find((character) => character.id === assignedCharacterId)
             : undefined
-        let rules = await heartbeatRoom(roomSession, activeDnd5eRulesPluginRequirements(), {
-          activeCharacterId: activeCharacter?.id ?? null,
-          activeCharacterName: activeCharacter?.name ?? null,
-        })
+        let rules = await heartbeatRoom(
+          roomSession,
+          activeDnd5eRulesPluginRequirements(),
+          activeCharacter
+            ? { activeCharacterId: activeCharacter.id, activeCharacterName: activeCharacter.name }
+            : undefined,
+        )
         if (!rules.member.ready) {
           try {
             rules = (await synchronizeRoomPlugins(roomSession, rules)).rules
@@ -184,6 +188,7 @@ export default function App() {
         {!isSpectator && <RoomHandoutNotification />}
         {!isSpectator && <GroupAbilityCheckSystem />}
         <CampaignTimeSystem isDm={endpointMode !== 'player'} />
+        <SceneAudioPlaybackSystem />
       </Suspense>
       <iframe
         title="D20 dice preloader"
