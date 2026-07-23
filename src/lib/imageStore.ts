@@ -19,10 +19,9 @@ function openDB(): Promise<IDBDatabase> {
   })
 }
 
-export async function putImage(id: string, blob: Blob): Promise<void> {
-  await putSharedImage(id, blob)
+async function putLocalImage(id: string, blob: Blob): Promise<void> {
   const db = await openDB()
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
     tx.objectStore(STORE).put(blob, id)
     tx.oncomplete = () => resolve()
@@ -30,9 +29,7 @@ export async function putImage(id: string, blob: Blob): Promise<void> {
   })
 }
 
-export async function getImage(id: string): Promise<Blob | undefined> {
-  const shared = await getSharedImage(id)
-  if (shared) return shared
+async function getLocalImage(id: string): Promise<Blob | undefined> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly')
@@ -40,6 +37,32 @@ export async function getImage(id: string): Promise<Blob | undefined> {
     req.onsuccess = () => resolve(req.result as Blob | undefined)
     req.onerror = () => reject(req.error)
   })
+}
+
+export async function putImage(id: string, blob: Blob): Promise<boolean> {
+  const shared = await putSharedImage(id, blob)
+  await putLocalImage(id, blob)
+  return shared
+}
+
+export async function getImage(id: string): Promise<Blob | undefined> {
+  const shared = await getSharedImage(id)
+  if (shared) {
+    // Keep a local copy so a DM can reuse the same map in another room. A
+    // failed cache write must not hide an image that was already downloaded.
+    void putLocalImage(id, shared).catch(() => undefined)
+    return shared
+  }
+
+  const local = await getLocalImage(id)
+  if (!local) return undefined
+
+  // Room images are deliberately isolated on the server. When a DM reuses a
+  // locally cached map in a new room, restore that room's copy automatically.
+  // putSharedImage enforces the current room role, so players cannot promote a
+  // local blob into shared storage.
+  await putSharedImage(id, local)
+  return local
 }
 
 export async function deleteImage(id: string): Promise<void> {

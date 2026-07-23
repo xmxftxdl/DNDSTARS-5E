@@ -100,7 +100,7 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
 
   const editor = page.getByTestId('character-portrait-editor')
   await expect(editor).toBeVisible()
-  await editor.locator('input[type="file"]').setInputFiles({
+  await editor.getByLabel('上传人物立绘').setInputFiles({
     name: 'portrait.png',
     mimeType: 'image/png',
     buffer: Buffer.from(
@@ -109,12 +109,23 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
     ),
   })
 
+  const cropDialog = page.getByRole('dialog', { name: '裁切地图 Token' })
+  await expect(cropDialog).toBeVisible()
+  const cropConfirm = cropDialog.getByRole('button', { name: '使用此取景' })
+  await expect(cropConfirm).toBeVisible()
+  const confirmBox = await cropConfirm.boundingBox()
+  expect(confirmBox).not.toBeNull()
+  expect(await page.evaluate(({ x, y }) => {
+    const hit = document.elementFromPoint(x, y)
+    return hit?.closest('button')?.textContent ?? ''
+  }, { x: confirmBox!.x + confirmBox!.width / 2, y: confirmBox!.y + confirmBox!.height / 2 })).toContain('使用此取景')
+
   await expect(editor.locator('img')).toHaveAttribute('src', /^data:image\/(?:webp|jpeg);base64,/)
   await expect.poll(async () => {
     const state = await (await request.get(`${DM}/api/state/characters?room=${created.roomId}`, {
       headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
     })).json() as {
-      characters?: Array<{ id?: string; portrait?: string }>
+      characters?: Array<{ id?: string; portrait?: string; initiativePortrait?: string }>
     }
     return state.characters?.find((character) => character.id === characterId)?.portrait ?? ''
   }, { timeout: 15_000 }).toMatch(/^data:image\/(?:webp|jpeg);base64,/)
@@ -124,5 +135,18 @@ test('人物立绘上传后随房间角色保存，并在刷新后恢复', async
     'src',
     /^data:image\/(?:webp|jpeg);base64,/,
   )
+  await page.getByRole('button', { name: '编辑立绘' }).click()
+  await expect(page.getByRole('dialog', { name: '编辑人物立绘' })).toBeVisible()
+  await expect(page.getByLabel('上传先攻立绘')).toHaveCount(0)
+  await page.getByRole('button', { name: '设置先攻取景' }).click()
+  const initiativeCropDialog = page.getByRole('dialog', { name: '裁切先攻立绘' })
+  await expect(initiativeCropDialog).toBeVisible()
+  await initiativeCropDialog.getByRole('button', { name: '使用此取景' }).click()
+  await expect.poll(async () => {
+    const state = await (await request.get(`${DM}/api/state/characters?room=${created.roomId}`, {
+      headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
+    })).json() as { characters?: Array<{ id?: string; initiativePortrait?: string }> }
+    return state.characters?.find((character) => character.id === characterId)?.initiativePortrait ?? ''
+  }, { timeout: 15_000 }).toMatch(/^data:image\/(?:webp|jpeg);base64,/)
   await expect(page.getByRole('button', { name: 'AI 生成（稍后）' })).toBeDisabled()
 })

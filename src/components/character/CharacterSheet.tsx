@@ -213,9 +213,12 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
             avatar={c.avatar}
             accent={c.accent}
             portrait={c.portrait}
+            initiativePortrait={c.initiativePortrait}
+            tokenPortrait={c.tokenPortrait}
             editable={!readOnly}
             onChange={(portrait) => updateCharacter({ portrait })}
-            onAvatarChange={(avatar) => updateCharacter({ avatar })}
+            onInitiativePortraitChange={(initiativePortrait) => updateCharacter({ initiativePortrait })}
+            onTokenPortraitChange={(tokenPortrait) => updateCharacter({ tokenPortrait })}
           />
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="角色名称" value={c.name} onChange={(value) => updateCharacter({ name: value })} className="col-span-2" />
@@ -269,6 +272,7 @@ export default function CharacterSheet({ id, isDM, readOnly = false }: Character
             <NumberField label="经验值" value={c.experience} min={0} max={999999999} onChange={(value) => updateCharacter({ experience: value })} />
             <Field label="玩家" value={c.player} onChange={(value) => updateCharacter({ player: value })} />
             <NumberField label="激励骰数量" value={c.inspiration} min={0} max={99} onChange={(value) => updateCharacter({ inspiration: value })} />
+            <NumberField label="额外先攻加值" value={c.initiativeBonus} min={-30} max={30} onChange={(value) => updateCharacter({ initiativeBonus: value })} />
           </div>
         </div>
       </section>

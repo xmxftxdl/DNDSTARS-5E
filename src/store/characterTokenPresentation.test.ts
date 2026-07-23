@@ -27,4 +27,18 @@ describe('character token presentation', () => {
     const original = [token({ characterId: undefined })]
     expect(projectCharacterTokenPresentations(original, [])).toBe(original)
   })
+
+  it('projects full portrait and the separately cropped map token from the character', () => {
+    const projected = projectCharacterTokenPresentations([token()], [{
+      id: 'character-1',
+      name: 'Hero',
+      avatar: 'H',
+      portrait: 'data:image/webp;base64,AAAA',
+      tokenPortrait: 'data:image/webp;base64,BBBB',
+    }])
+    expect(projected[0]).toMatchObject({
+      portrait: 'data:image/webp;base64,AAAA',
+      tokenPortrait: 'data:image/webp;base64,BBBB',
+    })
+  })
 })

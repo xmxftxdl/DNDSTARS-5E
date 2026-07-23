@@ -1,12 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
 import { isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { getAccountSession } from '../lib/accountSession'
 import { restoreClassResources, syncCharacterClassResources } from '../lib/classResources'
 import { migrateLegacyCharacterFields } from '../lib/legacyCharacterMigration'
-import { normalizeCharacterPortrait } from '../lib/characterPortrait'
+import { normalizeCharacterInitiativePortrait, normalizeCharacterPortrait, normalizeCharacterTokenPortrait } from '../lib/characterPortrait'
 import { normalizeCharacterAvatar } from '../lib/characterAvatar'
 import { defaultEquipmentForDnd5eCharacter, normalizeDnd5eCharacterEquipment } from '../rulesets/dnd5e/equipment'
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
@@ -901,6 +901,8 @@ export function normalizeCharacter(input: LegacyCharacterSave): Character {
     dnd5eClassLevels: c.dnd5eClassLevels,
     avatar: normalizeCharacterAvatar(c.avatar),
     portrait: normalizeCharacterPortrait(c.portrait),
+    initiativePortrait: normalizeCharacterInitiativePortrait(c.initiativePortrait),
+    tokenPortrait: normalizeCharacterTokenPortrait(c.tokenPortrait),
     saveDC: c.saveDC ?? d.saveDC,
     passivePerception: c.passivePerception ?? d.passivePerception,
     inspiration: c.inspiration ?? d.inspiration,
@@ -1022,8 +1024,13 @@ export const useCharacterStore = create<CharacterState>()(
           updatedAt,
         }
         lastLocalCharactersWriteAt = payload.updatedAt ?? Date.now()
-        lastSharedCharactersSnapshot = JSON.stringify(payload)
-        await saveSharedResource('characters', payload)
+        const result = await saveSharedResourceWithResult('characters', payload)
+        if (result.status !== 'saved' && seq === characterSaveSeq) {
+          lastLocalCharactersWriteAt = lastAppliedCharactersUpdatedAt
+        }
+        if (result.status === 'saved' && seq === characterSaveSeq) {
+          lastSharedCharactersSnapshot = JSON.stringify(payload)
+        }
         if (seq !== characterSaveSeq) return updatedAt
         return updatedAt
       }
@@ -1062,8 +1069,13 @@ export const useCharacterStore = create<CharacterState>()(
           }
           if (seq !== characterSaveSeq) return
           lastLocalCharactersWriteAt = payload.updatedAt ?? Date.now()
-          lastSharedCharactersSnapshot = JSON.stringify(payload)
-          await saveSharedResource('characters', payload)
+          const result = await saveSharedResourceWithResult('characters', payload)
+          if (result.status !== 'saved' && seq === characterSaveSeq) {
+            lastLocalCharactersWriteAt = lastAppliedCharactersUpdatedAt
+          }
+          if (result.status === 'saved' && seq === characterSaveSeq) {
+            lastSharedCharactersSnapshot = JSON.stringify(payload)
+          }
         }
         void save()
       }

@@ -49,7 +49,7 @@ export default function CharacterDetailPanel({
   }
 
   return (
-    <div className="glass absolute bottom-3 left-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+    <div data-testid="character-detail-panel" className="glass absolute bottom-3 left-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 bg-void-900 text-2xl"

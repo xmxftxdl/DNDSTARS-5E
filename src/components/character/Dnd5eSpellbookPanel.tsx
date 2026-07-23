@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { BookMarked, BookOpen, Bot, Search, Sparkles, X } from 'lucide-react'
+import { BookMarked, BookOpen, Bot, Check, Search, Sparkles, X } from 'lucide-react'
 import type { Character } from '../../types/character'
 import {
   DND5E_SPELL_CLASS_LABELS,
@@ -36,6 +36,7 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   )
   const [query, setQuery] = useState('')
   const [levelFilter, setLevelFilter] = useState('all')
+  const [wizardSpellLevel, setWizardSpellLevel] = useState(0)
   const [detailSpellId, setDetailSpellId] = useState<string | null>(null)
   const classLevels = normalizeDnd5eClassLevels(character)
   const castingDefinitions = DND5E_SRD_CLASS_DEFINITIONS.filter((candidate) =>
@@ -75,6 +76,8 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   const selectedCantripEntries = selectedCantrips.flatMap((id) => entriesById.get(id) ?? [])
   const selectedSpellEntries = selectedSpells.flatMap((id) => entriesById.get(id) ?? [])
   const wizardBookEntries = wizardBook.flatMap((id) => entriesById.get(id) ?? []).filter((spell) => spell.level > 0)
+  const wizardSpellbookEntries = [...selectedCantripEntries, ...wizardBookEntries]
+  const visibleWizardBookEntries = wizardSpellbookEntries.filter((spell) => spell.level === wizardSpellLevel)
   const availableCandidates = candidates.filter((spell) => spell.level === 0
     ? !selectedCantrips.includes(spell.id)
     : definition.id === 'wizard'
@@ -126,12 +129,16 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   }
 
   const modeLabel = definition.id === 'wizard'
-    ? '法术书与今日准备'
+    ? '法术书'
     : definition.spellcasting.kind === 'full-prepared' || definition.spellcasting.kind === 'half-prepared'
       ? '今日准备法术'
       : '已知法术'
 
-  const renderSpellChoice = (spell: Dnd5eSpellbookEntry, showWizardBookAction = true) => <SpellChoice
+  const renderSpellChoice = (
+    spell: Dnd5eSpellbookEntry,
+    showWizardBookAction = true,
+    showPreparedCheck = false,
+  ) => <SpellChoice
     key={`${spell.sourceKind}:${spell.id}`}
     spell={spell}
     wizard={definition.id === 'wizard' && showWizardBookAction}
@@ -142,6 +149,7 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
       : definition.id !== 'wizard' && !selectedSpells.includes(spell.id) && selectedSpells.length >= limits.spells}
     preparationDisabled={definition.id === 'wizard' && !wizardBook.includes(spell.id)}
     selectionMode={preparationMode ? 'prepared' : 'known'}
+    showPreparedCheck={showPreparedCheck}
     onView={() => setDetailSpellId(spell.id)}
     onToggleBook={() => toggleWizardBook(spell.id)}
     onToggle={() => spell.level === 0 ? toggleCantrip(spell.id) : toggleKnownOrPrepared(spell.id)}
@@ -172,26 +180,49 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     </div>
 
     <div className="mt-5 space-y-4">
-      <SpellCollection
-        title="已学习戏法"
-        description="这些戏法已记录在角色上，不占用法术位。"
-        count={selectedCantripEntries.length}
-        empty="尚未学习戏法。"
-      >{selectedCantripEntries.map((spell) => renderSpellChoice(spell, false))}</SpellCollection>
+      {definition.id === 'wizard' ? <section className="rounded-2xl border border-white/8 bg-black/10 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">法术书</h4>
+            <p className="mt-1 text-xs text-slate-500">按环阶查看已学习戏法与法术书；右上角带勾的法术当前已准备。</p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-xs font-semibold text-slate-300">{wizardSpellbookEntries.length}</span>
+        </div>
+        <div className="mt-4 grid grid-cols-5 gap-1.5 sm:grid-cols-10" role="tablist" aria-label="法术书环阶">
+          {Array.from({ length: 10 }, (_, level) => level).map((level) => {
+            const count = wizardSpellbookEntries.filter((spell) => spell.level === level).length
+            return <button
+              key={level}
+              type="button"
+              role="tab"
+              aria-selected={wizardSpellLevel === level}
+              onClick={() => setWizardSpellLevel(level)}
+              className={`rounded-lg border px-1 py-2 text-xs font-semibold transition ${wizardSpellLevel === level ? 'border-violet-300/45 bg-violet-500/20 text-violet-100' : 'border-white/8 bg-white/[0.025] text-slate-500 hover:bg-white/[0.06] hover:text-slate-300'}`}
+            >
+              <span className="block">{level === 0 ? '戏法' : `${level}环`}</span>
+              <span className="mt-0.5 block text-[9px] opacity-70">{count}</span>
+            </button>
+          })}
+        </div>
+        {visibleWizardBookEntries.length > 0
+          ? <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">{visibleWizardBookEntries.map((spell) => renderSpellChoice(spell, spell.level > 0, spell.level > 0))}</div>
+          : <p className="mt-4 rounded-xl border border-dashed border-white/8 px-4 py-5 text-center text-xs text-slate-600">{wizardSpellLevel === 0 ? '尚未学习戏法。' : `法术书中尚无 ${wizardSpellLevel} 环法术。`}</p>}
+      </section> : null}
 
-      {definition.id === 'wizard' ? <SpellCollection
-        title="法术书（已学习法术）"
-        description="法师已经抄录或学习的法术；只有这里的法术才能加入今日准备。"
-        count={wizardBookEntries.length}
-        empty="法术书中还没有一环或更高环级法术。"
-      >{wizardBookEntries.map((spell) => renderSpellChoice(spell))}</SpellCollection> : null}
-
-      <SpellCollection
-        title={preparationMode ? '今日已准备法术' : '已学习／已知法术'}
-        description={preparationMode ? '当前可以使用法术位施放的已准备法术。' : '角色当前已经学习并掌握的法术。'}
-        count={selectedSpellEntries.length}
-        empty={preparationMode ? '今天尚未准备任何法术。' : '尚未学习任何法术。'}
-      >{selectedSpellEntries.map((spell) => renderSpellChoice(spell, false))}</SpellCollection>
+      {definition.id !== 'wizard' ? <>
+        <SpellCollection
+          title="已学习戏法"
+          description="这些戏法已记录在角色上，不占用法术位。"
+          count={selectedCantripEntries.length}
+          empty="尚未学习戏法。"
+        >{selectedCantripEntries.map((spell) => renderSpellChoice(spell, false))}</SpellCollection>
+        <SpellCollection
+          title={preparationMode ? '今日已准备法术' : '已学习／已知法术'}
+          description={preparationMode ? '当前可以使用法术位施放的已准备法术。' : '角色当前已经学习并掌握的法术。'}
+          count={selectedSpellEntries.length}
+          empty={preparationMode ? '今天尚未准备任何法术。' : '尚未学习任何法术。'}
+        >{selectedSpellEntries.map((spell) => renderSpellChoice(spell, false))}</SpellCollection>
+      </> : null}
     </div>
 
     <div className="mt-6 border-t border-white/10 pt-5">
@@ -214,7 +245,7 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   </section>
 }
 
-function SpellChoice({ spell, wizard, inWizardBook, selected, disabled, preparationDisabled, selectionMode, onView, onToggleBook, onToggle }: {
+function SpellChoice({ spell, wizard, inWizardBook, selected, disabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onToggleBook, onToggle }: {
   spell: Dnd5eSpellbookEntry
   wizard: boolean
   inWizardBook: boolean
@@ -222,6 +253,7 @@ function SpellChoice({ spell, wizard, inWizardBook, selected, disabled, preparat
   disabled: boolean
   preparationDisabled: boolean
   selectionMode: 'known' | 'prepared'
+  showPreparedCheck: boolean
   onView: () => void
   onToggleBook: () => void
   onToggle: () => void
@@ -230,10 +262,10 @@ function SpellChoice({ spell, wizard, inWizardBook, selected, disabled, preparat
   const description = spell.imported?.description ?? spell.reference?.description ?? spell.combat?.description
   return <div className={`rounded-xl border p-3 ${selected ? 'border-violet-300/30 bg-violet-500/[0.08]' : 'border-white/8 bg-black/10'}`}>
     <button type="button" onClick={onView} className="block w-full rounded-lg text-left outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-violet-400/60" aria-label={`查看${spell.name}详情`}>
-      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate text-sm text-slate-100">{spell.name}</strong><span className="mt-0.5 block text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`}{school ? ` · ${school}` : ''}</span></div>{spell.headless ? <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-200"><Bot className="h-3 w-3" />Headless</span> : null}</div>
+      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate text-sm text-slate-100">{spell.name}</strong><span className="mt-0.5 block text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`}{school ? ` · ${school}` : ''}</span></div><div className="flex shrink-0 flex-wrap justify-end gap-1">{showPreparedCheck && selected ? <span className="flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-semibold text-violet-100" title="已准备"><Check className="h-3 w-3" />已准备</span> : null}{spell.headless ? <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-200"><Bot className="h-3 w-3" />Headless</span> : null}</div></div>
       <span className="mt-2 block text-[10px] leading-4 text-slate-500">职业：{spellClassLabel(spell)}</span>
-      {description ? <span className="mt-2 line-clamp-2 block text-[11px] leading-4 text-slate-500">{description}</span> : null}
-      <span className="mt-2 flex items-center gap-1 text-[10px] font-semibold text-violet-300"><BookOpen className="h-3 w-3" />点击查看完整规则</span>
+      {description ? <span className="mt-2 line-clamp-4 whitespace-pre-line text-[11px] leading-4 text-slate-500">{description}</span> : null}
+      <span className="mt-2 flex items-center gap-1 text-[10px] font-semibold text-violet-300"><BookOpen className="h-3 w-3" />点击法术查看详情</span>
     </button>
     <div className="mt-3 flex flex-wrap gap-2">
       {wizard && spell.level > 0 ? <ToggleButton active={inWizardBook} onClick={onToggleBook} label={inWizardBook ? '移出法术书' : '加入法术书'} /> : null}

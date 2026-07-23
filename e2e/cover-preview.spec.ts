@@ -104,8 +104,8 @@ test('weapon targeting previews creature cover and lets DM override this attack 
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
-  await player.getByTitle('技能').click()
-  await player.getByRole('button', { name: '选择目标并攻击' }).click()
+  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible()
+  await player.getByRole('button', { name: /攻击：长弓/ }).click()
   await player.getByTestId('map-canvas').click({ position: { x: targetToken.x, y: targetToken.y } })
   await player.getByTestId('dnd5e-cover-preview').getByTestId('dnd5e-cover-confirm').click()
 
@@ -118,8 +118,7 @@ test('weapon targeting previews creature cover and lets DM override this attack 
     dm.reload({ waitUntil: 'domcontentloaded' }),
     player.reload({ waitUntil: 'domcontentloaded' }),
   ])
-  await player.getByTitle('技能').click()
-  await player.getByRole('button', { name: '选择目标并攻击' }).click()
+  await player.getByRole('button', { name: /攻击：长弓/ }).click()
   await player.getByTestId('map-canvas').click({ position: { x: targetToken.x, y: targetToken.y } })
 
   const playerPreview = player.getByTestId('dnd5e-cover-preview')

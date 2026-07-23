@@ -1,5 +1,8 @@
 export const CHARACTER_PORTRAIT_WIDTH = 480
 export const CHARACTER_PORTRAIT_HEIGHT = 640
+export const CHARACTER_TOKEN_PORTRAIT_SIZE = 256
+export const CHARACTER_INITIATIVE_PORTRAIT_WIDTH = 288
+export const CHARACTER_INITIATIVE_PORTRAIT_HEIGHT = 376
 export const CHARACTER_PORTRAIT_MAX_SOURCE_BYTES = 12 * 1024 * 1024
 export const CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH = 600_000
 /** Keeps the complete characters resource below the shared-state 8 MiB boundary. */
@@ -15,6 +18,119 @@ export function isCharacterPortraitDataUrl(value: unknown): value is string {
 
 export function normalizeCharacterPortrait(value: unknown): string | undefined {
   return isCharacterPortraitDataUrl(value) ? value : undefined
+}
+
+export function normalizeCharacterInitiativePortrait(value: unknown): string | undefined {
+  return isCharacterPortraitDataUrl(value) ? value : undefined
+}
+
+export function normalizeCharacterTokenPortrait(value: unknown): string | undefined {
+  return isCharacterPortraitDataUrl(value) ? value : undefined
+}
+
+export interface CharacterTokenCrop {
+  /** 取景中心在原图中的归一化坐标。 */
+  centerX: number
+  centerY: number
+  /** 以“刚好铺满正方形”为 1 的缩放倍数。 */
+  zoom: number
+}
+
+export const DEFAULT_CHARACTER_TOKEN_CROP: CharacterTokenCrop = {
+  centerX: 0.5,
+  centerY: 0.32,
+  zoom: 1.25,
+}
+
+export const DEFAULT_CHARACTER_INITIATIVE_CROP: CharacterTokenCrop = {
+  centerX: 0.5,
+  centerY: 0.42,
+  zoom: 1,
+}
+
+export function clampCharacterTokenCrop(crop: CharacterTokenCrop): CharacterTokenCrop {
+  return {
+    centerX: Math.max(0, Math.min(1, crop.centerX)),
+    centerY: Math.max(0, Math.min(1, crop.centerY)),
+    zoom: Math.max(1, Math.min(4, crop.zoom)),
+  }
+}
+
+export function drawCharacterTokenCrop(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource & { naturalWidth: number; naturalHeight: number },
+  crop: CharacterTokenCrop,
+  size: number,
+): void {
+  drawCharacterPortraitCrop(context, image, crop, size, size)
+}
+
+export function drawCharacterPortraitCrop(
+  context: CanvasRenderingContext2D,
+  image: CanvasImageSource & { naturalWidth: number; naturalHeight: number },
+  crop: CharacterTokenCrop,
+  width: number,
+  height: number,
+): void {
+  const normalized = clampCharacterTokenCrop(crop)
+  const sourceWidth = Math.max(1, image.naturalWidth)
+  const sourceHeight = Math.max(1, image.naturalHeight)
+  const coverScale = Math.max(width / sourceWidth, height / sourceHeight)
+  const scale = coverScale * normalized.zoom
+  const drawnWidth = sourceWidth * scale
+  const drawnHeight = sourceHeight * scale
+  const desiredX = width / 2 - normalized.centerX * drawnWidth
+  const desiredY = height / 2 - normalized.centerY * drawnHeight
+  const x = Math.min(0, Math.max(width - drawnWidth, desiredX))
+  const y = Math.min(0, Math.max(height - drawnHeight, desiredY))
+  context.clearRect(0, 0, width, height)
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(image, x, y, drawnWidth, drawnHeight)
+}
+
+function createCroppedCharacterPortraitDataUrl(
+  image: HTMLImageElement,
+  crop: CharacterTokenCrop,
+  width: number,
+  height: number,
+  errorLabel: string,
+): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error(`浏览器无法生成${errorLabel}。`)
+  drawCharacterPortraitCrop(context, image, crop, width, height)
+  const result = canvasDataUrl(canvas)
+  if (!isCharacterPortraitDataUrl(result)) throw new Error(`${errorLabel}图片过大，请调整取景或更换立绘。`)
+  return result
+}
+
+export function createCharacterTokenPortraitDataUrl(
+  image: HTMLImageElement,
+  crop: CharacterTokenCrop,
+): string {
+  return createCroppedCharacterPortraitDataUrl(
+    image,
+    crop,
+    CHARACTER_TOKEN_PORTRAIT_SIZE,
+    CHARACTER_TOKEN_PORTRAIT_SIZE,
+    '地图 Token',
+  )
+}
+
+export function createCharacterInitiativePortraitDataUrl(
+  image: HTMLImageElement,
+  crop: CharacterTokenCrop,
+): string {
+  return createCroppedCharacterPortraitDataUrl(
+    image,
+    crop,
+    CHARACTER_INITIATIVE_PORTRAIT_WIDTH,
+    CHARACTER_INITIATIVE_PORTRAIT_HEIGHT,
+    '先攻立绘',
+  )
 }
 
 export function validateCharacterPortraitFile(file: Pick<File, 'size' | 'type'>): string | null {

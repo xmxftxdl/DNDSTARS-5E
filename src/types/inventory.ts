@@ -203,7 +203,7 @@ export type Dnd5eInventoryMutation =
   | { type: 'transfer'; characterId: string; targetCharacterId: string; instanceId: string; quantity: number }
   | { type: 'equip'; characterId: string; instanceId: string }
   | { type: 'unequip'; characterId: string; instanceId: string }
-  | { type: 'prepare-attunement'; characterId: string; instanceId: string; prerequisiteConfirmed?: boolean }
+  | { type: 'prepare-attunement'; characterId: string; instanceId: string; dmPrerequisiteConfirmed?: boolean }
   | { type: 'cancel-attunement'; characterId: string; instanceId: string }
   | { type: 'end-attunement'; characterId: string; instanceId: string }
   | { type: 'set-container'; characterId: string; instanceId: string; containerInstanceId?: string }

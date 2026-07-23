@@ -22,12 +22,18 @@ import {
   Weight,
 } from 'lucide-react'
 import { useCharacterStore } from '../../store/characters'
+import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 import { EQUIPMENT_SLOT_LABELS } from '../../lib/equipmentDefaults'
 import { formatEquipmentStatLine } from '../../lib/combatStats'
+import { dnd5eItemActionIcon } from '../../lib/dnd5eActionIcons'
 import { modeFromPort } from '../../lib/appMode'
 import { getRoomSession } from '../../lib/roomSession'
 import { submitDnd5eInventoryMutation } from '../../lib/inventoryAuthority'
-import { dnd5eInventoryLoad, normalizeDnd5eInventory } from '../../rulesets/dnd5e/items'
+import {
+  dnd5eAttunementRequirementDecision,
+  dnd5eInventoryLoad,
+  normalizeDnd5eInventory,
+} from '../../rulesets/dnd5e/items'
 import {
   DND5E_MAGIC_ITEM_KIND_LABELS,
   DND5E_MAGIC_ITEM_RARITY_LABELS,
@@ -104,13 +110,14 @@ export default function EquipmentTab({
 }: EquipmentTabProps) {
   const character = useCharacterStore((state) => state.characters.find((candidate) => candidate.id === charId))
   const characters = useCharacterStore((state) => state.characters)
-  const [group, setGroup] = useState<'equipment' | 'items'>('equipment')
+  const [group, setGroup] = useState<'equipment' | 'items'>(compact ? 'items' : 'equipment')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transferTargetId, setTransferTargetId] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [notice, setNotice] = useState('')
   const combatManagementLocked = !!onUseItem
-  const canIdentify = (getRoomSession()?.role ?? modeFromPort()) === 'dm'
+  const isDm = (getRoomSession()?.role ?? modeFromPort()) === 'dm'
+  const canIdentify = isDm
 
   const inventory = useMemo(() => character ? normalizeDnd5eInventory(character) : null, [character])
   if (!character || !inventory) return null
@@ -119,6 +126,9 @@ export default function EquipmentTab({
     ? entry.item.category === 'equipment'
     : entry.item.category !== 'equipment')
   const selected = inventory.entries.find((entry) => entry.instanceId === selectedId)
+  const attunementDecision = selected
+    ? dnd5eAttunementRequirementDecision(character, selected)
+    : 'met'
   const transferTargets = characters.filter((candidate) =>
     candidate.id !== character.id &&
     candidate.visibleToPlayers !== false &&
@@ -136,23 +146,24 @@ export default function EquipmentTab({
     }
   }
 
-  const useSelected = () => {
-    if (!selected) return
+  const activateEntry = (entry: Dnd5eInventoryEntry) => {
     if (onUseItem) {
-      const submitted = onUseItem(selected.instanceId)
+      const submitted = onUseItem(entry.instanceId)
       setNotice(submitted === false ? '当前战斗中不能使用该物品。' : '已提交给 DM/Headless 进行战斗结算。')
       return
     }
-    run({ type: 'use', characterId: character.id, instanceId: selected.instanceId })
+    run({ type: 'use', characterId: character.id, instanceId: entry.instanceId })
   }
+
+  const useSelected = () => selected && activateEntry(selected)
 
   return (
     <div className="space-y-4" data-testid="dnd5e-inventory">
       <section className="glass rounded-2xl p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">物品栏</p>
-            <p className="mt-1 text-xs text-slate-500">{inventory.entries.length} 个物品栏位 · {formatWeight(load.totalWeightLb)} / {load.carryingCapacityLb} 磅</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{compact ? '战斗物品快捷栏' : '物品栏'}</p>
+            <p className="mt-1 text-xs text-slate-500">{compact ? '点击图标查看；再次点击已选中的可用道具即可选择目标或提交结算。' : `${inventory.entries.length} 个物品栏位 · ${formatWeight(load.totalWeightLb)} / ${load.carryingCapacityLb} 磅`}</p>
           </div>
           <div className="flex rounded-xl border border-white/8 bg-black/20 p-1">
             <GroupButton active={group === 'equipment'} onClick={() => { setGroup('equipment'); setSelectedId(null) }} icon={Shield}>装备</GroupButton>
@@ -160,7 +171,7 @@ export default function EquipmentTab({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
+        {!compact && <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
           <div className="grid grid-cols-5 gap-2 rounded-xl border border-white/8 bg-black/15 p-3">
             {CURRENCIES.map((currency) => (
               <label key={`${currency}:${inventory.currency?.[currency] ?? 0}`} className="space-y-1 text-[10px] text-slate-500">
@@ -187,9 +198,9 @@ export default function EquipmentTab({
             <p className="mt-1 text-[11px] text-slate-500">可选负重阈值 {load.encumberedThresholdLb} / {load.heavilyEncumberedThresholdLb} 磅 · 携带上限 {load.carryingCapacityLb} 磅</p>
             {load.status !== 'normal' && <p className="mt-1 text-[11px] text-amber-200">{load.status === 'encumbered' ? '负重：速度 -10 尺。' : load.status === 'heavily-encumbered' ? '重度负重：速度 -20 尺，并承受相应检定与豁免劣势。' : '超过携带上限，通常无法继续携带或移动。'}</p>}
           </div>
-        </div>
+        </div>}
 
-        {group === 'equipment' && (
+        {!compact && group === 'equipment' && (
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {DND5E_EQUIPMENT_SLOTS.map((slot) => {
               const item = character.equipment?.[slot]
@@ -219,16 +230,19 @@ export default function EquipmentTab({
           </div>
         )}
 
-        <div className={`mt-4 grid gap-3 ${compact ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-7' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
+        <div className={`mt-4 grid gap-3 ${compact ? 'grid-cols-4 sm:grid-cols-6 lg:grid-cols-9 xl:grid-cols-11' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
           {entries.map((entry) => (
             <InventoryTile
               key={entry.instanceId}
               entry={entry}
               selected={entry.instanceId === selectedId}
+              compact={compact}
+              combatQuickUse={compact && !!onUseItem}
               onSelect={() => {
                 setSelectedId(entry.instanceId === selectedId ? null : entry.instanceId)
                 setQuantity(1)
               }}
+              onActivate={() => activateEntry(entry)}
             />
           ))}
         </div>
@@ -260,11 +274,20 @@ export default function EquipmentTab({
               {selected.item.magicItem?.attunement === 'required' && !selected.attuned && !selected.attunementPending && (
                 <ActionButton
                   icon={Sparkles}
-                  disabled={pending || combatManagementLocked}
+                  disabled={
+                    pending || combatManagementLocked || attunementDecision === 'unmet' ||
+                    (!isDm && attunementDecision === 'dm-confirmation-required')
+                  }
                   onClick={() => {
                     const requirement = selected.item.magicItem?.attunementRequirement
-                    const prerequisiteConfirmed = !requirement || window.confirm(`确认角色满足同调条件：${requirement}？\n确认后将在下一次短休完成同调。`)
-                    if (prerequisiteConfirmed) run({ type: 'prepare-attunement', characterId: character.id, instanceId: selected.instanceId, prerequisiteConfirmed })
+                    const dmPrerequisiteConfirmed = attunementDecision !== 'dm-confirmation-required' ||
+                      (isDm && window.confirm(`确认当前环境满足同调条件：${requirement}？\n该确认只允许由 DM 权威端完成。`))
+                    if (dmPrerequisiteConfirmed) run({
+                      type: 'prepare-attunement',
+                      characterId: character.id,
+                      instanceId: selected.instanceId,
+                      dmPrerequisiteConfirmed,
+                    })
                   }}
                 >准备同调</ActionButton>
               )}
@@ -282,6 +305,17 @@ export default function EquipmentTab({
               )}
             </div>}
           </div>
+
+          {selected.item.magicItem?.attunement === 'required' && attunementDecision === 'unmet' && (
+            <p className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              当前角色不满足同调条件：{selected.item.magicItem.attunementRequirement}。
+            </p>
+          )}
+          {selected.item.magicItem?.attunement === 'required' && attunementDecision === 'dm-confirmation-required' && !isDm && (
+            <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              该同调条件需要 DM 核对当前环境：{selected.item.magicItem.attunementRequirement}。请由 DM 打开此角色卡完成确认。
+            </p>
+          )}
 
           {selected.identified === false ? (
             <div className="mt-4 rounded-xl border border-fuchsia-300/15 bg-fuchsia-500/[0.055] p-4 text-sm text-fuchsia-100/85">
@@ -386,33 +420,41 @@ export default function EquipmentTab({
   )
 }
 
-function InventoryTile({ entry, selected, onSelect }: { entry: Dnd5eInventoryEntry; selected: boolean; onSelect: () => void }) {
+function InventoryTile({ entry, selected, compact, combatQuickUse, onSelect, onActivate }: {
+  entry: Dnd5eInventoryEntry
+  selected: boolean
+  compact?: boolean
+  combatQuickUse?: boolean
+  onSelect: () => void
+  onActivate?: () => void
+}) {
   const Icon = ICONS[entry.item.icon] ?? PackageOpen
   const usable = !!entry.item.use && entry.identified !== false
   const primaryResource = Object.values(entry.resources ?? {})[0]
+  const actionIcon = dnd5eItemActionIcon(entry.item)
   return (
     <button
       type="button"
-      onClick={onSelect}
-      title={entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name}\n${entry.item.rulesText}`}
-      className={`group relative min-h-28 rounded-2xl border p-3 text-left transition ${selected
+      onClick={() => combatQuickUse && selected && usable ? onActivate?.() : onSelect()}
+      title={entry.identified === false ? '未鉴定魔法物品' : `${entry.item.name}\n${entry.item.rulesText}${combatQuickUse && usable ? '\n再次点击使用' : ''}`}
+      className={`group relative rounded-2xl border p-2 text-left transition ${compact ? 'min-h-24' : 'min-h-28'} ${selected
         ? 'border-arcane-400/60 bg-arcane-500/15 shadow-[0_0_22px_rgba(124,92,255,0.16)]'
         : 'border-white/8 bg-gradient-to-b from-white/[0.045] to-black/20 hover:-translate-y-0.5 hover:border-white/20'}`}
     >
-      <div className={`flex h-11 w-11 items-center justify-center rounded-xl border ${usable
-        ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-200'
-        : 'border-amber-300/15 bg-amber-500/10 text-amber-200'}`}
-      >
-        <Icon className="h-6 w-6" />
+      <div className="relative w-full">
+        <Dnd5eActionIcon
+          spec={actionIcon}
+          active={selected}
+          disabled={entry.identified === false || (primaryResource != null && primaryResource.current <= 0)}
+          badge={primaryResource ? primaryResource.current : entry.quantity > 1 ? entry.quantity : undefined}
+          className={`mx-auto ${compact ? 'h-14 w-14' : 'h-16 w-16'}`}
+        />
+        <span className="absolute bottom-0 right-1/2 flex h-5 w-5 translate-x-8 items-center justify-center rounded-full border border-white/20 bg-void-950/90 text-slate-200 shadow">
+          <Icon className="h-3 w-3" />
+        </span>
       </div>
-      <p className="mt-2 line-clamp-2 text-xs font-semibold leading-snug text-slate-100">{displayItemName(entry)}</p>
-      <p className="mt-1 text-[10px] text-slate-600">{CATEGORY_LABELS[entry.item.category]}</p>
-      {entry.quantity > 1 && (
-        <span className={`absolute right-2 ${primaryResource ? 'top-8' : 'top-2'} min-w-6 rounded-full border border-white/10 bg-void-950/90 px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-200`}>×{entry.quantity}</span>
-      )}
-      {primaryResource && (
-        <span className={`absolute right-2 top-2 min-w-6 rounded-full border px-1.5 py-0.5 text-center text-[10px] font-bold ${primaryResource.current > 0 ? 'border-emerald-300/15 bg-emerald-500/15 text-emerald-100' : 'border-slate-400/15 bg-slate-500/10 text-slate-400'}`}>{primaryResource.current}/{primaryResource.maximum}</span>
-      )}
+      <p className="mt-2 line-clamp-2 text-center text-[11px] font-semibold leading-snug text-slate-100">{displayItemName(entry)}</p>
+      {!compact && <p className="mt-1 text-[10px] text-slate-600">{CATEGORY_LABELS[entry.item.category]}</p>}
       {entry.equippedSlot && (
         <span className="absolute bottom-2 right-2 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-200">已装备</span>
       )}

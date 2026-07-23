@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { createDnd5eEffectiveRulesContextV1 } from '../src/rulesets/dnd5e/effectiveRulesContext'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
@@ -84,19 +85,28 @@ async function putRoomState(
   member: RoomMembershipResponse['member'],
 ) {
   const resourceUrl = `${DM}/api/state/${name}?room=${roomId}`
-  const current = await request.get(resourceUrl, {
-    headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
-  })
-  const revision = Number(current.headers()['x-stars-state-revision'] ?? 0)
-  const response = await request.put(resourceUrl, {
-    headers: {
-      'X-Stars-Protocol': '5',
-      'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0),
-      'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken,
-    },
-    data: value,
-  })
-  expect(response.ok()).toBeTruthy()
+  let lastStatus = 0
+  let lastBody = ''
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const current = await request.get(resourceUrl, {
+      headers: { 'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken },
+    })
+    const revision = Number(current.headers()['x-stars-state-revision'] ?? 0)
+    const response = await request.put(resourceUrl, {
+      headers: {
+        'X-Stars-Protocol': '5',
+        'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0),
+        'X-Stars-Member': member.memberId, 'X-Stars-Room-Token': member.roomToken,
+      },
+      data: value,
+    })
+    if (response.ok()) return
+    lastStatus = response.status()
+    lastBody = await response.text()
+    if (![409, 412, 428].includes(lastStatus)) break
+  }
+  expect(lastStatus, `${name} CAS write failed: ${lastBody}`).toBeGreaterThanOrEqual(200)
+  expect(lastStatus, `${name} CAS write failed: ${lastBody}`).toBeLessThan(300)
 }
 
 async function getRoomState<T>(
@@ -313,7 +323,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
 
   const combatId = 'plugin-map:combat'
   await putRoomState(request, created.roomId, 'combat-log', { mapId: 'plugin-map', entries: [], updatedAt: Date.now() }, created.member)
-  await putRoomState(request, created.roomId, 'player-action-requests', { mapId: 'plugin-map', combatId, requests: [], updatedAt: Date.now() }, created.member)
+  await putRoomState(request, created.roomId, 'player-action-requests', { mapId: 'plugin-map', combatId, requests: [], updatedAt: Date.now() }, joined.member)
   await putRoomState(request, created.roomId, 'player-action-processed', { mapId: 'plugin-map', combatId, actionIds: [], updatedAt: Date.now() }, created.member)
   await putRoomState(request, created.roomId, 'player-action-ack', {
     id: 'plugin-none', mapId: 'plugin-map', combatId, actionId: 'none', status: 'accepted',
@@ -330,6 +340,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
       { slotId: 'ally-token:normal', tokenId: 'ally-token', label: '插件盟友', emoji: '🛡️', color: '#22c55e', roll: 10 },
       { slotId: 'goblin-token:normal', tokenId: 'goblin-token', label: '地精', emoji: '👺', color: '#ef4444', roll: 5 },
     ],
+    effectiveRules: createDnd5eEffectiveRulesContextV1({ requiredPlugins: [requirement] }),
     updatedAt: Date.now(),
   }, created.member)
 
@@ -340,7 +351,8 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   ])
   await expect(dm.getByTestId('initiative-token-hero-token')).toBeVisible({ timeout: 20_000 })
   await expect(player.getByTestId('initiative-token-hero-token')).toBeVisible({ timeout: 20_000 })
-  await player.getByTitle('技能').click()
+  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible()
+  await player.getByRole('button', { name: /职业特性$/ }).click()
   const pluginPanel = player.getByTestId('dnd5e-plugin-combat-panel')
   await expect(pluginPanel).toBeVisible()
   await pluginPanel.locator('[data-testid^="dnd5e-plugin-target-"]').selectOption({ label: '插件盟友 · 5尺' })
@@ -349,14 +361,20 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   await actionButton.click()
 
   await expect.poll(async () => {
+    const state = await getRoomState<{ status: string; actionId: string; reason?: string } | null>(
+      request, created.roomId, 'player-action-ack', joined.member,
+    )
+    if (!state) return null
+    return state.actionId === 'none' ? null : {
+      status: state.status,
+      reason: state.reason,
+    }
+  }, { timeout: 20_000 }).toEqual({ status: 'accepted', reason: undefined })
+  await expect.poll(async () => {
     const state = await getRoomState<{ characters: Array<{ id: string; tempHp: number }> }>(request, created.roomId, 'characters', joined.member)
     const temporaryHp = state.characters.find((candidate) => candidate.id === ally.id)?.tempHp ?? 0
     return temporaryHp >= 3 && temporaryHp <= 6
   }, { timeout: 30_000 }).toBe(true)
-  await expect.poll(async () => {
-    const state = await getRoomState<{ status: string; actionId: string }>(request, created.roomId, 'player-action-ack', joined.member)
-    return state.actionId === 'none' ? '' : state.status
-  }, { timeout: 20_000 }).toBe('accepted')
   await expect(player2.getByText(/^\+[3-6] 临时$/)).toBeVisible({ timeout: 20_000 })
   await expect(actionButton).toBeDisabled()
 
