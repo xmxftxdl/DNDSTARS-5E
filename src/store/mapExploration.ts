@@ -11,7 +11,8 @@ import {
   type SharedMapExplorationState,
 } from '../lib/mapExploration'
 import type { MapGeometryPoint } from '../lib/mapGeometry'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 
 interface MapExplorationStoreState {
   maps: MapExplorationMapState[]
@@ -20,14 +21,16 @@ interface MapExplorationStoreState {
   clearMember: (mapId: string, memberId: string) => void
 }
 
-let lastSharedUpdatedAt = 0
+const sharedWriteWatermark = createSharedWriteWatermark()
 
 function publish(maps: MapExplorationMapState[]) {
   if (!canWriteSharedState()) return
-  const updatedAt = Math.max(Date.now(), lastSharedUpdatedAt + 1)
+  const ticket = sharedWriteWatermark.begin()
+  const updatedAt = ticket.updatedAt
   const payload: SharedMapExplorationState = { schemaVersion: MAP_EXPLORATION_SCHEMA_VERSION, maps, updatedAt }
-  lastSharedUpdatedAt = updatedAt
-  void saveSharedResource(MAP_EXPLORATION_RESOURCE, payload)
+  void saveSharedResourceWithResult(MAP_EXPLORATION_RESOURCE, payload).then((result) => {
+    sharedWriteWatermark.settle(ticket, result.status === 'saved')
+  })
 }
 
 export const useMapExplorationStore = create<MapExplorationStoreState>()(
@@ -36,8 +39,8 @@ export const useMapExplorationStore = create<MapExplorationStoreState>()(
     loadShared: async () => {
       const shared = normalizeSharedMapExploration(await loadSharedResource(MAP_EXPLORATION_RESOURCE))
       if (!shared) return
-      if (shared.updatedAt < lastSharedUpdatedAt) return
-      lastSharedUpdatedAt = shared.updatedAt
+      if (!sharedWriteWatermark.shouldApplyRemote(shared.updatedAt)) return
+      sharedWriteWatermark.acceptRemote(shared.updatedAt)
       set({ maps: shared.maps })
     },
     record: (mapId, memberId, polygons) => {

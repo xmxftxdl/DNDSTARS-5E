@@ -119,10 +119,12 @@ import {
 import {
   DND5E_DEFAULT_PLAYER_VISION_RANGE_FEET,
   mapGeometryMovementBlocked,
+  mapGeometryMagicalDarknessObstacleIsSuppressed,
   mapGeometryObstacleAffectsElevation,
   mapGeometryAttachOpeningToWall,
   mapGeometryOpeningOverlaps,
   mapGeometryLightPolygon,
+  mapGeometrySpellLightingSources,
   mapGeometryWallRenderSegments,
   mapGeometryVisibilityPolygon,
   mapGeometryVisibleTargets,
@@ -142,6 +144,7 @@ import type {
   MapTabletopPoint,
   MapTabletopTool,
 } from '../../lib/mapTabletop'
+import type { SceneRegion } from '../../lib/sceneOrchestration'
 
 export interface MoveCircle {
   centerX: number
@@ -169,7 +172,10 @@ export interface MapProjectile {
   id: string
   from: { x: number; y: number }
   to: { x: number; y: number }
-  kind?: 'arrow' | 'focus'
+  kind?: 'arrow' | 'focus' | 'fire-bolt'
+  hit?: boolean
+  issuedAt?: number
+  durationMs?: number
 }
 
 export interface DeleteSelectionRect {
@@ -177,6 +183,14 @@ export interface DeleteSelectionRect {
   y: number
   width: number
   height: number
+}
+
+export interface SceneTriggerZoneOverlay {
+  sceneId: string
+  triggerId: string
+  name: string
+  enabled: boolean
+  region: SceneRegion
 }
 
 interface MapCanvasProps {
@@ -224,6 +238,11 @@ interface MapCanvasProps {
   deleteSelectMode?: boolean
   onDeleteBoxConfirm?: (rect: DeleteSelectionRect) => void
   onDeleteCancel?: () => void
+  sceneTriggerZones?: readonly SceneTriggerZoneOverlay[]
+  sceneEditMode?: boolean
+  sceneRegionKind?: SceneRegion['kind']
+  onSceneRegionCommit?: (region: SceneRegion) => void
+  onSceneEditCancel?: () => void
   fog?: MapFogState
   fogEditMode?: boolean
   fogTool?: FogTool
@@ -237,6 +256,7 @@ interface MapCanvasProps {
   selectedGeometryEntityId?: string | null
   geometryPreviewAsPlayer?: boolean
   geometrySnapToGrid?: boolean
+  geometryTerrainEditingLocked?: boolean
   visionSourceTokenIds?: string[]
   exploredVisionPolygons?: MapGeometryPoint[][]
   onGeometryEntityCommit?: (entity: MapGeometryEntity) => void
@@ -456,11 +476,13 @@ function LightingLayer({
   isDM: boolean
   visionSourceTokenIds: readonly string[]
 }) {
-  if (!geometry) return null
   const visionSourceIds = new Set(visionSourceTokenIds)
   const viewers = map.tokens.filter((token) => visionSourceIds.has(token.id))
-  const magicalDarkness = geometry.obstacles.filter((obstacle) =>
-    obstacle.magicalDarkness === true && (
+  const spellLighting = mapGeometrySpellLightingSources(map, geometry)
+  const spellDarkness = spellLighting.filter((source) => source.kind === 'magical-darkness')
+  const magicalDarkness = (geometry?.obstacles ?? []).filter((obstacle) =>
+    obstacle.magicalDarkness === true &&
+    !mapGeometryMagicalDarknessObstacleIsSuppressed({ obstacle, map, geometry, spellLighting }) && (
       viewers.length === 0 || viewers.some((viewer) => mapGeometryObstacleAffectsElevation(
         obstacle,
         viewer.elevationFeet ?? 0,
@@ -468,8 +490,9 @@ function LightingLayer({
       ))
     ),
   )
-  if ((!geometry.vision.enabled || geometry.vision.ambientLight === 'bright') && magicalDarkness.length === 0) return null
-  const opacity = geometry.vision.ambientLight === 'darkness' ? 0.9 : 0.3
+  if ((!geometry?.vision.enabled || geometry.vision.ambientLight === 'bright') &&
+    magicalDarkness.length === 0 && spellDarkness.length === 0) return null
+  const opacity = geometry?.vision.ambientLight === 'darkness' ? 0.9 : 0.3
   const seesMagicalDarkness = visionSourceTokenIds.some((id) => map.tokens.find((token) => token.id === id)?.canSeeMagicalDarkness)
   const visibleTargets = mapGeometryVisibleTargets({
     geometry,
@@ -486,18 +509,25 @@ function LightingLayer({
       brightRadiusFeet: token.lightSource!.brightRadiusFeet,
       dimRadiusFeet: token.lightSource!.dimRadiusFeet,
     })),
-    ...(geometry.lights ?? []).filter((light) => campaignLightIsActive(light, worldMinute)).map((light) => ({
+    ...(geometry?.lights ?? []).filter((light) => campaignLightIsActive(light, worldMinute)).map((light) => ({
       id: `scene:${light.id}`,
       point: light.points[0],
       elevationFeet: light.elevationFeet,
       brightRadiusFeet: light.brightRadiusFeet,
       dimRadiusFeet: light.dimRadiusFeet,
     })),
+    ...spellLighting.filter((source) => source.kind === 'light').map((source) => ({
+      id: source.id,
+      point: source.point,
+      elevationFeet: source.elevationFeet,
+      brightRadiusFeet: source.brightRadiusFeet,
+      dimRadiusFeet: source.dimRadiusFeet,
+    })),
   ]
   return (
     <Layer listening={false}>
-      {geometry.vision.enabled && geometry.vision.ambientLight !== 'bright' && <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" opacity={opacity} listening={false} />}
-      {geometry.vision.enabled && geometry.vision.ambientLight !== 'bright' && sources.flatMap((source) => {
+      {geometry?.vision.enabled && geometry.vision.ambientLight !== 'bright' && <Rect x={0} y={0} width={map.width} height={map.height} fill="#02030a" opacity={opacity} listening={false} />}
+      {geometry?.vision.enabled && geometry.vision.ambientLight !== 'bright' && sources.flatMap((source) => {
         const brightPolygon = mapGeometryLightPolygon({
           geometry, map, source: source.point, radiusFeet: source.brightRadiusFeet,
           elevationFeet: source.elevationFeet,
@@ -517,6 +547,19 @@ function LightingLayer({
           key={`magical-darkness:${zone.id}`}
           points={zone.points.flatMap((point) => [point.x, point.y])}
           closed
+          fill="#010108"
+          stroke="rgba(139,92,246,0.7)"
+          strokeWidth={isDM ? 2 : 0}
+          opacity={isDM ? 0.22 : seesMagicalDarkness ? 0.08 : 0.97}
+          listening={false}
+        />
+      ))}
+      {spellDarkness.map((source) => (
+        <Circle
+          key={source.id}
+          x={source.point.x}
+          y={source.point.y}
+          radius={source.radiusFeet / Math.max(1, map.feetPerCell ?? 5) * Math.max(1, map.gridSize)}
           fill="#010108"
           stroke="rgba(139,92,246,0.7)"
           strokeWidth={isDM ? 2 : 0}
@@ -637,6 +680,7 @@ function MapGeometryLayer({
   tool,
   selectedEntityId,
   inv,
+  terrainEditingLocked,
   onSelect,
   onDelete,
   onPointsChange,
@@ -649,6 +693,7 @@ function MapGeometryLayer({
   tool: MapGeometryTool
   selectedEntityId: string | null
   inv: number
+  terrainEditingLocked: boolean
   onSelect?: (entityId: string | null) => void
   onDelete?: (entityId: string) => void
   onPointsChange?: (entityId: string, points: MapGeometryPoint[]) => void
@@ -679,7 +724,7 @@ function MapGeometryLayer({
               ? '#f87171'
               : '#fbbf24'
           : entity.kind === 'obstacle'
-            ? entity.magicalDarkness ? '#8b5cf6' : '#fb923c'
+            ? entity.terrainRegion ? '#fbbf24' : entity.magicalDarkness ? '#8b5cf6' : '#fb923c'
             : entity.kind === 'light'
               ? entity.color
               : entity.kind === 'window'
@@ -691,7 +736,12 @@ function MapGeometryLayer({
                 : material.color
         const selectEntity = (event: Konva.KonvaEventObject<MouseEvent>) => {
           event.cancelBubble = true
-          if (editMode && tool === 'delete') onDelete?.(entity.id)
+          if (editMode && tool === 'delete') {
+            if (terrainEditingLocked && entity.kind === 'obstacle' && (
+              entity.terrainRegion || (entity.terrainElevationFeet ?? 0) !== 0
+            )) return
+            onDelete?.(entity.id)
+          }
           else onSelect?.(entity.id)
         }
         if (entity.kind === 'light') {
@@ -832,7 +882,9 @@ function MapGeometryLayer({
             closed
             fill={entity.kind === 'obstacle' && entity.magicalDarkness
               ? selected ? 'rgba(76,29,149,0.38)' : 'rgba(15,7,32,0.32)'
-              : selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
+              : entity.kind === 'obstacle' && entity.terrainRegion
+                ? selected ? 'rgba(251,191,36,0.22)' : 'rgba(251,191,36,0.1)'
+                : selected ? 'rgba(251,146,60,0.28)' : 'rgba(251,146,60,0.16)'}
           />
         )
       })}
@@ -1194,6 +1246,9 @@ function Dnd5eStaticPluginAreaOverlay({ area, map }: { area: Dnd5ePluginArea; ma
 }
 
 const CORE_AREA_VISUALS: Readonly<Record<string, { icon: string; glow: string }>> = {
+  grease: { icon: '≋', glow: '#fde68a' },
+  daylight: { icon: '☀', glow: '#fef3c7' },
+  darkness: { icon: '●', glow: '#8b5cf6' },
   moonbeam: { icon: '☾', glow: '#eff6ff' },
   'spirit-guardians': { icon: '✦', glow: '#fef3c7' },
   'spike-growth': { icon: '✣', glow: '#bef264' },
@@ -1320,6 +1375,69 @@ function Dnd5ePluginAreaOverlays({
   })}</>
 }
 
+function TerrainElevationContours({
+  geometry,
+  inv,
+}: {
+  geometry?: MapGeometryState
+  inv: number
+}) {
+  const regions = (geometry?.obstacles ?? []).filter((obstacle) =>
+    obstacle.terrainRegion === true || (obstacle.terrainElevationFeet ?? 0) !== 0,
+  )
+  return <Group listening={false}>{regions.map((region) => {
+    const elevationFeet = region.terrainElevationFeet ?? 0
+    const center = region.points.reduce(
+      (sum, point) => ({ x: sum.x + point.x / region.points.length, y: sum.y + point.y / region.points.length }),
+      { x: 0, y: 0 },
+    )
+    const color = elevationFeet < 0 ? '#38bdf8' : '#fbbf24'
+    const label = `${elevationFeet > 0 ? '+' : ''}${elevationFeet} 尺`
+    return (
+      <Group key={`terrain-contour:${region.id}`}>
+        <Line
+          points={geometryEntityPoints(region)}
+          closed
+          stroke="rgba(2,6,23,0.92)"
+          strokeWidth={5 * inv}
+          lineJoin="round"
+        />
+        <Line
+          points={geometryEntityPoints(region)}
+          closed
+          stroke={color}
+          strokeWidth={2 * inv}
+          dash={[10 * inv, 5 * inv]}
+          lineJoin="round"
+          opacity={0.9}
+        />
+        <Group x={center.x} y={center.y}>
+          <Rect
+            x={-25 * inv}
+            y={-9 * inv}
+            width={50 * inv}
+            height={18 * inv}
+            cornerRadius={6 * inv}
+            fill="rgba(2,6,23,0.82)"
+            stroke={color}
+            strokeWidth={inv}
+          />
+          <Text
+            x={-25 * inv}
+            y={-5.5 * inv}
+            width={50 * inv}
+            text={label}
+            align="center"
+            fontSize={10 * inv}
+            fontStyle="bold"
+            fill="#f8fafc"
+          />
+        </Group>
+      </Group>
+    )
+  })}</Group>
+}
+
 export default function MapCanvas({
   map,
   selectedTokenId,
@@ -1356,6 +1474,11 @@ export default function MapCanvas({
   deleteSelectMode = false,
   onDeleteBoxConfirm,
   onDeleteCancel,
+  sceneTriggerZones = [],
+  sceneEditMode = false,
+  sceneRegionKind = 'circle',
+  onSceneRegionCommit,
+  onSceneEditCancel,
   fog,
   fogEditMode = false,
   fogTool = 'reveal-rect',
@@ -1369,6 +1492,7 @@ export default function MapCanvas({
   selectedGeometryEntityId = null,
   geometryPreviewAsPlayer = false,
   geometrySnapToGrid = true,
+  geometryTerrainEditingLocked = false,
   visionSourceTokenIds = [],
   exploredVisionPolygons = [],
   onGeometryEntityCommit,
@@ -1398,16 +1522,24 @@ export default function MapCanvas({
     origOy: number
   } | null>(null)
   const [size, setSize] = useState({ width: 800, height: 600 })
-  const [image, setImage] = useState<HTMLImageElement | undefined>(undefined)
+  const [loadedMapImage, setLoadedMapImage] = useState<{
+    mapId: string
+    state: 'loaded' | 'missing' | 'error'
+    image?: HTMLImageElement
+  } | null>(null)
+  const image = loadedMapImage?.mapId === map.id ? loadedMapImage.image : undefined
+  const imageLoadState = loadedMapImage?.mapId === map.id ? loadedMapImage.state : 'loading'
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const [hoveredTokenId, setHoveredTokenId] = useState<string | null>(null)
   const [dragPreviewPositions, setDragPreviewPositions] = useState<Record<string, Point>>({})
   const [movementNow, setMovementNow] = useState(() => Date.now())
   const [deleteDrag, setDeleteDrag] = useState<{ start: Point; current: Point } | null>(null)
+  const sceneDragStartRef = useRef<Point | null>(null)
+  const [sceneDraft, setSceneDraft] = useState<SceneRegion | null>(null)
   const fogDragStartRef = useRef<Point | null>(null)
   const [fogDraft, setFogDraft] = useState<FogShape | null>(null)
   const [fogPolygonPoints, setFogPolygonPoints] = useState<number[]>([])
-  const geometryDragStartRef = useRef<{ point: Point; id: string; createdAt: number } | null>(null)
+  const geometryDragStartRef = useRef<{ point: Point; points: Point[]; id: string; createdAt: number } | null>(null)
   const [geometryDraft, setGeometryDraft] = useState<MapGeometryEntity | null>(null)
   const tabletopDragStartRef = useRef<MapTabletopPoint | null>(null)
   const [tabletopDraft, setTabletopDraft] = useState<{
@@ -1680,9 +1812,9 @@ export default function MapCanvas({
       canClimb: moveTraversalMode === 'climb' || moveTraversalMode === 'fly',
       canSwim: moveTraversalMode === 'swim',
       canFly: moveTraversalMode === 'fly',
-      targetElevationFeet: moveTraversalMode === 'walk' || moveTraversalMode === 'swim'
-        ? undefined
-        : moveTargetElevationFeet,
+      targetElevationFeet: moveTraversalMode === 'fly'
+        ? moveTargetElevationFeet ?? movingToken.elevationFeet ?? 0
+        : undefined,
       maximumTerrainStepFeet: moveTraversalMode === 'fall' ? 10_000 : 10,
       additionalDifficultTerrainMultiplier: difficultTerrainMultiplierAtPosition,
       additionalSpeedCostMultiplier: speedCostMultiplierAtPosition,
@@ -1762,13 +1894,13 @@ export default function MapCanvas({
     if (!drag || geometryTool === 'select' || geometryTool === 'delete') return null
     const common = {
       id: drag.id,
-      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : '区域地形',
+      label: geometryTool === 'wall' ? '墙' : geometryTool === 'door' ? '门' : geometryTool === 'window' ? '窗户' : geometryTool === 'light' ? '场景光源' : geometryTool === 'elevation' ? '高地区域' : '区域地形',
       createdAt: drag.createdAt,
       baseHeightFeet: 0,
-      heightFeet: geometryTool === 'obstacle' ? 5 : 10,
-      blocksVision: geometryTool !== 'obstacle',
-      blocksMovement: true,
-      blocksLineOfEffect: geometryTool !== 'obstacle',
+      heightFeet: geometryTool === 'elevation' ? 0 : geometryTool === 'obstacle' ? 5 : 10,
+      blocksVision: geometryTool !== 'obstacle' && geometryTool !== 'elevation',
+      blocksMovement: geometryTool !== 'elevation',
+      blocksLineOfEffect: geometryTool !== 'obstacle' && geometryTool !== 'elevation',
     }
     if (geometryTool === 'wall') return { ...common, kind: 'wall', material: geometryWallMaterial, points: [start, current] }
     if (geometryTool === 'door' || geometryTool === 'window') {
@@ -1814,6 +1946,16 @@ export default function MapCanvas({
         color: '#fbbf24', elevationFeet: 5, createdAt: drag.createdAt,
       }
     }
+    if (geometryTool === 'elevation') {
+      return {
+        ...common,
+        kind: 'obstacle',
+        cover: 'none',
+        terrainElevationFeet: 10,
+        terrainRegion: true,
+        points: drag.points,
+      }
+    }
     const rect = rectFromPoints(start, current)
     return {
       ...common,
@@ -1847,12 +1989,14 @@ export default function MapCanvas({
       return true
     }
     const rawPoint = relativePoint(stage)
+    if (geometryTool === 'elevation' && geometryTerrainEditingLocked) return true
     const point = rawPoint
-      ? geometryTool === 'door' || geometryTool === 'window' ? rawPoint : snapGeometryPoint(rawPoint)
+      ? geometryTool === 'door' || geometryTool === 'window' || geometryTool === 'elevation' ? rawPoint : snapGeometryPoint(rawPoint)
       : null
     if (!point) return true
     geometryDragStartRef.current = {
       point,
+      points: [point],
       id: `geometry:${Date.now()}:${Math.random().toString(36).slice(2, 9)}`,
       createdAt: Date.now(),
     }
@@ -1865,9 +2009,18 @@ export default function MapCanvas({
     if (!geometryEditMode || !drag) return false
     const rawPoint = relativePoint(stage)
     const point = rawPoint
-      ? geometryTool === 'door' || geometryTool === 'window' ? rawPoint : snapGeometryPoint(rawPoint)
+      ? geometryTool === 'door' || geometryTool === 'window' || geometryTool === 'elevation' ? rawPoint : snapGeometryPoint(rawPoint)
       : null
-    if (point) setGeometryDraft(geometryEntityFromDrag(drag.point, point))
+    if (point && geometryTool === 'elevation') {
+      const previous = drag.points.at(-1) ?? drag.point
+      const sampleDistance = Math.max(4, map.gridSize * 0.08)
+      if (drag.points.length < 2_048 && Math.hypot(point.x - previous.x, point.y - previous.y) >= sampleDistance) {
+        drag.points.push(point)
+      }
+      setGeometryDraft(geometryEntityFromDrag(drag.point, point))
+    } else if (point) {
+      setGeometryDraft(geometryEntityFromDrag(drag.point, point))
+    }
     return true
   }
 
@@ -1879,7 +2032,9 @@ export default function MapCanvas({
     setGeometryDraft(null)
     if (!draft) return true
     const valid = draft.kind === 'light' || (draft.kind === 'obstacle'
-      ? Math.abs(draft.points[1].x - draft.points[0].x) >= 4 && Math.abs(draft.points[2].y - draft.points[1].y) >= 4
+      ? draft.terrainRegion
+        ? draft.points.length >= 3
+        : Math.abs(draft.points[1].x - draft.points[0].x) >= 4 && Math.abs(draft.points[2].y - draft.points[1].y) >= 4
       : Math.hypot(draft.points[1].x - draft.points[0].x, draft.points[1].y - draft.points[0].y) >= 4)
     if (valid) onGeometryEntityCommit?.(draft)
     return true
@@ -1905,13 +2060,23 @@ export default function MapCanvas({
       if (target instanceof HTMLElement && (
         target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
       )) return
+      const selectedEntity = [
+        ...(geometry?.walls ?? []),
+        ...(geometry?.doors ?? []),
+        ...(geometry?.windows ?? []),
+        ...(geometry?.obstacles ?? []),
+        ...(geometry?.lights ?? []),
+      ].find((entity) => entity.id === selectedGeometryEntityId)
+      if (geometryTerrainEditingLocked && selectedEntity?.kind === 'obstacle' && (
+        selectedEntity.terrainRegion || (selectedEntity.terrainElevationFeet ?? 0) !== 0
+      )) return
       event.preventDefault()
       onGeometryEntityDelete(selectedGeometryEntityId)
       onGeometryEntitySelect?.(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [geometryEditMode, onGeometryEntityDelete, onGeometryEntitySelect, selectedGeometryEntityId])
+  }, [geometry, geometryEditMode, geometryTerrainEditingLocked, onGeometryEntityDelete, onGeometryEntitySelect, selectedGeometryEntityId])
 
   const snapMeasure = measureSnapsToGrid(map)
   const segmentCells = (a: Point, b: Point): number =>
@@ -1920,45 +2085,62 @@ export default function MapCanvas({
   const measurePoint = (raw: Point): Point =>
     snapMeasure ? snapToCellCenter(raw.x, raw.y, map) : raw
 
-  // Load map image from IndexedDB.
-  // This effect owns blob URL creation, decoding, and release.
-  // Avoid dual ownership between useImage and manual object URLs.
-  // Revoke URL after image decode completes.
-  // If decode has not completed, cleanup revokes the URL to avoid leaks.
+  // Shared images may arrive after the map snapshot (for example when a DM
+  // restores a locally cached map into a newly created room). Keep retrying a
+  // missing image instead of permanently rendering a black grid until reload.
   useEffect(() => {
     let cancelled = false
     let objectUrl = ''
     let img: HTMLImageElement | null = null
-    getImage(map.id).then((blob) => {
-      if (cancelled || !blob) return
-      objectUrl = URL.createObjectURL(blob)
-      img = new window.Image()
-      img.onload = () => {
+    let retryTimer: number | undefined
+    let retryCount = 0
+
+    const revokeObjectUrl = () => {
+      if (!objectUrl) return
+      URL.revokeObjectURL(objectUrl)
+      objectUrl = ''
+    }
+    const scheduleRetry = (state: 'missing' | 'error') => {
+      if (cancelled) return
+      setLoadedMapImage({ mapId: map.id, state })
+      const delay = Math.min(10_000, 750 * (2 ** Math.min(retryCount, 4)))
+      retryCount += 1
+      retryTimer = window.setTimeout(() => void loadImage(), delay)
+    }
+    const loadImage = async () => {
+      try {
+        const blob = await getImage(map.id)
         if (cancelled) return
-        setImage(img ?? undefined)
-        // Decode finished; the object URL is no longer needed.
-        URL.revokeObjectURL(objectUrl)
-        objectUrl = ''
-      }
-      img.onerror = () => {
-        if (objectUrl) {
-          URL.revokeObjectURL(objectUrl)
-          objectUrl = ''
+        if (!blob) {
+          scheduleRetry('missing')
+          return
         }
+        objectUrl = URL.createObjectURL(blob)
+        img = new window.Image()
+        img.onload = () => {
+          if (cancelled) return
+          setLoadedMapImage({ mapId: map.id, state: 'loaded', image: img ?? undefined })
+          revokeObjectUrl()
+        }
+        img.onerror = () => {
+          revokeObjectUrl()
+          scheduleRetry('error')
+        }
+        img.src = objectUrl
+      } catch {
+        scheduleRetry('error')
       }
-      img.src = objectUrl
-    })
+    }
+
+    void loadImage()
     return () => {
       cancelled = true
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
       if (img) {
         img.onload = null
         img.onerror = null
       }
-      // If image has not decoded yet, cleanup still revokes the URL.
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl)
-        objectUrl = ''
-      }
+      revokeObjectUrl()
     }
   }, [map.id])
 
@@ -2132,6 +2314,27 @@ export default function MapCanvas({
 
   const inv = 1 / view.scale // Keep strokes/text size stable while zooming.
 
+  const updateSceneDraft = (start: Point, current: Point): SceneRegion => sceneRegionKind === 'circle'
+    ? { kind: 'circle', x: start.x, y: start.y, radius: Math.max(4, Math.hypot(current.x - start.x, current.y - start.y)) }
+    : {
+        kind: 'rect',
+        x: Math.min(start.x, current.x),
+        y: Math.min(start.y, current.y),
+        width: Math.max(4, Math.abs(current.x - start.x)),
+        height: Math.max(4, Math.abs(current.y - start.y)),
+      }
+
+  const sceneRegionNode = (region: SceneRegion, key: string, label: string, enabled: boolean, draft = false) => {
+    const fill = draft ? 'rgba(251,191,36,0.18)' : enabled ? 'rgba(34,211,238,0.12)' : 'rgba(148,163,184,0.08)'
+    const stroke = draft ? '#fbbf24' : enabled ? '#22d3ee' : '#64748b'
+    const shape = region.kind === 'circle'
+      ? <Circle x={region.x} y={region.y} radius={region.radius} fill={fill} stroke={stroke} strokeWidth={2 * inv} dash={[8 * inv, 5 * inv]} listening={false} />
+      : <Rect x={region.x} y={region.y} width={region.width} height={region.height} fill={fill} stroke={stroke} strokeWidth={2 * inv} dash={[8 * inv, 5 * inv]} listening={false} />
+    const labelX = region.kind === 'circle' ? region.x - region.radius : region.x
+    const labelY = region.kind === 'circle' ? region.y - region.radius : region.y
+    return <Group key={key} listening={false}>{shape}<Text x={labelX} y={labelY - 18 * inv} text={label} fill={draft ? '#fde68a' : '#a5f3fc'} fontSize={12 * inv} listening={false} /></Group>
+  }
+
   return (
     <div
       ref={containerRef}
@@ -2140,6 +2343,9 @@ export default function MapCanvas({
       data-vision-enabled={geometry?.vision.enabled === true ? 'true' : 'false'}
       data-fog-filled={fog?.filled === true ? 'true' : 'false'}
       data-visibility-mask="combined"
+      data-map-image-state={imageLoadState}
+      data-combat-projectile-count={projectiles.length}
+      data-combat-projectile-ids={projectiles.map((projectile) => projectile.id).join(',')}
       className={`h-full w-full overflow-hidden rounded-2xl bg-void-900/60 ${
         tabletopTool !== 'none'
           ? 'cursor-crosshair'
@@ -2148,6 +2354,8 @@ export default function MapCanvas({
           : geometryEditMode
             ? geometryTool === 'select' ? 'cursor-default' : 'cursor-crosshair'
           : fogEditMode
+            ? 'cursor-crosshair'
+          : sceneEditMode
             ? 'cursor-crosshair'
           : measureMode
             ? 'cursor-crosshair'
@@ -2169,7 +2377,7 @@ export default function MapCanvas({
         scaleY={view.scale}
         x={view.x}
         y={view.y}
-        draggable={tabletopTool === 'none' && !measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !geometrySearchMode}
+        draggable={tabletopTool === 'none' && !measureMode && !moveSelectMode && !aoeSelectMode && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !geometrySearchMode && !sceneEditMode}
         onWheel={handleWheel}
         onDragEnd={(e) => {
           // Only update viewport when dragging the stage itself.
@@ -2180,6 +2388,12 @@ export default function MapCanvas({
         onContextMenu={(e) => {
           // 屏蔽浏览器右键菜单；测距时右键取消正在放置的起点
           e.evt.preventDefault()
+          if (sceneEditMode) {
+            sceneDragStartRef.current = null
+            setSceneDraft(null)
+            onSceneEditCancel?.()
+            return
+          }
           if (tabletopTool !== 'none') {
             tabletopDragStartRef.current = null
             setTabletopDraft(null)
@@ -2216,6 +2430,14 @@ export default function MapCanvas({
         }}
         onMouseDown={(e) => {
           const stage = e.target.getStage()
+          if (sceneEditMode && e.evt.button === 0) {
+            e.cancelBubble = true
+            const point = relativePoint(stage)
+            if (!point) return
+            sceneDragStartRef.current = point
+            setSceneDraft(updateSceneDraft(point, point))
+            return
+          }
           if (tabletopTool !== 'none' && e.evt.button === 0) {
             e.cancelBubble = true
             const point = relativePoint(stage)
@@ -2296,6 +2518,11 @@ export default function MapCanvas({
           if (!isMapTokenNode(e.target)) onSelectToken(null)
         }}
         onMouseMove={(e) => {
+          if (sceneEditMode && sceneDragStartRef.current) {
+            const point = relativePoint(e.target.getStage())
+            if (point) setSceneDraft(updateSceneDraft(sceneDragStartRef.current, point))
+            return
+          }
           if (tabletopTool !== 'none' && tabletopDragStartRef.current) {
             const point = relativePoint(e.target.getStage())
             if (point) setTabletopDraft((draft) => draft ? { ...draft, to: point } : draft)
@@ -2329,6 +2556,16 @@ export default function MapCanvas({
           }
         }}
         onMouseUp={(e) => {
+          if (sceneEditMode && sceneDragStartRef.current) {
+            e.cancelBubble = true
+            const start = sceneDragStartRef.current
+            const point = relativePoint(e.target.getStage()) ?? start
+            const region = updateSceneDraft(start, point)
+            sceneDragStartRef.current = null
+            setSceneDraft(null)
+            onSceneRegionCommit?.(region)
+            return
+          }
           if (tabletopTool !== 'none' && tabletopDragStartRef.current) {
             e.cancelBubble = true
             const from = tabletopDragStartRef.current
@@ -2378,8 +2615,12 @@ export default function MapCanvas({
           {image && <KonvaImage image={image} width={map.width} height={map.height} />}
           {gridLines}
           {coordinateLabels}
+          <TerrainElevationContours geometry={geometry} inv={inv} />
           <Dnd5eItemAreaOverlays map={map} />
           <Dnd5ePluginAreaOverlays map={map} isDM={isDM} onVisibilityToggle={onDnd5ePluginAreaVisibilityToggle} />
+          {isDM && sceneTriggerZones.map((zone) =>
+            sceneRegionNode(zone.region, `scene-zone:${zone.sceneId}:${zone.triggerId}`, zone.name, zone.enabled))}
+          {isDM && sceneEditMode && sceneDraft && sceneRegionNode(sceneDraft, 'scene-zone:draft', '绘制触发区', true, true)}
           {aoeSelectMode && aoeHighlight?.areaCircle && (
             <Circle
               x={aoeHighlight.areaCircle.centerX}
@@ -2504,9 +2745,9 @@ export default function MapCanvas({
             )
           })}
 
-          {projectiles.map((projectile) => (
-            <ProjectileArrow key={projectile.id} projectile={projectile} />
-          ))}
+          {projectiles.map((projectile) => projectile.kind === 'fire-bolt'
+            ? <FireBoltProjectile key={projectile.id} projectile={projectile} />
+            : <ProjectileArrow key={projectile.id} projectile={projectile} />)}
 
           {tabletopAnnotations.map((annotation) => annotation.shape === 'arrow' ? (
             <Arrow
@@ -2708,6 +2949,7 @@ export default function MapCanvas({
             tool={geometryTool}
             selectedEntityId={selectedGeometryEntityId}
             inv={inv}
+            terrainEditingLocked={geometryTerrainEditingLocked}
             onSelect={isDM ? onGeometryEntitySelect : geometrySearchMode ? undefined : (entityId) => {
               if (entityId) onGeometryDoorInteract?.(entityId)
             }}
@@ -2954,6 +3196,156 @@ function ProjectileArrow({ projectile }: { projectile: MapProjectile }) {
   )
 }
 
+function FireBoltProjectile({ projectile }: { projectile: MapProjectile }) {
+  const projectileRef = useRef<Konva.Group>(null)
+  const outerFlameRef = useRef<Konva.Circle>(null)
+  const innerFlameRef = useRef<Konva.Circle>(null)
+  const tailRef = useRef<Konva.Line>(null)
+  const impactRef = useRef<Konva.Group>(null)
+  const impactRingRef = useRef<Konva.Circle>(null)
+  const impactCoreRef = useRef<Konva.Circle>(null)
+
+  useEffect(() => {
+    const group = projectileRef.current
+    const layer = group?.getLayer()
+    if (!group || !layer) return
+    const outerFlame = outerFlameRef.current
+    const innerFlame = innerFlameRef.current
+    const tail = tailRef.current
+    const impact = impactRef.current
+    const impactRing = impactRingRef.current
+    const impactCore = impactCoreRef.current
+    const dx = projectile.to.x - projectile.from.x
+    const dy = projectile.to.y - projectile.from.y
+    const distance = Math.max(1, Math.hypot(dx, dy))
+    const duration = Math.max(400, projectile.durationMs ?? 980)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    group.rotation((Math.atan2(dy, dx) * 180) / Math.PI)
+    impact?.position(projectile.to)
+    const anim = new Konva.Animation((frame) => {
+      const elapsed = initialElapsed + (frame?.time ?? 0)
+      const raw = Math.min(1, elapsed / duration)
+      const chargeEnd = 0.13
+      const travelEnd = 0.76
+      const travelRaw = Math.max(0, Math.min(1, (raw - chargeEnd) / (travelEnd - chargeEnd)))
+      const travel = 1 - Math.pow(1 - travelRaw, 2.15)
+      const pulse = 1 + Math.sin(elapsed * 0.045) * 0.14
+      const wobble = Math.sin(travelRaw * Math.PI * 5) * 2.2 * (1 - travelRaw)
+      group.x(projectile.from.x + dx * travel - (dy / distance) * wobble)
+      group.y(projectile.from.y + dy * travel + (dx / distance) * wobble)
+      group.scale({ x: pulse, y: pulse })
+      group.opacity(raw < chargeEnd ? Math.max(0.25, raw / chargeEnd) : raw < travelEnd ? 1 : 0)
+      outerFlame?.radius(8.5 + Math.sin(elapsed * 0.06) * 1.5)
+      innerFlame?.radius(4.2 + Math.sin(elapsed * 0.075 + 1) * 0.8)
+      if (tail) {
+        const tailLength = 26 + Math.sin(elapsed * 0.055) * 5
+        tail.points([-tailLength, 0, -7, 0])
+        tail.opacity(0.65 + Math.sin(elapsed * 0.04) * 0.16)
+      }
+
+      if (impact) {
+        const impactRaw = Math.max(0, Math.min(1, (raw - travelEnd) / (1 - travelEnd)))
+        const strength = projectile.hit === false ? 0.5 : 1
+        impact.visible(impactRaw > 0)
+        impact.opacity(Math.max(0, (1 - impactRaw) * strength))
+        impact.scale({ x: 0.35 + impactRaw * 1.8, y: 0.35 + impactRaw * 1.8 })
+        impactRing?.radius(8 + impactRaw * 17)
+        impactCore?.radius(10 - impactRaw * 4)
+      }
+      if (raw >= 1) anim.stop()
+    }, layer)
+    anim.start()
+    return () => {
+      anim.stop()
+    }
+  }, [projectile])
+
+  return (
+    <>
+      <Group
+        ref={projectileRef}
+        x={projectile.from.x}
+        y={projectile.from.y}
+        listening={false}
+      >
+        <Line
+          ref={tailRef}
+          points={[-30, 0, -7, 0]}
+          stroke="rgba(239,68,68,0.64)"
+          strokeWidth={13}
+          lineCap="round"
+          shadowColor="#dc2626"
+          shadowBlur={18}
+          perfectDrawEnabled={false}
+        />
+        <Line
+          points={[-22, 0, -4, 0]}
+          stroke="rgba(251,146,60,0.92)"
+          strokeWidth={7}
+          lineCap="round"
+          shadowColor="#f97316"
+          shadowBlur={10}
+          perfectDrawEnabled={false}
+        />
+        <Circle
+          ref={outerFlameRef}
+          radius={9}
+          fill="#f97316"
+          stroke="rgba(254,215,170,0.9)"
+          strokeWidth={1.2}
+          shadowColor="#ef4444"
+          shadowBlur={22}
+          perfectDrawEnabled={false}
+        />
+        <Circle
+          ref={innerFlameRef}
+          radius={4.5}
+          fill="#fef3c7"
+          shadowColor="#facc15"
+          shadowBlur={12}
+          perfectDrawEnabled={false}
+        />
+      </Group>
+      <Group
+        ref={impactRef}
+        x={projectile.to.x}
+        y={projectile.to.y}
+        visible={false}
+        listening={false}
+      >
+        <Circle
+          ref={impactRingRef}
+          radius={8}
+          stroke={projectile.hit === false ? '#fb923c' : '#fde68a'}
+          strokeWidth={3}
+          shadowColor="#ef4444"
+          shadowBlur={18}
+          perfectDrawEnabled={false}
+        />
+        <Circle
+          ref={impactCoreRef}
+          radius={10}
+          fill={projectile.hit === false ? 'rgba(249,115,22,0.38)' : 'rgba(254,215,170,0.88)'}
+          shadowColor="#f97316"
+          shadowBlur={24}
+          perfectDrawEnabled={false}
+        />
+        {[-42, -12, 18, 48, 78, 132, 168, 210].map((rotation, index) => (
+          <Line
+            key={rotation}
+            points={[7, 0, 18 + (index % 3) * 4, 0]}
+            rotation={rotation}
+            stroke={index % 2 === 0 ? '#fbbf24' : '#fb7185'}
+            strokeWidth={2.5}
+            lineCap="round"
+            perfectDrawEnabled={false}
+          />
+        ))}
+      </Group>
+    </>
+  )
+}
+
 function TokenNode({
   renderMode = 'full',
   token,
@@ -2997,6 +3389,13 @@ function TokenNode({
   instantPosition?: boolean
 }) {
   const groupRef = useRef<Konva.Group>(null)
+  const tokenImageKey = token.tokenPortrait
+    ? `inline:${token.tokenPortrait}`
+    : token.portraitImageId
+      ? `shared:${token.portraitImageId}`
+      : ''
+  const [loadedTokenImage, setLoadedTokenImage] = useState<{ key: string; image?: HTMLImageElement }>()
+  const tokenImage = loadedTokenImage?.key === tokenImageKey ? loadedTokenImage.image : undefined
   const [initialPosition] = useState(() => ({ x: token.x, y: token.y }))
   const draggingRef = useRef(false)
   const suppressClickUntilRef = useRef(0)
@@ -3039,6 +3438,50 @@ function TokenNode({
   const isDetectedUnseen = token.perceptionVisibility === 'detected-unseen'
   const emojiFontScale = isDragonEmoji ? 0.94 : 1
   const emojiOffsetY = isDragonEmoji ? radius * 0.07 : 0
+
+  useEffect(() => {
+    let disposed = false
+    let objectUrl: string | undefined
+
+    const load = (source: string) => {
+      const image = new Image()
+      image.onload = () => {
+        if (!disposed) setLoadedTokenImage({ key: tokenImageKey, image })
+      }
+      image.onerror = () => {
+        if (!disposed) setLoadedTokenImage({ key: tokenImageKey })
+      }
+      image.src = source
+    }
+
+    if (token.tokenPortrait) {
+      load(token.tokenPortrait)
+    } else if (token.portraitImageId) {
+      void getImage(token.portraitImageId).then((blob) => {
+        if (!blob || disposed) return
+        objectUrl = URL.createObjectURL(blob)
+        load(objectUrl)
+      })
+    }
+
+    return () => {
+      disposed = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [token.tokenPortrait, token.portraitImageId, tokenImageKey])
+
+  const tokenImageCrop = useMemo(() => {
+    if (!tokenImage) return undefined
+    const width = Math.max(1, tokenImage.naturalWidth)
+    const height = Math.max(1, tokenImage.naturalHeight)
+    const side = Math.min(width, height)
+    return {
+      x: (width - side) / 2,
+      y: (height - side) / 2,
+      width: side,
+      height: side,
+    }
+  }, [tokenImage])
 
   useLayoutEffect(() => {
     const node = groupRef.current
@@ -3315,6 +3758,26 @@ function TokenNode({
             : baseStrokeW
         }
       />
+      {tokenImage && tokenImageCrop && (
+        <Group
+          clipFunc={(context) => {
+            context.beginPath()
+            context.arc(0, 0, radius - Math.max(1, baseStrokeW / 2), 0, Math.PI * 2)
+            context.closePath()
+          }}
+          listening={false}
+        >
+          <KonvaImage
+            image={tokenImage}
+            x={-radius}
+            y={-radius}
+            width={radius * 2}
+            height={radius * 2}
+            crop={tokenImageCrop}
+            opacity={defeated ? 0.55 : 1}
+          />
+        </Group>
+      )}
       {defeated && (
         <Circle
           radius={radius}
@@ -3399,18 +3862,20 @@ function TokenNode({
           />
         </Group>
       )}
-      <Text
-        text={token.emoji}
-        y={emojiOffsetY}
-        fontSize={radius * emojiFontScale}
-        width={radius * 2}
-        height={radius * 2}
-        offsetX={radius}
-        offsetY={radius}
-        align="center"
-        verticalAlign="middle"
-        opacity={defeated ? 0.65 : 1}
-      />
+      {!tokenImage && (
+        <Text
+          text={token.emoji}
+          y={emojiOffsetY}
+          fontSize={radius * emojiFontScale}
+          width={radius * 2}
+          height={radius * 2}
+          offsetX={radius}
+          offsetY={radius}
+          align="center"
+          verticalAlign="middle"
+          opacity={defeated ? 0.65 : 1}
+        />
+      )}
       {isPoisoned && <PoisonCloud radius={radius} />}
       {isStunned && <StunOrbitStars radius={radius} />}
       {renderMode !== 'body' && (() => {

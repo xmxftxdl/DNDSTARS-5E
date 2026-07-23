@@ -10,7 +10,7 @@ import { mapGeometryCanSeeToken, mapGeometryCoverBetween, mapGeometryLineOfSight
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
 import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster } from './monsters'
+import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
 import { dnd5eChallengeRatingValue } from './wildShape'
 import { DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
@@ -32,6 +32,20 @@ export interface Dnd5eAttackCoverSnapshot {
   cover: Dnd5eAttackCoverOverride
   armorClassBonus: 0 | 2 | 5
   blocksLineOfEffect: boolean
+}
+
+function dnd5eMonsterConditionImmunities(monster: Dnd5eMonsterStatBlock | undefined): readonly string[] | undefined {
+  if (!monster) return undefined
+  const hasMagicalSleepImmunity = monster.traits.some((trait) => {
+    const name = trait.name.trim().toLowerCase()
+    const description = trait.description.trim().toLowerCase()
+    return name === 'fey ancestry' || name === '妖精血统' || name === '精灵血统' ||
+      description.includes("magic can't put") || description.includes('magic cannot put') ||
+      description.includes('魔法无法使其入睡') || description.includes('魔法不能使其入睡')
+  })
+  return hasMagicalSleepImmunity
+    ? [...new Set([...(monster.conditionImmunities ?? []), 'magical-sleep', '魔法睡眠'])]
+    : monster.conditionImmunities
 }
 
 export function dnd5eAttackCoverForPair(
@@ -334,7 +348,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       damageVulnerabilities: monster?.damageVulnerabilities,
       damageResistances: monster?.damageResistances,
       damageImmunities: monster?.damageImmunities,
-      conditionImmunities: monster?.conditionImmunities,
+      conditionImmunities: dnd5eMonsterConditionImmunities(monster),
     })]
   })
   applyClassPassiveDefenses(combatants)
@@ -420,6 +434,9 @@ export function planDnd5eMapResultApplication(input: {
             monsterOnHitSavePending: combatant.classState.monsterOnHitSavePending
               ? { ...combatant.classState.monsterOnHitSavePending }
               : undefined,
+            activeEffectDamageSavePendingIds: combatant.classState.activeEffectDamageSavePendingIds
+              ? [...combatant.classState.activeEffectDamageSavePendingIds]
+              : undefined,
             activeEffects: combatant.classState.activeEffects?.map((effect) => ({
               ...effect,
               source: { ...effect.source },
@@ -463,6 +480,7 @@ export function planDnd5eMapResultApplication(input: {
             monsterSpellUsesBySpellId: combatant.classState.monsterSpellUsesBySpellId,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
             monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
+            monsterThreatByTargetId: combatant.classState.monsterThreatByTargetId,
             hurlThroughHellSourceId: combatant.classState.hurlThroughHellSourceId,
             hurlThroughHellDamage: combatant.classState.hurlThroughHellDamage,
             hurlThroughHellAppliedTurnKey: combatant.classState.hurlThroughHellAppliedTurnKey,

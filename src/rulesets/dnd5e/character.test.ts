@@ -29,6 +29,14 @@ describe('D&D 5e character boundary', () => {
     expect(combatant).toMatchObject({ concentrating: true, initiative: 15, proficiencyBonus: 3, turn: { actionAvailable: true, reactionAvailable: true, movementRemaining: 30 } })
   })
 
+  it('projects elf Fey Ancestry as magical Sleep immunity', () => {
+    const character = migrateCharacterToDnd5e({ ...legacyCharacter(), race: '精灵' })
+    const combatant = createCombatantFromDnd5eCharacter({
+      character, controller: 'player', initiativeD20: 12, position: { x: 5, y: 5 },
+    })
+    expect(combatant.conditionImmunities).toEqual(expect.arrayContaining(['magical-sleep', '魔法睡眠']))
+  })
+
   it('projects equipped saving-throw effects into every Headless saving throw', () => {
     const migrated = migrateCharacterToDnd5e({
       ...legacyCharacter(),

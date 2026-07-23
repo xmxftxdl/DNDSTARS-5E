@@ -92,6 +92,8 @@ export interface MapGeometryObstacle extends MapGeometryHeight, MapGeometryBlock
   traversal?: 'ground' | 'climb' | 'swim'
   /** 多边形区域内可站立地面的绝对标高；与障碍物阻挡体积的底高分开。 */
   terrainElevationFeet?: number
+  /** 由 DM 高度画笔创建的纯地形标高区域；不充当障碍物或掩护。 */
+  terrainRegion?: boolean
   /** 多边形内部压制非魔法光源；普通黑暗视觉无法看穿。 */
   magicalDarkness?: boolean
   darknessSpellLevel?: number
@@ -116,7 +118,7 @@ export interface MapGeometryLight {
 }
 
 export type MapGeometryEntity = MapGeometryWall | MapGeometryDoor | MapGeometryWindow | MapGeometryObstacle | MapGeometryLight
-export type MapGeometryTool = 'select' | 'wall' | 'door' | 'window' | 'obstacle' | 'light' | 'delete'
+export type MapGeometryTool = 'select' | 'wall' | 'door' | 'window' | 'obstacle' | 'elevation' | 'light' | 'delete'
 export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBlocking> & {
   label?: string
   points?: MapGeometryPoint[]
@@ -133,6 +135,7 @@ export type MapGeometryEntityPatch = Partial<MapGeometryHeight & MapGeometryBloc
   terrainCostMultiplier?: number
   traversal?: 'ground' | 'climb' | 'swim'
   terrainElevationFeet?: number
+  terrainRegion?: boolean
   magicalDarkness?: boolean
   darknessSpellLevel?: number
   enabled?: boolean
@@ -376,6 +379,7 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       (raw.terrainCostMultiplier != null && !finite(raw.terrainCostMultiplier, 1, 10)) ||
       (raw.traversal != null && !['ground', 'climb', 'swim'].includes(String(raw.traversal))) ||
       (raw.terrainElevationFeet != null && !finite(raw.terrainElevationFeet, -1_000, 10_000)) ||
+      (raw.terrainRegion != null && typeof raw.terrainRegion !== 'boolean') ||
       (raw.magicalDarkness != null && typeof raw.magicalDarkness !== 'boolean') ||
       (raw.darknessSpellLevel != null && !finite(raw.darknessSpellLevel, 0, 9))) return undefined
     return {
@@ -383,6 +387,7 @@ export function normalizeMapGeometryEntity(value: unknown): MapGeometryEntity | 
       ...(raw.terrainCostMultiplier != null ? { terrainCostMultiplier: raw.terrainCostMultiplier as number } : {}),
       ...(raw.traversal != null ? { traversal: raw.traversal as MapGeometryObstacle['traversal'] } : {}),
       ...(raw.terrainElevationFeet != null ? { terrainElevationFeet: raw.terrainElevationFeet as number } : {}),
+      ...(raw.terrainRegion === true ? { terrainRegion: true } : {}),
       ...(raw.magicalDarkness === true ? { magicalDarkness: true } : {}),
       ...(raw.darknessSpellLevel != null ? { darknessSpellLevel: raw.darknessSpellLevel as number } : {}),
     }
@@ -1131,6 +1136,136 @@ export function mapGeometryVisibleTargets(input: {
 
 export type MapGeometryIllumination = 'bright' | 'dim' | 'darkness' | 'magical-darkness'
 
+export type MapGeometrySpellLightingSource = {
+  id: string
+  areaId: string
+  point: MapGeometryPoint
+  elevationFeet: number
+  spellLevel: number
+  color: string
+} & (
+  | {
+      kind: 'light'
+      brightRadiusFeet: number
+      dimRadiusFeet: number
+      suppressesMagicalDarknessThroughLevel?: number
+    }
+  | {
+      kind: 'magical-darkness'
+      radiusFeet: number
+      suppressesMagicalLightThroughLevel?: number
+    }
+)
+
+function spellLightingRadius(source: MapGeometrySpellLightingSource): number {
+  return source.kind === 'light'
+    ? source.brightRadiusFeet + source.dimRadiusFeet
+    : source.radiusFeet
+}
+
+function spellLightingOverlaps(
+  left: MapGeometrySpellLightingSource,
+  right: MapGeometrySpellLightingSource,
+  map: BattleMap,
+): boolean {
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  const distanceFeet = Math.hypot(left.point.x - right.point.x, left.point.y - right.point.y) /
+    Math.max(1, map.gridSize) * feetPerCell
+  return distanceFeet <= spellLightingRadius(left) + spellLightingRadius(right)
+}
+
+/**
+ * 将法术持续区域投影为统一地图光源。这里同时处理 Darkness/Daylight 的
+ * 环级压制，确保权威可见性和画布遮罩不会各算一套结果。
+ */
+export function mapGeometrySpellLightingSources(
+  map: BattleMap,
+  geometry?: MapGeometryState,
+): MapGeometrySpellLightingSource[] {
+  const candidates = (map.dnd5ePluginAreas ?? []).flatMap((area): MapGeometrySpellLightingSource[] => {
+    const lighting = area.lighting
+    const anchor = area.anchorCell ?? area.cells[0]
+    if (!lighting || !anchor) return []
+    const point = {
+      x: map.gridOffsetX + (anchor.col + 0.5) * Math.max(1, map.gridSize),
+      y: map.gridOffsetY + (anchor.row + 0.5) * Math.max(1, map.gridSize),
+    }
+    const anchorToken = area.anchorTokenId
+      ? map.tokens.find((token) => token.id === area.anchorTokenId)
+      : undefined
+    const elevationFeet = anchorToken?.elevationFeet ?? mapGeometryTerrainElevationAtPoint(geometry, point)
+    return lighting.kind === 'light'
+      ? [{
+          id: `spell-light:${area.id}`,
+          areaId: area.id,
+          point,
+          elevationFeet,
+          spellLevel: lighting.spellLevel,
+          color: lighting.color,
+          kind: 'light',
+          brightRadiusFeet: lighting.brightRadiusFeet,
+          dimRadiusFeet: lighting.dimRadiusFeet,
+          suppressesMagicalDarknessThroughLevel: lighting.suppressesMagicalDarknessThroughLevel,
+        }]
+      : [{
+          id: `spell-darkness:${area.id}`,
+          areaId: area.id,
+          point,
+          elevationFeet,
+          spellLevel: lighting.spellLevel,
+          color: '#0f102a',
+          kind: 'magical-darkness',
+          radiusFeet: lighting.radiusFeet,
+          suppressesMagicalLightThroughLevel: lighting.suppressesMagicalLightThroughLevel,
+        }]
+  })
+  return candidates.filter((candidate) => !candidates.some((other) => {
+    if (other.id === candidate.id || other.kind === candidate.kind || !spellLightingOverlaps(candidate, other, map)) {
+      return false
+    }
+    return candidate.kind === 'magical-darkness'
+      ? (other.kind === 'light' &&
+          (other.suppressesMagicalDarknessThroughLevel ?? -1) >= candidate.spellLevel)
+      : (other.kind === 'magical-darkness' &&
+          (other.suppressesMagicalLightThroughLevel ?? -1) >= candidate.spellLevel)
+  }))
+}
+
+/** SRD 光照法术一旦与相应环级的魔法黑暗重叠，会解除整个黑暗来源。 */
+export function mapGeometryMagicalDarknessObstacleIsSuppressed(input: {
+  obstacle: MapGeometryObstacle
+  map: BattleMap
+  geometry?: MapGeometryState
+  spellLighting?: readonly MapGeometrySpellLightingSource[]
+}): boolean {
+  const darknessLevel = input.obstacle.darknessSpellLevel ?? 2
+  const gridSize = Math.max(1, input.map.gridSize)
+  const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
+  return (input.spellLighting ?? mapGeometrySpellLightingSources(input.map, input.geometry)).some((source) => {
+    if (source.kind !== 'light' ||
+      (source.suppressesMagicalDarknessThroughLevel ?? -1) < darknessLevel) return false
+    const radius = spellLightingRadius(source) / feetPerCell * gridSize
+    if (mapGeometryPointInPolygon(source.point, input.obstacle.points)) return true
+    return input.obstacle.points.some((point) => Math.hypot(point.x - source.point.x, point.y - source.point.y) <= radius) ||
+      input.obstacle.points.some((point, index) => pointToSegmentDistance(
+        source.point,
+        point,
+        input.obstacle.points[(index + 1) % input.obstacle.points.length],
+      ) <= radius)
+  })
+}
+
+function spellLightingAffectsPoint(
+  source: MapGeometrySpellLightingSource,
+  point: MapGeometryPoint,
+  map: BattleMap,
+): boolean {
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
+    Math.max(1, map.gridSize) * feetPerCell
+  return distanceFeet <= spellLightingRadius(source)
+}
+
 export function mapGeometryIlluminationAtPoint(input: {
   geometry?: MapGeometryState
   map: BattleMap
@@ -1141,9 +1276,15 @@ export function mapGeometryIlluminationAtPoint(input: {
 }): MapGeometryIllumination {
   const ambient = input.geometry?.vision.ambientLight ?? 'bright'
   const pointElevation = input.elevationFeet ?? mapGeometryTerrainElevationAtPoint(input.geometry, input.point)
+  const spellLighting = mapGeometrySpellLightingSources(input.map, input.geometry)
   if (input.geometry?.obstacles.some((obstacle) =>
     obstacle.magicalDarkness === true && mapGeometryPointInPolygon(input.point, obstacle.points) &&
-      mapGeometryObstacleAffectsElevation(obstacle, pointElevation),
+      mapGeometryObstacleAffectsElevation(obstacle, pointElevation) &&
+      !mapGeometryMagicalDarknessObstacleIsSuppressed({
+        obstacle, map: input.map, geometry: input.geometry, spellLighting,
+      }),
+  ) || spellLighting.some((source) =>
+    source.kind === 'magical-darkness' && spellLightingAffectsPoint(source, input.point, input.map),
   )) return 'magical-darkness'
   if (ambient === 'bright') return 'bright'
   let result: MapGeometryIllumination = ambient
@@ -1176,6 +1317,21 @@ export function mapGeometryIlluminationAtPoint(input: {
     if (rayBlocked({
       geometry: input.geometry,
       from: point,
+      to: input.point,
+      fromElevationFeet: source.elevationFeet,
+      toElevationFeet: pointElevation,
+      purpose: 'vision',
+    })) continue
+    if (distanceFeet <= source.brightRadiusFeet) return 'bright'
+    result = 'dim'
+  }
+  for (const source of spellLighting) {
+    if (source.kind !== 'light' || !spellLightingAffectsPoint(source, input.point, input.map)) continue
+    const distanceFeet = Math.hypot(input.point.x - source.point.x, input.point.y - source.point.y) /
+      gridSize * feetPerCell
+    if (rayBlocked({
+      geometry: input.geometry,
+      from: source.point,
       to: input.point,
       fromElevationFeet: source.elevationFeet,
       toElevationFeet: pointElevation,

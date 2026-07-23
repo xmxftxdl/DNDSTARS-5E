@@ -91,7 +91,10 @@ export function prepareDnd5ePlayerMove(input: {
   if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
   const distanceFeet = path.distanceFeet
   const isProne = actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
-  const standFromProne = isProne && action.dnd5eStandFromProne !== false
+  const cannotStand = actorCombatant.classState.activeEffects?.some((effect) =>
+    effect.source.kind === 'spell' && effect.source.rulesId === 'hideous-laughter',
+  ) === true
+  const standFromProne = isProne && !cannotStand && action.dnd5eStandFromProne !== false
   const traversal = dnd5eTraversalMovementCost({
     distanceFeet: path.distanceFeet,
     baseMovementCostFeet: path.movementCostFeet,

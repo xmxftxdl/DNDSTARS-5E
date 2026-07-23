@@ -50,7 +50,10 @@ describe('D&D 5e player map movement', () => {
     }])
     const prepared = prepareDnd5ePlayerMove({
       action, map, characters: [character()],
-      initiativeOrder: [{ tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 }],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
       turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
     })
     expect(prepared.ok).toBe(true)
@@ -116,6 +119,49 @@ describe('D&D 5e player map movement', () => {
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared.toElevationFeet).toBe(10)
+  })
+
+  it('validates a flying move as one three-dimensional trajectory over a tall wall', () => {
+    const hero = character()
+    hero.speed = 60
+    hero.dnd5eMovementSpeeds = { fly: 60 }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [{
+        id: 'high-wall', kind: 'wall', label: '高墙',
+        points: [{ x: 15, y: 0 }, { x: 15, y: map.height }],
+        blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+        baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+      }],
+      doors: [], windows: [], obstacles: [], lights: [],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' },
+      updatedAt: 1,
+    }])
+    const prepared = prepareDnd5ePlayerMove({
+      action: {
+        ...action,
+        targetPosition: { x: 25, y: 5 },
+        dnd5eTraversalMode: 'fly',
+        targetElevationFeet: 40,
+      },
+      map,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 60),
+    })
+    expect(prepared).toEqual(expect.objectContaining({ ok: true }))
+    if (!prepared.ok) return
+    expect(prepared.prepared.toElevationFeet).toBe(40)
+    expect(prepared.prepared.pathElevationsFeet[0]).toBe(0)
+    expect(prepared.prepared.pathElevationsFeet.at(-1)).toBe(40)
+    expect(prepared.prepared.movementCostFeet).toBe(50)
+    const resolved = resolvePreparedDnd5ePlayerMove({ prepared: prepared.prepared })
+    expect(resolved.result).toEqual(expect.objectContaining({ ok: true }))
+    expect(resolved.application?.map.tokens.find((token) => token.id === 'hero-token'))
+      .toMatchObject({ x: 25, y: 5, elevationFeet: 40 })
   })
 
   it('half-speed careful movement consumes twice the traversed distance in Headless', () => {

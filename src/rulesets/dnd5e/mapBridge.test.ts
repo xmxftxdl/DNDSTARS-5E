@@ -28,6 +28,20 @@ function characterWithConditions(base: Character, conditions: string[]): Charact
 describe('D&D 5e map bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
+  it('projects monster Fey Ancestry as magical Sleep immunity', () => {
+    const drow = token({ id: 'drow-token', poolId: 'srd-5.1:drow', hp: 13, maxHp: 13 })
+    const map: BattleMap = {
+      id: 'fey-ancestry-map', name: 'Fey Ancestry', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5, tokens: [drow],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'fey-ancestry', map, characters: [],
+      initiativeOrder: [{ tokenId: drow.id, label: drow.label, emoji: '', color: '', roll: 10 }],
+    })
+    expect(snapshot.state.combatants[drow.id].conditionImmunities)
+      .toEqual(expect.arrayContaining(['magical-sleep', '魔法睡眠']))
+  })
+
   it('compiles obstacle cover and blocked effect lines into Headless attack resolution', () => {
     const hero = character()
     const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, x: 10, y: 50, hp: 20, maxHp: 20 })
@@ -133,6 +147,7 @@ describe('D&D 5e map bridge', () => {
     const hero: Character = {
       ...character(),
       dnd5eCombatState: {
+        activeEffectDamageSavePendingIds: ['hero-effect'],
         monsterOnHitSavePending: {
           sourceId: 'zombie-token', actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
         },
@@ -141,7 +156,10 @@ describe('D&D 5e map bridge', () => {
     const heroToken = token({ id: 'hero-token', type: 'player', characterId: hero.id, hp: 20, maxHp: 20 })
     const zombie = token({
       id: 'zombie-token', poolId: 'srd-5.1:zombie', hp: 0, maxHp: 22,
-      dnd5eCombatState: { undeadFortitudePending: { dc: 12, damage: 7, sourceId: heroToken.id } },
+      dnd5eCombatState: {
+        activeEffectDamageSavePendingIds: ['zombie-effect'],
+        undeadFortitudePending: { dc: 12, damage: 7, sourceId: heroToken.id },
+      },
     })
     const map: BattleMap = {
       id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10,
@@ -159,11 +177,14 @@ describe('D&D 5e map bridge', () => {
     expect(first.state.combatants[heroToken.id].classState.monsterOnHitSavePending).toMatchObject({
       sourceId: zombie.id, actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
     })
+    expect(first.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect'])
     const plan = planDnd5eMapResultApplication({
       state: first.state, map, characters: [hero], characterIdByCombatantId: first.characterIdByCombatantId,
     })
     expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.undeadFortitudePending)
       .toEqual({ dc: 12, damage: 7, sourceId: heroToken.id })
+    expect(plan.map.tokens.find((entry) => entry.id === zombie.id)?.dnd5eCombatState?.activeEffectDamageSavePendingIds)
+      .toEqual(['zombie-effect'])
     expect(plan.characters[0].dnd5eCombatState?.monsterOnHitSavePending).toMatchObject({
       sourceId: zombie.id, actionId: 'bite', ability: 'str', dc: 11, condition: 'prone',
     })
@@ -173,6 +194,8 @@ describe('D&D 5e map bridge', () => {
     })
     expect(reconnected.state.combatants[zombie.id].classState.undeadFortitudePending?.dc).toBe(12)
     expect(reconnected.state.combatants[heroToken.id].classState.monsterOnHitSavePending?.dc).toBe(11)
+    expect(reconnected.state.combatants[zombie.id].classState.activeEffectDamageSavePendingIds).toEqual(['zombie-effect'])
+    expect(reconnected.state.combatants[heroToken.id].classState.activeEffectDamageSavePendingIds).toEqual(['hero-effect'])
   })
 
   it('creates combatants keyed by token and applies authoritative HP/position only', () => {

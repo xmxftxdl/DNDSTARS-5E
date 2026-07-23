@@ -24,6 +24,19 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
     roomId: string; roomName: string; rulesetId: string; createdAt: number
     member: { memberId: string; roomToken: string; clientId: string; role: 'player'; slot: 'player1'; displayName: string }
   }
+  const heartbeat = await request.post(`${DM}/api/rooms/${created.roomId}/heartbeat`, {
+    headers: {
+      'X-Stars-Member': joined.member.memberId,
+      'X-Stars-Room-Token': joined.member.roomToken,
+    },
+    data: {
+      memberId: joined.member.memberId,
+      activePlugins: [],
+      activeCharacterId: 'vision-character',
+      activeCharacterName: '视野角色',
+    },
+  })
+  expect(heartbeat.ok()).toBeTruthy()
   const now = Date.now()
   const dmHeaders = {
     'Content-Type': 'application/json',
@@ -45,6 +58,9 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
       tokens: [{
         id: 'vision-hero', label: '视野角色', type: 'player', characterId: 'vision-character',
         x: 400, y: 400, size: 1, color: '#34d399', emoji: '勇', hp: 10, maxHp: 10,
+      }, {
+        id: 'vision-other-player', label: '另一名玩家', type: 'player', characterId: 'other-character',
+        x: 80, y: 80, size: 1, color: '#34d399', emoji: '友', hp: 10, maxHp: 10,
       }, {
         id: 'vision-hidden-enemy', label: '远处敌人', type: 'enemy',
         x: 720, y: 400, size: 1, color: '#ef4444', emoji: '敌', hp: 10, maxHp: 10,
@@ -71,6 +87,18 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
     }],
   })
 
+  const projectedMaps = await request.get(`${PLAYER}/api/state/maps?room=${created.roomId}`, {
+    headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
+  })
+  expect(projectedMaps.ok()).toBeTruthy()
+  const projectedBody = await projectedMaps.json() as {
+    maps: Array<{ tokens: Array<{ id: string; viewerControlled?: boolean }> }>
+  }
+  expect(projectedBody.maps[0].tokens.map((token) => token.id)).toContain('vision-hero')
+  expect(projectedBody.maps[0].tokens.find((token) => token.id === 'vision-hero')?.viewerControlled).toBe(true)
+  expect(projectedBody.maps[0].tokens.find((token) => token.id === 'vision-other-player')?.viewerControlled).toBe(false)
+  expect(projectedBody.maps[0].tokens.map((token) => token.id)).not.toContain('vision-hidden-enemy')
+
   const context = await browser.newContext()
   await context.addInitScript(([key, response]) => {
     localStorage.setItem(key, JSON.stringify({
@@ -84,17 +112,34 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   const page = await context.newPage()
   await page.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
   const canvas = page.getByTestId('map-canvas')
+  await expect.poll(() => page.evaluate(async () => {
+    const { useMapStore } = await import('/src/store/maps.ts')
+    return useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'vision-hero')?.viewerControlled
+  })).toBe(true)
   await expect(canvas).toHaveAttribute('data-vision-enabled', 'false')
   await expect(canvas).toHaveAttribute('data-fog-filled', 'true')
   await expect(canvas).toHaveAttribute('data-vision-source-count', '1')
 
-  const projectedMaps = await request.get(`${PLAYER}/api/state/maps?room=${created.roomId}`, {
-    headers: { 'X-Stars-Member': joined.member.memberId, 'X-Stars-Room-Token': joined.member.roomToken },
+  // The map snapshot can legitimately arrive before its binary image (for
+  // example while the DM restores a cached map into a new room). The player
+  // canvas must recover without a page reload when that image appears later.
+  await expect(canvas).toHaveAttribute('data-map-image-state', 'missing')
+  const mapImage = Buffer.from([
+    '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800">',
+    '<rect width="800" height="800" fill="#7e22ce"/>',
+    '</svg>',
+  ].join(''))
+  const imageResponse = await request.put(`${DM}/api/images/vision-map?room=${created.roomId}`, {
+    headers: {
+      'Content-Type': 'image/svg+xml',
+      'X-Stars-Protocol': '5',
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    },
+    data: mapImage,
   })
-  expect(projectedMaps.ok()).toBeTruthy()
-  const projectedBody = await projectedMaps.json() as { maps: Array<{ tokens: Array<{ id: string }> }> }
-  expect(projectedBody.maps[0].tokens.map((token) => token.id)).toContain('vision-hero')
-  expect(projectedBody.maps[0].tokens.map((token) => token.id)).not.toContain('vision-hidden-enemy')
+  expect(imageResponse.ok()).toBeTruthy()
+  await expect(canvas).toHaveAttribute('data-map-image-state', 'loaded', { timeout: 10_000 })
 
   await expect.poll(async () => canvas.evaluate((element) => {
     const layers = [...element.querySelectorAll('canvas')]
@@ -112,13 +157,20 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
     return visiblePixels
   })).toBeGreaterThan(100)
   await expect.poll(async () => canvas.evaluate((element) => {
-    const points = [{ x: 400, y: 400 }, { x: 620, y: 400 }, { x: 660, y: 400 }]
     return [...element.querySelectorAll('canvas')].some((layer) => {
       if (layer.width < 700 || layer.height < 500) return false
       const context2d = layer.getContext('2d')
       if (!context2d) return false
-      const alpha = points.map((point) => context2d.getImageData(point.x, point.y, 1, 1).data[3])
-      return alpha[0] < 32 && alpha[1] < 32 && alpha[2] > 128
+      let hasTransparentVision = false
+      let hasOpaqueFog = false
+      for (let y = 20; y < layer.height; y += 40) {
+        for (let x = 20; x < layer.width; x += 40) {
+          const alpha = context2d.getImageData(x, y, 1, 1).data[3]
+          hasTransparentVision ||= alpha < 32
+          hasOpaqueFog ||= alpha > 192
+        }
+      }
+      return hasTransparentVision && hasOpaqueFog
     })
   })).toBe(true)
   await context.close()

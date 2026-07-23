@@ -20,7 +20,8 @@ import {
   type MapGeometryVisionSettings,
   type SharedMapGeometryState,
 } from '../lib/mapGeometry'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 import { campaignLightIsActive } from '../lib/campaignTime'
 import type { Dnd5eMapEnvironment } from '../rulesets/dnd5e/environmentRules'
 
@@ -46,17 +47,20 @@ interface MapGeometryStoreState {
   redo: (mapId: string) => void
 }
 
-let lastSharedUpdatedAt = 0
+const sharedWriteWatermark = createSharedWriteWatermark()
 
 function publish(state: Pick<MapGeometryStoreState, 'maps'>): void {
   if (!canWriteSharedState()) return
-  const updatedAt = Math.max(Date.now(), lastSharedUpdatedAt + 1)
+  const ticket = sharedWriteWatermark.begin()
+  const updatedAt = ticket.updatedAt
   const payload: SharedMapGeometryState = {
     schemaVersion: MAP_GEOMETRY_SCHEMA_VERSION,
     maps: state.maps.map((map) => ({ ...map, updatedAt })),
     updatedAt,
   }
-  void saveSharedResource(MAP_GEOMETRY_RESOURCE, payload)
+  void saveSharedResourceWithResult(MAP_GEOMETRY_RESOURCE, payload).then((result) => {
+    sharedWriteWatermark.settle(ticket, result.status === 'saved')
+  })
 }
 
 function mutateMap(
@@ -153,8 +157,8 @@ export const useMapGeometryStore = create<MapGeometryStoreState>()(
           if (canWriteSharedState() && get().maps.length > 0) publish(get())
           return
         }
-        if (normalized.updatedAt < lastSharedUpdatedAt) return
-        lastSharedUpdatedAt = normalized.updatedAt
+        if (!sharedWriteWatermark.shouldApplyRemote(normalized.updatedAt)) return
+        sharedWriteWatermark.acceptRemote(normalized.updatedAt)
         setMapGeometryRuntime(normalized.maps)
         set({ maps: normalized.maps, historyByMapId: {}, futureByMapId: {} })
         if (canWriteSharedState() && shared?.schemaVersion !== MAP_GEOMETRY_SCHEMA_VERSION) publish(get())

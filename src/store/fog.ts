@@ -11,7 +11,8 @@ import {
   type MapFogState,
   type SharedMapFogState,
 } from '../lib/fogOfWar'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import { createSharedWriteWatermark } from '../lib/sharedWriteWatermark'
 
 interface FogStoreState {
   maps: MapFogState[]
@@ -25,20 +26,22 @@ interface FogStoreState {
   setStyle: (mapId: string, patch: Pick<Partial<MapFogState>, 'color' | 'opacity'>) => void
 }
 
-let lastSharedUpdatedAt = 0
+const sharedWriteWatermark = createSharedWriteWatermark()
 
 function publish(state: Pick<FogStoreState, 'maps'>): void {
   if (!canWriteSharedState()) return
-  const updatedAt = Math.max(Date.now(), lastSharedUpdatedAt + 1)
-  // 记录本端已发布的时间戳，防止一次由旧事件触发的 loadShared 用
-  // 保存前的快照覆盖刚画好的迷雾。
-  lastSharedUpdatedAt = updatedAt
+  const ticket = sharedWriteWatermark.begin()
+  const updatedAt = ticket.updatedAt
+  // 独立记录待确认写入，避免保存进行中时被旧事件覆盖；只有服务端 ACK
+  // 后才推进共享水位，失败时释放本地水位以允许冲突恢复快照落地。
   const payload: SharedMapFogState = {
     schemaVersion: MAP_FOG_SCHEMA_VERSION,
     maps: state.maps.map((map) => ({ ...map, shapes: map.shapes.map((shape) => ({ ...shape })), updatedAt })),
     updatedAt,
   }
-  void saveSharedResource(MAP_FOG_RESOURCE, payload)
+  void saveSharedResourceWithResult(MAP_FOG_RESOURCE, payload).then((result) => {
+    sharedWriteWatermark.settle(ticket, result.status === 'saved')
+  })
 }
 
 function mutateMap(
@@ -59,8 +62,8 @@ export const useFogStore = create<FogStoreState>()(
       loadShared: async () => {
         const shared = await loadSharedResource<SharedMapFogState>(MAP_FOG_RESOURCE)
         const normalized = normalizeSharedMapFog(shared)
-        if (!normalized || normalized.updatedAt < lastSharedUpdatedAt) return
-        lastSharedUpdatedAt = normalized.updatedAt
+        if (!normalized || !sharedWriteWatermark.shouldApplyRemote(normalized.updatedAt)) return
+        sharedWriteWatermark.acceptRemote(normalized.updatedAt)
         set({ maps: normalized.maps, redoByMap: {} })
       },
       fill: (mapId) => {

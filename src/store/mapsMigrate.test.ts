@@ -107,6 +107,29 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.maps[0].tokens[1].movementAnimation).toBeUndefined()
   })
 
+  it('keeps valid monster target preferences and sanitizes persisted threat values', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 100, height: 100,
+        tokens: [{
+          id: 'monster', type: 'enemy',
+          dnd5eTargetingPreference: { schemaVersion: 1, priority: 'highest-threat' },
+          dnd5eCombatState: {
+            monsterThreatByTargetId: {
+              hero: 12.8,
+              negative: -1,
+              invalid: 'many',
+            },
+          },
+        }],
+      }],
+    })
+    expect(result.maps[0].tokens[0]).toMatchObject({
+      dnd5eTargetingPreference: { schemaVersion: 1, priority: 'highest-threat' },
+      dnd5eCombatState: { monsterThreatByTargetId: { hero: 12 } },
+    })
+  })
+
   it('keeps valid core spell effect tokens and drops malformed metadata', () => {
     const effect = {
       schemaVersion: 1, spellId: 'flaming-sphere', sourceCharacterId: 'wizard',
@@ -170,5 +193,37 @@ describe('T10/AC3 — maps store version + migrate', () => {
       anchorMode: 'source-token', anchorCell: { col: 1, row: 1 },
       movement: { economy: 'bonus-action', maximumFeet: 30 }, movementCostMultiplier: 2,
     })
+  })
+
+  it('keeps valid spell lighting declarations and drops malformed executable areas fail-closed', () => {
+    const base = {
+      pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:darkness', label: '黑暗术', color: '#312e81',
+      sourceCharacterId: 'hero', sourceTokenId: 'hero-token', cells: [{ col: 1, row: 1 }],
+      createdRound: 1, expiresAfterRound: 101, sourceKind: 'core-spell', coreSpellId: 'darkness',
+    }
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map', name: '地图', width: 500, height: 500,
+        dnd5ePluginAreas: [
+          {
+            ...base, id: 'valid-lighting',
+            lighting: {
+              kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2,
+              suppressesMagicalLightThroughLevel: 2,
+            },
+          },
+          { ...base, id: 'invalid-lighting', lighting: { kind: 'javascript', code: 'fetch("/")' } },
+        ],
+      }],
+    })
+    expect(result.maps[0].dnd5ePluginAreas).toEqual([
+      expect.objectContaining({
+        id: 'valid-lighting',
+        lighting: {
+          kind: 'magical-darkness', radiusFeet: 15, spellLevel: 2,
+          suppressesMagicalLightThroughLevel: 2,
+        },
+      }),
+    ])
   })
 })

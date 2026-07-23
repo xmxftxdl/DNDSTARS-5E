@@ -21,6 +21,18 @@ describe('player vision sources', () => {
     })).toEqual(['player-b-token'])
   })
 
+  it('uses the server-projected controller identity before local character state finishes loading', () => {
+    expect(resolvePlayerVisionSourceTokenIds({
+      tokens: [
+        { ...tokens[0], viewerControlled: false },
+        { ...tokens[1], viewerControlled: true },
+        tokens[2],
+      ],
+      sharePartyVision: false,
+      controlledCharacterIds: [],
+    })).toEqual(['player-b-token'])
+  })
+
   it('uses the only player token as a safe recovery fallback', () => {
     expect(resolvePlayerVisionSourceTokenIds({
       tokens: [tokens[0], tokens[2]],

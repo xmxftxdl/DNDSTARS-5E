@@ -28,6 +28,9 @@ export interface Dnd5eCharacter {
   id: string
   name: string
   player: string
+  /** 保留种族身份，以便 Headless 投影种族被动规则。 */
+  race?: string
+  raceId?: string
   level: number
   abilities: Record<AbilityKey, number>
   savingThrowProficiencies: readonly AbilityKey[]
@@ -156,6 +159,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
     id: character.id,
     name: character.name,
     player: character.player,
+    race: character.race,
+    raceId: character.dnd5eRaceId,
     level,
     abilities: character.rulesetId ? { ...character.abilities } : normalizeLegacyAbilities(character.abilities),
     savingThrowProficiencies: [...dnd5eEffectiveSavingThrowProficiencies(character)],
@@ -204,6 +209,16 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
 
 export function dnd5eInitiativeModifier(character: Dnd5eCharacter): number {
   return rules.abilityModifier(character.abilities.dex) + character.initiativeBonus
+}
+
+function dnd5eRaceHasMagicalSleepImmunity(race?: string, raceId?: string): boolean {
+  const identity = [race, raceId]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim().toLowerCase())
+  return identity.some((value) => [
+    '精灵', '半精灵', '高等精灵', '木精灵', '黑暗精灵', '卓尔',
+    'elf', 'half-elf', 'half elf', 'high elf', 'wood elf', 'dark elf', 'drow',
+  ].includes(value))
 }
 
 export function createCombatantFromDnd5eCharacter(input: {
@@ -256,6 +271,9 @@ export function createCombatantFromDnd5eCharacter(input: {
     wearingHeavyArmor: character.wearingHeavyArmor,
     wearingMetalArmor: character.wearingMetalArmor,
     hasShield: character.hasShield,
+    conditionImmunities: dnd5eRaceHasMagicalSleepImmunity(character.race, character.raceId)
+      ? ['magical-sleep', '魔法睡眠']
+      : undefined,
     classState: {
       ...character.classState,
       wildShapeOriginalDamageVulnerabilities: normalizedDamageTypes(character.classState.wildShapeOriginalDamageVulnerabilities),

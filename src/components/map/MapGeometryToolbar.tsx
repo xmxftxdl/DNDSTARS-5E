@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import {
   BrickWall, Copy, DoorClosed, Download, Eye, Grid3X3, Lightbulb, LockKeyhole,
-  MousePointer2, Package, Redo2, Square, Trash2, Undo2, Upload,
+  Mountain, MousePointer2, Package, Redo2, Square, Trash2, Undo2, Upload,
 } from 'lucide-react'
 import { normalizeMapGeometry, type MapGeometryEntity, type MapGeometryState, type MapGeometryTool, type MapGeometryWallMaterial } from '../../lib/mapGeometry'
 import { useMapGeometryStore } from '../../store/mapGeometry'
@@ -25,6 +25,7 @@ interface MapGeometryToolbarProps {
   wallMaterial: MapGeometryWallMaterial
   previewAsPlayer: boolean
   snapToGrid: boolean
+  terrainEditingLocked?: boolean
   onEditModeChange: (enabled: boolean) => void
   onToolChange: (tool: MapGeometryTool) => void
   onWallMaterialChange: (material: MapGeometryWallMaterial) => void
@@ -38,6 +39,7 @@ const TOOL_LABELS: Record<MapGeometryTool, string> = {
   door: '门',
   window: '窗户',
   obstacle: '区域/障碍',
+  elevation: '高度画笔',
   light: '光源',
   delete: '删除',
 }
@@ -54,11 +56,13 @@ function NumberField({
   label,
   value,
   min = -1_000,
+  disabled = false,
   onChange,
 }: {
   label: string
   value: number
   min?: number
+  disabled?: boolean
   onChange: (value: number) => void
 }) {
   return (
@@ -68,8 +72,9 @@ function NumberField({
         type="number"
         min={min}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value) || 0)}
-        className="w-14 rounded border border-white/10 bg-void-900 px-1 py-0.5 text-slate-200 outline-none"
+        className="w-14 rounded border border-white/10 bg-void-900 px-1 py-0.5 text-slate-200 outline-none disabled:cursor-not-allowed disabled:opacity-45"
       />
     </label>
   )
@@ -85,6 +90,7 @@ export default function MapGeometryToolbar({
   wallMaterial,
   previewAsPlayer,
   snapToGrid,
+  terrainEditingLocked = false,
   onEditModeChange,
   onToolChange,
   onWallMaterialChange,
@@ -107,6 +113,10 @@ export default function MapGeometryToolbar({
   const updateToken = useMapStore((state) => state.updateToken)
   const worldMinute = useCampaignTimeStore((state) => state.state.worldMinute)
   const count = geometry.walls.length + geometry.doors.length + (geometry.windows?.length ?? 0) + geometry.obstacles.length + (geometry.lights?.length ?? 0)
+  const selectedTerrainRegion = selectedEntity?.kind === 'obstacle' && selectedEntity.terrainRegion === true
+  const selectedTerrainRegionLocked = terrainEditingLocked && selectedEntity?.kind === 'obstacle' && (
+    selectedEntity.terrainRegion === true || (selectedEntity.terrainElevationFeet ?? 0) !== 0
+  )
 
   return (
     <div className="flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-violet-400/15 bg-violet-500/[0.05] px-1 py-0.5">
@@ -129,7 +139,7 @@ export default function MapGeometryToolbar({
             title="按住并拖动绘制；选择工具可检视已有实体"
           >
             {Object.entries(TOOL_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
+              <option key={value} value={value} disabled={terrainEditingLocked && value === 'elevation'}>{label}</option>
             ))}
           </select>
           {tool === 'select' && <MousePointer2 className="h-3.5 w-3.5 text-violet-200" />}
@@ -141,6 +151,15 @@ export default function MapGeometryToolbar({
             </span>
           )}
           {tool === 'obstacle' && <Package className="h-3.5 w-3.5 text-orange-200" />}
+          {tool === 'elevation' && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-200" title="按住鼠标自由绘制区域；松开后设置绝对地形标高">
+              <Mountain className="h-3.5 w-3.5" />
+              按住绘制高度区
+            </span>
+          )}
+          {terrainEditingLocked && (
+            <span className="text-[10px] text-amber-300">战斗中高度区域已锁定</span>
+          )}
           {tool === 'light' && <Lightbulb className="h-3.5 w-3.5 text-amber-200" />}
           {tool === 'delete' && <Trash2 className="h-3.5 w-3.5 text-rose-300" />}
           {tool === 'wall' && (
@@ -212,7 +231,7 @@ export default function MapGeometryToolbar({
           </button>
           <button
             type="button"
-            disabled={!canUndo}
+            disabled={!canUndo || terrainEditingLocked}
             onClick={() => undo(mapId)}
             className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
             title="撤销几何编辑"
@@ -221,7 +240,7 @@ export default function MapGeometryToolbar({
           </button>
           <button
             type="button"
-            disabled={!canRedo}
+            disabled={!canRedo || terrainEditingLocked}
             onClick={() => redo(mapId)}
             className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:opacity-30"
             title="重做几何编辑"
@@ -254,8 +273,9 @@ export default function MapGeometryToolbar({
           </button>
           <button
             type="button"
+            disabled={terrainEditingLocked}
             onClick={() => importInputRef.current?.click()}
-            className="rounded-md p-1 text-slate-300 hover:bg-white/10"
+            className="rounded-md p-1 text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
             title="导入地图几何 JSON"
           >
             <Upload className="h-3.5 w-3.5" />
@@ -268,6 +288,7 @@ export default function MapGeometryToolbar({
             onChange={(event) => {
               const file = event.target.files?.[0]
               event.currentTarget.value = ''
+              if (terrainEditingLocked) return
               if (!file) return
               void file.text().then((text) => {
                 try {
@@ -283,7 +304,7 @@ export default function MapGeometryToolbar({
           <span className="text-[10px] text-slate-500">{count} 项</span>
           <button
             type="button"
-            disabled={count === 0}
+            disabled={count === 0 || terrainEditingLocked}
             onClick={() => {
               if (confirm('清除当前地图的全部墙、门、窗户、障碍物和场景光源吗？')) clearMap(mapId)
             }}
@@ -299,28 +320,32 @@ export default function MapGeometryToolbar({
         <div className="ml-1 flex flex-wrap items-center gap-1 border-l border-white/10 pl-2">
           <input
             value={selectedEntity.label}
+            disabled={selectedTerrainRegionLocked}
             onChange={(event) => updateEntity(mapId, selectedEntity.id, { label: event.target.value.slice(0, 120) })}
-            className="w-20 rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200 outline-none"
+            className="w-20 rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200 outline-none disabled:cursor-not-allowed disabled:opacity-45"
             aria-label="几何名称"
           />
-          {selectedEntity.kind !== 'light' && (['blocksVision', 'blocksMovement', 'blocksLineOfEffect'] as const).map((field, index) => (
+          {selectedEntity.kind !== 'light' && !selectedTerrainRegion && (['blocksVision', 'blocksMovement', 'blocksLineOfEffect'] as const).map((field, index) => (
             <label key={field} className="flex items-center gap-0.5 text-[10px] text-slate-300">
               <input
                 type="checkbox"
+                disabled={selectedTerrainRegionLocked}
                 checked={selectedEntity[field]}
                 onChange={(event) => updateEntity(mapId, selectedEntity.id, { [field]: event.target.checked })}
               />
               {['视线', '移动', '效果线'][index]}
             </label>
           ))}
-          {selectedEntity.kind !== 'light' && <NumberField
+          {selectedEntity.kind !== 'light' && !selectedTerrainRegion && <NumberField
             label="底高"
+            disabled={selectedTerrainRegionLocked}
             value={selectedEntity.baseHeightFeet}
             onChange={(baseHeightFeet) => updateEntity(mapId, selectedEntity.id, { baseHeightFeet })}
           />}
-          {selectedEntity.kind !== 'light' && <NumberField
+          {selectedEntity.kind !== 'light' && !selectedTerrainRegion && <NumberField
             label="高度"
             min={0}
+            disabled={selectedTerrainRegionLocked}
             value={selectedEntity.heightFeet}
             onChange={(heightFeet) => updateEntity(mapId, selectedEntity.id, { heightFeet })}
           />}
@@ -489,58 +514,70 @@ export default function MapGeometryToolbar({
             </span>
           )}
           {selectedEntity.kind === 'obstacle' && (
-            <>
-              <select
-                value={selectedEntity.cover}
-                onChange={(event) => updateEntity(mapId, selectedEntity.id, { cover: event.target.value as 'none' | 'half' | 'three-quarters' | 'total' })}
-                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
-                title="D&D 5e 掩护等级"
-              >
-                <option value="none">无掩护</option>
-                <option value="half">半身 +2 AC</option>
-                <option value="three-quarters">四分之三 +5 AC</option>
-                <option value="total">全身掩护</option>
-              </select>
-              <NumberField
-                label="地形倍率"
-                min={1}
-                value={selectedEntity.terrainCostMultiplier ?? 1}
-                onChange={(terrainCostMultiplier) => updateEntity(mapId, selectedEntity.id, {
-                  terrainCostMultiplier: Math.max(1, terrainCostMultiplier),
-                })}
-              />
+            selectedTerrainRegion ? (
               <NumberField
                 label="地形标高"
+                disabled={selectedTerrainRegionLocked}
                 value={selectedEntity.terrainElevationFeet ?? 0}
                 onChange={(terrainElevationFeet) => updateEntity(mapId, selectedEntity.id, {
                   terrainElevationFeet: Math.max(-1_000, Math.min(10_000, terrainElevationFeet)),
                 })}
               />
-              <select
-                value={selectedEntity.traversal ?? 'ground'}
-                onChange={(event) => updateEntity(mapId, selectedEntity.id, {
-                  traversal: event.target.value as 'ground' | 'climb' | 'swim',
-                })}
-                className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
-                title="地形通行方式；没有对应速度时按双倍移动"
-              >
-                <option value="ground">地面</option>
-                <option value="climb">攀爬</option>
-                <option value="swim">游泳</option>
-              </select>
-              <label className="flex items-center gap-0.5 text-[10px] text-violet-200" title="区域压制普通光源；黑暗视觉不能看穿，魔鬼视界、盲视与真视可以">
-                <input
-                  type="checkbox"
-                  checked={selectedEntity.magicalDarkness === true}
-                  onChange={(event) => updateEntity(mapId, selectedEntity.id, {
-                    magicalDarkness: event.target.checked,
-                    darknessSpellLevel: event.target.checked ? selectedEntity.darknessSpellLevel ?? 2 : undefined,
+            ) : (
+              <>
+                <select
+                  value={selectedEntity.cover}
+                  onChange={(event) => updateEntity(mapId, selectedEntity.id, { cover: event.target.value as 'none' | 'half' | 'three-quarters' | 'total' })}
+                  className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                  title="D&D 5e 掩护等级"
+                >
+                  <option value="none">无掩护</option>
+                  <option value="half">半身 +2 AC</option>
+                  <option value="three-quarters">四分之三 +5 AC</option>
+                  <option value="total">全身掩护</option>
+                </select>
+                <NumberField
+                  label="地形倍率"
+                  min={1}
+                  value={selectedEntity.terrainCostMultiplier ?? 1}
+                  onChange={(terrainCostMultiplier) => updateEntity(mapId, selectedEntity.id, {
+                    terrainCostMultiplier: Math.max(1, terrainCostMultiplier),
                   })}
                 />
-                魔法黑暗
-              </label>
-              {selectedEntity.magicalDarkness && <NumberField label="环级" min={0} value={selectedEntity.darknessSpellLevel ?? 2} onChange={(darknessSpellLevel) => updateEntity(mapId, selectedEntity.id, { darknessSpellLevel: Math.min(9, darknessSpellLevel) })} />}
-            </>
+                <NumberField
+                  label="地形标高"
+                  disabled={terrainEditingLocked}
+                  value={selectedEntity.terrainElevationFeet ?? 0}
+                  onChange={(terrainElevationFeet) => updateEntity(mapId, selectedEntity.id, {
+                    terrainElevationFeet: Math.max(-1_000, Math.min(10_000, terrainElevationFeet)),
+                  })}
+                />
+                <select
+                  value={selectedEntity.traversal ?? 'ground'}
+                  onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                    traversal: event.target.value as 'ground' | 'climb' | 'swim',
+                  })}
+                  className="rounded border border-white/10 bg-void-900 px-1 py-0.5 text-[10px] text-slate-200"
+                  title="地形通行方式；没有对应速度时按双倍移动"
+                >
+                  <option value="ground">地面</option>
+                  <option value="climb">攀爬</option>
+                  <option value="swim">游泳</option>
+                </select>
+                <label className="flex items-center gap-0.5 text-[10px] text-violet-200" title="区域压制普通光源；黑暗视觉不能看穿，魔鬼视界、盲视与真视可以">
+                  <input
+                    type="checkbox"
+                    checked={selectedEntity.magicalDarkness === true}
+                    onChange={(event) => updateEntity(mapId, selectedEntity.id, {
+                      magicalDarkness: event.target.checked,
+                      darknessSpellLevel: event.target.checked ? selectedEntity.darknessSpellLevel ?? 2 : undefined,
+                    })}
+                  />
+                  魔法黑暗
+                </label>
+                {selectedEntity.magicalDarkness && <NumberField label="环级" min={0} value={selectedEntity.darknessSpellLevel ?? 2} onChange={(darknessSpellLevel) => updateEntity(mapId, selectedEntity.id, { darknessSpellLevel: Math.min(9, darknessSpellLevel) })} />}
+              </>
+            )
           )}
           {selectedEntity.kind === 'light' && (
             <>
@@ -589,16 +626,18 @@ export default function MapGeometryToolbar({
           )}
           {selectedEntity.kind !== 'door' && selectedEntity.kind !== 'window' && <button
             type="button"
+            disabled={selectedTerrainRegionLocked}
             onClick={() => duplicateEntity(mapId, selectedEntity.id)}
-            className="rounded p-1 text-slate-300 hover:bg-white/10"
+            className="rounded p-1 text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
             title="复制选中几何"
           >
             <Copy className="h-3.5 w-3.5" />
           </button>}
           <button
             type="button"
+            disabled={selectedTerrainRegionLocked}
             onClick={() => removeEntity(mapId, selectedEntity.id)}
-            className="rounded p-1 text-rose-300 hover:bg-rose-500/15"
+            className="rounded p-1 text-rose-300 hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-35"
             title="删除选中几何"
           >
             <Trash2 className="h-3.5 w-3.5" />

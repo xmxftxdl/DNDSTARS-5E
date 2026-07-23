@@ -61,6 +61,29 @@ describe('地图迷雾与几何控制器', () => {
     expect(projection.exploredVisionPolygons).toEqual([])
   })
 
+  it('角色数据尚未同步时仍使用服务端标记的受控 Token 打开玩家视野', () => {
+    const geometry = createEmptyMapGeometry(map.id, 0)
+    geometry.vision.sharePartyVision = false
+    const projectedMap = {
+      ...map,
+      tokens: map.tokens.map((entry) => ({
+        ...entry,
+        viewerControlled: entry.id === 'token-a',
+      })),
+    }
+
+    const projection = buildMapsFogGeometryProjection({
+      map: projectedMap,
+      fogMaps: [{ ...createEmptyMapFog(map.id, 0), filled: true }],
+      geometryMaps: [geometry],
+      explorationMaps: [],
+      isDm: false,
+      controlledCharacterIds: [],
+    })
+
+    expect(projection.visionSourceTokenIds).toEqual(['token-a'])
+  })
+
   it('组队探索时把两名角色本轮看到的区域合并给每个成员', () => {
     const geometry = createEmptyMapGeometry(map.id, 0)
     geometry.vision.enabled = true

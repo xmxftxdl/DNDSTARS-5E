@@ -5,22 +5,26 @@ import { applyGridDetectPatch, type GridDetectResult } from '../lib/gridDetect'
 import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
 import { dnd5eEncounterGridOffset, dnd5eEncounterRoster, type Dnd5eEncounterEntry } from '../rulesets/dnd5e/encounterBuilder'
 import { putImage, deleteImage, pruneOrphanImages } from '../lib/imageStore'
-import { loadSharedResource, saveSharedResource } from '../lib/sharedApi'
+import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
 import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
+import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
-import type { Dnd5eDamageType } from '../rulesets/dnd5e/monsters'
+import type { Dnd5eDamageType, Dnd5eMonsterTargetingPreferenceV1 } from '../rulesets/dnd5e/monsters'
+import { normalizeDnd5eMonsterTargetingPreference } from '../rulesets/dnd5e/monsterAutomation'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
 import {
+  normalizeDnd5ePersistentAreaLighting,
   normalizeDnd5ePersistentAreaVisual,
   normalizeDnd5ePersistentAreaTriggerSnapshot,
   type Dnd5ePersistentAreaAnchorMode,
   type Dnd5ePersistentAreaMovementDeclaration,
+  type Dnd5ePersistentAreaLighting,
   type Dnd5ePersistentAreaSourceKind,
   type Dnd5ePersistentAreaVisual,
   type Dnd5ePersistentAreaTriggerReceipt,
@@ -85,6 +89,8 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           creatureTypes: sharedToken.creatureTypes,
           creatureSize: sharedToken.creatureSize,
           size: sharedToken.size,
+          viewerControlled: sharedToken.viewerControlled,
+          dnd5eTargetingPreference: sharedToken.dnd5eTargetingPreference,
           dnd5eCombatState: sharedToken.dnd5eCombatState,
           dnd5eSummon: sharedToken.dnd5eSummon,
           dnd5eSpellEffect: sharedToken.dnd5eSpellEffect,
@@ -97,6 +103,12 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
   })
 }
 
+function stripViewerControlProjection(token: Token): Omit<Token, 'viewerControlled'> {
+  const { viewerControlled, ...persisted } = token
+  void viewerControlled
+  return persisted
+}
+
 function publishMapsState(state: Pick<MapState, 'maps' | 'selectedId'>): Promise<void> {
   const seq = ++mapSaveSeq
   return (async () => {
@@ -106,13 +118,22 @@ function publishMapsState(state: Pick<MapState, 'maps' | 'selectedId'>): Promise
       if (seq !== mapSaveSeq) return
       if (shared?.maps) maps = mergePlayerTokenCombatFields(maps, shared.maps)
     }
+    const persistedMaps = maps.map((map) => ({
+      ...map,
+      tokens: map.tokens.map(stripViewerControlProjection),
+    }))
     const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
-    const payload: SharedMapsState = { maps, selectedId: state.selectedId, updatedAt }
+    const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
     if (seq !== mapSaveSeq) return
     lastLocalMapsWriteAt = updatedAt
+    const result = await saveSharedResourceWithResult('maps', payload)
+    if (result.status !== 'saved') {
+      if (seq === mapSaveSeq) lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
+      return
+    }
+    if (seq !== mapSaveSeq) return
     lastSharedMapsUpdatedAt = payload.updatedAt ?? Date.now()
     lastSharedMapsSnapshot = JSON.stringify(payload)
-    await saveSharedResource('maps', payload)
   })()
 }
 
@@ -123,8 +144,16 @@ export interface Token {
   y: number
   color: string // 边框/底色
   emoji: string
+  /** 仅供渲染投影使用：关联角色的完整立绘，不写入地图存档。 */
+  portrait?: string
+  /** 仅供渲染投影使用：关联角色手动裁切后的地图 Token。 */
+  tokenPortrait?: string
+  /** 怪物/NPC 立绘存放于共享图片通道，地图状态只保存引用。 */
+  portraitImageId?: string
   size: number // 直径（格数的倍数，1 = 一格）
   type: 'player' | 'enemy' | 'npc' | 'obstacle'
+  /** 玩家读取地图时由服务端临时投影；不会作为 DM 地图数据持久化。 */
+  viewerControlled?: boolean
   creatureTypes?: CreatureType[]
   creatureSize?: CreatureSize
   characterId?: string // 关联的角色（点击 token 即可调出其技能栏）
@@ -136,6 +165,8 @@ export interface Token {
   showDetailOnToken?: boolean
   /** 来自怪物池的模板 id */
   poolId?: string
+  /** DM 对单个怪物实例设置的自动攻击目标偏好。 */
+  dnd5eTargetingPreference?: Dnd5eMonsterTargetingPreferenceV1
   /** 由声明式 Headless 事务创建的召唤物；Token 仍由 DM 操作，side 只表示战斗阵营。 */
   dnd5eSummon?: {
     schemaVersion: 1
@@ -173,6 +204,7 @@ export interface Token {
       dc: number
       condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
+    activeEffectDamageSavePendingIds?: string[]
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
@@ -212,6 +244,8 @@ export interface Token {
     monsterSpellUsesBySpellId?: Record<string, { current: number; max: number }>
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
+    /** 由 Headless 按有效承伤累计；DM 可在怪物面板中调整。 */
+    monsterThreatByTargetId?: Record<string, number>
     hurlThroughHellSourceId?: string
     hurlThroughHellDamage?: number
     hurlThroughHellAppliedTurnKey?: string
@@ -334,13 +368,15 @@ export interface Dnd5ePluginArea {
   includeSelf?: boolean
   /** 隐蔽区域只投影给来源角色与 DM，直到 DM 将其揭示。 */
   hiddenFromPlayers?: boolean
+  /** 与权威视线判定共享的声明式光照/魔法黑暗。 */
+  lighting?: Dnd5ePersistentAreaLighting
   visual?: Dnd5ePersistentAreaVisual
   triggers?: Dnd5ePersistentAreaTriggerSnapshot[]
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V11：增加无战斗属性的核心法术效果 Token。 */
-export const MAPS_PERSIST_VERSION = 12
+/** 地图存档 V15：持续区域增加经白名单校验的法术光照声明。 */
+export const MAPS_PERSIST_VERSION = 15
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -348,6 +384,9 @@ const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'ob
 function normalizeToken(raw: unknown): Token {
   const legacy = (raw ?? {}) as LegacyTokenSave
   const {
+    portrait: _projectedPortrait,
+    tokenPortrait: _projectedTokenPortrait,
+    viewerControlled: _projectedViewerControlled,
     burningTurns: _burningTurns,
     igniteTurns: _igniteTurns,
     poisonTurns: _poisonTurns,
@@ -424,7 +463,18 @@ function normalizeToken(raw: unknown): Token {
       })
     : undefined
   const { timedEffects: _legacyTimedEffects, ...nativeCombatState } = legacyCombatState ?? {}
+  const monsterThreatByTargetId = legacyCombatState?.monsterThreatByTargetId &&
+    typeof legacyCombatState.monsterThreatByTargetId === 'object'
+    ? Object.fromEntries(Object.entries(legacyCombatState.monsterThreatByTargetId).flatMap(([targetId, value]) =>
+        targetId.length > 0 && targetId.length <= 160 && Number.isFinite(value) && Number(value) >= 0
+          ? [[targetId, Math.min(1_000_000_000, Math.floor(Number(value)))]]
+          : [],
+      ))
+    : undefined
   void _burningTurns
+  void _projectedPortrait
+  void _projectedTokenPortrait
+  void _projectedViewerControlled
   void _igniteTurns
   void _poisonTurns
   void _knockbackTurns
@@ -443,10 +493,14 @@ function normalizeToken(raw: unknown): Token {
     y: Number.isFinite(t.y) ? (t.y as number) : 0,
     color: typeof t.color === 'string' && t.color ? t.color : preset.color,
     emoji: typeof t.emoji === 'string' && t.emoji ? t.emoji : preset.emoji,
+    portraitImageId: typeof t.portraitImageId === 'string' && /^[a-z0-9_-]{1,160}$/i.test(t.portraitImageId)
+      ? t.portraitImageId
+      : undefined,
     size: creatureSize ? creatureSizeToTokenSize(creatureSize) : rawSize,
     type,
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
+    dnd5eTargetingPreference: normalizeDnd5eMonsterTargetingPreference(t.dnd5eTargetingPreference),
     dnd5eSummon,
     dnd5eSpellEffect,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
@@ -486,12 +540,13 @@ function normalizeToken(raw: unknown): Token {
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {
           ...nativeCombatState,
+          monsterThreatByTargetId,
           schemaVersion: migratedEffects!.schemaVersion,
           activeEffects: migratedEffects!.activeEffects,
           conditions: migratedEffects!.conditions.length > 0 ? migratedEffects!.conditions : undefined,
       }
       : invalidCurrentEffects
-        ? { ...nativeCombatState, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: undefined, conditions: undefined }
+        ? { ...nativeCombatState, monsterThreatByTargetId, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: undefined, conditions: undefined }
         : undefined,
   }
 }
@@ -590,6 +645,8 @@ function normalizeMap(raw: unknown): BattleMap {
               maximumFeet: Math.floor(area.movement.maximumFeet),
             }
           : undefined
+        const lighting = area.lighting ? normalizeDnd5ePersistentAreaLighting(area.lighting) : undefined
+        if (area.lighting != null && !lighting) return []
         return [{
           id: area.id,
           pluginId: area.pluginId,
@@ -620,6 +677,7 @@ function normalizeMap(raw: unknown): BattleMap {
           relation: area.relation === 'ally' || area.relation === 'enemy' ? area.relation : 'any',
           includeSelf: area.includeSelf === true,
           hiddenFromPlayers: area.hiddenFromPlayers === true,
+          lighting,
           visual: area.visual ? normalizeDnd5ePersistentAreaVisual(area.visual) : undefined,
           triggers: triggers.length > 0 ? triggers : undefined,
           triggerReceipts: triggerReceipts.length > 0 ? triggerReceipts : undefined,
@@ -680,6 +738,8 @@ type CharacterTokenPresentation = {
   id: string
   name: string
   avatar: string
+  portrait?: string
+  tokenPortrait?: string
 }
 
 /** 角色是人物 Token 名称与头像的单一真相来源；未关联角色的 Token 保持原样。 */
@@ -695,9 +755,16 @@ export function projectCharacterTokenPresentations(
     if (!character) return token
     const emoji = character.avatar || token.emoji
     const label = character.name || token.label
-    if (emoji === token.emoji && label === token.label) return token
+    const portrait = character.portrait
+    const tokenPortrait = character.tokenPortrait
+    if (
+      emoji === token.emoji &&
+      label === token.label &&
+      portrait === token.portrait &&
+      tokenPortrait === token.tokenPortrait
+    ) return token
     changed = true
-    return { ...token, emoji, label }
+    return { ...token, emoji, label, portrait, tokenPortrait }
   })
   return changed ? projected : tokens
 }
@@ -736,6 +803,7 @@ interface MapState {
   applyAuthorityMapUpdate: (mapId: string, patch: Partial<BattleMap>) => void
   expireTimedLights: (worldMinute: number) => number
   removeToken: (mapId: string, tokenId: string) => void
+  transferToken: (fromMapId: string, toMapId: string, tokenId: string, position: { x: number; y: number }) => boolean
 }
 
 export const useMapStore = create<MapState>()(
@@ -762,14 +830,21 @@ export const useMapStore = create<MapState>()(
         lastSharedMapsSnapshot = decision.next.lastSnapshot
         set({ maps: shared.maps, selectedId: shared.selectedId ?? shared.maps[0]?.id ?? null })
         // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
-        if (isPlayerPort()) void pruneOrphanImages(shared.maps.map((m) => m.id))
+        if (isPlayerPort()) void pruneOrphanImages(shared.maps.flatMap((map) => [
+          map.id,
+          ...map.tokens.flatMap((token) => token.portraitImageId ? [token.portraitImageId] : []),
+        ]))
       },
       saveSharedNow: () => publishMapsState(get()),
       select: (id) => set({ selectedId: id }),
 
       addMap: async ({ name, width, height, blob, gridDetect }) => {
         const id = uid()
-        await putImage(id, blob)
+        const sharedImageSaved = await putImage(id, blob)
+        if (getRoomSession() && !sharedImageSaved) {
+          await deleteImage(id)
+          throw new Error('地图图片未能上传到房间主机；已取消创建地图，请确认 DM 服务在线后重试。')
+        }
         const gridPatch = gridDetect ? applyGridDetectPatch(gridDetect) : { builtinGridDetected: false }
         const map: BattleMap = {
           id,
@@ -814,7 +889,11 @@ export const useMapStore = create<MapState>()(
       },
 
       removeMap: (id) => {
+        const removedMap = get().maps.find((map) => map.id === id)
         void deleteImage(id)
+        for (const imageId of removedMap?.tokens.flatMap((token) => token.portraitImageId ? [token.portraitImageId] : []) ?? []) {
+          void deleteImage(imageId)
+        }
         set((s) => {
           const maps = s.maps.filter((m) => m.id !== id)
           return { maps, selectedId: s.selectedId === id ? (maps[0]?.id ?? null) : s.selectedId }
@@ -989,12 +1068,48 @@ export const useMapStore = create<MapState>()(
       },
 
       removeToken: (mapId, tokenId) => {
+        const portraitImageId = get().maps
+          .find((map) => map.id === mapId)
+          ?.tokens.find((token) => token.id === tokenId)
+          ?.portraitImageId
+        if (portraitImageId) void deleteImage(portraitImageId)
         set((s) => ({
           maps: s.maps.map((m) =>
             m.id === mapId ? { ...m, tokens: m.tokens.filter((t) => t.id !== tokenId) } : m,
           ),
         }))
         publishMapsState(get())
+      },
+      transferToken: (fromMapId, toMapId, tokenId, position) => {
+        if (fromMapId === toMapId) {
+          const exists = get().maps.some((map) => map.id === fromMapId && map.tokens.some((token) => token.id === tokenId))
+          if (!exists) return false
+          set((state) => ({
+            maps: state.maps.map((map) => map.id === fromMapId ? {
+              ...map,
+              tokens: map.tokens.map((token) => token.id === tokenId
+                ? { ...token, x: position.x, y: position.y, movementAnimation: undefined }
+                : token),
+            } : map),
+          }))
+          publishMapsState(get())
+          return true
+        }
+        const sourceMap = get().maps.find((map) => map.id === fromMapId)
+        const targetMap = get().maps.find((map) => map.id === toMapId)
+        const token = sourceMap?.tokens.find((candidate) => candidate.id === tokenId)
+        if (!sourceMap || !targetMap || !token || targetMap.tokens.some((candidate) => candidate.id === tokenId)) return false
+        const moved = { ...token, x: position.x, y: position.y, movementAnimation: undefined }
+        set((state) => ({
+          maps: state.maps.map((map) => map.id === fromMapId
+            ? { ...map, tokens: map.tokens.filter((candidate) => candidate.id !== tokenId) }
+            : map.id === toMapId
+              ? { ...map, tokens: [...map.tokens, moved] }
+              : map),
+          selectedId: toMapId,
+        }))
+        publishMapsState(get())
+        return true
       },
     }),
     {

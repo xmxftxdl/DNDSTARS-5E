@@ -292,6 +292,54 @@ describe('map geometry', () => {
     expect(mapGeometryCanSeeToken({ geometry: g, map: litMap, viewer: { ...viewer, canSeeMagicalDarkness: true }, target })).toBe(true)
   })
 
+  it('uses core spell areas as authoritative light and magical-darkness sources', () => {
+    const g = geometry()
+    g.walls = []
+    g.obstacles = []
+    g.vision.ambientLight = 'darkness'
+    const daylight = {
+      id: 'daylight', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:daylight',
+      sourceKind: 'core-spell' as const, coreSpellId: 'daylight', label: '昼明术', color: '#fde68a',
+      sourceCharacterId: 'cleric', sourceTokenId: 'cleric-token', cells: [{ col: 1, row: 1 }],
+      anchorCell: { col: 1, row: 1 }, createdRound: 1, expiresAfterRound: 601,
+      lighting: {
+        kind: 'light' as const, brightRadiusFeet: 60, dimRadiusFeet: 60,
+        color: '#fef3c7', spellLevel: 3, suppressesMagicalDarknessThroughLevel: 3,
+      },
+    }
+    const darkness = {
+      id: 'darkness', pluginId: 'srd-5.1', featureId: 'srd-5.1:spell:darkness',
+      sourceKind: 'core-spell' as const, coreSpellId: 'darkness', label: '黑暗术', color: '#312e81',
+      sourceCharacterId: 'wizard', sourceTokenId: 'wizard-token', cells: [{ col: 3, row: 1 }],
+      anchorCell: { col: 3, row: 1 }, createdRound: 1, expiresAfterRound: 101,
+      lighting: {
+        kind: 'magical-darkness' as const, radiusFeet: 15, spellLevel: 2,
+        suppressesMagicalLightThroughLevel: 2,
+      },
+    }
+    const target = { x: 175, y: 75 }
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g, map: { ...map, dnd5ePluginAreas: [darkness] }, point: target,
+    })).toBe('magical-darkness')
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g, map: { ...map, dnd5ePluginAreas: [darkness, daylight] }, point: target,
+    })).toBe('bright')
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g, map: { ...map, dnd5ePluginAreas: [daylight] }, point: { x: 975, y: 75 },
+    })).toBe('dim')
+
+    g.obstacles = [{
+      id: 'legacy-darkness', kind: 'obstacle', label: '魔法黑暗', magicalDarkness: true,
+      darknessSpellLevel: 2,
+      points: [{ x: 140, y: 40 }, { x: 210, y: 40 }, { x: 210, y: 110 }, { x: 140, y: 110 }],
+      blocksVision: false, blocksMovement: false, blocksLineOfEffect: false, cover: 'none',
+      baseHeightFeet: 0, heightFeet: 20, createdAt: 1,
+    }]
+    expect(mapGeometryIlluminationAtPoint({
+      geometry: g, map: { ...map, dnd5ePluginAreas: [daylight] }, point: target,
+    })).toBe('bright')
+  })
+
   it('applies light blockers and magical darkness only across matching height intervals', () => {
     const g = geometry()
     g.vision.ambientLight = 'darkness'
@@ -350,6 +398,7 @@ describe('map geometry', () => {
   it('migrates V1 openings to explicit wall attachments and always emits Schema V2', () => {
     const g = geometry()
     g.obstacles[0].terrainElevationFeet = 15
+    g.obstacles[0].terrainRegion = true
     g.doors = [{
       id: 'legacy-door', kind: 'door', label: '旧门', points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
       state: 'closed', secret: false, blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
@@ -363,6 +412,7 @@ describe('map geometry', () => {
       points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
     })
     expect(normalized?.maps[0].obstacles[0].terrainElevationFeet).toBe(15)
+    expect(normalized?.maps[0].obstacles[0].terrainRegion).toBe(true)
     expect(normalizeSharedMapGeometry({
       schemaVersion: 2,
       maps: [{ ...g, obstacles: [{ ...g.obstacles[0], terrainElevationFeet: 20_000 }] }],
