@@ -25,6 +25,14 @@ python scripts/generate-srd-spell-translations.py path\to\SRD_CC_v5.1.pdf
 
 审校结果保存为 `content/srd51/spells.zh.reviewed.json`。审校批次可追加 `--emit-reviewed` 生成运行时覆盖层；全部 319 项完成后才可追加 `--emit` 生成完整发布数据。旧的 PHB PDF 提取器已从仓库移除，不能再用于核心包。
 
+怪物工作表由以下命令生成：
+
+```powershell
+node scripts/generate-srd-monster-translations.mjs --report
+```
+
+怪物名、规则标题与固定术语分别保存于 `monster-names.zh.json`、`monster-rule-names.zh.json` 和 `monster-terms.zh.json`；通过上下文审校的完整数据卡保存于 `monsters.zh.reviewed.json`。施法怪物的法术名必须引用同一套 319 项 SRD 5.1 法术词表，不得自行创建第二套译名。
+
 当前覆盖进度由工作表和运行时测试共同核对；不能用旧译文补齐 `reviewedBy`，也不能把“已有中文正文”误报成“已完成 SRD 语境审校”。
 
 运行发布数据一致性审计：
@@ -35,4 +43,4 @@ npm run audit:srd-content
 
 该审计会同时核对法术目录、法术书展示正文、Headless 法术定义、魔法物品发布模板和装备正文中的法术专名。未完成语境审校的条目会计入待办数量，但不会被误判为已审校；目录缺项、环级/职业归属分叉、正文标题分叉和旧法术名重新进入发布模板则会直接失败。
 
-运行时目录保留 319 个 SRD 法术与 240 件 SRD 魔法物品的目录元数据；当前只有带人工审校记录的 11 个法术正文和 5 件魔法物品正文进入核心构建。其余条目明确标记为待翻译，只显示目录信息，不装载旧 PHB 或机器翻译正文。
+运行时目录保留 319 个 SRD 法术、240 件 SRD 魔法物品与 334 只 SRD 怪物的目录元数据。当前 319/319 个法术正文、240/240 件魔法物品正文与 334/334 只怪物完整数据卡，已完成基于英文 SRD 5.1 的语境翻译与上下文复核，并进入核心构建。法术、魔法物品或怪物正文缺失时会直接终止对应发布数据的生成，不再以占位文案或来源不合规的旧正文降级。

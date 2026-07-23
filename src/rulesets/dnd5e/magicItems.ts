@@ -407,6 +407,10 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
   const kind = DND5E_MAGIC_ITEM_KIND_LABELS[entry.kind]
   const rules = CATALOG_RULE_OVERRIDES[entry.id]
   const srdRules = DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED[entry.id]
+  const rulesText = rules?.rulesText ?? srdRules?.rulesText
+  if (!rulesText) {
+    throw new Error(`SRD 5.1 魔法物品缺少已复核中文正文：${entry.id}`)
+  }
   return {
     id: `srd-5.1:magic-item:${entry.id}`,
     name: entry.name,
@@ -414,7 +418,7 @@ function catalogTemplate(entry: Dnd5eSrdMagicItemCatalogEntry): Dnd5eInventoryIt
     category: entry.kind === 'potion' ? 'consumable' : 'magic-item',
     icon: iconForKind(entry.kind),
     description: rules?.description ?? `${rarity}${kind}${attunement === 'required' ? '，需要同调' : ''}。`,
-    rulesText: rules?.rulesText ?? srdRules?.rulesText ?? '该条目属于 SRD 5.1 魔法物品目录；中文规则正文尚未完成基于英文 SRD 5.1 的语境翻译与人工审校。当前仅保留目录信息，具体效果须由 DM 依据英文 SRD 5.1 裁定。',
+    rulesText,
     stackable: entry.kind === 'ammunition' || entry.kind === 'potion' || entry.kind === 'scroll',
     ...(rules?.use ? { use: rules.use } : {}),
     magicItem: {

@@ -22,19 +22,21 @@ describe('SRD 5.1 magic items', () => {
     expect(new Set(DND5E_SRD_MAGIC_ITEM_CATALOG.map((item) => item.id)).size).toBe(240)
   })
 
-  it('keeps every catalog item distributable without loading unreviewed legacy prose', () => {
+  it('keeps every catalog item distributable with reviewed Chinese rules text', () => {
     expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES).toHaveLength(240)
     for (const template of DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES) {
       expect(template.rulesText.length, template.id).toBeGreaterThan(10)
     }
-    const pending = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(
-      (item) => item.id === 'srd-5.1:magic-item:holy-avenger',
+    const completed = DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.find(
+      (item) => item.id === 'srd-5.1:magic-item:deck-of-many-things',
     )
-    expect(pending?.rulesText).toContain('中文规则正文尚未完成')
+    expect(completed?.rulesText).toContain('***虚空。***')
+    expect(DND5E_SRD_MAGIC_ITEM_CATALOG_TEMPLATES.map((item) => item.rulesText).join('\n'))
+      .not.toContain('中文规则正文尚未完成')
   })
 
-  it('uses reviewed SRD translations as an explicit partial overlay', () => {
-    expect(Object.keys(DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED)).toHaveLength(5)
+  it('publishes a reviewed SRD translation for every catalog item', () => {
+    expect(Object.keys(DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED)).toHaveLength(240)
     expect(DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED['boots-of-levitation']).toMatchObject({
       sourcePage: 212,
       rulesText: expect.stringContaining('浮空术'),
@@ -48,6 +50,17 @@ describe('SRD 5.1 magic items', () => {
     expect(boots).toContain('浮空术')
     expect(boots).not.toContain('悬浮法术')
     expect(Object.values(DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED).flatMap((entry) => entry ? [entry.rulesText] : []).join('\n')).not.toMatch(/暗示咒语|悬浮法术/)
+  })
+
+  it('does not publish untranslated English prose in reviewed magic-item rules', () => {
+    const allowed = new Set(['AC', 'DC', 'DM', 'NPC', 'XP', 'gp'])
+    const residual = Object.entries(DND5E_SRD_MAGIC_ITEM_RULES_ZH_REVIEWED).flatMap(([id, entry]) =>
+      [...(entry?.rulesText.matchAll(/[A-Za-z]{2,}/g) ?? [])]
+        .map((match) => match[0])
+        .filter((token) => !allowed.has(token) && !/^d\d+$/.test(token))
+        .map((token) => `${id}:${token}`),
+    )
+    expect(residual).toEqual([])
   })
 
   it('keeps rarity, attunement and automation metadata on distributable templates', () => {

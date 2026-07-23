@@ -1,0 +1,3326 @@
+{
+  "acolyte": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-black-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-blue-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-brass-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-bronze-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-copper-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-gold-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-green-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-red-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-silver-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "adult-white-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-black-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-blue-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-brass-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-bronze-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-copper-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-gold-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-green-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-red-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-silver-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ancient-white-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "animated-armor": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ape": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "archmage": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "awakened-shrub": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "awakened-tree": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "axe-beak": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "baboon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "badger": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bandit": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bandit-captain": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bat": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "berserker": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "black-bear": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "black-dragon-wyrmling": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "blink-dog": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "blood-hawk": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "blue-dragon-wyrmling": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "boar": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bone-devil": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "brass-dragon-wyrmling": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bronze-dragon-wyrmling": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "brown-bear": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "camel": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "cat": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "cloud-giant": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "commoner": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "constrictor-snake": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "copper-dragon-wyrmling": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "crab": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "crocodile": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "cult-fanatic": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "cultist": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "deer": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "dire-wolf": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "draft-horse": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "drider": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "eagle": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "earth-elemental": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "efreeti": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "elephant": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "elk": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "fire-giant": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "flying-snake": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "flying-sword": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "frog": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "frost-giant": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gargoyle": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ghoul": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-ape": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-badger": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-bat": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-boar": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-constrictor-snake": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-crab": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-crocodile": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-eagle": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-elk": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-fire-beetle": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-goat": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-hyena": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-lizard": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-owl": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-poisonous-snake": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-rat": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-scorpion": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-sea-horse": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-shark": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-vulture": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-wasp": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-weasel": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-wolf-spider": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gnoll": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "goat": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "goblin": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gold-dragon-wyrmling": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "green-dragon-wyrmling": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "grick": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "griffon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "grimlock": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "guard": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "guardian-naga": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "half-red-dragon-veteran": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hawk": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hell-hound": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hezrou": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hill-giant": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hippogriff": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hobgoblin": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hunter-shark": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hyena": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "jackal": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "kobold": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "lion": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "lizard": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "lizardfolk": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mage": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mammoth": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mastiff": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "merfolk": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mule": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "noble": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ochre-jelly": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ogre": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ogre-zombie": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "orc": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "owl": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "owlbear": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "panther": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "pegasus": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "phase-spider": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "planetar": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "plesiosaurus": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "poisonous-snake": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "polar-bear": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "pony": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "quipper": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "rat": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "raven": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "red-dragon-wyrmling": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "reef-shark": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "rhinoceros": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "riding-horse": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "roc": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "saber-toothed-tiger": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "satyr": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "scorpion": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "scout": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "sea-horse": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "shrieker": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "silver-dragon-wyrmling": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "skeleton": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "spider": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "spirit-naga": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "stone-golem": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "storm-giant": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-beetles": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-insects": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-quippers": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-rats": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-ravens": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-spiders": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-wasps": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "thug": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "tiger": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "tribal-warrior": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "triceratops": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "troll": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "veteran": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "violet-fungus": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "vulture": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "warhorse": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "warhorse-skeleton": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "weasel": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "werebear-bear": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "werebear-human": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "werebear-hybrid": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wereboar-boar": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wereboar-human": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wereboar-hybrid": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wererat-human": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wererat-hybrid": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wererat-rat": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "weretiger-human": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "weretiger-hybrid": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "weretiger-tiger": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "werewolf-human": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "werewolf-hybrid": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "werewolf-wolf": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "white-dragon-wyrmling": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "winter-wolf": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wolf": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "worg": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-black-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-blue-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-brass-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-bronze-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-copper-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-gold-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-green-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-red-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-silver-dragon": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "young-white-dragon": {
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "zombie": {
+    "reviewedBy": "Codex SRD 5.1 上下文复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "basilisk": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果一个生物在距石化蜥蜴 30 尺内开始其回合，且双方能够彼此看见，则只要石化蜥蜴未处于失能状态，它就可以迫使该生物进行一次 DC 12 的体质豁免。豁免失败时，该生物开始被魔法变成石头，并陷入束缚状态。它必须在自己下一回合结束时再次进行该豁免。豁免成功时，效应结束；豁免失败时，该生物陷入石化状态，直至被高等复原术或其他魔法解救。\n未陷入突袭的生物可以在自己回合开始时移开视线，以避免进行该豁免。若如此做，它直到自己下一回合开始前都无法看见石化蜥蜴；届时它可以再次移开视线。若它在此期间看向石化蜥蜴，则必须立即进行该豁免。\n如果石化蜥蜴在明亮光照中看见自己位于 30 尺内的倒影，它会误以为那是竞争对手，并以自身作为凝视的目标。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bulette": {
+    "actions": [
+      {
+        "id": "deadly-leap",
+        "description": "如果掘地鲨在移动过程中跳跃了至少 15 尺，它随后可以使用此动作，以站立姿态落入一个包含一个或多个其他生物的空间。每个此类生物都必须通过一次 DC 16 的力量或敏捷豁免（由目标选择），否则倒地，并受到 14（3d6 + 4）点钝击伤害和 14（3d6 + 4）点挥砍伤害。豁免成功时，该生物只受到一半伤害且不会倒地，并被推出掘地鲨的空间 5 尺，进入由该生物选择的一处未占据空间。如果范围内没有未占据空间，该生物改为倒在掘地鲨的空间内。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "centaur": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "半人马发动两次攻击：一次使用长矛，另一次使用蹄击；或者使用长弓发动两次攻击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "cockatrice": {
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +3，触及 5 尺，单一生物。命中：3（1d4 + 1）点穿刺伤害，且目标必须通过一次 DC 11 的体质豁免，否则会被魔法石化。豁免失败时，该生物开始变成石头，并陷入束缚状态。它必须在自己下一回合结束时再次进行该豁免。豁免成功时，效应结束；豁免失败时，该生物陷入石化状态，持续 24 小时。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "death-dog": {
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：5（1d6 + 2）点穿刺伤害。如果目标是生物，它必须通过一次 DC 12 的体质豁免，否则感染疾病并陷入中毒状态，直至疾病被治愈。每经过 24 小时，该生物都必须再次进行该豁免；豁免失败时，其生命值上限降低 5（1d10）点。该降低持续到疾病被治愈。如果此疾病使该生物的生命值上限降至 0，该生物死亡。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "dretch": {
+    "actions": [
+      {
+        "id": "fetid-cloud",
+        "description": "一团半径 10 尺的恶臭绿色气体从怯魔身上向外扩散。气体可以绕过角落，且其区域处于轻度遮蔽。气体持续 1 分钟，或直到被强风吹散。任何在该区域内开始其回合的生物都必须通过一次 DC 11 的体质豁免，否则陷入中毒状态，持续到其下一回合开始。以这种方式中毒期间，目标在其回合内只能执行一个动作或一个附赠动作，不能两者都执行，且无法执行反应。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "drow": {
+    "actions": [
+      {
+        "id": "hand-crossbow",
+        "description": "远程武器攻击：命中 +4，射程 30/120 尺，单一目标。命中：5（1d6 + 2）点穿刺伤害，且目标必须通过一次 DC 13 的体质豁免，否则陷入中毒状态，持续 1 小时。如果豁免结果比 DC 低 5 或更多，目标以这种方式中毒期间还会陷入昏迷状态。目标受到伤害时会醒来；另一生物也可以使用一个动作将其摇醒。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "druid": {
+    "actions": [
+      {
+        "id": "quarterstaff",
+        "description": "近战武器攻击：命中 +2（施展橡棍术时命中 +4），触及 5 尺，单一目标。命中：3（1d6）点钝击伤害；以双手持用时为 4（1d8）点钝击伤害；受橡棍术影响时为 6（1d8 + 2）点钝击伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-centipede": {
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一生物。命中：4（1d4 + 2）点穿刺伤害，且目标必须通过一次 DC 11 的体质豁免，否则受到 10（3d6）点毒素伤害。如果该毒素伤害使目标降至 0 生命值，目标会伤势稳定，但即使恢复了生命值，也会陷入中毒状态 1 小时，并在以这种方式中毒期间陷入麻痹状态。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-frog": {
+    "actions": [
+      {
+        "id": "swallow",
+        "description": "巨蛙对一个正被它擒抱的小型或更小目标发动一次啃咬攻击。若攻击命中，目标被吞咽，且擒抱结束。被吞咽的目标陷入目盲和束缚状态，对来自巨蛙体外的攻击和其他效应具有全身掩护，并在巨蛙每个回合开始时受到 5（2d4）点强酸伤害。巨蛙同一时间只能吞咽一个目标。如果巨蛙死亡，被吞咽的生物不再被它束缚，并可以花费 5 尺移动力从尸体中逃出，离开时处于倒地状态。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-rat-diseased": {
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：3（1d4 + 2）点穿刺伤害。如果目标是生物，它必须通过一次 DC 10 的体质豁免，否则感染疾病。疾病被治愈前，目标只能通过魔法手段恢复生命值，且其生命值上限每经过 24 小时降低 3（1d6）点。如果此疾病使目标的生命值上限降至 0，目标死亡。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-spider": {
+    "actions": [
+      {
+        "id": "web",
+        "description": "远程武器攻击：命中 +5，射程 30/60 尺，单一生物。命中：目标被蛛网束缚。被束缚的目标可以使用一个动作进行一次 DC 12 的力量检定，成功时挣破蛛网。蛛网也可以被攻击并摧毁（AC 10；生命值 5；易伤火焰伤害；免疫钝击、毒素和心灵伤害）。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "knight": {
+    "actions": [
+      {
+        "id": "leadership",
+        "description": "持续 1 分钟，每当骑士能够看见的一个 30 尺内非敌对生物进行攻击检定或豁免时，骑士可以说出一项特殊命令或警告。只要该生物能够听见并理解骑士，它就可以为该次掷骰增加一个 d4。同一时间，一个生物只能受益于一枚领导力骰。如果骑士陷入失能状态，此效应结束。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "minotaur-skeleton": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果骷髅在同一回合中先向一个目标直线移动至少 10 尺，随后以抵角攻击命中该目标，则目标额外受到 9（2d8）点穿刺伤害。如果目标是生物，它必须通过一次 DC 14 的力量豁免，否则被推开至多 10 尺并倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "priest": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "祭司可以使用一个附赠动作消耗一个法术位，使其近战武器攻击在命中目标时以魔法额外造成 10（3d6）点光耀伤害。此增益持续到该回合结束。如果祭司消耗 2 环或更高环阶的法术位，则法术位每高于 1 环一环，额外伤害便增加 1d6。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "specter": {
+    "actions": [
+      {
+        "id": "life-drain",
+        "description": "近战法术攻击：命中 +4，触及 5 尺，单一生物。命中：10（3d6）点黯蚀伤害。目标必须通过一次 DC 10 的体质豁免，否则其生命值上限降低等同于所受伤害的数值。该降低持续到该生物完成一次长休。如果此效应使目标的生命值上限降至 0，目标死亡。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "stirge": {
+    "actions": [
+      {
+        "id": "blood-drain",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一生物。命中：5（1d4 + 3）点穿刺伤害，且吸血飞虫附着到目标身上。附着期间，吸血飞虫不发动攻击；改为在吸血飞虫每个回合开始时，目标因失血损失 5（1d4 + 3）点生命值。\n吸血飞虫可以花费 5 尺移动力主动脱离。它从目标身上吸取 10 点生命值或目标死亡后也会脱离。任何生物（包括目标）都可以使用一个动作使吸血飞虫脱离。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "stone-giant": {
+    "reactions": [
+      {
+        "id": "rock-catching",
+        "description": "如果一块岩石或类似物体被投向巨人，巨人可以进行一次 DC 10 的敏捷豁免；豁免成功时，它接住该投射物，并且不会受到该投射物造成的钝击伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-centipedes": {
+    "actions": [
+      {
+        "id": "bites",
+        "description": "近战武器攻击：命中 +3，触及 0 尺，群集空间内的单一目标。命中：10（4d4）点穿刺伤害；如果群集当前生命值不高于其生命值上限的一半，则改为 5（2d4）点穿刺伤害。\n被蜈蚣群集降至 0 生命值的生物会伤势稳定，但即使恢复了生命值，也会陷入中毒状态 1 小时，并在以这种方式中毒期间陷入麻痹状态。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "treant": {
+    "actions": [
+      {
+        "id": "animate-trees",
+        "description": "树人以魔法活化它能看见的、位于 60 尺内的一棵或两棵树。这些树具有与树人相同的数据，但其智力和魅力值均为 1，无法说话，并且只有猛击动作选项。被活化的树作为树人的盟友行动。该树保持活化 1 日或直到死亡；直到树人死亡或距该树超过 120 尺；或者直到树人使用一个附赠动作使其变回普通树木。随后，该树会在可能的情况下扎根。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "air-elemental": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "气元素可以进入一个敌对生物的空间并停留于其中。它无需挤入即可穿过最窄仅 1 英寸宽的空间。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "whirlwind",
+        "description": "气元素空间内的每个生物都必须进行一次 DC 13 的力量豁免。豁免失败时，目标受到 15（3d8 + 2）点钝击伤害，被朝随机方向抛离气元素至多 20 尺，并倒地。如果被抛出的目标撞上墙壁或地面等物体，则其每被抛出 10 尺便受到 3（1d6）点钝击伤害。如果目标被抛向另一生物，该生物必须通过一次 DC 13 的敏捷豁免，否则受到相同伤害并倒地。\n豁免成功时，目标受到一半钝击伤害，且不会被抛开或倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ankheg": {
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：10（2d6 + 3）点挥砍伤害，外加 3（1d6）点强酸伤害。如果目标是大型或更小的生物，它会被擒抱（逃脱 DC 13）。在此擒抱结束前，安赫格掘穴虫只能啃咬被擒抱的生物，并且为此进行攻击检定时具有优势。"
+      },
+      {
+        "id": "acid-spray",
+        "description": "只要安赫格掘穴虫当前没有擒抱任何生物，它便会沿一条长 30 尺、宽 5 尺的线状区域喷吐强酸。线状区域内的每个生物都必须进行一次 DC 13 的敏捷豁免；豁免失败时受到 10（3d6）点强酸伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "barbed-devil": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "针刺魔每个回合开始时，会对任何正在擒抱它的生物造成 5（1d10）点穿刺伤害。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "针刺魔发动三次近战攻击：一次使用尾巴，两次使用爪。它也可以改为使用两次投掷火焰。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bugbear": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "熊地精使用近战武器命中时，该武器额外造成一枚伤害骰的伤害（已计入攻击）。"
+      },
+      {
+        "index": 1,
+        "description": "如果熊地精突袭了一个生物，并在战斗第一轮中以攻击命中该生物，则该次攻击对目标额外造成 7（2d6）点伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "chimera": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "奇美拉发动三次攻击：一次使用啃咬，一次使用角撞，一次使用爪。当火焰吐息可用时，它可以用吐息替代啃咬或角撞。"
+      },
+      {
+        "id": "fire-breath",
+        "description": "龙首向一处 15 尺锥状区域呼出火焰。区域内的每个生物都必须进行一次 DC 15 的敏捷豁免；豁免失败时受到 31（7d8）点火焰伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "deep-gnome-svirfneblin": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "侏儒对抗魔法进行智力、感知和魅力豁免时具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "poisoned-dart",
+        "description": "远程武器攻击：命中 +4，射程 30/120 尺，单一生物。命中：4（1d4 + 2）点穿刺伤害，且目标必须通过一次 DC 12 的体质豁免，否则陷入中毒状态，持续 1 分钟。目标可以在自己每个回合结束时再次进行该豁免，成功时结束自身所受的此效应。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "deva": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "提婆的武器攻击具有魔法性质。提婆以任何武器命中时，该武器额外造成 4d8 点光耀伤害（已计入攻击）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "change-shape",
+        "description": "提婆以魔法变形成一个挑战等级不高于自身的人形生物或野兽，或变回其真实形态。提婆死亡时会变回真实形态。它穿戴或携带的任何装备会融入新形态，或继续由新形态穿戴或携带（由提婆选择）。\n处于新形态时，提婆保留自身的游戏数据和说话能力，但其 AC、移动方式、力量、敏捷和特殊感官会替换为新形态的相应数据；它还会获得新形态拥有而自身不具备的任何数据与能力，但职业特性、传奇动作和巢穴动作除外。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "djinni": {
+    "actions": [
+      {
+        "id": "scimitar",
+        "description": "近战武器攻击：命中 +9，触及 5 尺，单一目标。命中：12（2d6 + 5）点挥砍伤害，外加 3（1d6）点闪电或雷鸣伤害（由气巨灵选择）。"
+      },
+      {
+        "id": "create-whirlwind",
+        "description": "气巨灵在它能看见的、位于 120 尺内的一点上，以魔法形成一道半径 5 尺、高 30 尺的旋转气流圆柱。只要气巨灵保持专注（如同专注于法术），旋风便持续存在。除气巨灵外，任何进入旋风的生物都必须通过一次 DC 18 的力量豁免，否则被旋风束缚。气巨灵可以使用一个动作将旋风移动至多 60 尺，受旋风束缚的生物也会随之移动。如果气巨灵无法再看见旋风，旋风便会结束。\n一个生物可以使用一个动作，进行一次 DC 18 的力量检定，以解救一个被旋风束缚的生物，包括其自身。检定成功时，该生物不再被束缚，并移动到旋风外最近的空间。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "dust-mephit": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "尘土魔蝠死亡时会爆裂成一团尘埃。它周围 5 尺内的每个生物都必须通过一次 DC 10 的体质豁免，否则陷入目盲状态，持续 1 分钟。目盲的生物可以在自己的每个回合再次进行该豁免，成功时结束自身所受的此效应。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "blinding-breath",
+        "description": "尘土魔蝠向一处 15 尺锥状区域呼出致盲尘埃。区域内的每个生物都必须通过一次 DC 10 的敏捷豁免，否则陷入目盲状态，持续 1 分钟。生物可以在自己每个回合结束时再次进行该豁免，成功时结束自身所受的此效应。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ettercap": {
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一生物。命中：6（1d8 + 2）点穿刺伤害，外加 4（1d8）点毒素伤害。目标必须通过一次 DC 11 的体质豁免，否则陷入中毒状态，持续 1 分钟。该生物可以在自己每个回合结束时再次进行该豁免，成功时结束自身所受的此效应。"
+      },
+      {
+        "id": "web",
+        "description": "远程武器攻击：命中 +4，射程 30/60 尺，单一大型或更小的生物。命中：该生物被蛛网束缚。被束缚的生物可以使用一个动作进行一次 DC 11 的力量检定，成功时挣脱蛛网。如果蛛网被摧毁，此效应结束。蛛网的 AC 为 10，具有 5 点生命值，易伤火焰伤害，并免疫钝击伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ettin": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "双头巨人的一个头颅睡着时，另一个头颅仍保持清醒。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "双头巨人发动两次攻击：一次使用战斧，一次使用钉头锤。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "glabrezu": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "格拉兹特魔发动四次攻击：两次使用螯钳，两次使用拳击。它也可以改为使用螯钳发动两次攻击并施展一个法术。"
+      },
+      {
+        "id": "pincer",
+        "description": "近战武器攻击：命中 +9，触及 10 尺，单一目标。命中：16（2d10 + 5）点钝击伤害。如果目标是中型或更小的生物，它会被擒抱（逃脱 DC 15）。格拉兹特魔有两只螯钳，每只螯钳只能擒抱一个目标。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gorgon": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果铁甲牛在同一回合中先向一个生物直线移动至少 20 尺，随后以抵角攻击命中该生物，则目标必须通过一次 DC 16 的力量豁免，否则倒地。如果目标已倒地，铁甲牛可以使用一个附赠动作对其发动一次蹄击攻击。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "petrifying-breath",
+        "description": "铁甲牛向一处 30 尺锥状区域呼出石化气体。区域内的每个生物都必须通过一次 DC 13 的体质豁免。豁免失败时，目标开始变成石头并陷入束缚状态。被束缚的目标必须在自己下一回合结束时再次进行该豁免。豁免成功时，目标所受的效应结束；豁免失败时，目标陷入石化状态，直至被高等复原术或其他魔法解救。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gynosphinx": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "雌性斯芬克斯免疫任何试图感知其情绪或读取其思想的效应，也免疫任何它拒绝承受的预言系法术。为判断斯芬克斯的意图或真诚程度而进行的感知（洞悉）检定具有劣势。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "cast-a-spell-costs-3-actions",
+        "description": "斯芬克斯从其准备法术列表中施展一个法术，并照常消耗法术位。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "harpy": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "鹰身女妖发动两次攻击：一次使用爪，另一次使用棍棒。"
+      },
+      {
+        "id": "luring-song",
+        "description": "鹰身女妖唱出一段魔法旋律。距鹰身女妖 300 尺内、能够听见歌声的每个人形生物和巨人都必须通过一次 DC 11 的感知豁免，否则陷入魅惑状态，直至歌声结束。鹰身女妖必须在后续回合使用一个附赠动作才能继续歌唱。它随时都可以停止歌唱。如果鹰身女妖陷入失能状态，歌声结束。\n被鹰身女妖魅惑期间，目标陷入失能状态，并且无视其他鹰身女妖的歌声。如果受魅惑目标距鹰身女妖超过 5 尺，它必须在自己的回合沿最直接的路线向鹰身女妖移动。它不会避开借机攻击；但在进入熔岩、陷坑等会造成伤害的地形前，以及每当受到并非来自该鹰身女妖的伤害时，目标都可以再次进行该豁免。生物也可以在自己每个回合结束时再次进行该豁免。豁免成功时，该生物所受的效应结束。\n成功通过豁免的目标在接下来 24 小时内免疫这只鹰身女妖的歌声。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "homunculus": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "只要魔宠人偶与其主人位于同一存在位面，它就可以用魔法将自己感知到的一切传达给主人，双方也可以通过心灵感应交流。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一生物。命中：1 点穿刺伤害，且目标必须通过一次 DC 10 的体质豁免，否则陷入中毒状态，持续 1 分钟。如果豁免结果比 DC 低 5 或更多，目标改为中毒 5（1d10）分钟，并在以这种方式中毒期间陷入昏迷状态。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "horned-devil": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "角魔发动三次近战攻击：两次使用叉矛，一次使用尾巴。它可以用投掷火焰替代其中任何一次近战攻击。"
+      },
+      {
+        "id": "tail",
+        "description": "近战武器攻击：命中 +10，触及 10 尺，单一目标。命中：10（1d8 + 6）点穿刺伤害。如果目标是既非不死生物也非构装生物的生物，它必须通过一次 DC 17 的体质豁免，否则会因炼狱创伤而在自己每个回合开始时损失 10（3d6）点生命值。角魔每次以此攻击命中受伤目标，该创伤造成的生命值损失便增加 10（3d6）点。任何生物都可以使用一个动作并通过一次 DC 12 的感知（医药）检定来止住伤口。如果目标受到魔法治疗，创伤也会闭合。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ice-devil": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "冰魔发动三次攻击：一次使用啃咬，一次使用爪，另一次使用尾巴。"
+      },
+      {
+        "id": "wall-of-ice",
+        "description": "冰魔在它能看见的、位于 60 尺内的一处坚固表面上，以魔法形成一堵不透明冰墙。冰墙厚 1 尺，最长 30 尺、高 10 尺；也可以形成一个直径最大 20 尺的半球形穹顶。\n冰墙出现时，其空间内的每个生物都会沿最短路线被推出墙外。除非生物陷入失能状态，否则由该生物选择最终位于冰墙哪一侧。随后，该生物进行一次 DC 17 的敏捷豁免；豁免失败时受到 35（10d6）点冷冻伤害，成功时伤害减半。\n冰墙持续 1 分钟，或直到冰魔陷入失能状态或死亡。冰墙可以被伤害并打破；每段 10 尺长的墙体 AC 为 5，具有 30 点生命值，易伤火焰伤害，并免疫强酸、冷冻、黯蚀、毒素和心灵伤害。如果一段墙体被摧毁，其原本占据的空间会留下一片寒冷气流。每当一个生物在某回合中完成穿越该寒冷气流的移动时，无论自愿与否，都必须进行一次 DC 17 的体质豁免；豁免失败时受到 17（5d6）点冷冻伤害，成功时伤害减半。冰墙其余部分消失时，寒冷气流也随之消散。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "invisible-stalker": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "隐形追猎者处于隐形状态。"
+      },
+      {
+        "index": 1,
+        "description": "隐形追猎者的召唤者会为它指定一个猎物。只要双方位于同一存在位面，隐形追猎者就知道自己猎物所在的方向和距离。它也知道其召唤者的位置。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "iron-golem": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "每当铁魔像将受到火焰伤害时，它不会受到该伤害，改为恢复等同于该次火焰伤害数值的生命值。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "poison-breath",
+        "description": "铁魔像向一处 15 尺锥状区域呼出毒气。区域内的每个生物都必须进行一次 DC 19 的体质豁免；豁免失败时受到 45（10d8）点毒素伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "aboleth": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "在水下时，底栖魔鱼被一层会使生物变异的黏液包围。触碰底栖魔鱼的生物，或在它 5 尺内以近战攻击命中它的生物，必须进行一次 DC 14 的体质豁免。豁免失败时，该生物染病 1d4 小时。染病的生物只能在水下呼吸。"
+      },
+      {
+        "index": 2,
+        "description": "如果一个生物与底栖魔鱼进行心灵感应交流，且底栖魔鱼能看见该生物，底栖魔鱼便会得知其最强烈的欲望。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "tentacle",
+        "description": "近战武器攻击：命中 +9，触及 10 尺，单一目标。命中：12（2d6 + 5）点钝击伤害。如果目标是生物，它必须通过一次 DC 14 的体质豁免，否则染病。该疾病在最初 1 分钟内不会产生效果，且可被任何能治愈疾病的魔法移除。1 分钟后，染病生物的皮肤变得半透明而黏滑；除非浸在水中，该生物无法恢复生命值，并且只能通过治愈术，或其他 6 环或更高环阶、能治愈疾病的法术移除该疾病。生物位于水体之外时，每过 10 分钟受到 6（1d12）点强酸伤害；如果在这 10 分钟结束前将皮肤浸湿，则不受此伤害。"
+      },
+      {
+        "id": "enslave",
+        "description": "底栖魔鱼选择一个它能看见的、30 尺内的生物。目标必须通过一次 DC 14 的感知豁免，否则被底栖魔鱼以魔法魅惑，直到底栖魔鱼死亡，或它与目标分处不同存在位面。被魅惑的目标受底栖魔鱼控制，无法执行反应；底栖魔鱼与目标可以跨越任意距离互相进行心灵感应交流。\n每当被魅惑的目标受到伤害时，它可以重新进行此豁免，成功时结束该效果。当目标距离底栖魔鱼至少 1 英里时，它也可以重新进行此豁免，但每 24 小时最多如此尝试一次。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "psychic-drain-costs-2-actions",
+        "description": "一个被底栖魔鱼魅惑的生物受到 10（3d6）点心灵伤害，底栖魔鱼恢复等同于该生物实际承受伤害的生命值。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "androsphinx": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "雄性斯芬克斯免疫任何会感知其情绪或读取其思想的效果，也免疫任何它不愿接受的预言系法术。为判断雄性斯芬克斯的意图或真诚程度而进行的感知（洞悉）检定具有劣势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "roar",
+        "description": "雄性斯芬克斯发出魔法咖哮。在完成一次长休前，它每次咖哮的声势都会更加强烈，并产生不同效果，详见下文。雄性斯芬克斯 500 尺内能听见咖哮的每个生物都必须进行一次豁免。\n\n第一次咖哮。感知豁免 DC 18；失败的生物恐慌 1 分钟。恐慌的生物可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。\n\n第二次咖哮。感知豁免 DC 18；失败的生物耳聋并恐慌 1 分钟。恐慌的生物同时麻痹，并可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。\n\n第三次咖哮。每个生物进行一次 DC 18 的体质豁免。失败时，生物受到 44（8d10）点雷鸣伤害并倒地；成功时只受一半伤害，且不会倒地。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "cast-a-spell-costs-3-actions",
+        "description": "雄性斯芬克斯从已准备法术列表中施展一个法术，并照常消耗法术位。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "assassin": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "在刺客的第一个回合中，它对任何尚未执行过回合的生物进行的攻击检定具有优势。刺客对陷入受惊状态的生物造成的任何命中都是重击。"
+      },
+      {
+        "index": 1,
+        "description": "当刺客受到某种允许它进行敏捷豁免以仅承受一半伤害的效果时，若豁免成功，刺客不受伤害；若豁免失败，则只受一半伤害。"
+      },
+      {
+        "index": 2,
+        "description": "每回合一次，当刺客以武器攻击命中目标且该攻击检定具有优势时，它额外造成 13（4d6）点伤害。如果目标 5 尺内有一名未失能的刺客盟友，且刺客的攻击检定不具有劣势，也可以造成此额外伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "azer": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "触碰艾泽的生物，或在艾泽 5 尺内以近战攻击命中它的生物，受到 5（1d10）点火焰伤害。"
+      },
+      {
+        "index": 1,
+        "description": "艾泽以金属近战武器命中时，额外造成 3（1d6）点火焰伤害（已计入攻击）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "warhammer",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：7（1d8 + 3）点钝击伤害；若以双手发动近战攻击，则改为 8（1d10 + 3）点钝击伤害；另加 3（1d6）点火焰伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "balor": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "巴洛炎魔死亡时会爆炸。它 30 尺内的每个生物都必须进行一次 DC 20 的敏捷豁免；失败时受到 70（20d6）点火焰伤害，成功时伤害减半。爆炸会点燃区域内未被穿戴或携带的可燃物体，并摧毁巴洛炎魔的武器。"
+      },
+      {
+        "index": 1,
+        "description": "在巴洛炎魔每个回合开始时，它 5 尺内的每个生物受到 10（3d6）点火焰伤害，光环内未被穿戴或携带的可燃物体也会被点燃。触碰巴洛炎魔的生物，或在它 5 尺内以近战攻击命中它的生物，受到 10（3d6）点火焰伤害。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "longsword",
+        "description": "近战武器攻击：命中 +14，触及 10 尺，单一目标。命中：21（3d8 + 8）点挥砍伤害，外加 13（3d8）点闪电伤害。如果巴洛炎魔造成重击，它为伤害骰投掷三倍骰子，而非两倍。"
+      },
+      {
+        "id": "whip",
+        "description": "近战武器攻击：命中 +14，触及 30 尺，单一目标。命中：15（2d6 + 8）点挥砍伤害，外加 10（3d6）点火焰伤害；目标必须通过一次 DC 20 的力量豁免，否则被向巴洛炎魔方向拉动至多 25 尺。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "bearded-devil": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "只要须魔能看见它 30 尺内的一个盟友生物，它便无法陷入恐慌。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "beard",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一生物。命中：6（1d8 + 2）点穿刺伤害；目标必须通过一次 DC 12 的体质豁免，否则中毒 1 分钟。以此方式中毒期间，目标无法恢复生命值。目标可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。"
+      },
+      {
+        "id": "glaive",
+        "description": "近战武器攻击：命中 +5，触及 10 尺，单一目标。命中：8（1d10 + 3）点挥砍伤害。如果目标是亡灵或构装生物以外的生物，它必须通过一次 DC 12 的体质豁免，否则因炼狱伤口而在自己的每个回合开始时失去 5（1d10）点生命值。每当须魔以此攻击再次命中负伤目标时，伤口造成的生命值损失增加 5（1d10）点。任何生物都可以使用一个动作，并通过一次 DC 12 的感知（医药）检定来止住伤口。如果目标获得魔法治疗，伤口也会闭合。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "behir": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "贝希摩斯发动两次攻击：一次啮咬与一次缠绕。"
+      },
+      {
+        "id": "constrict",
+        "description": "近战武器攻击：命中 +10，触及 5 尺，单一大型或更小的生物。命中：17（2d10 + 6）点钝击伤害，外加 17（2d10 + 6）点挥砍伤害。如果贝希摩斯尚未缠绕其他生物，目标被擒抱（逃脱 DC 16）；在此擒抱结束前，目标陷入束缚。"
+      },
+      {
+        "id": "lightning-breath",
+        "description": "贝希摩斯呼出一道长 20 尺、宽 5 尺的闪电。线状区域内的每个生物都必须进行一次 DC 16 的敏捷豁免；失败时受到 66（12d10）点闪电伤害，成功时伤害减半。"
+      },
+      {
+        "id": "swallow",
+        "description": "贝希摩斯对一个正被它擒抱的中型或更小目标发动一次啮咬攻击。如果攻击命中，目标同时被吞咽，擒抱随之结束。被吞咽期间，目标陷入目盲和束缚，对来自贝希摩斯体外的攻击及其他效果具有全身掩护，并在贝希摩斯的每个回合开始时受到 21（6d6）点强酸伤害。贝希摩斯同一时间只能吞咽一个生物。\n如果贝希摩斯在同一回合中受到来自被吞咽生物的 30 点或更多伤害，它必须在该回合结束时通过一次 DC 14 的体质豁免，否则将该生物反刍出来。被反刍的生物会倒地在贝希摩斯 10 尺内的一处空间中。如果贝希摩斯死亡，被吞咽的生物不再因它而束缚，并可以消耗 15 尺移动从尸体中逃出，在出口处倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "black-pudding": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "触碰黑布丁的生物，或在它 5 尺内以近战攻击命中它的生物，受到 4（1d8）点强酸伤害。以金属或木材制成的非魔法武器命中黑布丁时会被腐蚀。该武器造成伤害后，其伤害掷骰遭受永久且可叠加的 -1 减值；减值降至 -5 时，武器被摧毁。以金属或木材制成的非魔法弹药命中黑布丁并造成伤害后会被摧毁。黑布丁可以在 1 轮内蚀穿厚 2 英寸的非魔法木材或金属。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "pseudopod",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：6（1d6 + 3）点钝击伤害，外加 18（4d8）点强酸伤害。此外，目标穿着的非魔法护甲会部分溶解，其提供的 AC 遭受永久且可叠加的 -1 减值。如果该减值使护甲提供的 AC 降至 10，护甲被摧毁。"
+      }
+    ],
+    "reactions": [
+      {
+        "id": "split",
+        "description": "中型或更大的黑布丁受到闪电或挥砍伤害时，如果它当前至少有 10 点生命值，则分裂为两个新的黑布丁。每个新黑布丁的生命值等于原黑布丁生命值的一半，向下取整。新黑布丁的体型比原黑布丁小一级。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "chain-devil": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "锁链魔以锁链发动两次攻击。"
+      },
+      {
+        "id": "chain",
+        "description": "近战武器攻击：命中 +8，触及 10 尺，单一目标。命中：11（2d6 + 4）点挥砍伤害。如果锁链魔尚未擒抱其他生物，目标被擒抱（逃脱 DC 14）。在此擒抱结束前，目标陷入束缚，并在自己的每个回合开始时受到 7（2d6）点穿刺伤害。"
+      },
+      {
+        "id": "animate-chains",
+        "description": "锁链魔可使它能看见的、60 尺内至多四条未被穿戴或携带的锁链，以魔法长出刀刃般的尖刺，并在锁链魔的控制下活动。\n每条活化锁链都是 AC 20、20 点生命值的物体，对穿刺伤害具有抗性，并免疫心灵和雷鸣伤害。锁链魔在自己的回合中使用多重攻击时，每条活化锁链都可以额外发动一次锁链攻击。一条活化锁链可以擒抱一个生物，但在擒抱生物时无法发动攻击。活化锁链降至 0 点生命值，或锁链魔陷入失能或死亡时，它会恢复成没有生命的状态。"
+      }
+    ],
+    "reactions": [
+      {
+        "id": "unnerving-mask",
+        "description": "当一个锁链魔能看见的生物在锁链魔 30 尺内开始其回合时，锁链魔可以制造幻象，使自己看起来像该生物已故的挚爱亲友或不共戴天的仇敌。如果该生物能看见锁链魔，它必须通过一次 DC 14 的感知豁免，否则恐慌至自己的回合结束。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "chuul": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "楚尔异怪可以随意感知它 120 尺内的魔法。除此之外，此特性如同侦测魔法法术，但特性本身不属于魔法效果。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "楚尔异怪发动两次螯肢攻击。如果它正擒抱一个生物，还可以使用一次触须。"
+      },
+      {
+        "id": "pincer",
+        "description": "近战武器攻击：命中 +6，触及 10 尺，单一目标。命中：11（2d6 + 4）点钝击伤害。如果目标是大型或更小的生物，且楚尔异怪当前尚未擒抱两个其他生物，目标被擒抱（逃脱 DC 14）。"
+      },
+      {
+        "id": "tentacles",
+        "description": "一个正被楚尔异怪擒抱的生物必须通过一次 DC 13 的体质豁免，否则中毒 1 分钟。在此中毒结束前，目标同时陷入麻痹。目标可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "clay-golem": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "每当黏土魔像将受到强酸伤害时，它不会受到该伤害，改为恢复等同于该次强酸伤害数值的生命值。"
+      },
+      {
+        "index": 1,
+        "description": "每当黏土魔像以 60 点或更少生命值开始其回合时，投掷一枚 d6。如果结果为 6，黏土魔像陷入狂暴。狂暴期间，黏土魔像在自己的每个回合攻击它能看见的最近生物。如果没有距离足够近、可供它移动过去并攻击的生物，它便攻击一个物体，优先选择比自身体型更小的物体。黏土魔像一旦陷入狂暴，便会持续如此，直到它被摧毁或恢复全部生命值。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "slam",
+        "description": "近战武器攻击：命中 +8，触及 5 尺，单一目标。命中：16（2d10 + 5）点钝击伤害。如果目标是生物，它必须通过一次 DC 15 的体质豁免，否则生命值上限降低等同于此次承受伤害的数值。如果此攻击使目标的生命值上限降至 0，目标死亡。此减值持续至被高等复原术或其他魔法移除。"
+      },
+      {
+        "id": "haste",
+        "description": "直到黏土魔像的下个回合结束，它以魔法获得 +2 AC，敏捷豁免具有优势，并可以用一个附赠动作发动猛击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "cloaker": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "披风怪附着在一个生物身上时，它只承受原本对它造成伤害的一半（向下取整），被附着的生物承受另一半伤害。"
+      },
+      {
+        "index": 1,
+        "description": "披风怪保持静止且不露出底面时，与一件深色皮革披风别无二致。"
+      },
+      {
+        "index": 2,
+        "description": "处于明亮光照中时，披风怪的攻击检定和依赖视觉的感知（察觉）检定具有劣势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +6，触及 5 尺，单一生物。命中：10（2d6 + 3）点穿刺伤害；如果目标为大型或更小，披风怪便附着在目标身上。如果披风怪对目标具有优势，它会附着在目标头部；在披风怪以此方式附着期间，目标陷入目盲且无法呼吸。附着期间，披风怪只能以此攻击对付该目标，但攻击检定具有优势。披风怪可以消耗 5 尺移动自行脱离。任何生物（包括目标）都可以使用一个动作，并通过一次 DC 16 的力量检定使披风怪脱离。"
+      },
+      {
+        "id": "moan",
+        "description": "披风怪 60 尺内能听见其哀嚎、且不是异怪的每个生物，都必须通过一次 DC 13 的感知豁免，否则恐慌至披风怪的下个回合结束。如果生物的豁免成功，它在接下来的 24 小时内免疫该披风怪的哀嚎。"
+      },
+      {
+        "id": "phantasms",
+        "description": "如果披风怪不在明亮光照中，它以魔法创造三个自身的幻象复制体。复制体随它移动并模仿它的动作，不断变换位置，使人无法追踪哪一个才是真正的披风怪。披风怪一旦进入明亮光照区域，复制体便会消失。\n只要仍有复制体存在，每当一个生物以攻击或有害法术选择披风怪为目标时，该生物都要随机判定它选中的是披风怪还是某个复制体。无法看见或依赖视觉以外感官的生物不受此魔法效果影响。\n复制体具有披风怪的 AC，并使用披风怪的豁免。如果一次攻击命中复制体，或复制体未能通过某个造成伤害的效果的豁免，该复制体便会消失。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "couatl": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "羽蛇免疫占卜术，也免疫任何会感知其情绪、读取其思想或侦测其所在位置的效果。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +8，触及 5 尺，单一生物。命中：8（1d6 + 5）点穿刺伤害；目标必须通过一次 DC 13 的体质豁免，否则中毒 24 小时。在此中毒结束前，目标陷入昏迷。另一个生物可以使用一个动作将目标摇醒。"
+      },
+      {
+        "id": "change-shape",
+        "description": "羽蛇以魔法变成挑战等级不高于自身的类人生物或野兽，或变回其真实形态。羽蛇死亡时会恢复真实形态。它穿戴或携带的任何装备都由羽蛇选择被新形态吸收，或继续由新形态携带。\n在新形态中，羽蛇保留自身的游戏数据和说话能力，但其 AC、移动方式、力量、敏捷和其他动作均替换为新形态的对应数据。羽蛇还会获得新形态具有而自身不具有的其他数据与能力，但不包括职业特性、传奇动作和巢穴动作。如果新形态具有啮咬攻击，羽蛇可以在该形态下使用自身的啮咬。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "darkmantle": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "暗幕怪陷入耳聋时无法使用盲视。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "crush",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一生物。命中：6（1d6 + 3）点钝击伤害，暗幕怪附着在目标身上。如果目标是中型或更小的生物，且暗幕怪的攻击检定具有优势，它会包裹目标的头部而附着；在暗幕怪以此方式附着期间，目标同时陷入目盲且无法呼吸。\n暗幕怪附着在目标身上时，只能攻击该目标，但其攻击检定具有优势。暗幕怪的速度也变为 0，无法从任何速度加值中受益，并会随目标一起移动。\n一个生物可以使用一个动作，并通过一次 DC 13 的力量检定使暗幕怪脱离。在自己的回合中，暗幕怪可以消耗 5 尺移动从目标身上自行脱离。"
+      },
+      {
+        "id": "darkness-aura",
+        "description": "以暗幕怪为中心向外延伸出半径 15 尺的魔法黑暗。黑暗会随暗幕怪移动，并能绕过转角扩散。只要暗幕怪维持专注（如同专注于法术），黑暗便会持续，最长 10 分钟。黑暗视觉无法看穿此黑暗，任何自然光也无法将其照亮。如果该黑暗的任何部分与由 2 环或更低环阶法术创造的光照区域重叠，创造该光照的法术会被解除。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "doppelganger": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "变形怪可以使用一个动作，变形为一个它曾见过的小型或中型类人生物，或变回其真实形态。除体型之外，它在每种形态下的数据均保持不变。它穿戴或携带的任何装备都不会随之变形。变形怪死亡时会恢复真实形态。"
+      },
+      {
+        "index": 1,
+        "description": "在战斗的第一轮中，变形怪对任何被它出其不意的生物进行的攻击检定具有优势。"
+      },
+      {
+        "index": 2,
+        "description": "如果变形怪使一个生物受惊，并在战斗第一轮中以攻击命中该生物，此次攻击对目标额外造成 10（3d6）点伤害。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "read-thoughts",
+        "description": "变形怪以魔法读取一个位于它 60 尺内生物的表层思想。此效果可以穿透障碍，但厚 3 尺的木材或泥土、厚 2 尺的石材、厚 2 英寸的金属，或一张薄铅片都能阻挡它。只要目标仍在范围内，且变形怪未失去专注（如同专注于法术），变形怪便可以继续读取其思想。读取目标心思期间，变形怪对目标进行的感知（洞悉）和魅力（欺瞒、威吓、游说）检定具有优势。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "dragon-turtle": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "龙龟发动三次攻击：一次啮咬和两次爪击。它可以用一次尾击替代两次爪击。"
+      },
+      {
+        "id": "tail",
+        "description": "近战武器攻击：命中 +13，触及 15 尺，单一目标。命中：26（3d12 + 7）点钝击伤害。如果目标是生物，它必须通过一次 DC 20 的力量豁免，否则被推离龙龟至多 10 尺并倒地。"
+      },
+      {
+        "id": "steam-breath",
+        "description": "龙龟向一处 60 尺锥状区域呼出滚烫蒸汽。区域内的每个生物都必须进行一次 DC 18 的体质豁免；失败时受到 52（15d6）点火焰伤害，成功时伤害减半。处于水下不会获得对此伤害的抗性。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "dryad": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "树精可以与野兽和植物交流，如同它们共享一种语言。"
+      },
+      {
+        "index": 3,
+        "description": "树精每回合一次，可以消耗 10 尺移动，以魔法踏入一棵位于她触及范围内的活树，并从距离第一棵树 60 尺内的第二棵活树中现身，出现在第二棵树 5 尺内的一处未占据空间中。两棵树都必须为大型或更大。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "club",
+        "description": "近战武器攻击：命中 +2（使用橡棍术时命中 +6），触及 5 尺，单一目标。命中：2（1d4）点钝击伤害；使用橡棍术时改为 8（1d8 + 4）点钝击伤害。"
+      },
+      {
+        "id": "fey-charm",
+        "description": "树精选择一个她能看见的、30 尺内的类人生物或野兽。如果目标能看见树精，它必须通过一次 DC 14 的感知豁免，否则被魔法魅惑。被魅惑的生物将树精视为应当听从并保护的可信朋友。尽管目标不受树精控制，但会尽可能从最有利于树精的角度解读她的请求或行动。\n每当树精或她的盟友对目标做出任何有害行为时，目标可以重新进行此豁免，成功时结束自身的该效果。否则，该效果持续 24 小时，或直到树精死亡、树精与目标分处不同存在位面，或树精使用一个附赠动作结束该效果。如果目标的豁免成功，它在接下来的 24 小时内免疫该树精的精类魅惑。\n树精同一时间至多可以魅惑一个类人生物和三只野兽。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "duergar": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "灰矮人对抗毒素、法术和幻象的豁免，以及抵抗陷入魅惑或麻痹的豁免具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "enlarge",
+        "description": "在 1 分钟内，灰矮人与其穿戴或携带的所有物品一同以魔法变大。变大期间，灰矮人为大型，基于力量的武器攻击的伤害骰数量加倍（已计入攻击），力量检定和力量豁免具有优势。如果可用空间不足以让灰矮人变为大型，它会变成该空间所允许的最大体型。"
+      },
+      {
+        "id": "war-pick",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：6（1d8 + 2）点穿刺伤害；变大期间改为 11（2d8 + 2）点穿刺伤害。"
+      },
+      {
+        "id": "javelin",
+        "description": "近战或远程武器攻击：命中 +4，触及 5 尺或射程 30/120 尺，单一目标。命中：5（1d6 + 2）点穿刺伤害；变大期间改为 9（2d6 + 2）点穿刺伤害。"
+      },
+      {
+        "id": "invisibility",
+        "description": "灰矮人以魔法陷入隐形，直到它发动攻击、施展法术、使用变大，或失去专注（如同专注于法术），最长持续 1 小时。灰矮人穿戴或携带的任何装备都会随它一同隐形。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "erinyes": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "欲魔的武器攻击视为魔法攻击，命中时额外造成 13（3d8）点毒素伤害（已计入攻击）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "欲魔发动三次攻击。"
+      },
+      {
+        "id": "longsword",
+        "description": "近战武器攻击：命中 +8，触及 5 尺，单一目标。命中：8（1d8 + 4）点挥砍伤害；若以双手使用，则改为 9（1d10 + 4）点挥砍伤害；另加 13（3d8）点毒素伤害。"
+      },
+      {
+        "id": "longbow",
+        "description": "远程武器攻击：命中 +7，射程 150/600 尺，单一目标。命中：7（1d8 + 3）点穿刺伤害，外加 13（3d8）点毒素伤害；目标必须通过一次 DC 14 的体质豁免，否则中毒。此中毒会持续至被次级复原术或类似魔法移除。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "fire-elemental": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "火元素可以穿过宽度窄至 1 英寸的空间，且无需挤入。触碰火元素的生物，或在它 5 尺内以近战攻击命中它的生物，受到 5（1d10）点火焰伤害。此外，火元素可以进入一个敌对生物的空间并停留在其中。它在一个回合中首次进入某生物的空间时，该生物受到 5（1d10）点火焰伤害并被点燃。直到有人使用一个动作将火熄灭，被点燃的生物在自己的每个回合开始时受到 5（1d10）点火焰伤害。"
+      },
+      {
+        "index": 1,
+        "description": "火元素在 30 尺半径内散发明亮光照，并在其外 30 尺散发微光光照。"
+      },
+      {
+        "index": 2,
+        "description": "火元素在水中每移动 5 尺，或每被 1 加仑水泼溅，都会受到 1 点冷冻伤害。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "火元素发动两次触碰攻击。"
+      },
+      {
+        "id": "touch",
+        "description": "近战武器攻击：命中 +6，触及 5 尺，单一目标。命中：10（2d6 + 3）点火焰伤害。如果目标是生物或可燃物体，它会被点燃。直到有生物使用一个动作将火熄灭，目标在自己的每个回合开始时受到 5（1d10）点火焰伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "flesh-golem": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "每当血肉魔像以 40 点或更少生命值开始其回合时，投掷一枚 d6。如果结果为 6，血肉魔像陷入狂暴。狂暴期间，血肉魔像在自己的每个回合攻击它能看见的最近生物。如果没有距离足够近、可供它移动过去并攻击的生物，它便攻击一个物体，优先选择比自身体型更小的物体。血肉魔像一旦陷入狂暴，便会持续如此，直到它被摧毁或恢复全部生命值。\n如果血肉魔像的创造者位于陷入狂暴的魔像 60 尺内，可以尝试以坚定而有说服力的语气让它平静下来。魔像必须能听见创造者；创造者必须使用一个动作进行一次 DC 15 的魅力（游说）检定。检定成功时，魔像结束狂暴。如果它在生命值仍为 40 或更少时受到伤害，便有可能再次陷入狂暴。"
+      },
+      {
+        "index": 1,
+        "description": "如果血肉魔像受到火焰伤害，它的攻击检定和属性检定均具有劣势，直到其下个回合结束。"
+      },
+      {
+        "index": 3,
+        "description": "每当血肉魔像将受到闪电伤害时，它不会受到该伤害，改为恢复等同于该次闪电伤害数值的生命值。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gelatinous-cube": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "胶质立方怪会占满自身的整个空间。其他生物可以进入该空间，但这样做的生物会受到胶质立方怪的吞没，且该豁免具有劣势。\n位于胶质立方怪内部的生物仍然可见，但具有全身掩护。\n位于胶质立方怪 5 尺内的生物可以使用一个动作，尝试将一个生物或物体从其中拉出。这需要通过一次 DC 12 的力量检定，且进行尝试的生物受到 10（3d6）点强酸伤害。\n胶质立方怪同一时间只能在体内容纳一个大型生物，或至多四个中型或更小的生物。"
+      },
+      {
+        "index": 1,
+        "description": "即使胶质立方怪就在明处，仍需通过一次 DC 15 的感知（察觉）检定，才能发现一个尚未移动且尚未攻击的胶质立方怪。一个在不知情的情况下尝试进入其空间的生物，会被胶质立方怪出其不意。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "engulf",
+        "description": "胶质立方怪移动至多等同于其速度的距离。移动期间，它可以进入大型或更小生物的空间。每当胶质立方怪进入一个生物的空间时，该生物都必须进行一次 DC 12 的敏捷豁免。\n豁免成功时，生物可以选择被向胶质立方怪后方或侧方推动 5 尺。选择不被推动的生物会承受豁免失败的后果。\n豁免失败时，胶质立方怪进入该生物的空间；生物受到 10（3d6）点强酸伤害并被吞没。被吞没的生物无法呼吸、陷入束缚，并在胶质立方怪的每个回合开始时受到 21（6d6）点强酸伤害。胶质立方怪移动时，被吞没的生物会随之移动。\n被吞没的生物可以使用一个动作，进行一次 DC 12 的力量检定以尝试逃脱。成功时，生物逃出，并进入胶质立方怪 5 尺内由自己选择的一处空间。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ghast": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "任何在尸妖 5 尺内开始回合的生物都必须通过一次 DC 10 的体质豁免，否则中毒至自己的下个回合开始。豁免成功的生物在 24 小时内免疫该尸妖的恶臭。"
+      },
+      {
+        "index": 1,
+        "description": "尸妖与它 30 尺内的任何食尸鬼，对抗驱散亡灵效果的豁免具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "claws",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：10（2d6 + 3）点挥砍伤害。如果目标是亡灵以外的生物，它必须通过一次 DC 10 的体质豁免，否则麻痹 1 分钟。目标可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ghost": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "幽灵位于物质位面时，可以看入以太位面 60 尺；位于以太位面时反之亦然。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "etherealness",
+        "description": "幽灵从物质位面进入以太位面，或反向进行。幽灵位于边境以太时，在物质位面上仍然可见；反之亦然。然而，它无法影响另一个位面上的任何事物，也无法被其影响。"
+      },
+      {
+        "id": "horrifying-visage",
+        "description": "幽灵 60 尺内能看见它的每个非亡灵生物，都必须通过一次 DC 13 的感知豁免，否则恐慌 1 分钟。如果豁免结果比 DC 低 5 或更多，目标还会衰老 1d4 × 10 年。恐慌的目标可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的恐慌状态。如果目标豁免成功或该效果对它结束，它在接下来的 24 小时内免疫该幽灵的骇人面容。高等复原术可以逆转衰老效果，但必须在衰老发生后 24 小时内施展。"
+      },
+      {
+        "id": "possession",
+        "description": "幽灵选择一个它能看见的、5 尺内的类人生物。目标必须通过一次 DC 13 的魅力豁免，否则被幽灵附身。随后幽灵消失，目标陷入失能并失去对身体的控制。幽灵控制该身体，但不会夺去目标的意识。除了驱散亡灵的效果以外，任何攻击、法术或其他效果都无法以幽灵为目标。幽灵保留自身的阵营、智力、感知、魅力，以及对魅惑和恐慌的免疫。除此之外，它使用被附身目标的数据，但不会获得目标的知识、职业特性或熟练项。\n附身持续至该身体降至 0 点生命值，幽灵使用一个附赠动作结束附身，或幽灵被驱散，或被类似解除善恶的效果强行逐出。附身结束时，幽灵在该身体 5 尺内的一处未占据空间重新出现。目标通过豁免或附身结束后，在 24 小时内免疫该幽灵的附身。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-octopus": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "离开水后，巨型章鱼可以屏住呼吸 1 小时。"
+      },
+      {
+        "index": 1,
+        "description": "巨型章鱼在水下进行的敏捷（隐匿）检定具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "tentacles",
+        "description": "近战武器攻击：命中 +5，触及 15 尺，单一目标。命中：10（2d6 + 3）点钝击伤害。如果目标是生物，它被擒抱（逃脱 DC 16）。在此擒抱结束前，目标陷入束缚，且巨型章鱼无法对另一个目标使用触手。"
+      },
+      {
+        "id": "ink-cloud",
+        "description": "巨型章鱼位于水下时，以它为中心向四周扩散出半径 20 尺的墨汁云。该区域陷入重度遮蔽 1 分钟，但强劲水流可以将墨汁吹散。释放墨汁后，巨型章鱼可以用一个附赠动作执行疾走动作。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "giant-toad": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "巨蟾蜍可以呼吸空气和水。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：7（1d10 + 2）点穿刺伤害，外加 5（1d10）点毒素伤害；目标被擒抱（逃脱 DC 13）。在此擒抱结束前，目标陷入束缚，且巨蟾蜍无法啮咬另一个目标。"
+      },
+      {
+        "id": "swallow",
+        "description": "巨蟾蜍对一个正被它擒抱的中型或更小目标发动一次啮咬攻击。如果攻击命中，目标被吞咽，擒抱随之结束。被吞咽的目标陷入目盲和束缚，对来自巨蟾蜍体外的攻击及其他效果具有全身掩护，并在巨蟾蜍的每个回合开始时受到 10（3d6）点强酸伤害。巨蟾蜍同一时间只能吞咽一个目标。\n如果巨蟾蜍死亡，被吞咽的生物不再因它而束缚，并可以消耗 5 尺移动从尸体中逃出，在出口处倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gibbering-mouther": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "喋喋不休怪周围 10 尺半径内的地面会变成面团般的困难地形。任何在该区域内开始回合的生物都必须通过一次 DC 10 的力量豁免，否则速度降至 0，直到自己的下个回合开始。"
+      },
+      {
+        "index": 1,
+        "description": "只要喋喋不休怪能看见任何生物且未陷入失能，它便会语无伦次地喋喋不休。任何在它 20 尺内开始回合且能听见这些呢喃的生物，都必须通过一次 DC 10 的感知豁免。失败时，生物在自己的下个回合开始前无法执行反应，并投掷一枚 d8 以决定它在本回合中的行为。结果为 1—4 时，生物什么都不做。结果为 5 或 6 时，生物不执行动作或附赠动作，并使用全部移动沿随机方向移动。结果为 7 或 8 时，生物对自身触及范围内随机决定的一个生物发动一次近战攻击；如果无法发动这样的攻击，则什么都不做。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "喋喋不休怪发动一次啮咬攻击，并在可以时使用致盲唾液。"
+      },
+      {
+        "id": "bites",
+        "description": "近战武器攻击：命中 +2，触及 5 尺，单一生物。命中：17（5d6）点穿刺伤害。如果目标是中型或更小的生物，它必须通过一次 DC 10 的力量豁免，否则倒地。如果此伤害杀死目标，目标会被吸收进喋喋不休怪体内。"
+      },
+      {
+        "id": "blinding-spittle",
+        "description": "喋喋不休怪向一个它能看见的、15 尺内的点吐出一团化学物质。该物质命中时爆开，发出令人目盲的闪光。闪光 5 尺内的每个生物都必须通过一次 DC 13 的敏捷豁免，否则目盲至喋喋不休怪的下个回合结束。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gladiator": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "角斗士以近战武器命中时，该武器额外造成一枚伤害骰的伤害（已计入攻击）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "角斗士发动三次近战攻击，或两次远程攻击。"
+      },
+      {
+        "id": "shield-bash",
+        "description": "近战武器攻击：命中 +7，触及 5 尺，单一生物。命中：9（2d4 + 4）点钝击伤害。如果目标是中型或更小的生物，它必须通过一次 DC 15 的力量豁免，否则倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "gray-ooze": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "以金属制成的非魔法武器命中灰泥怪时会被腐蚀。该武器造成伤害后，其伤害掷骰遭受永久且可叠加的 -1 减值；减值降至 -5 时，武器被摧毁。以金属制成的非魔法弹药命中灰泥怪并造成伤害后会被摧毁。\n灰泥怪可以在 1 轮内蚀穿厚 2 英寸的非魔法金属。"
+      },
+      {
+        "index": 2,
+        "description": "灰泥怪保持静止时，与一滩油污或潮湿的岩石别无二致。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "pseudopod",
+        "description": "近战武器攻击：命中 +3，触及 5 尺，单一目标。命中：4（1d6 + 1）点钝击伤害，外加 7（2d6）点强酸伤害。如果目标穿着非魔法金属护甲，该护甲会部分腐蚀，其提供的 AC 遭受永久且可叠加的 -1 减值。如果该减值使护甲提供的 AC 降至 10，护甲被摧毁。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "green-hag": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "绿鬼婆可以模仿动物的声音和类人生物的说话声。听到声音的生物可以通过一次 DC 14 的感知（洞悉）检定，分辨出这些声音是模仿而来的。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "illusory-appearance",
+        "description": "绿鬼婆以魔法幻象覆盖自身以及穿戴或携带的所有物品，使她看起来像一个体型大致相同、外形为类人形态的其他生物。如果绿鬼婆使用一个附赠动作结束幻象，或她死亡，幻象便会结束。\n此效果造成的变化无法通过物理检验。例如，绿鬼婆可以让自己看起来拥有光滑的皮肤，但触碰她的人仍会感觉到粗糙的肌肤。除此之外，生物必须使用一个动作以视觉检验幻象，并通过一次 DC 20 的智力（调查）检定，才能辨别出绿鬼婆正处于伪装。"
+      },
+      {
+        "id": "invisible-passage",
+        "description": "绿鬼婆以魔法陷入隐形，直到她发动攻击、施展法术，或失去专注（如同专注于法术）。隐形期间，她不会留下任何经过的物理证据，因此只能通过魔法追踪她。她穿戴或携带的任何装备都会随她一同隐形。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "hydra": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "多头蛇有五颗头。只要它有不止一颗头，它对抗目盲、魅惑、耳聋、恐慌、震慑和昏迷的豁免便具有优势。\n每当多头蛇在同一回合中受到 25 点或更多伤害时，它的一颗头会死去。如果所有头都死去，多头蛇随之死亡。\n在多头蛇的回合结束时，自其上个回合以来每死去一颗头，它便长出两颗新头；如果它自上个回合以来受到过火焰伤害，则不会如此再生。每以此方式重新长出一颗头，多头蛇恢复 10 点生命值。"
+      },
+      {
+        "index": 2,
+        "description": "多头蛇每拥有一颗超出第一颗的头，便额外获得一次反应；这些额外反应只能用于发动借机攻击。"
+      },
+      {
+        "index": 3,
+        "description": "多头蛇睡眠时，至少有一颗头保持清醒。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "多头蛇每拥有一颗头，便发动一次啮咬攻击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "ice-mephit": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "冰魔蝠死亡时会爆开，迸发出尖锐的冰片。它 5 尺内的每个生物都必须进行一次 DC 10 的敏捷豁免；失败时受到 4（1d8）点挥砍伤害，成功时伤害减半。"
+      },
+      {
+        "index": 1,
+        "description": "冰魔蝠保持静止时，与一块普通冰片别无二致。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "frost-breath",
+        "description": "冰魔蝠向一处 15 尺锥状区域呼出寒冷空气。区域内的每个生物都必须进行一次 DC 10 的敏捷豁免；失败时受到 5（2d4）点冷冻伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "imp": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "小魔鬼可以使用一个动作，变形为类似老鼠（速度 20 尺）、乌鸦（步行 20 尺，飞行 60 尺）或蜘蛛（步行 20 尺，攀爬 20 尺）的野兽形态，或变回其真实形态。除上述速度变化外，它在每种形态下的数据相同。它穿戴或携带的任何装备都不会随之变形。小魔鬼死亡时会恢复真实形态。"
+      },
+      {
+        "index": 1,
+        "description": "魔法黑暗不会妨碍小魔鬼的黑暗视觉。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "sting-bite-in-beast-form",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：5（1d4 + 3）点穿刺伤害；目标必须进行一次 DC 11 的体质豁免，失败时受到 10（3d6）点毒素伤害，成功时伤害减半。"
+      },
+      {
+        "id": "invisibility",
+        "description": "小魔鬼以魔法陷入隐形，直到它发动攻击，或失去专注（如同专注于法术）。小魔鬼穿戴或携带的任何装备都会随它一同隐形。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "killer-whale": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "虎鲸陷入耳聋时无法使用盲视。"
+      },
+      {
+        "index": 1,
+        "description": "虎鲸可以屏住呼吸 30 分钟。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "kraken": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "海妖克拉肯忽略困难地形；魔法效果无法降低其速度，也无法使它陷入束缚。它可以消耗 5 尺移动，从非魔法束缚或擒抱中逃脱。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "海妖克拉肯发动三次触手攻击；每次触手攻击都可以替换为使用一次抛飞。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +7，触及 5 尺，单一目标。命中：23（3d8 + 10）点穿刺伤害。如果目标是正被海妖克拉肯擒抱的大型或更小生物，该生物被吞咽，擒抱随之结束。被吞咽期间，生物陷入目盲和束缚，对来自海妖克拉肯体外的攻击及其他效果具有全身掩护，并在海妖克拉肯的每个回合开始时受到 42（12d6）点强酸伤害。如果海妖克拉肯在同一回合中受到来自体内生物的 50 点或更多伤害，它必须在该回合结束时通过一次 DC 25 的体质豁免，否则将所有被吞咽的生物反刍出来。被反刍的生物会倒地在海妖克拉肯 10 尺内的一处空间中。如果海妖克拉肯死亡，被吞咽的生物不再因它而束缚，并可以消耗 15 尺移动从尸体中逃出，在出口处倒地。"
+      },
+      {
+        "id": "tentacle",
+        "description": "近战武器攻击：命中 +7，触及 30 尺，单一目标。命中：20（3d6 + 10）点钝击伤害；目标被擒抱（逃脱 DC 18）。在此擒抱结束前，目标陷入束缚。海妖克拉肯有十条触手，每条触手可以擒抱一个目标。"
+      },
+      {
+        "id": "fling",
+        "description": "海妖克拉肯将一个由它持有的大型或更小物体，或正被它擒抱的大型或更小生物，沿随机方向抛出至多 60 尺并使其倒地。如果被抛出的目标撞上坚硬表面，每被抛出 10 尺，目标便受到 3（1d6）点钝击伤害。如果目标被抛向另一个生物，该生物必须通过一次 DC 18 的敏捷豁免，否则受到相同伤害并倒地。"
+      },
+      {
+        "id": "lightning-storm",
+        "description": "海妖克拉肯以魔法创造三道闪电，每道都可以击中一个海妖克拉肯能看见的、120 尺内的目标。每个目标都必须进行一次 DC 23 的敏捷豁免；失败时受到 22（4d10）点闪电伤害，成功时伤害减半。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "tentacle-attack-or-fling",
+        "description": "海妖克拉肯发动一次触手攻击，或使用抛飞。"
+      },
+      {
+        "id": "lightning-storm-costs-2-actions",
+        "description": "海妖克拉肯使用闪电风暴。"
+      },
+      {
+        "id": "ink-cloud-costs-3-actions",
+        "description": "海妖克拉肯位于水下时，排出半径 60 尺的墨汁云。墨汁云能绕过转角扩散，且该区域对海妖克拉肯以外的生物陷入重度遮蔽。任何海妖克拉肯以外、在区域内结束回合的生物，都必须通过一次 DC 23 的体质豁免；失败时受到 16（3d10）点毒素伤害，成功时伤害减半。强劲水流可以将墨汁云吹散；否则，墨汁云会在海妖克拉肯的下个回合结束时消失。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "lamia": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "拉弥亚发动两次攻击：一次爪击，以及一次匕首攻击或迷醉之触。"
+      },
+      {
+        "id": "intoxicating-touch",
+        "description": "近战法术攻击：命中 +5，触及 5 尺，单一生物。命中：目标被魔法诅咒 1 小时。在诅咒结束前，目标的感知豁免和所有属性检定均具有劣势。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "lemure": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "魔法黑暗不会妨碍劣魔的黑暗视觉。"
+      },
+      {
+        "index": 1,
+        "description": "在九层地狱中死亡的劣魔会在 1d10 日后以全部生命值复活，除非它是被一个已被施展祝福术的善良阵营生物杀死，或它的遗骸被洒上圣水。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "lich": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "如果拥有命匣，被摧毁的巫妖会在 1d10 日后获得一具新身体，恢复全部生命值并重新活动。新身体出现在命匣 5 尺内。"
+      },
+      {
+        "index": 3,
+        "description": "巫妖对抗任何驱散亡灵效果的豁免具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "paralyzing-touch",
+        "description": "近战法术攻击：命中 +12，触及 5 尺，单一生物。命中：10（3d6）点冷冻伤害。目标必须通过一次 DC 18 的体质豁免，否则麻痹 1 分钟。目标可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "cantrip",
+        "description": "巫妖施展一个戏法。"
+      },
+      {
+        "id": "paralyzing-touch-costs-2-actions",
+        "description": "巫妖使用麻痹之触。"
+      },
+      {
+        "id": "frightening-gaze-costs-2-actions",
+        "description": "巫妖盯住一个它能看见的、10 尺内的生物。目标必须通过一次 DC 18 的感知豁免以抵抗此魔法，否则恐慌 1 分钟。恐慌的目标可以在自己的每个回合结束时重新进行此豁免，成功时结束自身的该效果。如果目标豁免成功或该效果对它结束，它在接下来的 24 小时内免疫该巫妖的凝视。"
+      },
+      {
+        "id": "disrupt-life-costs-3-actions",
+        "description": "巫妖 20 尺内的每个活着的生物都必须进行一次 DC 18 的体质豁免以抵抗此魔法；失败时受到 21（6d6）点黏蚀伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "magma-mephit": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "岩浆魔蝠死亡时会爆开，迸发出熔岩。它 5 尺内的每个生物都必须进行一次 DC 11 的敏捷豁免；失败时受到 7（2d6）点火焰伤害，成功时伤害减半。"
+      },
+      {
+        "index": 1,
+        "description": "岩浆魔蝠保持静止时，与一堆普通岩浆别无二致。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "fire-breath",
+        "description": "岩浆魔蝠向一处 15 尺锥状区域呼出火焰。区域内的每个生物都必须进行一次 DC 11 的敏捷豁免；失败时受到 7（2d6）点火焰伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "magmin": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "岩浆怪死亡时会爆开，迸发出火焰和岩浆。它 10 尺内的每个生物都必须进行一次 DC 11 的敏捷豁免；失败时受到 7（2d6）点火焰伤害，成功时伤害减半。区域内未被穿戴或携带的可燃物体会被点燃。"
+      },
+      {
+        "index": 1,
+        "description": "岩浆怪可以用一个附赠动作点燃自身，或熄灭自身的火焰。燃烧期间，岩浆怪在 10 尺半径内散发明亮光照，并在其外 10 尺散发微光光照。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "touch",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：7（2d6）点火焰伤害。如果目标是生物或可燃物体，它会被点燃。直到目标使用一个动作将火熄灭，它在自己的每个回合结束时受到 3（1d6）点火焰伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "manticore": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "蝎尾狮有二十四根尾刺。用掉的尾刺会在蝎尾狮完成一次长休后重新长出。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "蝎尾狮发动三次攻击：一次啃咬和两次爪击，或三次尾刺攻击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "marilith": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "六臂蛇魔在战斗中的每个回合都可以进行一次反应。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "六臂蛇魔可以发动七次攻击：六次长剑攻击和一次蛇尾攻击。"
+      },
+      {
+        "id": "tail",
+        "description": "近战武器攻击：命中 +9，触及 10 尺，单一生物。命中：15（2d10 + 4）点钝击伤害。如果目标为中型或更小体型，它会被擒抱（逃脱 DC 19）。在该擒抱结束前，目标受到束缚，六臂蛇魔的蛇尾攻击会自动命中该目标，且六臂蛇魔不能以蛇尾攻击其他目标。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "medusa": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "当一个能看见美杜莎双眼的生物在美杜莎 30 尺内开始其回合时，若美杜莎未失能且能看见该生物，美杜莎可以迫使它进行一次 DC 14 的体质豁免。若豁免失败的差值达到或超过 5，该生物立即石化。否则，豁免失败的生物开始化为石头并受到束缚。受束缚的生物必须在其下一回合结束时再次进行该豁免：失败则石化，成功则结束该效果。石化持续到该生物被高等复原术或其他魔法解救为止。\n除非处于突袭状态，否则生物可以在其回合开始时移开目光，以避免进行该豁免。如此做时，该生物直到其下一回合开始前都无法看见美杜莎，届时它可以再次移开目光。如果该生物在此期间看向美杜莎，则必须立即进行该豁免。\n如果美杜莎在距自身 30 尺内、处于明亮光照区域的一处光滑表面上看见自己的倒影，它会因自身诅咒而受到自己凝视的影响。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "美杜莎可以发动三次近战攻击——一次蛇发攻击和两次短剑攻击——或用长弓发动两次远程攻击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "merrow": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "海魔发动两次攻击：一次啃咬，以及一次爪击或鱼叉攻击。"
+      },
+      {
+        "id": "harpoon",
+        "description": "近战或远程武器攻击：命中 +6，触及 5 尺或射程 20/60 尺，单一目标。命中：11（2d6 + 4）点穿刺伤害。如果目标是巨型或更小体型的生物，它必须在与海魔的力量对抗中成功，否则会被拉向海魔最多 20 尺。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mimic": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "拟态怪可以用其动作变形成一个物件，或变回其无定形的真实形态。它在两种形态下的游戏数据相同。它穿戴或携带的任何装备都不会随之变形。拟态怪死亡时会变回其真实形态。"
+      },
+      {
+        "index": 1,
+        "description": "拟态怪会黏住任何接触它的东西。被拟态怪黏住的巨型或更小体型生物也会被它擒抱（逃脱 DC 13）。为逃脱该擒抱而进行的属性检定具有劣势。"
+      },
+      {
+        "index": 2,
+        "description": "拟态怪保持静止时，与普通物件别无二致。"
+      },
+      {
+        "index": 3,
+        "description": "拟态怪对任何被它擒抱的生物进行攻击检定时具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "pseudopod",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：7（1d8 + 3）点钝击伤害。如果拟态怪正处于物件形态，目标还会受到其黏附特性的影响。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "minotaur": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果牛头怪直线朝目标移动至少 10 尺，并在同一回合中以抵角攻击命中该目标，则目标额外受到 9（2d8）点穿刺伤害。如果目标是生物，它必须通过一次 DC 14 的力量豁免，否则会被推开至多 10 尺并倒地。"
+      },
+      {
+        "index": 1,
+        "description": "牛头怪能完美回忆自己走过的任何路径。"
+      },
+      {
+        "index": 2,
+        "description": "牛头怪可以在其回合开始时，使自己在该回合中进行的所有近战武器攻击检定具有优势；但在其下一回合开始前，针对它的攻击检定也具有优势。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mummy": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "木乃伊可以使用恐怖凝视，并以腐烂拳发动一次攻击。"
+      },
+      {
+        "id": "rotting-fist",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，单一目标。命中：10（2d6 + 3）点钝击伤害，外加 10（3d6）点黯蚀伤害。如果目标是生物，它必须通过一次 DC 12 的体质豁免，否则会受到木乃伊腐朽诅咒。受诅咒的目标无法恢复生命值，并且每经过 24 小时，其生命值上限降低 10（3d6）点。如果该诅咒使目标的生命值上限降至 0，目标死亡，躯体化为尘土。该诅咒持续到被移除诅咒法术或其他魔法移除为止。"
+      },
+      {
+        "id": "dreadful-glare",
+        "description": "木乃伊以一个它能看见的、位于自身 60 尺内的生物为目标。如果目标能看见木乃伊，它必须通过一次 DC 11 的感知豁免以抵抗此魔法，否则会恐慌至木乃伊下一回合结束。如果目标豁免失败的差值达到或超过 5，它还会麻痹相同的持续时间。豁免成功的目标在接下来的 24 小时内免疫所有木乃伊（但不包括木乃伊领主）的恐怖凝视。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "mummy-lord": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "如果木乃伊领主的心脏完好无损，被摧毁的木乃伊领主会在 24 小时后获得一具新躯体，恢复全部生命值并重新开始活动。新躯体出现在木乃伊领主心脏 5 尺内。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "木乃伊可以使用恐怖凝视，并以腐烂拳发动一次攻击。"
+      },
+      {
+        "id": "rotting-fist",
+        "description": "近战武器攻击：命中 +9，触及 5 尺，单一目标。命中：14（3d6 + 4）点钝击伤害，外加 21（6d6）点黯蚀伤害。如果目标是生物，它必须通过一次 DC 16 的体质豁免，否则会受到木乃伊腐朽诅咒。受诅咒的目标无法恢复生命值，并且每经过 24 小时，其生命值上限降低 10（3d6）点。如果该诅咒使目标的生命值上限降至 0，目标死亡，躯体化为尘土。该诅咒持续到被移除诅咒法术或其他魔法移除为止。"
+      },
+      {
+        "id": "dreadful-glare",
+        "description": "木乃伊领主以一个它能看见的、位于自身 60 尺内的生物为目标。如果目标能看见木乃伊领主，它必须通过一次 DC 16 的感知豁免以抵抗此魔法，否则会恐慌至木乃伊下一回合结束。如果目标豁免失败的差值达到或超过 5，它还会麻痹相同的持续时间。豁免成功的目标在接下来的 24 小时内免疫所有木乃伊和木乃伊领主的恐怖凝视。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "attack",
+        "description": "木乃伊领主以腐烂拳发动一次攻击，或使用恐怖凝视。"
+      },
+      {
+        "id": "blinding-dust",
+        "description": "令人目盲的尘土和沙砾以魔法在木乃伊领主周围旋舞。木乃伊领主 5 尺内的每个生物都必须通过一次 DC 16 的体质豁免，否则会目盲至该生物下一回合结束。"
+      },
+      {
+        "id": "blasphemous-word-costs-2-actions",
+        "description": "木乃伊领主吐出亵渎之言。木乃伊领主 10 尺内每个能听见这句魔法话语的非亡灵生物都必须通过一次 DC 16 的体质豁免，否则会震慑至木乃伊领主下一回合结束。"
+      },
+      {
+        "id": "channel-negative-energy-costs-2-actions",
+        "description": "木乃伊领主以魔法释放负能量。木乃伊领主 60 尺内的生物无法恢复生命值，包括位于屏障后或拐角另一侧的生物。该效果持续到木乃伊领主下一回合结束。"
+      },
+      {
+        "id": "whirlwind-of-sand-costs-2-actions",
+        "description": "木乃伊领主以魔法变成一股沙旋风，移动至多 60 尺，然后恢复正常形态。在旋风形态下，木乃伊领主免疫所有伤害，并且无法被擒抱、石化、击倒、束缚或震慑。木乃伊领主穿戴或携带的装备仍归它持有。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "nalfeshnee": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "纳尔弗希尼魔能使用恐怖光晕时会先使用它，随后发动三次攻击：一次啃咬和两次爪击。"
+      },
+      {
+        "id": "horror-nimbus",
+        "description": "纳尔弗希尼魔以魔法放出闪烁的多彩光芒。纳尔弗希尼魔 15 尺内每个能看见这道光的生物都必须通过一次 DC 15 的感知豁免，否则会恐慌 1 分钟。生物可以在其每个回合结束时再次进行该豁免，成功时结束自身的该效果。如果生物豁免成功，或该效果对它结束，则它在接下来的 24 小时内免疫该纳尔弗希尼魔的恐怖光晕。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "night-hag": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "鬼婆携带两件必须由她亲手制作的极珍稀魔法物品。如果其中任何一件遗失，鬼婆会不惜代价将其寻回，因为制作新工具需要耗费时间和精力。\n心石：这颗光亮的黑色宝石让持有它的鬼婆能够进入以太位面。心石的触碰还能治愈任何疾病。制作一颗心石需要 30 天。\n灵魂袋：当一个邪恶类人生物因鬼婆的噩梦缠身而死亡时，鬼婆会将其灵魂收进这个由缝合皮肉制成的黑色袋子。灵魂袋一次只能容纳一个邪恶灵魂，并且只有制作该袋子的鬼婆才能用它捕获灵魂。制作一个灵魂袋需要 7 天，并献祭一个类人生物（其皮肉会用于制作袋子）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "change-shape",
+        "description": "鬼婆以魔法变形成一名小型或中型女性类人生物，或变回她的真实形态。她在每种形态下的游戏数据相同。她穿戴或携带的任何装备都不会随之变形。鬼婆死亡时会变回其真实形态。"
+      },
+      {
+        "id": "etherealness",
+        "description": "鬼婆以魔法从物质位面进入以太位面，或反向移动。鬼婆必须持有心石才能如此做。"
+      },
+      {
+        "id": "nightmare-haunting",
+        "description": "身处以太位面时，鬼婆以魔法触碰物质位面上一个正在睡眠的类人生物。对目标施展的防护善恶法术会阻止这种接触，魔法阵也有相同效果。只要接触持续，目标就会看见可怖幻象。如果幻象持续至少 1 小时，目标无法从休息中获得任何益处，并且其生命值上限降低 5（1d10）点。如果该效果使目标的生命值上限降至 0，目标死亡；如果目标为邪恶阵营，其灵魂会被困在鬼婆的灵魂袋中。目标生命值上限的降低持续到被高等复原术或类似魔法移除为止。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "nightmare": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "梦魇兽可以使任何骑乘它的生物获得火焰伤害抗性。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "ethereal-stride",
+        "description": "梦魇兽与其 5 尺内至多三个自愿生物以魔法从物质位面进入以太位面，或反向移动。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "octopus": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "离开水后，章鱼可以屏息 30 分钟。"
+      },
+      {
+        "index": 1,
+        "description": "章鱼在水下进行的敏捷（隐匿）检定具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "tentacles",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：1 点钝击伤害，且目标被擒抱（逃脱 DC 10）。在该擒抱结束前，章鱼不能对另一个目标使用触须。"
+      },
+      {
+        "id": "ink-cloud",
+        "description": "如果章鱼身处水下，一团半径 5 尺的墨汁云会向其四周扩散。该区域在 1 分钟内处于重度遮蔽，但强劲水流可以驱散墨汁。释放墨汁后，章鱼可以用一个附赠动作执行疾走动作。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "oni": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "如果鬼人至少还有 1 点生命值，它会在自己的回合开始时恢复 10 点生命值。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "鬼人以爪或长柄刀发动两次攻击。"
+      },
+      {
+        "id": "glaive",
+        "description": "近战武器攻击：命中 +7，触及 10 尺，单一目标。命中：15（2d10 + 4）点挥砍伤害；处于小型或中型形态时则造成 9（1d10 + 4）点挥砍伤害。"
+      },
+      {
+        "id": "change-shape",
+        "description": "鬼人以魔法变形成一个小型或中型类人生物、一个大型巨人，或变回其真实形态。除体型外，它在每种形态下的游戏数据相同。只有它的长柄刀会随之变形：长柄刀会缩小，以便在类人生物形态下使用。如果鬼人死亡，它会变回真实形态，长柄刀也会恢复正常大小。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "otyugh": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "奥图克能以魔法向自身 120 尺内任何理解一门语言的生物通过心灵感应传递简单的信息和图像。这种心灵感应无法让接收信息的生物以心灵感应回应。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "奥图克发动三次攻击：一次啃咬和两次触须攻击。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +6，触及 5 尺，单一目标。命中：12（2d8 + 3）点穿刺伤害。如果目标是生物，它必须通过一次 DC 15 的体质豁免以抵抗疾病，否则会中毒直至疾病被治愈。每经过 24 小时，目标必须再次进行该豁免；失败时，其生命值上限降低 5（1d10）点；成功时，疾病被治愈。如果疾病使目标的生命值上限降至 0，目标死亡。目标生命值上限的降低持续到疾病被治愈为止。"
+      },
+      {
+        "id": "tentacle",
+        "description": "近战武器攻击：命中 +6，触及 10 尺，单一目标。命中：7（1d8 + 3）点钝击伤害，外加 4（1d8）点穿刺伤害。如果目标为中型或更小体型，它会被擒抱（逃脱 DC 13），并在该擒抱结束前受到束缚。奥图克有两根触须，每根触须都能擒抱一个目标。"
+      },
+      {
+        "id": "tentacle-slam",
+        "description": "奥图克将被自己擒抱的生物相互撞击，或撞向坚固表面。每个生物都必须通过一次 DC 14 的体质豁免，否则受到 10（2d6 + 3）点钝击伤害，并被震慑至奥图克下一回合结束。豁免成功时，目标只受一半钝击伤害，且不会被震慑。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "pit-fiend": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "任何敌视深狱炼魔、并在深狱炼魔 20 尺内开始其回合的生物都必须进行一次 DC 21 的感知豁免，除非深狱炼魔已失能。豁免失败时，该生物恐慌至其下一回合开始。如果生物豁免成功，它会在接下来的 24 小时内免疫该深狱炼魔的恐惧灵光。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "深狱炼魔发动四次攻击：一次啃咬、一次爪击、一次硬头锤攻击和一次蛇尾攻击。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +14，触及 5 尺，单一目标。命中：22（4d6 + 8）点穿刺伤害。目标必须通过一次 DC 21 的体质豁免，否则会中毒。以此方式中毒期间，目标无法恢复生命值，并会在自己的每个回合开始时受到 21（6d6）点毒素伤害。中毒的目标可以在自己的每个回合结束时再次进行该豁免，成功时结束自身的该效果。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "pseudodragon": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "伪龙依赖视觉、听觉或嗅觉进行的感知（察觉）检定具有优势。"
+      },
+      {
+        "index": 2,
+        "description": "伪龙能以魔法与自身 100 尺内任何理解一门语言的生物通过心灵感应交流简单的想法、情绪和图像。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "sting",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一生物。命中：4（1d4 + 2）点穿刺伤害，且目标必须通过一次 DC 11 的体质豁免，否则会中毒 1 小时。如果豁免失败的差值达到或超过 5，目标会昏迷相同的持续时间，直到它受到伤害，或另一个生物使用一个动作将它摇醒。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "purple-worm": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "紫虫可以用其掘穴速度的一半穿过实心岩石，并在身后留下一条直径 10 尺的隧道。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "紫虫发动两次攻击：一次啃咬和一次尾刺攻击。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +9，触及 10 尺，单一目标。命中：22（3d8 + 9）点穿刺伤害。如果目标是大型或更小体型的生物，它必须通过一次 DC 19 的敏捷豁免，否则会被紫虫吞下。被吞下的生物目盲且受到束缚，对来自紫虫体外的攻击及其他效应具有全身掩护，并会在紫虫的每个回合开始时受到 21（6d6）点强酸伤害。\n如果紫虫在一个回合内受到其体内生物造成的 30 点或更多伤害，它必须在该回合结束时通过一次 DC 21 的体质豁免，否则会将所有吞下的生物吐出；这些生物会倒在紫虫 10 尺内的一处空间中。如果紫虫死亡，被吞下的生物不再受其束缚，并可以花费 20 尺移动力从尸体中逃出，离开时倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "quasit": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "夸塞魔可以用其动作变形成类似蝙蝠（速度 10 尺，飞行 40 尺）、蜈蚣（速度 40 尺，攀爬 40 尺）或蟾蜍（速度 40 尺，游泳 40 尺）的野兽形态，或变回其真实形态。除上述速度变化外，它在每种形态下的游戏数据相同。它穿戴或携带的任何装备都不会随之变形。夸塞魔死亡时会变回其真实形态。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "claw-bite-in-beast-form",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一目标。命中：5（1d4 + 3）点穿刺伤害，且目标必须通过一次 DC 10 的体质豁免，否则受到 5（2d4）点毒素伤害，并中毒 1 分钟。目标可以在自己的每个回合结束时再次进行该豁免，成功时结束自身的该效果。"
+      },
+      {
+        "id": "scare",
+        "description": "夸塞魔选择自身 20 尺内的一个生物。该生物必须通过一次 DC 10 的感知豁免，否则会恐慌 1 分钟。目标可以在自己的每个回合结束时再次进行该豁免；如果夸塞魔在其视线内，此豁免具有劣势；成功时，目标结束自身的该效果。"
+      },
+      {
+        "id": "invisibility",
+        "description": "夸塞魔以魔法隐形，直到它发动攻击、使用惊吓，或其专注结束（如同专注于一道法术）。夸塞魔穿戴或携带的任何装备都会随它一同隐形。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "rakshasa": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "除非罗刹自愿，否则它不会受到 6 环或更低环级法术的影响，也无法被这些法术探测。它对抗所有其他法术和魔法效应的豁免具有优势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "罗刹发动两次爪击。"
+      },
+      {
+        "id": "claw",
+        "description": "近战武器攻击：命中 +7，触及 5 尺，单一目标。命中：9（2d6 + 2）点挥砍伤害；如果目标是生物，它还会受到诅咒。每当目标进行短休或长休时，这道魔法诅咒就会生效，使其思绪充满恐怖的图像与梦境。受诅咒的目标完成短休或长休时无法获得任何益处。该诅咒持续到被移除诅咒法术或类似魔法解除为止。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "remorhaz": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "生物触碰寒炎虫，或在其 5 尺内以近战攻击命中它时，会受到 10（3d6）点火焰伤害。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +11，触及 10 尺，单一目标。命中：40（6d10 + 7）点穿刺伤害，外加 10（3d6）点火焰伤害。如果目标是生物，它会被擒抱（逃脱 DC 17）。在该擒抱结束前，目标受到束缚，且寒炎虫不能啃咬另一个目标。"
+      },
+      {
+        "id": "swallow",
+        "description": "寒炎虫对一个被它擒抱的中型或更小体型生物发动一次啃咬攻击。如果攻击命中，该生物受到啃咬的伤害并被吞下，擒抱随之结束。被吞下的生物目盲且受到束缚，对来自寒炎虫体外的攻击及其他效应具有全身掩护，并会在寒炎虫的每个回合开始时受到 21（6d6）点强酸伤害。\n如果寒炎虫在一个回合内受到其体内生物造成的 30 点或更多伤害，它必须在该回合结束时通过一次 DC 15 的体质豁免，否则会将所有吞下的生物吐出；这些生物会倒在寒炎虫 10 尺内的一处空间中。如果寒炎虫死亡，被吞下的生物不再受其束缚，并可以花费 15 尺移动力从尸体中逃出，离开时倒地。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "roper": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "绳索怪保持静止时，与石笋等普通洞穴构造别无二致。"
+      },
+      {
+        "index": 1,
+        "description": "绳索怪同时至多可以有六条卷须。每条卷须都可以被攻击（AC 20；10 点生命值；免疫毒素和心灵伤害）。摧毁卷须不会对绳索怪造成伤害，绳索怪可以在其下一回合伸出一条替代卷须。生物也可以使用一个动作并通过一次 DC 15 的力量检定来扯断一条卷须。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "绳索怪以卷须发动四次攻击，使用拖拽，然后以啃咬发动一次攻击。"
+      },
+      {
+        "id": "tendril",
+        "description": "近战武器攻击：命中 +7，触及 50 尺，单一生物。命中：目标被擒抱（逃脱 DC 15）。在该擒抱结束前，目标受到束缚，其力量检定和力量豁免具有劣势，且绳索怪不能用同一条卷须攻击另一个目标。"
+      },
+      {
+        "id": "reel",
+        "description": "绳索怪将每个被它擒抱的生物直线拉向自己至多 25 尺。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "rug-of-smothering": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "窒息地毯擒抱着一个生物时，只会承受对其所造成伤害的一半；另一半伤害由被地毯擒抱的生物承受。"
+      },
+      {
+        "index": 2,
+        "description": "窒息地毯保持静止时，与普通地毯别无二致。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "smother",
+        "description": "近战武器攻击：命中 +5，触及 5 尺，一个中型或更小体型的生物。命中：该生物被擒抱（逃脱 DC 13）。在该擒抱结束前，目标受到束缚、目盲并有窒息风险，且地毯不能使另一个目标窒息。此外，目标会在自己的每个回合开始时受到 10（2d6 + 3）点钝击伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "rust-monster": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "锈蚀怪能凭嗅觉精确定位自身 30 尺内含铁金属的位置。"
+      },
+      {
+        "index": 1,
+        "description": "任何以金属制成、命中锈蚀怪的非魔法武器都会被锈蚀。造成伤害后，该武器的伤害掷骰受到永久且可累加的 −1 减值。如果该减值降至 −5，武器被摧毁。以金属制成的非魔法弹药命中锈蚀怪并造成伤害后会被摧毁。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "antennae",
+        "description": "锈蚀怪锈蚀一个它能看见的、位于自身 5 尺内的非魔法含铁金属物件。如果该物件无人穿戴或携带，这次触碰会摧毁其中一个 1 尺立方区域。如果该物件由一个生物穿戴或携带，该生物可以进行一次 DC 11 的敏捷豁免，以避开锈蚀怪的触碰。\n如果被触碰的物件是正在穿戴或携带的金属护甲或金属盾牌，它所提供的 AC 会受到永久且可累加的 −1 减值。护甲的 AC 降至 10，或盾牌的加值降至 +0 时，该物件被摧毁。如果被触碰的物件是一把持握中的金属武器，它会依照锈蚀金属特性的说明被锈蚀。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "sahuagin": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "沙华鱼人能在空气和水中呼吸，但它必须每 4 小时至少浸入水中一次，否则会开始窒息。"
+      },
+      {
+        "index": 2,
+        "description": "沙华鱼人能通过有限的心灵感应，以魔法命令自身 120 尺内的任何鲨鱼。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "沙华鱼人发动两次近战攻击：一次啃咬，以及一次爪击或长矛攻击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "salamander": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "生物触碰火蜥蜴，或在其 5 尺内以近战攻击命中它时，会受到 7（2d6）点火焰伤害。"
+      },
+      {
+        "index": 1,
+        "description": "火蜥蜴使用的任何金属近战武器在命中时额外造成 3（1d6）点火焰伤害（已计入攻击）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "spear",
+        "description": "近战或远程武器攻击：命中 +7，触及 5 尺或射程 20/60 尺，单一目标。命中：11（2d6 + 4）点穿刺伤害；如果双手持握并发动近战攻击，则造成 13（2d8 + 4）点穿刺伤害；外加 3（1d6）点火焰伤害。"
+      },
+      {
+        "id": "tail",
+        "description": "近战武器攻击：命中 +7，触及 10 尺，单一目标。命中：11（2d6 + 4）点钝击伤害，外加 7（2d6）点火焰伤害，且目标被擒抱（逃脱 DC 14）。在该擒抱结束前，目标受到束缚，火蜥蜴的蛇尾攻击会自动命中该目标，且火蜥蜴不能以蛇尾攻击其他目标。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "sea-hag": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "任何在海鬼婆 30 尺内开始其回合、并能看见鬼婆真实形态的类人生物都必须进行一次 DC 11 的感知豁免。豁免失败时，该生物恐慌 1 分钟。生物可以在自己的每个回合结束时再次进行该豁免；如果鬼婆在其视线内，此豁免具有劣势；成功时，生物结束自身的该效果。如果生物豁免成功，或该效果对它结束，则它在接下来的 24 小时内免疫该鬼婆的恐怖外貌。\n除非目标处于突袭状态，或鬼婆突然显露其真实形态，否则目标可以移开目光，避免进行首次豁免。移开目光的生物对鬼婆进行的攻击检定具有劣势，直至其下一回合开始。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "death-glare",
+        "description": "海鬼婆以一个她能看见的、位于自身 30 尺内的恐慌生物为目标。如果目标能看见鬼婆，它必须通过一次 DC 11 的感知豁免以抵抗此魔法，否则生命值降至 0。"
+      },
+      {
+        "id": "illusory-appearance",
+        "description": "海鬼婆以魔法幻象覆盖自身以及她穿戴或携带的一切，使她看起来像一个体型大致相同、具有类人外形的丑陋生物。如果鬼婆用一个附赠动作结束该效果，或鬼婆死亡，该效果结束。\n该效果造成的改变经不起物理检验。例如，鬼婆看起来可以没有爪子，但触碰她手部的人仍可能摸到爪子。除此以外，生物必须使用一个动作目视检查幻象，并通过一次 DC 16 的智力（调查）检定，才能识破鬼婆的伪装。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "shadow": {
+    "traits": [
+      {
+        "index": 1,
+        "description": "处于微光或黑暗中时，幽影可以用一个附赠动作执行躲藏动作。它的隐匿加值也会提高至 +6。"
+      },
+      {
+        "index": 2,
+        "description": "处于阳光下时，幽影的攻击检定、属性检定和豁免具有劣势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "strength-drain",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一生物。命中：9（2d6 + 2）点黯蚀伤害，且目标的力量值降低 1d4。如果这使目标的力量降至 0，目标死亡。否则，该降低持续到目标完成一次短休或长休为止。\n如果一个非邪恶类人生物死于此攻击，一只新的幽影会在 1d4 小时后从尸体中升起。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "shambling-mound": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "每当蔓生怪受到闪电伤害时，它不会受到伤害，反而会恢复等同于该闪电伤害数值的生命值。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "蔓生怪发动两次猛击攻击。如果两次攻击都命中一个中型或更小体型的目标，该目标会被擒抱（逃脱 DC 14），并且蔓生怪对其使用包覆。"
+      },
+      {
+        "id": "engulf",
+        "description": "蔓生怪包覆一个被它擒抱的中型或更小体型生物。被包覆的目标目盲、受到束缚且无法呼吸；它必须在蔓生怪的每个回合开始时通过一次 DC 14 的体质豁免，否则受到 13（2d8 + 4）点钝击伤害。如果蔓生怪移动，被包覆的目标会随之移动。蔓生怪同时只能包覆一个生物。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "shield-guardian": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "盾卫者以魔法与一枚护符绑定。只要盾卫者与其护符位于同一存在位面，护符的佩戴者就能通过心灵感应召唤盾卫者前往自己身边，盾卫者也知道护符的距离与方向。如果盾卫者位于护符佩戴者 60 尺内，佩戴者受到的任何伤害都有一半（向上取整）转移给盾卫者。"
+      },
+      {
+        "index": 1,
+        "description": "如果盾卫者至少还有 1 点生命值，它会在自己的回合开始时恢复 10 点生命值。"
+      },
+      {
+        "index": 2,
+        "description": "佩戴盾卫者护符的施法者可以让盾卫者储存一道 4 环或更低环级的法术。为此，佩戴者必须对盾卫者施展该法术。法术不产生效果，而是储存在盾卫者体内。当佩戴者发出命令，或施法者预先设定的情况出现时，盾卫者会依照原施法者设定的所有参数施展所储存的法术，且无需任何成分。储存的法术施展后，或一道新法术被储存时，先前储存的任何法术都会消失。"
+      }
+    ],
+    "reactions": [
+      {
+        "id": "shield",
+        "description": "当一个生物攻击盾卫者护符的佩戴者时，如果盾卫者位于佩戴者 5 尺内，盾卫者会使佩戴者的 AC 获得 +2 加值。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "solar": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "太阳神使的武器攻击视为魔法攻击。太阳神使以任何武器命中时，该武器额外造成 6d8 点光耀伤害（已计入攻击）。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "slaying-longbow",
+        "description": "远程武器攻击：命中 +13，射程 150/600 尺，单一目标。命中：15（2d8 + 6）点穿刺伤害，外加 27（6d8）点光耀伤害。如果目标是一个生命值不高于 190 的生物，它必须通过一次 DC 15 的体质豁免，否则死亡。"
+      },
+      {
+        "id": "flying-sword",
+        "description": "太阳神使放开巨剑，使其以魔法悬浮在自身 5 尺内的一处未占据空间。如果太阳神使能看见该剑，它可以用一个附赠动作在心中命令巨剑飞行至多 50 尺，并对一个目标发动一次攻击，或回到太阳神使手中。如果任何效应以悬浮的巨剑为目标，视为太阳神使正持握该剑。太阳神使死亡时，悬浮的巨剑会坠落。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "searing-burst-costs-2-actions",
+        "description": "太阳神使放出魔法神圣能量。它选择半径 10 尺内的任意生物；每个目标都必须进行一次 DC 23 的敏捷豁免，失败时受到 14（4d6）点火焰伤害和 14（4d6）点光耀伤害，成功时伤害减半。"
+      },
+      {
+        "id": "blinding-gaze-costs-3-actions",
+        "description": "太阳神使以一个它能看见的、位于自身 30 尺内的生物为目标。如果目标能看见太阳神使，目标必须通过一次 DC 15 的体质豁免，否则会目盲，直到次级复原术等魔法移除目盲。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "sprite": {
+    "actions": [
+      {
+        "id": "shortbow",
+        "description": "远程武器攻击：命中 +6，射程 40/160 尺，单一目标。命中：1 点穿刺伤害，且目标必须通过一次 DC 10 的体质豁免，否则会中毒 1 分钟。如果其豁免结果不高于 5，中毒的目标会昏迷相同的持续时间，直到它受到伤害，或另一个生物使用一个动作将它摇醒。"
+      },
+      {
+        "id": "heart-sight",
+        "description": "小妖精触碰一个生物，并以魔法得知该生物当前的情绪状态。如果目标未通过一次 DC 10 的魅力豁免，小妖精还会得知该生物的阵营。天界生物、邪魔和亡灵自动豁免失败。"
+      },
+      {
+        "id": "invisibility",
+        "description": "小妖精以魔法隐形，直到它发动攻击、施展法术，或其专注结束（如同专注于一道法术）。小妖精穿戴或携带的任何装备都会随它一同隐形。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "spy": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "间谍可以在自己的每个回合中使用一个附赠动作，执行疾走、撤离或躲藏动作。"
+      },
+      {
+        "index": 1,
+        "description": "间谍以武器攻击命中目标时，若该次攻击检定具有优势，或目标位于一个未失能的间谍盟友 5 尺内且间谍的攻击检定不具有劣势，则该攻击额外造成 7（2d6）点伤害。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "steam-mephit": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "蒸汽魔蝠死亡时会爆炸，迸发出一团蒸汽。它 5 尺内的每个生物都必须通过一次 DC 10 的敏捷豁免，否则受到 4（1d8）点火焰伤害。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "steam-breath",
+        "description": "蒸汽魔蝠向一处 15 尺锥状区域呼出滚烫蒸汽。区域内的每个生物都必须进行一次 DC 10 的敏捷豁免；失败时受到 4（1d8）点火焰伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "succubus-incubus": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "魅魔／梦魔与一个被其魅惑的生物交流时，可以无视自身心灵感应的距离限制。双方甚至无需位于同一存在位面。"
+      },
+      {
+        "index": 1,
+        "description": "魅魔／梦魔可以用其动作变形成一个小型或中型类人生物，或变回其真实形态。失去翅膀时，它也会失去飞行速度。除体型和速度外，它在每种形态下的游戏数据相同。它穿戴或携带的任何装备都不会随之变形。魅魔／梦魔死亡时会变回其真实形态。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "charm",
+        "description": "魅魔／梦魔能看见的、自身 30 尺内的一个类人生物必须通过一次 DC 15 的感知豁免，否则会被魔法魅惑 1 天。被魅惑的目标会服从魅魔／梦魔通过言语或心灵感应下达的命令。如果目标受到任何伤害或收到自杀性命令，它可以再次进行该豁免，成功时结束该效果。如果目标成功豁免该效果，或该效果对它结束，则它在接下来的 24 小时内免疫该魅魔／梦魔的魅惑。\n魅魔／梦魔同时只能魅惑一个目标。如果它魅惑另一个目标，先前目标身上的效果结束。"
+      },
+      {
+        "id": "draining-kiss",
+        "description": "魅魔／梦魔亲吻一个被它魅惑的生物或一个自愿生物。目标必须进行一次 DC 15 的体质豁免以抵抗此魔法；失败时受到 32（5d10 + 5）点心灵伤害，成功时伤害减半。目标的生命值上限降低等同于所受伤害的数值。该降低持续到目标完成一次长休为止。如果该效果使目标的生命值上限降至 0，目标死亡。"
+      },
+      {
+        "id": "etherealness",
+        "description": "魅魔／梦魔以魔法从物质位面进入以太位面，或反向移动。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-bats": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "蝙蝠群耳聋时无法使用其盲视。"
+      },
+      {
+        "index": 2,
+        "description": "蝙蝠群可以占据另一个生物的空间，反之亦然；蝙蝠群也能穿过任何足以容纳一只微型蝙蝠通过的开口。蝙蝠群无法恢复生命值或获得临时生命值。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "swarm-of-poisonous-snakes": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "毒蛇群可以占据另一个生物的空间，反之亦然；毒蛇群也能穿过任何足以容纳一条微型蛇通过的开口。毒蛇群无法恢复生命值或获得临时生命值。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bites",
+        "description": "近战武器攻击：命中 +6，触及 0 尺，毒蛇群空间内的一个生物。命中：7（2d6）点穿刺伤害；如果毒蛇群的生命值不高于其生命值上限的一半，则为 3（1d6）点穿刺伤害。目标必须进行一次 DC 10 的体质豁免；失败时受到 14（4d6）点毒素伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "tarrasque": {
+    "traits": [
+      {
+        "index": 2,
+        "description": "每当塔拉斯克成为魔法飞弹法术、线状法术，或需要进行远程攻击检定的法术的目标时，掷一次 d6。结果为 1 至 5 时，塔拉斯克不受影响。结果为 6 时，塔拉斯克不受影响，并且该效果会反射回施法者，如同以塔拉斯克为起点，使施法者成为目标。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "塔拉斯克可以使用骇人威仪。随后它发动五次攻击：一次啃咬、两次爪击、一次抵角和一次尾击。它可以用吞咽代替啃咬。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +19，触及 10 尺，单一目标。命中：36（4d12 + 10）点穿刺伤害。如果目标是生物，它会被擒抱（逃脱 DC 20）。在该擒抱结束前，目标受到束缚，且塔拉斯克不能啃咬另一个目标。"
+      },
+      {
+        "id": "frightful-presence",
+        "description": "塔拉斯克选择自身 120 尺内任意意识到它的生物；每个目标都必须通过一次 DC 17 的感知豁免，否则会恐慌 1 分钟。生物可以在自己的每个回合结束时再次进行该豁免；如果塔拉斯克在其视线内，此豁免具有劣势；成功时，生物结束自身的该效果。如果生物豁免成功，或该效果对它结束，则它在接下来的 24 小时内免疫塔拉斯克的骇人威仪。"
+      },
+      {
+        "id": "swallow",
+        "description": "塔拉斯克对一个被它擒抱的大型或更小体型生物发动一次啃咬攻击。如果攻击命中，目标受到啃咬的伤害、被吞下，擒抱随之结束。被吞下的生物目盲且受到束缚，对来自塔拉斯克体外的攻击及其他效应具有全身掩护，并会在塔拉斯克的每个回合开始时受到 56（16d6）点强酸伤害。\n如果塔拉斯克在一个回合内受到其体内生物造成的 60 点或更多伤害，它必须在该回合结束时通过一次 DC 20 的体质豁免，否则会将所有吞下的生物吐出；这些生物会倒在塔拉斯克 10 尺内的一处空间中。如果塔拉斯克死亡，被吞下的生物不再受其束缚，并可以花费 30 尺移动力从尸体中逃出，离开时倒地。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "attack",
+        "description": "塔拉斯克发动一次爪击或尾击。"
+      },
+      {
+        "id": "move",
+        "description": "塔拉斯克移动至多其速度的一半。"
+      },
+      {
+        "id": "chomp-costs-2-actions",
+        "description": "塔拉斯克发动一次啃咬攻击或使用吞咽。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "tyrannosaurus-rex": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "霸王龙发动两次攻击：一次啃咬和一次尾击。它不能对同一个目标发动这两次攻击。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +10，触及 10 尺，单一目标。命中：33（4d12 + 7）点穿刺伤害。如果目标是中型或更小体型的生物，它会被擒抱（逃脱 DC 17）。在该擒抱结束前，目标受到束缚，且霸王龙不能啃咬另一个目标。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "unicorn": {
+    "actions": [
+      {
+        "id": "healing-touch",
+        "description": "独角兽用角触碰另一个生物。目标以魔法恢复 11（2d8 + 2）点生命值。此外，这次触碰会移除目标感染的所有疾病，并中和影响目标的所有毒素。"
+      },
+      {
+        "id": "teleport",
+        "description": "独角兽以魔法传送自身，以及它能看见的、自身 5 尺内至多三个自愿生物，连同他们穿戴或携带的任何装备，抵达独角兽熟悉的一个地点，最远可达 1 英里。"
+      }
+    ],
+    "legendaryActions": [
+      {
+        "id": "hooves",
+        "description": "独角兽以蹄发动一次攻击。"
+      },
+      {
+        "id": "shimmering-shield-costs-2-actions",
+        "description": "独角兽在自身或它能看见的、自身 60 尺内的另一个生物周围创造一层闪耀的魔法力场。目标的 AC 获得 +2 加值，直至独角兽下一回合结束。"
+      },
+      {
+        "id": "heal-self-costs-3-actions",
+        "description": "独角兽以魔法恢复 11（2d8 + 2）点生命值。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "vampire-spawn": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果吸血鬼至少还有 1 点生命值，且未处于阳光或流水中，它会在自己的回合开始时恢复 10 点生命值。如果吸血鬼受到光耀伤害或圣水造成的伤害，该特性在吸血鬼下一回合开始时不会生效。"
+      },
+      {
+        "index": 2,
+        "description": "吸血鬼具有下列缺陷：\n禁入。未经居所内任一居住者邀请，吸血鬼无法进入该居所。\n流水伤害。吸血鬼在流水中结束其回合时受到 20 点强酸伤害。\n木桩穿心。当吸血鬼在其安息地中失能时，如果一把木制穿刺武器刺入它的心脏，吸血鬼会被摧毁。\n阳光超敏。吸血鬼在阳光下开始其回合时受到 20 点光耀伤害。处于阳光下时，它的攻击检定和属性检定具有劣势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +6，触及 5 尺，一个自愿生物，或一个被吸血鬼擒抱、失能或束缚的生物。命中：6（1d6 + 3）点穿刺伤害，外加 7（2d6）点黯蚀伤害。目标的生命值上限降低等同于所受黯蚀伤害的数值，吸血鬼恢复等量生命值。该降低持续到目标完成一次长休为止。如果该效果使目标的生命值上限降至 0，目标死亡。"
+      },
+      {
+        "id": "claws",
+        "description": "近战武器攻击：命中 +6，触及 5 尺，单一生物。命中：8（2d4 + 3）点挥砍伤害。吸血鬼可以不造成伤害，改为擒抱目标（逃脱 DC 13）。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "vampire-bat": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果吸血鬼未处于阳光或流水中，它可以用其动作变形成一只微型蝙蝠、一团中型雾云，或变回其真实形态。\n处于蝙蝠形态时，吸血鬼无法说话，其步行速度为 5 尺，飞行速度为 30 尺。除体型和速度外，它的游戏数据保持不变。它穿戴的一切都会随之变形，但它携带的物品不会。吸血鬼死亡时会变回其真实形态。\n处于雾化形态时，吸血鬼无法执行任何动作、说话或操纵物件。它没有重量，飞行速度为 20 尺，能够悬浮，并且可以进入敌对生物的空间并停留其中。此外，只要空气能够穿过一处空间，雾气就可以穿过且无需挤入，但无法穿过水。它的力量、敏捷和体质豁免具有优势，并且除阳光造成的伤害外，它免疫所有非魔法伤害。"
+      },
+      {
+        "index": 2,
+        "description": "吸血鬼在其安息地以外生命值降至 0 时，只要它未处于阳光或流水中，就会变成一团雾气（如同变形者特性），而非陷入昏迷。如果它无法变形，就会被摧毁。\n以雾化形态处于 0 生命值时，吸血鬼无法变回吸血鬼形态，并且必须在 2 小时内抵达其安息地，否则会被摧毁。一旦进入安息地，它会变回吸血鬼形态，随后陷入麻痹，直到恢复至少 1 点生命值。它在安息地以 0 生命值度过 1 小时后，会恢复 1 点生命值。"
+      },
+      {
+        "index": 3,
+        "description": "如果吸血鬼至少还有 1 点生命值，且未处于阳光或流水中，它会在自己的回合开始时恢复 20 点生命值。如果吸血鬼受到光耀伤害或圣水造成的伤害，该特性在吸血鬼下一回合开始时不会生效。"
+      },
+      {
+        "index": 5,
+        "description": "吸血鬼具有下列缺陷：\n禁入。未经居所内任一居住者邀请，吸血鬼无法进入该居所。\n流水伤害。吸血鬼在流水中结束其回合时受到 20 点强酸伤害。\n木桩穿心。当吸血鬼在其安息地中失能时，如果一把木制穿刺武器刺入它的心脏，吸血鬼会陷入麻痹，直到木桩被拔除。\n阳光超敏。吸血鬼在阳光下开始其回合时受到 20 点光耀伤害。处于阳光下时，它的攻击检定和属性检定具有劣势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +9，触及 5 尺，一个自愿生物，或一个被吸血鬼擒抱、失能或束缚的生物。命中：7（1d6 + 4）点穿刺伤害，外加 10（3d6）点黯蚀伤害。目标的生命值上限降低等同于所受黯蚀伤害的数值，吸血鬼恢复等量生命值。该降低持续到目标完成一次长休为止。如果该效果使目标的生命值上限降至 0，目标死亡。以这种方式被杀死并被埋入地下的类人生物，会在次日夜晚作为受吸血鬼控制的吸血鬼衍体复起。"
+      },
+      {
+        "id": "charm",
+        "description": "吸血鬼以一个它能看见的、位于自身 30 尺内的类人生物为目标。如果目标能看见吸血鬼，它必须通过一次 DC 17 的感知豁免以抵抗此魔法，否则会被吸血鬼魅惑。被魅惑的目标将吸血鬼视为应当听从并保护的可信友人。尽管目标不受吸血鬼直接控制，它仍会以尽可能有利于吸血鬼的方式理解吸血鬼的请求或行为，并且自愿成为吸血鬼啃咬攻击的目标。\n每当吸血鬼或吸血鬼的同伴做出任何伤害目标的行为时，目标可以再次进行该豁免，成功时结束自身的该效果。否则，该效果持续 24 小时，直到吸血鬼被摧毁、吸血鬼与目标位于不同存在位面，或吸血鬼用一个附赠动作结束该效果。"
+      },
+      {
+        "id": "children-of-the-night",
+        "description": "只要太阳尚未升起，吸血鬼便以魔法召唤 2d4 群蝙蝠或老鼠。如果身处户外，吸血鬼可以改为召唤 3d6 只狼。被召唤的生物会在 1d4 轮后抵达，作为吸血鬼的盟友行动并服从其口头命令。这些野兽会停留 1 小时，直到吸血鬼死亡，或吸血鬼用一个附赠动作解散它们。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "vampire-mist": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果吸血鬼未处于阳光或流水中，它可以用其动作变形成一只微型蝙蝠、一团中型雾云，或变回其真实形态。\n处于蝙蝠形态时，吸血鬼无法说话，其步行速度为 5 尺，飞行速度为 30 尺。除体型和速度外，它的游戏数据保持不变。它穿戴的一切都会随之变形，但它携带的物品不会。吸血鬼死亡时会变回其真实形态。\n处于雾化形态时，吸血鬼无法执行任何动作、说话或操纵物件。它没有重量，飞行速度为 20 尺，能够悬浮，并且可以进入敌对生物的空间并停留其中。此外，只要空气能够穿过一处空间，雾气就可以穿过且无需挤入，但无法穿过水。它的力量、敏捷和体质豁免具有优势，并且除阳光造成的伤害外，它免疫所有非魔法伤害。"
+      },
+      {
+        "index": 2,
+        "description": "吸血鬼在其安息地以外生命值降至 0 时，只要它未处于阳光或流水中，就会变成一团雾气（如同变形者特性），而非陷入昏迷。如果它无法变形，就会被摧毁。\n以雾化形态处于 0 生命值时，吸血鬼无法变回吸血鬼形态，并且必须在 2 小时内抵达其安息地，否则会被摧毁。一旦进入安息地，它会变回吸血鬼形态，随后陷入麻痹，直到恢复至少 1 点生命值。它在安息地以 0 生命值度过 1 小时后，会恢复 1 点生命值。"
+      },
+      {
+        "index": 3,
+        "description": "如果吸血鬼至少还有 1 点生命值，且未处于阳光或流水中，它会在自己的回合开始时恢复 20 点生命值。如果吸血鬼受到光耀伤害或圣水造成的伤害，该特性在吸血鬼下一回合开始时不会生效。"
+      },
+      {
+        "index": 5,
+        "description": "吸血鬼具有下列缺陷：\n禁入。未经居所内任一居住者邀请，吸血鬼无法进入该居所。\n流水伤害。吸血鬼在流水中结束其回合时受到 20 点强酸伤害。\n木桩穿心。当吸血鬼在其安息地中失能时，如果一把木制穿刺武器刺入它的心脏，吸血鬼会陷入麻痹，直到木桩被拔除。\n阳光超敏。吸血鬼在阳光下开始其回合时受到 20 点光耀伤害。处于阳光下时，它的攻击检定和属性检定具有劣势。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "vampire-vampire": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "如果吸血鬼未处于阳光或流水中，它可以用其动作变形成一只微型蝙蝠、一团中型雾云，或变回其真实形态。\n处于蝙蝠形态时，吸血鬼无法说话，其步行速度为 5 尺，飞行速度为 30 尺。除体型和速度外，它的游戏数据保持不变。它穿戴的一切都会随之变形，但它携带的物品不会。吸血鬼死亡时会变回其真实形态。\n处于雾化形态时，吸血鬼无法执行任何动作、说话或操纵物件。它没有重量，飞行速度为 20 尺，能够悬浮，并且可以进入敌对生物的空间并停留其中。此外，只要空气能够穿过一处空间，雾气就可以穿过且无需挤入，但无法穿过水。它的力量、敏捷和体质豁免具有优势，并且除阳光造成的伤害外，它免疫所有非魔法伤害。"
+      },
+      {
+        "index": 2,
+        "description": "吸血鬼在其安息地以外生命值降至 0 时，只要它未处于阳光或流水中，就会变成一团雾气（如同变形者特性），而非陷入昏迷。如果它无法变形，就会被摧毁。\n以雾化形态处于 0 生命值时，吸血鬼无法变回吸血鬼形态，并且必须在 2 小时内抵达其安息地，否则会被摧毁。一旦进入安息地，它会变回吸血鬼形态，随后陷入麻痹，直到恢复至少 1 点生命值。它在安息地以 0 生命值度过 1 小时后，会恢复 1 点生命值。"
+      },
+      {
+        "index": 3,
+        "description": "如果吸血鬼至少还有 1 点生命值，且未处于阳光或流水中，它会在自己的回合开始时恢复 20 点生命值。如果吸血鬼受到光耀伤害或圣水造成的伤害，该特性在吸血鬼下一回合开始时不会生效。"
+      },
+      {
+        "index": 5,
+        "description": "吸血鬼具有下列缺陷：\n禁入。未经居所内任一居住者邀请，吸血鬼无法进入该居所。\n流水伤害。吸血鬼在流水中结束其回合时受到 20 点强酸伤害。\n木桩穿心。当吸血鬼在其安息地中失能时，如果一把木制穿刺武器刺入它的心脏，吸血鬼会陷入麻痹，直到木桩被拔除。\n阳光超敏。吸血鬼在阳光下开始其回合时受到 20 点光耀伤害。处于阳光下时，它的攻击检定和属性检定具有劣势。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "unarmed-strike",
+        "description": "近战武器攻击：命中 +9，触及 5 尺，单一生物。命中：8（1d8 + 4）点钝击伤害。吸血鬼可以不造成伤害，改为擒抱目标（逃脱 DC 18）。"
+      },
+      {
+        "id": "bite",
+        "description": "近战武器攻击：命中 +9，触及 5 尺，一个自愿生物，或一个被吸血鬼擒抱、失能或束缚的生物。命中：7（1d6 + 4）点穿刺伤害，外加 10（3d6）点黯蚀伤害。目标的生命值上限降低等同于所受黯蚀伤害的数值，吸血鬼恢复等量生命值。该降低持续到目标完成一次长休为止。如果该效果使目标的生命值上限降至 0，目标死亡。以这种方式被杀死并被埋入地下的类人生物，会在次日夜晚作为受吸血鬼控制的吸血鬼衍体复起。"
+      },
+      {
+        "id": "charm",
+        "description": "吸血鬼以一个它能看见的、位于自身 30 尺内的类人生物为目标。如果目标能看见吸血鬼，它必须通过一次 DC 17 的感知豁免以抵抗此魔法，否则会被吸血鬼魅惑。被魅惑的目标将吸血鬼视为应当听从并保护的可信友人。尽管目标不受吸血鬼直接控制，它仍会以尽可能有利于吸血鬼的方式理解吸血鬼的请求或行为，并且自愿成为吸血鬼啃咬攻击的目标。\n每当吸血鬼或吸血鬼的同伴做出任何伤害目标的行为时，目标可以再次进行该豁免，成功时结束自身的该效果。否则，该效果持续 24 小时，直到吸血鬼被摧毁、吸血鬼与目标位于不同存在位面，或吸血鬼用一个附赠动作结束该效果。"
+      },
+      {
+        "id": "children-of-the-night",
+        "description": "只要太阳尚未升起，吸血鬼便以魔法召唤 2d4 群蝙蝠或老鼠。如果身处户外，吸血鬼可以改为召唤 3d6 只狼。被召唤的生物会在 1d4 轮后抵达，作为吸血鬼的盟友行动并服从其口头命令。这些野兽会停留 1 小时，直到吸血鬼死亡，或吸血鬼用一个附赠动作解散它们。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "vrock": {
+    "actions": [
+      {
+        "id": "spores",
+        "description": "一团半径 15 尺的有毒孢子云从弗洛魔向外扩散。孢子可以绕过拐角。区域内的每个生物都必须通过一次 DC 14 的体质豁免，否则会中毒。以此方式中毒期间，目标会在自己的每个回合开始时受到 5（1d10）点毒素伤害。目标可以在自己的每个回合结束时再次进行该豁免，成功时结束自身的该效果。将一瓶圣水倒在目标身上也会结束该效果。"
+      },
+      {
+        "id": "stunning-screech",
+        "description": "弗洛魔发出骇人的尖啸。它 20 尺内每个能听见尖啸且不是恶魔的生物都必须通过一次 DC 14 的体质豁免，否则会被震慑至弗洛魔下一回合结束。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "water-elemental": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "水元素可以进入敌对生物的空间并停留其中。它可以穿过窄至 1 寸宽的空间，且无需挤入。"
+      },
+      {
+        "index": 1,
+        "description": "如果水元素受到冷冻伤害，它会部分冻结；其速度降低 20 尺，直至其下一回合结束。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "whelm",
+        "description": "水元素空间内的每个生物都必须进行一次 DC 15 的力量豁免。豁免失败时，目标受到 13（2d8 + 4）点钝击伤害。如果目标为大型或更小体型，它还会被擒抱（逃脱 DC 14）。在该擒抱结束前，目标受到束缚且无法呼吸，除非它能在水中呼吸。豁免成功时，目标被推出水元素的空间。\n水元素同时可以擒抱一个大型生物，或至多两个中型或更小体型的生物。水元素的每个回合开始时，每个被它擒抱的目标都会受到 13（2d8 + 4）点钝击伤害。水元素 5 尺内的生物可以使用一个动作并通过一次 DC 14 的力量检定，将一个生物或物件从水元素体内拉出。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wight": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "尸鬼发动两次长剑攻击或两次长弓攻击。它可以用生命吸取代替其中一次长剑攻击。"
+      },
+      {
+        "id": "life-drain",
+        "description": "近战武器攻击：命中 +4，触及 5 尺，单一生物。命中：5（1d6 + 2）点黯蚀伤害。目标必须通过一次 DC 13 的体质豁免，否则其生命值上限降低等同于所受伤害的数值。该降低持续到目标完成一次长休为止。如果该效果使目标的生命值上限降至 0，目标死亡。\n被此攻击杀死的类人生物会在 24 小时后作为受尸鬼控制的僵尸复起，除非该类人生物恢复生命，或其躯体被摧毁。尸鬼同时至多可以控制十二只僵尸。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "will-o-wisp": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "鬼火可以用一个附赠动作，以一个它能看见的、自身 5 尺内仍然存活且生命值为 0 的生物为目标。目标必须通过一次 DC 10 的体质豁免以抵抗此魔法，否则死亡。如果目标死亡，鬼火恢复 10（3d6）点生命值。"
+      },
+      {
+        "index": 1,
+        "description": "鬼火无法穿戴或携带任何东西。"
+      },
+      {
+        "index": 2,
+        "description": "鬼火可以穿过其他生物和物件，如同穿越困难地形。如果鬼火在物件内结束其回合，它会受到 5（1d10）点力场伤害。"
+      },
+      {
+        "index": 3,
+        "description": "鬼火在 5 至 20 尺的可选半径内散发明亮光照，并在所选半径之外相同距离内散发微光光照。鬼火可以用一个附赠动作改变该半径。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "invisibility",
+        "description": "鬼火及其光芒以魔法隐形，直到它发动攻击、使用吞噬生命，或其专注结束（如同专注于一道法术）。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wraith": {
+    "actions": [
+      {
+        "id": "life-drain",
+        "description": "近战武器攻击：命中 +6，触及 5 尺，单一生物。命中：21（4d8 + 3）点黯蚀伤害。目标必须通过一次 DC 14 的体质豁免，否则其生命值上限降低等同于所受伤害的数值。该降低持续到目标完成一次长休为止。如果该效果使目标的生命值上限降至 0，目标死亡。"
+      },
+      {
+        "id": "create-specter",
+        "description": "缚灵以一个位于自身 10 尺内、死亡不超过 1 分钟且死于暴力的类人生物为目标。目标的灵魂会在其尸体所在空间或最近的未占据空间中作为幽魂复起。幽魂受缚灵控制。缚灵同时至多可以控制七只幽魂。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "wyvern": {
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "双足飞龙发动两次攻击：一次啃咬和一次尾刺攻击。飞行时，它可以用爪击代替其中一次攻击。"
+      },
+      {
+        "id": "stinger",
+        "description": "近战武器攻击：命中 +7，触及 10 尺，单一生物。命中：11（2d6 + 4）点穿刺伤害。目标必须进行一次 DC 15 的体质豁免；失败时受到 24（7d6）点毒素伤害，成功时伤害减半。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  },
+  "xorn": {
+    "traits": [
+      {
+        "index": 0,
+        "description": "索尔石怪可以在非魔法且未经加工的泥土和石头中掘穴。如此移动时，它不会扰动自己所穿过的材料。"
+      },
+      {
+        "index": 2,
+        "description": "索尔石怪能凭嗅觉精确定位自身 60 尺内硬币、宝石等贵重金属和石头的位置。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "multiattack",
+        "description": "索尔石怪发动三次爪击和一次啃咬攻击。"
+      }
+    ],
+    "reviewedBy": "Codex 英文 SRD 5.1 语境复核",
+    "reviewedAt": "2026-07-22"
+  }
+}

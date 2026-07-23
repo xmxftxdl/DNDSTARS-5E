@@ -7,13 +7,13 @@ describe('SRD 5.1 published content consistency audit', () => {
 
     expect(report).toMatchObject({
       spellCatalogCount: 319,
-      headlessSpellCount: 66,
+      headlessSpellCount: 71,
       magicItemCatalogCount: 240,
     })
-    expect(report.reviewedSpellCount).toBeGreaterThan(0)
-    expect(report.pendingSpellReviewCount).toBe(report.spellCatalogCount - report.reviewedSpellCount)
-    expect(report.reviewedMagicItemCount).toBeGreaterThan(0)
-    expect(report.pendingMagicItemReviewCount).toBe(report.magicItemCatalogCount - report.reviewedMagicItemCount)
+    expect(report.reviewedSpellCount).toBe(319)
+    expect(report.pendingSpellReviewCount).toBe(0)
+    expect(report.reviewedMagicItemCount).toBe(240)
+    expect(report.pendingMagicItemReviewCount).toBe(0)
     expect(report.issues).toEqual([])
   })
 })

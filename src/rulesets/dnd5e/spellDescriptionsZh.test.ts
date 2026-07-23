@@ -6,7 +6,7 @@ import { dnd5eSpellbookEntries } from './spellbook'
 describe('release-cleared Chinese SRD 5.1 spell descriptions', () => {
   it('contains only allow-listed, context-reviewed SRD entries', () => {
     const catalogById = new Map(DND5E_SRD_SPELL_CATALOG.map((spell) => [spell.id, spell]))
-    expect(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED)).toHaveLength(11)
+    expect(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED)).toHaveLength(319)
     for (const [id, reference] of Object.entries(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED)) {
       if (!reference) throw new Error(`reviewed spell entry is undefined: ${id}`)
       const catalog = catalogById.get(id)
@@ -23,13 +23,17 @@ describe('release-cleared Chinese SRD 5.1 spell descriptions', () => {
     }
   })
 
-  it('never exposes an unreviewed fallback body through the spellbook', () => {
+  it('exposes only reviewed bodies through the complete SRD spellbook', () => {
     expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED.shield).toMatchObject({
       sourcePage: 179,
       sourceEnglishName: 'Shield',
       castingTime: expect.stringContaining('反应'),
     })
-    expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED.wish).toBeUndefined()
+    expect(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED.wish).toMatchObject({
+      sourcePage: 193,
+      sourceEnglishName: 'Wish',
+      sourceName: '祈愿术',
+    })
 
     const entries = dnd5eSpellbookEntries([])
     expect(entries.find((spell) => spell.id === 'shield')).toMatchObject({
@@ -37,8 +41,25 @@ describe('release-cleared Chinese SRD 5.1 spell descriptions', () => {
       reference: { sourcePage: 179 },
     })
     expect(entries.find((spell) => spell.id === 'wish')).toMatchObject({
-      translationStatus: 'pending-srd-translation',
+      translationStatus: 'context-reviewed',
+      reference: { sourcePage: 193 },
     })
-    expect(entries.find((spell) => spell.id === 'wish')?.reference).toBeUndefined()
+    expect(entries.filter((spell) => spell.sourceKind === 'srd-core' && spell.translationStatus !== 'context-reviewed')).toHaveLength(0)
+  })
+
+  it('does not publish untranslated English prose in spell rule fields', () => {
+    const allowed = new Set(['AC', 'DC', 'DM', 'HP', 'XP', 'gp'])
+    const fields = ['castingTime', 'range', 'components', 'duration', 'description'] as const
+    const residual = Object.entries(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).flatMap(([id, entry]) =>
+      entry
+        ? fields.flatMap((field) =>
+            [...entry[field].matchAll(/[A-Za-z]{2,}/g)]
+              .map((match) => match[0])
+              .filter((token) => !allowed.has(token) && !/^d\d+$/.test(token))
+              .map((token) => `${id}:${field}:${token}`),
+          )
+        : [],
+    )
+    expect(residual).toEqual([])
   })
 })
