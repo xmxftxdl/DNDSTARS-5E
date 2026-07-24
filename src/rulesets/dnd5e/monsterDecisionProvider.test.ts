@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V2,
+  DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
   rankMonsterDecisionCandidates,
   type MonsterDecisionCandidate,
   type MonsterDecisionContext,
@@ -135,5 +136,38 @@ describe('MonsterDecisionProvider', () => {
     )
     expect(aggressive[0].candidate.id).toBe('open-shot')
     expect(defensive[0].candidate.id).toBe('covered-shot')
+  })
+
+  it('V3 compares target priority, concentration and survival risk without creating actions', () => {
+    const ranked = rankMonsterDecisionCandidates(
+      DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
+      context,
+      [
+        candidate('ordinary-target', {
+          expectedDamage: 5,
+          hitProbability: 0.7,
+          attacksThisTurn: true,
+          targetMaximumHp: 20,
+        }),
+        candidate('ordered-concentrator', {
+          expectedDamage: 4,
+          hitProbability: 0.65,
+          attacksThisTurn: true,
+          targetMaximumHp: 20,
+          targetPriorityWeight: 1,
+          targetConcentrating: true,
+        }),
+        candidate('unsafe-route', {
+          expectedDamage: 6,
+          hitProbability: 0.75,
+          attacksThisTurn: true,
+          targetMaximumHp: 20,
+          expectedIncomingDamage: 30,
+        }),
+      ],
+    )
+    expect(ranked[0].candidate.id).toBe('ordered-concentrator')
+    expect(ranked[0].reasons.join(' ')).toContain('专注')
+    expect(ranked.at(-1)?.candidate.id).toBe('unsafe-route')
   })
 })

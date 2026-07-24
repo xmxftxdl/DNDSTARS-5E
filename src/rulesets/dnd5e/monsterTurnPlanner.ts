@@ -36,7 +36,7 @@ import {
   selectDnd5eMonsterPreferredTarget,
 } from './monsterAutomation'
 import {
-  DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V2,
+  DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
   rankMonsterDecisionCandidates,
   type MonsterDecisionCandidate,
   type MonsterDecisionContext,
@@ -406,6 +406,27 @@ function defensiveCoverBonusAgainstTarget(map: BattleMap, enemy: Token, target: 
   return mapGeometryCoverBetween(geometry, target, enemy, map).armorClassBonus
 }
 
+function targetConcentrating(target: Token, characters: readonly Character[]): boolean {
+  const character = target.characterId
+    ? characters.find((candidate) => candidate.id === target.characterId)
+    : undefined
+  return character?.concentrating === true ||
+    !!character?.dnd5eCombatState?.concentrationSpellId ||
+    !!target.dnd5eCombatState?.concentrationSpellId
+}
+
+function targetSupportCount(map: BattleMap, enemyAt: Token, target: Token): number {
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  return map.tokens.filter((candidate) =>
+    candidate.id !== target.id &&
+    candidate.id !== enemyAt.id &&
+    candidate.type !== 'obstacle' &&
+    !areOpposedCombatTokens(candidate, target) &&
+    areOpposedCombatTokens(candidate, enemyAt) &&
+    tokenThreeDimensionalDistanceFeet(map, geometry, candidate, enemyAt) <= 5,
+  ).length
+}
+
 function monsterHasNimbleEscape(monster: Dnd5eMonsterStatBlock): boolean {
   return monster.traits.some((trait) =>
     trait.automation === 'headless' && trait.rule?.kind === 'nimble-escape' &&
@@ -525,6 +546,7 @@ function createTacticalCandidates(input: {
   target: Token
   characters: readonly Character[]
   canUseBonusAction: boolean
+  preferredTargetId?: string
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
   const { map, enemy, monster, target, characters } = input
   const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
@@ -580,6 +602,10 @@ function createTacticalCandidates(input: {
   const preferred = preferredDistanceFeet(monster, role, behaviorStyle)
   const hasNimbleEscape = input.canUseBonusAction && monsterHasNimbleEscape(monster)
   const targetHp = targetHitPoints(target, characters)
+  const targetAc = targetArmorClass(target, characters)
+  const targetIsConcentrating = targetConcentrating(target, characters)
+  const targetThreat = enemy.dnd5eCombatState?.monsterThreatByTargetId?.[target.id] ?? 0
+  const targetPriorityWeight = target.id === input.preferredTargetId ? 1 : 0
   const candidates: MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] = []
   const routeCache = new Map<string, ExactMonsterRoute | null>()
   const exactRoute = (plan: Dnd5eMonsterTurnPlan): ExactMonsterRoute | undefined => {
@@ -639,6 +665,7 @@ function createTacticalCandidates(input: {
       const route = exactRoute(plan)
       if (!route) continue
       const coverBonus = defensiveCoverBonusAgainstTarget(map, at, target)
+      const supportCount = targetSupportCount(map, at, target)
       const kind = !moved ? 'attack'
         : distanceFeet > startDistanceFeet ? 'retreat-attack'
           : 'move-attack'
@@ -649,6 +676,12 @@ function createTacticalCandidates(input: {
         metrics: {
           expectedDamage: attackValue.expectedDamage,
           targetCurrentHp: targetHp.current,
+          targetMaximumHp: targetHp.maximum,
+          targetArmorClass: targetAc,
+          targetPriorityWeight,
+          targetThreat,
+          targetConcentrating: targetIsConcentrating,
+          targetSupportCount: supportCount,
           hitProbability: attackValue.hitProbability,
           targetDistanceFeet: distanceFeet,
           preferredDistanceFeet: preferred,
@@ -694,13 +727,20 @@ function createTacticalCandidates(input: {
     const route = exactRoute(plan)
     if (!route) continue
     const coverBonus = defensiveCoverBonusAgainstTarget(map, at, target)
+    const supportCount = targetSupportCount(map, at, target)
     candidates.push({
-      id: `${moved ? 'move-dodge' : 'dodge'}:${reachable.cell.col},${reachable.cell.row}:${desiredElevationFeet}`,
+      id: `${moved ? 'move-dodge' : 'dodge'}:${target.id}:${reachable.cell.col},${reachable.cell.row}:${desiredElevationFeet}`,
       kind: moved ? 'move-dodge' : 'dodge',
       payload: plan,
       metrics: {
         expectedDamage: 0,
         targetCurrentHp: targetHp.current,
+        targetMaximumHp: targetHp.maximum,
+        targetArmorClass: targetAc,
+        targetPriorityWeight,
+        targetThreat,
+        targetConcentrating: targetIsConcentrating,
+        targetSupportCount: supportCount,
         hitProbability: 0,
         targetDistanceFeet: distanceFeet,
         preferredDistanceFeet: preferred,
@@ -747,13 +787,20 @@ function createTacticalCandidates(input: {
     const route = exactRoute(plan)
     if (!route) continue
     const coverBonus = defensiveCoverBonusAgainstTarget(map, at, target)
+    const supportCount = targetSupportCount(map, at, target)
     candidates.push({
-      id: `dash:${reachable.cell.col},${reachable.cell.row}:${desiredElevationFeet}`,
+      id: `dash:${target.id}:${reachable.cell.col},${reachable.cell.row}:${desiredElevationFeet}`,
       kind: 'dash',
       payload: plan,
       metrics: {
         expectedDamage: 0,
         targetCurrentHp: targetHp.current,
+        targetMaximumHp: targetHp.maximum,
+        targetArmorClass: targetAc,
+        targetPriorityWeight,
+        targetThreat,
+        targetConcentrating: targetIsConcentrating,
+        targetSupportCount: supportCount,
         hitProbability: 0,
         targetDistanceFeet: distanceFeet,
         preferredDistanceFeet: preferred,
@@ -806,24 +853,30 @@ export function planDnd5eMonsterTurn(
     }
   }
 
-  const target = selectDnd5eMonsterPreferredTarget({ map, enemy, monster, characters })
-  if (!target) return { moved: false, attacked: false, message: `${enemy.label} 找不到可攻击目标。` }
+  const preferredTarget = selectDnd5eMonsterPreferredTarget({ map, enemy, monster, characters })
+  if (!preferredTarget) return { moved: false, attacked: false, message: `${enemy.label} 找不到可攻击目标。` }
+  const targets = map.tokens.filter((target) =>
+    target.id !== enemy.id &&
+    target.type !== 'obstacle' &&
+    areOpposedCombatTokens(enemy, target) &&
+    targetHitPoints(target, characters).current > 0,
+  )
   const role = monsterTacticalRole(monster)
   const behaviorStyle = dnd5eMonsterEffectiveBehaviorStyle(enemy, role)
   const hp = targetHitPoints(enemy, characters)
-  const candidates = createTacticalCandidates({
+  const candidates = targets.flatMap((target) => createTacticalCandidates({
     map,
     enemy,
     monster,
     target,
     characters,
     canUseBonusAction: (options.turnEconomy?.bonusAction.current ?? 1) > 0,
-  })
-  const provider = options.decisionProvider ?? DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V2
+    preferredTargetId: preferredTarget.id,
+  }))
+  const provider = options.decisionProvider ?? DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3
   const ranked = rankMonsterDecisionCandidates(provider, {
     monsterId: monster.id,
     actorTokenId: enemy.id,
-    targetTokenId: target.id,
     currentHp: hp.current,
     maxHp: hp.maximum,
     tacticalRole: role,
@@ -837,7 +890,7 @@ export function planDnd5eMonsterTurn(
       moved: false,
       attacked: false,
       attackerTokenId: enemy.id,
-      targetTokenId: target.id,
+      targetTokenId: preferredTarget.id,
       message: `${enemy.label} 没有可通过权威几何复核的战术方案。`,
     }
   }

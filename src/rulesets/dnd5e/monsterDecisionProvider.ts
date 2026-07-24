@@ -17,6 +17,26 @@ export interface MonsterDecisionContext {
 export interface MonsterDecisionMetrics {
   expectedDamage: number
   targetCurrentHp: number
+  /** 目标最大生命值；旧 Provider 缺失时按当前生命值处理。 */
+  targetMaximumHp?: number
+  /** 目标当前 AC，只用于合法候选之间的战术比较。 */
+  targetArmorClass?: number
+  /** DM 目标偏好生成的 0..1 权重；不替代 Host 的目标合法性检查。 */
+  targetPriorityWeight?: number
+  /** 该目标对当前怪物累积的仇恨值。 */
+  targetThreat?: number
+  /** 打断专注的战术收益。 */
+  targetConcentrating?: boolean
+  /** 目标周围可以立即支援或威胁当前怪物的敌对生物数。 */
+  targetSupportCount?: number
+  /** 当前路线结束后，预计下一轮会承受的基础伤害。 */
+  expectedIncomingDamage?: number
+  /** 多目标或控制型能力的额外收益；仅允许 Host 对已实现能力填入。 */
+  controlValue?: number
+  /** 治疗、保护或恢复资源的收益；仅允许 Host 对已实现能力填入。 */
+  supportValue?: number
+  /** 稀缺能力的资源成本，越高越不应浪费。 */
+  resourceCost?: number
   hitProbability: number
   targetDistanceFeet: number
   preferredDistanceFeet: number
@@ -134,14 +154,19 @@ interface BehaviorWeights {
   dodge: number
   dash: number
   retreat: number
+  targetPriority: number
+  survival: number
+  control: number
+  support: number
+  resource: number
 }
 
 const BEHAVIOR_WEIGHTS: Readonly<Record<Dnd5eMonsterBehaviorStyle, BehaviorWeights>> = {
-  balanced: { damage: 1, cover: 1, opportunityRisk: 1, distance: 1, dodge: 1, dash: 1, retreat: 0 },
-  aggressive: { damage: 1.25, cover: 0.55, opportunityRisk: 0.6, distance: 1.05, dodge: 0.5, dash: 1.25, retreat: -3 },
-  defensive: { damage: 0.9, cover: 1.8, opportunityRisk: 1.45, distance: 1.15, dodge: 1.45, dash: 0.8, retreat: 3 },
-  skirmisher: { damage: 1.05, cover: 1.5, opportunityRisk: 1.55, distance: 1.45, dodge: 1, dash: 0.9, retreat: 5 },
-  cowardly: { damage: 0.72, cover: 2.1, opportunityRisk: 1.9, distance: 1.7, dodge: 1.8, dash: 1.2, retreat: 8 },
+  balanced: { damage: 1, cover: 1, opportunityRisk: 1, distance: 1, dodge: 1, dash: 1, retreat: 0, targetPriority: 1, survival: 1, control: 1, support: 1, resource: 1 },
+  aggressive: { damage: 1.25, cover: 0.55, opportunityRisk: 0.6, distance: 1.05, dodge: 0.5, dash: 1.25, retreat: -3, targetPriority: 0.9, survival: 0.55, control: 0.8, support: 0.65, resource: 0.75 },
+  defensive: { damage: 0.9, cover: 1.8, opportunityRisk: 1.45, distance: 1.15, dodge: 1.45, dash: 0.8, retreat: 3, targetPriority: 1.05, survival: 1.55, control: 1.15, support: 1.25, resource: 1.15 },
+  skirmisher: { damage: 1.05, cover: 1.5, opportunityRisk: 1.55, distance: 1.45, dodge: 1, dash: 0.9, retreat: 5, targetPriority: 1.1, survival: 1.3, control: 1, support: 0.9, resource: 1 },
+  cowardly: { damage: 0.72, cover: 2.1, opportunityRisk: 1.9, distance: 1.7, dodge: 1.8, dash: 1.2, retreat: 8, targetPriority: 0.8, survival: 2, control: 0.7, support: 1.1, resource: 1.35 },
 }
 
 /**
@@ -220,5 +245,71 @@ export const DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V2: MonsterDecisio
     }
 
     return { candidateId: candidate.id, score, reasons }
+  },
+}
+
+/**
+ * Tactical Planner V3 仍只为 Host 已生成的合法候选评分。
+ * 相比 V2，它会比较不同目标、专注、仇恨、生存风险、控制收益和资源效率；
+ * 旧插件 Provider 协议保持 schemaVersion 1，不需要迁移。
+ */
+export const DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3: MonsterDecisionProvider = {
+  id: 'dnd5e:deterministic-tactical-v3',
+  schemaVersion: 1,
+  scoreCandidate(context, candidate) {
+    const base = DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V2.scoreCandidate(context, candidate)
+    const metrics = candidate.metrics
+    const weights = BEHAVIOR_WEIGHTS[context.behaviorStyle]
+    const reasons = [...base.reasons]
+    let score = base.score
+
+    const maximumHp = Math.max(1, metrics.targetMaximumHp ?? metrics.targetCurrentHp)
+    const targetHpRatio = Math.max(0, Math.min(1, metrics.targetCurrentHp / maximumHp))
+    const priorityWeight = Math.max(0, Math.min(1, metrics.targetPriorityWeight ?? 0))
+    if (priorityWeight > 0) {
+      // DM 显式偏好是战术指令而不是轻微建议；仍允许在该目标完全不可达时回退到其他合法目标。
+      score += priorityWeight * 48 * weights.targetPriority
+      reasons.push(`符合 DM 目标偏好 ${rounded(priorityWeight * 100)}%`)
+    }
+    if (metrics.attacksThisTurn && targetHpRatio <= 0.35) {
+      score += (1 - targetHpRatio) * 12 * weights.damage
+      reasons.push('优先压制低生命值目标')
+    }
+    if (metrics.attacksThisTurn && metrics.targetConcentrating) {
+      score += Math.max(2, metrics.hitProbability * 10) * weights.control
+      reasons.push('命中可能迫使目标进行专注豁免')
+    }
+    if ((metrics.targetThreat ?? 0) > 0) {
+      score += Math.min(12, Math.log2(1 + (metrics.targetThreat ?? 0)) * 2.5) * weights.targetPriority
+      reasons.push('目标已对该怪物造成有效威胁')
+    }
+    if ((metrics.controlValue ?? 0) > 0) {
+      score += (metrics.controlValue ?? 0) * weights.control
+      reasons.push('能力具有控制或多目标收益')
+    }
+    if ((metrics.supportValue ?? 0) > 0) {
+      score += (metrics.supportValue ?? 0) * weights.support
+      reasons.push('能力具有治疗或保护收益')
+    }
+    if ((metrics.expectedIncomingDamage ?? 0) > 0) {
+      const hpRatio = Math.max(0, Math.min(1, context.currentHp / Math.max(1, context.maxHp)))
+      const survivalPenalty = (metrics.expectedIncomingDamage ?? 0) *
+        (1.25 - hpRatio * 0.5) * weights.survival
+      score -= survivalPenalty
+      reasons.push(`预计承伤 ${rounded(metrics.expectedIncomingDamage ?? 0)}`)
+    }
+    if ((metrics.targetSupportCount ?? 0) > 0) {
+      score -= (metrics.targetSupportCount ?? 0) * 1.5 * weights.survival
+    }
+    if ((metrics.resourceCost ?? 0) > 0) {
+      score -= (metrics.resourceCost ?? 0) * weights.resource
+      reasons.push('计入有限资源成本')
+    }
+
+    return {
+      candidateId: candidate.id,
+      score,
+      reasons: reasons.slice(0, 12),
+    }
   },
 }

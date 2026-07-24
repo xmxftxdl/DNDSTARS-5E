@@ -46,7 +46,7 @@ describe('SRD monster 5e turn planner', () => {
       attacked: true,
       actionIndex: 1,
       nimbleEscape: 'disengage',
-      decision: { providerId: 'dnd5e:deterministic-tactical-v2' },
+      decision: { providerId: 'dnd5e:deterministic-tactical-v3' },
     })
     expect(plan.decision?.reasons.join(' ')).toContain('灵巧脱逃')
 
@@ -331,7 +331,7 @@ describe('SRD monster 5e turn planner', () => {
       dodged: true,
       attackerTokenId: wolf.id,
       targetTokenId: hero.id,
-      decision: { providerId: 'dnd5e:deterministic-tactical-v2' },
+      decision: { providerId: 'dnd5e:deterministic-tactical-v3' },
     })
   })
 
