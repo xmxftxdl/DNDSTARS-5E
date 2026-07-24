@@ -70,6 +70,16 @@ export interface Dnd5eMonsterCoreSpellCompatibility {
 export function dnd5eMonsterCoreSpellCompatibility(
   spell: Dnd5eSrdSpellDefinition,
 ): Dnd5eMonsterCoreSpellCompatibility {
+  if (['blight', 'disintegrate', 'finger-of-death'].includes(spell.id)) {
+    return {
+      automation: 'manual',
+      reason: spell.id === 'blight'
+        ? '构装/亡灵免疫与植物目标最大伤害尚未结构化'
+        : spell.id === 'disintegrate'
+          ? '降至 0 HP 时的解离结果尚未结构化'
+          : '击杀人形生物后的僵尸创建尚未结构化',
+    }
+  }
   if (spell.target === 'area' || spell.area) {
     return { automation: 'manual', reason: '需要地图区域原点与区域内目标的权威快照' }
   }

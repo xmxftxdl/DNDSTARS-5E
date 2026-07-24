@@ -45,6 +45,8 @@ export interface Dnd5eCustomMonsterActionDraft {
   damageDice: string
   damageType: Dnd5eDamageType
   additionalDamage: Array<{ id: string; dice: string; damageType: Dnd5eDamageType }>
+  criticalThreshold: number
+  criticalExtraDamage: Array<{ id: string; dice: string; damageType: Dnd5eDamageType }>
   onHitSaveEnabled: boolean
   onHitSaveAbility: AbilityKey
   onHitSaveDc: number
@@ -97,7 +99,7 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   hpPercentageAtOrBelow?: number
   hpPercentageAtOrAbove?: number
   requiresPositiveHp: boolean
-  effectKind: 'healing' | 'temporary-hit-points' | 'damage' | 'standard-condition' | 'summon' | 'area-attack'
+  effectKind: 'healing' | 'temporary-hit-points' | 'damage' | 'standard-condition' | 'remove-standard-condition' | 'summon' | 'area-attack'
   effectTarget: Dnd5eMonsterMechanicEffectTargetV2
   healingDice: string
   damageType: Dnd5eDamageType
@@ -206,6 +208,8 @@ export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionD
     damageDice: '1d6+1',
     damageType: 'slashing',
     additionalDamage: [],
+    criticalThreshold: 20,
+    criticalExtraDamage: [],
     onHitSaveEnabled: false,
     onHitSaveAbility: 'str',
     onHitSaveDc: 12,
@@ -357,6 +361,14 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
       type: component.damageType,
     }
   })
+  const criticalExtraDamage = action.criticalExtraDamage.map((component) => {
+    const dice = parseDice(component.dice)
+    return {
+      average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+      ...dice,
+      type: component.damageType,
+    }
+  })
   const attack = {
     mode: action.mode,
     toHit: Math.trunc(action.toHit),
@@ -373,6 +385,10 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
       ...parsed,
       type: action.damageType,
     }, ...additionalDamage],
+    ...(action.criticalThreshold < 20 ? {
+      criticalThreshold: Math.max(2, Math.min(20, Math.trunc(action.criticalThreshold))),
+    } : {}),
+    ...(criticalExtraDamage.length > 0 ? { criticalExtraDamage } : {}),
     ...(action.onHitSaveEnabled ? {
       onHitRule: {
         kind: 'saving-throw-condition' as const,
@@ -502,6 +518,11 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                 ? { kind: 'rounds' as const, rounds: Math.max(1, Math.trunc(mechanic.durationRounds)) }
                 : { kind: mechanic.durationKind },
             }
+          : mechanic.effectKind === 'remove-standard-condition'
+            ? {
+                id: 'effect-0', kind: 'remove-standard-condition' as const,
+                target: mechanic.effectTarget, condition: mechanic.condition,
+              }
           : mechanic.effectKind === 'summon'
             ? {
                 id: 'effect-0', kind: 'summon' as const, monsterId: mechanic.summonMonsterId,
@@ -659,6 +680,12 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
           dice: `${component.count}d${component.sides}${component.bonus === 0 ? '' : component.bonus > 0 ? `+${component.bonus}` : component.bonus}`,
           damageType: component.type,
         })),
+        criticalThreshold: action.attack?.criticalThreshold ?? 20,
+        criticalExtraDamage: (action.attack?.criticalExtraDamage ?? []).map((component) => ({
+          id: `critical-damage-${uid().slice(0, 8)}`,
+          dice: `${component.count}d${component.sides}${component.bonus === 0 ? '' : component.bonus > 0 ? `+${component.bonus}` : component.bonus}`,
+          damageType: component.type,
+        })),
         onHitSaveEnabled: action.attack?.onHitRule?.kind === 'saving-throw-condition',
         onHitSaveAbility: action.attack?.onHitRule?.ability ?? 'str',
         onHitSaveDc: action.attack?.onHitRule?.dc ?? 12,
@@ -753,7 +780,9 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         effectTarget: effect && 'target' in effect ? effect.target : 'self',
         healingDice: `${dice.count}d${dice.sides}${dice.bonus === 0 ? '' : dice.bonus > 0 ? `+${dice.bonus}` : dice.bonus}`,
         damageType: effect && 'damageType' in effect ? effect.damageType : 'necrotic',
-        condition: effect?.kind === 'standard-condition' ? effect.condition : 'frightened',
+        condition: effect?.kind === 'standard-condition' || effect?.kind === 'remove-standard-condition'
+          ? effect.condition
+          : 'frightened',
         durationKind: duration.kind,
         durationRounds: duration.kind === 'rounds' ? duration.rounds : 1,
         summonMonsterId: effect?.kind === 'summon' ? effect.monsterId : 'srd-5.1:wolf',

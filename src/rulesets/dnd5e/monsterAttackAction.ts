@@ -5,6 +5,7 @@ import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
+import { resolveDnd5eAttackOutcome } from './attackResolution'
 import {
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
@@ -270,7 +271,15 @@ export function previewDnd5eMonsterAttack(
     protectedAttack,
   )
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
-  return rules.resolveAttack({ rolls, mode, modifier: definition.attack.toHit + (blessRoll ?? 0) - (baneRoll ?? 0), targetAc: prepared.targetArmorClass })
+  return resolveDnd5eAttackOutcome({
+    attack: rules.resolveAttack({
+      rolls,
+      mode,
+      modifier: definition.attack.toHit + (blessRoll ?? 0) - (baneRoll ?? 0),
+      targetAc: prepared.targetArmorClass,
+    }),
+    criticalThreshold: definition.attack.criticalThreshold,
+  })
 }
 
 export function dnd5eMonsterAttackModeWithProtection(

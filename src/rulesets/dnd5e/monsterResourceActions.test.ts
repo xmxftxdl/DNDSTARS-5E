@@ -5,6 +5,7 @@ import {
   startDnd5eHeadlessCombat,
 } from './headlessCombatEngine'
 import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
+import { createDnd5eConditionEffect } from './activeEffects'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -115,6 +116,149 @@ describe('D&D 5e monster resource actions', () => {
       type: 'monster-core-spell-resolved',
       actorId: 'mage',
       spellId: 'fire-bolt',
+    }))
+  })
+
+  it('rejects a monster core spell through total cover', () => {
+    const target = combatant('target', 10, { controller: 'player', currentHp: 30, maxHp: 30 })
+    const mage = combatant('mage', 20, { statBlockId: 'srd-5.1:mage' })
+    const state = startDnd5eHeadlessCombat('monster-core-spell-cover', [mage, target])
+    state.distanceFeetByCombatantPair = { ['mage\u0000target']: 30 }
+    state.lineOfEffectBlockedByCombatantPair = { ['mage\u0000target']: true }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'mage',
+      spellId: 'fire-bolt',
+      slotLevel: 0,
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['target'],
+        d20: 15,
+        effectRolls: [[5, 6]],
+      },
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('spends both committed resources when a player counterspells a monster spell', () => {
+    const target = combatant('target', 10, { controller: 'player', currentHp: 30, maxHp: 30 })
+    const cultist = combatant('cultist', 20, {
+      statBlockId: 'srd-5.1:cult-fanatic',
+      classState: { monsterSpellSlots: { 1: { current: 2, max: 2 } } },
+    })
+    const wizard = combatant('wizard', 15, {
+      controller: 'player',
+      classId: 'wizard',
+      classLevels: { wizard: 5 },
+      level: 5,
+      classSelections: { 'spell-prepared': ['counterspell'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['counterspell'] } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const state = startDnd5eHeadlessCombat('monster-core-spell-counterspell', [cultist, wizard, target])
+    state.distanceFeetByCombatantPair = {
+      ['cultist\u0000target']: 5,
+      ['cultist\u0000wizard']: 30,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'cultist',
+      spellId: 'inflict-wounds',
+      slotLevel: 1,
+      counterspellReaction: { actorId: 'wizard', slotLevel: 3 },
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['target'],
+        d20: 18,
+        effectRolls: [[5, 5, 5]],
+      },
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.target.currentHp).toBe(30)
+    expect(result.state.combatants.cultist.classState.monsterSpellSlots?.['1'].current).toBe(1)
+    expect(result.state.combatants.wizard.classResources['dnd5e-spell-slot-3'].current).toBe(0)
+    expect(result.state.combatants.wizard.turn.reactionAvailable).toBe(false)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'counterspell-resolved',
+      actorId: 'wizard',
+      success: true,
+    }))
+    expect(result.events.some((event) => event.type === 'monster-core-spell-resolved')).toBe(false)
+  })
+
+  it('requires the counterspeller to see the monster caster', () => {
+    const target = combatant('target', 10, { controller: 'player' })
+    const cultist = combatant('cultist', 20, {
+      statBlockId: 'srd-5.1:cult-fanatic',
+      classState: { monsterSpellSlots: { 1: { current: 2, max: 2 } } },
+    })
+    const wizard = combatant('wizard', 15, {
+      controller: 'player',
+      classId: 'wizard',
+      classLevels: { wizard: 5 },
+      level: 5,
+      classSelections: { 'spell-prepared': ['counterspell'] },
+      classSelectionsByClass: { wizard: { 'spell-prepared': ['counterspell'] } },
+      classResources: { 'dnd5e-spell-slot-3': { current: 1, max: 1 } },
+    })
+    const state = startDnd5eHeadlessCombat('monster-counterspell-sight', [cultist, wizard, target])
+    state.distanceFeetByCombatantPair = {
+      ['cultist\u0000target']: 5,
+      ['cultist\u0000wizard']: 30,
+    }
+    state.lineOfSightBlockedByCombatantPair = {
+      ['wizard\u0000cultist']: true,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'cultist',
+      spellId: 'inflict-wounds',
+      slotLevel: 1,
+      counterspellReaction: { actorId: 'wizard', slotLevel: 3 },
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['target'],
+        d20: 18,
+        effectRolls: [[5, 5, 5]],
+      },
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+  })
+
+  it('makes a monster spell attack critical against a paralyzed target within 5 feet', () => {
+    const target = combatant('target', 10, {
+      controller: 'player',
+      currentHp: 30,
+      maxHp: 30,
+      classState: {
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'paralyzed',
+          source: { kind: 'spell', actorId: 'mage', rulesId: 'hold-person' },
+          targetId: 'target',
+        })],
+      },
+    })
+    const mage = combatant('mage', 20, { statBlockId: 'srd-5.1:mage' })
+    const state = startDnd5eHeadlessCombat('monster-spell-auto-critical', [mage, target])
+    state.distanceFeetByCombatantPair = { ['mage\u0000target']: 5 }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-core-spell',
+      actorId: 'mage',
+      spellId: 'fire-bolt',
+      slotLevel: 0,
+      resolution: {
+        schemaVersion: 1,
+        targetIds: ['target'],
+        d20: 10,
+        d20Second: 10,
+        effectRolls: [[2, 3, 4, 5]],
+      },
+    })
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    expect(result.state.combatants.target.currentHp).toBe(16)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      critical: true,
     }))
   })
 

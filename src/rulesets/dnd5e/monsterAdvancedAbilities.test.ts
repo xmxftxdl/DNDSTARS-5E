@@ -45,5 +45,13 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fireball')!)).toMatchObject({
       automation: 'manual',
     })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('blight')!)).toMatchObject({
+      automation: 'manual',
+      reason: expect.stringContaining('亡灵'),
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('disintegrate')!)).toMatchObject({
+      automation: 'manual',
+      reason: expect.stringContaining('解离'),
+    })
   })
 })

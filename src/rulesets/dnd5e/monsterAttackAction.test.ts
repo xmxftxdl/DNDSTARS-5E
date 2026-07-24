@@ -11,7 +11,7 @@ import {
   previewDnd5eMonsterAttack,
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
-import { createDnd5eMechanicalEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 
 function character(): Character {
   return { id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 40, currentHp: 40, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -109,7 +109,7 @@ describe('SRD monster map action adapter', () => {
         { d20: 10, damageRolls: [[4, 4]] },
       ],
     })
-    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
     expect(resolved.application?.characters[0].currentHp).toBe(17)
     expect(resolved.application?.changedCharacterIds).toEqual([hero.id])
     expect(resolved.application?.changedTokenIds).toEqual(['owlbear', heroToken.id])
@@ -228,6 +228,158 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.application?.characters[0].conditions).toContain('frightened')
     expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'monster-mechanic-v2-triggered', actorId: enemy.id, mechanicId: 'burning-strike', trigger: 'after-hit',
+    }))
+  })
+
+  it('uses a custom critical range and validates critical-only extra damage dice', () => {
+    const hero = character()
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.actions[0].criticalThreshold = 19
+    draft.actions[0].criticalExtraDamage = [{
+      id: 'brutal',
+      dice: '1d6',
+      damageType: 'slashing',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const enemy = token({
+      id: 'critical-monster',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'critical-map',
+      name: 'Critical map',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [enemy, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'combat',
+      map,
+      characters: [hero],
+      initiativeOrder: [enemy, heroToken].map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      })),
+      actorTokenId: enemy.id,
+      targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(previewDnd5eMonsterAttack(prepared.prepared, 0, 19).critical).toBe(true)
+    expect(resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 19, damageRolls: [[4, 3]] }],
+    }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 19, damageRolls: [[4, 3], [6]] }],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      critical: true,
+    }))
+    expect(resolved.application?.characters[0].currentHp).toBe(26)
+  })
+
+  it('removes a standard condition through an after-hit Headless mechanism', () => {
+    const hero = { ...character(), conditions: ['frightened'] }
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'rallying-hit',
+      name: 'Rallying Hit',
+      trigger: 'after-hit',
+      hpPercentageAtOrBelow: 100,
+      effectKind: 'remove-standard-condition',
+      effectTarget: 'trigger-target',
+      condition: 'frightened',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const enemy = token({ id: 'rally-monster', poolId: monster.id })
+    const heroToken = token({
+      id: 'hero-token',
+      type: 'player',
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'frightened',
+          source: { kind: 'monster', actorId: 'fear-source', rulesId: 'test-fear' },
+          targetId: 'hero-token',
+        })],
+      },
+    })
+    const map: BattleMap = {
+      id: 'rally-map',
+      name: 'Rally map',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [enemy, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'combat',
+      map,
+      characters: [hero],
+      initiativeOrder: [enemy, heroToken].map((entry, index) => ({
+        tokenId: entry.id,
+        label: entry.label,
+        emoji: '',
+        color: '',
+        roll: 20 - index,
+      })),
+      actorTokenId: enemy.id,
+      targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(previewDnd5eMonsterAttack(prepared.prepared, 0, 15).hit).toBe(true)
+    expect(prepareDnd5eMonsterAfterHitMechanics(prepared.prepared, true)).toEqual([
+      expect.objectContaining({ mechanicId: 'rallying-hit', targetId: heroToken.id, effects: [] }),
+    ])
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 15, damageRolls: [[4]] }],
+      mechanicRolls: [{
+        actorId: enemy.id,
+        mechanicId: 'rallying-hit',
+        targetId: heroToken.id,
+        effectRolls: [],
+      }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.state.combatants[heroToken.id].conditions).not.toContain('frightened')
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'monster-mechanic-v2-triggered',
+      mechanicId: 'rallying-hit',
+      outcomes: [expect.objectContaining({
+        kind: 'remove-standard-condition',
+        condition: 'frightened',
+        applied: true,
+      })],
     }))
   })
 

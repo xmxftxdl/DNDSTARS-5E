@@ -176,6 +176,8 @@ describe('D&D 5e custom monster workshop', () => {
       usageKind: 'per-day',
       usageMax: 3,
       additionalDamage: [{ id: 'fire', dice: '1d6', damageType: 'fire' }],
+      criticalThreshold: 19,
+      criticalExtraDamage: [{ id: 'brutal', dice: '1d8', damageType: 'slashing' }],
       onHitSaveEnabled: true,
       onHitSaveAbility: 'con',
       onHitSaveDc: 14,
@@ -210,6 +212,8 @@ describe('D&D 5e custom monster workshop', () => {
         usage: { kind: 'per-day', max: 3 },
         attack: expect.objectContaining({
           damage: [expect.anything(), expect.objectContaining({ type: 'fire' })],
+          criticalThreshold: 19,
+          criticalExtraDamage: [{ average: 4, count: 1, sides: 8, bonus: 0, type: 'slashing' }],
           onHitRule: { kind: 'saving-throw-condition', ability: 'con', dc: 14, condition: 'stunned' },
         }),
       })],
@@ -223,9 +227,43 @@ describe('D&D 5e custom monster workshop', () => {
       tokenPortrait: draft.tokenPortrait,
       initiativePortrait: draft.initiativePortrait,
       actions: [
-        expect.objectContaining({ usageKind: 'per-day', usageMax: 3, onHitCondition: 'stunned' }),
+        expect.objectContaining({
+          usageKind: 'per-day',
+          usageMax: 3,
+          onHitCondition: 'stunned',
+          criticalThreshold: 19,
+          criticalExtraDamage: [expect.objectContaining({ dice: '1d8', damageType: 'slashing' })],
+        }),
         expect.objectContaining({ category: 'legendary', legendaryCost: 2 }),
       ],
+    })
+  })
+
+  it('round-trips a Headless standard-condition removal mechanism', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'shake-it-off',
+      name: 'Shake It Off',
+      trigger: 'turn-start',
+      effectKind: 'remove-standard-condition',
+      effectTarget: 'self',
+      condition: 'frightened',
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.headlessMechanics?.[0]).toMatchObject({
+      schemaVersion: 2,
+      effects: [{
+        id: 'effect-0',
+        kind: 'remove-standard-condition',
+        target: 'self',
+        condition: 'frightened',
+      }],
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics[0]).toMatchObject({
+      effectKind: 'remove-standard-condition',
+      condition: 'frightened',
     })
   })
 })

@@ -95,6 +95,12 @@ export type Dnd5eMonsterMechanicEffectV2 =
     }
   | {
       id: string
+      kind: 'remove-standard-condition'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      condition: Dnd5eStandardConditionId
+    }
+  | {
+      id: string
       kind: 'summon'
       monsterId: string
       count: number
@@ -142,6 +148,10 @@ export interface Dnd5eMonsterWeaponAttack {
   rangeFeet?: { normal: number; long: number }
   target: string
   damage: readonly Dnd5eMonsterDamage[]
+  /** Natural d20 result that starts the critical range. Defaults to 20. */
+  criticalThreshold?: number
+  /** Extra dice added only on a critical hit, after normal damage dice are doubled. */
+  criticalExtraDamage?: readonly Dnd5eMonsterDamage[]
   /** 群集在生命值不高于一半时使用的替代伤害。 */
   damageAtHalfHp?: readonly Dnd5eMonsterDamage[]
   onHit?: string

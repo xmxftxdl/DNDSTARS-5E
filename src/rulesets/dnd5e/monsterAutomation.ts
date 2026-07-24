@@ -170,11 +170,11 @@ export function dnd5eMonsterMechanicCompatibility(
     if (effect.kind === 'summon') reasons.push('召唤效果需要 DM 或触发来源提供合法地图落点。')
     if (effect.kind === 'area-attack') reasons.push('范围攻击需要 DM 确认范围方向、覆盖格与目标集合。')
     if (
-      (effect.kind === 'damage' || effect.kind === 'standard-condition') &&
+      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition') &&
       effect.target === 'damage-source'
     ) reasons.push('伤害来源目标只在受到伤害后的反应事务中可用。')
     if (
-      (effect.kind === 'damage' || effect.kind === 'standard-condition') &&
+      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition') &&
       effect.target === 'trigger-target' && event !== 'after-hit'
     ) reasons.push('“触发目标”当前只在命中后事务中有权威目标。')
   }

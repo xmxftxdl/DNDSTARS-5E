@@ -87,6 +87,8 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     !finiteInteger(attack.toHit, -100, 100) || !requiredText(attack.target, 500) ||
     !validateDamageList(attack.damage)) return false
   if (attack.damageAtHalfHp != null && !validateDamageList(attack.damageAtHalfHp)) return false
+  if (attack.criticalThreshold != null && !finiteInteger(attack.criticalThreshold, 2, 20)) return false
+  if (attack.criticalExtraDamage != null && !validateDamageList(attack.criticalExtraDamage)) return false
   if (attack.reachFeet != null && !finiteInteger(attack.reachFeet, 0, 10_000)) return false
   if (attack.rangeFeet != null && (!isRecord(attack.rangeFeet) ||
     !finiteInteger(attack.rangeFeet.normal, 0, 100_000) || !finiteInteger(attack.rangeFeet.long, 0, 100_000) ||
@@ -146,6 +148,9 @@ function mechanicEffectV2IsValid(raw: unknown): boolean {
     return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition)) && !!duration &&
       ['permanent', 'until-target-turn-start', 'until-source-turn-start', 'rounds'].includes(String(duration.kind)) &&
       (duration.kind !== 'rounds' || finiteInteger(duration.rounds, 1, 10_000))
+  }
+  if (raw.kind === 'remove-standard-condition') {
+    return MECHANIC_TARGETS.has(String(raw.target)) && STANDARD_CONDITIONS.has(String(raw.condition))
   }
   if (raw.kind === 'summon') {
     return requiredText(raw.monsterId, 120) && ID_PATTERN.test(String(raw.monsterId)) &&
