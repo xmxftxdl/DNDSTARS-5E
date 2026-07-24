@@ -229,12 +229,15 @@ export default function EquipmentTab({
                 <input
                   type="number"
                   min={0}
+                  max={isDm ? undefined : inventory.currency?.[currency] ?? 0}
                   step={1}
                   defaultValue={inventory.currency?.[currency] ?? 0}
                   disabled={!editable || pending || combatManagementLocked}
                   onBlur={(event) => {
                     const current = inventory.currency?.[currency] ?? 0
-                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
+                    const requested = Math.max(0, Math.floor(Number(event.target.value) || 0))
+                    const next = isDm ? requested : Math.min(current, requested)
+                    event.target.value = String(next)
                     if (next !== current) run({ type: 'adjust-currency', characterId: character.id, currency, delta: next - current })
                   }}
                   className="w-full rounded-lg border border-white/10 bg-void-900/70 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-arcane-500 disabled:opacity-50"

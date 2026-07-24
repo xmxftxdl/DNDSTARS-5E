@@ -137,6 +137,61 @@ describe('member-specific shared state projections', () => {
     expect(projected.characters[2]).not.toHaveProperty('equipment')
   })
 
+  it('does not disclose unidentified item templates or Headless effects to their player owner', () => {
+    const projected = projectCharactersForRoomMember({
+      characters: [{
+        id: 'own',
+        roomMemberId: 'player-a',
+        visibleToPlayers: true,
+        dnd5eInventory: {
+          schemaVersion: 3,
+          entries: [{
+            instanceId: 'mystery-1',
+            templateId: 'srd-5.1:item:ring-of-invisibility',
+            item: {
+              id: 'srd-5.1:item:ring-of-invisibility',
+              name: '隐形戒指',
+              englishName: 'Ring of Invisibility',
+              category: 'magic-item',
+              icon: 'magic-ring',
+              description: '秘密正文',
+              rulesText: '可以施展隐形术。',
+              stackable: false,
+              magicItem: { kind: 'ring', rarity: 'legendary', attunement: 'required', automation: 'headless' },
+              resources: [{ id: 'charges', label: '充能', maximum: 4, resetOn: 'dawn' }],
+              headlessEffects: [{ kind: 'attack-roll-reroll', resourceId: 'charges', maximumDice: 1, trigger: 'after-attack-roll', appliesTo: 'weapon-attacks' }],
+              source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+            },
+            quantity: 1,
+            resources: { charges: { id: 'charges', label: '充能', current: 4, maximum: 4, resetOn: 'dawn' } },
+            identified: false,
+            acquiredAt: 1,
+          }],
+        },
+      }],
+    }, member)
+    const entry = (projected.characters[0] as {
+      dnd5eInventory: {
+        entries: Array<{
+          instanceId: string
+          templateId: string
+          identified: boolean
+          item: Record<string, unknown>
+        }>
+      }
+    }).dnd5eInventory.entries[0]
+    expect(entry).toMatchObject({
+      instanceId: 'mystery-1',
+      templateId: 'unidentified:mystery-1',
+      identified: false,
+      item: { name: '未鉴定物品', icon: 'generic' },
+    })
+    expect(JSON.stringify(entry)).not.toContain('ring-of-invisibility')
+    expect(entry).not.toHaveProperty('resources')
+    expect(entry.item).not.toHaveProperty('headlessEffects')
+    expect(entry.item).not.toHaveProperty('magicItem')
+  })
+
   it('projects only public interaction markers while hiding checks, rewards, triggers, and runtime', () => {
     const projected = projectSceneOrchestrationForPlayer({
       schemaVersion: 1,
@@ -1157,6 +1212,45 @@ describe('map geometry player projection', () => {
       })
     expect(normalizeCombatPresentationEvent({ ...payload, spellId: 'unknown' }, { role: 'dm' }, timestamp))
       .toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('authors Sanctuary target effects with authoritative timing', () => {
+    const timestamp = 27_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'sanctuary-transaction-1',
+      type: 'spell-target-effect',
+      mapId: 'map-1',
+      transactionId: 'transaction-1',
+      spellId: 'sanctuary',
+      sourceTokenId: 'cleric',
+      targetTokenId: 'guardian',
+      createdAt: 1,
+      expiresAt: 999_999,
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    expect(normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp))
+      .toEqual({
+        ok: true,
+        event: {
+          schemaVersion: 1,
+          id: payload.id,
+          type: payload.type,
+          mapId: payload.mapId,
+          transactionId: payload.transactionId,
+          spellId: payload.spellId,
+          sourceTokenId: payload.sourceTokenId,
+          targetTokenId: payload.targetTokenId,
+          createdAt: timestamp,
+          expiresAt: timestamp + 1_600,
+        },
+      })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, targetTokenId: '' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
   })
 
   it('authors bounded Fireball presentation events with an authoritative lifetime', () => {

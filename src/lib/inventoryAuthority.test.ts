@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizeDnd5ePlayerInventoryMutation } from './inventoryAuthority'
+import {
+  dnd5ePlayerInventoryMutationAllowed,
+  sanitizeDnd5ePlayerInventoryMutation,
+} from './inventoryAuthority'
 
 describe('D&D 5e inventory authority boundary', () => {
   it('strips a player-reported DM attunement confirmation', () => {
@@ -28,5 +31,20 @@ describe('D&D 5e inventory authority boundary', () => {
       instanceId: 'potion',
       healingRolls: undefined,
     })
+  })
+
+  it('rejects player-authored currency grants while allowing authoritative spending requests', () => {
+    expect(dnd5ePlayerInventoryMutationAllowed({
+      type: 'adjust-currency',
+      characterId: 'hero',
+      currency: 'gp',
+      delta: 10,
+    })).toBe(false)
+    expect(dnd5ePlayerInventoryMutationAllowed({
+      type: 'adjust-currency',
+      characterId: 'hero',
+      currency: 'gp',
+      delta: -3,
+    })).toBe(true)
   })
 })

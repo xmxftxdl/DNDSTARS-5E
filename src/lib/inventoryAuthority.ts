@@ -44,6 +44,13 @@ export function submitDnd5eInventoryMutation(
     }
   }
 
+  if (!dnd5ePlayerInventoryMutationAllowed(mutation)) {
+    return {
+      status: 'rejected',
+      message: '玩家不能直接增加角色货币；请由 DM 通过权威奖励或分发事务发放。',
+    }
+  }
+
   const request: Dnd5eInventoryAuthorityRequest = {
     id: inventoryRequestId(),
     roomId: session?.roomId,
@@ -135,9 +142,17 @@ export function sanitizeDnd5ePlayerInventoryMutation(
   return mutation
 }
 
+export function dnd5ePlayerInventoryMutationAllowed(
+  mutation: Exclude<Dnd5eInventoryMutation, { type: 'grant' }>,
+): boolean {
+  return mutation.type !== 'adjust-currency' ||
+    (Number.isSafeInteger(mutation.delta) && mutation.delta < 0)
+}
+
 function validRequest(request: Dnd5eInventoryAuthorityRequest, dmRoomId?: string): boolean {
   if (!request || !request.mutation || typeof request.mutation !== 'object') return false
   if (!['discard', 'transfer', 'equip', 'unequip', 'prepare-attunement', 'cancel-attunement', 'end-attunement', 'set-container', 'adjust-currency', 'use'].includes(request.mutation.type)) return false
+  if (!dnd5ePlayerInventoryMutationAllowed(request.mutation)) return false
   if (dmRoomId && (request.roomId !== dmRoomId || typeof request.memberId !== 'string')) return false
   return request.sourceMode === 'player' &&
     typeof request.id === 'string' && !seenRequestIds.has(request.id) &&

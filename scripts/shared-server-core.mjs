@@ -1593,6 +1593,32 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     }
   }
 
+  if (
+    common.type === 'spell-target-effect' &&
+    ['shocking-grasp', 'guidance', 'resistance', 'sanctuary'].includes(common.spellId)
+  ) {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const accentColor = payload?.accentColor
+    const glowColor = payload?.glowColor
+    if (
+      !targetTokenId ||
+      common.spellId === 'resistance' && (
+        typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor) ||
+        typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)
+      )
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        ...(common.spellId === 'resistance' ? { accentColor, glowColor } : {}),
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
   if (common.type === 'spell-area-projectile' && common.spellId === 'fireball') {
     const col = payload?.targetCell?.col
     const row = payload?.targetCell?.row
@@ -1788,6 +1814,37 @@ function characterOwnedByRoomMember(character, member) {
   )
 }
 
+function projectUnidentifiedInventoryForPlayer(inventory) {
+  if (!plainObject(inventory) || !Array.isArray(inventory.entries)) return inventory
+  return {
+    ...inventory,
+    entries: inventory.entries.map((entry) => {
+      if (!plainObject(entry) || entry.identified !== false) return entry
+      const instanceId = typeof entry.instanceId === 'string' ? entry.instanceId : 'unknown'
+      return {
+        instanceId,
+        templateId: `unidentified:${instanceId}`,
+        item: {
+          id: `unidentified:${instanceId}`,
+          name: '未鉴定物品',
+          category: 'magic-item',
+          icon: 'generic',
+          description: '该物品尚未鉴定。',
+          rulesText: '鉴定完成后才会公开其名称与规则效果。',
+          stackable: false,
+          source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+        },
+        quantity: Number.isSafeInteger(entry.quantity) && entry.quantity > 0 ? entry.quantity : 1,
+        identified: false,
+        ...(typeof entry.containerInstanceId === 'string'
+          ? { containerInstanceId: entry.containerInstanceId }
+          : {}),
+        acquiredAt: Number.isFinite(entry.acquiredAt) ? entry.acquiredAt : 0,
+      }
+    }),
+  }
+}
+
 export function projectCharactersForRoomMember(value, member) {
   const characters = Array.isArray(value?.characters) ? value.characters : []
   return {
@@ -1797,7 +1854,9 @@ export function projectCharactersForRoomMember(value, member) {
       .map((character) => {
         const projected = { ...character }
         delete projected.dmNotes
-        if (!characterOwnedByRoomMember(character, member)) {
+        if (characterOwnedByRoomMember(character, member)) {
+          projected.dnd5eInventory = projectUnidentifiedInventoryForPlayer(projected.dnd5eInventory)
+        } else {
           delete projected.notes
           delete projected.backstory
           delete projected.dnd5eInventory
