@@ -655,13 +655,14 @@ export default function EnemyDetailPanel({
               </section>
             )}
             {([
+              ['附赠动作', stats.bonusActions, 'bg-emerald-500/10', 'text-emerald-200'],
               ['反应', stats.reactions, 'bg-cyan-500/10', 'text-cyan-200'],
               ['传奇动作', stats.legendaryActions, 'bg-amber-500/10', 'text-amber-200'],
               ['巢穴动作', stats.lairActions, 'bg-fuchsia-500/10', 'text-fuchsia-200'],
             ] as const).map(([label, actions, background, text]) => actions?.length ? (
               <section key={label} className="mb-4">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</h3>
-                <ul className="space-y-2">{actions.map((action) => <li key={action.name} className={`rounded-xl ${background} px-3 py-2`}><div className="flex items-center justify-between gap-2"><p className={`text-sm font-medium ${text}`}>{action.name}</p><span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">DM 裁定</span></div><p className="mt-0.5 text-xs leading-relaxed text-slate-400">{action.description}</p></li>)}</ul>
+                <ul className="space-y-2">{actions.map((action) => <li key={action.name} className={`rounded-xl ${background} px-3 py-2`}><div className="flex items-center justify-between gap-2"><p className={`text-sm font-medium ${text}`}>{action.name}</p><span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${action.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{action.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span></div><p className="mt-0.5 text-xs leading-relaxed text-slate-400">{action.description}</p></li>)}</ul>
               </section>
             ) : null)}
           </>

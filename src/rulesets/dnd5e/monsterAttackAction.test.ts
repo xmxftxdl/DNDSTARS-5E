@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
+import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import type { Character } from '../../types/character'
 import { DND5E_SHIELD } from './equipment'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
@@ -21,7 +22,40 @@ function token(patch: Partial<Token>): Token {
 }
 
 describe('SRD monster map action adapter', () => {
-  afterEach(() => setDnd5eRoomMonsterCatalog([]))
+  afterEach(() => {
+    setDnd5eRoomMonsterCatalog([])
+    setMapGeometryRuntime([])
+  })
+
+  it('applies underwater disadvantage to land monsters and preserves swimming predators', () => {
+    const hero = character()
+    const heroToken = token({ id: 'hero-token', x: 10, type: 'player', characterId: hero.id })
+    const wolf = token({ id: 'wolf', x: 0, poolId: 'srd-5.1:wolf' })
+    const shark = token({ id: 'shark', x: 0, poolId: 'srd-5.1:reef-shark' })
+    const map: BattleMap = {
+      id: 'underwater-map', name: 'Underwater', width: 100, height: 100, gridSize: 10,
+      feetPerCell: 5, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [wolf, heroToken],
+    }
+    setMapGeometryRuntime([{ ...createEmptyMapGeometry(map.id), environment: 'underwater' }])
+    const initiativeOrder = [wolf, shark, heroToken].map((entry, index) => ({
+      tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index,
+    }))
+    const landAttack = prepareDnd5eMonsterAttack({
+      combatId: 'combat', map, characters: [hero], initiativeOrder,
+      actorTokenId: wolf.id, targetTokenId: heroToken.id,
+    })
+    expect(landAttack.ok).toBe(true)
+    if (!landAttack.ok) return
+    expect(landAttack.prepared.attackModes[0]).toBe('disadvantage')
+
+    const swimmingAttack = prepareDnd5eMonsterAttack({
+      combatId: 'combat', map: { ...map, tokens: [shark, heroToken] }, characters: [hero],
+      initiativeOrder, actorTokenId: shark.id, targetTokenId: heroToken.id,
+    })
+    expect(swimmingAttack.ok).toBe(true)
+    if (!swimmingAttack.ok) return
+    expect(swimmingAttack.prepared.attackModes[0]).toBe('normal')
+  })
 
   it('applies Pack Tactics only while a conscious ally is within 5 feet of the target', () => {
     const hero = character()

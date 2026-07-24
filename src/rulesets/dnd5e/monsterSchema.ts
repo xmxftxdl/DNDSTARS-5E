@@ -70,11 +70,15 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     !requiredText(action.description) || typeof action.kind !== 'string' || !ACTION_KINDS.has(action.kind)) return false
   if (action.automation != null && action.automation !== 'headless' && action.automation !== 'dm-adjudication') return false
   if (action.sequence != null && (!Array.isArray(action.sequence) || action.sequence.some((entry) => !requiredText(entry, 120)))) return false
-  if (action.usage != null && (
-    !isRecord(action.usage) || action.usage.kind !== 'recharge' ||
-    !finiteInteger(action.usage.dieSides, 2, 100) ||
-    !finiteInteger(action.usage.minimum, 1, Number(action.usage.dieSides))
-  )) return false
+  if (action.usage != null) {
+    if (!isRecord(action.usage)) return false
+    if (action.usage.kind === 'recharge') {
+      if (!finiteInteger(action.usage.dieSides, 2, 100) ||
+        !finiteInteger(action.usage.minimum, 1, Number(action.usage.dieSides))) return false
+    } else if (action.usage.kind === 'per-day') {
+      if (!finiteInteger(action.usage.max, 1, 99)) return false
+    } else return false
+  }
   if (action.legendaryCost != null && !finiteInteger(action.legendaryCost, 1, 10)) return false
   if (action.referencedActionId != null && !requiredText(action.referencedActionId, 120)) return false
   if (action.attack == null) return true
@@ -91,7 +95,8 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   if (attack.onHitRule != null) {
     if (!isRecord(attack.onHitRule) || attack.onHitRule.kind !== 'saving-throw-condition' ||
       !ABILITY_KEYS.includes(attack.onHitRule.ability as typeof ABILITY_KEYS[number]) ||
-      !finiteInteger(attack.onHitRule.dc, 1, 100) || attack.onHitRule.condition !== 'prone') return false
+      !finiteInteger(attack.onHitRule.dc, 1, 100) ||
+      !STANDARD_CONDITIONS.has(String(attack.onHitRule.condition))) return false
   }
   return true
 }
@@ -269,9 +274,31 @@ function validateCoreShape(raw: unknown): Dnd5eMonsterSchemaIssue[] {
   if (raw.legendaryResistanceUses != null && !finiteInteger(raw.legendaryResistanceUses, 0, 99)) {
     issues.push(issue(monsterId, '传奇抗性次数无效'))
   }
+  if (raw.legendaryActionPoints != null && !finiteInteger(raw.legendaryActionPoints, 0, 99)) {
+    issues.push(issue(monsterId, '传奇动作点数无效'))
+  }
+  if (raw.lairInitiative != null && !finiteInteger(raw.lairInitiative, 0, 99)) {
+    issues.push(issue(monsterId, '巢穴动作先攻值无效'))
+  }
+  for (const key of ['tokenPortrait', 'initiativePortrait'] as const) {
+    if (raw[key] != null && (
+      typeof raw[key] !== 'string' || raw[key].length > 600_000 ||
+      !/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=\r\n]+$/i.test(raw[key])
+    )) issues.push(issue(monsterId, `${key} 图片数据无效`))
+  }
+  if (raw.equipment != null && (
+    !Array.isArray(raw.equipment) || raw.equipment.length > 128 ||
+    raw.equipment.some((entry) => !isRecord(entry) ||
+      !requiredText(entry.id, 120) || !requiredText(entry.name, 240) ||
+      !['weapon', 'armor', 'shield', 'gear', 'consumable', 'other'].includes(String(entry.category)) ||
+      !finiteInteger(entry.quantity, 1, 999) ||
+      (entry.description != null && typeof entry.description !== 'string') ||
+      (entry.armorClass != null && !finiteInteger(entry.armorClass, 0, 100)) ||
+      (entry.linkedActionId != null && !requiredText(entry.linkedActionId, 120)))
+  )) issues.push(issue(monsterId, '装备数据无效'))
   if (!Array.isArray(raw.traits) || raw.traits.length > 128 || raw.traits.some((trait) => !traitShapeIsValid(trait))) issues.push(issue(monsterId, '特性数据无效'))
   if (!Array.isArray(raw.actions) || raw.actions.length > 128) issues.push(issue(monsterId, '动作列表无效'))
-  for (const [key, label] of [['reactions', '反应'], ['legendaryActions', '传奇动作'], ['lairActions', '巢穴动作']] as const) {
+  for (const [key, label] of [['bonusActions', '附赠动作'], ['reactions', '反应'], ['legendaryActions', '传奇动作'], ['lairActions', '巢穴动作']] as const) {
     if (raw[key] != null && (!Array.isArray(raw[key]) || raw[key].length > 128)) issues.push(issue(monsterId, `${label}列表无效`))
   }
   if (raw.spellcasting != null) {
@@ -342,6 +369,7 @@ export function validateDnd5eMonsterSchema(monster: Dnd5eMonsterStatBlock): Dnd5
   if (issues.length > 0) return issues
   issues.push(...validateActionList(monster, monster.actions, '动作'))
   for (const [label, actions] of [
+    ['附赠动作', monster.bonusActions],
     ['反应', monster.reactions],
     ['传奇动作', monster.legendaryActions],
     ['巢穴动作', monster.lairActions],
@@ -355,6 +383,16 @@ export function validateDnd5eMonsterSchema(monster: Dnd5eMonsterStatBlock): Dnd5
         actionId: action.id,
         code: 'invalid-stat-block',
         message: `传奇动作引用了不存在的普通动作：${action.referencedActionId}`,
+      })
+    }
+  }
+  for (const equipment of monster.equipment ?? []) {
+    if (equipment.linkedActionId && !monster.actions.some((candidate) => candidate.id === equipment.linkedActionId)) {
+      issues.push({
+        monsterId: monster.id,
+        actionId: equipment.linkedActionId,
+        code: 'invalid-stat-block',
+        message: `装备引用了不存在的动作：${equipment.linkedActionId}`,
       })
     }
   }

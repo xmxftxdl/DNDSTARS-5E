@@ -115,14 +115,20 @@ const SRD_MONSTER_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = 
 export function getEnemyVisualVariants(id: string): readonly EnemyVisualVariant[] {
   const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
   if (!monster) return []
+  if (monster.tokenPortrait && monster.initiativePortrait) return [{
+    id: 'custom',
+    label: '自定义形象',
+    tokenPortrait: monster.tokenPortrait,
+    initiativePortrait: monster.initiativePortrait,
+  }]
   const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
   if (presentation?.visualVariants?.length) return presentation.visualVariants
   if (!presentation?.tokenPortrait || !presentation.initiativePortrait) return []
   return [{
     id: 'default',
     label: '默认形象',
-    tokenPortrait: presentation.tokenPortrait,
-    initiativePortrait: presentation.initiativePortrait,
+    tokenPortrait: monster.tokenPortrait ?? monster.initiativePortrait ?? presentation.tokenPortrait,
+    initiativePortrait: monster.initiativePortrait ?? monster.tokenPortrait ?? presentation.initiativePortrait,
   }]
 }
 
@@ -142,6 +148,12 @@ export function getEnemyVisualPresentation(
   }
   const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
   if (!monster) return undefined
+  if (monster.tokenPortrait || monster.initiativePortrait) {
+    return {
+      tokenPortrait: monster.tokenPortrait ?? monster.initiativePortrait!,
+      initiativePortrait: monster.initiativePortrait ?? monster.tokenPortrait!,
+    }
+  }
   const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
   if (!presentation?.tokenPortrait || !presentation.initiativePortrait) return undefined
   return {

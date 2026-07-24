@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
-import { Download, Plus, Save, Trash2, Upload, X } from 'lucide-react'
+import { Download, ImagePlus, Plus, Save, Trash2, Upload, X } from 'lucide-react'
 import { useCustomMonsterStore } from '../../store/customMonsters'
 import {
   DND5E_DAMAGE_TYPES,
   buildDnd5eCustomMonster,
   createDnd5eCustomMonsterActionDraft,
   createDnd5eCustomMonsterMechanicDraft,
+  createDnd5eCustomMonsterTraitDraft,
   createDnd5eCustomMonsterDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
   type Dnd5eCustomMonsterDraft,
@@ -14,6 +15,7 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eMonsterSize } from '../../rulesets/dnd5e/monsters'
 import { DND5E_MONSTER_TARGET_PRIORITY_OPTIONS } from '../../rulesets/dnd5e/monsterAutomation'
 import { DND5E_STANDARD_CONDITIONS } from '../../rulesets/dnd5e/conditions'
+import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 
 const ABILITY_LABELS: readonly [AbilityKey, string][] = [
   ['str', '力量'], ['dex', '敏捷'], ['con', '体质'], ['int', '智力'], ['wis', '感知'], ['cha', '魅力'],
@@ -51,6 +53,8 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
+  const tokenPortraitRef = useRef<HTMLInputElement>(null)
+  const initiativePortraitRef = useRef<HTMLInputElement>(null)
   const preservesAdvancedFields = !!draft.preservedStatBlock && (
     !!draft.preservedStatBlock.savingThrows || !!draft.preservedStatBlock.skills?.length ||
     !!draft.preservedStatBlock.senses.length || !!draft.preservedStatBlock.damageResistances?.length ||
@@ -64,6 +68,21 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
 
   const patchDraft = <K extends keyof Dnd5eCustomMonsterDraft>(key: K, value: Dnd5eCustomMonsterDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  const uploadPortrait = async (kind: 'tokenPortrait' | 'initiativePortrait', file?: File) => {
+    if (!file) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      patchDraft(kind, await createCharacterPortraitDataUrl(file))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+      if (kind === 'tokenPortrait' && tokenPortraitRef.current) tokenPortraitRef.current.value = ''
+      if (kind === 'initiativePortrait' && initiativePortraitRef.current) initiativePortraitRef.current.value = ''
+    }
   }
 
   const save = async () => {
@@ -114,7 +133,7 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm" onClick={onClose}>
-      <div className="glass grid max-h-[94vh] w-full max-w-6xl grid-cols-[240px,minmax(0,1fr)] overflow-hidden rounded-2xl border border-white/10 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="glass grid max-h-[94vh] w-full max-w-6xl grid-cols-[240px_minmax(0,1fr)] overflow-hidden rounded-2xl border border-white/10 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black/15">
           <div className="border-b border-white/10 p-3">
             <p className="font-semibold text-slate-100">房间怪物</p>
@@ -179,6 +198,27 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                 <label className="text-xs text-slate-400">语言<input value={draft.languages} onChange={(event) => patchDraft('languages', event.target.value)} placeholder="通用语、地精语" className={`mt-1 ${inputClass()}`} /></label>
               </div>
               <label className="mt-3 block text-xs text-slate-400">简介<textarea rows={2} value={draft.description} onChange={(event) => patchDraft('description', event.target.value)} className={`mt-1 resize-y ${inputClass()}`} /></label>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {([
+                  ['tokenPortrait', '地图 Token', tokenPortraitRef],
+                  ['initiativePortrait', '先攻立绘', initiativePortraitRef],
+                ] as const).map(([key, label, ref]) => (
+                  <div key={key} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                    <div className={`overflow-hidden border border-white/10 bg-void-950 ${key === 'tokenPortrait' ? 'h-20 w-20 rounded-full' : 'h-24 w-20 rounded-lg'}`}>
+                      {draft[key] ? <img src={draft[key]} alt={label} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-slate-600"><ImagePlus className="h-5 w-5" /></div>}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-slate-200">{label}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">PNG、JPG 或 WebP，保存时压缩并随房间同步。</p>
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" disabled={busy} onClick={() => ref.current?.click()} className="rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10">上传</button>
+                        {draft[key] && <button type="button" onClick={() => patchDraft(key, undefined)} className="rounded-lg px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10">移除</button>}
+                      </div>
+                      <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void uploadPortrait(key, event.target.files?.[0])} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </section>
 
             <section>
@@ -190,6 +230,83 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                 {([['walk', '步行'], ['fly', '飞行'], ['swim', '游泳'], ['climb', '攀爬'], ['burrow', '掘穴']] as const).map(([key, label]) => <label key={key} className="text-xs text-slate-400">{label}（尺）<input type="number" min={0} value={draft[key]} onChange={(event) => patchDraft(key, Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>)}
                 <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={draft.hover} onChange={(event) => patchDraft('hover', event.target.checked)} className="accent-arcane-500" />悬浮</label>
               </div>
+            </section>
+
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">防御、豁免、技能与感官</h3>
+              <div className="grid gap-3 sm:grid-cols-4">
+                <label className="text-xs text-slate-400">护甲说明<input value={draft.armorClassNote} onChange={(event) => patchDraft('armorClassNote', event.target.value)} placeholder="天然护甲、链甲与盾牌" className={`mt-1 ${inputClass()}`} /></label>
+                <label className="text-xs text-slate-400">传奇抗性（每日）<input type="number" min={0} max={99} value={draft.legendaryResistanceUses} onChange={(event) => patchDraft('legendaryResistanceUses', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
+                <label className="text-xs text-slate-400">传奇动作点<input type="number" min={0} max={99} value={draft.legendaryActionPoints} onChange={(event) => patchDraft('legendaryActionPoints', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
+                <label className="text-xs text-slate-400">巢穴动作先攻值<input type="number" min={0} max={99} value={draft.lairInitiative} onChange={(event) => patchDraft('lairInitiative', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
+              </div>
+              <p className="mt-3 text-[11px] font-semibold text-slate-500">豁免加值（留空表示不熟练）</p>
+              <div className="mt-2 grid grid-cols-3 gap-2 lg:grid-cols-6">
+                {ABILITY_LABELS.map(([key, label]) => <label key={key} className="text-xs text-slate-400">{label}<input type="number" value={draft.savingThrows[key] ?? ''} onChange={(event) => patchDraft('savingThrows', { ...draft.savingThrows, [key]: event.target.value === '' ? undefined : Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>)}
+              </div>
+              {([
+                ['damageVulnerabilities', '伤害易伤'],
+                ['damageResistances', '伤害抗性'],
+                ['damageImmunities', '伤害免疫'],
+              ] as const).map(([key, label]) => (
+                <div key={key} className="mt-3">
+                  <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {DND5E_DAMAGE_TYPES.map((type) => {
+                      const checked = draft[key].includes(type)
+                      return <button key={type} type="button" onClick={() => patchDraft(key, checked ? draft[key].filter((entry) => entry !== type) : [...draft[key], type])} className={`rounded-full border px-2 py-1 text-[11px] ${checked ? 'border-arcane-400/40 bg-arcane-500/15 text-arcane-100' : 'border-white/10 text-slate-500 hover:bg-white/5'}`}>{type}</button>
+                    })}
+                  </div>
+                </div>
+              ))}
+              <div className="mt-3">
+                <p className="text-[11px] font-semibold text-slate-500">状态免疫</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => {
+                    const checked = draft.conditionImmunities.includes(condition.id)
+                    return <button key={condition.id} type="button" onClick={() => patchDraft('conditionImmunities', checked ? draft.conditionImmunities.filter((entry) => entry !== condition.id) : [...draft.conditionImmunities, condition.id])} className={`rounded-full border px-2 py-1 text-[11px] ${checked ? 'border-arcane-400/40 bg-arcane-500/15 text-arcane-100' : 'border-white/10 text-slate-500 hover:bg-white/5'}`}>{condition.label}</button>
+                  })}
+                </div>
+              </div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div>
+                  <div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">技能</p><button type="button" onClick={() => patchDraft('skills', [...draft.skills, { id: `skill-${Date.now()}`, key: '', name: '', bonus: 0 }])} className="text-xs text-arcane-200">+ 添加</button></div>
+                  <div className="mt-2 space-y-2">{draft.skills.map((skill, index) => <div key={skill.id} className="grid grid-cols-[1fr_1fr_80px_auto] gap-2"><input value={skill.key} onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, key: event.target.value } : entry))} placeholder="stealth" className={inputClass()} /><input value={skill.name} onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, name: event.target.value } : entry))} placeholder="隐匿" className={inputClass()} /><input type="number" value={skill.bonus} onChange={(event) => patchDraft('skills', draft.skills.map((entry, i) => i === index ? { ...entry, bonus: Number(event.target.value) } : entry))} className={inputClass()} /><button type="button" onClick={() => patchDraft('skills', draft.skills.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">特殊感官</p><button type="button" onClick={() => patchDraft('senses', [...draft.senses, { id: `sense-${Date.now()}`, name: '黑暗视觉', distanceFeet: 60 }])} className="text-xs text-arcane-200">+ 添加</button></div>
+                  <div className="mt-2 space-y-2">{draft.senses.map((sense, index) => <div key={sense.id} className="grid grid-cols-[1fr_100px_auto] gap-2"><input value={sense.name} onChange={(event) => patchDraft('senses', draft.senses.map((entry, i) => i === index ? { ...entry, name: event.target.value } : entry))} placeholder="黑暗视觉" className={inputClass()} /><input type="number" min={0} value={sense.distanceFeet ?? ''} onChange={(event) => patchDraft('senses', draft.senses.map((entry, i) => i === index ? { ...entry, distanceFeet: event.target.value === '' ? undefined : Number(event.target.value) } : entry))} placeholder="尺" className={inputClass()} /><button type="button" onClick={() => patchDraft('senses', draft.senses.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <div className="flex items-center justify-between"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">装备与武器</h3><p className="mt-1 text-[11px] text-slate-500">武器可关联到一个结构化攻击动作；护甲信息会保留在 Stat Block 中。</p></div><button type="button" onClick={() => patchDraft('equipment', [...draft.equipment, { id: `equipment-${Date.now()}`, name: '', category: 'weapon', quantity: 1, description: '', linkedActionId: '' }])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300"><Plus className="h-3 w-3" /> 添加装备</button></div>
+              <div className="mt-3 space-y-2">{draft.equipment.map((item, index) => {
+                const update = (patch: Partial<typeof item>) => patchDraft('equipment', draft.equipment.map((entry, i) => i === index ? { ...entry, ...patch } : entry))
+                return <div key={item.id} className="rounded-xl border border-white/10 bg-black/10 p-3"><div className="grid grid-cols-2 gap-2 lg:grid-cols-[1fr_150px_90px_110px_1fr_auto]"><input value={item.name} onChange={(event) => update({ name: event.target.value })} placeholder="长剑" className={inputClass()} /><select value={item.category} onChange={(event) => update({ category: event.target.value as typeof item.category })} className={inputClass()}><option value="weapon">武器</option><option value="armor">护甲</option><option value="shield">盾牌</option><option value="gear">装备</option><option value="consumable">消耗品</option><option value="other">其他</option></select><input type="number" min={1} value={item.quantity} onChange={(event) => update({ quantity: Number(event.target.value) })} title="数量" className={inputClass()} /><input type="number" min={0} value={item.armorClass ?? ''} onChange={(event) => update({ armorClass: event.target.value === '' ? undefined : Number(event.target.value) })} placeholder="AC" className={inputClass()} /><select value={item.linkedActionId} onChange={(event) => update({ linkedActionId: event.target.value })} className={inputClass()}><option value="">不关联动作</option>{draft.actions.filter((action) => action.category === 'action').map((action) => <option key={action.id} value={action.id}>{action.name || action.id}</option>)}</select><button type="button" onClick={() => patchDraft('equipment', draft.equipment.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div><textarea value={item.description} onChange={(event) => update({ description: event.target.value })} rows={1} placeholder="装备说明、魔法加值或特殊用途" className={`mt-2 resize-y ${inputClass()}`} /></div>
+              })}</div>
+            </section>
+
+            <section className="rounded-xl border border-sky-400/15 bg-sky-500/[0.035] p-4">
+              <div className="flex items-center justify-between gap-3"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-sky-200">施法</h3><p className="mt-1 text-[11px] text-slate-500">可配置法术位、随意法术和每日法术；具体法术能否 Headless 仍由法术目录兼容性决定。</p></div><label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={draft.spellcastingEnabled} onChange={(event) => patchDraft('spellcastingEnabled', event.target.checked)} />启用施法</label></div>
+              {draft.spellcastingEnabled && <>
+                <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-5">
+                  <label className="text-xs text-slate-400">施法者等级<input type="number" min={1} max={30} value={draft.spellcastingCasterLevel} onChange={(event) => patchDraft('spellcastingCasterLevel', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
+                  <label className="text-xs text-slate-400">施法属性<select value={draft.spellcastingAbility} onChange={(event) => patchDraft('spellcastingAbility', event.target.value as AbilityKey)} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                  <label className="text-xs text-slate-400">法术豁免 DC<input type="number" min={1} value={draft.spellcastingSaveDc} onChange={(event) => patchDraft('spellcastingSaveDc', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
+                  <label className="text-xs text-slate-400">法术攻击加值<input type="number" value={draft.spellcastingAttackBonus} onChange={(event) => patchDraft('spellcastingAttackBonus', Number(event.target.value))} className={`mt-1 ${inputClass()}`} /></label>
+                  <label className="text-xs text-slate-400">期望自动化<select value={draft.spellcastingAutomation} onChange={(event) => patchDraft('spellcastingAutomation', event.target.value as typeof draft.spellcastingAutomation)} className={`mt-1 ${inputClass()}`}><option value="headless">Headless</option><option value="dm-adjudication">DM 裁定</option></select></label>
+                </div>
+                <label className="mt-2 block text-xs text-slate-400">施法说明<textarea rows={2} value={draft.spellcastingDescription} onChange={(event) => patchDraft('spellcastingDescription', event.target.value)} className={`mt-1 resize-y ${inputClass()}`} /></label>
+                <p className="mt-3 text-[11px] font-semibold text-slate-500">1–9 环法术位</p>
+                <div className="mt-1 grid grid-cols-3 gap-2 sm:grid-cols-9">{Array.from({ length: 9 }, (_, index) => String(index + 1)).map((level) => <label key={level} className="text-center text-[10px] text-slate-500">{level} 环<input type="number" min={0} max={99} value={draft.spellSlots[level] ?? 0} onChange={(event) => patchDraft('spellSlots', { ...draft.spellSlots, [level]: Number(event.target.value) })} className={`mt-1 text-center ${inputClass()}`} /></label>)}</div>
+                <div className="mt-4 flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">法术列表</p><button type="button" onClick={() => patchDraft('spells', [...draft.spells, { id: '', name: '', level: 0, usageKind: 'slots', usageMax: 1 }])} className="text-xs text-sky-200">+ 添加法术</button></div>
+                <div className="mt-2 space-y-2">{draft.spells.map((spell, index) => {
+                  const update = (patch: Partial<typeof spell>) => patchDraft('spells', draft.spells.map((entry, i) => i === index ? { ...entry, ...patch } : entry))
+                  return <div key={`${spell.id}:${index}`} className="grid grid-cols-2 gap-2 lg:grid-cols-[1fr_1fr_90px_140px_100px_auto]"><input value={spell.id} onChange={(event) => update({ id: event.target.value })} placeholder="fireball" className={inputClass()} /><input value={spell.name} onChange={(event) => update({ name: event.target.value })} placeholder="火球术" className={inputClass()} /><input type="number" min={0} max={9} value={spell.level} onChange={(event) => update({ level: Number(event.target.value) })} title="环位" className={inputClass()} /><select value={spell.usageKind} onChange={(event) => update({ usageKind: event.target.value as typeof spell.usageKind })} className={inputClass()}><option value="slots">消耗法术位</option><option value="at-will">随意</option><option value="per-day">每日 N 次</option></select>{spell.usageKind === 'per-day' ? <input type="number" min={1} max={99} value={spell.usageMax} onChange={(event) => update({ usageMax: Number(event.target.value) })} title="每日次数" className={inputClass()} /> : <div />}<button type="button" onClick={() => patchDraft('spells', draft.spells.filter((_, i) => i !== index))} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>
+                })}</div>
+              </>}
             </section>
 
             <section className="rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-4">
@@ -271,9 +388,20 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
             </section>
 
             <section>
-              <div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">特性（默认 DM 裁定）</h3><button type="button" onClick={() => patchDraft('traits', [...draft.traits, { name: '', description: '' }])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"><Plus className="h-3 w-3" /> 添加</button></div>
+              <div className="mb-3 flex items-center justify-between"><div><h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">特性</h3><p className="mt-1 text-[11px] text-slate-500">常见规则可选择 Headless 预设；其余特性保留完整描述并明确交给 DM 裁定。</p></div><button type="button" onClick={() => patchDraft('traits', [...draft.traits, createDnd5eCustomMonsterTraitDraft()])} className="flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"><Plus className="h-3 w-3" /> 添加</button></div>
               <div className="space-y-2">
-                {draft.traits.map((trait, index) => <div key={index} className="grid grid-cols-[180px,minmax(0,1fr),auto] gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2"><input value={trait.name} onChange={(event) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, name: event.target.value } : entry))} placeholder="特性名称" className={inputClass()} /><textarea rows={2} value={trait.description} onChange={(event) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, description: event.target.value } : entry))} placeholder="完整规则描述" className={`${inputClass()} resize-y`} /><button type="button" onClick={() => patchDraft('traits', draft.traits.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>)}
+                {draft.traits.map((trait, index) => {
+                  const update = (patch: Partial<typeof trait>) => patchDraft('traits', draft.traits.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
+                  return <div key={index} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-[1fr_220px_150px_auto]"><input value={trait.name} onChange={(event) => update({ name: event.target.value })} placeholder="特性名称" className={inputClass()} /><select value={trait.ruleKind} onChange={(event) => update({ ruleKind: event.target.value as typeof trait.ruleKind, automation: event.target.value === 'none' ? 'dm-adjudication' : 'headless' })} className={inputClass()}><option value="none">自定义规则（DM 裁定）</option><option value="regeneration">再生</option><option value="undead-fortitude">不死坚韧</option><option value="nimble-escape">灵巧逃脱</option><option value="swarm">集群规则</option></select><select value={trait.ruleKind === 'none' ? 'dm-adjudication' : 'headless'} disabled className={inputClass()}><option value="headless">Headless</option><option value="dm-adjudication">DM 裁定</option></select><button type="button" onClick={() => patchDraft('traits', draft.traits.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
+                    {(trait.ruleKind === 'regeneration' || trait.ruleKind === 'undead-fortitude') && <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      {trait.ruleKind === 'regeneration' ? <label className="text-xs text-slate-400">每回合恢复<input type="number" min={1} value={trait.amount} onChange={(event) => update({ amount: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <label className="text-xs text-slate-400">DC 基数<input type="number" min={1} value={trait.dcBase} onChange={(event) => update({ dcBase: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
+                      <label className="col-span-2 text-xs text-slate-400">{trait.ruleKind === 'regeneration' ? '压制再生的伤害类型' : '不能触发的伤害类型'}<div className="mt-1 flex flex-wrap gap-1">{DND5E_DAMAGE_TYPES.map((type) => <button key={type} type="button" onClick={() => update({ damageTypes: trait.damageTypes.includes(type) ? trait.damageTypes.filter((entry) => entry !== type) : [...trait.damageTypes, type] })} className={`rounded-full border px-2 py-1 text-[10px] ${trait.damageTypes.includes(type) ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 text-slate-500'}`}>{type}</button>)}</div></label>
+                      {trait.ruleKind === 'regeneration' ? <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={trait.requiresPositiveHp} onChange={(event) => update({ requiresPositiveHp: event.target.checked })} />仅 HP 大于 0</label> : <label className="flex items-end gap-2 pb-2 text-xs text-slate-400"><input type="checkbox" checked={trait.excludedOnCritical} onChange={(event) => update({ excludedOnCritical: event.target.checked })} />重击时不触发</label>}
+                    </div>}
+                    <textarea rows={2} value={trait.description} onChange={(event) => update({ description: event.target.value })} placeholder="完整规则描述" className={`mt-2 ${inputClass()} resize-y`} />
+                  </div>
+                })}
               </div>
             </section>
 
@@ -283,8 +411,29 @@ export default function Dnd5eMonsterWorkshopDialog({ open, onClose }: { open: bo
                 {draft.actions.map((action, index) => {
                   const update = (patch: Partial<typeof action>) => patchDraft('actions', draft.actions.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry))
                   return <div key={action.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-5"><label className="text-xs text-slate-400">名称<input value={action.name} onChange={(event) => update({ name: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">类型<select value={action.kind} onChange={(event) => update({ kind: event.target.value as typeof action.kind, automation: event.target.value === 'other' ? 'dm-adjudication' : action.automation })} className={`mt-1 ${inputClass()}`}><option value="weapon-attack">武器攻击</option><option value="other">其他动作</option></select></label><label className="text-xs text-slate-400">结算<select value={action.kind === 'other' ? 'dm-adjudication' : action.automation} disabled={action.kind === 'other'} onChange={(event) => update({ automation: event.target.value as typeof action.automation })} className={`mt-1 ${inputClass()}`}><option value="headless">Headless</option><option value="dm-adjudication">DM 裁定</option></select></label>{action.kind === 'weapon-attack' && <><label className="text-xs text-slate-400">攻击方式<select value={action.mode} onChange={(event) => update({ mode: event.target.value as typeof action.mode })} className={`mt-1 ${inputClass()}`}><option value="melee">近战</option><option value="ranged">远程</option><option value="melee-or-ranged">近战或远程</option></select></label><label className="text-xs text-slate-400">每动作次数<input type="number" min={1} max={10} value={action.attacksPerAction} onChange={(event) => update({ attacksPerAction: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}</div>
+                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-6">
+                      <label className="text-xs text-slate-400">名称<input value={action.name} onChange={(event) => update({ name: event.target.value })} className={`mt-1 ${inputClass()}`} /></label>
+                      <label className="text-xs text-slate-400">动作经济<select value={action.category} onChange={(event) => update({ category: event.target.value as typeof action.category })} className={`mt-1 ${inputClass()}`}><option value="action">动作</option><option value="bonus-action">附赠动作</option><option value="reaction">反应</option><option value="legendary">传奇动作</option><option value="lair">巢穴动作</option></select></label>
+                      <label className="text-xs text-slate-400">类型<select value={action.kind} onChange={(event) => update({ kind: event.target.value as typeof action.kind, automation: event.target.value === 'other' ? 'dm-adjudication' : action.automation })} className={`mt-1 ${inputClass()}`}><option value="weapon-attack">武器攻击</option><option value="other">其他动作</option></select></label>
+                      <label className="text-xs text-slate-400">结算<select value={action.kind === 'other' ? 'dm-adjudication' : action.automation} disabled={action.kind === 'other' || action.category === 'bonus-action' || action.category === 'reaction' || action.category === 'lair'} onChange={(event) => update({ automation: event.target.value as typeof action.automation })} className={`mt-1 ${inputClass()}`}><option value="headless">Headless</option><option value="dm-adjudication">DM 裁定</option></select></label>
+                      <label className="text-xs text-slate-400">使用限制<select value={action.usageKind} onChange={(event) => update({ usageKind: event.target.value as typeof action.usageKind })} className={`mt-1 ${inputClass()}`}><option value="at-will">随意</option><option value="per-day">每日 N 次</option><option value="recharge">充能 N–骰面</option></select></label>
+                      {action.category === 'legendary' ? <label className="text-xs text-slate-400">传奇动作点消耗<input type="number" min={1} max={10} value={action.legendaryCost} onChange={(event) => update({ legendaryCost: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label> : <div />}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-6">
+                      {action.usageKind === 'per-day' && <label className="text-xs text-slate-400">每日次数<input type="number" min={1} max={99} value={action.usageMax} onChange={(event) => update({ usageMax: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}
+                      {action.usageKind === 'recharge' && <><label className="text-xs text-slate-400">充能成功下限<input type="number" min={1} value={action.rechargeMinimum} onChange={(event) => update({ rechargeMinimum: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">充能骰面<input type="number" min={2} value={action.rechargeDieSides} onChange={(event) => update({ rechargeDieSides: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label></>}
+                      {action.category === 'legendary' && <label className="col-span-2 text-xs text-slate-400">引用普通动作<select value={action.referencedActionId} onChange={(event) => update({ referencedActionId: event.target.value })} className={`mt-1 ${inputClass()}`}><option value="">不引用，使用本动作数据</option>{draft.actions.filter((candidate) => candidate.category === 'action' && candidate.kind === 'weapon-attack').map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name || candidate.id}</option>)}</select></label>}
+                      {action.kind === 'weapon-attack' && <><label className="text-xs text-slate-400">攻击方式<select value={action.mode} onChange={(event) => update({ mode: event.target.value as typeof action.mode })} className={`mt-1 ${inputClass()}`}><option value="melee">近战</option><option value="ranged">远程</option><option value="melee-or-ranged">近战或远程</option></select></label>{action.category === 'action' && <label className="text-xs text-slate-400">每动作次数<input type="number" min={1} max={10} value={action.attacksPerAction} onChange={(event) => update({ attacksPerAction: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label>}</>}
+                    </div>
                     {action.kind === 'weapon-attack' && <div className="mt-2 grid grid-cols-3 gap-2 lg:grid-cols-7"><label className="text-xs text-slate-400">命中加值<input type="number" value={action.toHit} onChange={(event) => update({ toHit: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">触及<input type="number" min={0} value={action.reachFeet} onChange={(event) => update({ reachFeet: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">正常射程<input type="number" min={0} value={action.rangeNormal} onChange={(event) => update({ rangeNormal: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">最远射程<input type="number" min={0} value={action.rangeLong} onChange={(event) => update({ rangeLong: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="text-xs text-slate-400">伤害骰<input value={action.damageDice} onChange={(event) => update({ damageDice: event.target.value })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">伤害类型<select value={action.damageType} onChange={(event) => update({ damageType: event.target.value as typeof action.damageType })} className={`mt-1 ${inputClass()}`}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label></div>}
+                    {action.kind === 'weapon-attack' && <div className="mt-2 rounded-lg border border-white/8 bg-black/10 p-2">
+                      <div className="flex items-center justify-between"><p className="text-[11px] font-semibold text-slate-500">附加伤害组件</p><button type="button" onClick={() => update({ additionalDamage: [...action.additionalDamage, { id: `damage-${Date.now()}`, dice: '1d6', damageType: 'fire' }] })} className="text-[11px] text-arcane-200">+ 添加</button></div>
+                      <div className="mt-1 space-y-1">{action.additionalDamage.map((component, damageIndex) => <div key={component.id} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={component.dice} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, dice: event.target.value } : entry) })} placeholder="1d6" className={inputClass()} /><select value={component.damageType} onChange={(event) => update({ additionalDamage: action.additionalDamage.map((entry, i) => i === damageIndex ? { ...entry, damageType: event.target.value as typeof component.damageType } : entry) })} className={inputClass()}>{DND5E_DAMAGE_TYPES.map((type) => <option key={type}>{type}</option>)}</select><button type="button" onClick={() => update({ additionalDamage: action.additionalDamage.filter((_, i) => i !== damageIndex) })} className="text-rose-300"><Trash2 className="h-4 w-4" /></button></div>)}</div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-5">
+                        <label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={action.onHitSaveEnabled} onChange={(event) => update({ onHitSaveEnabled: event.target.checked })} />命中后要求豁免</label>
+                        {action.onHitSaveEnabled && <><label className="text-xs text-slate-400">豁免属性<select value={action.onHitSaveAbility} onChange={(event) => update({ onHitSaveAbility: event.target.value as AbilityKey })} className={`mt-1 ${inputClass()}`}>{ABILITY_LABELS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="text-xs text-slate-400">DC<input type="number" min={1} value={action.onHitSaveDc} onChange={(event) => update({ onHitSaveDc: Number(event.target.value) })} className={`mt-1 ${inputClass()}`} /></label><label className="col-span-2 text-xs text-slate-400">失败施加状态<select value={action.onHitCondition} onChange={(event) => update({ onHitCondition: event.target.value as typeof action.onHitCondition })} className={`mt-1 ${inputClass()}`}>{Object.values(DND5E_STANDARD_CONDITIONS).map((condition) => <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select></label></>}
+                      </div>
+                    </div>}
                     <div className="mt-2 grid grid-cols-[minmax(0,1fr),auto] gap-2"><textarea rows={2} value={action.description} onChange={(event) => update({ description: event.target.value })} placeholder={action.kind === 'weapon-attack' ? '可留空，系统会生成基础攻击描述；附带效果必须完整填写。' : '填写完整规则描述'} className={`${inputClass()} resize-y`} /><button type="button" onClick={() => patchDraft('actions', draft.actions.filter((_, entryIndex) => entryIndex !== index))} className="rounded-lg p-2 text-rose-300 hover:bg-rose-500/10"><Trash2 className="h-4 w-4" /></button></div>
                   </div>
                 })}

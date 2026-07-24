@@ -45,6 +45,7 @@ export interface EnemyStatBlock {
   languages?: string
   traits: MonsterTrait[]
   actions: MonsterAction[]
+  bonusActions?: MonsterAction[]
   reactions?: MonsterAction[]
   legendaryActions?: MonsterAction[]
   lairActions?: MonsterAction[]
@@ -104,6 +105,7 @@ function srdMonsterToEnemyStatBlock(monster: Dnd5eMonsterStatBlock): EnemyStatBl
     languages: monster.languages.length > 0 ? monster.languages.join('、') : '—',
     traits: monster.traits.map((trait) => ({ ...trait })),
     actions: monster.actions.map(convertAction),
+    bonusActions: monster.bonusActions?.map(convertAction),
     reactions: monster.reactions?.map(convertAction),
     legendaryActions: monster.legendaryActions?.map(convertAction),
     lairActions: monster.lairActions?.map(convertAction),

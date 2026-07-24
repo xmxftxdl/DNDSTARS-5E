@@ -38,6 +38,11 @@ import { dnd5eMonsterEffectiveWeaponAttack, dnd5eMonsterHasGenericAbility } from
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eActiveWeaponDamageD4Mode } from './activeEffects'
+import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import {
+  dnd5eMonsterWeaponIdForUnderwater,
+  dnd5eUnderwaterWeaponAttack,
+} from './environmentRules'
 
 export type Dnd5eMonsterAttackRejectReason =
   | 'invalid-actor'
@@ -129,6 +134,22 @@ export function prepareDnd5eMonsterAttack(input: {
         : Math.max(attack.reachFeet ?? 5, attack.rangeFeet?.long ?? attack.rangeFeet?.normal ?? 0)
   ))
   if (!allAttacksInRange) return { ok: false, reason: 'target-out-of-range' }
+  const environment = mapGeometryRuntimeForMap(input.map.id)?.environment
+  const underwaterAttacks = attacks.map(({ id, name, attack }) => {
+    const usesRangedAttack = attack.mode === 'ranged' ||
+      (attack.mode === 'melee-or-ranged' && distanceFeet > (attack.reachFeet ?? 5))
+    return dnd5eUnderwaterWeaponAttack({
+      environment,
+      weaponId: dnd5eMonsterWeaponIdForUnderwater(id, name),
+      mode: usesRangedAttack ? 'ranged' : 'melee',
+      distanceFeet,
+      normalRangeFeet: attack.rangeFeet?.normal,
+      hasSwimmingSpeed: (monster.speed.swim ?? 0) > 0,
+    })
+  })
+  if (underwaterAttacks.some((result) => result.automaticMiss)) {
+    return { ok: false, reason: 'target-out-of-range' }
+  }
 
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
@@ -199,12 +220,12 @@ export function prepareDnd5eMonsterAttack(input: {
       dnd5eMapTokenCanThreatenRangedAttacker(actorCombatant, candidate, candidateCombatant) &&
       tokenFootprintDistanceCells(actorToken, candidate, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
   })
-  const attackModes = attacks.map(({ attack }) => {
+  const attackModes = attacks.map(({ attack }, attackIndex) => {
     const usesRangedAttack = attack.mode === 'ranged' || (attack.mode === 'melee-or-ranged' && distanceFeet > (attack.reachFeet ?? 5))
     const rangeDisadvantage = usesRangedAttack && (
       rangedThreatened || distanceFeet > (attack.rangeFeet?.normal ?? 0)
     )
-    if (!rangeDisadvantage) return targetAttackMode
+    if (!rangeDisadvantage && !underwaterAttacks[attackIndex]?.disadvantage) return targetAttackMode
     return imposeDnd5eRollDisadvantage(targetAttackMode, 'ranged-attack').mode
   })
   return {

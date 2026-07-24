@@ -149,7 +149,7 @@ export interface Dnd5eMonsterWeaponAttack {
     kind: 'saving-throw-condition'
     ability: AbilityKey
     dc: number
-    condition: 'prone'
+    condition: Dnd5eStandardConditionId
   }
 }
 
@@ -184,6 +184,21 @@ export interface Dnd5eMonsterActionUsage {
   minimum: number
 }
 
+export interface Dnd5eMonsterActionPerDayUsage {
+  kind: 'per-day'
+  max: number
+}
+
+export interface Dnd5eMonsterEquipment {
+  id: string
+  name: string
+  category: 'weapon' | 'armor' | 'shield' | 'gear' | 'consumable' | 'other'
+  quantity: number
+  description?: string
+  armorClass?: number
+  linkedActionId?: string
+}
+
 export interface Dnd5eMonsterAction {
   id: string
   name: string
@@ -192,7 +207,7 @@ export interface Dnd5eMonsterAction {
   automation?: Dnd5eMonsterAutomation
   attack?: Dnd5eMonsterWeaponAttack
   sequence?: readonly string[]
-  usage?: Dnd5eMonsterActionUsage
+  usage?: Dnd5eMonsterActionUsage | Dnd5eMonsterActionPerDayUsage
   legendaryCost?: number
   /** 传奇动作直接调用普通武器动作时指向其 ID。 */
   referencedActionId?: string
@@ -252,8 +267,17 @@ export interface Dnd5eMonsterStatBlock {
   languages: readonly string[]
   challenge: { rating: string; xp: number }
   legendaryResistanceUses?: number
+  /** Defaults to 3 for legacy legendary monsters. */
+  legendaryActionPoints?: number
+  /** Lair actions normally resolve on initiative count 20. */
+  lairInitiative?: number
+  /** Room-owned compressed images. Data URLs are validated at the schema boundary. */
+  tokenPortrait?: string
+  initiativePortrait?: string
+  equipment?: readonly Dnd5eMonsterEquipment[]
   traits: readonly Dnd5eMonsterTrait[]
   actions: readonly Dnd5eMonsterAction[]
+  bonusActions?: readonly Dnd5eMonsterAction[]
   reactions?: readonly Dnd5eMonsterAction[]
   legendaryActions?: readonly Dnd5eMonsterAction[]
   lairActions?: readonly Dnd5eMonsterAction[]

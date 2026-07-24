@@ -600,6 +600,12 @@ function createTacticalCandidates(input: {
   const legalActions = monster.actions
     .map((action, index) => ({ action, index }))
     .filter(({ action }) => dnd5eMonsterActionAutomation(action) === 'headless')
+    .filter(({ action }) =>
+      action.usage?.kind !== 'recharge' ||
+      enemy.dnd5eCombatState?.monsterRechargeReadyByActionId?.[action.id] !== false)
+    .filter(({ action }) =>
+      action.usage?.kind !== 'per-day' ||
+      (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ?? action.usage.max) > 0)
 
   for (const reachable of normalPositions) {
     const moved = reachable.steps > 0 || desiredElevationFeet !== currentElevationFeet

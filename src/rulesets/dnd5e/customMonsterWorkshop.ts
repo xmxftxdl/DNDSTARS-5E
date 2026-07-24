@@ -8,11 +8,12 @@ import {
   type Dnd5eMonsterMechanicTrigger,
   type Dnd5eMonsterMechanicTriggerEventV2,
   type Dnd5eMonsterMechanicTriggerV2,
+  type Dnd5eMonsterEquipment,
   type Dnd5eMonsterSize,
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterTargetPriority,
 } from './monsters'
-import type { Dnd5eStandardConditionId } from './conditions'
+import { DND5E_STANDARD_CONDITIONS, type Dnd5eStandardConditionId } from './conditions'
 import { parseDnd5eMonsterStatBlock } from './monsterSchema'
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
@@ -20,6 +21,14 @@ const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const
 export interface Dnd5eCustomMonsterTraitDraft {
   name: string
   description: string
+  automation: 'headless' | 'dm-adjudication'
+  ruleKind: 'none' | 'undead-fortitude' | 'regeneration' | 'swarm' | 'nimble-escape'
+  amount: number
+  dcBase: number
+  damageTypes: Dnd5eDamageType[]
+  requiresPositiveHp: boolean
+  excludedOnCritical: boolean
+  diesAtZeroWhenSuppressed: boolean
 }
 
 export interface Dnd5eCustomMonsterActionDraft {
@@ -35,7 +44,50 @@ export interface Dnd5eCustomMonsterActionDraft {
   rangeLong: number
   damageDice: string
   damageType: Dnd5eDamageType
+  additionalDamage: Array<{ id: string; dice: string; damageType: Dnd5eDamageType }>
+  onHitSaveEnabled: boolean
+  onHitSaveAbility: AbilityKey
+  onHitSaveDc: number
+  onHitCondition: Dnd5eStandardConditionId
   attacksPerAction: number
+  category: 'action' | 'bonus-action' | 'reaction' | 'legendary' | 'lair'
+  usageKind: 'at-will' | 'per-day' | 'recharge'
+  usageMax: number
+  rechargeMinimum: number
+  rechargeDieSides: number
+  legendaryCost: number
+  referencedActionId: string
+}
+
+export interface Dnd5eCustomMonsterEquipmentDraft {
+  id: string
+  name: string
+  category: Dnd5eMonsterEquipment['category']
+  quantity: number
+  description: string
+  armorClass?: number
+  linkedActionId: string
+}
+
+export interface Dnd5eCustomMonsterSkillDraft {
+  id: string
+  key: string
+  name: string
+  bonus: number
+}
+
+export interface Dnd5eCustomMonsterSenseDraft {
+  id: string
+  name: string
+  distanceFeet?: number
+}
+
+export interface Dnd5eCustomMonsterSpellDraft {
+  id: string
+  name: string
+  level: number
+  usageKind: 'slots' | 'at-will' | 'per-day'
+  usageMax: number
 }
 
 export interface Dnd5eCustomMonsterMechanicDraft {
@@ -75,6 +127,7 @@ export interface Dnd5eCustomMonsterDraft {
   creatureType: string
   alignment: string
   armorClass: number
+  armorClassNote: string
   hitPointsAverage: number
   hitPointsDice: string
   walk: number
@@ -84,11 +137,33 @@ export interface Dnd5eCustomMonsterDraft {
   burrow: number
   hover: boolean
   abilities: Record<AbilityKey, number>
+  savingThrows: Partial<Record<AbilityKey, number>>
+  skills: Dnd5eCustomMonsterSkillDraft[]
+  senses: Dnd5eCustomMonsterSenseDraft[]
+  damageVulnerabilities: Dnd5eDamageType[]
+  damageResistances: Dnd5eDamageType[]
+  damageImmunities: Dnd5eDamageType[]
+  conditionImmunities: Dnd5eStandardConditionId[]
   passivePerception: number
   languages: string
   challengeRating: string
   xp: number
   description: string
+  tokenPortrait?: string
+  initiativePortrait?: string
+  equipment: Dnd5eCustomMonsterEquipmentDraft[]
+  legendaryResistanceUses: number
+  legendaryActionPoints: number
+  lairInitiative: number
+  spellcastingEnabled: boolean
+  spellcastingDescription: string
+  spellcastingCasterLevel: number
+  spellcastingAbility: AbilityKey
+  spellcastingSaveDc: number
+  spellcastingAttackBonus: number
+  spellSlots: Record<string, number>
+  spells: Dnd5eCustomMonsterSpellDraft[]
+  spellcastingAutomation: 'headless' | 'dm-adjudication'
   targetingPriority: Dnd5eMonsterTargetPriority
   headlessMechanics: Dnd5eCustomMonsterMechanicDraft[]
   traits: Dnd5eCustomMonsterTraitDraft[]
@@ -99,6 +174,21 @@ function uid(): string {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID().replaceAll('-', '').slice(0, 16)
     : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function createDnd5eCustomMonsterTraitDraft(): Dnd5eCustomMonsterTraitDraft {
+  return {
+    name: '',
+    description: '',
+    automation: 'dm-adjudication',
+    ruleKind: 'none',
+    amount: 10,
+    dcBase: 5,
+    damageTypes: [],
+    requiresPositiveHp: true,
+    excludedOnCritical: true,
+    diesAtZeroWhenSuppressed: true,
+  }
 }
 
 export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionDraft {
@@ -115,7 +205,19 @@ export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionD
     rangeLong: 120,
     damageDice: '1d6+1',
     damageType: 'slashing',
+    additionalDamage: [],
+    onHitSaveEnabled: false,
+    onHitSaveAbility: 'str',
+    onHitSaveDc: 12,
+    onHitCondition: 'prone',
     attacksPerAction: 1,
+    category: 'action',
+    usageKind: 'at-will',
+    usageMax: 1,
+    rechargeMinimum: 5,
+    rechargeDieSides: 6,
+    legendaryCost: 1,
+    referencedActionId: '',
   }
 }
 
@@ -153,6 +255,7 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
     creatureType: '怪兽',
     alignment: '无阵营',
     armorClass: 12,
+    armorClassNote: '',
     hitPointsAverage: 11,
     hitPointsDice: '2d8+2',
     walk: 30,
@@ -162,11 +265,33 @@ export function createDnd5eCustomMonsterDraft(): Dnd5eCustomMonsterDraft {
     burrow: 0,
     hover: false,
     abilities: { str: 12, dex: 12, con: 12, int: 8, wis: 10, cha: 8 },
+    savingThrows: {},
+    skills: [],
+    senses: [],
+    damageVulnerabilities: [],
+    damageResistances: [],
+    damageImmunities: [],
+    conditionImmunities: [],
     passivePerception: 10,
     languages: '',
     challengeRating: '1/4',
     xp: 50,
     description: '由 DM 创建的房间怪物。',
+    tokenPortrait: undefined,
+    initiativePortrait: undefined,
+    equipment: [],
+    legendaryResistanceUses: 0,
+    legendaryActionPoints: 3,
+    lairInitiative: 20,
+    spellcastingEnabled: false,
+    spellcastingDescription: '',
+    spellcastingCasterLevel: 1,
+    spellcastingAbility: 'int',
+    spellcastingSaveDc: 11,
+    spellcastingAttackBonus: 3,
+    spellSlots: {},
+    spells: [],
+    spellcastingAutomation: 'dm-adjudication',
     targetingPriority: 'nearest',
     headlessMechanics: [],
     traits: [],
@@ -198,6 +323,20 @@ function actionDescription(action: Dnd5eCustomMonsterActionDraft, dice: ReturnTy
 
 function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAction {
   if (!action.name.trim()) throw new Error('动作名称不能为空')
+  const usage = action.usageKind === 'per-day'
+    ? { kind: 'per-day' as const, max: Math.max(1, Math.min(99, Math.trunc(action.usageMax))) }
+    : action.usageKind === 'recharge'
+      ? {
+          kind: 'recharge' as const,
+          dieSides: Math.max(2, Math.min(100, Math.trunc(action.rechargeDieSides))),
+          minimum: Math.max(1, Math.min(Math.trunc(action.rechargeMinimum), Math.max(2, Math.trunc(action.rechargeDieSides)))),
+        }
+      : undefined
+  const metadata = {
+    ...(usage ? { usage } : {}),
+    ...(action.category === 'legendary' ? { legendaryCost: Math.max(1, Math.min(10, Math.trunc(action.legendaryCost))) } : {}),
+    ...(action.referencedActionId.trim() ? { referencedActionId: action.referencedActionId.trim() } : {}),
+  }
   if (action.kind === 'other') {
     if (!action.description.trim()) throw new Error(`动作“${action.name}”需要填写规则描述`)
     return {
@@ -206,9 +345,18 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
       description: action.description.trim(),
       kind: 'other',
       automation: 'dm-adjudication',
+      ...metadata,
     }
   }
   const parsed = parseDice(action.damageDice)
+  const additionalDamage = action.additionalDamage.map((component) => {
+    const dice = parseDice(component.dice)
+    return {
+      average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+      ...dice,
+      type: component.damageType,
+    }
+  })
   const attack = {
     mode: action.mode,
     toHit: Math.trunc(action.toHit),
@@ -224,24 +372,41 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
       average: Math.max(0, Math.floor(parsed.count * (parsed.sides + 1) / 2 + parsed.bonus)),
       ...parsed,
       type: action.damageType,
-    }],
+    }, ...additionalDamage],
+    ...(action.onHitSaveEnabled ? {
+      onHitRule: {
+        kind: 'saving-throw-condition' as const,
+        ability: action.onHitSaveAbility,
+        dc: Math.max(1, Math.min(100, Math.trunc(action.onHitSaveDc))),
+        condition: action.onHitCondition,
+      },
+    } : {}),
   } as const
   return {
     id: action.id,
     name: action.name.trim(),
     description: actionDescription(action, parsed),
     kind: 'weapon-attack',
-    automation: action.automation,
+    automation: action.category === 'action' || action.category === 'legendary'
+      ? action.automation
+      : 'dm-adjudication',
     attack,
+    ...metadata,
   }
 }
 
 export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMonsterStatBlock {
   const slug = draft.slug ?? `custom-${uid()}`
   const preserved = draft.preservedStatBlock
-  const baseActions = draft.actions.map((draftAction) => {
+  const normalizedDraftActions = draft.actions.map((draftAction) => {
     const normalized = normalizedAction(draftAction)
-    const previous = preserved?.actions.find((action) => action.id === normalized.id && action.kind === normalized.kind)
+    const previous = [
+      ...(preserved?.actions ?? []),
+      ...(preserved?.bonusActions ?? []),
+      ...(preserved?.reactions ?? []),
+      ...(preserved?.legendaryActions ?? []),
+      ...(preserved?.lairActions ?? []),
+    ].find((action) => action.id === normalized.id && action.kind === normalized.kind)
     if (!previous) return normalized
     if (normalized.kind !== 'weapon-attack' || !normalized.attack || !previous.attack) {
       return { ...previous, ...normalized }
@@ -252,11 +417,16 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       attack: {
         ...previous.attack,
         ...normalized.attack,
-        damage: [normalized.attack.damage[0], ...previous.attack.damage.slice(1)],
+        damage: normalized.attack.damage,
       },
     }
   })
-  const repeated = draft.actions.filter((action) => action.kind === 'weapon-attack' && action.attacksPerAction > 1)
+  const actionById = new Map(normalizedDraftActions.map((action) => [action.id, action]))
+  const actionsForCategory = (category: Dnd5eCustomMonsterActionDraft['category']) =>
+    draft.actions.flatMap((action) => action.category === category ? [actionById.get(action.id)!] : [])
+  const baseActions = actionsForCategory('action')
+  const repeated = draft.actions.filter((action) =>
+    action.category === 'action' && action.kind === 'weapon-attack' && action.attacksPerAction > 1)
   const actions: Dnd5eMonsterAction[] = [...baseActions]
   const preservedMultiattacks = preserved?.actions.filter((action) =>
     action.kind === 'multiattack' && action.sequence?.every((id) => baseActions.some((candidate) => candidate.id === id)),
@@ -276,12 +446,31 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     })
   }
   const traits = draft.traits.filter((trait) => trait.name.trim() || trait.description.trim()).map((trait) => {
-    const previous = preserved?.traits.find((candidate) => candidate.name === trait.name.trim())
+    const rule = trait.ruleKind === 'undead-fortitude'
+      ? {
+          kind: 'undead-fortitude' as const,
+          dcBase: Math.max(1, Math.min(100, Math.trunc(trait.dcBase))),
+          excludedDamageTypes: [...new Set(trait.damageTypes)],
+          excludedOnCritical: trait.excludedOnCritical,
+        }
+      : trait.ruleKind === 'regeneration'
+        ? {
+            kind: 'regeneration' as const,
+            amount: Math.max(1, Math.trunc(trait.amount)),
+            requiresPositiveHp: trait.requiresPositiveHp,
+            suppressedByDamageTypes: [...new Set(trait.damageTypes)],
+            diesAtZeroWhenSuppressed: trait.diesAtZeroWhenSuppressed,
+          }
+        : trait.ruleKind === 'swarm'
+          ? { kind: 'swarm' as const, cannotRegainHitPoints: true as const, cannotGainTemporaryHitPoints: true as const }
+          : trait.ruleKind === 'nimble-escape'
+            ? { kind: 'nimble-escape' as const, bonusActionOptions: ['disengage', 'hide'] as const }
+            : undefined
     return {
-      ...previous,
       name: trait.name.trim(),
       description: trait.description.trim(),
-      automation: previous?.automation ?? ('dm-adjudication' as const),
+      automation: rule ? ('headless' as const) : ('dm-adjudication' as const),
+      ...(rule ? { rule } : {}),
     }
   })
   const traitNameIncludes = (pattern: RegExp) => traits.some((trait) => pattern.test(trait.name))
@@ -289,10 +478,10 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     swarm: traitNameIncludes(/群集|swarm/i),
     shapechanger: traitNameIncludes(/变形|shapechange/i),
     regeneration: traitNameIncludes(/再生|regeneration/i),
-    spellcaster: preserved?.spellcasting != null || traitNameIncludes(/施法|spellcasting/i),
+    spellcaster: draft.spellcastingEnabled || traitNameIncludes(/施法|spellcasting/i),
     legendary: preserved?.capabilities?.legendary === true ||
-      (preserved?.legendaryResistanceUses ?? 0) > 0 ||
-      (preserved?.legendaryActions?.length ?? 0) > 0,
+      draft.legendaryResistanceUses > 0 ||
+      draft.actions.some((action) => action.category === 'legendary'),
     hasFlySpeed: draft.fly > 0,
     hasSwimSpeed: draft.swim > 0,
   }
@@ -354,7 +543,10 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
     size: draft.size,
     creatureType: draft.creatureType.trim(),
     alignment: draft.alignment.trim(),
-    armorClass: { ...preserved?.armorClass, value: Math.trunc(draft.armorClass) },
+    armorClass: {
+      value: Math.trunc(draft.armorClass),
+      ...(draft.armorClassNote.trim() ? { note: draft.armorClassNote.trim() } : {}),
+    },
     hitPoints: { average: Math.trunc(draft.hitPointsAverage), dice: draft.hitPointsDice.replace(/\s+/g, '') },
     speed: {
       walk: Math.trunc(draft.walk),
@@ -364,12 +556,66 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       ...(draft.burrow > 0 ? { burrow: Math.trunc(draft.burrow) } : {}),
     },
     abilities: Object.fromEntries(ABILITY_KEYS.map((key) => [key, Math.trunc(draft.abilities[key])])) as Record<AbilityKey, number>,
-    senses: preserved?.senses ? structuredClone(preserved.senses) : [],
+    savingThrows: Object.fromEntries(Object.entries(draft.savingThrows)
+      .filter(([, value]) => Number.isFinite(value))
+      .map(([key, value]) => [key, Math.trunc(value!)])),
+    skills: draft.skills.filter((skill) => skill.key.trim() && skill.name.trim()).map((skill) => ({
+      key: skill.key.trim(),
+      name: skill.name.trim(),
+      bonus: Math.trunc(skill.bonus),
+    })),
+    senses: draft.senses.filter((sense) => sense.name.trim()).map((sense) => ({
+      name: sense.name.trim(),
+      ...(Number.isFinite(sense.distanceFeet) ? { distanceFeet: Math.max(0, Math.trunc(sense.distanceFeet!)) } : {}),
+    })),
+    damageVulnerabilities: [...new Set(draft.damageVulnerabilities)],
+    damageResistances: [...new Set(draft.damageResistances)],
+    damageImmunities: [...new Set(draft.damageImmunities)],
+    conditionImmunities: [...new Set(draft.conditionImmunities)],
     passivePerception: Math.trunc(draft.passivePerception),
     languages: draft.languages.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean),
     challenge: { rating: draft.challengeRating.trim(), xp: Math.trunc(draft.xp) },
+    legendaryResistanceUses: Math.max(0, Math.min(99, Math.trunc(draft.legendaryResistanceUses))),
+    legendaryActionPoints: Math.max(0, Math.min(99, Math.trunc(draft.legendaryActionPoints))),
+    lairInitiative: Math.max(0, Math.min(99, Math.trunc(draft.lairInitiative))),
+    ...(draft.tokenPortrait ? { tokenPortrait: draft.tokenPortrait } : {}),
+    ...(draft.initiativePortrait ? { initiativePortrait: draft.initiativePortrait } : {}),
+    equipment: draft.equipment.filter((item) => item.name.trim()).map((item) => ({
+      id: item.id,
+      name: item.name.trim(),
+      category: item.category,
+      quantity: Math.max(1, Math.min(999, Math.trunc(item.quantity))),
+      ...(item.description.trim() ? { description: item.description.trim() } : {}),
+      ...(Number.isFinite(item.armorClass) ? { armorClass: Math.max(0, Math.trunc(item.armorClass!)) } : {}),
+      ...(item.linkedActionId.trim() ? { linkedActionId: item.linkedActionId.trim() } : {}),
+    })),
     traits,
     actions,
+    bonusActions: actionsForCategory('bonus-action'),
+    reactions: actionsForCategory('reaction'),
+    legendaryActions: actionsForCategory('legendary'),
+    lairActions: actionsForCategory('lair'),
+    spellcasting: draft.spellcastingEnabled ? {
+      description: draft.spellcastingDescription.trim() || '该生物拥有施法能力。',
+      casterLevel: Math.max(1, Math.min(30, Math.trunc(draft.spellcastingCasterLevel))),
+      ability: draft.spellcastingAbility,
+      saveDc: Math.max(1, Math.min(100, Math.trunc(draft.spellcastingSaveDc))),
+      attackBonus: Math.max(-100, Math.min(100, Math.trunc(draft.spellcastingAttackBonus))),
+      slots: Object.fromEntries(Object.entries(draft.spellSlots)
+        .filter(([level, count]) => /^[1-9]$/.test(level) && Number.isFinite(count) && count > 0)
+        .map(([level, count]) => [level, Math.max(0, Math.min(99, Math.trunc(count)))])),
+      spells: draft.spells.filter((spell) => spell.id.trim() && spell.name.trim()).map((spell) => ({
+        id: spell.id.trim(),
+        name: spell.name.trim(),
+        level: Math.max(0, Math.min(9, Math.trunc(spell.level))),
+        ...(spell.usageKind === 'at-will'
+          ? { usage: { kind: 'at-will' as const } }
+          : spell.usageKind === 'per-day'
+            ? { usage: { kind: 'per-day' as const, max: Math.max(1, Math.min(99, Math.trunc(spell.usageMax))) } }
+            : {}),
+      })),
+      automation: draft.spellcastingAutomation,
+    } : undefined,
     capabilities,
     targetingPreference: { schemaVersion: 1, priority: draft.targetingPriority ?? 'nearest' },
     headlessMechanics,
@@ -381,6 +627,55 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
 }
 
 export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBlock): Dnd5eCustomMonsterDraft {
+  const actionGroups: readonly [
+    Dnd5eCustomMonsterActionDraft['category'],
+    readonly Dnd5eMonsterAction[],
+  ][] = [
+    ['action', monster.actions.filter((action) => action.kind !== 'multiattack')],
+    ['bonus-action', monster.bonusActions ?? []],
+    ['reaction', monster.reactions ?? []],
+    ['legendary', monster.legendaryActions ?? []],
+    ['lair', monster.lairActions ?? []],
+  ]
+  const draftActions: Dnd5eCustomMonsterActionDraft[] = actionGroups.flatMap(([category, entries]) =>
+    entries.map((action) => {
+      const damage = action.attack?.damage[0]
+      const usage = action.usage
+      return {
+        id: action.id,
+        name: action.name,
+        description: action.description,
+        kind: action.kind === 'weapon-attack' ? 'weapon-attack' : 'other',
+        automation: action.automation ?? (action.kind === 'weapon-attack' ? 'headless' : 'dm-adjudication'),
+        mode: action.attack?.mode ?? 'melee',
+        toHit: action.attack?.toHit ?? 0,
+        reachFeet: action.attack?.reachFeet ?? 5,
+        rangeNormal: action.attack?.rangeFeet?.normal ?? 30,
+        rangeLong: action.attack?.rangeFeet?.long ?? 120,
+        damageDice: damage ? `${damage.count}d${damage.sides}${damage.bonus === 0 ? '' : damage.bonus > 0 ? `+${damage.bonus}` : damage.bonus}` : '1d4',
+        damageType: damage?.type ?? 'bludgeoning',
+        additionalDamage: (action.attack?.damage.slice(1) ?? []).map((component) => ({
+          id: `damage-${uid().slice(0, 8)}`,
+          dice: `${component.count}d${component.sides}${component.bonus === 0 ? '' : component.bonus > 0 ? `+${component.bonus}` : component.bonus}`,
+          damageType: component.type,
+        })),
+        onHitSaveEnabled: action.attack?.onHitRule?.kind === 'saving-throw-condition',
+        onHitSaveAbility: action.attack?.onHitRule?.ability ?? 'str',
+        onHitSaveDc: action.attack?.onHitRule?.dc ?? 12,
+        onHitCondition: action.attack?.onHitRule?.condition ?? 'prone',
+        attacksPerAction: category === 'action'
+          ? Math.max(1, monster.actions.find((candidate) => candidate.kind === 'multiattack')?.sequence?.filter((id) => id === action.id).length ?? 1)
+          : 1,
+        category,
+        usageKind: usage?.kind ?? 'at-will',
+        usageMax: usage?.kind === 'per-day' ? usage.max : 1,
+        rechargeMinimum: usage?.kind === 'recharge' ? usage.minimum : 5,
+        rechargeDieSides: usage?.kind === 'recharge' ? usage.dieSides : 6,
+        legendaryCost: action.legendaryCost ?? 1,
+        referencedActionId: action.referencedActionId ?? '',
+      }
+    }),
+  )
   return {
     preservedStatBlock: structuredClone(monster),
     id: monster.id,
@@ -391,6 +686,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     creatureType: monster.creatureType,
     alignment: monster.alignment,
     armorClass: monster.armorClass.value,
+    armorClassNote: monster.armorClass.note ?? '',
     hitPointsAverage: monster.hitPoints.average,
     hitPointsDice: monster.hitPoints.dice,
     walk: monster.speed.walk,
@@ -400,11 +696,45 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     burrow: monster.speed.burrow ?? 0,
     hover: monster.speed.hover ?? false,
     abilities: { ...monster.abilities },
+    savingThrows: { ...(monster.savingThrows ?? {}) },
+    skills: (monster.skills ?? []).map((skill) => ({ id: `skill-${uid().slice(0, 8)}`, ...skill })),
+    senses: monster.senses.map((sense) => ({ id: `sense-${uid().slice(0, 8)}`, ...sense })),
+    damageVulnerabilities: [...(monster.damageVulnerabilities ?? [])],
+    damageResistances: [...(monster.damageResistances ?? [])],
+    damageImmunities: [...(monster.damageImmunities ?? [])],
+    conditionImmunities: (monster.conditionImmunities ?? [])
+      .filter((condition): condition is Dnd5eStandardConditionId =>
+        Object.values(DND5E_STANDARD_CONDITIONS).some((definition) => definition.id === condition)),
     passivePerception: monster.passivePerception,
     languages: monster.languages.join('、'),
     challengeRating: monster.challenge.rating,
     xp: monster.challenge.xp,
     description: monster.description,
+    tokenPortrait: monster.tokenPortrait,
+    initiativePortrait: monster.initiativePortrait,
+    equipment: (monster.equipment ?? []).map((item) => ({
+      ...item,
+      description: item.description ?? '',
+      linkedActionId: item.linkedActionId ?? '',
+    })),
+    legendaryResistanceUses: monster.legendaryResistanceUses ?? 0,
+    legendaryActionPoints: monster.legendaryActionPoints ?? 3,
+    lairInitiative: monster.lairInitiative ?? 20,
+    spellcastingEnabled: !!monster.spellcasting,
+    spellcastingDescription: monster.spellcasting?.description ?? '',
+    spellcastingCasterLevel: monster.spellcasting?.casterLevel ?? 1,
+    spellcastingAbility: monster.spellcasting?.ability ?? 'int',
+    spellcastingSaveDc: monster.spellcasting?.saveDc ?? 11,
+    spellcastingAttackBonus: monster.spellcasting?.attackBonus ?? 3,
+    spellSlots: { ...(monster.spellcasting?.slots ?? {}) },
+    spells: (monster.spellcasting?.spells ?? []).map((spell) => ({
+      id: spell.id,
+      name: spell.name,
+      level: spell.level,
+      usageKind: spell.usage?.kind ?? 'slots',
+      usageMax: spell.usage?.kind === 'per-day' ? spell.usage.max : 1,
+    })),
+    spellcastingAutomation: monster.spellcasting?.automation ?? 'dm-adjudication',
     targetingPriority: monster.targetingPreference?.priority ?? 'nearest',
     headlessMechanics: (monster.headlessMechanics ?? []).map((mechanic) => {
       const effect = mechanic.schemaVersion === 1
@@ -439,25 +769,24 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
           : mechanic.effects.map((entry) => structuredClone(entry)),
       }
     }),
-    traits: monster.traits.map((trait) => ({ name: trait.name, description: trait.description })),
-    actions: monster.actions.filter((action) => action.kind !== 'multiattack').map((action) => {
-      const damage = action.attack?.damage[0]
-      return {
-        id: action.id,
-        name: action.name,
-        description: action.description,
-        kind: action.kind === 'weapon-attack' ? 'weapon-attack' : 'other',
-        automation: action.automation ?? (action.kind === 'weapon-attack' ? 'headless' : 'dm-adjudication'),
-        mode: action.attack?.mode ?? 'melee',
-        toHit: action.attack?.toHit ?? 0,
-        reachFeet: action.attack?.reachFeet ?? 5,
-        rangeNormal: action.attack?.rangeFeet?.normal ?? 30,
-        rangeLong: action.attack?.rangeFeet?.long ?? 120,
-        damageDice: damage ? `${damage.count}d${damage.sides}${damage.bonus === 0 ? '' : damage.bonus > 0 ? `+${damage.bonus}` : damage.bonus}` : '1d4',
-        damageType: damage?.type ?? 'bludgeoning',
-        attacksPerAction: Math.max(1, monster.actions.find((candidate) => candidate.kind === 'multiattack')?.sequence?.filter((id) => id === action.id).length ?? 1),
-      }
-    }),
+    traits: monster.traits.map((trait) => ({
+      ...createDnd5eCustomMonsterTraitDraft(),
+      name: trait.name,
+      description: trait.description,
+      automation: trait.automation ?? 'dm-adjudication',
+      ruleKind: trait.rule?.kind ?? 'none',
+      amount: trait.rule?.kind === 'regeneration' ? trait.rule.amount : 10,
+      dcBase: trait.rule?.kind === 'undead-fortitude' ? trait.rule.dcBase : 5,
+      damageTypes: trait.rule?.kind === 'regeneration'
+        ? [...trait.rule.suppressedByDamageTypes]
+        : trait.rule?.kind === 'undead-fortitude'
+          ? [...trait.rule.excludedDamageTypes]
+          : [],
+      requiresPositiveHp: trait.rule?.kind === 'regeneration' ? trait.rule.requiresPositiveHp : true,
+      excludedOnCritical: trait.rule?.kind === 'undead-fortitude' ? trait.rule.excludedOnCritical : true,
+      diesAtZeroWhenSuppressed: trait.rule?.kind === 'regeneration' ? trait.rule.diesAtZeroWhenSuppressed : true,
+    })),
+    actions: draftActions,
   }
 }
 

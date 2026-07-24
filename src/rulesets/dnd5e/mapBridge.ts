@@ -29,6 +29,7 @@ import {
   restoreDnd5eEffectiveRulesContextForCombat,
   type Dnd5eEffectiveRulesContextV1,
 } from './effectiveRulesContext'
+import { dnd5eMonsterHasStructuredShapechange } from './monsterAdvancedAbilities'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -331,13 +332,25 @@ export function createDnd5eMapCombatSnapshot(input: {
         mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
-      shapechanger: monster?.capabilities?.shapechanger === true,
+      shapechanger: monster?.capabilities?.shapechanger === true ||
+        (!!monster && dnd5eMonsterHasStructuredShapechange(monster.id)),
       concentrating: !!tokenClassState.concentrationSpellId,
       classState: {
         ...tokenClassState,
         legendaryResistanceUses: tokenClassState.legendaryResistanceUses ?? monster?.legendaryResistanceUses,
         monsterLegendaryActionPoints: tokenClassState.monsterLegendaryActionPoints ??
-          ((monster?.legendaryActions?.length ?? 0) > 0 ? 3 : undefined),
+          ((monster?.legendaryActions?.length ?? 0) > 0 ? (monster?.legendaryActionPoints ?? 3) : undefined),
+        monsterActionUsesByActionId: tokenClassState.monsterActionUsesByActionId ?? (monster
+          ? Object.fromEntries([
+              ...monster.actions,
+              ...(monster.bonusActions ?? []),
+              ...(monster.reactions ?? []),
+              ...(monster.legendaryActions ?? []),
+              ...(monster.lairActions ?? []),
+            ].flatMap((action) => action.usage?.kind === 'per-day'
+              ? [[action.id, { current: action.usage.max, max: action.usage.max }]]
+              : []))
+          : undefined),
         monsterSpellSlots: tokenClassState.monsterSpellSlots ?? (monster?.spellcasting?.slots
           ? Object.fromEntries(Object.entries(monster.spellcasting.slots).map(([level, maximum]) => [
               level,
@@ -478,6 +491,7 @@ export function planDnd5eMapResultApplication(input: {
             declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
             declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
             concentrationSpellId: combatant.classState.concentrationSpellId,
+            concentrationSpellLevel: combatant.classState.concentrationSpellLevel,
             concentrationTargetIds: combatant.classState.concentrationTargetIds,
             concentrationRoundsRemaining: combatant.classState.concentrationRoundsRemaining,
             concentrationEffectsBySource: combatant.classState.concentrationEffectsBySource,
@@ -487,9 +501,14 @@ export function planDnd5eMapResultApplication(input: {
             shieldSpellActive: combatant.classState.shieldSpellActive,
             legendaryResistanceUses: combatant.classState.legendaryResistanceUses,
             monsterLegendaryActionPoints: combatant.classState.monsterLegendaryActionPoints,
+            monsterLairActionRoundUsed: combatant.classState.monsterLairActionRoundUsed,
+            monsterLairActionLastId: combatant.classState.monsterLairActionLastId,
             monsterRechargeReadyByActionId: combatant.classState.monsterRechargeReadyByActionId,
+            monsterActionUsesByActionId: combatant.classState.monsterActionUsesByActionId,
             monsterSpellSlots: combatant.classState.monsterSpellSlots,
             monsterSpellUsesBySpellId: combatant.classState.monsterSpellUsesBySpellId,
+            monsterShapechangeOriginalStatBlockId: combatant.classState.monsterShapechangeOriginalStatBlockId,
+            monsterShapechangeFormId: combatant.classState.monsterShapechangeFormId,
             monsterRegenerationSuppressedDamageTypes: combatant.classState.monsterRegenerationSuppressedDamageTypes,
             monsterRegenerationPendingAtZero: combatant.classState.monsterRegenerationPendingAtZero,
             monsterThreatByTargetId: combatant.classState.monsterThreatByTargetId,
@@ -507,6 +526,9 @@ export function planDnd5eMapResultApplication(input: {
           : combatant.elevationFeet,
         hp: combatant.currentHp,
         maxHp: combatant.maxHp,
+        ...(!token.characterId && combatant.statBlockId && combatant.statBlockId !== token.poolId
+          ? { poolId: combatant.statBlockId }
+          : {}),
         ...(!token.characterId ? { dnd5eCombatState: nextTokenClassState } : {}),
       }
       const tokenClassStateUnchanged = token.characterId ||
@@ -514,6 +536,7 @@ export function planDnd5eMapResultApplication(input: {
       if (
         token.x === patch.x && token.y === patch.y && token.size === patch.size &&
         token.elevationFeet === patch.elevationFeet && token.hp === patch.hp && token.maxHp === patch.maxHp &&
+        token.poolId === (patch.poolId ?? token.poolId) &&
         tokenClassStateUnchanged
       ) return token
       changedTokenIds.push(token.id)

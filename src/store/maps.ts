@@ -468,9 +468,14 @@ export interface Token {
     shieldSpellActive?: boolean
     legendaryResistanceUses?: number
     monsterLegendaryActionPoints?: number
+    monsterLairActionRoundUsed?: number
+    monsterLairActionLastId?: string
     monsterRechargeReadyByActionId?: Record<string, boolean>
+    monsterActionUsesByActionId?: Record<string, { current: number; max: number }>
     monsterSpellSlots?: Record<string, { current: number; max: number }>
     monsterSpellUsesBySpellId?: Record<string, { current: number; max: number }>
+    monsterShapechangeOriginalStatBlockId?: string
+    monsterShapechangeFormId?: string
     monsterRegenerationSuppressedDamageTypes?: Dnd5eDamageType[]
     monsterRegenerationPendingAtZero?: boolean
     /** 由 Headless 按有效承伤累计；DM 可在怪物面板中调整。 */

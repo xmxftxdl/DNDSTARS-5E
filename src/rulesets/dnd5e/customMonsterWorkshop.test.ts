@@ -162,4 +162,70 @@ describe('D&D 5e custom monster workshop', () => {
     }).ok).toBe(false)
     expect(parseDnd5eMonsterStatBlock({ ...monster, legendaryResistanceUses: -1 }).ok).toBe(false)
   })
+
+  it('round-trips portraits, defenses, equipment, action economy and daily uses', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.armorClassNote = '天然护甲与盾牌'
+    draft.savingThrows = { con: 6, wis: 4 }
+    draft.damageResistances = ['fire']
+    draft.conditionImmunities = ['frightened']
+    draft.tokenPortrait = 'data:image/png;base64,AA=='
+    draft.initiativePortrait = 'data:image/webp;base64,AA=='
+    draft.actions[0] = {
+      ...draft.actions[0],
+      usageKind: 'per-day',
+      usageMax: 3,
+      additionalDamage: [{ id: 'fire', dice: '1d6', damageType: 'fire' }],
+      onHitSaveEnabled: true,
+      onHitSaveAbility: 'con',
+      onHitSaveDc: 14,
+      onHitCondition: 'stunned',
+    }
+    draft.equipment = [{
+      id: 'veteran-blade',
+      name: '老兵长剑',
+      category: 'weapon',
+      quantity: 1,
+      description: '与长剑攻击关联。',
+      linkedActionId: draft.actions[0].id,
+    }]
+    draft.actions.push({
+      ...createDnd5eCustomMonsterDraft().actions[0],
+      id: 'legendary-cut',
+      name: '传奇斩击',
+      category: 'legendary',
+      legendaryCost: 2,
+      referencedActionId: draft.actions[0].id,
+    })
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster).toMatchObject({
+      armorClass: { note: '天然护甲与盾牌' },
+      savingThrows: { con: 6, wis: 4 },
+      damageResistances: ['fire'],
+      conditionImmunities: ['frightened'],
+      equipment: [{ id: 'veteran-blade', linkedActionId: draft.actions[0].id }],
+      actions: [expect.objectContaining({
+        usage: { kind: 'per-day', max: 3 },
+        attack: expect.objectContaining({
+          damage: [expect.anything(), expect.objectContaining({ type: 'fire' })],
+          onHitRule: { kind: 'saving-throw-condition', ability: 'con', dc: 14, condition: 'stunned' },
+        }),
+      })],
+      legendaryActions: [expect.objectContaining({
+        id: 'legendary-cut',
+        legendaryCost: 2,
+        referencedActionId: draft.actions[0].id,
+      })],
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster)).toMatchObject({
+      tokenPortrait: draft.tokenPortrait,
+      initiativePortrait: draft.initiativePortrait,
+      actions: [
+        expect.objectContaining({ usageKind: 'per-day', usageMax: 3, onHitCondition: 'stunned' }),
+        expect.objectContaining({ category: 'legendary', legendaryCost: 2 }),
+      ],
+    })
+  })
 })

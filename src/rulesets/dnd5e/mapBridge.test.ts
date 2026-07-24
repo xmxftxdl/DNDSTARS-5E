@@ -6,6 +6,8 @@ import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication } from './m
 import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
+import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft } from './customMonsterWorkshop'
+import { setDnd5eRoomMonsterCatalog } from './monsters'
 
 function character(): Character {
   return { id: 'char', name: 'Hero', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 20, currentHp: 20, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -26,7 +28,52 @@ function characterWithConditions(base: Character, conditions: string[]): Charact
 }
 
 describe('D&D 5e map bridge', () => {
-  afterEach(() => setMapGeometryRuntime([]))
+  afterEach(() => {
+    setMapGeometryRuntime([])
+    setDnd5eRoomMonsterCatalog([])
+  })
+
+  it('initializes and persists custom per-day action uses and legendary points', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.actions[0].usageKind = 'per-day'
+    draft.actions[0].usageMax = 2
+    draft.legendaryActionPoints = 5
+    draft.actions.push({
+      ...createDnd5eCustomMonsterDraft().actions[0],
+      id: 'legendary-strike',
+      category: 'legendary',
+      name: '传奇斩击',
+    })
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const monsterToken = token({ id: 'custom', poolId: monster.id, hp: monster.hitPoints.average, maxHp: monster.hitPoints.average })
+    const map: BattleMap = {
+      id: 'custom-resources', name: 'Custom resources', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'custom-resources',
+      map,
+      characters: [],
+      initiativeOrder: [{ tokenId: monsterToken.id, label: monsterToken.label, emoji: '', color: '', roll: 10 }],
+    })
+    expect(snapshot.state.combatants[monsterToken.id].classState).toMatchObject({
+      monsterLegendaryActionPoints: 5,
+      monsterActionUsesByActionId: {
+        [draft.actions[0].id]: { current: 2, max: 2 },
+      },
+    })
+    snapshot.state.combatants[monsterToken.id].classState.monsterActionUsesByActionId![draft.actions[0].id].current = 1
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    expect(plan.map.tokens[0].dnd5eCombatState?.monsterActionUsesByActionId?.[draft.actions[0].id])
+      .toEqual({ current: 1, max: 2 })
+  })
 
   it('projects monster Fey Ancestry as magical Sleep immunity', () => {
     const drow = token({ id: 'drow-token', poolId: 'srd-5.1:drow', hp: 13, maxHp: 13 })
