@@ -352,7 +352,7 @@ test('房间规则包握手贯通角色选择、DM Headless 结算和三端同�
   await expect(dm.getByTestId('initiative-token-hero-token')).toBeVisible({ timeout: 20_000 })
   await expect(player.getByTestId('initiative-token-hero-token')).toBeVisible({ timeout: 20_000 })
   await expect(player.getByTestId('player-combat-hotbar')).toBeVisible()
-  await player.getByRole('button', { name: /职业特性$/ }).click()
+  await player.getByRole('button', { name: '职业特性', exact: true }).click()
   const pluginPanel = player.getByTestId('dnd5e-plugin-combat-panel')
   await expect(pluginPanel).toBeVisible()
   await pluginPanel.locator('[data-testid^="dnd5e-plugin-target-"]').selectOption({ label: '插件盟友 · 5尺' })

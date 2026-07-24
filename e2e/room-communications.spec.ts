@@ -102,8 +102,8 @@ test('chat, private DM notes, server rolls and targeted handouts synchronize acr
   await dmPage.getByRole('button', { name: '讲义' }).click()
   await dmPage.getByPlaceholder('讲义标题').fill('只给甲的密信')
   await dmPage.getByPlaceholder(/信件正文/).fill('午夜到旧钟楼来。')
-  await dmPage.getByText('全体玩家').click()
-  await dmPage.getByText('玩家甲', { exact: true }).click()
+  await dmPage.locator('select').filter({ has: dmPage.locator('option[value="selected"]') }).selectOption('selected')
+  await dmPage.getByLabel('玩家甲', { exact: true }).check()
   await dmPage.getByRole('button', { name: '分发讲义' }).click()
   await expect(dmPage.getByText('只给甲的密信')).toBeVisible()
 

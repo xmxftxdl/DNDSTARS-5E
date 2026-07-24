@@ -1210,6 +1210,19 @@ describe('map geometry player projection', () => {
         ok: true,
         event: { ...payload, createdAt: timestamp, expiresAt: timestamp + 1_600 },
       })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, spellId: 'ray-of-frost', outcome: undefined },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({
+      ok: true,
+      event: {
+        spellId: 'ray-of-frost',
+        targetTokenId: 'goblin',
+        createdAt: timestamp,
+        expiresAt: timestamp + 1_600,
+      },
+    })
     expect(normalizeCombatPresentationEvent({ ...payload, spellId: 'unknown' }, { role: 'dm' }, timestamp))
       .toMatchObject({ ok: false, status: 400 })
   })

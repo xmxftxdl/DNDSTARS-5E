@@ -1575,10 +1575,13 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     !common.transactionId || !common.sourceTokenId
   ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
 
-  if (common.type === 'spell-projectile' && common.spellId === 'fire-bolt') {
+  if (
+    common.type === 'spell-projectile' &&
+    ['fire-bolt', 'ray-of-frost', 'eldritch-blast', 'produce-flame'].includes(common.spellId)
+  ) {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const outcome = payload?.outcome
-    if (!targetTokenId || (outcome !== 'hit' && outcome !== 'miss')) {
+    if (!targetTokenId || (outcome != null && outcome !== 'hit' && outcome !== 'miss')) {
       return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     }
     return {
@@ -1586,7 +1589,7 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
       event: {
         ...common,
         targetTokenId,
-        outcome,
+        ...(outcome ? { outcome } : {}),
         createdAt: now,
         expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
       },

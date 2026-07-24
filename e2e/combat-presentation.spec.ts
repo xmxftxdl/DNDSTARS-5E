@@ -100,6 +100,9 @@ test('DM publishes Fireball flight and area explosion through SSE', async ({ bro
       mapId: activeMapId,
       transactionId: `e2e-fireball-transaction-${Date.now()}`,
       sourceTokenId,
+      casterName: '法师',
+      spellName: '火球术',
+      castingClassId: 'wizard',
       targetCell: { col: 6, row: 3 },
       radiusFeet: 20,
     })
