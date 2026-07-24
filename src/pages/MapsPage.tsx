@@ -7899,7 +7899,16 @@ export default function MapsPage() {
     const prompt = sharedShieldSpellPrompt
     suppressedShieldSpellPromptIdsRef.current.add(prompt.id)
     setSharedShieldSpellPrompt(null)
-    await answerSharedCombatInterrupt(prompt.id, { useShieldSpell })
+    const response = { useShieldSpell }
+    await answerSharedCombatInterrupt(prompt.id, response)
+    const pending = pendingSharedShieldSpellRef.current
+    if (pending?.id === prompt.id) {
+      await finishSharedCombatInterrupt(prompt.id, response)
+      if (pendingSharedShieldSpellRef.current?.id === prompt.id) {
+        pendingSharedShieldSpellRef.current = null
+        pending.resolve(useShieldSpell)
+      }
+    }
   }
 
   const handleSharedCounterspellChoice = async (useCounterspell: boolean) => {
