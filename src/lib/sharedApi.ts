@@ -28,26 +28,22 @@ export type SharedResourceSaveResult =
   | { status: 'conflict'; expectedRevision: number; currentRevision: number }
   | { status: 'failed' }
 
-// DM 写共享态时附带的鉴权 secret。永远从环境读取，绝不硬编码/提交。
-// 服务端 STARS_SHARED_SECRET 未设时此 header 被忽略（鉴权关闭，零回归）。
 function sharedSecretHeader(): Record<string, string> {
-  const secret = import.meta.env.VITE_STARS_SHARED_SECRET as string | undefined
-  return secret ? { 'X-Stars-Secret': secret } : {}
+  // VITE_* values are public browser code. Production authority is carried by
+  // the opaque room membership token, never by a bundled server secret.
+  return {}
 }
 
 function sharedAccessHeaders(): Record<string, string> {
-  const token = import.meta.env.VITE_STARS_ACCESS_TOKEN as string | undefined
-  return token ? { 'X-Stars-Token': token } : {}
+  return {}
 }
 
 function sharedSessionUrl(url: string, includeToken = false): string {
   const session = getRoomSession()
   const room = session?.roomId ?? (import.meta.env.VITE_STARS_ROOM_ID as string | undefined)?.trim()
-  const token = import.meta.env.VITE_STARS_ACCESS_TOKEN as string | undefined
-  if (!room && (!includeToken || (!token && !session?.memberId))) return url
+  if (!room && (!includeToken || !session?.memberId)) return url
   const parsed = new URL(url)
   if (room) parsed.searchParams.set('room', room)
-  if (includeToken && token) parsed.searchParams.set('token', token)
   if (includeToken && session?.memberId) parsed.searchParams.set('member', session.memberId)
   if (includeToken && session?.roomToken) parsed.searchParams.set('roomToken', session.roomToken)
   return parsed.toString()
@@ -79,10 +75,16 @@ function sameOriginApiBase(): string {
   return sameOrigin
 }
 
+export function defaultSharedApiCandidates(production = import.meta.env.PROD): string[] {
+  if (production) return [sameOriginApiBase()]
+  return [defaultDmApiBase(), sameOriginApiBase()]
+    .filter((value, index, all) => all.indexOf(value) === index)
+}
+
 function sharedApiCandidates(): string[] {
   const configured = configuredApiBases()
   if (configured) return configured
-  return [defaultDmApiBase(), sameOriginApiBase()].filter((value, index, all) => all.indexOf(value) === index)
+  return defaultSharedApiCandidates()
 }
 
 function sharedMemberHeaders(): Record<string, string> {
@@ -124,7 +126,7 @@ export function sharedLobbyApiCandidates(): string[] {
 export function sharedWriteApiCandidates(): string[] {
   const configured = configuredApiBases()
   if (configured) return configured
-  return [defaultDmApiBase()]
+  return import.meta.env.PROD ? [sameOriginApiBase()] : [defaultDmApiBase()]
 }
 
 // 事件（SSE 订阅 + POST + DELETE）只走单一 canonical 端口（DM），
@@ -135,7 +137,7 @@ export function sharedWriteApiCandidates(): string[] {
 export function sharedEventApiCandidates(): string[] {
   const configured = configuredApiBases()
   if (configured && configured.length > 0) return [configured[0]]
-  return [defaultDmApiBase()]
+  return import.meta.env.PROD ? [sameOriginApiBase()] : [defaultDmApiBase()]
 }
 
 async function requestJson<T>(path: string, init?: RequestInit, resourceName?: string): Promise<T | null> {

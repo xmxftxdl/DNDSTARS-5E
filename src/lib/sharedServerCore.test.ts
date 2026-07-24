@@ -63,6 +63,58 @@ import {
   validateSharedStateShape,
 } from '../../scripts/shared-server-core.mjs'
 
+describe('production transport security', () => {
+  it('fails closed when a production origin or persistent shared root is missing', () => {
+    expect(sharedServerCore.validateProductionSecurityConfig({
+      STARS_SECURITY_MODE: 'production',
+    })).toMatchObject({
+      ok: false,
+      production: true,
+      errors: expect.arrayContaining([
+        'STARS_PUBLIC_ORIGIN must be an absolute http(s) origin',
+        'STARS_SHARED_ROOT must point to persistent storage',
+      ]),
+    })
+  })
+
+  it('accepts an HTTPS public origin and rejects wildcard CORS in production', () => {
+    expect(sharedServerCore.validateProductionSecurityConfig({
+      STARS_SECURITY_MODE: 'production',
+      STARS_PUBLIC_ORIGIN: 'https://table.dndstars.example',
+      STARS_SHARED_ROOT: '/persistent/stars',
+      STARS_ALLOWED_ORIGINS: '*',
+    })).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining(['STARS_ALLOWED_ORIGINS cannot contain * in production']),
+    })
+  })
+
+  it('emits exact-origin CORS and security headers for production requests', () => {
+    const headers = new Map<string, string>()
+    const res = { setHeader: (name: string, value: string) => headers.set(name, value) }
+    const env = {
+      STARS_SECURITY_MODE: 'production',
+      STARS_PUBLIC_ORIGIN: 'https://table.dndstars.example',
+      STARS_SHARED_ROOT: '/persistent/stars',
+    }
+    expect(sharedServerCore.applyCors(
+      { headers: { origin: 'https://table.dndstars.example' } },
+      res,
+      env,
+    )).toBe(true)
+    sharedServerCore.applySecurityHeaders(res, { production: true })
+    expect(headers.get('Access-Control-Allow-Origin')).toBe('https://table.dndstars.example')
+    expect(headers.get('Vary')).toBe('Origin')
+    expect(headers.get('Content-Security-Policy')).toContain("connect-src 'self'")
+    expect(headers.get('Strict-Transport-Security')).toContain('max-age=31536000')
+    expect(sharedServerCore.applyCors(
+      { headers: { origin: 'https://evil.example' } },
+      { setHeader: () => undefined },
+      env,
+    )).toBe(false)
+  })
+})
+
 describe('member-specific shared state projections', () => {
   const member = { memberId: 'player-a', accountId: 'ACCOUNTOWNER1' }
   const characters = {

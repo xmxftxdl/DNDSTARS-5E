@@ -98,6 +98,100 @@ describe('AC7 — 玩家 PUT 在两种 flag 状态都成功', () => {
   })
 })
 
+describe('production same-origin and room authentication boundary', () => {
+  let server: Running
+
+  beforeAll(async () => {
+    server = await startServer(5394, {
+      STARS_SECURITY_MODE: 'production',
+      STARS_PUBLIC_ORIGIN: 'http://127.0.0.1:5394',
+      STARS_ALLOWED_ORIGINS: '',
+    })
+  }, 30000)
+
+  afterAll(async () => {
+    if (server) await stopServer(server)
+  })
+
+  it('adds browser security headers and rejects foreign origins', async () => {
+    const page = await fetch(`${server.base}/`)
+    expect(page.status).toBe(200)
+    expect(page.headers.get('content-security-policy')).toContain("connect-src 'self'")
+    expect(page.headers.get('x-content-type-options')).toBe('nosniff')
+
+    const accepted = await fetch(`${server.base}/api/meta`, {
+      headers: { Origin: server.base },
+    })
+    expect(accepted.status).toBe(200)
+    expect(accepted.headers.get('access-control-allow-origin')).toBe(server.base)
+
+    const rejected = await fetch(`${server.base}/api/meta`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://evil.example' },
+    })
+    expect(rejected.status).toBe(403)
+    await expect(rejected.json()).resolves.toMatchObject({ error: 'origin-not-allowed' })
+  })
+
+  it('blocks the legacy default room and requires an account before room creation', async () => {
+    const legacy = await fetch(`${server.base}/api/state/maps`)
+    expect(legacy.status).toBe(403)
+    await expect(legacy.json()).resolves.toMatchObject({ error: 'room-session-required' })
+
+    const unauthenticated = await fetch(`${server.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: 'production-room',
+        displayName: 'DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'production-dm-client',
+        activePlugins: [],
+      }),
+    })
+    expect(unauthenticated.status).toBe(401)
+  })
+
+  it('authorizes room-scoped state with account and room bearer credentials', async () => {
+    const accountResponse = await fetch(`${server.base}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'DM', clientId: 'production-dm-client' }),
+    })
+    expect(accountResponse.status).toBe(201)
+    const account = await accountResponse.json() as {
+      session: { sessionToken: string }
+    }
+
+    const roomResponse = await fetch(`${server.base}/api/rooms`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': account.session.sessionToken,
+      },
+      body: JSON.stringify({
+        roomName: 'production-room',
+        displayName: 'DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'production-dm-client',
+        activePlugins: [],
+      }),
+    })
+    expect(roomResponse.status).toBe(201)
+    const room = await roomResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const query = `?room=${room.roomId}`
+    const headers = {
+      'X-Stars-Member': room.member.memberId,
+      'X-Stars-Room-Token': room.member.roomToken,
+    }
+    expect((await fetch(`${server.base}/api/state/maps${query}`, { headers })).status).toBe(404)
+    expect((await fetch(`${server.base}/api/state/maps${query}`)).status).toBe(403)
+  })
+})
+
 describe('观战席位与地图桌面事件权限', () => {
   it('观战不占玩家槽位，并在服务端禁止一切共享写入', async () => {
     const createdResponse = await fetch(`${offServer.base}/api/rooms`, {

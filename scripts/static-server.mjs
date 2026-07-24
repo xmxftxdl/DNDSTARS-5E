@@ -4,7 +4,12 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { handleSharedApi } from './shared-server-core.mjs'
+import {
+  applySecurityHeaders,
+  handleSharedApi,
+  productionSecurityEnabled,
+  validateProductionSecurityConfig,
+} from './shared-server-core.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -27,6 +32,10 @@ const sharedRoot = process.env.STARS_SHARED_ROOT
       'StarsApp',
       'shared',
     )
+const securityConfig = validateProductionSecurityConfig()
+if (!securityConfig.ok) {
+  throw new Error(`Unsafe production configuration:\n- ${securityConfig.errors.join('\n- ')}`)
+}
 // /api 分发统一在 shared-server-core 的 handleSharedApi；本文件只保留静态回退。
 const apiCtx = {
   lobbyRoot: path.join(sharedRoot, 'lobby'),
@@ -81,6 +90,7 @@ async function findStaticFile(requestPath) {
 }
 
 const server = http.createServer(async (req, res) => {
+  applySecurityHeaders(res, { production: productionSecurityEnabled() })
   const parsed = new URL(req.url ?? '/', `http://${host}:${port}`)
   if (parsed.pathname.startsWith('/api/')) {
     // handleSharedApi 内部已自带 try/catch（含锁超时 503）；返回 true 即已处理（含错误响应）。
@@ -114,4 +124,14 @@ server.listen(port, host, () => {
   console.log(`Static server listening on http://${host}:${port}/ from ${root}`)
 })
 
-setInterval(() => {}, 1 << 30)
+let closing = false
+const close = () => {
+  if (closing) return
+  closing = true
+  server.close(() => process.exit(0))
+  const forceExit = setTimeout(() => process.exit(1), 10_000)
+  forceExit.unref()
+}
+
+process.on('SIGINT', close)
+process.on('SIGTERM', close)

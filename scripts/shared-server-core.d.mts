@@ -30,6 +30,24 @@ export const CAMPAIGN_SNAPSHOT_LIMIT: number
 export const CAMPAIGN_IMPORT_MAX_BYTES: number
 export const CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS: number
 
+export function productionSecurityEnabled(env?: Record<string, string | undefined>): boolean
+export function validateProductionSecurityConfig(env?: Record<string, string | undefined>): {
+  ok: boolean
+  production: boolean
+  publicOrigin?: string | null
+  allowedOrigins?: string[]
+  errors: string[]
+}
+export function applySecurityHeaders(
+  res: { setHeader(name: string, value: string): void },
+  options?: { production?: boolean },
+): void
+export function applyCors(
+  req: { headers?: Record<string, string | string[] | undefined> } | null | undefined,
+  res: { setHeader(name: string, value: string): void },
+  env?: Record<string, string | undefined>,
+): boolean
+
 export function migrateLegacyApCombatLogText(text: unknown): string
 export function normalizeCombatPresentationEvent(
   payload: unknown,

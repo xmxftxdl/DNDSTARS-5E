@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   configuredApiBases,
+  defaultSharedApiCandidates,
   saveSharedResourceWithResult,
   sharedEventApiCandidates,
   sharedWriteApiCandidates,
@@ -40,6 +41,17 @@ describe('T-P1-422/AC4 — sharedApi base-list routing (dedup / order / topology
     // writes fan out to 3, events collapse to 1 — the C2 divergence fix.
     expect(sharedWriteApiCandidates()).toHaveLength(3)
     expect(sharedEventApiCandidates()).toEqual(['http://h:6173/api'])
+  })
+
+  it('uses only the same-origin API when built for production', () => {
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'https://table.dndstars.example',
+        protocol: 'https:',
+        hostname: 'table.dndstars.example',
+      },
+    })
+    expect(defaultSharedApiCandidates(true)).toEqual(['https://table.dndstars.example/api'])
   })
 
   it('returns a saved ACK only after the authoritative PUT succeeds', async () => {

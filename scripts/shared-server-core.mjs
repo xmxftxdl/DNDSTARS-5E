@@ -73,6 +73,89 @@ export const CAMPAIGN_AUTO_SNAPSHOT_INTERVAL_MS = 2 * 60 * 1000
 const PROCESS_STARTED_AT = Date.now()
 const lastAutoSnapshotAt = new Map()
 
+export function productionSecurityEnabled(env = process.env) {
+  const explicit = String(env.STARS_SECURITY_MODE ?? '').trim().toLowerCase()
+  if (explicit === 'production') return true
+  if (explicit === 'development' || explicit === 'test') return false
+  return env.NODE_ENV === 'production'
+}
+
+function normalizedHttpOrigin(value) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const parsed = new URL(value.trim())
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) return null
+    if (parsed.pathname !== '/' && parsed.pathname !== '') return null
+    return parsed.origin
+  } catch {
+    return null
+  }
+}
+
+export function validateProductionSecurityConfig(env = process.env) {
+  if (!productionSecurityEnabled(env)) return { ok: true, production: false, errors: [] }
+  const errors = []
+  const publicOrigin = normalizedHttpOrigin(env.STARS_PUBLIC_ORIGIN)
+  if (!publicOrigin) errors.push('STARS_PUBLIC_ORIGIN must be an absolute http(s) origin')
+  if (
+    publicOrigin?.startsWith('http://') &&
+    !/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(publicOrigin)
+  ) {
+    errors.push('STARS_PUBLIC_ORIGIN must use https outside localhost')
+  }
+  if (typeof env.STARS_SHARED_ROOT !== 'string' || !env.STARS_SHARED_ROOT.trim()) {
+    errors.push('STARS_SHARED_ROOT must point to persistent storage')
+  }
+  const configuredOrigins = String(env.STARS_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+  if (configuredOrigins.includes('*')) errors.push('STARS_ALLOWED_ORIGINS cannot contain * in production')
+  for (const origin of configuredOrigins) {
+    if (!normalizedHttpOrigin(origin)) errors.push(`invalid STARS_ALLOWED_ORIGINS entry: ${origin}`)
+  }
+  return {
+    ok: errors.length === 0,
+    production: true,
+    publicOrigin,
+    allowedOrigins: [...new Set([publicOrigin, ...configuredOrigins.map(normalizedHttpOrigin)].filter(Boolean))],
+    errors,
+  }
+}
+
+export function applySecurityHeaders(res, options = {}) {
+  const production = options.production ?? productionSecurityEnabled()
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Referrer-Policy', 'no-referrer')
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+  // The 3D dice renderer is an application-owned iframe, so same-origin
+  // framing must remain available while third-party framing stays blocked.
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN')
+  if (!production) return
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "media-src 'self' blob:",
+      "worker-src 'self' blob:",
+      "frame-src 'self'",
+      "connect-src 'self'",
+    ].join('; '),
+  )
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+}
+
 /**
  * Dedicated SRD 5.1 servers must not relay retired AP balances even when an
  * older client reconnects and writes a pre-migration snapshot. Keeping this at
@@ -872,11 +955,27 @@ export function extractSecret(req) {
 // 两个服务端（vite-server.mjs + static-server.mjs）此前各自复制了一份字节相同的 /api 分发逻辑
 // （events / state / image），极易漂移。现集中到此处单一定义，服务端只保留各自的静态回退差异。
 // ctx = { stateRoot, imageRoot, legacyStateRoot, legacyImageRoot, eventClients, eventBacklog }
-function applyCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+export function applyCors(req, res, env = process.env) {
+  const origin = typeof req?.headers?.origin === 'string' ? req.headers.origin : null
+  const production = productionSecurityEnabled(env)
+  const publicOrigin = normalizedHttpOrigin(env.STARS_PUBLIC_ORIGIN)
+  const configured = String(env.STARS_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map(normalizedHttpOrigin)
+    .filter(Boolean)
+  const allowedOrigins = new Set([publicOrigin, ...configured].filter(Boolean))
+  if (origin) {
+    if (production && !allowedOrigins.has(origin)) return false
+    if (!production && allowedOrigins.size > 0 && !allowedOrigins.has(origin)) return false
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigins.size > 0 ? origin : '*')
+    if (allowedOrigins.size > 0) res.setHeader('Vary', 'Origin')
+  } else if (!production && allowedOrigins.size === 0) {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
   res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
+  return true
 }
 
 function extractAccessToken(req, parsed) {
@@ -4927,7 +5026,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
 
   if (parsed.pathname === '/api/rooms' && req.method === 'POST') {
     const payload = await readJsonRequest(req)
-    const account = await authenticateAccount(req, ctx, true)
+    const account = await authenticateAccount(req, ctx, !productionSecurityEnabled())
     if (payload?.accountId != null && account?.accountId !== payload.accountId) {
       throw new RoomProtocolError(401, 'invalid-account-session')
     }
@@ -5551,7 +5650,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     const resumeMemberId = payload?.resumeMemberId
     const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
     const requestedRole = payload?.role === 'spectator' ? 'spectator' : 'player'
-    const account = await authenticateAccount(req, ctx, true)
+    const account = await authenticateAccount(req, ctx, !productionSecurityEnabled())
     const roomToken = createRoomSessionToken()
     const roomTokenHash = roomSessionTokenHash(roomToken)
     if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
@@ -5696,7 +5795,6 @@ function addEventClient(ctx, channel, res, viewer) {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
   })
   res.write(`event: ready\ndata: ${JSON.stringify({
     channel,
@@ -5826,7 +5924,11 @@ async function handleCampaignApi(req, res, parsed, ctx) {
  */
 export async function handleSharedApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/')) return false
-  applyCors(res)
+  applySecurityHeaders(res)
+  if (!applyCors(req, res)) {
+    writeJson(res, 403, { error: 'origin-not-allowed' })
+    return true
+  }
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
     res.end()
@@ -5845,6 +5947,17 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 
+  if (parsed.pathname === '/api/healthz' && req.method === 'GET') {
+    writeJson(res, 200, {
+      status: 'ok',
+      service: 'dndstars-5e-shared',
+      protocolVersion: SHARED_PROTOCOL_VERSION,
+      buildId: ctx.serverBuildId ?? process.env.STARS_BUILD_ID ?? 'development',
+      uptimeMs: Math.max(0, Date.now() - (ctx.serverStartedAt ?? PROCESS_STARTED_AT)),
+    })
+    return true
+  }
+
   try {
     if (await handleAccountApi(req, res, parsed, ctx)) return true
     if (await handleRoomLobbyApi(req, res, parsed, ctx)) return true
@@ -5855,6 +5968,10 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   }
 
   const roomId = normalizeRoomId(parsed.searchParams.get('room'))
+  if (productionSecurityEnabled() && roomId === 'default') {
+    writeJson(res, 403, { error: 'room-session-required' })
+    return true
+  }
   if (!ctx.rateLimits) ctx.rateLimits = new Map()
   ctx = scopedContext(ctx, roomId)
   const access = authorizeAccessToken(extractAccessToken(req, parsed))
@@ -6298,7 +6415,9 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     }
 
     if (parsed.pathname === '/api/state/combat-interrupts/interrupt' && req.method === 'PATCH') {
-      const auth = authorizeStateWrite('combat-interrupts', extractSecret(req))
+      const auth = authenticatedRoomMember
+        ? { ok: true }
+        : authorizeStateWrite('combat-interrupts', extractSecret(req))
       if (!auth.ok) {
         res.writeHead(auth.status, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify({ error: 'unauthorized' }))
@@ -6486,7 +6605,9 @@ export async function handleSharedApi(req, res, parsed, ctx) {
           writeJson(res, 403, { error: 'dm-authority-required', name })
           return true
         }
-        const auth = authorizeStateWrite(name, extractSecret(req))
+        const auth = authenticatedRoomMember
+          ? { ok: true }
+          : authorizeStateWrite(name, extractSecret(req))
         if (!auth.ok) {
           res.writeHead(auth.status, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify({ error: 'unauthorized' }))
@@ -6598,6 +6719,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (req.method === 'DELETE') {
+        const auth = authenticatedRoomMember
+          ? { ok: true }
+          : authorizeStateWrite(name, extractSecret(req))
+        if (!auth.ok) {
+          writeJson(res, auth.status, { error: 'unauthorized' })
+          return true
+        }
         await maybeWriteAutoCampaignSnapshot(ctx)
         const expectedHeader = req?.headers?.['x-stars-expected-revision']
         if ((ctx.roomId ?? 'default') !== 'default' && (expectedHeader == null || expectedHeader === '')) {
@@ -6698,6 +6826,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (req.method === 'PUT') {
+        const auth = authenticatedRoomMember
+          ? { ok: true }
+          : authorizeStateWrite('shared-images', extractSecret(req))
+        if (!auth.ok) {
+          writeJson(res, auth.status, { error: 'unauthorized' })
+          return true
+        }
         await mkdir(ctx.imageRoot, { recursive: true })
         await maybeWriteAutoCampaignSnapshot(ctx)
         const body = await readBody(req, IMAGE_MAX_BYTES)
@@ -6718,6 +6853,13 @@ export async function handleSharedApi(req, res, parsed, ctx) {
         return true
       }
       if (req.method === 'DELETE') {
+        const auth = authenticatedRoomMember
+          ? { ok: true }
+          : authorizeStateWrite('shared-images', extractSecret(req))
+        if (!auth.ok) {
+          writeJson(res, auth.status, { error: 'unauthorized' })
+          return true
+        }
         await maybeWriteAutoCampaignSnapshot(ctx)
         await rm(filePath, { force: true })
         await rm(metaPath, { force: true })
