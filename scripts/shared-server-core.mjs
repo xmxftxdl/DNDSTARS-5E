@@ -53,6 +53,7 @@ export const COMBAT_PRESENTATION_CHANNEL = 'combat-presentation'
 export const MAP_PING_LIFETIME_MS = 3_200
 export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
 export const COMBAT_PRESENTATION_LIFETIME_MS = 1_600
+export const SPELL_BANNER_PRESENTATION_LIFETIME_MS = 3_500
 export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
 export const FIREBALL_PRESENTATION_LIFETIME_MS = 3_500
 export const KILL_STREAK_BANNER_START_DELAY_MS = 650
@@ -1618,6 +1619,26 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         ...(common.spellId === 'resistance' ? { accentColor, glowColor } : {}),
         createdAt: now,
         expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'spell-banner' && common.spellId === 'shatter') {
+    const casterName = normalizedLabel(payload?.casterName, 80)
+    const spellName = normalizedLabel(payload?.spellName, 80)
+    const castingClassId = normalizedLabel(payload?.castingClassId, 40)
+    if (!casterName || !spellName || !castingClassId) {
+      return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        casterName,
+        spellName,
+        castingClassId,
+        createdAt: now,
+        expiresAt: now + SPELL_BANNER_PRESENTATION_LIFETIME_MS,
       },
     }
   }
@@ -3481,6 +3502,30 @@ function tokenHeightFeet(token) {
   return Math.max(5, Math.max(1, Number(token?.size) || 1) * 5)
 }
 
+function clampTokenToMap(map, token) {
+  const width = Math.max(1, Number(map?.width) || 1)
+  const height = Math.max(1, Number(map?.height) || 1)
+  const gridSize = Math.max(1, Number(map?.gridSize) || 1)
+  const creatureFootprint = {
+    '微型': 1,
+    '小型': 1,
+    '中型': 1,
+    '大型': 2,
+    '超大型': 3,
+    '巨型': 4,
+  }[token?.creatureSize]
+  const footprintCells = creatureFootprint ?? Math.max(1, Math.round(Number(token?.size) || 1))
+  const halfExtent = footprintCells * gridSize / 2
+  const clampAxis = (value, extent) => {
+    if (extent <= halfExtent * 2) return extent / 2
+    const finiteValue = Number.isFinite(value) ? Number(value) : extent / 2
+    return Math.max(halfExtent, Math.min(extent - halfExtent, finiteValue))
+  }
+  const x = clampAxis(token?.x, width)
+  const y = clampAxis(token?.y, height)
+  return x === token?.x && y === token?.y ? token : { ...token, x, y }
+}
+
 function tokenVisibilitySamples(token, gridSize) {
   const radius = Math.max(1, gridSize * Math.max(1, Number(token?.size) || 1) * 0.4)
   return [
@@ -3889,10 +3934,13 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
       if (!plainObject(map) || !Array.isArray(map.tokens)) return map
       const effectiveMap = {
         ...map,
-        tokens: map.tokens.map((token) => plainObject(token) && plainObject(token.lightSource) &&
-          !campaignLightActive(token.lightSource, worldMinute)
-          ? { ...token, lightSource: { ...token.lightSource, enabled: false } }
-          : token),
+        tokens: map.tokens.map((token) => {
+          if (!plainObject(token)) return token
+          const bounded = clampTokenToMap(map, token)
+          return plainObject(bounded.lightSource) && !campaignLightActive(bounded.lightSource, worldMinute)
+            ? { ...bounded, lightSource: { ...bounded.lightSource, enabled: false } }
+            : bounded
+        }),
       }
       const rawGeometry = geometryByMapId.get(map.id)
       const geometry = plainObject(rawGeometry)

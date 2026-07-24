@@ -35,7 +35,11 @@ import {
 } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eEligibleMonsterMechanics, dnd5eMonsterMechanicDiceRequirements } from './monsterAutomation'
-import { dnd5eMonsterEffectiveWeaponAttack, dnd5eMonsterHasGenericAbility } from './monsterGenericAbilities'
+import {
+  dnd5eMonsterEffectiveWeaponAttack,
+  dnd5eMonsterHasGenericAbility,
+  dnd5eMonsterWeaponAttackAgainstConditions,
+} from './monsterGenericAbilities'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eActiveWeaponDamageD4Mode } from './activeEffects'
@@ -110,7 +114,7 @@ export function prepareDnd5eMonsterAttack(input: {
   const action = multiattack ?? indexedAction
   if (dnd5eMonsterActionAutomation(action) !== 'headless') return { ok: false, reason: 'invalid-action' }
   const attackIds = action.kind === 'multiattack' ? action.sequence ?? [] : [action.id]
-  const attacks = attackIds.flatMap((actionId) => {
+  let attacks = attackIds.flatMap((actionId) => {
     const definition = monster.actions.find((candidate) => candidate.id === actionId)
     return definition?.attack && dnd5eMonsterActionAutomation(definition) === 'headless'
       ? [{
@@ -165,6 +169,10 @@ export function prepareDnd5eMonsterAttack(input: {
   if (actorIndex < 0 || !actorCombatant || !target) {
     return { ok: false, reason: 'combatant-missing' }
   }
+  attacks = attacks.map((entry) => ({
+    ...entry,
+    attack: dnd5eMonsterWeaponAttackAgainstConditions(monster, entry.attack, target.conditions),
+  }))
   for (const [tokenId, economy] of Object.entries(input.turnEconomyByToken ?? {})) {
     const combatant = snapshot.state.combatants[tokenId]
     if (!combatant) continue

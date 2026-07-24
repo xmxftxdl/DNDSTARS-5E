@@ -83,9 +83,45 @@ export function dnd5eMonsterEffectiveWeaponAttack(
     : attack
 }
 
+export function dnd5eMonsterHasMagicResistance(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.rule?.kind === 'magic-resistance' ||
+    /魔法抗性|magic resistance/i.test(trait.name)) === true
+}
+
+export function dnd5eMonsterWeaponAttackAgainstConditions(
+  monster: Dnd5eMonsterStatBlock,
+  attack: Dnd5eMonsterWeaponAttack,
+  targetConditions: readonly string[],
+): Dnd5eMonsterWeaponAttack {
+  const normalizedConditions = new Set(targetConditions.map((condition) => condition.trim().toLowerCase()))
+  const bonuses = monster.traits.flatMap((trait) =>
+    trait.rule?.kind === 'conditional-target-bonus' &&
+    trait.rule.targetConditions.some((condition) => normalizedConditions.has(condition.toLowerCase()))
+      ? [trait.rule]
+      : [])
+  if (bonuses.length === 0) return attack
+  const attackBonus = bonuses.reduce((sum, bonus) => sum + bonus.attackBonus, 0)
+  const damageBonus = bonuses.reduce((sum, bonus) => sum + bonus.damageBonus, 0)
+  return {
+    ...attack,
+    toHit: attack.toHit + attackBonus,
+    damage: attack.damage.map((component, index) =>
+      index === 0 ? { ...component, bonus: component.bonus + damageBonus } : component),
+  }
+}
+
 export function dnd5eMonsterRechargeActions(monster: Dnd5eMonsterStatBlock | undefined): readonly Dnd5eMonsterAction[] {
   if (!monster) return []
-  return [...monster.actions, ...monster.legendaryActions ?? [], ...monster.lairActions ?? []]
+  return [
+    ...monster.actions,
+    ...monster.bonusActions ?? [],
+    ...monster.reactions ?? [],
+    ...monster.legendaryActions ?? [],
+    ...monster.lairActions ?? [],
+  ]
     .filter((action) => action.usage?.kind === 'recharge')
 }
 

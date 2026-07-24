@@ -21,6 +21,15 @@ function creature(patch: Partial<Dnd5eDefensiveCreature> = {}): Dnd5eDefensiveCr
 }
 
 describe('SRD 5.1 passive class defenses', () => {
+  it('applies magic resistance only against spells and explicitly magical effects', () => {
+    const resistant = creature({ magicResistance: true })
+    expect(dnd5eSavingThrowMode(resistant, 'wis', { sourceIsSpell: true })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(resistant, 'con', { sourceIsMagical: true })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(resistant, 'str')).toBe('normal')
+    expect(dnd5eSavingThrowMode({ ...resistant, exhaustionLevel: 3 }, 'wis', { sourceIsSpell: true }))
+      .toBe('normal')
+  })
+
   it('applies Danger Sense and cancels it against level-three exhaustion', () => {
     const barbarian = creature({ classId: 'barbarian', level: 2 })
     expect(dnd5eSavingThrowMode(barbarian, 'dex')).toBe('advantage')

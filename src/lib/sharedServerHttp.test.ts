@@ -1478,6 +1478,18 @@ describe('room privacy projections and event channel ACLs', () => {
       targetTokenId: 'goblin',
       outcome: 'hit',
     })).status).toBe(200)
+    expect((await post('combat-presentation', dmHeaders, {
+      schemaVersion: 1,
+      id: 'shatter-animation-1:spell-banner',
+      type: 'spell-banner',
+      mapId: 'map',
+      transactionId: 'shatter-transaction-1',
+      spellId: 'shatter',
+      sourceTokenId: 'bard',
+      casterName: '吟游诗人',
+      spellName: '粉碎音波',
+      castingClassId: 'bard',
+    })).status).toBe(200)
     expect((await post('unregistered-private-channel', dmHeaders, { secret: true })).status).toBe(404)
     expect((await post('player-action-player-to-dm', playerHeaders, { id: 'valid-request', sourceMode: 'dm' })).status).toBe(200)
   })

@@ -41,4 +41,18 @@ describe('CombatActionBanner', () => {
     expect(html).toContain('data-icon-motif="fire"')
     expect(html).toContain('kill-streak-banner__gold-line--top')
   })
+
+  it('renders two gently animated notes on each side for bard banners', () => {
+    const html = renderToStaticMarkup(createElement(CombatActionBanner, {
+      mode: 'spell',
+      classId: 'bard',
+      spellId: 'shatter',
+      spellName: '粉碎音波',
+    }))
+    expect(html).toContain('data-combat-class-backdrop="bard"')
+    expect(html.match(/combat-banner-class-backdrop__bard-note--left-/g)).toHaveLength(2)
+    expect(html.match(/combat-banner-class-backdrop__bard-note--right-/g)).toHaveLength(2)
+    expect(html.match(/🎵/g)).toHaveLength(2)
+    expect(html.match(/♪/g)).toHaveLength(2)
+  })
 })

@@ -30,6 +30,7 @@ import {
   type Dnd5eEffectiveRulesContextV1,
 } from './effectiveRulesContext'
 import { dnd5eMonsterHasStructuredShapechange } from './monsterAdvancedAbilities'
+import { dnd5eMonsterHasMagicResistance } from './monsterGenericAbilities'
 
 export interface Dnd5eMapCombatSnapshot {
   state: Dnd5eHeadlessCombatState
@@ -332,6 +333,7 @@ export function createDnd5eMapCombatSnapshot(input: {
         mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
+      magicResistance: dnd5eMonsterHasMagicResistance(monster),
       shapechanger: monster?.capabilities?.shapechanger === true ||
         (!!monster && dnd5eMonsterHasStructuredShapechange(monster.id)),
       concentrating: !!tokenClassState.concentrationSpellId,
@@ -490,6 +492,9 @@ export function planDnd5eMapResultApplication(input: {
             openHandNoReactionsAppliedTurnKeysBySource: combatant.classState.openHandNoReactionsAppliedTurnKeysBySource,
             declarativeUsedTurnKeys: combatant.classState.declarativeUsedTurnKeys,
             declarativeTransactionIds: combatant.classState.declarativeTransactionIds,
+            monsterMechanicRollModifiers: combatant.classState.monsterMechanicRollModifiers,
+            pendingMonsterMechanicTriggers: combatant.classState.pendingMonsterMechanicTriggers,
+            monsterMechanicTriggerSequence: combatant.classState.monsterMechanicTriggerSequence,
             concentrationSpellId: combatant.classState.concentrationSpellId,
             concentrationSpellLevel: combatant.classState.concentrationSpellLevel,
             concentrationTargetIds: combatant.classState.concentrationTargetIds,

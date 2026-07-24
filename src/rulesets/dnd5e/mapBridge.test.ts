@@ -75,6 +75,52 @@ describe('D&D 5e map bridge', () => {
       .toEqual({ current: 1, max: 2 })
   })
 
+  it('persists pending monster triggers and one-shot roll modifiers across map snapshots', () => {
+    const monsterToken = token({ id: 'custom', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7 })
+    const map: BattleMap = {
+      id: 'mechanic-state', name: 'Mechanic state', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [monsterToken],
+    }
+    const initiativeOrder = [{ tokenId: monsterToken.id, label: monsterToken.label, emoji: '', color: '', roll: 10 }]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'mechanic-state', map, characters: [], initiativeOrder,
+    })
+    const trigger = {
+      id: 'mechanic-state:1:1:custom:test',
+      mechanicOwnerId: monsterToken.id,
+      mechanicId: 'test',
+      event: 'when-hit' as const,
+      subjectId: monsterToken.id,
+      createdRound: 1,
+      chainDepth: 0,
+    }
+    snapshot.state.combatants[monsterToken.id].classState.pendingMonsterMechanicTriggers = {
+      [trigger.id]: trigger,
+    }
+    snapshot.state.combatants[monsterToken.id].classState.monsterMechanicTriggerSequence = 1
+    snapshot.state.combatants[monsterToken.id].classState.monsterMechanicRollModifiers = [{
+      id: 'modifier',
+      mechanicOwnerId: monsterToken.id,
+      mechanicId: 'test',
+      roll: 'attack',
+      mode: 'bonus',
+      bonus: 2,
+    }]
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state, map, characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'mechanic-state', map: plan.map, characters: [], initiativeOrder,
+    })
+    expect(reconnected.state.combatants[monsterToken.id].classState).toMatchObject({
+      pendingMonsterMechanicTriggers: { [trigger.id]: trigger },
+      monsterMechanicTriggerSequence: 1,
+      monsterMechanicRollModifiers: [{ mechanicId: 'test', roll: 'attack', mode: 'bonus', bonus: 2 }],
+    })
+  })
+
   it('projects monster Fey Ancestry as magical Sleep immunity', () => {
     const drow = token({ id: 'drow-token', poolId: 'srd-5.1:drow', hp: 13, maxHp: 13 })
     const map: BattleMap = {

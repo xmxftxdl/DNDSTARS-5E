@@ -313,7 +313,8 @@ export function defaultTokenSizeForMap(map: BattleMap): number {
 
 export function realignTokensToGrid(tokens: Token[], map: BattleMap): Token[] {
   return tokens.map((t) => {
-    const pos = snapTokenToGridCenter(t.x, t.y, t, map)
+    const snapped = snapTokenToGridCenter(t.x, t.y, t, map)
+    const pos = clampTokenPositionToMap(snapped, t, map)
     return { ...t, ...pos }
   })
 }

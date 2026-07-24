@@ -88,6 +88,21 @@ export interface CombatPresentationFireballEventV1 {
   expiresAt: number
 }
 
+export interface CombatPresentationSpellBannerEventV1 {
+  schemaVersion: 1
+  id: string
+  type: 'spell-banner'
+  mapId: string
+  transactionId: string
+  spellId: string
+  sourceTokenId: string
+  casterName: string
+  spellName: string
+  castingClassId: string
+  createdAt: number
+  expiresAt: number
+}
+
 export interface CombatPresentationShockingGraspEventV1 {
   schemaVersion: 1
   id: string
@@ -150,6 +165,7 @@ export interface CombatPresentationKillStreakEventV1 {
 export type CombatPresentationEventV1 =
   | CombatPresentationSpellProjectileEventV1
   | CombatPresentationFireballEventV1
+  | CombatPresentationSpellBannerEventV1
   | CombatPresentationShockingGraspEventV1
   | CombatPresentationChillTouchEventV1
   | CombatPresentationSacredFlameEventV1
@@ -175,7 +191,7 @@ export interface CombatPresentationMapProjectile {
 export interface CombatPresentationSpellBanner {
   id: string
   casterName: string
-  spellId: 'fireball'
+  spellId: string
   spellName: string
   castingClassId: string
   createdAt: number
@@ -264,6 +280,16 @@ export function parseCombatPresentationEvent(
     ) return null
     return fireball as CombatPresentationFireballEventV1
   }
+  if (event.type === 'spell-banner') {
+    const banner = event as Partial<CombatPresentationSpellBannerEventV1>
+    if (
+      !boundedId(banner.spellId, 120) ||
+      !boundedId(banner.casterName, 80) ||
+      !boundedId(banner.spellName, 80) ||
+      !boundedId(banner.castingClassId, 40)
+    ) return null
+    return banner as CombatPresentationSpellBannerEventV1
+  }
   if (event.type === 'spell-target-effect') {
     const effect = event as Partial<CombatPresentationShockingGraspEventV1>
     if (
@@ -333,7 +359,7 @@ export function combatPresentationProjectilesForMap(
   now = Date.now(),
 ): CombatPresentationMapProjectile[] {
   return state.spellProjectiles.flatMap<CombatPresentationMapProjectile>((event) => {
-    if (event.type === 'kill-streak') return []
+    if (event.type === 'kill-streak' || event.type === 'spell-banner') return []
     const animationDuration = event.spellId === 'fireball'
       ? FIREBALL_ANIMATION_DURATION_MS
       : event.spellId === 'shocking-grasp'
@@ -485,12 +511,12 @@ export function combatPresentationSpellBannerForMap(
   now = Date.now(),
 ): CombatPresentationSpellBanner | null {
   const event = [...state.spellProjectiles].reverse().find((candidate) =>
-    candidate.type === 'spell-area-projectile' &&
+    (candidate.type === 'spell-area-projectile' || candidate.type === 'spell-banner') &&
     candidate.mapId === mapId &&
     candidate.createdAt <= now &&
     candidate.createdAt + SPELL_BANNER_TOTAL_DURATION_MS > now,
   )
-  if (!event || event.type !== 'spell-area-projectile') return null
+  if (!event || (event.type !== 'spell-area-projectile' && event.type !== 'spell-banner')) return null
   return {
     id: event.id,
     casterName: event.casterName,
@@ -498,7 +524,9 @@ export function combatPresentationSpellBannerForMap(
     spellName: event.spellName,
     castingClassId: event.castingClassId,
     createdAt: event.createdAt,
-    animationStartsAt: event.animationStartsAt,
+    animationStartsAt: event.type === 'spell-area-projectile'
+      ? event.animationStartsAt
+      : event.createdAt,
     expiresAt: event.expiresAt,
   }
 }
@@ -525,6 +553,28 @@ export function combatPresentationKillStreakForMap(
     bannerStartsAt: event.bannerStartsAt,
     expiresAt: event.expiresAt,
   }
+}
+
+export async function publishSpellBannerPresentation(input: {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  spellId: string
+  casterName: string
+  spellName: string
+  castingClassId: string
+}): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-banner',
+    ...input,
+    createdAt,
+    expiresAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS + 500,
+  })
+  return { completesAt: createdAt + SPELL_BANNER_TOTAL_DURATION_MS }
 }
 
 export async function publishFireBoltPresentation(input: {

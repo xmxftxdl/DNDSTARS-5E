@@ -39,6 +39,26 @@ export default function BannerClassBackdrop({
           ))}
         </>
       ) : null}
+      {classId === 'bard' ? (
+        <div className="combat-banner-class-backdrop__bard-notes">
+          {(['left', 'right'] as const).flatMap((side) => (
+            [
+              <span
+                className={`combat-banner-class-backdrop__bard-note combat-banner-class-backdrop__bard-note--${side}-primary`}
+                key={`${side}-primary`}
+              >
+                🎵
+              </span>,
+              <span
+                className={`combat-banner-class-backdrop__bard-note combat-banner-class-backdrop__bard-note--${side}-secondary`}
+                key={`${side}-secondary`}
+              >
+                ♪
+              </span>,
+            ]
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

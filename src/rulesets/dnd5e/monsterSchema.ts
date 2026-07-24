@@ -29,9 +29,13 @@ const ACTION_KINDS = new Set(['weapon-attack', 'multiattack', 'other'])
 const ATTACK_MODES = new Set(['melee', 'ranged', 'melee-or-ranged'])
 const TARGET_PRIORITIES = new Set(['nearest', 'lowest-current-hp', 'lowest-hp-percentage', 'lowest-armor-class', 'highest-threat'])
 const MECHANIC_LIMITS = new Set(['once-per-turn', 'once-per-combat', 'unlimited'])
-const MECHANIC_EVENTS = new Set(['turn-start', 'turn-end', 'after-hit', 'after-damaged', 'phase-transition'])
+const MECHANIC_EVENTS = new Set([
+  'turn-start', 'turn-end', 'after-hit', 'after-miss', 'when-hit', 'after-damaged',
+  'saving-throw-magic', 'saving-throw-physical', 'movement', 'phase-transition',
+])
 const MECHANIC_AUTOMATION = new Set(['full', 'partial', 'manual'])
-const MECHANIC_TARGETS = new Set(['self', 'trigger-target', 'damage-source'])
+const MECHANIC_TARGETS = new Set(['self', 'trigger-target', 'damage-source', 'selected-subject'])
+const MECHANIC_SUBJECTS = new Set(['self', 'ally-within', 'hostile-within'])
 const STANDARD_CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 const ID_PATTERN = /^(?:srd-5\.1|room-monster):[a-z0-9][a-z0-9-]{0,95}$/
 const DICE_PATTERN = /^\d+d\d+(?:\s*[+\-−]\s*\d+)?$/i
@@ -81,6 +85,19 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   }
   if (action.legendaryCost != null && !finiteInteger(action.legendaryCost, 1, 10)) return false
   if (action.referencedActionId != null && !requiredText(action.referencedActionId, 120)) return false
+  if (action.movement != null) {
+    if (!isRecord(action.movement) ||
+      action.movement.kind !== 'straight-toward-visible-hostile' ||
+      typeof action.movement.maximumSpeedFraction !== 'number' ||
+      !Number.isFinite(action.movement.maximumSpeedFraction) ||
+      action.movement.maximumSpeedFraction <= 0 ||
+      action.movement.maximumSpeedFraction > 1) return false
+  }
+  if (action.reactionTrigger != null) {
+    if (!isRecord(action.reactionTrigger) ||
+      action.reactionTrigger.kind !== 'after-action' ||
+      !requiredText(action.reactionTrigger.actionId, 120)) return false
+  }
   if (action.attack == null) return true
   const attack = action.attack
   if (!isRecord(attack) || typeof attack.mode !== 'string' || !ATTACK_MODES.has(attack.mode) ||
@@ -127,6 +144,31 @@ function traitShapeIsValid(raw: unknown): boolean {
       raw.rule.bonusActionOptions[0] === 'disengage' &&
       raw.rule.bonusActionOptions[1] === 'hide'
   }
+  if (raw.rule.kind === 'keen-sense') {
+    return ['smell', 'hearing', 'sight'].includes(String(raw.rule.sense)) &&
+      requiredText(raw.rule.skillKey, 120) &&
+      finiteInteger(raw.rule.checkBonus, -100, 100) &&
+      (raw.rule.blindsightFeet == null || finiteInteger(raw.rule.blindsightFeet, 0, 10_000))
+  }
+  if (raw.rule.kind === 'ambusher') {
+    return raw.rule.initiativeAdvantageWhenSurprising === true
+  }
+  if (raw.rule.kind === 'charge-damage') {
+    return finiteInteger(raw.rule.minimumStraightMovementFeet, 5, 10_000) &&
+      requiredText(raw.rule.actionId, 120) &&
+      validateDamage(raw.rule.extraDamage)
+  }
+  if (raw.rule.kind === 'magic-resistance') {
+    return raw.rule.savingThrowAdvantageAgainstMagic === true
+  }
+  if (raw.rule.kind === 'conditional-target-bonus') {
+    return Array.isArray(raw.rule.targetConditions) &&
+      raw.rule.targetConditions.length >= 1 &&
+      raw.rule.targetConditions.length <= STANDARD_CONDITIONS.size &&
+      raw.rule.targetConditions.every((condition) => STANDARD_CONDITIONS.has(String(condition))) &&
+      finiteInteger(raw.rule.attackBonus, -100, 100) &&
+      finiteInteger(raw.rule.damageBonus, -1_000_000, 1_000_000)
+  }
   return false
 }
 
@@ -161,6 +203,18 @@ function mechanicEffectV2IsValid(raw: unknown): boolean {
       finiteInteger(raw.rangeFeet, 0, 100_000) && finiteInteger(raw.sizeFeet, 5, 100_000) &&
       mechanicDiceIsValid(raw.dice) && DAMAGE_TYPE_VALUES.has(String(raw.damageType))
   }
+  if (raw.kind === 'roll-modifier') {
+    return MECHANIC_TARGETS.has(String(raw.target)) &&
+      ['attack', 'damage', 'saving-throw'].includes(String(raw.roll)) &&
+      ['bonus', 'advantage', 'disadvantage'].includes(String(raw.mode)) &&
+      (raw.mode !== 'bonus' || finiteInteger(raw.bonus, -1_000_000, 1_000_000))
+  }
+  if (raw.kind === 'attack') {
+    return MECHANIC_TARGETS.has(String(raw.target)) &&
+      finiteInteger(raw.toHit, -100, 100) &&
+      (raw.economy == null || ['none', 'reaction'].includes(String(raw.economy))) &&
+      validateDamage(raw.damage)
+  }
   return false
 }
 
@@ -172,11 +226,24 @@ function mechanicShapeIsValid(raw: unknown): boolean {
     const predicates = isRecord(raw.predicates) ? raw.predicates : null
     if (!trigger || !MECHANIC_EVENTS.has(String(trigger.event)) || !predicates ||
       typeof predicates.requiresPositiveHp !== 'boolean' || !MECHANIC_AUTOMATION.has(String(raw.automation))) return false
+    if (trigger.subject != null && !MECHANIC_SUBJECTS.has(String(trigger.subject))) return false
+    if ((trigger.subject ?? 'self') === 'self') {
+      if (trigger.radiusFeet != null) return false
+    } else if (!finiteInteger(trigger.radiusFeet, 5, 100_000)) return false
+    if (trigger.event === 'movement') {
+      if (!isRecord(trigger.movement) ||
+        !['at-least', 'at-most'].includes(String(trigger.movement.comparison)) ||
+        !finiteInteger(trigger.movement.feet, 0, 100_000)) return false
+    } else if (trigger.movement != null) return false
     for (const threshold of ['hpPercentageAtOrBelow', 'hpPercentageAtOrAbove'] as const) {
       if (predicates[threshold] != null && (!Number.isFinite(predicates[threshold]) || Number(predicates[threshold]) < 0 || Number(predicates[threshold]) > 100)) return false
     }
     if (!Array.isArray(raw.effects) || raw.effects.length < 1 || raw.effects.length > 16 ||
       raw.effects.some((effect) => !mechanicEffectV2IsValid(effect))) return false
+    if (
+      (trigger.subject ?? 'self') === 'self' &&
+      raw.effects.some((effect) => isRecord(effect) && effect.target === 'selected-subject')
+    ) return false
     const effectIds = raw.effects.map((effect) => String((effect as Record<string, unknown>).id))
     return new Set(effectIds).size === effectIds.length
   }

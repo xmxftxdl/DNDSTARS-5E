@@ -17,6 +17,7 @@ export const COMBAT_PRESENTATION_CHANNEL: 'combat-presentation'
 export const MAP_PING_LIFETIME_MS: number
 export const MAP_ANNOTATION_LIFETIME_MS: number
 export const COMBAT_PRESENTATION_LIFETIME_MS: number
+export const SPELL_BANNER_PRESENTATION_LIFETIME_MS: number
 export const DND5E_2014_RULESET_ID: 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION: number
 export const SHARED_MIN_CLIENT_PROTOCOL: number

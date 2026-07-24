@@ -19,6 +19,7 @@ import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
+const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
 const MapsPage = lazy(() => import('./pages/MapsPage'))
 const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
@@ -240,6 +241,12 @@ export default function App() {
                   />
                 ))}
           />
+          {endpointMode !== 'player' && (
+            <Route
+              path="/simulation"
+              element={lazyPage('战斗 AI 模拟', <CombatSimulationPage />)}
+            />
+          )}
           <Route path="/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
           {!isSpectator && <Route path="/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}

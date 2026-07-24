@@ -124,6 +124,7 @@ export interface Dnd5eMonsterMechanicRuntimeContext {
   currentHp: number
   maxHp: number
   usedKeys?: Readonly<Record<string, string>>
+  movementDistanceFeet?: number
 }
 
 export interface Dnd5eMonsterMechanicCompatibility {
@@ -163,20 +164,19 @@ export function dnd5eMonsterMechanicCompatibility(
   }
   const reasons: string[] = []
   const event = mechanic.trigger.event
-  if (event === 'after-damaged') reasons.push('受到伤害后的跨事务反应队列尚未接入所有伤害来源。')
   if (event === 'phase-transition') reasons.push('阶段切换需要即时阈值穿越检测和原子场景变更。')
-  if (event === 'after-hit' && mechanic.limit === 'unlimited') reasons.push('命中后无限触发需要逐次命中的独立次数账本。')
   for (const effect of mechanic.effects) {
     if (effect.kind === 'summon') reasons.push('召唤效果需要 DM 或触发来源提供合法地图落点。')
     if (effect.kind === 'area-attack') reasons.push('范围攻击需要 DM 确认范围方向、覆盖格与目标集合。')
     if (
-      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition') &&
-      effect.target === 'damage-source'
-    ) reasons.push('伤害来源目标只在受到伤害后的反应事务中可用。')
+      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition' || effect.kind === 'roll-modifier' || effect.kind === 'attack') &&
+      effect.target === 'damage-source' && event !== 'after-damaged'
+    ) reasons.push('“伤害来源”只在受到伤害后的事件中存在。')
     if (
-      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition') &&
-      effect.target === 'trigger-target' && event !== 'after-hit'
-    ) reasons.push('“触发目标”当前只在命中后事务中有权威目标。')
+      (effect.kind === 'damage' || effect.kind === 'standard-condition' || effect.kind === 'remove-standard-condition' || effect.kind === 'roll-modifier' || effect.kind === 'attack') &&
+      effect.target === 'trigger-target' &&
+      !['after-hit', 'after-miss', 'when-hit'].includes(event)
+    ) reasons.push('该触发时机没有可绑定的攻击目标。')
   }
   const requested = mechanic.automation
   const effective = requested === 'partial' || reasons.length > 0 ? 'partial' : 'full'
@@ -206,6 +206,12 @@ export function dnd5eEligibleMonsterMechanics(
   return (monster.headlessMechanics ?? []).filter((mechanic) => {
     if (dnd5eMonsterMechanicEvent(mechanic) !== event) return false
     if (dnd5eMonsterMechanicCompatibility(mechanic).effective !== 'full') return false
+    if (mechanic.schemaVersion === 2 && mechanic.trigger.event === 'movement') {
+      const movement = mechanic.trigger.movement
+      if (!movement || context.movementDistanceFeet == null) return false
+      if (movement.comparison === 'at-least' && context.movementDistanceFeet < movement.feet) return false
+      if (movement.comparison === 'at-most' && context.movementDistanceFeet > movement.feet) return false
+    }
     const predicates = mechanic.predicates
     if (predicates.requiresPositiveHp && context.currentHp <= 0) return false
     if (predicates.hpPercentageAtOrBelow != null && hpPercentage > predicates.hpPercentageAtOrBelow) return false

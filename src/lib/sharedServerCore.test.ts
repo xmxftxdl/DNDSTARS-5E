@@ -934,6 +934,38 @@ describe('map geometry player projection', () => {
     expect(projected.maps[0].tokens[0]).toMatchObject({ id: 'hero', viewerControlled: true })
   })
 
+  it('clamps legacy edge positions before player visibility projection', () => {
+    const openGeometry = {
+      schemaVersion: 2,
+      updatedAt: 1,
+      maps: [{
+        mapId: 'map-1',
+        walls: [],
+        doors: [],
+        windows: [],
+        obstacles: [],
+        vision: { enabled: true, defaultRangeFeet: 120, sharePartyVision: false, ambientLight: 'bright' },
+        updatedAt: 1,
+      }],
+    }
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 100, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 10 },
+          { id: 'east-edge', type: 'enemy', size: 1, x: 100, y: 50 },
+          { id: 'south-edge', type: 'enemy', creatureSize: '大型', size: 1, x: 50, y: 110 },
+        ],
+      }],
+    }, openGeometry, 'character-1')
+
+    expect(projected.maps[0].tokens).toEqual([
+      expect.objectContaining({ id: 'hero', x: 10, y: 10 }),
+      expect.objectContaining({ id: 'east-edge', x: 95, y: 50 }),
+      expect.objectContaining({ id: 'south-edge', x: 50, y: 90 }),
+    ])
+  })
+
   it('rejects a requested active character owned by another room member', () => {
     const projected = sharedServerCore.projectMapsForPlayer({
       maps: [{
@@ -1316,6 +1348,56 @@ describe('map geometry player projection', () => {
     )).toMatchObject({ ok: false, status: 400 })
     expect(normalizeCombatPresentationEvent(
       { ...payload, radiusFeet: 201 },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('accepts Shatter spell banners and authors their display lifetime', () => {
+    const timestamp = 33_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'shatter-transaction-1:spell-banner',
+      type: 'spell-banner',
+      mapId: 'map-1',
+      transactionId: 'shatter-transaction-1',
+      spellId: 'shatter',
+      sourceTokenId: 'bard',
+      casterName: '吟游诗人',
+      spellName: '粉碎音波',
+      castingClassId: 'bard',
+      createdAt: 1,
+      expiresAt: 999_999,
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+    expect(normalized).toEqual({
+      ok: true,
+      event: {
+        schemaVersion: 1,
+        id: payload.id,
+        type: payload.type,
+        mapId: payload.mapId,
+        transactionId: payload.transactionId,
+        spellId: payload.spellId,
+        sourceTokenId: payload.sourceTokenId,
+        casterName: payload.casterName,
+        spellName: payload.spellName,
+        castingClassId: payload.castingClassId,
+        createdAt: timestamp,
+        expiresAt: timestamp + 3_500,
+      },
+    })
+    if (!normalized.ok) throw new Error('expected Shatter banner normalization')
+    expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, spellName: '' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, spellId: 'unknown' },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })

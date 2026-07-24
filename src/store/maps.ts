@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { defaultTokenSizeForMap, realignTokensToGrid, snapTokenToGridCenter } from '../lib/gridCombat'
+import {
+  clampTokenPositionToMap,
+  defaultTokenSizeForMap,
+  realignTokensToGrid,
+  snapTokenToGridCenter,
+} from '../lib/gridCombat'
 import { applyGridDetectPatch, type GridDetectResult } from '../lib/gridDetect'
 import {
   enemyTemplateToTokenPatch,
@@ -19,6 +24,7 @@ import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../rulesets/dnd5e/headlessCombatEngine'
 import type {
   Dnd5eDamageType,
   Dnd5eMonsterBehaviorPreferenceV1,
@@ -455,6 +461,16 @@ export interface Token {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    monsterMechanicRollModifiers?: Array<{
+      id: string
+      mechanicOwnerId: string
+      mechanicId: string
+      roll: 'attack' | 'damage' | 'saving-throw'
+      mode: 'bonus' | 'advantage' | 'disadvantage'
+      bonus?: number
+    }>
+    pendingMonsterMechanicTriggers?: Record<string, Dnd5eMonsterMechanicTriggerSnapshot>
+    monsterMechanicTriggerSequence?: number
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
     concentrationSpellId?: string
@@ -1290,7 +1306,15 @@ export const useMapStore = create<MapState>()(
         set((s) => ({
           maps: s.maps.map((m) =>
             m.id === mapId
-              ? { ...m, tokens: m.tokens.map((t) => (t.id === tokenId ? { ...t, ...patch } : t)) }
+              ? {
+                  ...m,
+                  tokens: m.tokens.map((t) => {
+                    if (t.id !== tokenId) return t
+                    const next = { ...t, ...patch }
+                    const position = clampTokenPositionToMap(next, next, m)
+                    return { ...next, ...position }
+                  }),
+                }
               : m,
           ),
         }))
@@ -1307,9 +1331,12 @@ export const useMapStore = create<MapState>()(
             map.id === mapId
               ? {
                   ...map,
-                  tokens: map.tokens.map((token) =>
-                    token.id === tokenId ? { ...token, ...patch } : token,
-                  ),
+                  tokens: map.tokens.map((token) => {
+                    if (token.id !== tokenId) return token
+                    const next = { ...token, ...patch }
+                    const position = clampTokenPositionToMap(next, next, map)
+                    return { ...next, ...position }
+                  }),
                 }
               : map,
           ),
@@ -1354,13 +1381,15 @@ export const useMapStore = create<MapState>()(
       },
       transferToken: (fromMapId, toMapId, tokenId, position) => {
         if (fromMapId === toMapId) {
-          const exists = get().maps.some((map) => map.id === fromMapId && map.tokens.some((token) => token.id === tokenId))
-          if (!exists) return false
+          const currentMap = get().maps.find((map) => map.id === fromMapId)
+          const currentToken = currentMap?.tokens.find((token) => token.id === tokenId)
+          if (!currentMap || !currentToken) return false
+          const boundedPosition = clampTokenPositionToMap(position, currentToken, currentMap)
           set((state) => ({
             maps: state.maps.map((map) => map.id === fromMapId ? {
               ...map,
               tokens: map.tokens.map((token) => token.id === tokenId
-                ? { ...token, x: position.x, y: position.y, movementAnimation: undefined }
+                ? { ...token, ...boundedPosition, movementAnimation: undefined }
                 : token),
             } : map),
           }))
@@ -1371,7 +1400,8 @@ export const useMapStore = create<MapState>()(
         const targetMap = get().maps.find((map) => map.id === toMapId)
         const token = sourceMap?.tokens.find((candidate) => candidate.id === tokenId)
         if (!sourceMap || !targetMap || !token || targetMap.tokens.some((candidate) => candidate.id === tokenId)) return false
-        const moved = { ...token, x: position.x, y: position.y, movementAnimation: undefined }
+        const boundedPosition = clampTokenPositionToMap(position, token, targetMap)
+        const moved = { ...token, ...boundedPosition, movementAnimation: undefined }
         set((state) => ({
           maps: state.maps.map((map) => map.id === fromMapId
             ? { ...map, tokens: map.tokens.filter((candidate) => candidate.id !== tokenId) }

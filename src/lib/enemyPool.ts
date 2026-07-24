@@ -59,6 +59,166 @@ export interface EnemyVisualPresentation {
 }
 
 const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
+  aboleth: {
+    emoji: '🐙',
+    color: '#0f766e',
+    tokenPortrait: '/assets/portraits/aboleth-ancient-depths-token.png',
+    initiativePortrait: '/assets/portraits/aboleth-ancient-depths-initiative.png',
+    visualVariants: [
+      {
+        id: 'ancient-depths',
+        label: '远古深渊',
+        tokenPortrait: '/assets/portraits/aboleth-ancient-depths-token.png',
+        initiativePortrait: '/assets/portraits/aboleth-ancient-depths-initiative.png',
+      },
+      {
+        id: 'drowned-temple',
+        label: '熔火深渊',
+        tokenPortrait: '/assets/portraits/aboleth-volcanic-trench-token.png',
+        initiativePortrait: '/assets/portraits/aboleth-volcanic-trench-initiative.png',
+      },
+    ],
+  },
+  acolyte: {
+    emoji: '🕯️',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/acolyte-stone-shrine-token.png',
+    initiativePortrait: '/assets/portraits/acolyte-stone-shrine-initiative.png',
+    visualVariants: [
+      {
+        id: 'stone-shrine-female',
+        label: '女性侍僧',
+        tokenPortrait: '/assets/portraits/acolyte-stone-shrine-token.png',
+        initiativePortrait: '/assets/portraits/acolyte-stone-shrine-initiative.png',
+      },
+      {
+        id: 'stone-shrine-male',
+        label: '男性修院侍僧',
+        tokenPortrait: '/assets/portraits/acolyte-scriptorium-male-token.png',
+        initiativePortrait: '/assets/portraits/acolyte-scriptorium-male-initiative.png',
+      },
+    ],
+  },
+  'adult-black-dragon': {
+    emoji: '🐉',
+    color: '#1f2937',
+    tokenPortrait: '/assets/portraits/adult-black-dragon-acid-swamp-token.png',
+    initiativePortrait: '/assets/portraits/adult-black-dragon-acid-swamp-initiative.png',
+    visualVariants: [
+      {
+        id: 'acid-swamp',
+        label: '酸沼暴君',
+        tokenPortrait: '/assets/portraits/adult-black-dragon-acid-swamp-token.png',
+        initiativePortrait: '/assets/portraits/adult-black-dragon-acid-swamp-initiative.png',
+      },
+      {
+        id: 'flooded-crypt',
+        label: '沉墓伏袭',
+        tokenPortrait: '/assets/portraits/adult-black-dragon-flooded-crypt-token.png',
+        initiativePortrait: '/assets/portraits/adult-black-dragon-flooded-crypt-initiative.png',
+      },
+    ],
+  },
+  'adult-blue-dragon': {
+    emoji: '🐉',
+    color: '#1d4ed8',
+    tokenPortrait: '/assets/portraits/adult-blue-dragon-storm-citadel-token.png',
+    initiativePortrait: '/assets/portraits/adult-blue-dragon-storm-citadel-initiative.png',
+    visualVariants: [
+      {
+        id: 'storm-citadel',
+        label: '雷冠沙王',
+        tokenPortrait: '/assets/portraits/adult-blue-dragon-storm-citadel-token.png',
+        initiativePortrait: '/assets/portraits/adult-blue-dragon-storm-citadel-initiative.png',
+      },
+      {
+        id: 'sand-necropolis',
+        label: '沙墓雷袭',
+        tokenPortrait: '/assets/portraits/adult-blue-dragon-sand-necropolis-token.png',
+        initiativePortrait: '/assets/portraits/adult-blue-dragon-sand-necropolis-initiative.png',
+      },
+    ],
+  },
+  'adult-brass-dragon': {
+    emoji: '🐉',
+    color: '#b45309',
+    tokenPortrait: '/assets/portraits/adult-brass-dragon-canyon-library-token.png',
+    initiativePortrait: '/assets/portraits/adult-brass-dragon-canyon-library-initiative.png',
+    visualVariants: [
+      {
+        id: 'canyon-library',
+        label: '古卷守望',
+        tokenPortrait: '/assets/portraits/adult-brass-dragon-canyon-library-token.png',
+        initiativePortrait: '/assets/portraits/adult-brass-dragon-canyon-library-initiative.png',
+      },
+      {
+        id: 'twilight-flight',
+        label: '暮沙巡游',
+        tokenPortrait: '/assets/portraits/adult-brass-dragon-twilight-flight-v3-token.png',
+        initiativePortrait: '/assets/portraits/adult-brass-dragon-twilight-flight-v3-initiative.png',
+      },
+    ],
+  },
+  'adult-bronze-dragon': {
+    emoji: '🐉',
+    color: '#0f766e',
+    tokenPortrait: '/assets/portraits/adult-bronze-dragon-storm-cliff-token.png',
+    initiativePortrait: '/assets/portraits/adult-bronze-dragon-storm-cliff-initiative.png',
+    visualVariants: [
+      {
+        id: 'storm-cliff',
+        label: '雷潮守望',
+        tokenPortrait: '/assets/portraits/adult-bronze-dragon-storm-cliff-token.png',
+        initiativePortrait: '/assets/portraits/adult-bronze-dragon-storm-cliff-initiative.png',
+      },
+      {
+        id: 'sunken-galleon',
+        label: '沉舰巡游',
+        tokenPortrait: '/assets/portraits/adult-bronze-dragon-sunken-galleon-token.png',
+        initiativePortrait: '/assets/portraits/adult-bronze-dragon-sunken-galleon-initiative.png',
+      },
+    ],
+  },
+  'adult-copper-dragon': {
+    emoji: '🐉',
+    color: '#c2410c',
+    tokenPortrait: '/assets/portraits/adult-copper-dragon-riddle-gate-token.png',
+    initiativePortrait: '/assets/portraits/adult-copper-dragon-riddle-gate-initiative.png',
+    visualVariants: [
+      {
+        id: 'riddle-gate',
+        label: '岩岭谜门',
+        tokenPortrait: '/assets/portraits/adult-copper-dragon-riddle-gate-token.png',
+        initiativePortrait: '/assets/portraits/adult-copper-dragon-riddle-gate-initiative.png',
+      },
+      {
+        id: 'echo-valley',
+        label: '幽谷君临',
+        tokenPortrait: '/assets/portraits/adult-copper-dragon-echo-valley-v2-token.png',
+        initiativePortrait: '/assets/portraits/adult-copper-dragon-echo-valley-v2-initiative.png',
+      },
+    ],
+  },
+  'adult-gold-dragon': {
+    emoji: '🐉',
+    color: '#ca8a04',
+    tokenPortrait: '/assets/portraits/adult-gold-dragon-waterfall-sanctuary-token.png',
+    initiativePortrait: '/assets/portraits/adult-gold-dragon-waterfall-sanctuary-initiative.png',
+    visualVariants: [
+      {
+        id: 'waterfall-sanctuary',
+        label: '瀑隐圣殿',
+        tokenPortrait: '/assets/portraits/adult-gold-dragon-waterfall-sanctuary-token.png',
+        initiativePortrait: '/assets/portraits/adult-gold-dragon-waterfall-sanctuary-initiative.png',
+      },
+      {
+        id: 'sunrise-sovereign',
+        label: '旭日天巡',
+        tokenPortrait: '/assets/portraits/adult-gold-dragon-sunrise-sovereign-token.png',
+        initiativePortrait: '/assets/portraits/adult-gold-dragon-sunrise-sovereign-initiative.png',
+      },
+    ],
+  },
   bandit: { emoji: '🗡️', color: '#78716c' },
   bugbear: {
     emoji: '👹',

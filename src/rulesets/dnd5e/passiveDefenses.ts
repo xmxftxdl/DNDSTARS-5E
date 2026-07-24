@@ -45,9 +45,14 @@ export interface Dnd5eDefensiveCreature {
     holyNimbusRoundsRemaining?: number
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
+    monsterMechanicRollModifiers?: readonly {
+      roll: 'attack' | 'damage' | 'saving-throw'
+      mode: 'bonus' | 'advantage' | 'disadvantage'
+    }[]
   }
   conditions: readonly string[]
   creatureType?: string
+  magicResistance?: boolean
   speed?: number
   dodging?: boolean
   wearingUnproficientArmor?: boolean
@@ -87,7 +92,13 @@ export function dnd5eIsIncapacitated(
 export function dnd5eSavingThrowMode(
   creature: Dnd5eDefensiveCreature,
   ability: AbilityKey,
-  context: { effectVisible?: boolean; condition?: string; sourceCreatureType?: string; sourceIsSpell?: boolean } = {},
+  context: {
+    effectVisible?: boolean
+    condition?: string
+    sourceCreatureType?: string
+    sourceIsSpell?: boolean
+    sourceIsMagical?: boolean
+  } = {},
 ): D20RollMode {
   const dangerSenseBlocked = dnd5eIsIncapacitated(creature) || hasCondition(creature, new Set([
     'blinded', 'deafened', '目盲', '耳聋',
@@ -107,15 +118,20 @@ export function dnd5eSavingThrowMode(
     (creature.classState.holyNimbusRoundsRemaining ?? 0) > 0 && context.sourceIsSpell === true &&
     (sourceType === 'fiend' || sourceType.includes('邪魔') || sourceType === 'undead' || sourceType.includes('亡灵'))
   const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
+  const magicResistance = creature.magicResistance === true &&
+    (context.sourceIsSpell === true || context.sourceIsMagical === true)
   const strengthEffect = ability === 'str'
     ? dnd5eActiveStrengthRollFlags(creature.classState.activeEffects)
     : { advantage: false, disadvantage: false }
-  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus ||
-    poisonProtection || dodgeDexterity || strengthEffect.advantage
+  const mechanicModifiers = creature.classState.monsterMechanicRollModifiers?.filter((entry) => entry.roll === 'saving-throw') ?? []
+  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || magicResistance ||
+    poisonProtection || dodgeDexterity || strengthEffect.advantage ||
+    mechanicModifiers.some((entry) => entry.mode === 'advantage')
   const disadvantage = creature.exhaustionLevel >= 3 ||
     dnd5eConditionSavingThrowDisadvantage(creature, ability) ||
     (creature.wearingUnproficientArmor === true && (ability === 'str' || ability === 'dex')) ||
-    strengthEffect.disadvantage
+    strengthEffect.disadvantage ||
+    mechanicModifiers.some((entry) => entry.mode === 'disadvantage')
   return resolveDnd5eRollMode({
     advantage: [{ active: advantage, reason: 'saving-throw-advantage' }],
     disadvantage: [{ active: disadvantage, reason: 'saving-throw-disadvantage' }],

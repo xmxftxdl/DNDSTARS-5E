@@ -3,7 +3,12 @@ import type { BattleMap, Token } from '../../store/maps'
 import { createEmptyMapGeometry, setMapGeometryRuntime } from '../../lib/mapGeometry'
 import type { Character } from '../../types/character'
 import { DND5E_SHIELD } from './equipment'
-import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
+import {
+  buildDnd5eCustomMonster,
+  createDnd5eCustomMonsterDraft,
+  createDnd5eCustomMonsterMechanicDraft,
+  createDnd5eCustomMonsterTraitDraft,
+} from './customMonsterWorkshop'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
 import {
   prepareDnd5eMonsterAfterHitMechanics,
@@ -77,6 +82,69 @@ describe('SRD monster map action adapter', () => {
     if (!prepared.ok) return
     expect(prepared.prepared.packTactics).toBe(true)
     expect(prepared.prepared.targetAttackMode).toBe('advantage')
+  })
+
+  it('applies a structured attack and damage bonus against frightened or stunned targets', () => {
+    const hero = {
+      ...character(),
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eConditionEffect({
+          condition: 'frightened',
+          source: { kind: 'monster', actorId: 'fear-source', rulesId: 'test-fear' },
+          targetId: 'hero-token',
+        })],
+      },
+    }
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.traits = [{
+      ...createDnd5eCustomMonsterTraitDraft(),
+      name: '恐惧支配',
+      description: '攻击恐慌或震慑目标时攻击和伤害获得 +2。',
+      ruleKind: 'conditional-target-bonus',
+      targetBonusConditions: ['frightened', 'stunned'],
+      targetAttackBonus: 2,
+      targetDamageBonus: 2,
+    }]
+    const monster = buildDnd5eCustomMonster(draft)
+    setDnd5eRoomMonsterCatalog([monster])
+    const enemy = token({
+      id: 'dominator',
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const map: BattleMap = {
+      id: 'domination-map', name: 'Domination', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [enemy, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: enemy.id, label: enemy.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: enemy.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.attacks[0].attack).toMatchObject({
+      toHit: draft.actions[0].toHit + 2,
+      damage: [expect.objectContaining({ bonus: 3 })],
+    })
+
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 15, damageRolls: [[4]] }],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0].currentHp).toBe(33)
   })
 
   it('prepares the owlbear multiattack and returns one authoritative map application', () => {
@@ -198,10 +266,15 @@ describe('SRD monster map action adapter', () => {
       mechanicId: 'burning-strike', targetId: heroToken.id,
       effects: [{ effectId: 'effect-0', effectName: '额外伤害', count: 1, sides: 6, bonus: 0 }],
     })])
-    expect(resolvePreparedDnd5eMonsterAttack({
+    const pendingResolution = resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,
       rolls: [{ d20: 15, damageRolls: [[4]] }],
-    }).result).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    }).result
+    expect(pendingResolution).toMatchObject({ ok: true })
+    expect(pendingResolution.events).toContainEqual(expect.objectContaining({
+      type: 'monster-mechanic-trigger-pending',
+      snapshot: expect.objectContaining({ mechanicId: 'burning-strike', triggerTargetId: heroToken.id }),
+    }))
     expect(resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,
       rolls: [{ d20: 15, damageRolls: [[4]] }],

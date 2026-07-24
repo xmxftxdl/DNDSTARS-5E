@@ -55,10 +55,21 @@ export type Dnd5eMonsterMechanicTriggerEventV2 =
   | 'turn-start'
   | 'turn-end'
   | 'after-hit'
+  | 'after-miss'
+  | 'when-hit'
   | 'after-damaged'
+  | 'saving-throw-magic'
+  | 'saving-throw-physical'
+  | 'movement'
   | 'phase-transition'
 
-export type Dnd5eMonsterMechanicEffectTargetV2 = 'self' | 'trigger-target' | 'damage-source'
+export type Dnd5eMonsterMechanicSubjectV2 = 'self' | 'ally-within' | 'hostile-within'
+
+export type Dnd5eMonsterMechanicEffectTargetV2 =
+  | 'self'
+  | 'trigger-target'
+  | 'damage-source'
+  | 'selected-subject'
 
 export type Dnd5eMonsterMechanicDurationV2 =
   | { kind: 'permanent' }
@@ -115,12 +126,33 @@ export type Dnd5eMonsterMechanicEffectV2 =
       dice: { count: number; sides: number; bonus: number }
       damageType: Dnd5eDamageType
     }
+  | {
+      id: string
+      kind: 'roll-modifier'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      roll: 'attack' | 'damage' | 'saving-throw'
+      mode: 'bonus' | 'advantage' | 'disadvantage'
+      bonus?: number
+    }
+  | {
+      id: string
+      kind: 'attack'
+      target: Dnd5eMonsterMechanicEffectTargetV2
+      toHit: number
+      economy?: 'none' | 'reaction'
+      damage: Dnd5eMonsterDamage
+    }
 
 export interface Dnd5eMonsterMechanicTriggerV2 {
   schemaVersion: 2
   id: string
   name: string
-  trigger: { event: Dnd5eMonsterMechanicTriggerEventV2 }
+  trigger: {
+    event: Dnd5eMonsterMechanicTriggerEventV2
+    subject?: Dnd5eMonsterMechanicSubjectV2
+    radiusFeet?: number
+    movement?: { comparison: 'at-least' | 'at-most'; feet: number }
+  }
   predicates: {
     hpPercentageAtOrBelow?: number
     hpPercentageAtOrAbove?: number
@@ -185,6 +217,31 @@ export interface Dnd5eMonsterTrait {
   } | {
     kind: 'nimble-escape'
     bonusActionOptions: readonly ['disengage', 'hide']
+  } | {
+    /** A conditional skill bonus tied to one sense, with an optional combat sense. */
+    kind: 'keen-sense'
+    sense: 'smell' | 'hearing' | 'sight'
+    skillKey: string
+    checkBonus: number
+    blindsightFeet?: number
+  } | {
+    /** Initiative advantage only when the creature actually starts combat as an ambusher. */
+    kind: 'ambusher'
+    initiativeAdvantageWhenSurprising: true
+  } | {
+    /** Conditional damage after a straight-line approach; path qualification remains authoritative. */
+    kind: 'charge-damage'
+    minimumStraightMovementFeet: number
+    actionId: string
+    extraDamage: Dnd5eMonsterDamage
+  } | {
+    kind: 'magic-resistance'
+    savingThrowAdvantageAgainstMagic: true
+  } | {
+    kind: 'conditional-target-bonus'
+    targetConditions: readonly Dnd5eStandardConditionId[]
+    attackBonus: number
+    damageBonus: number
   }
 }
 
@@ -221,6 +278,14 @@ export interface Dnd5eMonsterAction {
   legendaryCost?: number
   /** 传奇动作直接调用普通武器动作时指向其 ID。 */
   referencedActionId?: string
+  movement?: {
+    kind: 'straight-toward-visible-hostile'
+    maximumSpeedFraction: number
+  }
+  reactionTrigger?: {
+    kind: 'after-action'
+    actionId: string
+  }
 }
 
 export interface Dnd5eMonsterSpellcasting {

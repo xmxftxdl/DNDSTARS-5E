@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Bot,
   FlaskConical,
+  Import,
   Play,
   Plus,
   ShieldCheck,
@@ -12,12 +13,17 @@ import {
 import {
   DND5E_COMBAT_SIMULATION_MAX_TRIALS,
   DND5E_COMBAT_SIMULATION_MONSTERS,
-  simulateDnd5eCombats,
   validateDnd5eCombatSimulationRequest,
   type Dnd5eCombatSimulationMonsterSelection,
   type Dnd5eCombatSimulationResult,
 } from '../rulesets/dnd5e/combatSimulation'
 import { useCharacterStore } from '../store/characters'
+import { useCustomMonsterStore } from '../store/customMonsters'
+import { useMapStore } from '../store/maps'
+import type {
+  Dnd5eCombatSimulationWorkerRequest,
+  Dnd5eCombatSimulationWorkerResponse,
+} from '../workers/dnd5eCombatSimulation.worker'
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`
@@ -29,7 +35,14 @@ function decimal(value: number): string {
 
 export default function Dnd5eCombatSimulationPanel() {
   const characters = useCharacterStore((state) => state.characters)
+  const customMonsters = useCustomMonsterStore((state) => state.monsters)
+  const loadCustomMonsters = useCustomMonsterStore((state) => state.loadShared)
+  const maps = useMapStore((state) => state.maps)
+  const selectedMapId = useMapStore((state) => state.selectedId)
+  const activeMap = maps.find((map) => map.id === selectedMapId) ?? maps[0]
   const initializedCharacters = useRef(false)
+  const workerRef = useRef<Worker | null>(null)
+  const workerRequestId = useRef(0)
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<string>>(new Set())
   const [monsterSearch, setMonsterSearch] = useState('')
   const [selectedMonsterId, setSelectedMonsterId] = useState(
@@ -45,6 +58,32 @@ export default function Dnd5eCombatSimulationPanel() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
 
   useEffect(() => {
+    void loadCustomMonsters()
+  }, [loadCustomMonsters])
+
+  useEffect(() => {
+    const worker = new Worker(
+      new URL('../workers/dnd5eCombatSimulation.worker.ts', import.meta.url),
+      { type: 'module' },
+    )
+    workerRef.current = worker
+    worker.onmessage = (event: MessageEvent<Dnd5eCombatSimulationWorkerResponse>) => {
+      if (event.data.id !== workerRequestId.current) return
+      if (event.data.status === 'completed') setResult(event.data.result)
+      else setRuntimeError(event.data.error)
+      setBusy(false)
+    }
+    worker.onerror = (event) => {
+      setRuntimeError(event.message || '战斗模拟 Worker 运行失败。')
+      setBusy(false)
+    }
+    return () => {
+      worker.terminate()
+      workerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
     if (initializedCharacters.current || characters.length === 0) return
     initializedCharacters.current = true
     setSelectedCharacterIds(new Set(characters.slice(0, 8).map((character) => character.id)))
@@ -54,21 +93,27 @@ export default function Dnd5eCombatSimulationPanel() {
     () => characters.filter((character) => selectedCharacterIds.has(character.id)),
     [characters, selectedCharacterIds],
   )
+  const monsterCatalog = useMemo(
+    () => [...DND5E_COMBAT_SIMULATION_MONSTERS, ...customMonsters]
+      .filter((monster, index, all) => all.findIndex((candidate) => candidate.id === monster.id) === index),
+    [customMonsters],
+  )
   const filteredMonsters = useMemo(() => {
     const query = monsterSearch.trim().toLowerCase()
-    if (!query) return DND5E_COMBAT_SIMULATION_MONSTERS
-    return DND5E_COMBAT_SIMULATION_MONSTERS.filter((monster) =>
+    if (!query) return monsterCatalog
+    return monsterCatalog.filter((monster) =>
       [monster.name, monster.englishName, monster.challenge.rating, monster.creatureType]
         .some((value) => value.toLowerCase().includes(query)))
-  }, [monsterSearch])
+  }, [monsterCatalog, monsterSearch])
   const request = useMemo(() => ({
     characters: selectedCharacters,
     monsters: monsterSelections,
+    customMonsters,
     trials,
     seed,
     initialDistanceFeet,
     maxRounds: 20,
-  }), [initialDistanceFeet, monsterSelections, seed, selectedCharacters, trials])
+  }), [customMonsters, initialDistanceFeet, monsterSelections, seed, selectedCharacters, trials])
   const validationErrors = useMemo(
     () => validateDnd5eCombatSimulationRequest(request),
     [request],
@@ -89,18 +134,51 @@ export default function Dnd5eCombatSimulationPanel() {
 
   const runSimulation = () => {
     if (busy || validationErrors.length > 0) return
+    const worker = workerRef.current
+    if (!worker) {
+      setRuntimeError('战斗模拟 Worker 尚未就绪，请稍后重试。')
+      return
+    }
     setBusy(true)
     setRuntimeError(null)
     setResult(null)
-    window.setTimeout(() => {
-      try {
-        setResult(simulateDnd5eCombats(request))
-      } catch (error) {
-        setRuntimeError(error instanceof Error ? error.message : String(error))
-      } finally {
-        setBusy(false)
-      }
-    }, 0)
+    const id = workerRequestId.current + 1
+    workerRequestId.current = id
+    worker.postMessage({ id, request } satisfies Dnd5eCombatSimulationWorkerRequest)
+  }
+
+  const loadCurrentEncounter = () => {
+    if (!activeMap) {
+      setRuntimeError('当前没有可读取的地图。')
+      return
+    }
+    const nextMonsters: Dnd5eCombatSimulationMonsterSelection[] = []
+    const counts = new Map<string, number>()
+    for (const token of activeMap.tokens) {
+      if (token.type !== 'enemy' || !token.poolId) continue
+      if (!monsterCatalog.some((monster) => monster.id === token.poolId)) continue
+      counts.set(token.poolId, (counts.get(token.poolId) ?? 0) + 1)
+    }
+    let remaining = 24
+    for (const [monsterId, count] of counts) {
+      if (remaining <= 0) break
+      const accepted = Math.min(12, count, remaining)
+      nextMonsters.push({ monsterId, count: accepted })
+      remaining -= accepted
+    }
+    const characterIds = activeMap.tokens
+      .filter((token) => token.type === 'player' && token.characterId)
+      .map((token) => token.characterId!)
+      .filter((id, index, all) => all.indexOf(id) === index && characters.some((character) => character.id === id))
+      .slice(0, 8)
+    if (nextMonsters.length === 0) {
+      setRuntimeError(`地图“${activeMap.name}”上没有关联 SRD 或自创怪物数据的敌方 Token。`)
+      return
+    }
+    setMonsterSelections(nextMonsters)
+    if (characterIds.length > 0) setSelectedCharacterIds(new Set(characterIds))
+    setRuntimeError(null)
+    setResult(null)
   }
 
   return (
@@ -112,19 +190,30 @@ export default function Dnd5eCombatSimulationPanel() {
             <h3 className="font-semibold text-slate-100">遭遇模拟器</h3>
           </div>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-            使用确定性 Tactical Planner V3 和带种子的 5e 骰池批量模拟，最多运行 1000 场。
-            模拟不会写入角色、地图或房间资源。
+            在 Web Worker 中复用 Tactical Planner V3 与 Headless 战斗事务，最多运行 1000 场；
+            可直接载入怪物工坊和当前地图遭遇，且不会写入角色、地图或房间资源。
           </p>
         </div>
-        <button
-          type="button"
-          onClick={runSimulation}
-          disabled={busy || validationErrors.length > 0}
-          className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Play className={`h-4 w-4 ${busy ? 'animate-pulse' : ''}`} />
-          {busy ? `正在模拟 ${trials} 场…` : `模拟 ${trials} 场`}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={loadCurrentEncounter}
+            disabled={busy || !activeMap}
+            className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-4 py-2.5 text-sm font-bold text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Import className="h-4 w-4" />
+            载入当前遭遇
+          </button>
+          <button
+            type="button"
+            onClick={runSimulation}
+            disabled={busy || validationErrors.length > 0}
+            className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Play className={`h-4 w-4 ${busy ? 'animate-pulse' : ''}`} />
+            {busy ? `正在模拟 ${trials} 场…` : `模拟 ${trials} 场`}
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-5 p-5 xl:grid-cols-2">
@@ -195,7 +284,7 @@ export default function Dnd5eCombatSimulationPanel() {
             >
               {filteredMonsters.map((monster) => (
                 <option key={monster.id} value={monster.id}>
-                  {monster.name} · CR {monster.challenge.rating}
+                  {monster.name} · CR {monster.challenge.rating}{monster.source === 'DM 自定义' ? ' · 自创' : ''}
                 </option>
               ))}
             </select>
@@ -211,10 +300,10 @@ export default function Dnd5eCombatSimulationPanel() {
           <div className="mt-3 space-y-2">
             {monsterSelections.length === 0 ? (
               <div className="rounded-xl border border-dashed border-white/8 px-4 py-6 text-center text-sm text-slate-600">
-                从 SRD 5.1 目录选择怪物加入模拟。
+                从 SRD 5.1 或怪物工坊目录选择怪物，也可载入当前地图遭遇。
               </div>
             ) : monsterSelections.map((entry) => {
-              const monster = DND5E_COMBAT_SIMULATION_MONSTERS.find((candidate) => candidate.id === entry.monsterId)
+              const monster = monsterCatalog.find((candidate) => candidate.id === entry.monsterId)
               if (!monster) return null
               return (
                 <div key={entry.monsterId} className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/15 px-3 py-2">
@@ -355,6 +444,119 @@ export default function Dnd5eCombatSimulationPanel() {
                 {result.coverage.limitations.map((limitation) => <li key={limitation}>• {limitation}</li>)}
               </ul>
             </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <div className="overflow-hidden rounded-2xl border border-white/8">
+              <div className="border-b border-white/8 px-4 py-3 text-sm font-semibold text-slate-200">逐轮统计</div>
+              <div className="max-h-80 overflow-auto">
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead className="sticky top-0 bg-void-900 text-xs text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2">轮次</th>
+                      <th className="px-4 py-2">到达场次</th>
+                      <th className="px-4 py-2">玩家伤害</th>
+                      <th className="px-4 py-2">怪物伤害</th>
+                      <th className="px-4 py-2">玩家死亡</th>
+                      <th className="px-4 py-2">怪物死亡</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.roundSummaries.map((entry) => (
+                      <tr key={entry.round} className="border-t border-white/6 text-slate-300">
+                        <td className="px-4 py-2 font-semibold">{entry.round}</td>
+                        <td className="px-4 py-2">{entry.appearances}</td>
+                        <td className="px-4 py-2">{decimal(entry.averagePlayerDamage)}</td>
+                        <td className="px-4 py-2">{decimal(entry.averageMonsterDamage)}</td>
+                        <td className="px-4 py-2">{decimal(entry.averagePlayerDeaths)}</td>
+                        <td className="px-4 py-2">{decimal(entry.averageMonsterDeaths)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-white/8">
+              <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
+                <span className="text-sm font-semibold text-slate-200">技能使用率</span>
+                <span className="text-[11px] text-slate-500">
+                  Headless 已提交事务 {result.headlessTransactionCount.toLocaleString('zh-CN')}
+                </span>
+              </div>
+              <div className="max-h-80 overflow-auto">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="sticky top-0 bg-void-900 text-xs text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2">单位 / 技能</th>
+                      <th className="px-4 py-2">次/场</th>
+                      <th className="px-4 py-2">命中率</th>
+                      <th className="px-4 py-2">均伤</th>
+                      <th className="px-4 py-2">事务</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.actionUsage.map((entry) => (
+                      <tr key={`${entry.side}:${entry.actorName}:${entry.actionId}`} className="border-t border-white/6">
+                        <td className="px-4 py-2">
+                          <span className="block font-semibold text-slate-200">{entry.actionName}</span>
+                          <span className="text-[11px] text-slate-500">{entry.actorName}</span>
+                        </td>
+                        <td className="px-4 py-2 tabular-nums text-slate-300">{decimal(entry.usesPerTrial)}</td>
+                        <td className="px-4 py-2 tabular-nums text-slate-300">{percent(entry.hitRate)}</td>
+                        <td className="px-4 py-2 tabular-nums text-slate-300">{decimal(entry.averageDamage)}</td>
+                        <td className="px-4 py-2 tabular-nums text-slate-500">{entry.headlessTransactions}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="rounded-2xl border border-white/8 p-4">
+              <h4 className="text-sm font-semibold text-slate-200">死亡原因</h4>
+              {result.deathCauses.length === 0 ? (
+                <p className="mt-3 text-xs text-slate-500">没有单位死亡。</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {result.deathCauses.slice(0, 30).map((entry) => (
+                    <div
+                      key={`${entry.victimName}:${entry.killerName}:${entry.actionName}`}
+                      className="flex items-center justify-between gap-3 rounded-lg bg-black/15 px-3 py-2 text-xs"
+                    >
+                      <span className="text-slate-300">
+                        {entry.victimName} ← {entry.killerName} · {entry.actionName}
+                      </span>
+                      <span className="shrink-0 font-semibold tabular-nums text-rose-300">{entry.count} 次</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <details className="rounded-2xl border border-white/8 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+                AI 决策日志（首场，{result.decisionLog.length} 条）
+              </summary>
+              <div className="mt-3 max-h-96 space-y-2 overflow-auto">
+                {result.decisionLog.map((entry, index) => (
+                  <div key={`${entry.round}:${entry.actorName}:${index}`} className="rounded-lg bg-black/15 px-3 py-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-slate-300">
+                      <span className="font-semibold text-violet-200">第 {entry.round} 轮</span>
+                      <span>{entry.actorName}</span>
+                      <span>→ {entry.targetName ?? '无目标'}</span>
+                      <span>· {entry.actionName ?? '闪避/移动'}</span>
+                      <span className="text-slate-500">评分 {decimal(entry.score)}</span>
+                    </div>
+                    <p className="mt-1 text-slate-500">
+                      {entry.candidateId} · {entry.reasons.join('；') || '无附加评分原因'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </details>
           </div>
         </div>
       )}

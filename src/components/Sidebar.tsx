@@ -1,33 +1,19 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  BookOpen,
   Check,
   Copy,
   Crown,
-  LayoutDashboard,
   LogOut,
-  MessageSquareText,
   PanelLeftClose,
   Settings,
   Sparkles,
-  Swords,
-  Users,
 } from 'lucide-react'
 import type { AppMode } from '../lib/appMode'
 import type { RoomSession } from '../lib/roomSession'
 import { useRoomCommunicationsStore } from '../store/roomCommunications'
 import CampaignTimeWidget from './CampaignTimeWidget'
-
-const navItems = [
-  { to: '/', label: '战役总览', icon: LayoutDashboard, end: true },
-  { to: '/maps', label: '战斗地图', icon: Swords },
-  { to: '/characters', label: '角色', icon: Users },
-  { to: '/spellbook', label: '法术书', icon: BookOpen },
-  { to: '/communications', label: '通讯与日志', icon: MessageSquareText },
-]
-
-const playerNavItems = navItems.filter((item) => item.to === '/maps' || item.to === '/characters' || item.to === '/spellbook' || item.to === '/communications')
+import { sidebarNavItems } from './sidebarNavigation'
 
 export default function Sidebar({
   onCollapse,
@@ -44,9 +30,7 @@ export default function Sidebar({
 }) {
   const [copied, setCopied] = useState(false)
   const unreadHandouts = useRoomCommunicationsStore((state) => state.unreadHandoutIds.length)
-  const items = roomSession?.role === 'spectator'
-    ? navItems.filter((item) => item.to === '/maps')
-    : mode === 'player' ? playerNavItems : navItems
+  const items = sidebarNavItems(mode, roomSession?.role)
   const copyRoomCode = async () => {
     if (!roomSession) return
     await navigator.clipboard?.writeText(roomSession.roomId)

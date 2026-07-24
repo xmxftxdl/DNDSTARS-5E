@@ -6,6 +6,7 @@ import {
   simulateDnd5eCombats,
   validateDnd5eCombatSimulationRequest,
 } from './combatSimulation'
+import { getDnd5eSrdMonster } from './monsters'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -57,6 +58,10 @@ describe('D&D 5e combat simulator', () => {
     expect(first.playerWins + first.monsterWins + first.draws).toBe(1_000)
     expect(second).toEqual(first)
     expect(first.coverage.automatedMonsterActions).toBeGreaterThan(0)
+    expect(first.roundSummaries.length).toBeGreaterThan(0)
+    expect(first.actionUsage.length).toBeGreaterThan(0)
+    expect(first.decisionLog.length).toBeGreaterThan(0)
+    expect(first.headlessTransactionCount).toBeGreaterThan(0)
   })
 
   it('reports a stronger party as more likely to beat a single goblin', () => {
@@ -86,6 +91,8 @@ describe('D&D 5e combat simulator', () => {
     )
     expect(result.participantSummaries.find((entry) => entry.side === 'monsters')?.averageDamage)
       .toBeGreaterThan(0)
+    expect(result.actionUsage.some((entry) =>
+      entry.actionId.startsWith('spell:') && entry.headlessTransactions > 0)).toBe(true)
   })
 
   it('rejects empty teams, unknown monsters and trial counts above the safe cap', () => {
@@ -98,5 +105,30 @@ describe('D&D 5e combat simulator', () => {
       '找不到怪物：not-a-monster',
       '模拟次数必须是 1 至 1000 的整数。',
     ]))
+  })
+
+  it('loads a workshop monster into the shared simulation catalog', () => {
+    const goblin = getDnd5eSrdMonster('srd-5.1:goblin')
+    expect(goblin).toBeDefined()
+    const workshopMonster = {
+      ...goblin!,
+      id: 'dm-custom:worker-goblin',
+      slug: 'worker-goblin',
+      name: '工坊测试地精',
+      englishName: 'Workshop Goblin',
+      source: 'DM 自定义',
+    } as const
+
+    const request = {
+      characters: [fighter()],
+      monsters: [{ monsterId: workshopMonster.id, count: 1 }],
+      customMonsters: [workshopMonster],
+      trials: 20,
+      seed: 99,
+    }
+    expect(validateDnd5eCombatSimulationRequest(request)).toEqual([])
+    const result = simulateDnd5eCombats(request)
+    expect(result.participantSummaries.some((entry) => entry.name === workshopMonster.name)).toBe(true)
+    expect(result.actionUsage.some((entry) => entry.actorName === workshopMonster.name)).toBe(true)
   })
 })

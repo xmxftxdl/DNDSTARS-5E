@@ -1,15 +1,17 @@
 import {
+  ArrowRight,
+  FlaskConical,
   Map as MapIcon,
   Users,
   Swords,
   Bot,
   Dices,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import CampaignAdvancedAnalyticsPanel from '../components/CampaignAdvancedAnalyticsPanel'
 import RoomPartyOverview from '../components/RoomPartyOverview'
-import Dnd5eCombatSimulationPanel from '../components/Dnd5eCombatSimulationPanel'
 
 interface DashboardProps {
   onCreateCampaign?: () => void
@@ -65,7 +67,28 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
         遭遇战术模拟
       </h3>
-      <Dnd5eCombatSimulationPanel />
+      <Card className="border-violet-400/15 bg-gradient-to-br from-violet-500/[0.08] to-cyan-500/[0.04]">
+        <div className="flex flex-wrap items-center justify-between gap-5">
+          <div className="flex min-w-0 items-start gap-4">
+            <div className="rounded-2xl bg-violet-500/15 p-3 text-violet-300">
+              <FlaskConical className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="font-semibold text-slate-100">战斗 AI 模拟器</p>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">
+                选择当前队伍和怪物，批量运行带随机种子的遭遇模拟，并查看胜率、存活率、平均伤害与自动化覆盖程度。
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/simulation"
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400"
+          >
+            打开模拟器
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </Card>
 
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
         战役进阶数据

@@ -39,6 +39,7 @@ import {
   publishSanctuaryPresentation,
   publishSacredFlamePresentation,
   publishShockingGraspPresentation,
+  publishSpellBannerPresentation,
   reduceCombatPresentationState,
   refreshCombatPresentationClock,
 } from './combatPresentation'
@@ -463,6 +464,65 @@ describe('combat presentation events', () => {
       ...map,
       tokens: map.tokens.filter((token) => token.id !== 'wizard'),
     }, fireball.animationStartsAt)).toEqual([])
+  })
+
+  it('projects a synchronized banner-only spell without creating a map projectile', () => {
+    const shatterBanner = {
+      schemaVersion: 1 as const,
+      id: 'shatter-banner-1',
+      type: 'spell-banner' as const,
+      mapId: map.id,
+      transactionId: 'shatter-transaction',
+      spellId: 'shatter',
+      sourceTokenId: 'wizard',
+      casterName: '吟游诗人',
+      spellName: '粉碎音波',
+      castingClassId: 'bard',
+      createdAt: 1_000,
+      expiresAt: 4_500,
+    }
+    const state = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      shatterBanner,
+      1_100,
+    )
+    expect(combatPresentationSpellBannerForMap(state, map.id, 1_100)).toMatchObject({
+      spellId: 'shatter',
+      spellName: '粉碎音波',
+      castingClassId: 'bard',
+    })
+    expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([])
+    expect(combatPresentationSpellBannerForMap(
+      state,
+      map.id,
+      shatterBanner.createdAt + SPELL_BANNER_TOTAL_DURATION_MS,
+    )).toBeNull()
+  })
+
+  it('publishes a parser-valid synchronized banner event for Shatter', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(20_000)
+    await refreshCombatPresentationClock(true)
+    const schedule = await publishSpellBannerPresentation({
+      id: 'shatter-banner-live-1',
+      mapId: 'map-a',
+      transactionId: 'shatter-live-1',
+      sourceTokenId: 'bard',
+      spellId: 'shatter',
+      casterName: '吟游诗人',
+      spellName: '粉碎音波',
+      castingClassId: 'bard',
+    })
+    const event = vi.mocked(publishSharedEvent).mock.calls.at(-1)?.[1]
+    expect(event).toMatchObject({
+      type: 'spell-banner',
+      spellId: 'shatter',
+      spellName: '粉碎音波',
+      castingClassId: 'bard',
+    })
+    expect(parseCombatPresentationEvent(event)).not.toBeNull()
+    expect(schedule.completesAt).toBe(20_500 + SPELL_BANNER_TOTAL_DURATION_MS)
+    vi.useRealTimers()
   })
 
   it('publishes a complete server-clock event that the receiving parser accepts', async () => {

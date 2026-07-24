@@ -564,6 +564,7 @@ body > .dice-box-canvas {
   --combat-banner-deep: #071a38;
   --combat-banner-accent: #dbeafe;
   --combat-banner-glow: #60a5fa;
+  --combat-banner-title-size: clamp(30px, 4.3vw, 56px);
   position: relative;
   width: min(980px, calc(100vw - 2rem));
   min-height: 104px;
@@ -652,6 +653,48 @@ body > .dice-box-canvas {
 .combat-banner-class-backdrop__mini--left { left: 10%; }
 .combat-banner-class-backdrop__mini--right { right: 10%; }
 
+.combat-banner-class-backdrop__bard-notes {
+  position: absolute;
+  inset: 0;
+}
+
+.combat-banner-class-backdrop__bard-note {
+  position: absolute;
+  top: 50%;
+  color: var(--streak-accent);
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(21px, 2.3vw, 31px);
+  line-height: 1;
+  opacity: .88;
+  filter:
+    drop-shadow(0 0 5px var(--streak-glow))
+    drop-shadow(0 0 11px var(--streak-class));
+  animation: combat-banner-bard-note-pulse 3.6s ease-in-out infinite;
+}
+
+.combat-banner-class-backdrop__bard-note--left-primary {
+  left: 8%;
+  --bard-note-x: -8px;
+}
+
+.combat-banner-class-backdrop__bard-note--left-secondary {
+  left: 17%;
+  --bard-note-x: 5px;
+  animation-delay: -1.8s;
+}
+
+.combat-banner-class-backdrop__bard-note--right-primary {
+  right: 8%;
+  --bard-note-x: 8px;
+  animation-delay: -.9s;
+}
+
+.combat-banner-class-backdrop__bard-note--right-secondary {
+  right: 17%;
+  --bard-note-x: -5px;
+  animation-delay: -2.7s;
+}
+
 @keyframes combat-banner-class-sigil {
   from { transform: rotate(0deg) scale(1.02); }
   50% { transform: rotate(180deg) scale(1.08); }
@@ -662,6 +705,17 @@ body > .dice-box-canvas {
   from { transform: translateY(-50%) rotate(0deg) scale(.96); }
   50% { transform: translateY(-50%) rotate(180deg) scale(1.08); }
   to { transform: translateY(-50%) rotate(360deg) scale(.96); }
+}
+
+@keyframes combat-banner-bard-note-pulse {
+  0%, 100% {
+    opacity: .56;
+    transform: translate3d(var(--bard-note-x), -42%, 0) scale(.88);
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(0, -66%, 0) scale(1.09);
+  }
 }
 
 .combat-action-banner__content {
@@ -692,7 +746,7 @@ body > .dice-box-canvas {
 .combat-action-banner__copy strong {
   color: #fff;
   font-family: "Noto Serif SC", "Songti SC", serif;
-  font-size: clamp(21px, 2.5vw, 31px);
+  font-size: var(--combat-banner-title-size);
   line-height: 1.12;
   letter-spacing: .14em;
 }
@@ -718,7 +772,7 @@ body > .dice-box-canvas {
   }
   .combat-action-banner__content { min-height: 68px; gap: 10px; padding: 6px 14px; }
   .combat-action-banner__icon { width: 46px; flex-basis: 46px; }
-  .combat-action-banner__copy strong { font-size: 20px; }
+  .combat-action-banner { --combat-banner-title-size: clamp(25px, 7vw, 36px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -729,7 +783,8 @@ body > .dice-box-canvas {
       combat-banner-turn-lifetime 2.999s 1ms ease-in both;
   }
   .combat-action-banner__aether,
-  .combat-action-banner__runes {
+  .combat-action-banner__runes,
+  .combat-banner-class-backdrop__bard-note {
     animation: none;
   }
 }
@@ -1065,6 +1120,7 @@ body > .dice-box-canvas {
 }
 
 .kill-streak-banner {
+  --combat-banner-title-size: clamp(30px, 4.3vw, 56px);
   position: absolute;
   z-index: 2;
   top: 3%;
@@ -1132,7 +1188,7 @@ body > .dice-box-canvas {
   position: relative;
   z-index: 2;
   font-family: "Noto Serif SC", "Songti SC", serif;
-  font-size: clamp(30px, 4.3vw, 56px);
+  font-size: var(--combat-banner-title-size);
   line-height: .98;
   letter-spacing: .22em;
   color: #fff4bd;
@@ -1150,7 +1206,7 @@ body > .dice-box-canvas {
 }
 
 .kill-streak-banner__center .combat-action-banner__copy strong {
-  font-size: clamp(21px, 2.5vw, 31px);
+  font-size: var(--combat-banner-title-size);
   letter-spacing: .14em;
 }
 
@@ -1290,8 +1346,8 @@ body > .dice-box-canvas {
   .kill-streak-banner__center { min-height: 68px; padding: 6px 12px; }
   .kill-streak-banner__center.combat-action-banner__center { min-height: 68px; padding: 6px 12px; }
   .kill-streak-banner__tail { height: 64px; }
-  .kill-streak-banner__center strong { font-size: clamp(25px, 7vw, 36px); letter-spacing: .12em; }
-  .kill-streak-banner__center .combat-action-banner__copy strong { font-size: 20px; }
+  .kill-streak-banner { --combat-banner-title-size: clamp(25px, 7vw, 36px); }
+  .kill-streak-banner__center strong { letter-spacing: .12em; }
   .kill-streak-banner__eyebrow { font-size: 9px; letter-spacing: .1em; }
 }
 

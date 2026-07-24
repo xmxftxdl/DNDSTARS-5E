@@ -5,6 +5,7 @@ import {
   type Dnd5eMonsterAction,
   type Dnd5eMonsterMechanicEffectV2,
   type Dnd5eMonsterMechanicEffectTargetV2,
+  type Dnd5eMonsterMechanicSubjectV2,
   type Dnd5eMonsterMechanicTrigger,
   type Dnd5eMonsterMechanicTriggerEventV2,
   type Dnd5eMonsterMechanicTriggerV2,
@@ -22,20 +23,41 @@ export interface Dnd5eCustomMonsterTraitDraft {
   name: string
   description: string
   automation: 'headless' | 'dm-adjudication'
-  ruleKind: 'none' | 'undead-fortitude' | 'regeneration' | 'swarm' | 'nimble-escape'
+  ruleKind:
+    | 'none'
+    | 'undead-fortitude'
+    | 'regeneration'
+    | 'swarm'
+    | 'nimble-escape'
+    | 'keen-sense'
+    | 'ambusher'
+    | 'charge-damage'
+    | 'magic-resistance'
+    | 'conditional-target-bonus'
   amount: number
   dcBase: number
   damageTypes: Dnd5eDamageType[]
   requiresPositiveHp: boolean
   excludedOnCritical: boolean
   diesAtZeroWhenSuppressed: boolean
+  keenSense: 'smell' | 'hearing' | 'sight'
+  keenSenseSkillKey: string
+  keenSenseCheckBonus: number
+  keenSenseBlindsightFeet: number
+  chargeMinimumFeet: number
+  chargeActionId: string
+  chargeDamageDice: string
+  chargeDamageType: Dnd5eDamageType
+  targetBonusConditions: Dnd5eStandardConditionId[]
+  targetAttackBonus: number
+  targetDamageBonus: number
 }
 
 export interface Dnd5eCustomMonsterActionDraft {
   id: string
   name: string
   description: string
-  kind: 'weapon-attack' | 'other'
+  kind: 'weapon-attack' | 'movement' | 'other'
   automation: 'headless' | 'dm-adjudication'
   mode: 'melee' | 'ranged' | 'melee-or-ranged'
   toHit: number
@@ -59,6 +81,8 @@ export interface Dnd5eCustomMonsterActionDraft {
   rechargeDieSides: number
   legendaryCost: number
   referencedActionId: string
+  movementSpeedFraction: number
+  reactionTriggerActionId: string
 }
 
 export interface Dnd5eCustomMonsterEquipmentDraft {
@@ -96,10 +120,23 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   id: string
   name: string
   trigger: Dnd5eMonsterMechanicTriggerEventV2
+  triggerSubject: Dnd5eMonsterMechanicSubjectV2
+  triggerRadiusFeet: number
+  movementComparison: 'at-least' | 'at-most'
+  movementFeet: number
   hpPercentageAtOrBelow?: number
   hpPercentageAtOrAbove?: number
   requiresPositiveHp: boolean
-  effectKind: 'healing' | 'temporary-hit-points' | 'damage' | 'standard-condition' | 'remove-standard-condition' | 'summon' | 'area-attack'
+  effectKind:
+    | 'healing'
+    | 'temporary-hit-points'
+    | 'damage'
+    | 'standard-condition'
+    | 'remove-standard-condition'
+    | 'summon'
+    | 'area-attack'
+    | 'roll-modifier'
+    | 'attack'
   effectTarget: Dnd5eMonsterMechanicEffectTargetV2
   healingDice: string
   damageType: Dnd5eDamageType
@@ -112,6 +149,13 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   areaShape: 'circle' | 'cone' | 'line'
   areaRangeFeet: number
   areaSizeFeet: number
+  modifierRoll: 'attack' | 'damage' | 'saving-throw'
+  modifierMode: 'bonus' | 'advantage' | 'disadvantage'
+  modifierBonus: number
+  attackToHit: number
+  attackEconomy: 'none' | 'reaction'
+  attackDamageMode: 'dice' | 'fixed'
+  attackFixedDamage: number
   limit: Dnd5eMonsterMechanicTrigger['limit']
   automation: 'full' | 'partial' | 'manual'
   /** 表单编辑首个效果；高级 JSON 中的其余效果必须无损保留。 */
@@ -190,6 +234,17 @@ export function createDnd5eCustomMonsterTraitDraft(): Dnd5eCustomMonsterTraitDra
     requiresPositiveHp: true,
     excludedOnCritical: true,
     diesAtZeroWhenSuppressed: true,
+    keenSense: 'smell',
+    keenSenseSkillKey: 'perception',
+    keenSenseCheckBonus: 4,
+    keenSenseBlindsightFeet: 10,
+    chargeMinimumFeet: 20,
+    chargeActionId: '',
+    chargeDamageDice: '2d10',
+    chargeDamageType: 'piercing',
+    targetBonusConditions: ['frightened', 'stunned'],
+    targetAttackBonus: 2,
+    targetDamageBonus: 2,
   }
 }
 
@@ -222,6 +277,8 @@ export function createDnd5eCustomMonsterActionDraft(): Dnd5eCustomMonsterActionD
     rechargeDieSides: 6,
     legendaryCost: 1,
     referencedActionId: '',
+    movementSpeedFraction: 0.5,
+    reactionTriggerActionId: '',
   }
 }
 
@@ -230,6 +287,10 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     id: `mechanic-${uid().slice(0, 8)}`,
     name: '低生命恢复',
     trigger: 'turn-start',
+    triggerSubject: 'self',
+    triggerRadiusFeet: 30,
+    movementComparison: 'at-least',
+    movementFeet: 20,
     hpPercentageAtOrBelow: 50,
     hpPercentageAtOrAbove: undefined,
     requiresPositiveHp: true,
@@ -246,6 +307,13 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     areaShape: 'circle',
     areaRangeFeet: 60,
     areaSizeFeet: 15,
+    modifierRoll: 'attack',
+    modifierMode: 'bonus',
+    modifierBonus: 2,
+    attackToHit: 5,
+    attackEconomy: 'reaction',
+    attackDamageMode: 'dice',
+    attackFixedDamage: 8,
     limit: 'once-per-combat',
     automation: 'full',
   }
@@ -340,6 +408,24 @@ function normalizedAction(action: Dnd5eCustomMonsterActionDraft): Dnd5eMonsterAc
     ...(usage ? { usage } : {}),
     ...(action.category === 'legendary' ? { legendaryCost: Math.max(1, Math.min(10, Math.trunc(action.legendaryCost))) } : {}),
     ...(action.referencedActionId.trim() ? { referencedActionId: action.referencedActionId.trim() } : {}),
+    ...(action.category === 'reaction' && action.reactionTriggerActionId.trim()
+      ? { reactionTrigger: { kind: 'after-action' as const, actionId: action.reactionTriggerActionId.trim() } }
+      : {}),
+  }
+  if (action.kind === 'movement') {
+    return {
+      id: action.id,
+      name: action.name.trim(),
+      description: action.description.trim() ||
+        `该生物向一名可见敌人直线移动至多等于其速度 ${Math.round(action.movementSpeedFraction * 100)}% 的距离。`,
+      kind: 'other',
+      automation: 'dm-adjudication',
+      movement: {
+        kind: 'straight-toward-visible-hostile',
+        maximumSpeedFraction: Math.max(0.05, Math.min(1, action.movementSpeedFraction)),
+      },
+      ...metadata,
+    }
   }
   if (action.kind === 'other') {
     if (!action.description.trim()) throw new Error(`动作“${action.name}”需要填写规则描述`)
@@ -481,11 +567,55 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
           ? { kind: 'swarm' as const, cannotRegainHitPoints: true as const, cannotGainTemporaryHitPoints: true as const }
           : trait.ruleKind === 'nimble-escape'
             ? { kind: 'nimble-escape' as const, bonusActionOptions: ['disengage', 'hide'] as const }
-            : undefined
+            : trait.ruleKind === 'keen-sense'
+              ? {
+                  kind: 'keen-sense' as const,
+                  sense: trait.keenSense,
+                  skillKey: trait.keenSenseSkillKey.trim() || 'perception',
+                  checkBonus: Math.max(-100, Math.min(100, Math.trunc(trait.keenSenseCheckBonus))),
+                  ...(trait.keenSenseBlindsightFeet > 0
+                    ? { blindsightFeet: Math.trunc(trait.keenSenseBlindsightFeet) }
+                    : {}),
+                }
+              : trait.ruleKind === 'ambusher'
+                ? { kind: 'ambusher' as const, initiativeAdvantageWhenSurprising: true as const }
+                : trait.ruleKind === 'charge-damage'
+                  ? (() => {
+                      const dice = parseDice(trait.chargeDamageDice)
+                      if (!trait.chargeActionId.trim()) {
+                        throw new Error(`特性“${trait.name}”必须选择触发追加伤害的攻击动作`)
+                      }
+                      return {
+                        kind: 'charge-damage' as const,
+                        minimumStraightMovementFeet: Math.max(5, Math.trunc(trait.chargeMinimumFeet)),
+                        actionId: trait.chargeActionId.trim(),
+                        extraDamage: {
+                          average: Math.max(0, Math.floor(dice.count * (dice.sides + 1) / 2 + dice.bonus)),
+                          ...dice,
+                          type: trait.chargeDamageType,
+                        },
+                      }
+                    })()
+                  : trait.ruleKind === 'magic-resistance'
+                    ? { kind: 'magic-resistance' as const, savingThrowAdvantageAgainstMagic: true as const }
+                    : trait.ruleKind === 'conditional-target-bonus'
+                      ? {
+                          kind: 'conditional-target-bonus' as const,
+                          targetConditions: [...new Set(trait.targetBonusConditions)],
+                          attackBonus: Math.max(-100, Math.min(100, Math.trunc(trait.targetAttackBonus))),
+                          damageBonus: Math.max(-1_000_000, Math.min(1_000_000, Math.trunc(trait.targetDamageBonus))),
+                        }
+                      : undefined
+    const headlessRule = rule?.kind === 'undead-fortitude' ||
+      rule?.kind === 'regeneration' ||
+      rule?.kind === 'swarm' ||
+      rule?.kind === 'nimble-escape' ||
+      rule?.kind === 'magic-resistance' ||
+      rule?.kind === 'conditional-target-bonus'
     return {
       name: trait.name.trim(),
       description: trait.description.trim(),
-      automation: rule ? ('headless' as const) : ('dm-adjudication' as const),
+      automation: headlessRule ? ('headless' as const) : ('dm-adjudication' as const),
       ...(rule ? { rule } : {}),
     }
   })
@@ -503,7 +633,10 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
   }
   const headlessMechanics: Dnd5eMonsterMechanicTriggerV2[] = (draft.headlessMechanics ?? []).map((mechanic) => {
     if (!mechanic.name.trim()) throw new Error('怪物机制名称不能为空')
-    const dice = ['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind)
+    const dice = (
+      ['healing', 'temporary-hit-points', 'damage', 'area-attack'].includes(mechanic.effectKind) ||
+      (mechanic.effectKind === 'attack' && mechanic.attackDamageMode === 'dice')
+    )
       ? parseDice(mechanic.healingDice)
       : undefined
     const effect = mechanic.effectKind === 'healing' || mechanic.effectKind === 'temporary-hit-points'
@@ -529,7 +662,33 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
                 count: Math.max(1, Math.trunc(mechanic.summonCount)),
                 durationRounds: Math.max(1, Math.trunc(mechanic.summonDurationRounds)),
               }
-            : {
+            : mechanic.effectKind === 'roll-modifier'
+              ? {
+                  id: 'effect-0', kind: 'roll-modifier' as const, target: mechanic.effectTarget,
+                  roll: mechanic.modifierRoll, mode: mechanic.modifierMode,
+                  ...(mechanic.modifierMode === 'bonus'
+                    ? { bonus: Math.trunc(mechanic.modifierBonus) }
+                    : {}),
+                }
+              : mechanic.effectKind === 'attack'
+                ? {
+                    id: 'effect-0', kind: 'attack' as const, target: mechanic.effectTarget,
+                    toHit: Math.trunc(mechanic.attackToHit),
+                    economy: mechanic.attackEconomy,
+                    damage: mechanic.attackDamageMode === 'fixed'
+                      ? {
+                          average: Math.max(0, Math.trunc(mechanic.attackFixedDamage)),
+                          count: 0, sides: 2,
+                          bonus: Math.max(0, Math.trunc(mechanic.attackFixedDamage)),
+                          type: mechanic.damageType,
+                        }
+                      : {
+                          average: Math.max(0, Math.floor(dice!.count * (dice!.sides + 1) / 2 + dice!.bonus)),
+                          ...dice!,
+                          type: mechanic.damageType,
+                        },
+                  }
+                : {
                 id: 'effect-0', kind: 'area-attack' as const, shape: mechanic.areaShape,
                 rangeFeet: Math.max(0, Math.trunc(mechanic.areaRangeFeet)),
                 sizeFeet: Math.max(5, Math.trunc(mechanic.areaSizeFeet)),
@@ -539,7 +698,21 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       schemaVersion: 2,
       id: mechanic.id,
       name: mechanic.name.trim(),
-      trigger: { event: mechanic.trigger },
+      trigger: {
+        event: mechanic.trigger,
+        ...(mechanic.triggerSubject !== 'self' ? { subject: mechanic.triggerSubject } : {}),
+        ...(mechanic.triggerSubject !== 'self'
+          ? { radiusFeet: Math.max(5, Math.trunc(mechanic.triggerRadiusFeet)) }
+          : {}),
+        ...(mechanic.trigger === 'movement'
+          ? {
+              movement: {
+                comparison: mechanic.movementComparison,
+                feet: Math.max(0, Math.trunc(mechanic.movementFeet)),
+              },
+            }
+          : {}),
+      },
       predicates: {
         ...(Number.isFinite(mechanic.hpPercentageAtOrBelow)
           ? { hpPercentageAtOrBelow: Math.max(0, Math.min(100, Number(mechanic.hpPercentageAtOrBelow))) }
@@ -585,10 +758,18 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
       name: skill.name.trim(),
       bonus: Math.trunc(skill.bonus),
     })),
-    senses: draft.senses.filter((sense) => sense.name.trim()).map((sense) => ({
-      name: sense.name.trim(),
-      ...(Number.isFinite(sense.distanceFeet) ? { distanceFeet: Math.max(0, Math.trunc(sense.distanceFeet!)) } : {}),
-    })),
+    senses: [
+      ...draft.senses.filter((sense) => sense.name.trim()).map((sense) => ({
+        name: sense.name.trim(),
+        ...(Number.isFinite(sense.distanceFeet) ? { distanceFeet: Math.max(0, Math.trunc(sense.distanceFeet!)) } : {}),
+      })),
+      ...traits.flatMap((trait) =>
+        trait.rule?.kind === 'keen-sense' && (trait.rule.blindsightFeet ?? 0) > 0
+          ? [{ name: '盲视', distanceFeet: trait.rule.blindsightFeet }]
+          : []),
+    ].filter((sense, index, senses) =>
+      senses.findIndex((candidate) =>
+        candidate.name === sense.name && candidate.distanceFeet === sense.distanceFeet) === index),
     damageVulnerabilities: [...new Set(draft.damageVulnerabilities)],
     damageResistances: [...new Set(draft.damageResistances)],
     damageImmunities: [...new Set(draft.damageImmunities)],
@@ -666,7 +847,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         id: action.id,
         name: action.name,
         description: action.description,
-        kind: action.kind === 'weapon-attack' ? 'weapon-attack' : 'other',
+        kind: action.kind === 'weapon-attack' ? 'weapon-attack' : action.movement ? 'movement' : 'other',
         automation: action.automation ?? (action.kind === 'weapon-attack' ? 'headless' : 'dm-adjudication'),
         mode: action.attack?.mode ?? 'melee',
         toHit: action.attack?.toHit ?? 0,
@@ -700,6 +881,8 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         rechargeDieSides: usage?.kind === 'recharge' ? usage.dieSides : 6,
         legendaryCost: action.legendaryCost ?? 1,
         referencedActionId: action.referencedActionId ?? '',
+        movementSpeedFraction: action.movement?.maximumSpeedFraction ?? 0.5,
+        reactionTriggerActionId: action.reactionTrigger?.actionId ?? '',
       }
     }),
   )
@@ -725,7 +908,12 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
     abilities: { ...monster.abilities },
     savingThrows: { ...(monster.savingThrows ?? {}) },
     skills: (monster.skills ?? []).map((skill) => ({ id: `skill-${uid().slice(0, 8)}`, ...skill })),
-    senses: monster.senses.map((sense) => ({ id: `sense-${uid().slice(0, 8)}`, ...sense })),
+    senses: monster.senses
+      .filter((sense) => !monster.traits.some((trait) =>
+        trait.rule?.kind === 'keen-sense' &&
+        sense.name === '盲视' &&
+        sense.distanceFeet === trait.rule.blindsightFeet))
+      .map((sense) => ({ id: `sense-${uid().slice(0, 8)}`, ...sense })),
     damageVulnerabilities: [...(monster.damageVulnerabilities ?? [])],
     damageResistances: [...(monster.damageResistances ?? [])],
     damageImmunities: [...(monster.damageImmunities ?? [])],
@@ -767,19 +955,33 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       const effect = mechanic.schemaVersion === 1
         ? { id: 'effect-0', kind: 'healing' as const, target: 'self' as const, dice: mechanic.effect.dice }
         : mechanic.effects[0]
-      const dice = effect && 'dice' in effect ? effect.dice : { count: 2, sides: 6, bonus: 0 }
+      const dice = effect?.kind === 'attack'
+        ? effect.damage
+        : effect && 'dice' in effect
+          ? effect.dice
+          : { count: 2, sides: 6, bonus: 0 }
       const duration = effect?.kind === 'standard-condition' ? effect.duration : { kind: 'rounds' as const, rounds: 1 }
       return {
         id: mechanic.id,
         name: mechanic.name,
         trigger: mechanic.schemaVersion === 1 ? mechanic.event : mechanic.trigger.event,
+        triggerSubject: mechanic.schemaVersion === 2 ? mechanic.trigger.subject ?? 'self' : 'self',
+        triggerRadiusFeet: mechanic.schemaVersion === 2 ? mechanic.trigger.radiusFeet ?? 30 : 30,
+        movementComparison: mechanic.schemaVersion === 2
+          ? mechanic.trigger.movement?.comparison ?? 'at-least'
+          : 'at-least',
+        movementFeet: mechanic.schemaVersion === 2 ? mechanic.trigger.movement?.feet ?? 20 : 20,
         hpPercentageAtOrBelow: mechanic.predicates.hpPercentageAtOrBelow,
         hpPercentageAtOrAbove: mechanic.schemaVersion === 2 ? mechanic.predicates.hpPercentageAtOrAbove : undefined,
         requiresPositiveHp: mechanic.predicates.requiresPositiveHp,
         effectKind: effect?.kind ?? 'healing',
         effectTarget: effect && 'target' in effect ? effect.target : 'self',
         healingDice: `${dice.count}d${dice.sides}${dice.bonus === 0 ? '' : dice.bonus > 0 ? `+${dice.bonus}` : dice.bonus}`,
-        damageType: effect && 'damageType' in effect ? effect.damageType : 'necrotic',
+        damageType: effect?.kind === 'attack'
+          ? effect.damage.type
+          : effect && 'damageType' in effect
+            ? effect.damageType
+            : 'necrotic',
         condition: effect?.kind === 'standard-condition' || effect?.kind === 'remove-standard-condition'
           ? effect.condition
           : 'frightened',
@@ -791,6 +993,13 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         areaShape: effect?.kind === 'area-attack' ? effect.shape : 'circle',
         areaRangeFeet: effect?.kind === 'area-attack' ? effect.rangeFeet : 60,
         areaSizeFeet: effect?.kind === 'area-attack' ? effect.sizeFeet : 15,
+        modifierRoll: effect?.kind === 'roll-modifier' ? effect.roll : 'attack',
+        modifierMode: effect?.kind === 'roll-modifier' ? effect.mode : 'bonus',
+        modifierBonus: effect?.kind === 'roll-modifier' ? effect.bonus ?? 0 : 2,
+        attackToHit: effect?.kind === 'attack' ? effect.toHit : 5,
+        attackEconomy: effect?.kind === 'attack' ? effect.economy ?? 'none' : 'reaction',
+        attackDamageMode: effect?.kind === 'attack' && effect.damage.count === 0 ? 'fixed' : 'dice',
+        attackFixedDamage: effect?.kind === 'attack' ? effect.damage.average : 8,
         limit: mechanic.limit,
         automation: mechanic.schemaVersion === 1 ? 'full' : mechanic.automation,
         preservedEffects: mechanic.schemaVersion === 1
@@ -814,6 +1023,31 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       requiresPositiveHp: trait.rule?.kind === 'regeneration' ? trait.rule.requiresPositiveHp : true,
       excludedOnCritical: trait.rule?.kind === 'undead-fortitude' ? trait.rule.excludedOnCritical : true,
       diesAtZeroWhenSuppressed: trait.rule?.kind === 'regeneration' ? trait.rule.diesAtZeroWhenSuppressed : true,
+      keenSense: trait.rule?.kind === 'keen-sense' ? trait.rule.sense : 'smell',
+      keenSenseSkillKey: trait.rule?.kind === 'keen-sense' ? trait.rule.skillKey : 'perception',
+      keenSenseCheckBonus: trait.rule?.kind === 'keen-sense' ? trait.rule.checkBonus : 4,
+      keenSenseBlindsightFeet: trait.rule?.kind === 'keen-sense' ? trait.rule.blindsightFeet ?? 0 : 10,
+      chargeMinimumFeet: trait.rule?.kind === 'charge-damage'
+        ? trait.rule.minimumStraightMovementFeet
+        : 20,
+      chargeActionId: trait.rule?.kind === 'charge-damage' ? trait.rule.actionId : '',
+      chargeDamageDice: trait.rule?.kind === 'charge-damage'
+        ? `${trait.rule.extraDamage.count}d${trait.rule.extraDamage.sides}${
+            trait.rule.extraDamage.bonus === 0
+              ? ''
+              : trait.rule.extraDamage.bonus > 0
+                ? `+${trait.rule.extraDamage.bonus}`
+                : trait.rule.extraDamage.bonus
+          }`
+        : '2d10',
+      chargeDamageType: trait.rule?.kind === 'charge-damage'
+        ? trait.rule.extraDamage.type
+        : 'piercing',
+      targetBonusConditions: trait.rule?.kind === 'conditional-target-bonus'
+        ? [...trait.rule.targetConditions]
+        : ['frightened', 'stunned'],
+      targetAttackBonus: trait.rule?.kind === 'conditional-target-bonus' ? trait.rule.attackBonus : 2,
+      targetDamageBonus: trait.rule?.kind === 'conditional-target-bonus' ? trait.rule.damageBonus : 2,
     })),
     actions: draftActions,
   }

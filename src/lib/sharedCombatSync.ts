@@ -81,12 +81,21 @@ export function resolveSharedCombatStateApply(input: {
   if (!state) return { status: 'ignored', reason: 'missing-state' }
   if (state.mapId !== input.mapId) return { status: 'ignored', reason: 'wrong-map' }
 
-  const validTokenIds = new Set(input.validTokenIds)
-  if (state.active && (state.initiativeOrder?.length ?? 0) > 0 && validTokenIds.size === 0) {
+  const visibleTokenIds = new Set(input.validTokenIds)
+  if (input.isDm && state.active && (state.initiativeOrder?.length ?? 0) > 0 && visibleTokenIds.size === 0) {
     return { status: 'ignored', reason: 'empty-token-map' }
   }
 
-  const initiativeOrder = (state.initiativeOrder ?? []).filter((entry) => validTokenIds.has(entry.tokenId))
+  // The combat snapshot is authoritative for players. Their projected map can
+  // temporarily omit a combatant because of fog/LOS or while an edge-position
+  // correction is arriving; that must not delete its initiative slot.
+  const combatTokenIds = input.isDm
+    ? visibleTokenIds
+    : new Set([
+        ...visibleTokenIds,
+        ...(state.initiativeOrder ?? []).map((entry) => entry.tokenId),
+      ])
+  const initiativeOrder = (state.initiativeOrder ?? []).filter((entry) => combatTokenIds.has(entry.tokenId))
   const initiativeIndex =
     initiativeOrder.length > 0
       ? Math.min(Math.max(0, state.initiativeIndex ?? 0), initiativeOrder.length - 1)
@@ -95,7 +104,7 @@ export function resolveSharedCombatStateApply(input: {
   const dnd5eTurnEconomyByToken = reconcileDnd5eTurnEconomy(
     state.dnd5eTurnEconomyByToken,
     input.currentDnd5eTurnEconomyByToken ?? {},
-    validTokenIds,
+    combatTokenIds,
   )
   const incomingCombatId = state.combatId ?? ''
   const incomingUpdatedAt = state.updatedAt ?? 0
@@ -107,7 +116,7 @@ export function resolveSharedCombatStateApply(input: {
     return { status: 'ignored', reason: 'stale' }
   }
 
-  const snapshot = JSON.stringify({ state, tokenIds: Array.from(validTokenIds).sort() })
+  const snapshot = JSON.stringify({ state, tokenIds: Array.from(combatTokenIds).sort() })
   if (snapshot === input.lastSnapshot) return { status: 'ignored', reason: 'unchanged' }
 
   const combatChanged = incomingCombatId !== input.currentCombatId

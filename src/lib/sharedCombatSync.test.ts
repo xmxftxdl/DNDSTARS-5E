@@ -65,7 +65,7 @@ describe('shared combat sync', () => {
       lastAppliedCombatId: 'combat-old',
       lastAppliedUpdatedAt: 0,
       lastSnapshot: '',
-      isDm: false,
+      isDm: true,
     })
 
     expect(decision.status).toBe('apply')
@@ -77,6 +77,26 @@ describe('shared combat sync', () => {
       expect(decision.shouldResetPlayerActionState).toBe(true)
       expect(decision.playerCombatEndedLocked).toBe(false)
       expect(decision.settlementMode).toBe('automatic')
+    }
+  })
+
+  it('keeps player initiative slots when a projected edge token is temporarily absent', () => {
+    const decision = resolveSharedCombatStateApply({
+      state: makeState(),
+      mapId: 'map-1',
+      validTokenIds: ['hero-token'],
+      currentCombatId: 'combat-1',
+      lastAppliedCombatId: '',
+      lastAppliedUpdatedAt: 0,
+      lastSnapshot: '',
+      isDm: false,
+    })
+
+    expect(decision.status).toBe('apply')
+    if (decision.status === 'apply') {
+      expect(decision.initiativeOrder.map((entry) => entry.tokenId))
+        .toEqual(['hero-token', 'enemy-token'])
+      expect(decision.active).toBe(true)
     }
   })
 
@@ -102,7 +122,7 @@ describe('shared combat sync', () => {
         lastAppliedCombatId: '',
         lastAppliedUpdatedAt: 0,
         lastSnapshot: '',
-        isDm: false,
+        isDm: true,
       }),
     ).toEqual({ status: 'ignored', reason: 'wrong-map' })
 
@@ -115,7 +135,7 @@ describe('shared combat sync', () => {
         lastAppliedCombatId: '',
         lastAppliedUpdatedAt: 0,
         lastSnapshot: '',
-        isDm: false,
+        isDm: true,
       }),
     ).toEqual({ status: 'ignored', reason: 'empty-token-map' })
 

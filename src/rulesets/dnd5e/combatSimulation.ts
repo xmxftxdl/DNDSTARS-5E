@@ -25,6 +25,14 @@ import {
   type MonsterDecisionCandidate,
   type MonsterDecisionContext,
 } from './monsterDecisionProvider'
+import {
+  createDnd5eCombatant,
+  dnd5eCombatantPairKey,
+  resolveDnd5eHeadlessAction,
+  startDnd5eHeadlessCombat,
+  type Dnd5eHeadlessCombatState,
+} from './headlessCombatEngine'
+import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
 
 export const DND5E_COMBAT_SIMULATION_MAX_TRIALS = 1_000
 
@@ -36,10 +44,52 @@ export interface Dnd5eCombatSimulationMonsterSelection {
 export interface Dnd5eCombatSimulationRequest {
   characters: readonly Character[]
   monsters: readonly Dnd5eCombatSimulationMonsterSelection[]
+  customMonsters?: readonly Dnd5eMonsterStatBlock[]
   trials?: number
   seed?: number
   initialDistanceFeet?: number
   maxRounds?: number
+}
+
+export interface Dnd5eCombatSimulationRoundSummary {
+  round: number
+  appearances: number
+  averagePlayerDamage: number
+  averageMonsterDamage: number
+  averagePlayerDeaths: number
+  averageMonsterDeaths: number
+}
+
+export interface Dnd5eCombatSimulationActionUsage {
+  actorName: string
+  side: 'players' | 'monsters'
+  actionId: string
+  actionName: string
+  uses: number
+  attempts: number
+  hits: number
+  totalDamage: number
+  usesPerTrial: number
+  hitRate: number
+  averageDamage: number
+  headlessTransactions: number
+}
+
+export interface Dnd5eCombatSimulationDeathCause {
+  victimName: string
+  killerName: string
+  actionName: string
+  count: number
+}
+
+export interface Dnd5eCombatSimulationDecisionLog {
+  round: number
+  actorName: string
+  targetName?: string
+  actionName?: string
+  candidateId: string
+  score: number
+  reasons: readonly string[]
 }
 
 export interface Dnd5eCombatSimulationParticipantSummary {
@@ -78,6 +128,11 @@ export interface Dnd5eCombatSimulationResult {
   averagePlayerSurvivors: number
   averageMonsterSurvivors: number
   participantSummaries: readonly Dnd5eCombatSimulationParticipantSummary[]
+  roundSummaries: readonly Dnd5eCombatSimulationRoundSummary[]
+  actionUsage: readonly Dnd5eCombatSimulationActionUsage[]
+  deathCauses: readonly Dnd5eCombatSimulationDeathCause[]
+  decisionLog: readonly Dnd5eCombatSimulationDecisionLog[]
+  headlessTransactionCount: number
   coverage: Dnd5eCombatSimulationCoverage
 }
 
@@ -97,6 +152,7 @@ interface SimulationAction {
   parts: readonly SimulationAttackPart[]
   usage?: Dnd5eMonsterAction['usage']
   spell?: {
+    id: string
     effect: Dnd5eSrdSpellDefinition['effect']
     saveAbility?: AbilityKey
     saveDc?: number
@@ -141,6 +197,33 @@ interface SimulationDecision {
   nextPosition: number
   dodges?: boolean
   dashes?: boolean
+  candidateId?: string
+  score?: number
+  reasons?: readonly string[]
+}
+
+interface SimulationTelemetry {
+  roundTotals: Map<number, {
+    appearances: number
+    playerDamage: number
+    monsterDamage: number
+    playerDeaths: number
+    monsterDeaths: number
+  }>
+  actionUsage: Map<string, {
+    actorName: string
+    side: 'players' | 'monsters'
+    actionId: string
+    actionName: string
+    uses: number
+    attempts: number
+    hits: number
+    totalDamage: number
+    headlessTransactions: number
+  }>
+  deathCauses: Map<string, Dnd5eCombatSimulationDeathCause>
+  decisionLog: Dnd5eCombatSimulationDecisionLog[]
+  headlessTransactionCount: number
 }
 
 interface SeededRandom {
@@ -226,6 +309,7 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
         ? { kind: 'per-day', max: listedSpell.usage.max }
         : undefined,
       spell: {
+        id: spell.id,
         effect: spell.effect,
         saveAbility: spell.saveAbility,
         saveDc: monster.spellcasting?.saveDc,
@@ -579,11 +663,19 @@ function monsterDecision(actor: SimulationActor, opponents: readonly SimulationA
       : actor.behaviorStyle === 'skirmisher' ? 'skirmisher' : 'ranged',
     behaviorStyle: actor.behaviorStyle,
   }
-  return rankMonsterDecisionCandidates(
+  const ranked = rankMonsterDecisionCandidates(
     DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
     context,
     candidates,
-  )[0]?.candidate.payload ?? { nextPosition: actor.position, dodges: true }
+  )[0]
+  return ranked
+    ? {
+        ...ranked.candidate.payload,
+        candidateId: ranked.candidate.id,
+        score: ranked.score,
+        reasons: ranked.reasons,
+      }
+    : { nextPosition: actor.position, dodges: true, candidateId: 'fallback:dodge', score: 0, reasons: ['没有可执行攻击，采取闪避。'] }
 }
 
 function playerDecision(actor: SimulationActor, opponents: readonly SimulationActor[]): SimulationDecision {
@@ -614,17 +706,239 @@ function applyDamage(target: SimulationActor, rawDamage: number, type: Dnd5eDama
   return damage
 }
 
+function synchronizeHeadlessActors(
+  holder: { state: Dnd5eHeadlessCombatState },
+  actors: readonly SimulationActor[],
+): void {
+  holder.state.distanceFeetByCombatantPair = {}
+  for (const actor of actors) {
+    const combatant = holder.state.combatants[actor.id]
+    if (!combatant) continue
+    combatant.currentHp = actor.hp
+    combatant.maxHp = actor.maxHp
+    combatant.position = { x: actor.position, y: 0 }
+  }
+  for (let left = 0; left < actors.length; left += 1) {
+    for (let right = left + 1; right < actors.length; right += 1) {
+      holder.state.distanceFeetByCombatantPair[
+        dnd5eCombatantPairKey(actors[left].id, actors[right].id)
+      ] = Math.abs(actors[left].position - actors[right].position)
+    }
+  }
+}
+
+function rollDamageGroups(
+  parts: readonly SimulationAttackPart[],
+  random: SeededRandom,
+): readonly (readonly (readonly number[])[])[] {
+  return parts.map((part) => part.damages.map((damage) =>
+    Array.from({ length: damage.count }, () => random.die(damage.sides))))
+}
+
+function executeHeadlessWeaponAction(input: {
+  actor: SimulationActor
+  target: SimulationActor
+  action: SimulationAction
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  disadvantaged: boolean
+}): { handled: boolean; hits: number; damage: number; transactions: number } {
+  const { actor, target, action, actors, holder, random } = input
+  if (action.spell || action.parts.length === 0) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  synchronizeHeadlessActors(holder, actors)
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  if (actorIndex < 0) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  holder.state.initiativeIndex = actorIndex
+  const combatant = holder.state.combatants[actor.id]
+  if (!combatant) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  combatant.turn.actionAvailable = true
+  combatant.turn.bonusActionAvailable = true
+  combatant.turn.reactionAvailable = true
+  combatant.turn.movementRemaining = actor.speed
+  const hpBefore = target.hp
+  let hits = 0
+  let transactions = 0
+  if (actor.monster) {
+    const damageGroups = rollDamageGroups(action.parts, random)
+    const result = resolveDnd5eHeadlessAction(holder.state, {
+      type: 'monster-action',
+      actorId: actor.id,
+      actionId: action.id,
+      rolls: action.parts.map((_, index) => ({
+        targetId: target.id,
+        d20: random.die(20),
+        d20Second: input.disadvantaged ? random.die(20) : undefined,
+        mode: input.disadvantaged ? 'disadvantage' : 'normal',
+        damageRolls: damageGroups[index],
+      })),
+    }, {
+      transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}`,
+      now: holder.state.round,
+    })
+    if (!result.ok) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+    holder.state = result.state
+    hits = result.events.filter((event) => event.type === 'attack-resolved' && event.hit).length
+    transactions = result.transaction?.status === 'committed' ? 1 : 0
+  } else {
+    let state = holder.state
+    for (const [index, part] of action.parts.entries()) {
+      const damage = part.damages[0]
+      if (!damage) continue
+      const result = resolveDnd5eHeadlessAction(state, {
+        type: 'attack',
+        actorId: actor.id,
+        targetId: target.id,
+        attackModifier: part.toHit,
+        criticalThreshold: part.criticalThreshold,
+        d20: random.die(20),
+        d20Second: input.disadvantaged ? random.die(20) : undefined,
+        mode: input.disadvantaged ? 'disadvantage' : 'normal',
+        spendAction: index === 0,
+        damage: {
+          ...damage,
+          rolls: Array.from({ length: damage.count }, () => random.die(damage.sides)),
+        },
+      }, {
+        transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}:${index}`,
+        now: holder.state.round,
+      })
+      if (!result.ok) return index === 0
+        ? { handled: false, hits: 0, damage: 0, transactions: 0 }
+        : { handled: true, hits, damage: Math.max(0, hpBefore - target.hp), transactions }
+      state = result.state
+      holder.state = state
+      hits += result.events.some((event) => event.type === 'attack-resolved' && event.hit) ? 1 : 0
+      if (result.transaction?.status === 'committed') transactions += 1
+      const nextTargetHp = state.combatants[target.id]?.currentHp
+      if (nextTargetHp != null && nextTargetHp <= 0) break
+    }
+  }
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (resolved) candidate.hp = Math.max(0, resolved.currentHp)
+  }
+  const resolvedActor = holder.state.combatants[actor.id]
+  const actionUses = resolvedActor?.classState.monsterActionUsesByActionId?.[action.id]
+  if (actionUses) actor.perDayUses.set(action.id, actionUses.current)
+  const rechargeReady = resolvedActor?.classState.monsterRechargeReadyByActionId?.[action.id]
+  if (rechargeReady != null) actor.rechargeReady.set(action.id, rechargeReady)
+  return {
+    handled: true,
+    hits,
+    damage: Math.max(0, hpBefore - target.hp),
+    transactions,
+  }
+}
+
+function executeHeadlessSpellAction(input: {
+  actor: SimulationActor
+  target: SimulationActor
+  action: SimulationAction
+  actors: readonly SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  disadvantaged: boolean
+}): { handled: boolean; hits: number; damage: number; transactions: number } {
+  const { actor, target, action, actors, holder, random } = input
+  const spell = action.spell
+  if (!actor.monster || !spell) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  synchronizeHeadlessActors(holder, actors)
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  const combatant = holder.state.combatants[actor.id]
+  if (actorIndex < 0 || !combatant) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state.initiativeIndex = actorIndex
+  combatant.turn.actionAvailable = true
+  combatant.turn.bonusActionAvailable = true
+  combatant.turn.reactionAvailable = true
+  const targetCombatant = holder.state.combatants[target.id]
+  if (targetCombatant) targetCombatant.dodging = input.disadvantaged
+  const hpBefore = target.hp
+  const effectRolls = ['spell-attack', 'saving-throw'].includes(spell.effect)
+    ? [Array.from({ length: spell.dice.count }, () => random.die(spell.dice.sides))]
+    : []
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'monster-core-spell',
+    actorId: actor.id,
+    spellId: spell.id,
+    slotLevel: spell.slotLevel,
+    resolution: {
+      schemaVersion: 1,
+      targetIds: [target.id],
+      d20: spell.effect === 'spell-attack' ? random.die(20) : undefined,
+      d20Second: spell.effect === 'spell-attack' && input.disadvantaged ? random.die(20) : undefined,
+      targetSavingThrows: spell.effect === 'saving-throw'
+        ? [{ targetId: target.id, d20: random.die(20), d20Second: random.die(20) }]
+        : undefined,
+      effectRolls,
+    },
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:${action.id}`,
+    now: holder.state.round,
+  })
+  if (!result.ok) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (resolved) candidate.hp = Math.max(0, resolved.currentHp)
+  }
+  const resolvedActor = holder.state.combatants[actor.id]
+  const listedSpellUses = resolvedActor?.classState.monsterSpellUsesBySpellId?.[spell.id]
+  if (listedSpellUses) actor.perDayUses.set(action.id, listedSpellUses.current)
+  const slot = resolvedActor?.classState.monsterSpellSlots?.[String(spell.slotLevel)]
+  if (slot) actor.spellSlots.set(spell.slotLevel, slot.current)
+  const hits = result.events.filter((event) =>
+    (event.type === 'attack-resolved' && event.hit) ||
+    (event.type === 'saving-throw-resolved' && !event.success)).length ||
+    (hpBefore > target.hp ? 1 : 0)
+  return {
+    handled: true,
+    hits,
+    damage: Math.max(0, hpBefore - target.hp),
+    transactions: result.transaction?.status === 'committed' ? 1 : 0,
+  }
+}
+
 function executeAction(
   actor: SimulationActor,
   decision: SimulationDecision,
   actors: SimulationActor[],
   random: SeededRandom,
   dodgingIds: ReadonlySet<string>,
-): void {
+  headless: { state: Dnd5eHeadlessCombatState },
+): { action?: SimulationAction; target?: SimulationActor; hits: number; damage: number; transactions: number } {
   actor.position = decision.nextPosition
   const action = actor.actions.find((candidate) => candidate.id === decision.actionId)
   let target = actors.find((candidate) => candidate.id === decision.targetId && candidate.hp > 0)
-  if (!action || !target || !availableAction(actor, action)) return
+  if (!action || !target || !availableAction(actor, action)) {
+    return { hits: 0, damage: 0, transactions: 0 }
+  }
+  const headlessSpellResult = executeHeadlessSpellAction({
+    actor,
+    target,
+    action,
+    actors,
+    holder: headless,
+    random,
+    disadvantaged: dodgingIds.has(target.id),
+  })
+  if (headlessSpellResult.handled) return { action, target, ...headlessSpellResult }
+  const headlessResult = executeHeadlessWeaponAction({
+    actor,
+    target,
+    action,
+    actors,
+    holder: headless,
+    random,
+    disadvantaged: dodgingIds.has(target.id),
+  })
+  if (headlessResult.handled) return { action, target, ...headlessResult }
   if (action.usage?.kind === 'per-day') {
     actor.perDayUses.set(action.id, Math.max(0, (actor.perDayUses.get(action.id) ?? 0) - 1))
   }
@@ -639,13 +953,14 @@ function executeAction(
   if (action.spell) {
     const spell = action.spell
     const distance = Math.abs(actor.position - target.position)
-    if (distance > spell.rangeFeet) return
+    if (distance > spell.rangeFeet) return { action, target, hits: 0, damage: 0, transactions: 0 }
     if (spell.effect === 'power-word-kill') {
       if (target.hp <= 100) {
-        actor.damageDealt += target.hp
+        const dealt = target.hp
         target.hp = 0
+        return { action, target, hits: 1, damage: dealt, transactions: 0 }
       }
-      return
+      return { action, target, hits: 1, damage: 0, transactions: 0 }
     }
     let applies = false
     let halfDamage = false
@@ -668,7 +983,7 @@ function executeAction(
       applies = total < spell.saveDc
       halfDamage = !applies && spell.damageOnSuccessfulSave === 'half'
     }
-    if (!applies && !halfDamage) return
+    if (!applies && !halfDamage) return { action, target, hits: 0, damage: 0, transactions: 0 }
     let rawDamage = spell.dice.bonus
     const count = spell.dice.count * (critical ? 2 : 1)
     for (let dieIndex = 0; dieIndex < count; dieIndex += 1) {
@@ -676,10 +991,11 @@ function executeAction(
     }
     if (halfDamage) rawDamage = Math.floor(rawDamage / 2)
     const dealt = applyDamage(target, rawDamage, spell.damageType ?? 'force')
-    actor.damageDealt += dealt
-    return
+    return { action, target, hits: applies ? 1 : 0, damage: dealt, transactions: 0 }
   }
 
+  let hits = 0
+  let totalDamage = 0
   for (const part of action.parts) {
     if (!target || target.hp <= 0) {
       target = actors.filter((candidate) => candidate.side !== actor.side && candidate.hp > 0)
@@ -697,6 +1013,7 @@ function executeAction(
     const roll = disadvantage ? Math.min(first, second) : first
     const attack = rules.resolveAttack({ rolls: [roll], mode: 'normal', modifier: part.toHit, targetAc: target.ac })
     if (!attack.hit) continue
+    hits += 1
     const critical = attack.critical || roll >= part.criticalThreshold
     const damages = actor.hp / actor.maxHp <= 0.5 && part.damagesAtHalfHp
       ? part.damagesAtHalfHp
@@ -706,9 +1023,10 @@ function executeAction(
       const count = damage.count * (critical ? 2 : 1)
       for (let dieIndex = 0; dieIndex < count; dieIndex += 1) rawDamage += random.die(damage.sides)
       const dealt = applyDamage(target, Math.max(0, rawDamage), damage.type)
-      actor.damageDealt += dealt
+      totalDamage += dealt
     }
   }
+  return { action, target, hits, damage: totalDamage, transactions: 0 }
 }
 
 function rechargeMonsterActions(actor: SimulationActor, random: SeededRandom): void {
@@ -736,6 +1054,8 @@ function simulateTrial(
   actors: SimulationActor[],
   random: SeededRandom,
   maxRounds: number,
+  telemetry: SimulationTelemetry,
+  trialIndex: number,
 ): { winner: 'players' | 'monsters' | 'draw'; rounds: number } {
   const initiativeRolls = new Map(actors.map((actor) => [
     actor.id,
@@ -745,8 +1065,68 @@ function simulateTrial(
     (initiativeRolls.get(right.id) ?? 0) - (initiativeRolls.get(left.id) ?? 0) ||
     right.initiativeBonus - left.initiativeBonus ||
     left.id.localeCompare(right.id))
+  const headless = {
+    state: startDnd5eHeadlessCombat(
+      `simulation:${trialIndex}`,
+      initiative.map((actor) => createDnd5eCombatant({
+        id: actor.id,
+        name: actor.name,
+        controller: actor.side === 'players' ? 'player' : 'dm',
+        initiative: initiativeRolls.get(actor.id) ?? 0,
+        abilities: actor.monster ? { ...actor.monster.abilities } : { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+        savingThrowBonuses: actor.savingThrowModifiers,
+        proficiencyBonus: actor.monster ? rules.proficiencyBonus(Math.max(1, Number(actor.monster.challenge.rating) || 1)) : 2,
+        armorClass: actor.ac,
+        currentHp: actor.hp,
+        maxHp: actor.maxHp,
+        temporaryHp: 0,
+        speed: actor.speed,
+        position: { x: actor.position, y: 0 },
+        concentrating: false,
+        usesDeathSaves: false,
+        classState: actor.monster ? {
+          monsterRechargeReadyByActionId: Object.fromEntries(actor.actions.flatMap((action) =>
+            action.usage?.kind === 'recharge' ? [[action.id, true]] : [])),
+          monsterActionUsesByActionId: Object.fromEntries(actor.actions.flatMap((action) =>
+            action.usage?.kind === 'per-day'
+              ? [[action.id, { current: action.usage.max, max: action.usage.max }]]
+              : [])),
+          monsterSpellSlots: actor.monster.spellcasting?.slots
+            ? Object.fromEntries(Object.entries(actor.monster.spellcasting.slots).map(([level, maximum]) => [
+                level,
+                { current: maximum, max: maximum },
+              ]))
+            : undefined,
+          monsterSpellUsesBySpellId: actor.monster.spellcasting?.spells
+            ? Object.fromEntries(actor.monster.spellcasting.spells.flatMap((spell) =>
+                spell.usage?.kind === 'per-day'
+                  ? [[spell.id, { current: spell.usage.max, max: spell.usage.max }]]
+                  : []))
+            : undefined,
+        } : undefined,
+        statBlockId: actor.monster?.id,
+        creatureType: actor.monster?.creatureType,
+        damageVulnerabilities: [...actor.vulnerabilities],
+        damageResistances: [...actor.resistances],
+        damageImmunities: [...actor.immunities],
+        conditionImmunities: actor.monster?.conditionImmunities,
+        magicResistance: actor.monster?.traits.some((trait) =>
+          trait.automation === 'headless' && trait.rule?.kind === 'magic-resistance'),
+      })),
+    ),
+  }
   const dodgingIds = new Set<string>()
   for (let round = 1; round <= maxRounds; round += 1) {
+    headless.state.round = round
+    const roundTotal = telemetry.roundTotals.get(round) ?? {
+      appearances: 0,
+      playerDamage: 0,
+      monsterDamage: 0,
+      playerDeaths: 0,
+      monsterDeaths: 0,
+    }
+    roundTotal.appearances += 1
+    telemetry.roundTotals.set(round, roundTotal)
     for (const actor of initiative) {
       if (actor.hp <= 0) continue
       dodgingIds.delete(actor.id)
@@ -757,8 +1137,59 @@ function simulateTrial(
       const decision = actor.side === 'monsters'
         ? monsterDecision(actor, opponents)
         : playerDecision(actor, opponents)
+      const selectedAction = actor.actions.find((action) => action.id === decision.actionId)
+      const selectedTarget = actors.find((candidate) => candidate.id === decision.targetId)
+      if (trialIndex === 0 && actor.side === 'monsters' && telemetry.decisionLog.length < 200) {
+        telemetry.decisionLog.push({
+          round,
+          actorName: actor.name,
+          targetName: selectedTarget?.name,
+          actionName: selectedAction?.name,
+          candidateId: decision.candidateId ?? 'unknown',
+          score: decision.score ?? 0,
+          reasons: decision.reasons ?? [],
+        })
+      }
       if (decision.dodges) dodgingIds.add(actor.id)
-      executeAction(actor, decision, actors, random, dodgingIds)
+      const targetHpBefore = selectedTarget?.hp ?? 0
+      const executed = executeAction(actor, decision, actors, random, dodgingIds, headless)
+      actor.damageDealt += executed.damage
+      if (executed.action) {
+        const key = `${actor.side}:${actor.name}:${executed.action.id}`
+        const usage = telemetry.actionUsage.get(key) ?? {
+          actorName: actor.name,
+          side: actor.side,
+          actionId: executed.action.id,
+          actionName: executed.action.name,
+          uses: 0,
+          attempts: 0,
+          hits: 0,
+          totalDamage: 0,
+          headlessTransactions: 0,
+        }
+        usage.uses += 1
+        usage.attempts += executed.action.spell ? 1 : executed.action.parts.length
+        usage.hits += executed.hits
+        usage.totalDamage += executed.damage
+        usage.headlessTransactions += executed.transactions
+        telemetry.actionUsage.set(key, usage)
+        telemetry.headlessTransactionCount += executed.transactions
+        if (actor.side === 'players') roundTotal.playerDamage += executed.damage
+        else roundTotal.monsterDamage += executed.damage
+      }
+      if (executed.target && targetHpBefore > 0 && executed.target.hp <= 0 && executed.action) {
+        if (executed.target.side === 'players') roundTotal.playerDeaths += 1
+        else roundTotal.monsterDeaths += 1
+        const key = `${executed.target.name}\u0000${actor.name}\u0000${executed.action.name}`
+        const cause = telemetry.deathCauses.get(key) ?? {
+          victimName: executed.target.name,
+          killerName: actor.name,
+          actionName: executed.action.name,
+          count: 0,
+        }
+        cause.count += 1
+        telemetry.deathCauses.set(key, cause)
+      }
       const remainingOpponents = actors.some((candidate) => candidate.side !== actor.side && candidate.hp > 0)
       if (!remainingOpponents) return { winner: actor.side, rounds: round }
     }
@@ -814,9 +1245,14 @@ function simulationCoverage(
   }
 }
 
+function configureSimulationMonsterCatalog(request: Dnd5eCombatSimulationRequest): void {
+  setDnd5eRoomMonsterCatalog(request.customMonsters ?? [])
+}
+
 export function validateDnd5eCombatSimulationRequest(
   request: Dnd5eCombatSimulationRequest,
 ): readonly string[] {
+  configureSimulationMonsterCatalog(request)
   const errors: string[] = []
   if (request.characters.length === 0) errors.push('至少选择一名玩家角色。')
   if (request.characters.length > 8) errors.push('单次模拟最多选择 8 名玩家角色。')
@@ -839,6 +1275,7 @@ export function validateDnd5eCombatSimulationRequest(
 export function simulateDnd5eCombats(
   request: Dnd5eCombatSimulationRequest,
 ): Dnd5eCombatSimulationResult {
+  configureSimulationMonsterCatalog(request)
   const errors = validateDnd5eCombatSimulationRequest(request)
   if (errors.length > 0) throw new Error(errors.join(' '))
   const trials = Math.floor(request.trials ?? DND5E_COMBAT_SIMULATION_MAX_TRIALS)
@@ -857,6 +1294,13 @@ export function simulateDnd5eCombats(
   let totalRounds = 0
   let totalPlayerSurvivors = 0
   let totalMonsterSurvivors = 0
+  const telemetry: SimulationTelemetry = {
+    roundTotals: new Map(),
+    actionUsage: new Map(),
+    deathCauses: new Map(),
+    decisionLog: [],
+    headlessTransactionCount: 0,
+  }
   const participantTotals = new Map<string, {
     name: string
     side: 'players' | 'monsters'
@@ -871,7 +1315,7 @@ export function simulateDnd5eCombats(
       ...request.characters.map(playerActor),
       ...selectedMonsters.map((monster, index) => monsterActor(monster, index, initialDistanceFeet)),
     ]
-    const outcome = simulateTrial(actors, random, maxRounds)
+    const outcome = simulateTrial(actors, random, maxRounds, telemetry, trial)
     if (outcome.winner === 'players') playerWins += 1
     else if (outcome.winner === 'monsters') monsterWins += 1
     else draws += 1
@@ -922,6 +1366,28 @@ export function simulateDnd5eCombats(
       averageRemainingHp: total.remainingHp / total.appearances,
     })).sort((left, right) =>
       left.side.localeCompare(right.side) || right.averageDamage - left.averageDamage || left.name.localeCompare(right.name)),
+    roundSummaries: [...telemetry.roundTotals.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([round, total]) => ({
+        round,
+        appearances: total.appearances,
+        averagePlayerDamage: total.playerDamage / Math.max(1, total.appearances),
+        averageMonsterDamage: total.monsterDamage / Math.max(1, total.appearances),
+        averagePlayerDeaths: total.playerDeaths / Math.max(1, total.appearances),
+        averageMonsterDeaths: total.monsterDeaths / Math.max(1, total.appearances),
+      })),
+    actionUsage: [...telemetry.actionUsage.values()]
+      .map((usage) => ({
+        ...usage,
+        usesPerTrial: usage.uses / trials,
+        hitRate: usage.hits / Math.max(1, usage.attempts),
+        averageDamage: usage.totalDamage / Math.max(1, usage.uses),
+      }))
+      .sort((left, right) => right.uses - left.uses || left.actorName.localeCompare(right.actorName, 'zh-CN')),
+    deathCauses: [...telemetry.deathCauses.values()]
+      .sort((left, right) => right.count - left.count || left.victimName.localeCompare(right.victimName, 'zh-CN')),
+    decisionLog: telemetry.decisionLog,
+    headlessTransactionCount: telemetry.headlessTransactionCount,
     coverage,
   }
 }

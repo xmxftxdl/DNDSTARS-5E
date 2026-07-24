@@ -8,6 +8,7 @@ import {
   resolveTokenDropPosition,
   tokenCenterForAnchorCell,
   tokenOccupiedCellsAt,
+  realignTokensToGrid,
 } from './gridCombat'
 
 function token(patch: Partial<Token>): Token {
@@ -58,6 +59,16 @@ describe('grid token occupancy on drop', () => {
     expect(resolveTokenDropPosition(-100, 1_200, monster, m)).toEqual({
       x: 100,
       y: 900,
+    })
+  })
+
+  it('keeps realigned tokens inside the map after grid settings change', () => {
+    const m = { ...map([]), gridOffsetX: 40, gridOffsetY: 40 }
+    const monster = token({ id: 'legacy-edge-monster', x: 1_100, y: 1_100, size: 1 })
+
+    expect(realignTokensToGrid([monster], m)[0]).toMatchObject({
+      x: 950,
+      y: 950,
     })
   })
 

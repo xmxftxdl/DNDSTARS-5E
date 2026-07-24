@@ -137,6 +137,7 @@ import {
   publishSanctuaryPresentation,
   publishSacredFlamePresentation,
   publishShockingGraspPresentation,
+  publishSpellBannerPresentation,
 } from '../lib/combatPresentation'
 import {
   advanceCombatKillStreak,
@@ -302,6 +303,7 @@ import {
   type Dnd5eMapResultPlan,
   type Dnd5eCombatant,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eHeadlessResolutionObservation,
   type Dnd5eTranquilitySaveRoll,
   type Dnd5eTranquilityWardCheck,
   type Dnd5eSpellTargetAttackRoll,
@@ -482,6 +484,7 @@ import {
   clampGridSize,
   cellKey,
   gridSizeBounds,
+  mapCellExtent,
   cellDistance,
   movementRadiusPx,
   occupiedCells,
@@ -1957,6 +1960,43 @@ export default function MapsPage() {
   const publishCombatStateEvent = useEffectEvent(() => {
     void publishCombatState()
   })
+  const processCombatKillStreakObservation = useCallback((
+    observation: Dnd5eHeadlessResolutionObservation,
+    mapId: string,
+  ) => {
+    if (!combatActiveRef.current) return
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === mapId)
+    const sideByCombatantId = Object.fromEntries((latestMap?.tokens ?? []).map((token) => [
+      token.id,
+      token.type === 'player' ? 'player' : token.type === 'enemy' ? 'enemy' : 'npc',
+    ] as const))
+    const credits = dnd5eCombatKillCredits({ observation, sideByCombatantId })
+    if (credits.length === 0) return
+    const resultState = observation.result.state
+    const turnKey = `${resultState.combatId}:${resultState.round}:${resultState.initiativeIndex}`
+    const advanced = advanceCombatKillStreak({
+      current: combatKillStreakTrackerRef.current,
+      turnKey,
+      credits,
+    })
+    combatKillStreakTrackerRef.current = advanced.next
+    for (const killerId of advanced.triggeredKillerIds) {
+      const killer = resultState.combatants[killerId]
+      if (!killer) continue
+      const classId = combatKillStreakClassId(observation, killerId)
+      void publishKillStreakPresentation({
+        id: `${turnKey}:${killerId}:kill-streak`,
+        mapId,
+        transactionId: `${turnKey}:${killerId}`,
+        sourceTokenId: killerId,
+        actorName: killer.name,
+        classId,
+        style: combatKillStreakStyleForClass(classId),
+      }).catch((error) => {
+        console.error('Failed to publish combat kill streak presentation', error)
+      })
+    }
+  }, [])
   useEffect(() => {
     if (!isDM || !activeMapId) return
     return setDnd5eHeadlessResolutionObserver((observation) => {
@@ -1969,33 +2009,7 @@ export default function MapsPage() {
       const characterIdByCombatantId = Object.fromEntries((latestMap?.tokens ?? []).flatMap((token) =>
         token.characterId ? [[token.id, token.characterId] as const] : [],
       ))
-      const credits = dnd5eCombatKillCredits({ observation, sideByCombatantId })
-      if (credits.length > 0) {
-        const resultState = observation.result.state
-        const turnKey = `${resultState.combatId}:${resultState.round}:${resultState.initiativeIndex}`
-        const advanced = advanceCombatKillStreak({
-          current: combatKillStreakTrackerRef.current,
-          turnKey,
-          credits,
-        })
-        combatKillStreakTrackerRef.current = advanced.next
-        for (const killerId of advanced.triggeredKillerIds) {
-          const killer = resultState.combatants[killerId]
-          if (!killer) continue
-          const classId = combatKillStreakClassId(observation, killerId)
-          void publishKillStreakPresentation({
-            id: `${turnKey}:${killerId}:kill-streak`,
-            mapId: activeMapId,
-            transactionId: `${turnKey}:${killerId}`,
-            sourceTokenId: killerId,
-            actorName: killer.name,
-            classId,
-            style: combatKillStreakStyleForClass(classId),
-          }).catch((error) => {
-            console.error('Failed to publish combat kill streak presentation', error)
-          })
-        }
-      }
+      processCombatKillStreakObservation(observation, activeMapId)
       try {
         recordCombatStatistics(activeMapId, observation, sideByCombatantId, characterIdByCombatantId)
       } catch (error) {
@@ -2003,7 +2017,7 @@ export default function MapsPage() {
         console.error('Failed to record combat statistics observation', error)
       }
     })
-  }, [activeMapId, isDM, recordCombatStatistics])
+  }, [activeMapId, isDM, processCombatKillStreakObservation, recordCombatStatistics])
   const activeFogGeometry = activeMap
     ? resolveMapsFogGeometryState({ map: activeMap, fogMaps, geometryMaps })
     : undefined
@@ -3301,7 +3315,14 @@ export default function MapsPage() {
       const pos = tokenCenterForAnchorCell(to, selectedToken, activeMap)
       const candidate = { ...selectedToken, ...pos }
       const cells = tokenOccupiedCellsAt(candidate, activeMap, candidate)
-      if (cells.some((cell) => cell.col < 0 || cell.row < 0 || blocked.has(cellKey(cell)))) return
+      const { cols, rows } = mapCellExtent(activeMap)
+      if (cells.some((cell) =>
+        cell.col < 0 ||
+        cell.row < 0 ||
+        cell.col >= cols ||
+        cell.row >= rows ||
+        blocked.has(cellKey(cell))
+      )) return
       updateToken(activeMap.id, selectedToken.id, pos)
     }
     window.addEventListener('keydown', onKey)
@@ -10593,6 +10614,18 @@ export default function MapsPage() {
         (counterspellReaction.abilityCheckTotal ?? Number.NEGATIVE_INFINITY) >= 10 + spellCast.slotLevel
       )
       const spellResolutionContinues = !counterspellSucceeded
+      if (spellResolutionContinues && spellCast.spell.id === 'shatter') {
+        await publishSpellBannerPresentation({
+          id: `${action.id}:spell-banner`,
+          mapId: authorityMap.id,
+          transactionId: action.id,
+          sourceTokenId: spellCast.actorToken.id,
+          spellId: spellCast.spell.id,
+          casterName: spellCast.actor.name,
+          spellName: spellCast.spell.name,
+          castingClassId: spellCast.castingClassId,
+        })
+      }
       const fireballPresentation = spellResolutionContinues
         ? fireballPresentationForSettlement({
             spellId: spellCast.spell.id,
@@ -11616,6 +11649,27 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      // The global headless observer is intentionally best-effort telemetry and
+      // can be temporarily detached during long, async spell settlement renders.
+      // Re-process the authoritative spell result here so area spells that end
+      // combat (notably a bard's Shatter) cannot lose the three-kill presentation.
+      processCombatKillStreakObservation({
+        source: spellCast.state,
+        action: {
+          type: 'cast-spell',
+          actorId: spellCast.actorToken.id,
+          castingClassId: spellCast.castingClassId,
+          targetId: spellCast.targetToken.id,
+          targetIds: spellCast.targetTokens.map((target) => target.id),
+          projectileTargetIds: spellCast.projectileTargetIds,
+          spellId: spellCast.spell.id,
+          slotLevel: spellCast.slotLevel,
+          effectRolls,
+          additionalEffectRolls,
+          delayedEffectRolls,
+        },
+        result: initialResolved.result,
+      }, authorityMap.id)
       const resolved = await settleDnd5eConcentrationChecks({
         result: initialResolved.result,
         map: initialResolved.application.map,

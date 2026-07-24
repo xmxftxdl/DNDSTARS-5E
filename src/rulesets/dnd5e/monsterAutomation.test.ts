@@ -55,7 +55,7 @@ describe('D&D 5e declarative monster mechanism compatibility', () => {
     }
     const report = dnd5eMonsterMechanicCompatibility(mechanic)
     expect(report.effective).toBe('partial')
-    expect(report.reasons).toHaveLength(3)
+    expect(report.reasons).toHaveLength(2)
     expect(dnd5eEligibleMonsterMechanics({
       id: 'room-monster:test', slug: 'test', name: '测试', englishName: 'Test', source: 'DM 自定义',
       size: '中型', creatureType: '怪兽', alignment: '无阵营', armorClass: { value: 10 },
@@ -66,5 +66,29 @@ describe('D&D 5e declarative monster mechanism compatibility', () => {
     }, 'after-damaged', {
       combatId: 'combat', round: 1, actorId: 'monster', currentHp: 4, maxHp: 10,
     })).toEqual([])
+  })
+
+  it('promotes generic movement and triggered-attack chains to authoritative snapshots', () => {
+    const mechanic: Dnd5eMonsterMechanicTrigger = {
+      ...base,
+      schemaVersion: 2,
+      trigger: {
+        event: 'movement',
+        subject: 'hostile-within',
+        radiusFeet: 30,
+        movement: { comparison: 'at-least', feet: 20 },
+      },
+      effects: [{
+        id: 'horn-attack',
+        kind: 'attack',
+        target: 'selected-subject',
+        toHit: 13,
+        damage: { average: 29, count: 5, sides: 6, bonus: 12, type: 'piercing' },
+      }],
+      automation: 'full',
+    }
+
+    const report = dnd5eMonsterMechanicCompatibility(mechanic)
+    expect(report).toEqual({ requested: 'full', effective: 'full', reasons: [] })
   })
 })

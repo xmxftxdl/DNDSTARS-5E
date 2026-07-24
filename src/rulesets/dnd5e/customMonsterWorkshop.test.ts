@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildDnd5eCustomMonster,
+  createDnd5eCustomMonsterActionDraft,
   createDnd5eCustomMonsterDraft,
   createDnd5eCustomMonsterMechanicDraft,
+  createDnd5eCustomMonsterTraitDraft,
   dnd5eCustomMonsterDraftFromStatBlock,
 } from './customMonsterWorkshop'
 import { dnd5eMonsterActionAutomation, parseDnd5eMonsterStatBlock } from './monsterSchema'
@@ -52,6 +54,211 @@ describe('D&D 5e custom monster workshop', () => {
     const monster = buildDnd5eCustomMonster(draft)
     expect(monster.actions[0]).toMatchObject({ kind: 'multiattack', sequence: [draft.actions[0].id, draft.actions[0].id] })
     expect(buildDnd5eCustomMonster(dnd5eCustomMonsterDraftFromStatBlock(monster))).toMatchObject({ id: monster.id, slug: monster.slug })
+  })
+
+  it('represents keen smell, ambusher, charge damage, weapon profiles, multiattack, and nimble escape', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    const spear = {
+      ...createDnd5eCustomMonsterActionDraft(),
+      id: 'spear-one-handed',
+      name: '矛',
+      toHit: 4,
+      damageDice: '1d6+2',
+      damageType: 'piercing' as const,
+    }
+    const spearTwoHanded = {
+      ...createDnd5eCustomMonsterActionDraft(),
+      id: 'spear-two-handed',
+      name: '矛（双手）',
+      toHit: 4,
+      damageDice: '1d8+4',
+      damageType: 'piercing' as const,
+      additionalDamage: [{ id: 'spear-poison', dice: '1d4', damageType: 'poison' as const }],
+    }
+    const scimitar = {
+      ...createDnd5eCustomMonsterActionDraft(),
+      id: 'scimitar',
+      name: '弯刀',
+      toHit: 6,
+      damageDice: '1d6+4',
+      damageType: 'piercing' as const,
+      additionalDamage: [{ id: 'scimitar-poison', dice: '1d4', damageType: 'poison' as const }],
+      attacksPerAction: 2,
+    }
+    draft.actions = [spear, spearTwoHanded, scimitar]
+    draft.traits = [
+      {
+        ...createDnd5eCustomMonsterTraitDraft(),
+        name: '灵敏嗅觉',
+        description: '嗅觉相关的察觉检定获得 +4，并拥有 10 尺盲视。',
+        ruleKind: 'keen-sense',
+        keenSense: 'smell',
+        keenSenseCheckBonus: 4,
+        keenSenseBlindsightFeet: 10,
+      },
+      {
+        ...createDnd5eCustomMonsterTraitDraft(),
+        name: '袭掠',
+        description: '直线移动至少 20 尺后立即以矛攻击，命中时额外造成 2d10 伤害。',
+        ruleKind: 'charge-damage',
+        chargeMinimumFeet: 20,
+        chargeActionId: spear.id,
+        chargeDamageDice: '2d10',
+        chargeDamageType: 'piercing',
+      },
+      {
+        ...createDnd5eCustomMonsterTraitDraft(),
+        name: '伏击手',
+        description: '发动突袭时，先攻具有优势。',
+        ruleKind: 'ambusher',
+      },
+      {
+        ...createDnd5eCustomMonsterTraitDraft(),
+        name: '迅捷逃逸',
+        description: '以附赠动作执行撤离或躲藏。',
+        ruleKind: 'nimble-escape',
+      },
+    ]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.senses).toContainEqual({ name: '盲视', distanceFeet: 10 })
+    expect(monster.traits).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: '灵敏嗅觉',
+        automation: 'dm-adjudication',
+        rule: expect.objectContaining({ kind: 'keen-sense', sense: 'smell', checkBonus: 4 }),
+      }),
+      expect.objectContaining({
+        name: '袭掠',
+        automation: 'dm-adjudication',
+        rule: expect.objectContaining({
+          kind: 'charge-damage',
+          minimumStraightMovementFeet: 20,
+          actionId: spear.id,
+          extraDamage: expect.objectContaining({ count: 2, sides: 10, type: 'piercing' }),
+        }),
+      }),
+      expect.objectContaining({
+        name: '伏击手',
+        rule: { kind: 'ambusher', initiativeAdvantageWhenSurprising: true },
+      }),
+      expect.objectContaining({
+        name: '迅捷逃逸',
+        automation: 'headless',
+        rule: { kind: 'nimble-escape', bonusActionOptions: ['disengage', 'hide'] },
+      }),
+    ]))
+    expect(monster.actions.find((action) => action.kind === 'multiattack')?.sequence)
+      .toEqual(['scimitar', 'scimitar'])
+    expect(monster.actions.find((action) => action.id === 'spear-two-handed')?.attack?.damage)
+      .toEqual([
+        expect.objectContaining({ count: 1, sides: 8, bonus: 4, type: 'piercing' }),
+        expect.objectContaining({ count: 1, sides: 4, type: 'poison' }),
+      ])
+
+    const roundTrip = dnd5eCustomMonsterDraftFromStatBlock(monster)
+    expect(roundTrip.traits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleKind: 'keen-sense', keenSenseBlindsightFeet: 10 }),
+      expect.objectContaining({ ruleKind: 'charge-damage', chargeActionId: spear.id, chargeDamageDice: '2d10' }),
+      expect.objectContaining({ ruleKind: 'ambusher' }),
+    ]))
+    expect(roundTrip.senses).not.toContainEqual(expect.objectContaining({ name: '盲视', distanceFeet: 10 }))
+  })
+
+  it('represents magic resistance, condition bonuses, charge movement, and a triggered recharge reaction', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    const charge = {
+      ...createDnd5eCustomMonsterActionDraft(),
+      id: 'charge',
+      name: '冲锋',
+      category: 'bonus-action' as const,
+      kind: 'movement' as const,
+      movementSpeedFraction: 0.5,
+      description: '向一名可见敌人直线移动至多等于速度一半的距离。',
+    }
+    const stunningCharge = {
+      ...createDnd5eCustomMonsterActionDraft(),
+      id: 'stunning-charge',
+      name: '震慑冲锋',
+      category: 'reaction' as const,
+      toHit: 13,
+      damageDice: '5d6+12',
+      damageType: 'piercing' as const,
+      usageKind: 'recharge' as const,
+      rechargeMinimum: 4,
+      rechargeDieSides: 6,
+      reactionTriggerActionId: charge.id,
+      onHitSaveEnabled: true,
+      onHitSaveAbility: 'str' as const,
+      onHitSaveDc: 18,
+      onHitCondition: 'stunned' as const,
+    }
+    draft.actions = [draft.actions[0], charge, stunningCharge]
+    draft.traits = [
+      {
+        ...createDnd5eCustomMonsterTraitDraft(),
+        name: '魔法抗性',
+        description: '对抗法术和其他魔法效应的豁免具有优势。',
+        ruleKind: 'magic-resistance',
+      },
+      {
+        ...createDnd5eCustomMonsterTraitDraft(),
+        name: '恐惧支配',
+        description: '攻击恐慌或震慑目标时，攻击与伤害获得 +2。',
+        ruleKind: 'conditional-target-bonus',
+        targetBonusConditions: ['frightened', 'stunned'],
+        targetAttackBonus: 2,
+        targetDamageBonus: 2,
+      },
+    ]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.traits).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        automation: 'headless',
+        rule: { kind: 'magic-resistance', savingThrowAdvantageAgainstMagic: true },
+      }),
+      expect.objectContaining({
+        automation: 'headless',
+        rule: {
+          kind: 'conditional-target-bonus',
+          targetConditions: ['frightened', 'stunned'],
+          attackBonus: 2,
+          damageBonus: 2,
+        },
+      }),
+    ]))
+    expect(monster.bonusActions).toContainEqual(expect.objectContaining({
+      id: charge.id,
+      kind: 'other',
+      movement: {
+        kind: 'straight-toward-visible-hostile',
+        maximumSpeedFraction: 0.5,
+      },
+    }))
+    expect(monster.reactions).toContainEqual(expect.objectContaining({
+      id: stunningCharge.id,
+      usage: { kind: 'recharge', dieSides: 6, minimum: 4 },
+      reactionTrigger: { kind: 'after-action', actionId: charge.id },
+      attack: expect.objectContaining({
+        toHit: 13,
+        damage: [expect.objectContaining({ count: 5, sides: 6, bonus: 12, type: 'piercing' })],
+        onHitRule: { kind: 'saving-throw-condition', ability: 'str', dc: 18, condition: 'stunned' },
+      }),
+    }))
+
+    const roundTrip = dnd5eCustomMonsterDraftFromStatBlock(monster)
+    expect(roundTrip.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: charge.id, kind: 'movement', movementSpeedFraction: 0.5 }),
+      expect.objectContaining({
+        id: stunningCharge.id,
+        category: 'reaction',
+        reactionTriggerActionId: charge.id,
+        rechargeMinimum: 4,
+      }),
+    ]))
   })
 
   it('preserves additional V2 effects imported through advanced JSON when the form edits the first effect', () => {
@@ -264,6 +471,114 @@ describe('D&D 5e custom monster workshop', () => {
     expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics[0]).toMatchObject({
       effectKind: 'remove-standard-condition',
       condition: 'frightened',
+    })
+  })
+
+  it('round-trips a subject, movement trigger and roll modifier chain', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'pack-movement-bonus',
+      name: '协同突进',
+      triggerSubject: 'ally-within',
+      triggerRadiusFeet: 30,
+      trigger: 'movement',
+      movementComparison: 'at-least',
+      movementFeet: 20,
+      effectKind: 'roll-modifier',
+      effectTarget: 'selected-subject',
+      modifierRoll: 'attack',
+      modifierMode: 'bonus',
+      modifierBonus: 2,
+    }]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.headlessMechanics?.[0]).toMatchObject({
+      trigger: {
+        event: 'movement',
+        subject: 'ally-within',
+        radiusFeet: 30,
+        movement: { comparison: 'at-least', feet: 20 },
+      },
+      effects: [{
+        kind: 'roll-modifier',
+        target: 'selected-subject',
+        roll: 'attack',
+        mode: 'bonus',
+        bonus: 2,
+      }],
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics[0]).toMatchObject({
+      triggerSubject: 'ally-within',
+      triggerRadiusFeet: 30,
+      trigger: 'movement',
+      movementComparison: 'at-least',
+      movementFeet: 20,
+      effectKind: 'roll-modifier',
+      modifierBonus: 2,
+    })
+  })
+
+  it('round-trips a triggered attack with typed damage', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'stunning-charge-reaction',
+      name: '震慑冲锋',
+      trigger: 'movement',
+      triggerSubject: 'hostile-within',
+      triggerRadiusFeet: 30,
+      effectKind: 'attack',
+      effectTarget: 'selected-subject',
+      attackToHit: 13,
+      healingDice: '5d6+12',
+      damageType: 'piercing',
+    }]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.headlessMechanics?.[0]).toMatchObject({
+      effects: [{
+        kind: 'attack',
+        target: 'selected-subject',
+        toHit: 13,
+        damage: { average: 29, count: 5, sides: 6, bonus: 12, type: 'piercing' },
+      }],
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics[0]).toMatchObject({
+      effectKind: 'attack',
+      attackToHit: 13,
+      healingDice: '5d6+12',
+      damageType: 'piercing',
+    })
+  })
+
+  it('stores fixed triggered-attack damage without inventing a random die', () => {
+    const draft = createDnd5eCustomMonsterDraft()
+    draft.headlessMechanics = [{
+      ...createDnd5eCustomMonsterMechanicDraft(),
+      id: 'fixed-reprisal',
+      name: '固定反击',
+      trigger: 'when-hit',
+      effectKind: 'attack',
+      effectTarget: 'trigger-target',
+      attackDamageMode: 'fixed',
+      attackFixedDamage: 9,
+      damageType: 'slashing',
+    }]
+
+    const monster = buildDnd5eCustomMonster(draft)
+    expect(parseDnd5eMonsterStatBlock(monster).ok).toBe(true)
+    expect(monster.headlessMechanics?.[0]).toMatchObject({
+      effects: [{
+        kind: 'attack',
+        damage: { average: 9, count: 0, sides: 2, bonus: 9, type: 'slashing' },
+      }],
+    })
+    expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics[0]).toMatchObject({
+      attackDamageMode: 'fixed',
+      attackFixedDamage: 9,
     })
   })
 })
