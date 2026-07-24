@@ -619,7 +619,7 @@ export function detectWallCandidatesFromRgba(input) {
     const value = input.data[index] * 0.2126 + input.data[index + 1] * 0.7152 + input.data[index + 2] * 0.0722
     luminance[pixel] = value * alpha + 255 * (1 - alpha)
   }
-  const blurRadius = Math.max(1, Math.min(3, Math.round(Math.min(width, height) / 650)))
+  const blurRadius = Math.max(2, Math.min(5, Math.round(Math.min(width, height) / 280)))
   const horizontal = new Float32Array(pixelCount)
   const blurred = new Float32Array(pixelCount)
   for (let y = 0; y < height; y += 1) {
@@ -677,12 +677,18 @@ export function detectWallCandidatesFromRgba(input) {
     : Number.isFinite(input.darknessThreshold)
       ? input.darknessThreshold * 0.32
       : 22
-  const edgeThreshold = Math.max(12, Math.min(120, requestedThreshold, adaptiveThreshold))
+  // Treat 22 as the neutral multiplier for the per-image adaptive threshold.
+  // This preserves low-contrast sensitivity while making the tuning control
+  // effective across maps with very different contrast distributions.
+  const neutralThreshold = Math.max(12, Math.min(22, adaptiveThreshold))
+  const edgeThreshold = Math.max(8, Math.min(120, neutralThreshold * requestedThreshold / 22))
   const angleBins = Math.max(12, Math.min(36, Math.floor(input.angleBins ?? 24)))
   const rhoStep = Math.max(1.5, stride)
   const buckets = Array.from({ length: angleBins }, () => new Map())
+  const strongGradients = []
   for (const gradient of gradients) {
     if (gradient.magnitude < edgeThreshold) continue
+    strongGradients.push(gradient)
     let normalAngle = Math.atan2(gradient.gy, gradient.gx)
     if (normalAngle < 0) normalAngle += Math.PI
     if (normalAngle >= Math.PI) normalAngle -= Math.PI
@@ -738,6 +744,65 @@ export function detectWallCandidatesFromRgba(input) {
         start = index
       }
     }
+  }
+  // Curved walls do not stay in one global Hough bucket. Fit a local principal
+  // direction inside small tiles so arcs become a manageable polyline instead
+  // of disappearing or exploding into individual pixels.
+  const tileSize = Math.max(16, Math.min(48, Math.round(minimumRun * 1.25)))
+  const tiles = new Map()
+  for (const gradient of strongGradients) {
+    const key = `${Math.floor(gradient.x / tileSize)}:${Math.floor(gradient.y / tileSize)}`
+    const tile = tiles.get(key)
+    if (tile) tile.push(gradient)
+    else tiles.set(key, [gradient])
+  }
+  const tileMinimumSamples = Math.max(6, Math.floor(tileSize / stride * 0.4))
+  for (const points of tiles.values()) {
+    if (points.length < tileMinimumSamples) continue
+    const center = points.reduce((sum, point) => ({
+      x: sum.x + point.x,
+      y: sum.y + point.y,
+    }), { x: 0, y: 0 })
+    center.x /= points.length
+    center.y /= points.length
+    let xx = 0
+    let xy = 0
+    let yy = 0
+    let strength = 0
+    for (const point of points) {
+      const dx = point.x - center.x
+      const dy = point.y - center.y
+      xx += dx * dx
+      xy += dx * dy
+      yy += dy * dy
+      strength += point.magnitude
+    }
+    const trace = xx + yy
+    const root = Math.sqrt(Math.max(0, (xx - yy) ** 2 + 4 * xy * xy))
+    const major = (trace + root) / 2
+    const minor = (trace - root) / 2
+    if (major <= 0 || major / Math.max(1, minor) < 5) continue
+    const angle = 0.5 * Math.atan2(2 * xy, xx - yy)
+    const ux = Math.cos(angle)
+    const uy = Math.sin(angle)
+    let start = Infinity
+    let end = -Infinity
+    for (const point of points) {
+      const projection = (point.x - center.x) * ux + (point.y - center.y) * uy
+      start = Math.min(start, projection)
+      end = Math.max(end, projection)
+    }
+    const length = end - start
+    const density = points.length / Math.max(1, length / stride)
+    if (length < Math.max(8, minimumRun * 0.55) || density < 0.32) continue
+    segments.push({
+      a: { x: center.x + ux * start, y: center.y + uy * start },
+      b: { x: center.x + ux * end, y: center.y + uy * end },
+      confidence: Math.max(0, Math.min(1,
+        0.18 + Math.min(1, major / Math.max(1, minor) / 12) * 0.35 +
+        Math.min(1, density) * 0.3 + Math.min(1, strength / points.length / 128) * 0.17,
+      )),
+    })
   }
   return segments
 }

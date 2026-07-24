@@ -21,6 +21,50 @@ export interface WallDetectionOptions {
   maximumDimension?: number
   maximumCandidates?: number
   region?: { x: number; y: number; width: number; height: number }
+  focusMode?: 'all' | 'dominant'
+}
+
+interface CachedImageAnalysis {
+  data: Uint8ClampedArray
+  width: number
+  height: number
+}
+
+const imageAnalysisCache = new WeakMap<File, Map<number, Promise<CachedImageAnalysis>>>()
+
+function cachedImageAnalysis(file: File, maximumDimension: number): Promise<CachedImageAnalysis> {
+  let variants = imageAnalysisCache.get(file)
+  if (!variants) {
+    variants = new Map()
+    imageAnalysisCache.set(file, variants)
+  }
+  const cached = variants.get(maximumDimension)
+  if (cached) return cached
+  const pending = createImageBitmap(file).then((bitmap) => {
+    try {
+      const analysisScale = Math.min(1, maximumDimension / Math.max(bitmap.width, bitmap.height))
+      const width = Math.max(1, Math.round(bitmap.width * analysisScale))
+      const height = Math.max(1, Math.round(bitmap.height * analysisScale))
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (!context) throw new Error('浏览器无法创建图像分析画布')
+      context.drawImage(bitmap, 0, 0, width, height)
+      return {
+        data: context.getImageData(0, 0, width, height).data,
+        width,
+        height,
+      }
+    } finally {
+      bitmap.close()
+    }
+  }).catch((error) => {
+    variants?.delete(maximumDimension)
+    throw error
+  })
+  variants.set(maximumDimension, pending)
+  return pending
 }
 
 async function detectCandidatesInWorker(input: {
@@ -45,7 +89,11 @@ async function detectCandidatesInWorker(input: {
       worker.terminate()
       reject(new Error(event.message || '墙体识别后台任务失败'))
     }
-    worker.postMessage(input)
+    if (input.data.buffer instanceof ArrayBuffer) {
+      worker.postMessage(input, [input.data.buffer])
+    } else {
+      worker.postMessage(input)
+    }
   })
 }
 
@@ -181,18 +229,30 @@ export function removeLikelyGridLines(
       }
       return total + current[1] - current[0]
     }
-    const longClusters = clusters.filter((cluster) => coverage(cluster.intervals) >= span * 0.65)
+    const longClusters = clusters
+      .filter((cluster) => coverage(cluster.intervals) >= span * 0.32)
+      .sort((left, right) => left.axis - right.axis)
     if (longClusters.length < 4) return new Set<WallDetectionCandidate>()
-    const axes = longClusters.map((cluster) => cluster.axis).sort((a, b) => a - b)
-    const gaps = axes.slice(1).map((axis, index) => axis - axes[index]).filter((gap) => gap >= 6)
-    if (gaps.length < 3) return new Set<WallDetectionCandidate>()
-    const baseGap = Math.min(...gaps)
-    const regularCount = gaps.filter((gap) => {
-      const multiple = Math.max(1, Math.round(gap / baseGap))
-      return Math.abs(gap - baseGap * multiple) <= Math.max(2.5, baseGap * 0.14)
-    }).length
-    if (regularCount / gaps.length < 0.72) return new Set<WallDetectionCandidate>()
-    return new Set(longClusters.flatMap((cluster) => cluster.candidates))
+    const axes = longClusters.map((cluster) => cluster.axis)
+    let best: { spacing: number; offset: number; matches: number[] } | undefined
+    for (let left = 0; left < axes.length; left += 1) {
+      for (let right = left + 1; right < axes.length; right += 1) {
+        const distance = axes[right] - axes[left]
+        for (let divisor = 1; divisor <= 8; divisor += 1) {
+          const spacing = distance / divisor
+          if (spacing < 8 || spacing > span / 3) continue
+          const tolerance = Math.max(2.5, spacing * 0.1)
+          const offset = axes[left]
+          const matches = axes.flatMap((axis, index) => {
+            const lattice = Math.round((axis - offset) / spacing)
+            return Math.abs(axis - (offset + lattice * spacing)) <= tolerance ? [index] : []
+          })
+          if (!best || matches.length > best.matches.length) best = { spacing, offset, matches }
+        }
+      }
+    }
+    if (!best || best.matches.length < 4) return new Set<WallDetectionCandidate>()
+    return new Set(best.matches.flatMap((index) => longClusters[index].candidates))
   }
   const horizontalGrid = regular(candidates
     .filter(horizontal)
@@ -227,6 +287,33 @@ export function rankWallDetectionCandidates(
     .slice(0, maximumCandidates)
 }
 
+export function filterToDominantCandidateCluster(
+  candidates: WallDetectionCandidate[],
+  width: number,
+  height: number,
+): WallDetectionCandidate[] {
+  if (candidates.length < 8) return candidates
+  // A semantic "largest object" guess is unstable on illustrated maps: nearby
+  // rigging or furniture can connect unrelated clusters. Use a deterministic
+  // center band instead, and leave exact ROI selection to the explicit region option.
+  const landscape = width >= height
+  const horizontalMargin = landscape ? width * 0.01 : width * 0.14
+  const verticalMargin = landscape ? height * 0.12 : height * 0.01
+  const bounds = {
+    left: horizontalMargin,
+    right: width - horizontalMargin,
+    top: verticalMargin,
+    bottom: height - verticalMargin,
+  }
+  const focused = candidates.filter((candidate) => {
+    const midpointX = (candidate.a.x + candidate.b.x) / 2
+    const midpointY = (candidate.a.y + candidate.b.y) / 2
+    return midpointX >= bounds.left && midpointX <= bounds.right &&
+      midpointY >= bounds.top && midpointY <= bounds.bottom
+  })
+  return focused.length >= Math.min(8, candidates.length) ? focused : candidates
+}
+
 export function wallDetectionCandidatesToGeometry(
   geometry: MapGeometryState,
   candidates: WallDetectionCandidate[],
@@ -258,49 +345,41 @@ export async function detectWallsFromImageFile(
   target: { width: number; height: number },
   options: WallDetectionOptions = {},
 ): Promise<WallDetectionCandidate[]> {
-  const bitmap = await createImageBitmap(file)
-  try {
-    const maximumDimension = Math.max(512, options.maximumDimension ?? 1_600)
-    const analysisScale = Math.min(1, maximumDimension / Math.max(bitmap.width, bitmap.height))
-    const width = Math.max(1, Math.round(bitmap.width * analysisScale))
-    const height = Math.max(1, Math.round(bitmap.height * analysisScale))
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const context = canvas.getContext('2d', { willReadFrequently: true })
-    if (!context) throw new Error('浏览器无法创建图像分析画布')
-    context.drawImage(bitmap, 0, 0, width, height)
-    const image = context.getImageData(0, 0, width, height)
-    const raw = await detectCandidatesInWorker({
-      data: image.data,
-      width,
-      height,
-      sampleStride: 2,
-      darknessThreshold: Math.max(0, Math.min(255, options.darknessThreshold ?? 68)),
-      edgeThreshold: Math.max(8, Math.min(120, options.edgeThreshold ?? 22)),
-      edgePercentile: Math.max(0.78, Math.min(0.98, options.edgePercentile ?? 0.88)),
-      minimumRun: Math.max(12, Math.round(Math.min(width, height) * (options.minimumRunRatio ?? 0.025))),
-      region: options.region
-        ? {
-            x: options.region.x / target.width * width,
-            y: options.region.y / target.height * height,
-            width: options.region.width / target.width * width,
-            height: options.region.height / target.height * height,
-          }
-        : undefined,
-    })
-    const scaleX = target.width / width
-    const scaleY = target.height / height
-    const consolidated = consolidateWallDetectionCandidates(raw.map((candidate) => ({
-      a: { x: candidate.a.x * scaleX, y: candidate.a.y * scaleY },
-      b: { x: candidate.b.x * scaleX, y: candidate.b.y * scaleY },
-      confidence: candidate.confidence,
-    })), Math.max(4, Math.min(scaleX, scaleY) * 6))
-    return rankWallDetectionCandidates(
-      removeLikelyGridLines(consolidated, target.width, target.height),
-      Math.max(100, options.maximumCandidates ?? 1_200),
-    )
-  } finally {
-    bitmap.close()
-  }
+  const maximumDimension = Math.max(512, options.maximumDimension ?? 1_600)
+  const analysis = await cachedImageAnalysis(file, maximumDimension)
+  const { width, height } = analysis
+  const raw = await detectCandidatesInWorker({
+    // The cached raster remains reusable while this disposable copy is transferred.
+    data: new Uint8ClampedArray(analysis.data),
+    width,
+    height,
+    sampleStride: 2,
+    darknessThreshold: Math.max(0, Math.min(255, options.darknessThreshold ?? 68)),
+    edgeThreshold: Math.max(8, Math.min(120, options.edgeThreshold ?? 22)),
+    edgePercentile: Math.max(0.78, Math.min(0.98, options.edgePercentile ?? 0.88)),
+    minimumRun: Math.max(12, Math.round(Math.min(width, height) * (options.minimumRunRatio ?? 0.025))),
+    region: options.region
+      ? {
+          x: options.region.x / target.width * width,
+          y: options.region.y / target.height * height,
+          width: options.region.width / target.width * width,
+          height: options.region.height / target.height * height,
+        }
+      : undefined,
+  })
+  const scaleX = target.width / width
+  const scaleY = target.height / height
+  const consolidated = consolidateWallDetectionCandidates(raw.map((candidate) => ({
+    a: { x: candidate.a.x * scaleX, y: candidate.a.y * scaleY },
+    b: { x: candidate.b.x * scaleX, y: candidate.b.y * scaleY },
+    confidence: candidate.confidence,
+  })), Math.max(4, Math.min(scaleX, scaleY) * 6))
+  const gridFiltered = removeLikelyGridLines(consolidated, target.width, target.height)
+  const focused = options.focusMode === 'dominant'
+    ? filterToDominantCandidateCluster(gridFiltered, target.width, target.height)
+    : gridFiltered
+  return rankWallDetectionCandidates(
+    focused,
+    Math.max(100, options.maximumCandidates ?? 1_200),
+  )
 }

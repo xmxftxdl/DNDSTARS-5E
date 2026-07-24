@@ -16,14 +16,18 @@ function parseArguments(argv) {
     index += 1
   }
   const corpus = values.get('corpus')
-  if (!corpus) throw new Error('Usage: node scripts/map-image-benchmark.mjs --corpus <directory> [--output report.json] [--runs 3] [--overlays directory]')
+  if (!corpus) {
+    throw new Error('Usage: node scripts/map-image-benchmark.mjs --corpus <directory> [--output report.json] [--runs 3] [--overlays directory] [--edge-threshold 22] [--minimum-run-ratio 0.025] [--focus-mode dominant]')
+  }
   return {
     corpus: path.resolve(corpus),
     output: path.resolve(values.get('output') ?? 'map-image-benchmark.json'),
     overlays: values.has('overlays') ? path.resolve(values.get('overlays')) : undefined,
     runs: Math.max(1, Number.parseInt(values.get('runs') ?? '3', 10) || 3),
     darknessThreshold: Math.max(0, Math.min(255, Number(values.get('darkness-threshold') ?? 68))),
+    edgeThreshold: Math.max(8, Math.min(120, Number(values.get('edge-threshold') ?? 22))),
     minimumRunRatio: Math.max(0.005, Math.min(0.25, Number(values.get('minimum-run-ratio') ?? 0.025))),
+    focusMode: values.get('focus-mode') === 'dominant' ? 'dominant' : 'all',
   }
 }
 
@@ -228,6 +232,7 @@ async function main() {
   if (options.overlays) await mkdir(options.overlays, { recursive: true })
   const files = (await filesUnder(options.corpus))
     .filter((file) => !file.includes(`${path.sep}.decoded${path.sep}`))
+    .filter((file) => !file.endsWith('.overlay.png'))
     .filter((file) => /\.(?:dd2vtt|uvtt|df2vtt|png|jpe?g|webp)$/i.test(file))
     .sort()
   const server = await createServer({
@@ -262,7 +267,9 @@ async function main() {
         : undefined
       const analyzed = await analyzeFile(page, { imageFile }, {
         darknessThreshold: options.darknessThreshold,
+        edgeThreshold: options.edgeThreshold,
         minimumRunRatio: options.minimumRunRatio,
+        focusMode: options.focusMode,
       }, options.runs, overlayPath)
       const truth = raw ? uvttSegments(raw, analyzed.width, analyzed.height) : []
       const pixelsPerGrid = Number(raw?.resolution?.pixels_per_grid)
@@ -301,8 +308,10 @@ async function main() {
     generatedAt: new Date().toISOString(),
     detector: {
       darknessThreshold: options.darknessThreshold,
+      edgeThreshold: options.edgeThreshold,
       minimumRunRatio: options.minimumRunRatio,
       maximumDimension: 1_600,
+      focusMode: options.focusMode,
       runsPerMap: options.runs,
     },
     aggregate: {

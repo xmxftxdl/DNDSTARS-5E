@@ -157,10 +157,13 @@ export default function MapGeometryToolbar({
 }: MapGeometryToolbarProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const imageDetectionInputRef = useRef<HTMLInputElement>(null)
+  const detectionRequestRef = useRef(0)
   const [roomSummary, setRoomSummary] = useState<{ rooms: number; sealed: number } | null>(null)
   const [detectionSourceFile, setDetectionSourceFile] = useState<File | null>(null)
-  const [detectionDarkness, setDetectionDarkness] = useState(68)
+  const [detectionEdgeThreshold, setDetectionEdgeThreshold] = useState(22)
   const [detectionMinimumRatio, setDetectionMinimumRatio] = useState(0.025)
+  const [detectionFocusOnDominant, setDetectionFocusOnDominant] = useState(false)
+  const [detectionRunning, setDetectionRunning] = useState(false)
   const [showRegionHelp, setShowRegionHelp] = useState(false)
   const updateEntity = useMapGeometryStore((state) => state.updateEntity)
   const removeEntity = useMapGeometryStore((state) => state.removeEntity)
@@ -192,10 +195,14 @@ export default function MapGeometryToolbar({
     : 0
   const runWallDetection = (file: File) => {
     if (!activeMap) return
+    const requestId = ++detectionRequestRef.current
+    setDetectionRunning(true)
     void detectWallsFromImageFile(file, activeMap, {
-      darknessThreshold: detectionDarkness,
+      edgeThreshold: detectionEdgeThreshold,
       minimumRunRatio: detectionMinimumRatio,
+      focusMode: detectionFocusOnDominant ? 'dominant' : 'all',
     }).then((candidates) => {
+      if (requestId !== detectionRequestRef.current) return
       if (candidates.length === 0) {
         alert('没有识别到可靠的墙线候选。')
         return
@@ -203,7 +210,10 @@ export default function MapGeometryToolbar({
       onDetectionCandidatesChange(candidates)
       onDiagnosticsEnabledChange(true)
     }).catch((error) => {
+      if (requestId !== detectionRequestRef.current) return
       alert(`无法识别地图墙体：${error instanceof Error ? error.message : '图像无效'}`)
+    }).finally(() => {
+      if (requestId === detectionRequestRef.current) setDetectionRunning(false)
     })
   }
   const selectedTokenGroundElevation = selectedToken
@@ -434,7 +444,7 @@ export default function MapGeometryToolbar({
           />
           <button
             type="button"
-            disabled={terrainEditingLocked || !activeMap}
+            disabled={terrainEditingLocked || !activeMap || detectionRunning}
             onClick={() => imageDetectionInputRef.current?.click()}
             className="rounded-md p-1 text-cyan-200 hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-30"
             title="从地图图片识别候选墙；确认后才写入权威几何"
@@ -454,24 +464,24 @@ export default function MapGeometryToolbar({
                runWallDetection(file)
              }}
            />
-           {detectionCandidates.length > 0 && (
+           {detectionSourceFile && (
              <span
                className="flex flex-wrap items-center gap-1 rounded border border-cyan-400/20 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-100"
                title="候选线尚未写入权威几何；可点击地图上的青色候选线逐条删除"
              >
-               候选 {detectionCandidates.length}
+               {detectionRunning ? '正在识别…' : `候选 ${detectionCandidates.length}`}
                <label className="flex items-center gap-0.5">
-                 暗度
+                 边缘
                  <input
                    type="range"
-                   min={24}
-                   max={128}
-                   step={4}
-                   value={detectionDarkness}
-                   onChange={(event) => setDetectionDarkness(Number(event.target.value))}
+                   min={8}
+                   max={80}
+                   step={2}
+                   value={detectionEdgeThreshold}
+                   onChange={(event) => setDetectionEdgeThreshold(Number(event.target.value))}
                    className="w-14 accent-cyan-400"
                  />
-                 {detectionDarkness}
+                 {detectionEdgeThreshold}
                </label>
                <label className="flex items-center gap-0.5">
                  最短
@@ -486,31 +496,50 @@ export default function MapGeometryToolbar({
                  />
                  {Math.round(detectionMinimumRatio * 100)}%
                </label>
+               <label className="flex items-center gap-0.5" title="横图忽略上下背景带，竖图忽略左右背景带；适合主体位于画面中央的船只、建筑和单个地牢">
+                 <input
+                   type="checkbox"
+                   checked={detectionFocusOnDominant}
+                   onChange={(event) => setDetectionFocusOnDominant(event.target.checked)}
+                   className="accent-cyan-400"
+                 />
+                 仅主体
+               </label>
                <button
                  type="button"
-                 disabled={!detectionSourceFile}
+                 disabled={!detectionSourceFile || detectionRunning}
                  onClick={() => {
                    if (detectionSourceFile) runWallDetection(detectionSourceFile)
                  }}
                  className="rounded bg-cyan-500/20 px-1 text-cyan-50 hover:bg-cyan-500/30 disabled:opacity-40"
                >
-                 重算
+                 {detectionRunning ? '识别中…' : '重算'}
                </button>
+               {detectionCandidates.length >= 1_200 && (
+                 <span className="text-amber-200" title="候选已达到安全上限；请提高边缘阈值、最短线比例，或启用仅主体后重算">
+                   已达上限
+                 </span>
+               )}
                <button
                  type="button"
+                 disabled={detectionCandidates.length === 0 || detectionRunning}
                  onClick={() => {
                    if (replaceMap(mapId, wallDetectionCandidatesToGeometry(geometry, [...detectionCandidates]))) {
+                     detectionRequestRef.current += 1
+                     setDetectionRunning(false)
                      onDetectionCandidatesChange([])
                      setDetectionSourceFile(null)
                    }
                  }}
-                 className="rounded bg-emerald-500/20 px-1 text-emerald-100 hover:bg-emerald-500/30"
+                 className="rounded bg-emerald-500/20 px-1 text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-40"
               >
                 接受
               </button>
                <button
                  type="button"
                  onClick={() => {
+                   detectionRequestRef.current += 1
+                   setDetectionRunning(false)
                    onDetectionCandidatesChange([])
                    setDetectionSourceFile(null)
                  }}
