@@ -11,12 +11,15 @@ import {
   FIREBALL_ANIMATION_START_DELAY_MS,
   FIREBALL_PRESENTATION_EVENT_TTL_MS,
   GUIDANCE_MANIFESTATION_DURATION_MS,
+  GUIDANCE_ORBIT_RADIUS_FACTOR,
   KILL_STREAK_BANNER_START_DELAY_MS,
   KILL_STREAK_PRESENTATION_EVENT_TTL_MS,
   PRODUCE_FLAME_ANIMATION_DURATION_MS,
   RAY_OF_FROST_ANIMATION_DURATION_MS,
   RESISTANCE_MANIFESTATION_DURATION_MS,
   RESISTANCE_ORBIT_RADIUS_FACTOR,
+  SANCTUARY_MANIFESTATION_DURATION_MS,
+  SANCTUARY_ORBIT_RADIUS_FACTOR,
   SACRED_FLAME_ANIMATION_DURATION_MS,
   SHOCKING_GRASP_ANIMATION_DURATION_MS,
   SPELL_BANNER_TOTAL_DURATION_MS,
@@ -33,6 +36,7 @@ import {
   publishProduceFlamePresentation,
   publishRayOfFrostPresentation,
   publishResistancePresentation,
+  publishSanctuaryPresentation,
   publishSacredFlamePresentation,
   publishShockingGraspPresentation,
   reduceCombatPresentationState,
@@ -123,6 +127,13 @@ const resistance = {
   spellId: 'resistance' as const,
   accentColor: '#3b82f6',
   glowColor: '#60a5fa',
+}
+
+const sanctuary = {
+  ...shockingGrasp,
+  id: 'sanctuary-transaction-1',
+  transactionId: 'transaction-sanctuary-1',
+  spellId: 'sanctuary' as const,
 }
 
 const chillTouch = {
@@ -320,6 +331,7 @@ describe('combat presentation events', () => {
       kind: 'guidance',
       to: { x: 250, y: 100 },
       durationMs: GUIDANCE_MANIFESTATION_DURATION_MS,
+      radiusPx: 50 * GUIDANCE_ORBIT_RADIUS_FACTOR,
     })
   })
 
@@ -342,6 +354,22 @@ describe('combat presentation events', () => {
       accentColor: '#3b82f6',
       glowColor: '#60a5fa',
       radiusPx: 50 * RESISTANCE_ORBIT_RADIUS_FACTOR,
+    })
+  })
+
+  it('projects Sanctuary on the shared close status orbit around the target', () => {
+    expect(parseCombatPresentationEvent(sanctuary)).toEqual(sanctuary)
+    const state = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      sanctuary,
+      1_100,
+    )
+    const [effect] = combatPresentationProjectilesForMap(state, map, 1_100)
+    expect(effect).toMatchObject({
+      kind: 'sanctuary',
+      to: { x: 250, y: 100 },
+      durationMs: SANCTUARY_MANIFESTATION_DURATION_MS,
+      radiusPx: 50 * SANCTUARY_ORBIT_RADIUS_FACTOR,
     })
   })
 
@@ -647,6 +675,30 @@ describe('combat presentation events', () => {
     const event = vi.mocked(publishSharedEvent).mock.calls[0]?.[1]
     expect(parseCombatPresentationEvent(event)).not.toBeNull()
     expect(schedule.completesAt).toBe(26_750 + RESISTANCE_MANIFESTATION_DURATION_MS)
+    vi.useRealTimers()
+  })
+
+  it('publishes a synchronized Sanctuary manifestation', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(26_400)
+    await refreshCombatPresentationClock(true)
+    const schedule = await publishSanctuaryPresentation({
+      id: 'sanctuary-live-1',
+      mapId: 'map-a',
+      transactionId: 'transaction-sanctuary-live-1',
+      sourceTokenId: 'cleric',
+      targetTokenId: 'fighter',
+    })
+    expect(publishSharedEvent).toHaveBeenCalledWith(
+      COMBAT_PRESENTATION_CHANNEL,
+      expect.objectContaining({
+        type: 'spell-target-effect',
+        spellId: 'sanctuary',
+        createdAt: 26_900,
+        expiresAt: 26_900 + COMBAT_PRESENTATION_EVENT_TTL_MS,
+      }),
+    )
+    expect(schedule.completesAt).toBe(26_900 + SANCTUARY_MANIFESTATION_DURATION_MS)
     vi.useRealTimers()
   })
 

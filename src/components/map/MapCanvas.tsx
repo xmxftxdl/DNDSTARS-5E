@@ -197,7 +197,7 @@ export interface MapProjectile {
   id: string
   from: { x: number; y: number }
   to: { x: number; y: number }
-  kind?: 'arrow' | 'focus' | 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sacred-flame'
+  kind?: 'arrow' | 'focus' | 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame'
   hit?: boolean
   issuedAt?: number
   durationMs?: number
@@ -274,6 +274,10 @@ interface MapCanvasProps {
   guidanceTokenIds?: string[]
   /** Targets carrying Resistance, rendered in the target character's primary class colors. */
   resistanceTokenMarks?: ResistanceTokenMark[]
+  /** Targets protected by the authoritative Sanctuary spell. */
+  sanctuaryTokenIds?: string[]
+  /** Characters currently wielding a club or quarterstaff empowered by Shillelagh. */
+  shillelaghTokenIds?: string[]
   /** Defeated tokens are dimmed. */
   defeatedTokenIds?: string[]
   /** 当前先攻回合的 Token；仅用于绘制呼吸闪烁光环，不改变占地和交互范围。 */
@@ -1235,6 +1239,37 @@ function Dnd5eStandardConditionBadge({
   )
 }
 
+function ShillelaghTokenBadge({ radius, gridIndex }: { radius: number; gridIndex: number }) {
+  const size = rightBadgeSize(radius)
+  const { x, y } = rightBadgeGridPos(radius, size, gridIndex)
+  const scale = tokenScale(radius)
+  return (
+    <Group x={x} y={y} listening={false}>
+      <Circle
+        radius={size / 2}
+        fill="#173b2a"
+        stroke="#86efac"
+        strokeWidth={tokenLineWidth(radius, 1.5)}
+        shadowBlur={5 * scale}
+        shadowColor="#4ade80"
+      />
+      <Line
+        points={[-size * 0.18, size * 0.28, size * 0.15, -size * 0.25]}
+        stroke="#f5d0a5"
+        strokeWidth={Math.max(1.5, size * 0.13)}
+        lineCap="round"
+      />
+      <Line
+        points={[size * 0.02, -size * 0.05, -size * 0.2, -size * 0.15, -size * 0.08, size * 0.02]}
+        closed
+        fill="#4ade80"
+        stroke="#bbf7d0"
+        strokeWidth={Math.max(0.7, size * 0.04)}
+      />
+    </Group>
+  )
+}
+
 function MapGeometryDiagnosticsLayer({
   diagnostics,
   candidates = [],
@@ -1832,6 +1867,8 @@ export default function MapCanvas({
   chillTouchTokenIds = [],
   guidanceTokenIds = [],
   resistanceTokenMarks = [],
+  sanctuaryTokenIds = [],
+  shillelaghTokenIds = [],
   defeatedTokenIds = [],
   currentTurnTokenId,
   lockDragTokenIds = [],
@@ -2893,6 +2930,7 @@ export default function MapCanvas({
       data-combat-projectile-count={projectiles.length}
       data-combat-projectile-ids={projectiles.map((projectile) => projectile.id).join(',')}
       data-combat-projectile-kinds={projectiles.map((projectile) => projectile.kind ?? 'arrow').join(',')}
+      data-sanctuary-token-count={sanctuaryTokenIds.length}
       data-scene-interaction-count={sceneInteractionPoints.length}
       data-viewport-x={view.x}
       data-viewport-y={view.y}
@@ -3388,7 +3426,7 @@ export default function MapCanvas({
                 key={`guidance:${token.id}`}
                 x={token.x}
                 y={token.y}
-                radius={map.gridSize * Math.max(1, token.size ?? 1) * 0.66}
+                radius={map.gridSize * Math.max(1, token.size ?? 1) * 0.52}
               />
             )]
           })}
@@ -3403,6 +3441,18 @@ export default function MapCanvas({
                 radius={mark.radiusPx}
                 accentColor={mark.accentColor}
                 glowColor={mark.glowColor}
+              />
+            )]
+          })}
+          {sanctuaryTokenIds.flatMap((tokenId) => {
+            const token = map.tokens.find((candidate) => candidate.id === tokenId)
+            if (!token) return []
+            return [(
+              <SanctuaryPersistentMark
+                key={`sanctuary:${token.id}`}
+                x={token.x}
+                y={token.y}
+                radius={map.gridSize * Math.max(1, token.size ?? 1) * 0.52}
               />
             )]
           })}
@@ -3424,6 +3474,8 @@ export default function MapCanvas({
                     ? <GuidanceManifestation key={projectile.id} projectile={projectile} />
                     : projectile.kind === 'resistance'
                       ? <ResistanceManifestation key={projectile.id} projectile={projectile} />
+                    : projectile.kind === 'sanctuary'
+                      ? <SanctuaryManifestation key={projectile.id} projectile={projectile} />
                     : projectile.kind === 'sacred-flame'
                       ? <SacredFlameEffect key={projectile.id} projectile={projectile} />
                   : projectile.kind === 'chill-touch'
@@ -3557,6 +3609,7 @@ export default function MapCanvas({
                   (isDM || !!t.characterId || t.showHpOnToken !== false)
                 }
                 standardConditions={dnd5eConditionsByToken[t.id]}
+                shillelaghActive={shillelaghTokenIds.includes(t.id)}
                 airborne={mapGeometryTokenElevation(geometry, t) >
                   mapGeometryTerrainElevationAtPoint(geometry, t)}
                 onStandardConditionClick={(condition) => onDnd5eConditionClick?.(t.id, condition)}
@@ -4129,7 +4182,7 @@ function GuidancePersistentMark(input: { x: number; y: number; radius: number })
     (frame) => {
       const time = frame?.time ?? 0
       orbitRef.current?.rotation(reducedMotion ? 0 : time * 0.012)
-      counterOrbitRef.current?.rotation(reducedMotion ? 0 : -time * 0.007)
+      counterOrbitRef.current?.rotation(reducedMotion ? 22.5 : 22.5 + time * 0.012)
       glowRef.current?.opacity(reducedMotion ? 0.2 : 0.16 + Math.sin(time * 0.004) * 0.08)
       markRef.current?.scale({
         x: reducedMotion ? 1 : 1 + Math.sin(time * 0.0035) * 0.025,
@@ -4259,6 +4312,161 @@ function ResistancePersistentMark(input: {
             glowColor={input.glowColor}
           />
         </Group>
+      </Group>
+    </Group>
+  )
+}
+
+function SanctuaryWardGlyph({ size }: { size: number }) {
+  return (
+    <Group listening={false}>
+      <Circle
+        radius={size}
+        fill="rgba(224,242,254,0.9)"
+        stroke="#f8fafc"
+        strokeWidth={Math.max(1.2, size * 0.13)}
+        shadowColor="#7dd3fc"
+        shadowBlur={size * 1.15}
+        shadowOpacity={0.95}
+        perfectDrawEnabled={false}
+      />
+      <Line
+        points={[
+          0, -size * 0.72,
+          size * 0.58, -size * 0.18,
+          size * 0.4, size * 0.58,
+          0, size * 0.82,
+          -size * 0.4, size * 0.58,
+          -size * 0.58, -size * 0.18,
+        ]}
+        closed
+        fill="rgba(59,130,246,0.38)"
+        stroke="#ffffff"
+        strokeWidth={Math.max(1, size * 0.1)}
+        lineJoin="round"
+        perfectDrawEnabled={false}
+      />
+      <Line
+        points={[-size * 0.3, 0, size * 0.3, 0, 0, -size * 0.45, 0, size * 0.5]}
+        stroke="#ffffff"
+        strokeWidth={Math.max(1, size * 0.09)}
+        lineCap="round"
+        lineJoin="round"
+        perfectDrawEnabled={false}
+      />
+    </Group>
+  )
+}
+
+function SanctuaryPersistentMark(input: { x: number; y: number; radius: number }) {
+  const orbitRef = useRef<Konva.Group>(null)
+  const haloRef = useRef<Konva.Circle>(null)
+  const reducedMotion = usePrefersReducedMotion()
+
+  useStatusAnimation(
+    () => orbitRef.current?.getLayer() ?? null,
+    (frame) => {
+      const time = frame?.time ?? 0
+      orbitRef.current?.rotation(reducedMotion ? 52 : 52 + time * 0.012)
+      haloRef.current?.opacity(reducedMotion ? 0.42 : 0.34 + Math.sin(time * 0.004) * 0.11)
+    },
+    [input.radius, reducedMotion],
+    { fps: reducedMotion ? 1 : 30 },
+  )
+
+  return (
+    <Group x={input.x} y={input.y} listening={false}>
+      <Circle
+        ref={haloRef}
+        radius={input.radius * 0.96}
+        stroke="rgba(186,230,253,0.88)"
+        strokeWidth={2}
+        dash={[2, 9]}
+        shadowColor="#38bdf8"
+        shadowBlur={13}
+        perfectDrawEnabled={false}
+      />
+      <Circle
+        radius={input.radius * 1.08}
+        stroke="rgba(248,250,252,0.32)"
+        strokeWidth={1.2}
+        dash={[10, 14]}
+        perfectDrawEnabled={false}
+      />
+      <Group ref={orbitRef}>
+        {[0, 120, 240].map((rotation) => (
+          <Group key={rotation} rotation={rotation}>
+            <Group x={input.radius}>
+              <SanctuaryWardGlyph size={Math.max(8, input.radius * 0.13)} />
+            </Group>
+          </Group>
+        ))}
+      </Group>
+    </Group>
+  )
+}
+
+function SanctuaryManifestation({ projectile }: { projectile: MapProjectile }) {
+  const effectRef = useRef<Konva.Group>(null)
+  const orbitRef = useRef<Konva.Group>(null)
+  const radius = Math.max(34, projectile.radiusPx ?? 58)
+
+  useEffect(() => {
+    const effect = effectRef.current
+    const layer = effect?.getLayer()
+    if (!effect || !layer) return
+    const duration = Math.max(1, projectile.durationMs ?? 1_000)
+    const initialElapsed = Math.max(0, Date.now() - (projectile.issuedAt ?? Date.now()))
+    const animation = new Konva.Animation((frame) => {
+      const elapsed = initialElapsed + (frame?.time ?? 0)
+      const raw = Math.min(1, elapsed / duration)
+      const arrival = 1 - Math.pow(1 - Math.min(1, raw / 0.42), 3)
+      effect.position(projectile.to)
+      effect.opacity(raw < 0.14
+        ? raw / 0.14
+        : raw > 0.82
+          ? Math.max(0, (1 - raw) / 0.18)
+          : 1)
+      effect.scale({
+        x: 0.38 + arrival * 0.62,
+        y: 0.38 + arrival * 0.62,
+      })
+      orbitRef.current?.rotation(52 + raw * 320)
+      if (raw >= 1) animation.stop()
+    }, layer)
+    animation.start()
+    return () => {
+      animation.stop()
+    }
+  }, [projectile, radius])
+
+  return (
+    <Group ref={effectRef} x={projectile.to.x} y={projectile.to.y} listening={false}>
+      <Circle
+        radius={radius * 0.96}
+        fill="rgba(125,211,252,0.08)"
+        stroke="rgba(224,242,254,0.9)"
+        strokeWidth={2.4}
+        dash={[3, 8]}
+        shadowColor="#38bdf8"
+        shadowBlur={18}
+        perfectDrawEnabled={false}
+      />
+      <Circle
+        radius={radius * 1.08}
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth={1.4}
+        dash={[11, 13]}
+        perfectDrawEnabled={false}
+      />
+      <Group ref={orbitRef}>
+        {[0, 120, 240].map((rotation) => (
+          <Group key={rotation} rotation={rotation}>
+            <Group x={radius}>
+              <SanctuaryWardGlyph size={Math.max(8, radius * 0.13)} />
+            </Group>
+          </Group>
+        ))}
       </Group>
     </Group>
   )
@@ -5586,6 +5794,7 @@ function TokenNode({
   hp,
   showHpBar = true,
   standardConditions = [],
+  shillelaghActive = false,
   airborne = false,
   onStandardConditionClick,
   hoverLabel,
@@ -5609,6 +5818,7 @@ function TokenNode({
   hp?: { hp: number; max: number; temp?: number }
   showHpBar?: boolean
   standardConditions?: readonly Dnd5eStandardConditionId[]
+  shillelaghActive?: boolean
   airborne?: boolean
   onStandardConditionClick?: (condition?: Dnd5eStandardConditionId) => void
   hoverLabel?: string
@@ -5878,13 +6088,19 @@ function TokenNode({
       )}
 
       {(() => {
-        let grid = airborne ? 1 : 0
+        let grid = (airborne ? 1 : 0) + (shillelaghActive ? 1 : 0)
         return (
           <>
             {airborne && (
               <Dnd5eFlightBadge
                 radius={radius}
                 onClick={() => onStandardConditionClick?.()}
+              />
+            )}
+            {shillelaghActive && (
+              <ShillelaghTokenBadge
+                radius={radius}
+                gridIndex={airborne ? 1 : 0}
               />
             )}
             {(standardConditions.length > 4 ? standardConditions.slice(0, 3) : standardConditions)

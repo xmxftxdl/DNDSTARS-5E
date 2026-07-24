@@ -134,6 +134,7 @@ import {
   publishProduceFlamePresentation,
   publishRayOfFrostPresentation,
   publishResistancePresentation,
+  publishSanctuaryPresentation,
   publishSacredFlamePresentation,
   publishShockingGraspPresentation,
 } from '../lib/combatPresentation'
@@ -157,8 +158,10 @@ import {
   guidancePresentationsForTargets,
   hasGuidancePresentationEffect,
   hasResistancePresentationEffect,
+  hasSanctuaryPresentationEffect,
   mergeDnd5eSpellAreaDelta,
   resistancePresentationsForTargets,
+  sanctuaryPresentationsForTargets,
   spellPresentationsBeforeRoll,
   spellSettlementMapLayerChanges,
   spellSettlementSpentTurnResource,
@@ -415,6 +418,7 @@ import {
   resolveDnd5eSpellModifierIntents,
   dnd5eSelectedFightingStyles,
   dnd5eOffHandWeaponAttackProfile,
+  dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponRangeFeet,
   getDnd5eSrdCombatSpell,
@@ -3028,6 +3032,18 @@ export default function MapsPage() {
     if (!casterToken) return null
     return pixelToCell(casterToken.x, casterToken.y, activeMap)
   })()
+  const shillelaghTokenIds = (activeMap?.tokens ?? []).flatMap((token) => {
+    const linked = token.characterId
+      ? characters.find((character) => character.id === token.characterId)
+      : undefined
+    const active = normalizeDnd5eActiveEffects(
+      linked?.dnd5eCombatState?.activeEffects ?? token.dnd5eCombatState?.activeEffects,
+    ).some((effect) =>
+      effect.definitionId === 'srd-5.1:spell:shillelagh' &&
+      effect.source.rulesId === 'shillelagh',
+    )
+    return active ? [token.id] : []
+  })
   const chillTouchTokenIds = (activeMap?.tokens ?? []).flatMap((token) => {
     const linked = token.characterId
       ? characters.find((character) => character.id === token.characterId)
@@ -3061,6 +3077,13 @@ export default function MapsPage() {
           ...dnd5eCharacterPresentationColors(linked),
         }]
       : []
+  })
+  const sanctuaryTokenIds = (activeMap?.tokens ?? []).flatMap((token) => {
+    const linked = token.characterId
+      ? characters.find((character) => character.id === token.characterId)
+      : undefined
+    const combatState = linked?.dnd5eCombatState ?? token.dnd5eCombatState
+    return hasSanctuaryPresentationEffect(combatState) ? [token.id] : []
   })
   const activeAoeTargetingSessionKey = mapAoeTargetingSessionKey({
     coreAreaMove: dnd5eCoreAreaMoveTargeting,
@@ -6296,7 +6319,11 @@ export default function MapsPage() {
   }): Promise<{ passed: boolean; roll?: Dnd5eTranquilitySaveRoll }> => {
     const ward = input.ward
     if (!ward) return { passed: true }
-    const wardName = ward.source === 'nature-sanctuary' ? '自然庇护' : '宁静心境'
+    const wardName = ward.source === 'nature-sanctuary'
+      ? '自然庇护'
+      : ward.source === 'sanctuary'
+        ? '庇护术'
+        : '宁静心境'
     const d20 = await rollDiceBoxD20(`${wardName}·感知豁免`, input.attackerName)
     const d20Second = ward.saveMode !== 'normal'
       ? await rollDiceBoxD20(`${wardName}·感知豁免（${ward.saveMode === 'advantage' ? '优势' : '劣势'}）`, input.attackerName)
@@ -9799,8 +9826,16 @@ export default function MapsPage() {
         actorTokenId: finalPrepared.prepared.actorToken.id,
         targetTokenIds: response.effects.map((effect) => effect.targetTokenId),
       })
+      const sanctuaryPresentations = sanctuaryPresentationsForTargets({
+        spellId: finalPrepared.prepared.spell.id,
+        transactionId: action.id,
+        mapId: authorityMap.id,
+        actorTokenId: finalPrepared.prepared.actorToken.id,
+        targetTokenIds: response.effects.map((effect) => effect.targetTokenId),
+      })
       const manifestationSchedules = await Promise.all([
         ...guidancePresentations.map(publishGuidancePresentation),
+        ...sanctuaryPresentations.map(publishSanctuaryPresentation),
         ...resistancePresentations.map((presentation) => {
           const targetToken = finalPrepared.prepared.map.tokens.find(
             (token) => token.id === presentation.targetTokenId,
@@ -10273,6 +10308,7 @@ export default function MapsPage() {
           case 'shocking-grasp': return publishShockingGraspPresentation(input)
           case 'chill-touch': return publishChillTouchPresentation(input)
           case 'sacred-flame': return publishSacredFlamePresentation(input)
+          case 'sanctuary': return publishSanctuaryPresentation(input)
         }
       }))
       const preRollCompletesAt = Math.max(
@@ -13576,7 +13612,10 @@ export default function MapsPage() {
         ? await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定（${attackMode === 'advantage' ? '优势' : '劣势'}）`, attack.targetToken.label)
         : undefined
       let attackTransaction: CombatTransaction | undefined
-      let resourceSpentActor: Character | undefined
+      let equipmentRerollSpend: {
+        instanceId: string
+        resourceId: string
+      } | undefined
       if (tranquility.passed) {
         attackTransaction = appendRollLedgerEntry(createCombatTransaction({
           id: action.id,
@@ -13647,8 +13686,8 @@ export default function MapsPage() {
               .find((entry) => entry.id === choice)
             if (match) {
               const replacement = await rollDiceBoxD20(`${match.candidate.itemName}·重掷攻击骰`, attack.targetToken.label)
-              const spent = spendDnd5eInventoryResource(attack.actor, match.candidate.instanceId, match.candidate.effect.resourceId, 1)
-              if (spent.ok) {
+              const resourceAvailable = match.candidate.resource.current > 0
+              if (resourceAvailable) {
                 attackTransaction = rerollLedgerDie(attackTransaction, {
                   entryId: `${action.id}:attack-roll`,
                   dieIndex: match.dieIndex,
@@ -13665,7 +13704,10 @@ export default function MapsPage() {
                 })
                 if (match.dieIndex === 0) d20 = replacement
                 else d20Second = replacement
-                resourceSpentActor = spent.character
+                equipmentRerollSpend = {
+                  instanceId: match.candidate.instanceId,
+                  resourceId: match.candidate.effect.resourceId,
+                }
               }
             }
           }
@@ -13978,16 +14020,35 @@ export default function MapsPage() {
       requestBardicInspiration: requestDnd5eBardicInspirationRoll,
       requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
       })
+      let applicationCharacters = resolved.application.characters
       const changedCharacterIds = new Set(resolved.application.changedCharacterIds)
-      if (resourceSpentActor) changedCharacterIds.add(resourceSpentActor.id)
+      if (equipmentRerollSpend) {
+        const postAttackActor = applicationCharacters.find((character) => character.id === attack.actor.id)
+        if (!postAttackActor) {
+          acknowledgePlayerAction(action, 'rejected', 'equipment-resource-owner-missing')
+          completePlayerActionRequest(action)
+          return
+        }
+        const spent = spendDnd5eInventoryResource(
+          postAttackActor,
+          equipmentRerollSpend.instanceId,
+          equipmentRerollSpend.resourceId,
+          1,
+        )
+        if (!spent.ok) {
+          acknowledgePlayerAction(action, 'rejected', 'equipment-resource-unavailable')
+          completePlayerActionRequest(action)
+          return
+        }
+        changedCharacterIds.add(spent.character.id)
+        applicationCharacters = applicationCharacters.map((character) =>
+          character.id === spent.character.id ? spent.character : character,
+        )
+      }
       applyDnd5eCombatApplication({
         ...resolved.application,
         changedCharacterIds: [...changedCharacterIds],
-        characters: resolved.application.characters.map((character) =>
-          resourceSpentActor?.id === character.id
-            ? { ...character, dnd5eInventory: resourceSpentActor.dnd5eInventory }
-            : character,
-        ),
+        characters: applicationCharacters,
       })
       await resolveDnd5eBerserkerRetaliations(resolved.result, authorityMap.id)
       await resolveDnd5eHunterGiantKiller(resolved.result, authorityMap.id)
@@ -15248,6 +15309,7 @@ export default function MapsPage() {
               chillTouchTokenIds={chillTouchTokenIds}
               guidanceTokenIds={guidanceTokenIds}
               resistanceTokenMarks={resistanceTokenMarks}
+              sanctuaryTokenIds={sanctuaryTokenIds}
               pingEnabled={!isSpectator && !measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               onMapPing={(point) => void publishMapTabletopPing(activeMap.id, point)}
               onTabletopPoint={(point) => {
@@ -15262,6 +15324,7 @@ export default function MapsPage() {
               measureMode={isDM && measureMode && !showMoveRange && !gridAdjustMode && !deleteSelectMode && !fogEditMode && !geometryEditMode && !sceneDrawTarget}
               hpByToken={hpByToken}
               dnd5eConditionsByToken={dnd5eConditionsByToken}
+              shillelaghTokenIds={shillelaghTokenIds}
               onDnd5eConditionClick={(tokenId) => {
                 setEffectDetailTokenId(tokenId)
               }}
@@ -15527,7 +15590,7 @@ export default function MapsPage() {
               onCoverChange={(selectedCover) => setDnd5eWeaponAttackConfirmation((current) => current
                 ? { ...current, selectedCover }
                 : current)}
-              onConfirm={() => {
+              onConfirm={async () => {
                 const confirmation = dnd5eWeaponAttackConfirmation
                 if (confirmation.authorityActionId) {
                   settleDmCoverOverride(confirmation.selectedCover)
@@ -15543,6 +15606,26 @@ export default function MapsPage() {
                   options.coverOverride = confirmation.selectedCover
                 } else {
                   delete options.coverOverride
+                }
+                const actorCharacter = characters.find((character) =>
+                  character.id === confirmation.actorCharacterId,
+                )
+                const shillelagh = actorCharacter
+                  ? dnd5eShillelaghAttackChoice(actorCharacter)
+                  : undefined
+                if (shillelagh && options.offHandAttack !== true) {
+                  const abilityLabel = ABILITIES.find((ability) =>
+                    ability.key === shillelagh.spellcastingAbility,
+                  )?.label ?? shillelagh.spellcastingAbility
+                  const signed = (value: number) => value >= 0 ? `+${value}` : `${value}`
+                  const useSpellcasting = await showCombatDialog({
+                    title: '橡棍术 · 选择攻击属性',
+                    message: `${confirmation.weaponName}正受到橡棍术强化。\n本次近战攻击的攻击检定与伤害掷骰使用哪项属性？`,
+                    confirmText: `${abilityLabel}（${signed(shillelagh.spellcastingModifier)}）`,
+                    cancelText: `力量（${signed(shillelagh.strengthModifier)}）`,
+                    tone: 'violet',
+                  })
+                  options.shillelaghAbility = useSpellcasting ? 'spellcasting' : 'str'
                 }
                 const sent = sendPlayerDnd5eWeaponAttackRequest(
                   targetToken,

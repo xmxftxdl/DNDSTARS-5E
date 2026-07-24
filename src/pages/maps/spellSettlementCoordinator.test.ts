@@ -4,8 +4,10 @@ import {
   guidancePresentationsForTargets,
   hasGuidancePresentationEffect,
   hasResistancePresentationEffect,
+  hasSanctuaryPresentationEffect,
   mergeDnd5eSpellAreaDelta,
   resistancePresentationsForTargets,
+  sanctuaryPresentationsForTargets,
   spellPresentationsBeforeRoll,
   spellSettlementMapLayerChanges,
   spellSettlementSpentTurnResource,
@@ -35,6 +37,7 @@ describe('SpellSettlementCoordinator', () => {
       'shocking-grasp',
       'chill-touch',
       'sacred-flame',
+      'sanctuary',
     ]) {
       expect(spellPresentationsBeforeRoll({
         spellId,
@@ -127,6 +130,29 @@ describe('SpellSettlementCoordinator', () => {
       activeEffects: [{ source: { rulesId: 'resistance' } }],
     })).toBe(true)
     expect(hasResistancePresentationEffect(undefined)).toBe(false)
+  })
+
+  it('derives Sanctuary manifestations and recognizes its authoritative duration marker', () => {
+    expect(sanctuaryPresentationsForTargets({
+      spellId: 'sanctuary',
+      transactionId: 'sanctuary-tx',
+      mapId: 'map',
+      actorTokenId: 'cleric',
+      targetTokenIds: ['fighter', 'fighter'],
+    })).toEqual([{
+      id: 'sanctuary-tx:sanctuary:0',
+      transactionId: 'sanctuary-tx',
+      mapId: 'map',
+      sourceTokenId: 'cleric',
+      targetTokenId: 'fighter',
+    }])
+    expect(hasSanctuaryPresentationEffect({
+      activeEffects: [{
+        definitionId: 'srd-5.1:spell:sanctuary',
+        source: { rulesId: 'sanctuary' },
+      }],
+    })).toBe(true)
+    expect(hasSanctuaryPresentationEffect(undefined)).toBe(false)
   })
 
   it('derives Fireball presentation from the Host-validated area anchor', () => {

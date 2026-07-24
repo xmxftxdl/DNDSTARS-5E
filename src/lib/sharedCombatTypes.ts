@@ -110,6 +110,8 @@ export interface Dnd5eItemUsePayload {
 export interface Dnd5eWeaponAttackOptions {
   /** DM-only, single-transaction cover ruling. The Headless authority rejects this field on player requests. */
   coverOverride?: Dnd5eAttackCoverOverride
+  /** 橡棍术生效时，本次主手近战攻击使用力量或施法关键属性。 */
+  shillelaghAbility?: 'str' | 'spellcasting'
   /** 荒野变形后使用当前野兽数据块中的动作序号；由 Headless 重新验证。 */
   wildShapeActionIndex?: number
   /** 仅表示玩家请求；是否可用、法术位与伤害骰均由 DM/Headless 重算。 */

@@ -9,8 +9,11 @@ export const RAY_OF_FROST_ANIMATION_DURATION_MS = 1_000
 export const ELDRITCH_BLAST_ANIMATION_DURATION_MS = 900
 export const PRODUCE_FLAME_ANIMATION_DURATION_MS = 1_100
 export const GUIDANCE_MANIFESTATION_DURATION_MS = 1_000
+export const GUIDANCE_ORBIT_RADIUS_FACTOR = 0.52
 export const RESISTANCE_MANIFESTATION_DURATION_MS = 1_000
-export const RESISTANCE_ORBIT_RADIUS_FACTOR = 0.9
+export const RESISTANCE_ORBIT_RADIUS_FACTOR = 0.52
+export const SANCTUARY_MANIFESTATION_DURATION_MS = 1_000
+export const SANCTUARY_ORBIT_RADIUS_FACTOR = 0.52
 export const SACRED_FLAME_ANIMATION_DURATION_MS = 1_200
 export const COMBAT_PRESENTATION_EVENT_TTL_MS = 1_600
 export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
@@ -91,7 +94,7 @@ export interface CombatPresentationShockingGraspEventV1 {
   type: 'spell-target-effect'
   mapId: string
   transactionId: string
-  spellId: 'shocking-grasp' | 'guidance' | 'resistance'
+  spellId: 'shocking-grasp' | 'guidance' | 'resistance' | 'sanctuary'
   sourceTokenId: string
   targetTokenId: string
   accentColor?: string
@@ -160,7 +163,7 @@ export interface CombatPresentationMapProjectile {
   id: string
   from: { x: number; y: number }
   to: { x: number; y: number }
-  kind: 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sacred-flame'
+  kind: 'fire-bolt' | 'fireball' | 'shocking-grasp' | 'chill-touch' | 'ray-of-frost' | 'eldritch-blast' | 'produce-flame' | 'guidance' | 'resistance' | 'sanctuary' | 'sacred-flame'
   hit: boolean
   issuedAt: number
   durationMs: number
@@ -266,7 +269,8 @@ export function parseCombatPresentationEvent(
     if (
       effect.spellId !== 'shocking-grasp' &&
         effect.spellId !== 'guidance' &&
-        effect.spellId !== 'resistance' ||
+        effect.spellId !== 'resistance' &&
+        effect.spellId !== 'sanctuary' ||
       !boundedId(effect.targetTokenId, 160) ||
       effect.spellId === 'resistance' &&
         (!hexColor(effect.accentColor) || !hexColor(effect.glowColor))
@@ -338,6 +342,8 @@ export function combatPresentationProjectilesForMap(
           ? GUIDANCE_MANIFESTATION_DURATION_MS
           : event.spellId === 'resistance'
             ? RESISTANCE_MANIFESTATION_DURATION_MS
+          : event.spellId === 'sanctuary'
+            ? SANCTUARY_MANIFESTATION_DURATION_MS
           : event.spellId === 'sacred-flame'
             ? SACRED_FLAME_ANIMATION_DURATION_MS
         : event.spellId === 'chill-touch'
@@ -374,7 +380,13 @@ export function combatPresentationProjectilesForMap(
         issuedAt: Date.now() - Math.max(0, now - event.createdAt),
         durationMs: animationDuration,
         radiusPx: gridSize * Math.max(1, target.size ?? 1) * (
-          event.spellId === 'resistance' ? RESISTANCE_ORBIT_RADIUS_FACTOR : 0.62
+          event.spellId === 'guidance'
+            ? GUIDANCE_ORBIT_RADIUS_FACTOR
+            : event.spellId === 'resistance'
+              ? RESISTANCE_ORBIT_RADIUS_FACTOR
+            : event.spellId === 'sanctuary'
+              ? SANCTUARY_ORBIT_RADIUS_FACTOR
+              : 0.62
         ),
         accentColor: event.accentColor,
         glowColor: event.glowColor,
@@ -655,6 +667,26 @@ export async function publishResistancePresentation(input: {
     expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
   })
   return { completesAt: combatPresentationServerNow() + RESISTANCE_MANIFESTATION_DURATION_MS }
+}
+
+export async function publishSanctuaryPresentation(input: {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  targetTokenId: string
+}): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-target-effect',
+    spellId: 'sanctuary',
+    ...input,
+    createdAt,
+    expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+  })
+  return { completesAt: combatPresentationServerNow() + SANCTUARY_MANIFESTATION_DURATION_MS }
 }
 
 export async function publishSacredFlamePresentation(input: {

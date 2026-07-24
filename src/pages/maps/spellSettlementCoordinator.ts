@@ -27,6 +27,7 @@ export type PreRollSpellPresentation = {
     | 'shocking-grasp'
     | 'chill-touch'
     | 'sacred-flame'
+    | 'sanctuary'
   id: string
   mapId: string
   transactionId: string
@@ -49,6 +50,7 @@ export function spellPresentationsBeforeRoll(input: {
     'shocking-grasp',
     'chill-touch',
     'sacred-flame',
+    'sanctuary',
   ])
   if (!supported.has(input.spellId as PreRollSpellPresentation['spellId'])) return []
   const spellId = input.spellId as PreRollSpellPresentation['spellId']
@@ -124,6 +126,23 @@ export function resistancePresentationsForTargets(input: {
   }))
 }
 
+export function sanctuaryPresentationsForTargets(input: {
+  spellId: string
+  transactionId: string
+  mapId: string
+  actorTokenId: string
+  targetTokenIds: readonly string[]
+}): GuidancePresentationSettlement[] {
+  if (input.spellId !== 'sanctuary') return []
+  return [...new Set(input.targetTokenIds)].map((targetTokenId, index) => ({
+    id: `${input.transactionId}:sanctuary:${index}`,
+    mapId: input.mapId,
+    transactionId: input.transactionId,
+    sourceTokenId: input.actorTokenId,
+    targetTokenId,
+  }))
+}
+
 export function hasGuidancePresentationEffect(combatState: {
   concentrationEffectsBySource?: Readonly<Record<string, string>>
   activeEffects?: readonly { source: { rulesId?: string } }[]
@@ -138,6 +157,15 @@ export function hasResistancePresentationEffect(combatState: {
 } | undefined): boolean {
   return Object.values(combatState?.concentrationEffectsBySource ?? {}).includes('resistance') ||
     (combatState?.activeEffects ?? []).some((effect) => effect.source.rulesId === 'resistance')
+}
+
+export function hasSanctuaryPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return (combatState?.activeEffects ?? []).some((effect) =>
+    effect.source.rulesId === 'sanctuary' ||
+    effect.definitionId === 'srd-5.1:spell:sanctuary',
+  )
 }
 
 export function spellSettlementMapLayerChanges(before: BattleMap, after: BattleMap) {
