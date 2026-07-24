@@ -80,6 +80,10 @@ describe('D&D 5e combat action icon registry', () => {
       longstrider: '/assets/icons/longstrider-spell-action.png',
       'speak-with-animals': '/assets/icons/speak-with-animals-spell-action.png',
       'mage-armor': '/assets/icons/mage-armor-spell-action.png',
+      'protection-from-evil-and-good': '/assets/icons/protection-from-evil-and-good-spell-action.png',
+      'floating-disk': '/assets/icons/floating-disk-spell-action.png',
+      shield: '/assets/icons/shield-spell-action.png',
+      'animal-friendship': '/assets/icons/animal-friendship-spell-action.png',
     }
     for (const [id, asset] of Object.entries(expected)) {
       expect(dnd5eSpellActionIcon({ id, name: id, castingClassId: 'wizard' })).toMatchObject({
