@@ -8,7 +8,10 @@ self.onmessage = (event: MessageEvent<{
   height: number
   sampleStride: number
   darknessThreshold: number
+  edgeThreshold: number
+  edgePercentile: number
   minimumRun: number
+  region?: { x: number; y: number; width: number; height: number }
 }>) => {
   const candidates = detectWallCandidatesFromRgba(event.data)
   self.postMessage(candidates)

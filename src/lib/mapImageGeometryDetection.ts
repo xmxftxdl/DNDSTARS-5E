@@ -13,9 +13,14 @@ export interface WallDetectionCandidate {
 }
 
 export interface WallDetectionOptions {
+  /** @deprecated Use edgeThreshold. Kept for saved UI settings from the dark-run detector. */
   darknessThreshold?: number
+  edgeThreshold?: number
+  edgePercentile?: number
   minimumRunRatio?: number
   maximumDimension?: number
+  maximumCandidates?: number
+  region?: { x: number; y: number; width: number; height: number }
 }
 
 async function detectCandidatesInWorker(input: {
@@ -24,7 +29,10 @@ async function detectCandidatesInWorker(input: {
   height: number
   sampleStride: number
   darknessThreshold: number
+  edgeThreshold: number
+  edgePercentile: number
   minimumRun: number
+  region?: { x: number; y: number; width: number; height: number }
 }): Promise<WallDetectionCandidate[]> {
   if (typeof Worker === 'undefined') return detectWallCandidatesFromRgba(input)
   return new Promise((resolve, reject) => {
@@ -53,61 +61,83 @@ export function consolidateWallDetectionCandidates(
   candidates: WallDetectionCandidate[],
   tolerance = 8,
 ): WallDetectionCandidate[] {
-  const consolidate = (entries: WallDetectionCandidate[], isHorizontal: boolean) => {
-    const result: WallDetectionCandidate[] = []
-    const sorted = [...entries].sort((left, right) =>
-      (isHorizontal ? left.a.y - right.a.y : left.a.x - right.a.x),
-    )
-    for (const candidate of sorted) {
-      const axis = isHorizontal ? candidate.a.y : candidate.a.x
-      const start = Math.min(
-        isHorizontal ? candidate.a.x : candidate.a.y,
-        isHorizontal ? candidate.b.x : candidate.b.y,
+  type ProjectedCandidate = {
+    candidate: WallDetectionCandidate
+    angleKey: number
+    ux: number
+    uy: number
+    nx: number
+    ny: number
+    rho: number
+    start: number
+    end: number
+  }
+  const projected = candidates.flatMap<ProjectedCandidate>((candidate) => {
+    let dx = candidate.b.x - candidate.a.x
+    let dy = candidate.b.y - candidate.a.y
+    const length = Math.hypot(dx, dy)
+    if (length < 1) return []
+    dx /= length
+    dy /= length
+    if (dx < 0 || (Math.abs(dx) < 1e-6 && dy < 0)) {
+      dx *= -1
+      dy *= -1
+    }
+    const nx = -dy
+    const ny = dx
+    const angle = Math.atan2(dy, dx)
+    const start = Math.min(candidate.a.x * dx + candidate.a.y * dy, candidate.b.x * dx + candidate.b.y * dy)
+    const end = Math.max(candidate.a.x * dx + candidate.a.y * dy, candidate.b.x * dx + candidate.b.y * dy)
+    return [{
+      candidate: { ...candidate, a: { ...candidate.a }, b: { ...candidate.b } },
+      angleKey: Math.round(angle / (Math.PI / 24)),
+      ux: dx,
+      uy: dy,
+      nx,
+      ny,
+      rho: ((candidate.a.x + candidate.b.x) / 2) * nx + ((candidate.a.y + candidate.b.y) / 2) * ny,
+      start,
+      end,
+    }]
+  })
+  const groups = new Map<number, ProjectedCandidate[]>()
+  for (const entry of projected) {
+    const group = groups.get(entry.angleKey)
+    if (group) group.push(entry)
+    else groups.set(entry.angleKey, [entry])
+  }
+  const result: WallDetectionCandidate[] = []
+  for (const group of groups.values()) {
+    const merged: ProjectedCandidate[] = []
+    for (const entry of group.sort((left, right) => left.rho - right.rho || left.start - right.start)) {
+      const match = merged.find((existing) =>
+        Math.abs(existing.rho - entry.rho) <= tolerance &&
+        entry.start <= existing.end + tolerance * 1.5 &&
+        entry.end >= existing.start - tolerance * 1.5,
       )
-      const end = Math.max(
-        isHorizontal ? candidate.a.x : candidate.a.y,
-        isHorizontal ? candidate.b.x : candidate.b.y,
-      )
-      const match = result.find((existing) => {
-        const existingAxis = isHorizontal ? existing.a.y : existing.a.x
-        const existingStart = Math.min(
-          isHorizontal ? existing.a.x : existing.a.y,
-          isHorizontal ? existing.b.x : existing.b.y,
-        )
-        const existingEnd = Math.max(
-          isHorizontal ? existing.a.x : existing.a.y,
-          isHorizontal ? existing.b.x : existing.b.y,
-        )
-        return Math.abs(existingAxis - axis) <= tolerance &&
-          start <= existingEnd + tolerance && end >= existingStart - tolerance
-      })
       if (!match) {
-        result.push({ ...candidate, a: { ...candidate.a }, b: { ...candidate.b } })
+        merged.push(entry)
         continue
       }
-      const existingAxis = isHorizontal ? match.a.y : match.a.x
-      const mergedAxis = (existingAxis + axis) / 2
-      const existingStart = Math.min(
-        isHorizontal ? match.a.x : match.a.y,
-        isHorizontal ? match.b.x : match.b.y,
-      )
-      const existingEnd = Math.max(
-        isHorizontal ? match.a.x : match.a.y,
-        isHorizontal ? match.b.x : match.b.y,
-      )
-      const mergedStart = Math.min(existingStart, start)
-      const mergedEnd = Math.max(existingEnd, end)
-      match.a = isHorizontal ? { x: mergedStart, y: mergedAxis } : { x: mergedAxis, y: mergedStart }
-      match.b = isHorizontal ? { x: mergedEnd, y: mergedAxis } : { x: mergedAxis, y: mergedEnd }
-      match.confidence = Math.max(match.confidence, candidate.confidence)
+      const leftLength = match.end - match.start
+      const rightLength = entry.end - entry.start
+      const totalLength = Math.max(1, leftLength + rightLength)
+      match.rho = (match.rho * leftLength + entry.rho * rightLength) / totalLength
+      match.start = Math.min(match.start, entry.start)
+      match.end = Math.max(match.end, entry.end)
+      match.candidate.confidence = Math.max(match.candidate.confidence, entry.candidate.confidence)
+      match.candidate.a = {
+        x: match.ux * match.start + match.nx * match.rho,
+        y: match.uy * match.start + match.ny * match.rho,
+      }
+      match.candidate.b = {
+        x: match.ux * match.end + match.nx * match.rho,
+        y: match.uy * match.end + match.ny * match.rho,
+      }
     }
-    return result
+    result.push(...merged.map((entry) => entry.candidate))
   }
-  return [
-    ...consolidate(candidates.filter(horizontal), true),
-    ...consolidate(candidates.filter(vertical), false),
-    ...candidates.filter((candidate) => !horizontal(candidate) && !vertical(candidate)),
-  ]
+  return result
 }
 
 export function removeLikelyGridLines(
@@ -115,23 +145,86 @@ export function removeLikelyGridLines(
   width: number,
   height: number,
 ): WallDetectionCandidate[] {
-  const regular = (entries: Array<{ candidate: WallDetectionCandidate; axis: number }>) => {
-    if (entries.length < 4) return new Set<WallDetectionCandidate>()
-    const sorted = [...entries].sort((left, right) => left.axis - right.axis)
-    const gaps = sorted.slice(1).map((entry, index) => entry.axis - sorted[index].axis)
-    const median = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)]
-    if (median < 8 || gaps.some((gap) => Math.abs(gap - median) > Math.max(2, median * 0.12))) {
-      return new Set<WallDetectionCandidate>()
+  const regular = (
+    entries: Array<{ candidate: WallDetectionCandidate; axis: number; start: number; end: number }>,
+    span: number,
+  ) => {
+    const axisTolerance = Math.max(2, Math.min(width, height) * 0.0025)
+    const clusters: Array<{
+      axis: number
+      candidates: WallDetectionCandidate[]
+      intervals: Array<[number, number]>
+    }> = []
+    for (const entry of [...entries].sort((left, right) => left.axis - right.axis)) {
+      const cluster = clusters.find((candidate) => Math.abs(candidate.axis - entry.axis) <= axisTolerance)
+      if (cluster) {
+        cluster.axis = (cluster.axis * cluster.candidates.length + entry.axis) / (cluster.candidates.length + 1)
+        cluster.candidates.push(entry.candidate)
+        cluster.intervals.push([entry.start, entry.end])
+      } else {
+        clusters.push({ axis: entry.axis, candidates: [entry.candidate], intervals: [[entry.start, entry.end]] })
+      }
     }
-    return new Set(sorted.map((entry) => entry.candidate))
+    const coverage = (intervals: Array<[number, number]>) => {
+      const sorted = intervals
+        .map(([start, end]) => [Math.min(start, end), Math.max(start, end)] as [number, number])
+        .sort((left, right) => left[0] - right[0])
+      let total = 0
+      let current = sorted[0]
+      if (!current) return 0
+      for (const interval of sorted.slice(1)) {
+        if (interval[0] <= current[1] + axisTolerance * 2) current[1] = Math.max(current[1], interval[1])
+        else {
+          total += current[1] - current[0]
+          current = interval
+        }
+      }
+      return total + current[1] - current[0]
+    }
+    const longClusters = clusters.filter((cluster) => coverage(cluster.intervals) >= span * 0.65)
+    if (longClusters.length < 4) return new Set<WallDetectionCandidate>()
+    const axes = longClusters.map((cluster) => cluster.axis).sort((a, b) => a - b)
+    const gaps = axes.slice(1).map((axis, index) => axis - axes[index]).filter((gap) => gap >= 6)
+    if (gaps.length < 3) return new Set<WallDetectionCandidate>()
+    const baseGap = Math.min(...gaps)
+    const regularCount = gaps.filter((gap) => {
+      const multiple = Math.max(1, Math.round(gap / baseGap))
+      return Math.abs(gap - baseGap * multiple) <= Math.max(2.5, baseGap * 0.14)
+    }).length
+    if (regularCount / gaps.length < 0.72) return new Set<WallDetectionCandidate>()
+    return new Set(longClusters.flatMap((cluster) => cluster.candidates))
   }
   const horizontalGrid = regular(candidates
-    .filter((candidate) => horizontal(candidate) && Math.abs(candidate.b.x - candidate.a.x) >= width * 0.88)
-    .map((candidate) => ({ candidate, axis: (candidate.a.y + candidate.b.y) / 2 })))
+    .filter(horizontal)
+    .map((candidate) => ({
+      candidate,
+      axis: (candidate.a.y + candidate.b.y) / 2,
+      start: candidate.a.x,
+      end: candidate.b.x,
+    })), width)
   const verticalGrid = regular(candidates
-    .filter((candidate) => vertical(candidate) && Math.abs(candidate.b.y - candidate.a.y) >= height * 0.88)
-    .map((candidate) => ({ candidate, axis: (candidate.a.x + candidate.b.x) / 2 })))
+    .filter(vertical)
+    .map((candidate) => ({
+      candidate,
+      axis: (candidate.a.x + candidate.b.x) / 2,
+      start: candidate.a.y,
+      end: candidate.b.y,
+    })), height)
   return candidates.filter((candidate) => !horizontalGrid.has(candidate) && !verticalGrid.has(candidate))
+}
+
+export function rankWallDetectionCandidates(
+  candidates: WallDetectionCandidate[],
+  maximumCandidates = 1_200,
+): WallDetectionCandidate[] {
+  if (candidates.length <= maximumCandidates) return candidates
+  return [...candidates]
+    .sort((left, right) => {
+      const leftLength = Math.hypot(left.b.x - left.a.x, left.b.y - left.a.y)
+      const rightLength = Math.hypot(right.b.x - right.a.x, right.b.y - right.a.y)
+      return right.confidence * Math.sqrt(rightLength) - left.confidence * Math.sqrt(leftLength)
+    })
+    .slice(0, maximumCandidates)
 }
 
 export function wallDetectionCandidatesToGeometry(
@@ -184,7 +277,17 @@ export async function detectWallsFromImageFile(
       height,
       sampleStride: 2,
       darknessThreshold: Math.max(0, Math.min(255, options.darknessThreshold ?? 68)),
+      edgeThreshold: Math.max(8, Math.min(120, options.edgeThreshold ?? 22)),
+      edgePercentile: Math.max(0.78, Math.min(0.98, options.edgePercentile ?? 0.88)),
       minimumRun: Math.max(12, Math.round(Math.min(width, height) * (options.minimumRunRatio ?? 0.025))),
+      region: options.region
+        ? {
+            x: options.region.x / target.width * width,
+            y: options.region.y / target.height * height,
+            width: options.region.width / target.width * width,
+            height: options.region.height / target.height * height,
+          }
+        : undefined,
     })
     const scaleX = target.width / width
     const scaleY = target.height / height
@@ -193,7 +296,10 @@ export async function detectWallsFromImageFile(
       b: { x: candidate.b.x * scaleX, y: candidate.b.y * scaleY },
       confidence: candidate.confidence,
     })), Math.max(4, Math.min(scaleX, scaleY) * 6))
-    return removeLikelyGridLines(consolidated, target.width, target.height)
+    return rankWallDetectionCandidates(
+      removeLikelyGridLines(consolidated, target.width, target.height),
+      Math.max(100, options.maximumCandidates ?? 1_200),
+    )
   } finally {
     bitmap.close()
   }
