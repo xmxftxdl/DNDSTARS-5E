@@ -9,6 +9,7 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import CampaignAdvancedAnalyticsPanel from '../components/CampaignAdvancedAnalyticsPanel'
 import RoomPartyOverview from '../components/RoomPartyOverview'
+import Dnd5eCombatSimulationPanel from '../components/Dnd5eCombatSimulationPanel'
 
 interface DashboardProps {
   onCreateCampaign?: () => void
@@ -60,6 +61,11 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
       <div className="mt-8">
         <RoomPartyOverview />
       </div>
+
+      <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
+        遭遇战术模拟
+      </h3>
+      <Dnd5eCombatSimulationPanel />
 
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
         战役进阶数据
