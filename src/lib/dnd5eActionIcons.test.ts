@@ -12,6 +12,12 @@ describe('D&D 5e combat action icon registry', () => {
     expect(dnd5eSpellActionIcon(DND5E_SRD_SPELL_CATALOG[0])).toEqual(specs[0])
   })
 
+  it('为全部戏法提供专属绘制缩略图', () => {
+    const cantrips = DND5E_SRD_SPELL_CATALOG.filter((spell) => spell.level === 0)
+    expect(cantrips).toHaveLength(24)
+    expect(cantrips.filter((spell) => !dnd5eSpellActionIcon(spell).asset).map((spell) => spell.id)).toEqual([])
+  })
+
   it('为全部核心物品模板生成稳定图标', () => {
     const specs = DND5E_SRD_ITEM_TEMPLATES.map((item) => dnd5eItemActionIcon(item))
     expect(specs).toHaveLength(DND5E_SRD_ITEM_TEMPLATES.length)
@@ -58,6 +64,7 @@ describe('D&D 5e combat action icon registry', () => {
       'ray-of-frost': '/assets/icons/ray-of-frost-spell-action.png',
       prestidigitation: '/assets/icons/prestidigitation-spell-action.png',
       'eldritch-blast': '/assets/icons/eldritch-blast-spell-action.png',
+      'mage-hand': '/assets/icons/mage-hand-spell-action.png',
       thaumaturgy: '/assets/icons/thaumaturgy-spell-action.png',
       'produce-flame': '/assets/icons/produce-flame-spell-action.png',
       guidance: '/assets/icons/guidance-spell-action.png',
@@ -65,6 +72,14 @@ describe('D&D 5e combat action icon registry', () => {
       'acid-splash': '/assets/icons/acid-splash-spell-action.png',
       resistance: '/assets/icons/resistance-spell-action.png',
       'spare-the-dying': '/assets/icons/spare-the-dying-spell-action.png',
+      'dancing-lights': '/assets/icons/dancing-lights-spell-action.png',
+      shillelagh: '/assets/icons/shillelagh-spell-action.png',
+      mending: '/assets/icons/mending-spell-action.png',
+      'vicious-mockery': '/assets/icons/vicious-mockery-spell-action.png',
+      sanctuary: '/assets/icons/sanctuary-spell-action.png',
+      longstrider: '/assets/icons/longstrider-spell-action.png',
+      'speak-with-animals': '/assets/icons/speak-with-animals-spell-action.png',
+      'mage-armor': '/assets/icons/mage-armor-spell-action.png',
     }
     for (const [id, asset] of Object.entries(expected)) {
       expect(dnd5eSpellActionIcon({ id, name: id, castingClassId: 'wizard' })).toMatchObject({

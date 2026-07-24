@@ -282,6 +282,7 @@ export function createDnd5eMapCombatSnapshot(input: {
       })
       return [{
         ...combatant,
+        mainWeaponId: character.equipment?.mainWeapon?.id,
         id: token.id,
         name: token.label,
         initiative,

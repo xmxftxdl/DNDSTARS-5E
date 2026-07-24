@@ -47,6 +47,8 @@ export interface Dnd5eActiveEffectSource {
   actorId?: string
   actorName?: string
   rulesId?: string
+  /** The authoritative slot level used to create a spell effect. */
+  spellLevel?: number
   label?: string
   pluginId?: string
 }
@@ -115,6 +117,12 @@ export interface Dnd5eActiveEffectModifiers {
   preventReactions?: boolean
   damageResistance?: Dnd5eDamageType
   conditionImmunities?: readonly Dnd5eStandardConditionId[]
+  /** 橡棍术只强化施法时所持的短棒或长棍。 */
+  shillelagh?: {
+    weaponId: string
+    spellcastingAbility: AbilityKey
+    spellcastingModifier: number
+  }
 }
 
 /**
@@ -254,7 +262,14 @@ export function createDnd5eMechanicalEffect(input: {
     potency: input.potency,
     visibility: input.visibility ?? 'public',
     legacyCondition: input.legacyCondition,
-    modifiers: input.modifiers ? { ...input.modifiers } : undefined,
+    modifiers: input.modifiers
+      ? {
+          ...input.modifiers,
+          shillelagh: input.modifiers.shillelagh
+            ? { ...input.modifiers.shillelagh }
+            : undefined,
+        }
+      : undefined,
   }
 }
 
@@ -377,6 +392,22 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       : undefined
     seen.add(candidate.id)
     const rawModifiers = candidate.modifiers
+    const rawShillelagh = isRecord(rawModifiers) ? rawModifiers.shillelagh : undefined
+    const shillelagh = isRecord(rawShillelagh) &&
+      typeof rawShillelagh.weaponId === 'string' &&
+      rawShillelagh.weaponId.trim().length > 0 &&
+      rawShillelagh.weaponId.length <= 200 &&
+      ABILITIES.has(rawShillelagh.spellcastingAbility as AbilityKey) &&
+      typeof rawShillelagh.spellcastingModifier === 'number' &&
+      Number.isInteger(rawShillelagh.spellcastingModifier) &&
+      rawShillelagh.spellcastingModifier >= -10 &&
+      rawShillelagh.spellcastingModifier <= 20
+      ? {
+          weaponId: rawShillelagh.weaponId.trim(),
+          spellcastingAbility: rawShillelagh.spellcastingAbility as AbilityKey,
+          spellcastingModifier: rawShillelagh.spellcastingModifier,
+        }
+      : undefined
     const modifiers = isRecord(rawModifiers)
       ? {
           speedPenaltyFeet: typeof rawModifiers.speedPenaltyFeet === 'number' &&
@@ -422,6 +453,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             )
             ? [...new Set(rawModifiers.conditionImmunities)] as Dnd5eStandardConditionId[]
             : undefined,
+          shillelagh,
         }
       : undefined
     effects.push({
@@ -430,7 +462,14 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       definitionId: candidate.definitionId.trim(),
       label: candidate.label.trim(),
       standardCondition,
-      source: { ...(candidate.source as unknown as Dnd5eActiveEffectSource) },
+      source: {
+        ...(candidate.source as unknown as Dnd5eActiveEffectSource),
+        spellLevel: Number.isInteger(candidate.source.spellLevel) &&
+          Number(candidate.source.spellLevel) >= 0 &&
+          Number(candidate.source.spellLevel) <= 9
+          ? Number(candidate.source.spellLevel)
+          : undefined,
+      },
       duration: normalizedDuration,
       repeatSave,
       escapeCheck,
@@ -448,7 +487,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.weaponDamageD4 != null ||
         modifiers.preventReactions != null ||
         modifiers.damageResistance != null ||
-        modifiers.conditionImmunities != null
+        modifiers.conditionImmunities != null ||
+        modifiers.shillelagh != null
       )
         ? modifiers
         : undefined,
@@ -480,6 +520,9 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     if (raw.repeatSave != null && effect.repeatSave == null) issues.push(`activeEffects[${index}].repeatSave 损坏`)
     if (raw.escapeCheck != null && effect.escapeCheck == null) issues.push(`activeEffects[${index}].escapeCheck 损坏`)
     if (raw.potency != null && effect.potency == null) issues.push(`activeEffects[${index}].potency 无效`)
+    if (isRecord(raw.source) && raw.source.spellLevel != null && effect.source.spellLevel == null) {
+      issues.push(`activeEffects[${index}].source.spellLevel 无效`)
+    }
     if (Array.isArray(raw.breakOn) && (effect.breakOn?.length ?? 0) !== new Set(raw.breakOn).size) {
       issues.push(`activeEffects[${index}].breakOn 含未知触发器`)
     }
@@ -540,6 +583,17 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
             !(DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(entry),
           )
         )) issues.push(`activeEffects[${index}].modifiers.conditionImmunities 无效`)
+        if (raw.modifiers.shillelagh != null && (
+          !isRecord(raw.modifiers.shillelagh) ||
+          typeof raw.modifiers.shillelagh.weaponId !== 'string' ||
+          raw.modifiers.shillelagh.weaponId.trim().length === 0 ||
+          raw.modifiers.shillelagh.weaponId.length > 200 ||
+          !ABILITIES.has(raw.modifiers.shillelagh.spellcastingAbility as AbilityKey) ||
+          typeof raw.modifiers.shillelagh.spellcastingModifier !== 'number' ||
+          !Number.isInteger(raw.modifiers.shillelagh.spellcastingModifier) ||
+          raw.modifiers.shillelagh.spellcastingModifier < -10 ||
+          raw.modifiers.shillelagh.spellcastingModifier > 20
+        )) issues.push(`activeEffects[${index}].modifiers.shillelagh 无效`)
       }
     }
   }

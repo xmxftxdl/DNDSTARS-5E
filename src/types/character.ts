@@ -220,6 +220,7 @@ export interface Character {
     bonusActionSpellTurnKey?: string
     leveledSpellTurnKey?: string
     concentrationSpellId?: string
+    concentrationSpellLevel?: number
     concentrationTargetIds?: string[]
     concentrationRoundsRemaining?: number
     concentrationEffectsBySource?: Record<string, string>

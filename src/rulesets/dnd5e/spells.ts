@@ -134,6 +134,8 @@ export interface Dnd5eSrdSpellDefinition {
     | 'heroism'
     | 'enlarge-reduce'
     | 'flame-blade'
+    | 'shillelagh'
+    | 'sanctuary'
   /** 法术持续期间授予的重复攻击。Host 会从 ActiveEffect 中恢复原始施法环位。 */
   sustainedAttack?: Dnd5eSustainedSpellAttackDefinition
   enlargeReduceOptions?: readonly ('enlarge' | 'reduce')[]
@@ -148,6 +150,20 @@ export interface Dnd5eSrdSpellDefinition {
 }
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
+  {
+    id: 'shillelagh', name: '橡棍术', englishName: 'Shillelagh', level: 0, school: '变化',
+    classes: ['druid'], castingTime: 'bonus-action', rangeFeet: 0,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'shillelagh', effectDurationRounds: 10,
+    description: '你手持的短棒或长棍获得自然魔力，持续1分钟。其伤害骰变为d8；以它进行近战攻击时，你可以选择使用施法关键属性或力量进行攻击检定和伤害掷骰。',
+  },
+  {
+    id: 'sanctuary', name: '庇护术', englishName: 'Sanctuary', level: 1, school: '防护',
+    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 30,
+    target: 'creature', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'sanctuary', effectDurationRounds: 10,
+    description: '保护一个生物1分钟。任何以目标为攻击或有害法术目标的生物必须先通过感知豁免，否则必须改选目标或令攻击／法术落空。区域效果不受影响；受保护生物发动攻击或施展影响敌人的法术时，效果结束。',
+  },
   {
     id: 'darkness', name: '黑暗术', englishName: 'Darkness', level: 2, school: '塑能',
     classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 60,

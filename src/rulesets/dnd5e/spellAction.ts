@@ -624,7 +624,7 @@ export function prepareDnd5eSpellCast(input: {
   const isUndeadOrConstruct = (creatureType: string | undefined) =>
     ['构装体', 'construct', '亡灵', 'undead'].includes((creatureType ?? '').toLowerCase())
   if (
-    ((spell.id === 'false-life' || spell.id === 'blur' || spell.id === 'divine-favor') && targetToken.id !== actorToken.id) ||
+    ((spell.id === 'false-life' || spell.id === 'blur' || spell.id === 'divine-favor' || spell.id === 'shillelagh') && targetToken.id !== actorToken.id) ||
     (spell.id === 'spare-the-dying' && (
       targetCombatant.currentHp !== 0 || targetCombatant.deathSaves.dead || isUndeadOrConstruct(targetCombatant.creatureType)
     )) ||
@@ -634,6 +634,11 @@ export function prepareDnd5eSpellCast(input: {
     })) ||
     (spell.id === 'hideous-laughter' && targetCombatants.some((combatant) => combatant.abilities.int <= 4)) ||
     (spell.id === 'hold-monster' && targetCombatants.some((combatant) => ['亡灵', 'undead'].includes((combatant.creatureType ?? '').toLowerCase())))
+  ) return { ok: false, reason: 'invalid-target' }
+  if (
+    spell.id === 'shillelagh' &&
+    actor.equipment?.mainWeapon?.id !== 'dnd5e-club' &&
+    actor.equipment?.mainWeapon?.id !== 'dnd5e-quarterstaff'
   ) return { ok: false, reason: 'invalid-target' }
   const healingAllocations = payload.healingAllocations?.map((allocation) => ({
     targetId: allocation.targetTokenId,

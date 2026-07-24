@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
+import { DND5E_CLUB, DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
 import {
   dnd5eEquipmentClassDamageDefinitions,
   prepareDnd5eEquipmentAttack,
@@ -11,7 +11,7 @@ import {
 } from './equipmentAttackAction'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 import { applyDnd5eInventoryMutation } from './items'
-import { createDnd5eMechanicalEffect } from './activeEffects'
+import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 
 function fighter(): Character {
   const base: Character = {
@@ -53,6 +53,49 @@ describe('D&D 5e equipment attack authority', () => {
     const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: prepared.prepared, d20: 15, damageRolls: [5] })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(12)
+  })
+
+  it('authorizes the selected Shillelagh ability and rejects it after the enchanted weapon is changed', () => {
+    const input = fixture()
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:shillelagh',
+      label: '橡棍术',
+      targetId: input.actor.id,
+      source: { kind: 'spell', actorId: input.actor.id, rulesId: 'shillelagh' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        shillelagh: {
+          weaponId: DND5E_CLUB.id,
+          spellcastingAbility: 'wis',
+          spellcastingModifier: 4,
+        },
+      },
+    })
+    input.actor.equipment = { mainWeapon: DND5E_CLUB }
+    input.actor.dnd5eCombatState = {
+      schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+      activeEffects: [effect],
+    }
+    input.action.dnd5eWeaponAttackOptions = { shillelaghAbility: 'spellcasting' }
+    const prepared = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.profile).toMatchObject({
+      attackAbility: 'wis',
+      attackModifier: 7,
+      damage: { sides: 8, bonus: 4 },
+    })
+
+    input.actor.equipment = DND5E_FIGHTER_STARTING_EQUIPMENT
+    expect(prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'invalid-action' })
   })
 
   it('separates weapon proficiency from armor proficiency for a wizard attack', () => {

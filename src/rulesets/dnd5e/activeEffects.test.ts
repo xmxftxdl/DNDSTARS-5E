@@ -98,6 +98,41 @@ describe('D&D 5e ActiveEffectInstance', () => {
     })
   })
 
+  it('normalizes Shillelagh weapon and spellcasting metadata but rejects forged values', () => {
+    const shillelagh = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:shillelagh',
+      label: '橡棍术',
+      targetId: 'druid',
+      source: { kind: 'spell', actorId: 'druid', rulesId: 'shillelagh' },
+      modifiers: {
+        shillelagh: {
+          weaponId: 'dnd5e-club',
+          spellcastingAbility: 'wis',
+          spellcastingModifier: 4,
+        },
+      },
+    })
+    expect(validateDnd5eActiveEffectsStrict([shillelagh])).toMatchObject({ ok: true })
+    expect(normalizeDnd5eActiveEffects([shillelagh])[0].modifiers?.shillelagh).toEqual({
+      weaponId: 'dnd5e-club',
+      spellcastingAbility: 'wis',
+      spellcastingModifier: 4,
+    })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...shillelagh,
+      modifiers: {
+        shillelagh: {
+          weaponId: '',
+          spellcastingAbility: 'luck',
+          spellcastingModifier: 99,
+        },
+      },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('shillelagh')]),
+    })
+  })
+
   it('normalizes a granted flying speed and rejects unsafe values', () => {
     const flight = createDnd5eMechanicalEffect({
       definitionId: 'srd-5.1:spell:fly', label: '飞行术', targetId: 'target',

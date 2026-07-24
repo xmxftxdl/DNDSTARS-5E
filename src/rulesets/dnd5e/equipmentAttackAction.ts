@@ -12,6 +12,7 @@ import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
 import {
   dnd5eMonkMartialArtsEligible,
   dnd5eOffHandWeaponAttackProfile,
+  dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponRangeFeet,
   dnd5eWearingUnproficientArmor,
@@ -131,7 +132,19 @@ export function prepareDnd5eEquipmentAttack(input: {
   const targetToken = input.map.tokens.find((token) => token.id === action.targetTokenId)
   if (!targetToken || targetToken.id === actorToken.id || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
   const offHandAttack = action.dnd5eWeaponAttackOptions?.offHandAttack === true
-  const profile = offHandAttack ? dnd5eOffHandWeaponAttackProfile(actor) : dnd5eWeaponAttackProfile(actor)
+  const shillelaghAbility = action.dnd5eWeaponAttackOptions?.shillelaghAbility
+  const shillelagh = dnd5eShillelaghAttackChoice(actor)
+  if (
+    shillelaghAbility != null &&
+    shillelaghAbility !== 'str' &&
+    shillelaghAbility !== 'spellcasting'
+  ) return { ok: false, reason: 'invalid-action' }
+  if (shillelaghAbility != null && (offHandAttack || !shillelagh)) {
+    return { ok: false, reason: 'invalid-action' }
+  }
+  const profile = offHandAttack
+    ? dnd5eOffHandWeaponAttackProfile(actor)
+    : dnd5eWeaponAttackProfile(actor, { shillelaghAbility })
   if (!profile) return { ok: false, reason: 'no-weapon' }
   if (!consumeDnd5eWeaponAmmunition(actor, profile.weaponId).ok) return { ok: false, reason: 'ammunition-unavailable' }
   if (

@@ -93,6 +93,7 @@ import {
   type Dnd5eActiveEffectBreakTrigger,
   type Dnd5eActiveEffectDuration,
   type Dnd5eActiveEffectInstance,
+  type Dnd5eActiveEffectModifiers,
   type Dnd5eActiveEffectRepeatSave,
   type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
@@ -158,6 +159,8 @@ export interface Dnd5eCombatant {
   wearingHeavyArmor: boolean
   wearingMetalArmor: boolean
   hasShield: boolean
+  /** 地图快照中的主手武器，用于验证只强化施法时所持的武器。 */
+  mainWeaponId?: string
   /** 快照中按阵营、距离、听觉与来源状态计算；不持久化到目标。 */
   countercharmSourceIds?: readonly string[]
   /** 奉献圣武士神圣光轮来源；由地图桥按敌对关系与30尺距离实时计算。 */
@@ -244,6 +247,8 @@ export interface Dnd5eCombatant {
     leveledSpellTurnKey?: string
     /** The concentration spell currently maintained by this combatant. */
     concentrationSpellId?: string
+    /** Authoritative slot level of the currently maintained spell. */
+    concentrationSpellLevel?: number
     /** Combatants currently affected by the maintained concentration spell. */
     concentrationTargetIds?: string[]
     /** Remaining duration in combat rounds for the maintained concentration spell. */
@@ -949,7 +954,7 @@ export type Dnd5eCombatEvent =
   | { type: 'hit-points-reduced-to-zero'; sourceId: string; targetId: string; hpBefore: number }
   | { type: 'instant-death'; sourceId: string; targetId: string; hpBefore: number }
   | { type: 'death-ward-triggered'; targetId: string; trigger: 'damage' | 'instant-death' }
-  | { type: 'hostile-targeting-prevented'; actorId: string; targetId: string; source: 'tranquility' | 'nature-sanctuary' }
+  | { type: 'hostile-targeting-prevented'; actorId: string; targetId: string; source: 'tranquility' | 'nature-sanctuary' | 'sanctuary' }
   | { type: 'ability-check-resolved'; actorId: string; ability: AbilityKey; skill?: string; d20: number; modifier: number; total: number; mode: D20RollMode; reliableTalentApplied: boolean; indomitableMightApplied?: boolean; bardicInspirationApplied?: number; peerlessSkillApplied?: number; darkOnesOwnLuckApplied?: number; cuttingWordsApplied?: number; strokeOfLuckApplied?: boolean; dc?: number; success?: boolean }
   | { type: 'object-action-taken'; actorId: string; action: 'use-object' | 'interact-object'; interactionId?: string }
   | { type: 'hide-resolved'; actorId: string; d20: number; total: number }
@@ -1266,6 +1271,7 @@ export function applyDnd5eStandardConditionEffect(
     breakOn?: Dnd5eActiveEffectInstance['breakOn']
     sourceKind?: Dnd5eActiveEffectInstance['source']['kind']
     pluginId?: string
+    spellLevel?: number
   },
   events: Dnd5eCombatEvent[],
 ): boolean {
@@ -1277,6 +1283,7 @@ export function applyDnd5eStandardConditionEffect(
     source: {
       kind: input.sourceKind ?? 'spell', actorId: source?.id,
       actorName: source?.name, rulesId: input.rulesId, pluginId: input.pluginId,
+      spellLevel: input.spellLevel,
     },
     targetId: target.id,
     duration: input.duration,
@@ -1327,9 +1334,11 @@ function applyDnd5eMechanicalStatusEffect(
     sizeRankDelta?: -1 | 1
     strengthRollMode?: 'advantage' | 'disadvantage'
     weaponDamageD4?: 'add' | 'subtract'
+    shillelagh?: Dnd5eActiveEffectModifiers['shillelagh']
     preventReactions?: boolean
     damageResistance?: Dnd5eDamageType
     conditionImmunities?: readonly Dnd5eStandardConditionId[]
+    spellLevel?: number
     potency?: number
     stackingPolicy?: Dnd5eActiveEffectInstance['stackingPolicy']
     stackingKey?: string
@@ -1344,7 +1353,13 @@ function applyDnd5eMechanicalStatusEffect(
       : dnd5eActiveEffectId(input.definitionId, source.id, target.id),
     definitionId: input.definitionId,
     label: input.label,
-    source: { kind: 'spell', actorId: source.id, actorName: source.name, rulesId: input.rulesId ?? input.definitionId },
+    source: {
+      kind: 'spell',
+      actorId: source.id,
+      actorName: source.name,
+      rulesId: input.rulesId ?? input.definitionId,
+      spellLevel: input.spellLevel,
+    },
     targetId: target.id,
     duration: input.duration,
     repeatSave: input.repeatSave,
@@ -1360,6 +1375,7 @@ function applyDnd5eMechanicalStatusEffect(
       sizeRankDelta: input.sizeRankDelta,
       strengthRollMode: input.strengthRollMode,
       weaponDamageD4: input.weaponDamageD4,
+      shillelagh: input.shillelagh,
       preventReactions: input.preventReactions,
       damageResistance: input.damageResistance,
       conditionImmunities: input.conditionImmunities,
@@ -1405,6 +1421,7 @@ function applyDnd5eRulesCondition(
     breakOn?: Dnd5eActiveEffectInstance['breakOn']
     appliedTurnKey?: string
     sourceKind?: Dnd5eActiveEffectInstance['source']['kind']
+    spellLevel?: number
   },
   events: Dnd5eCombatEvent[],
 ): boolean {
@@ -1417,6 +1434,7 @@ function applyDnd5eRulesCondition(
       breakOn: input.breakOn,
       appliedTurnKey: input.appliedTurnKey,
       sourceKind: input.sourceKind ?? 'feature',
+      spellLevel: input.spellLevel,
     }, events)
   }
   const incoming = createDnd5eMechanicalEffect({
@@ -1426,7 +1444,7 @@ function applyDnd5eRulesCondition(
     kind: 'custom',
     source: {
       kind: input.sourceKind ?? 'feature', actorId: source?.id,
-      actorName: source?.name, rulesId: input.rulesId,
+      actorName: source?.name, rulesId: input.rulesId, spellLevel: input.spellLevel,
     },
     targetId: target.id,
     duration: input.duration ?? { type: 'permanent' },
@@ -2865,6 +2883,7 @@ function applyDamage(
     } else {
       target.concentrating = false
       target.classState.concentrationSpellId = undefined
+      target.classState.concentrationSpellLevel = undefined
       target.classState.concentrationTargetIds = undefined
       target.classState.concentrationRoundsRemaining = undefined
       target.classState.huntersMarkTargetId = undefined
@@ -2934,6 +2953,7 @@ function reduceHitPointsToZero(
     } else {
       target.concentrating = false
       target.classState.concentrationSpellId = undefined
+      target.classState.concentrationSpellLevel = undefined
       target.classState.concentrationTargetIds = undefined
       target.classState.concentrationRoundsRemaining = undefined
       target.classState.huntersMarkTargetId = undefined
@@ -2997,6 +3017,7 @@ export function endDnd5eConcentration(
   }
   actor.concentrating = false
   actor.classState.concentrationSpellId = undefined
+  actor.classState.concentrationSpellLevel = undefined
   actor.classState.concentrationTargetIds = undefined
   actor.classState.concentrationRoundsRemaining = undefined
   actor.classState.huntersMarkTargetId = undefined
@@ -3078,6 +3099,7 @@ function beginDnd5eConcentration(
   targetIds: readonly string[],
   rounds: number,
   events: Dnd5eCombatEvent[],
+  spellLevel?: number,
 ): void {
   if (actor.concentrating || actor.classState.concentrationSpellId) {
     endDnd5eConcentration(state, actor, events)
@@ -3085,6 +3107,9 @@ function beginDnd5eConcentration(
   const uniqueTargetIds = [...new Set(targetIds)]
   actor.concentrating = true
   actor.classState.concentrationSpellId = spellId
+  actor.classState.concentrationSpellLevel = Number.isInteger(spellLevel) && spellLevel! >= 0 && spellLevel! <= 9
+    ? spellLevel
+    : undefined
   actor.classState.concentrationTargetIds = uniqueTargetIds
   actor.classState.concentrationRoundsRemaining = Math.max(1, Math.floor(rounds))
   for (const targetId of uniqueTargetIds) {
@@ -3281,7 +3306,7 @@ function triggerHurlThroughHell(input: {
 }
 
 export interface Dnd5eTranquilityWardCheck {
-  source: 'tranquility' | 'nature-sanctuary'
+  source: 'tranquility' | 'nature-sanctuary' | 'sanctuary'
   saveDc: number
   saveModifier: number
   saveMode: D20RollMode
@@ -3302,19 +3327,29 @@ export function dnd5eTranquilityWardCheck(
   state?: Dnd5eHeadlessCombatState,
   includeNatureSanctuary = true,
 ): Dnd5eTranquilityWardCheck | undefined {
+  const sanctuary = reconciledDnd5eActiveEffects(target).find((effect) =>
+    effect.definitionId === 'srd-5.1:spell:sanctuary' &&
+    effect.source.rulesId === 'sanctuary' &&
+    Number.isInteger(effect.potency) &&
+    (effect.potency ?? 0) > 0,
+  )
   const natureSanctuary = includeNatureSanctuary &&
     dnd5eCombatantClassLevel(target, 'druid') >= 14 && dnd5eCombatantHasSubclass(target, 'druid', 'land') &&
     dnd5eNatureSanctuaryAttackerEligible(attacker) &&
     (attacker.classState.natureSanctuaryImmunityRoundsByTarget?.[target.id] ?? 0) <= 0
-  const source = target.classState.tranquilityActive
-    ? 'tranquility' as const
-    : natureSanctuary
-      ? 'nature-sanctuary' as const
-      : undefined
+  const source = sanctuary
+    ? 'sanctuary' as const
+    : target.classState.tranquilityActive
+      ? 'tranquility' as const
+      : natureSanctuary
+        ? 'nature-sanctuary' as const
+        : undefined
   if (!source) return undefined
   return {
     source,
-    saveDc: 8 + target.proficiencyBonus + rules.abilityModifier(target.abilities.wis),
+    saveDc: source === 'sanctuary'
+      ? sanctuary!.potency!
+      : 8 + target.proficiencyBonus + rules.abilityModifier(target.abilities.wis),
     saveModifier: attacker.savingThrowBonuses.wis ?? rules.abilityModifier(attacker.abilities.wis),
     saveMode: dnd5eSavingThrowMode(attacker, 'wis', { effectVisible: true }),
     blessed: state ? dnd5eCombatantHasConcentrationEffect(state, attacker.id, 'bless') : false,
@@ -3322,10 +3357,32 @@ export function dnd5eTranquilityWardCheck(
   }
 }
 
-function endTranquilityForHostileAction(actor: Dnd5eCombatant, events: Dnd5eCombatEvent[]): void {
-  if (!actor.classState.tranquilityActive) return
-  actor.classState.tranquilityActive = undefined
-  events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'tranquility', active: false })
+function endTranquilityForHostileAction(
+  actor: Dnd5eCombatant,
+  events: Dnd5eCombatEvent[],
+  reason: 'makes-attack' | 'casts-spell',
+): void {
+  if (actor.classState.tranquilityActive) {
+    actor.classState.tranquilityActive = undefined
+    events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'tranquility', active: false })
+  }
+  const removed = removeDnd5eEffectsByPredicate(
+    actor,
+    (effect) =>
+      effect.definitionId === 'srd-5.1:spell:sanctuary' &&
+      effect.source.rulesId === 'sanctuary',
+    reason,
+    events,
+  )
+  if (removed.length > 0) {
+    events.push({
+      type: 'class-state-changed',
+      actorId: actor.id,
+      targetId: actor.id,
+      stateKey: 'sanctuary',
+      active: false,
+    })
+  }
 }
 
 function passesTranquilityWard(
@@ -3633,7 +3690,7 @@ export function dnd5eTargetArmorClassForAttack(
   const mageArmor = !target.wearingArmor && target.classState.activeEffects?.some((effect) =>
     effect.definitionId === 'srd-5.1:spell:mage-armor'
   ) === true
-  const mageArmorClass = 13 + rules.abilityModifier(target.abilities.dex)
+  const mageArmorClass = 13 + rules.abilityModifier(target.abilities.dex) + (target.hasShield ? 2 : 0)
   const baseArmorClass = Math.max(
     target.armorClass,
     barkskin ? 16 : 0,
@@ -4156,7 +4213,7 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
     if (!spend(actor, resource)) return fail(state, events, resource === 'reaction' ? 'reaction-unavailable' : resource === 'bonusAction' ? 'bonus-action-unavailable' : 'action-unavailable')
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource })
   }
-  endTranquilityForHostileAction(actor, events)
+  endTranquilityForHostileAction(actor, events, 'makes-attack')
   if (attackingFromHidden) {
     actor.classState.hiddenCheckTotal = undefined
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'hidden', active: false })
@@ -4648,7 +4705,7 @@ function resolveSpellCast(
     return type === 'undead' || type.includes('亡灵') || type === 'construct' || type.includes('构装')
   }
   if (
-    ((spell.id === 'false-life' || spell.id === 'blur' || spell.id === 'divine-favor') && target.id !== actor.id) ||
+    ((spell.id === 'false-life' || spell.id === 'blur' || spell.id === 'divine-favor' || spell.id === 'shillelagh') && target.id !== actor.id) ||
     (spell.id === 'spare-the-dying' && (
       target.currentHp !== 0 || target.deathSaves.dead || isUndeadOrConstructForSpell(target)
     )) ||
@@ -4661,6 +4718,11 @@ function resolveSpellCast(
       return type === 'undead' || type.includes('亡灵')
     }))
   ) return fail(state, events, 'invalid-target')
+  if (
+    spell.id === 'shillelagh' &&
+    actor.mainWeaponId !== 'dnd5e-club' &&
+    actor.mainWeaponId !== 'dnd5e-quarterstaff'
+  ) return fail(state, events, 'invalid-class-feature')
   if (
     (spell.conditionOptions?.length && (!action.conditionChoice || !spell.conditionOptions.includes(action.conditionChoice))) ||
     (!spell.conditionOptions?.length && action.conditionChoice != null)
@@ -4867,7 +4929,7 @@ function resolveSpellCast(
     }
     if (!sustainedAttack && spell.sustainedAttack?.origin === 'persistent-area') {
       if (actor.classState.concentrationSpellId !== spell.id) {
-        beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events)
+        beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events, action.slotLevel)
       }
       applyDnd5eMechanicalStatusEffect(actor, actor, {
         definitionId: `srd-5.1:spell:${spell.id}`,
@@ -4879,6 +4941,7 @@ function resolveSpellCast(
           concentrationId: spell.id,
         },
         appliedTurnKey: turnKey,
+        spellLevel: action.slotLevel,
         potency: action.slotLevel,
         stackingPolicy: 'replace',
         stackingKey: `sustained-spell:${spell.id}`,
@@ -4900,6 +4963,7 @@ function resolveSpellCast(
           tickOn: 'target-turn-end',
         },
         appliedTurnKey: turnKey,
+        spellLevel: action.slotLevel,
         potency: action.slotLevel,
         stackingPolicy: 'stack',
         stackingKey: sustainedEffectAreaId,
@@ -4955,7 +5019,7 @@ function resolveSpellCast(
   const allowedHostileTargetIds = new Set(requestedTargetIds)
   const includeNatureSanctuary = usesSpellAttackRoll
   if (spell.target === 'hostile' || sustainedAttack) {
-    endTranquilityForHostileAction(actor, events)
+    endTranquilityForHostileAction(actor, events, 'casts-spell')
     if (spell.effect !== 'attack-save-debuff' && requestedTargetIds.length > 1) {
       if (action.tranquilitySave) return fail(state, events, 'invalid-dice')
       const wardedTargets = targets.filter((candidate) =>
@@ -5000,7 +5064,7 @@ function resolveSpellCast(
       return fail(state, events, 'invalid-dice')
     }
     if (spell.concentration) {
-      beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events)
+      beginDnd5eConcentration(state, actor, spell.id, [], concentrationDurationRounds, events, action.slotLevel)
     }
     events.push({
       type: 'class-state-changed', actorId: actor.id,
@@ -5020,7 +5084,7 @@ function resolveSpellCast(
       if (!spellEffects.has(key)) {
         spellEffects.set(key, {
           spellId: catalog.id,
-          spellLevel: catalog.level,
+          spellLevel: effect.source.spellLevel ?? catalog.level,
           effectId: effect.id,
           sourceActorId: effect.source.actorId,
         })
@@ -5031,9 +5095,12 @@ function resolveSpellCast(
       if (!catalog) continue
       const key = `${sourceActorId}\u0000${catalog.id}`
       if (!spellEffects.has(key)) {
+        const source = state.combatants[sourceActorId]
         spellEffects.set(key, {
           spellId: catalog.id,
-          spellLevel: catalog.level,
+          spellLevel: source?.classState.concentrationSpellId === catalog.id
+            ? source.classState.concentrationSpellLevel ?? catalog.level
+            : catalog.level,
           effectId: `concentration:${sourceActorId}:${catalog.id}`,
           sourceActorId,
         })
@@ -5088,6 +5155,7 @@ function resolveSpellCast(
       [target.id],
       concentrationDurationRounds,
       events,
+      action.slotLevel,
     )
     actor.classState.huntersMarkTargetId = target.id
     events.push({ type: 'class-state-changed', actorId: actor.id, stateKey: 'hunters-mark', active: true, targetId: target.id })
@@ -5103,6 +5171,7 @@ function resolveSpellCast(
       [target.id],
       concentrationDurationRounds,
       events,
+      action.slotLevel,
     )
     events.push({ type: 'class-state-changed', actorId: actor.id, targetId: target.id, stateKey: spell.id, active: true })
     return finishSpellCast()
@@ -5117,6 +5186,7 @@ function resolveSpellCast(
       requestedTargetIds,
       concentrationDurationRounds,
       events,
+      action.slotLevel,
     )
     for (const affected of targets) {
       events.push({ type: 'class-state-changed', actorId: actor.id, targetId: affected!.id, stateKey: spell.id, active: true })
@@ -5205,6 +5275,7 @@ function resolveSpellCast(
       affectedTargetIds,
       concentrationDurationRounds,
       events,
+      action.slotLevel,
     )
     for (const affectedTargetId of affectedTargetIds) {
       events.push({ type: 'class-state-changed', actorId: actor.id, targetId: affectedTargetId, stateKey: spell.id, active: true })
@@ -5338,6 +5409,7 @@ function resolveSpellCast(
         [...affectedTargetIds],
         concentrationDurationRounds,
         events,
+        action.slotLevel,
       )
     }
     for (const affectedTarget of targets) {
@@ -5360,6 +5432,7 @@ function resolveSpellCast(
           id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:invisible`, actor.id, affected.id),
           rulesId: spell.id,
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
+          spellLevel: action.slotLevel,
           condition: 'invisible',
           duration,
           breakOn: spell.appliedEffect === 'invisibility' ? ['makes-attack', 'casts-spell'] : undefined,
@@ -5387,12 +5460,15 @@ function resolveSpellCast(
             ? '变巨/缩小术：变巨'
             : '变巨/缩小术：缩小',
           'flame-blade': '火焰刀：可用动作进行近战法术攻击',
+          shillelagh: '橡棍术：短棒或长棍的伤害骰变为d8，并可使用施法属性攻击',
+          sanctuary: '庇护术：成为攻击或有害法术目标前，攻击者须通过感知豁免',
         } as const
         applyDnd5eMechanicalStatusEffect(affected, actor, {
           definitionId: `srd-5.1:spell:${spell.appliedEffect}`,
           rulesId: spell.id,
           label: labels[spell.appliedEffect],
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
+          spellLevel: action.slotLevel,
           duration,
           speedBonusFeet: spell.appliedEffect === 'longstrider' ? 10 : undefined,
           flySpeedFeet: spell.appliedEffect === 'fly' ? 60 : undefined,
@@ -5406,12 +5482,21 @@ function resolveSpellCast(
           weaponDamageD4: spell.appliedEffect === 'enlarge-reduce'
             ? action.enlargeReduceChoice === 'enlarge' ? 'add' : 'subtract'
             : undefined,
+          shillelagh: spell.appliedEffect === 'shillelagh' && actor.mainWeaponId
+            ? {
+                weaponId: actor.mainWeaponId,
+                spellcastingAbility: spellcasting.ability,
+                spellcastingModifier: rules.abilityModifier(actor.abilities[spellcasting.ability]),
+              }
+            : undefined,
           damageResistance: spell.appliedEffect === 'protection-from-energy' ? action.effectDamageType : undefined,
           conditionImmunities: spell.appliedEffect === 'heroism' ? ['frightened'] : undefined,
           potency: spell.appliedEffect === 'heroism'
             ? Math.max(0, rules.abilityModifier(actor.abilities[spellcasting.ability]))
             : spell.appliedEffect === 'flame-blade'
               ? action.slotLevel
+              : spell.appliedEffect === 'sanctuary'
+                ? 8 + actor.proficiencyBonus + rules.abilityModifier(actor.abilities[spellcasting.ability])
               : undefined,
           stackingPolicy: spell.appliedEffect === 'heroism' ? 'stack' : undefined,
           stackingKey: spell.appliedEffect === 'enlarge-reduce'
@@ -5488,6 +5573,7 @@ function resolveSpellCast(
             id: dnd5eActiveEffectId('srd-5.1:spell:sleep:unconscious', actor.id, affected.id),
             definitionId: 'srd-5.1:spell:sleep:unconscious',
             rulesId: 'sleep',
+            spellLevel: action.slotLevel,
             condition: 'unconscious',
             duration: { type: 'rounds', remainingRounds: sleepDurationRounds, tickOn: 'target-turn-end' },
             appliedTurnKey,
@@ -5497,6 +5583,7 @@ function resolveSpellCast(
             id: dnd5eActiveEffectId('srd-5.1:spell:color-spray:blinded', actor.id, affected.id),
             definitionId: 'srd-5.1:spell:color-spray:blinded',
             rulesId: 'color-spray',
+            spellLevel: action.slotLevel,
             condition: 'blinded',
             duration: {
               type: 'until-turn-boundary',
@@ -5511,6 +5598,7 @@ function resolveSpellCast(
           id: dnd5eActiveEffectId('srd-5.1:spell:sleep:fall-prone', actor.id, affected.id),
           definitionId: 'srd-5.1:spell:sleep:fall-prone',
           rulesId: 'sleep-fall-prone',
+          spellLevel: action.slotLevel,
           condition: 'prone',
           duration: { type: 'permanent' },
           appliedTurnKey,
@@ -5685,6 +5773,7 @@ function resolveSpellCast(
         definitionId: `srd-5.1:spell:${spell.id}:speed-penalty`,
         label: '冷冻射线：速度降低',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         speedPenaltyFeet: 10,
         duration: { type: 'until-turn-boundary', boundary: 'source-turn-start', appliedTurnKey: classFeatureTurnKey(state, actor.id) },
       }, events)
@@ -5702,6 +5791,7 @@ function resolveSpellCast(
         definitionId: `srd-5.1:spell:${spell.id}:reaction-lock`,
         label: '电爪：无法执行反应',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         preventReactions: true,
         duration: { type: 'until-turn-boundary', boundary: 'target-turn-start', appliedTurnKey: classFeatureTurnKey(state, actor.id) },
       }, events)
@@ -5714,6 +5804,7 @@ function resolveSpellCast(
         definitionId: 'srd-5.1:spell:guiding-bolt:attack-advantage',
         label: '曳光弹：下一次攻击具有优势',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         duration: {
           type: 'until-turn-boundary', boundary: 'source-turn-end',
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
@@ -5733,6 +5824,7 @@ function resolveSpellCast(
         definitionId: 'srd-5.1:spell:chill-touch:no-healing',
         label: '冻寒之触：无法恢复生命值',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         duration: noHealingDuration,
       }, events)
       const creatureType = (affectedTarget.creatureType ?? '').trim().toLowerCase()
@@ -5741,6 +5833,7 @@ function resolveSpellCast(
           definitionId: 'srd-5.1:spell:chill-touch:undead-disadvantage',
           label: '冻寒之触：对施法者的攻击具有劣势',
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
+          spellLevel: action.slotLevel,
           duration: {
             type: 'until-turn-boundary', boundary: 'source-turn-end',
             appliedTurnKey: classFeatureTurnKey(state, actor.id),
@@ -5774,7 +5867,13 @@ function resolveSpellCast(
       definitionId,
       label: `${spell.name}：后续伤害`,
       kind: 'debuff',
-      source: { kind: 'spell', actorId: actor.id, actorName: actor.name, rulesId: spell.id },
+      source: {
+        kind: 'spell',
+        actorId: actor.id,
+        actorName: actor.name,
+        rulesId: spell.id,
+        spellLevel: action.slotLevel,
+      },
       targetId: affectedTarget.id,
       duration: { type: 'until-turn-boundary', boundary: 'target-turn-end', appliedTurnKey },
       appliedTurnKey,
@@ -5803,6 +5902,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:blinded`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition: 'blinded',
         duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
         repeatSave: { ability: 'con', dc, timing: 'target-turn-end', onSuccess: 'remove' },
@@ -5816,6 +5916,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:${condition}`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition,
         duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
         repeatSave: { ability: 'con', dc, timing: 'target-turn-end', onSuccess: 'remove' },
@@ -5831,6 +5932,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:prone`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition: 'prone',
         duration,
       }, events)
@@ -5838,6 +5940,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:incapacitated`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition: 'incapacitated',
         duration,
       }, events)
@@ -5846,6 +5949,7 @@ function resolveSpellCast(
         rulesId: spell.id,
         label: '狂笑术：重复豁免',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         duration,
         repeatSave: {
           ability: 'wis', dc, timing: 'target-turn-end', onSuccess: 'remove',
@@ -5859,6 +5963,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:paralyzed`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition: 'paralyzed',
         duration: {
           type: 'concentration', sourceActorId: actor.id,
@@ -5872,6 +5977,7 @@ function resolveSpellCast(
       applyDnd5eRulesCondition(affectedTarget, actor, {
         condition: 'banished', rulesId: spell.id, sourceKind: 'spell',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         duration: {
           type: 'concentration', sourceActorId: actor.id,
           concentrationId: spell.id, remainingRounds: concentrationDurationRounds,
@@ -5881,6 +5987,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:incapacitated`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition: 'incapacitated',
         duration: {
           type: 'concentration', sourceActorId: actor.id,
@@ -5898,6 +6005,7 @@ function resolveSpellCast(
         definitionId: 'srd-5.1:spell:faerie-fire',
         label: '妖火：显形',
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         duration: {
           type: 'concentration', sourceActorId: actor.id,
           concentrationId: spell.id, remainingRounds: concentrationDurationRounds,
@@ -5914,6 +6022,7 @@ function resolveSpellCast(
         id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:frightened`, actor.id, affectedTarget.id),
         rulesId: spell.id,
         appliedTurnKey: classFeatureTurnKey(state, actor.id),
+        spellLevel: action.slotLevel,
         condition: 'frightened',
         duration: {
           type: 'concentration', sourceActorId: actor.id,
@@ -6126,6 +6235,7 @@ function resolveSpellCast(
           id: dnd5eActiveEffectId(`srd-5.1:spell:${spell.id}:stunned`, actor.id, affectedTarget!.id),
           rulesId: spell.id,
           appliedTurnKey: classFeatureTurnKey(state, actor.id),
+          spellLevel: action.slotLevel,
           condition: 'stunned',
           duration: { type: 'permanent' },
           repeatSave: { ability: 'con', dc: spellSaveDc, timing: 'target-turn-end', onSuccess: 'remove' },
@@ -6267,6 +6377,7 @@ function resolveSpellCast(
             failedEffectTargets.map(({ target: failedTarget }) => failedTarget.id),
             concentrationDurationRounds,
             events,
+            action.slotLevel,
           )
         }
         for (const resolvedTarget of failedEffectTargets) {
@@ -6353,7 +6464,15 @@ function resolveSpellCast(
       }
       if (!save.success) {
         if (!sustainedAttack && spell.concentration) {
-          beginDnd5eConcentration(state, actor, spell.id, [target.id], concentrationDurationRounds, events)
+          beginDnd5eConcentration(
+            state,
+            actor,
+            spell.id,
+            [target.id],
+            concentrationDurationRounds,
+            events,
+            action.slotLevel,
+          )
         }
         applyFailedSaveSpellEffect(target, spellSaveDc)
       }
@@ -7324,7 +7443,7 @@ function resolveMonkUnarmedBonus(
   if (!spend(actor, 'bonusAction')) return fail(state, events, 'bonus-action-unavailable')
   events.push({ type: 'turn-resource-spent', actorId: actor.id, resource: 'bonusAction' })
   if (action.mode === 'flurry') spendClassResource(actor, 'dnd5e-ki', events)
-  endTranquilityForHostileAction(actor, events)
+  endTranquilityForHostileAction(actor, events, 'makes-attack')
   const attackingFromHidden = actor.classState.hiddenCheckTotal != null
   if (attackingFromHidden) {
     actor.classState.hiddenCheckTotal = undefined
@@ -7619,7 +7738,7 @@ function resolveMonkDeflectMissilesReturn(
     return { ok: true, state, events }
   }
   if (!spendClassResource(actor, 'dnd5e-ki', events)) return fail(state, events, 'class-resource-unavailable')
-  endTranquilityForHostileAction(actor, events)
+  endTranquilityForHostileAction(actor, events, 'makes-attack')
 
   const requestedMode = action.mode ?? 'normal'
   const targetGrantsAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
@@ -7927,7 +8046,15 @@ function resolveAdjudicatedSpell(
   }
 
   if (concentrationRounds != null) {
-    beginDnd5eConcentration(state, actor, action.spellId, affectedTargetIds, concentrationRounds, events)
+    beginDnd5eConcentration(
+      state,
+      actor,
+      action.spellId,
+      affectedTargetIds,
+      concentrationRounds,
+      events,
+      action.slotLevel,
+    )
   }
   events.push({
     type: 'adjudicated-spell-resolved', actorId: actor.id,

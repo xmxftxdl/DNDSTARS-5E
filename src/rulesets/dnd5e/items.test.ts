@@ -17,6 +17,7 @@ import { DND5E_LONGSWORD } from './equipment'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createCombatTransaction } from '../../lib/combatTransaction'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 import type { Character } from '../../types/character'
 
 function character(id: string, currentHp = 10) {
@@ -89,6 +90,35 @@ describe('SRD 5.1 inventory', () => {
       equippedSlot: 'mainWeapon',
       quantity: 1,
     })
+  })
+
+  it('ends Mage Armor when the target equips body armor', () => {
+    const mageArmor = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:mage-armor',
+      label: '法师护甲',
+      targetId: 'wizard',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'mage-armor', spellLevel: 1 },
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+    })
+    const wizard = {
+      ...character('wizard'),
+      dnd5eCombatState: { activeEffects: [mageArmor], conditions: [] },
+    }
+    const granted = applyDnd5eInventoryMutation([wizard], {
+      type: 'grant',
+      characterId: wizard.id,
+      templateId: 'srd-5.1:equipment:dnd5e-leather-armor',
+      quantity: 1,
+    })
+    expect(granted.ok).toBe(true)
+    const armor = inventoryEntry(granted.characters[0], 'srd-5.1:equipment:dnd5e-leather-armor')
+    const equipped = applyDnd5eInventoryMutation(granted.characters, {
+      type: 'equip',
+      characterId: wizard.id,
+      instanceId: armor.instanceId,
+    })
+    expect(equipped.ok).toBe(true)
+    expect(equipped.characters[0].dnd5eCombatState?.activeEffects ?? []).toEqual([])
   })
 
   it('grants, stacks and authoritatively uses a healing potion', () => {

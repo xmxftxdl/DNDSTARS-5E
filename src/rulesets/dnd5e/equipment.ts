@@ -11,6 +11,7 @@ import {
 } from './classes'
 import { dnd5eEquippedEffectTotal, dnd5eWeaponEffectTotal } from './equipmentEffects'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
+import { normalizeDnd5eActiveEffects } from './activeEffects'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
   id: 'dnd5e-longsword',
@@ -403,7 +404,33 @@ export function dnd5eArmorClass(character: Character): number {
   return Math.max(0, Math.floor(armorClass))
 }
 
-export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttackProfile | undefined {
+export interface Dnd5eShillelaghAttackChoice {
+  weaponId: string
+  spellcastingAbility: AbilityKey
+  spellcastingModifier: number
+  strengthModifier: number
+}
+
+export function dnd5eShillelaghAttackChoice(character: Character): Dnd5eShillelaghAttackChoice | undefined {
+  const weaponId = character.equipment?.mainWeapon?.id
+  if (weaponId !== 'dnd5e-club' && weaponId !== 'dnd5e-quarterstaff') return undefined
+  const effect = normalizeDnd5eActiveEffects(character.dnd5eCombatState?.activeEffects).find((candidate) =>
+    candidate.definitionId === 'srd-5.1:spell:shillelagh' &&
+    candidate.source.rulesId === 'shillelagh' &&
+    candidate.modifiers?.shillelagh?.weaponId === weaponId,
+  )
+  const shillelagh = effect?.modifiers?.shillelagh
+  if (!shillelagh) return undefined
+  return {
+    ...shillelagh,
+    strengthModifier: rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str))),
+  }
+}
+
+export function dnd5eWeaponAttackProfile(
+  character: Character,
+  options?: { shillelaghAbility?: 'str' | 'spellcasting' },
+): Dnd5eWeaponAttackProfile | undefined {
   const weapon = character.equipment?.mainWeapon
   const data = weapon?.dnd5e
   if (!weapon || !data || data.kind !== 'weapon') return undefined
@@ -411,10 +438,20 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
   if (properties.some((property) => property.includes('双手')) && character.equipment?.offHand) return undefined
   const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
-  const ability: AbilityKey = data.attackAbility === 'finesse'
-    ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
-    : data.attackAbility
-  const abilityModifier = ability === 'dex' ? dexterityModifier : strengthModifier
+  const shillelagh = dnd5eShillelaghAttackChoice(character)
+  const useSpellcastingAbility = shillelagh && options?.shillelaghAbility === 'spellcasting'
+  const ability: AbilityKey = useSpellcastingAbility
+    ? shillelagh.spellcastingAbility
+    : shillelagh
+      ? 'str'
+      : data.attackAbility === 'finesse'
+        ? (dexterityModifier > strengthModifier ? 'dex' : 'str')
+        : data.attackAbility
+  const abilityModifier = useSpellcastingAbility
+    ? shillelagh.spellcastingModifier
+    : ability === 'dex'
+      ? dexterityModifier
+      : strengthModifier
   const proficient = dnd5eWeaponProficient(character, weapon)
   const proficiency = proficient ? rules.proficiencyBonus(Math.min(20, Math.max(1, character.level))) : 0
   const styles = dnd5eSelectedFightingStyles(character)
@@ -456,7 +493,7 @@ export function dnd5eWeaponAttackProfile(character: Character): Dnd5eWeaponAttac
     properties,
     damage: {
       ...data.damage,
-      sides: versatileSides > 0 && usesTwoHands ? versatileSides : data.damage.sides,
+      sides: shillelagh ? 8 : versatileSides > 0 && usesTwoHands ? versatileSides : data.damage.sides,
       bonus: abilityModifier + duelingBonus + rageBonus + equipmentDamageBonus,
     },
     reachFeet: data.reachFeet,

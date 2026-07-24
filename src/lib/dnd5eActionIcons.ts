@@ -117,6 +117,7 @@ const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = {
   'ray-of-frost': '/assets/icons/ray-of-frost-spell-action.png',
   prestidigitation: '/assets/icons/prestidigitation-spell-action.png',
   'eldritch-blast': '/assets/icons/eldritch-blast-spell-action.png',
+  'mage-hand': '/assets/icons/mage-hand-spell-action.png',
   thaumaturgy: '/assets/icons/thaumaturgy-spell-action.png',
   'produce-flame': '/assets/icons/produce-flame-spell-action.png',
   guidance: '/assets/icons/guidance-spell-action.png',
@@ -124,6 +125,14 @@ const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = {
   'acid-splash': '/assets/icons/acid-splash-spell-action.png',
   resistance: '/assets/icons/resistance-spell-action.png',
   'spare-the-dying': '/assets/icons/spare-the-dying-spell-action.png',
+  'dancing-lights': '/assets/icons/dancing-lights-spell-action.png',
+  shillelagh: '/assets/icons/shillelagh-spell-action.png',
+  mending: '/assets/icons/mending-spell-action.png',
+  'vicious-mockery': '/assets/icons/vicious-mockery-spell-action.png',
+  sanctuary: '/assets/icons/sanctuary-spell-action.png',
+  longstrider: '/assets/icons/longstrider-spell-action.png',
+  'speak-with-animals': '/assets/icons/speak-with-animals-spell-action.png',
+  'mage-armor': '/assets/icons/mage-armor-spell-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [

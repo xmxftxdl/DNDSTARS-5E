@@ -25,6 +25,7 @@ import { DND5E_SRD_MAGIC_ITEM_TEMPLATES } from './magicItems'
 import { dnd5ePluginItemDefinition, registeredDnd5ePluginItems } from './pluginApi'
 import { DND5E_SRD_CLASS_DEFINITIONS, dnd5eClassDefinition, dnd5eIgnoresMagicItemRequirements } from './classes'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
+import { projectDnd5eActiveEffectState } from './activeEffects'
 
 const SRD_SOURCE = { book: 'SRD 5.1' as const, license: 'CC BY 4.0' as const }
 const EMPTY_CURRENCY: Dnd5eCurrencyWallet = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 }
@@ -1022,10 +1023,27 @@ function equipEntry(character: Character, entry: Dnd5eInventoryEntry): Character
         ? undefined
         : candidate.equippedSlot,
   }))
-  return {
+  const nextCharacter: Character = {
     ...character,
     equipment: { ...(character.equipment ?? {}), [slot]: { ...equipment } },
     dnd5eInventory: inventoryWithEntries(inventory, entries),
+  }
+  if (equipment.dnd5e?.kind !== 'armor' || !character.dnd5eCombatState?.activeEffects) {
+    return nextCharacter
+  }
+  const effectsWithoutMageArmor = character.dnd5eCombatState.activeEffects.filter((effect) =>
+    effect.definitionId !== 'srd-5.1:spell:mage-armor',
+  )
+  if (effectsWithoutMageArmor.length === character.dnd5eCombatState.activeEffects.length) {
+    return nextCharacter
+  }
+  const projected = projectDnd5eActiveEffectState(effectsWithoutMageArmor)
+  return {
+    ...nextCharacter,
+    dnd5eCombatState: {
+      ...character.dnd5eCombatState,
+      activeEffects: projected.activeEffects,
+    },
   }
 }
 

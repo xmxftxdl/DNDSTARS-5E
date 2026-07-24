@@ -3996,6 +3996,53 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }))
   })
 
+  it('uses a Sanctuary spell effect for targeting saves and ends it when the warded creature attacks', () => {
+    const attacker = fighter('attacker', 20, { savingThrowBonuses: { wis: 1 } })
+    const warded = fighter('warded', 10, {
+      classState: {
+        activeEffects: [createDnd5eMechanicalEffect({
+          definitionId: 'srd-5.1:spell:sanctuary',
+          label: '庇护术',
+          targetId: 'warded',
+          source: { kind: 'spell', actorId: 'cleric', rulesId: 'sanctuary' },
+          duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+          potency: 15,
+        })],
+      },
+    })
+    const blocked = resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('sanctuary-blocked', [attacker, warded]), {
+      type: 'attack', actorId: 'attacker', targetId: 'warded', attackModifier: 20, d20: 20,
+      tranquilitySave: { d20: 5 },
+      damage: { count: 1, sides: 8, bonus: 3, rolls: [8] },
+    })
+    expect(blocked.ok).toBe(true)
+    if (!blocked.ok) return
+    expect(blocked.state.combatants.warded.currentHp).toBe(20)
+    expect(blocked.events).toContainEqual({
+      type: 'hostile-targeting-prevented',
+      actorId: 'attacker',
+      targetId: 'warded',
+      source: 'sanctuary',
+    })
+
+    const wardedTurn = startDnd5eHeadlessCombat('sanctuary-break', [
+      { ...warded, initiative: 30 },
+      attacker,
+    ])
+    const struck = resolveDnd5eHeadlessAction(wardedTurn, {
+      type: 'attack', actorId: 'warded', targetId: 'attacker', attackModifier: 20, d20: 10,
+      damage: { count: 1, sides: 4, bonus: 0, rolls: [1] },
+    })
+    expect(struck.ok).toBe(true)
+    if (!struck.ok) return
+    expect(struck.state.combatants.warded.classState.activeEffects).toBeUndefined()
+    expect(struck.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed',
+      definitionId: 'srd-5.1:spell:sanctuary',
+      reason: 'makes-attack',
+    }))
+  })
+
   it("uses the Land druid's Nature's Sanctuary only against beast or plant attacks", () => {
     const beast = fighter('beast', 20, {
       controller: 'dm', creatureType: '野兽', savingThrowBonuses: { wis: 1 },
@@ -4296,6 +4343,22 @@ describe('D&D 5e 2014 headless combat engine', () => {
     if (!result.ok) return
     expect(dnd5eTargetArmorClassForAttack(result.state, 'wizard', 'ally')).toBe(15)
 
+    const shieldedAlly = fighter('shielded-ally', 10, {
+      armorClass: 14,
+      abilities: { ...abilities, dex: 14 },
+      hasShield: true,
+    })
+    const shieldedResult = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('mage-armor-shield', [wizard, shieldedAlly]),
+      {
+        type: 'cast-spell', actorId: 'wizard', targetId: 'shielded-ally',
+        spellId: 'mage-armor', slotLevel: 1, effectRolls: [],
+      },
+    )
+    expect(shieldedResult.ok).toBe(true)
+    if (!shieldedResult.ok) return
+    expect(dnd5eTargetArmorClassForAttack(shieldedResult.state, 'wizard', 'shielded-ally')).toBe(17)
+
     const armored = fighter('armored', 10, { wearingArmor: true })
     expect(resolveDnd5eHeadlessAction(startDnd5eHeadlessCombat('mage-armor-armored', [wizard, armored]), {
       type: 'cast-spell', actorId: 'wizard', targetId: 'armored', spellId: 'mage-armor', slotLevel: 1,
@@ -4318,7 +4381,8 @@ describe('D&D 5e 2014 headless combat engine', () => {
       }),
       createDnd5eMechanicalEffect({
         id: 'greater-invisibility-effect', definitionId: 'srd-5.1:spell:greater-invisibility', label: '高等隐形术',
-        kind: 'buff', source: { kind: 'spell', actorId: 'sorcerer', rulesId: 'greater-invisibility' },
+        kind: 'buff',
+        source: { kind: 'spell', actorId: 'sorcerer', rulesId: 'greater-invisibility', spellLevel: 6 },
         targetId: 'target', duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
       }),
     ]
@@ -4334,7 +4398,7 @@ describe('D&D 5e 2014 headless combat engine', () => {
       type: 'spell-dispelled', spellId: 'shield-of-faith', success: true,
     }))
     expect(result.events).toContainEqual(expect.objectContaining({
-      type: 'spell-dispelled', spellId: 'greater-invisibility', dc: 14, total: 5, success: false,
+      type: 'spell-dispelled', spellId: 'greater-invisibility', spellLevel: 6, dc: 16, total: 5, success: false,
     }))
   })
 })

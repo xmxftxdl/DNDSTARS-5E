@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
 import {
   DND5E_DAGGER,
+  DND5E_CLUB,
   DND5E_DART,
   DND5E_FIGHTER_STARTING_EQUIPMENT,
   DND5E_HAND_CROSSBOW,
@@ -18,11 +19,13 @@ import {
   dnd5eArmorProficient,
   dnd5eArmorProficiencies,
   dnd5eOffHandWeaponAttackProfile,
+  dnd5eShillelaghAttackChoice,
   dnd5eWeaponAttackProfile,
   dnd5eWeaponProficient,
   dnd5eWearingUnproficientArmor,
 } from './equipment'
 import { dnd5eWalkingSpeed } from './classes'
+import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
 
 function fighter(patch: Partial<Character> = {}): Character {
   return {
@@ -55,6 +58,45 @@ describe('D&D 5e 2014 fighter equipment', () => {
       attackModifier: 5,
       damage: { count: 1, sides: 8, bonus: 3, type: 'slashing' },
       reachFeet: 5,
+    })
+  })
+
+  it('uses the chosen Shillelagh ability for attack and damage while keeping a d8 weapon die', () => {
+    const shillelagh = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:shillelagh',
+      label: '橡棍术',
+      targetId: 'fighter',
+      source: { kind: 'spell', actorId: 'fighter', rulesId: 'shillelagh' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        shillelagh: {
+          weaponId: DND5E_CLUB.id,
+          spellcastingAbility: 'wis',
+          spellcastingModifier: 4,
+        },
+      },
+    })
+    const druid = fighter({
+      charClass: '德鲁伊',
+      abilities: { str: 10, dex: 12, con: 14, int: 10, wis: 18, cha: 10 },
+      equipment: { mainWeapon: DND5E_CLUB },
+      dnd5eCombatState: { schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: [shillelagh] },
+    })
+    expect(dnd5eShillelaghAttackChoice(druid)).toMatchObject({
+      weaponId: DND5E_CLUB.id,
+      spellcastingAbility: 'wis',
+      spellcastingModifier: 4,
+      strengthModifier: 0,
+    })
+    expect(dnd5eWeaponAttackProfile(druid, { shillelaghAbility: 'spellcasting' })).toMatchObject({
+      attackAbility: 'wis',
+      attackModifier: 6,
+      damage: { sides: 8, bonus: 4 },
+    })
+    expect(dnd5eWeaponAttackProfile(druid, { shillelaghAbility: 'str' })).toMatchObject({
+      attackAbility: 'str',
+      attackModifier: 2,
+      damage: { sides: 8, bonus: 0 },
     })
   })
 

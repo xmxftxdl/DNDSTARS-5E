@@ -25,7 +25,7 @@ import { collectDnd5ePersistentAreaTriggers, dnd5ePersistentAreaDifficultTerrain
 import { prepareDnd5ePersistentAreaTrigger, resolvePreparedDnd5ePersistentAreaTrigger } from './pluginAreaTransactions'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createDnd5eMechanicalEffect } from './activeEffects'
-import { DND5E_LEATHER_ARMOR } from './equipment'
+import { DND5E_CLUB, DND5E_LEATHER_ARMOR } from './equipment'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -844,6 +844,77 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     expect(jumped.ok).toBe(true)
     if (!jumped.ok) return
     expect(jumped.state.combatants[allyToken.id].turn.movementRemaining).toBe(10)
+  })
+
+  it('casts Shillelagh only on the caster holding a club and stores its authoritative attack choice', () => {
+    const druid = character('druid', '德鲁伊', {
+      abilities: { str: 10, dex: 14, con: 14, int: 12, wis: 18, cha: 10 },
+      equipment: { mainWeapon: DND5E_CLUB },
+      dnd5eClassChoices: { classes: { druid: { selections: { 'spell-cantrips': ['shillelagh'] } } } },
+    })
+    const input = fixture(druid, 'shillelagh', 0, token('enemy', 'enemy', 75))
+    input.action.targetTokenId = input.action.actorTokenId
+    input.action.dnd5eSpellCast = {
+      spellId: 'shillelagh',
+      slotLevel: 0,
+      targetTokenId: input.action.actorTokenId,
+    }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(cast.result.ok).toBe(true)
+    if (!cast.result.ok) return
+    expect(cast.result.state.combatants[input.action.actorTokenId].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:shillelagh',
+        duration: expect.objectContaining({ type: 'rounds', remainingRounds: 10 }),
+        modifiers: expect.objectContaining({
+          shillelagh: {
+            weaponId: DND5E_CLUB.id,
+            spellcastingAbility: 'wis',
+            spellcastingModifier: 4,
+          },
+        }),
+      }),
+    )
+    expect(cast.result.state.combatants[input.action.actorTokenId].turn.bonusActionAvailable).toBe(false)
+
+    const unarmed = character('unarmed-druid', '德鲁伊', {
+      dnd5eClassChoices: { classes: { druid: { selections: { 'spell-cantrips': ['shillelagh'] } } } },
+    })
+    const invalid = fixture(unarmed, 'shillelagh', 0, token('enemy-2', 'enemy', 75))
+    invalid.action.targetTokenId = invalid.action.actorTokenId
+    invalid.action.dnd5eSpellCast = {
+      spellId: 'shillelagh',
+      slotLevel: 0,
+      targetTokenId: invalid.action.actorTokenId,
+    }
+    expect(prepareDnd5eSpellCast(invalid)).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('casts Sanctuary as a bonus-action ward using the original caster spell save DC', () => {
+    const cleric = character('cleric', '牧师', {
+      abilities: { str: 10, dex: 12, con: 14, int: 10, wis: 18, cha: 10 },
+      dnd5eClassChoices: { classes: { cleric: { selections: { 'spell-prepared': ['sanctuary'] } } } },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 4 } },
+    })
+    const ally = character('ally', '战士')
+    const allyToken = token('ally-token', 'player', 125, ally.id)
+    const prepared = prepareDnd5eSpellCast(fixture(cleric, 'sanctuary', 1, allyToken, [ally]))
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(cast.result.ok).toBe(true)
+    if (!cast.result.ok) return
+    expect(cast.result.state.combatants[allyToken.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:sanctuary',
+        potency: 15,
+        duration: expect.objectContaining({ type: 'rounds', remainingRounds: 10 }),
+      }),
+    )
+    expect(cast.result.state.combatants[prepared.prepared.actorToken.id].turn.bonusActionAvailable).toBe(false)
   })
 
   it('grants Fly as a concentration-backed 60-foot flying speed used by authoritative movement', () => {

@@ -458,6 +458,7 @@ export interface Token {
     hiddenCheckTotal?: number
     hideInPlainSightPrepared?: boolean
     concentrationSpellId?: string
+    concentrationSpellLevel?: number
     concentrationTargetIds?: string[]
     concentrationRoundsRemaining?: number
     concentrationEffectsBySource?: Record<string, string>
