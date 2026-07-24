@@ -1,0 +1,12 @@
+.git
+.github
+.stars-shared
+.vite
+dist
+node_modules
+playwright-report
+test-results
+coverage
+*.log
+docs
+e2e

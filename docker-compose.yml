@@ -1,0 +1,35 @@
+services:
+  dndstars:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dndstars-5e:local
+    restart: unless-stopped
+    ports:
+      - "${STARS_PORT:-8080}:8080"
+    environment:
+      STARS_SECURITY_MODE: production
+      STARS_PUBLIC_ORIGIN: "${STARS_PUBLIC_ORIGIN:-http://localhost:8080}"
+      STARS_ALLOWED_ORIGINS: "${STARS_ALLOWED_ORIGINS:-}"
+      STARS_BUILD_ID: "${STARS_BUILD_ID:-docker-local}"
+      STARS_SHARED_ROOT: /data
+    volumes:
+      - dndstars-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  dndstars-data:

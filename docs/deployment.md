@@ -103,3 +103,31 @@ npm audit
 - SSE backlog 和在线状态保存在进程内存中，进程重启后客户端会通过完整状态恢复。
 - 尚未提供自动备份、跨区域容灾、集中日志、指标告警和数据库迁移。
 - 房间 token 目前由浏览器保存；部署必须防止 XSS、使用 HTTPS，并避免代理访问日志记录 SSE 查询字符串。
+
+## 8. Docker 单实例部署
+
+仓库根目录提供 `Dockerfile` 与 `docker-compose.yml`。容器继续使用同一个
+Node 进程提供前端、SSE 与权威 API，避免跨域配置和多实例内存状态分叉。
+
+本机验证：
+
+```powershell
+$env:STARS_PUBLIC_ORIGIN = "http://localhost:8080"
+docker compose up --build
+```
+
+浏览器访问 `http://localhost:8080`，健康检查地址为
+`http://localhost:8080/api/healthz`。账号、房间、角色、地图、图片、规则包和
+快照都写入命名卷 `dndstars-data`；重新创建容器不会清空该卷。
+
+公网部署必须把 `STARS_PUBLIC_ORIGIN` 设置为玩家实际访问的 HTTPS 源，并由
+Caddy、nginx、Traefik 或云负载均衡器终止 TLS：
+
+```powershell
+$env:STARS_PUBLIC_ORIGIN = "https://table.example.com"
+$env:STARS_BUILD_ID = "2026-07-24.1"
+docker compose up --build -d
+```
+
+当前容器设计仍是单权威实例。不要把同一个数据卷同时挂载给多个副本，也不要在
+没有共享数据库、分布式锁和 SSE 消息总线时直接横向扩容。
