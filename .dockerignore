@@ -1,5 +1,7 @@
 .git
 .github
+.env
+.env.*
 .stars-shared
 .vite
 dist

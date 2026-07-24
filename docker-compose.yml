@@ -1,13 +1,23 @@
+name: "${COMPOSE_PROJECT_NAME:-dndstars-5e}"
+
 services:
   dndstars:
     build:
       context: .
       dockerfile: Dockerfile
-    image: dndstars-5e:local
+      args:
+        STARS_BUILD_ID: "${STARS_BUILD_ID:-docker-local}"
+    image: "${STARS_IMAGE:-dndstars-5e}:${STARS_IMAGE_TAG:-local}"
+    init: true
     restart: unless-stopped
+    stop_grace_period: 20s
     ports:
-      - "${STARS_PORT:-8080}:8080"
+      # 默认只允许本机反向代理访问；局域网调试时显式设为 0.0.0.0。
+      - "${STARS_BIND_ADDRESS:-127.0.0.1}:${STARS_PORT:-8080}:8080"
+    expose:
+      - "8080"
     environment:
+      NODE_ENV: production
       STARS_SECURITY_MODE: production
       STARS_PUBLIC_ORIGIN: "${STARS_PUBLIC_ORIGIN:-http://localhost:8080}"
       STARS_ALLOWED_ORIGINS: "${STARS_ALLOWED_ORIGINS:-}"
@@ -17,9 +27,16 @@ services:
       - dndstars-data:/data
     read_only: true
     tmpfs:
-      - /tmp:size=64m
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "${STARS_LOG_MAX_SIZE:-10m}"
+        max-file: "${STARS_LOG_MAX_FILES:-3}"
     healthcheck:
       test:
         - CMD
