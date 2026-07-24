@@ -80,9 +80,6 @@ export function dnd5eMonsterCoreSpellCompatibility(
           : '击杀人形生物后的僵尸创建尚未结构化',
     }
   }
-  if (spell.target === 'area' || spell.area) {
-    return { automation: 'manual', reason: '需要地图区域原点与区域内目标的权威快照' }
-  }
   if (
     spell.concentration ||
     spell.appliedEffect ||

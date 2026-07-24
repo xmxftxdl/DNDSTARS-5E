@@ -7699,8 +7699,8 @@ function resolveMonsterCoreSpell(
     if (spell.target === 'hostile' && !hostile) return true
     if (spell.target === 'ally' && hostile) return true
     if (spell.target === 'hostile' && dnd5eCannotAttackSource(actor, target!.id)) return true
-    if (dnd5eAttackDistanceFeet(state, actor.id, target!.id) > spell.rangeFeet) return true
-    if (state.lineOfEffectBlockedByCombatantPair?.[
+    if (!spell.area && dnd5eAttackDistanceFeet(state, actor.id, target!.id) > spell.rangeFeet) return true
+    if (!spell.area && state.lineOfEffectBlockedByCombatantPair?.[
       dnd5eDirectedCombatantPairKey(actor.id, target!.id)
     ]) return true
     if (

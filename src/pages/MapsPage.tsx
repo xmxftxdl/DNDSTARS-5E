@@ -27,7 +27,7 @@ import {
   Eraser,
 } from 'lucide-react'
 import MapCanvas from '../components/map/MapCanvas'
-import type { DeleteSelectionRect } from '../components/map/MapCanvas'
+import type { AoeHighlight, DeleteSelectionRect } from '../components/map/MapCanvas'
 import SceneOrchestrationSystem, { type SceneDrawTarget } from '../components/map/SceneOrchestrationSystem'
 import MapGeometryToolbar from '../components/map/MapGeometryToolbar'
 import { buildMapGeometryDiagnostics } from '../lib/mapGeometryDiagnostics'
@@ -952,6 +952,10 @@ export default function MapsPage() {
   } | null>(null)
   const [aoePreviewCell, setAoePreviewCell] = useState<GridCell | null>(null)
   const [aoeRectRotation, setAoeRectRotation] = useState(0)
+  const [enemySpellAoeWarning, setEnemySpellAoeWarning] = useState<{
+    spellName: string
+    highlight: AoeHighlight
+  } | null>(null)
   const [roll, setRoll] = useState<DiceRoll | null>(null)
   const afterRollRef = useRef<(() => void) | null>(null)
   const d20RequestCounterRef = useRef(0)
@@ -3217,7 +3221,7 @@ export default function MapsPage() {
       areaPolygon,
     }
   }, [activeAoeTargeting, aoePreviewCell, aoeCasterCell, activeMapGridSize, activeMapGridOffsetX, activeMapGridOffsetY, aoeRectRotation])
-  const aoeHighlight = dnd5eItemAreaHighlight ?? spellOrSkillAoeHighlight
+  const aoeHighlight = enemySpellAoeWarning?.highlight ?? dnd5eItemAreaHighlight ?? spellOrSkillAoeHighlight
 
   const rangedRangeCells = (() => {
     if (dnd5eItemCreatureTargeting && activeMap) {
@@ -7598,6 +7602,8 @@ export default function MapsPage() {
       initiativeOrder: initiativeOrderRef.current,
       actorTokenId: plan.attackerTokenId,
       targetTokenIds: plan.spellCast.targetTokenIds,
+      areaTargetCell: plan.spellCast.areaTargetCell,
+      areaTargetOrientation: plan.spellCast.areaTargetOrientation,
       spellId: plan.spellCast.spellId,
       slotLevel: plan.spellCast.slotLevel,
       turnEconomy: currentDnd5eTurnEconomy(plan.attackerTokenId),
@@ -8414,11 +8420,46 @@ export default function MapsPage() {
     }
 
     if (result.spellCast) {
+      const enemySpellCast = result.spellCast
       const castSpell = () => {
         if (!isStillEnemyTurn()) return
-        void finishEnemyCoreSpell(result).then(() => {
-          pushTimer(() => { void advanceEnemyIfCurrent() }, ADVANCE_DELAY_MS)
-        })
+        const settleSpell = () => {
+          if (!isStillEnemyTurn()) {
+            setEnemySpellAoeWarning(null)
+            return
+          }
+          setEnemySpellAoeWarning(null)
+          void finishEnemyCoreSpell(result).then(() => {
+            pushTimer(() => { void advanceEnemyIfCurrent() }, ADVANCE_DELAY_MS)
+          })
+        }
+        const area = enemySpellCast.area
+        const targetCell = enemySpellCast.areaTargetCell
+        if (area && targetCell) {
+          const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+          const latestCaster = latestMap.tokens.find((token) => token.id === enemy.id) ?? enemy
+          const casterCell = tokenAnchorCellFromPixel(
+            latestCaster.x,
+            latestCaster.y,
+            latestCaster,
+            latestMap,
+          )
+          const orientFrom = aoeOrientFromCell(area, casterCell, targetCell, {
+            rectRotation: enemySpellCast.areaTargetOrientation,
+          })
+          setEnemySpellAoeWarning({
+            spellName: enemySpellCast.spellName,
+            highlight: {
+              cells: cellsForAoe(area, orientFrom, targetCell),
+              valid: true,
+              variant: 'attack',
+            },
+          })
+          pushCombatLog(`${enemy.label} 正在准备${enemySpellCast.spellName}，范围将在 2 秒后生效。`, 'system')
+          pushTimer(settleSpell, 2_000)
+          return
+        }
+        settleSpell()
       }
       if (result.moved) pushTimer(castSpell, TOKEN_MOVE_MS)
       else castSpell()
@@ -15653,7 +15694,7 @@ export default function MapsPage() {
                 dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: activeMap, token, position })}
               speedCostMultiplierAtPosition={(token, position) =>
                 dnd5ePersistentAreaSpeedCostMultiplierAt({ map: activeMap, token, position })}
-              aoeSelectMode={!playerCombatLocked && (!!activeAoeTargeting || !!dnd5eItemAreaTargeting)}
+              aoeSelectMode={!!enemySpellAoeWarning || (!playerCombatLocked && (!!activeAoeTargeting || !!dnd5eItemAreaTargeting))}
               aoeHighlight={aoeHighlight}
               rangedRangeCells={rangedRangeCells}
               onAoePreviewCell={handleAoePreviewCell}
@@ -15828,6 +15869,16 @@ export default function MapsPage() {
               }
             />
           </div>
+          {enemySpellAoeWarning ? (
+            <div
+              data-testid="enemy-spell-area-warning"
+              className="pointer-events-none absolute inset-x-0 top-5 z-[75] flex justify-center"
+            >
+              <div className="rounded-xl border border-rose-300/50 bg-rose-950/90 px-5 py-2 text-sm font-bold text-rose-100 shadow-[0_0_35px_rgba(244,63,94,0.35)]">
+                {enemySpellAoeWarning.spellName} · 范围预警 · 2 秒后生效
+              </div>
+            </div>
+          ) : null}
           {activeCombatKillStreak ? (
             <KillStreakPresentation
               key={activeCombatKillStreak.id}

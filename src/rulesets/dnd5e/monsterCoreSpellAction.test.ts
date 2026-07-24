@@ -88,7 +88,12 @@ describe('monster core spell map action', () => {
   afterEach(() => setMapGeometryRuntime([]))
 
   it('prepares and resolves a listed SRD spell through the authoritative map snapshot', () => {
-    const mage = token({ id: 'mage', label: '法师', poolId: 'srd-5.1:mage' })
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: { monsterSpellSlots: {} },
+    })
     const heroToken = token({
       id: 'hero-token',
       label: '英雄',
@@ -194,6 +199,80 @@ describe('monster core spell map action', () => {
         providerId: 'dnd5e:deterministic-tactical-v3',
       },
     })
+  })
+
+  it('selects a safe fireball placement that covers clustered hostiles and is revalidated by the Host', () => {
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: {
+        monsterSpellSlots: {
+          '3': { current: 1, max: 1 },
+        },
+      },
+    })
+    const first = token({
+      id: 'hero-one',
+      label: '英雄一',
+      type: 'player',
+      characterId: 'hero',
+      x: 105,
+      y: 45,
+    })
+    const second = token({
+      id: 'hero-two',
+      label: '英雄二',
+      type: 'player',
+      x: 115,
+      y: 45,
+    })
+    const map = battleMap([mage, first, second])
+    const plan = planDnd5eMonsterTurn(map, mage, [character()])
+    expect(plan.spellCast).toMatchObject({
+      spellId: 'fireball',
+      targetTokenIds: expect.arrayContaining([first.id, second.id]),
+      area: { shape: 'circle', radiusFeet: 20 },
+      areaTargetCell: expect.any(Object),
+    })
+
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'combat',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: plan.spellCast!.targetTokenIds,
+      areaTargetCell: plan.spellCast!.areaTargetCell,
+      spellId: plan.spellCast!.spellId,
+      slotLevel: plan.spellCast!.slotLevel,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) throw new Error('expected fireball to prepare')
+    const settled = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: prepared.prepared.targetTokens.map((target) => ({
+          targetId: target.id,
+          d20: 1,
+        })),
+        effectRolls: [Array.from({ length: 8 }, () => 6)],
+      },
+    })
+    expect(settled.result.ok).toBe(true)
+    expect(settled.result.state.combatants[first.id].currentHp).toBe(0)
+    expect(settled.result.state.combatants[second.id].currentHp).toBe(0)
+    expect(prepareDnd5eMonsterCoreSpell({
+      combatId: 'combat',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: [first.id],
+      areaTargetCell: plan.spellCast!.areaTargetCell,
+      spellId: plan.spellCast!.spellId,
+      slotLevel: plan.spellCast!.slotLevel,
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
   })
 
   it('uses a healing spell when an allied monster is badly wounded', () => {

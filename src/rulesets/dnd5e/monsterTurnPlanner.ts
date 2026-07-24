@@ -16,6 +16,7 @@ import {
   mapGeometryCoverBetween,
   mapGeometryDoorLockState,
   mapGeometryDoorOpenState,
+  mapGeometryLineOfEffectBlocked,
   mapGeometryLineOfSightBlocked,
   mapGeometryMovementBlocked,
   mapGeometryRuntimeForMap,
@@ -623,16 +624,44 @@ function bestMonsterAreaPlacement(input: {
   const { map, attacker, focusTarget, spell } = input
   const area = spell.area
   if (!area) return undefined
+  const geometry = mapGeometryRuntimeForMap(map.id)
   const casterCell = tokenAnchorCellFromPixel(attacker.x, attacker.y, attacker, map)
+  const focusCell = tokenAnchorCellFromPixel(focusTarget.x, focusTarget.y, focusTarget, map)
   const columns = Math.max(1, Math.floor((map.width - map.gridOffsetX) / Math.max(1, map.gridSize)))
   const rows = Math.max(1, Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)))
+  const livingHostileCells = map.tokens
+    .filter((token) =>
+      token.type !== 'obstacle' &&
+      areOpposedCombatTokens(attacker, token) &&
+      targetHitPoints(token, input.characters).current > 0)
+    .slice(0, 24)
+    .map((token) => tokenAnchorCellFromPixel(token.x, token.y, token, map))
+  const candidateCells = [focusCell, ...livingHostileCells]
+  if (area.origin === 'point') {
+    for (let left = 0; left < livingHostileCells.length; left += 1) {
+      for (let right = left + 1; right < livingHostileCells.length; right += 1) {
+        const first = livingHostileCells[left]
+        const second = livingHostileCells[right]
+        candidateCells.push({
+          col: Math.round((first.col + second.col) / 2),
+          row: Math.round((first.row + second.row) / 2),
+        })
+      }
+    }
+  }
+  const seenAnchors = new Set<string>()
+  const boundedCandidates = candidateCells.filter((cell) => {
+    if (cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows) return false
+    const key = `${cell.col},${cell.row}`
+    if (seenAnchors.has(key)) return false
+    seenAnchors.add(key)
+    return true
+  })
   const anchors: GridCell[] = area.origin === 'self'
     ? area.shape === 'circle'
       ? [casterCell]
-      : Array.from({ length: rows }, (_, row) =>
-          Array.from({ length: columns }, (_, col) => ({ col, row }))).flat()
-    : Array.from({ length: rows }, (_, row) =>
-        Array.from({ length: columns }, (_, col) => ({ col, row }))).flat()
+      : boundedCandidates
+    : boundedCandidates
   const averageDamage = dnd5eSpellDiceCount(
     spell,
     input.casterLevel,
@@ -643,14 +672,43 @@ function bestMonsterAreaPlacement(input: {
     if (!canPlaceAoe(area, casterCell, targetCell)) continue
     const orientFrom = aoeOrientFromCell(area, casterCell, targetCell)
     const cells = cellsForAoe(area, orientFrom, targetCell)
+    const effectOrigin = area.origin === 'point'
+      ? {
+          x: map.gridOffsetX + (targetCell.col + 0.5) * map.gridSize,
+          y: map.gridOffsetY + (targetCell.row + 0.5) * map.gridSize,
+        }
+      : attacker
+    const effectOriginElevation = area.origin === 'point'
+      ? mapGeometryTerrainElevationAtPoint(geometry, effectOrigin)
+      : mapGeometryTokenElevation(geometry, attacker)
+    if (
+      area.origin === 'point' &&
+      mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: attacker,
+        to: effectOrigin,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
+        toElevationFeet: effectOriginElevation,
+      })
+    ) continue
     const affected = tokensInCells(map, map.tokens, cells).filter((token) =>
-      token.type !== 'obstacle' && (token.id !== attacker.id || spell.areaIncludesSelf))
+      token.type !== 'obstacle' &&
+      (token.id !== attacker.id || spell.areaIncludesSelf) &&
+      !mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: effectOrigin,
+        to: token,
+        fromElevationFeet: effectOriginElevation,
+        toElevationFeet: mapGeometryTokenElevation(geometry, token),
+      }))
     const friendlies = affected.filter((token) =>
       token.id !== attacker.id && !areOpposedCombatTokens(attacker, token))
     if (friendlies.length > 0) continue
     const hostiles = affected.filter((token) =>
       areOpposedCombatTokens(attacker, token) && targetHitPoints(token, input.characters).current > 0)
-    if (hostiles.length < 1 || !hostiles.some((token) => token.id === focusTarget.id)) continue
+    // Do not spend a limited area spell slot on a lone target when the planner
+    // already has single-target spells and attacks available.
+    if (hostiles.length < 2 || !hostiles.some((token) => token.id === focusTarget.id)) continue
     const expectedDamage = averageDamage * hostiles.length * (spell.effect === 'saving-throw' ? 0.75 : 1)
     const focusBonus = hostiles.some((token) => token.id === focusTarget.id) ? 24 : 0
     const score = expectedDamage + hostiles.length * 40 + focusBonus

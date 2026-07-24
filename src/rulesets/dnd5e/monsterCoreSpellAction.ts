@@ -1,6 +1,7 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
+import { DND_FEET_PER_CELL, tokenAnchorCellFromPixel, tokenFootprintDistanceCells, type GridCell } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
@@ -31,6 +32,12 @@ import {
   getDnd5eSrdCombatSpell,
   type Dnd5eSrdSpellDefinition,
 } from './spells'
+import {
+  mapGeometryLineOfEffectBlocked,
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+} from '../../lib/mapGeometry'
 
 type ListedMonsterSpell = NonNullable<Dnd5eMonsterSpellcasting['spells']>[number]
 
@@ -61,6 +68,8 @@ export interface PreparedDnd5eMonsterCoreSpell {
   maximumTargets: number
   spellAttackMode?: 'normal' | 'advantage' | 'disadvantage'
   spellAttackAutomaticCritical?: boolean
+  areaTargetCell?: GridCell
+  areaTargetOrientation?: 0 | 1 | 2 | 3
 }
 
 function applyTurnEconomy(
@@ -124,6 +133,8 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   initiativeOrder: readonly InitiativeEntry[]
   actorTokenId: string
   targetTokenIds: readonly string[]
+  areaTargetCell?: GridCell
+  areaTargetOrientation?: 0 | 1 | 2 | 3
   spellId: string
   slotLevel: number
   turnEconomy?: Dnd5eTurnEconomyCounts
@@ -153,17 +164,94 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       .includes(input.slotLevel)
   ) return { ok: false, reason: 'resource-unavailable' }
 
-  const targetIds = [...new Set(input.targetTokenIds)]
+  let targetIds = [...new Set(input.targetTokenIds)]
   const casterLevel = Math.max(1, monster.spellcasting.casterLevel ?? 1)
   const maximumTargets = dnd5eSpellMaximumTargets(spell, input.slotLevel, casterLevel)
-  if (
-    targetIds.length !== input.targetTokenIds.length ||
-    targetIds.length < 1 ||
-    targetIds.length > maximumTargets
-  ) return { ok: false, reason: 'invalid-target' }
+  if (targetIds.length !== input.targetTokenIds.length) return { ok: false, reason: 'invalid-target' }
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  if (spell.area) {
+    const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
+    const targetCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
+      ? casterCell
+      : input.areaTargetCell
+    const columns = Math.max(
+      1,
+      Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)),
+    )
+    const rows = Math.max(
+      1,
+      Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)),
+    )
+    if (
+      !targetCell ||
+      !Number.isInteger(targetCell.col) ||
+      !Number.isInteger(targetCell.row) ||
+      targetCell.col < 0 ||
+      targetCell.row < 0 ||
+      targetCell.col >= columns ||
+      targetCell.row >= rows ||
+      !canPlaceAoe(spell.area, casterCell, targetCell) ||
+      (input.areaTargetOrientation != null && (
+        spell.area.shape !== 'rect' ||
+        !spell.area.rotatable ||
+        !Number.isInteger(input.areaTargetOrientation) ||
+        input.areaTargetOrientation < 0 ||
+        input.areaTargetOrientation > 3
+      ))
+    ) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    const orientFrom = aoeOrientFromCell(spell.area, casterCell, targetCell, {
+      rectRotation: input.areaTargetOrientation,
+    })
+    const cells = cellsForAoe(spell.area, orientFrom, targetCell)
+    const effectOrigin = spell.area.origin === 'point'
+      ? {
+          x: input.map.gridOffsetX + (targetCell.col + 0.5) * input.map.gridSize,
+          y: input.map.gridOffsetY + (targetCell.row + 0.5) * input.map.gridSize,
+        }
+      : actorToken
+    const effectOriginElevation = spell.area.origin === 'point'
+      ? mapGeometryTerrainElevationAtPoint(geometry, effectOrigin)
+      : mapGeometryTokenElevation(geometry, actorToken)
+    if (
+      spell.area.origin === 'point' &&
+      mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: actorToken,
+        to: effectOrigin,
+        fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
+        toElevationFeet: effectOriginElevation,
+      })
+    ) return { ok: false, reason: 'line-of-effect-blocked' }
+    const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cells).filter((candidate) => {
+      if (candidate.type === 'obstacle' || (candidate.id === actorToken.id && !spell.areaIncludesSelf)) return false
+      const opposed = areOpposedCombatTokens(actorToken, candidate)
+      if (spell.target === 'hostile' && !opposed) return false
+      if (spell.target === 'ally' && opposed) return false
+      return !mapGeometryLineOfEffectBlocked({
+        geometry,
+        from: effectOrigin,
+        to: candidate,
+        fromElevationFeet: effectOriginElevation,
+        toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
+      })
+    })
+    if (authoritativeTargets.length < 1 || authoritativeTargets.length > maximumTargets) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    const supplied = [...targetIds].sort()
+    const authoritative = authoritativeTargets.map((target) => target.id).sort()
+    if (supplied.length !== authoritative.length || supplied.some((id, index) => id !== authoritative[index])) {
+      return { ok: false, reason: 'invalid-target' }
+    }
+    targetIds = authoritativeTargets.map((target) => target.id)
+  } else if (targetIds.length < 1 || targetIds.length > maximumTargets) {
+    return { ok: false, reason: 'invalid-target' }
+  }
   const targetTokens = targetIds.map((targetId) =>
     input.map.tokens.find((token) => token.id === targetId && token.type !== 'obstacle'))
-  if (targetTokens.some((target) =>
+  if (!spell.area && targetTokens.some((target) =>
     !target || (target.id === actorToken.id && spell.target === 'hostile')
   )) {
     return { ok: false, reason: 'invalid-target' }
@@ -174,7 +262,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       (spell.target === 'ally' && opposed)
   })) return { ok: false, reason: 'invalid-target' }
   const feetPerCell = Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-  if (targetTokens.some((target) =>
+  if (!spell.area && targetTokens.some((target) =>
     tokenFootprintDistanceCells(actorToken, target!, input.map) * feetPerCell > spell.rangeFeet
   )) return { ok: false, reason: 'target-out-of-range' }
 
@@ -198,7 +286,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   if (!monsterSpellResourceAvailable(snapshot.state, actorToken.id, listedSpell, input.slotLevel)) {
     return { ok: false, reason: 'resource-unavailable' }
   }
-  if (targetTokens.some((target) =>
+  if (!spell.area && targetTokens.some((target) =>
     snapshot.state.lineOfEffectBlockedByCombatantPair?.[
       dnd5eDirectedCombatantPairKey(actorToken.id, target!.id)
     ]
@@ -230,6 +318,8 @@ export function prepareDnd5eMonsterCoreSpell(input: {
             snapshot.state.combatants[targetTokens[0]!.id],
           )
         : undefined,
+      areaTargetCell: input.areaTargetCell,
+      areaTargetOrientation: input.areaTargetOrientation,
     },
   }
 }

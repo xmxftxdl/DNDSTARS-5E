@@ -43,7 +43,7 @@ describe('advanced monster Headless declarations', () => {
       automation: 'manual',
     })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fireball')!)).toMatchObject({
-      automation: 'manual',
+      automation: 'full',
     })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('blight')!)).toMatchObject({
       automation: 'manual',
