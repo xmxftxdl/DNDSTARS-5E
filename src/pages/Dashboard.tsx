@@ -7,8 +7,13 @@ import {
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
-import CampaignCombatStatisticsPanel from '../components/CampaignCombatStatisticsPanel'
+import CampaignAdvancedAnalyticsPanel from '../components/CampaignAdvancedAnalyticsPanel'
 import RoomPartyOverview from '../components/RoomPartyOverview'
+
+interface DashboardProps {
+  onCreateCampaign?: () => void
+  creatingCampaign?: boolean
+}
 
 const stats = [
   { label: '已上传地图', value: '0', icon: MapIcon, color: 'text-sky-300' },
@@ -17,16 +22,22 @@ const stats = [
   { label: '进行中战斗', value: '0', icon: Swords, color: 'text-amber-300' },
 ]
 
-export default function Dashboard() {
+export default function Dashboard({ onCreateCampaign, creatingCampaign = false }: DashboardProps) {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="欢迎回来，地下城主"
         description="在这里管理你的战役、地图、角色与战斗。"
         actions={
-          <button className="glow-arcane flex items-center gap-2 rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600 px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:scale-[1.02]">
+          <button
+            type="button"
+            onClick={onCreateCampaign}
+            disabled={!onCreateCampaign || creatingCampaign}
+            aria-label="新建战役"
+            className="glow-arcane flex items-center gap-2 rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600 px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:scale-[1.02] disabled:cursor-wait disabled:opacity-60 disabled:hover:scale-100"
+          >
             <Dices className="h-4 w-4" />
-            新建战役
+            {creatingCampaign ? '正在退出当前战役…' : '新建战役'}
           </button>
         }
       />
@@ -51,9 +62,9 @@ export default function Dashboard() {
       </div>
 
       <h3 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wider text-slate-500">
-        战役战斗统计
+        战役进阶数据
       </h3>
-      <CampaignCombatStatisticsPanel />
+      <CampaignAdvancedAnalyticsPanel />
     </div>
   )
 }

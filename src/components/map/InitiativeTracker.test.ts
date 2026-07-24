@@ -32,8 +32,10 @@ describe('先攻头像队列', () => {
     expect(html).toMatch(/data-testid="initiative-roll-hero-token"[^>]*>18<\/span>/)
     expect(html).toContain('data-testid="initiative-health-hero-token"')
     expect(html).toContain('width:50%')
-    expect(html).toContain('width:72px;height:94px')
-    expect(html).toContain('h-[7px] w-[72px]')
+    expect(html).toContain('data-active-turn="true"')
+    expect(html).toContain('width:87px;height:114px')
+    expect(html).toContain('h-[7px]')
+    expect(html).toContain('style="width:87px"')
   })
 
   it('不再把角色名称渲染为可见文本', () => {

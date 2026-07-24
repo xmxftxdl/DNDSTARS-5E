@@ -26,15 +26,22 @@ import {
 } from '../../lib/sceneOrchestration'
 import SceneOrchestrationPanel from './SceneOrchestrationPanel'
 
-export interface SceneDrawTarget {
-  sceneId: string
-  triggerId: string
-  kind: SceneRegion['kind']
-}
+export type SceneDrawTarget =
+  | {
+      sceneId: string
+      triggerId: string
+      kind: SceneRegion['kind']
+    }
+  | {
+      sceneId: string
+      interactionPointId: string
+      kind: 'interaction-point'
+    }
 
 export interface SceneOrchestrationSystemProps {
   map: BattleMap
   isDm: boolean
+  combatActive: boolean
   drawing?: SceneDrawTarget | null
   onBeginDraw: (target: SceneDrawTarget) => void
   onCancelDraw: () => void
@@ -60,6 +67,7 @@ function wait(delayMs = 0): Promise<void> {
 export default function SceneOrchestrationSystem({
   map,
   isDm,
+  combatActive,
   drawing,
   onBeginDraw,
   onCancelDraw,
@@ -341,6 +349,7 @@ export default function SceneOrchestrationSystem({
     <>
       {isDm && <SceneOrchestrationPanel
         map={map}
+        combatActive={combatActive}
         open={editorOpen}
         onOpenChange={(visible) => {
           setEditorOpen(visible)

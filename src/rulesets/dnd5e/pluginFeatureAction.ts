@@ -70,6 +70,98 @@ export interface PreparedDnd5ePluginFeatureAction {
   headlessAction: Dnd5ePluginAction
 }
 
+export type Dnd5ePluginApplicationRebaseResult =
+  | { ok: true; application: Dnd5eMapResultPlan }
+  | { ok: false; reason: 'plugin-commit-conflict' }
+
+function sameSnapshot(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+/**
+ * Interrupt/骰子等待期间地图仍可被其他事务推进。插件结果提交前只把本事务
+ * 声明修改的实体覆盖到最新快照；同一实体被并发修改时 fail closed。
+ */
+export function rebaseDnd5ePluginFeatureApplication(input: {
+  baseMap: BattleMap
+  baseCharacters: readonly Character[]
+  application: Dnd5eMapResultPlan
+  latestMap: BattleMap
+  latestCharacters: readonly Character[]
+}): Dnd5ePluginApplicationRebaseResult {
+  if (
+    input.baseMap.id !== input.application.map.id ||
+    input.latestMap.id !== input.application.map.id
+  ) return { ok: false, reason: 'plugin-commit-conflict' }
+
+  const changedTokenIds = [...new Set(input.application.changedTokenIds)]
+  const changedCharacterIds = [...new Set(input.application.changedCharacterIds)]
+  const baseTokens = new Map(input.baseMap.tokens.map((token) => [token.id, token]))
+  const resultTokens = new Map(input.application.map.tokens.map((token) => [token.id, token]))
+  const latestTokens = new Map(input.latestMap.tokens.map((token) => [token.id, token]))
+  if (
+    baseTokens.size !== input.baseMap.tokens.length ||
+    resultTokens.size !== input.application.map.tokens.length ||
+    latestTokens.size !== input.latestMap.tokens.length
+  ) return { ok: false, reason: 'plugin-commit-conflict' }
+
+  for (const tokenId of changedTokenIds) {
+    const result = resultTokens.get(tokenId)
+    const base = baseTokens.get(tokenId)
+    const latest = latestTokens.get(tokenId)
+    if (!result || (base && !latest) || (!base && latest)) {
+      return { ok: false, reason: 'plugin-commit-conflict' }
+    }
+    if (base && latest && !sameSnapshot(base, latest)) {
+      return { ok: false, reason: 'plugin-commit-conflict' }
+    }
+    latestTokens.set(tokenId, result)
+  }
+
+  const baseCharacters = new Map(input.baseCharacters.map((character) => [character.id, character]))
+  const resultCharacters = new Map(input.application.characters.map((character) => [character.id, character]))
+  const latestCharacters = new Map(input.latestCharacters.map((character) => [character.id, character]))
+  for (const characterId of changedCharacterIds) {
+    const base = baseCharacters.get(characterId)
+    const result = resultCharacters.get(characterId)
+    const latest = latestCharacters.get(characterId)
+    if (!base || !result || !latest || !sameSnapshot(base, latest)) {
+      return { ok: false, reason: 'plugin-commit-conflict' }
+    }
+    latestCharacters.set(characterId, result)
+  }
+
+  const baseAreas = new Map((input.baseMap.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
+  const resultAreas = new Map((input.application.map.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
+  const latestAreas = new Map((input.latestMap.dnd5ePluginAreas ?? []).map((area) => [area.id, area]))
+  const areaIds = new Set([...baseAreas.keys(), ...resultAreas.keys()])
+  for (const areaId of areaIds) {
+    const base = baseAreas.get(areaId)
+    const result = resultAreas.get(areaId)
+    if (sameSnapshot(base, result)) continue
+    const latest = latestAreas.get(areaId)
+    if ((base && !sameSnapshot(base, latest)) || (!base && latest)) {
+      return { ok: false, reason: 'plugin-commit-conflict' }
+    }
+    if (result) latestAreas.set(areaId, result)
+    else latestAreas.delete(areaId)
+  }
+
+  return {
+    ok: true,
+    application: {
+      map: {
+        ...input.latestMap,
+        tokens: [...latestTokens.values()],
+        dnd5ePluginAreas: [...latestAreas.values()],
+      },
+      characters: [...latestCharacters.values()],
+      changedTokenIds,
+      changedCharacterIds,
+    },
+  }
+}
+
 function economyRejectReason(
   economy: NonNullable<RegisteredDnd5ePluginFeature['action']>['economy'],
   turnEconomy: Dnd5eTurnEconomyCounts | undefined,

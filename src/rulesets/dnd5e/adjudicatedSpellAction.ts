@@ -27,11 +27,13 @@ import {
 } from './spells'
 import type { Dnd5eSpellbookEntry } from './spellbook'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eWearingUnproficientArmor } from './equipment'
 
 export type Dnd5eAdjudicatedSpellRejectReason =
   | 'invalid-action'
   | 'invalid-actor'
   | 'spell-unavailable'
+  | 'armor-proficiency-required'
   | 'slot-unavailable'
   | 'action-unavailable'
   | 'bonus-action-unavailable'
@@ -128,6 +130,9 @@ export function prepareDnd5eAdjudicatedSpell(input: {
     token.id === input.action.actorTokenId && token.characterId === input.action.characterId,
   )
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  if (dnd5eWearingUnproficientArmor(actor)) {
+    return { ok: false, reason: 'armor-proficiency-required' }
+  }
   const castingClassId = dnd5eSpellcastingClassIdForSpell(
     actor,
     input.spell.id,

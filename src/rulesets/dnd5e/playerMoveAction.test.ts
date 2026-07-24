@@ -121,6 +121,53 @@ describe('D&D 5e player map movement', () => {
     expect(prepared.prepared.toElevationFeet).toBe(10)
   })
 
+  it('treats a legacy token without elevation as standing on its terrain surface', () => {
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      windows: [],
+      lights: [],
+      obstacles: [{
+        id: 'plateau',
+        kind: 'obstacle',
+        label: 'Plateau',
+        points: [{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 }, { x: 0, y: 10 }],
+        blocksVision: false,
+        blocksMovement: false,
+        blocksLineOfEffect: false,
+        cover: 'none',
+        baseHeightFeet: 0,
+        heightFeet: 0,
+        terrainRegion: true,
+        terrainElevationFeet: 20,
+        createdAt: 1,
+      }],
+      vision: { enabled: false, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' },
+      updatedAt: 1,
+    }])
+
+    const prepared = prepareDnd5ePlayerMove({
+      action,
+      map,
+      characters: [character()],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: 'Hero', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy-token', label: 'Enemy', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      toElevationFeet: 20,
+      pathElevationsFeet: [20, 20, 20],
+      movementCostFeet: 10,
+    })
+    expect(prepared.prepared.state.combatants['hero-token'].elevationFeet).toBe(20)
+  })
+
   it('validates a flying move as one three-dimensional trajectory over a tall wall', () => {
     const hero = character()
     hero.speed = 60

@@ -173,13 +173,18 @@ function buildEnemyAttack(
   moved: boolean,
   pos: { x: number; y: number } | undefined,
   kind: 'melee' | 'ranged',
+  requestedActionIndex?: number,
 ): EnemyTurnResult {
   const values: number[] = []
 
   // 标签/骰面/命中加值来自怪物的结构化主攻击（damageDice/damageType/toHit），
   // 不再硬编码全局 1d6。inferEnemyDamageDiceCount 会从 label 解析 \d+d\d+。
   const block = enemy.poolId ? getEnemyStatBlock(enemy.poolId) : undefined
-  const selectedAction = selectAttackAction(block, kind)
+  const requestedAction = requestedActionIndex == null ? undefined : block?.actions[requestedActionIndex]
+  const selectedAction =
+    requestedAction?.damageDice && requestedAction.kind === kind
+      ? { action: requestedAction, index: requestedActionIndex }
+      : selectAttackAction(block, kind)
   const action = selectedAction?.action
   let sides: number
   let diceLabel: string
@@ -234,6 +239,24 @@ function buildEnemyAttack(
   }
 
   return result
+}
+
+/**
+ * 手动结算模式使用的声明式怪物攻击选择。
+ * 这里只构建攻击意图；距离、阵营、动作和骰子仍由 Host 的 Headless 事务复核。
+ */
+export function buildSelectedEnemyAttack(
+  enemy: Token,
+  target: Token,
+  actionIndex: number,
+): EnemyTurnResult | undefined {
+  const action = enemy.poolId ? getEnemyStatBlock(enemy.poolId)?.actions[actionIndex] : undefined
+  if (
+    !action?.damageDice ||
+    (action.kind !== 'melee' && action.kind !== 'ranged') ||
+    action.automation !== 'headless'
+  ) return undefined
+  return buildEnemyAttack(enemy, target, false, undefined, action.kind, actionIndex)
 }
 
 /**

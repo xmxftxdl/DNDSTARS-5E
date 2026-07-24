@@ -1,5 +1,6 @@
 import type { AbilityKey } from '../../lib/dnd'
 import {
+  DND5E_STANDARD_CONDITION_IDS,
   DND5E_STANDARD_CONDITIONS,
   dnd5eStandardConditionId,
   type Dnd5eStandardConditionId,
@@ -68,13 +69,29 @@ export interface Dnd5eActiveEffectRepeatSave {
   timing: 'target-turn-start' | 'target-turn-end'
   /** 受到伤害后额外触发一次豁免；由 Headless 记录待结算项，客户端不能自行伪造。 */
   onDamage?: { mode: 'normal' | 'advantage' }
+  /** 部分持续法术会在重复豁免失败时造成伤害；骰池由 Host 校验并结算。 */
+  damageOnFailure?: {
+    count: number
+    sides: number
+    modifier?: number
+    type: Dnd5eDamageType
+  }
   onSuccess: 'remove'
+}
+
+export interface Dnd5eActiveEffectEscapeCheck {
+  ability: AbilityKey
+  /** 规则允许目标自行选择另一项属性时，Host 会采用目标更有利的合法选项。 */
+  alternativeAbility?: AbilityKey
+  dc: number
+  economy: 'action'
 }
 
 export interface Dnd5eActiveEffectSavingThrowRoll {
   effectId: string
   d20: number
   d20Second?: number
+  damageRolls?: readonly number[]
   blessRoll?: number
   baneRoll?: number
   rerollD20?: number
@@ -89,8 +106,15 @@ export interface Dnd5eActiveEffectSavingThrowRoll {
 export interface Dnd5eActiveEffectModifiers {
   speedPenaltyFeet?: number
   speedBonusFeet?: number
+  /** 授予飞行速度，但不改写生物的固有移动资料。 */
+  flySpeedFeet?: number
+  jumpDistanceMultiplier?: number
+  sizeRankDelta?: -1 | 1
+  strengthRollMode?: 'advantage' | 'disadvantage'
+  weaponDamageD4?: 'add' | 'subtract'
   preventReactions?: boolean
   damageResistance?: Dnd5eDamageType
+  conditionImmunities?: readonly Dnd5eStandardConditionId[]
 }
 
 /**
@@ -111,6 +135,7 @@ export interface Dnd5eActiveEffectInstance {
   appliedTurnKey?: string
   duration: Dnd5eActiveEffectDuration
   repeatSave?: Dnd5eActiveEffectRepeatSave
+  escapeCheck?: Dnd5eActiveEffectEscapeCheck
   breakOn?: Dnd5eActiveEffectBreakTrigger[]
   stackingKey: string
   stackingPolicy: Dnd5eActiveEffectStackingPolicy
@@ -154,6 +179,7 @@ export function createDnd5eConditionEffect(input: {
   targetId: string
   duration?: Dnd5eActiveEffectDuration
   repeatSave?: Dnd5eActiveEffectRepeatSave
+  escapeCheck?: Dnd5eActiveEffectEscapeCheck
   breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
   stackingPolicy?: Dnd5eActiveEffectStackingPolicy
   stackingKey?: string
@@ -178,6 +204,7 @@ export function createDnd5eConditionEffect(input: {
     appliedTurnKey: input.appliedTurnKey,
     duration: input.duration ?? { type: 'permanent' },
     repeatSave: input.repeatSave ? { ...input.repeatSave } : undefined,
+    escapeCheck: input.escapeCheck ? { ...input.escapeCheck } : undefined,
     breakOn: input.breakOn ? [...new Set(input.breakOn)] : undefined,
     stackingKey: input.stackingKey ?? definitionId,
     stackingPolicy: input.stackingPolicy ?? 'refresh-duration',
@@ -195,6 +222,7 @@ export function createDnd5eMechanicalEffect(input: {
   targetId: string
   duration?: Dnd5eActiveEffectDuration
   repeatSave?: Dnd5eActiveEffectRepeatSave
+  escapeCheck?: Dnd5eActiveEffectEscapeCheck
   breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
   stackingPolicy?: Dnd5eActiveEffectStackingPolicy
   stackingKey?: string
@@ -219,6 +247,7 @@ export function createDnd5eMechanicalEffect(input: {
     appliedTurnKey: input.appliedTurnKey,
     duration: input.duration ?? { type: 'permanent' },
     repeatSave: input.repeatSave ? { ...input.repeatSave } : undefined,
+    escapeCheck: input.escapeCheck ? { ...input.escapeCheck } : undefined,
     breakOn: input.breakOn ? [...new Set(input.breakOn)] : undefined,
     stackingKey: input.stackingKey ?? input.definitionId,
     stackingPolicy: input.stackingPolicy ?? 'refresh-duration',
@@ -288,10 +317,27 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       }
     } else continue
     const rawRepeatSave = candidate.repeatSave
+    const rawFailureDamage = isRecord(rawRepeatSave) ? rawRepeatSave.damageOnFailure : undefined
+    const damageOnFailure = rawFailureDamage == null
+      ? undefined
+      : isRecord(rawFailureDamage) &&
+        Number.isInteger(rawFailureDamage.count) && Number(rawFailureDamage.count) >= 1 && Number(rawFailureDamage.count) <= 40 &&
+        Number.isInteger(rawFailureDamage.sides) && Number(rawFailureDamage.sides) >= 2 && Number(rawFailureDamage.sides) <= 100 &&
+        Number.isInteger(rawFailureDamage.modifier ?? 0) &&
+        Number(rawFailureDamage.modifier ?? 0) >= -1_000 && Number(rawFailureDamage.modifier ?? 0) <= 1_000 &&
+        (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawFailureDamage.type)
+        ? {
+            count: Number(rawFailureDamage.count),
+            sides: Number(rawFailureDamage.sides),
+            modifier: Number(rawFailureDamage.modifier ?? 0),
+            type: rawFailureDamage.type as Dnd5eDamageType,
+          }
+        : null
     const repeatSave = isRecord(rawRepeatSave) &&
       ABILITIES.has(rawRepeatSave.ability as AbilityKey) &&
       typeof rawRepeatSave.dc === 'number' && Number.isInteger(rawRepeatSave.dc) && rawRepeatSave.dc > 0 &&
       (rawRepeatSave.timing === 'target-turn-start' || rawRepeatSave.timing === 'target-turn-end') &&
+      damageOnFailure !== null &&
       (rawRepeatSave.onDamage == null || (
         isRecord(rawRepeatSave.onDamage) &&
         (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
@@ -304,7 +350,23 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
             ? { mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage' }
             : undefined,
+          damageOnFailure,
           onSuccess: 'remove' as const,
+        }
+      : undefined
+    const rawEscapeCheck = candidate.escapeCheck
+    const escapeCheck = isRecord(rawEscapeCheck) &&
+      Object.keys(rawEscapeCheck).every((key) => ['ability', 'alternativeAbility', 'dc', 'economy'].includes(key)) &&
+      ABILITIES.has(rawEscapeCheck.ability as AbilityKey) &&
+      (rawEscapeCheck.alternativeAbility == null || ABILITIES.has(rawEscapeCheck.alternativeAbility as AbilityKey)) &&
+      typeof rawEscapeCheck.dc === 'number' && Number.isInteger(rawEscapeCheck.dc) &&
+      rawEscapeCheck.dc > 0 && rawEscapeCheck.dc <= 100 &&
+      rawEscapeCheck.economy === 'action'
+      ? {
+          ability: rawEscapeCheck.ability as AbilityKey,
+          alternativeAbility: rawEscapeCheck.alternativeAbility as AbilityKey | undefined,
+          dc: rawEscapeCheck.dc,
+          economy: 'action' as const,
         }
       : undefined
     const potency = typeof candidate.potency === 'number' &&
@@ -325,11 +387,40 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             Number.isFinite(rawModifiers.speedBonusFeet) && rawModifiers.speedBonusFeet >= 0
             ? rawModifiers.speedBonusFeet
             : undefined,
+          flySpeedFeet: typeof rawModifiers.flySpeedFeet === 'number' &&
+            Number.isFinite(rawModifiers.flySpeedFeet) &&
+            rawModifiers.flySpeedFeet > 0 &&
+            rawModifiers.flySpeedFeet <= 1_000
+            ? rawModifiers.flySpeedFeet
+            : undefined,
+          jumpDistanceMultiplier: typeof rawModifiers.jumpDistanceMultiplier === 'number' &&
+            Number.isFinite(rawModifiers.jumpDistanceMultiplier) &&
+            rawModifiers.jumpDistanceMultiplier >= 1 &&
+            rawModifiers.jumpDistanceMultiplier <= 10
+            ? rawModifiers.jumpDistanceMultiplier
+            : undefined,
+          sizeRankDelta: rawModifiers.sizeRankDelta === -1 || rawModifiers.sizeRankDelta === 1
+            ? rawModifiers.sizeRankDelta as -1 | 1
+            : undefined,
+          strengthRollMode: rawModifiers.strengthRollMode === 'advantage' ||
+            rawModifiers.strengthRollMode === 'disadvantage'
+            ? rawModifiers.strengthRollMode as 'advantage' | 'disadvantage'
+            : undefined,
+          weaponDamageD4: rawModifiers.weaponDamageD4 === 'add' ||
+            rawModifiers.weaponDamageD4 === 'subtract'
+            ? rawModifiers.weaponDamageD4 as 'add' | 'subtract'
+            : undefined,
           preventReactions: typeof rawModifiers.preventReactions === 'boolean'
             ? rawModifiers.preventReactions
             : undefined,
           damageResistance: (DND5E_DAMAGE_TYPES as readonly unknown[]).includes(rawModifiers.damageResistance)
             ? rawModifiers.damageResistance as Dnd5eDamageType
+            : undefined,
+          conditionImmunities: Array.isArray(rawModifiers.conditionImmunities) &&
+            rawModifiers.conditionImmunities.every((entry) =>
+              (DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(entry),
+            )
+            ? [...new Set(rawModifiers.conditionImmunities)] as Dnd5eStandardConditionId[]
             : undefined,
         }
       : undefined
@@ -342,11 +433,23 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       source: { ...(candidate.source as unknown as Dnd5eActiveEffectSource) },
       duration: normalizedDuration,
       repeatSave,
+      escapeCheck,
       potency,
       breakOn: Array.isArray(candidate.breakOn)
         ? [...new Set(candidate.breakOn.filter((entry): entry is Dnd5eActiveEffectBreakTrigger => BREAK_TRIGGERS.has(entry as Dnd5eActiveEffectBreakTrigger)))]
         : undefined,
-      modifiers: modifiers && (modifiers.speedPenaltyFeet != null || modifiers.speedBonusFeet != null || modifiers.preventReactions != null || modifiers.damageResistance != null)
+      modifiers: modifiers && (
+        modifiers.speedPenaltyFeet != null ||
+        modifiers.speedBonusFeet != null ||
+        modifiers.flySpeedFeet != null ||
+        modifiers.jumpDistanceMultiplier != null ||
+        modifiers.sizeRankDelta != null ||
+        modifiers.strengthRollMode != null ||
+        modifiers.weaponDamageD4 != null ||
+        modifiers.preventReactions != null ||
+        modifiers.damageResistance != null ||
+        modifiers.conditionImmunities != null
+      )
         ? modifiers
         : undefined,
     })
@@ -375,6 +478,7 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     const effect = effects.find((candidate) => candidate.id === raw.id)
     if (!effect) continue
     if (raw.repeatSave != null && effect.repeatSave == null) issues.push(`activeEffects[${index}].repeatSave 损坏`)
+    if (raw.escapeCheck != null && effect.escapeCheck == null) issues.push(`activeEffects[${index}].escapeCheck 损坏`)
     if (raw.potency != null && effect.potency == null) issues.push(`activeEffects[${index}].potency 无效`)
     if (Array.isArray(raw.breakOn) && (effect.breakOn?.length ?? 0) !== new Set(raw.breakOn).size) {
       issues.push(`activeEffects[${index}].breakOn 含未知触发器`)
@@ -398,12 +502,44 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           typeof raw.modifiers.speedBonusFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.speedBonusFeet) || raw.modifiers.speedBonusFeet < 0
         )) issues.push(`activeEffects[${index}].modifiers.speedBonusFeet 无效`)
+        if (raw.modifiers.flySpeedFeet != null && (
+          typeof raw.modifiers.flySpeedFeet !== 'number' ||
+          !Number.isFinite(raw.modifiers.flySpeedFeet) ||
+          raw.modifiers.flySpeedFeet <= 0 ||
+          raw.modifiers.flySpeedFeet > 1_000
+        )) issues.push(`activeEffects[${index}].modifiers.flySpeedFeet 无效`)
+        if (raw.modifiers.jumpDistanceMultiplier != null && (
+          typeof raw.modifiers.jumpDistanceMultiplier !== 'number' ||
+          !Number.isFinite(raw.modifiers.jumpDistanceMultiplier) ||
+          raw.modifiers.jumpDistanceMultiplier < 1 ||
+          raw.modifiers.jumpDistanceMultiplier > 10
+        )) issues.push(`activeEffects[${index}].modifiers.jumpDistanceMultiplier 无效`)
+        if (raw.modifiers.sizeRankDelta != null &&
+          raw.modifiers.sizeRankDelta !== -1 && raw.modifiers.sizeRankDelta !== 1) {
+          issues.push(`activeEffects[${index}].modifiers.sizeRankDelta 无效`)
+        }
+        if (raw.modifiers.strengthRollMode != null &&
+          raw.modifiers.strengthRollMode !== 'advantage' &&
+          raw.modifiers.strengthRollMode !== 'disadvantage') {
+          issues.push(`activeEffects[${index}].modifiers.strengthRollMode 无效`)
+        }
+        if (raw.modifiers.weaponDamageD4 != null &&
+          raw.modifiers.weaponDamageD4 !== 'add' &&
+          raw.modifiers.weaponDamageD4 !== 'subtract') {
+          issues.push(`activeEffects[${index}].modifiers.weaponDamageD4 无效`)
+        }
         if (raw.modifiers.preventReactions != null && typeof raw.modifiers.preventReactions !== 'boolean') {
           issues.push(`activeEffects[${index}].modifiers.preventReactions 无效`)
         }
         if (raw.modifiers.damageResistance != null && !(DND5E_DAMAGE_TYPES as readonly unknown[]).includes(raw.modifiers.damageResistance)) {
           issues.push(`activeEffects[${index}].modifiers.damageResistance 无效`)
         }
+        if (raw.modifiers.conditionImmunities != null && (
+          !Array.isArray(raw.modifiers.conditionImmunities) ||
+          raw.modifiers.conditionImmunities.some((entry) =>
+            !(DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(entry),
+          )
+        )) issues.push(`activeEffects[${index}].modifiers.conditionImmunities 无效`)
       }
     }
   }
@@ -426,6 +562,62 @@ export function dnd5eActiveSpeedBonus(
     (total, effect) => total + Math.max(0, effect.modifiers?.speedBonusFeet ?? 0),
     0,
   )
+}
+
+export function dnd5eActiveFlySpeed(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number | undefined {
+  const speed = normalizeDnd5eActiveEffects(effects).reduce(
+    (maximum, effect) => Math.max(maximum, effect.modifiers?.flySpeedFeet ?? 0),
+    0,
+  )
+  return speed > 0 ? speed : undefined
+}
+
+export function dnd5eActiveJumpDistanceMultiplier(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (multiplier, effect) => Math.max(multiplier, effect.modifiers?.jumpDistanceMultiplier ?? 1),
+    1,
+  )
+}
+
+export function dnd5eActiveSizeRankDelta(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (total, effect) => total + (effect.modifiers?.sizeRankDelta ?? 0),
+    0,
+  )
+}
+
+export function dnd5eActiveStrengthRollFlags(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): { advantage: boolean; disadvantage: boolean } {
+  const modes = normalizeDnd5eActiveEffects(effects).map((effect) => effect.modifiers?.strengthRollMode)
+  return {
+    advantage: modes.includes('advantage'),
+    disadvantage: modes.includes('disadvantage'),
+  }
+}
+
+export function dnd5eActiveWeaponDamageD4Mode(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): 'add' | 'subtract' | undefined {
+  const modes = normalizeDnd5eActiveEffects(effects)
+    .map((effect) => effect.modifiers?.weaponDamageD4)
+    .filter((mode): mode is 'add' | 'subtract' => mode != null)
+  if (modes.includes('add') && modes.includes('subtract')) return undefined
+  return modes[0]
+}
+
+export function dnd5eActiveConditionImmunities(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): Dnd5eStandardConditionId[] {
+  return [...new Set(normalizeDnd5eActiveEffects(effects).flatMap(
+    (effect) => effect.modifiers?.conditionImmunities ?? [],
+  ))]
 }
 
 export function dnd5eActiveEffectsPreventReactions(

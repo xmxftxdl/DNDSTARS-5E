@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { planEnemyTurn, clearEnemyAiWarnings } from './enemyAi'
+import { buildSelectedEnemyAttack, planEnemyTurn, clearEnemyAiWarnings } from './enemyAi'
+import { getEnemyStatBlock } from './enemyStatBlocks'
 import type { BattleMap, Token } from '../store/maps'
 
 // 50px/格、无偏移：cell(c,r) 中心 = ((c+0.5)*50, (r+0.5)*50)，相邻格距离 = 1（近战触及）。
@@ -67,6 +68,29 @@ describe('[T7/AC1] buildEnemyAttack 按怪物真实结构化攻击数据投骰',
     expect(attack.total).toBe(expected)
     expect(result.damage).toBe(expected)
     expect(attack.total).toBeGreaterThan(1)
+  })
+
+  it('手动怪物回合保留 DM 选择的具体结构化攻击', () => {
+    const enemy = token({ id: 'e', type: 'enemy', poolId: 'goblin', x: 25, y: 25 })
+    const player = token({ id: 'p', type: 'player', x: 75, y: 25 })
+    const actions = getEnemyStatBlock('goblin')?.actions ?? []
+    const rangedIndex = actions.findIndex((action) => action.kind === 'ranged' && action.automation === 'headless')
+    expect(rangedIndex).toBeGreaterThanOrEqual(0)
+
+    const result = buildSelectedEnemyAttack(enemy, player, rangedIndex)
+    expect(result).toMatchObject({
+      attackerTokenId: enemy.id,
+      targetTokenId: player.id,
+      actionIndex: rangedIndex,
+      attacked: true,
+    })
+    expect(result?.attack?.label).toContain(actions[rangedIndex].name)
+  })
+
+  it('手动怪物回合拒绝非攻击或非 Headless 动作', () => {
+    const enemy = token({ id: 'e', type: 'enemy', poolId: 'goblin' })
+    const player = token({ id: 'p', type: 'player' })
+    expect(buildSelectedEnemyAttack(enemy, player, -1)).toBeUndefined()
   })
 })
 

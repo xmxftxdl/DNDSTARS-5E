@@ -5,6 +5,13 @@ import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'n
 import { createReadStream } from 'node:fs'
 import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
+import {
+  compileGeometryCached,
+  doorOpenState,
+  raycastGeometry,
+  validateGeometryRelationships,
+  validateGeometryStructure,
+} from '../shared/map-geometry-kernel.mjs'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
@@ -46,6 +53,10 @@ export const COMBAT_PRESENTATION_CHANNEL = 'combat-presentation'
 export const MAP_PING_LIFETIME_MS = 3_200
 export const MAP_ANNOTATION_LIFETIME_MS = 30 * 60 * 1_000
 export const COMBAT_PRESENTATION_LIFETIME_MS = 1_600
+export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
+export const FIREBALL_PRESENTATION_LIFETIME_MS = 3_500
+export const KILL_STREAK_BANNER_START_DELAY_MS = 650
+export const KILL_STREAK_PRESENTATION_LIFETIME_MS = 5_800
 export const DND5E_2014_RULESET_ID = 'dnd5e-2014-srd-5.1'
 export const SHARED_PROTOCOL_VERSION = 5
 export const SHARED_MIN_CLIENT_PROTOCOL = 5
@@ -975,7 +986,13 @@ export async function atomicMutateJsonStateLocked(filePath, updater) {
   })
 }
 
-export function mutateCombatInterruptQueue(queue, mutation, now = Date.now(), authorityRole = 'open') {
+export function mutateCombatInterruptQueue(
+  queue,
+  mutation,
+  now = Date.now(),
+  authorityRole = 'open',
+  authorityCharacterIds,
+) {
   const operation = mutation?.operation
   const mapId = String(mutation?.mapId ?? '')
   if (!mapId) return { ok: false, status: 400, error: 'invalid-map' }
@@ -1063,7 +1080,11 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now(), au
     if (response.acceptedContributionId && !acceptedContribution) {
       return { ok: false, status: 409, error: 'roll-contribution-not-found' }
     }
-    const expectedValue = acceptedContribution?.replacementValue ?? originalValue
+    const dmOverrideAllowed =
+      current.payload?.visibility === 'dm-only' &&
+      current.payload?.allowDmOverride === true &&
+      !response.acceptedContributionId
+    const expectedValue = dmOverrideAllowed ? response.finalValue : acceptedContribution?.replacementValue ?? originalValue
     if (response.finalValue !== expectedValue) {
       return { ok: false, status: 409, error: 'roll-confirmation-value-conflict' }
     }
@@ -1085,6 +1106,29 @@ export function mutateCombatInterruptQueue(queue, mutation, now = Date.now(), au
       !Number.isFinite(contribution.createdAt) ||
       (contribution.featureId != null && typeof contribution.featureId !== 'string')
     ) return { ok: false, status: 400, error: 'invalid-contribution' }
+    const eligibleModifiers = Array.isArray(current.payload?.eligibleModifiers)
+      ? current.payload.eligibleModifiers
+      : []
+    const eligibleModifier = eligibleModifiers.find((entry) =>
+      entry?.characterId === contribution.characterId &&
+      entry?.featureId === contribution.featureId &&
+      entry?.featureLabel === contribution.featureLabel,
+    )
+    if (!eligibleModifier) {
+      return { ok: false, status: 403, error: 'ineligible-roll-modifier' }
+    }
+    if (
+      authorityRole === 'player' &&
+      (
+        !Array.isArray(authorityCharacterIds) ||
+        !authorityCharacterIds.includes(contribution.characterId)
+      )
+    ) {
+      return { ok: false, status: 403, error: 'character-ownership-required' }
+    }
+    if (contribution.id !== `${current.id}:${contribution.characterId}`) {
+      return { ok: false, status: 400, error: 'invalid-contribution-id' }
+    }
     const normalizedContribution = {
       id: contribution.id.slice(0, 240),
       kind: 'replace-d20',
@@ -1418,7 +1462,7 @@ export function normalizeMapTabletopEvent(payload, actor, now = Date.now()) {
 /** Author transient combat visuals without allowing them to mutate combat state. */
 export function normalizeCombatPresentationEvent(payload, actor, now = Date.now()) {
   if (actor?.role !== 'dm') return { ok: false, status: 403, error: 'forbidden' }
-  const event = {
+  const common = {
     schemaVersion: payload?.schemaVersion,
     id: normalizedLabel(payload?.id, 200),
     type: payload?.type,
@@ -1426,22 +1470,88 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
     transactionId: normalizedLabel(payload?.transactionId, 200),
     spellId: normalizedLabel(payload?.spellId, 80),
     sourceTokenId: normalizedLabel(payload?.sourceTokenId, 160),
-    targetTokenId: normalizedLabel(payload?.targetTokenId, 160),
-    outcome: payload?.outcome,
   }
   if (
-    event.schemaVersion !== 1 || event.type !== 'spell-projectile' ||
-    !event.id || !event.mapId || !event.transactionId || event.spellId !== 'fire-bolt' ||
-    !event.sourceTokenId || !event.targetTokenId ||
-    (event.outcome !== 'hit' && event.outcome !== 'miss')
+    common.schemaVersion !== 1 || !common.id || !common.mapId ||
+    !common.transactionId || !common.sourceTokenId
   ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+
+  if (common.type === 'spell-projectile' && common.spellId === 'fire-bolt') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const outcome = payload?.outcome
+    if (!targetTokenId || (outcome !== 'hit' && outcome !== 'miss')) {
+      return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        outcome,
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'spell-area-projectile' && common.spellId === 'fireball') {
+    const col = payload?.targetCell?.col
+    const row = payload?.targetCell?.row
+    const radiusFeet = payload?.radiusFeet
+    const casterName = normalizedLabel(payload?.casterName, 80)
+    const spellName = normalizedLabel(payload?.spellName, 80)
+    const castingClassId = normalizedLabel(payload?.castingClassId, 40)
+    if (
+      !casterName || !spellName || !castingClassId ||
+      !Number.isInteger(col) || col < 0 || col > 10_000 ||
+      !Number.isInteger(row) || row < 0 || row > 10_000 ||
+      !Number.isFinite(radiusFeet) || radiusFeet <= 0 || radiusFeet > 200
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        casterName,
+        spellName,
+        castingClassId,
+        targetCell: { col, row },
+        radiusFeet,
+        createdAt: now,
+        animationStartsAt: now + FIREBALL_ANIMATION_START_DELAY_MS,
+        expiresAt: now + FIREBALL_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'kill-streak') {
+    const actorName = normalizedLabel(payload?.actorName, 80)
+    const classId = normalizedLabel(payload?.classId, 40)
+    const style = payload?.style
+    if (
+      !actorName || !classId ||
+      (style !== 'arcane' && style !== 'martial') ||
+      payload?.killCount !== 3
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    const { spellId: _unusedSpellId, ...killStreakCommon } = common
+    return {
+      ok: true,
+      event: {
+        ...killStreakCommon,
+        actorName,
+        classId,
+        style,
+        killCount: 3,
+        createdAt: now,
+        bannerStartsAt: now + KILL_STREAK_BANNER_START_DELAY_MS,
+        expiresAt: now + KILL_STREAK_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
   return {
-    ok: true,
-    event: {
-      ...event,
-      createdAt: now,
-      expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
-    },
+    ok: false,
+    status: 400,
+    error: 'invalid-combat-presentation-event',
   }
 }
 
@@ -1547,13 +1657,27 @@ export function mutateRoomChatState(current, mutation, now, member, context = {}
 
 export function projectRoomJournalForMember(value, memberId, isDm = false) {
   const handouts = Array.isArray(value?.handouts) ? value.handouts : []
+  const visibleHandouts = handouts.filter((handout) =>
+    isDm || handout?.audience === 'all' ||
+    (Array.isArray(handout?.audience) && handout.audience.includes(memberId)))
+  const sharedNotes = Array.isArray(value?.sharedNotes) ? value.sharedNotes : []
+  const stripAuthorityReceipt = (entry) => {
+    const projected = { ...entry }
+    delete projected.authorityReceiptId
+    return projected
+  }
   return {
     schemaVersion: 1,
-    handouts: handouts.filter((handout) =>
-      isDm || handout?.audience === 'all' ||
-      (Array.isArray(handout?.audience) && handout.audience.includes(memberId))),
+    handouts: isDm
+      ? visibleHandouts
+      : visibleHandouts.map(stripAuthorityReceipt),
     campaignEntries: Array.isArray(value?.campaignEntries) ? value.campaignEntries : [],
-    sharedNotes: Array.isArray(value?.sharedNotes) ? value.sharedNotes : [],
+    sharedNotes: isDm
+      ? sharedNotes
+      : sharedNotes.map(stripAuthorityReceipt),
+    authorityMutationReceipts: isDm && Array.isArray(value?.authorityMutationReceipts)
+      ? value.authorityMutationReceipts
+      : [],
     updatedAt: Number(value?.updatedAt) || 0,
     ...(plainObject(value?._sync) ? { _sync: value._sync } : {}),
   }
@@ -1646,6 +1770,9 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
     handouts: Array.isArray(current?.handouts) ? current.handouts : [],
     campaignEntries: Array.isArray(current?.campaignEntries) ? current.campaignEntries : [],
     sharedNotes: Array.isArray(current?.sharedNotes) ? current.sharedNotes : [],
+    authorityMutationReceipts: Array.isArray(current?.authorityMutationReceipts)
+      ? current.authorityMutationReceipts.map((entry) => boundedText(entry, 300)).filter(Boolean).slice(-512)
+      : [],
     updatedAt: now,
   }
   const authorMemberId = boundedText(member?.memberId, 160)
@@ -1653,12 +1780,22 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
   const operation = mutation?.operation
   if (operation === 'add-handout') {
     if (!isDm) return { ok: false, status: 403, error: 'dm-only' }
+    const authorityReceiptId = boundedText(mutation?.authorityReceiptId, 300)
+    if (
+      authorityReceiptId &&
+      (
+        base.authorityMutationReceipts.includes(authorityReceiptId) ||
+        base.handouts.some((entry) => entry?.authorityReceiptId === authorityReceiptId)
+      )
+    ) {
+      return { ok: true, changed: false, next: current ?? base }
+    }
     const title = boundedText(mutation?.title, 120)
     const body = boundedText(mutation?.body, 20_000)
     const imageId = boundedText(mutation?.imageId, 160)
     if (!title || (!body && !imageId)) return { ok: false, status: 400, error: 'invalid-handout' }
     let audience = mutation?.audience
-    if (audience !== 'all') {
+    if (audience !== 'all' && audience !== 'dm') {
       if (!Array.isArray(audience)) return { ok: false, status: 400, error: 'invalid-audience' }
       audience = [...new Set(audience.map((entry) => boundedText(entry, 160)).filter(Boolean))]
       if (audience.length < 1 || audience.some((id) => !context.playerMemberIds?.includes(id))) {
@@ -1679,8 +1816,19 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
       authorName,
       createdAt: now,
       updatedAt: now,
+      ...(authorityReceiptId ? { authorityReceiptId } : {}),
     }
-    return { ok: true, changed: true, next: { ...base, handouts: [...base.handouts, handout].slice(-ROOM_HANDOUT_LIMIT) } }
+    return {
+      ok: true,
+      changed: true,
+      next: {
+        ...base,
+        handouts: [...base.handouts, handout].slice(-ROOM_HANDOUT_LIMIT),
+        authorityMutationReceipts: authorityReceiptId
+          ? [...base.authorityMutationReceipts, authorityReceiptId].slice(-512)
+          : base.authorityMutationReceipts,
+      },
+    }
   }
   if (operation === 'remove-handout') {
     if (!isDm) return { ok: false, status: 403, error: 'dm-only' }
@@ -1713,6 +1861,17 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
     return { ok: true, changed: true, next: { ...base, campaignEntries: base.campaignEntries.filter((entry) => entry?.id !== id) } }
   }
   if (operation === 'add-shared-note') {
+    const authorityReceiptId = boundedText(mutation?.authorityReceiptId, 300)
+    if (authorityReceiptId && !isDm) return { ok: false, status: 403, error: 'dm-only' }
+    if (
+      authorityReceiptId &&
+      (
+        base.authorityMutationReceipts.includes(authorityReceiptId) ||
+        base.sharedNotes.some((entry) => entry?.authorityReceiptId === authorityReceiptId)
+      )
+    ) {
+      return { ok: true, changed: false, next: current ?? base }
+    }
     const title = boundedText(mutation?.title, 120)
     if (!title) return { ok: false, status: 400, error: 'invalid-shared-note' }
     const note = {
@@ -1727,10 +1886,32 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
       lastEditorName: authorName,
       createdAt: now,
       updatedAt: now,
+      ...(authorityReceiptId ? { authorityReceiptId } : {}),
     }
-    return { ok: true, changed: true, next: { ...base, sharedNotes: [...base.sharedNotes, note].slice(-ROOM_SHARED_NOTE_LIMIT) } }
+    return {
+      ok: true,
+      changed: true,
+      next: {
+        ...base,
+        sharedNotes: [...base.sharedNotes, note].slice(-ROOM_SHARED_NOTE_LIMIT),
+        authorityMutationReceipts: authorityReceiptId
+          ? [...base.authorityMutationReceipts, authorityReceiptId].slice(-512)
+          : base.authorityMutationReceipts,
+      },
+    }
   }
   if (operation === 'update-shared-note') {
+    const authorityReceiptId = boundedText(mutation?.authorityReceiptId, 300)
+    if (authorityReceiptId && !isDm) return { ok: false, status: 403, error: 'dm-only' }
+    if (
+      authorityReceiptId &&
+      (
+        base.authorityMutationReceipts.includes(authorityReceiptId) ||
+        base.sharedNotes.some((entry) => entry?.authorityReceiptId === authorityReceiptId)
+      )
+    ) {
+      return { ok: true, changed: false, next: current ?? base }
+    }
     const id = boundedText(mutation?.id, 120)
     const note = base.sharedNotes.find((entry) => entry?.id === id)
     if (!note) return { ok: false, status: 404, error: 'shared-note-not-found' }
@@ -1746,8 +1927,19 @@ export function mutateRoomJournalState(current, mutation, now, member, context =
       lastEditorMemberId: authorMemberId,
       lastEditorName: authorName,
       updatedAt: now,
+      ...(authorityReceiptId ? { authorityReceiptId } : {}),
     }
-    return { ok: true, changed: true, next: { ...base, sharedNotes: base.sharedNotes.map((entry) => entry?.id === id ? updated : entry) } }
+    return {
+      ok: true,
+      changed: true,
+      next: {
+        ...base,
+        sharedNotes: base.sharedNotes.map((entry) => entry?.id === id ? updated : entry),
+        authorityMutationReceipts: authorityReceiptId
+          ? [...base.authorityMutationReceipts, authorityReceiptId].slice(-512)
+          : base.authorityMutationReceipts,
+      },
+    }
   }
   if (operation === 'remove-shared-note') {
     const id = boundedText(mutation?.id, 120)
@@ -1979,11 +2171,53 @@ export function projectGroupAbilityChecksForMember(value, memberId, isDm = false
   }
 }
 
-/** Hidden trigger geometry, encounter presets, and queued DM actions never cross to players. */
+/**
+ * Hidden trigger geometry, encounter presets, checks, rewards, and queued DM actions never cross
+ * to players. Explicitly public interaction points retain only the marker and prompt required for
+ * the player to request a Host-authoritative interaction.
+ */
 export function projectSceneOrchestrationForPlayer(value) {
   return {
     schemaVersion: 1,
-    scenes: [],
+    scenes: (Array.isArray(value?.scenes) ? value.scenes : []).flatMap((scene) => {
+      if (!plainObject(scene) || !validSceneId(scene.id) || !validSceneId(scene.mapId)) return []
+      const interactionPoints = (Array.isArray(scene.interactionPoints) ? scene.interactionPoints : [])
+        .filter((point) => plainObject(point) && point.enabled === true && point.visibleToPlayers === true)
+        .map((point) => ({
+          id: point.id,
+          name: point.name,
+          enabled: true,
+          visibleToPlayers: true,
+          icon: point.icon,
+          x: point.x,
+          y: point.y,
+          interactionRadiusFeet: point.interactionRadiusFeet,
+          prompt: point.prompt,
+          repeat: point.repeat,
+          successText: '',
+          failureText: '',
+          rewards: [],
+          successEffects: [],
+          failureEffects: [],
+        }))
+      if (interactionPoints.length < 1) return []
+      return [{
+        id: scene.id,
+        mapId: scene.mapId,
+        name: scene.name,
+        description: '',
+        environmentLabel: '',
+        backgroundCue: 'none',
+        backgroundAudioLoop: false,
+        backgroundAudioVolume: 0,
+        boundHandoutIds: [],
+        boundJournalEntryIds: [],
+        interactionPoints,
+        triggers: [],
+        createdAt: Number(scene.createdAt) || 0,
+        updatedAt: Number(scene.updatedAt) || 0,
+      }]
+    }),
     runtime: { paused: false, pendingRuns: [], receipts: [], history: [] },
     updatedAt: Number.isFinite(value?.updatedAt) ? value.updatedAt : 0,
   }
@@ -2482,6 +2716,110 @@ function validSceneAction(action) {
   return typeof action.title === 'string' && action.title.length > 0 && action.title.length <= 160 && typeof action.body === 'string' && action.body.length <= 4_000
 }
 
+const SCENE_INTERACTION_POINT_ICONS = new Set(['bookshelf', 'chest', 'search', 'altar', 'switch', 'custom'])
+const SCENE_INTERACTION_CURRENCIES = new Set(['cp', 'sp', 'ep', 'gp', 'pp'])
+const SCENE_INTERACTION_DAMAGE_TYPES = new Set([
+  'acid', 'bludgeoning', 'cold', 'fire', 'force', 'lightning', 'necrotic',
+  'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder',
+])
+const SCENE_INTERACTION_CONDITIONS = new Set([
+  'blinded', 'charmed', 'deafened', 'frightened', 'grappled', 'incapacitated',
+  'invisible', 'paralyzed', 'petrified', 'poisoned', 'prone', 'restrained',
+  'stunned', 'unconscious',
+])
+
+function validSceneInteractionOutcomeEffect(effect) {
+  if (!plainObject(effect) || !validSceneId(effect.id)) return false
+  if (effect.kind === 'currency') {
+    return SCENE_INTERACTION_CURRENCIES.has(effect.currency) &&
+      Number.isInteger(effect.amount) && effect.amount >= 1 && effect.amount <= 1_000_000
+  }
+  if (effect.kind === 'handout') {
+    return validSceneId(effect.handoutId) && ['all', 'triggering-player'].includes(effect.audience)
+  }
+  if (effect.kind === 'task') {
+    return ['add', 'complete'].includes(effect.operation) &&
+      (effect.operation !== 'complete' || validSceneId(effect.taskId)) &&
+      typeof effect.title === 'string' && effect.title.length <= 120 &&
+      (effect.operation !== 'add' || effect.title.trim().length > 0) &&
+      typeof effect.body === 'string' && effect.body.length <= 4_000
+  }
+  if (effect.kind === 'damage') {
+    return Number.isInteger(effect.count) && effect.count >= 1 && effect.count <= 40 &&
+      Number.isInteger(effect.sides) && effect.sides >= 2 && effect.sides <= 100 &&
+      Number.isInteger(effect.bonus) && effect.bonus >= -1_000 && effect.bonus <= 1_000 &&
+      SCENE_INTERACTION_DAMAGE_TYPES.has(effect.damageType)
+  }
+  if (effect.kind === 'condition') {
+    return SCENE_INTERACTION_CONDITIONS.has(effect.condition) && plainObject(effect.duration) && (
+      effect.duration.type === 'permanent' ||
+      (
+        effect.duration.type === 'rounds' &&
+        Number.isInteger(effect.duration.rounds) &&
+        effect.duration.rounds >= 1 &&
+        effect.duration.rounds <= 10_000
+      )
+    )
+  }
+  return false
+}
+
+function validSceneInteractionPoint(point) {
+  if (
+    !plainObject(point) ||
+    !validSceneId(point.id) ||
+    typeof point.name !== 'string' ||
+    !point.name.trim() ||
+    point.name.length > 160 ||
+    typeof point.enabled !== 'boolean' ||
+    typeof point.visibleToPlayers !== 'boolean' ||
+    !SCENE_INTERACTION_POINT_ICONS.has(point.icon) ||
+    !Number.isFinite(point.x) ||
+    !Number.isFinite(point.y) ||
+    !Number.isFinite(point.interactionRadiusFeet) ||
+    point.interactionRadiusFeet < 5 ||
+    point.interactionRadiusFeet > 120 ||
+    typeof point.prompt !== 'string' ||
+    !point.prompt.trim() ||
+    point.prompt.length > 1_000 ||
+    !['once', 'per-character', 'always'].includes(point.repeat) ||
+    typeof point.successText !== 'string' ||
+    point.successText.length > 1_000 ||
+    typeof point.failureText !== 'string' ||
+    point.failureText.length > 1_000 ||
+    !plainObject(point.check) ||
+    typeof point.check.label !== 'string' ||
+    !point.check.label.trim() ||
+    point.check.label.length > 160 ||
+    !/^(?:ability):(str|dex|con|int|wis|cha)$|^skill:[a-zA-Z]+$/.test(point.check.selection) ||
+    !Number.isInteger(point.check.dc) ||
+    point.check.dc < 0 ||
+    point.check.dc > 100 ||
+    !['normal', 'advantage', 'disadvantage'].includes(point.check.mode) ||
+    !Array.isArray(point.rewards) ||
+    point.rewards.length > 12 ||
+    (point.successEffects != null && (
+      !Array.isArray(point.successEffects) ||
+      point.successEffects.length > 24 ||
+      !point.successEffects.every(validSceneInteractionOutcomeEffect) ||
+      new Set(point.successEffects.map((effect) => effect.id)).size !== point.successEffects.length
+    )) ||
+    (point.failureEffects != null && (
+      !Array.isArray(point.failureEffects) ||
+      point.failureEffects.length > 24 ||
+      !point.failureEffects.every(validSceneInteractionOutcomeEffect) ||
+      new Set(point.failureEffects.map((effect) => effect.id)).size !== point.failureEffects.length
+    ))
+  ) return false
+  return point.rewards.every((reward) =>
+    plainObject(reward) &&
+    validSceneId(reward.templateId) &&
+    Number.isInteger(reward.quantity) &&
+    reward.quantity >= 1 &&
+    reward.quantity <= 999 &&
+    typeof reward.identified === 'boolean')
+}
+
 function validateSceneOrchestrationState(value) {
   if (value.schemaVersion !== 1 || !Array.isArray(value.scenes) || value.scenes.length > 80 || !plainObject(value.runtime) ||
     !Array.isArray(value.runtime.pendingRuns) || value.runtime.pendingRuns.length > 50 ||
@@ -2500,6 +2838,12 @@ function validateSceneOrchestrationState(value) {
       (scene.backgroundAudioVolume != null && (!Number.isFinite(scene.backgroundAudioVolume) || scene.backgroundAudioVolume < 0 || scene.backgroundAudioVolume > 1)) ||
       !Array.isArray(scene.boundHandoutIds) || scene.boundHandoutIds.length > 100 || !scene.boundHandoutIds.every(validSceneId) ||
       !Array.isArray(scene.boundJournalEntryIds) || scene.boundJournalEntryIds.length > 100 || !scene.boundJournalEntryIds.every(validSceneId) ||
+      (scene.interactionPoints != null && (
+        !Array.isArray(scene.interactionPoints) ||
+        scene.interactionPoints.length > 160 ||
+        !scene.interactionPoints.every(validSceneInteractionPoint) ||
+        new Set(scene.interactionPoints.map((point) => point.id)).size !== scene.interactionPoints.length
+      )) ||
       !Array.isArray(scene.triggers) || scene.triggers.length > 120 || !Number.isFinite(scene.createdAt) || !Number.isFinite(scene.updatedAt)) {
       return 'invalid-scene'
     }
@@ -2657,6 +3001,10 @@ function validateDnd5eResourceStates(name, value) {
           typeof token.portraitImageId !== 'string' ||
           !/^[a-z0-9_-]{1,160}$/i.test(token.portraitImageId)
         )) return 'invalid-token-portrait-image'
+        if (token.visualVariantId != null && (
+          typeof token.visualVariantId !== 'string' ||
+          !/^[a-z0-9_-]{1,80}$/i.test(token.visualVariantId)
+        )) return 'invalid-token-visual-variant'
         if (token.lightSource != null && !validTimedLightState(token.lightSource)) return 'invalid-token-light-source'
         if (token.movementAnimation != null && !validTokenMovementAnimation(token.movementAnimation)) {
           return 'invalid-token-movement-animation'
@@ -2734,15 +3082,31 @@ function validGeometryEntity(entity, kind) {
     !Number.isFinite(entity.baseHeightFeet) || !Number.isFinite(entity.heightFeet) || entity.heightFeet < 0 ||
     !Number.isFinite(entity.createdAt)
   ) return false
-  const validWallAttachment = (entity.parentWallId == null && entity.parentWallSegmentIndex == null) || (
+  const validLegacyWallAttachment = (entity.parentWallId == null && entity.parentWallSegmentIndex == null) || (
     typeof entity.parentWallId === 'string' && entity.parentWallId.length > 0 && entity.parentWallId.length <= 160 &&
     Number.isInteger(entity.parentWallSegmentIndex) && entity.parentWallSegmentIndex >= 0 && entity.parentWallSegmentIndex <= 2_047
   )
-  if (!validWallAttachment) return false
+  const validStableWallAttachment = (entity.wallEdgeId == null && entity.startT == null && entity.endT == null) || (
+    typeof entity.wallEdgeId === 'string' && entity.wallEdgeId.length > 0 && entity.wallEdgeId.length <= 200 &&
+    Number.isFinite(entity.startT) && entity.startT >= 0 && entity.startT <= 1 &&
+    Number.isFinite(entity.endT) && entity.endT >= 0 && entity.endT <= 1 &&
+    Math.abs(entity.endT - entity.startT) > 0.0001
+  )
+  if (!validLegacyWallAttachment || !validStableWallAttachment) return false
   if (kind === 'wall') return entity.points.length >= 2 && entity.points.length <= 2_048 &&
-    (entity.material == null || ['stone', 'brick', 'wood', 'metal', 'natural'].includes(entity.material))
+    (entity.material == null || ['stone', 'brick', 'wood', 'metal', 'natural'].includes(entity.material)) &&
+    (entity.edgeIds == null || (
+      Array.isArray(entity.edgeIds) && entity.edgeIds.length === entity.points.length - 1 &&
+      entity.edgeIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200) &&
+      new Set(entity.edgeIds).size === entity.edgeIds.length
+    ))
   if (kind === 'door') {
-    if (!(entity.points.length === 2 && ['open', 'closed', 'locked'].includes(entity.state) && typeof entity.secret === 'boolean') ||
+    if (!(entity.points.length === 2 &&
+      (['open', 'closed', 'locked'].includes(entity.state) || ['open', 'closed'].includes(entity.openState)) &&
+      (entity.openState == null || ['open', 'closed'].includes(entity.openState)) &&
+      (entity.lockState == null || ['unlocked', 'locked', 'jammed'].includes(entity.lockState)) &&
+      (entity.physicalState == null || ['intact', 'broken', 'destroyed'].includes(entity.physicalState)) &&
+      typeof entity.secret === 'boolean') ||
       (entity.hinge != null && !['start', 'end'].includes(entity.hinge)) ||
       (entity.swing != null && !['clockwise', 'counterclockwise'].includes(entity.swing))) return false
     if (entity.revealedToMemberIds != null && (
@@ -2783,13 +3147,13 @@ function validGeometryLight(entity) {
 }
 
 function validateMapGeometryState(value) {
-  if (![1, 2].includes(value.schemaVersion) || !Array.isArray(value.maps) || value.maps.length > 4_096) return 'invalid-map-geometry'
+  if (![1, 2, 3].includes(value.schemaVersion) || !Array.isArray(value.maps) || value.maps.length > 4_096) return 'invalid-map-geometry'
   const mapIds = new Set()
   for (const map of value.maps) {
     if (
       !plainObject(map) || typeof map.mapId !== 'string' || !map.mapId || mapIds.has(map.mapId) ||
       !Array.isArray(map.walls) || !Array.isArray(map.doors) || !Array.isArray(map.obstacles) ||
-      (value.schemaVersion === 2
+      (value.schemaVersion >= 2
         ? !Array.isArray(map.windows) || !Array.isArray(map.lights)
         : map.windows != null && !Array.isArray(map.windows) || map.lights != null && !Array.isArray(map.lights)) ||
       map.walls.length + map.doors.length + (Array.isArray(map.windows) ? map.windows.length : 0) +
@@ -2812,6 +3176,12 @@ function validateMapGeometryState(value) {
       ...map.obstacles, ...(Array.isArray(map.lights) ? map.lights : []),
     ].map((entity) => entity.id)
     if (new Set(entityIds).size !== entityIds.length) return 'duplicate-map-geometry-entity'
+    if (value.schemaVersion >= 3 && (
+      validateGeometryStructure(map).length > 0 ||
+      validateGeometryRelationships(map).length > 0
+    )) {
+      return 'invalid-map-geometry-relationships'
+    }
   }
   return null
 }
@@ -2834,6 +3204,7 @@ function validateMapExplorationState(value) {
 }
 
 const COMBAT_STATISTIC_NUMBER_FIELDS = [
+  'turnsTaken', 'turnTrackedDamageDealt', 'turnTrackedHealingDone',
   'damageDealt', 'damageTaken', 'healingDone', 'healingReceived', 'temporaryHpGranted', 'damagePrevented',
   'hostileConditionsApplied', 'attacks', 'hits', 'criticalHits', 'knockouts', 'kills', 'alliesRescued',
   'successfulSaves', 'failedSaves', 'concentrationChecks', 'concentrationMaintained', 'actionsSpent',
@@ -2841,7 +3212,7 @@ const COMBAT_STATISTIC_NUMBER_FIELDS = [
 ]
 
 function validateCombatStatisticsState(value) {
-  if (![1, 2].includes(value.schemaVersion) || !Array.isArray(value.sessions) || value.sessions.length > 24 ||
+  if (![1, 2, 3].includes(value.schemaVersion) || !Array.isArray(value.sessions) || value.sessions.length > 24 ||
     !Number.isFinite(value.updatedAt) || value.updatedAt < 0) return 'invalid-combat-statistics'
   const combatIds = new Set()
   for (const session of value.sessions) {
@@ -2856,9 +3227,21 @@ function validateCombatStatisticsState(value) {
     }
     combatIds.add(session.combatId)
     for (const [combatantId, stats] of Object.entries(session.combatants)) {
+      const requiredNumberFields = value.schemaVersion >= 3
+        ? COMBAT_STATISTIC_NUMBER_FIELDS
+        : COMBAT_STATISTIC_NUMBER_FIELDS.filter((field) =>
+          field !== 'turnsTaken' &&
+          field !== 'turnTrackedDamageDealt' &&
+          field !== 'turnTrackedHealingDone')
       if (!combatantId || combatantId.length > 160 || !plainObject(stats) || stats.combatantId !== combatantId ||
+        (stats.characterId != null && (typeof stats.characterId !== 'string' || !stats.characterId || stats.characterId.length > 160)) ||
         typeof stats.name !== 'string' || stats.name.length > 240 || !['player', 'enemy', 'npc'].includes(stats.side) ||
-        COMBAT_STATISTIC_NUMBER_FIELDS.some((field) => !Number.isFinite(stats[field]) || stats[field] < 0)) {
+        requiredNumberFields.some((field) => !Number.isFinite(stats[field]) || stats[field] < 0) ||
+        (value.schemaVersion >= 3 && (
+          !Array.isArray(stats.combatD20FaceCounts) ||
+          stats.combatD20FaceCounts.length !== 20 ||
+          stats.combatD20FaceCounts.some((count) => !Number.isSafeInteger(count) || count < 0)
+        ))) {
         return 'invalid-combat-statistics'
       }
     }
@@ -2905,47 +3288,47 @@ function validateCombatStatisticsState(value) {
   return null
 }
 
-function geometrySegments(geometry) {
-  if (!geometry) return []
-  const segments = []
-  const add = (entity, closed) => {
-    const count = closed ? entity.points.length : entity.points.length - 1
-    for (let index = 0; index < count; index += 1) {
-      segments.push({
-        entityId: entity.id,
-        a: entity.points[index],
-        b: entity.points[(index + 1) % entity.points.length],
-        blocksVision: entity.blocksVision,
-        baseHeightFeet: entity.baseHeightFeet,
-        heightFeet: entity.heightFeet,
-      })
-    }
+function geometryPointInPolygon(point, polygon) {
+  let inside = false
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const currentPoint = polygon[index]
+    const previousPoint = polygon[previous]
+    if (
+      (currentPoint.y > point.y) !== (previousPoint.y > point.y) &&
+      point.x < (previousPoint.x - currentPoint.x) * (point.y - currentPoint.y) /
+        ((previousPoint.y - currentPoint.y) || 1e-9) + currentPoint.x
+    ) inside = !inside
   }
-  for (const wall of geometry.walls ?? []) add(wall, false)
-  for (const door of geometry.doors ?? []) {
-    if (door.state !== 'open') add(door, false)
+  return inside
+}
+
+function terrainElevationAtPoint(geometry, point) {
+  let elevation = 0
+  for (const obstacle of geometry?.obstacles ?? []) {
+    if (!Number.isFinite(obstacle?.terrainElevationFeet) || !Array.isArray(obstacle.points)) continue
+    if (geometryPointInPolygon(point, obstacle.points)) elevation = obstacle.terrainElevationFeet
   }
-  for (const obstacle of geometry.obstacles ?? []) add(obstacle, true)
-  return segments
+  return elevation
 }
 
-function cross2d(a, b) {
-  return a.x * b.y - a.y * b.x
+function tokenElevationFeet(geometry, token) {
+  const terrain = terrainElevationAtPoint(geometry, token)
+  return Number.isFinite(token?.elevationFeet) ? Math.max(terrain, token.elevationFeet) : terrain
 }
 
-function segmentIntersectionParameter(from, to, a, b) {
-  const r = { x: to.x - from.x, y: to.y - from.y }
-  const s = { x: b.x - a.x, y: b.y - a.y }
-  const denominator = cross2d(r, s)
-  if (Math.abs(denominator) < 1e-8) return null
-  const delta = { x: a.x - from.x, y: a.y - from.y }
-  const t = cross2d(delta, s) / denominator
-  const u = cross2d(delta, r) / denominator
-  return t > 1e-5 && t <= 1 + 1e-7 && u >= -1e-7 && u <= 1 + 1e-7 ? t : null
+function tokenHeightFeet(token) {
+  return Math.max(5, Math.max(1, Number(token?.size) || 1) * 5)
 }
 
-function tokenElevationFeet(token) {
-  return Number.isFinite(token?.elevationFeet) ? token.elevationFeet : 0
+function tokenVisibilitySamples(token, gridSize) {
+  const radius = Math.max(1, gridSize * Math.max(1, Number(token?.size) || 1) * 0.4)
+  return [
+    { x: token.x, y: token.y },
+    { x: token.x - radius, y: token.y - radius },
+    { x: token.x + radius, y: token.y - radius },
+    { x: token.x + radius, y: token.y + radius },
+    { x: token.x - radius, y: token.y + radius },
+  ]
 }
 
 const DEFAULT_PLAYER_VISION_RANGE_FEET = 30
@@ -3013,6 +3396,178 @@ function campaignLightActive(light, worldMinute = null) {
     Number(worldMinute) < Number(light.expiresAtWorldMinute)
 }
 
+function geometryObstacleAffectsElevation(obstacle, elevationFeet, creatureHeightFeet = 5) {
+  const baseHeightFeet = Number(obstacle?.baseHeightFeet) || 0
+  const heightFeet = Number(obstacle?.heightFeet) || 0
+  if (heightFeet > 0) {
+    return elevationFeet < baseHeightFeet + heightFeet - 1e-7 &&
+      elevationFeet + creatureHeightFeet > baseHeightFeet + 1e-7
+  }
+  const surfaceElevation = Number.isFinite(obstacle?.terrainElevationFeet)
+    ? Number(obstacle.terrainElevationFeet)
+    : baseHeightFeet
+  return Math.abs(elevationFeet - surfaceElevation) <= 1e-4
+}
+
+function spellLightingRadius(source) {
+  return source.kind === 'light'
+    ? source.brightRadiusFeet + source.dimRadiusFeet
+    : source.radiusFeet
+}
+
+function spellLightingAffectsPoint(source, point, map) {
+  const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
+  const gridSize = Math.max(1, Number(map.gridSize) || 1)
+  const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
+    gridSize * feetPerCell
+  return distanceFeet <= spellLightingRadius(source)
+}
+
+function mapSpellLightingSources(map, geometry) {
+  const gridSize = Math.max(1, Number(map.gridSize) || 1)
+  const candidates = (Array.isArray(map?.dnd5ePluginAreas) ? map.dnd5ePluginAreas : [])
+    .flatMap((area) => {
+      const lighting = area?.lighting
+      const anchor = area?.anchorCell ?? (Array.isArray(area?.cells) ? area.cells[0] : null)
+      if (!plainObject(lighting) || !plainObject(anchor)) return []
+      const point = {
+        x: (Number(map.gridOffsetX) || 0) + (Number(anchor.col) + 0.5) * gridSize,
+        y: (Number(map.gridOffsetY) || 0) + (Number(anchor.row) + 0.5) * gridSize,
+      }
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return []
+      const anchorToken = typeof area.anchorTokenId === 'string'
+        ? (map.tokens ?? []).find((token) => token?.id === area.anchorTokenId)
+        : null
+      const elevationFeet = anchorToken
+        ? tokenElevationFeet(geometry, anchorToken)
+        : terrainElevationAtPoint(geometry, point)
+      const spellLevel = Math.max(0, Math.floor(Number(lighting.spellLevel) || 0))
+      if (lighting.kind === 'light') {
+        return [{
+          id: `spell-light:${area.id}`,
+          kind: 'light',
+          point,
+          elevationFeet,
+          spellLevel,
+          brightRadiusFeet: Math.max(0, Number(lighting.brightRadiusFeet) || 0),
+          dimRadiusFeet: Math.max(0, Number(lighting.dimRadiusFeet) || 0),
+          suppressesMagicalDarknessThroughLevel:
+            Number.isFinite(lighting.suppressesMagicalDarknessThroughLevel)
+              ? Number(lighting.suppressesMagicalDarknessThroughLevel)
+              : null,
+        }]
+      }
+      if (lighting.kind !== 'magical-darkness') return []
+      return [{
+        id: `spell-darkness:${area.id}`,
+        kind: 'magical-darkness',
+        point,
+        elevationFeet,
+        spellLevel,
+        radiusFeet: Math.max(0, Number(lighting.radiusFeet) || 0),
+        suppressesMagicalLightThroughLevel:
+          Number.isFinite(lighting.suppressesMagicalLightThroughLevel)
+            ? Number(lighting.suppressesMagicalLightThroughLevel)
+            : null,
+      }]
+    })
+  const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
+  return candidates.filter((candidate) => !candidates.some((other) => {
+    if (other.id === candidate.id || other.kind === candidate.kind) return false
+    const distanceFeet = Math.hypot(
+      candidate.point.x - other.point.x,
+      candidate.point.y - other.point.y,
+    ) / gridSize * feetPerCell
+    if (distanceFeet > spellLightingRadius(candidate) + spellLightingRadius(other)) return false
+    return candidate.kind === 'magical-darkness'
+      ? other.kind === 'light' &&
+          (other.suppressesMagicalDarknessThroughLevel ?? -1) >= candidate.spellLevel
+      : other.kind === 'magical-darkness' &&
+          (other.suppressesMagicalLightThroughLevel ?? -1) >= candidate.spellLevel
+  }))
+}
+
+function magicalDarknessObstacleSuppressed(obstacle, map, spellLighting) {
+  const darknessLevel = Math.max(0, Math.floor(Number(obstacle?.darknessSpellLevel) || 2))
+  const gridSize = Math.max(1, Number(map.gridSize) || 1)
+  const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
+  return spellLighting.some((source) => {
+    if (
+      source.kind !== 'light' ||
+      (source.suppressesMagicalDarknessThroughLevel ?? -1) < darknessLevel
+    ) return false
+    const radiusPx = spellLightingRadius(source) / feetPerCell * gridSize
+    if (geometryPointInPolygon(source.point, obstacle.points)) return true
+    return obstacle.points.some((point) =>
+      Math.hypot(point.x - source.point.x, point.y - source.point.y) <= radiusPx,
+    ) || obstacle.points.some((point, index) =>
+      projectPointToSegment(
+        source.point,
+        point,
+        obstacle.points[(index + 1) % obstacle.points.length],
+      ).distance <= radiusPx,
+    )
+  })
+}
+
+function mapIlluminationAtPoint(map, geometry, point, elevationFeet, lineBlocked) {
+  const spellLighting = mapSpellLightingSources(map, geometry)
+  const magicalDarkness = (geometry?.obstacles ?? []).some((obstacle) =>
+    obstacle?.magicalDarkness === true &&
+    Array.isArray(obstacle.points) &&
+    geometryPointInPolygon(point, obstacle.points) &&
+    geometryObstacleAffectsElevation(obstacle, elevationFeet) &&
+    !magicalDarknessObstacleSuppressed(obstacle, map, spellLighting),
+  ) || spellLighting.some((source) =>
+    source.kind === 'magical-darkness' && spellLightingAffectsPoint(source, point, map),
+  )
+  if (magicalDarkness) return 'magical-darkness'
+
+  const ambient = geometry?.vision?.ambientLight ?? 'bright'
+  if (ambient === 'bright') return 'bright'
+  let result = ambient
+  const gridSize = Math.max(1, Number(map.gridSize) || 1)
+  const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
+  for (const source of map.tokens ?? []) {
+    const light = source?.lightSource
+    if (!light?.enabled) continue
+    const distanceFeet = Math.hypot(point.x - source.x, point.y - source.y) / gridSize * feetPerCell
+    const brightRadius = Math.max(0, Number(light.brightRadiusFeet) || 0)
+    const dimRadius = brightRadius + Math.max(0, Number(light.dimRadiusFeet) || 0)
+    const sourceEye = tokenElevationFeet(geometry, source) + tokenHeightFeet(source) / 2
+    if (distanceFeet > dimRadius || lineBlocked(source, point, sourceEye, elevationFeet + 2.5)) continue
+    if (distanceFeet <= brightRadius) return 'bright'
+    result = 'dim'
+  }
+  for (const source of geometry?.lights ?? []) {
+    if (!source?.enabled || !Array.isArray(source.points) || !source.points[0]) continue
+    const sourcePoint = source.points[0]
+    const distanceFeet = Math.hypot(point.x - sourcePoint.x, point.y - sourcePoint.y) /
+      gridSize * feetPerCell
+    const brightRadius = Math.max(0, Number(source.brightRadiusFeet) || 0)
+    const dimRadius = brightRadius + Math.max(0, Number(source.dimRadiusFeet) || 0)
+    const sourceBase = Math.max(
+      terrainElevationAtPoint(geometry, sourcePoint),
+      Number.isFinite(source.elevationFeet) ? Number(source.elevationFeet) : 0,
+    )
+    if (distanceFeet > dimRadius || lineBlocked(sourcePoint, point, sourceBase + 2.5, elevationFeet + 2.5)) continue
+    if (distanceFeet <= brightRadius) return 'bright'
+    result = 'dim'
+  }
+  for (const source of spellLighting) {
+    if (
+      source.kind !== 'light' ||
+      !spellLightingAffectsPoint(source, point, map) ||
+      lineBlocked(source.point, point, source.elevationFeet + 2.5, elevationFeet + 2.5)
+    ) continue
+    const distanceFeet = Math.hypot(point.x - source.point.x, point.y - source.point.y) /
+      gridSize * feetPerCell
+    if (distanceFeet <= source.brightRadiusFeet) return 'bright'
+    result = 'dim'
+  }
+  return result
+}
+
 function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = null, lightingEnabled = true) {
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
@@ -3031,49 +3586,37 @@ function playerCanSeeToken(map, geometry, viewer, target, fallbackRangeFeet = nu
     : 0
   const rangeFeet = Math.max(normalRangeFeet, darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet, carriedLightRangeFeet)
   const rangePx = rangeFeet / feetPerCell * gridSize
-  const distancePx = Math.hypot(target.x - viewer.x, target.y - viewer.y)
+  const targetRadiusPx = Math.max(0, gridSize * Math.max(1, Number(target.size) || 1) * 0.4)
+  const distancePx = Math.max(0, Math.hypot(target.x - viewer.x, target.y - viewer.y) - targetRadiusPx)
   if (distancePx > rangePx) return false
-  const fromElevation = tokenElevationFeet(viewer)
-  const toElevation = tokenElevationFeet(target)
-  const lineBlocked = (from, to, sourceElevation = 0, destinationElevation = 0) => geometrySegments(geometry).some((segment) => {
-    if (!segment.blocksVision) return false
-    const t = segmentIntersectionParameter(from, to, segment.a, segment.b)
-    if (t == null) return false
-    const rayHeight = sourceElevation + 2.5 + (destinationElevation - sourceElevation) * t
-    return rayHeight >= segment.baseHeightFeet && rayHeight < segment.baseHeightFeet + segment.heightFeet
+  const fromElevation = tokenElevationFeet(geometry, viewer)
+  const toElevation = tokenElevationFeet(geometry, target)
+  const fromEyeElevation = fromElevation + tokenHeightFeet(viewer) / 2
+  const toEyeElevation = toElevation + tokenHeightFeet(target) / 2
+  const compiled = compileGeometryCached(geometry)
+  const lineBlocked = (from, to, sourceEyeElevation = 2.5, destinationEyeElevation = 2.5) => !!raycastGeometry({
+    compiled,
+    from,
+    to,
+    purpose: 'vision',
+    fromElevationFeet: sourceEyeElevation,
+    toElevationFeet: destinationEyeElevation,
+    ignoreStart: true,
   })
-  if (lineBlocked(viewer, target, fromElevation, toElevation)) return false
-  const ambient = lightingEnabled ? geometry?.vision?.ambientLight ?? 'bright' : 'bright'
-  if (ambient !== 'bright') {
-    let illuminated = ambient === 'dim'
-    for (const source of map.tokens ?? []) {
-      const light = source?.lightSource
-      if (!light?.enabled) continue
-      const distanceFeet = Math.hypot(target.x - source.x, target.y - source.y) / gridSize * feetPerCell
-      const lightRange = Math.max(0, Number(light.brightRadiusFeet) || 0) + Math.max(0, Number(light.dimRadiusFeet) || 0)
-      if (distanceFeet <= lightRange && !lineBlocked(source, target, tokenElevationFeet(source), toElevation)) {
-        illuminated = true
-        break
-      }
-    }
-    if (!illuminated) {
-      for (const source of geometry?.lights ?? []) {
-        if (!source?.enabled || !Array.isArray(source.points) || !source.points[0]) continue
-        const point = source.points[0]
-        const distanceFeet = Math.hypot(target.x - point.x, target.y - point.y) / gridSize * feetPerCell
-        const lightRange = Math.max(0, Number(source.brightRadiusFeet) || 0) +
-          Math.max(0, Number(source.dimRadiusFeet) || 0)
-        if (
-          distanceFeet <= lightRange &&
-          !lineBlocked(point, target, Number(source.elevationFeet) || 0, toElevation)
-        ) {
-          illuminated = true
-          break
-        }
-      }
-    }
-    const distanceFeet = distancePx / gridSize * feetPerCell
-    if (!illuminated && distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
+  const targetSamples = tokenVisibilitySamples(target, gridSize)
+  if (targetSamples.every((sample) => lineBlocked(viewer, sample, fromEyeElevation, toEyeElevation))) return false
+  const illumination = lightingEnabled
+    ? mapIlluminationAtPoint(map, geometry, target, toElevation, lineBlocked)
+    : 'bright'
+  const distanceFeet = distancePx / gridSize * feetPerCell
+  if (illumination === 'magical-darkness') {
+    const magicalRangeFeet = viewer.canSeeMagicalDarkness === true ? normalRangeFeet : 0
+    if (distanceFeet > Math.max(magicalRangeFeet, blindsightRangeFeet, truesightRangeFeet)) return false
+  } else if (
+    illumination === 'darkness' &&
+    distanceFeet > Math.max(darkvisionRangeFeet, blindsightRangeFeet, truesightRangeFeet)
+  ) {
+    return false
   }
   return true
 }
@@ -3086,7 +3629,9 @@ function playerSpecialSenseRange(viewer, target, kind, map) {
   if (rangeFeet <= 0) return false
   const feetPerCell = Math.max(1, Number(map.feetPerCell) || 5)
   const gridSize = Math.max(1, Number(map.gridSize) || 1)
-  return Math.hypot(target.x - viewer.x, target.y - viewer.y) / gridSize * feetPerCell <= rangeFeet
+  const targetRadiusPx = Math.max(0, gridSize * Math.max(1, Number(target.size) || 1) * 0.4)
+  return Math.max(0, Math.hypot(target.x - viewer.x, target.y - viewer.y) - targetRadiusPx) /
+    gridSize * feetPerCell <= rangeFeet
 }
 
 function tokenHiddenCheckTotal(token) {
@@ -3146,6 +3691,7 @@ function redactUnseenToken(token) {
   } = token
   return {
     ...position,
+    size: 1,
     label: '未见生物',
     emoji: '◇',
     color: '#64748b',
@@ -3162,15 +3708,20 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
   const characterById = new Map((characterState?.characters ?? [])
     .filter((character) => plainObject(character) && typeof character.id === 'string')
     .map((character) => [character.id, character]))
-  const resolvedActiveCharacterId = typeof activeCharacterId === 'string' && activeCharacterId.length > 0
+  const ownsCharacter = (character) =>
+    (typeof viewerIdentity?.memberId === 'string' && character.roomMemberId === viewerIdentity.memberId) ||
+    (typeof viewerIdentity?.accountId === 'string' && character.ownerAccountId === viewerIdentity.accountId)
+  const requestedCharacterId = typeof activeCharacterId === 'string' && activeCharacterId.length > 0
     ? activeCharacterId
-    : [...characterById.values()].find((character) =>
-        (typeof viewerIdentity?.memberId === 'string' && character.roomMemberId === viewerIdentity.memberId) ||
-        (typeof viewerIdentity?.accountId === 'string' && character.ownerAccountId === viewerIdentity.accountId),
-      )?.id ?? [...characterById.values()].find((character) =>
-        typeof viewerIdentity?.activeCharacterName === 'string' &&
-        character.name === viewerIdentity.activeCharacterName,
-      )?.id ?? null
+    : null
+  const requestedCharacter = requestedCharacterId ? characterById.get(requestedCharacterId) : null
+  // 显式角色 ID 同样必须通过账号/房间成员归属校验；名字绝不能作为权限凭据。
+  // viewerIdentity 为空只用于纯函数/旧测试调用；真实 HTTP 投影始终传 roomMember。
+  const resolvedActiveCharacterId = requestedCharacterId && !plainObject(viewerIdentity)
+    ? requestedCharacterId
+    : requestedCharacter && ownsCharacter(requestedCharacter)
+      ? requestedCharacter.id
+    : [...characterById.values()].find(ownsCharacter)?.id ?? null
   return {
     ...value,
     maps: value.maps.map((map) => {
@@ -3231,8 +3782,8 @@ export function projectMapsForPlayer(value, geometryState, activeCharacterId = n
         )
         const tremorsenseViewers = viewers.filter((viewer) =>
           playerSpecialSenseRange(viewer, token, 'tremorsense', effectiveMap) &&
-          Math.abs(tokenElevationFeet(viewer) - tokenElevationFeet(token)) <= 5 &&
-          token.airborne !== true,
+          Math.abs(tokenElevationFeet(geometry, viewer) - tokenElevationFeet(geometry, token)) <= 5 &&
+          tokenElevationFeet(geometry, token) <= terrainElevationAtPoint(geometry, token) + 1e-7,
         )
         if (observingViewers.length === 0) return tremorsenseViewers.length > 0 ? [redactUnseenToken(token)] : []
         const hiddenCheckTotal = tokenHiddenCheckTotal(token)
@@ -3272,7 +3823,7 @@ export function projectMapGeometryForPlayer(value, memberId = null, worldMinute 
       )
       const secretWalls = map.doors.flatMap((door) => {
         const parentWall = map.walls.find((wall) => wall?.id === door?.parentWallId)
-        return !maySeeSecretDoor(door) && door.state !== 'open' ? [{
+        return !maySeeSecretDoor(door) && doorOpenState(door) !== 'open' ? [{
             id: `wall:${createHash('sha256').update(JSON.stringify([door.points, door.createdAt])).digest('hex').slice(0, 20)}`,
             kind: 'wall',
             label: '墙',
@@ -3286,7 +3837,7 @@ export function projectMapGeometryForPlayer(value, memberId = null, worldMinute 
             createdAt: door.createdAt,
           }] : []
       })
-      const secretOpenings = map.doors.flatMap((door) => !maySeeSecretDoor(door) && door.state === 'open'
+      const secretOpenings = map.doors.flatMap((door) => !maySeeSecretDoor(door) && doorOpenState(door) === 'open'
         ? [{
             id: `window:${createHash('sha256').update(JSON.stringify([door.points, door.createdAt, 'open'])).digest('hex').slice(0, 20)}`,
             kind: 'window',
@@ -3375,6 +3926,18 @@ export function validateSharedStateShape(name, value) {
   }
   if (name === 'room-journal' && (!Array.isArray(value.campaignEntries) || !Array.isArray(value.sharedNotes))) {
     return { ok: false, reason: 'missing-journal-arrays' }
+  }
+  if (
+    name === 'room-journal' &&
+    value.authorityMutationReceipts != null &&
+    (
+      !Array.isArray(value.authorityMutationReceipts) ||
+      value.authorityMutationReceipts.length > 512 ||
+      value.authorityMutationReceipts.some((receipt) =>
+        typeof receipt !== 'string' || !receipt.trim() || receipt.length > 300)
+    )
+  ) {
+    return { ok: false, reason: 'invalid-journal-authority-receipts' }
   }
   if (value.updatedAt != null && (!Number.isFinite(value.updatedAt) || value.updatedAt < 0)) {
     return { ok: false, reason: 'invalid-updated-at' }
@@ -5746,8 +6309,17 @@ export async function handleSharedApi(req, res, parsed, ctx) {
       const body = await readBody(req)
       const mutation = JSON.parse(body.toString('utf8'))
       const filePath = path.join(ctx.stateRoot, 'combat-interrupts.json')
+      let authorityCharacterIds
+      if (ctx.accessRole === 'player') {
+        const characters = await readCharactersForProjection(ctx)
+        authorityCharacterIds = characters.corrupted || !authenticatedRoomMember
+          ? []
+          : characters.value.characters
+            .filter((character) => characterOwnedByRoomMember(character, authenticatedRoomMember))
+            .map((character) => character.id)
+      }
       const result = await atomicMutateJsonStateLocked(filePath, (queue) =>
-        mutateCombatInterruptQueue(queue, mutation, Date.now(), ctx.accessRole),
+        mutateCombatInterruptQueue(queue, mutation, Date.now(), ctx.accessRole, authorityCharacterIds),
       )
       if (!result?.ok) {
         res.writeHead(result?.status ?? 400, { 'Content-Type': 'application/json; charset=utf-8' })

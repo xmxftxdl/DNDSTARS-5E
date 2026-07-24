@@ -3,7 +3,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication } from './mapBridge'
-import { dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { setMapGeometryRuntime, type MapGeometryState } from '../../lib/mapGeometry'
 
@@ -40,6 +40,39 @@ describe('D&D 5e map bridge', () => {
     })
     expect(snapshot.state.combatants[drow.id].conditionImmunities)
       .toEqual(expect.arrayContaining(['magical-sleep', '魔法睡眠']))
+  })
+
+  it('projects effective Headless size and elevation back to the map token', () => {
+    const ogre = token({
+      id: 'ogre', poolId: 'srd-5.1:ogre', creatureSize: '大型',
+      size: 2, elevationFeet: 5, hp: 59, maxHp: 59,
+    })
+    const map: BattleMap = {
+      id: 'projection-map', name: 'Projection', width: 100, height: 100,
+      gridSize: 10, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [ogre],
+    }
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'projection', map, characters: [],
+      initiativeOrder: [{ tokenId: ogre.id, label: ogre.label, emoji: '', color: '', roll: 10 }],
+    })
+    const combatant = snapshot.state.combatants[ogre.id]
+    combatant.elevationFeet = 15
+    combatant.classState.activeEffects = [createDnd5eMechanicalEffect({
+      definitionId: 'test:enlarge',
+      label: '变巨',
+      targetId: ogre.id,
+      source: { kind: 'spell', actorId: ogre.id, rulesId: 'enlarge-reduce' },
+      modifiers: { sizeRankDelta: 1 },
+    })]
+    const plan = planDnd5eMapResultApplication({
+      state: snapshot.state,
+      map,
+      characters: [],
+      characterIdByCombatantId: {},
+    })
+    expect(plan.map.tokens[0]).toMatchObject({ size: 3, elevationFeet: 15 })
+    expect(plan.changedTokenIds).toContain(ogre.id)
   })
 
   it('compiles obstacle cover and blocked effect lines into Headless attack resolution', () => {

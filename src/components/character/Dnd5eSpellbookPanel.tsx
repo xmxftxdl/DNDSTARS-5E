@@ -24,6 +24,8 @@ import {
 } from '../../rulesets/dnd5e'
 import { useSpellbookStore } from '../../store/spellbook'
 import { DND5E_SRD_5_1_LICENSE_URL, DND5E_SRD_5_1_SOURCE_URL } from '../../rulesets/dnd5e/srdContent'
+import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
+import Dnd5eActionIcon from '../map/Dnd5eActionIcon'
 
 const WIZARD_SPELLBOOK_KEY = 'wizard-spellbook'
 
@@ -141,6 +143,7 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
   ) => <SpellChoice
     key={`${spell.sourceKind}:${spell.id}`}
     spell={spell}
+    castingClassId={definition.id}
     wizard={definition.id === 'wizard' && showWizardBookAction}
     inWizardBook={wizardBook.includes(spell.id)}
     selected={spell.level === 0 ? selectedCantrips.includes(spell.id) : selectedSpells.includes(spell.id)}
@@ -241,12 +244,13 @@ export default function Dnd5eSpellbookPanel({ character, onChange }: { character
     </div>
     {availableCandidates.length === 0 ? <p className="py-12 text-center text-sm text-slate-500">没有符合条件的未选择法术。</p> : null}
     <p className="mt-4 text-[11px] leading-5 text-slate-600">房间导入和仅目录法术可以正常记录在人物法术书中，但不会出现在自动战斗施法栏；只有带“Headless”标记的法术会自动结算。</p>
-    {detailSpell ? <SpellDetailsDialog spell={detailSpell} onClose={() => setDetailSpellId(null)} /> : null}
+    {detailSpell ? <SpellDetailsDialog spell={detailSpell} castingClassId={definition.id} onClose={() => setDetailSpellId(null)} /> : null}
   </section>
 }
 
-function SpellChoice({ spell, wizard, inWizardBook, selected, disabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onToggleBook, onToggle }: {
+function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, disabled, preparationDisabled, selectionMode, showPreparedCheck, onView, onToggleBook, onToggle }: {
   spell: Dnd5eSpellbookEntry
+  castingClassId: Dnd5eClassId
   wizard: boolean
   inWizardBook: boolean
   selected: boolean
@@ -260,9 +264,25 @@ function SpellChoice({ spell, wizard, inWizardBook, selected, disabled, preparat
 }) {
   const school = spell.imported ? DND5E_SPELL_SCHOOL_LABELS[spell.imported.school] : spell.reference?.school ?? spell.combat?.school
   const description = spell.imported?.description ?? spell.reference?.description ?? spell.combat?.description
+  const icon = dnd5eSpellActionIcon({
+    id: spell.id,
+    name: spell.name,
+    englishName: spell.englishName,
+    level: spell.level,
+    school,
+    effect: spell.combat?.effect ?? spell.imported?.mechanics?.resolution,
+    damageType: spell.combat?.damageType ?? spell.imported?.mechanics?.damage?.type,
+    tags: spell.imported?.tags,
+    castingClassId,
+  })
   return <div className={`rounded-xl border p-3 ${selected ? 'border-violet-300/30 bg-violet-500/[0.08]' : 'border-white/8 bg-black/10'}`}>
     <button type="button" onClick={onView} className="block w-full rounded-lg text-left outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-violet-400/60" aria-label={`查看${spell.name}详情`}>
-      <div className="flex items-start justify-between gap-2"><div className="min-w-0"><strong className="block truncate text-sm text-slate-100">{spell.name}</strong><span className="mt-0.5 block text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`}{school ? ` · ${school}` : ''}</span></div><div className="flex shrink-0 flex-wrap justify-end gap-1">{showPreparedCheck && selected ? <span className="flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-semibold text-violet-100" title="已准备"><Check className="h-3 w-3" />已准备</span> : null}{spell.headless ? <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-200"><Bot className="h-3 w-3" />Headless</span> : null}</div></div>
+      <span className="flex items-start gap-3">
+        <Dnd5eActionIcon spec={icon} level={spell.level} className="h-12 w-12 shrink-0" />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-start justify-between gap-2"><span className="min-w-0"><strong className="block truncate text-sm text-slate-100">{spell.name}</strong><span className="mt-0.5 block text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level} 环`}{school ? ` · ${school}` : ''}</span></span><span className="flex shrink-0 flex-wrap justify-end gap-1">{showPreparedCheck && selected ? <span className="flex items-center gap-1 rounded-full bg-violet-500/20 px-2 py-0.5 text-[9px] font-semibold text-violet-100" title="已准备"><Check className="h-3 w-3" />已准备</span> : null}{spell.headless ? <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-200"><Bot className="h-3 w-3" />Headless</span> : null}</span></span>
+        </span>
+      </span>
       <span className="mt-2 block text-[10px] leading-4 text-slate-500">职业：{spellClassLabel(spell)}</span>
       {description ? <span className="mt-2 line-clamp-4 whitespace-pre-line text-[11px] leading-4 text-slate-500">{description}</span> : null}
       <span className="mt-2 flex items-center gap-1 text-[10px] font-semibold text-violet-300"><BookOpen className="h-3 w-3" />点击法术查看详情</span>
@@ -333,7 +353,7 @@ function importedDuration(spell: ImportedSpell): string {
   return `${prefix}${spell.duration.value ?? 0} ${spell.duration.unit ? units[spell.duration.unit] : ''}`
 }
 
-function SpellDetailsDialog({ spell, onClose }: { spell: Dnd5eSpellbookEntry; onClose: () => void }) {
+function SpellDetailsDialog({ spell, castingClassId, onClose }: { spell: Dnd5eSpellbookEntry; castingClassId: Dnd5eClassId; onClose: () => void }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -357,13 +377,24 @@ function SpellDetailsDialog({ spell, onClose }: { spell: Dnd5eSpellbookEntry; on
   const duration = reference?.duration ?? (imported ? importedDuration(imported) : combat?.concentration ? '专注' : '未记录')
   const description = imported?.description ?? reference?.description ?? combat?.description ?? '该法术尚未附带规则正文。'
   const higherLevels = imported?.higherLevels ?? reference?.higherLevels
+  const icon = dnd5eSpellActionIcon({
+    id: spell.id,
+    name: spell.name,
+    englishName: spell.englishName,
+    level: spell.level,
+    school,
+    effect: combat?.effect ?? imported?.mechanics?.resolution,
+    damageType: combat?.damageType ?? imported?.mechanics?.damage?.type,
+    tags: imported?.tags,
+    castingClassId,
+  })
 
   return createPortal(<div role="presentation" className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm" onMouseDown={(event) => {
     if (event.target === event.currentTarget) onClose()
   }}>
     <section role="dialog" aria-modal="true" aria-labelledby="character-spell-detail-title" className="glass max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/12 p-5 shadow-2xl shadow-black/50">
       <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
-        <div><h3 id="character-spell-detail-title" className="text-xl font-bold text-slate-50">{spell.name}</h3>{spell.englishName && spell.englishName !== spell.name ? <p className="mt-1 text-sm text-slate-500">{spell.englishName}</p> : null}<p className="mt-2 text-xs text-slate-400">职业：{spellClassLabel(spell)}</p></div>
+        <div className="flex min-w-0 items-start gap-4"><Dnd5eActionIcon spec={icon} level={spell.level} className="h-16 w-16 shrink-0" /><div className="min-w-0"><h3 id="character-spell-detail-title" className="text-xl font-bold text-slate-50">{spell.name}</h3>{spell.englishName && spell.englishName !== spell.name ? <p className="mt-1 text-sm text-slate-500">{spell.englishName}</p> : null}<p className="mt-2 text-xs text-slate-400">施法职业：{DND5E_SPELL_CLASS_LABELS[castingClassId as keyof typeof DND5E_SPELL_CLASS_LABELS] ?? castingClassId}</p></div></div>
         <button type="button" onClick={onClose} aria-label="关闭法术详情" className="rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-slate-100"><X className="h-5 w-5" /></button>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

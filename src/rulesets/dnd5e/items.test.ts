@@ -3,6 +3,7 @@ import { normalizeCharacter } from '../../store/characters'
 import {
   DND5E_SRD_GEAR_ITEM_TEMPLATES,
   DND5E_SRD_ITEM_TEMPLATES,
+  applyDnd5eInventoryGrantBundle,
   applyDnd5eInventoryMutation,
   createDnd5eInventoryForCharacter,
   consumeDnd5eWeaponAmmunition,
@@ -398,5 +399,50 @@ describe('SRD 5.1 inventory', () => {
     expect(last.ok).toBe(true)
     if (!last.ok) return
     expect(consumeDnd5eWeaponAmmunition(last.character, 'dnd5e-longbow')).toMatchObject({ ok: false, reason: 'ammunition-unavailable' })
+  })
+
+  it('atomically grants an interaction reward and deduplicates the authority receipt', () => {
+    const hero = character('searcher')
+    const receiptId = 'scene-interaction:scene:bookshelf:character:searcher'
+    const granted = applyDnd5eInventoryGrantBundle([hero], {
+      characterId: hero.id,
+      receiptId,
+      grants: [
+        { templateId: 'srd-5.1:item:potion-of-healing', quantity: 1 },
+        { templateId: 'missing-template', quantity: 1 },
+      ],
+    })
+    expect(granted).toMatchObject({ ok: false, reason: 'template-not-found' })
+    expect(granted.characters[0].dnd5eInventory?.entries).toEqual([])
+
+    const valid = applyDnd5eInventoryGrantBundle([hero], {
+      characterId: hero.id,
+      receiptId,
+      grants: [{ templateId: 'srd-5.1:item:potion-of-healing', quantity: 1 }],
+      currencyGrants: [{ currency: 'gp', amount: 12 }],
+    })
+    expect(valid.ok).toBe(true)
+    expect(inventoryEntry(valid.characters[0], 'srd-5.1:item:potion-of-healing').quantity).toBe(1)
+    expect(valid.characters[0].dnd5eInventory?.currency?.gp).toBe(12)
+    expect(valid.characters[0].dnd5eInventory?.authorityGrantReceipts).toContain(receiptId)
+
+    const replayed = applyDnd5eInventoryGrantBundle(valid.characters, {
+      characterId: hero.id,
+      receiptId,
+      grants: [{ templateId: 'srd-5.1:item:potion-of-healing', quantity: 1 }],
+      currencyGrants: [{ currency: 'gp', amount: 12 }],
+    })
+    expect(replayed).toMatchObject({ ok: true, deduplicated: true })
+    expect(inventoryEntry(replayed.characters[0], 'srd-5.1:item:potion-of-healing').quantity).toBe(1)
+    expect(replayed.characters[0].dnd5eInventory?.currency?.gp).toBe(12)
+
+    const invalidCurrency = applyDnd5eInventoryGrantBundle([hero], {
+      characterId: hero.id,
+      receiptId: `${receiptId}:invalid`,
+      grants: [{ templateId: 'srd-5.1:item:potion-of-healing', quantity: 1 }],
+      currencyGrants: [{ currency: 'gp', amount: -1 }],
+    })
+    expect(invalidCurrency).toMatchObject({ ok: false, reason: 'invalid-currency' })
+    expect(invalidCurrency.characters[0].dnd5eInventory?.entries).toEqual([])
   })
 })

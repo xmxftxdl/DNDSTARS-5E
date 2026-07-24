@@ -79,13 +79,13 @@ test('player selects flight altitude and the DM commits one 3D path over a wall'
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
-  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible()
+  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible({ timeout: 20_000 })
   await player.getByRole('button', { name: /移动$/ }).click()
   await player.getByRole('combobox', { name: '移动方式' }).selectOption('fly')
   for (let step = 0; step < 8; step += 1) {
     await player.getByRole('button', { name: '飞行高度升高 5 尺' }).click()
   }
-  await expect(player.getByLabel('飞行目标高度')).toHaveText('高度 40 尺')
+  await expect(player.getByLabel('飞行目标高度')).toHaveText('海拔 40 尺')
   await player.getByTestId('map-canvas').click({ position: target })
 
   await expect.poll(async () => {

@@ -28,6 +28,7 @@ interface CombatStatisticsStoreState {
     mapId: string,
     observation: Dnd5eHeadlessResolutionObservation,
     sideByCombatantId?: Readonly<Record<string, CombatStatisticsSide>>,
+    characterIdByCombatantId?: Readonly<Record<string, string>>,
   ) => void
   /** 同一 combatId 仅接受一次；返回 false 表示已经结算。 */
   settleExperience: (settlement: CombatExperienceSettlement) => boolean
@@ -35,6 +36,38 @@ interface CombatStatisticsStoreState {
 }
 
 const sharedWriteWatermark = createSharedWriteWatermark()
+
+function migratePersistedStatisticsState(persistedState: unknown): Pick<CombatStatisticsStoreState, 'sessions'> {
+  const raw = persistedState && typeof persistedState === 'object'
+    ? persistedState as { sessions?: unknown }
+    : {}
+  const sessions = Array.isArray(raw.sessions) ? raw.sessions : []
+  const isV3 = sessions.every((session) => {
+    if (!session || typeof session !== 'object') return false
+    const combatants = (session as { combatants?: unknown }).combatants
+    if (!combatants || typeof combatants !== 'object' || Array.isArray(combatants)) return false
+    return Object.values(combatants).every((entry) => {
+      if (!entry || typeof entry !== 'object') return false
+      const stats = entry as Record<string, unknown>
+      return Number.isFinite(stats.turnsTaken) &&
+        Number.isFinite(stats.turnTrackedDamageDealt) &&
+        Number.isFinite(stats.turnTrackedHealingDone) &&
+        Array.isArray(stats.combatD20FaceCounts)
+    })
+  })
+  const updatedAt = sessions.reduce((latest, session) => {
+    const value = session && typeof session === 'object'
+      ? Number((session as { updatedAt?: unknown }).updatedAt)
+      : 0
+    return Number.isFinite(value) ? Math.max(latest, value) : latest
+  }, 0)
+  const normalized = normalizeSharedCombatStatistics({
+    schemaVersion: isV3 ? COMBAT_STATISTICS_SCHEMA_VERSION : 2,
+    sessions,
+    updatedAt,
+  })
+  return { sessions: normalized?.sessions ?? [] }
+}
 
 function publish(sessions: CombatStatisticsSession[]) {
   if (!canWriteSharedState()) return
@@ -70,7 +103,7 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
       }))
       queueMicrotask(() => publish(get().sessions))
     },
-    record: (mapId, observation, sideByCombatantId) => {
+    record: (mapId, observation, sideByCombatantId, characterIdByCombatantId) => {
       if (!observation.result.ok || observation.result.events.length === 0) return
       const combatId = observation.result.state.combatId
       const current = get().sessions.find((session) => session.combatId === combatId)
@@ -80,6 +113,7 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
         receiptId: dnd5eCombatStatisticsReceipt(observation),
         observedAt: Date.now(),
         sideByCombatantId,
+        characterIdByCombatantId,
       }
       const next = applyDnd5eCombatStatisticsObservation(current, input)
       if (next === current || current?.receipts.includes(input.receiptId)) return
@@ -112,6 +146,8 @@ export const useCombatStatisticsStore = create<CombatStatisticsStoreState>()(
     },
   }), {
     name: 'dndstars-combat-statistics',
+    version: COMBAT_STATISTICS_SCHEMA_VERSION,
+    migrate: (persistedState) => migratePersistedStatisticsState(persistedState),
     partialize: (state) => ({ sessions: state.sessions }),
   }),
 )

@@ -566,7 +566,9 @@ export function prepareDnd5eClassFeature(input: {
     const supremeSneak = payload.feature === 'rogue-cunning-action' &&
       dnd5eCombatantHasSubclass(actorCombatant, 'rogue', 'thief') &&
       dnd5eCombatantClassLevel(actorCombatant, 'rogue') >= 9 && movementSpent <= actorCombatant.speed / 2
-    const disadvantage = actorCombatant.exhaustionLevel >= 1
+    const disadvantage = actorCombatant.exhaustionLevel >= 1 ||
+      actorCombatant.wearingUnproficientArmor ||
+      (actorCombatant.armorStealthDisadvantage && skill === 'stealth')
     const mode = resolveDnd5eRollMode({
       advantage: [{ active: supremeSneak, reason: 'supreme-sneak' }],
       disadvantage: [{ active: disadvantage, reason: 'exhaustion' }],

@@ -2,6 +2,7 @@ import type { BattleMap } from '../store/maps'
 import type { Character } from '../types/character'
 import type { SharedPlayerActionAckState } from './sharedCombatTypes'
 import type { SharedCombatState } from './sharedCombatTypes'
+import type { SharedResourceSaveResult } from './sharedApi'
 
 export interface PlayerActionAuthoritativeSnapshots {
   characters: Character[]
@@ -12,7 +13,7 @@ export interface PlayerActionAuthoritativeSnapshots {
   combat?: SharedCombatState
 }
 
-export type PlayerActionAckResourceWriter = <T>(name: string, data: T) => Promise<void>
+export type PlayerActionAckResourceWriter = <T>(name: string, data: T) => Promise<SharedResourceSaveResult>
 
 export interface PublishPlayerActionAckInput {
   ack: SharedPlayerActionAckState
@@ -27,8 +28,13 @@ export async function publishPlayerActionAckWithSnapshots({
   saveSharedResource,
   publishAck,
 }: PublishPlayerActionAckInput): Promise<void> {
+  const requireSaved = (name: string, result: SharedResourceSaveResult): void => {
+    if (result.status === 'saved') return
+    throw new Error(`authoritative-resource-save-rejected:${name}:${result.status}`)
+  }
+
   if (ack.status === 'accepted' && snapshots) {
-    await Promise.all([
+    const resources = await Promise.all([
       saveSharedResource('characters', {
         characters: snapshots.characters,
         selectedId: snapshots.characterSelectedId ?? null,
@@ -43,8 +49,12 @@ export async function publishPlayerActionAckWithSnapshots({
         ? [saveSharedResource('combat', snapshots.combat)]
         : []),
     ])
+    const resourceNames = snapshots.combat
+      ? ['characters', 'maps', 'combat']
+      : ['characters', 'maps']
+    resources.forEach((result, index) => requireSaved(resourceNames[index], result))
   }
 
-  await saveSharedResource('player-action-ack', ack)
+  requireSaved('player-action-ack', await saveSharedResource('player-action-ack', ack))
   await publishAck(ack)
 }

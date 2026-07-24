@@ -30,8 +30,27 @@ describe('room communications client contracts', () => {
 
   it('normalizes all three journal collections', () => {
     const normalized = normalizeSharedRoomJournal({
-      handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 42,
+      handouts: [{
+        id: 'draft',
+        title: '待发布讲义',
+        body: '正文',
+        audience: 'dm',
+        authorMemberId: 'dm',
+        authorName: 'DM',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+      campaignEntries: [],
+      sharedNotes: [],
+      authorityMutationReceipts: ['receipt-1', '', 'receipt-2'],
+      updatedAt: 42,
     })
-    expect(normalized).toMatchObject({ handouts: [], campaignEntries: [], sharedNotes: [], updatedAt: 42 })
+    expect(normalized).toMatchObject({
+      handouts: [{ id: 'draft', audience: 'dm' }],
+      campaignEntries: [],
+      sharedNotes: [],
+      authorityMutationReceipts: ['receipt-1', 'receipt-2'],
+      updatedAt: 42,
+    })
   })
 })

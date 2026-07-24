@@ -4,6 +4,7 @@ export const MAP_FOG_MAX_SHAPES = 2_048
 
 export type FogOperation = 'cover' | 'reveal'
 export type FogTool =
+  | 'pan'
   | 'cover-rect'
   | 'reveal-rect'
   | 'cover-circle'

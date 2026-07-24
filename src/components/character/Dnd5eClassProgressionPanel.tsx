@@ -17,7 +17,6 @@ import {
   dnd5eClassChoiceOptionAvailable,
   dnd5eClassDefinitionForCharacter,
   dnd5eClassProgression,
-  dnd5eCombatSpellSelectionLimits,
   dnd5eMonkMartialArtsDie,
   dnd5eLoreAdditionalMagicalSecretsLimit,
   dnd5ePaladinAuraRadius,
@@ -25,7 +24,6 @@ import {
   dnd5ePactSlotLevel,
   dnd5eRogueSneakAttackDice,
   dnd5eSpellAttackModifier,
-  dnd5eSpellSelectionKey,
   dnd5eSpellSaveDc,
   dnd5eDruidWildShapeLimits,
   dnd5eWizardArcaneRecoveryLevels,
@@ -139,8 +137,6 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
     ? (definition.subclass.spellLists ?? []).filter((list) => !list.choiceOptionId || (stored.selections?.['land-terrain'] ?? []).includes(list.choiceOptionId))
     : []
   const availableCombatSpells = dnd5eAvailableCombatSpells(character)
-  const combatSpellLimits = dnd5eCombatSpellSelectionLimits(character)
-  const leveledSpellSelectionKey = dnd5eSpellSelectionKey(character)
   const availableWildShapeForms = dnd5eAvailableWildShapeForms(character)
 
   const setClassChoices = (next: typeof stored, skills?: string[]) => {
@@ -185,22 +181,6 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
       ...stored,
       selections: { ...stored.selections, [group.id]: next },
     }, nextSkills)
-  }
-
-  const toggleCombatSpell = (spellId: string, cantrip: boolean) => {
-    const selectionKey = cantrip ? 'spell-cantrips' : leveledSpellSelectionKey
-    if (!selectionKey) return
-    const current = [...new Set(stored.selections?.[selectionKey] ?? [])]
-    const selected = current.includes(spellId)
-    const limit = cantrip ? combatSpellLimits.cantrips : combatSpellLimits.spells
-    if (!selected && current.length >= limit) return
-    setClassChoices({
-      ...stored,
-      selections: {
-        ...stored.selections,
-        [selectionKey]: selected ? current.filter((id) => id !== spellId) : [...current, spellId],
-      },
-    })
   }
 
   const toggleKnownWildShapeForm = (formId: string) => {
@@ -357,30 +337,6 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
             ).map((item) => (
               <InfoBlock key={item.label} title={item.label} text={item.value} />
             ))}
-          </div>
-          <div className="mt-4 border-t border-violet-300/10 pt-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h5 className="text-sm font-semibold text-violet-100">已接入 Headless 的 SRD 战斗法术</h5>
-              <span className="text-[10px] text-slate-500">戏法 {stored.selections?.['spell-cantrips']?.length ?? 0}/{combatSpellLimits.cantrips} · 法术 {leveledSpellSelectionKey ? stored.selections?.[leveledSpellSelectionKey]?.length ?? 0 : 0}/{combatSpellLimits.spells}</span>
-            </div>
-            {availableCombatSpells.length > 0 ? <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {availableCombatSpells.map((spell) => {
-                const selectionKey = spell.level === 0 ? 'spell-cantrips' : leveledSpellSelectionKey
-                const selected = !!selectionKey && stored.selections?.[selectionKey]?.includes(spell.id) === true
-                const limit = spell.level === 0 ? combatSpellLimits.cantrips : combatSpellLimits.spells
-                const count = selectionKey ? stored.selections?.[selectionKey]?.length ?? 0 : 0
-                return <label key={spell.id} className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 ${selected ? 'border-violet-300/35 bg-violet-400/10' : 'border-white/8 bg-black/10'}`}>
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    disabled={!selected && count >= limit}
-                    onChange={() => toggleCombatSpell(spell.id, spell.level === 0)}
-                    className="mt-1"
-                  />
-                  <span><strong className="text-xs text-slate-200">{spell.name}</strong><span className="ml-1 text-[10px] text-slate-500">{spell.level === 0 ? '戏法' : `${spell.level}环`}</span><span className="mt-1 block text-[11px] leading-4 text-slate-500">{spell.description}</span></span>
-                </label>
-              })}
-            </div> : <p className="mt-2 text-xs text-slate-500">当前等级暂无已接入地图结算的战斗法术。</p>}
           </div>
         </div>
       )}

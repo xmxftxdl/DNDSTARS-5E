@@ -7,8 +7,11 @@ import {
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
   mapGeometryIlluminationAtPoint,
+  mapGeometryGridSelectionBoundary,
   mapGeometryMovementBlocked,
   mapGeometrySegments,
+  mapGeometrySimplifyTerrainRegionPoints,
+  mapGeometryTokenElevation,
   mapGeometryVisibilityPolygon,
   mapGeometryVisibleTargets,
   normalizeSharedMapGeometry,
@@ -395,7 +398,91 @@ describe('map geometry', () => {
     expect(normalized?.maps[0].walls[0].material).toBe('stone')
   })
 
-  it('migrates V1 openings to explicit wall attachments and always emits Schema V2', () => {
+  it('uses terrain as the minimum absolute elevation for legacy or stale tokens', () => {
+    const g = geometry()
+    g.obstacles.push({
+      id: 'plateau',
+      kind: 'obstacle',
+      label: 'Plateau',
+      points: [{ x: 0, y: 0 }, { x: 90, y: 0 }, { x: 90, y: 90 }, { x: 0, y: 90 }],
+      blocksVision: false,
+      blocksMovement: false,
+      blocksLineOfEffect: false,
+      cover: 'none',
+      baseHeightFeet: 0,
+      heightFeet: 0,
+      terrainRegion: true,
+      terrainElevationFeet: 20,
+      createdAt: 2,
+    })
+
+    expect(mapGeometryTokenElevation(g, token('legacy', 50, 50))).toBe(20)
+    expect(mapGeometryTokenElevation(g, token('stale', 50, 50, { elevationFeet: 0 }))).toBe(20)
+    expect(mapGeometryTokenElevation(g, token('flying', 50, 50, { elevationFeet: 35 }))).toBe(35)
+  })
+
+  it('simplifies a dense height-brush loop into an editable closed-region outline', () => {
+    const denseLoop = [
+      ...Array.from({ length: 101 }, (_, index) => ({ x: index, y: Math.sin(index) * 0.4 })),
+      ...Array.from({ length: 101 }, (_, index) => ({ x: 100 + Math.sin(index) * 0.4, y: index })),
+      ...Array.from({ length: 101 }, (_, index) => ({ x: 100 - index, y: 100 + Math.sin(index) * 0.4 })),
+      ...Array.from({ length: 101 }, (_, index) => ({ x: Math.sin(index) * 0.4, y: 100 - index })),
+      { x: 0, y: 0 },
+    ]
+    const simplified = mapGeometrySimplifyTerrainRegionPoints(denseLoop, 2, 48)
+
+    expect(simplified.length).toBeGreaterThanOrEqual(4)
+    expect(simplified.length).toBeLessThanOrEqual(48)
+    expect(Math.min(...simplified.map((point) => point.x))).toBeLessThanOrEqual(1)
+    expect(Math.max(...simplified.map((point) => point.x))).toBeGreaterThanOrEqual(99)
+    expect(Math.min(...simplified.map((point) => point.y))).toBeLessThanOrEqual(1)
+    expect(Math.max(...simplified.map((point) => point.y))).toBeGreaterThanOrEqual(99)
+    expect(simplified.at(-1)).not.toEqual(simplified[0])
+  })
+
+  it('filters invalid and duplicate height-brush samples before storing the outline', () => {
+    expect(mapGeometrySimplifyTerrainRegionPoints([
+      { x: 0, y: 0 },
+      { x: 0.1, y: 0.1 },
+      { x: Number.NaN, y: 5 },
+      { x: 20, y: 0 },
+      { x: 20, y: 20 },
+      { x: 0, y: 20 },
+      { x: 0, y: 0 },
+    ], 1)).toEqual([
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 20 },
+      { x: 0, y: 20 },
+    ])
+  })
+
+  it('merges selected height cells into an outer grid boundary without internal edges', () => {
+    expect(mapGeometryGridSelectionBoundary([
+      { col: 1, row: 1 },
+      { col: 2, row: 1 },
+      { col: 1, row: 2 },
+      { col: 2, row: 2 },
+    ], 50, 5, 10)).toEqual([
+      { x: 55, y: 60 },
+      { x: 155, y: 60 },
+      { x: 155, y: 160 },
+      { x: 55, y: 160 },
+    ])
+  })
+
+  it('keeps the concave outline of an L-shaped height-cell selection', () => {
+    const boundary = mapGeometryGridSelectionBoundary([
+      { col: 0, row: 0 },
+      { col: 1, row: 0 },
+      { col: 0, row: 1 },
+    ], 40)
+    expect(boundary).toHaveLength(6)
+    expect(boundary).toContainEqual({ x: 40, y: 40 })
+    expect(boundary).not.toContainEqual({ x: 40, y: 0 })
+  })
+
+  it('migrates V1 openings to stable wall-edge attachments and always emits Schema V3', () => {
     const g = geometry()
     g.obstacles[0].terrainElevationFeet = 15
     g.obstacles[0].terrainRegion = true
@@ -405,10 +492,16 @@ describe('map geometry', () => {
       baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
     }]
     const normalized = normalizeSharedMapGeometry({ schemaVersion: 1, maps: [g], updatedAt: 2 })
-    expect(normalized).toMatchObject({ schemaVersion: 2 })
+    expect(normalized).toMatchObject({ schemaVersion: 3 })
     expect(normalized?.maps[0].doors[0]).toMatchObject({
       parentWallId: 'wall',
       parentWallSegmentIndex: 0,
+      wallEdgeId: 'edge:wall:0',
+      startT: 0.2,
+      endT: 0.4,
+      openState: 'closed',
+      lockState: 'unlocked',
+      physicalState: 'intact',
       points: [{ x: 100, y: 40 }, { x: 100, y: 80 }],
     })
     expect(normalized?.maps[0].obstacles[0].terrainElevationFeet).toBe(15)
@@ -419,6 +512,6 @@ describe('map geometry', () => {
       updatedAt: 2,
     })).toBeUndefined()
     expect(normalizeSharedMapGeometry({ schemaVersion: '1', maps: [g], updatedAt: 2 })).toBeUndefined()
-    expect(normalizeSharedMapGeometry({ schemaVersion: 3, maps: [g], updatedAt: 2 })).toBeUndefined()
+    expect(normalizeSharedMapGeometry({ schemaVersion: 4, maps: [g], updatedAt: 2 })).toBeUndefined()
   })
 })

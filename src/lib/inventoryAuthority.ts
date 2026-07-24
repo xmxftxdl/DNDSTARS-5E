@@ -113,6 +113,7 @@ export function inventoryFailureMessage(reason?: Dnd5eInventoryMutationResult['r
     case 'item-unidentified': return '该魔法物品尚未鉴定，不能启用其规则效果。'
     case 'not-magic-item': return '该物品不需要鉴定。'
     case 'ammunition-unavailable': return '没有可供该武器使用的弹药。'
+    case 'invalid-receipt': return '权威奖励收据无效，未写入库存。'
     case 'unauthorized': return '当前房间成员无权变更该角色的库存。'
     default: return '物品操作未能完成。'
   }

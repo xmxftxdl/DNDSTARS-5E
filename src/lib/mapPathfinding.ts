@@ -7,6 +7,8 @@ import {
 } from './gridCombat'
 import {
   mapGeometryObstacleAffectsElevation,
+  mapGeometryDoorLockState,
+  mapGeometryDoorOpenState,
   mapGeometryMovementBlocked,
   mapGeometryPlacementBlocked,
   mapGeometryPointInPolygon,
@@ -88,31 +90,33 @@ export function findMapGeometryPath(input: {
   const rows = Math.max(1, Math.ceil(input.map.height / gridSize))
   const start = tokenAnchorCellFromPixel(input.token.x, input.token.y, input.token, input.map)
   const destination = tokenAnchorCellFromPixel(input.to.x, input.to.y, input.token, input.map)
-  const startElevation = Number.isFinite(input.token.elevationFeet) ? input.token.elevationFeet! : 0
+  const pathGeometry = input.allowOpenUnlockedDoors && input.geometry
+    ? {
+        ...input.geometry,
+        doors: input.geometry.doors.map((door) =>
+          mapGeometryDoorOpenState(door) === 'closed' && mapGeometryDoorLockState(door) === 'unlocked'
+            ? { ...door, state: 'open' as const, openState: 'open' as const }
+            : door,
+        ),
+      }
+    : input.geometry
+  const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
+  const destinationPosition = tokenCenterForAnchorCell(destination, input.token, input.map)
+  const startTerrainElevation = mapGeometryTerrainElevationAtPoint(pathGeometry, startPosition)
+  const storedStartElevation = Number.isFinite(input.token.elevationFeet)
+    ? Math.max(-1_000, Math.min(10_000, input.token.elevationFeet!))
+    : startTerrainElevation
+  const startElevation = Math.max(startTerrainElevation, storedStartElevation)
   const targetElevation = Number.isFinite(input.targetElevationFeet)
     ? Math.max(-1_000, Math.min(10_000, input.targetElevationFeet!))
     : input.canFly ? startElevation : undefined
   const maximumTerrainStepFeet = Math.max(0, input.maximumTerrainStepFeet ?? 10)
   const tokenHeightFeet = Math.max(5, Math.max(1, input.token.size) * 5)
-  const pathGeometry = input.allowOpenUnlockedDoors && input.geometry
-    ? {
-        ...input.geometry,
-        doors: input.geometry.doors.map((door) => door.state === 'closed' ? { ...door, state: 'open' as const } : door),
-      }
-    : input.geometry
-  const startPosition = tokenCenterForAnchorCell(start, input.token, input.map)
-  const destinationPosition = tokenCenterForAnchorCell(destination, input.token, input.map)
-  const routeDx = destinationPosition.x - startPosition.x
-  const routeDy = destinationPosition.y - startPosition.y
-  const routeLengthSquared = routeDx * routeDx + routeDy * routeDy
   const elevationAtPosition = (position: { x: number; y: number }, isDestination = false) => {
     if (input.canFly && targetElevation != null) {
-      const progress = routeLengthSquared <= 1e-6
-        ? 1
-        : Math.max(0, Math.min(1, (
-            (position.x - startPosition.x) * routeDx + (position.y - startPosition.y) * routeDy
-          ) / routeLengthSquared))
-      return startElevation + (targetElevation - startElevation) * progress
+      // 三维移动采用明确顺序：先在起点升降至声明高度，再水平飞行。
+      // 这样同一条移动不会因拆成“升高 + 平移”而得到不同的墙体碰撞结果。
+      return targetElevation
     }
     const terrainElevation = mapGeometryTerrainElevationAtPoint(pathGeometry, position)
     return isDestination && targetElevation != null ? targetElevation : terrainElevation
@@ -168,7 +172,11 @@ export function findMapGeometryPath(input: {
         const to = points[index]
         distanceFeet += feetPerCell
         for (const door of input.geometry?.doors ?? []) {
-          if (door.state === 'closed' && mapGeometrySegmentsIntersect(from, to, door.points[0], door.points[1], true)) {
+          if (
+            mapGeometryDoorOpenState(door) === 'closed' &&
+            mapGeometryDoorLockState(door) === 'unlocked' &&
+            mapGeometrySegmentsIntersect(from, to, door.points[0], door.points[1], true)
+          ) {
             doorsToOpen.add(door.id)
           }
         }

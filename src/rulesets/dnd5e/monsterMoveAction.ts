@@ -2,9 +2,17 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
-import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import {
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+} from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
-import { resolveDnd5eHeadlessAction, type Dnd5eActionResult } from './headlessCombatEngine'
+import {
+  resolveDnd5eHeadlessAction,
+  type Dnd5eActionResult,
+  type Dnd5eCombatEvent,
+} from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
@@ -17,19 +25,35 @@ export function resolveDnd5eMonsterMapMove(input: {
   initiativeOrder: readonly InitiativeEntry[]
   actorTokenId: string
   to: { x: number; y: number }
+  targetElevationFeet?: number
   dash?: boolean
+  nimbleEscape?: 'disengage'
   turnEconomy?: Dnd5eTurnEconomyCounts
 }): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-blocked' | 'object-interaction-unavailable' } {
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type === 'enemy')
   const monster = actorToken?.poolId ? getDnd5eSrdMonster(actorToken.poolId) : undefined
   if (!actorToken || !monster) return { ok: false, reason: 'invalid-actor' }
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const actorElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
+  const actorGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
+  const targetGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, input.to)
+  const targetElevationFeet = Number.isFinite(input.targetElevationFeet)
+    ? Math.max(targetGroundElevationFeet, input.targetElevationFeet!)
+    : actorElevationFeet > actorGroundElevationFeet
+      ? Math.max(targetGroundElevationFeet, actorElevationFeet)
+      : targetGroundElevationFeet
+  const actorCanFly = (monster.speed.fly ?? 0) > 0
+  const usesFlight = actorCanFly && (
+    actorElevationFeet > actorGroundElevationFeet ||
+    targetElevationFeet > targetGroundElevationFeet
+  )
   const path = findMapGeometryPath({
-    geometry: mapGeometryRuntimeForMap(input.map.id), map: input.map, token: actorToken, to: input.to,
+    geometry, map: input.map, token: actorToken, to: input.to,
     allowOpenUnlockedDoors: true,
     canClimb: (monster.speed.climb ?? 0) > 0,
     canSwim: (monster.speed.swim ?? 0) > 0,
-    canFly: (monster.speed.fly ?? 0) > 0 && (actorToken.elevationFeet ?? 0) > 0,
-    targetElevationFeet: (actorToken.elevationFeet ?? 0) > 0 ? actorToken.elevationFeet : undefined,
+    canFly: usesFlight,
+    targetElevationFeet,
     additionalDifficultTerrainMultiplier: (token, position) =>
       dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
     additionalSpeedCostMultiplier: (token, position) =>
@@ -56,8 +80,12 @@ export function resolveDnd5eMonsterMapMove(input: {
       movementRemaining: input.turnEconomy.movement.current,
     }
   }
-  const distanceFeet = path.distanceFeet
+  const finalElevationFeet = path.elevationsFeet.at(-1) ?? actorElevationFeet
+  const verticalDistanceFeet = Math.abs(finalElevationFeet - actorElevationFeet)
+  const distanceFeet = path.distanceFeet + verticalDistanceFeet
+  const movementCostFeet = path.movementCostFeet + verticalDistanceFeet
   let actionState = { ...snapshot.state, initiativeIndex: actorIndex }
+  const priorEvents: Dnd5eCombatEvent[] = []
   if (path.doorsToOpen.length === 1) {
     if (input.turnEconomy && (input.turnEconomy.objectInteraction?.current ?? 1) < 1) {
       return { ok: false, reason: 'object-interaction-unavailable' }
@@ -71,29 +99,52 @@ export function resolveDnd5eMonsterMapMove(input: {
       return { ok: true, result: interacted, distanceFeet, path: path.points, doorsToOpen: path.doorsToOpen }
     }
     actionState = interacted.state
+    priorEvents.push(...interacted.events)
+  }
+  if (input.nimbleEscape === 'disengage') {
+    const escaped = resolveDnd5eHeadlessAction(actionState, {
+      type: 'monster-nimble-escape',
+      actorId: actorToken.id,
+      option: 'disengage',
+    })
+    if (!escaped.ok) return {
+      ok: true,
+      result: escaped,
+      distanceFeet,
+      path: path.points,
+      doorsToOpen: path.doorsToOpen,
+    }
+    actionState = escaped.state
+    priorEvents.push(...escaped.events)
   }
   if (input.dash) {
     const dashed = resolveDnd5eHeadlessAction(actionState, { type: 'dash', actorId: actorToken.id })
     if (!dashed.ok) return { ok: true, result: dashed, distanceFeet, path: path.points, doorsToOpen: path.doorsToOpen }
     actionState = dashed.state
+    priorEvents.push(...dashed.events)
   }
   const result = resolveDnd5eHeadlessAction(
     actionState,
     {
-      type: 'move', actorId: actorToken.id, to: input.to, distance: distanceFeet, movementCost: path.movementCostFeet,
-      toElevationFeet: path.elevationsFeet.at(-1) ?? actorToken.elevationFeet ?? 0,
+      type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet, movementCost: movementCostFeet,
+      traversalMode: usesFlight ? 'fly' : 'walk',
+      toElevationFeet: finalElevationFeet,
       standFromProne: actorCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase())),
     },
   )
   if (!result.ok) return { ok: true, result, distanceFeet, path: path.points, doorsToOpen: path.doorsToOpen }
+  const transactionResult: Dnd5eActionResult = {
+    ...result,
+    events: [...priorEvents, ...result.events],
+  }
   return {
     ok: true,
-    result,
+    result: transactionResult,
     distanceFeet,
     path: path.points,
     doorsToOpen: path.doorsToOpen,
     application: planDnd5eMapResultApplication({
-      state: result.state,
+      state: transactionResult.state,
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,

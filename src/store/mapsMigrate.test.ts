@@ -70,6 +70,23 @@ describe('T10/AC3 — maps store version + migrate', () => {
     expect(result.selectedId).toBe('a')
   })
 
+  it('keeps bounded monster appearance ids and drops unsafe values', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map',
+        name: '地图',
+        width: 100,
+        height: 100,
+        tokens: [
+          { id: 'safe', visualVariantId: 'cave-skulk' },
+          { id: 'unsafe', visualVariantId: '../private' },
+        ],
+      }],
+    })
+    expect(result.maps[0].tokens.find((token) => token.id === 'safe')?.visualVariantId).toBe('cave-skulk')
+    expect(result.maps[0].tokens.find((token) => token.id === 'unsafe')?.visualVariantId).toBeUndefined()
+  })
+
   it('normalizes valid persistent item areas and drops malformed entries', () => {
     const result = migrateMapsState({
       maps: [{
@@ -114,6 +131,7 @@ describe('T10/AC3 — maps store version + migrate', () => {
         tokens: [{
           id: 'monster', type: 'enemy',
           dnd5eTargetingPreference: { schemaVersion: 1, priority: 'highest-threat' },
+          dnd5eBehaviorPreference: { schemaVersion: 1, style: 'skirmisher' },
           dnd5eCombatState: {
             monsterThreatByTargetId: {
               hero: 12.8,
@@ -126,6 +144,7 @@ describe('T10/AC3 — maps store version + migrate', () => {
     })
     expect(result.maps[0].tokens[0]).toMatchObject({
       dnd5eTargetingPreference: { schemaVersion: 1, priority: 'highest-threat' },
+      dnd5eBehaviorPreference: { schemaVersion: 1, style: 'skirmisher' },
       dnd5eCombatState: { monsterThreatByTargetId: { hero: 12 } },
     })
   })

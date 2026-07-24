@@ -11,6 +11,29 @@ import Dnd5eMonsterWorkshopDialog from './Dnd5eMonsterWorkshopDialog'
 import Dnd5eEncounterBuilderDialog from './Dnd5eEncounterBuilderDialog'
 import type { Dnd5eEncounterEntry } from '../../rulesets/dnd5e/encounterBuilder'
 
+function EnemyPoolThumbnail({ monster }: { monster: EnemyTemplate }) {
+  const [failedSource, setFailedSource] = useState<string>()
+  const portrait = monster.tokenPortrait
+  const showPortrait = !!portrait && failedSource !== portrait
+
+  return (
+    <span
+      className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-xl"
+      style={{ borderColor: monster.color }}
+    >
+      {showPortrait ? (
+        <img
+          src={portrait}
+          alt={`${monster.name} Token`}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          onError={() => setFailedSource(portrait)}
+        />
+      ) : monster.emoji}
+    </span>
+  )
+}
+
 export default function EnemyPoolPicker({
   open,
   title = '怪物池',
@@ -31,6 +54,7 @@ export default function EnemyPoolPicker({
   const [query, setQuery] = useState('')
   const [workshopOpen, setWorkshopOpen] = useState(false)
   const [encounterOpen, setEncounterOpen] = useState(false)
+  const [appearanceTarget, setAppearanceTarget] = useState<EnemyTemplate>()
   const customMonsters = useCustomMonsterStore((state) => state.monsters)
   const pool = useMemo(
     () => [...DND5E_SRD_ENEMY_POOL, ...customMonsters.map(dnd5eMonsterToEnemyTemplate)],
@@ -38,14 +62,26 @@ export default function EnemyPoolPicker({
   )
 
   const allResults = useMemo(() => searchEnemyPool(query, pool), [pool, query])
-  const results = query.trim() ? allResults : allResults.slice(0, 100)
+  const results = allResults
 
   if (!open) return null
+
+  const closePicker = () => {
+    setAppearanceTarget(undefined)
+    onClose()
+  }
+
+  const finishPick = (template: EnemyTemplate, visualVariantId?: string) => {
+    onPick({ ...template, visualVariantId })
+    setAppearanceTarget(undefined)
+    setQuery('')
+    onClose()
+  }
 
   return <>
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={closePicker}
     >
       <div
         className="glass flex max-h-[min(640px,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl shadow-2xl"
@@ -79,7 +115,7 @@ export default function EnemyPoolPicker({
           )}
           <button
             type="button"
-            onClick={onClose}
+            onClick={closePicker}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-slate-200"
           >
             <X className="h-4 w-4" />
@@ -99,7 +135,6 @@ export default function EnemyPoolPicker({
           </div>
           <p className="mt-2 text-xs text-slate-500">
             SRD 5.1：{DND5E_SRD_ENEMY_POOL.length} · 房间自定义：{customMonsters.length} · 显示 {results.length}/{allResults.length} 项
-            {!query.trim() && allResults.length > results.length ? '（输入名称可搜索全部）' : ''}
           </p>
         </div>
 
@@ -113,18 +148,15 @@ export default function EnemyPoolPicker({
                   <button
                     type="button"
                     onClick={() => {
-                      onPick(m)
-                      setQuery('')
-                      onClose()
+                      if ((m.visualVariants?.length ?? 0) > 1) {
+                        setAppearanceTarget(m)
+                        return
+                      }
+                      finishPick(m)
                     }}
                     className="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left transition-colors hover:border-rose-500/30 hover:bg-rose-500/10"
                   >
-                    <span
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 bg-void-900 text-xl"
-                      style={{ borderColor: m.color }}
-                    >
-                      {m.emoji}
-                    </span>
+                    <EnemyPoolThumbnail monster={m} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-slate-100">{m.name}</span>
@@ -167,6 +199,67 @@ export default function EnemyPoolPicker({
         </div>
       </div>
     </div>
+    {appearanceTarget && (
+      <div
+        className="fixed inset-0 z-[140] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md"
+        onClick={() => setAppearanceTarget(undefined)}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`选择${appearanceTarget.name}形象`}
+          className="glass flex max-h-[min(760px,92vh)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-start gap-3 border-b border-white/10 px-5 py-4">
+            <Skull className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
+            <div className="min-w-0 flex-1">
+              <h2 className="font-semibold text-slate-100">选择{appearanceTarget.name}形象</h2>
+              <p className="mt-1 text-xs text-slate-500">地图 Token 与先攻头像会使用同一套形象；每次放置都可重新选择。</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAppearanceTarget(undefined)}
+              className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"
+              aria-label="返回怪物列表"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 overflow-y-auto p-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {appearanceTarget.visualVariants?.map((variant) => (
+                <button
+                  key={variant.id}
+                  type="button"
+                  onClick={() => finishPick(appearanceTarget, variant.id)}
+                  className="group overflow-hidden rounded-xl border border-white/10 bg-black/20 text-left transition hover:border-emerald-300/60 hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                >
+                  <div className="aspect-[288/376] overflow-hidden bg-void-950">
+                    <img
+                      src={variant.initiativePortrait}
+                      alt={`${appearanceTarget.name}·${variant.label}`}
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                      loading="lazy"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 px-2.5 py-2">
+                    <img
+                      src={variant.tokenPortrait}
+                      alt=""
+                      aria-hidden="true"
+                      className="h-8 w-8 shrink-0 rounded-full border border-white/15 object-cover"
+                      loading="lazy"
+                    />
+                    <span className="min-w-0 text-xs font-semibold text-slate-200">{variant.label}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
     <Dnd5eMonsterWorkshopDialog open={workshopOpen} onClose={() => setWorkshopOpen(false)} />
     <Dnd5eEncounterBuilderDialog
       open={encounterOpen}
@@ -175,7 +268,7 @@ export default function EnemyPoolPicker({
       onConfirm={(entries) => {
         onBuildEncounter?.(entries)
         setEncounterOpen(false)
-        onClose()
+        closePicker()
       }}
     />
   </>

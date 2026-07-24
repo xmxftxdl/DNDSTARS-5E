@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DND5E_SRD_ENEMY_POOL, enemyTemplateToTokenPatch } from '../../lib/enemyPool'
+import {
+  DND5E_SRD_ENEMY_POOL,
+  enemyTemplateToTokenPatch,
+  searchEnemyPool,
+} from '../../lib/enemyPool'
 import { getEnemyStatBlock } from '../../lib/enemyStatBlocks'
 import reviewedMonsterTranslations from './generated/srdMonsterTranslationsZh.reviewed.generated.json'
 import {
@@ -84,6 +88,10 @@ describe('SRD 5.1 monster catalog', () => {
       challenge: { rating: '1/4', xp: 50 },
     })
     expect(goblin.actions.find((action) => action.id === 'scimitar')?.attack).toMatchObject({ toHit: 4 })
+    expect(goblin.traits[0]).toMatchObject({
+      automation: 'headless',
+      rule: { kind: 'nimble-escape', bonusActionOptions: ['disengage', 'hide'] },
+    })
 
     const skeleton = getDnd5eSrdMonster('srd-5.1:skeleton')!
     expect(skeleton.damageVulnerabilities).toEqual(['bludgeoning'])
@@ -128,14 +136,57 @@ describe('SRD 5.1 monster catalog', () => {
 
   it('drives the visible map pool and the compatibility detail block from the same SRD source', () => {
     expect(DND5E_SRD_ENEMY_POOL).toHaveLength(DND5E_SRD_MONSTERS.length)
+    expect(DND5E_SRD_ENEMY_POOL.every((entry) => new Set(entry.tags).size === entry.tags.length)).toBe(true)
     const template = DND5E_SRD_ENEMY_POOL.find((entry) => entry.id === 'srd-5.1:goblin')!
-    expect(template).toMatchObject({ name: '地精', maxHp: 7, armorClass: 15, challengeRating: '1/4' })
+    expect(template).toMatchObject({
+      name: '地精',
+      maxHp: 7,
+      armorClass: 15,
+      challengeRating: '1/4',
+      tokenPortrait: '/assets/portraits/goblin-forest-scout-token.png',
+      initiativePortrait: '/assets/portraits/goblin-forest-scout-initiative.png',
+      searchAliases: ['哥布林'],
+    })
+    expect(template.visualVariants?.map((variant) => variant.id)).toEqual([
+      'forest-scout',
+      'woodland-archer',
+      'ruin-raider',
+      'cave-skulk',
+    ])
+    expect(searchEnemyPool('哥布林').map((entry) => entry.id)).toContain('srd-5.1:goblin')
     expect(enemyTemplateToTokenPatch(template)).toMatchObject({ maxHp: 7, hp: 7, poolId: 'srd-5.1:goblin' })
+    expect(enemyTemplateToTokenPatch({ ...template, visualVariantId: 'ruin-raider' }))
+      .toMatchObject({ poolId: 'srd-5.1:goblin', visualVariantId: 'ruin-raider' })
     expect(getEnemyStatBlock(template.id)).toMatchObject({ ac: 15, maxHp: 7, hitDice: '2d6', source: 'SRD 5.1' })
   })
 })
 
 describe('SRD monster actions in the D&D 5e Headless engine', () => {
+  it('validates Nimble Escape from the monster stat block and spends a bonus action', () => {
+    const state = startDnd5eHeadlessCombat('combat', [
+      combatant('monster', 20, { statBlockId: 'srd-5.1:goblin' }),
+      combatant('hero', 10),
+    ])
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-nimble-escape',
+      actorId: 'monster',
+      option: 'disengage',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants.monster).toMatchObject({
+      disengaged: true,
+      turn: { actionAvailable: true, bonusActionAvailable: false },
+    })
+    expect(resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('invalid', [
+        combatant('monster', 20, { statBlockId: 'srd-5.1:wolf' }),
+        combatant('hero', 10),
+      ]),
+      { type: 'monster-nimble-escape', actorId: 'monster', option: 'disengage' },
+    )).toMatchObject({ ok: false, reason: 'invalid-class-feature' })
+  })
+
   it('resolves a stat-block weapon attack without accepting client supplied modifiers', () => {
     const state = startDnd5eHeadlessCombat('combat', [
       combatant('monster', 20, { statBlockId: 'srd-5.1:goblin' }),

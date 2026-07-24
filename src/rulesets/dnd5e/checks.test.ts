@@ -8,6 +8,7 @@ import {
   resolveDnd5eAbilityCheck,
   resolveDnd5eInitiative,
 } from './checks'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function character(patch: Partial<Character> = {}): Character {
   return {
@@ -91,5 +92,20 @@ describe('SRD 5.1 ability checks', () => {
     expect(result.roll.total).toBe(20)
     expect(result.indomitableMightApplied).toBe(true)
     expect(resolveDnd5eAbilityCheck({ character: barbarian, ability: 'dex', rolls: [2] }).indomitableMightApplied).toBe(false)
+  })
+
+  it('applies Enlarge/Reduce mode to Strength checks', () => {
+    const enlarge = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:enlarge-reduce', label: '变巨', targetId: 'hero',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'enlarge-reduce' },
+      modifiers: { strengthRollMode: 'advantage' },
+    })
+    const enlarged = character({ dnd5eCombatState: { activeEffects: [enlarge] } })
+    expect(resolveDnd5eAbilityCheck({
+      character: enlarged, ability: 'str', rolls: [2, 18],
+    }).roll.d20).toBe(18)
+    expect(resolveDnd5eAbilityCheck({
+      character: enlarged, ability: 'dex', rolls: [2],
+    }).roll.d20).toBe(2)
   })
 })

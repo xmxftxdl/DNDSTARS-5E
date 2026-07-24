@@ -11,6 +11,7 @@ import {
   prepareDnd5ePersistentAreaTrigger,
   resolvePreparedDnd5ePersistentAreaTrigger,
 } from './pluginAreaTransactions'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 const area = (patch: Partial<Dnd5ePluginArea> = {}): Dnd5ePluginArea => ({
   id: 'area-1', pluginId: 'com.example.area', featureId: 'com.example.area:mist', label: '迷雾', color: '#8b5cf6',
@@ -39,6 +40,30 @@ describe('D&D 5e plugin persistent areas', () => {
       dnd5eCombatState: { concentrationSpellId: 'plugin-area:action-1' },
     })], 2)).toHaveLength(1)
     expect(reconcileDnd5ePluginAreas([concentrated], [character({ concentrating: false })], 2)).toHaveLength(0)
+  })
+
+  it('keeps Spiritual Weapon only while its matching authoritative effect instance exists', () => {
+    const spiritualWeapon = area({
+      id: 'core-spell-area:cast',
+      sourceKind: 'core-spell',
+      coreSpellId: 'spiritual-weapon',
+      sourceTokenId: 'caster-token',
+      expiresAfterRound: 11,
+    })
+    const activeEffect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:spiritual-weapon',
+      label: '灵体武器',
+      targetId: 'caster-token',
+      source: { kind: 'spell', actorId: 'caster-token', rulesId: 'spiritual-weapon' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      potency: 2,
+      stackingPolicy: 'stack',
+      stackingKey: spiritualWeapon.id,
+    })
+    expect(reconcileDnd5ePluginAreas([spiritualWeapon], [character({
+      dnd5eCombatState: { activeEffects: [activeEffect] },
+    })], 2)).toHaveLength(1)
+    expect(reconcileDnd5ePluginAreas([spiritualWeapon], [character()], 2)).toHaveLength(0)
   })
 
   it('persists old trigger-receipt cleanup even when the area count does not change', () => {

@@ -31,12 +31,74 @@ export interface EnemyTemplate {
   experiencePoints?: number
   hitDice?: string
   source?: string
+  tokenPortrait?: string
+  initiativePortrait?: string
+  visualVariants?: readonly EnemyVisualVariant[]
+  visualVariantId?: string
+  searchAliases?: string[]
 }
 
-const SRD_MONSTER_PRESENTATION: Record<string, { emoji: string; color: string }> = {
+export interface EnemyVisualVariant {
+  id: string
+  label: string
+  tokenPortrait: string
+  initiativePortrait: string
+}
+
+interface SrdMonsterPresentation {
+  emoji: string
+  color: string
+  tokenPortrait?: string
+  initiativePortrait?: string
+  visualVariants?: readonly EnemyVisualVariant[]
+}
+
+export interface EnemyVisualPresentation {
+  tokenPortrait: string
+  initiativePortrait: string
+}
+
+const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
   bandit: { emoji: '🗡️', color: '#78716c' },
+  bugbear: {
+    emoji: '👹',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/bugbear-forest-raider-token.png',
+    initiativePortrait: '/assets/portraits/bugbear-forest-raider-initiative.png',
+  },
   kobold: { emoji: '🐲', color: '#f59e0b' },
-  goblin: { emoji: '👺', color: '#4ade80' },
+  goblin: {
+    emoji: '👺',
+    color: '#4ade80',
+    tokenPortrait: '/assets/portraits/goblin-forest-scout-token.png',
+    initiativePortrait: '/assets/portraits/goblin-forest-scout-initiative.png',
+    visualVariants: [
+      {
+        id: 'forest-scout',
+        label: '森林斥候',
+        tokenPortrait: '/assets/portraits/goblin-forest-scout-token.png',
+        initiativePortrait: '/assets/portraits/goblin-forest-scout-initiative.png',
+      },
+      {
+        id: 'woodland-archer',
+        label: '黄兜弓手',
+        tokenPortrait: '/assets/portraits/goblin-woodland-archer-token.png',
+        initiativePortrait: '/assets/portraits/goblin-woodland-archer-initiative.png',
+      },
+      {
+        id: 'ruin-raider',
+        label: '遗迹掠夺者',
+        tokenPortrait: '/assets/portraits/goblin-ruin-raider-token.png',
+        initiativePortrait: '/assets/portraits/goblin-ruin-raider-initiative.png',
+      },
+      {
+        id: 'cave-skulk',
+        label: '洞穴潜伏者',
+        tokenPortrait: '/assets/portraits/goblin-cave-skulk-token.png',
+        initiativePortrait: '/assets/portraits/goblin-cave-skulk-initiative.png',
+      },
+    ],
+  },
   skeleton: { emoji: '💀', color: '#e2e8f0' },
   zombie: { emoji: '🧟', color: '#84cc16' },
   wolf: { emoji: '🐺', color: '#94a3b8' },
@@ -44,6 +106,48 @@ const SRD_MONSTER_PRESENTATION: Record<string, { emoji: string; color: string }>
   'dire-wolf': { emoji: '🐺', color: '#64748b' },
   ogre: { emoji: '🧌', color: '#ea580c' },
   owlbear: { emoji: '🦉', color: '#78350f' },
+}
+
+const SRD_MONSTER_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  goblin: ['哥布林'],
+}
+
+export function getEnemyVisualVariants(id: string): readonly EnemyVisualVariant[] {
+  const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
+  if (!monster) return []
+  const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
+  if (presentation?.visualVariants?.length) return presentation.visualVariants
+  if (!presentation?.tokenPortrait || !presentation.initiativePortrait) return []
+  return [{
+    id: 'default',
+    label: '默认形象',
+    tokenPortrait: presentation.tokenPortrait,
+    initiativePortrait: presentation.initiativePortrait,
+  }]
+}
+
+export function getEnemyVisualPresentation(
+  id: string,
+  visualVariantId?: string,
+): EnemyVisualPresentation | undefined {
+  const variants = getEnemyVisualVariants(id)
+  const selected = visualVariantId
+    ? variants.find((variant) => variant.id === visualVariantId)
+    : variants[0]
+  if (selected) {
+    return {
+      tokenPortrait: selected.tokenPortrait,
+      initiativePortrait: selected.initiativePortrait,
+    }
+  }
+  const monster = getDnd5eSrdMonster(id) ?? getDnd5eSrdMonsterBySlug(id)
+  if (!monster) return undefined
+  const presentation = SRD_MONSTER_PRESENTATION[monster.slug]
+  if (!presentation?.tokenPortrait || !presentation.initiativePortrait) return undefined
+  return {
+    tokenPortrait: presentation.tokenPortrait,
+    initiativePortrait: presentation.initiativePortrait,
+  }
 }
 
 function srdCreatureTypes(type: string): CreatureType[] {
@@ -76,7 +180,14 @@ export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): Ene
     maxHp: monster.hitPoints.average,
     creatureTypes: srdCreatureTypes(monster.creatureType),
     creatureSize: monster.size,
-    tags: [monster.source, `CR ${monster.challenge.rating}`, monster.creatureType, monster.size, ...monster.subtypes ?? [], ...capabilityTags],
+    tags: [...new Set([
+      monster.source,
+      `CR ${monster.challenge.rating}`,
+      monster.creatureType,
+      monster.size,
+      ...(monster.subtypes ?? []),
+      ...capabilityTags,
+    ])],
     description: monster.name === monster.englishName
       ? monster.description
       : `${monster.englishName} · ${monster.description}`,
@@ -85,6 +196,10 @@ export function dnd5eMonsterToEnemyTemplate(monster: Dnd5eMonsterStatBlock): Ene
     experiencePoints: monster.challenge.xp,
     hitDice: monster.hitPoints.dice,
     source: monster.source,
+    tokenPortrait: presentation.tokenPortrait,
+    initiativePortrait: presentation.initiativePortrait,
+    visualVariants: getEnemyVisualVariants(monster.id),
+    searchAliases: [...(SRD_MONSTER_SEARCH_ALIASES[monster.slug] ?? [])],
   }
 }
 
@@ -108,6 +223,7 @@ export function searchEnemyPool(query: string, pool: readonly EnemyTemplate[] = 
       enemy.tags.some((tag) => tag.toLowerCase().includes(q)) ||
       enemy.creatureTypes?.some((type) => type.toLowerCase().includes(q)) ||
       enemy.creatureSize?.toLowerCase().includes(q) ||
+      enemy.searchAliases?.some((alias) => alias.toLowerCase().includes(q)) ||
       enemy.description?.toLowerCase().includes(q),
   )
 }
@@ -127,6 +243,7 @@ export function enemyTemplateToTokenPatch(template: EnemyTemplate): Partial<Toke
     hp,
     size: creatureSizeToTokenSize(creatureSize),
     poolId: template.id,
+    visualVariantId: template.visualVariantId,
     creatureTypes,
     creatureSize,
     type: 'enemy' as const,
@@ -144,6 +261,7 @@ export interface TokenFields {
   hp?: number
   size?: number
   poolId?: string
+  visualVariantId?: string
   creatureTypes?: CreatureType[]
   creatureSize?: CreatureSize
   type: 'enemy'

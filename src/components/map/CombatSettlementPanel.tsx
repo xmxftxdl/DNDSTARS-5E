@@ -15,6 +15,7 @@ export interface ManualSettlementTarget {
 interface Props {
   mode: CombatSettlementMode
   isDM: boolean
+  canRoll?: boolean
   rollerName: string
   targets: readonly ManualSettlementTarget[]
   currentTurnTokenId?: string
@@ -31,6 +32,7 @@ interface Props {
 export default function CombatSettlementPanel({
   mode,
   isDM,
+  canRoll = true,
   rollerName,
   targets,
   currentTurnTokenId,
@@ -62,17 +64,18 @@ export default function CombatSettlementPanel({
     if (!target || !onSettle) return
     onSettle(target.id, operation, amount)
   }
+  const panelTitle = mode === 'manual' ? '手动结算台' : 'DM 战场修正台'
 
   return (
     <div data-testid="combat-settlement-panel" className="absolute right-3 top-16 z-40 w-[min(25rem,calc(100vw-1.5rem))] rounded-2xl border border-violet-400/20 bg-void-950/92 shadow-2xl backdrop-blur-md">
       <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
         <Dices className="h-4 w-4 text-violet-300" />
-        <span className="text-sm font-bold text-slate-100">{mode === 'manual' ? '手动结算台' : '怪物手动操作台'}</span>
+        <span className="text-sm font-bold text-slate-100">{panelTitle}</span>
         <span className="ml-auto text-xs text-slate-500">{open ? '收起' : '展开'}</span>
       </button>
       {open && (
         <div className="space-y-4 border-t border-white/8 px-4 py-4">
-          <div>
+          {canRoll && <div>
             <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">{rollerName} 的骰盘</p>{isDM && <button type="button" data-testid="manual-roll-visibility" aria-label="切换明骰暗骰" onClick={() => setVisibility((value) => value === 'public' ? 'dm' : 'public')} className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs ${visibility === 'public' ? 'bg-emerald-500/12 text-emerald-200' : 'bg-fuchsia-500/12 text-fuchsia-200'}`}>{visibility === 'public' ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}{visibility === 'public' ? '明骰' : '暗骰'}</button>}</div>
             <div className="grid grid-cols-[70px_90px_70px_1fr] gap-2">
               <label><span className="sr-only">骰子数量</span><input aria-label="骰子数量" type="number" min={1} max={12} value={count} onChange={(event) => setCount(Math.min(12, Math.max(1, Number(event.target.value) || 1)))} className="w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100" /></label>
@@ -81,11 +84,14 @@ export default function CombatSettlementPanel({
               <label><span className="sr-only">投骰名称</span><input aria-label="投骰名称" value={label} onChange={(event) => setLabel(event.target.value)} className="w-full rounded-lg border border-white/10 bg-void-900 px-2 py-2 text-sm text-slate-100" /></label>
             </div>
             <button type="button" data-testid="manual-roll-submit" disabled={rolling} onClick={() => void roll()} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500/20 px-3 py-2 text-sm font-semibold text-violet-100 disabled:opacity-50"><Dices className="h-4 w-4" />{rolling ? '投骰中…' : `投掷 ${count}d${sides}${bonus === 0 ? '' : bonus > 0 ? `+${bonus}` : bonus}`}</button>
-          </div>
+          </div>}
 
           {isDM && onSettle && (
-            <div className="border-t border-white/8 pt-4">
-              <p className="mb-2 text-xs font-semibold text-slate-300">DM 手动应用结果</p>
+            <div className={canRoll ? 'border-t border-white/8 pt-4' : ''}>
+              <p className="mb-1 text-xs font-semibold text-slate-300">DM 战场修正</p>
+              <p className="mb-2 text-[10px] leading-relaxed text-slate-500">
+                不消耗动作，并由 DM 权威同步及写入战斗记录。
+              </p>
               <select aria-label="手动结算目标" value={target?.id ?? ''} onChange={(event) => setTargetId(event.target.value)} className="w-full rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-sm text-slate-100">{targets.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.currentHp}/{item.maxHp}{item.temporaryHp > 0 ? ` +${item.temporaryHp}临时` : ''}</option>)}</select>
               <div className="mt-2 flex items-center gap-2">
                 <button type="button" aria-label="减少结算数值" onClick={() => setAmount((value) => Math.max(0, value - 1))} className="h-9 w-9 rounded-lg border border-white/10 text-slate-300"><Minus className="mx-auto h-4 w-4" /></button>

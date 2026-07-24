@@ -10,6 +10,7 @@ import {
   previewDnd5eMonsterAttack,
   resolvePreparedDnd5eMonsterAttack,
 } from './monsterAttackAction'
+import { createDnd5eMechanicalEffect } from './activeEffects'
 
 function character(): Character {
   return { id: 'hero', name: '英雄', player: 'P1', avatar: '', accent: '', race: '', charClass: '', level: 1, background: '', experience: 0, reputation: 0, abilities: { str: 16, dex: 14, con: 14, int: 10, wis: 10, cha: 10 }, savingThrows: [], skills: [], maxHp: 40, currentHp: 40, tempHp: 0, hitDice: '1d10', ac: 16, speed: 30, initiativeBonus: 0, saveDC: 10, passivePerception: 10, inspiration: 0, conditions: [], notes: '', dmNotes: '', visibleToPlayers: true }
@@ -78,6 +79,47 @@ describe('SRD monster map action adapter', () => {
     expect(resolved.application?.characters[0].currentHp).toBe(17)
     expect(resolved.application?.changedCharacterIds).toEqual([hero.id])
     expect(resolved.application?.changedTokenIds).toEqual(['owlbear', heroToken.id])
+  })
+
+  it('applies Enlarge weapon damage to an SRD monster attack', () => {
+    const hero = character()
+    const wolf = token({
+      id: 'wolf', poolId: 'srd-5.1:wolf', hp: 11, maxHp: 11,
+      dnd5eCombatState: {
+        activeEffects: [createDnd5eMechanicalEffect({
+          definitionId: 'srd-5.1:spell:enlarge-reduce', label: '变巨', targetId: 'wolf',
+          source: { kind: 'spell', actorId: 'wizard', rulesId: 'enlarge-reduce' },
+          modifiers: { sizeRankDelta: 1, strengthRollMode: 'advantage', weaponDamageD4: 'add' },
+        })],
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token', label: hero.name, type: 'player', characterId: hero.id, hp: 40, maxHp: 40,
+    })
+    const map: BattleMap = {
+      id: 'map', name: 'Map', width: 100, height: 100, gridSize: 10,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [wolf, heroToken],
+    }
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'combat', map, characters: [hero],
+      initiativeOrder: [
+        { tokenId: wolf.id, label: wolf.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: wolf.id, targetTokenId: heroToken.id,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.sizeDamageD4Mode).toBe('add')
+    const resolved = resolvePreparedDnd5eMonsterAttack({
+      prepared: prepared.prepared,
+      rolls: [{ d20: 15, damageRolls: [[3, 3]], sizeDamageRolls: [4] }],
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters[0].currentHp).toBe(28)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'class-damage-applied', actorId: wolf.id, source: 'enlarge', amount: 4,
+    }))
   })
 
   it('executes a V2 after-hit damage and condition mechanism through the authoritative attack transaction', () => {
@@ -305,15 +347,15 @@ describe('SRD monster map action adapter', () => {
     const resolved = resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,
       rolls: [
-        { d20: 10, shieldSpellReaction: true, damageRolls: [[]] },
-        { d20: 10, damageRolls: [[], []] },
+        { d20: 9, shieldSpellReaction: true, damageRolls: [[]] },
+        { d20: 9, damageRolls: [[], []] },
       ],
     })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.characters[0].currentHp).toBe(40)
     expect(resolved.result.events.filter((event) => event.type === 'attack-resolved')).toEqual([
-      expect.objectContaining({ armorClass: 19, hit: false }),
-      expect.objectContaining({ armorClass: 19, hit: false }),
+      expect.objectContaining({ armorClass: 17, hit: false }),
+      expect.objectContaining({ armorClass: 17, hit: false }),
     ])
     expect(resolved.result.events).toContainEqual(expect.objectContaining({
       type: 'class-state-changed', actorId: wizardToken.id, stateKey: 'shield-spell', active: true,

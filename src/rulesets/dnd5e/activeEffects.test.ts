@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   applyDnd5eActiveEffect,
   createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  dnd5eActiveConditionImmunities,
   dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveFlySpeed,
+  dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveSizeRankDelta,
   dnd5eActiveSpeedPenalty,
+  dnd5eActiveStrengthRollFlags,
+  dnd5eActiveWeaponDamageD4Mode,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
   removeDnd5eActiveEffectsForEvent,
@@ -69,6 +76,68 @@ describe('D&D 5e ActiveEffectInstance', () => {
     }])).toEqual([])
   })
 
+  it('normalizes the whitelisted Jump and Heroism mechanical modifiers', () => {
+    const jump = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:jump', label: '跳跃术', targetId: 'target',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'jump' },
+      modifiers: { jumpDistanceMultiplier: 3 },
+    })
+    const heroism = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:heroism', label: '英雄气概', targetId: 'target',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'heroism' },
+      modifiers: { conditionImmunities: ['frightened'] },
+    })
+    expect(dnd5eActiveJumpDistanceMultiplier([jump, heroism])).toBe(3)
+    expect(dnd5eActiveConditionImmunities([jump, heroism])).toEqual(['frightened'])
+    expect(validateDnd5eActiveEffectsStrict([jump, heroism])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...jump, modifiers: { jumpDistanceMultiplier: 0 },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('jumpDistanceMultiplier')]),
+    })
+  })
+
+  it('normalizes a granted flying speed and rejects unsafe values', () => {
+    const flight = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:fly', label: '飞行术', targetId: 'target',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'fly' },
+      modifiers: { flySpeedFeet: 60 },
+    })
+    expect(dnd5eActiveFlySpeed([flight])).toBe(60)
+    expect(validateDnd5eActiveEffectsStrict([flight])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...flight,
+      modifiers: { flySpeedFeet: -1 },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('flySpeedFeet')]),
+    })
+  })
+
+  it('normalizes the whitelisted Enlarge/Reduce mechanical modifiers', () => {
+    const enlarge = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:enlarge-reduce', label: '变巨', targetId: 'target',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'enlarge-reduce' },
+      modifiers: {
+        sizeRankDelta: 1,
+        strengthRollMode: 'advantage',
+        weaponDamageD4: 'add',
+      },
+    })
+    expect(dnd5eActiveSizeRankDelta([enlarge])).toBe(1)
+    expect(dnd5eActiveStrengthRollFlags([enlarge])).toEqual({ advantage: true, disadvantage: false })
+    expect(dnd5eActiveWeaponDamageD4Mode([enlarge])).toBe('add')
+    expect(validateDnd5eActiveEffectsStrict([enlarge])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...enlarge,
+      modifiers: { ...enlarge.modifiers, sizeRankDelta: 2 },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('sizeRankDelta')]),
+    })
+  })
+
   it('strictly rejects malformed remote values instead of silently repairing them', () => {
     const effect = createDnd5eConditionEffect({
       id: 'blind', condition: 'blinded', targetId: 'target', source: { kind: 'dm' },
@@ -89,6 +158,46 @@ describe('D&D 5e ActiveEffectInstance', () => {
     expect(validateDnd5eActiveEffectsStrict([{ ...effect, potency: Number.POSITIVE_INFINITY }])).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('potency')]),
+    })
+  })
+
+  it('preserves bounded failed-save damage and alternative escape ability declarations', () => {
+    const effect = createDnd5eConditionEffect({
+      id: 'phantasm',
+      condition: 'frightened',
+      targetId: 'target',
+      source: { kind: 'spell', actorId: 'wizard', rulesId: 'phantasmal-killer' },
+      duration: {
+        type: 'concentration',
+        sourceActorId: 'wizard',
+        concentrationId: 'phantasmal-killer',
+        remainingRounds: 10,
+      },
+      repeatSave: {
+        ability: 'wis',
+        dc: 16,
+        timing: 'target-turn-end',
+        damageOnFailure: { count: 5, sides: 10, modifier: 0, type: 'psychic' },
+        onSuccess: 'remove',
+      },
+      escapeCheck: {
+        ability: 'str',
+        alternativeAbility: 'dex',
+        dc: 16,
+        economy: 'action',
+      },
+    })
+    expect(normalizeDnd5eActiveEffects([effect])).toEqual([effect])
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      repeatSave: {
+        ...effect.repeatSave!,
+        damageOnFailure: { count: 5, sides: 10, modifier: 0, type: 'not-damage' },
+      },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('repeatSave')]),
     })
   })
 

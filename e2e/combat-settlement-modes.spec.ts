@@ -111,7 +111,7 @@ async function seedManualCombat(request: APIRequestContext, mapId: string) {
   })
 }
 
-test('DM 同步三种结算模式，明骰公开、暗骰保密，并可手动应用 HP', async ({ browser, request }) => {
+test('DM 同步自动与手动结算模式，明骰公开、暗骰保密，并可手动应用 HP', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const mapId = `settlement-${Date.now()}`
   await seedManualCombat(request, mapId)
@@ -161,59 +161,37 @@ test('DM 同步三种结算模式，明骰公开、暗骰保密，并可手动�
     return state.events.some((event) => event.sourceMode === 'player' && event.visibility === 'public' && event.roll?.label.includes('玩家公开检定'))
   }).toBe(true)
 
+  // 当前怪物回合可从结构化数据块选择攻击；怪物 AI 仍不会自行执行。
+  await dm.getByTestId('initiative-token-manual-goblin').click()
+  const enemyDetail = dm.getByTestId('enemy-detail-panel')
+  await expect(enemyDetail.getByRole('button', { name: /选择目标/ }).first()).toBeVisible()
+  await enemyDetail.getByRole('button', { name: '关闭' }).click()
+
+  await dm.getByTestId('dm-next-turn').click()
+  await expect.poll(async () => (await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(1)
+  await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 15_000 })
+
   const publicDiceCount = (await getState<{ events: unknown[] }>(request, 'dice-events')).events.length
   await dm.getByTestId('manual-roll-visibility').click()
   await expect(dm.getByTestId('manual-roll-visibility')).toHaveText('暗骰')
   await dm.getByLabel('投骰名称').fill('DM 秘密检定')
   await dm.getByTestId('manual-roll-submit').click()
-  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toBeVisible({ timeout: 15_000 })
-  await dm.getByRole('button', { name: /并继续结算$/ }).click()
+  await expect(dm.getByRole('dialog', { name: 'DM 暗骰确认' })).toBeVisible({ timeout: 15_000 })
+  await dm.getByTestId('d20-dm-override').fill('17')
+  await dm.getByTestId('d20-roll-continue').click()
   await expect(dm.getByTestId('manual-roll-submit')).toBeEnabled({ timeout: 15_000 })
   await dm.waitForTimeout(500)
   expect((await getState<{ events: unknown[] }>(request, 'dice-events')).events).toHaveLength(publicDiceCount)
+  expect((await getState<{ entries: Array<{ text?: string }> }>(request, 'combat-log')).entries)
+    .not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('DM 秘密检定') }),
+    ]))
   await expect(player.getByText('DM 秘密检定')).toHaveCount(0)
-
-  await dm.getByTestId('combat-settlement-mode').selectOption('semi-automatic')
-  await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('半自动')
-  await expect(dm.getByTestId('combat-settlement-panel')).toContainText('怪物手动操作台')
-  await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
-  await dm.waitForTimeout(1_200)
-  expect((await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(0)
-
-  await dm.getByTestId('dm-next-turn').click()
-  await expect.poll(async () => (await getState<{ initiativeIndex: number }>(request, 'combat')).initiativeIndex).toBe(1)
-  await expect(player.getByTestId('player-end-turn-top')).toBeEnabled({ timeout: 15_000 })
-  await expect(dm.getByTestId('player-combat-hotbar')).toHaveCount(0)
-  await dm.getByTestId('initiative-token-manual-player').evaluate((element: HTMLElement) => element.click())
-  await expect(dm.getByTestId('character-detail-panel')).toBeVisible()
-  await expect(dm.getByTestId('character-action-panel')).toHaveCount(0)
-  await expect(dm.getByTestId('player-combat-hotbar')).toHaveCount(0)
-  await expect(player.getByTestId('player-combat-hotbar')).toBeVisible()
-  await expect(player.getByTestId('combat-hotbar-spells')).toBeVisible()
-  await expect(player.getByTestId('combat-hotbar-features')).toBeVisible()
-  await expect(player.getByTestId('combat-hotbar-items')).toBeVisible()
-  await expect(player.getByTestId('combat-hotbar-basics')).toBeVisible()
-  const moveAction = player.getByTestId('combat-hotbar-basics').getByRole('button', { name: /移动$/ })
-  await expect(moveAction.locator('svg')).toHaveAttribute('data-icon-motif', 'move')
-  await moveAction.hover()
-  const actionTooltip = player.getByRole('tooltip')
-  await expect(actionTooltip).toContainText('移动 · 选择地图位置')
-  const [hotbarBox, tooltipBox] = await Promise.all([
-    player.getByTestId('player-combat-hotbar').boundingBox(),
-    actionTooltip.boundingBox(),
-  ])
-  expect(hotbarBox).not.toBeNull()
-  expect(tooltipBox).not.toBeNull()
-  expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(hotbarBox!.y)
-  await expect(player.getByTestId('map-dice-roller-toggle')).toBeVisible()
-  await player.getByTestId('map-dice-roller-toggle').click()
-  await expect(player.getByTestId('map-dice-roller-panel')).toBeVisible()
-  await expect(player.getByText('作为属性／技能鉴定')).toBeVisible()
-  await player.getByRole('button', { name: '关闭自由掷骰' }).click()
 
   await dm.getByTestId('combat-settlement-mode').selectOption('automatic')
   await expect(player.getByTestId('combat-settlement-mode-label')).toHaveText('自动结算')
-  await expect(dm.getByTestId('combat-settlement-panel')).toHaveCount(0)
+  await expect(dm.getByTestId('combat-settlement-panel')).toContainText('DM 战场修正台')
+  await expect(dm.getByTestId('manual-roll-submit')).toBeEnabled()
   await expect(player.getByTestId('combat-settlement-panel')).toHaveCount(0)
 
   // 结算模式与回合推进会在共享 combat 资源中排队写入。一次结束点击必须

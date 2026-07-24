@@ -266,10 +266,18 @@ function AbilityCard({ ability, onChange, onDelete }: { ability: DeclarativeSubc
       <EditorNumber label="可用次数（0=不限）" value={uses} min={0} max={1_000_000} onChange={setUses} />
       {uses > 0 && <label><span className="mb-1 block text-[11px] text-slate-500">次数恢复</span><select className={fieldClass()} value={ability.limits?.reset ?? 'long-rest'} onChange={(event) => onChange({ ...ability, limits: { ...ability.limits, reset: event.target.value as 'combat' | 'short-rest' | 'long-rest', uses: ability.limits!.uses } })}><option value="combat">每场战斗</option><option value="short-rest">短休</option><option value="long-rest">长休</option></select></label>}
     </div>
-    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+    <div className="mt-2 grid gap-2 sm:grid-cols-4">
       <label><span className="mb-1 block text-[11px] text-slate-500">自身必须具有状态</span><select className={fieldClass()} value={ability.predicates?.actorHasConditions?.[0] ?? ''} onChange={(event) => onChange({ ...ability, predicates: { ...ability.predicates, actorHasConditions: event.target.value ? [event.target.value as Dnd5eStandardConditionId] : undefined } })}><option value="">无</option>{DND5E_STANDARD_CONDITION_IDS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}</select></label>
       <label><span className="mb-1 block text-[11px] text-slate-500">目标不得具有状态</span><select className={fieldClass()} value={ability.predicates?.targetLacksConditions?.[0] ?? ''} onChange={(event) => onChange({ ...ability, predicates: { ...ability.predicates, targetLacksConditions: event.target.value ? [event.target.value as Dnd5eStandardConditionId] : undefined } })}><option value="">无</option>{DND5E_STANDARD_CONDITION_IDS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}</select></label>
       <label className="flex items-end gap-2 pb-2 text-xs text-slate-300"><input type="checkbox" checked={ability.limits?.oncePerTurn === true} onChange={(event) => onChange({ ...ability, limits: { ...ability.limits, oncePerTurn: event.target.checked } })} />每回合一次</label>
+      <label className="flex items-end gap-2 pb-2 text-xs text-slate-300">
+        <input
+          type="checkbox"
+          checked={ability.canModifyEnemyD20 === true}
+          onChange={(event) => onChange({ ...ability, canModifyEnemyD20: event.target.checked })}
+        />
+        可改变敌方 d20 结果
+      </label>
     </div>
 
     <section className="mt-3 rounded-lg border border-white/8 p-2">

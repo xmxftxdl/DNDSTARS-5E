@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, Clock3, Eye, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
+import { AlertTriangle, Clock3, Eye, MoonStar, RefreshCw, ShieldCheck, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { roomCharactersOwnedByMembers } from '../../lib/playerView'
 import { loadRoomRoster, roomApiErrorMessage, roomRosterMemberLabel, type RoomRosterMember } from '../../lib/roomApi'
 import { getRoomSession } from '../../lib/roomSession'
+import { useCampaignTimeStore } from '../../store/campaignTime'
 import { useCharacterStore } from '../../store/characters'
 import Dnd5eDmInventoryDistributor from './Dnd5eDmInventoryDistributor'
 import CharacterSheet from './CharacterSheet'
@@ -15,6 +16,23 @@ export default function DMRoster() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [inspectedCharacterId, setInspectedCharacterId] = useState<string | null>(null)
+  const [longRestBusy, setLongRestBusy] = useState(false)
+  const [longRestMessage, setLongRestMessage] = useState('')
+  const mutateCampaignTime = useCampaignTimeStore((state) => state.mutate)
+
+  const completeLongRest = async () => {
+    if (longRestBusy) return
+    setLongRestBusy(true)
+    setLongRestMessage('')
+    try {
+      await mutateCampaignTime({ operation: 'long-rest', reason: 'DM 在角色栏发起全队长休' })
+      setLongRestMessage('长休结算完成：已推进 8 小时，并恢复符合条件角色的生命值、法术位和长休资源。')
+    } catch (cause) {
+      setLongRestMessage(cause instanceof Error ? cause.message : '长休结算失败，请稍后重试。')
+    } finally {
+      setLongRestBusy(false)
+    }
+  }
 
   const refresh = useCallback(async () => {
     if (!roomSession || roomSession.role !== 'dm') {
@@ -86,6 +104,15 @@ export default function DMRoster() {
           <p className="mt-1 text-sm text-slate-500">只读查看已加入本房间的玩家，以及他们创建的角色。</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void completeLongRest()}
+            disabled={longRestBusy || !roomSession}
+            className="flex items-center gap-2 rounded-lg border border-indigo-300/20 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-100 transition hover:border-indigo-300/35 hover:bg-indigo-500/20 disabled:opacity-50"
+          >
+            <MoonStar className="h-3.5 w-3.5" />
+            {longRestBusy ? '正在长休…' : '一键长休 · 恢复法术位'}
+          </button>
           <span className="rounded-lg border border-white/8 bg-black/20 px-3 py-1.5 text-xs text-slate-400">
             {onlineCount}/{currentPlayers.length} 在线
           </span>
@@ -104,6 +131,11 @@ export default function DMRoster() {
       {error && (
         <div className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {error}
+        </div>
+      )}
+      {longRestMessage && (
+        <div className="mt-4 rounded-xl border border-indigo-300/15 bg-indigo-500/[0.07] px-4 py-3 text-sm text-indigo-100">
+          {longRestMessage}
         </div>
       )}
 

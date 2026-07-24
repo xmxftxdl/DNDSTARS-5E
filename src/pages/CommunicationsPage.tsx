@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
-import { combatantContributionScore } from '../lib/combatStatistics'
+import { combatantDamagePerTurn } from '../lib/combatStatistics'
 import { loadRoomRoster, roomApiErrorMessage, type RoomRosterMember } from '../lib/roomApi'
 import {
   type RoomChatChannel,
@@ -411,7 +411,7 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
 }) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [audienceAll, setAudienceAll] = useState(true)
+  const [audienceMode, setAudienceMode] = useState<'all' | 'selected' | 'dm'>('all')
   const [audience, setAudience] = useState<string[]>([])
   const [image, setImage] = useState<File | null>(null)
 
@@ -428,7 +428,7 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
         operation: 'add-handout',
         title,
         body,
-        audience: audienceAll ? 'all' : audience,
+        audience: audienceMode === 'all' ? 'all' : audienceMode === 'dm' ? 'dm' : audience,
         ...(imageId && image ? { imageId, imageMimeType: image.type, imageName: image.name } : {}),
       })
       setTitle('')
@@ -459,14 +459,20 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
           </div>
           <textarea maxLength={20_000} rows={4} value={body} onChange={(event) => setBody(event.target.value)} placeholder="信件正文、线索说明或符号描述…" className="mt-3 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-100" />
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={audienceAll} onChange={(event) => setAudienceAll(event.target.checked)} />全体玩家</label>
-            {!audienceAll && roster.map((player) => (
+            <select value={audienceMode} onChange={(event) => setAudienceMode(event.target.value as typeof audienceMode)} className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-slate-300">
+              <option value="all">立即分发给全体玩家</option>
+              <option value="selected">立即分发给指定玩家</option>
+              <option value="dm">保存为 DM 讲义草稿</option>
+            </select>
+            {audienceMode === 'selected' && roster.map((player) => (
               <label key={player.memberId} className="flex items-center gap-2 text-slate-400">
                 <input type="checkbox" checked={audience.includes(player.memberId)} onChange={(event) => setAudience((current) => event.target.checked ? [...current, player.memberId] : current.filter((id) => id !== player.memberId))} />
                 {player.displayName}
               </label>
             ))}
-            <button disabled={busy || (!body.trim() && !image) || (!audienceAll && audience.length === 0)} className="ml-auto rounded-xl bg-amber-400/15 px-4 py-2 font-semibold text-amber-100 hover:bg-amber-400/25 disabled:opacity-40">分发讲义</button>
+            <button disabled={busy || (!body.trim() && !image) || (audienceMode === 'selected' && audience.length === 0)} className="ml-auto rounded-xl bg-amber-400/15 px-4 py-2 font-semibold text-amber-100 hover:bg-amber-400/25 disabled:opacity-40">
+              {audienceMode === 'dm' ? '保存草稿' : '分发讲义'}
+            </button>
           </div>
         </form>
       )}
@@ -483,7 +489,13 @@ function HandoutsPanel({ isDm, handouts, roster, busy, onMutate }: {
               </div>
               {handout.body && <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{handout.body}</p>}
               <SharedHandoutImage handout={handout} />
-              {isDm && <p className="mt-4 text-xs text-violet-300">接收者：{handout.audience === 'all' ? '全体玩家' : handout.audience.map((id) => playerNames.get(id) ?? '已离开玩家').join('、')}</p>}
+              {isDm && <p className="mt-4 text-xs text-violet-300">接收者：{
+                handout.audience === 'all'
+                  ? '全体玩家'
+                  : handout.audience === 'dm'
+                    ? 'DM 草稿（尚未发布）'
+                    : handout.audience.map((id) => playerNames.get(id) ?? '已离开玩家').join('、')
+              }</p>}
             </article>
           ))}
         </div>
@@ -514,7 +526,7 @@ function CampaignJournalPanel({ isDm, entries, sessions, maps, busy, onMutate }:
     setTitle(selectedSessions.length > 1 ? `${new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(Date.now())} · 团务战斗纪要` : `${mapName} · 战斗纪要`)
     setBody(source.flatMap((combat, index) => {
       const combatMapName = maps.find((map) => map.id === combat.mapId)?.name ?? '未命名地图'
-      const combatants = Object.values(combat.combatants).sort((a, b) => combatantContributionScore(b) - combatantContributionScore(a))
+      const combatants = Object.values(combat.combatants).sort((a, b) => b.damageDealt - a.damageDealt)
       const settlement = combat.experienceSettlement
       return [
         ...(index > 0 ? ['', '---', ''] : []),
@@ -522,7 +534,7 @@ function CampaignJournalPanel({ isDm, entries, sessions, maps, busy, onMutate }:
         `战斗轮数：${combat.lastRound}`,
         settlement ? `经验结算：${settlement.awardedXp}/${settlement.totalXp} XP` : '经验结算：尚未结算',
         '参战统计：',
-        ...combatants.map((entry) => `- ${entry.name}：输出 ${entry.damageDealt}，承伤 ${entry.damageTaken}，治疗 ${entry.healingDone}，击倒/击杀 ${entry.knockouts}/${entry.kills}，贡献 ${combatantContributionScore(entry)}`),
+        ...combatants.map((entry) => `- ${entry.name}：每回合伤害 ${combatantDamagePerTurn(entry).toFixed(1)}，有效伤害 ${entry.damageDealt}，承伤 ${entry.damageTaken}，治疗 ${entry.healingDone}，减伤 ${entry.damagePrevented}，击倒/击杀 ${entry.knockouts}/${entry.kills}`),
       ]
     }).join('\n'))
   }

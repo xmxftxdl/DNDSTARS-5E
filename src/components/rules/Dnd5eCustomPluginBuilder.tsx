@@ -64,6 +64,7 @@ interface FeatureDraft {
   summary: string
   description: string
   minimumLevel: number
+  canModifyEnemyD20: boolean
   headless: HeadlessEffectEditorDraft
 }
 
@@ -316,6 +317,7 @@ function newFeature(index: number): FeatureDraft {
   return {
     id: `custom-feature-${index}`, name: `自定义特性 ${index}`,
     summary: '由 DM 提供的自定义特性。', description: '', minimumLevel: 1,
+    canModifyEnemyD20: false,
     headless: newHeadlessEffectDraft(),
   }
 }
@@ -494,7 +496,9 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
   if (!feature.headless.enabled) {
     return {
       id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
-      description: feature.description.trim(), minimumLevel: feature.minimumLevel, automation: 'manual',
+      description: feature.description.trim(), minimumLevel: feature.minimumLevel,
+      canModifyEnemyD20: feature.canModifyEnemyD20,
+      automation: 'manual',
     }
   }
   const targeting = feature.headless.targetingKind === 'self'
@@ -535,7 +539,9 @@ function toFeatureDefinition(feature: FeatureDraft): Dnd5ePluginFeatureDefinitio
         }
   return {
     id: feature.id.trim(), name: feature.name.trim(), summary: feature.summary.trim(),
-    description: feature.description.trim(), minimumLevel: feature.minimumLevel, automation: 'full',
+    description: feature.description.trim(), minimumLevel: feature.minimumLevel,
+    canModifyEnemyD20: feature.canModifyEnemyD20,
+    automation: 'full',
     action: {
       id: feature.id.trim(),
       label: feature.headless.actionLabel.trim() || `使用${feature.name.trim()}`,
@@ -1056,6 +1062,16 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
                   <BuilderInput label="摘要" value={feature.summary} onChange={(value) => patchFeature(index, { summary: value })} />
                   <BuilderTextarea label="规则正文" value={feature.description} onChange={(value) => patchFeature(index, { description: value })} />
                   <DeleteButton label={`删除特性 ${feature.name}`} onClick={() => setFeatures((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
+                </div>
+                <div className="mt-3">
+                  <Toggle
+                    label="可改变敌方 d20 结果"
+                    value={feature.canModifyEnemyD20}
+                    onChange={(canModifyEnemyD20) => patchFeature(index, { canModifyEnemyD20 })}
+                  />
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    仅在敌方 d20 已成功时开放玩家声明窗口；最终替换值仍须由 DM 确认。
+                  </p>
                 </div>
                 <HeadlessEffectEditor
                   value={feature.headless}

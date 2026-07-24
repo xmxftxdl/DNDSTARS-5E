@@ -1,4 +1,4 @@
-export type CombatSettlementMode = 'automatic' | 'manual' | 'semi-automatic'
+export type CombatSettlementMode = 'automatic' | 'manual'
 export type ManualSettlementOperation = 'damage' | 'healing' | 'temporary-hit-points'
 
 export interface ManualHitPointState {
@@ -14,15 +14,24 @@ export const COMBAT_SETTLEMENT_MODE_OPTIONS: ReadonlyArray<{
 }> = [
   { id: 'automatic', label: '自动结算', summary: '玩家与怪物都由 D&D 5e Headless 结算。' },
   { id: 'manual', label: '手动结算', summary: '双方只使用公共骰盘，DM 手工应用伤害和治疗。' },
-  { id: 'semi-automatic', label: '半自动', summary: '玩家 Headless 自动结算，怪物由 DM 手动操作。' },
 ]
 
 export function normalizeCombatSettlementMode(value: unknown): CombatSettlementMode {
-  return value === 'manual' || value === 'semi-automatic' ? value : 'automatic'
+  // 旧房间的半自动模式迁移为手动，避免重新载入后意外启动怪物 AI。
+  return value === 'manual' || value === 'semi-automatic' ? 'manual' : 'automatic'
 }
 
 export function usesAutomatedPlayerSettlement(mode: CombatSettlementMode): boolean {
   return mode !== 'manual'
+}
+
+export function allowsPlayerActionInSettlementMode(
+  mode: CombatSettlementMode,
+  actionType: string,
+): boolean {
+  return usesAutomatedPlayerSettlement(mode) ||
+    actionType === 'end-turn' ||
+    actionType === 'dnd5e-map-interaction'
 }
 
 export function usesAutomatedMonsterSettlement(mode: CombatSettlementMode): boolean {
@@ -30,7 +39,18 @@ export function usesAutomatedMonsterSettlement(mode: CombatSettlementMode): bool
 }
 
 export function supportsManualDice(mode: CombatSettlementMode, role: 'dm' | 'player'): boolean {
-  return mode === 'manual' || (mode === 'semi-automatic' && role === 'dm')
+  return role === 'dm' || mode === 'manual'
+}
+
+/**
+ * DM 战场修正不属于角色行动，也不受自动／手动结算模式限制。
+ * 玩家永远不能通过该入口直接改写生命值或状态。
+ */
+export function supportsDmBattlefieldAdjustment(
+  _mode: CombatSettlementMode,
+  role: 'dm' | 'player',
+): boolean {
+  return role === 'dm'
 }
 
 export function applyManualHitPointOperation(
@@ -55,4 +75,3 @@ export function applyManualHitPointOperation(
     temporaryHp: temporaryHp - absorbed,
   }
 }
-

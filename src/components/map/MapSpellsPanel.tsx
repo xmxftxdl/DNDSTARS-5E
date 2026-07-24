@@ -33,11 +33,20 @@ interface MapSpellsPanelProps {
   targetingCanHeightened?: boolean
   targetingHeightenedSelected?: boolean
   targetingHeightenedSelecting?: boolean
+  targetingSustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
   movablePersistentAreas?: readonly {
     id: string
     label: string
     economy: 'action' | 'bonus-action'
     maximumFeet: number
+    coreSpellId?: string
+    slotLevel?: number
+  }[]
+  activatablePersistentAreas?: readonly {
+    id: string
+    label: string
+    coreSpellId: 'call-lightning'
+    slotLevel: number
   }[]
   movingPersistentAreaId?: string
   requestedFocusedSpellId?: string
@@ -48,6 +57,14 @@ interface MapSpellsPanelProps {
   onToggleSculptSpellTargets?: () => void
   onToggleCarefulSpellTargets?: () => void
   onToggleHeightenedSpellTarget?: () => void
+  onUseSustainedSpellAttack?: (
+    spellId: string,
+    slotLevel: number,
+    castingClassId: Dnd5eClassId,
+    attackId: 'flame-blade',
+  ) => void
+  onUseSustainedAreaAttack?: (areaId: string) => void
+  onActivatePersistentArea?: (areaId: string) => void
   onMovePersistentArea?: (areaId: string) => void
   onFocusedSpellChange?: (spellId: string) => void
 }
@@ -62,10 +79,14 @@ export default function MapSpellsPanel({
   targetingCanCareful = false, targetingCarefulCount = 0, targetingMaximumCarefulTargets = 0,
   targetingCarefulSelecting = false,
   targetingCanHeightened = false, targetingHeightenedSelected = false, targetingHeightenedSelecting = false,
-  movablePersistentAreas = [], movingPersistentAreaId,
+  targetingSustainedEffectAttack,
+  movablePersistentAreas = [], activatablePersistentAreas = [], movingPersistentAreaId,
   requestedFocusedSpellId,
   onCastSpell, onRequestAdjudication, onConfirmSpellTargets, onUndoSpellTarget, onToggleSculptSpellTargets,
   onToggleCarefulSpellTargets, onToggleHeightenedSpellTarget,
+  onUseSustainedSpellAttack,
+  onUseSustainedAreaAttack,
+  onActivatePersistentArea,
   onMovePersistentArea, onFocusedSpellChange,
 }: MapSpellsPanelProps) {
   const c = useCharacterStore((s) => s.characters.find((x) => x.id === charId))
@@ -211,7 +232,7 @@ export default function MapSpellsPanel({
                 className={`group rounded-xl border p-1.5 text-center transition ${active ? 'border-amber-300/60 bg-amber-400/10 shadow-[0_0_22px_rgba(251,191,36,0.15)]' : 'border-white/8 bg-white/[0.025] hover:-translate-y-0.5 hover:border-violet-300/30 hover:bg-violet-500/[0.07]'}`}
               >
                 <Dnd5eActionIcon
-                  spec={dnd5eSpellActionIcon(spell)}
+                  spec={dnd5eSpellActionIcon({ ...spell, castingClassId: definition.id })}
                   level={spell.level}
                   active={active}
                   disabled={wildShapeBlocksSpellcasting || unsupported}
@@ -223,17 +244,36 @@ export default function MapSpellsPanel({
             })}
           </div>
         </section> : null}
-        {movablePersistentAreas.length > 0 ? <div className="space-y-2 rounded-xl border border-sky-300/20 bg-sky-400/[0.04] p-3">
+        {movablePersistentAreas.length > 0 || activatablePersistentAreas.length > 0 ? <div className="space-y-2 rounded-xl border border-sky-300/20 bg-sky-400/[0.04] p-3">
           <div className="text-xs font-semibold text-sky-100">场上持续法术</div>
+          {activatablePersistentAreas.map((area) => <button
+            key={area.id}
+            type="button"
+            disabled={!canAct || pending}
+            onClick={() => onActivatePersistentArea?.(area.id)}
+            className={`w-full rounded-lg border px-3 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${movingPersistentAreaId === area.id ? 'border-amber-300/50 bg-amber-400/10 text-amber-100' : 'border-blue-300/25 bg-blue-500/[0.07] text-blue-100 hover:bg-blue-500/15'}`}
+          >
+            <strong>{movingPersistentAreaId === area.id ? '请选择云下的落雷点' : '再次召雷'}</strong>
+            <span className="mt-0.5 block text-[10px] opacity-70">
+              消耗动作；落雷点必须位于雷云中心 60 尺内 · {area.slotLevel}环效果
+            </span>
+          </button>)}
           {movablePersistentAreas.map((area) => <button
             key={area.id}
             type="button"
             disabled={!canAct || pending}
-            onClick={() => onMovePersistentArea?.(area.id)}
-            className={`w-full rounded-lg border px-3 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${movingPersistentAreaId === area.id ? 'border-amber-300/50 bg-amber-400/10 text-amber-100' : 'border-sky-300/20 bg-black/10 text-sky-100 hover:bg-sky-400/10'}`}
+            onClick={() => area.coreSpellId === 'spiritual-weapon'
+              ? onUseSustainedAreaAttack?.(area.id)
+              : onMovePersistentArea?.(area.id)}
+            className={`w-full rounded-lg border px-3 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${movingPersistentAreaId === area.id ? 'border-amber-300/50 bg-amber-400/10 text-amber-100' : area.coreSpellId === 'spiritual-weapon' ? 'border-violet-300/25 bg-violet-500/[0.06] text-violet-100 hover:bg-violet-500/15' : 'border-sky-300/20 bg-black/10 text-sky-100 hover:bg-sky-400/10'}`}
           >
-            <strong>{movingPersistentAreaId === area.id ? '请在地图选择新位置' : `移动${area.label}`}</strong>
-            <span className="mt-0.5 block text-[10px] opacity-70">消耗{area.economy === 'action' ? '动作' : '附赠动作'}，至多移动 {area.maximumFeet} 尺</span>
+            <strong>{movingPersistentAreaId === area.id
+              ? area.coreSpellId === 'spiritual-weapon' ? '请选择新位置与攻击目标' : '请在地图选择新位置'
+              : area.coreSpellId === 'spiritual-weapon' ? '移动并用灵体武器攻击' : `移动${area.label}`}</strong>
+            <span className="mt-0.5 block text-[10px] opacity-70">
+              消耗{area.economy === 'action' ? '动作' : '附赠动作'}，至多移动 {area.maximumFeet} 尺
+              {area.slotLevel ? ` · ${area.slotLevel}环效果` : ''}
+            </span>
           </button>)}
         </div> : null}
         {selectedSpells.length > 0 ? <div className="grid gap-2">
@@ -292,6 +332,17 @@ export default function MapSpellsPanel({
             const totalSorceryPointCost = metamagicCost + (empowered ? 1 : 0) + (draconicResistance ? 1 : 0)
             const areaLabel = dnd5eSpellAreaLabel(spell)
             const projectileUnit = spell.id === 'magic-missile' ? '枚飞弹' : '道射线'
+            const activeSustainedEffect = spell.sustainedAttack?.origin === 'caster'
+              ? c.dnd5eCombatState?.activeEffects?.find((effect) =>
+                  effect.source.kind === 'spell' &&
+                  effect.source.rulesId === spell.id &&
+                  effect.definitionId === `srd-5.1:spell:${spell.id}` &&
+                  effect.duration.type === 'concentration' &&
+                  Number.isInteger(effect.potency) &&
+                  effect.potency! >= spell.level,
+                )
+              : undefined
+            const sustainedAttackSlotLevel = activeSustainedEffect?.potency
             return <div key={spell.id} className="rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div><div className="text-sm font-semibold text-violet-100">{spell.name}</div><div className="text-[10px] text-slate-500">{spell.englishName} · {spell.level === 0 ? '戏法' : `${spell.level}环`} · {spell.castingTime === 'bonus-action' ? '附赠动作' : spell.castingTime === 'reaction' ? '反应' : '动作'} · {effectiveRangeFeet}尺{spell.concentration ? ' · 专注' : ''}</div></div>
@@ -394,9 +445,9 @@ export default function MapSpellsPanel({
                   draconicResistance,
                   repellingBlast,
                 })}
-                className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === spell.id ? 'bg-amber-400 text-void-950' : 'bg-violet-500/20 text-violet-100 hover:bg-violet-500/30'}`}
+                className={`mt-2 w-full rounded-lg px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${targetingSpellId === spell.id && !targetingSustainedEffectAttack ? 'bg-amber-400 text-void-950' : 'bg-violet-500/20 text-violet-100 hover:bg-violet-500/30'}`}
               >
-                {targetingSpellId === spell.id
+                {targetingSpellId === spell.id && !targetingSustainedEffectAttack
                   ? targetingHeightenedSelecting
                     ? `升阶法术（点击一个已选生物，使其第一次豁免具有劣势）`
                     : targetingCarefulSelecting
@@ -409,10 +460,31 @@ export default function MapSpellsPanel({
                         : spell.area
                           ? `已框选 ${targetingTargetCount} 个生物（在地图移动并点击范围）`
                           : `选择目标 ${targetingTargetCount}/${targetingMaximumTargets}（再次点击取消）`
-                      : '请点击地图目标'
+                      : spell.area
+                        ? `已框选 ${targetingTargetCount} 个生物（在地图选择位置）`
+                        : '请点击地图目标'
                   : spell.castingTime === 'reaction' ? '符合触发条件时自动询问' : '选择目标并施放'}
               </button>
-              {targetingSpellId === spell.id && targetingMaximumTargets > 1 ? <>
+              {spell.sustainedAttack?.origin === 'caster' && sustainedAttackSlotLevel != null ? <button
+                type="button"
+                disabled={!canAct || pending || wildShapeBlocksSpellcasting}
+                onClick={() => onUseSustainedSpellAttack?.(
+                  spell.id,
+                  sustainedAttackSlotLevel,
+                  definition.id,
+                  spell.sustainedAttack!.id as 'flame-blade',
+                )}
+                className={`mt-2 w-full rounded-lg border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
+                  targetingSpellId === spell.id && targetingSustainedEffectAttack === spell.sustainedAttack.id
+                    ? 'border-orange-200/70 bg-orange-400 text-void-950'
+                    : 'border-orange-300/25 bg-orange-500/10 text-orange-100 hover:bg-orange-500/20'
+                }`}
+              >
+                {targetingSpellId === spell.id && targetingSustainedEffectAttack === spell.sustainedAttack.id
+                  ? `请选择 ${spell.sustainedAttack.rangeFeet} 尺内的攻击目标`
+                  : `使用动作：${spell.name}攻击（${sustainedAttackSlotLevel}环效果）`}
+              </button> : null}
+              {targetingSpellId === spell.id && (targetingMaximumTargets > 1 || !!spell.area) ? <>
                 {targetingAllowsDuplicateTargets ? <button
                   type="button"
                   disabled={pending || targetingTargetCount < 1}

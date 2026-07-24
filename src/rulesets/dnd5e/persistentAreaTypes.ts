@@ -1,4 +1,5 @@
 import type { AbilityKey } from '../../lib/dnd'
+import type { GridCell } from '../../lib/gridCombat'
 import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from './conditions'
 import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
 
@@ -11,10 +12,15 @@ export const DND5E_PERSISTENT_AREA_VISUAL_PRESETS = [
   'daylight',
   'darkness',
   'moonbeam',
+  'call-lightning',
   'spirit-guardians',
   'spike-growth',
   'flaming-sphere',
+  'spiritual-weapon',
   'grease',
+  'entangle',
+  'black-tentacles',
+  'wall-of-fire',
 ] as const
 
 export type Dnd5ePersistentAreaVisualPreset = typeof DND5E_PERSISTENT_AREA_VISUAL_PRESETS[number]
@@ -92,6 +98,12 @@ export interface Dnd5ePersistentAreaSaveDeclaration {
 export interface Dnd5ePersistentAreaConditionDeclaration {
   condition: Dnd5eStandardConditionId
   duration: Dnd5ePluginEffectDuration
+  escapeCheck?: {
+    ability: AbilityKey
+    alternativeAbility?: AbilityKey
+    dc: number
+    economy: 'action'
+  }
 }
 
 /**
@@ -110,6 +122,11 @@ export interface Dnd5ePersistentAreaTriggerDeclaration {
   /** `on-move-distance` 每累计多少尺触发一次；由 Host 根据完整移动路径计数。 */
   movementIntervalFeet?: number
   savingThrow?: Dnd5ePersistentAreaSaveDeclaration
+  /**
+   * 目标已带有同一来源的指定状态时跳过本次豁免。
+   * 用于黑触手这类“已被本法术束缚者在回合开始自动受伤”的规则。
+   */
+  skipSaveWhenSourceConditionActive?: Dnd5eStandardConditionId
   damage?: Dnd5ePersistentAreaDamageDeclaration
   condition?: Dnd5ePersistentAreaConditionDeclaration
   /** Pause before commit so the DM may adjust the proposed save, damage or condition. */
@@ -118,6 +135,8 @@ export interface Dnd5ePersistentAreaTriggerDeclaration {
 
 export interface Dnd5ePersistentAreaTriggerSnapshot extends Omit<Dnd5ePersistentAreaTriggerDeclaration, 'savingThrow'> {
   savingThrow?: Omit<Dnd5ePersistentAreaSaveDeclaration, 'dc'> & { dc: number }
+  /** 核心法术可为单个触发器限定权威触发格；缺省使用区域本体格。 */
+  cells?: readonly GridCell[]
 }
 
 export interface Dnd5ePersistentAreaTriggerReceipt {
@@ -262,10 +281,32 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
         saveDc: rawDuration.saveDc as number | undefined,
       }
     : undefined
+  const rawEscapeCheck = record(rawCondition?.escapeCheck)
+  const escapeCheck = rawCondition?.escapeCheck == null
+    ? undefined
+    : rawEscapeCheck &&
+      Object.keys(rawEscapeCheck).every((key) => ['ability', 'alternativeAbility', 'dc', 'economy'].includes(key)) &&
+      ABILITIES.includes(rawEscapeCheck.ability as AbilityKey) &&
+      (rawEscapeCheck.alternativeAbility == null ||
+        ABILITIES.includes(rawEscapeCheck.alternativeAbility as AbilityKey)) &&
+      integer(rawEscapeCheck.dc, 1, 100) &&
+      rawEscapeCheck.economy === 'action'
+      ? {
+          ability: rawEscapeCheck.ability as AbilityKey,
+          alternativeAbility: rawEscapeCheck.alternativeAbility as AbilityKey | undefined,
+          dc: Number(rawEscapeCheck.dc),
+          economy: 'action' as const,
+        }
+      : null
   const condition = rawCondition && duration &&
     (DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(rawCondition.condition) &&
-    (duration.expiresAt !== 'target-turn-end-save' || (!!duration.saveAbility && !!duration.saveDc))
-    ? { condition: rawCondition.condition as Dnd5eStandardConditionId, duration }
+    (duration.expiresAt !== 'target-turn-end-save' || (!!duration.saveAbility && !!duration.saveDc)) &&
+    escapeCheck !== null
+    ? {
+        condition: rawCondition.condition as Dnd5eStandardConditionId,
+        duration,
+        escapeCheck,
+      }
     : undefined
 
   if (!damage && !condition) return undefined
@@ -276,6 +317,24 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
     : undefined
   if (trigger.timing === 'on-move-distance' && movementIntervalFeet == null) return undefined
   if (trigger.timing !== 'on-move-distance' && trigger.movementIntervalFeet != null) return undefined
+  const cells = trigger.cells == null
+    ? undefined
+    : Array.isArray(trigger.cells) && trigger.cells.length >= 1 && trigger.cells.length <= 4_096
+      ? trigger.cells.flatMap((cell) => {
+          const entry = record(cell)
+          return entry && integer(entry.col, -10_000, 10_000) && integer(entry.row, -10_000, 10_000)
+            ? [{ col: Number(entry.col), row: Number(entry.row) }]
+            : []
+        })
+      : []
+  if (trigger.cells != null && (
+    !Array.isArray(trigger.cells) || cells?.length !== trigger.cells.length
+  )) return undefined
+  const skipSaveWhenSourceConditionActive =
+    (DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(trigger.skipSaveWhenSourceConditionActive)
+      ? trigger.skipSaveWhenSourceConditionActive as Dnd5eStandardConditionId
+      : undefined
+  if (trigger.skipSaveWhenSourceConditionActive != null && !skipSaveWhenSourceConditionActive) return undefined
   return {
     id,
     frequencyGroupId: frequencyGroupId as string | undefined,
@@ -285,8 +344,10 @@ export function normalizeDnd5ePersistentAreaTriggerSnapshot(
     oncePerTurn: trigger.oncePerTurn === true,
     movementIntervalFeet,
     savingThrow,
+    skipSaveWhenSourceConditionActive,
     damage,
     condition,
+    cells,
     dmAdjustable: trigger.dmAdjustable === true,
   }
 }

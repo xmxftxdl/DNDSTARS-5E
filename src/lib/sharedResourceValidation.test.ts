@@ -43,6 +43,12 @@ describe('shared resource runtime validation', () => {
     expect(validateAndMigrateSharedResource('combat', { active: 'yes' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-chat', { messages: 'broken' }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('room-journal', { handouts: [], campaignEntries: 'broken', sharedNotes: [] }).status).toBe('invalid')
+    expect(validateAndMigrateSharedResource('room-journal', {
+      handouts: [],
+      campaignEntries: [],
+      sharedNotes: [],
+      authorityMutationReceipts: [''],
+    }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('group-ability-checks', { schemaVersion: 1, checks: [{ id: 'broken' }] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('campaign-time', { schemaVersion: 1, worldMinute: -1, timers: [], advances: [] }).status).toBe('invalid')
     expect(validateAndMigrateSharedResource('scene-orchestration', { schemaVersion: 1, scenes: 'hidden', runtime: {} }).status).toBe('invalid')

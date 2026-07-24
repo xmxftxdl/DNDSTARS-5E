@@ -27,6 +27,7 @@ import {
 import { dnd5eSpellcastingClassIdForSpell } from './spells'
 import type { Dnd5eSpellConditionDuration, Dnd5eSpellMechanicsDefinition } from './spellMechanics'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eWearingUnproficientArmor } from './equipment'
 
 export type Dnd5ePluginSpellRejectReason =
   | 'invalid-action'
@@ -36,6 +37,7 @@ export type Dnd5ePluginSpellRejectReason =
   | 'plugin-not-enabled-for-room'
   | 'plugin-version-mismatch'
   | 'spell-unavailable'
+  | 'armor-proficiency-required'
   | 'spell-not-headless'
   | 'component-unavailable'
   | 'invalid-target'
@@ -146,6 +148,9 @@ export function prepareDnd5ePluginSpellCast(input: {
   const actor = input.characters.find((character) => character.id === input.action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === input.action.actorTokenId && token.characterId === input.action.characterId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  if (dnd5eWearingUnproficientArmor(actor)) {
+    return { ok: false, reason: 'armor-proficiency-required' }
+  }
   const castingClassId = dnd5eSpellcastingClassIdForSpell(actor, spell.id, payload.castingClassId, spell.classes)
   const classDefinition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
   const castingClassLevel = castingClassId ? dnd5eCharacterClassLevel(actor, castingClassId) : 0

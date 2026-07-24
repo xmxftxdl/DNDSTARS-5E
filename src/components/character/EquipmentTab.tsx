@@ -38,8 +38,10 @@ import {
   DND5E_MAGIC_ITEM_KIND_LABELS,
   DND5E_MAGIC_ITEM_RARITY_LABELS,
 } from '../../rulesets/dnd5e/magicItems'
+import { dnd5eArmorProficient, dnd5eWeaponProficient } from '../../rulesets/dnd5e/equipment'
 import type { Dnd5eCurrency, Dnd5eInventoryEntry, Dnd5eInventoryIconId } from '../../types/inventory'
-import type { EquipmentSlot } from '../../types/equipment'
+import type { EquipmentItem, EquipmentSlot } from '../../types/equipment'
+import type { Character } from '../../types/character'
 
 const ICONS: Record<Dnd5eInventoryIconId, ComponentType<{ className?: string }>> = {
   weapon: Sword,
@@ -99,6 +101,54 @@ export interface EquipmentTabProps {
   pending?: boolean
   /** 战斗界面将“使用”接入当前战斗的 DM/Headless 行动事务。 */
   onUseItem?: (instanceId: string) => boolean | void
+}
+
+function equipmentProficiency(character: Character, item: EquipmentItem): {
+  category: string
+  proficient: boolean
+  consequence: string
+} | undefined {
+  const rules = item.dnd5e
+  if (!rules) return undefined
+  if (rules.kind === 'weapon') {
+    return {
+      category: rules.category === 'simple' ? '简易武器' : '军用武器',
+      proficient: dnd5eWeaponProficient(character, item),
+      consequence: '未熟练武器的攻击检定不加入熟练加值；伤害仍加入适用的属性调整值。',
+    }
+  }
+  return {
+    category: rules.kind === 'shield'
+      ? '盾牌'
+      : rules.category === 'light' ? '轻甲' : rules.category === 'medium' ? '中甲' : '重甲',
+    proficient: dnd5eArmorProficient(character, item),
+    consequence: '穿戴未熟练护甲或持用未熟练盾牌时，涉及力量或敏捷的检定、豁免与攻击具有劣势，并且不能施法；AC 仍按该装备计算。',
+  }
+}
+
+function EquipmentProficiencyLine({ character, item }: { character: Character; item: EquipmentItem }) {
+  const result = equipmentProficiency(character, item)
+  if (!result) return null
+  return (
+    <p className={`mt-1 text-[11px] ${result.proficient ? 'text-emerald-300/75' : 'text-amber-300/85'}`}>
+      {result.category} · {result.proficient ? '熟练' : '未熟练'}
+    </p>
+  )
+}
+
+function EquipmentProficiencyNotice({ character, item }: { character: Character; item: EquipmentItem }) {
+  const result = equipmentProficiency(character, item)
+  if (!result) return null
+  return (
+    <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+      result.proficient
+        ? 'border-emerald-400/15 bg-emerald-500/[0.055] text-emerald-100/85'
+        : 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+    }`}>
+      <span className="font-semibold">{result.category} · {result.proficient ? '角色具有熟练' : '角色不具有熟练'}</span>
+      {!result.proficient && <span>。{result.consequence}</span>}
+    </div>
+  )
 }
 
 export default function EquipmentTab({
@@ -214,6 +264,7 @@ export default function EquipmentTab({
                   </div>
                   <p className="mt-2 text-sm font-semibold text-slate-100">{item?.name ?? '空'}</p>
                   {item && <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{formatEquipmentStatLine(item)}</p>}
+                  {item && <EquipmentProficiencyLine character={character} item={item} />}
                   {editable && entry && (
                     <button
                       type="button"
@@ -315,6 +366,9 @@ export default function EquipmentTab({
             <p className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
               该同调条件需要 DM 核对当前环境：{selected.item.magicItem.attunementRequirement}。请由 DM 打开此角色卡完成确认。
             </p>
+          )}
+          {selected.identified !== false && selected.item.equipment && (
+            <EquipmentProficiencyNotice character={character} item={selected.item.equipment} />
           )}
 
           {selected.identified === false ? (

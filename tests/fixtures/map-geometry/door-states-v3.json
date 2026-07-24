@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 3,
+  "maps": [{
+    "mapId": "door-state-fixture",
+    "walls": [{
+      "id": "wall",
+      "kind": "wall",
+      "label": "状态测试墙",
+      "points": [{ "x": 0, "y": 100 }, { "x": 600, "y": 100 }],
+      "edgeIds": ["fixture-edge"],
+      "material": "stone",
+      "blocksVision": true,
+      "blocksMovement": true,
+      "blocksLineOfEffect": true,
+      "baseHeightFeet": 0,
+      "heightFeet": 10,
+      "createdAt": 1
+    }],
+    "doors": [{
+      "id": "jammed",
+      "kind": "door",
+      "label": "卡死门",
+      "points": [{ "x": 120, "y": 100 }, { "x": 180, "y": 100 }],
+      "wallEdgeId": "fixture-edge",
+      "startT": 0.2,
+      "endT": 0.3,
+      "state": "closed",
+      "openState": "closed",
+      "lockState": "jammed",
+      "physicalState": "intact",
+      "secret": false,
+      "blocksVision": true,
+      "blocksMovement": true,
+      "blocksLineOfEffect": true,
+      "baseHeightFeet": 0,
+      "heightFeet": 10,
+      "createdAt": 2
+    }, {
+      "id": "destroyed",
+      "kind": "door",
+      "label": "摧毁门",
+      "points": [{ "x": 360, "y": 100 }, { "x": 420, "y": 100 }],
+      "wallEdgeId": "fixture-edge",
+      "startT": 0.6,
+      "endT": 0.7,
+      "state": "open",
+      "openState": "open",
+      "lockState": "unlocked",
+      "physicalState": "destroyed",
+      "secret": false,
+      "blocksVision": true,
+      "blocksMovement": true,
+      "blocksLineOfEffect": true,
+      "baseHeightFeet": 0,
+      "heightFeet": 10,
+      "createdAt": 3
+    }],
+    "windows": [],
+    "obstacles": [],
+    "lights": [],
+    "vision": {
+      "enabled": true,
+      "defaultRangeFeet": 60,
+      "sharePartyVision": true,
+      "ambientLight": "bright"
+    },
+    "environment": "normal",
+    "updatedAt": 3
+  }],
+  "updatedAt": 3
+}

@@ -23,10 +23,27 @@ import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffec
 import { createCharacterPortraitDataUrl } from '../../lib/characterPortrait'
 import { deleteImage, getImage, putImage } from '../../lib/imageStore'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
-import { getDnd5eSrdMonster, type Dnd5eMonsterTargetPriority } from '../../rulesets/dnd5e/monsters'
-import { DND5E_MONSTER_TARGET_PRIORITY_OPTIONS } from '../../rulesets/dnd5e/monsterAutomation'
+import {
+  getDnd5eSrdMonster,
+  type Dnd5eMonsterBehaviorStyle,
+  type Dnd5eMonsterTargetPriority,
+} from '../../rulesets/dnd5e/monsters'
+import {
+  DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS,
+  DND5E_MONSTER_TARGET_PRIORITY_OPTIONS,
+} from '../../rulesets/dnd5e/monsterAutomation'
 
-function SharedMonsterPortrait({ imageId, name }: { imageId: string; name: string }) {
+function SharedMonsterPortrait({
+  imageId,
+  name,
+  fallbackSrc,
+  fallbackEmoji,
+}: {
+  imageId: string
+  name: string
+  fallbackSrc?: string
+  fallbackEmoji: string
+}) {
   const [loaded, setLoaded] = useState<{ imageId: string; src: string }>()
   useEffect(() => {
     let disposed = false
@@ -42,7 +59,11 @@ function SharedMonsterPortrait({ imageId, name }: { imageId: string; name: strin
     }
   }, [imageId])
   const src = loaded?.imageId === imageId ? loaded.src : undefined
-  return src ? <img src={src} alt={`${name}的完整立绘`} className="h-full w-full object-cover" /> : null
+  if (src) return <img src={src} alt={`${name}的地图缩略图`} className="h-full w-full object-cover" />
+  if (fallbackSrc) {
+    return <img src={fallbackSrc} alt={`${name}的地图缩略图`} className="h-full w-full object-cover" />
+  }
+  return <span aria-hidden="true">{fallbackEmoji}</span>
 }
 
 function resolveEnemyDetail(token: Token): {
@@ -67,6 +88,9 @@ export default function EnemyDetailPanel({
   canManageConditions = false,
   onConditionsChange,
   conditionSourceOptions = [],
+  canUseMonsterActions = false,
+  monsterActionUsed = false,
+  onSelectMonsterAction,
 }: {
   token: Token
   onClose: () => void
@@ -81,6 +105,9 @@ export default function EnemyDetailPanel({
   canManageConditions?: boolean
   onConditionsChange?: (conditions: string[], activeEffects: Dnd5eActiveEffectInstance[]) => void
   conditionSourceOptions?: readonly { id: string; label: string }[]
+  canUseMonsterActions?: boolean
+  monsterActionUsed?: boolean
+  onSelectMonsterAction?: (actionIndex: number, actionName: string) => void
 }) {
   const portraitInputRef = useRef<HTMLInputElement>(null)
   const [portraitBusy, setPortraitBusy] = useState(false)
@@ -94,6 +121,7 @@ export default function EnemyDetailPanel({
 
   const name = token.label || template?.name || '敌人'
   const emoji = token.emoji || template?.emoji || '👹'
+  const tokenThumbnail = token.tokenPortrait || template?.tokenPortrait
   const color = token.color || template?.color || '#f87171'
   const templateTags = template?.tags ?? []
   const creatureTypes = token.creatureTypes?.length
@@ -141,13 +169,24 @@ export default function EnemyDetailPanel({
   }
 
   return (
-    <div className="glass absolute bottom-3 right-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
+    <div data-testid="enemy-detail-panel" className="glass absolute bottom-3 right-3 z-40 flex max-h-[min(720px,calc(100%-6rem))] w-[min(340px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl">
       <div className="flex items-start gap-3 border-b border-white/10 px-4 py-3">
         <span
-          className={`flex shrink-0 items-center justify-center overflow-hidden border-2 bg-void-900 text-2xl ${token.portraitImageId ? 'h-16 w-12 rounded-lg' : 'h-12 w-12 rounded-full'}`}
+          className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-void-900 text-2xl"
           style={{ borderColor: color }}
         >
-          {token.portraitImageId ? <SharedMonsterPortrait imageId={token.portraitImageId} name={name} /> : emoji}
+          {token.portraitImageId ? (
+            <SharedMonsterPortrait
+              imageId={token.portraitImageId}
+              name={name}
+              fallbackSrc={tokenThumbnail}
+              fallbackEmoji={emoji}
+            />
+          ) : tokenThumbnail ? (
+            <img src={tokenThumbnail} alt={`${name}的地图缩略图`} className="h-full w-full object-cover" />
+          ) : (
+            emoji
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -358,6 +397,28 @@ export default function EnemyDetailPanel({
                   </select>
                 </label>
                 <p className="mt-1 text-[10px] leading-relaxed text-slate-500">{DND5E_MONSTER_TARGET_PRIORITY_OPTIONS.find((entry) => entry.value === targetPriority)?.description}</p>
+                <label className="mt-3 block text-xs text-slate-500">
+                  自动行为风格
+                  <select
+                    value={token.dnd5eBehaviorPreference?.style ?? 'auto'}
+                    onChange={(event) => updateToken!(mapId!, token.id, {
+                      dnd5eBehaviorPreference: event.target.value === 'auto'
+                        ? undefined
+                        : { schemaVersion: 1, style: event.target.value as Dnd5eMonsterBehaviorStyle },
+                    })}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-void-950/70 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-arcane-500"
+                  >
+                    <option value="auto">自动判断（按武器与能力）</option>
+                    {DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  {token.dnd5eBehaviorPreference
+                    ? DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS.find((entry) => entry.value === token.dnd5eBehaviorPreference?.style)?.description
+                    : '近战怪物默认强攻、纯远程怪物默认守势，同时拥有近战与远程武器的怪物默认游击。'}
+                </p>
                 {targetPriority === 'highest-threat' && hostileTargets.length > 0 && (
                   <div className="mt-2 space-y-1.5 rounded-lg border border-white/10 bg-black/15 p-2">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">仇恨值调整</p>
@@ -568,10 +629,20 @@ export default function EnemyDetailPanel({
                   动作
                 </h3>
                 <ul className="space-y-2">
-                  {stats.actions.map((a) => (
-                    <li key={a.name} className="rounded-xl bg-rose-500/10 px-3 py-2">
+                  {stats.actions.map((a, actionIndex) => (
+                    <li key={`${a.name}:${actionIndex}`} className="rounded-xl bg-rose-500/10 px-3 py-2">
                       <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-rose-200">{a.name}</p>{a.automation && <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${a.automation === 'headless' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>{a.automation === 'headless' ? 'Headless' : 'DM 裁定'}</span>}</div>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{a.description}</p>
+                      {canUseMonsterActions && a.automation === 'headless' && (a.kind === 'melee' || a.kind === 'ranged') ? (
+                        <button
+                          type="button"
+                          disabled={monsterActionUsed}
+                          onClick={() => onSelectMonsterAction?.(actionIndex, a.name)}
+                          className="mt-2 w-full rounded-lg bg-rose-500/20 px-2 py-1.5 text-xs font-semibold text-rose-100 hover:bg-rose-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {monsterActionUsed ? '本回合动作已使用' : `选择目标 · ${a.name}`}
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

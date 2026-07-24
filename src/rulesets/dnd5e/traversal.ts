@@ -9,16 +9,28 @@ export interface Dnd5eTraversalProfile {
   flySpeed?: number
   climbWithoutSpeedCostMultiplier?: number
   runningLongJumpBonusFeet?: number
+  jumpDistanceMultiplier?: number
 }
 
-export function dnd5eLongJumpMaximumFeet(strengthScore: number, runningStart: boolean, runningBonusFeet = 0): number {
+export function dnd5eLongJumpMaximumFeet(
+  strengthScore: number,
+  runningStart: boolean,
+  runningBonusFeet = 0,
+  jumpDistanceMultiplier = 1,
+): number {
   const maximum = Math.max(0, Math.floor(strengthScore))
-  return runningStart ? maximum + Math.max(0, Math.floor(runningBonusFeet)) : Math.floor(maximum / 2)
+  const base = runningStart ? maximum + Math.max(0, Math.floor(runningBonusFeet)) : Math.floor(maximum / 2)
+  return Math.floor(base * Math.max(1, jumpDistanceMultiplier))
 }
 
-export function dnd5eHighJumpMaximumFeet(strengthModifier: number, runningStart: boolean): number {
+export function dnd5eHighJumpMaximumFeet(
+  strengthModifier: number,
+  runningStart: boolean,
+  jumpDistanceMultiplier = 1,
+): number {
   const maximum = Math.max(0, 3 + Math.floor(strengthModifier))
-  return runningStart ? maximum : Math.floor(maximum / 2)
+  const base = runningStart ? maximum : Math.floor(maximum / 2)
+  return Math.floor(base * Math.max(1, jumpDistanceMultiplier))
 }
 
 export function dnd5eTraversalMovementCost(input: {
@@ -41,10 +53,15 @@ export function dnd5eTraversalMovementCost(input: {
       input.profile.strengthScore,
       running,
       running ? input.profile.runningLongJumpBonusFeet : 0,
+      input.profile.jumpDistanceMultiplier,
     )) {
       return { ok: false, reason: 'jump-too-far' }
     }
-    if (elevationGainFeet > dnd5eHighJumpMaximumFeet(input.profile.strengthModifier, running)) {
+    if (elevationGainFeet > dnd5eHighJumpMaximumFeet(
+      input.profile.strengthModifier,
+      running,
+      input.profile.jumpDistanceMultiplier,
+    )) {
       return { ok: false, reason: 'jump-too-high' }
     }
     return { ok: true, movementCostFeet: baseMovementCostFeet + elevationGainFeet }

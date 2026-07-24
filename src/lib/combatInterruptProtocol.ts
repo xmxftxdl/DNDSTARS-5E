@@ -255,6 +255,13 @@ export type RollConfirmationInterruptPayload = Record<string, unknown> & {
   targetName: string
   originalValue: number
   visibility: 'public' | 'dm-only'
+  reason?: 'enemy-feature' | 'dm-secret-roll'
+  eligibleModifiers?: Array<{
+    characterId: string
+    featureId: string
+    featureLabel: string
+  }>
+  allowDmOverride?: boolean
   transaction: CombatTransaction
 }
 
@@ -262,6 +269,7 @@ export type RollConfirmationInterruptResponse = Record<string, unknown> & {
   decision: 'continue' | 'cancelled'
   finalValue?: number
   acceptedContributionId?: string
+  dmOverrideApplied?: boolean
   transaction?: CombatTransaction
 }
 

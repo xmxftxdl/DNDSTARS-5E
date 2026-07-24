@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
+import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_LIGHT_CROSSBOW, DND5E_LONGBOW, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter } from './equipment'
 import {
   dnd5eEquipmentClassDamageDefinitions,
   prepareDnd5eEquipmentAttack,
@@ -53,6 +53,58 @@ describe('D&D 5e equipment attack authority', () => {
     const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: prepared.prepared, d20: 15, damageRolls: [5] })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(12)
+  })
+
+  it('separates weapon proficiency from armor proficiency for a wizard attack', () => {
+    const input = fixture()
+    input.actor.charClass = '法师'
+    input.actor.dnd5eClassLevels = { wizard: 5 }
+    const prepared = prepareDnd5eEquipmentAttack({ ...input, characters: [input.actor], attacksUsed: 0 })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.profile).toMatchObject({ proficient: false, attackModifier: 3 })
+    expect(prepared.prepared.attackMode).toBe('disadvantage')
+    expect(previewDnd5eEquipmentAttack(prepared.prepared, 18, 2)).toMatchObject({
+      roll: { d20: 2 },
+      hit: false,
+    })
+  })
+
+  it('limits a Loading weapon to one shot per action while allowing a second action', () => {
+    const input = fixture(125)
+    input.actor.equipment = { mainWeapon: DND5E_LIGHT_CROSSBOW }
+    input.actor = applyDnd5eInventoryMutation([input.actor], {
+      type: 'grant',
+      characterId: input.actor.id,
+      templateId: 'srd-5.1:item:crossbow-bolts',
+      quantity: 20,
+    }).characters[0]
+    const first = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+      attackActionsAvailable: 1,
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(first.prepared).toMatchObject({ attacksAllowed: 1, spendsAction: true })
+
+    expect(prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 1,
+      attackActionsAvailable: 1,
+    })).toEqual({ ok: false, reason: 'attack-action-spent' })
+
+    const actionSurgeShot = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 1,
+      attackActionsAvailable: 2,
+    })
+    expect(actionSurgeShot.ok).toBe(true)
+    if (!actionSurgeShot.ok) return
+    expect(actionSurgeShot.prepared).toMatchObject({ attacksAllowed: 2, spendsAction: true })
   })
 
   it('grants half cover from an intervening creature and accepts a DM-only one-attack override', () => {

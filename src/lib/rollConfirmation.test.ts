@@ -49,4 +49,29 @@ describe('d20 roll confirmation', () => {
     const interrupt = createD20RollConfirmationInterrupt({ mapId: 'm', rollId: 'r', label: '检定', originalValue: 11 })
     expect(settleD20RollConfirmation(interrupt, 'missing').finalValue).toBe(11)
   })
+
+  it('allows a DM-only roll to be corrected while preserving the original ledger value', () => {
+    const interrupt = createD20RollConfirmationInterrupt({
+      mapId: 'map-1',
+      rollId: 'secret-roll',
+      label: '暗骰察觉',
+      originalValue: 6,
+      visibility: 'dm-only',
+      reason: 'dm-secret-roll',
+      allowDmOverride: true,
+      now: 10,
+    })
+    const response = settleD20RollConfirmation(interrupt, undefined, 20, 15)
+    expect(response).toMatchObject({
+      decision: 'continue',
+      finalValue: 15,
+      dmOverrideApplied: true,
+    })
+    expect(response.transaction?.rollLedger.entries[0].rerolls[0]).toMatchObject({
+      method: 'replace',
+      previousValue: 6,
+      replacementValue: 15,
+      sourceId: 'dm',
+    })
+  })
 })

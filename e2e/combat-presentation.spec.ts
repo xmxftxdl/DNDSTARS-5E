@@ -41,7 +41,6 @@ test('DM publishes a Fire Bolt presentation through SSE and the player renders i
     expect(dm.getByTestId('map-canvas')).toBeVisible(),
     expect(player.getByTestId('map-canvas')).toBeVisible(),
   ])
-
   await dm.evaluate(async ({ activeMapId, sourceTokenId, targetTokenId }) => {
     const presentation = await import('/src/lib/combatPresentation.ts')
     await presentation.publishFireBoltPresentation({
@@ -50,7 +49,6 @@ test('DM publishes a Fire Bolt presentation through SSE and the player renders i
       transactionId: `e2e-transaction-${Date.now()}`,
       sourceTokenId,
       targetTokenId,
-      outcome: 'hit',
     })
   }, {
     activeMapId: mapId,
@@ -59,6 +57,59 @@ test('DM publishes a Fire Bolt presentation through SSE and the player renders i
   })
 
   await expect(player.getByTestId('map-canvas')).toHaveAttribute('data-combat-projectile-count', '1')
+  await expect.poll(async () =>
+    Number(await player.getByTestId('map-canvas').getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
+test('DM publishes Fireball flight and area explosion through SSE', async ({ browser, request }) => {
+  const now = Date.now()
+  const mapId = `fireball-presentation-${now}`
+  const sourceToken = {
+    id: 'fireball-wizard', label: '法师', x: 105, y: 245,
+    color: '#8b5cf6', emoji: '🧙', size: 1, type: 'player',
+  }
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId, name: '火球术表现 E2E', width: 700, height: 560,
+      gridSize: 70, gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [sourceToken],
+    }],
+  })
+
+  const context = await browser.newContext()
+  const dm = await context.newPage()
+  const player = await context.newPage()
+  await Promise.all([
+    dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
+    player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
+  ])
+  await Promise.all([
+    expect(dm.getByTestId('map-canvas')).toBeVisible(),
+    expect(player.getByTestId('map-canvas')).toBeVisible(),
+  ])
+
+  await dm.evaluate(async ({ activeMapId, sourceTokenId }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.publishFireballPresentation({
+      id: `e2e-fireball-${Date.now()}`,
+      mapId: activeMapId,
+      transactionId: `e2e-fireball-transaction-${Date.now()}`,
+      sourceTokenId,
+      targetCell: { col: 6, row: 3 },
+      radiusFeet: 20,
+    })
+  }, {
+    activeMapId: mapId,
+    sourceTokenId: sourceToken.id,
+  })
+
+  await expect(player.getByTestId('map-canvas')).toHaveAttribute('data-combat-projectile-count', '1')
+  await expect(player.getByTestId('map-canvas')).toHaveAttribute('data-combat-projectile-kinds', 'fireball')
   await expect.poll(async () =>
     Number(await player.getByTestId('map-canvas').getAttribute('data-combat-projectile-count')),
   ).toBe(0)

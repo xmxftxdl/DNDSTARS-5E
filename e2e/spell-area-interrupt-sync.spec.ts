@@ -91,13 +91,6 @@ async function submitPlayerAction(page: Page, action: Record<string, unknown>) {
   }, action)
 }
 
-async function confirmNextD20(dm: Page, expectedLabel?: string | RegExp) {
-  const dialog = dm.getByRole('dialog', { name: 'd20 投掷确认' })
-  await expect(dialog).toBeVisible({ timeout: 20_000 })
-  if (expectedLabel) await expect(dialog).toContainText(expectedLabel)
-  await dialog.getByRole('button', { name: /并继续结算$/ }).click()
-}
-
 function spellcaster(
   id: string,
   spellIds: string[],
@@ -311,7 +304,7 @@ test('未机械化法术跨端进入 DM Interrupt，批准前不消费，批准�
     const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
     return ack.actionId === action.id ? ack.status : ''
   }, { timeout: 30_000 }).toBe('accepted')
-  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toHaveCount(0)
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
   await expect.poll(async () => {
     const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
     return state.characters[0].classResources?.['dnd5e-spell-slot-2']?.current
@@ -369,13 +362,12 @@ test('普通法术攻击只结算一次：并发重复请求不会重复扣法�
   }
 
   await Promise.all([submitPlayerAction(player, action), submitPlayerAction(player, action)])
-  await confirmNextD20(dm)
 
   await expect.poll(async () => {
     const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
     return ack.actionId === action.id ? ack.status : ''
   }, { timeout: 30_000 }).toBe('accepted')
-  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toHaveCount(0)
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
   await expect.poll(async () => {
     const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
     return state.characters[0].classResources?.['dnd5e-spell-slot-2']?.current
@@ -389,7 +381,7 @@ test('普通法术攻击只结算一次：并发重复请求不会重复扣法�
   await context.close()
 })
 
-test('普通豁免法术由 DM 确认 d20 后在 Headless 中结算并同步伤害', async ({ browser, request }) => {
+test('无可用改骰特性时，普通豁免法术直接在 Headless 中结算并同步伤害', async ({ browser, request }) => {
   test.setTimeout(90_000)
   const mapId = `spell-save-${Date.now()}`
   const seeded = await seedCombat(request, mapId, [], 'wizard', ['acid-splash'])
@@ -424,7 +416,6 @@ test('普通豁免法术由 DM 确认 d20 后在 Headless 中结算并同步伤�
     updatedAt: now,
   }
   await submitPlayerAction(player, action)
-  await confirmNextD20(dm)
 
   await expect.poll(async () => {
     const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
@@ -488,7 +479,7 @@ test('法术反制通过共享 Interrupt 消耗双方资源并阻止原法术效
     const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
     return ack.actionId === action.id ? ack.status : ''
   }, { timeout: 30_000 }).toBe('accepted')
-  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toHaveCount(0)
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
   await expect.poll(async () => {
     const state = await getState<{ characters: ResourceCharacter[] }>(request, 'characters')
     return state.characters.map((character) => ({
@@ -561,8 +552,6 @@ test('低环法术反制检定失败后继续原法术，并仍消耗双方已�
   await submitPlayerAction(player, action)
   await expect(dm.getByTestId('shared-counterspell-use')).toBeVisible({ timeout: 20_000 })
   await dm.getByTestId('shared-counterspell-use').click()
-  await confirmNextD20(dm, '法术反制·施法属性检定')
-  await confirmNextD20(dm, /强酸箭·法术攻击/)
 
   await expect.poll(async () => {
     const ack = await getState<{ actionId?: string; status?: string }>(request, 'player-action-ack')
@@ -584,10 +573,7 @@ test('低环法术反制检定失败后继续原法术，并仍消耗双方已�
   const interrupts = await getState<{
     interrupts: Array<{ kind: string; status: string; payload?: { label?: string } }>
   }>(request, 'combat-interrupts')
-  expect(interrupts.interrupts.filter((interrupt) => interrupt.kind === 'roll-confirmation')).toEqual([
-    expect.objectContaining({ status: 'done', payload: expect.objectContaining({ label: '法术反制·施法属性检定' }) }),
-    expect.objectContaining({ status: 'done', payload: expect.objectContaining({ label: expect.stringMatching(/强酸箭·法术攻击/) }) }),
-  ])
+  expect(interrupts.interrupts.filter((interrupt) => interrupt.kind === 'roll-confirmation')).toEqual([])
   await context.close()
 })
 
@@ -612,7 +598,9 @@ test('DM 控制角色施放护盾术后重新判定命中，消耗反应与最�
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
   await expect(dm.getByTestId(`initiative-token-${seeded.actorToken.id}`)).toBeVisible({ timeout: 20_000 })
-  await dm.evaluate(() => { Math.random = () => 0.45 })
+  // d20=9, spell attack total=16. The target's derived AC is 12, so Shield
+  // changes the triggering hit into a miss at AC 17.
+  await dm.evaluate(() => { Math.random = () => 0.4 })
 
   const now = Date.now()
   const action = {
@@ -635,7 +623,6 @@ test('DM 控制角色施放护盾术后重新判定命中，消耗反应与最�
     updatedAt: now,
   }
   await submitPlayerAction(player, action)
-  await confirmNextD20(dm, /强酸箭·法术攻击/)
   await expect(dm.getByTestId('shared-shield-spell-use')).toBeVisible({ timeout: 20_000 })
   await expect(player.getByTestId('shared-shield-spell-use')).toHaveCount(0)
   await dm.getByTestId('shared-shield-spell-use').click()

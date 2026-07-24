@@ -47,6 +47,7 @@ function makeAction(patch: Partial<PlayerActionAuthorityAction> = {}): PlayerAct
     type: 'move-token',
     actorTokenId: 'hero-token',
     characterId: 'hero',
+    roomMemberId: 'member-a',
     round: 1,
     initiativeIndex: 0,
     ...patch,
@@ -57,6 +58,7 @@ function makeCharacter(patch: Partial<Character> = {}): Character {
   return {
     id: 'hero',
     currentHp: 10,
+    roomMemberId: 'member-a',
     ...patch,
   } as Character
 }
@@ -136,6 +138,35 @@ describe('player action authority router', () => {
         makeContext({ characters: [makeCharacter({ roomMemberId: 'member-a' })] }),
       ),
     ).toEqual({ status: 'rejected', reason: 'character-owner-mismatch' })
+  })
+
+  it('fails closed when either side is missing room ownership metadata', () => {
+    expect(
+      preflightPlayerActionAuthority(
+        makeAction({ roomMemberId: undefined }),
+        makeContext(),
+      ),
+    ).toEqual({ status: 'rejected', reason: 'character-owner-mismatch' })
+
+    expect(
+      preflightPlayerActionAuthority(
+        makeAction(),
+        makeContext({ characters: [makeCharacter({ roomMemberId: undefined })] }),
+      ),
+    ).toEqual({ status: 'rejected', reason: 'character-owner-mismatch' })
+  })
+
+  it('allows a fully unowned action only in explicit local table mode', () => {
+    const action = makeAction({ roomMemberId: undefined })
+    const context = makeContext({
+      characters: [makeCharacter({ roomMemberId: undefined })],
+      allowUnownedLegacySession: true,
+    })
+    expect(preflightPlayerActionAuthority(action, context).status).toBe('accepted')
+    expect(preflightPlayerActionAuthority(
+      makeAction({ roomMemberId: 'forged-member' }),
+      context,
+    )).toEqual({ status: 'rejected', reason: 'character-owner-mismatch' })
   })
 
   it('ignores already processed or seen actions', () => {

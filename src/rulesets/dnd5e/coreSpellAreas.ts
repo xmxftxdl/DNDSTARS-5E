@@ -29,10 +29,16 @@ export interface Dnd5eCoreSpellAreaDamageDeclaration {
 
 export interface Dnd5eCoreSpellAreaTriggerDeclaration extends Omit<
   Dnd5ePersistentAreaTriggerDeclaration,
-  'savingThrow' | 'damage'
+  'savingThrow' | 'damage' | 'condition'
 > {
   savingThrow?: Omit<NonNullable<Dnd5ePersistentAreaTriggerDeclaration['savingThrow']>, 'dc'>
   damage?: Dnd5eCoreSpellAreaDamageDeclaration
+  condition?: Omit<NonNullable<Dnd5ePersistentAreaTriggerDeclaration['condition']>, 'escapeCheck'> & {
+    escapeCheck?: Omit<
+      NonNullable<NonNullable<Dnd5ePersistentAreaTriggerDeclaration['condition']>['escapeCheck']>,
+      'dc'
+    >
+  }
 }
 
 export interface Dnd5eCoreSpellAreaDeclaration {
@@ -131,6 +137,79 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
     ],
   },
   {
+    spellId: 'entangle',
+    label: '纠缠术',
+    minimumSlotLevel: 1,
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#4d7c0f',
+    visual: { preset: 'entangle', intensity: 'normal' },
+    triggers: [{
+      id: 'entangle-create',
+      label: '纠缠术·植物缠绕',
+      timing: 'on-create',
+      savingThrow: { ability: 'str', onSuccess: 'none' },
+      condition: {
+        condition: 'restrained',
+        duration: { expiresAt: 'permanent' },
+        escapeCheck: { ability: 'str', economy: 'action' },
+      },
+      dmAdjustable: true,
+    }],
+  },
+  {
+    spellId: 'black-tentacles',
+    label: '黑触手',
+    minimumSlotLevel: 4,
+    template: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    movementCostMultiplier: 2,
+    color: '#312e81',
+    visual: { preset: 'black-tentacles', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'black-tentacles-enter',
+        frequencyGroupId: 'black-tentacles-grasp',
+        label: '黑触手·首次进入',
+        timing: 'on-enter',
+        oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        damage: { count: 3, sides: 6, type: 'bludgeoning' },
+        condition: {
+          condition: 'restrained',
+          duration: { expiresAt: 'permanent' },
+          escapeCheck: { ability: 'str', alternativeAbility: 'dex', economy: 'action' },
+        },
+        dmAdjustable: true,
+      },
+      {
+        id: 'black-tentacles-turn-start',
+        frequencyGroupId: 'black-tentacles-grasp',
+        label: '黑触手·回合开始',
+        timing: 'turn-start',
+        oncePerTurn: true,
+        savingThrow: { ability: 'dex', onSuccess: 'none' },
+        skipSaveWhenSourceConditionActive: 'restrained',
+        damage: { count: 3, sides: 6, type: 'bludgeoning' },
+        condition: {
+          condition: 'restrained',
+          duration: { expiresAt: 'permanent' },
+          escapeCheck: { ability: 'str', alternativeAbility: 'dex', economy: 'action' },
+        },
+        dmAdjustable: true,
+      },
+    ],
+  },
+  {
     spellId: 'flaming-sphere',
     label: '炽焰法球',
     minimumSlotLevel: 2,
@@ -160,6 +239,21 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
         dmAdjustable: true,
       },
     ],
+  },
+  {
+    spellId: 'spiritual-weapon',
+    label: '灵体武器',
+    minimumSlotLevel: 2,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
+    durationRounds: 10,
+    concentration: false,
+    anchorMode: 'effect-token',
+    movement: { economy: 'bonus-action', maximumFeet: 20 },
+    relation: 'enemy',
+    includeSelf: false,
+    color: '#c4b5fd',
+    visual: { preset: 'spiritual-weapon', intensity: 'normal' },
+    triggers: [],
   },
   {
     spellId: 'spike-growth',
@@ -250,6 +344,62 @@ export const DND5E_CORE_SPELL_AREA_DECLARATIONS: readonly Dnd5eCoreSpellAreaDecl
       },
     ],
   },
+  {
+    spellId: 'call-lightning',
+    label: '召雷术·雷云',
+    minimumSlotLevel: 3,
+    template: { shape: 'circle', origin: 'point', radiusFeet: 60, placeRangeFeet: 0 },
+    durationRounds: 100,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    color: '#60a5fa',
+    visual: { preset: 'call-lightning', intensity: 'strong' },
+    triggers: [],
+  },
+  {
+    spellId: 'wall-of-fire',
+    label: '火墙术',
+    minimumSlotLevel: 4,
+    template: {
+      shape: 'rect', origin: 'point', widthFeet: 60, heightFeet: 5,
+      placeRangeFeet: 120, rotatable: true,
+    },
+    durationRounds: 10,
+    concentration: true,
+    anchorMode: 'fixed',
+    relation: 'any',
+    includeSelf: true,
+    color: '#ef4444',
+    visual: { preset: 'wall-of-fire', intensity: 'strong' },
+    triggers: [
+      {
+        id: 'wall-of-fire-create',
+        label: '火墙术·火墙出现',
+        timing: 'on-create',
+        savingThrow: { ability: 'dex', onSuccess: 'half' },
+        damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'fire' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'wall-of-fire-enter',
+        label: '火墙术·进入火墙',
+        timing: 'on-enter',
+        oncePerTurn: true,
+        damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'fire' },
+        dmAdjustable: true,
+      },
+      {
+        id: 'wall-of-fire-turn-end',
+        label: '火墙术·伤害侧回合结束',
+        timing: 'turn-end',
+        oncePerTurn: true,
+        damage: { count: 5, sides: 8, perHigherSlot: 1, type: 'fire' },
+        dmAdjustable: true,
+      },
+    ],
+  },
 ]
 
 export function getDnd5eCoreSpellAreaDeclaration(
@@ -275,6 +425,7 @@ function resolvedTrigger(
     savingThrow: declaration.savingThrow
       ? { ...declaration.savingThrow, dc: input.sourceSaveDc }
       : undefined,
+    skipSaveWhenSourceConditionActive: declaration.skipSaveWhenSourceConditionActive,
     damage: declaration.damage
       ? {
           count: declaration.damage.count + higherLevels * (declaration.damage.perHigherSlot ?? 0),
@@ -283,7 +434,14 @@ function resolvedTrigger(
           type: damageType ?? declaration.damage.type,
         }
       : undefined,
-    condition: declaration.condition,
+    condition: declaration.condition
+      ? {
+          ...declaration.condition,
+          escapeCheck: declaration.condition.escapeCheck
+            ? { ...declaration.condition.escapeCheck, dc: input.sourceSaveDc }
+            : undefined,
+        }
+      : undefined,
     dmAdjustable: declaration.dmAdjustable === true,
   }
 }
@@ -301,6 +459,7 @@ export function createDnd5eCoreSpellArea(input: {
   anchorTokenId?: string
   durationRounds?: number
   sourceAlignment?: string
+  triggerCellsById?: Readonly<Record<string, readonly GridCell[]>>
 }): Dnd5ePluginArea {
   const declaration = input.declaration
   const sourceIsEvil = /邪恶|evil/i.test(input.sourceAlignment ?? '')
@@ -338,12 +497,54 @@ export function createDnd5eCoreSpellArea(input: {
       ? { ...declaration.lighting, spellLevel: input.slotLevel }
       : undefined,
     visual: { ...declaration.visual },
-    triggers: declaration.triggers.map((trigger) => resolvedTrigger(trigger, {
-      slotLevel: input.slotLevel,
-      minimumSlotLevel: declaration.minimumSlotLevel,
-      sourceSaveDc: input.sourceSaveDc,
-    }, alignmentDamageType)),
+    triggers: declaration.triggers.map((trigger) => {
+      const resolved = resolvedTrigger(trigger, {
+        slotLevel: input.slotLevel,
+        minimumSlotLevel: declaration.minimumSlotLevel,
+        sourceSaveDc: input.sourceSaveDc,
+      }, alignmentDamageType)
+      const cells = input.triggerCellsById?.[trigger.id]
+      return cells?.length ? { ...resolved, cells: cells.map((cell) => ({ ...cell })) } : resolved
+    }),
   }
+}
+
+/**
+ * 火墙术以 5 尺网格近似 1 尺厚墙体。orientation 决定墙体长轴，
+ * 伤害带位于该方向的顺时针垂直侧：0 东、1 南、2 西、3 北。
+ */
+export function dnd5eWallOfFireDamagingSideCells(input: {
+  wallCells: readonly GridCell[]
+  orientation: 0 | 1 | 2 | 3
+  map: Pick<BattleMap, 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY'>
+}): GridCell[] {
+  const direction = [
+    { col: 1, row: 0 },
+    { col: 0, row: 1 },
+    { col: -1, row: 0 },
+    { col: 0, row: -1 },
+  ][input.orientation]
+  const columns = Math.max(1, Math.floor(
+    (input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize),
+  ))
+  const rows = Math.max(1, Math.floor(
+    (input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize),
+  ))
+  const unique = new Map<string, GridCell>()
+  for (const cell of input.wallCells) {
+    for (let distance = 0; distance <= 2; distance += 1) {
+      const candidate = {
+        col: cell.col + direction.col * distance,
+        row: cell.row + direction.row * distance,
+      }
+      if (
+        candidate.col < 0 || candidate.row < 0 ||
+        candidate.col >= columns || candidate.row >= rows
+      ) continue
+      unique.set(cellKey(candidate), candidate)
+    }
+  }
+  return [...unique.values()]
 }
 
 export interface Dnd5eCoreSpellLightingConflictResult {
@@ -431,6 +632,16 @@ export function moveDnd5eCoreSpellArea(input: {
   const cells = Math.max(Math.abs(input.targetCell.col - previous.col), Math.abs(input.targetCell.row - previous.row))
   const distanceFeet = cells * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
   if (distanceFeet > area.movement.maximumFeet) return { ok: false, reason: 'target-out-of-range' }
+  const columns = Math.max(1, Math.floor((input.map.width - input.map.gridOffsetX) / Math.max(1, input.map.gridSize)))
+  const rows = Math.max(1, Math.floor((input.map.height - input.map.gridOffsetY) / Math.max(1, input.map.gridSize)))
+  if (
+    !Number.isInteger(input.targetCell.col) ||
+    !Number.isInteger(input.targetCell.row) ||
+    input.targetCell.col < 0 ||
+    input.targetCell.row < 0 ||
+    input.targetCell.col >= columns ||
+    input.targetCell.row >= rows
+  ) return { ok: false, reason: 'invalid-target' }
   let resolvedTargetCell = { ...input.targetCell }
   let impactTargetId: string | undefined
   const anchorToken = area.anchorMode === 'effect-token' && area.anchorTokenId
@@ -467,13 +678,30 @@ export function moveDnd5eCoreSpellArea(input: {
         break
       }
     }
+  } else if (area.coreSpellId === 'spiritual-weapon' && anchorToken) {
+    const path = dnd5eMovementPathCells(previous, input.targetCell)
+    let lastCell = previous
+    for (const nextCell of path.slice(1)) {
+      const from = tokenCenterForAnchorCell(lastCell, anchorToken, input.map)
+      const to = tokenCenterForAnchorCell(nextCell, anchorToken, input.map)
+      if (mapGeometryMovementBlocked({
+        geometry: input.geometry,
+        map: input.map,
+        token: { ...anchorToken, ...from },
+        to,
+      }).blocked) {
+        return { ok: false, reason: 'movement-blocked' }
+      }
+      lastCell = nextCell
+      resolvedTargetCell = nextCell
+    }
   }
   const nextArea = {
     ...area,
     cells: shiftedCells(area, resolvedTargetCell, input.map),
     anchorCell: { ...resolvedTargetCell },
   }
-  if (nextArea.cells.length !== area.cells.length) return { ok: false, reason: 'invalid-target' }
+  if (nextArea.cells.length < 1) return { ok: false, reason: 'invalid-target' }
   const anchorPosition = anchorToken
     ? tokenCenterForAnchorCell(resolvedTargetCell, anchorToken, input.map)
     : undefined

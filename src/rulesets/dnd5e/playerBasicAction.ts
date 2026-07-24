@@ -49,6 +49,8 @@ export interface PreparedDnd5eBasicAction {
   actorRollMode: D20RollMode
   targetRollMode: D20RollMode
   actorContestSkill?: 'athletics' | 'acrobatics'
+  actorCheckAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+  escapeEffectId?: string
   targetDefense?: 'athletics' | 'acrobatics'
   pushTo?: { x: number; y: number }
 }
@@ -176,6 +178,19 @@ export function prepareDnd5ePlayerBasicAction(input: {
     effect.standardCondition === 'grappled' && effect.source.actorId === targetCombatant.id))) {
     return { ok: false, reason: 'invalid-target' }
   }
+  const escapeEffect = payload.kind === 'escape-effect'
+    ? combatant.classState.activeEffects?.find((effect) => effect.escapeCheck?.economy === 'action')
+    : undefined
+  if (payload.kind === 'escape-effect' && !escapeEffect) {
+    return { ok: false, reason: 'invalid-target' }
+  }
+  const escapeAbility = escapeEffect?.escapeCheck
+    ? escapeEffect.escapeCheck.alternativeAbility &&
+      Math.floor((combatant.abilities[escapeEffect.escapeCheck.alternativeAbility] - 10) / 2) >
+        Math.floor((combatant.abilities[escapeEffect.escapeCheck.ability] - 10) / 2)
+      ? escapeEffect.escapeCheck.alternativeAbility
+      : escapeEffect.escapeCheck.ability
+    : undefined
   const actorContestSkill = escapingGrapple
     ? dnd5eBestGrappleDefense(combatant).skill
     : replacesAttack ? 'athletics' : undefined
@@ -188,7 +203,10 @@ export function prepareDnd5ePlayerBasicAction(input: {
   if (payload.kind === 'shove' && payload.outcome === 'push' && !pushTo) return { ok: false, reason: 'invalid-target' }
   const actorRollMode = resolveDnd5eRollMode({
     advantage: [{
-      active: actorContestSkill === 'athletics' && combatant.classState.raging === true,
+      active: (
+        actorContestSkill === 'athletics' ||
+        escapeAbility === 'str'
+      ) && combatant.classState.raging === true,
       reason: 'rage-strength-check',
     }],
     disadvantage: [{
@@ -231,6 +249,8 @@ export function prepareDnd5ePlayerBasicAction(input: {
       actorRollMode,
       targetRollMode,
       actorContestSkill,
+      actorCheckAbility: escapeAbility,
+      escapeEffectId: escapeEffect?.id,
       targetDefense,
       pushTo,
     },
@@ -273,6 +293,13 @@ export function resolvePreparedDnd5ePlayerBasicAction(input: {
     case 'escape-grapple': action = {
       type: 'escape-grapple', actorId: prepared.actorTokenId, grapplerId: payload.targetTokenId,
       actorD20, actorD20Second, targetD20, targetD20Second,
+    }; break
+    case 'escape-effect': action = {
+      type: 'escape-active-effect',
+      actorId: prepared.actorTokenId,
+      effectId: prepared.escapeEffectId ?? '',
+      d20: actorD20,
+      d20Second: actorD20Second,
     }; break
     case 'wake': action = {
       type: 'wake-sleeping-creature', actorId: prepared.actorTokenId, targetId: payload.targetTokenId,

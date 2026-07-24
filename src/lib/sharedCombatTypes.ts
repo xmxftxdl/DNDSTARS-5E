@@ -179,6 +179,12 @@ export interface Dnd5eSpellCastPayload {
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   /** 防护能量伤害等法术的受控伤害类型选择；DM Host 会按法术白名单复核。 */
   effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'
+  /** 变巨/缩小术的受控形态选择；DM Host 会按法术白名单复核。 */
+  enlargeReduceChoice?: 'enlarge' | 'reduce'
+  /** 使用一个仍在维持的核心法术效果；不会再次施法或消费新的法术位。 */
+  sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  /** 独立法术实体或固定持续区域授予后续动作时，指向 Host 已创建并同步的地图实体。 */
+  sustainedEffectAreaId?: string
   /** 群体医疗术的逐目标治疗分配；总和不得超过法术的治疗池。 */
   healingAllocations?: Array<{ targetTokenId: string; amount: number }>
   /** 焰击术等法术升环时，由施法者选择额外伤害加入哪一种法术伤害类型。 */
@@ -226,6 +232,7 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
   | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
   | { kind: 'escape-grapple'; targetTokenId: string }
+  | { kind: 'escape-effect' }
   | { kind: 'wake'; targetTokenId: string }
 
 export interface SharedPlayerActionState {

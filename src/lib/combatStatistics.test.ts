@@ -8,7 +8,8 @@ import type {
 import {
   applyDnd5eCombatStatisticsObservation,
   applyCombatExperienceSettlement,
-  combatantContributionScore,
+  combatantDefensiveContributionIndex,
+  combatantOffensiveContributionIndex,
   normalizeSharedCombatStatistics,
   type CombatStatisticsSide,
 } from './combatStatistics'
@@ -61,17 +62,30 @@ describe('Headless combat statistics', () => {
     }))
     session = applyDnd5eCombatStatisticsObservation(session, observe({
       receiptId: 'r2', actorId: 'cleric',
-      events: [{ type: 'healing-applied', targetId: 'fighter', amount: 8, hpBefore: 0, hpAfter: 8 }],
+      events: [
+        { type: 'turn-started', actorId: 'cleric', round: 2 },
+        { type: 'healing-applied', targetId: 'fighter', amount: 8, hpBefore: 0, hpAfter: 8 },
+      ],
     }))
 
     expect(session.combatants.fighter).toMatchObject({
-      damageDealt: 45, attacks: 1, hits: 1, criticalHits: 1,
+      damageDealt: 45, turnTrackedDamageDealt: 45,
+      attacks: 1, hits: 1, criticalHits: 1,
       hostileConditionsApplied: 1, knockouts: 1, kills: 1,
     })
     expect(session.combatants.goblin.damageTaken).toBe(45)
-    expect(session.combatants.cleric).toMatchObject({ healingDone: 8, alliesRescued: 1 })
+    expect(session.combatants.cleric).toMatchObject({
+      healingDone: 8,
+      turnTrackedHealingDone: 8,
+      alliesRescued: 1,
+    })
     expect(session.combatants.fighter.healingReceived).toBe(8)
-    expect(combatantContributionScore(session.combatants.fighter)).toBe(60)
+    expect(session.combatants.fighter).toMatchObject({ turnsTaken: 1 })
+    expect(session.combatants.cleric).toMatchObject({ turnsTaken: 1 })
+    expect(session.combatants.fighter.combatD20FaceCounts[19]).toBe(1)
+    const party = [session.combatants.fighter, session.combatants.cleric]
+    expect(combatantOffensiveContributionIndex(session.combatants.fighter, party)).toBe(100)
+    expect(combatantDefensiveContributionIndex(session.combatants.cleric, party)).toBe(100)
   })
 
   it('counts action economy, class resources, slots, saves, concentration, and damage prevention', () => {
@@ -90,10 +104,13 @@ describe('Headless combat statistics', () => {
       ],
     }))
     expect(session.combatants.cleric).toMatchObject({
+      turnsTaken: 1,
       actionsSpent: 1, bonusActionsSpent: 1, reactionsSpent: 1, movementSpentFeet: 15,
       classResourcesSpent: 1, spellSlotsSpent: 1, successfulSaves: 1,
       concentrationChecks: 1, concentrationMaintained: 1, damagePrevented: 13,
     })
+    expect(session.combatants.cleric.combatD20FaceCounts[13]).toBe(1)
+    expect(session.combatants.cleric.combatD20FaceCounts[11]).toBe(1)
   })
 
   it('deduplicates replayed Headless transactions and fails closed on damaged shared data', () => {
@@ -165,9 +182,15 @@ describe('Headless combat statistics', () => {
       updatedAt: 20,
     })
     expect(migrated).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       sessions: [{ experienceSettlement: { totalXp: 50, awardedXp: 50 } }],
     })
+    expect(migrated?.sessions[0].combatants.fighter).toMatchObject({
+      turnsTaken: 0,
+      turnTrackedDamageDealt: 0,
+      turnTrackedHealingDone: 0,
+    })
+    expect(migrated?.sessions[0].combatants.fighter.combatD20FaceCounts).toEqual(Array(20).fill(0))
     expect(normalizeSharedCombatStatistics({
       schemaVersion: 2,
       sessions: [{ ...session, experienceSettlement: { ...settlement, awardedXp: 49 } }],

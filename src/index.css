@@ -525,3 +525,793 @@ body > .dice-box-canvas {
   animation: initiative-ring-pulse 1.2s ease-in-out infinite;
   border-color: rgba(167, 139, 250, 0.9) !important;
 }
+
+@keyframes combat-banner-open {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 50% 0 50%);
+    transform: translateY(-8px) scaleX(.12);
+  }
+  62% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0) scaleX(1.025);
+  }
+  100% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0) scaleX(1);
+  }
+}
+
+@keyframes combat-banner-turn-lifetime {
+  0%, 78% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-10px) scale(.98); }
+}
+
+@keyframes combat-banner-aether {
+  0% { transform: translate3d(-24%, -8%, 0) rotate(-4deg); }
+  50% { transform: translate3d(8%, 7%, 0) rotate(2deg); }
+  100% { transform: translate3d(28%, -6%, 0) rotate(-4deg); }
+}
+
+@keyframes combat-banner-edge-flow {
+  to { background-position: 220% 50%; }
+}
+
+.combat-action-banner {
+  --combat-banner-color: #3b82f6;
+  --combat-banner-deep: #071a38;
+  --combat-banner-accent: #dbeafe;
+  --combat-banner-glow: #60a5fa;
+  position: relative;
+  width: min(980px, calc(100vw - 2rem));
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: minmax(100px, 17%) minmax(280px, 1fr) minmax(100px, 17%);
+  align-items: center;
+  overflow: visible;
+  color: var(--combat-banner-accent);
+  filter: drop-shadow(0 24px 30px rgba(0, 0, 0, .7));
+  animation:
+    combat-banner-open 650ms cubic-bezier(.16, .82, .2, 1) both,
+    combat-banner-turn-lifetime 2.35s 650ms ease-in both;
+  isolation: isolate;
+}
+
+.combat-action-banner--turn {
+  animation-duration: 650ms, 2.35s;
+}
+
+.combat-action-banner::before,
+.combat-action-banner::after {
+  display: none;
+}
+
+.combat-action-banner__center {
+  overflow: hidden;
+}
+
+.combat-action-banner__aether {
+  position: absolute;
+  z-index: 0;
+  inset: -80% -35%;
+  opacity: .54;
+  filter: blur(14px);
+  background:
+    conic-gradient(from 90deg at 50% 50%, transparent, var(--combat-banner-color), transparent 23%, var(--combat-banner-glow), transparent 51%, var(--combat-banner-color), transparent 78%);
+  mix-blend-mode: screen;
+  animation: combat-banner-aether 3.2s linear infinite;
+}
+
+.combat-action-banner__runes {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  color: var(--combat-banner-glow);
+  opacity: .12;
+  font-size: 32px;
+  transform: rotate(-4deg) scale(1.12);
+}
+
+.combat-banner-class-backdrop {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  opacity: .58;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.combat-banner-class-backdrop__main {
+  width: 250px;
+  height: 250px;
+  max-width: 48%;
+  overflow: visible;
+  filter: drop-shadow(0 0 12px var(--streak-glow));
+  animation: combat-banner-class-sigil 18s linear infinite;
+}
+
+.combat-banner-class-backdrop__mini {
+  position: absolute;
+  top: 50%;
+  width: 62px;
+  height: 62px;
+  overflow: visible;
+  opacity: .82;
+  filter: drop-shadow(0 0 8px var(--streak-glow));
+  animation: combat-banner-mini-sigil 10s linear infinite;
+}
+
+.combat-banner-class-backdrop__mini--left { left: 10%; }
+.combat-banner-class-backdrop__mini--right { right: 10%; }
+
+@keyframes combat-banner-class-sigil {
+  from { transform: rotate(0deg) scale(1.02); }
+  50% { transform: rotate(180deg) scale(1.08); }
+  to { transform: rotate(360deg) scale(1.02); }
+}
+
+@keyframes combat-banner-mini-sigil {
+  from { transform: translateY(-50%) rotate(0deg) scale(.96); }
+  50% { transform: translateY(-50%) rotate(180deg) scale(1.08); }
+  to { transform: translateY(-50%) rotate(360deg) scale(.96); }
+}
+
+.combat-action-banner__content {
+  position: relative;
+  z-index: 2;
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 26px;
+}
+
+.combat-action-banner__icon {
+  width: 58px;
+  flex: 0 0 58px;
+  border-radius: 11px;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--combat-banner-glow) 46%, transparent);
+}
+
+.combat-action-banner__copy {
+  display: grid;
+  min-width: 170px;
+  text-align: left;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, .78);
+}
+
+.combat-action-banner__copy strong {
+  color: #fff;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(21px, 2.5vw, 31px);
+  line-height: 1.12;
+  letter-spacing: .14em;
+}
+
+.combat-action-banner__eyebrow,
+.combat-action-banner__subtitle {
+  color: color-mix(in srgb, var(--combat-banner-accent) 82%, transparent);
+  font-size: 11px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+}
+
+.combat-action-banner__subtitle {
+  margin-top: 5px;
+  color: color-mix(in srgb, var(--combat-banner-glow) 78%, white 22%);
+}
+
+@media (max-width: 640px) {
+  .combat-action-banner {
+    width: calc(100vw - 10px);
+    min-height: 86px;
+    grid-template-columns: 56px minmax(190px, 1fr) 56px;
+  }
+  .combat-action-banner__content { min-height: 68px; gap: 10px; padding: 6px 14px; }
+  .combat-action-banner__icon { width: 46px; flex-basis: 46px; }
+  .combat-action-banner__copy strong { font-size: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .combat-action-banner,
+  .combat-action-banner--turn {
+    animation:
+      combat-banner-open 1ms both,
+      combat-banner-turn-lifetime 2.999s 1ms ease-in both;
+  }
+  .combat-action-banner__aether,
+  .combat-action-banner__runes {
+    animation: none;
+  }
+}
+
+@keyframes kill-streak-effect-in {
+  0% { opacity: 0; transform: scale(.34); }
+  5% { opacity: 1; transform: scale(.82); }
+  11% { opacity: 1; transform: scale(1.18); }
+  18%, 76% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.12); }
+}
+
+@keyframes kill-streak-core-detonate {
+  0% { opacity: 0; transform: scale(.08); filter: brightness(3.4); }
+  5% { opacity: 1; transform: scale(.42); }
+  9% { opacity: 1; transform: scale(1.18); filter: brightness(2.8); }
+  12% { opacity: 1; transform: scale(1.58); filter: brightness(4.2) blur(1px); }
+  16% { opacity: .62; transform: scale(2.08); filter: brightness(2.4) blur(5px); }
+  21% { opacity: 0; transform: scale(2.8); filter: brightness(1.2) blur(14px); }
+  100% { opacity: 0; transform: scale(2.8); filter: brightness(1.2) blur(14px); }
+}
+
+@keyframes kill-streak-blast-bloom {
+  0%, 4% { opacity: 0; transform: scale(.05) rotate(-12deg); }
+  8% { opacity: 1; transform: scale(.46) rotate(4deg); }
+  15% { opacity: .95; transform: scale(1.18) rotate(13deg); }
+  28% { opacity: .62; transform: scale(1.42) rotate(20deg); }
+  70% { opacity: .3; transform: scale(1.6) rotate(28deg); }
+  100% { opacity: 0; transform: scale(1.82) rotate(34deg); }
+}
+
+@keyframes kill-streak-flash-pop {
+  0%, 6% { opacity: 0; transform: scale(.05); }
+  9% { opacity: 1; transform: scale(.72); }
+  14% { opacity: .82; transform: scale(1.65); }
+  22%, 100% { opacity: 0; transform: scale(2.2); }
+}
+
+@keyframes kill-streak-ember-glow {
+  0%, 7% { opacity: 0; transform: scale(.1); }
+  10% { opacity: 1; transform: scale(1.2); filter: brightness(3); }
+  18% { opacity: 1; transform: scale(.82); filter: brightness(1.8); }
+  62% { opacity: .9; transform: scale(.54); filter: brightness(1.25); }
+  100% { opacity: 0; transform: scale(.16); filter: brightness(.7); }
+}
+
+@keyframes kill-streak-firework-spark {
+  0%, 8% {
+    opacity: 0;
+    transform: rotate(calc(var(--spark-index) * 15deg)) scaleY(.02);
+  }
+  11% { opacity: 1; }
+  20% {
+    opacity: 1;
+    transform: rotate(calc(var(--spark-index) * 15deg)) scaleY(1);
+  }
+  46% { opacity: .72; }
+  76%, 100% {
+    opacity: 0;
+    transform: rotate(calc(var(--spark-index) * 15deg)) scaleY(1.34);
+  }
+}
+
+@keyframes kill-streak-ring-burst {
+  0%, 7% { opacity: 0; transform: scale(.12); }
+  12% { opacity: .98; }
+  32% { opacity: .48; transform: scale(2.1); }
+  55%, 100% { opacity: 0; transform: scale(3.25); }
+}
+
+@keyframes kill-streak-particle-burst {
+  0%, 7% { opacity: 0; transform: rotate(calc(var(--particle-index) * 18deg)) translateY(0) scale(.15); }
+  12% { opacity: 1; }
+  38% { opacity: .85; }
+  82%, 100% { opacity: 0; transform: rotate(calc(var(--particle-index) * 18deg)) translateY(-230px) scale(.72); }
+}
+
+@keyframes kill-streak-sword-cleave {
+  0% { opacity: 0; transform: translate3d(-30px, -115%, 0) rotate(-16deg) scale(.74); }
+  18% { opacity: 1; }
+  58% { opacity: 1; transform: translate3d(12px, 2%, 0) rotate(5deg) scale(1.06); }
+  72% { opacity: 1; transform: translate3d(0, -2%, 0) rotate(0) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, 10%, 0) rotate(0) scale(.96); }
+}
+
+@keyframes kill-streak-banner-lifetime {
+  0%, 78% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-12px) scale(.985); }
+}
+
+@keyframes kill-streak-gold-sweep {
+  to { background-position: 220% 50%; }
+}
+
+@keyframes kill-streak-title-stamp {
+  0% {
+    opacity: 0;
+    transform: translateY(-34px) scale(2.4) rotate(-2deg);
+    filter: blur(8px) brightness(2.4) drop-shadow(0 0 28px #fff1a8);
+  }
+  9% {
+    opacity: 1;
+    transform: translateY(5px) scale(.82) rotate(.6deg);
+    filter: blur(0) brightness(1.75) drop-shadow(0 8px 3px rgba(0, 0, 0, .9));
+  }
+  13% {
+    transform: translateY(-2px) scale(1.08) rotate(-.35deg);
+  }
+  18% {
+    transform: translateY(1px) scale(.97) rotate(.15deg);
+  }
+  24% {
+    transform: translateY(0) scale(1) rotate(0);
+    filter: brightness(1.15) drop-shadow(0 0 12px rgba(250, 204, 21, .68));
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: brightness(1.08) drop-shadow(0 0 8px rgba(250, 204, 21, .42));
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: brightness(1) drop-shadow(0 0 5px rgba(250, 204, 21, .24));
+  }
+}
+
+@keyframes kill-streak-title-stamp-echo {
+  0%, 8% {
+    opacity: 0;
+    transform: scale(.74);
+  }
+  10% {
+    opacity: .9;
+    transform: scale(.94);
+  }
+  23% {
+    opacity: .42;
+    transform: scale(1.16);
+  }
+  58% {
+    opacity: .12;
+    transform: scale(1.28);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.38);
+  }
+}
+
+.kill-streak-presentation {
+  position: absolute;
+  z-index: 78;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  --streak-class: #dc2626;
+  --streak-deep: #250609;
+  --streak-accent: #fff1c2;
+  --streak-glow: #fb923c;
+}
+
+.kill-streak-effect {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.kill-streak-fireball {
+  position: relative;
+  width: min(32vw, 270px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  animation: kill-streak-effect-in var(--kill-streak-effect-duration, 4s) cubic-bezier(.12, .65, .15, 1) both;
+}
+
+.kill-streak-fireball__blast,
+.kill-streak-fireball__flash {
+  position: absolute;
+  inset: -18%;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.kill-streak-fireball__blast {
+  z-index: 0;
+  background:
+    repeating-conic-gradient(
+      from 8deg,
+      #fff4b0 0 4deg,
+      #f97316 5deg 13deg,
+      transparent 14deg 24deg
+    );
+  -webkit-mask: radial-gradient(circle, transparent 0 18%, #000 25% 58%, transparent 75%);
+  mask: radial-gradient(circle, transparent 0 18%, #000 25% 58%, transparent 75%);
+  filter: blur(2px) drop-shadow(0 0 18px #ef4444);
+  animation: kill-streak-blast-bloom var(--kill-streak-effect-duration, 4s) ease-out both;
+}
+
+.kill-streak-fireball__flash {
+  z-index: 3;
+  inset: 13%;
+  background: radial-gradient(circle, #fff 0 18%, #fff7b2 32%, #facc15 54%, rgba(249, 115, 22, .5) 72%, transparent);
+  box-shadow: 0 0 55px #fff7b2, 0 0 120px #f97316, 0 0 190px #dc2626;
+  animation: kill-streak-flash-pop var(--kill-streak-effect-duration, 4s) ease-out both;
+}
+
+.kill-streak-fireball__ember {
+  position: absolute;
+  z-index: 4;
+  width: 23%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 44% 40%, #fff 0 13%, #fff9c7 22%, #fde047 42%, #f97316 68%, rgba(153, 27, 27, .4) 82%, transparent);
+  box-shadow:
+    0 0 18px #fff,
+    0 0 42px #fde047,
+    0 0 82px #f97316;
+  animation: kill-streak-ember-glow var(--kill-streak-effect-duration, 4s) ease-out both;
+}
+
+.kill-streak-fireball__spark {
+  --spark-index: 0;
+  --spark-length: 90px;
+  position: absolute;
+  z-index: 3;
+  left: calc(50% - 2px);
+  top: 50%;
+  width: 4px;
+  height: var(--spark-length);
+  border-radius: 999px;
+  transform-origin: 50% 0;
+  background:
+    linear-gradient(
+      180deg,
+      #fff 0,
+      #fff8bd 8%,
+      #fde047 22%,
+      #f97316 52%,
+      rgba(220, 38, 38, .42) 75%,
+      transparent 100%
+    );
+  box-shadow: 0 0 8px #fde047, 0 0 15px rgba(249, 115, 22, .75);
+  animation: kill-streak-firework-spark var(--kill-streak-effect-duration, 4s) cubic-bezier(.12, .72, .2, 1) both;
+}
+
+.kill-streak-fireball__core {
+  position: relative;
+  z-index: 2;
+  width: 48%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 43% 42%, #fff 0 10%, #fff5b7 18%, #facc15 35%, #f97316 58%, #991b1b 77%, transparent 79%),
+    conic-gradient(from 12deg, #fb923c, #ef4444, #fde047, #dc2626, #fb923c);
+  box-shadow:
+    0 0 22px #fff7b2,
+    0 0 52px #f97316,
+    0 0 105px #dc2626;
+  animation: kill-streak-core-detonate var(--kill-streak-effect-duration, 4s) ease-out both;
+}
+
+.kill-streak-fireball__core::before,
+.kill-streak-fireball__core::after {
+  content: "";
+  position: absolute;
+  inset: 21%;
+  border-radius: 42% 58% 65% 35% / 62% 38% 62% 38%;
+  border: 12px solid #fb923c;
+  filter: blur(2px) drop-shadow(0 0 12px #ef4444);
+  transform: rotate(35deg);
+}
+
+.kill-streak-fireball__core::after {
+  inset: 14%;
+  border-width: 7px;
+  border-color: #fde047;
+  transform: rotate(-42deg);
+}
+
+.kill-streak-fireball__ring {
+  position: absolute;
+  inset: 18%;
+  border: 4px solid #fef3c7;
+  border-radius: 50%;
+  box-shadow: 0 0 22px #fb923c, inset 0 0 22px #ef4444;
+  animation: kill-streak-ring-burst var(--kill-streak-effect-duration, 4s) ease-out both;
+}
+
+.kill-streak-fireball__ring--two {
+  animation-delay: .12s;
+  border-width: 2px;
+}
+
+.kill-streak-fireball i {
+  --particle-index: 0;
+  position: absolute;
+  left: calc(50% - 5px);
+  top: calc(50% - 14px);
+  width: 10px;
+  height: 28px;
+  border-radius: 999px 999px 30% 30%;
+  background: linear-gradient(#fff8c7, #f97316 48%, #991b1b);
+  box-shadow: 0 0 14px #fb923c;
+  transform-origin: 5px 14px;
+  animation: kill-streak-particle-burst var(--kill-streak-effect-duration, 4s) ease-out both;
+}
+
+.kill-streak-sword {
+  width: min(25vw, 215px);
+  height: min(72vh, 560px);
+  overflow: visible;
+  transform-origin: 50% 100%;
+  animation: kill-streak-sword-cleave 1.05s cubic-bezier(.12, .72, .18, 1) both;
+}
+
+.kill-streak-presentation--martial .kill-streak-effect::after {
+  content: "";
+  position: absolute;
+  width: min(70vw, 780px);
+  height: 8px;
+  top: 57%;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, #fff7c2 42%, #facc15 50%, #fff7c2 58%, transparent);
+  box-shadow: 0 0 18px #facc15, 0 0 42px #f97316;
+  opacity: 0;
+  transform: rotate(-9deg) scaleX(.2);
+  animation: kill-streak-ring-burst .55s .48s ease-out both;
+}
+
+.kill-streak-banner {
+  position: absolute;
+  z-index: 2;
+  top: 3%;
+  left: 50%;
+  right: auto;
+  translate: -50% 0;
+  width: min(980px, calc(100vw - 2rem));
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: minmax(100px, 17%) minmax(280px, 1fr) minmax(100px, 17%);
+  align-items: center;
+  opacity: 0;
+  animation:
+    combat-banner-open 650ms cubic-bezier(.16, .82, .2, 1) both,
+    kill-streak-banner-lifetime var(--kill-streak-banner-duration, 4s) 650ms ease-in both;
+  filter: drop-shadow(0 24px 30px rgba(0, 0, 0, .7));
+}
+
+.kill-streak-banner__center {
+  position: relative;
+  z-index: 3;
+  min-height: 86px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 8px 24px;
+  border: 3px solid #d4a72c;
+  border-left-width: 5px;
+  border-right-width: 5px;
+  border-radius: 11px 11px 20% 20% / 16px 16px 22px 22px;
+  color: #fff8dc;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at 50% -30%, color-mix(in srgb, var(--streak-accent) 30%, transparent), transparent 48%),
+    radial-gradient(circle at 16% 78%, color-mix(in srgb, var(--streak-glow) 20%, transparent), transparent 34%),
+    repeating-linear-gradient(97deg, transparent 0 8%, rgba(255, 255, 255, .035) 9%, transparent 11%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--streak-class) 62%, #12101a) 0%,
+      var(--streak-deep) 54%,
+      color-mix(in srgb, var(--streak-deep) 82%, #02030a) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px #fff1a8aa,
+    inset 0 -24px 42px rgba(0, 0, 0, .45),
+    0 0 24px color-mix(in srgb, var(--streak-glow) 34%, transparent);
+  transform: perspective(500px) rotateX(-2deg);
+}
+
+.kill-streak-banner__center::before,
+.kill-streak-banner__center::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: linear-gradient(transparent, #fff3ad, #b7791f, transparent);
+  box-shadow: 0 0 8px #facc15;
+}
+
+.kill-streak-banner__center::before { left: 10px; }
+.kill-streak-banner__center::after { right: 10px; }
+
+.kill-streak-banner__center strong {
+  position: relative;
+  z-index: 2;
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(30px, 4.3vw, 56px);
+  line-height: .98;
+  letter-spacing: .22em;
+  color: #fff4bd;
+  background: linear-gradient(180deg, #fffde7 0%, #fde68a 42%, #d4a72c 72%, #fff0a6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 5px 18px rgba(0, 0, 0, .72);
+  filter: drop-shadow(0 0 7px rgba(250, 204, 21, .3));
+}
+
+.kill-streak-banner__center.combat-action-banner__center {
+  min-height: 86px;
+  padding: 8px 24px;
+}
+
+.kill-streak-banner__center .combat-action-banner__copy strong {
+  font-size: clamp(21px, 2.5vw, 31px);
+  letter-spacing: .14em;
+}
+
+.kill-streak-banner__title {
+  transform-origin: 50% 72%;
+  animation: kill-streak-title-stamp 3s 1.2s cubic-bezier(.16, .82, .2, 1) both;
+}
+
+.kill-streak-banner__title::after {
+  content: attr(data-stamp-text);
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  white-space: nowrap;
+  color: transparent;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 2px #f7d66a;
+  text-shadow:
+    0 0 12px #facc15,
+    0 0 26px color-mix(in srgb, var(--streak-glow) 72%, transparent);
+  transform-origin: center;
+  animation: kill-streak-title-stamp-echo 3s 1.2s ease-out both;
+}
+
+.kill-streak-banner__eyebrow,
+.kill-streak-banner__english {
+  position: relative;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .26em;
+  color: #fde9a9;
+  text-transform: uppercase;
+}
+
+.kill-streak-banner__english {
+  margin-top: 6px;
+  color: #eabf51;
+  letter-spacing: .42em;
+}
+
+.kill-streak-banner__shine {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.kill-streak-banner__shine::after {
+  content: "";
+  position: absolute;
+  inset: -80% auto -80% -20%;
+  width: 16%;
+  background: linear-gradient(90deg, transparent, rgba(255, 244, 185, .3), transparent);
+  transform: skewX(-18deg);
+  animation: combat-banner-aether 2.8s .7s ease-in-out infinite;
+}
+
+.kill-streak-banner__gold-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #7c4b0b, #fde68a 18%, #fff8cf 48%, #d4a72c 72%, #7c4b0b);
+  background-size: 220% 100%;
+  box-shadow: 0 0 9px rgba(250, 204, 21, .65);
+  animation: kill-streak-gold-sweep 3.6s linear infinite;
+}
+
+.kill-streak-banner__gold-line--top { top: -3px; }
+.kill-streak-banner__gold-line--bottom { bottom: -3px; animation-direction: reverse; }
+
+.kill-streak-banner__tail {
+  position: relative;
+  z-index: 1;
+  height: 84px;
+  filter: drop-shadow(0 8px 9px rgba(0, 0, 0, .58));
+}
+
+.kill-streak-banner__tail--left {
+  margin-right: -20px;
+}
+
+.kill-streak-banner__tail--right {
+  margin-left: -20px;
+}
+
+.kill-streak-banner__tail-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.kill-streak-banner__tail-ribbon {
+  fill: color-mix(in srgb, var(--streak-class) 58%, #111422);
+  stroke: #d4a72c;
+  stroke-width: 3;
+  filter: brightness(.78) drop-shadow(0 5px 5px rgba(0, 0, 0, .62));
+  vector-effect: non-scaling-stroke;
+}
+
+.kill-streak-banner__tail-fold {
+  fill: color-mix(in srgb, var(--streak-deep) 88%, #02030a);
+  stroke: #bd8720;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.kill-streak-banner__tail-front {
+  fill: color-mix(in srgb, var(--streak-class) 78%, #334155);
+  stroke: #e1b33b;
+  stroke-width: 2.4;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .55));
+  vector-effect: non-scaling-stroke;
+}
+
+.kill-streak-banner__tail-highlight {
+  fill: none;
+  stroke: color-mix(in srgb, var(--streak-accent) 68%, #d4a72c);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: .55;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (max-width: 640px) {
+  .kill-streak-banner {
+    left: 50%;
+    right: auto;
+    width: calc(100vw - 10px);
+    grid-template-columns: 56px minmax(190px, 1fr) 56px;
+    min-height: 86px;
+  }
+  .kill-streak-banner__center { min-height: 68px; padding: 6px 12px; }
+  .kill-streak-banner__center.combat-action-banner__center { min-height: 68px; padding: 6px 12px; }
+  .kill-streak-banner__tail { height: 64px; }
+  .kill-streak-banner__center strong { font-size: clamp(25px, 7vw, 36px); letter-spacing: .12em; }
+  .kill-streak-banner__center .combat-action-banner__copy strong { font-size: 20px; }
+  .kill-streak-banner__eyebrow { font-size: 9px; letter-spacing: .1em; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kill-streak-fireball,
+  .kill-streak-sword,
+  .kill-streak-fireball__ring,
+  .kill-streak-fireball i,
+  .kill-streak-presentation--martial .kill-streak-effect::after {
+    animation-duration: 1ms;
+  }
+  .kill-streak-banner {
+    animation:
+      combat-banner-open 1ms both,
+      kill-streak-banner-lifetime var(--kill-streak-banner-duration, 4s) 1ms ease-in both;
+  }
+  .kill-streak-banner__gold-line,
+  .kill-streak-banner__shine::after,
+  .kill-streak-banner__title,
+  .kill-streak-banner__title::after {
+    animation: none;
+  }
+}

@@ -5,6 +5,7 @@ import {
   occupiedCells,
   pixelToCell,
   resolveFreeDropCell,
+  resolveTokenDropPosition,
   tokenCenterForAnchorCell,
   tokenOccupiedCellsAt,
 } from './gridCombat'
@@ -50,6 +51,16 @@ function atAnchor(id: string, col: number, row: number, m: BattleMap, patch: Par
 }
 
 describe('grid token occupancy on drop', () => {
+  it('keeps unsnapped monster footprints inside every map edge', () => {
+    const m = { ...map([]), snapMonstersToGrid: false }
+    const monster = token({ id: 'edge-monster', creatureSize: '大型', size: 2 })
+
+    expect(resolveTokenDropPosition(-100, 1_200, monster, m)).toEqual({
+      x: 100,
+      y: 900,
+    })
+  })
+
   it('excludes the moving token from occupied cells', () => {
     const m = map([])
     const a = atCell('a', 0, 0, m)

@@ -1,4 +1,4 @@
-import { CloudFog, Eye, Redo2, Undo2 } from 'lucide-react'
+import { CloudFog, Eye, Hand, Redo2, Undo2 } from 'lucide-react'
 import type { FogTool, MapFogState } from '../../lib/fogOfWar'
 
 interface MapFogToolbarProps {
@@ -60,6 +60,7 @@ export default function MapFogToolbar({
             title="迷雾绘制工具；多边形双击或按 Enter 完成"
             aria-label="迷雾绘制工具"
           >
+            <option value="pan">移动地图</option>
             <option value="reveal-rect">矩形揭示</option>
             <option value="cover-rect">矩形遮盖</option>
             <option value="reveal-circle">圆形揭示</option>
@@ -69,6 +70,7 @@ export default function MapFogToolbar({
             <option value="reveal-brush">画笔揭示</option>
             <option value="cover-brush">画笔遮盖</option>
           </select>
+          {tool === 'pan' && <Hand className="h-3.5 w-3.5 text-sky-200" aria-label="移动地图" />}
           <button
             type="button"
             onClick={() => {

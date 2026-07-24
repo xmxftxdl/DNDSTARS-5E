@@ -9,7 +9,14 @@ import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
-import { dnd5eMonkMartialArtsEligible, dnd5eOffHandWeaponAttackProfile, dnd5eWeaponAttackProfile, dnd5eWeaponRangeFeet, type Dnd5eWeaponAttackProfile } from './equipment'
+import {
+  dnd5eMonkMartialArtsEligible,
+  dnd5eOffHandWeaponAttackProfile,
+  dnd5eWeaponAttackProfile,
+  dnd5eWeaponRangeFeet,
+  dnd5eWearingUnproficientArmor,
+  type Dnd5eWeaponAttackProfile,
+} from './equipment'
 import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from './classes'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
@@ -174,6 +181,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     )
   ) return { ok: false, reason: 'frenzy-attack-unavailable' }
   const hordeBreakerAttack = action.dnd5eWeaponAttackOptions?.hordeBreakerAttack === true
+  const loadingWeapon = profile.properties.some((property) => property.includes('装填'))
   const rangerChoices = actor.dnd5eClassChoices?.classes?.ranger
   const hordeBreakerSelected = dnd5eCharacterClassLevel(actor, 'ranger') >= 3 && rangerChoices?.subclass === 'hunter' &&
     rangerChoices.selections?.['hunters-prey']?.includes('horde-breaker') === true
@@ -184,6 +192,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     hordeBreakerAttack && (
       frenzyAttack || !hordeBreakerSelected || actor.dnd5eCombatState?.hordeBreakerOpportunityTurnKey !== turnKey ||
       actor.dnd5eCombatState?.hordeBreakerUsedTurnKey === turnKey || !hordeSourceToken ||
+      loadingWeapon ||
       hordeSourceToken.id === targetToken.id || !areOpposedCombatTokens(actorToken, hordeSourceToken) ||
       !areOpposedCombatTokens(actorToken, targetToken) ||
       tokenFootprintDistanceCells(hordeSourceToken, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) > 5
@@ -199,9 +208,10 @@ export function prepareDnd5eEquipmentAttack(input: {
   const foeSlayer = action.dnd5eWeaponAttackOptions?.foeSlayer
   const specialAttack = frenzyAttack || hordeBreakerAttack || offHandAttack
   const attacksPerAction = dnd5eAttacksPerAttackAction(actor)
-  const attacksAllowed = specialAttack ? 1 : attacksPerAction * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
+  const weaponAttacksPerAction = loadingWeapon ? 1 : attacksPerAction
+  const attacksAllowed = specialAttack ? 1 : weaponAttacksPerAction * Math.max(1, Math.floor(input.attackActionsAvailable ?? 1))
   if (!specialAttack && input.attacksUsed >= attacksAllowed) return { ok: false, reason: 'attack-action-spent' }
-  const spendsAction = !specialAttack && input.attacksUsed % attacksPerAction === 0
+  const spendsAction = !specialAttack && input.attacksUsed % weaponAttacksPerAction === 0
   if (!specialAttack && spendsAction && input.turnEconomy && input.turnEconomy.action.current < 1) {
     return { ok: false, reason: 'attack-action-spent' }
   }
@@ -281,6 +291,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     (dnd5eTargetGrantsAttackAdvantage(target) || dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
   const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
+    dnd5eWearingUnproficientArmor(actor) ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
     dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) || actorProne || (targetProne && distanceFeet > 5) ||
     (profile.mode === 'ranged' && (

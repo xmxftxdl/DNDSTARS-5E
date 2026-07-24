@@ -7,6 +7,7 @@ import {
   resolvePreparedDnd5eAdjudicatedSpell,
 } from './adjudicatedSpellAction'
 import { dnd5eSpellbookEntries, type Dnd5eImportedSpell } from './spellbook'
+import { DND5E_LEATHER_ARMOR } from './equipment'
 
 function wizard(spellId: string): Character {
   return {
@@ -66,6 +67,15 @@ function fixture() {
 }
 
 describe('DM-adjudicated spell Headless transaction', () => {
+  it('rejects DM-adjudicated casting while the caster wears unproficient armor', () => {
+    const input = fixture()
+    input.actor.equipment = { armor: DND5E_LEATHER_ARMOR }
+    expect(prepareDnd5eAdjudicatedSpell(input)).toEqual({
+      ok: false,
+      reason: 'armor-proficiency-required',
+    })
+  })
+
   it('does not spend resources during preparation and commits all approved effects atomically', () => {
     const input = fixture()
     const prepared = prepareDnd5eAdjudicatedSpell({

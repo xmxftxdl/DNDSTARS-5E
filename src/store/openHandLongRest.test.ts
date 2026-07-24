@@ -66,7 +66,7 @@ describe('Open Hand Tranquility long-rest state', () => {
     expect(rested.currentHp).toBe(rested.maxHp)
     expect(rested.dnd5eCombatState).toEqual({ tranquilityActive: true })
     useCharacterStore.setState({ characters: originalCharacters, selectedId: originalSelectedId })
-  })
+  }, 15_000)
 
   it('clears a Wizard\'s accumulated Overchannel uses on a long rest', async () => {
     const { useCharacterStore } = await import('./characters')

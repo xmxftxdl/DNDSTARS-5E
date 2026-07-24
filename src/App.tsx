@@ -51,6 +51,8 @@ export default function App() {
   const [roomSession, setRoomSession] = useState(() => getRoomSession())
   const [roomNotice, setRoomNotice] = useState<string | null>(null)
   const [connection, setConnection] = useState<'online' | 'reconnecting'>('online')
+  const [roomTransition, setRoomTransition] = useState<'leave' | 'new-campaign' | null>(null)
+  const [forceRoomLobby, setForceRoomLobby] = useState(false)
   const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
   const isSpectator = roomSession?.role === 'spectator'
   const roomReady = !!roomSession || bypassRoomLobby
@@ -154,7 +156,7 @@ export default function App() {
     return startAccountCharacterVaultSync()
   }, [roomSession])
 
-  if (!roomSession && !bypassRoomLobby) return (
+  if (forceRoomLobby || (!roomSession && !bypassRoomLobby)) return (
     <>
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
@@ -165,9 +167,13 @@ export default function App() {
     </>
   )
 
-  const handleLeaveRoom = async () => {
-    if (!roomSession) return
-    if (roomSession.role === 'dm' && !window.confirm('关闭房间后，所有玩家都需要重新加入。确定离开吗？')) return
+  const handleLeaveRoom = async (intent: 'leave' | 'new-campaign' = 'leave') => {
+    if (!roomSession || roomTransition) return
+    const confirmation = intent === 'new-campaign'
+      ? '新建战役会关闭当前房间，房间内玩家将断开连接。当前战役的服务器数据不会被覆盖。确定继续吗？'
+      : '关闭房间后，所有玩家都需要重新加入。确定离开吗？'
+    if (roomSession.role === 'dm' && !window.confirm(confirmation)) return
+    setRoomTransition(intent)
     try {
       await leaveRoom(roomSession)
     } catch {
@@ -176,6 +182,12 @@ export default function App() {
     clearRoomSession()
     setRoomRulesSnapshot(null)
     setRoomPluginSyncError(null)
+    if (intent === 'new-campaign') {
+      window.history.replaceState(null, '', '/?mode=create')
+      setForceRoomLobby(true)
+      setRoomTransition(null)
+      return
+    }
     window.location.assign('/')
   }
 
@@ -203,7 +215,7 @@ export default function App() {
           roomSession={roomSession ?? undefined}
           connection={connection}
           onCollapse={() => setCollapsed(true)}
-          onLeaveRoom={roomSession ? () => void handleLeaveRoom() : undefined}
+          onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
         />
       )}
       <main className={`relative flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
@@ -217,7 +229,17 @@ export default function App() {
           </button>
         )}
         <Routes>
-          <Route path="/" element={endpointMode === 'player' ? <Navigate to="/maps" replace /> : lazyPage('战役总览', <Dashboard />)} />
+          <Route
+            path="/"
+            element={endpointMode === 'player'
+              ? <Navigate to="/maps" replace />
+              : lazyPage('战役总览', (
+                  <Dashboard
+                    onCreateCampaign={() => void handleLeaveRoom('new-campaign')}
+                    creatingCampaign={roomTransition === 'new-campaign'}
+                  />
+                ))}
+          />
           <Route path="/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
           {!isSpectator && <Route path="/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}

@@ -42,7 +42,10 @@ export function prepareDnd5eCoreSpellAreaMove(input: {
     area.sourceCharacterId !== actor.id || area.sourceTokenId !== actorToken.id || !area.movement ||
     !Number.isInteger(payload.targetCell.col) || !Number.isInteger(payload.targetCell.row)
   ) return { ok: false, reason: 'invalid-target' }
-  if (!actor.concentrating || actor.dnd5eCombatState?.concentrationSpellId !== area.concentrationId) {
+  if (
+    area.concentrationId &&
+    (!actor.concentrating || actor.dnd5eCombatState?.concentrationSpellId !== area.concentrationId)
+  ) {
     return { ok: false, reason: 'concentration-ended' }
   }
   const moved = moveDnd5eCoreSpellArea({

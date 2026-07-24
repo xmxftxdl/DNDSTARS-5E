@@ -14,6 +14,7 @@ import type {
   Dnd5ePersistentAreaTriggerTiming,
 } from './persistentAreaTypes'
 import { reconcileDnd5ePersistentAreaAnchors } from './coreSpellAreas'
+import { normalizeDnd5eActiveEffects } from './activeEffects'
 
 export interface Dnd5ePersistentAreaTriggerCandidate {
   area: Dnd5ePluginArea
@@ -30,8 +31,9 @@ function tokenIntersectsAreaAt(
   map: BattleMap,
   area: Dnd5ePluginArea,
   position: { x: number; y: number },
+  cells: readonly GridCell[] = area.cells,
 ): boolean {
-  const areaCells = new Set(area.cells.map(cellKey))
+  const areaCells = new Set(cells.map(cellKey))
   return tokenOccupiedCellsAt(token, map, position).some((cell) => areaCells.has(cellKey(cell)))
 }
 
@@ -187,20 +189,39 @@ export function collectDnd5ePersistentAreaTriggers(input: {
       : dnd5eMovementPathCells(from, to)
     for (const area of areas) {
       if (!areaAllowsTarget(area, target, input.map)) continue
-      let inside = tokenIntersectsAreaAt(target, input.map, area, target)
+      if (input.timing === 'on-enter') {
+        for (const trigger of area.triggers ?? []) {
+          if (trigger.timing !== 'on-enter') continue
+          const triggerCells = trigger.cells ?? area.cells
+          let inside = tokenIntersectsAreaAt(target, input.map, area, target, triggerCells)
+          let occurrence = 0
+          for (let pathIndex = 1; pathIndex < path.length; pathIndex += 1) {
+            const position = tokenCenterForAnchorCell(path[pathIndex], target, input.map)
+            const nextInside = tokenIntersectsAreaAt(target, input.map, area, position, triggerCells)
+            if (!inside && nextInside && mayQueue(area, trigger, target.id)) {
+              out.push(candidate(
+                area,
+                trigger,
+                target,
+                input.round,
+                `enter-${pathIndex}-${occurrence}`,
+                path[pathIndex],
+                pathIndex,
+                input.turnKey,
+              ))
+              occurrence += 1
+            }
+            inside = nextInside
+          }
+        }
+        continue
+      }
       let occurrence = 0
       let distanceInsideFeet = 0
       const feetPerCell = Math.max(1, input.map.feetPerCell ?? 5)
       for (let pathIndex = 1; pathIndex < path.length; pathIndex += 1) {
         const position = tokenCenterForAnchorCell(path[pathIndex], target, input.map)
         const nextInside = tokenIntersectsAreaAt(target, input.map, area, position)
-        if (input.timing === 'on-enter' && !inside && nextInside) {
-          for (const trigger of area.triggers ?? []) {
-            if (trigger.timing !== 'on-enter' || !mayQueue(area, trigger, target.id)) continue
-            out.push(candidate(area, trigger, target, input.round, `enter-${pathIndex}-${occurrence}`, path[pathIndex], pathIndex, input.turnKey))
-          }
-          occurrence += 1
-        }
         if (input.timing === 'on-move-distance' && nextInside) {
           const previousCell = path[pathIndex - 1]
           const stepCells = Math.max(
@@ -229,7 +250,6 @@ export function collectDnd5ePersistentAreaTriggers(input: {
             }
           }
         }
-        inside = nextInside
       }
     }
     return out.sort((left, right) => (left.pathIndex ?? 0) - (right.pathIndex ?? 0))
@@ -240,9 +260,13 @@ export function collectDnd5ePersistentAreaTriggers(input: {
     : input.map.tokens
   for (const area of areas) {
     for (const target of targets) {
-      if (!areaAllowsTarget(area, target, input.map) || !tokenIntersectsAreaAt(target, input.map, area, target)) continue
+      if (!areaAllowsTarget(area, target, input.map)) continue
       for (const trigger of area.triggers ?? []) {
-        if (trigger.timing !== input.timing || !mayQueue(area, trigger, target.id)) continue
+        if (
+          trigger.timing !== input.timing ||
+          !tokenIntersectsAreaAt(target, input.map, area, target, trigger.cells ?? area.cells) ||
+          !mayQueue(area, trigger, target.id)
+        ) continue
         out.push(candidate(area, trigger, target, input.round, input.timing, undefined, undefined, input.turnKey))
       }
     }
@@ -277,8 +301,16 @@ export function reconcileDnd5ePluginAreas(
   const charactersById = new Map(characters.map((character) => [character.id, character]))
   return (areas ?? []).filter((area) => {
     if (round > area.expiresAfterRound) return false
-    if (!area.concentrationId) return true
     const source = charactersById.get(area.sourceCharacterId)
+    if (area.sourceKind === 'core-spell' && area.coreSpellId === 'spiritual-weapon') {
+      return normalizeDnd5eActiveEffects(source?.dnd5eCombatState?.activeEffects).some((effect) =>
+        effect.definitionId === 'srd-5.1:spell:spiritual-weapon' &&
+        effect.source.kind === 'spell' &&
+        effect.source.actorId === area.sourceTokenId &&
+        effect.stackingKey === area.id,
+      )
+    }
+    if (!area.concentrationId) return true
     return !!source?.concentrating && source.dnd5eCombatState?.concentrationSpellId === area.concentrationId
   }).map((area) => {
     if (!area.triggerReceipts) return area

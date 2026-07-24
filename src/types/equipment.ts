@@ -23,6 +23,8 @@ export interface Dnd5eEquipmentEffects {
 
 export interface EquipmentItem {
   id: string
+  /** 魔法／插件变体沿用哪一件基础装备的熟练项与武器类型。 */
+  baseEquipmentId?: string
   name: string
   slot: EquipmentSlot
   /** 兼容旧装备的显示值；规则结算读取 dnd5e。 */

@@ -10,7 +10,13 @@ import { resolveDnd5eAttackOutcome } from './attackResolution'
 import { dnd5eConditionHitIsAutomaticCritical } from './conditions'
 import { dnd5eAttackModeWithProtection } from './equipmentAttackAction'
 import { resolveDnd5eRollMode } from './rollMode'
-import { dnd5eMonkMartialArtsEligible, dnd5eWeaponAttackProfile, dnd5eWeaponRangeFeet, type Dnd5eWeaponAttackProfile } from './equipment'
+import {
+  dnd5eMonkMartialArtsEligible,
+  dnd5eWeaponAttackProfile,
+  dnd5eWeaponRangeFeet,
+  dnd5eWearingUnproficientArmor,
+  type Dnd5eWeaponAttackProfile,
+} from './equipment'
 import {
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
@@ -114,7 +120,12 @@ export function prepareDnd5eHunterMultiattack(input: {
     !choices.selections?.multiattack?.includes(feature)
   ) return { ok: false, reason: 'feature-locked' }
   const profile = dnd5eWeaponAttackProfile(actor)
-  if (!profile || (feature === 'volley' ? profile.mode !== 'ranged' : profile.mode !== 'melee')) {
+  if (
+    !profile ||
+    (feature === 'volley'
+      ? profile.mode !== 'ranged' || profile.properties.some((property) => property.includes('装填'))
+      : profile.mode !== 'melee')
+  ) {
     return { ok: false, reason: 'wrong-weapon' }
   }
   if (input.turnEconomy.action.current < 1) return { ok: false, reason: 'action-unavailable' }
@@ -173,6 +184,7 @@ export function prepareDnd5eHunterMultiattack(input: {
         (targetProne && targetDistance <= 5))
     const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
       dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, token.id) || actorCombatant.exhaustionLevel >= 3 ||
+      dnd5eWearingUnproficientArmor(actor) ||
       dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
       (targetIndex === 0 && dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant)) ||
       dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, token.id) || actorProne || (targetProne && targetDistance > 5) ||

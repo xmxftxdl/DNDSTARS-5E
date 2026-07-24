@@ -2,11 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   COMBAT_PRESENTATION_CHANNEL,
   EMPTY_COMBAT_PRESENTATION_STATE,
+  combatPresentationKillStreakForMap,
   combatPresentationProjectilesForMap,
   combatPresentationServerNow,
+  combatPresentationSpellBannerForMap,
   reduceCombatPresentationState,
   refreshCombatPresentationClock,
   type CombatPresentationMapProjectile,
+  type CombatPresentationKillStreak,
+  type CombatPresentationSpellBanner,
   type CombatPresentationState,
 } from '../../lib/combatPresentation'
 import { subscribeSharedEvent } from '../../lib/sharedApi'
@@ -15,6 +19,8 @@ import type { BattleMap } from '../../store/maps'
 export interface CombatPresentationCoordinator {
   state: CombatPresentationState
   projectiles: CombatPresentationMapProjectile[]
+  spellBanner: CombatPresentationSpellBanner | null
+  killStreak: CombatPresentationKillStreak | null
 }
 
 export function useCombatPresentationCoordinator(
@@ -44,6 +50,12 @@ export function useCombatPresentationCoordinator(
     return () => window.clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    if (state.spellProjectiles.length === 0) return
+    const timer = window.setInterval(() => setClockRevision((value) => value + 1), 50)
+    return () => window.clearInterval(timer)
+  }, [state.spellProjectiles.length])
+
   const projectiles = useMemo(
     () => map
       ? combatPresentationProjectilesForMap(state, map, combatPresentationServerNow())
@@ -51,5 +63,19 @@ export function useCombatPresentationCoordinator(
     [clockRevision, map, state],
   )
 
-  return { state, projectiles }
+  const spellBanner = useMemo(
+    () => map
+      ? combatPresentationSpellBannerForMap(state, map.id, combatPresentationServerNow())
+      : null,
+    [clockRevision, map, state],
+  )
+
+  const killStreak = useMemo(
+    () => map
+      ? combatPresentationKillStreakForMap(state, map.id, combatPresentationServerNow())
+      : null,
+    [clockRevision, map, state],
+  )
+
+  return { state, projectiles, spellBanner, killStreak }
 }

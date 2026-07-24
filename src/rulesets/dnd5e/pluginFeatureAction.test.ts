@@ -6,6 +6,7 @@ import type { Character } from '../../types/character'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import {
   prepareDnd5ePluginFeatureAction,
+  rebaseDnd5ePluginFeatureApplication,
   resolvePreparedDnd5ePluginFeatureAction,
 } from './pluginFeatureAction'
 
@@ -390,5 +391,71 @@ describe('D&D 5e plugin feature authority action', () => {
     } finally {
       dispose()
     }
+  })
+})
+
+describe('插件事务提交重基线', () => {
+  it('保留等待期间发生在无关 Token 上的移动与 HP 更新', () => {
+    const hero = character('hero')
+    const enemy = character('enemy')
+    const heroToken = token('hero-token', hero.id, 25)
+    const enemyToken = { ...token('enemy-token', enemy.id, 125, 'enemy'), hp: 10, maxHp: 10 }
+    const baseMap = {
+      id: 'map-1', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
+      tokens: [heroToken, enemyToken],
+    } as BattleMap
+    const result = rebaseDnd5ePluginFeatureApplication({
+      baseMap,
+      baseCharacters: [hero, enemy],
+      application: {
+        map: { ...baseMap, tokens: [{ ...heroToken, hp: 8 }, enemyToken] },
+        characters: [hero, enemy],
+        changedTokenIds: ['hero-token'],
+        changedCharacterIds: [],
+      },
+      latestMap: {
+        ...baseMap,
+        tokens: [heroToken, { ...enemyToken, x: 225, hp: 4 }],
+      },
+      latestCharacters: [hero, enemy],
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.application.map.tokens.find((candidate) => candidate.id === 'hero-token')?.hp).toBe(8)
+    expect(result.application.map.tokens.find((candidate) => candidate.id === 'enemy-token')).toMatchObject({
+      x: 225,
+      hp: 4,
+    })
+  })
+
+  it('同一实体被并发修改或召唤 ID 已存在时 fail closed', () => {
+    const hero = character('hero')
+    const heroToken = token('hero-token', hero.id, 25)
+    const summon = { ...token('summon-token', '', 75, 'npc'), characterId: undefined }
+    const baseMap = {
+      id: 'map-1', name: 'map', width: 500, height: 500, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, tokens: [heroToken],
+    } as BattleMap
+    const application = {
+      map: { ...baseMap, tokens: [{ ...heroToken, hp: 8 }, summon] },
+      characters: [hero],
+      changedTokenIds: ['hero-token', 'summon-token'],
+      changedCharacterIds: [],
+    }
+    expect(rebaseDnd5ePluginFeatureApplication({
+      baseMap,
+      baseCharacters: [hero],
+      application,
+      latestMap: { ...baseMap, tokens: [{ ...heroToken, x: 75 }] },
+      latestCharacters: [hero],
+    })).toEqual({ ok: false, reason: 'plugin-commit-conflict' })
+    expect(rebaseDnd5ePluginFeatureApplication({
+      baseMap,
+      baseCharacters: [hero],
+      application,
+      latestMap: { ...baseMap, tokens: [heroToken, summon] },
+      latestCharacters: [hero],
+    })).toEqual({ ok: false, reason: 'plugin-commit-conflict' })
   })
 })

@@ -91,7 +91,7 @@ describe('D&D 5e room spellbook import', () => {
     expect(entries.find((entry) => entry.id === 'arcane-hand')?.reference?.sourcePage).toBe(118)
     expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.reference))
       .toHaveLength(Object.keys(DND5E_SRD_SPELL_DESCRIPTIONS_ZH_REVIEWED).length)
-    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(73)
+    expect(entries.filter((entry) => entry.sourceKind === 'srd-core' && entry.headless)).toHaveLength(84)
     expect(entries.find((entry) => entry.id === 'test-pack:ember-lance')).toMatchObject({ sourceKind: 'room-import', headless: false })
   })
 

@@ -1,13 +1,36 @@
 import type { BattleMap, Token } from '../../store/maps'
-import type { MapGeometryDoor, MapGeometryState } from '../../lib/mapGeometry'
+import {
+  mapGeometryDoorLockState,
+  mapGeometryDoorOpenState,
+  mapGeometryDoorPhysicalState,
+  type MapGeometryDoor,
+  type MapGeometryDoorPhysicalState,
+  type MapGeometryState,
+} from '../../lib/mapGeometry'
+import { SKILLS, type AbilityKey } from '../../lib/dnd'
+import type { SceneInteractionPoint } from '../../lib/sceneOrchestration'
 
-export type Dnd5eMapInteractionOperation = 'open' | 'close' | 'unlock' | 'break' | 'inspect' | 'search'
-export type Dnd5eMapInteractionMethod = 'interact' | 'key' | 'thieves-tools' | 'force' | 'perception' | 'investigation'
+export type Dnd5eMapInteractionOperation =
+  | 'open'
+  | 'close'
+  | 'unlock'
+  | 'break'
+  | 'inspect'
+  | 'search'
+  | 'interact-point'
+export type Dnd5eMapInteractionMethod =
+  | 'interact'
+  | 'key'
+  | 'thieves-tools'
+  | 'force'
+  | 'perception'
+  | 'investigation'
+  | 'scene-point'
 
 export type Dnd5eMapInteractionPayload =
   | {
       doorId: string
-      operation: Exclude<Dnd5eMapInteractionOperation, 'search'>
+      operation: Exclude<Dnd5eMapInteractionOperation, 'search' | 'interact-point'>
       method?: Dnd5eMapInteractionMethod
     }
   | {
@@ -15,21 +38,28 @@ export type Dnd5eMapInteractionPayload =
       point: { x: number; y: number }
       method: 'perception' | 'investigation'
     }
+  | {
+      operation: 'interact-point'
+      interactionPointId: string
+    }
 
 export interface PreparedDnd5eMapInteraction {
   door?: MapGeometryDoor
+  point?: SceneInteractionPoint
   interactionId: string
   label: string
   blindSearch: boolean
   operation: Dnd5eMapInteractionOperation
   method: Dnd5eMapInteractionMethod
   dc?: number
-  checkAbility?: 'str' | 'dex' | 'int' | 'wis'
-  checkSkill?: 'athletics' | 'sleightOfHand' | 'investigation' | 'perception'
+  checkAbility?: AbilityKey
+  checkSkill?: string
+  rollMode?: 'normal' | 'advantage' | 'disadvantage'
   spendAction: boolean
   turnCost: 'object-interaction' | 'action'
   automaticSuccess: boolean
   nextDoorState?: 'open' | 'closed'
+  nextDoorPhysicalState?: MapGeometryDoorPhysicalState
 }
 
 export type PrepareDnd5eMapInteractionResult =
@@ -58,6 +88,60 @@ function withinInteractionReach(map: BattleMap, actor: Token, door: MapGeometryD
 function finiteMapPoint(map: BattleMap, point: { x: number; y: number }): boolean {
   return Number.isFinite(point.x) && Number.isFinite(point.y) &&
     point.x >= 0 && point.y >= 0 && point.x <= map.width && point.y <= map.height
+}
+
+function withinPointReach(map: BattleMap, actor: Token, point: SceneInteractionPoint): boolean {
+  const gridSize = Math.max(1, map.gridSize)
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  const configuredReachPx = (point.interactionRadiusFeet / feetPerCell) * gridSize
+  const actorRadiusPx = gridSize * Math.max(1, actor.size) * 0.5
+  return Math.hypot(actor.x - point.x, actor.y - point.y) <= configuredReachPx + actorRadiusPx
+}
+
+function prepareSceneInteractionPoint(input: {
+  map: BattleMap
+  actor: Token
+  payload: Extract<Dnd5eMapInteractionPayload, { operation: 'interact-point' }>
+  interactionPoints?: readonly SceneInteractionPoint[]
+}): PrepareDnd5eMapInteractionResult {
+  const point = input.interactionPoints?.find((candidate) => candidate.id === input.payload.interactionPointId)
+  if (!point || !point.enabled || !point.visibleToPlayers) {
+    return { ok: false, reason: 'interaction-point-not-found' }
+  }
+  if (!finiteMapPoint(input.map, point)) return { ok: false, reason: 'invalid-interaction-point' }
+  if (!withinPointReach(input.map, input.actor, point)) {
+    return { ok: false, reason: 'interaction-point-out-of-reach' }
+  }
+  if (!point.check) return { ok: false, reason: 'interaction-point-check-unavailable' }
+  const [selectionKind, selectionKey] = point.check.selection.split(':')
+  if (selectionKind === 'save') return { ok: false, reason: 'interaction-point-check-unavailable' }
+  const skill = selectionKind === 'skill'
+    ? SKILLS.find((candidate) => candidate.key === selectionKey)
+    : undefined
+  const checkAbility = selectionKind === 'ability'
+    ? selectionKey as AbilityKey
+    : skill?.ability
+  if (!checkAbility || (selectionKind === 'skill' && !skill)) {
+    return { ok: false, reason: 'interaction-point-check-unavailable' }
+  }
+  return {
+    ok: true,
+    prepared: {
+      point,
+      interactionId: `scene-point:${point.id}`,
+      label: point.name,
+      blindSearch: false,
+      operation: 'interact-point',
+      method: 'scene-point',
+      dc: point.check.dc,
+      checkAbility,
+      ...(skill ? { checkSkill: skill.key } : {}),
+      rollMode: point.check.mode,
+      spendAction: true,
+      turnCost: 'action',
+      automaticSuccess: false,
+    },
+  }
 }
 
 function prepareBlindSecretDoorSearch(input: {
@@ -111,10 +195,19 @@ export function prepareDnd5eMapInteraction(input: {
   geometry?: MapGeometryState
   actor: Token
   payload: Dnd5eMapInteractionPayload
+  interactionPoints?: readonly SceneInteractionPoint[]
   hasMatchingKey?: boolean
   hasThievesTools?: boolean
 }): PrepareDnd5eMapInteractionResult {
   const payload = input.payload
+  if (payload.operation === 'interact-point') {
+    return prepareSceneInteractionPoint({
+      map: input.map,
+      actor: input.actor,
+      payload,
+      interactionPoints: input.interactionPoints,
+    })
+  }
   if (payload.operation === 'search') {
     return prepareBlindSecretDoorSearch({
       map: input.map,
@@ -129,17 +222,23 @@ export function prepareDnd5eMapInteraction(input: {
 
   const interaction = door.interaction
   const operation = payload.operation
+  const openState = mapGeometryDoorOpenState(door)
+  const lockState = mapGeometryDoorLockState(door)
+  const physicalState = mapGeometryDoorPhysicalState(door)
   if (operation === 'open') {
-    if (door.state === 'open') return { ok: false, reason: 'door-already-open' }
-    if (door.state === 'locked') return { ok: false, reason: 'door-locked' }
+    if (openState === 'open') return { ok: false, reason: 'door-already-open' }
+    if (lockState === 'locked') return { ok: false, reason: 'door-locked' }
+    if (lockState === 'jammed') return { ok: false, reason: 'door-jammed' }
     return { ok: true, prepared: { door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false, operation, method: 'interact', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'open' } }
   }
   if (operation === 'close') {
-    if (door.state !== 'open') return { ok: false, reason: 'door-not-open' }
+    if (openState !== 'open') return { ok: false, reason: 'door-not-open' }
+    if (physicalState === 'destroyed') return { ok: false, reason: 'door-destroyed' }
     return { ok: true, prepared: { door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false, operation, method: 'interact', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'closed' } }
   }
   if (operation === 'unlock') {
-    if (door.state !== 'locked') return { ok: false, reason: 'door-not-locked' }
+    if (lockState === 'jammed') return { ok: false, reason: 'door-jammed' }
+    if (lockState !== 'locked') return { ok: false, reason: 'door-not-locked' }
     if (payload.method === 'key' && input.hasMatchingKey) {
       return { ok: true, prepared: { door, interactionId: `${operation}:${door.id}`, label: door.label, blindSearch: false, operation, method: 'key', spendAction: false, turnCost: 'object-interaction', automaticSuccess: true, nextDoorState: 'closed' } }
     }
@@ -157,7 +256,7 @@ export function prepareDnd5eMapInteraction(input: {
     }
   }
   if (operation === 'break') {
-    if (door.state === 'open') return { ok: false, reason: 'door-already-open' }
+    if (openState === 'open') return { ok: false, reason: 'door-already-open' }
     return {
       ok: true,
       prepared: {
@@ -165,6 +264,7 @@ export function prepareDnd5eMapInteraction(input: {
         operation, method: 'force', dc: interaction?.breakDc ?? DEFAULT_BREAK_DC,
         checkAbility: 'str', checkSkill: 'athletics', spendAction: true, turnCost: 'action', automaticSuccess: false,
         nextDoorState: 'open',
+        nextDoorPhysicalState: 'broken',
       },
     }
   }
@@ -188,7 +288,14 @@ export function resolveDnd5eMapInteraction(input: {
   modifier?: number
   adjustedDc?: number
   dmOverride?: 'success' | 'failure'
-}): { success: boolean; total?: number; dc?: number; nextDoorState?: 'open' | 'closed'; revealSecret: boolean } {
+}): {
+  success: boolean
+  total?: number
+  dc?: number
+  nextDoorState?: 'open' | 'closed'
+  nextDoorPhysicalState?: MapGeometryDoorPhysicalState
+  revealSecret: boolean
+} {
   const dc = input.prepared.dc == null
     ? undefined
     : Math.max(0, Math.min(100, Math.floor(input.adjustedDc ?? input.prepared.dc)))
@@ -203,6 +310,9 @@ export function resolveDnd5eMapInteraction(input: {
     ...(total == null ? {} : { total }),
     ...(dc == null ? {} : { dc }),
     ...(success && input.prepared.nextDoorState ? { nextDoorState: input.prepared.nextDoorState } : {}),
+    ...(success && input.prepared.nextDoorPhysicalState
+      ? { nextDoorPhysicalState: input.prepared.nextDoorPhysicalState }
+      : {}),
     revealSecret: success && (input.prepared.operation === 'inspect' || input.prepared.operation === 'search') && !!input.prepared.door?.secret,
   }
 }

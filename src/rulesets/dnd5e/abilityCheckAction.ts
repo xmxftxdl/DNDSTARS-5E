@@ -4,6 +4,7 @@ import type { Dnd5eAbilityCheckPayload, Dnd5eTurnEconomyCounts, SharedPlayerActi
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import {
+  dnd5eCombatantClassLevel,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatEvent,
@@ -11,6 +12,8 @@ import {
   type Dnd5eHeadlessCombatState,
 } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
+import { dnd5eConditionAbilityCheckDisadvantage } from './conditions'
+import { resolveDnd5eRollMode } from './rollMode'
 
 export type Dnd5eAbilityCheckRejectReason =
   | 'invalid-action'
@@ -27,6 +30,7 @@ export interface PreparedDnd5eAbilityCheck {
   state: Dnd5eHeadlessCombatState
   actor: Character
   actorToken: Token
+  rollMode: 'normal' | 'advantage' | 'disadvantage'
 }
 
 export function prepareDnd5eAbilityCheck(input: {
@@ -81,6 +85,33 @@ export function prepareDnd5eAbilityCheck(input: {
       state: { ...snapshot.state, initiativeIndex: actorIndex },
       actor,
       actorToken,
+      rollMode: resolveDnd5eRollMode({
+        requestedMode: payload.mode ?? 'normal',
+        advantage: [
+          {
+            active: dnd5eCombatantClassLevel(actorCombatant, 'barbarian') >= 1 &&
+              actorCombatant.classState.raging === true && payload.ability === 'str',
+            reason: 'rage-strength-check',
+          },
+          {
+            active: actorCombatant.classState.helpedAbilityCheckSourceId != null,
+            reason: 'help',
+          },
+        ],
+        disadvantage: [
+          { active: actorCombatant.exhaustionLevel >= 1, reason: 'exhaustion' },
+          { active: dnd5eConditionAbilityCheckDisadvantage(actorCombatant), reason: 'condition' },
+          {
+            active: actorCombatant.wearingUnproficientArmor &&
+              (payload.ability === 'str' || payload.ability === 'dex'),
+            reason: 'unproficient-armor',
+          },
+          {
+            active: actorCombatant.armorStealthDisadvantage && payload.skill === 'stealth',
+            reason: 'armor-stealth-disadvantage',
+          },
+        ],
+      }).mode,
     },
   }
 }

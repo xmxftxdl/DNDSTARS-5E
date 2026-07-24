@@ -1,5 +1,7 @@
 import type { Dnd5eActionIconSpec } from './dnd5eActionIcons'
 import { dnd5eSystemActionIcon } from './dnd5eActionIcons'
+import type { Dnd5eSpellMetamagicPayload } from './sharedCombatTypes'
+import type { Dnd5eSpellModifierIntentId } from '../rulesets/dnd5e/spellModifierIntents'
 
 export const DND5E_COMBAT_ACTION_DESCRIPTOR_SCHEMA_VERSION = 1 as const
 
@@ -8,12 +10,34 @@ export type Dnd5eCombatActionEconomy = 'action' | 'bonus-action' | 'reaction' | 
 export type Dnd5eCombatActionTargeting = 'none' | 'self' | 'creature' | 'area' | 'map-position' | 'configure'
 export type Dnd5eCombatActionPanel = 'inventory' | 'features' | 'spells' | 'skills'
 
+export interface Dnd5eCombatSpellOptions {
+  overchannel?: boolean
+  metamagic?: Dnd5eSpellMetamagicPayload
+  empowered?: boolean
+  draconicResistance?: boolean
+  repellingBlast?: boolean
+  /** UI intent only. The Host still revalidates Sculpt Spells and every protected target. */
+  sculptSpell?: boolean
+  /** Hotbar casts resolve immediately after a legal map target/area is selected. */
+  autoSubmitOnTargetSelection?: boolean
+}
+
+export type Dnd5eCombatSpellModifier = Dnd5eSpellModifierIntentId
+
 export type Dnd5eCombatActionCommand =
   | { kind: 'select-move' }
   | { kind: 'select-weapon-target' }
   | { kind: 'basic-action'; action: 'dash' | 'hide' }
   | { kind: 'dodge' }
   | { kind: 'disengage' }
+  | {
+      kind: 'cast-spell'
+      spellId: string
+      castingClassId: string
+      slotLevel: number
+      options?: Dnd5eCombatSpellOptions
+    }
+  | { kind: 'toggle-spell-modifier'; modifier: Dnd5eCombatSpellModifier }
   | { kind: 'open-panel'; panel: Dnd5eCombatActionPanel; focusId?: string }
   | { kind: 'use-item'; instanceId: string }
   | { kind: 'end-turn' }
@@ -38,9 +62,35 @@ export interface Dnd5eCombatActionDescriptorV1 {
   economy: Dnd5eCombatActionEconomy
   targeting: Dnd5eCombatActionTargeting
   resource?: Dnd5eCombatActionResourceBadge
+  availableSlotLevels?: readonly number[]
   enabled: boolean
   disabledReason?: string
   command: Dnd5eCombatActionCommand
+}
+
+export type Dnd5eCombatSpellSlotSelection =
+  | { ok: true; slotLevel: number; explicitlyConfigured: boolean }
+  | { ok: false; reason: string }
+
+/**
+ * 左键不能把“某个更高环位可用”解释成升环意图；右键配置才可以覆盖默认环位。
+ */
+export function resolveDnd5eCombatSpellSlotSelection(
+  descriptor: Dnd5eCombatActionDescriptorV1,
+  configuredSlotLevel?: number,
+): Dnd5eCombatSpellSlotSelection {
+  if (descriptor.command.kind !== 'cast-spell') return { ok: false, reason: '该动作不是法术施放。' }
+  const explicitlyConfigured = configuredSlotLevel != null
+  const slotLevel = explicitlyConfigured ? configuredSlotLevel : descriptor.command.slotLevel
+  if (!(descriptor.availableSlotLevels ?? []).includes(slotLevel)) {
+    return {
+      ok: false,
+      reason: explicitlyConfigured
+        ? `${slotLevel} 环位当前不可用。`
+        : `${descriptor.command.slotLevel} 环位不可用；普通施放不会自动升环，请右键选择可用的更高环位。`,
+    }
+  }
+  return { ok: true, slotLevel, explicitlyConfigured }
 }
 
 export function groupDnd5eCombatHotbarDescriptors(descriptors: readonly Dnd5eCombatActionDescriptorV1[]) {
@@ -61,7 +111,21 @@ export interface Dnd5eCombatActionSpellSource {
   castingTime: Dnd5eCombatActionEconomy
   targeting: Dnd5eCombatActionTargeting
   castingClassId: string
+  /** 左键普通施放使用的环位；标准施法为法术基础环位，契约魔法为当前固定契约环位。 */
+  defaultSlotLevel: number
+  availableSlotLevels: readonly number[]
   available: boolean
+  unavailableReason?: string
+}
+
+export interface Dnd5eCombatActionFeatureSource {
+  id: string
+  label: string
+  description: string
+  icon: Dnd5eActionIconSpec
+  modifier: Dnd5eCombatSpellModifier
+  resource?: Dnd5eCombatActionResourceBadge
+  available?: boolean
   unavailableReason?: string
 }
 
@@ -86,6 +150,7 @@ export interface BuildDnd5eCombatActionDescriptorsInput {
   movementRemaining: number
   weaponLabel?: string
   spells?: readonly Dnd5eCombatActionSpellSource[]
+  features?: readonly Dnd5eCombatActionFeatureSource[]
   items?: readonly Dnd5eCombatActionItemSource[]
 }
 
@@ -111,7 +176,7 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
     descriptor({
       id: 'system:weapon-attack', sourceKind: 'weapon', label: input.weaponLabel ? `攻击：${input.weaponLabel}` : '武器攻击',
       description: '选择地图上的目标，由 Headless 校验武器、熟练、距离、掩护、弹药与本回合攻击次数。',
-      icon: dnd5eSystemActionIcon('weapon-attack', 'weapon'), economy: 'action', targeting: 'creature',
+      icon: dnd5eSystemActionIcon('weapon-attack', 'melee-attack'), economy: 'action', targeting: 'creature',
       command: { kind: 'select-weapon-target' },
     }, availability(input, 'action')),
     descriptor({
@@ -121,15 +186,15 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
     }, availability(input, 'movement')),
     descriptor({
       id: 'system:dash', sourceKind: 'system', label: '疾走', description: '消耗一个动作，使本回合可用移动力增加等同于当前有效速度的数值。',
-      icon: dnd5eSystemActionIcon('dash', 'movement'), economy: 'action', targeting: 'none', command: { kind: 'basic-action', action: 'dash' },
+      icon: dnd5eSystemActionIcon('dash', 'dash'), economy: 'action', targeting: 'none', command: { kind: 'basic-action', action: 'dash' },
     }, availability(input, 'action')),
     descriptor({
       id: 'system:dodge', sourceKind: 'system', label: '闪避', description: '消耗一个动作；直到你的下一回合开始，针对你的可见攻击具有劣势，并使敏捷豁免具有优势。',
-      icon: dnd5eSystemActionIcon('dodge', 'armor'), economy: 'action', targeting: 'self', command: { kind: 'dodge' },
+      icon: dnd5eSystemActionIcon('dodge', 'dodge'), economy: 'action', targeting: 'self', command: { kind: 'dodge' },
     }, availability(input, 'action')),
     descriptor({
       id: 'system:disengage', sourceKind: 'system', label: '撤离', description: '消耗一个动作；你在本回合的移动不会触发借机攻击。',
-      icon: dnd5eSystemActionIcon('disengage', 'movement'), economy: 'action', targeting: 'self', command: { kind: 'disengage' },
+      icon: dnd5eSystemActionIcon('disengage', 'disengage'), economy: 'action', targeting: 'self', command: { kind: 'disengage' },
     }, availability(input, 'action')),
     descriptor({
       id: 'system:hide', sourceKind: 'system', label: '躲藏', description: '消耗一个动作并进行敏捷（隐匿）检定；Headless 会与敌人的被动察觉比较。',
@@ -157,10 +222,30 @@ export function buildDnd5eCombatActionDescriptors(input: BuildDnd5eCombatActionD
       description: spell.description,
       icon: spell.icon,
       economy: spell.castingTime,
-      targeting: 'configure',
+      targeting: spell.targeting,
       resource: { label: spell.level === 0 ? '戏法' : '环', current: spell.level },
-      command: { kind: 'open-panel', panel: 'spells', focusId: spell.id },
+      availableSlotLevels: [...spell.availableSlotLevels],
+      command: {
+        kind: 'cast-spell',
+        spellId: spell.id,
+        castingClassId: spell.castingClassId,
+        slotLevel: spell.defaultSlotLevel,
+      },
     }, availability(input, spell.castingTime, spell.available, spell.unavailableReason)))
+  }
+
+  for (const feature of input.features ?? []) {
+    actions.push(descriptor({
+      id: `feature:${feature.id}`,
+      sourceKind: 'feature',
+      label: feature.label,
+      description: feature.description,
+      icon: feature.icon,
+      economy: 'none',
+      targeting: 'none',
+      resource: feature.resource,
+      command: { kind: 'toggle-spell-modifier', modifier: feature.modifier },
+    }, availability(input, 'none', feature.available ?? true, feature.unavailableReason)))
   }
 
   for (const item of input.items ?? []) {

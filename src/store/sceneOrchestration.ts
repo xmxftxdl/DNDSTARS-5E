@@ -13,6 +13,7 @@ import {
   type OrchestratedScene,
   type SceneAction,
   type SceneHistoryEntry,
+  type SceneInteractionPoint,
   type ScenePendingRun,
   type SceneRegion,
   type SceneTrigger,
@@ -34,6 +35,18 @@ export interface SceneOrchestrationStore {
   >>) => void
   removeScene: (sceneId: string) => void
   removeAudioReferences: (assetId: string) => void
+  addInteractionPoint: (sceneId: string, position: { x: number; y: number }) => string
+  updateInteractionPoint: (
+    sceneId: string,
+    interactionPointId: string,
+    patch: Partial<Omit<SceneInteractionPoint, 'id'>>,
+  ) => void
+  setInteractionPointPosition: (
+    sceneId: string,
+    interactionPointId: string,
+    position: { x: number; y: number },
+  ) => void
+  removeInteractionPoint: (sceneId: string, interactionPointId: string) => void
   addTrigger: (sceneId: string, region: SceneRegion) => string
   updateTrigger: (sceneId: string, triggerId: string, patch: Partial<Omit<SceneTrigger, 'id' | 'actions'>>) => void
   setTriggerRegion: (sceneId: string, triggerId: string, region: SceneRegion) => void
@@ -126,6 +139,7 @@ export const useSceneOrchestrationStore = create<SceneOrchestrationStore>()(
           backgroundAudioVolume: 0.7,
           boundHandoutIds: [],
           boundJournalEntryIds: [],
+          interactionPoints: [],
           triggers: [{
             id: crypto.randomUUID(),
             name: '入口触发区',
@@ -166,6 +180,68 @@ export const useSceneOrchestrationStore = create<SceneOrchestrationStore>()(
           })),
           updatedAt: Date.now(),
         })),
+      })),
+      addInteractionPoint: (sceneId, position) => {
+        const interactionPointId = crypto.randomUUID()
+        mutate((shared) => ({
+          ...shared,
+          scenes: shared.scenes.map((scene) => scene.id === sceneId ? {
+            ...scene,
+            updatedAt: Date.now(),
+            interactionPoints: [...scene.interactionPoints, {
+              id: interactionPointId,
+              name: `互动点 ${scene.interactionPoints.length + 1}`,
+              enabled: true,
+              visibleToPlayers: true,
+              icon: 'search',
+              x: position.x,
+              y: position.y,
+              interactionRadiusFeet: 5,
+              prompt: '仔细调查这里。',
+              repeat: 'per-character',
+              check: {
+                label: '智力（调查）检定',
+                selection: 'skill:investigation',
+                dc: 12,
+                mode: 'normal',
+              },
+              successText: '你发现了一些有用的东西。',
+              failureText: '你没有发现异常。',
+              rewards: [],
+              successEffects: [],
+              failureEffects: [],
+            }],
+          } : scene),
+        }))
+        return interactionPointId
+      },
+      updateInteractionPoint: (sceneId, interactionPointId, patch) => mutate((shared) => ({
+        ...shared,
+        scenes: shared.scenes.map((scene) => scene.id === sceneId ? {
+          ...scene,
+          updatedAt: Date.now(),
+          interactionPoints: scene.interactionPoints.map((point) => point.id === interactionPointId
+            ? { ...point, ...patch, id: point.id }
+            : point),
+        } : scene),
+      })),
+      setInteractionPointPosition: (sceneId, interactionPointId, position) => mutate((shared) => ({
+        ...shared,
+        scenes: shared.scenes.map((scene) => scene.id === sceneId ? {
+          ...scene,
+          updatedAt: Date.now(),
+          interactionPoints: scene.interactionPoints.map((point) => point.id === interactionPointId
+            ? { ...point, x: position.x, y: position.y }
+            : point),
+        } : scene),
+      })),
+      removeInteractionPoint: (sceneId, interactionPointId) => mutate((shared) => ({
+        ...shared,
+        scenes: shared.scenes.map((scene) => scene.id === sceneId ? {
+          ...scene,
+          updatedAt: Date.now(),
+          interactionPoints: scene.interactionPoints.filter((point) => point.id !== interactionPointId),
+        } : scene),
       })),
       addTrigger: (sceneId, region) => {
         const triggerId = crypto.randomUUID()

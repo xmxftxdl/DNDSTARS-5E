@@ -114,6 +114,12 @@ function traitShapeIsValid(raw: unknown): boolean {
   if (raw.rule.kind === 'swarm') {
     return raw.rule.cannotRegainHitPoints === true && raw.rule.cannotGainTemporaryHitPoints === true
   }
+  if (raw.rule.kind === 'nimble-escape') {
+    return Array.isArray(raw.rule.bonusActionOptions) &&
+      raw.rule.bonusActionOptions.length === 2 &&
+      raw.rule.bonusActionOptions[0] === 'disengage' &&
+      raw.rule.bonusActionOptions[1] === 'hide'
+  }
   return false
 }
 

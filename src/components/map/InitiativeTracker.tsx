@@ -19,8 +19,9 @@ export interface InitiativeEntry {
 }
 
 const VISIBLE_MAX = 7
-const PORTRAIT_WIDTH = 72
-const PORTRAIT_HEIGHT = 94
+const PORTRAIT_WIDTH = Math.round(72 * 1.05)
+const PORTRAIT_HEIGHT = Math.round(94 * 1.05)
+const ACTIVE_PORTRAIT_SCALE = 1.15
 
 function InitiativePortrait({ entry, active }: { entry: InitiativeEntry; active: boolean }) {
   const [loaded, setLoaded] = useState<{ imageId: string; src: string }>()
@@ -114,15 +115,19 @@ export default function InitiativeTracker({
           const hpPct = hp ? Math.max(0, Math.min(1, hp.hp / hpDenominator)) : 0
           const tempHpPct = hp ? Math.max(0, Math.min(1 - hpPct, tempHp / hpDenominator)) : 0
           const realHpPct = hp ? Math.max(0, Math.min(1, hp.hp / Math.max(1, hp.max))) : 0
+          const portraitWidth = Math.round(PORTRAIT_WIDTH * (isActive && !defeated ? ACTIVE_PORTRAIT_SCALE : 1))
+          const portraitHeight = Math.round(PORTRAIT_HEIGHT * (isActive && !defeated ? ACTIVE_PORTRAIT_SCALE : 1))
           const hpColor =
             realHpPct > 0.55 ? 'bg-emerald-400' : realHpPct > 0.25 ? 'bg-amber-400' : 'bg-rose-400'
           return (
             <button
               key={entry.slotId ?? entry.tokenId}
               data-testid={`initiative-token-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
+              data-active-turn={isActive && !defeated ? 'true' : 'false'}
               type="button"
               onClick={() => onSelect(entry.tokenId)}
-              className="group flex w-[72px] shrink-0 flex-col items-center gap-1 outline-none"
+              className="group flex shrink-0 flex-col items-center gap-1 outline-none transition-[width] duration-200"
+              style={{ width: portraitWidth }}
               title={`${entry.label} · 先攻 ${entry.roll}${entry.turnKind === 'thief-reflexes' ? ' · 盗贼反射额外回合' : ''}${hp ? ` · HP ${hp.hp}/${hp.max}` : ''}${defeated ? ' · 已阵亡' : ''}${isActive && !defeated ? ' · 当前回合' : ''}`}
               aria-label={`${entry.label}，先攻 ${entry.roll}${hp ? `，生命值 ${hp.hp}/${hp.max}` : ''}${isActive && !defeated ? '，当前回合' : ''}`}
             >
@@ -140,8 +145,8 @@ export default function InitiativeTracker({
                     isActive && !defeated ? 'initiative-active-ring z-10' : 'group-hover:border-white/35',
                   ].join(' ')}
                   style={{
-                    width: PORTRAIT_WIDTH,
-                    height: PORTRAIT_HEIGHT,
+                    width: portraitWidth,
+                    height: portraitHeight,
                     borderColor: defeated ? '#64748b' : isActive ? undefined : entry.color,
                   }}
                 >
@@ -164,7 +169,8 @@ export default function InitiativeTracker({
               </div>
               <div
                 data-testid={`initiative-health-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
-                className="h-[7px] w-[72px] overflow-hidden rounded-full bg-slate-950/90 shadow-md ring-1 ring-white/15"
+                className="h-[7px] overflow-hidden rounded-full bg-slate-950/90 shadow-md ring-1 ring-white/15 transition-[width] duration-200"
+                style={{ width: portraitWidth }}
                 title={hp ? `HP ${hp.hp}/${hp.max}${tempHp > 0 ? ` + ${tempHp} 临时生命` : ''}` : '无生命值数据'}
               >
                 {hp ? (

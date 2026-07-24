@@ -45,6 +45,7 @@ function action(type: SharedPlayerActionState['type'] = 'move-token'): SharedPla
     type,
     actorTokenId: 'hero-token',
     characterId: 'hero',
+    roomMemberId: 'member-a',
     round: 1,
     initiativeIndex: 0,
     updatedAt: 100,
@@ -60,7 +61,7 @@ function preflight() {
     round: 1,
     initiativeIndex: 0,
     currentTokenId: 'hero-token',
-    characters: [{ id: 'hero' }],
+    characters: [{ id: 'hero', roomMemberId: 'member-a' }],
     processedActionIds: new Set<string>(),
     seenActionIds: new Set<string>(),
   }

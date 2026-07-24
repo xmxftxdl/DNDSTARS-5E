@@ -38,7 +38,8 @@ describe('地图战争迷雾工具栏', () => {
 
   it('编辑状态提供八种绘制工具以及撤销、重做和玩家预览', () => {
     const html = render({ editMode: true, previewAsPlayer: true })
-    expect(html.match(/<option/g)).toHaveLength(8)
+    expect(html.match(/<option/g)).toHaveLength(9)
+    expect(html).toContain('移动地图')
     expect(html).toContain('多边形遮盖')
     expect(html).toContain('撤销最后一笔')
     expect(html).toContain('重做')

@@ -65,6 +65,10 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
     }
   }
   const advance = (minutes: number, reason: string) => run(() => mutate({ operation: 'advance', minutes, reason }))
+  const startLongRest = () => run(() => mutate({
+    operation: 'long-rest',
+    reason: '队伍完成长休',
+  }))
   const createTimer = () => {
     const character = characters.find((entry) => entry.id === timerCharacterId)
     const durationMinutes = timerDuration * (timerUnit === 'hour' ? 60 : 1)
@@ -174,7 +178,7 @@ export default function CampaignTimeWidget({ mode }: { mode?: AppMode }) {
                       void advance(customAmount * multiplier, 'DM 自定义推进')
                     }} className="rounded-xl bg-violet-500/20 px-3 text-xs font-semibold text-violet-200 disabled:opacity-50">推进</button>
                   </div>
-                  <button type="button" disabled={busy} onClick={() => void run(() => mutate({ operation: 'long-rest', reason: '队伍完成长休' }))} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-500/20 px-3 py-2.5 text-sm font-semibold text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50"><MoonStar className="h-4 w-4" />完成长休并推进 8 小时</button>
+                  <button type="button" disabled={busy} onClick={() => void startLongRest()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-500/20 px-3 py-2.5 text-sm font-semibold text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50"><MoonStar className="h-4 w-4" />完成长休并推进 8 小时</button>
                   <p className="mt-2 text-[11px] text-slate-500">{eligibleLongRests}/{dndCharacters.length} 名角色可获得长休收益；24 小时内重复长休只推进时间。</p>
                 </section>
 

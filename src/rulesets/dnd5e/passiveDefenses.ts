@@ -2,7 +2,14 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { D20RollMode } from '../contracts'
 import type { Dnd5eClassId } from './classes'
 import type { Dnd5eDamageType } from './monsters'
-import { dnd5eActiveEffectsPreventReactions, dnd5eActiveSpeedBonus, dnd5eActiveSpeedPenalty, type Dnd5eActiveEffectInstance } from './activeEffects'
+import {
+  dnd5eActiveConditionImmunities,
+  dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveStrengthRollFlags,
+  dnd5eActiveSpeedBonus,
+  dnd5eActiveSpeedPenalty,
+  type Dnd5eActiveEffectInstance,
+} from './activeEffects'
 import {
   dnd5eConditionGrantsAttackAdvantage,
   dnd5eConditionGrantsAttackAdvantageToAttacker,
@@ -43,6 +50,7 @@ export interface Dnd5eDefensiveCreature {
   creatureType?: string
   speed?: number
   dodging?: boolean
+  wearingUnproficientArmor?: boolean
 }
 
 function defensiveClassLevel(creature: Dnd5eDefensiveCreature, classId: Dnd5eClassId): number {
@@ -99,8 +107,15 @@ export function dnd5eSavingThrowMode(
     (creature.classState.holyNimbusRoundsRemaining ?? 0) > 0 && context.sourceIsSpell === true &&
     (sourceType === 'fiend' || sourceType.includes('邪魔') || sourceType === 'undead' || sourceType.includes('亡灵'))
   const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
-  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus || poisonProtection || dodgeDexterity
-  const disadvantage = creature.exhaustionLevel >= 3 || dnd5eConditionSavingThrowDisadvantage(creature, ability)
+  const strengthEffect = ability === 'str'
+    ? dnd5eActiveStrengthRollFlags(creature.classState.activeEffects)
+    : { advantage: false, disadvantage: false }
+  const advantage = dangerSense || steelWill || countercharm || rageStrength || holyNimbus ||
+    poisonProtection || dodgeDexterity || strengthEffect.advantage
+  const disadvantage = creature.exhaustionLevel >= 3 ||
+    dnd5eConditionSavingThrowDisadvantage(creature, ability) ||
+    (creature.wearingUnproficientArmor === true && (ability === 'str' || ability === 'dex')) ||
+    strengthEffect.disadvantage
   return resolveDnd5eRollMode({
     advantage: [{ active: advantage, reason: 'saving-throw-advantage' }],
     disadvantage: [{ active: disadvantage, reason: 'saving-throw-disadvantage' }],
@@ -256,6 +271,9 @@ export function dnd5eConditionImmuneFromSource(
     entry.trim().toLowerCase() === normalized ||
     (standard != null && dnd5eStandardConditionId(entry) === standard),
   )) return true
+  if (standard != null && dnd5eActiveConditionImmunities(target.classState.activeEffects).includes(standard)) {
+    return true
+  }
   const charmFearOrPossession = ['charmed', '魅惑', 'frightened', '惊惧', '恐慌', 'possessed', '附身'].includes(normalized)
   if (
     charmFearOrPossession && defensiveClassLevel(target, 'paladin') >= 15 &&

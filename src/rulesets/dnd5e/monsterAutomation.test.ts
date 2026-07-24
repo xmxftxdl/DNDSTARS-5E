@@ -4,6 +4,7 @@ import {
   dnd5eEligibleMonsterMechanics,
   dnd5eMonsterMechanicCompatibility,
   dnd5eMonsterMechanicEffects,
+  normalizeDnd5eMonsterBehaviorPreference,
 } from './monsterAutomation'
 
 const base = {
@@ -14,6 +15,17 @@ const base = {
 }
 
 describe('D&D 5e declarative monster mechanism compatibility', () => {
+  it('accepts only versioned deterministic behavior styles', () => {
+    expect(normalizeDnd5eMonsterBehaviorPreference({
+      schemaVersion: 1,
+      style: 'skirmisher',
+    })).toEqual({ schemaVersion: 1, style: 'skirmisher' })
+    expect(normalizeDnd5eMonsterBehaviorPreference({
+      schemaVersion: 1,
+      style: 'execute-arbitrary-script',
+    })).toBeUndefined()
+  })
+
   it('keeps V1 low-hit-point healing loadable as a full V2-compatible effect', () => {
     const mechanic: Dnd5eMonsterMechanicTrigger = {
       ...base,

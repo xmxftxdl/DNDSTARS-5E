@@ -51,7 +51,8 @@ export interface SendRoomChatInput {
   npcTokenId?: string
 }
 
-export type HandoutAudience = 'all' | string[]
+/** `dm` 表示尚未发布的讲义草稿，可由场景或地图互动在之后分发。 */
+export type HandoutAudience = 'all' | 'dm' | string[]
 
 export interface RoomHandout {
   id: string
@@ -65,6 +66,7 @@ export interface RoomHandout {
   authorName: string
   createdAt: number
   updatedAt: number
+  authorityReceiptId?: string
 }
 
 export interface CampaignJournalEntry {
@@ -94,6 +96,7 @@ export interface RoomSharedNote {
   lastEditorName: string
   createdAt: number
   updatedAt: number
+  authorityReceiptId?: string
 }
 
 export interface SharedRoomJournalState {
@@ -101,6 +104,8 @@ export interface SharedRoomJournalState {
   handouts: RoomHandout[]
   campaignEntries: CampaignJournalEntry[]
   sharedNotes: RoomSharedNote[]
+  /** DM 权威副作用的有界幂等收据；旧存档缺失时自动迁移为空数组。 */
+  authorityMutationReceipts: string[]
   updatedAt: number
 }
 
@@ -113,6 +118,7 @@ export type RoomJournalMutation =
       imageId?: string
       imageMimeType?: string
       imageName?: string
+      authorityReceiptId?: string
     }
   | { operation: 'remove-handout'; id: string }
   | {
@@ -123,7 +129,7 @@ export type RoomJournalMutation =
       combatId?: string
     }
   | { operation: 'remove-campaign-entry'; id: string }
-  | { operation: 'add-shared-note'; kind: SharedNoteKind; title: string; body: string }
+  | { operation: 'add-shared-note'; kind: SharedNoteKind; title: string; body: string; authorityReceiptId?: string }
   | {
       operation: 'update-shared-note'
       id: string
@@ -131,6 +137,7 @@ export type RoomJournalMutation =
       status?: SharedNoteStatus
       title?: string
       body?: string
+      authorityReceiptId?: string
     }
   | { operation: 'remove-shared-note'; id: string }
 
@@ -222,7 +229,7 @@ export function normalizeSharedRoomChat(value: unknown): SharedRoomChatState {
 }
 
 function normalizeAudience(value: unknown): HandoutAudience {
-  if (value === 'all') return 'all'
+  if (value === 'all' || value === 'dm') return value
   if (!Array.isArray(value)) return []
   return [...new Set(value.map((entry) => text(entry, 160)).filter(Boolean))].slice(0, 8)
 }
@@ -246,6 +253,7 @@ function normalizeHandout(value: unknown): RoomHandout | null {
     authorName,
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
+    authorityReceiptId: text(value.authorityReceiptId, 300) || undefined,
   }
 }
 
@@ -288,6 +296,7 @@ function normalizeSharedNote(value: unknown): RoomSharedNote | null {
     lastEditorName: text(value.lastEditorName, 80) || authorName,
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
+    authorityReceiptId: text(value.authorityReceiptId, 300) || undefined,
   }
 }
 
@@ -307,6 +316,13 @@ export function normalizeSharedRoomJournal(value: unknown): SharedRoomJournalSta
       .map(normalizeSharedNote)
       .filter((entry): entry is RoomSharedNote => entry !== null)
       .slice(-ROOM_SHARED_NOTE_LIMIT),
+    authorityMutationReceipts: (Array.isArray(source.authorityMutationReceipts)
+      ? source.authorityMutationReceipts
+      : []
+    )
+      .map((entry) => text(entry, 300))
+      .filter(Boolean)
+      .slice(-512),
     updatedAt: timestamp(source.updatedAt),
   }
 }

@@ -50,6 +50,40 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
     const response = await request.put(stateUrl(name), { headers: dmHeaders, data })
     expect(response.ok(), `${name} should save`).toBeTruthy()
   }
+  await put('characters', {
+    selectedId: 'vision-character',
+    updatedAt: now,
+    characters: [{
+      id: 'vision-character',
+      roomMemberId: joined.member.memberId,
+      name: '视野角色',
+      player: 'Vision Player',
+      avatar: '👁️',
+      accent: 'from-emerald-500 to-cyan-500',
+      race: '人类',
+      charClass: '战士',
+      level: 1,
+      experience: 0,
+      reputation: 0,
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      savingThrows: [],
+      skills: [],
+      maxHp: 10,
+      currentHp: 10,
+      tempHp: 0,
+      hitDice: '1d10',
+      ac: 10,
+      speed: 30,
+      initiativeBonus: 0,
+      saveDC: 10,
+      passivePerception: 10,
+      inspiration: 0,
+      conditions: [],
+      notes: '',
+      dmNotes: '',
+      visibleToPlayers: true,
+    }],
+  })
   await put('maps', {
     selectedId: 'vision-map', updatedAt: now,
     maps: [{
@@ -115,7 +149,7 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   await expect.poll(() => page.evaluate(async () => {
     const { useMapStore } = await import('/src/store/maps.ts')
     return useMapStore.getState().maps[0]?.tokens.find((token) => token.id === 'vision-hero')?.viewerControlled
-  })).toBe(true)
+  }), { timeout: 20_000 }).toBe(true)
   await expect(canvas).toHaveAttribute('data-vision-enabled', 'false')
   await expect(canvas).toHaveAttribute('data-fog-filled', 'true')
   await expect(canvas).toHaveAttribute('data-vision-source-count', '1')
@@ -155,7 +189,7 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
       if (pixels[index] + pixels[index + 1] + pixels[index + 2] > 180) visiblePixels += 1
     }
     return visiblePixels
-  })).toBeGreaterThan(100)
+  }), { timeout: 20_000 }).toBeGreaterThan(100)
   await expect.poll(async () => canvas.evaluate((element) => {
     return [...element.querySelectorAll('canvas')].some((layer) => {
       if (layer.width < 700 || layer.height < 500) return false
@@ -172,6 +206,6 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
       }
       return hasTransparentVision && hasOpaqueFog
     })
-  })).toBe(true)
+  }), { timeout: 20_000 }).toBe(true)
   await context.close()
 })

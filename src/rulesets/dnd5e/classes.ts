@@ -900,7 +900,8 @@ export function dnd5eWizardArcaneRecoveryLevels(level: number): number {
 
 /** 以角色存档中的种族基础速度为基准，应用职业带来的步行速度修正。 */
 export function dnd5eWalkingSpeed(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel'> & Partial<Pick<Character, 'abilities'>>,
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'speed' | 'equipment' | 'dnd5eInventory' | 'exhaustionLevel'> &
+    Partial<Pick<Character, 'abilities' | 'race' | 'dnd5eRaceId'>>,
 ): number {
   const base = Math.max(0, Math.floor(character.speed))
   const armor = character.equipment?.armor?.dnd5e
@@ -913,6 +914,18 @@ export function dnd5eWalkingSpeed(
   if (barbarianLevel >= 5 && !wearingHeavyArmor) speed += 10
   if (monkLevel >= 2 && !hasArmor && !hasShield) {
     speed += dnd5eMonkUnarmoredMovementBonus(monkLevel)
+  }
+  const dwarvenSpeed = [character.race, character.dnd5eRaceId]
+    .filter((value): value is string => typeof value === 'string')
+    .some((value) => /矮人|dwarf/i.test(value))
+  if (
+    wearingHeavyArmor &&
+    armor.kind === 'armor' &&
+    armor.strengthRequirement != null &&
+    (character.abilities?.str ?? 10) < armor.strengthRequirement &&
+    !dwarvenSpeed
+  ) {
+    speed -= 10
   }
   speed += dnd5eEquippedEffectTotal(character, 'speedBonusFeet')
   speed = Math.max(0, speed)

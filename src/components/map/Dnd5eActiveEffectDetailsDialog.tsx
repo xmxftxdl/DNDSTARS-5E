@@ -14,6 +14,21 @@ const BREAK_LABELS = {
 } as const
 
 const ABILITY_LABELS = { str: '力量', dex: '敏捷', con: '体质', int: '智力', wis: '感知', cha: '魅力' } as const
+const DAMAGE_LABELS: Readonly<Record<string, string>> = {
+  acid: '强酸',
+  bludgeoning: '钝击',
+  cold: '寒冷',
+  fire: '火焰',
+  force: '力场',
+  lightning: '闪电',
+  necrotic: '黯蚀',
+  piercing: '穿刺',
+  poison: '毒素',
+  psychic: '心灵',
+  radiant: '光耀',
+  slashing: '挥砍',
+  thunder: '雷鸣',
+}
 
 export default function Dnd5eActiveEffectDetailsDialog({
   targetName,
@@ -47,6 +62,9 @@ export default function Dnd5eActiveEffectDetailsDialog({
                 <div><dt className="text-slate-500">来源</dt><dd className="mt-0.5 text-slate-200">{effect.source.actorName ?? effect.source.label ?? effect.source.rulesId ?? '旧数据 / 未注明'}</dd></div>
                 <div><dt className="text-slate-500">持续</dt><dd className="mt-0.5 inline-flex items-center gap-1 text-slate-200"><Clock3 className="h-3.5 w-3.5 text-violet-300" />{dnd5eActiveEffectRemainingLabel(effect)}</dd></div>
                 {effect.repeatSave ? <div><dt className="text-slate-500">重复豁免</dt><dd className="mt-0.5 text-slate-200">每个目标回合{effect.repeatSave.timing === 'target-turn-start' ? '开始' : '结束'}：{ABILITY_LABELS[effect.repeatSave.ability]} DC {effect.repeatSave.dc}</dd></div> : null}
+                {effect.repeatSave?.damageOnFailure ? <div><dt className="text-slate-500">豁免失败</dt><dd className="mt-0.5 text-slate-200">{effect.repeatSave.damageOnFailure.count}d{effect.repeatSave.damageOnFailure.sides}{effect.repeatSave.damageOnFailure.modifier ? `${effect.repeatSave.damageOnFailure.modifier > 0 ? '+' : ''}${effect.repeatSave.damageOnFailure.modifier}` : ''} {DAMAGE_LABELS[effect.repeatSave.damageOnFailure.type] ?? effect.repeatSave.damageOnFailure.type}伤害</dd></div> : null}
+                {effect.escapeCheck ? <div><dt className="text-slate-500">挣脱</dt><dd className="mt-0.5 text-slate-200">消耗动作，{ABILITY_LABELS[effect.escapeCheck.ability]}{effect.escapeCheck.alternativeAbility ? `或${ABILITY_LABELS[effect.escapeCheck.alternativeAbility]}` : ''}检定 DC {effect.escapeCheck.dc}</dd></div> : null}
+                {effect.modifiers?.flySpeedFeet ? <div><dt className="text-slate-500">飞行速度</dt><dd className="mt-0.5 text-slate-200">{effect.modifiers.flySpeedFeet} 尺</dd></div> : null}
                 <div><dt className="text-slate-500">重复规则</dt><dd className="mt-0.5 text-slate-200">{effect.stackingPolicy}</dd></div>
               </dl>
               {effect.duration.type === 'concentration' ? <p className="mt-3 inline-flex items-center gap-1 rounded bg-sky-500/10 px-2 py-1 text-[11px] text-sky-200"><Link2 className="h-3.5 w-3.5" />来源失去专注时自动解除</p> : null}

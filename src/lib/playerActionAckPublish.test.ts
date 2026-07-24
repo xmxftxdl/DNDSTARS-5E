@@ -23,6 +23,7 @@ describe('publishPlayerActionAckWithSnapshots', () => {
     const map = { id: 'map-1' } as BattleMap
     const saveSharedResource = vi.fn(async (name: string) => {
       calls.push(`save:${name}`)
+      return { status: 'saved' as const, revision: 1 }
     })
     const publishAck = vi.fn(async () => {
       calls.push('publish:ack')
@@ -73,7 +74,7 @@ describe('publishPlayerActionAckWithSnapshots', () => {
   })
 
   it('publishes rejected acknowledgements without saving snapshots', async () => {
-    const saveSharedResource = vi.fn(async () => undefined)
+    const saveSharedResource = vi.fn(async () => ({ status: 'saved' as const, revision: 1 }))
     const publishAck = vi.fn(async () => undefined)
     const ack = makeAck('rejected')
 
@@ -91,5 +92,42 @@ describe('publishPlayerActionAckWithSnapshots', () => {
     expect(saveSharedResource).toHaveBeenCalledTimes(1)
     expect(saveSharedResource).toHaveBeenCalledWith('player-action-ack', ack)
     expect(publishAck).toHaveBeenCalledWith(ack)
+  })
+
+  it('does not publish an accepted ack when an authoritative snapshot conflicts', async () => {
+    const saveSharedResource = vi.fn(async (name: string) => (
+      name === 'maps'
+        ? { status: 'conflict' as const, expectedRevision: 4, currentRevision: 5 }
+        : { status: 'saved' as const, revision: 5 }
+    ))
+    const publishAck = vi.fn(async () => undefined)
+
+    await expect(publishPlayerActionAckWithSnapshots({
+      ack: makeAck('accepted'),
+      snapshots: {
+        characters: [{ id: 'char-1' } as Character],
+        maps: [{ id: 'map-1' } as BattleMap],
+        updatedAt: 123,
+      },
+      saveSharedResource,
+      publishAck,
+    })).rejects.toThrow('authoritative-resource-save-rejected:maps:conflict')
+
+    expect(saveSharedResource).not.toHaveBeenCalledWith('player-action-ack', expect.anything())
+    expect(publishAck).not.toHaveBeenCalled()
+  })
+
+  it('does not publish an ack event when the ack resource itself is rejected', async () => {
+    const ack = makeAck('rejected')
+    const saveSharedResource = vi.fn(async () => ({ status: 'failed' as const }))
+    const publishAck = vi.fn(async () => undefined)
+
+    await expect(publishPlayerActionAckWithSnapshots({
+      ack,
+      saveSharedResource,
+      publishAck,
+    })).rejects.toThrow('authoritative-resource-save-rejected:player-action-ack:failed')
+
+    expect(publishAck).not.toHaveBeenCalled()
   })
 })

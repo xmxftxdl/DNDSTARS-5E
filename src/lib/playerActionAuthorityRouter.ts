@@ -36,6 +36,12 @@ export interface PlayerActionAuthorityPreflightContext {
   initiativeIndex: number
   currentTokenId?: string
   characters: readonly Pick<Character, 'id' | 'roomMemberId'>[]
+  /**
+   * Local table/dev mode has no room identity service. It may accept an action
+   * only when both sides are genuinely unowned; a partially supplied or
+   * mismatched identity remains fail-closed.
+   */
+  allowUnownedLegacySession?: boolean
   processedActionIds: ReadonlySet<string>
   seenActionIds: ReadonlySet<string>
 }
@@ -66,7 +72,17 @@ export function preflightPlayerActionAuthority(
 
   const actorCharacter = context.characters.find((character) => character.id === action.characterId)
   if (!actorCharacter) return { status: 'rejected', reason: 'stale-turn' }
-  if (actorCharacter.roomMemberId && action.roomMemberId !== actorCharacter.roomMemberId) {
+  // 玩家行动必须携带可核验的房间身份；旧角色缺少归属信息时不能退化成
+  // “任何房间成员都可操作”，而应交给 DM 的归属修复流程。
+  const localUnownedCharacter =
+    context.allowUnownedLegacySession === true &&
+    !actorCharacter.roomMemberId &&
+    !action.roomMemberId
+  if (!localUnownedCharacter && (
+    !actorCharacter.roomMemberId ||
+    !action.roomMemberId ||
+    action.roomMemberId !== actorCharacter.roomMemberId
+  )) {
     return { status: 'rejected', reason: 'character-owner-mismatch' }
   }
 

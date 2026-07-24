@@ -269,6 +269,8 @@ export interface Dnd5ePluginFeatureDefinition {
   sourceLabel?: string
   minimumLevel?: number
   automation: Dnd5ePluginAutomationLevel
+  /** Whether this feature may submit a replacement for a successful enemy d20 result. */
+  canModifyEnemyD20?: boolean
   /** 返回 false 时人物卡不能选择，Headless 也会拒绝该特性。 */
   isAvailable?: (character: Character) => boolean
   action?: Dnd5ePluginFeatureAction
@@ -328,6 +330,7 @@ export interface Dnd5ePluginSubclassFeature {
   name: string
   description: string
   automation?: Dnd5ePluginAutomationLevel
+  canModifyEnemyD20?: boolean
   action?: Dnd5ePluginFeatureAction
   declarativeAbility?: DeclarativeSubclassAbilityV1
   automationReasons?: readonly string[]
@@ -567,6 +570,16 @@ function clonePluginItemDefinition(
     }
     if (!(EQUIPMENT_SLOTS as readonly unknown[]).includes(definition.equipment.slot)) {
       throw new Error(`Invalid plugin equipment slot: ${itemId}`)
+    }
+    if (
+      definition.equipment.baseEquipmentId != null &&
+      (
+        typeof definition.equipment.baseEquipmentId !== 'string' ||
+        !definition.equipment.baseEquipmentId.trim() ||
+        definition.equipment.baseEquipmentId.length > 160
+      )
+    ) {
+      throw new Error(`Invalid plugin base equipment id: ${itemId}`)
     }
     const effects = definition.equipment.effects
     if (effects) {
@@ -1241,6 +1254,9 @@ export function registerDnd5eRulesPlugin(
       if (!['full', 'partial', 'manual'].includes(definition.automation)) {
         throw new Error(`Invalid plugin feature automation level: ${featureId}`)
       }
+      if (definition.canModifyEnemyD20 != null && typeof definition.canModifyEnemyD20 !== 'boolean') {
+        throw new Error(`Invalid enemy d20 modifier declaration: ${featureId}`)
+      }
       if (definition.sourceLabel != null && typeof definition.sourceLabel !== 'string') {
         throw new Error(`Invalid plugin feature source label: ${featureId}`)
       }
@@ -1437,6 +1453,7 @@ export function registerDnd5eRulesPlugin(
           description: feature.description,
           minimumLevel: feature.level,
           automation: feature.automation ?? (feature.action ? 'full' : 'manual'),
+          canModifyEnemyD20: feature.canModifyEnemyD20,
           action: feature.action,
           sourceClassId: definition.classId,
           sourceSubclassId: subclassId,
@@ -1556,6 +1573,7 @@ export function registerDnd5eRulesPlugin(
           name: ability.name,
           description: ability.description,
           automation: compatibility.effective,
+          canModifyEnemyD20: ability.canModifyEnemyD20 === true,
           action,
           declarativeAbility: structuredClone(ability),
           automationReasons: [...compatibility.reasons],
@@ -2134,6 +2152,15 @@ export function dnd5ePluginFeaturesAvailableForCharacter(
 ): readonly RegisteredDnd5ePluginFeature[] {
   return registeredDnd5ePluginFeatures().filter((feature) =>
     dnd5ePluginFeatureAvailableForCharacter(feature, character),
+  )
+}
+
+export function dnd5eEnemyD20ModifierFeaturesForCharacter(
+  character: Character,
+): readonly RegisteredDnd5ePluginFeature[] {
+  return registeredDnd5ePluginFeatures().filter((feature) =>
+    feature.canModifyEnemyD20 === true &&
+    dnd5eCharacterHasPluginFeature(character, feature.id),
   )
 }
 

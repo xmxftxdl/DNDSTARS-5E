@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DND5E_SRD_COMBAT_SPELLS } from './spells'
+import { DND5E_SRD_COMBAT_SPELLS, dnd5eSpellDiceCount, getDnd5eSrdCombatSpell } from './spells'
 import { DND5E_SRD_SPELL_CATALOG, dnd5eBardMagicalSecretsOptions, dnd5eSrdSpellCatalogForClass, dnd5eWarlockMysticArcanumOptions, getDnd5eSrdSpellCatalogEntry } from './spellCatalog'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
 
@@ -43,13 +43,21 @@ describe('official SRD 5.1 spell-list catalog', () => {
   })
 
   it('requires every mechanically implemented combat spell to agree with the official catalog', () => {
-    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(73)
+    expect(DND5E_SRD_COMBAT_SPELLS).toHaveLength(84)
     for (const spell of DND5E_SRD_COMBAT_SPELLS) {
       const catalog = getDnd5eSrdSpellCatalogEntry(spell.id)
       expect(catalog, spell.id).toBeDefined()
       expect(spell.level, spell.id).toBe(catalog?.level)
       expect([...spell.classes].sort(), spell.id).toEqual([...(catalog?.classes ?? [])].sort())
     }
+  })
+
+  it('keeps Fireball at 8d6 for its base 3rd-level cast and adds only one die at 4th level', () => {
+    const fireball = getDnd5eSrdCombatSpell('fireball')
+    expect(fireball).toBeDefined()
+    if (!fireball) return
+    expect(dnd5eSpellDiceCount(fireball, 7, 3)).toBe(8)
+    expect(dnd5eSpellDiceCount(fireball, 7, 4)).toBe(9)
   })
 
   it('exposes every 2014 Warlock Mystic Arcanum option at its exact spell level with Chinese labels', () => {

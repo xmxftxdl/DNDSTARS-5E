@@ -20,12 +20,102 @@ function character(patch: Partial<Character> = {}): Character {
 
 describe('SRD monster 5e turn planner', () => {
   afterEach(() => setMapGeometryRuntime([]))
-  it('uses a ranged stat-block action without AP movement when the target is in range', () => {
+  it('uses a ranged stat-block action after a legal tactical reposition without AP', () => {
     const goblin = token({ id: 'goblin', label: '哥布林', poolId: 'srd-5.1:goblin', hp: 7, maxHp: 7 })
     const hero = token({ id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero', x: 50, hp: 20, maxHp: 20 })
     const plan = planDnd5eMonsterTurn(map([goblin, hero]), goblin)
-    expect(plan).toMatchObject({ moved: false, attacked: true, actionIndex: 1, attackerTokenId: goblin.id, targetTokenId: hero.id })
+    expect(plan).toMatchObject({ attacked: true, actionIndex: 1, attackerTokenId: goblin.id, targetTokenId: hero.id })
     expect(plan.moveApSpent).toBeUndefined()
+  })
+
+  it('uses Nimble Escape to leave melee reach and make a ranged attack without opportunity risk', () => {
+    const goblin = token({
+      id: 'goblin', label: '地精', poolId: 'srd-5.1:goblin',
+      x: 5, y: 45, hp: 7, maxHp: 7,
+      dnd5eBehaviorPreference: { schemaVersion: 1, style: 'skirmisher' },
+    })
+    const hero = token({
+      id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero',
+      x: 15, y: 45, hp: 20, maxHp: 20,
+    })
+    const battleMap = map([goblin, hero])
+    const plan = planDnd5eMonsterTurn(battleMap, goblin, [character()])
+
+    expect(plan).toMatchObject({
+      moved: true,
+      attacked: true,
+      actionIndex: 1,
+      nimbleEscape: 'disengage',
+      decision: { providerId: 'dnd5e:deterministic-tactical-v2' },
+    })
+    expect(plan.decision?.reasons.join(' ')).toContain('灵巧脱逃')
+
+    const resolved = resolveDnd5eMonsterMapMove({
+      combatId: 'combat',
+      map: battleMap,
+      characters: [character()],
+      initiativeOrder: [
+        { tokenId: goblin.id, label: goblin.label, emoji: '', color: '', roll: 20 },
+        { tokenId: hero.id, label: hero.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: goblin.id,
+      to: plan.newPosition!,
+      nimbleEscape: plan.nimbleEscape,
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok || !resolved.result.ok) return
+    expect(resolved.result.state.combatants[goblin.id]).toMatchObject({
+      disengaged: true,
+      turn: { actionAvailable: true, bonusActionAvailable: false },
+    })
+    expect(resolved.result.events).toContainEqual({
+      type: 'disengage-granted',
+      actorId: goblin.id,
+    })
+
+    const spentEconomy = createDnd5eTurnEconomyCounts('turn', 30)
+    spentEconomy.bonusAction.current = 0
+    expect(planDnd5eMonsterTurn(
+      battleMap,
+      goblin,
+      [character()],
+      { turnEconomy: spentEconomy },
+    ).nimbleEscape).toBeUndefined()
+  })
+
+  it('uses an exact path to a target-specific half-cover firing position', () => {
+    const goblin = token({
+      id: 'goblin', label: '地精', poolId: 'srd-5.1:goblin',
+      x: 5, y: 45, hp: 7, maxHp: 7,
+      dnd5eBehaviorPreference: { schemaVersion: 1, style: 'defensive' },
+    })
+    const hero = token({
+      id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero',
+      x: 155, y: 45, hp: 20, maxHp: 20,
+    })
+    const battleMap = map([goblin, hero])
+    const geometry = createEmptyMapGeometry(battleMap.id, 1)
+    geometry.obstacles.push({
+      id: 'half-cover',
+      kind: 'obstacle',
+      label: '矮石墙',
+      points: [{ x: 45, y: 5 }, { x: 55, y: 5 }, { x: 55, y: 35 }, { x: 45, y: 35 }],
+      blocksVision: false,
+      blocksMovement: true,
+      blocksLineOfEffect: false,
+      cover: 'half',
+      baseHeightFeet: 0,
+      heightFeet: 3,
+      createdAt: 1,
+    })
+    setMapGeometryRuntime([geometry])
+
+    const plan = planDnd5eMonsterTurn(battleMap, goblin, [character()])
+
+    expect(plan).toMatchObject({ moved: true, attacked: true })
+    expect(plan.decision?.reasons.join(' ')).toContain('精确掩护路线')
+    expect(plan.newPosition?.y).toBeLessThan(goblin.y)
   })
 
   it('uses the monster speed and may move and attack in the same 5e turn', () => {
@@ -90,14 +180,20 @@ describe('SRD monster 5e turn planner', () => {
       .toBe(expected)
   })
 
-  it('uses a flying monster\'s fly speed on the two-dimensional battle map', () => {
+  it('uses Dash when flight plus normal movement still cannot reach melee range', () => {
     const bat = token({ id: 'bat', label: '蝙蝠', poolId: 'srd-5.1:bat', x: 5, y: 5, hp: 1, maxHp: 1 })
     const hero = token({ id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero', x: 75, y: 5, hp: 20, maxHp: 20 })
     const battleMap = map([bat, hero])
 
     const plan = planDnd5eMonsterTurn(battleMap, bat)
 
-    expect(plan).toMatchObject({ moved: true, attacked: true, attackerTokenId: bat.id, targetTokenId: hero.id })
+    expect(plan).toMatchObject({
+      moved: true,
+      dashed: true,
+      attacked: false,
+      newElevationFeet: 5,
+      movementMode: 'fly',
+    })
     expect(plan.newPosition?.x).toBe(65)
     const resolved = resolveDnd5eMonsterMapMove({
       combatId: 'combat', map: battleMap, characters: [character()],
@@ -107,11 +203,96 @@ describe('SRD monster 5e turn planner', () => {
       ],
       actorTokenId: bat.id,
       to: plan.newPosition!,
+      targetElevationFeet: plan.newElevationFeet,
+      dash: plan.dashed,
     })
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
-    expect(resolved.result.ok).toBe(true)
-    expect(resolved.distanceFeet).toBe(30)
+    expect(resolved.result).toMatchObject({ ok: true })
+    expect(resolved.distanceFeet).toBe(35)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === bat.id)?.elevationFeet).toBe(5)
+  })
+
+  it('raises a flying monster above a wall before routing across it', () => {
+    const bat = token({
+      id: 'bat', label: '蝙蝠', poolId: 'srd-5.1:bat',
+      x: 5, y: 5, hp: 1, maxHp: 1,
+    })
+    const hero = token({
+      id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero',
+      x: 95, y: 5, hp: 20, maxHp: 20,
+    })
+    const battleMap = map([bat, hero])
+    const geometry = createEmptyMapGeometry(battleMap.id, 1)
+    geometry.walls.push({
+      id: 'wall', kind: 'wall', label: '矮墙',
+      points: [{ x: 40, y: 0 }, { x: 40, y: 100 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    setMapGeometryRuntime([geometry])
+
+    const firstTurn = planDnd5eMonsterTurn(battleMap, bat)
+    expect(firstTurn).toMatchObject({
+      moved: true,
+      attacked: false,
+      movementMode: 'fly',
+      newElevationFeet: 11,
+    })
+
+    const airborneBat = { ...bat, x: 35, elevationFeet: 11 }
+    const airborneMap = { ...battleMap, tokens: [airborneBat, hero] }
+    const crossed = resolveDnd5eMonsterMapMove({
+      combatId: 'combat',
+      map: airborneMap,
+      characters: [character()],
+      initiativeOrder: [
+        { tokenId: bat.id, label: bat.label, emoji: '', color: '', roll: 20 },
+        { tokenId: hero.id, label: hero.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: bat.id,
+      to: { x: 65, y: 5 },
+      targetElevationFeet: 11,
+    })
+    expect(crossed.ok).toBe(true)
+    if (!crossed.ok) return
+    expect(crossed.result).toMatchObject({ ok: true })
+    expect(crossed.application?.map.tokens.find((entry) => entry.id === bat.id)).toMatchObject({
+      x: 65,
+      elevationFeet: 11,
+    })
+  })
+
+  it('uses flight to pursue an airborne target even when walk and fly speeds are equal', () => {
+    const boneDevil = token({
+      id: 'bone-devil',
+      label: '骨魔',
+      poolId: 'srd-5.1:bone-devil',
+      x: 5,
+      y: 5,
+      hp: 142,
+      maxHp: 142,
+    })
+    const airborneHero = token({
+      id: 'airborne-hero',
+      label: '飞行英雄',
+      type: 'player',
+      characterId: 'hero',
+      x: 45,
+      y: 5,
+      elevationFeet: 20,
+      hp: 20,
+      maxHp: 20,
+    })
+
+    const plan = planDnd5eMonsterTurn(map([boneDevil, airborneHero]), boneDevil, [character()])
+
+    expect(plan).toMatchObject({
+      moved: true,
+      movementMode: 'fly',
+      newElevationFeet: 25,
+      targetTokenId: airborneHero.id,
+    })
   })
 
   it('routes around an occupied cell instead of abandoning movement', () => {
@@ -124,6 +305,34 @@ describe('SRD monster 5e turn planner', () => {
     expect(plan).toMatchObject({ moved: true, attacked: true, attackerTokenId: wolf.id, targetTokenId: hero.id })
     expect(plan.newPosition?.x).toBeGreaterThan(wolf.x)
     expect(plan.newPosition?.y).not.toBe(wolf.y)
+  })
+
+  it('uses authoritative Dodge when an enclosed monster has no legal attack or useful movement', () => {
+    const wolf = token({ id: 'wolf', label: '狼', poolId: 'srd-5.1:wolf', x: 5, y: 5, hp: 11, maxHp: 11 })
+    const hero = token({
+      id: 'hero-token', label: '英雄', type: 'player', characterId: 'hero',
+      x: 45, y: 5, hp: 20, maxHp: 20,
+    })
+    const battleMap = { ...map([wolf, hero]), width: 60, height: 10 }
+    const geometry = createEmptyMapGeometry(battleMap.id, 1)
+    geometry.walls.push({
+      id: 'wall', kind: 'wall', label: '封闭墙',
+      points: [{ x: 10, y: 0 }, { x: 10, y: 10 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 20, createdAt: 1,
+    })
+    setMapGeometryRuntime([geometry])
+
+    const plan = planDnd5eMonsterTurn(battleMap, wolf)
+
+    expect(plan).toMatchObject({
+      moved: false,
+      attacked: false,
+      dodged: true,
+      attackerTokenId: wolf.id,
+      targetTokenId: hero.id,
+      decision: { providerId: 'dnd5e:deterministic-tactical-v2' },
+    })
   })
 
   it('makes a turned undead Dash away from the source without attacking', () => {

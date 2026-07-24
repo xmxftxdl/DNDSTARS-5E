@@ -46,8 +46,13 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
         points: [{ x: 120, y: 0 }, { x: 160, y: 0 }],
       }],
       obstacles: [],
-      lights: [],
-      vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'bright' },
+      lights: [{
+        id: 'scene-light', kind: 'light', label: '场景火把',
+        points: [{ x: 100, y: 100 }], enabled: true,
+        brightRadiusFeet: 20, dimRadiusFeet: 20, color: '#fbbf24',
+        elevationFeet: 5, createdAt: 1,
+      }],
+      vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: true, ambientLight: 'darkness' },
       updatedAt: 1,
     }],
   }
@@ -71,6 +76,11 @@ test('Schema V2 geometry synchronizes doors and windows while preserving DM auth
     maps: [{
       doors: [{ id: 'door', hinge: 'end', swing: 'counterclockwise' }],
       windows: [{ id: 'window', windowState: 'closed', cover: 'three-quarters' }],
+      lights: [{
+        id: 'scene-light', points: [{ x: 100, y: 100 }],
+        brightRadiusFeet: 20, dimRadiusFeet: 20, enabled: true,
+      }],
+      vision: { ambientLight: 'darkness' },
     }],
   })
 

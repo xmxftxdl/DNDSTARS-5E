@@ -479,7 +479,7 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
     reasons.push('地图探索记忆结构损坏')
   }
   if (name === COMBAT_STATISTICS_RESOURCE && !normalizeSharedCombatStatistics(input)) {
-    reasons.push('战斗统计资源结构损坏')
+    reasons.push('进阶数据资源结构损坏')
   }
   if (name === GROUP_ABILITY_CHECK_RESOURCE && !validateSharedGroupAbilityChecks(input)) {
     reasons.push('群体检定资源结构损坏')
@@ -502,6 +502,18 @@ export function validateAndMigrateSharedResource(name: string, input: unknown): 
   }
   if (name === 'room-journal' && (!Array.isArray(input.campaignEntries) || !Array.isArray(input.sharedNotes))) {
     reasons.push('讲义资源缺少 campaignEntries 或 sharedNotes 数组')
+  }
+  if (
+    name === 'room-journal' &&
+    input.authorityMutationReceipts != null &&
+    (
+      !Array.isArray(input.authorityMutationReceipts) ||
+      input.authorityMutationReceipts.length > 512 ||
+      input.authorityMutationReceipts.some((receipt) =>
+        typeof receipt !== 'string' || !receipt.trim() || receipt.length > 300)
+    )
+  ) {
+    reasons.push('讲义权威事务收据损坏')
   }
   if (input.updatedAt != null && (!Number.isFinite(input.updatedAt) || Number(input.updatedAt) < 0)) {
     reasons.push('updatedAt 不是有效时间戳')

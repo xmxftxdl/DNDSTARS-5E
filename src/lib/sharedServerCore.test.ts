@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as sharedServerCore from '../../scripts/shared-server-core.mjs'
+import { parseCombatPresentationEvent } from './combatPresentation'
 import {
   EVENT_BACKLOG_LIMIT,
   EVENT_CHANNEL_LIMIT,
@@ -84,16 +85,104 @@ describe('member-specific shared state projections', () => {
     expect(projected.characters[2]).not.toHaveProperty('equipment')
   })
 
-  it('never projects hidden scene triggers or queued DM actions to a player', () => {
+  it('projects only public interaction markers while hiding checks, rewards, triggers, and runtime', () => {
     const projected = projectSceneOrchestrationForPlayer({
       schemaVersion: 1,
-      scenes: [{ id: 'scene', mapId: 'map', triggers: [{ id: 'ambush', actions: [{ kind: 'whisper', text: 'secret' }] }] }],
+      scenes: [{
+        id: 'scene',
+        mapId: 'map',
+        name: 'Library',
+        createdAt: 1,
+        updatedAt: 2,
+        interactionPoints: [
+          {
+            id: 'bookshelf',
+            name: '旧书柜',
+            enabled: true,
+            visibleToPlayers: true,
+            icon: 'bookshelf',
+            x: 20,
+            y: 30,
+            interactionRadiusFeet: 5,
+            prompt: '调查书柜。',
+            repeat: 'per-character',
+            check: { label: '调查', selection: 'skill:investigation', dc: 18, mode: 'normal' },
+            successText: '秘密',
+            failureText: '秘密',
+            rewards: [{ templateId: 'secret-item', quantity: 1, identified: true }],
+            successEffects: [{
+              id: 'secret-handout',
+              kind: 'handout',
+              handoutId: 'dm-only',
+              audience: 'triggering-player',
+            }],
+            failureEffects: [{
+              id: 'trap',
+              kind: 'damage',
+              count: 8,
+              sides: 6,
+              bonus: 0,
+              damageType: 'piercing',
+            }],
+          },
+          {
+            id: 'secret',
+            name: '暗格',
+            enabled: true,
+            visibleToPlayers: false,
+            icon: 'search',
+            x: 99,
+            y: 99,
+            interactionRadiusFeet: 5,
+            prompt: '隐藏',
+            repeat: 'once',
+            check: { label: '调查', selection: 'skill:investigation', dc: 30, mode: 'normal' },
+            successText: '秘密',
+            failureText: '秘密',
+            rewards: [],
+            successEffects: [],
+            failureEffects: [],
+          },
+        ],
+        triggers: [{ id: 'ambush', actions: [{ kind: 'whisper', text: 'secret' }] }],
+      }],
       runtime: { paused: true, pendingRuns: [{ id: 'run' }], receipts: ['secret'], history: [{ summary: 'secret' }] },
       updatedAt: 9,
     })
     expect(projected).toEqual({
       schemaVersion: 1,
-      scenes: [],
+      scenes: [{
+        id: 'scene',
+        mapId: 'map',
+        name: 'Library',
+        description: '',
+        environmentLabel: '',
+        backgroundCue: 'none',
+        backgroundAudioLoop: false,
+        backgroundAudioVolume: 0,
+        boundHandoutIds: [],
+        boundJournalEntryIds: [],
+        interactionPoints: [{
+          id: 'bookshelf',
+          name: '旧书柜',
+          enabled: true,
+          visibleToPlayers: true,
+          icon: 'bookshelf',
+          x: 20,
+          y: 30,
+          interactionRadiusFeet: 5,
+          prompt: '调查书柜。',
+          repeat: 'per-character',
+          successText: '',
+          failureText: '',
+          rewards: [],
+          successEffects: [],
+          failureEffects: [],
+        }],
+        triggers: [],
+        createdAt: 1,
+        updatedAt: 2,
+      }],
       runtime: { paused: false, pendingRuns: [], receipts: [], history: [] },
       updatedAt: 9,
     })
@@ -174,6 +263,8 @@ describe('authoritative campaign time', () => {
     expect(mutateCampaignTimeState(null, {
       operation: 'set-time', displayMode: 'campaign-day', day: 2, hour: 8, minute: 0,
     }, 1, player, context)).toMatchObject({ ok: false, error: 'dm-authority-required' })
+    expect(mutateCampaignTimeState(null, { operation: 'long-rest' }, 1, player, context))
+      .toMatchObject({ ok: false, error: 'dm-authority-required' })
     const result = mutateCampaignTimeState(null, { operation: 'advance', minutes: 60, reason: '旅行' }, 2, host, context)
     expect(result).toMatchObject({
       ok: true,
@@ -456,6 +547,55 @@ describe('room communications authority', () => {
       operation: 'update-shared-note', id: noteId, status: 'done',
     }, 2_300, host, context)).toMatchObject({ ok: true })
   })
+
+  it('deduplicates DM authority journal mutations and keeps receipts private', () => {
+    const receipt = 'scene-interaction:scene:point:character:hero:effect:0'
+    const added = mutateRoomJournalState(null, {
+      operation: 'add-handout',
+      title: '陷阱示意图',
+      body: '墙上的机关结构。',
+      audience: ['player-a'],
+      authorityReceiptId: receipt,
+    }, 3_000, host, context)
+    expect(added).toMatchObject({
+      ok: true,
+      changed: true,
+      next: {
+        authorityMutationReceipts: [receipt],
+      },
+    })
+    if (!added.ok) throw new Error('expected authority journal mutation')
+    expect(mutateRoomJournalState(added.next, {
+      operation: 'add-handout',
+      title: '不应重复',
+      body: '不应重复',
+      audience: ['player-a'],
+      authorityReceiptId: receipt,
+    }, 3_100, host, context)).toMatchObject({ ok: true, changed: false })
+    expect(mutateRoomJournalState(added.next, {
+      operation: 'add-shared-note',
+      kind: 'task',
+      title: '越权任务',
+      body: '',
+      authorityReceiptId: `${receipt}:player`,
+    }, 3_200, player, context)).toMatchObject({ ok: false, status: 403, error: 'dm-only' })
+    const playerProjection = projectRoomJournalForMember(added.next, 'player-a', false)
+    expect(playerProjection).toMatchObject({ authorityMutationReceipts: [] })
+    expect(playerProjection.handouts[0]).not.toHaveProperty('authorityReceiptId')
+  })
+
+  it('keeps DM handout drafts private until an interaction publishes a copy', () => {
+    const draft = mutateRoomJournalState(null, {
+      operation: 'add-handout',
+      title: '未开启的密信',
+      body: '只有触发机关后才能看到。',
+      audience: 'dm',
+    }, 4_000, host, context)
+    expect(draft).toMatchObject({ ok: true, changed: true })
+    if (!draft.ok) throw new Error('expected handout draft')
+    expect(projectRoomJournalForMember(draft.next, 'player-a', false).handouts).toEqual([])
+    expect(projectRoomJournalForMember(draft.next, 'dm-member', true).handouts).toHaveLength(1)
+  })
 })
 
 describe('room lobby allocation', () => {
@@ -687,6 +827,161 @@ describe('map geometry player projection', () => {
     expect(projected.maps[0].tokens[0]).toMatchObject({ id: 'hero', viewerControlled: true })
   })
 
+  it('rejects a requested active character owned by another room member', () => {
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 200, height: 100, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero-a', type: 'player', characterId: 'character-a', x: 10, y: 20 },
+          { id: 'hero-b', type: 'player', characterId: 'character-b', x: 180, y: 20 },
+        ],
+      }],
+    }, geometry, 'character-b', {
+      characters: [
+        { id: 'character-a', roomMemberId: 'member-a' },
+        { id: 'character-b', roomMemberId: 'member-b' },
+      ],
+    }, { memberId: 'member-a' })
+    expect(projected.maps[0].tokens).toEqual([
+      expect.objectContaining({ id: 'hero-a', viewerControlled: true }),
+      expect.objectContaining({ id: 'hero-b', viewerControlled: false }),
+    ])
+  })
+
+  it('uses wall openings, target footprint, and three-dimensional eye height in server visibility', () => {
+    const wall = {
+      ...common, id: 'wall', kind: 'wall',
+      points: [{ x: 50, y: 0 }, { x: 50, y: 100 }],
+    }
+    const door = {
+      ...common, id: 'door', kind: 'door', parentWallId: 'wall', parentWallSegmentIndex: 0,
+      points: [{ x: 50, y: 40 }, { x: 50, y: 60 }], state: 'open', secret: false,
+    }
+    const makeGeometry = (patch: Record<string, unknown> = {}) => ({
+      schemaVersion: 2, updatedAt: 1,
+      maps: [{
+        mapId: 'map-1', walls: [wall], doors: [door], windows: [], obstacles: [],
+        vision: { enabled: true, defaultRangeFeet: 120, sharePartyVision: false, ambientLight: 'bright' },
+        updatedAt: 1,
+        ...patch,
+      }],
+    })
+    const project = (target: Record<string, unknown>, geometryPatch: Record<string, unknown> = {}) =>
+      sharedServerCore.projectMapsForPlayer({
+        maps: [{
+          id: 'map-1', width: 200, height: 120, gridSize: 10, feetPerCell: 5,
+          tokens: [
+            { id: 'hero', type: 'player', characterId: 'character-1', size: 1, x: 10, y: 50 },
+            { id: 'target', type: 'enemy', size: 1, x: 90, y: 50, ...target },
+          ],
+        }],
+      }, makeGeometry(geometryPatch), 'character-1').maps[0].tokens
+
+    expect(project({}).map((token: { id: string }) => token.id)).toContain('target')
+    expect(project({}, { doors: [{ ...door, state: 'closed' }] }).map((token: { id: string }) => token.id))
+      .not.toContain('target')
+    expect(project({ elevationFeet: 15 }, { doors: [] }).map((token: { id: string }) => token.id))
+      .toContain('target')
+    expect(project({ size: 4, y: 5 }, { doors: [], walls: [{ ...wall, points: [{ x: 50, y: 25 }, { x: 50, y: 100 }] }] })
+      .map((token: { id: string }) => token.id)).toContain('target')
+  })
+
+  it('uses the same height-aware magical darkness rules as the client mask', () => {
+    const darknessGeometry = {
+      schemaVersion: 2,
+      updatedAt: 1,
+      maps: [{
+        mapId: 'map-1',
+        walls: [],
+        doors: [],
+        windows: [],
+        obstacles: [{
+          ...common,
+          id: 'darkness',
+          kind: 'obstacle',
+          points: [{ x: 65, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 35 }, { x: 65, y: 35 }],
+          blocksVision: false,
+          blocksMovement: false,
+          blocksLineOfEffect: false,
+          magicalDarkness: true,
+          darknessSpellLevel: 2,
+          heightFeet: 10,
+        }],
+        vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: false, ambientLight: 'bright' },
+        updatedAt: 1,
+      }],
+    }
+    const project = (viewer: Record<string, unknown>, target: Record<string, unknown>) =>
+      sharedServerCore.projectMapsForPlayer({
+        maps: [{
+          id: 'map-1', width: 120, height: 60, gridSize: 10, feetPerCell: 5,
+          tokens: [
+            { id: 'hero', type: 'player', characterId: 'character-1', x: 10, y: 20, ...viewer },
+            { id: 'target', type: 'enemy', x: 80, y: 20, ...target },
+          ],
+        }],
+      }, darknessGeometry, 'character-1').maps[0].tokens
+
+    expect(project({}, {}).map((token: { id: string }) => token.id)).not.toContain('target')
+    expect(project({}, { elevationFeet: 15 }).map((token: { id: string }) => token.id)).toContain('target')
+    expect(project({ truesightRangeFeet: 60 }, {}).map((token: { id: string }) => token.id)).toContain('target')
+  })
+
+  it('raises a scene light to its terrain surface before tracing over a low wall', () => {
+    const elevatedLightGeometry = {
+      schemaVersion: 2,
+      updatedAt: 1,
+      maps: [{
+        mapId: 'map-1',
+        walls: [{
+          ...common,
+          id: 'low-wall',
+          kind: 'wall',
+          points: [{ x: 50, y: 0 }, { x: 50, y: 60 }],
+          heightFeet: 10,
+        }],
+        doors: [],
+        windows: [],
+        obstacles: [{
+          ...common,
+          id: 'light-platform',
+          kind: 'obstacle',
+          blocksVision: false,
+          blocksMovement: false,
+          blocksLineOfEffect: false,
+          points: [{ x: 5, y: 5 }, { x: 35, y: 5 }, { x: 35, y: 35 }, { x: 5, y: 35 }],
+          terrainElevationFeet: 20,
+          heightFeet: 0,
+        }],
+        lights: [{
+          id: 'lamp',
+          kind: 'light',
+          label: '高台灯',
+          points: [{ x: 20, y: 20 }],
+          enabled: true,
+          brightRadiusFeet: 30,
+          dimRadiusFeet: 0,
+          color: '#ffffff',
+          elevationFeet: 0,
+          createdAt: 1,
+        }],
+        vision: { enabled: true, defaultRangeFeet: 60, sharePartyVision: false, ambientLight: 'darkness' },
+        updatedAt: 1,
+      }],
+    }
+    const projected = sharedServerCore.projectMapsForPlayer({
+      maps: [{
+        id: 'map-1', width: 120, height: 60, gridSize: 10, feetPerCell: 5,
+        tokens: [
+          { id: 'hero', type: 'player', characterId: 'character-1', x: 80, y: 20 },
+          { id: 'target', type: 'enemy', x: 70, y: 20 },
+        ],
+      }],
+    }, elevatedLightGeometry, 'character-1')
+
+    expect(projected.maps[0].tokens.map((token: { id: string }) => token.id)).toContain('target')
+  })
+
   it('projects the controlled player token even when the client character store has not loaded yet', () => {
     const projected = sharedServerCore.projectMapsForPlayer({
       maps: [{
@@ -810,6 +1105,94 @@ describe('map geometry player projection', () => {
       })
     expect(normalizeCombatPresentationEvent({ ...payload, spellId: 'unknown' }, { role: 'dm' }, timestamp))
       .toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('authors bounded Fireball presentation events with an authoritative lifetime', () => {
+    const timestamp = 30_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'fireball-transaction-1',
+      type: 'spell-area-projectile',
+      mapId: 'map-1',
+      transactionId: 'transaction-1',
+      spellId: 'fireball',
+      sourceTokenId: 'wizard',
+      casterName: '星辉法师',
+      spellName: '火球术',
+      castingClassId: 'wizard',
+      targetCell: { col: 12, row: 8 },
+      radiusFeet: 20,
+      createdAt: 1,
+      expiresAt: 999_999,
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+    expect(normalized).toEqual({
+        ok: true,
+        event: {
+          schemaVersion: 1,
+          id: payload.id,
+          type: payload.type,
+          mapId: payload.mapId,
+          transactionId: payload.transactionId,
+          spellId: payload.spellId,
+          sourceTokenId: payload.sourceTokenId,
+          casterName: payload.casterName,
+          spellName: payload.spellName,
+          castingClassId: payload.castingClassId,
+          targetCell: payload.targetCell,
+          radiusFeet: payload.radiusFeet,
+          createdAt: timestamp,
+          animationStartsAt: timestamp + 1_000,
+          expiresAt: timestamp + 3_500,
+        },
+      })
+    if (!normalized.ok) throw new Error('expected Fireball presentation normalization')
+    expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, targetCell: { col: -1, row: 8 } },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, radiusFeet: 201 },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('authors DM-only kill-streak presentations with authoritative timing', () => {
+    const timestamp = 36_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'combat-1:2:1:wizard:kill-streak',
+      type: 'kill-streak',
+      mapId: 'map-1',
+      transactionId: 'combat-1:2:1:wizard',
+      sourceTokenId: 'wizard',
+      actorName: '星辉法师',
+      classId: 'wizard',
+      style: 'arcane',
+      killCount: 3,
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    expect(normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp))
+      .toEqual({
+        ok: true,
+        event: {
+          ...payload,
+          createdAt: timestamp,
+          bannerStartsAt: timestamp + 650,
+          expiresAt: timestamp + 5_800,
+        },
+      })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, killCount: 2 },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
   })
 
   it('applies scene lights in dynamic darkness but ignores ambient lighting when only manual fog is enabled', () => {
@@ -1049,7 +1432,10 @@ describe('map geometry player projection', () => {
   it('projects an opened hidden door as an anonymous non-interactive wall opening', () => {
     const opened = structuredClone(geometry)
     Object.assign(opened.maps[0].doors[0], {
-      state: 'open',
+      state: 'closed',
+      openState: 'open',
+      lockState: 'unlocked',
+      physicalState: 'intact',
       parentWallId: 'wall-1',
       parentWallSegmentIndex: 0,
       points: [{ x: 50, y: 20 }, { x: 50, y: 40 }],
@@ -1126,6 +1512,39 @@ describe('map geometry player projection', () => {
       }],
     }
     expect(validateSharedStateShape('map-geometry', v2)).toEqual({ ok: true })
+    const v3 = {
+      ...v2,
+      schemaVersion: 3,
+      maps: [{
+        ...v2.maps[0],
+        walls: [{
+          ...v2.maps[0].walls[0],
+          edgeIds: ['edge-1'],
+        }],
+        doors: [{
+          ...common,
+          id: 'stable-door',
+          kind: 'door',
+          points: [{ x: 50, y: 20 }, { x: 50, y: 40 }],
+          state: 'closed',
+          openState: 'closed',
+          lockState: 'unlocked',
+          physicalState: 'intact',
+          secret: false,
+          wallEdgeId: 'edge-1',
+          startT: 0.2,
+          endT: 0.4,
+        }],
+      }],
+    }
+    expect(validateSharedStateShape('map-geometry', v3)).toEqual({ ok: true })
+    expect(validateSharedStateShape('map-geometry', {
+      ...v3,
+      maps: [{
+        ...v3.maps[0],
+        doors: [{ ...v3.maps[0].doors[0], wallEdgeId: 'missing-edge' }],
+      }],
+    })).toMatchObject({ ok: false, reason: 'invalid-map-geometry-relationships' })
     expect(validateSharedStateShape('map-geometry', {
       ...v2,
       maps: [{ ...v2.maps[0], lights: undefined }],
@@ -1181,6 +1600,12 @@ describe('P0 shared state boundary', () => {
       loop: false, volume: 0.7, fadeMs: 0, updatedAt: 1,
     })).toMatchObject({ ok: true })
     expect(validateSharedStateShape('spellbook', { spells: 'broken' })).toMatchObject({ ok: false })
+    expect(validateSharedStateShape('room-journal', {
+      handouts: [],
+      campaignEntries: [],
+      sharedNotes: [],
+      authorityMutationReceipts: [''],
+    })).toMatchObject({ ok: false, reason: 'invalid-journal-authority-receipts' })
     expect(validateSharedStateShape('custom-monsters', { monsters: 'broken' })).toMatchObject({ ok: false })
     expect(validateSharedStateShape('custom-monsters', { schemaVersion: 1, monsters: [{ id: 'forged' }] })).toMatchObject({
       ok: false,
@@ -1243,6 +1668,30 @@ describe('P0 shared state boundary', () => {
       updatedAt: 2,
     }
     expect(validateSharedStateShape('combat-statistics', state)).toEqual({ ok: true })
+    const analyticsCombatant = {
+      ...combatant,
+      characterId: 'character-fighter',
+      turnsTaken: 2,
+      turnTrackedDamageDealt: 10,
+      turnTrackedHealingDone: 0,
+      combatD20FaceCounts: Array.from({ length: 20 }, (_, index) => index === 19 ? 1 : 0),
+    }
+    expect(validateSharedStateShape('combat-statistics', {
+      ...state,
+      schemaVersion: 3,
+      sessions: [{
+        ...state.sessions[0],
+        combatants: { fighter: analyticsCombatant },
+      }],
+    })).toEqual({ ok: true })
+    expect(validateSharedStateShape('combat-statistics', {
+      ...state,
+      schemaVersion: 3,
+      sessions: [{
+        ...state.sessions[0],
+        combatants: { fighter: { ...analyticsCombatant, combatD20FaceCounts: [1, 2] } },
+      }],
+    })).toMatchObject({ ok: false, reason: 'invalid-combat-statistics' })
     const experienceSettlement = {
       combatId: 'combat', mapId: 'map', mode: 'even', totalXp: 50, awardedXp: 50, settledAt: 3,
       defeatedMonsters: [{ tokenId: 'goblin', name: '哥布林', monsterId: 'srd-5.1:goblin', challengeRating: '1/4', xp: 50 }],
@@ -1380,7 +1829,13 @@ describe('room isolation and access security', () => {
 
 const mutateCombatInterruptQueue = (
   sharedServerCore as unknown as {
-    mutateCombatInterruptQueue: (queue: unknown, mutation: unknown, now?: number, authorityRole?: 'open' | 'dm' | 'player') => {
+    mutateCombatInterruptQueue: (
+      queue: unknown,
+      mutation: unknown,
+      now?: number,
+      authorityRole?: 'open' | 'dm' | 'player',
+      authorityCharacterIds?: string[],
+    ) => {
       ok: boolean
       status?: number
       error?: string
@@ -1467,6 +1922,9 @@ describe('combat interrupt atomic mutation', () => {
       maps: [{ id: 'map', tokens: [{ id: 'monster', portraitImageId: '../private' }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-token-portrait-image' })
     expect(validateSharedStateShape('maps', {
+      maps: [{ id: 'map', tokens: [{ id: 'monster', visualVariantId: '../private' }] }],
+    })).toMatchObject({ ok: false, reason: 'invalid-token-visual-variant' })
+    expect(validateSharedStateShape('maps', {
       maps: [{ id: 'map', tokens: [{ id: 'summon', dnd5eSummon: { ...summon, expiresAfterRound: 14_401 } }] }],
     })).toMatchObject({ ok: false, reason: 'invalid-dnd5e-summon' })
     expect(validateSharedStateShape('maps', {
@@ -1493,15 +1951,18 @@ describe('combat interrupt atomic mutation', () => {
       mapId: 'map-1', revision: 1, updatedAt: 100,
       interrupts: [{
         id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
-        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: { originalValue: 7 }, createdAt: 1, updatedAt: 1,
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm', payload: {
+          originalValue: 7,
+          eligibleModifiers: [{ characterId: 'wizard', featureId: 'portent', featureLabel: '预兆' }],
+        }, createdAt: 1, updatedAt: 1,
       }],
     }
     const result = mutateCombatInterruptQueue(queue, {
       operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
         id: 'confirm:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
-        featureLabel: '预兆', dieIndex: 0, replacementValue: 17, createdAt: 150,
+        featureId: 'portent', featureLabel: '预兆', dieIndex: 0, replacementValue: 17, createdAt: 150,
       },
-    }, 200)
+    }, 200, 'player', ['wizard'])
     expect(result).toMatchObject({ ok: true, changed: true, next: { revision: 2 } })
     expect((result.next.interrupts[0] as { contributions?: unknown[] }).contributions).toEqual([
       expect.objectContaining({ characterId: 'wizard', replacementValue: 17 }),
@@ -1515,6 +1976,81 @@ describe('combat interrupt atomic mutation', () => {
         featureLabel: '幸运', dieIndex: 0, replacementValue: 20, createdAt: 220,
       },
     }, 220)).toMatchObject({ ok: false, status: 409 })
+  })
+
+  it('rejects a roll replacement from a character or feature not declared by the Host', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm',
+        payload: {
+          originalValue: 12,
+          eligibleModifiers: [{ characterId: 'wizard', featureId: 'portent', featureLabel: '预兆' }],
+        },
+        createdAt: 1, updatedAt: 1,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:rogue', kind: 'replace-d20', characterId: 'rogue', characterName: '游荡者',
+        featureId: 'luck', featureLabel: '幸运', dieIndex: 0, replacementValue: 1, createdAt: 150,
+      },
+    }, 200, 'player', ['rogue'])).toMatchObject({
+      ok: false,
+      status: 403,
+      error: 'ineligible-roll-modifier',
+    })
+  })
+
+  it('rejects an eligible roll modifier submitted through a different player identity', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm',
+        payload: {
+          originalValue: 12,
+          eligibleModifiers: [{ characterId: 'wizard', featureId: 'portent', featureLabel: '预兆' }],
+        },
+        createdAt: 1, updatedAt: 1,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:wizard', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+        featureId: 'portent', featureLabel: '预兆', dieIndex: 0, replacementValue: 1, createdAt: 150,
+      },
+    }, 200, 'player', ['rogue'])).toMatchObject({
+      ok: false,
+      status: 403,
+      error: 'character-ownership-required',
+    })
+  })
+
+  it('prevents one player contribution from replacing another contribution id', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'confirm', transactionId: 'roll-1', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm',
+        payload: {
+          originalValue: 12,
+          eligibleModifiers: [{ characterId: 'wizard', featureId: 'portent', featureLabel: '预兆' }],
+        },
+        createdAt: 1, updatedAt: 1,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'contribute', mapId: 'map-1', id: 'confirm', contribution: {
+        id: 'confirm:rogue', kind: 'replace-d20', characterId: 'wizard', characterName: '先知',
+        featureId: 'portent', featureLabel: '预兆', dieIndex: 0, replacementValue: 1, createdAt: 150,
+      },
+    }, 200, 'player', ['wizard'])).toMatchObject({
+      ok: false,
+      status: 400,
+      error: 'invalid-contribution-id',
+    })
   })
 
   it('accepts plugin and roll-confirmation Interrupt kinds at the shared boundary', () => {
@@ -1575,6 +2111,38 @@ describe('combat interrupt atomic mutation', () => {
         decision: 'continue', finalValue: 18, acceptedContributionId: 'confirm:wizard',
       },
     }, 200, 'dm')).toMatchObject({ ok: true, changed: true })
+  })
+
+  it('allows only the DM to override an explicitly editable hidden d20', () => {
+    const queue = {
+      mapId: 'map-1', revision: 1, updatedAt: 100,
+      interrupts: [{
+        id: 'secret', transactionId: 'roll-secret', mapId: 'map-1', kind: 'roll-confirmation',
+        status: 'pending', phase: 'after-roll', timeoutPolicy: 'wait-for-dm',
+        payload: { originalValue: 4, visibility: 'dm-only', allowDmOverride: true },
+        createdAt: 1, updatedAt: 1,
+      }],
+    }
+    expect(mutateCombatInterruptQueue(queue, {
+      operation: 'answer', mapId: 'map-1', id: 'secret',
+      response: { decision: 'continue', finalValue: 18, dmOverrideApplied: true },
+    }, 200, 'dm')).toMatchObject({ ok: true, changed: true })
+
+    const publicQueue = {
+      ...queue,
+      interrupts: queue.interrupts.map((interrupt) => ({
+        ...interrupt,
+        payload: { originalValue: 4, visibility: 'public', allowDmOverride: false },
+      })),
+    }
+    expect(mutateCombatInterruptQueue(publicQueue, {
+      operation: 'answer', mapId: 'map-1', id: 'secret',
+      response: { decision: 'continue', finalValue: 18 },
+    }, 200, 'dm')).toMatchObject({
+      ok: false,
+      status: 409,
+      error: 'roll-confirmation-value-conflict',
+    })
   })
 
   it('normalizes a newly published roll confirmation to an open DM-owned window', () => {
@@ -1949,7 +2517,7 @@ describe('enforceImageQuota — AC4 配额', () => {
     expect(remaining.length).toBe(IMAGE_COUNT_LIMIT)
     // 最旧的 5 张（img000..img004）被删。
     expect(removed.sort()).toEqual(['img000', 'img001', 'img002', 'img003', 'img004'])
-  })
+  }, 20_000)
 
   it('未超配额不删任何图片', async () => {
     await writeFile(path.join(dir, 'only'), Buffer.from('x'))

@@ -55,6 +55,52 @@ describe('战斗结果提交协调器', () => {
     expect(receipt).toEqual({ mapId: 'map', characterIds: ['hero'], tokenIds: ['token'] })
   })
 
+  it('地图级事务只提交一次完整地图，不暴露半完成 Token/区域状态', () => {
+    const applyCharacter = vi.fn()
+    const applyToken = vi.fn()
+    const applyMap = vi.fn()
+    const application = plan()
+    applyDnd5eCombatResultApplication({
+      application,
+      mapId: 'map',
+      applyCharacter,
+      applyToken,
+      applyMap,
+      applicationMode: 'map',
+    })
+    expect(applyCharacter).toHaveBeenCalledOnce()
+    expect(applyToken).not.toHaveBeenCalled()
+    expect(applyMap).toHaveBeenCalledOnce()
+    expect(applyMap).toHaveBeenCalledWith('map', application.map)
+  })
+
+  it('地图级事务在重复 Token 或缺少地图端口时 fail closed', () => {
+    const duplicate = { id: 'token', label: 'duplicate' } as Token
+    const applyCharacter = vi.fn()
+    const applyMap = vi.fn()
+    expect(() => applyDnd5eCombatResultApplication({
+      application: plan({
+        map: { id: 'map', tokens: [{ id: 'token', label: 'Hero' } as Token, duplicate] } as BattleMap,
+      }),
+      mapId: 'map',
+      applyCharacter,
+      applyToken: vi.fn(),
+      applyMap,
+      applicationMode: 'map',
+    })).toThrow('combat-result-token-duplicate')
+    expect(applyCharacter).not.toHaveBeenCalled()
+    expect(applyMap).not.toHaveBeenCalled()
+
+    expect(() => applyDnd5eCombatResultApplication({
+      application: plan(),
+      mapId: 'map',
+      applyCharacter,
+      applyToken: vi.fn(),
+      applicationMode: 'map',
+    })).toThrow('combat-result-map-application-port-missing')
+    expect(applyCharacter).not.toHaveBeenCalled()
+  })
+
   it('等待两个共享快照完成后才返回，并允许强制保存地图级变化', async () => {
     let resolveCharacters!: () => void
     let resolveMap!: () => void
@@ -79,5 +125,18 @@ describe('战斗结果提交协调器', () => {
     resolveMap()
     await committed
     expect(completed).toBe(true)
+  })
+
+  it('propagates an authoritative persistence rejection to the transaction coordinator', async () => {
+    await expect(commitDnd5eCombatResult({
+      application: plan(),
+      mapId: 'map',
+      applyCharacter: vi.fn(),
+      applyToken: vi.fn(),
+      saveCharacters: async () => {
+        throw new Error('characters-save-rejected:conflict')
+      },
+      saveMap: async () => undefined,
+    })).rejects.toThrow('characters-save-rejected:conflict')
   })
 })

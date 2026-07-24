@@ -224,12 +224,14 @@ test('战斗 XP 在 DM／玩家端同步，刷新重连和重复确认均不会�
     enterRoom(player, PLAYER, joined),
   ])
 
-  await expect(dm.getByTestId('dm-end-combat')).toBeVisible({ timeout: 20_000 })
-  await expect(player.getByTestId('combat-status')).not.toHaveText('未开始', { timeout: 20_000 })
-  await dm.getByTestId('dm-end-combat').click()
   const dialog = dm.getByTestId('combat-experience-dialog')
   await expect(dialog).toBeVisible({ timeout: 20_000 })
   await expect(dialog).toContainText('50 XP')
+  // XP distribution is post-combat DM work. The player must already be out of
+  // combat and must not receive another stale "your turn" presentation while
+  // the settlement dialog remains open.
+  await expect(player.getByTestId('combat-status')).toHaveText('未开始', { timeout: 20_000 })
+  await expect(player.locator('[data-combat-banner="turn"]')).toHaveCount(0)
   const awardButton = dialog.getByRole('button', { name: '确认发放 50 XP' })
   await awardButton.evaluate((button) => {
     button.click()

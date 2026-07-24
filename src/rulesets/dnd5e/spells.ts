@@ -41,6 +41,25 @@ export interface Dnd5eSpellDamageComponentDefinition {
   higherSlotChoice?: boolean
 }
 
+export interface Dnd5eSustainedSpellAttackDefinition {
+  id: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
+  economy: 'action' | 'bonus-action'
+  origin: 'caster' | 'effect-token' | 'persistent-area'
+  resolution?: 'spell-attack' | 'saving-throw'
+  relation?: 'hostile' | 'any'
+  rangeFeet: number
+  movementFeet?: number
+  effectDurationRounds?: number
+  immediateAttack?: boolean
+  dice: {
+    count: number
+    sides: number
+    /** 每跨过这么多环位，伤害骰增加一枚。 */
+    additionalDieEverySlotLevels?: number
+  }
+  damageType: Dnd5eDamageType
+}
+
 export interface Dnd5eSrdSpellDefinition {
   id: string
   name: string
@@ -53,6 +72,8 @@ export interface Dnd5eSrdSpellDefinition {
   target: 'hostile' | 'ally' | 'creature' | 'area'
   effect: Dnd5eSpellEffectKind
   saveAbility?: AbilityKey
+  /** 仅敌对（即不自愿）目标进行该豁免；友方目标视为自愿。 */
+  unwillingSaveAbility?: AbilityKey
   damageOnSuccessfulSave?: 'none' | 'half'
   dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
   damageType?: Dnd5eDamageType
@@ -96,6 +117,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'hold-monster'
     | 'banishment'
     | 'faerie-fire'
+    | 'phantasmal-killer'
   appliedEffect?:
     | 'invisibility'
     | 'greater-invisibility'
@@ -107,6 +129,14 @@ export interface Dnd5eSrdSpellDefinition {
     | 'longstrider'
     | 'mage-armor'
     | 'divine-favor'
+    | 'jump'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'flame-blade'
+  /** 法术持续期间授予的重复攻击。Host 会从 ActiveEffect 中恢复原始施法环位。 */
+  sustainedAttack?: Dnd5eSustainedSpellAttackDefinition
+  enlargeReduceOptions?: readonly ('enlarge' | 'reduce')[]
   effectDamageTypeOptions?: readonly Dnd5eDamageType[]
   effectDurationRounds?: number
   conditionOptions?: readonly ('blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease')[]
@@ -141,12 +171,80 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '触碰一名未穿护甲的自愿生物。法术持续期间，其基础护甲等级为13＋敏捷调整值；穿上护甲时效果提前结束。持续8小时。',
   },
   {
+    id: 'jump', name: '跳跃术', englishName: 'Jump', level: 1, school: '变化',
+    classes: ['druid', 'ranger', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'jump', effectDurationRounds: 10,
+    description: '触碰一个生物。目标的跳跃距离在法术持续期间变为三倍。持续1分钟。',
+  },
+  {
+    id: 'fly', name: '飞行术', englishName: 'Fly', level: 3, school: '变化',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 100,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, appliedEffect: 'fly',
+    description: '触摸一个自愿生物。目标在法术持续期间获得60尺飞行速度。法术结束时，若目标仍在空中且没有其他方式阻止坠落，它会坠落。使用高于3环的法术位施展时，法术位每高一环可额外指定一个目标。需要专注，持续至多10分钟。',
+  },
+  {
+    id: 'heroism', name: '英雄气概', englishName: 'Heroism', level: 1, school: '附魔',
+    classes: ['bard', 'paladin'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, appliedEffect: 'heroism',
+    description: '触碰一个自愿生物并使其充满勇气。法术结束前，目标免疫恐慌，并在自己的每个回合开始时获得等于你施法属性调整值的临时生命值。法术结束时，目标失去由本法术提供的剩余临时生命值。使用高于1环的法术位时，每高一环可额外指定一个生物。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'enlarge-reduce', name: '变巨/缩小术', englishName: 'Enlarge/Reduce', level: 2, school: '变化',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 30,
+    target: 'creature', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
+    unwillingSaveAbility: 'con', appliedEffect: 'enlarge-reduce',
+    enlargeReduceOptions: ['enlarge', 'reduce'],
+    description: '选择一个生物，使其变巨或缩小，持续至多1分钟并需要专注。敌对目标进行体质豁免，成功则不受影响。变巨使体型增大一级、力量检定和力量豁免具有优势，武器攻击额外造成1d4伤害；缩小产生相反的体型与力量效果，武器攻击少造成1d4伤害（最低1点）。物件目标仍由DM裁定。',
+  },
+  {
+    id: 'flame-blade', name: '火焰刀', englishName: 'Flame Blade', level: 2, school: '塑能',
+    classes: ['druid'], castingTime: 'bonus-action', rangeFeet: 0,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 6, bonus: 0 },
+    damageType: 'fire', concentration: true, concentrationDurationRounds: 100,
+    maximumTargets: 1, appliedEffect: 'flame-blade',
+    sustainedAttack: {
+      id: 'flame-blade', economy: 'action', origin: 'caster', rangeFeet: 5,
+      dice: { count: 3, sides: 6, additionalDieEverySlotLevels: 2 },
+      damageType: 'fire',
+    },
+    description: '以附赠动作在空手中唤出一把烈焰刀刃，持续至多10分钟并需要专注。法术持续期间，你可以用动作进行一次近战法术攻击，命中造成3d6火焰伤害。使用4环或更高环法术位施展时，法术位每比2环高两环，伤害增加1d6。',
+  },
+  {
+    id: 'spiritual-weapon', name: '灵体武器', englishName: 'Spiritual Weapon', level: 2, school: '塑能',
+    classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60,
+    target: 'hostile', effect: 'spell-attack',
+    dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'force',
+    addSpellcastingModifier: true, maximumTargets: 1,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
+    sustainedAttack: {
+      id: 'spiritual-weapon', economy: 'bonus-action', origin: 'effect-token',
+      rangeFeet: 5, movementFeet: 20, effectDurationRounds: 10, immediateAttack: true,
+      dice: { count: 1, sides: 8, additionalDieEverySlotLevels: 2 },
+      damageType: 'force',
+    },
+    description: '以附赠动作在射程内创造一把漂浮的灵体武器，持续1分钟。施法时可对武器5尺内的一个生物进行近战法术攻击，命中造成1d8＋施法属性调整值的力场伤害。此后每个你的回合中，可以用附赠动作让武器移动至多20尺，并再次攻击武器5尺内的一个生物。使用4环或更高环法术位施展时，法术位每比2环高两环，伤害增加1d8。',
+  },
+  {
     id: 'grease', name: '油腻术', englishName: 'Grease', level: 1, school: '咒法',
     classes: ['wizard'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'persistent-area',
     dice: { count: 0, sides: 4, bonus: 0 }, effectDurationRounds: 10,
     maximumTargets: 100, areaIncludesSelf: true,
     area: { shape: 'rect', origin: 'point', widthFeet: 10, heightFeet: 10, placeRangeFeet: 60 },
     description: '滑腻油脂覆盖射程内一点为中心的10尺方形地面，持续1分钟。区域成为困难地形。油脂出现时，站在区域内的每个生物必须进行敏捷豁免，失败则倒地。生物进入区域或在其中结束回合时，也必须进行同样的豁免。',
+  },
+  {
+    id: 'entangle', name: '纠缠术', englishName: 'Entangle', level: 1, school: '咒法',
+    classes: ['druid'], castingTime: 'action', rangeFeet: 90, target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    description: '射程内一点起始的20尺方形地面长出缠绕植物，持续至多1分钟并需要专注。区域成为困难地形。施法时位于区域内的生物进行力量豁免，失败则被束缚。被束缚的生物可以用一个动作进行力量检定，对抗你的法术豁免DC，成功则挣脱。',
   },
   {
     id: 'dispel-magic', name: '解除魔法', englishName: 'Dispel Magic', level: 3, school: '防护',
@@ -188,6 +286,21 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '在射程内一点创造一道半径5尺、高40尺的银白光柱，持续至多1分钟并需要专注。生物在一个回合内第一次进入光柱或在其中开始回合时进行体质豁免；失败受到2d10光耀伤害，成功减半。每使用高于2环一环的法术位，伤害增加1d10。施法后的每个你的回合中，可以用动作将光柱向任意方向移动至多60尺。',
   },
   {
+    id: 'call-lightning', name: '召雷术', englishName: 'Call Lightning', level: 3, school: '咒法',
+    classes: ['druid'], castingTime: 'action', rangeFeet: 120, target: 'area',
+    effect: 'saving-throw', saveAbility: 'dex', damageOnSuccessfulSave: 'half',
+    dice: { count: 3, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'lightning',
+    concentration: true, concentrationDurationRounds: 100, maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'circle', origin: 'point', radiusFeet: 5, placeRangeFeet: 60 },
+    sustainedAttack: {
+      id: 'call-lightning', economy: 'action', origin: 'persistent-area',
+      resolution: 'saving-throw', relation: 'any', rangeFeet: 60, immediateAttack: true,
+      dice: { count: 3, sides: 10, additionalDieEverySlotLevels: 1 },
+      damageType: 'lightning',
+    },
+    description: '在你正上方唤出半径60尺、高10尺的风暴云，持续至多10分钟并需要专注。施法时以及之后每个你的回合中，你可以用动作选择云下方一点；该点5尺内的每个生物进行敏捷豁免，失败受到3d10闪电伤害，成功减半。每使用高于3环一环的法术位，伤害增加1d10。室内空间限制与室外暴风天气的额外1d10伤害由DM依据场景裁定。',
+  },
+  {
     id: 'faerie-fire', name: '妖火', englishName: 'Faerie Fire', level: 1, school: '塑能',
     classes: ['bard', 'druid'], castingTime: 'action', rangeFeet: 60, target: 'area', effect: 'saving-throw', saveAbility: 'dex',
     dice: { count: 0, sides: 4, bonus: 0 }, concentration: true, concentrationDurationRounds: 10,
@@ -195,6 +308,39 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 60 },
     onFailedSaveEffect: 'faerie-fire',
     description: '指定60尺内一处20尺立方区域。区域内生物进行敏捷豁免；失败者被光包围，无法受益于隐形，且能看见它的攻击者对其攻击具有优势。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'phantasmal-killer', name: '魅影杀手', englishName: 'Phantasmal Killer', level: 4, school: '幻术',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 10, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10, maximumTargets: 1,
+    onFailedSaveEffect: 'phantasmal-killer',
+    description: '深入射程内一个生物的梦魇，使其进行感知豁免。失败时，目标在法术持续期间陷入恐慌。目标在自己的每个回合结束时重复豁免；失败受到4d10心灵伤害，成功则法术结束。每使用高于4环一环的法术位，伤害增加1d10。需要专注，持续至多1分钟。',
+  },
+  {
+    id: 'black-tentacles', name: '黑触手', englishName: 'Black Tentacles', level: 4, school: '咒法',
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 90,
+    target: 'area', effect: 'persistent-area',
+    dice: { count: 0, sides: 6, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: { shape: 'rect', origin: 'point', widthFeet: 20, heightFeet: 20, placeRangeFeet: 90 },
+    description: '乌黑触手充满射程内20尺见方地面，持续至多1分钟并需要专注。区域为困难地形。生物每回合首次进入或在其中开始回合时进行敏捷豁免；失败受到3d6钝击伤害并被束缚。已被本法术束缚者在区域内开始回合时自动受到3d6钝击伤害。目标可用动作进行力量或敏捷检定对抗施法豁免DC，成功则挣脱。',
+  },
+  {
+    id: 'wall-of-fire', name: '火墙术', englishName: 'Wall of Fire', level: 4, school: '塑能',
+    classes: ['druid', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120,
+    target: 'area', effect: 'persistent-area', saveAbility: 'dex',
+    damageOnSuccessfulSave: 'half',
+    dice: { count: 5, sides: 8, bonus: 0, perHigherSlot: 1 }, damageType: 'fire',
+    concentration: true, concentrationDurationRounds: 10,
+    maximumTargets: 100, areaIncludesSelf: true,
+    area: {
+      shape: 'rect', origin: 'point', widthFeet: 60, heightFeet: 5,
+      placeRangeFeet: 120, rotatable: true,
+    },
+    description: '在射程内实体表面创造一道至多60尺长、20尺高、1尺厚的火墙，持续至多1分钟并需要专注。火墙出现时，墙体内生物进行敏捷豁免，失败受到5d8火焰伤害，成功减半。施法时选择墙的一侧；生物在一个回合内首次进入墙体，或在该侧10尺内结束回合时，受到同样伤害且无豁免。每使用高于4环一环的法术位，伤害增加1d8。',
   },
   {
     id: 'hideous-laughter', name: '狂笑术', englishName: 'Hideous Laughter', level: 1, school: '附魔',
@@ -655,6 +801,16 @@ export function dnd5eSpellDiceCount(spell: Dnd5eSrdSpellDefinition, casterLevel:
   return spell.dice.count + Math.max(0, slotLevel - spell.level) * (spell.dice.perHigherSlot ?? 0)
 }
 
+export function dnd5eSustainedSpellAttackDiceCount(
+  spell: Dnd5eSrdSpellDefinition,
+  slotLevel: number,
+): number {
+  const attack = spell.sustainedAttack
+  if (!attack) return 0
+  const interval = Math.max(1, Math.floor(attack.dice.additionalDieEverySlotLevels ?? 1))
+  return attack.dice.count + Math.floor(Math.max(0, slotLevel - spell.level) / interval)
+}
+
 export function dnd5eSpellDamageDiceCounts(
   spell: Dnd5eSrdSpellDefinition,
   casterLevel: number,
@@ -945,7 +1101,10 @@ export function dnd5eMetamagicAvailableForSpell(
       : spell.effectDurationRounds ?? 0
     return durationRounds >= 10
   }
-  if (kind === 'heightened') return spell.effect === 'saving-throw' || spell.effect === 'attack-save-debuff'
+  if (kind === 'heightened') {
+    return spell.effect === 'saving-throw' || spell.effect === 'attack-save-debuff' ||
+      spell.unwillingSaveAbility != null
+  }
   if (kind === 'quickened') return spell.castingTime === 'action'
   if (kind === 'twinned') {
     return spell.target !== 'area' && spell.rangeFeet > 0 &&

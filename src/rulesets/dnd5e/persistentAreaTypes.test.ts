@@ -30,6 +30,42 @@ describe('persistent area visual declarations', () => {
     })
   })
 
+  it('accepts a bounded Entangle escape check and rejects executable escape metadata', () => {
+    expect(normalizeDnd5ePersistentAreaVisual({ preset: 'entangle' })).toEqual({
+      preset: 'entangle', intensity: 'normal',
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      id: 'entangle-create',
+      label: '纠缠术·植物缠绕',
+      timing: 'on-create',
+      savingThrow: { ability: 'str', dc: 14, onSuccess: 'none' },
+      condition: {
+        condition: 'restrained',
+        duration: { expiresAt: 'permanent' },
+        escapeCheck: { ability: 'str', alternativeAbility: 'dex', dc: 14, economy: 'action' },
+      },
+      skipSaveWhenSourceConditionActive: 'restrained',
+      cells: [{ col: 4, row: 5 }, { col: 4, row: 6 }],
+    })).toMatchObject({
+      condition: {
+        condition: 'restrained',
+        escapeCheck: { ability: 'str', alternativeAbility: 'dex', dc: 14, economy: 'action' },
+      },
+      skipSaveWhenSourceConditionActive: 'restrained',
+      cells: [{ col: 4, row: 5 }, { col: 4, row: 6 }],
+    })
+    expect(normalizeDnd5ePersistentAreaTriggerSnapshot({
+      id: 'unsafe-entangle',
+      label: '不安全脱困',
+      timing: 'on-create',
+      condition: {
+        condition: 'restrained',
+        duration: { expiresAt: 'permanent' },
+        escapeCheck: { ability: 'str', dc: 14, economy: 'action', run: 'eval()' },
+      },
+    })).toBeUndefined()
+  })
+
   it('fails closed on arbitrary renderers and unbounded values', () => {
     expect(normalizeDnd5ePersistentAreaVisual({ preset: 'custom-shader', sksl: 'while(true){}' })).toBeUndefined()
     expect(normalizeDnd5ePersistentAreaVisual({ preset: 'toxic-cloud', intensity: 999 })).toBeUndefined()

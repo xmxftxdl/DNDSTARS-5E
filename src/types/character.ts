@@ -153,6 +153,8 @@ export interface Character {
       condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
+    /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
+    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' }
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>

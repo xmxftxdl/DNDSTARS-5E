@@ -7,6 +7,7 @@ import {
   dnd5eEffectiveRulesContextForCombat,
 } from './effectiveRulesContext'
 import {
+  declarativeAbilityCompatibilityV1,
   declarativeSubclassCompatibilityReportV1,
   migrateLegacyFeatureActionToDeclarativeV1,
   parseDnd5eDeclarativeRulesPackageV1,
@@ -20,6 +21,7 @@ import {
 } from './headlessCombatEngine'
 import {
   dnd5eCharacterHasPluginFeature,
+  dnd5eEnemyD20ModifierFeaturesForCharacter,
   dnd5ePluginFeatureDefinition,
   registerDnd5eRulesPlugin,
 } from './pluginApi'
@@ -119,6 +121,45 @@ describe('DeclarativeSubclassAbilityV1', () => {
       expect(dnd5eCharacterHasPluginFeature(character(2), featureId)).toBe(false)
       expect(dnd5eCharacterHasPluginFeature(character(3), featureId)).toBe(true)
     } finally { dispose() }
+  })
+
+  it('registers enemy d20 modifier eligibility and reports the manual Interrupt boundary', () => {
+    const pluginId = 'com.example.enemy-roll'
+    const modifierAbility = ability({
+      canModifyEnemyD20: true,
+      automation: 'full',
+    })
+    const { dispose, featureId } = register(pluginId, subclass([modifierAbility]))
+    try {
+      expect(dnd5ePluginFeatureDefinition(featureId)?.canModifyEnemyD20).toBe(true)
+      expect(dnd5eEnemyD20ModifierFeaturesForCharacter(character(3, `${pluginId}:arc-guard`)))
+        .toEqual([expect.objectContaining({ id: featureId })])
+      expect(declarativeAbilityCompatibilityV1(modifierAbility)).toMatchObject({
+        effective: 'partial',
+        reasons: [expect.stringContaining('敌方 d20')],
+      })
+    } finally { dispose() }
+  })
+
+  it('rejects a non-boolean enemy d20 modifier declaration', () => {
+    const invalid = {
+      ...ability(),
+      canModifyEnemyD20: 'yes',
+    } as unknown as DeclarativeSubclassAbilityV1
+    expect(() => parseDnd5eDeclarativeRulesPackageV1(new TextEncoder().encode(JSON.stringify({
+      format: 'dndstars5e-declarative',
+      schemaVersion: 1,
+      manifest: {
+        id: 'com.example.invalid',
+        name: 'Invalid',
+        version: '1.0.0',
+        publisher: 'Test',
+        license: 'CC0-1.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+      },
+      subclasses: [subclass([invalid])],
+    })).buffer)).toThrow('敌方 d20 修改声明无效')
   })
 
   it('resolves active damage through the authoritative generic Headless action', () => {

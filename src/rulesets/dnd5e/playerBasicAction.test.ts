@@ -217,4 +217,58 @@ describe('D&D 5e player basic action bridge', () => {
       type: 'sleeping-creature-awakened', actorId: 'hero-token', targetId: 'enemy', spellId: 'sleep',
     })
   })
+
+  it('routes an Entangle escape check through the authoritative basic-action bridge', () => {
+    const restrainedHero: Character = {
+      ...hero,
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [
+          createDnd5eConditionEffect({
+            id: 'entangle-restraint',
+            condition: 'restrained',
+            source: { kind: 'spell', actorId: 'enemy', rulesId: 'entangle' },
+            targetId: 'hero-token',
+            duration: {
+              type: 'concentration',
+              sourceActorId: 'enemy',
+              concentrationId: 'entangle',
+              remainingRounds: 10,
+            },
+            escapeCheck: { ability: 'str', dc: 14, economy: 'action' },
+          }),
+        ],
+        concentrationEffectsBySource: { enemy: 'entangle' },
+      },
+    }
+    const prepared = prepareDnd5ePlayerBasicAction({
+      action: request({ kind: 'escape-effect' }),
+      map,
+      characters: [restrainedHero],
+      initiativeOrder: [
+        { tokenId: 'hero-token', label: '英雄', emoji: '', color: '', roll: 20 },
+        { tokenId: 'enemy', label: '敌人', emoji: '', color: '', roll: 10 },
+      ],
+      turnEconomy: createDnd5eTurnEconomyCounts('turn', 30),
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      actorCheckAbility: 'str',
+      escapeEffectId: 'entangle-restraint',
+    })
+    const resolved = resolvePreparedDnd5ePlayerBasicAction({
+      prepared: prepared.prepared,
+      actorD20: 20,
+    })
+    expect(resolved.result.ok).toBe(true)
+    expect(resolved.application?.characters[0].dnd5eCombatState?.activeEffects ?? [])
+      .not.toContainEqual(expect.objectContaining({ id: 'entangle-restraint' }))
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'ability-check-resolved',
+      ability: 'str',
+      dc: 14,
+      success: true,
+    }))
+  })
 })

@@ -41,4 +41,55 @@ describe('character token presentation', () => {
       tokenPortrait: 'data:image/webp;base64,BBBB',
     })
   })
+
+  it('projects bundled initiative portraits and map tokens for new and legacy monster ids', () => {
+    const cases = [
+      {
+        ids: ['srd-5.1:goblin', 'goblin'],
+        asset: 'goblin-forest-scout',
+      },
+      {
+        ids: ['srd-5.1:bugbear', 'bugbear'],
+        asset: 'bugbear-forest-raider',
+      },
+    ]
+    for (const { ids, asset } of cases) {
+      for (const poolId of ids) {
+        const projected = projectCharacterTokenPresentations([
+          token({ type: 'enemy', characterId: undefined, poolId }),
+        ], [])
+        expect(projected[0]).toMatchObject({
+          portrait: `/assets/portraits/${asset}-initiative.png`,
+          tokenPortrait: `/assets/portraits/${asset}-token.png`,
+        })
+      }
+    }
+  })
+
+  it('keeps a room-specific monster portrait ahead of the bundled goblin artwork', () => {
+    const original = [
+      token({
+        type: 'enemy',
+        characterId: undefined,
+        poolId: 'srd-5.1:goblin',
+        portraitImageId: 'custom-goblin',
+      }),
+    ]
+    expect(projectCharacterTokenPresentations(original, [])).toBe(original)
+  })
+
+  it('projects the selected goblin appearance into both map and initiative artwork', () => {
+    const projected = projectCharacterTokenPresentations([
+      token({
+        type: 'enemy',
+        characterId: undefined,
+        poolId: 'srd-5.1:goblin',
+        visualVariantId: 'cave-skulk',
+      }),
+    ], [])
+    expect(projected[0]).toMatchObject({
+      portrait: '/assets/portraits/goblin-cave-skulk-initiative.png',
+      tokenPortrait: '/assets/portraits/goblin-cave-skulk-token.png',
+    })
+  })
 })

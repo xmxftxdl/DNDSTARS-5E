@@ -4,13 +4,24 @@ import { snapTokenToGridCenter } from '../../lib/gridCombat'
 import type { Dnd5eTurnEconomyCounts, SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { mapGeometryRuntimeForMap, mapGeometryTerrainElevationAtPoint } from '../../lib/mapGeometry'
+import {
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+} from '../../lib/mapGeometry'
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
-import { dnd5eEffectiveSpeed, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import {
+  dnd5eEffectiveFlySpeed,
+  dnd5eEffectiveSpeed,
+  resolveDnd5eHeadlessAction,
+  type Dnd5eActionResult,
+  type Dnd5eHeadlessCombatState,
+} from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
 import { dnd5eFallingDamageDice, dnd5eTraversalMovementCost } from './traversal'
 import { dnd5eClimbingMovementCost, dnd5eRunningJumpBonusFeet } from './classes'
+import { dnd5eActiveJumpDistanceMultiplier } from './activeEffects'
 
 export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
@@ -58,10 +69,11 @@ export function prepareDnd5ePlayerMove(input: {
 
   const to = snapTokenToGridCenter(action.targetPosition.x, action.targetPosition.y, actorToken, input.map)
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  const fromElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
   const traversalMode = action.dnd5eTraversalMode ?? 'walk'
   const requestedElevationFeet = Number.isFinite(action.targetElevationFeet)
     ? Math.max(-1_000, Math.min(10_000, Math.floor(action.targetElevationFeet!)))
-    : actorToken.elevationFeet ?? 0
+    : fromElevationFeet
   const toElevationFeet = traversalMode === 'walk' || traversalMode === 'swim'
     ? mapGeometryTerrainElevationAtPoint(geometry, to)
     : requestedElevationFeet
@@ -98,7 +110,7 @@ export function prepareDnd5ePlayerMove(input: {
   const traversal = dnd5eTraversalMovementCost({
     distanceFeet: path.distanceFeet,
     baseMovementCostFeet: path.movementCostFeet,
-    elevationGainFeet: Math.max(0, toElevationFeet - (actorToken.elevationFeet ?? 0)),
+    elevationGainFeet: Math.max(0, toElevationFeet - fromElevationFeet),
     mode: traversalMode,
     profile: {
       strengthScore: actorCombatant.abilities.str,
@@ -106,9 +118,10 @@ export function prepareDnd5ePlayerMove(input: {
       walkSpeed: actorCombatant.movementSpeeds?.walk ?? actorCombatant.speed,
       climbSpeed: actorCombatant.movementSpeeds?.climb,
       swimSpeed: actorCombatant.movementSpeeds?.swim,
-      flySpeed: actorCombatant.movementSpeeds?.fly,
+      flySpeed: dnd5eEffectiveFlySpeed(actorCombatant),
       climbWithoutSpeedCostMultiplier: dnd5eClimbingMovementCost(actor, 1),
       runningLongJumpBonusFeet: dnd5eRunningJumpBonusFeet(actor),
+      jumpDistanceMultiplier: dnd5eActiveJumpDistanceMultiplier(actorCombatant.classState.activeEffects),
     },
   })
   if (!traversal.ok) return { ok: false, reason: 'movement-blocked' }
@@ -136,7 +149,7 @@ export function prepareDnd5ePlayerMove(input: {
       movementCostFeet,
       toElevationFeet,
       fallingDamageDice: traversalMode === 'fall'
-        ? dnd5eFallingDamageDice(Math.max(0, (actorToken.elevationFeet ?? 0) - toElevationFeet))
+        ? dnd5eFallingDamageDice(Math.max(0, fromElevationFeet - toElevationFeet))
         : 0,
       path: path.points,
       pathElevationsFeet: path.elevationsFeet,

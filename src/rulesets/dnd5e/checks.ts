@@ -5,6 +5,7 @@ import { dnd5eUnproficientAbilityCheckBonus } from './classes'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { resolveDnd5eRollMode } from './rollMode'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eActiveStrengthRollFlags, type Dnd5eActiveEffectInstance } from './activeEffects'
 
 export type Dnd5eCheckProficiencyRank = 0 | 1 | 2
 
@@ -55,11 +56,17 @@ export function dnd5eSkillCheckModifier(
 }
 
 export function dnd5eAbilityCheckMode(
-  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'exhaustionLevel'>,
-  context: { initiative?: boolean } = {},
+  character: Pick<Character, 'charClass' | 'level' | 'dnd5eClassLevels' | 'exhaustionLevel'> & {
+    dnd5eCombatState?: { activeEffects?: readonly Dnd5eActiveEffectInstance[] }
+  },
+  context: { initiative?: boolean; ability?: AbilityKey } = {},
 ): D20RollMode {
-  const advantage = context.initiative === true && dnd5eCharacterClassLevel(character, 'barbarian') >= 7
-  const disadvantage = (character.exhaustionLevel ?? 0) >= 1
+  const strengthEffect = context.ability === 'str'
+    ? dnd5eActiveStrengthRollFlags(character.dnd5eCombatState?.activeEffects)
+    : { advantage: false, disadvantage: false }
+  const advantage = (context.initiative === true && dnd5eCharacterClassLevel(character, 'barbarian') >= 7) ||
+    strengthEffect.advantage
+  const disadvantage = (character.exhaustionLevel ?? 0) >= 1 || strengthEffect.disadvantage
   return resolveDnd5eRollMode({
     advantage: [{ active: advantage, reason: 'initiative-advantage' }],
     disadvantage: [{ active: disadvantage, reason: 'exhaustion' }],
@@ -98,7 +105,7 @@ export function resolveDnd5eAbilityCheck(input: {
   additionalModifier?: number
 }): Dnd5eAbilityCheckResult {
   const proficiencyRank = input.proficiencyRank ?? 0
-  const mode = dnd5eAbilityCheckMode(input.character, { initiative: input.initiative })
+  const mode = dnd5eAbilityCheckMode(input.character, { initiative: input.initiative, ability: input.ability })
   const reliableTalent = reliableTalentApplies(input.character, proficiencyRank)
   const rolls = reliableTalent ? input.rolls.map((roll) => Math.max(10, roll)) : input.rolls
   const resolvedRoll = rules.resolveD20({

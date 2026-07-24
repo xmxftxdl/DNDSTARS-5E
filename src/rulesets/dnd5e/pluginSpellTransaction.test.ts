@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { registerDnd5eRulesPlugin } from './pluginApi'
 import { prepareDnd5ePluginSpellCast, resolvePreparedDnd5ePluginSpellCast } from './pluginSpellTransaction'
+import { DND5E_LEATHER_ARMOR } from './equipment'
 
 function wizard(spellId: string): Character {
   return {
@@ -60,6 +61,12 @@ describe('plugin spell CombatTransaction', () => {
         initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
         roomRequiredPlugins: null,
       })).toEqual({ ok: false, reason: 'room-rules-unavailable' })
+      expect(prepareDnd5ePluginSpellCast({
+        action,
+        map,
+        characters: [{ ...actor, equipment: { armor: DND5E_LEATHER_ARMOR } }],
+        initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),
+      })).toEqual({ ok: false, reason: 'armor-proficiency-required' })
       const prepared = prepareDnd5ePluginSpellCast({
         action, map, characters: [actor],
         initiativeOrder: [actorToken, enemy].map((entry, index) => ({ tokenId: entry.id, label: entry.label, emoji: '', color: '', roll: 20 - index })),

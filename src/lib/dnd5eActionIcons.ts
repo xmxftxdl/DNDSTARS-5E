@@ -7,13 +7,17 @@ export type Dnd5eActionIconMotif =
   | 'beast'
   | 'cold'
   | 'control'
+  | 'dash'
   | 'death'
+  | 'disengage'
   | 'divination'
+  | 'dodge'
   | 'fire'
   | 'force'
   | 'healing'
   | 'illusion'
   | 'lightning'
+  | 'melee-attack'
   | 'move'
   | 'movement'
   | 'nature'
@@ -32,6 +36,11 @@ export interface Dnd5eActionIconSpec {
   glow: string
   runeIndex: number
   textureRotation: number
+  /** Optional painted layer. Transparent foreground assets preserve the generated class-color background. */
+  asset?: string
+  assetMode?: 'cover' | 'foreground'
+  /** Optional semantic backdrop rendered beneath transparent artwork. */
+  classBackdropId?: string
 }
 
 export interface Dnd5eSpellActionIconInput {
@@ -43,6 +52,7 @@ export interface Dnd5eSpellActionIconInput {
   effect?: string
   damageType?: string
   tags?: readonly string[]
+  castingClassId?: string
 }
 
 type IconPalette = readonly [background: string, backgroundDeep: string, accent: string, glow: string]
@@ -54,13 +64,17 @@ const PALETTES: Record<Dnd5eActionIconMotif, readonly IconPalette[]> = {
   beast: [['#704523', '#211207', '#ffd08a', '#fb923c'], ['#355637', '#0c1c0e', '#bcf7ad', '#4ade80']],
   cold: [['#167187', '#041d29', '#d5fbff', '#67e8f9'], ['#315ca5', '#071a38', '#dbeafe', '#7dd3fc']],
   control: [['#5f3a7e', '#1a0a29', '#f0c8ff', '#c084fc'], ['#71304f', '#230917', '#ffd0e3', '#f472b6']],
+  dash: [['#126d76', '#031e22', '#c7fbff', '#22d3ee'], ['#3558a0', '#081432', '#dbeafe', '#60a5fa']],
   death: [['#49315f', '#100718', '#e0c3ff', '#a78bfa'], ['#365044', '#071711', '#c0f4ce', '#4ade80']],
+  disengage: [['#174f68', '#041720', '#bceeff', '#38bdf8'], ['#71304f', '#230917', '#ffd0e3', '#f472b6']],
   divination: [['#174f68', '#041720', '#bceeff', '#38bdf8'], ['#493d82', '#100b26', '#ddd6fe', '#8b5cf6']],
+  dodge: [['#174f68', '#041720', '#bceeff', '#38bdf8'], ['#71304f', '#230917', '#ffd0e3', '#f472b6']],
   fire: [['#a63a18', '#2b0904', '#ffe1a8', '#fb923c'], ['#8d211c', '#270606', '#ffd0a1', '#f97316']],
   force: [['#4358a6', '#0b1235', '#d8e1ff', '#818cf8'], ['#6d3ba1', '#1d092f', '#e9d5ff', '#c084fc']],
   healing: [['#176b54', '#041d15', '#d5ffef', '#34d399'], ['#217160', '#06231b', '#ccfbf1', '#2dd4bf']],
   illusion: [['#73376e', '#21081f', '#ffd6fb', '#e879f9'], ['#3e3d83', '#0c0b25', '#e0e7ff', '#818cf8']],
   lightning: [['#3157a6', '#071232', '#fff6a8', '#fde047'], ['#4f3b9c', '#100927', '#e0f2fe', '#38bdf8']],
+  'melee-attack': [['#7a2e1f', '#230907', '#ffe0b2', '#fb923c'], ['#73412a', '#211008', '#ffe4bd', '#f59e0b']],
   move: [['#126d76', '#031e22', '#d9ffff', '#22d3ee'], ['#285ea3', '#07172f', '#e0f2fe', '#60a5fa']],
   movement: [['#126d76', '#031e22', '#c7fbff', '#22d3ee'], ['#3558a0', '#081432', '#dbeafe', '#60a5fa']],
   nature: [['#2d6734', '#071d0c', '#d9f99d', '#4ade80'], ['#596324', '#171d07', '#efffa7', '#a3e635']],
@@ -68,6 +82,48 @@ const PALETTES: Record<Dnd5eActionIconMotif, readonly IconPalette[]> = {
   radiant: [['#8a661a', '#2b1a03', '#fff2b5', '#facc15'], ['#8a4f26', '#291104', '#ffdfb5', '#fb923c']],
   summon: [['#335d6d', '#071b22', '#cef4ff', '#67e8f9'], ['#4c4689', '#100d28', '#e0ddff', '#a78bfa']],
   weapon: [['#653329', '#210b07', '#ffd1bd', '#fb7185'], ['#4d5563', '#10141a', '#e5e7eb', '#94a3b8']],
+}
+
+/** Semantic class colors used behind spell artwork when the casting source is known. */
+export const DND5E_CLASS_ICON_PALETTES: Readonly<Record<string, IconPalette>> = {
+  barbarian: ['#E5484D', '#2B090B', '#FFE0E0', '#FF6B6B'],
+  bard: ['#D946EF', '#26072C', '#F9D5FF', '#E879F9'],
+  cleric: ['#FBBF24', '#2B1903', '#FFF3BF', '#FDE047'],
+  druid: ['#22C55E', '#05230F', '#D7FFE3', '#4ADE80'],
+  fighter: ['#94A3B8', '#111827', '#F1F5F9', '#CBD5E1'],
+  monk: ['#F97316', '#2B1003', '#FFE3C2', '#FB923C'],
+  paladin: ['#BAE6FD', '#0A2030', '#F0F9FF', '#7DD3FC'],
+  ranger: ['#65A30D', '#142304', '#ECFCCB', '#A3E635'],
+  rogue: ['#475569', '#090E17', '#E2E8F0', '#94A3B8'],
+  sorcerer: ['#FB7185', '#30070E', '#FFE4E8', '#FDA4AF'],
+  warlock: ['#8B5CF6', '#170A31', '#EDE9FE', '#A78BFA'],
+  wizard: ['#3B82F6', '#071A38', '#DBEAFE', '#60A5FA'],
+}
+
+const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = {
+  message: '/assets/icons/message-spell-action.png',
+  'minor-illusion': '/assets/icons/minor-illusion-spell-action.png',
+  druidcraft: '/assets/icons/druidcraft-spell-action.png',
+  'shocking-grasp': '/assets/icons/shocking-grasp-spell-action.png',
+  'chill-touch': '/assets/icons/chill-touch-spell-action.png',
+  'poison-spray': '/assets/icons/poison-spray-spell-action.png',
+  fireball: '/assets/icons/fireball-spell-action.png',
+  'wall-of-fire': '/assets/icons/wall-of-fire-spell-action.png',
+  'fire-bolt': '/assets/icons/fire-bolt-spell-action.png',
+  light: '/assets/icons/light-spell-action.png',
+  'burning-hands': '/assets/icons/burning-hands-spell-action.png',
+  shatter: '/assets/icons/shatter-spell-action.png',
+  'true-strike': '/assets/icons/true-strike-spell-action.png',
+  'ray-of-frost': '/assets/icons/ray-of-frost-spell-action.png',
+  prestidigitation: '/assets/icons/prestidigitation-spell-action.png',
+  'eldritch-blast': '/assets/icons/eldritch-blast-spell-action.png',
+  thaumaturgy: '/assets/icons/thaumaturgy-spell-action.png',
+  'produce-flame': '/assets/icons/produce-flame-spell-action.png',
+  guidance: '/assets/icons/guidance-spell-action.png',
+  'sacred-flame': '/assets/icons/sacred-flame-spell-action.png',
+  'acid-splash': '/assets/icons/acid-splash-spell-action.png',
+  resistance: '/assets/icons/resistance-spell-action.png',
+  'spare-the-dying': '/assets/icons/spare-the-dying-spell-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [
@@ -142,7 +198,20 @@ export function dnd5eSpellActionIcon(input: Dnd5eSpellActionIconInput): Dnd5eAct
     .filter(Boolean)
     .join(' ')
   const motif = explicitDamageMotif ?? motifFromText(searchable) ?? motifFromSchool(input.school)
-  return paletteFor(key, motif)
+  const spec = paletteFor(key, motif)
+  const asset = DND5E_PAINTED_SPELL_ASSETS[input.id]
+  const classPalette = input.castingClassId ? DND5E_CLASS_ICON_PALETTES[input.castingClassId] : undefined
+  return {
+    ...spec,
+    ...(classPalette ? {
+      background: classPalette[0],
+      backgroundDeep: classPalette[1],
+      accent: classPalette[2],
+      glow: classPalette[3],
+    } : {}),
+    ...(asset ? { asset, assetMode: 'foreground' as const } : {}),
+    classBackdropId: input.castingClassId,
+  }
 }
 
 export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' | 'name' | 'englishName' | 'category' | 'icon' | 'magicItem' | 'use'>): Dnd5eActionIconSpec {

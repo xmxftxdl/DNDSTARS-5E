@@ -15,6 +15,7 @@ import {
   recordDnd5ePersistentAreaTrigger,
   type Dnd5ePersistentAreaTriggerCandidate,
 } from './pluginAreas'
+import { normalizeDnd5eActiveEffects } from './activeEffects'
 
 export interface PreparedDnd5ePersistentAreaTrigger {
   candidate: Dnd5ePersistentAreaTriggerCandidate
@@ -51,7 +52,15 @@ export function prepareDnd5ePersistentAreaTrigger(input: {
   const source = snapshot.state.combatants[input.candidate.area.sourceTokenId]
   const target = snapshot.state.combatants[input.candidate.targetToken.id]
   if (!source || !target || target.deathSaves.dead) return { ok: false, reason: 'combatant-missing' }
-  const save = input.candidate.trigger.savingThrow
+  const skipSaveCondition = input.candidate.trigger.skipSaveWhenSourceConditionActive
+  const hasSourceCondition = skipSaveCondition
+    ? normalizeDnd5eActiveEffects(target.classState.activeEffects).some((effect) =>
+        effect.standardCondition === skipSaveCondition &&
+        effect.source.actorId === source.id &&
+        effect.source.rulesId === input.candidate.area.coreSpellId,
+      )
+    : false
+  const save = input.candidate.trigger.savingThrow && !hasSourceCondition
     ? {
         ability: input.candidate.trigger.savingThrow.ability,
         dc: input.candidate.trigger.savingThrow.dc,

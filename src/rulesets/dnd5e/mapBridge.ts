@@ -6,9 +6,16 @@ import type { Dnd5eAttackCoverOverride } from '../../lib/sharedCombatTypes'
 import { getTokenTargetAc } from '../../lib/enemyCombatStats'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
-import { mapGeometryCanSeeToken, mapGeometryCoverBetween, mapGeometryLineOfSightBlocked, mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
+import {
+  mapGeometryCanSeeToken,
+  mapGeometryCoverBetween,
+  mapGeometryLineOfSightBlocked,
+  mapGeometryRuntimeForMap,
+  mapGeometryTerrainElevationAtPoint,
+  mapGeometryTokenElevation,
+} from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, dnd5eEffectiveSizeRank, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
@@ -258,6 +265,7 @@ export function createDnd5eMapCombatSnapshot(input: {
     }
   }
   const characterIdByCombatantId: Record<string, string> = {}
+  const geometry = mapGeometryRuntimeForMap(input.map.id)
   const combatants = input.map.tokens.flatMap((token) => {
     if (token.type !== 'player' && token.type !== 'enemy') return []
     const initiative = initiativeByTokenId.get(token.id)
@@ -278,7 +286,9 @@ export function createDnd5eMapCombatSnapshot(input: {
         name: token.label,
         initiative,
         sizeRank: ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[token.creatureSize ?? '中型'],
-        elevationFeet: token.elevationFeet ?? 0,
+        elevationFeet: mapGeometryTokenElevation(geometry, token),
+        airborne: mapGeometryTokenElevation(geometry, token) >
+          mapGeometryTerrainElevationAtPoint(geometry, token),
         specialSenses: tokenSpecialSenses(token),
       }]
     }
@@ -315,8 +325,10 @@ export function createDnd5eMapCombatSnapshot(input: {
         fly: monster.speed.fly,
       } : { walk: 30 },
       position: { x: token.x, y: token.y },
-      elevationFeet: token.elevationFeet ?? 0,
-      airborne: !!monster?.speed.fly && (token.elevationFeet ?? 0) > 0,
+      elevationFeet: mapGeometryTokenElevation(geometry, token),
+      airborne: !!monster?.speed.fly &&
+        mapGeometryTokenElevation(geometry, token) >
+          mapGeometryTerrainElevationAtPoint(geometry, token),
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
       shapechanger: monster?.capabilities?.shapechanger === true,
       concentrating: !!tokenClassState.concentrationSpellId,
@@ -371,7 +383,6 @@ export function createDnd5eMapCombatSnapshot(input: {
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
   state.physicalLineOfSightBlockedByCombatantPair = {}
-  const geometry = mapGeometryRuntimeForMap(input.map.id)
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
       const left = combatantTokens[leftIndex]
@@ -489,6 +500,7 @@ export function planDnd5eMapResultApplication(input: {
       const patch: Partial<Token> = {
         x: combatant.position.x,
         y: combatant.position.y,
+        size: [1, 1, 1, 2, 3, 4][dnd5eEffectiveSizeRank(combatant)] ?? 1,
         elevationFeet: combatant.elevationFeet === 0 && token.elevationFeet == null
           ? undefined
           : combatant.elevationFeet,
@@ -499,7 +511,8 @@ export function planDnd5eMapResultApplication(input: {
       const tokenClassStateUnchanged = token.characterId ||
         JSON.stringify(token.dnd5eCombatState ?? {}) === JSON.stringify(nextTokenClassState ?? {})
       if (
-        token.x === patch.x && token.y === patch.y && token.elevationFeet === patch.elevationFeet && token.hp === patch.hp && token.maxHp === patch.maxHp &&
+        token.x === patch.x && token.y === patch.y && token.size === patch.size &&
+        token.elevationFeet === patch.elevationFeet && token.hp === patch.hp && token.maxHp === patch.maxHp &&
         tokenClassStateUnchanged
       ) return token
       changedTokenIds.push(token.id)

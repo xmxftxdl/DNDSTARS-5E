@@ -4,6 +4,7 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { prepareDnd5eAbilityCheck, previewPreparedDnd5eAbilityCheck, resolvePreparedDnd5eAbilityCheck } from './abilityCheckAction'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
+import { DND5E_CHAIN_MAIL } from './equipment'
 
 function bard(): Character {
   return {
@@ -62,5 +63,45 @@ describe('D&D 5e ability-check authority bridge', () => {
     expect(prepareDnd5eAbilityCheck({
       ...actionCheck, characters: [actionCheck.actor], turnEconomy: economy,
     })).toEqual({ ok: false, reason: 'action-unavailable' })
+  })
+
+  it('applies unproficient-armor disadvantage only to Strength and Dexterity checks', () => {
+    const dexterity = fixture({ ability: 'dex', dc: 15 })
+    dexterity.actor.equipment = { armor: DND5E_CHAIN_MAIL }
+    const preparedDexterity = prepareDnd5eAbilityCheck({ ...dexterity, characters: [dexterity.actor] })
+    expect(preparedDexterity.ok).toBe(true)
+    if (!preparedDexterity.ok) return
+    expect(preparedDexterity.prepared.rollMode).toBe('disadvantage')
+    expect(previewPreparedDnd5eAbilityCheck(preparedDexterity.prepared, 18, 2)).toMatchObject({
+      d20: 2,
+      mode: 'disadvantage',
+    })
+
+    const charisma = fixture({ ability: 'cha', dc: 15 })
+    charisma.actor.equipment = { armor: DND5E_CHAIN_MAIL }
+    const preparedCharisma = prepareDnd5eAbilityCheck({ ...charisma, characters: [charisma.actor] })
+    expect(preparedCharisma.ok).toBe(true)
+    if (!preparedCharisma.ok) return
+    expect(preparedCharisma.prepared.rollMode).toBe('normal')
+  })
+
+  it('applies an armor Stealth penalty even when the wearer is proficient', () => {
+    const stealth = fixture({ ability: 'dex', skill: 'stealth', dc: 15 })
+    stealth.actor.charClass = '战士'
+    stealth.actor.dnd5eClassLevels = { fighter: 14 }
+    stealth.actor.equipment = { armor: DND5E_CHAIN_MAIL }
+    const preparedStealth = prepareDnd5eAbilityCheck({ ...stealth, characters: [stealth.actor] })
+    expect(preparedStealth.ok).toBe(true)
+    if (!preparedStealth.ok) return
+    expect(preparedStealth.prepared.rollMode).toBe('disadvantage')
+
+    const acrobatics = fixture({ ability: 'dex', skill: 'acrobatics', dc: 15 })
+    acrobatics.actor.charClass = '战士'
+    acrobatics.actor.dnd5eClassLevels = { fighter: 14 }
+    acrobatics.actor.equipment = { armor: DND5E_CHAIN_MAIL }
+    const preparedAcrobatics = prepareDnd5eAbilityCheck({ ...acrobatics, characters: [acrobatics.actor] })
+    expect(preparedAcrobatics.ok).toBe(true)
+    if (!preparedAcrobatics.ok) return
+    expect(preparedAcrobatics.prepared.rollMode).toBe('normal')
   })
 })

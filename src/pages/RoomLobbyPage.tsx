@@ -38,16 +38,22 @@ import {
 } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
 import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
-
-type LobbyMode = 'create' | 'join'
+import {
+  clearLocalRoomCampaignCache,
+  requestedRoomLobbyMode,
+  type RoomLobbyMode,
+} from '../lib/campaignNavigation'
 
 export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
   const recentResume = typeof window === 'undefined' ? null : getRecentRoomPlayerResumeIdentity()
+  const requestedMode = typeof window === 'undefined' ? null : requestedRoomLobbyMode(window.location.search)
   const invitedRoomCode = typeof window === 'undefined'
     ? ''
     : (new URLSearchParams(window.location.search).get('join') ?? '').toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6)
-  const initialRoomCode = invitedRoomCode || recentResume?.roomId || ''
-  const [mode, setMode] = useState<LobbyMode>(initialRoomCode.length === 6 ? 'join' : 'create')
+  const initialRoomCode = requestedMode === 'create' ? '' : invitedRoomCode || recentResume?.roomId || ''
+  const [mode, setMode] = useState<RoomLobbyMode>(
+    requestedMode ?? (initialRoomCode.length === 6 ? 'join' : 'create'),
+  )
   const [roomName, setRoomName] = useState('我的 D&D 5e 战役')
   const [dmName, setDmName] = useState('地下城主')
   const [roomCode, setRoomCode] = useState(initialRoomCode)
@@ -97,7 +103,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
     }
   }, [mode, roomCode])
 
-  const selectMode = (next: LobbyMode) => {
+  const selectMode = (next: RoomLobbyMode) => {
     setMode(next)
     setError(null)
     setPreview(null)
@@ -129,6 +135,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
       const connection = mode === 'create'
         ? await createRoom({ roomName, displayName: dmName, password: roomPassword, maxPlayers, activePlugins })
         : await joinRoom({ roomId: roomCode, displayName: playerName, password: roomPassword, activePlugins, role: joinRole })
+      if (mode === 'create') clearLocalRoomCampaignCache(window.localStorage)
       saveRoomSession(connection.session)
       setRoomRulesSnapshot(connection.rules)
       window.location.assign(

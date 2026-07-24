@@ -1,6 +1,6 @@
 import type { Dnd5eMapResultPlan } from '../../rulesets/dnd5e'
 import type { Character } from '../../types/character'
-import type { Token } from '../../store/maps'
+import type { BattleMap, Token } from '../../store/maps'
 
 export interface Dnd5eCombatResultCommitReceipt {
   mapId: string
@@ -13,6 +13,12 @@ interface Dnd5eCombatResultApplicationPort {
   mapId: string
   applyCharacter: (characterId: string, character: Character) => void
   applyToken: (mapId: string, tokenId: string, token: Token) => void
+  /**
+   * 地图级事务（召唤、持续区域）使用单次完整地图提交，避免先写 Token、
+   * 再写区域时被同步读取到半完成状态。调用方必须先把结果重基线到最新地图。
+   */
+  applyMap?: (mapId: string, map: BattleMap) => void
+  applicationMode?: 'entities' | 'map'
 }
 
 interface Dnd5eCombatResultCommitInput extends Dnd5eCombatResultApplicationPort {
@@ -39,6 +45,9 @@ function prepareCommit(input: Pick<Dnd5eCombatResultApplicationPort, 'applicatio
   if (missingCharacterId) throw new Error(`combat-result-character-missing:${missingCharacterId}`)
   const missingTokenId = tokenIds.find((id) => !tokenById.has(id))
   if (missingTokenId) throw new Error(`combat-result-token-missing:${missingTokenId}`)
+  if (new Set(input.application.map.tokens.map((token) => token.id)).size !== input.application.map.tokens.length) {
+    throw new Error('combat-result-token-duplicate')
+  }
   return { characterIds, tokenIds, characterById, tokenById }
 }
 
@@ -47,11 +56,18 @@ export function applyDnd5eCombatResultApplication(
   input: Dnd5eCombatResultApplicationPort,
 ): Dnd5eCombatResultCommitReceipt {
   const prepared = prepareCommit(input)
+  if (input.applicationMode === 'map' && !input.applyMap) {
+    throw new Error('combat-result-map-application-port-missing')
+  }
   for (const characterId of prepared.characterIds) {
     input.applyCharacter(characterId, prepared.characterById.get(characterId)!)
   }
-  for (const tokenId of prepared.tokenIds) {
-    input.applyToken(input.mapId, tokenId, prepared.tokenById.get(tokenId)!)
+  if (input.applicationMode === 'map') {
+    input.applyMap!(input.mapId, input.application.map)
+  } else {
+    for (const tokenId of prepared.tokenIds) {
+      input.applyToken(input.mapId, tokenId, prepared.tokenById.get(tokenId)!)
+    }
   }
   return { mapId: input.mapId, characterIds: prepared.characterIds, tokenIds: prepared.tokenIds }
 }
@@ -65,7 +81,7 @@ export async function commitDnd5eCombatResult(
   if (input.saveCharacters && (input.forceSaveCharacters || receipt.characterIds.length > 0)) {
     writes.push(input.saveCharacters())
   }
-  if (input.saveMap && (input.forceSaveMap || receipt.tokenIds.length > 0)) {
+  if (input.saveMap && (input.forceSaveMap || input.applicationMode === 'map' || receipt.tokenIds.length > 0)) {
     writes.push(input.saveMap())
   }
   await Promise.all(writes)

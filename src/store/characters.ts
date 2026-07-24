@@ -12,7 +12,13 @@ import { defaultEquipmentForDnd5eCharacter, normalizeDnd5eCharacterEquipment } f
 import { dnd5eArmorClass } from '../rulesets/dnd5e/equipment'
 import { syncDnd5eHitPoints } from '../rulesets/dnd5e/hitPoints'
 import { applyDnd5eShortRestResourceFeatures, dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
-import { applyDnd5eInventoryMutation, normalizeDnd5eInventory, resolveDnd5eAttunementAfterShortRest, restoreDnd5eInventoryResources } from '../rulesets/dnd5e/items'
+import {
+  applyDnd5eInventoryGrantBundle,
+  applyDnd5eInventoryMutation,
+  normalizeDnd5eInventory,
+  resolveDnd5eAttunementAfterShortRest,
+  restoreDnd5eInventoryResources,
+} from '../rulesets/dnd5e/items'
 import { dnd5eTotalCharacterLevel, normalizeDnd5eClassLevels } from '../rulesets/dnd5e/multiclass'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
@@ -20,7 +26,12 @@ import {
   validateDnd5eActiveEffectsStrict,
 } from '../rulesets/dnd5e/activeEffects'
 import { migrateDnd5eCombatStateEffects } from '../rulesets/dnd5e/legacyActiveEffectMigration'
-import type { Dnd5eInventoryMutation, Dnd5eInventoryMutationResult } from '../types/inventory'
+import type {
+  Dnd5eInventoryGrant,
+  Dnd5eInventoryCurrencyGrant,
+  Dnd5eInventoryMutation,
+  Dnd5eInventoryMutationResult,
+} from '../types/inventory'
 import type { SharedCampaignTimeState } from '../lib/campaignTime'
 import { applyDnd5eLongRestBenefits, reconcileDnd5eCharacterCampaignTime } from '../rulesets/dnd5e/campaignTimeRules'
 import { canBenefitFromLongRest } from '../lib/campaignTime'
@@ -998,6 +1009,12 @@ interface CharacterState {
   ) => void
   applyAuthorityUpdate: (id: string, patch: Partial<Character>) => void
   applyInventoryMutation: (mutation: Dnd5eInventoryMutation) => Dnd5eInventoryMutationResult
+  applyInventoryGrantBundle: (input: {
+    characterId: string
+    grants: readonly Dnd5eInventoryGrant[]
+    currencyGrants?: readonly Dnd5eInventoryCurrencyGrant[]
+    receiptId: string
+  }) => Dnd5eInventoryMutationResult
   remove: (id: string) => void
   shortRestAll: () => void
   longRestAll: () => void
@@ -1027,6 +1044,9 @@ export const useCharacterStore = create<CharacterState>()(
         const result = await saveSharedResourceWithResult('characters', payload)
         if (result.status !== 'saved' && seq === characterSaveSeq) {
           lastLocalCharactersWriteAt = lastAppliedCharactersUpdatedAt
+        }
+        if (result.status !== 'saved') {
+          throw new Error(`characters-save-rejected:${result.status}`)
         }
         if (result.status === 'saved' && seq === characterSaveSeq) {
           lastSharedCharactersSnapshot = JSON.stringify(payload)
@@ -1355,6 +1375,13 @@ export const useCharacterStore = create<CharacterState>()(
         applyInventoryMutation: (mutation) => {
           const result = applyDnd5eInventoryMutation(get().characters, mutation)
           if (!result.ok) return result
+          set({ characters: result.characters })
+          saveCharacters()
+          return result
+        },
+        applyInventoryGrantBundle: (input) => {
+          const result = applyDnd5eInventoryGrantBundle(get().characters, input)
+          if (!result.ok || result.deduplicated) return result
           set({ characters: result.characters })
           saveCharacters()
           return result

@@ -139,6 +139,12 @@ export interface DeclarativeSubclassAbilityV1 {
   effects: readonly DeclarativeSubclassEffectV1[]
   limits?: DeclarativeSubclassLimitsV1
   duration?: DeclarativeSubclassDurationV1
+  /**
+   * Opens the post-result reaction window when an enemy succeeds on a d20.
+   * This is only an eligibility declaration; the Host and DM still validate
+   * ownership and the submitted replacement before settlement.
+   */
+  canModifyEnemyD20?: boolean
   automation: 'full' | 'partial' | 'manual'
 }
 
@@ -288,7 +294,7 @@ function validateDice(value: unknown, label: string): asserts value is Declarati
 
 export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能力'): asserts value is DeclarativeSubclassAbilityV1 {
   if (!record(value)) throw new Error(`${path}无效`)
-  assertKeys(value, ['schemaVersion', 'id', 'name', 'description', 'level', 'trigger', 'predicates', 'cost', 'targeting', 'rolls', 'effects', 'limits', 'duration', 'automation'], path)
+  assertKeys(value, ['schemaVersion', 'id', 'name', 'description', 'level', 'trigger', 'predicates', 'cost', 'targeting', 'rolls', 'effects', 'limits', 'duration', 'canModifyEnemyD20', 'automation'], path)
   if (value.schemaVersion !== 1) throw new Error(`${path} schemaVersion 不受支持`)
   assertId(value.id, path)
   assertText(value.name, `${path}名称`, 160)
@@ -297,6 +303,9 @@ export function validateDeclarativeSubclassAbilityV1(value: unknown, path = '能
   if (!record(value.trigger) || !['active-use', 'after-attack-hit', 'before-damage-taken', 'after-damage-taken', 'turn-start', 'turn-end', 'short-rest-complete', 'long-rest-complete'].includes(String(value.trigger.kind))) throw new Error(`${path}触发器无效`)
   assertKeys(value.trigger, ['kind'], `${path}触发器`)
   if (!AUTOMATION.has(String(value.automation))) throw new Error(`${path}自动化等级无效`)
+  if (value.canModifyEnemyD20 != null && typeof value.canModifyEnemyD20 !== 'boolean') {
+    throw new Error(`${path}敌方 d20 修改声明无效`)
+  }
 
   if (value.predicates != null) {
     if (!record(value.predicates)) throw new Error(`${path}条件无效`)
@@ -467,6 +476,9 @@ export function validateDeclarativeSubclassDefinitionV1(value: unknown, path = '
 
 export function declarativeAbilityCompatibilityV1(ability: DeclarativeSubclassAbilityV1): DeclarativeAbilityCompatibilityEntryV1 {
   const reasons: string[] = []
+  if (ability.canModifyEnemyD20) {
+    reasons.push('改变敌方 d20 需要玩家声明并由 DM 在投掷后 Interrupt 窗口确认')
+  }
   if (ability.effects.some((effect) =>
     effect.kind === 'temporary-hit-points' && effect.amount.kind === 'fixed' && effect.amount.value === 0
   )) reasons.push('旧 feature/action 未提供结构化效果，需由 DM 补全后才能自动结算')

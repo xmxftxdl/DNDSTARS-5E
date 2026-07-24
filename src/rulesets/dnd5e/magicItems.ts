@@ -464,7 +464,7 @@ function magicEquipmentTemplate(
       ? `使用该魔法武器进行攻击检定和伤害掷骰时获得 +${bonus} 加值；其余武器数据沿用基础武器。`
       : `穿戴该魔法护甲时，护甲等级在基础护甲公式之外再获得 +${bonus} 加值。`,
     stackable: false,
-    equipment: { ...base, id, name: magicName, effects },
+    equipment: { ...base, id, baseEquipmentId: base.baseEquipmentId ?? base.id, name: magicName, effects },
     magicItem: { kind, rarity, attunement: 'none', automation: 'headless' },
     source: SRD_SOURCE,
   }
@@ -498,6 +498,7 @@ export const DND5E_SRD_MAGIC_SHIELD_TEMPLATES: readonly Dnd5eInventoryItemTempla
     equipment: {
       ...base,
       id,
+      baseEquipmentId: base.baseEquipmentId ?? base.id,
       name,
       effects: { ...base.effects, armorClassBonus: bonus },
     },

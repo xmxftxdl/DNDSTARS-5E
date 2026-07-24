@@ -7,7 +7,7 @@ import type { Character } from '../../types/character'
 import { dnd5eCharacterClassLevel } from './multiclass'
 import type { D20RollMode } from '../contracts'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eWeaponAttackProfile } from './equipment'
+import { dnd5eWeaponAttackProfile, dnd5eWearingUnproficientArmor } from './equipment'
 import {
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
@@ -217,6 +217,7 @@ export function prepareDnd5eOpportunityAttack(input: {
       dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || actorCombatant.classState.hiddenCheckTotal != null ||
       targetCombatant.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
     const disadvantage = dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
+      (!!actor && dnd5eWearingUnproficientArmor(actor)) ||
       dnd5eFrightenedAttackDisadvantage(snapshot.state, actorCombatant) ||
       dnd5eTargetIsDodging(targetCombatant) ||
       dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) ||

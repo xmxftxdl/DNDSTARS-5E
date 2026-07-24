@@ -7,16 +7,25 @@ import type {
 import type { CombatExperienceSettlement } from './combatExperience'
 
 export const COMBAT_STATISTICS_RESOURCE = 'combat-statistics'
-export const COMBAT_STATISTICS_SCHEMA_VERSION = 2
+export const COMBAT_STATISTICS_SCHEMA_VERSION = 3
 export const COMBAT_STATISTICS_MAX_SESSIONS = 24
 export const COMBAT_STATISTICS_MAX_RECEIPTS = 4_096
+export const D20_FACE_COUNT = 20
 
 export type CombatStatisticsSide = 'player' | 'enemy' | 'npc'
 
 export interface CombatantStatistics {
   combatantId: string
+  characterId?: string
   name: string
   side: CombatStatisticsSide
+  turnsTaken: number
+  /** 与 turnsTaken 同一 V3 采样窗口内的有效伤害，避免旧存档累计量污染每回合均值。 */
+  turnTrackedDamageDealt: number
+  /** 与 turnsTaken 同一 V3 采样窗口内的有效治疗。 */
+  turnTrackedHealingDone: number
+  /** 仅记录 Headless 最终采用的天然 d20；索引 0 对应骰面 1。 */
+  combatD20FaceCounts: number[]
   damageDealt: number
   damageTaken: number
   healingDone: number
@@ -68,15 +77,25 @@ export interface Dnd5eCombatStatisticsObservation {
   receiptId: string
   observedAt: number
   sideByCombatantId?: Readonly<Record<string, CombatStatisticsSide>>
+  characterIdByCombatantId?: Readonly<Record<string, string>>
+}
+
+export function emptyD20FaceCounts(): number[] {
+  return Array.from({ length: D20_FACE_COUNT }, () => 0)
 }
 
 function emptyCombatant(
   combatantId: string,
   name: string,
   side: CombatStatisticsSide,
+  characterId?: string,
 ): CombatantStatistics {
   return {
-    combatantId, name, side,
+    combatantId, characterId, name, side,
+    turnsTaken: 0,
+    turnTrackedDamageDealt: 0,
+    turnTrackedHealingDone: 0,
+    combatD20FaceCounts: emptyD20FaceCounts(),
     damageDealt: 0, damageTaken: 0,
     healingDone: 0, healingReceived: 0,
     temporaryHpGranted: 0, damagePrevented: 0,
@@ -117,6 +136,17 @@ function ensureCombatant(
   const existing = session.combatants[id]
   const combatant = state.combatants[id]
   if (existing) {
+    existing.turnsTaken = finiteNonNegative(existing.turnsTaken) ? existing.turnsTaken : 0
+    existing.turnTrackedDamageDealt = finiteNonNegative(existing.turnTrackedDamageDealt)
+      ? existing.turnTrackedDamageDealt
+      : 0
+    existing.turnTrackedHealingDone = finiteNonNegative(existing.turnTrackedHealingDone)
+      ? existing.turnTrackedHealingDone
+      : 0
+    existing.combatD20FaceCounts = Array.isArray(existing.combatD20FaceCounts) &&
+      existing.combatD20FaceCounts.length === D20_FACE_COUNT
+      ? existing.combatD20FaceCounts
+      : emptyD20FaceCounts()
     if (combatant?.name) existing.name = combatant.name
     return existing
   }
@@ -138,6 +168,16 @@ function applyEvent(
   fallbackActorId: string | undefined,
   zeroedByDamage: ReadonlySet<string>,
 ): void {
+  const d20Sample = d20SampleForEvent(event)
+  if (d20Sample) {
+    const roller = ensureCombatant(session, state, d20Sample.combatantId)
+    if (roller) roller.combatD20FaceCounts[d20Sample.d20 - 1] += 1
+  }
+  if (event.type === 'turn-started') {
+    const actor = ensureCombatant(session, state, event.actorId)
+    if (actor) actor.turnsTaken += 1
+    return
+  }
   if (event.type === 'damage-applied') {
     const sourceId = eventSourceId(event, fallbackActorId)
     const effective = Math.max(0,
@@ -145,7 +185,10 @@ function applyEvent(
     )
     const source = ensureCombatant(session, state, sourceId)
     const target = ensureCombatant(session, state, event.targetId)
-    if (source && sourceId !== event.targetId) source.damageDealt += effective
+    if (source && sourceId !== event.targetId) {
+      source.damageDealt += effective
+      source.turnTrackedDamageDealt += effective
+    }
     if (target) target.damageTaken += effective
     const targetState = state.combatants[event.targetId]
     if (source && event.hpBefore > 0 && event.hpAfter === 0) {
@@ -160,7 +203,10 @@ function applyEvent(
     const sourceId = fallbackActorId ?? event.targetId
     const source = ensureCombatant(session, state, sourceId)
     const target = ensureCombatant(session, state, event.targetId)
-    if (source) source.healingDone += safeAmount(event.amount)
+    if (source) {
+      source.healingDone += safeAmount(event.amount)
+      source.turnTrackedHealingDone += safeAmount(event.amount)
+    }
     if (target) target.healingReceived += safeAmount(event.amount)
     if (source && sourceId !== event.targetId && event.hpBefore === 0 && event.hpAfter > 0) source.alliesRescued += 1
     return
@@ -241,11 +287,38 @@ function applyEvent(
   }
 }
 
+function d20SampleForEvent(
+  event: Dnd5eCombatEvent,
+): { combatantId: string; d20: number } | undefined {
+  let combatantId: string | undefined
+  let d20: number | undefined
+  if (event.type === 'attack-resolved') {
+    combatantId = event.actorId
+    d20 = event.d20
+  } else if (event.type === 'saving-throw-resolved') {
+    combatantId = event.targetId
+    d20 = event.d20
+  } else if (
+    event.type === 'ability-check-resolved' ||
+    event.type === 'hide-resolved' ||
+    event.type === 'death-save-resolved' ||
+    event.type === 'concentration-resolved' ||
+    event.type === 'relentless-rage-resolved'
+  ) {
+    combatantId = event.actorId
+    d20 = event.d20
+  }
+  return combatantId && Number.isInteger(d20) && d20! >= 1 && d20! <= D20_FACE_COUNT
+    ? { combatantId, d20: d20! }
+    : undefined
+}
+
 export function createCombatStatisticsSession(input: {
   combatId: string
   mapId: string
   state?: Dnd5eHeadlessCombatState
   sideByCombatantId?: Readonly<Record<string, CombatStatisticsSide>>
+  characterIdByCombatantId?: Readonly<Record<string, string>>
   now?: number
 }): CombatStatisticsSession {
   const now = input.now ?? Date.now()
@@ -263,6 +336,7 @@ export function createCombatStatisticsSession(input: {
       combatant.id,
       combatant.name,
       input.sideByCombatantId?.[combatant.id] ?? sideFor(combatant.controller),
+      input.characterIdByCombatantId?.[combatant.id],
     )
   }
   return session
@@ -276,7 +350,22 @@ export function applyDnd5eCombatStatisticsObservation(
   const session = current
     ? {
         ...current,
-        combatants: Object.fromEntries(Object.entries(current.combatants).map(([id, value]) => [id, { ...value }])),
+        combatants: Object.fromEntries(Object.entries(current.combatants).map(([id, value]) => [
+          id,
+          {
+            ...value,
+            turnsTaken: finiteNonNegative(value.turnsTaken) ? value.turnsTaken : 0,
+            turnTrackedDamageDealt: finiteNonNegative(value.turnTrackedDamageDealt)
+              ? value.turnTrackedDamageDealt
+              : 0,
+            turnTrackedHealingDone: finiteNonNegative(value.turnTrackedHealingDone)
+              ? value.turnTrackedHealingDone
+              : 0,
+            combatD20FaceCounts: Array.isArray(value.combatD20FaceCounts)
+              ? [...value.combatD20FaceCounts]
+              : emptyD20FaceCounts(),
+          },
+        ])),
         receipts: [...current.receipts],
       }
     : createCombatStatisticsSession({
@@ -284,6 +373,7 @@ export function applyDnd5eCombatStatisticsObservation(
         mapId: observation.mapId,
         state: observation.source,
         sideByCombatantId: observation.sideByCombatantId,
+        characterIdByCombatantId: observation.characterIdByCombatantId,
         now: observation.observedAt,
       })
   for (const combatant of Object.values(resultState.combatants)) {
@@ -291,9 +381,19 @@ export function applyDnd5eCombatStatisticsObservation(
     if (stats && observation.sideByCombatantId?.[combatant.id]) {
       stats.side = observation.sideByCombatantId[combatant.id]
     }
+    if (stats && observation.characterIdByCombatantId?.[combatant.id]) {
+      stats.characterId = observation.characterIdByCombatantId[combatant.id]
+    }
   }
   if (session.receipts.includes(observation.receiptId) || !observation.result.ok) return session
   let fallbackActorId = actionActorId(observation.action)
+  if (
+    Object.values(session.combatants).every((entry) => entry.turnsTaken === 0) &&
+    !observation.result.events.some((event) => event.type === 'turn-started')
+  ) {
+    const initialActor = ensureCombatant(session, resultState, fallbackActorId)
+    if (initialActor) initialActor.turnsTaken = 1
+  }
   const zeroedByDamage = new Set(observation.result.events.flatMap((event) =>
     event.type === 'damage-applied' && event.hpBefore > 0 && event.hpAfter === 0 ? [event.targetId] : [],
   ))
@@ -325,9 +425,57 @@ export function applyCombatExperienceSettlement(
   }
 }
 
-export function combatantContributionScore(stats: CombatantStatistics): number {
-  return stats.damageDealt + stats.healingDone + stats.temporaryHpGranted + stats.damagePrevented +
-    stats.hostileConditionsApplied * 5 + stats.kills * 10 + stats.alliesRescued * 10
+export function combatantDamagePerTurn(stats: CombatantStatistics): number {
+  return stats.turnsTaken > 0 ? stats.turnTrackedDamageDealt / stats.turnsTaken : 0
+}
+
+export function combatantHealingPerTurn(stats: CombatantStatistics): number {
+  return stats.turnsTaken > 0 ? stats.turnTrackedHealingDone / stats.turnsTaken : 0
+}
+
+type ContributionMetric = (stats: CombatantStatistics) => number
+
+function contributionIndex(
+  stats: CombatantStatistics,
+  team: readonly CombatantStatistics[],
+  metrics: readonly ContributionMetric[],
+): number {
+  const activeMetrics = metrics
+    .map((metric) => ({ metric, total: team.reduce((sum, entry) => sum + metric(entry), 0) }))
+    .filter(({ total }) => total > 0)
+  if (activeMetrics.length === 0) return 0
+  const share = activeMetrics.reduce((sum, { metric, total }) => sum + metric(stats) / total, 0)
+  return Math.round((share / activeMetrics.length) * 1_000) / 10
+}
+
+/**
+ * 同阵营内的相对进攻占比。四个可审计维度等权，队伍成员总和约为 100。
+ */
+export function combatantOffensiveContributionIndex(
+  stats: CombatantStatistics,
+  team: readonly CombatantStatistics[],
+): number {
+  return contributionIndex(stats, team, [
+    (entry) => entry.damageDealt,
+    (entry) => entry.hits,
+    (entry) => entry.hostileConditionsApplied,
+    (entry) => entry.knockouts + entry.kills,
+  ])
+}
+
+/**
+ * 同阵营内的相对防御/支援占比。治疗与临时生命、减伤、救援、成功豁免等权。
+ */
+export function combatantDefensiveContributionIndex(
+  stats: CombatantStatistics,
+  team: readonly CombatantStatistics[],
+): number {
+  return contributionIndex(stats, team, [
+    (entry) => entry.healingDone + entry.temporaryHpGranted,
+    (entry) => entry.damagePrevented,
+    (entry) => entry.alliesRescued,
+    (entry) => entry.successfulSaves,
+  ])
 }
 
 function finiteNonNegative(value: unknown): value is number {
@@ -399,6 +547,7 @@ function normalizedExperienceSettlement(
 }
 
 const numericCombatantFields: Array<keyof CombatantStatistics> = [
+  'turnsTaken', 'turnTrackedDamageDealt', 'turnTrackedHealingDone',
   'damageDealt', 'damageTaken', 'healingDone', 'healingReceived', 'temporaryHpGranted', 'damagePrevented',
   'hostileConditionsApplied', 'attacks', 'hits', 'criticalHits', 'knockouts', 'kills', 'alliesRescued',
   'successfulSaves', 'failedSaves', 'concentrationChecks', 'concentrationMaintained', 'actionsSpent',
@@ -408,7 +557,8 @@ const numericCombatantFields: Array<keyof CombatantStatistics> = [
 export function normalizeSharedCombatStatistics(value: unknown): SharedCombatStatisticsState | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
-  if (![1, COMBAT_STATISTICS_SCHEMA_VERSION].includes(Number(raw.schemaVersion)) || !Array.isArray(raw.sessions) ||
+  const schemaVersion = Number(raw.schemaVersion)
+  if (![1, 2, COMBAT_STATISTICS_SCHEMA_VERSION].includes(schemaVersion) || !Array.isArray(raw.sessions) ||
     raw.sessions.length > COMBAT_STATISTICS_MAX_SESSIONS || !finiteNonNegative(raw.updatedAt)) return undefined
   const sessions: CombatStatisticsSession[] = []
   for (const entry of raw.sessions) {
@@ -425,11 +575,29 @@ export function normalizeSharedCombatStatistics(value: unknown): SharedCombatSta
     for (const [id, rawStats] of entries) {
       if (!id || id.length > 160 || !rawStats || typeof rawStats !== 'object' || Array.isArray(rawStats)) return undefined
       const stats = rawStats as unknown as CombatantStatistics
-      if (stats.combatantId !== id || typeof stats.name !== 'string' || stats.name.length > 240 ||
-        !['player', 'enemy', 'npc'].includes(stats.side) || numericCombatantFields.some((field) => !finiteNonNegative(stats[field]))) {
+      const legacyNumericFields = numericCombatantFields.filter((field) =>
+        field !== 'turnsTaken' &&
+        field !== 'turnTrackedDamageDealt' &&
+        field !== 'turnTrackedHealingDone',
+      )
+      const combatD20FaceCounts = schemaVersion >= 3 ? stats.combatD20FaceCounts : emptyD20FaceCounts()
+      if (stats.combatantId !== id ||
+        (stats.characterId != null && (typeof stats.characterId !== 'string' || !stats.characterId || stats.characterId.length > 160)) ||
+        typeof stats.name !== 'string' || stats.name.length > 240 ||
+        !['player', 'enemy', 'npc'].includes(stats.side) ||
+        legacyNumericFields.some((field) => !finiteNonNegative(stats[field])) ||
+        (schemaVersion >= 3 && !finiteNonNegative(stats.turnsTaken)) ||
+        !Array.isArray(combatD20FaceCounts) || combatD20FaceCounts.length !== D20_FACE_COUNT ||
+        combatD20FaceCounts.some((count) => !Number.isSafeInteger(count) || count < 0)) {
         return undefined
       }
-      combatants[id] = { ...stats }
+      combatants[id] = {
+        ...stats,
+        turnsTaken: schemaVersion >= 3 ? stats.turnsTaken : 0,
+        turnTrackedDamageDealt: schemaVersion >= 3 ? stats.turnTrackedDamageDealt : 0,
+        turnTrackedHealingDone: schemaVersion >= 3 ? stats.turnTrackedHealingDone : 0,
+        combatD20FaceCounts: [...combatD20FaceCounts],
+      }
     }
     const experienceSettlement = normalizedExperienceSettlement(
       session.experienceSettlement,

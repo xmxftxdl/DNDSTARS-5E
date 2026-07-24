@@ -39,6 +39,22 @@ describe('D&D 5e 2014 traversal', () => {
     })).toEqual({ ok: true, movementCostFeet: 19 })
   })
 
+  it('triples both long-jump and high-jump limits under Jump without discounting movement cost', () => {
+    expect(dnd5eLongJumpMaximumFeet(16, true, 0, 3)).toBe(48)
+    expect(dnd5eHighJumpMaximumFeet(3, true, 3)).toBe(18)
+    expect(dnd5eTraversalMovementCost({
+      distanceFeet: 40,
+      elevationGainFeet: 15,
+      mode: 'long-jump-running',
+      profile: { ...profile, jumpDistanceMultiplier: 3 },
+    })).toEqual({ ok: true, movementCostFeet: 55 })
+    expect(dnd5eTraversalMovementCost({
+      distanceFeet: 49,
+      mode: 'long-jump-running',
+      profile: { ...profile, jumpDistanceMultiplier: 3 },
+    })).toEqual({ ok: false, reason: 'jump-too-far' })
+  })
+
   it('deals 1d6 per 10 feet up to 20d6 and knocks the faller prone', () => {
     expect(dnd5eFallingDamageDice(9)).toBe(0)
     expect(dnd5eFallingDamageDice(250)).toBe(20)

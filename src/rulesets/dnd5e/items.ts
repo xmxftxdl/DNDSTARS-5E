@@ -5,6 +5,7 @@ import type {
   Dnd5eAmmunitionKind,
   Dnd5eCurrencyWallet,
   Dnd5eInventoryEntry,
+  Dnd5eInventoryGrant,
   Dnd5eInventoryItemTemplate,
   Dnd5eInventoryMutation,
   Dnd5eInventoryMutationResult,
@@ -58,20 +59,22 @@ function equipmentRulesText(item: EquipmentItem): string {
   const rules = item.dnd5e
   if (!rules) return `该装备不替换基础武器或护甲公式。${equipmentEffectsText(item) || '具体规则由当前规则包或 DM 裁定。'}`
   if (item.id === 'dnd5e-net') return '射程 5/15 尺；命中大型或更小生物时使其受束缚。挣脱、破坏捕网以及每次只能进行一次捕网攻击由 Headless/DM 按 SRD 5.1 裁定。'
-  if (rules.kind === 'shield') return `持用盾牌时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}`
+  if (rules.kind === 'shield') return `盾牌。持用时护甲等级 +${rules.armorClassBonus}。同一时间只能从一面盾牌获得该加值。${equipmentEffectsText(item)}`
   if (rules.kind === 'armor') {
+    const category = rules.category === 'light' ? '轻甲' : rules.category === 'medium' ? '中甲' : '重甲'
     const dexterity = rules.dexterityBonus === 'full'
       ? '加上完整敏捷调整值'
       : rules.dexterityBonus === 'max-2'
         ? '加上至多 +2 的敏捷调整值'
         : '不加敏捷调整值'
-    return `护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}`
+    return `${category}。护甲等级 ${rules.baseArmorClass}，${dexterity}${rules.strengthRequirement ? `；力量需求 ${rules.strengthRequirement}` : ''}${rules.stealthDisadvantage ? '；进行隐匿检定时具有劣势' : ''}。${equipmentEffectsText(item)}`
   }
+  const category = rules.category === 'simple' ? '简易武器' : '军用武器'
   const range = rules.mode === 'ranged' && rules.rangeFeet
     ? `，射程 ${rules.rangeFeet.normal}/${rules.rangeFeet.long} 尺`
     : `，触及 ${rules.reachFeet ?? 5} 尺`
   const properties = rules.properties?.length ? `；属性：${rules.properties.join('、')}` : ''
-  return `命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}`
+  return `${category}。命中造成 ${rules.damage.count}d${rules.damage.sides} ${damageTypeLabel(rules.damage.type)}伤害${range}${properties}。${equipmentEffectsText(item)}`
 }
 
 function equipmentEffectsText(item: EquipmentItem): string {
@@ -315,12 +318,21 @@ export function createDnd5eInventoryForCharacter(character: Pick<Character, 'id'
       acquiredAt: 0,
     } satisfies Dnd5eInventoryEntry]
   })
-  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries, currency: { ...EMPTY_CURRENCY } }
+  return {
+    schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+    entries,
+    currency: { ...EMPTY_CURRENCY },
+    authorityGrantReceipts: [],
+  }
 }
 
 export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
   const raw = character.dnd5eInventory
   const currency = normalizeCurrency(raw?.currency)
+  const authorityGrantReceipts = [...new Set((raw?.authorityGrantReceipts ?? [])
+    .filter((receipt): receipt is string =>
+      typeof receipt === 'string' && receipt.length > 0 && receipt.length <= 300,
+    ))].slice(-512)
   const entries: Dnd5eInventoryEntry[] = (raw?.entries ?? [])
     .filter((entry) => entry && typeof entry.instanceId === 'string' && typeof entry.templateId === 'string')
     .map((entry) => {
@@ -370,7 +382,12 @@ export function normalizeDnd5eInventory(character: Character): Dnd5eInventory {
     if (!equipped || equipped.id !== entry.item.equipment?.id) entry.equippedSlot = undefined
   }
   normalizeContainerLinks(entries)
-  return { schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION, entries, currency }
+  return {
+    schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
+    entries,
+    currency,
+    authorityGrantReceipts,
+  }
 }
 
 export interface Dnd5eInventoryLoad {
@@ -550,6 +567,97 @@ export function applyDnd5eInventoryMutation(
       ? commitCombatTransaction(transaction)
       : rollbackCombatTransaction(transaction, result.reason ?? 'inventory-mutation-rejected'),
   }
+}
+
+export function dnd5eInventoryHasAuthorityGrantReceipt(
+  characters: readonly Character[],
+  receiptId: string,
+): boolean {
+  return characters.some((character) =>
+    normalizeDnd5eInventory(character).authorityGrantReceipts?.includes(receiptId),
+  )
+}
+
+/**
+ * 将一组 DM 权威奖励与确定性收据一次写入角色库存。
+ * 所有模板与数量先完整校验；任意一项无效时不会发生部分发放。
+ */
+export function applyDnd5eInventoryGrantBundle(
+  characters: readonly Character[],
+  input: {
+    characterId: string
+    grants: readonly Dnd5eInventoryGrant[]
+    currencyGrants?: readonly import('../../types/inventory').Dnd5eInventoryCurrencyGrant[]
+    receiptId: string
+  },
+): Dnd5eInventoryMutationResult {
+  const receiptId = input.receiptId.trim()
+  if (!receiptId || receiptId.length > 300) return failed(characters, 'invalid-receipt')
+  if (dnd5eInventoryHasAuthorityGrantReceipt(characters, receiptId)) {
+    return {
+      ...succeeded(characters, '该奖励已经结算，不会重复发放。'),
+      deduplicated: true,
+    }
+  }
+  const sourceIndex = characters.findIndex((character) => character.id === input.characterId)
+  if (sourceIndex < 0) return failed(characters, 'character-not-found')
+  if (input.grants.length > 12) return failed(characters, 'invalid-quantity')
+  if ((input.currencyGrants?.length ?? 0) > 24) return failed(characters, 'invalid-currency')
+
+  const validated = input.grants.map((grant) => ({
+    grant,
+    quantity: validQuantity(grant.quantity),
+    template: dnd5eInventoryItemTemplate(grant.templateId),
+  }))
+  if (validated.some((entry) => !entry.quantity)) return failed(characters, 'invalid-quantity')
+  if (validated.some((entry) => !entry.template)) return failed(characters, 'template-not-found')
+  const currencyGrants = (input.currencyGrants ?? []).map((grant) => ({
+    currency: grant.currency,
+    amount: Number(grant.amount),
+  }))
+  if (currencyGrants.some((grant) =>
+    !isCurrency(grant.currency) ||
+    !Number.isSafeInteger(grant.amount) ||
+    grant.amount < 1 ||
+    grant.amount > 1_000_000,
+  )) return failed(characters, 'invalid-currency')
+
+  let next = withNormalizedInventory(characters[sourceIndex])
+  for (const entry of validated) {
+    next = addItem(next, entry.template!, entry.quantity!, {
+      identified: entry.grant.identified ?? true,
+    })
+  }
+  const inventory = normalizeDnd5eInventory(next)
+  const currency = { ...EMPTY_CURRENCY, ...inventory.currency }
+  for (const grant of currencyGrants) {
+    const nextAmount = currency[grant.currency] + grant.amount
+    if (!Number.isSafeInteger(nextAmount) || nextAmount > 1_000_000_000) {
+      return failed(characters, 'invalid-currency')
+    }
+    currency[grant.currency] = nextAmount
+  }
+  next = {
+    ...next,
+    dnd5eInventory: {
+      ...inventory,
+      currency,
+      authorityGrantReceipts: [
+        ...(inventory.authorityGrantReceipts ?? []),
+        receiptId,
+      ].slice(-512),
+    },
+  }
+  const rewardText = validated.length > 0
+    ? validated.map((entry) => `${entry.template!.name} ×${entry.quantity}`).join('、')
+    : '无物品奖励'
+  const currencyText = currencyGrants.length > 0
+    ? currencyGrants.map((grant) => `${currencyLabel(grant.currency)} ×${grant.amount}`).join('、')
+    : ''
+  return succeeded(
+    replaceAt(characters, sourceIndex, next),
+    `${next.name} 获得：${[rewardText, currencyText].filter(Boolean).join('；')}。`,
+  )
 }
 
 function applyDnd5eInventoryMutationInternal(
@@ -1062,6 +1170,7 @@ function inventoryWithEntries(inventory: Dnd5eInventory, entries: Dnd5eInventory
     schemaVersion: DND5E_INVENTORY_SCHEMA_VERSION,
     entries,
     currency: normalizeCurrency(inventory.currency),
+    authorityGrantReceipts: [...(inventory.authorityGrantReceipts ?? [])],
   }
 }
 

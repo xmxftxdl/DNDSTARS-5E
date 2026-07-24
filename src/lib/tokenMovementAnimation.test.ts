@@ -19,6 +19,22 @@ describe('token movement path animation', () => {
     expect(tokenMovementAnimationPosition(animation, animation.durationMs)).toBeUndefined()
   })
 
+  it('keeps fractional frame positions instead of snapping movement to coarse steps', () => {
+    const animation = createTokenMovementAnimation({
+      id: 'smooth-move',
+      path: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+      finalPosition: { x: 100, y: 0 },
+      issuedAt: 1,
+    })!
+    const first = tokenMovementAnimationPosition(animation, 10)!
+    const second = tokenMovementAnimationPosition(animation, 20)!
+    expect(first.x).toBeGreaterThan(0)
+    expect(second.x).toBeGreaterThan(first.x)
+    expect(second.x - first.x).toBeCloseTo(1000 / animation.durationMs, 5)
+    expect(first.y).toBe(0)
+    expect(second.y).toBe(0)
+  })
+
   it('truncates a route at an authoritative hazard stop', () => {
     expect(truncateTokenMovementPath(
       [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }],

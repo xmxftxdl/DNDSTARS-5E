@@ -64,6 +64,13 @@ describe('SRD 5.1 passive class defenses', () => {
     expect(dnd5eSavingThrowMode({ ...dodging, exhaustionLevel: 3 }, 'dex')).toBe('normal')
   })
 
+  it('applies unproficient-armor disadvantage to Strength and Dexterity saving throws', () => {
+    const armored = creature({ wearingUnproficientArmor: true })
+    expect(dnd5eSavingThrowMode(armored, 'str')).toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(armored, 'dex')).toBe('disadvantage')
+    expect(dnd5eSavingThrowMode(armored, 'con')).toBe('normal')
+  })
+
   it('applies Hunter Steel Will only against being frightened', () => {
     const hunter = creature({
       classId: 'ranger', subclassId: 'hunter', level: 7,

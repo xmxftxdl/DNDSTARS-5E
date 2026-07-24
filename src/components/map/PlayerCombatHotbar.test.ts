@@ -28,7 +28,9 @@ describe('PlayerCombatHotbar', () => {
       movementRemaining: 30,
       spells: [{
         id: 'fire-bolt', label: '火焰箭', description: '远程法术攻击。', icon,
-        level: 0, castingTime: 'action', targeting: 'creature', castingClassId: 'wizard', available: true,
+        level: 0, castingTime: 'action', targeting: 'creature', castingClassId: 'wizard',
+        defaultSlotLevel: 0,
+        availableSlotLevels: [0], available: true,
       }],
       items: [{
         instanceId: 'potion', label: '治疗药水', description: '恢复生命值。', icon,
@@ -58,5 +60,38 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('8/12')
     expect(html).toContain('基础动作')
     expect(html).toContain('职业特性')
+  })
+
+  it('从角色实际选择生成可分页的通用施法修正图标', () => {
+    const sorcerer: Character = {
+      ...character(),
+      charClass: '术士',
+      level: 10,
+      dnd5eClassLevels: { sorcerer: 10 },
+      dnd5eClassChoices: {
+        classes: {
+          sorcerer: {
+            subclass: 'draconic',
+            selections: {
+              metamagic: ['careful', 'quickened', 'empowered'],
+              'dragon-ancestor': ['red-fire'],
+            },
+          },
+        },
+      },
+      classResources: {
+        'dnd5e-sorcery-points': { current: 10, max: 10 },
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: sorcerer,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+    expect(html).toContain('aria-label="谨慎法术"')
+    expect(html).toContain('aria-label="强效法术"')
+    expect(html).toContain('5 项 · 1/2')
   })
 })

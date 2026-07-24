@@ -26,7 +26,7 @@ describe('combat token liveness', () => {
     expect(checkCombatOutcome([linkedPlayer, enemy], [])).toEqual({ ended: false })
   })
 
-  it('keeps an unstable 0 HP player in initiative until death saves are resolved', () => {
+  it('ends combat immediately when the only player character enters death saves', () => {
     const linkedPlayer = token({ id: 'player-token', type: 'player', characterId: 'hero' })
     const enemy = token({ id: 'enemy-token', type: 'enemy', hp: 12, maxHp: 12 })
     const hero = { id: 'hero', currentHp: 0, deathSaveFailures: 0, deathSaveStable: false } as Character
@@ -34,17 +34,42 @@ describe('combat token liveness', () => {
     expect(isTokenAlive(linkedPlayer, [hero])).toBe(false)
     expect(characterNeedsDeathSave(hero)).toBe(true)
     expect(decideTurnAction(linkedPlayer, [hero])).toBe('player')
-    expect(checkCombatOutcome([linkedPlayer, enemy], [hero])).toEqual({ ended: false })
+    expect(checkCombatOutcome([linkedPlayer, enemy], [hero])).toMatchObject({
+      ended: true,
+      winner: 'enemy',
+      reason: 'party-downed',
+    })
   })
 
-  it('ends the player side only after the character has three failed death saves', () => {
-    const linkedPlayer = token({ id: 'player-token', type: 'player', characterId: 'hero' })
+  it('waits until every participating player character is down', () => {
+    const firstPlayer = token({ id: 'player-one', type: 'player', characterId: 'hero-one' })
+    const secondPlayer = token({ id: 'player-two', type: 'player', characterId: 'hero-two' })
     const enemy = token({ id: 'enemy-token', type: 'enemy', hp: 12, maxHp: 12 })
-    const hero = { id: 'hero', currentHp: 0, deathSaveFailures: 3, deathSaveStable: false } as Character
+    const firstHero = { id: 'hero-one', currentHp: 0, deathSaveFailures: 0, deathSaveStable: false } as Character
+    const secondHero = { id: 'hero-two', currentHp: 8, deathSaveFailures: 0, deathSaveStable: false } as Character
 
-    expect(characterNeedsDeathSave(hero)).toBe(false)
-    expect(decideTurnAction(linkedPlayer, [hero])).toBe('skip')
-    expect(checkCombatOutcome([linkedPlayer, enemy], [hero]).ended).toBe(true)
+    expect(checkCombatOutcome([firstPlayer, secondPlayer, enemy], [firstHero, secondHero]))
+      .toEqual({ ended: false })
+    expect(checkCombatOutcome(
+      [firstPlayer, secondPlayer, enemy],
+      [firstHero, { ...secondHero, currentHp: 0 }],
+    )).toMatchObject({ ended: true, reason: 'party-downed' })
+  })
+
+  it('only counts player characters included in the current initiative', () => {
+    const downPlayer = token({ id: 'down-player', type: 'player', characterId: 'down-hero' })
+    const spectatorCharacter = token({ id: 'spectator', type: 'player', characterId: 'spectator-hero' })
+    const enemy = token({ id: 'enemy-token', type: 'enemy', hp: 12, maxHp: 12 })
+    const characters = [
+      { id: 'down-hero', currentHp: 0, deathSaveFailures: 0, deathSaveStable: false },
+      { id: 'spectator-hero', currentHp: 10, deathSaveFailures: 0, deathSaveStable: false },
+    ] as Character[]
+
+    expect(checkCombatOutcome(
+      [downPlayer, spectatorCharacter, enemy],
+      characters,
+      { participantTokenIds: [downPlayer.id, enemy.id] },
+    )).toMatchObject({ ended: true, reason: 'party-downed' })
   })
 
   it('counts a DM-controlled allied summon on the player side for combat outcome', () => {

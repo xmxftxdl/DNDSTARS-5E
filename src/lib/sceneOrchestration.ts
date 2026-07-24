@@ -1,10 +1,15 @@
 import type { AbilityKey } from './dnd'
+import { DND5E_STANDARD_CONDITION_IDS, type Dnd5eStandardConditionId } from '../rulesets/dnd5e/conditions'
+import { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from '../rulesets/dnd5e/damageTypes'
 
 export const SCENE_ORCHESTRATION_RESOURCE = 'scene-orchestration'
 export const SCENE_ORCHESTRATION_SCHEMA_VERSION = 1
 export const SCENE_PRESENTATION_CHANNEL = 'scene-presentation'
 export const SCENE_MAX_SCENES = 80
 export const SCENE_MAX_TRIGGERS = 120
+export const SCENE_MAX_INTERACTION_POINTS = 160
+export const SCENE_MAX_INTERACTION_REWARDS = 12
+export const SCENE_MAX_INTERACTION_EFFECTS = 24
 export const SCENE_MAX_ACTIONS = 40
 export const SCENE_MAX_HISTORY = 240
 
@@ -17,6 +22,80 @@ export type SceneTokenFilter = 'any' | 'player' | 'enemy'
 export type SceneRepeatMode = 'always' | 'per-token' | 'once'
 export type SceneAudioCue = 'none' | 'discovery' | 'danger' | 'door' | 'mystery' | 'victory'
 export type SceneRollSelection = `ability:${AbilityKey}` | `skill:${string}` | `save:${AbilityKey}`
+export type SceneInteractionPointIcon = 'bookshelf' | 'chest' | 'search' | 'altar' | 'switch' | 'custom'
+export type SceneInteractionRepeat = 'once' | 'per-character' | 'always'
+
+export interface SceneInteractionPointCheck {
+  label: string
+  selection: SceneRollSelection
+  dc: number
+  mode: 'normal' | 'advantage' | 'disadvantage'
+}
+
+export interface SceneInteractionPointReward {
+  templateId: string
+  quantity: number
+  identified: boolean
+}
+
+export type SceneInteractionOutcomeEffect =
+  | {
+      id: string
+      kind: 'currency'
+      currency: 'cp' | 'sp' | 'ep' | 'gp' | 'pp'
+      amount: number
+    }
+  | {
+      id: string
+      kind: 'handout'
+      handoutId: string
+      audience: 'all' | 'triggering-player'
+    }
+  | {
+      id: string
+      kind: 'task'
+      operation: 'add' | 'complete'
+      taskId?: string
+      title: string
+      body: string
+    }
+  | {
+      id: string
+      kind: 'damage'
+      count: number
+      sides: number
+      bonus: number
+      damageType: Dnd5eDamageType
+    }
+  | {
+      id: string
+      kind: 'condition'
+      condition: Dnd5eStandardConditionId
+      duration: { type: 'permanent' } | { type: 'rounds'; rounds: number }
+    }
+
+/**
+ * 可点击地图互动点。check 与 rewards 属于 DM 私有配置；服务端向玩家投影时会删除，
+ * 玩家请求只携带 point id，最终配置始终由 DM Host 重新读取。
+ */
+export interface SceneInteractionPoint {
+  id: string
+  name: string
+  enabled: boolean
+  visibleToPlayers: boolean
+  icon: SceneInteractionPointIcon
+  x: number
+  y: number
+  interactionRadiusFeet: number
+  prompt: string
+  repeat: SceneInteractionRepeat
+  check?: SceneInteractionPointCheck
+  successText: string
+  failureText: string
+  rewards: SceneInteractionPointReward[]
+  successEffects: SceneInteractionOutcomeEffect[]
+  failureEffects: SceneInteractionOutcomeEffect[]
+}
 
 interface SceneActionBase {
   id: string
@@ -84,6 +163,7 @@ export interface OrchestratedScene {
   backgroundAudioVolume: number
   boundHandoutIds: string[]
   boundJournalEntryIds: string[]
+  interactionPoints: SceneInteractionPoint[]
   triggers: SceneTrigger[]
   createdAt: number
   updatedAt: number
@@ -188,10 +268,175 @@ function normalizeRegion(value: unknown): SceneRegion | null {
 }
 
 const ABILITY_KEYS = new Set(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+const INTERACTION_POINT_ICONS = new Set<SceneInteractionPointIcon>([
+  'bookshelf',
+  'chest',
+  'search',
+  'altar',
+  'switch',
+  'custom',
+])
+const INTERACTION_CURRENCIES = new Set(['cp', 'sp', 'ep', 'gp', 'pp'])
+const INTERACTION_DAMAGE_TYPES = new Set<string>(DND5E_DAMAGE_TYPES)
+const INTERACTION_CONDITIONS = new Set<string>(DND5E_STANDARD_CONDITION_IDS)
 
 function validSelection(value: string): value is SceneRollSelection {
   const [kind, key] = value.split(':')
   return (kind === 'ability' || kind === 'save') ? ABILITY_KEYS.has(key) : kind === 'skill' && /^[a-zA-Z]+$/.test(key)
+}
+
+function normalizeInteractionOutcomeEffect(value: unknown): SceneInteractionOutcomeEffect | null {
+  if (!object(value)) return null
+  const effectId = id(value.id)
+  if (!effectId) return null
+  if (value.kind === 'currency') {
+    const currency = text(value.currency, 4)
+    const amount = Math.floor(finite(value.amount))
+    return INTERACTION_CURRENCIES.has(currency) && amount >= 1 && amount <= 1_000_000
+      ? { id: effectId, kind: value.kind, currency: currency as 'cp' | 'sp' | 'ep' | 'gp' | 'pp', amount }
+      : null
+  }
+  if (value.kind === 'handout') {
+    const handoutId = id(value.handoutId)
+    return handoutId
+      ? {
+          id: effectId,
+          kind: value.kind,
+          handoutId,
+          audience: value.audience === 'all' ? 'all' : 'triggering-player',
+        }
+      : null
+  }
+  if (value.kind === 'task') {
+    const operation = value.operation === 'complete' ? 'complete' : 'add'
+    const taskId = id(value.taskId)
+    const title = text(value.title, 120)
+    const body = text(value.body, 4_000)
+    if ((operation === 'complete' && !taskId) || (operation === 'add' && !title)) return null
+    return {
+      id: effectId,
+      kind: value.kind,
+      operation,
+      ...(taskId ? { taskId } : {}),
+      title,
+      body,
+    }
+  }
+  if (value.kind === 'damage') {
+    const count = Math.floor(finite(value.count))
+    const sides = Math.floor(finite(value.sides))
+    const bonus = Math.floor(finite(value.bonus))
+    const damageType = text(value.damageType, 20)
+    return (
+      count >= 1 && count <= 40 &&
+      sides >= 2 && sides <= 100 &&
+      bonus >= -1_000 && bonus <= 1_000 &&
+      INTERACTION_DAMAGE_TYPES.has(damageType)
+    )
+      ? { id: effectId, kind: value.kind, count, sides, bonus, damageType: damageType as Dnd5eDamageType }
+      : null
+  }
+  if (value.kind === 'condition') {
+    const condition = text(value.condition, 40)
+    if (!INTERACTION_CONDITIONS.has(condition) || !object(value.duration)) return null
+    const duration = value.duration.type === 'rounds'
+      ? { type: 'rounds' as const, rounds: Math.min(10_000, Math.max(1, Math.floor(finite(value.duration.rounds, 1)))) }
+      : { type: 'permanent' as const }
+    return {
+      id: effectId,
+      kind: value.kind,
+      condition: condition as Dnd5eStandardConditionId,
+      duration,
+    }
+  }
+  return null
+}
+
+function normalizeInteractionOutcomeEffects(value: unknown): SceneInteractionOutcomeEffect[] {
+  return (Array.isArray(value) ? value : [])
+    .map(normalizeInteractionOutcomeEffect)
+    .filter((effect): effect is SceneInteractionOutcomeEffect => effect !== null)
+    .slice(0, SCENE_MAX_INTERACTION_EFFECTS)
+}
+
+function interactionOutcomeEffectStrictlyMatches(
+  raw: unknown,
+  effect: SceneInteractionOutcomeEffect | undefined,
+): boolean {
+  if (!effect || !object(raw) || raw.id !== effect.id || raw.kind !== effect.kind) return false
+  if (effect.kind === 'currency') {
+    return raw.currency === effect.currency && raw.amount === effect.amount
+  }
+  if (effect.kind === 'handout') {
+    return raw.handoutId === effect.handoutId && raw.audience === effect.audience
+  }
+  if (effect.kind === 'task') {
+    return raw.operation === effect.operation &&
+      (raw.taskId ?? undefined) === effect.taskId &&
+      raw.title === effect.title &&
+      raw.body === effect.body
+  }
+  if (effect.kind === 'damage') {
+    return raw.count === effect.count && raw.sides === effect.sides &&
+      raw.bonus === effect.bonus && raw.damageType === effect.damageType
+  }
+  return raw.condition === effect.condition && object(raw.duration) &&
+    raw.duration.type === effect.duration.type &&
+    (effect.duration.type !== 'rounds' || raw.duration.rounds === effect.duration.rounds)
+}
+
+function normalizeInteractionPoint(value: unknown): SceneInteractionPoint | null {
+  if (!object(value)) return null
+  const pointId = id(value.id)
+  const name = text(value.name, 160)
+  if (!pointId || !name || !Number.isFinite(Number(value.x)) || !Number.isFinite(Number(value.y))) return null
+  const icon = INTERACTION_POINT_ICONS.has(value.icon as SceneInteractionPointIcon)
+    ? value.icon as SceneInteractionPointIcon
+    : 'search'
+  let check: SceneInteractionPointCheck | undefined
+  if (value.check != null) {
+    if (!object(value.check)) return null
+    const selection = text(value.check.selection, 100)
+    if (!validSelection(selection) || selection.startsWith('save:')) return null
+    check = {
+      label: text(value.check.label, 160) || name,
+      selection,
+      dc: Math.min(100, Math.max(0, Math.floor(finite(value.check.dc, 10)))),
+      mode: value.check.mode === 'advantage' || value.check.mode === 'disadvantage'
+        ? value.check.mode
+        : 'normal',
+    }
+  }
+  const rewards = (Array.isArray(value.rewards) ? value.rewards : []).flatMap((reward) => {
+    if (!object(reward)) return []
+    const templateId = id(reward.templateId)
+    const quantity = Math.min(999, Math.max(1, Math.floor(finite(reward.quantity, 1))))
+    return templateId ? [{
+      templateId,
+      quantity,
+      identified: reward.identified !== false,
+    } satisfies SceneInteractionPointReward] : []
+  }).slice(0, SCENE_MAX_INTERACTION_REWARDS)
+  const successEffects = normalizeInteractionOutcomeEffects(value.successEffects)
+  const failureEffects = normalizeInteractionOutcomeEffects(value.failureEffects)
+  return {
+    id: pointId,
+    name,
+    enabled: value.enabled !== false,
+    visibleToPlayers: value.visibleToPlayers !== false,
+    icon,
+    x: finite(value.x),
+    y: finite(value.y),
+    interactionRadiusFeet: Math.min(120, Math.max(5, finite(value.interactionRadiusFeet, 5))),
+    prompt: text(value.prompt, 1_000) || `调查${name}`,
+    repeat: value.repeat === 'always' || value.repeat === 'once' ? value.repeat : 'per-character',
+    ...(check ? { check } : {}),
+    successText: text(value.successText, 1_000) || '你发现了一些有用的东西。',
+    failureText: text(value.failureText, 1_000) || '你没有发现异常。',
+    rewards,
+    successEffects,
+    failureEffects,
+  }
 }
 
 function normalizeAction(value: unknown): SceneAction | null {
@@ -320,6 +565,10 @@ function normalizeScene(value: unknown): OrchestratedScene | null {
     backgroundAudioVolume: Math.min(1, Math.max(0, finite(value.backgroundAudioVolume, 0.7))),
     boundHandoutIds: (Array.isArray(value.boundHandoutIds) ? value.boundHandoutIds : []).map(id).filter(Boolean).slice(0, 100),
     boundJournalEntryIds: (Array.isArray(value.boundJournalEntryIds) ? value.boundJournalEntryIds : []).map(id).filter(Boolean).slice(0, 100),
+    interactionPoints: (Array.isArray(value.interactionPoints) ? value.interactionPoints : [])
+      .map(normalizeInteractionPoint)
+      .filter((entry): entry is SceneInteractionPoint => entry !== null)
+      .slice(0, SCENE_MAX_INTERACTION_POINTS),
     triggers: (Array.isArray(value.triggers) ? value.triggers : []).map(normalizeTrigger)
       .filter((entry): entry is SceneTrigger => entry !== null).slice(0, SCENE_MAX_TRIGGERS),
     createdAt: timestamp(value.createdAt),
@@ -436,8 +685,74 @@ export function validateSharedSceneOrchestration(value: unknown): boolean {
   const sceneIds = new Set<string>()
   const scenesValid = normalized.scenes.every((scene, index) => {
     const raw = rawScenes[index]
-    if (!object(raw) || sceneIds.has(scene.id) || !Array.isArray(raw.triggers) || raw.triggers.length !== scene.triggers.length) return false
+    if (
+      !object(raw) ||
+      sceneIds.has(scene.id) ||
+      !Array.isArray(raw.triggers) ||
+      raw.triggers.length !== scene.triggers.length ||
+      (raw.interactionPoints != null && (
+        !Array.isArray(raw.interactionPoints) ||
+        raw.interactionPoints.length !== scene.interactionPoints.length ||
+        raw.interactionPoints.length > SCENE_MAX_INTERACTION_POINTS
+      ))
+    ) return false
     sceneIds.add(scene.id)
+    const interactionIds = new Set<string>()
+    if (scene.interactionPoints.some((point, pointIndex) => {
+      if (interactionIds.has(point.id)) return true
+      interactionIds.add(point.id)
+      const rawPoint = Array.isArray(raw.interactionPoints) ? raw.interactionPoints[pointIndex] : undefined
+      if (!object(rawPoint)) return true
+      const rawRewards = Array.isArray(rawPoint.rewards) ? rawPoint.rewards : []
+      const rawSuccessEffects = Array.isArray(rawPoint.successEffects) ? rawPoint.successEffects : []
+      const rawFailureEffects = Array.isArray(rawPoint.failureEffects) ? rawPoint.failureEffects : []
+      if (
+        rawPoint.check != null && !point.check ||
+        typeof rawPoint.name !== 'string' ||
+        !rawPoint.name.trim() ||
+        typeof rawPoint.enabled !== 'boolean' ||
+        typeof rawPoint.visibleToPlayers !== 'boolean' ||
+        !Number.isFinite(rawPoint.x) ||
+        !Number.isFinite(rawPoint.y) ||
+        !Number.isFinite(Number(rawPoint.interactionRadiusFeet)) ||
+        Number(rawPoint.interactionRadiusFeet) < 5 ||
+        Number(rawPoint.interactionRadiusFeet) > 120 ||
+        typeof rawPoint.prompt !== 'string' ||
+        !rawPoint.prompt.trim() ||
+        !Array.isArray(rawPoint.rewards) ||
+        rawRewards.length !== point.rewards.length ||
+        rawRewards.length > SCENE_MAX_INTERACTION_REWARDS ||
+        (rawPoint.successEffects != null && (
+          !Array.isArray(rawPoint.successEffects) ||
+          rawSuccessEffects.length !== point.successEffects.length ||
+          rawSuccessEffects.length > SCENE_MAX_INTERACTION_EFFECTS ||
+          new Set(point.successEffects.map((effect) => effect.id)).size !== point.successEffects.length ||
+          rawSuccessEffects.some((effect, effectIndex) =>
+            !interactionOutcomeEffectStrictlyMatches(effect, point.successEffects[effectIndex]))
+        )) ||
+        (rawPoint.failureEffects != null && (
+          !Array.isArray(rawPoint.failureEffects) ||
+          rawFailureEffects.length !== point.failureEffects.length ||
+          rawFailureEffects.length > SCENE_MAX_INTERACTION_EFFECTS ||
+          new Set(point.failureEffects.map((effect) => effect.id)).size !== point.failureEffects.length ||
+          rawFailureEffects.some((effect, effectIndex) =>
+            !interactionOutcomeEffectStrictlyMatches(effect, point.failureEffects[effectIndex]))
+        )) ||
+        rawRewards.some((reward, rewardIndex) => {
+          if (!object(reward)) return true
+          const normalizedReward = point.rewards[rewardIndex]
+          return (
+            !normalizedReward ||
+            typeof reward.templateId !== 'string' ||
+            reward.templateId !== normalizedReward.templateId ||
+            !Number.isInteger(reward.quantity) ||
+            reward.quantity !== normalizedReward.quantity ||
+            typeof reward.identified !== 'boolean'
+          )
+        })
+      ) return true
+      return false
+    })) return false
     const triggerIds = new Set<string>()
     return raw.triggers.every((trigger, triggerIndex) => {
       const normalizedTrigger = scene.triggers[triggerIndex]
@@ -487,6 +802,45 @@ export function sceneTriggerReceiptKey(
   if (trigger.repeat === 'always') return null
   if (trigger.repeat === 'once') return `${scene.id}:${trigger.id}:once`
   return `${scene.id}:${trigger.id}:token:${tokenId ?? 'manual'}`
+}
+
+export function sceneInteractionReceiptId(
+  scene: Pick<OrchestratedScene, 'id'>,
+  point: Pick<SceneInteractionPoint, 'id' | 'repeat'>,
+  characterId: string,
+  requestId: string,
+): string {
+  const scope = point.repeat === 'once'
+    ? 'once'
+    : point.repeat === 'per-character'
+      ? `character:${characterId}`
+      : `request:${requestId}`
+  return `scene-interaction:${scene.id}:${point.id}:${scope}`
+}
+
+export function sceneInteractionPointPublicSummary(
+  point: SceneInteractionPoint,
+): Pick<SceneInteractionPoint,
+  'id' | 'name' | 'enabled' | 'visibleToPlayers' | 'icon' | 'x' | 'y' |
+  'interactionRadiusFeet' | 'prompt' | 'repeat' | 'successText' | 'failureText'
+> & { rewards: []; successEffects: []; failureEffects: [] } {
+  return {
+    id: point.id,
+    name: point.name,
+    enabled: point.enabled,
+    visibleToPlayers: point.visibleToPlayers,
+    icon: point.icon,
+    x: point.x,
+    y: point.y,
+    interactionRadiusFeet: point.interactionRadiusFeet,
+    prompt: point.prompt,
+    repeat: point.repeat,
+    successText: '',
+    failureText: '',
+    rewards: [],
+    successEffects: [],
+    failureEffects: [],
+  }
 }
 
 export function sceneActionSummary(action: SceneAction): string {

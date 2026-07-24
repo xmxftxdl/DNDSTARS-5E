@@ -3,6 +3,8 @@ import type { BattleMap } from '../../store/maps'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import {
   createDnd5eCoreSpellArea,
+  dnd5eWallOfFireDamagingSideCells,
+  getDnd5eCoreSpellAreaDeclaration,
   mergeDnd5eSpellEffectTokenDelta,
   moveDnd5eCoreSpellArea,
   reconcileDnd5ePersistentAreaAnchors,
@@ -42,6 +44,47 @@ function map(): BattleMap {
 }
 
 describe('core spell persistent area declarations', () => {
+  it('keeps Wall of Fire damage on the selected side of the wall', () => {
+    const base = map()
+    const wallCells = [{ col: 4, row: 4 }, { col: 5, row: 4 }]
+    const east = dnd5eWallOfFireDamagingSideCells({
+      wallCells,
+      orientation: 0,
+      map: base,
+    })
+    expect(east).toEqual(expect.arrayContaining([
+      { col: 4, row: 4 }, { col: 5, row: 4 }, { col: 6, row: 4 },
+      { col: 5, row: 4 }, { col: 6, row: 4 }, { col: 7, row: 4 },
+    ]))
+    expect(east).not.toContainEqual({ col: 4, row: 3 })
+
+    const declaration = getDnd5eCoreSpellAreaDeclaration('wall-of-fire')
+    expect(declaration).toBeDefined()
+    if (!declaration) return
+    const area = createDnd5eCoreSpellArea({
+      declaration,
+      actionId: 'wall-cast',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 5,
+      sourceSaveDc: 15,
+      round: 1,
+      cells: wallCells,
+      anchorCell: wallCells[0],
+      triggerCellsById: { 'wall-of-fire-turn-end': east },
+    })
+    expect(area.triggers).toContainEqual(expect.objectContaining({
+      id: 'wall-of-fire-create',
+      savingThrow: { ability: 'dex', dc: 15, onSuccess: 'half' },
+      damage: { count: 6, sides: 8, modifier: 0, type: 'fire' },
+    }))
+    expect(area.triggers).toContainEqual(expect.objectContaining({
+      id: 'wall-of-fire-turn-end',
+      cells: east,
+      damage: { count: 6, sides: 8, modifier: 0, type: 'fire' },
+    }))
+  })
+
   it('resolves Darkness and Daylight overlap by spell level instead of render order', () => {
     const base = {
       ...createDnd5eCoreSpellArea({
@@ -228,6 +271,74 @@ describe('core spell persistent area declarations', () => {
     })
     expect(moveDnd5eCoreSpellArea({
       map: placed, geometry, areaId: area.id, sourceTokenId: 'caster-token', targetCell: { col: 6, row: 2 },
+    })).toMatchObject({ ok: false, reason: 'movement-blocked' })
+  })
+
+  it('moves Spiritual Weapon through creatures but not through walls or beyond 20 feet', () => {
+    const base = map()
+    const spiritualWeapon = getDnd5eCoreSpellAreaDeclaration('spiritual-weapon')
+    expect(spiritualWeapon).toBeDefined()
+    if (!spiritualWeapon) return
+    const effectToken = {
+      id: 'spiritual-weapon-token', label: '灵体武器', x: 125, y: 75,
+      color: '#8b5cf6', emoji: '⚔', size: 1, type: 'obstacle' as const,
+      dnd5eSpellEffect: {
+        schemaVersion: 1 as const, spellId: 'spiritual-weapon', sourceCharacterId: 'caster',
+        sourceTokenId: 'caster-token', createdRound: 1, expiresAfterRound: 11,
+      },
+    }
+    const area = createDnd5eCoreSpellArea({
+      declaration: spiritualWeapon,
+      actionId: 'cast-spiritual-weapon',
+      sourceCharacterId: 'caster',
+      sourceTokenId: 'caster-token',
+      slotLevel: 2,
+      sourceSaveDc: 13,
+      round: 1,
+      cells: [{ col: 2, row: 1 }],
+      anchorCell: { col: 2, row: 1 },
+      anchorTokenId: effectToken.id,
+    })
+    const creature = {
+      id: 'enemy', label: 'enemy', x: 225, y: 75, color: '#fff',
+      emoji: 'E', size: 1, type: 'enemy' as const,
+    }
+    const placed = {
+      ...base,
+      tokens: [...base.tokens, effectToken, creature],
+      dnd5ePluginAreas: [area],
+    }
+    const moved = moveDnd5eCoreSpellArea({
+      map: placed,
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 6, row: 1 },
+    })
+    expect(moved).toMatchObject({
+      ok: true,
+      distanceFeet: 20,
+      area: { anchorCell: { col: 6, row: 1 } },
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed,
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 7, row: 1 },
+    })).toMatchObject({ ok: false, reason: 'target-out-of-range' })
+
+    const geometry = createEmptyMapGeometry(base.id, 1)
+    geometry.walls.push({
+      id: 'wall', kind: 'wall', label: '石墙',
+      points: [{ x: 200, y: 50 }, { x: 200, y: 100 }],
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 1,
+    })
+    expect(moveDnd5eCoreSpellArea({
+      map: placed,
+      geometry,
+      areaId: area.id,
+      sourceTokenId: 'caster-token',
+      targetCell: { col: 6, row: 1 },
     })).toMatchObject({ ok: false, reason: 'movement-blocked' })
   })
 })

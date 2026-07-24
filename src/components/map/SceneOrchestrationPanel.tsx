@@ -32,9 +32,11 @@ import {
 } from '../../lib/sceneOrchestration'
 import type { SceneDrawTarget } from './SceneOrchestrationSystem'
 import type { SceneAudioAsset, SceneAudioKind } from '../../lib/sceneAudioLibrary'
+import SceneInteractionPointsEditor from './SceneInteractionPointsEditor'
 
 interface SceneOrchestrationPanelProps {
   map: BattleMap
+  combatActive: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   drawing?: SceneDrawTarget | null
@@ -74,6 +76,7 @@ function fieldClass() {
 
 export default function SceneOrchestrationPanel({
   map,
+  combatActive,
   open,
   onOpenChange,
   drawing,
@@ -207,6 +210,21 @@ export default function SceneOrchestrationPanel({
 
               <SceneAudioLibraryManager />
 
+              <SceneInteractionPointsEditor
+                map={map}
+                scene={scene}
+                combatActive={combatActive}
+                placingInteractionPointId={
+                  drawing?.kind === 'interaction-point' ? drawing.interactionPointId : null
+                }
+                onBeginPlace={(interactionPointId) => onBeginDraw({
+                  sceneId: scene.id,
+                  interactionPointId,
+                  kind: 'interaction-point',
+                })}
+                onCancelPlace={onCancelDraw}
+              />
+
               <section className="mt-4">
                 <div className="flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">触发区域</h3><button type="button" onClick={() => { const id = addTrigger(scene.id, { kind: 'circle', x: map.width / 2, y: map.height / 2, radius: Math.max(30, map.gridSize) }); setSelectedTriggerId(id) }} className="flex items-center gap-1 text-xs text-violet-300"><Plus className="h-3.5 w-3.5" />添加</button></div>
                 <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{scene.triggers.map((trigger) => <button key={trigger.id} type="button" onClick={() => setSelectedTriggerId(trigger.id)} className={`shrink-0 rounded-lg border px-3 py-2 text-xs ${selectedTrigger?.id === trigger.id ? 'border-violet-300/40 bg-violet-500/15 text-violet-100' : 'border-white/8 text-slate-500'}`}>{trigger.enabled ? '●' : '○'} {trigger.name}</button>)}</div>
@@ -216,7 +234,7 @@ export default function SceneOrchestrationPanel({
                 <div className="flex gap-2"><input value={selectedTrigger.name} onChange={(event) => updateTrigger(scene.id, selectedTrigger.id, { name: event.target.value })} className={fieldClass()} /><button type="button" onClick={() => removeTrigger(scene.id, selectedTrigger.id)} className="rounded-lg p-2 text-slate-600 hover:text-red-300"><Trash2 className="h-4 w-4" /></button></div>
                 <div className="mt-2 grid grid-cols-3 gap-2"><select value={selectedTrigger.tokenFilter} onChange={(event) => updateTrigger(scene.id, selectedTrigger.id, { tokenFilter: event.target.value as typeof selectedTrigger.tokenFilter })} className={fieldClass()}><option value="player">玩家</option><option value="enemy">敌人</option><option value="any">任意 Token</option></select><select value={selectedTrigger.repeat} onChange={(event) => updateTrigger(scene.id, selectedTrigger.id, { repeat: event.target.value as typeof selectedTrigger.repeat })} className={fieldClass()}><option value="per-token">每 Token 一次</option><option value="once">全局一次</option><option value="always">每次进入</option></select><label className="flex items-center justify-center gap-2 rounded-lg border border-white/10 text-xs text-slate-300"><input type="checkbox" checked={selectedTrigger.enabled} onChange={(event) => updateTrigger(scene.id, selectedTrigger.id, { enabled: event.target.checked })} />启用</label></div>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="text-slate-600">触发：</span>{(['enter', 'leave'] as const).map((eventName) => <label key={eventName} className="flex items-center gap-1 text-slate-300"><input type="checkbox" checked={selectedTrigger.events.includes(eventName)} onChange={(event) => updateTrigger(scene.id, selectedTrigger.id, { events: event.target.checked ? [...selectedTrigger.events, eventName] : selectedTrigger.events.filter((value) => value !== eventName) })} />{eventName === 'enter' ? '进入' : '离开'}</label>)}<span className="ml-auto text-slate-600">{selectedTrigger.region.kind === 'circle' ? `圆形 · 半径 ${Math.round(selectedTrigger.region.radius)}px` : `矩形 · ${Math.round(selectedTrigger.region.width)}×${Math.round(selectedTrigger.region.height)}px`}</span></div>
-                <div className="mt-3 flex gap-2"><button type="button" onClick={() => onBeginDraw({ sceneId: scene.id, triggerId: selectedTrigger.id, kind: 'circle' })} className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs ${drawing?.triggerId === selectedTrigger.id && drawing.kind === 'circle' ? 'border-cyan-300 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-slate-300'}`}><Circle className="h-3.5 w-3.5" />绘制圆形</button><button type="button" onClick={() => onBeginDraw({ sceneId: scene.id, triggerId: selectedTrigger.id, kind: 'rect' })} className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs ${drawing?.triggerId === selectedTrigger.id && drawing.kind === 'rect' ? 'border-cyan-300 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-slate-300'}`}><Square className="h-3.5 w-3.5" />绘制矩形</button>{drawing && <button type="button" onClick={onCancelDraw} className="rounded-lg border border-white/10 px-2 text-slate-400"><X className="h-3.5 w-3.5" /></button>}</div>
+                <div className="mt-3 flex gap-2"><button type="button" onClick={() => onBeginDraw({ sceneId: scene.id, triggerId: selectedTrigger.id, kind: 'circle' })} className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs ${drawing?.kind === 'circle' && drawing.triggerId === selectedTrigger.id ? 'border-cyan-300 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-slate-300'}`}><Circle className="h-3.5 w-3.5" />绘制圆形</button><button type="button" onClick={() => onBeginDraw({ sceneId: scene.id, triggerId: selectedTrigger.id, kind: 'rect' })} className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs ${drawing?.kind === 'rect' && drawing.triggerId === selectedTrigger.id ? 'border-cyan-300 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-slate-300'}`}><Square className="h-3.5 w-3.5" />绘制矩形</button>{drawing && drawing.kind !== 'interaction-point' && <button type="button" onClick={onCancelDraw} className="rounded-lg border border-white/10 px-2 text-slate-400"><X className="h-3.5 w-3.5" /></button>}</div>
 
                 <div className="mt-4 border-t border-white/8 pt-3"><div className="flex items-center justify-between"><h4 className="text-xs font-bold text-slate-300">动作序列</h4><button type="button" onClick={() => setPreview((value) => !value)} className="flex items-center gap-1 text-[11px] text-cyan-300"><Eye className="h-3.5 w-3.5" />{preview ? '关闭预览' : '预览'}</button></div>{selectedTrigger.actions.length === 0 ? <p className="mt-3 text-center text-xs text-slate-600">尚未添加动作</p> : <ol className="mt-2 space-y-1">{selectedTrigger.actions.map((action, index) => <li key={action.id} className="flex items-center gap-2 rounded-lg border border-white/6 bg-white/[0.02] px-2 py-2 text-xs"><span className="w-5 text-center text-slate-600">{index + 1}</span><span className="min-w-0 flex-1 truncate text-slate-300">{sceneActionSummary(action)}</span><button type="button" onClick={() => removeAction(scene.id, selectedTrigger.id, action.id)} className="text-slate-600 hover:text-red-300"><X className="h-3.5 w-3.5" /></button></li>)}</ol>}{preview && <div className="mt-2 rounded-lg border border-cyan-300/15 bg-cyan-500/[0.05] p-2 text-[11px] leading-5 text-cyan-100/80">触发后将按上方顺序执行；暂停模式下动作进入队列，可逐步执行。消息、讲义、日志、检定与已开始的战斗不可撤销。</div>}</div>
 

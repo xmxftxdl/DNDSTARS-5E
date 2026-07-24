@@ -8,6 +8,8 @@ import {
   type Dnd5eMonsterMechanicTrigger,
   type Dnd5eMonsterMechanicTriggerEventV2,
   type Dnd5eMonsterStatBlock,
+  type Dnd5eMonsterBehaviorPreferenceV1,
+  type Dnd5eMonsterBehaviorStyle,
   type Dnd5eMonsterTargetingPreferenceV1,
   type Dnd5eMonsterTargetPriority,
 } from './monsters'
@@ -26,6 +28,20 @@ export const DND5E_MONSTER_TARGET_PRIORITY_OPTIONS: readonly {
 
 const TARGET_PRIORITIES = new Set(DND5E_MONSTER_TARGET_PRIORITY_OPTIONS.map((entry) => entry.value))
 
+export const DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS: readonly {
+  value: Dnd5eMonsterBehaviorStyle
+  label: string
+  description: string
+}[] = [
+  { value: 'balanced', label: '均衡', description: '兼顾伤害、距离、掩护与借机攻击风险。' },
+  { value: 'aggressive', label: '强攻', description: '更重视造成伤害、击倒目标与快速接敌，较少顾虑掩护。' },
+  { value: 'defensive', label: '守势', description: '优先选择有掩护的合法落点，并更愿意闪避和规避借机攻击。' },
+  { value: 'skirmisher', label: '游击', description: '保持武器有效距离，利用撤离和掩护进行移动后攻击。' },
+  { value: 'cowardly', label: '惜命', description: '生命值降低时优先拉开距离、寻找掩护或闪避。' },
+]
+
+const BEHAVIOR_STYLES = new Set(DND5E_MONSTER_BEHAVIOR_STYLE_OPTIONS.map((entry) => entry.value))
+
 export function normalizeDnd5eMonsterTargetingPreference(
   raw: unknown,
 ): Dnd5eMonsterTargetingPreferenceV1 | undefined {
@@ -33,6 +49,23 @@ export function normalizeDnd5eMonsterTargetingPreference(
   const value = raw as Partial<Dnd5eMonsterTargetingPreferenceV1>
   if (value.schemaVersion !== 1 || !TARGET_PRIORITIES.has(value.priority as Dnd5eMonsterTargetPriority)) return undefined
   return { schemaVersion: 1, priority: value.priority as Dnd5eMonsterTargetPriority }
+}
+
+export function normalizeDnd5eMonsterBehaviorPreference(
+  raw: unknown,
+): Dnd5eMonsterBehaviorPreferenceV1 | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Partial<Dnd5eMonsterBehaviorPreferenceV1>
+  if (value.schemaVersion !== 1 || !BEHAVIOR_STYLES.has(value.style as Dnd5eMonsterBehaviorStyle)) return undefined
+  return { schemaVersion: 1, style: value.style as Dnd5eMonsterBehaviorStyle }
+}
+
+export function dnd5eMonsterEffectiveBehaviorStyle(
+  enemy: Token,
+  inferredRole: 'melee' | 'ranged' | 'skirmisher',
+): Dnd5eMonsterBehaviorStyle {
+  return normalizeDnd5eMonsterBehaviorPreference(enemy.dnd5eBehaviorPreference)?.style ??
+    (inferredRole === 'melee' ? 'aggressive' : inferredRole === 'ranged' ? 'defensive' : 'skirmisher')
 }
 
 function targetHitPoints(token: Token, charactersById: ReadonlyMap<string, Character>): { current: number; maximum: number } {

@@ -69,22 +69,60 @@ export function getTokenCombatSide(token: Token): 'ally' | 'enemy' | 'neutral' {
 export interface CombatOutcome {
   ended: true
   winner: 'ally' | 'enemy'
+  reason: 'enemies-defeated' | 'party-downed' | 'allies-defeated'
   message: string
 }
 
-/** 若某一阵营全员阵亡且该阵营在地图上有单位，则战斗结束 */
+export interface CombatOutcomeOptions {
+  /** 仅统计本场先攻中的 Token，避免地图上未参战的角色阻止战斗结束。 */
+  participantTokenIds?: readonly string[]
+}
+
+/** 敌方全灭、玩家角色全员倒地，或其他友方最终阵亡时结束战斗。 */
 export function checkCombatOutcome(
   tokens: Token[],
   characters: Character[],
+  options: CombatOutcomeOptions = {},
 ): CombatOutcome | { ended: false } {
-  const allies = tokens.filter((t) => getTokenCombatSide(t) === 'ally')
-  const enemies = tokens.filter((t) => getTokenCombatSide(t) === 'enemy')
+  const participantIds = options.participantTokenIds
+    ? new Set(options.participantTokenIds)
+    : undefined
+  const combatTokens = participantIds
+    ? tokens.filter((token) => participantIds.has(token.id))
+    : tokens
+  const allies = combatTokens.filter((t) => getTokenCombatSide(t) === 'ally')
+  const enemies = combatTokens.filter((t) => getTokenCombatSide(t) === 'enemy')
+  const playerCharacters = combatTokens.filter((token) => token.type === 'player' && !!token.characterId)
 
   if (enemies.length > 0 && enemies.every((t) => isTokenFinallyDefeated(t, characters))) {
-    return { ended: true, winner: 'ally', message: '所有敌人已被击败，战斗结束。' }
+    return {
+      ended: true,
+      winner: 'ally',
+      reason: 'enemies-defeated',
+      message: '所有敌人已被击败，战斗结束。',
+    }
+  }
+  if (
+    playerCharacters.length > 0 &&
+    playerCharacters.every((token) => {
+      const character = characters.find((candidate) => candidate.id === token.characterId)
+      return !!character && character.currentHp <= 0
+    })
+  ) {
+    return {
+      ended: true,
+      winner: 'enemy',
+      reason: 'party-downed',
+      message: '所有玩家角色均已倒地并进入死亡豁免，战斗结束。',
+    }
   }
   if (allies.length > 0 && allies.every((t) => isTokenFinallyDefeated(t, characters))) {
-    return { ended: true, winner: 'enemy', message: '所有友方角色已阵亡，战斗结束。' }
+    return {
+      ended: true,
+      winner: 'enemy',
+      reason: 'allies-defeated',
+      message: '所有友方角色已阵亡，战斗结束。',
+    }
   }
   return { ended: false }
 }

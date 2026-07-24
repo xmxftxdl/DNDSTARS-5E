@@ -22,6 +22,18 @@ export interface Dnd5eMonsterTargetingPreferenceV1 {
   priority: Dnd5eMonsterTargetPriority
 }
 
+export type Dnd5eMonsterBehaviorStyle =
+  | 'balanced'
+  | 'aggressive'
+  | 'defensive'
+  | 'skirmisher'
+  | 'cowardly'
+
+export interface Dnd5eMonsterBehaviorPreferenceV1 {
+  schemaVersion: 1
+  style: Dnd5eMonsterBehaviorStyle
+}
+
 export interface Dnd5eMonsterMechanicTriggerV1 {
   schemaVersion: 1
   id: string
@@ -160,6 +172,9 @@ export interface Dnd5eMonsterTrait {
     kind: 'swarm'
     cannotRegainHitPoints: true
     cannotGainTemporaryHitPoints: true
+  } | {
+    kind: 'nimble-escape'
+    bonusActionOptions: readonly ['disengage', 'hide']
   }
 }
 
@@ -402,6 +417,20 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
           damage: [{ average: 1, count: 0, sides: 4, bonus: 1, type: 'piercing' }],
         },
       } : action),
+    }
+  }
+
+  if (monster.slug === 'goblin') {
+    return {
+      ...monster,
+      traits: monster.traits.map((trait, index) => index === 0 ? {
+        ...trait,
+        automation: 'headless',
+        rule: {
+          kind: 'nimble-escape',
+          bonusActionOptions: ['disengage', 'hide'],
+        },
+      } : trait),
     }
   }
 

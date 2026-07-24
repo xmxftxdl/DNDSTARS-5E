@@ -49,4 +49,29 @@ describe('scene orchestration runtime queue', () => {
     store.discardRun(runId!)
     expect(store.enqueueRun({ sceneId, triggerId, mapId: 'map-1', event: 'enter', token })).toBeTruthy()
   })
+
+  it('creates, moves, updates, and removes a map interaction point', () => {
+    const store = useSceneOrchestrationStore.getState()
+    const sceneId = store.ensureScene('map-1', 'Map')
+    const pointId = store.addInteractionPoint(sceneId, { x: 25, y: 30 })
+    expect(useSceneOrchestrationStore.getState().shared.scenes[0].interactionPoints[0]).toMatchObject({
+      id: pointId,
+      x: 25,
+      y: 30,
+      check: { selection: 'skill:investigation', dc: 12 },
+    })
+    useSceneOrchestrationStore.getState().setInteractionPointPosition(sceneId, pointId, { x: 90, y: 110 })
+    useSceneOrchestrationStore.getState().updateInteractionPoint(sceneId, pointId, {
+      name: '书柜',
+      icon: 'bookshelf',
+    })
+    expect(useSceneOrchestrationStore.getState().shared.scenes[0].interactionPoints[0]).toMatchObject({
+      name: '书柜',
+      icon: 'bookshelf',
+      x: 90,
+      y: 110,
+    })
+    useSceneOrchestrationStore.getState().removeInteractionPoint(sceneId, pointId)
+    expect(useSceneOrchestrationStore.getState().shared.scenes[0].interactionPoints).toEqual([])
+  })
 })

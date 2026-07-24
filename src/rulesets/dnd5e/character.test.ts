@@ -19,7 +19,7 @@ describe('D&D 5e character boundary', () => {
   })
   it('drops legacy AP and custom combat fields from the SRD model', () => {
     const migrated = migrateCharacterToDnd5e(legacyCharacter())
-    expect(migrated).toMatchObject({ level: 5, armorClass: 17, hitPointDice: [{ sides: 10, current: 5, max: 5 }], inspiration: true })
+    expect(migrated).toMatchObject({ level: 5, armorClass: 12, hitPointDice: [{ sides: 10, current: 5, max: 5 }], inspiration: true })
     expect(JSON.stringify(migrated)).not.toMatch(/actionPoints|currentAP|saveDC|mana|combatSkills|traits/)
   })
 

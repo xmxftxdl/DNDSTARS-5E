@@ -297,9 +297,8 @@ test('player2 port 6175 sends a 5e weapon attack to DM and receives the red-drag
   // DM 先确认本次攻击的权威掩护预览。
   await expect(dm.getByText('掩护预览', { exact: true })).toBeVisible({ timeout: 20_000 })
   await dm.getByRole('button', { name: '应用并继续结算' }).click()
-  // 战斗中的每一枚 d20 都由 DM 确认后才继续权威事务。
-  await expect(dm.getByRole('dialog', { name: 'd20 投掷确认' })).toBeVisible({ timeout: 20_000 })
-  await dm.getByRole('button', { name: /并继续结算$/ }).click()
+  // 没有任何玩家拥有“改变敌方 d20”特性时，攻击骰直接结算。
+  await expect(dm.getByTestId('d20-roll-confirmation')).toHaveCount(0)
 
   await expect
     .poll(

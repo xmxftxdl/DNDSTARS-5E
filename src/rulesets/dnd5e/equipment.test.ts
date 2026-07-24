@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
-import { DND5E_FIGHTER_STARTING_EQUIPMENT, DND5E_OFFHAND_SHORTSWORD, DND5E_SHORTSWORD, defaultEquipmentForDnd5eCharacter, dnd5eArmorClass, dnd5eOffHandWeaponAttackProfile, dnd5eWeaponAttackProfile } from './equipment'
+import {
+  DND5E_DAGGER,
+  DND5E_DART,
+  DND5E_FIGHTER_STARTING_EQUIPMENT,
+  DND5E_HAND_CROSSBOW,
+  DND5E_LEATHER_ARMOR,
+  DND5E_LIGHT_CROSSBOW,
+  DND5E_LONGBOW,
+  DND5E_OFFHAND_SHORTSWORD,
+  DND5E_QUARTERSTAFF,
+  DND5E_SHIELD,
+  DND5E_SHORTSWORD,
+  DND5E_SLING,
+  defaultEquipmentForDnd5eCharacter,
+  dnd5eArmorClass,
+  dnd5eArmorProficient,
+  dnd5eArmorProficiencies,
+  dnd5eOffHandWeaponAttackProfile,
+  dnd5eWeaponAttackProfile,
+  dnd5eWeaponProficient,
+  dnd5eWearingUnproficientArmor,
+} from './equipment'
 import { dnd5eWalkingSpeed } from './classes'
 
 function fighter(patch: Partial<Character> = {}): Character {
@@ -42,6 +63,57 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(dnd5eWeaponAttackProfile(wizard)).toMatchObject({ proficient: false, attackModifier: 3 })
   })
 
+  it('uses the exact SRD wizard weapon list and does not confuse Light with proficiency', () => {
+    const wizard = fighter({ charClass: '法师', level: 5 })
+    for (const weapon of [DND5E_DAGGER, DND5E_DART, DND5E_SLING, DND5E_QUARTERSTAFF, DND5E_LIGHT_CROSSBOW]) {
+      expect(dnd5eWeaponProficient(wizard, weapon)).toBe(true)
+    }
+    expect(dnd5eWeaponProficient(wizard, {
+      ...DND5E_DAGGER,
+      id: 'srd-5.1:magic-item:weapon-dagger-plus-1',
+      baseEquipmentId: DND5E_DAGGER.id,
+    })).toBe(true)
+    expect(DND5E_HAND_CROSSBOW.dnd5e).toMatchObject({ kind: 'weapon', category: 'martial' })
+    expect(DND5E_HAND_CROSSBOW.dnd5e?.kind === 'weapon' && DND5E_HAND_CROSSBOW.dnd5e.properties).toContain('轻型')
+    expect(dnd5eWeaponProficient(wizard, DND5E_HAND_CROSSBOW)).toBe(false)
+  })
+
+  it('keeps armor AC while enforcing wizard armor and shield proficiency separately', () => {
+    const wizard = fighter({
+      charClass: '法师',
+      abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 8 },
+      equipment: { mainWeapon: DND5E_QUARTERSTAFF, armor: DND5E_LEATHER_ARMOR, offHand: DND5E_SHIELD },
+    })
+    expect([...dnd5eArmorProficiencies(wizard)]).toEqual([])
+    expect(dnd5eArmorProficient(wizard, DND5E_LEATHER_ARMOR)).toBe(false)
+    expect(dnd5eArmorProficient(wizard, DND5E_SHIELD)).toBe(false)
+    expect(dnd5eWearingUnproficientArmor(wizard)).toBe(true)
+    expect(dnd5eArmorClass(wizard)).toBe(15)
+  })
+
+  it('recomputes unarmored AC instead of preserving a stale saved value', () => {
+    const wizard = fighter({
+      charClass: '法师',
+      dnd5eClassLevels: { wizard: 20 },
+      level: 20,
+      ac: 22,
+      abilities: { str: 16, dex: 14, con: 15, int: 9, wis: 13, cha: 11 },
+      equipment: { mainWeapon: DND5E_QUARTERSTAFF },
+    })
+    expect(dnd5eArmorClass(wizard)).toBe(12)
+  })
+
+  it('applies starting-class and multiclass armor proficiency without granting heavy armor to a multiclass fighter', () => {
+    const fighterWizard = fighter({
+      charClass: '法师',
+      level: 6,
+      dnd5eClassLevels: { wizard: 5, fighter: 1 },
+    })
+    expect([...dnd5eArmorProficiencies(fighterWizard)].sort()).toEqual(['light', 'medium', 'shield'])
+    expect(dnd5eArmorProficient(fighterWizard, DND5E_LEATHER_ARMOR)).toBe(true)
+    expect(dnd5eArmorProficient(fighterWizard, DND5E_FIGHTER_STARTING_EQUIPMENT.armor)).toBe(false)
+  })
+
   it('applies the 2014 Dueling damage bonus while a shield is held', () => {
     const character = fighter({ dnd5eClassChoices: { fighter: { fightingStyles: ['dueling'] } } })
     expect(dnd5eWeaponAttackProfile(character)?.damage.bonus).toBe(5)
@@ -70,6 +142,9 @@ describe('D&D 5e 2014 fighter equipment', () => {
       greatWeaponFighting: false,
       damage: { sides: 8, bonus: 3 },
     })
+    expect(dnd5eWeaponAttackProfile(fighter({
+      equipment: { mainWeapon: DND5E_LONGBOW, offHand: DND5E_SHIELD },
+    }))).toBeUndefined()
   })
 
   it('applies Defense AC and Champion expanded critical ranges', () => {
@@ -144,5 +219,13 @@ describe('D&D 5e 2014 fighter equipment', () => {
     expect(dnd5eOffHandWeaponAttackProfile(character)).toMatchObject({ attackModifier: 7, damage: { bonus: 2 } })
     expect(dnd5eArmorClass(character)).toBe(17)
     expect(dnd5eWalkingSpeed(character)).toBe(35)
+  })
+
+  it('reduces speed for unmet heavy-armor Strength and preserves Dwarven Speed', () => {
+    const weak = fighter({
+      abilities: { str: 10, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+    })
+    expect(dnd5eWalkingSpeed(weak)).toBe(20)
+    expect(dnd5eWalkingSpeed({ ...weak, race: '矮人' })).toBe(30)
   })
 })

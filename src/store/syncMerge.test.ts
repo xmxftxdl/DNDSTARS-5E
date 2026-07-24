@@ -25,7 +25,16 @@ import {
   resetPendingLocalCharacterLevelEditMemoryForTest,
   resetPendingLocalCharacterHitPointEditMemoryForTest,
 } from './characters'
-import { mergePlayerTokenCombatFields, type BattleMap, type Token } from './maps'
+import {
+  clearPendingLocalTokenHitPointEditsForTest,
+  markPendingLocalTokenHitPointEdit,
+  mergePendingLocalTokenHitPointEdits,
+  mergePlayerTokenCombatFields,
+  resetPendingLocalTokenHitPointEditMemoryForTest,
+  saveMapsStateWithPendingHitPointRetry,
+  type BattleMap,
+  type Token,
+} from './maps'
 import type { Character } from '../types/character'
 import { dnd5eInventoryItemTemplate } from '../rulesets/dnd5e/items'
 import { createDnd5eConditionEffect } from '../rulesets/dnd5e/activeEffects'
@@ -522,5 +531,95 @@ describe('T13/AC6 mergePlayerTokenCombatFields preserves DM token positions', ()
       [map({ tokens: [authoritative] })],
     )
     expect(result.tokens[0]).toMatchObject({ x: 250, y: 150, dnd5eSpellEffect: effect })
+  })
+})
+
+describe('地图 Token HP 本地写入竞争保护', () => {
+  afterEach(() => {
+    clearPendingLocalTokenHitPointEditsForTest()
+    vi.unstubAllGlobals()
+  })
+
+  it('旧共享快照不会把刚编辑的怪物 HP 回弹，服务端回显后解除保护', () => {
+    markPendingLocalTokenHitPointEdit('map-1', 'enemy', { hp: 4 }, 1_000)
+    const stale = mergePendingLocalTokenHitPointEdits([
+      map({ id: 'map-1', tokens: [token({ id: 'enemy', type: 'enemy', hp: 9, maxHp: 12 })] }),
+    ], 1_001)
+    expect(stale[0].tokens[0].hp).toBe(4)
+
+    const acknowledged = mergePendingLocalTokenHitPointEdits([
+      map({ id: 'map-1', tokens: [token({ id: 'enemy', type: 'enemy', hp: 4, maxHp: 12 })] }),
+    ], 1_002)
+    expect(acknowledged[0].tokens[0].hp).toBe(4)
+
+    const laterAuthority = mergePendingLocalTokenHitPointEdits([
+      map({ id: 'map-1', tokens: [token({ id: 'enemy', type: 'enemy', hp: 2, maxHp: 12 })] }),
+    ], 1_003)
+    expect(laterAuthority[0].tokens[0].hp).toBe(2)
+  })
+
+  it('刷新后仍保留保护，并且不覆盖其他地图或 Token', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('window', { localStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } })
+    clearPendingLocalTokenHitPointEditsForTest()
+    markPendingLocalTokenHitPointEdit('map-1', 'enemy', { hp: 4, maxHp: 14 }, 1_000)
+    resetPendingLocalTokenHitPointEditMemoryForTest()
+
+    const result = mergePendingLocalTokenHitPointEdits([
+      map({
+        id: 'map-1',
+        tokens: [
+          token({ id: 'enemy', type: 'enemy', hp: 9, maxHp: 12 }),
+          token({ id: 'other', type: 'enemy', hp: 7, maxHp: 7 }),
+        ],
+      }),
+      map({ id: 'map-2', tokens: [token({ id: 'enemy', type: 'enemy', hp: 11, maxHp: 11 })] }),
+    ], 1_001)
+    expect(result[0].tokens[0]).toMatchObject({ hp: 4, maxHp: 14 })
+    expect(result[0].tokens[1]).toMatchObject({ hp: 7, maxHp: 7 })
+    expect(result[1].tokens[0]).toMatchObject({ hp: 11, maxHp: 11 })
+  })
+
+  it('CAS 冲突后以服务端新快照为底稿重放 HP，并有限重试', async () => {
+    markPendingLocalTokenHitPointEdit('map-1', 'enemy', { hp: 4 }, 1_000)
+    const writes: Array<{ maps: BattleMap[]; selectedId: string | null; updatedAt?: number }> = []
+    const save = vi.fn(async (payload) => {
+      writes.push(payload)
+      return writes.length === 1
+        ? { status: 'conflict' as const, expectedRevision: 2, currentRevision: 3 }
+        : { status: 'saved' as const, revision: 4 }
+    })
+    const load = vi.fn(async () => ({
+      maps: [map({
+        id: 'map-1',
+        tokens: [token({ id: 'enemy', type: 'enemy', x: 275, hp: 9, maxHp: 12 })],
+      })],
+      selectedId: 'map-1',
+      updatedAt: 1_050,
+    }))
+
+    const outcome = await saveMapsStateWithPendingHitPointRetry({
+      payload: {
+        maps: [map({
+          id: 'map-1',
+          tokens: [token({ id: 'enemy', type: 'enemy', x: 25, hp: 4, maxHp: 12 })],
+        })],
+        selectedId: 'map-1',
+        updatedAt: 1_001,
+      },
+      retryPendingHitPoints: true,
+      save,
+      load,
+      now: () => 1_051,
+    })
+
+    expect(outcome.result).toMatchObject({ status: 'saved', revision: 4 })
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(writes[1].maps[0].tokens[0]).toMatchObject({ x: 275, hp: 4, maxHp: 12 })
   })
 })

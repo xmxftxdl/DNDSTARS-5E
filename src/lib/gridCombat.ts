@@ -133,8 +133,10 @@ export function resolveTokenDropPosition(
   token: Token,
   map: BattleMap,
 ): { x: number; y: number } {
-  if (!shouldSnapTokenOnDrop(token, map)) return { x, y }
-  return snapTokenToGridCenter(x, y, token, map)
+  const position = shouldSnapTokenOnDrop(token, map)
+    ? snapTokenToGridCenter(x, y, token, map)
+    : { x, y }
+  return clampTokenPositionToMap(position, token, map)
 }
 
 export function isWithinMovementRange(
@@ -153,6 +155,28 @@ export function snapToCellCenter(x: number, y: number, map: BattleMap): { x: num
 
 export function tokenFootprintCells(token: Pick<Token, 'creatureSize' | 'size'>): number {
   return creatureSizeToFootprintCells(token.creatureSize ?? sizeFromTokenSize(token.size))
+}
+
+/**
+ * 保证生物的完整占格留在共享地图内。DM 可以把自己的视口平移到图片外，
+ * 但玩家端的自适应视口只保证地图边界以内可见。
+ */
+export function clampTokenPositionToMap(
+  position: { x: number; y: number },
+  token: Pick<Token, 'creatureSize' | 'size'>,
+  map: Pick<BattleMap, 'width' | 'height' | 'gridSize'>,
+): { x: number; y: number } {
+  const halfExtent = tokenFootprintCells(token) * Math.max(1, map.gridSize) / 2
+  const clampAxis = (value: number, extent: number) => {
+    const safeExtent = Math.max(1, extent)
+    if (safeExtent <= halfExtent * 2) return safeExtent / 2
+    const safeValue = Number.isFinite(value) ? value : safeExtent / 2
+    return Math.max(halfExtent, Math.min(safeExtent - halfExtent, safeValue))
+  }
+  return {
+    x: clampAxis(position.x, map.width),
+    y: clampAxis(position.y, map.height),
+  }
 }
 
 export function tokenAnchorCellFromPixel(

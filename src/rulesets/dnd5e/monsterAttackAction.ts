@@ -37,6 +37,7 @@ import { dnd5eEligibleMonsterMechanics, dnd5eMonsterMechanicDiceRequirements } f
 import { dnd5eMonsterEffectiveWeaponAttack, dnd5eMonsterHasGenericAbility } from './monsterGenericAbilities'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5eIsIncapacitated, dnd5ePreventsAttackAdvantage, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
+import { dnd5eActiveWeaponDamageD4Mode } from './activeEffects'
 
 export type Dnd5eMonsterAttackRejectReason =
   | 'invalid-actor'
@@ -65,6 +66,7 @@ export interface PreparedDnd5eMonsterAttack {
   tranquilityWard?: ReturnType<typeof dnd5eTranquilityWardCheck>
   blessed: boolean
   baned: boolean
+  sizeDamageD4Mode?: 'add' | 'subtract'
 }
 
 export function prepareDnd5eMonsterAttack(input: {
@@ -226,6 +228,7 @@ export function prepareDnd5eMonsterAttack(input: {
       tranquilityWard: dnd5eTranquilityWardCheck(actorCombatant, target, snapshot.state),
       blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bless'),
       baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, actorToken.id, 'bane'),
+      sizeDamageD4Mode: dnd5eActiveWeaponDamageD4Mode(actorCombatant.classState.activeEffects),
     },
   }
 }

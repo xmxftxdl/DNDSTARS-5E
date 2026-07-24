@@ -99,6 +99,33 @@ describe('map geometry pathfinding', () => {
       .toMatchObject({ elevationsFeet: [0, 10, 0] })
   })
 
+  it('uses terrain elevation as the starting elevation for legacy tokens without an explicit value', () => {
+    const map = battleMap({ height: 50 })
+    const state = geometry()
+    state.obstacles.push({
+      id: 'plateau',
+      kind: 'obstacle',
+      label: 'Plateau',
+      points: [{ x: 0, y: 0 }, { x: 150, y: 0 }, { x: 150, y: 50 }, { x: 0, y: 50 }],
+      blocksVision: false,
+      blocksMovement: false,
+      blocksLineOfEffect: false,
+      cover: 'none',
+      baseHeightFeet: 0,
+      heightFeet: 0,
+      terrainRegion: true,
+      terrainElevationFeet: 20,
+      createdAt: 1,
+    })
+
+    expect(findMapGeometryPath({
+      map,
+      geometry: state,
+      token: map.tokens[0],
+      to: { x: 125, y: 25 },
+    })).toMatchObject({ elevationsFeet: [20, 20, 20] })
+  })
+
   it('uses the declared target elevation along a three-dimensional flight path', () => {
     const map = battleMap({ height: 50 })
     const state = geometry()
@@ -114,7 +141,8 @@ describe('map geometry pathfinding', () => {
       to: { x: 125, y: 25 },
       canFly: true,
       targetElevationFeet: 40,
-    })).toMatchObject({ elevationsFeet: [0, 20, 40] })
+    // 飞行采用明确的“先在起点升降，再水平移动”顺序。
+    })).toMatchObject({ elevationsFeet: [0, 40, 40] })
     expect(findMapGeometryPath({
       map,
       geometry: state,

@@ -17,6 +17,7 @@ import {
   replaceLedgerDie,
   type RollLedgerKind,
 } from './combatTransaction'
+import type { D20EnemyModifierOption } from './d20InterruptPolicy'
 
 const CONTINUE_OPTION_ID = 'continue'
 
@@ -43,6 +44,9 @@ export function createD20RollConfirmationInterrupt(input: {
   rollerCharacterId?: string
   kind?: RollLedgerKind
   visibility?: 'public' | 'dm-only'
+  reason?: 'enemy-feature' | 'dm-secret-roll'
+  eligibleModifiers?: readonly D20EnemyModifierOption[]
+  allowDmOverride?: boolean
   now?: number
 }): CombatInterruptByKind<'roll-confirmation'> {
   const now = input.now ?? Date.now()
@@ -95,6 +99,13 @@ export function createD20RollConfirmationInterrupt(input: {
       targetName: input.targetName?.trim().slice(0, 120) ?? '',
       originalValue,
       visibility: input.visibility ?? 'public',
+      reason: input.reason,
+      eligibleModifiers: input.eligibleModifiers?.map((entry) => ({
+        characterId: requireText(entry.characterId, 'eligible-character-id', 160),
+        featureId: requireText(entry.featureId, 'eligible-feature-id', 160),
+        featureLabel: requireText(entry.featureLabel, 'eligible-feature-label', 120),
+      })),
+      allowDmOverride: input.allowDmOverride === true,
       transaction,
     },
     now,
@@ -106,6 +117,7 @@ export function settleD20RollConfirmation(
   interrupt: CombatInterruptByKind<'roll-confirmation'>,
   acceptedContributionId?: string,
   now = Date.now(),
+  dmOverrideValue?: number,
 ): RollConfirmationInterruptResponse {
   const originalValue = requireD20(interrupt.payload.originalValue)
   const windowId = `${interrupt.payload.rollId}:dm-confirmation`
@@ -123,6 +135,22 @@ export function settleD20RollConfirmation(
       sourceLabel: `${contribution.characterName} · ${contribution.featureLabel}`,
       now,
     })
+  } else if (
+    dmOverrideValue != null &&
+    interrupt.payload.visibility === 'dm-only' &&
+    interrupt.payload.allowDmOverride === true
+  ) {
+    const overrideValue = requireD20(dmOverrideValue)
+    if (overrideValue !== originalValue) {
+      transaction = replaceLedgerDie(transaction, {
+        entryId: interrupt.payload.rollId,
+        dieIndex: 0,
+        replacementValue: overrideValue,
+        sourceId: 'dm',
+        sourceLabel: 'DM 暗骰修正',
+        now,
+      })
+    }
   }
   transaction = answerInterruptWindow(transaction, windowId, CONTINUE_OPTION_ID, now)
   transaction = closeInterruptWindow(transaction, windowId, now)
@@ -134,6 +162,7 @@ export function settleD20RollConfirmation(
     decision: 'continue',
     finalValue,
     acceptedContributionId: contribution?.id,
+    dmOverrideApplied: !contribution && dmOverrideValue != null && finalValue !== originalValue,
     transaction,
   }
 }

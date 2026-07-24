@@ -3,7 +3,11 @@ import type { Character } from '../../types/character'
 import type { Dnd5eCombatant } from './headlessCombatEngine'
 import { createDnd5eCombatant, hydrateDnd5eWildShapeCombatant } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
-import { dnd5eArmorClass } from './equipment'
+import {
+  dnd5eArmorClass,
+  dnd5eArmorImposesStealthDisadvantage,
+  dnd5eWearingUnproficientArmor,
+} from './equipment'
 import { dnd5eEquippedEffectTotal } from './equipmentEffects'
 import { FIGHTER_RESOURCE_KEYS, fighterResourceState, fighterSelectedFightingStyles } from './fighter'
 import {
@@ -58,6 +62,8 @@ export interface Dnd5eCharacter {
   classSelectionsByClass: Partial<Record<Dnd5eClassId, Record<string, string[]>>>
   pluginFeatureIds: readonly string[]
   wearingArmor: boolean
+  wearingUnproficientArmor: boolean
+  armorStealthDisadvantage: boolean
   wearingHeavyArmor: boolean
   wearingMetalArmor: boolean
   hasShield: boolean
@@ -197,6 +203,8 @@ export function migrateCharacterToDnd5e(inputCharacter: Character): Dnd5eCharact
       .filter((feature) => dnd5eCharacterHasPluginFeature(character, feature.id))
       .map((feature) => feature.id),
     wearingArmor: armor?.kind === 'armor' || !!character.equipment?.armor,
+    wearingUnproficientArmor: dnd5eWearingUnproficientArmor(character),
+    armorStealthDisadvantage: dnd5eArmorImposesStealthDisadvantage(character),
     wearingHeavyArmor: armor?.kind === 'armor' && armor.category === 'heavy',
     wearingMetalArmor: armor?.kind === 'armor' && (
       armor.material === 'metal' || (armor.material == null && armor.category === 'heavy')
@@ -268,6 +276,8 @@ export function createCombatantFromDnd5eCharacter(input: {
     classSelectionsByClass: character.classSelectionsByClass,
     pluginFeatureIds: character.pluginFeatureIds,
     wearingArmor: character.wearingArmor,
+    wearingUnproficientArmor: character.wearingUnproficientArmor,
+    armorStealthDisadvantage: character.armorStealthDisadvantage,
     wearingHeavyArmor: character.wearingHeavyArmor,
     wearingMetalArmor: character.wearingMetalArmor,
     hasShield: character.hasShield,

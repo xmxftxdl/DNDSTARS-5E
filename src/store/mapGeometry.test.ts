@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createEmptyMapGeometry, normalizeMapGeometry, type MapGeometryWall } from '../lib/mapGeometry'
+import {
+  createEmptyMapGeometry,
+  mapGeometryRelationshipIssues,
+  normalizeMapGeometry,
+  type MapGeometryWall,
+} from '../lib/mapGeometry'
 import { useMapGeometryStore } from './mapGeometry'
 
 const wall: MapGeometryWall = {
@@ -45,6 +50,22 @@ describe('map geometry editor history', () => {
     expect(walls).toHaveLength(2)
     expect(walls[1].id).not.toBe(wall.id)
     expect(walls[1].points[0]).toEqual({ x: 10, y: 10 })
+    expect(walls[1].edgeIds).not.toEqual(walls[0].edgeIds)
+    expect(mapGeometryRelationshipIssues(useMapGeometryStore.getState().maps[0])).toEqual([])
+  })
+
+  it('removes stable-only openings with their wall', () => {
+    useMapGeometryStore.getState().addEntity('map-1', wall)
+    const storedWall = useMapGeometryStore.getState().maps[0].walls[0]
+    useMapGeometryStore.getState().addEntity('map-1', {
+      id: 'stable-door', kind: 'door', label: 'door', points: [{ x: 10, y: 0 }, { x: 20, y: 0 }],
+      wallEdgeId: storedWall.edgeIds![0], startT: 0.2, endT: 0.4,
+      state: 'closed', openState: 'closed', lockState: 'unlocked', physicalState: 'intact', secret: false,
+      blocksVision: true, blocksMovement: true, blocksLineOfEffect: true,
+      baseHeightFeet: 0, heightFeet: 10, createdAt: 2,
+    })
+    useMapGeometryStore.getState().removeEntity('map-1', wall.id)
+    expect(useMapGeometryStore.getState().maps[0].doors).toEqual([])
   })
 
   it('round-trips an exported geometry through schema validation', () => {
@@ -99,6 +120,43 @@ describe('map geometry editor history', () => {
     })
     expect(useMapGeometryStore.getState().setEntityPoints('map-1', wall.id, [{ x: 0, y: 0 }, { x: 100, y: 0 }])).toBe(true)
     expect(useMapGeometryStore.getState().maps[0].doors[0].points).toEqual([{ x: 20, y: 0 }, { x: 40, y: 0 }])
+  })
+
+  it('preserves a light source height above ground when moving across terrain elevations', () => {
+    const store = useMapGeometryStore.getState()
+    store.addEntity('map-1', {
+      id: 'high-ground',
+      kind: 'obstacle',
+      label: 'High ground',
+      points: [{ x: 50, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }],
+      blocksVision: false,
+      blocksMovement: false,
+      blocksLineOfEffect: false,
+      cover: 'none',
+      baseHeightFeet: 0,
+      heightFeet: 0,
+      terrainRegion: true,
+      terrainElevationFeet: 20,
+      createdAt: 2,
+    })
+    store.addEntity('map-1', {
+      id: 'light',
+      kind: 'light',
+      label: 'Torch',
+      points: [{ x: 25, y: 25 }],
+      enabled: true,
+      brightRadiusFeet: 20,
+      dimRadiusFeet: 20,
+      color: '#fbbf24',
+      elevationFeet: 5,
+      createdAt: 3,
+    })
+
+    expect(useMapGeometryStore.getState().setEntityPoints('map-1', 'light', [{ x: 75, y: 25 }])).toBe(true)
+    expect(useMapGeometryStore.getState().maps.find((map) => map.mapId === 'map-1')?.lights?.[0]).toMatchObject({
+      points: [{ x: 75, y: 25 }],
+      elevationFeet: 25,
+    })
   })
 
   it('rejects overlapping wall openings without changing history', () => {

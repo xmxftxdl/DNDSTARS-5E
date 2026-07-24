@@ -195,6 +195,22 @@ export interface Dnd5eInventory {
   entries: Dnd5eInventoryEntry[]
   /** V1/V2 存档可缺失；规范化后总会补齐五种币值。 */
   currency?: Dnd5eCurrencyWallet
+  /**
+   * DM Host 权威奖励收据。奖励和收据与库存写入同一个角色快照，
+   * 用于在 SSE 重放、刷新或 CAS 重试后避免重复发放。
+   */
+  authorityGrantReceipts?: string[]
+}
+
+export interface Dnd5eInventoryGrant {
+  templateId: string
+  quantity: number
+  identified?: boolean
+}
+
+export interface Dnd5eInventoryCurrencyGrant {
+  currency: Dnd5eCurrency
+  amount: number
 }
 
 export type Dnd5eInventoryMutation =
@@ -235,6 +251,7 @@ export type Dnd5eInventoryMutationFailure =
   | 'item-unidentified'
   | 'not-magic-item'
   | 'ammunition-unavailable'
+  | 'invalid-receipt'
   | 'unauthorized'
 
 export interface Dnd5eInventoryMutationResult {
@@ -246,4 +263,5 @@ export interface Dnd5eInventoryMutationResult {
   healingApplied?: number
   requiresDmAdjudication?: string
   spentEconomy?: 'action' | 'bonusAction'
+  deduplicated?: boolean
 }

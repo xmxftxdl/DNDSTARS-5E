@@ -2,17 +2,32 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { defaultTokenSizeForMap, realignTokensToGrid, snapTokenToGridCenter } from '../lib/gridCombat'
 import { applyGridDetectPatch, type GridDetectResult } from '../lib/gridDetect'
-import { enemyTemplateToTokenPatch, type EnemyTemplate } from '../lib/enemyPool'
+import {
+  enemyTemplateToTokenPatch,
+  getEnemyVisualPresentation,
+  type EnemyTemplate,
+} from '../lib/enemyPool'
 import { dnd5eEncounterGridOffset, dnd5eEncounterRoster, type Dnd5eEncounterEntry } from '../rulesets/dnd5e/encounterBuilder'
 import { putImage, deleteImage, pruneOrphanImages } from '../lib/imageStore'
-import { loadSharedResource, saveSharedResourceWithResult } from '../lib/sharedApi'
+import {
+  loadSharedResource,
+  saveSharedResourceWithResult,
+  type SharedResourceSaveResult,
+} from '../lib/sharedApi'
 import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
 import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
-import type { Dnd5eDamageType, Dnd5eMonsterTargetingPreferenceV1 } from '../rulesets/dnd5e/monsters'
-import { normalizeDnd5eMonsterTargetingPreference } from '../rulesets/dnd5e/monsterAutomation'
+import type {
+  Dnd5eDamageType,
+  Dnd5eMonsterBehaviorPreferenceV1,
+  Dnd5eMonsterTargetingPreferenceV1,
+} from '../rulesets/dnd5e/monsters'
+import {
+  normalizeDnd5eMonsterBehaviorPreference,
+  normalizeDnd5eMonsterTargetingPreference,
+} from '../rulesets/dnd5e/monsterAutomation'
 import {
   DND5E_COMBAT_STATE_SCHEMA_VERSION,
   validateDnd5eActiveEffectsStrict,
@@ -51,11 +66,204 @@ let lastSharedMapsSnapshot = ''
 let lastSharedMapsUpdatedAt = 0
 let mapSaveSeq = 0
 let lastLocalMapsWriteAt = 0
+const LOCAL_TOKEN_HIT_POINT_EDIT_TTL_MS = 30000
+const PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY = 'stars-map-token-hit-point-edits-v1'
+type PendingLocalTokenHitPointEdit = {
+  hp?: number
+  maxHp?: number
+  hasHp: boolean
+  hasMaxHp: boolean
+  updatedAt: number
+}
+const pendingLocalTokenHitPointEdits = new Map<string, PendingLocalTokenHitPointEdit>()
+let pendingLocalTokenHitPointEditsHydrated = false
 
-interface SharedMapsState {
+const pendingTokenKey = (mapId: string, tokenId: string) => `${mapId}:${tokenId}`
+
+function pendingTokenEditStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function persistPendingLocalTokenHitPointEdits(): void {
+  const storage = pendingTokenEditStorage()
+  if (!storage) return
+  try {
+    if (pendingLocalTokenHitPointEdits.size === 0) {
+      storage.removeItem(PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY)
+      return
+    }
+    storage.setItem(
+      PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(pendingLocalTokenHitPointEdits)),
+    )
+  } catch {
+    // localStorage 不可用时仍保留内存保护。
+  }
+}
+
+function hydratePendingLocalTokenHitPointEdits(): void {
+  if (pendingLocalTokenHitPointEditsHydrated) return
+  pendingLocalTokenHitPointEditsHydrated = true
+  const storage = pendingTokenEditStorage()
+  if (!storage) return
+  try {
+    const raw = storage.getItem(PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Record<string, Partial<PendingLocalTokenHitPointEdit>>
+    for (const [key, pending] of Object.entries(parsed)) {
+      const updatedAt = Number(pending.updatedAt)
+      if (!key || !Number.isFinite(updatedAt)) continue
+      pendingLocalTokenHitPointEdits.set(key, {
+        hp: pending.hasHp && Number.isFinite(Number(pending.hp)) ? Number(pending.hp) : undefined,
+        maxHp: pending.hasMaxHp && Number.isFinite(Number(pending.maxHp)) ? Number(pending.maxHp) : undefined,
+        hasHp: pending.hasHp === true,
+        hasMaxHp: pending.hasMaxHp === true,
+        updatedAt,
+      })
+    }
+  } catch {
+    try {
+      storage.removeItem(PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY)
+    } catch {
+      // Ignore storage implementations that reject reads and writes.
+    }
+  }
+}
+
+export function markPendingLocalTokenHitPointEdit(
+  mapId: string,
+  tokenId: string,
+  patch: Pick<Partial<Token>, 'hp' | 'maxHp'>,
+  now: number = Date.now(),
+): void {
+  const hasHp = Object.prototype.hasOwnProperty.call(patch, 'hp')
+  const hasMaxHp = Object.prototype.hasOwnProperty.call(patch, 'maxHp')
+  if (!hasHp && !hasMaxHp) return
+  hydratePendingLocalTokenHitPointEdits()
+  pendingLocalTokenHitPointEdits.set(pendingTokenKey(mapId, tokenId), {
+    hp: patch.hp,
+    maxHp: patch.maxHp,
+    hasHp,
+    hasMaxHp,
+    updatedAt: now,
+  })
+  persistPendingLocalTokenHitPointEdits()
+}
+
+function clearPendingLocalTokenHitPointEdit(mapId: string, tokenId: string): void {
+  if (!pendingLocalTokenHitPointEdits.delete(pendingTokenKey(mapId, tokenId))) return
+  persistPendingLocalTokenHitPointEdits()
+}
+
+export function clearPendingLocalTokenHitPointEditsForTest(): void {
+  pendingLocalTokenHitPointEdits.clear()
+  pendingLocalTokenHitPointEditsHydrated = true
+  persistPendingLocalTokenHitPointEdits()
+}
+
+export function resetPendingLocalTokenHitPointEditMemoryForTest(): void {
+  pendingLocalTokenHitPointEdits.clear()
+  pendingLocalTokenHitPointEditsHydrated = false
+}
+
+export function mergePendingLocalTokenHitPointEdits(
+  sharedMaps: BattleMap[],
+  now: number = Date.now(),
+): BattleMap[] {
+  hydratePendingLocalTokenHitPointEdits()
+  let pendingChanged = false
+  for (const [key, pending] of pendingLocalTokenHitPointEdits) {
+    if (now - pending.updatedAt > LOCAL_TOKEN_HIT_POINT_EDIT_TTL_MS) {
+      pendingLocalTokenHitPointEdits.delete(key)
+      pendingChanged = true
+    }
+  }
+  if (pendingLocalTokenHitPointEdits.size === 0) {
+    if (pendingChanged) persistPendingLocalTokenHitPointEdits()
+    return sharedMaps
+  }
+  const maps = sharedMaps.map((map) => ({
+    ...map,
+    tokens: map.tokens.map((token) => {
+      const key = pendingTokenKey(map.id, token.id)
+      const pending = pendingLocalTokenHitPointEdits.get(key)
+      if (!pending) return token
+      const acknowledged =
+        (!pending.hasHp || token.hp === pending.hp) &&
+        (!pending.hasMaxHp || token.maxHp === pending.maxHp)
+      if (acknowledged) {
+        pendingLocalTokenHitPointEdits.delete(key)
+        pendingChanged = true
+        return token
+      }
+      return {
+        ...token,
+        ...(pending.hasHp ? { hp: pending.hp } : {}),
+        ...(pending.hasMaxHp ? { maxHp: pending.maxHp } : {}),
+      }
+    }),
+  }))
+  if (pendingChanged) persistPendingLocalTokenHitPointEdits()
+  return maps
+}
+
+export interface SharedMapsState {
   maps: BattleMap[]
   selectedId: string | null
   updatedAt?: number
+}
+
+export async function saveMapsStateWithPendingHitPointRetry(input: {
+  payload: SharedMapsState
+  retryPendingHitPoints: boolean
+  save: (payload: SharedMapsState) => Promise<SharedResourceSaveResult>
+  load: () => Promise<SharedMapsState | null>
+  now?: () => number
+  maximumAttempts?: number
+}): Promise<{ result: SharedResourceSaveResult; payload: SharedMapsState }> {
+  const maximumAttempts = Math.max(1, Math.min(5, Math.floor(input.maximumAttempts ?? 3)))
+  const now = input.now ?? Date.now
+  let payload = input.payload
+  let result: SharedResourceSaveResult = { status: 'failed' }
+
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    result = await input.save(payload)
+    if (result.status === 'saved') {
+      if (input.retryPendingHitPoints) {
+        // The authoritative server now contains these exact values. Clear the
+        // temporary anti-bounce projection instead of keeping it alive for 30s.
+        mergePendingLocalTokenHitPointEdits(payload.maps, payload.updatedAt ?? now())
+      }
+      return { result, payload }
+    }
+    if (
+      !input.retryPendingHitPoints ||
+      result.status !== 'conflict' ||
+      attempt >= maximumAttempts - 1
+    ) return { result, payload }
+
+    const shared = await input.load()
+    if (!shared?.maps) return { result, payload }
+    const updatedAt = Math.max(
+      now(),
+      (payload.updatedAt ?? 0) + 1,
+      (shared.updatedAt ?? 0) + 1,
+    )
+    payload = {
+      maps: mergePendingLocalTokenHitPointEdits(shared.maps, updatedAt).map((map) => ({
+        ...map,
+        tokens: map.tokens.map(stripViewerControlProjection),
+      })),
+      selectedId: payload.selectedId ?? shared.selectedId,
+      updatedAt,
+    }
+  }
+  return { result, payload }
 }
 
 export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps: BattleMap[]): BattleMap[] {
@@ -79,6 +287,7 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
             ? {
                 x: sharedToken.x,
                 y: sharedToken.y,
+                elevationFeet: sharedToken.elevationFeet,
               }
             : {}
         return [{
@@ -91,6 +300,8 @@ export function mergePlayerTokenCombatFields(localMaps: BattleMap[], sharedMaps:
           size: sharedToken.size,
           viewerControlled: sharedToken.viewerControlled,
           dnd5eTargetingPreference: sharedToken.dnd5eTargetingPreference,
+          dnd5eBehaviorPreference: sharedToken.dnd5eBehaviorPreference,
+          visualVariantId: sharedToken.visualVariantId,
           dnd5eCombatState: sharedToken.dnd5eCombatState,
           dnd5eSummon: sharedToken.dnd5eSummon,
           dnd5eSpellEffect: sharedToken.dnd5eSpellEffect,
@@ -109,7 +320,10 @@ function stripViewerControlProjection(token: Token): Omit<Token, 'viewerControll
   return persisted
 }
 
-function publishMapsState(state: Pick<MapState, 'maps' | 'selectedId'>): Promise<void> {
+function publishMapsState(
+  state: Pick<MapState, 'maps' | 'selectedId'>,
+  options: { retryPendingHitPoints?: boolean; requireSaved?: boolean } = {},
+): Promise<void> {
   const seq = ++mapSaveSeq
   return (async () => {
     let maps = state.maps
@@ -126,14 +340,22 @@ function publishMapsState(state: Pick<MapState, 'maps' | 'selectedId'>): Promise
     const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
     if (seq !== mapSaveSeq) return
     lastLocalMapsWriteAt = updatedAt
-    const result = await saveSharedResourceWithResult('maps', payload)
+    const saved = await saveMapsStateWithPendingHitPointRetry({
+      payload,
+      retryPendingHitPoints: options.retryPendingHitPoints === true,
+      save: (nextPayload) => saveSharedResourceWithResult('maps', nextPayload),
+      load: () => loadSharedResource<SharedMapsState>('maps'),
+    })
+    const result = saved.result
     if (result.status !== 'saved') {
       if (seq === mapSaveSeq) lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
+      if (options.requireSaved) throw new Error(`maps-save-rejected:${result.status}`)
       return
     }
     if (seq !== mapSaveSeq) return
-    lastSharedMapsUpdatedAt = payload.updatedAt ?? Date.now()
-    lastSharedMapsSnapshot = JSON.stringify(payload)
+    lastLocalMapsWriteAt = saved.payload.updatedAt ?? lastLocalMapsWriteAt
+    lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? Date.now()
+    lastSharedMapsSnapshot = JSON.stringify(saved.payload)
   })()
 }
 
@@ -165,8 +387,12 @@ export interface Token {
   showDetailOnToken?: boolean
   /** 来自怪物池的模板 id */
   poolId?: string
+  /** 内置怪物外观变体；只持久化短 ID，图片由客户端静态资源解析。 */
+  visualVariantId?: string
   /** DM 对单个怪物实例设置的自动攻击目标偏好。 */
   dnd5eTargetingPreference?: Dnd5eMonsterTargetingPreferenceV1
+  /** DM 对单个怪物实例设置的确定性战术行为风格。 */
+  dnd5eBehaviorPreference?: Dnd5eMonsterBehaviorPreferenceV1
   /** 由声明式 Headless 事务创建的召唤物；Token 仍由 DM 操作，side 只表示战斗阵营。 */
   dnd5eSummon?: {
     schemaVersion: 1
@@ -205,6 +431,8 @@ export interface Token {
       condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
     }
     activeEffectDamageSavePendingIds?: string[]
+    /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
+    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' }
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
@@ -496,11 +724,15 @@ function normalizeToken(raw: unknown): Token {
     portraitImageId: typeof t.portraitImageId === 'string' && /^[a-z0-9_-]{1,160}$/i.test(t.portraitImageId)
       ? t.portraitImageId
       : undefined,
+    visualVariantId: typeof t.visualVariantId === 'string' && /^[a-z0-9_-]{1,80}$/i.test(t.visualVariantId)
+      ? t.visualVariantId
+      : undefined,
     size: creatureSize ? creatureSizeToTokenSize(creatureSize) : rawSize,
     type,
     creatureTypes: creatureTypes.length > 0 ? creatureTypes : undefined,
     creatureSize,
     dnd5eTargetingPreference: normalizeDnd5eMonsterTargetingPreference(t.dnd5eTargetingPreference),
+    dnd5eBehaviorPreference: normalizeDnd5eMonsterBehaviorPreference(t.dnd5eBehaviorPreference),
     dnd5eSummon,
     dnd5eSpellEffect,
     elevationFeet: Number.isFinite(t.elevationFeet) ? Math.max(-1_000, Math.min(10_000, t.elevationFeet as number)) : undefined,
@@ -742,7 +974,7 @@ type CharacterTokenPresentation = {
   tokenPortrait?: string
 }
 
-/** 角色是人物 Token 名称与头像的单一真相来源；未关联角色的 Token 保持原样。 */
+/** 角色资料与内置怪物素材只在渲染时投影，不写入地图存档。 */
 export function projectCharacterTokenPresentations(
   tokens: Token[],
   characters: readonly CharacterTokenPresentation[],
@@ -750,7 +982,30 @@ export function projectCharacterTokenPresentations(
   const charactersById = new Map(characters.map((character) => [character.id, character]))
   let changed = false
   const projected = tokens.map((token) => {
-    if (!token.characterId) return token
+    if (!token.characterId) {
+      const presentation = token.poolId
+        ? getEnemyVisualPresentation(token.poolId, token.visualVariantId)
+        : undefined
+      if (!presentation) return token
+
+      // A room-specific upload always overrides the bundled monster artwork.
+      if (token.portraitImageId) {
+        if (!token.portrait && !token.tokenPortrait) return token
+        changed = true
+        return { ...token, portrait: undefined, tokenPortrait: undefined }
+      }
+
+      if (
+        token.portrait === presentation.initiativePortrait &&
+        token.tokenPortrait === presentation.tokenPortrait
+      ) return token
+      changed = true
+      return {
+        ...token,
+        portrait: presentation.initiativePortrait,
+        tokenPortrait: presentation.tokenPortrait,
+      }
+    }
     const character = charactersById.get(token.characterId)
     if (!character) return token
     const emoji = character.avatar || token.emoji
@@ -828,14 +1083,15 @@ export const useMapStore = create<MapState>()(
         if (!decision.apply) return
         lastSharedMapsUpdatedAt = decision.next.lastUpdatedAt
         lastSharedMapsSnapshot = decision.next.lastSnapshot
-        set({ maps: shared.maps, selectedId: shared.selectedId ?? shared.maps[0]?.id ?? null })
+        const protectedMaps = mergePendingLocalTokenHitPointEdits(shared.maps)
+        set({ maps: protectedMaps, selectedId: shared.selectedId ?? shared.maps[0]?.id ?? null })
         // 玩家端在 maps 同步落地后 GC 孤儿图片（已删 map 的本地 IndexedDB 副本）。
         if (isPlayerPort()) void pruneOrphanImages(shared.maps.flatMap((map) => [
           map.id,
           ...map.tokens.flatMap((token) => token.portraitImageId ? [token.portraitImageId] : []),
         ]))
       },
-      saveSharedNow: () => publishMapsState(get()),
+      saveSharedNow: () => publishMapsState(get(), { requireSaved: true }),
       select: (id) => set({ selectedId: id }),
 
       addMap: async ({ name, width, height, blob, gridDetect }) => {
@@ -951,6 +1207,7 @@ export const useMapStore = create<MapState>()(
           hp: patch.hp,
           maxHp: patch.maxHp,
           poolId: patch.poolId,
+          visualVariantId: patch.visualVariantId,
           creatureTypes: patch.creatureTypes,
           creatureSize: patch.creatureSize,
           showHpOnToken: patch.showHpOnToken ?? true,
@@ -982,6 +1239,7 @@ export const useMapStore = create<MapState>()(
             color: patch.color ?? '#f87171', emoji: patch.emoji ?? '👾',
             size: patch.size ?? defaultTokenSizeForMap(map), type: 'enemy',
             hp: patch.hp, maxHp: patch.maxHp, poolId: patch.poolId,
+            visualVariantId: patch.visualVariantId,
             creatureTypes: patch.creatureTypes, creatureSize: patch.creatureSize,
             showHpOnToken: patch.showHpOnToken ?? true,
             showDetailOnToken: patch.showDetailOnToken ?? true,
@@ -1019,6 +1277,10 @@ export const useMapStore = create<MapState>()(
       },
 
       updateToken: (mapId, tokenId, patch) => {
+        const updatesHitPoints =
+          Object.prototype.hasOwnProperty.call(patch, 'hp') ||
+          Object.prototype.hasOwnProperty.call(patch, 'maxHp')
+        markPendingLocalTokenHitPointEdit(mapId, tokenId, patch)
         set((s) => ({
           maps: s.maps.map((m) =>
             m.id === mapId
@@ -1026,10 +1288,14 @@ export const useMapStore = create<MapState>()(
               : m,
           ),
         }))
-        publishMapsState(get())
+        publishMapsState(get(), { retryPendingHitPoints: updatesHitPoints })
       },
 
       applyAuthorityTokenUpdate: (mapId, tokenId, patch) => {
+        if (
+          Object.prototype.hasOwnProperty.call(patch, 'hp') ||
+          Object.prototype.hasOwnProperty.call(patch, 'maxHp')
+        ) clearPendingLocalTokenHitPointEdit(mapId, tokenId)
         set((state) => ({
           maps: state.maps.map((map) =>
             map.id === mapId
