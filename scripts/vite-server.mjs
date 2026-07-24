@@ -67,12 +67,23 @@ if (Array.isArray(server.middlewares.stack)) {
 await server.listen()
 server.printUrls()
 
+let closing = false
 const close = async () => {
-  await server.close()
-  process.exit(0)
+  if (closing) return
+  closing = true
+  for (const clients of apiCtx.eventClients.values()) {
+    for (const response of clients) response.end()
+  }
+  apiCtx.eventClients.clear()
+  const forceExit = setTimeout(() => process.exit(1), 10_000)
+  forceExit.unref()
+  try {
+    await server.close()
+    process.exit(0)
+  } catch {
+    process.exit(1)
+  }
 }
 
 process.on('SIGINT', close)
 process.on('SIGTERM', close)
-
-setInterval(() => {}, 1 << 30)
