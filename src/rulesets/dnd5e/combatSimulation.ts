@@ -1,3 +1,4 @@
+import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eAttacksPerAttackAction } from './classes'
@@ -12,6 +13,12 @@ import {
   type Dnd5eMonsterTargetPriority,
 } from './monsters'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
+import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
+import {
+  dnd5eSpellDiceCount,
+  getDnd5eSrdCombatSpell,
+  type Dnd5eSrdSpellDefinition,
+} from './spells'
 import {
   DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
   rankMonsterDecisionCandidates,
@@ -50,6 +57,8 @@ export interface Dnd5eCombatSimulationCoverage {
   playerCount: number
   automatedMonsterActions: number
   totalMonsterActions: number
+  automatedMonsterSpells: number
+  totalMonsterSpells: number
   percentage: number
   limitations: readonly string[]
 }
@@ -87,6 +96,18 @@ interface SimulationAction {
   name: string
   parts: readonly SimulationAttackPart[]
   usage?: Dnd5eMonsterAction['usage']
+  spell?: {
+    effect: Dnd5eSrdSpellDefinition['effect']
+    saveAbility?: AbilityKey
+    saveDc?: number
+    attackBonus?: number
+    damageOnSuccessfulSave?: 'none' | 'half'
+    dice: { count: number; sides: number; bonus: number }
+    damageType?: Dnd5eDamageType
+    rangeFeet: number
+    slotLevel: number
+    consumesSpellSlot: boolean
+  }
 }
 
 interface SimulationActor {
@@ -110,6 +131,8 @@ interface SimulationActor {
   damageTypesSinceTurn: Set<Dnd5eDamageType>
   perDayUses: Map<string, number>
   rechargeReady: Map<string, boolean>
+  spellSlots: Map<number, number>
+  savingThrowModifiers: Record<AbilityKey, number>
 }
 
 interface SimulationDecision {
@@ -149,7 +172,7 @@ function actionSequence(monster: Dnd5eMonsterStatBlock, action: Dnd5eMonsterActi
 }
 
 function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAction[] {
-  return monster.actions.flatMap((action) => {
+  const weaponActions = monster.actions.flatMap((action) => {
     if (dnd5eMonsterActionAutomation(action) !== 'headless') return []
     const parts = actionSequence(monster, action).flatMap((child): SimulationAttackPart[] => {
       if (!child.attack) return []
@@ -167,7 +190,7 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
           bonus: damage.bonus,
           type: damage.type,
         })),
-        criticalThreshold: 20,
+        criticalThreshold: child.attack.criticalThreshold ?? 20,
         mode: child.attack!.mode,
         reachFeet: child.attack!.reachFeet ?? 5,
         rangeFeet: child.attack!.rangeFeet,
@@ -180,6 +203,51 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
       usage: action.usage,
     }] : []
   })
+  const spellActions = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
+    const spell = getDnd5eSrdCombatSpell(listedSpell.id)
+    if (
+      !spell ||
+      dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full' ||
+      !['spell-attack', 'saving-throw', 'power-word-kill'].includes(spell.effect) ||
+      !['hostile', 'creature'].includes(spell.target)
+    ) return []
+    const slotLevels = listedSpell.usage?.kind === 'at-will' || listedSpell.level === 0
+      ? [listedSpell.level]
+      : listedSpell.usage?.kind === 'per-day'
+        ? [listedSpell.level]
+        : Object.keys(monster.spellcasting?.slots ?? {})
+            .map(Number)
+            .filter((slotLevel) => slotLevel >= listedSpell.level)
+    return slotLevels.map((slotLevel): SimulationAction => ({
+      id: `spell:${spell.id}:${slotLevel}`,
+      name: spell.name,
+      parts: [],
+      usage: listedSpell.usage?.kind === 'per-day'
+        ? { kind: 'per-day', max: listedSpell.usage.max }
+        : undefined,
+      spell: {
+        effect: spell.effect,
+        saveAbility: spell.saveAbility,
+        saveDc: monster.spellcasting?.saveDc,
+        attackBonus: monster.spellcasting?.attackBonus,
+        damageOnSuccessfulSave: spell.damageOnSuccessfulSave,
+        dice: {
+          count: dnd5eSpellDiceCount(
+            spell,
+            Math.max(1, monster.spellcasting?.casterLevel ?? 1),
+            slotLevel,
+          ),
+          sides: spell.dice.sides,
+          bonus: spell.dice.bonus,
+        },
+        damageType: spell.damageType,
+        rangeFeet: spell.rangeFeet,
+        slotLevel,
+        consumesSpellSlot: listedSpell.usage == null && listedSpell.level > 0,
+      },
+    }))
+  })
+  return [...weaponActions, ...spellActions]
 }
 
 function simulationPlayerAction(character: Character): SimulationAction {
@@ -214,9 +282,11 @@ function simulationPlayerAction(character: Character): SimulationAction {
 }
 
 function inferMonsterStyle(monster: Dnd5eMonsterStatBlock): Dnd5eMonsterBehaviorStyle {
-  const parts = simulationMonsterActions(monster).flatMap((action) => action.parts)
+  const actions = simulationMonsterActions(monster)
+  const parts = actions.flatMap((action) => action.parts)
   const hasMelee = parts.some((part) => part.mode !== 'ranged')
-  const hasRanged = parts.some((part) => part.mode !== 'melee' && (part.rangeFeet?.normal ?? 0) >= 20)
+  const hasRanged = parts.some((part) => part.mode !== 'melee' && (part.rangeFeet?.normal ?? 0) >= 20) ||
+    actions.some((action) => (action.spell?.rangeFeet ?? 0) >= 20)
   if (hasMelee && hasRanged) return 'skirmisher'
   return hasRanged ? 'defensive' : 'aggressive'
 }
@@ -242,6 +312,16 @@ function playerActor(character: Character): SimulationActor {
     damageTypesSinceTurn: new Set(),
     perDayUses: new Map(),
     rechargeReady: new Map(),
+    spellSlots: new Map(),
+    savingThrowModifiers: Object.fromEntries(
+      Object.entries(character.abilities).map(([ability, score]) => [
+        ability,
+        rules.abilityModifier(score) +
+          (character.savingThrows.includes(ability as AbilityKey)
+            ? rules.proficiencyBonus(character.level)
+            : 0),
+      ]),
+    ) as Record<AbilityKey, number>,
   }
 }
 
@@ -274,34 +354,67 @@ function monsterActor(
       action.usage?.kind === 'per-day' ? [[action.id, action.usage.max] as const] : [])),
     rechargeReady: new Map(actions.flatMap((action) =>
       action.usage?.kind === 'recharge' ? [[action.id, true] as const] : [])),
+    spellSlots: new Map(Object.entries(monster.spellcasting?.slots ?? {})
+      .map(([level, count]) => [Number(level), count])),
+    savingThrowModifiers: Object.fromEntries(
+      Object.entries(monster.abilities).map(([ability, score]) => [
+        ability,
+        monster.savingThrows?.[ability as AbilityKey] ?? rules.abilityModifier(score),
+      ]),
+    ) as Record<AbilityKey, number>,
   }
 }
 
 function actionMaximumRange(action: SimulationAction): number {
+  if (action.spell) return action.spell.rangeFeet
   return Math.max(...action.parts.map((part) =>
     part.mode === 'melee' ? part.reachFeet : part.rangeFeet?.long ?? part.reachFeet))
 }
 
 function actionNormalRange(action: SimulationAction): number {
+  if (action.spell) return action.spell.rangeFeet
   return Math.max(...action.parts.map((part) =>
     part.mode === 'melee' ? part.reachFeet : part.rangeFeet?.normal ?? part.reachFeet))
 }
 
 function actionExpectedDamage(
   action: SimulationAction,
-  targetAc: number,
+  target: SimulationActor,
   distanceFeet: number,
   actorHpRatio = 1,
 ): {
   expectedDamage: number
   hitProbability: number
 } | undefined {
+  if (action.spell) {
+    const spell = action.spell
+    if (distanceFeet > spell.rangeFeet) return undefined
+    if (spell.effect === 'power-word-kill') {
+      return target.hp <= 100
+        ? { expectedDamage: target.hp, hitProbability: 1 }
+        : undefined
+    }
+    const average = spell.dice.count * (spell.dice.sides + 1) / 2 + spell.dice.bonus
+    if (spell.effect === 'spell-attack' && spell.attackBonus != null) {
+      const base = Math.max(0.05, Math.min(0.95, (21 + spell.attackBonus - target.ac) / 20))
+      const hitProbability = distanceFeet <= 5 ? base ** 2 : base
+      return { expectedDamage: average * hitProbability, hitProbability }
+    }
+    if (spell.effect === 'saving-throw' && spell.saveAbility && spell.saveDc != null) {
+      const modifier = target.savingThrowModifiers[spell.saveAbility]
+      const successProbability = Math.max(0.05, Math.min(0.95, (21 + modifier - spell.saveDc) / 20))
+      const multiplier = 1 - successProbability +
+        (spell.damageOnSuccessfulSave === 'half' ? successProbability / 2 : 0)
+      return { expectedDamage: average * multiplier, hitProbability: 1 - successProbability }
+    }
+    return undefined
+  }
   let expectedDamage = 0
   let totalProbability = 0
   for (const part of action.parts) {
     const maximum = part.mode === 'melee' ? part.reachFeet : part.rangeFeet?.long ?? 0
     if (distanceFeet > maximum) return undefined
-    const base = Math.max(0.05, Math.min(0.95, (21 + part.toHit - targetAc) / 20))
+    const base = Math.max(0.05, Math.min(0.95, (21 + part.toHit - target.ac) / 20))
     const normal = part.mode === 'melee' ? part.reachFeet : part.rangeFeet?.normal ?? maximum
     const disadvantaged = distanceFeet > normal || (part.mode !== 'melee' && distanceFeet <= 5)
     const hitProbability = disadvantaged ? base ** 2 : base
@@ -337,6 +450,10 @@ function targetPriorityWeight(
 }
 
 function availableAction(actor: SimulationActor, action: SimulationAction): boolean {
+  if (
+    action.spell?.consumesSpellSlot &&
+    (actor.spellSlots.get(action.spell.slotLevel) ?? 0) <= 0
+  ) return false
   if (action.usage?.kind === 'per-day') return (actor.perDayUses.get(action.id) ?? 0) > 0
   if (action.usage?.kind === 'recharge') return actor.rechargeReady.get(action.id) !== false
   return true
@@ -358,16 +475,20 @@ function monsterDecision(actor: SimulationActor, opponents: readonly SimulationA
       if (actionNormalRange(action) > 5) positions.add(actor.position - direction * actor.speed)
       for (const nextPosition of positions) {
         const distance = Math.abs(nextPosition - target.position)
-        const attack = actionExpectedDamage(action, target.ac, distance, actor.hp / actor.maxHp)
+        const attack = actionExpectedDamage(action, target, distance, actor.hp / actor.maxHp)
         if (!attack) continue
         const movementFeet = Math.abs(nextPosition - actor.position)
         const supportCount = opponents.filter((candidate) =>
           candidate.id !== target.id && Math.abs(nextPosition - candidate.position) <= 5).length
         candidates.push({
           id: `attack:${target.id}:${action.id}:${nextPosition}`,
-          kind: movementFeet > 0
-            ? distance > startDistance ? 'retreat-attack' : 'move-attack'
-            : 'attack',
+          kind: action.spell
+            ? movementFeet > 0
+              ? distance > startDistance ? 'retreat-spell' : 'move-spell'
+              : 'spell'
+            : movementFeet > 0
+              ? distance > startDistance ? 'retreat-attack' : 'move-attack'
+              : 'attack',
           payload: { targetId: target.id, actionId: action.id, nextPosition },
           metrics: {
             expectedDamage: attack.expectedDamage,
@@ -390,7 +511,9 @@ function monsterDecision(actor: SimulationActor, opponents: readonly SimulationA
             dashes: false,
             usesNimbleEscape: hasNimbleEscape && movementFeet > 0 && startDistance <= 5 && distance > 5,
             usesPreciseCoverRoute: false,
-            resourceCost: action.usage ? 4 : 0,
+            resourceCost: action.spell?.consumesSpellSlot
+              ? action.spell.slotLevel * 3
+              : action.usage ? 4 : 0,
           },
         })
       }
@@ -506,6 +629,56 @@ function executeAction(
     actor.perDayUses.set(action.id, Math.max(0, (actor.perDayUses.get(action.id) ?? 0) - 1))
   }
   if (action.usage?.kind === 'recharge') actor.rechargeReady.set(action.id, false)
+  if (action.spell?.consumesSpellSlot) {
+    actor.spellSlots.set(
+      action.spell.slotLevel,
+      Math.max(0, (actor.spellSlots.get(action.spell.slotLevel) ?? 0) - 1),
+    )
+  }
+
+  if (action.spell) {
+    const spell = action.spell
+    const distance = Math.abs(actor.position - target.position)
+    if (distance > spell.rangeFeet) return
+    if (spell.effect === 'power-word-kill') {
+      if (target.hp <= 100) {
+        actor.damageDealt += target.hp
+        target.hp = 0
+      }
+      return
+    }
+    let applies = false
+    let halfDamage = false
+    let critical = false
+    if (spell.effect === 'spell-attack' && spell.attackBonus != null) {
+      const disadvantaged = distance <= 5 || dodgingIds.has(target.id)
+      const first = random.die(20)
+      const second = disadvantaged ? random.die(20) : first
+      const roll = disadvantaged ? Math.min(first, second) : first
+      const attack = rules.resolveAttack({
+        rolls: [roll],
+        mode: 'normal',
+        modifier: spell.attackBonus,
+        targetAc: target.ac,
+      })
+      applies = attack.hit
+      critical = attack.critical
+    } else if (spell.effect === 'saving-throw' && spell.saveAbility && spell.saveDc != null) {
+      const total = random.die(20) + target.savingThrowModifiers[spell.saveAbility]
+      applies = total < spell.saveDc
+      halfDamage = !applies && spell.damageOnSuccessfulSave === 'half'
+    }
+    if (!applies && !halfDamage) return
+    let rawDamage = spell.dice.bonus
+    const count = spell.dice.count * (critical ? 2 : 1)
+    for (let dieIndex = 0; dieIndex < count; dieIndex += 1) {
+      rawDamage += random.die(spell.dice.sides)
+    }
+    if (halfDamage) rawDamage = Math.floor(rawDamage / 2)
+    const dealt = applyDamage(target, rawDamage, spell.damageType ?? 'force')
+    actor.damageDealt += dealt
+    return
+  }
 
   for (const part of action.parts) {
     if (!target || target.hp <= 0) {
@@ -612,17 +785,30 @@ function simulationCoverage(
     sum + monster.actions.filter((action) =>
       dnd5eMonsterActionAutomation(action) === 'headless' && actionSequence(monster, action).some((child) => child.attack),
     ).length, 0)
+  const totalMonsterSpells = monsters.reduce((sum, monster) =>
+    sum + (monster.spellcasting?.spells?.length ?? 0), 0)
+  const automatedMonsterSpells = monsters.reduce((sum, monster) =>
+    sum + (monster.spellcasting?.spells ?? []).filter((listedSpell) => {
+      const spell = getDnd5eSrdCombatSpell(listedSpell.id)
+      return !!spell &&
+        dnd5eMonsterCoreSpellCompatibility(spell).automation === 'full' &&
+        ['spell-attack', 'saving-throw', 'power-word-kill'].includes(spell.effect)
+    }).length, 0)
   const playerBasicAttackProfiles = characters.filter((character) => !!dnd5eWeaponAttackProfile(character)).length
-  const denominator = Math.max(1, totalMonsterActions + characters.length)
+  const denominator = Math.max(1, totalMonsterActions + totalMonsterSpells + characters.length)
   return {
     playerBasicAttackProfiles,
     playerCount: characters.length,
     automatedMonsterActions,
     totalMonsterActions,
-    percentage: (automatedMonsterActions + playerBasicAttackProfiles) / denominator,
+    automatedMonsterSpells,
+    totalMonsterSpells,
+    percentage: (
+      automatedMonsterActions + automatedMonsterSpells + playerBasicAttackProfiles
+    ) / denominator,
     limitations: [
-      '模拟使用平均生命值、当前 AC、武器攻击、多重攻击、射程、劣势、抗性/免疫/易伤、再生、充能与每日次数。',
-      '地图墙体、精确掩护、法术选择、传奇/巢穴动作、反应、专注、死亡豁免和需 DM 裁定的能力暂不进入胜率。',
+      '模拟使用平均生命值、当前 AC、武器攻击、多重攻击、单体伤害法术、射程、豁免、抗性/免疫/易伤、再生、充能与每日次数。',
+      '地图墙体、精确掩护、范围/专注/附带状态法术、传奇/巢穴动作、反应、死亡豁免和需 DM 裁定的能力暂不进入胜率。',
       '结果用于遭遇强度预估，不替代真实地图上的 Headless 权威战斗。',
     ],
   }

@@ -56,7 +56,17 @@ export interface MonsterDecisionMetrics {
 
 export interface MonsterDecisionCandidate<TPayload> {
   id: string
-  kind: 'attack' | 'move-attack' | 'retreat-attack' | 'dash' | 'move-dodge' | 'dodge'
+  kind:
+    | 'attack'
+    | 'move-attack'
+    | 'retreat-attack'
+    | 'spell'
+    | 'move-spell'
+    | 'retreat-spell'
+    | 'heal'
+    | 'dash'
+    | 'move-dodge'
+    | 'dodge'
   payload: TPayload
   metrics: MonsterDecisionMetrics
 }

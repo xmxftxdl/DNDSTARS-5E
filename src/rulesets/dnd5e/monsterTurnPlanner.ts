@@ -11,6 +11,7 @@ import {
 } from '../../lib/gridCombat'
 import { isTokenMovementLocked } from '../../lib/combatStatus'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
+import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import {
   mapGeometryCoverBetween,
   mapGeometryDoorLockState,
@@ -30,6 +31,14 @@ import {
   type Dnd5eMonsterAction,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
+import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
+import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
+import { dnd5eAvailableMonsterSpellSlotLevels } from './monsterCoreSpellAction'
+import {
+  dnd5eSpellDiceCount,
+  getDnd5eSrdCombatSpell,
+  type Dnd5eSrdSpellDefinition,
+} from './spells'
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import {
   dnd5eMonsterEffectiveBehaviorStyle,
@@ -72,6 +81,20 @@ export interface Dnd5eMonsterTurnPlan {
   newElevationFeet?: number
   movementMode?: 'walk' | 'fly'
   attacked: boolean
+  spellCast?: {
+    spellId: string
+    spellName: string
+    slotLevel: number
+    targetTokenIds: readonly string[]
+    effect: Dnd5eSrdSpellDefinition['effect']
+    diceCount: number
+    diceSides: number
+    castingTime: Dnd5eSrdSpellDefinition['castingTime']
+    saveAbility?: Dnd5eSrdSpellDefinition['saveAbility']
+    area?: Dnd5eSrdSpellDefinition['area']
+    areaTargetCell?: GridCell
+    areaTargetOrientation?: 0 | 1 | 2 | 3
+  }
   attackerTokenId?: string
   targetTokenId?: string
   actionIndex?: number
@@ -282,6 +305,92 @@ function targetArmorClass(target: Token, characters: readonly Character[]): numb
   return target.poolId ? getDnd5eSrdMonster(target.poolId)?.armorClass.value ?? 10 : 10
 }
 
+function targetSavingThrowModifier(
+  target: Token,
+  characters: readonly Character[],
+  ability: NonNullable<Dnd5eSrdSpellDefinition['saveAbility']>,
+): number {
+  const character = target.characterId
+    ? characters.find((candidate) => candidate.id === target.characterId)
+    : undefined
+  if (character) {
+    return rules.abilityModifier(character.abilities[ability]) +
+      (character.savingThrows.includes(ability) ? rules.proficiencyBonus(character.level) : 0)
+  }
+  const monster = target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
+  return monster?.savingThrows?.[ability] ?? rules.abilityModifier(monster?.abilities[ability] ?? 10)
+}
+
+function offensiveMonsterSpellExpectedValue(input: {
+  map: BattleMap
+  attacker: Token
+  target: Token
+  monster: Dnd5eMonsterStatBlock
+  spell: Dnd5eSrdSpellDefinition
+  slotLevel: number
+  characters: readonly Character[]
+}): { expectedDamage: number; hitProbability: number; controlValue?: number } | undefined {
+  const { map, attacker, target, monster, spell, slotLevel, characters } = input
+  if (
+    !['spell-attack', 'saving-throw', 'power-word-kill', 'power-word-stun'].includes(spell.effect) ||
+    !['hostile', 'creature'].includes(spell.target)
+  ) return undefined
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, attacker, target)
+  if (distanceFeet > spell.rangeFeet) return undefined
+  const cover = mapGeometryCoverBetween(geometry, attacker, target, map)
+  if (cover.blocksLineOfEffect || cover.cover === 'total') return undefined
+  if (mapGeometryLineOfSightBlocked({
+    geometry,
+    from: attacker,
+    to: target,
+    fromElevationFeet: mapGeometryTokenElevation(geometry, attacker),
+    toElevationFeet: mapGeometryTokenElevation(geometry, target),
+  })) return undefined
+  const targetHp = targetHitPoints(target, characters)
+  if (spell.effect === 'power-word-kill') {
+    if (targetHp.current > 100) return undefined
+    return { expectedDamage: targetHp.current, hitProbability: 1, controlValue: 30 }
+  }
+  if (spell.effect === 'power-word-stun') {
+    if (targetHp.current > (spell.hitPointThreshold ?? 150)) return undefined
+    return { expectedDamage: 0, hitProbability: 1, controlValue: 28 }
+  }
+  const diceCount = dnd5eSpellDiceCount(
+    spell,
+    Math.max(1, monster.spellcasting?.casterLevel ?? 1),
+    slotLevel,
+  )
+  const averageDamage = diceCount * (spell.dice.sides + 1) / 2 + spell.dice.bonus
+  if (spell.effect === 'spell-attack') {
+    const ac = targetArmorClass(target, characters) + cover.armorClassBonus
+    const baseProbability = Math.max(
+      0.05,
+      Math.min(0.95, (21 + (monster.spellcasting?.attackBonus ?? 0) - ac) / 20),
+    )
+    const threatened = map.tokens.some((candidate) =>
+      candidate.id !== attacker.id &&
+      candidate.type !== 'obstacle' &&
+      areOpposedCombatTokens(attacker, candidate) &&
+      tokenThreeDimensionalDistanceFeet(map, geometry, attacker, candidate) <= 5,
+    )
+    const probability = threatened ? baseProbability ** 2 : baseProbability
+    return { expectedDamage: averageDamage * probability, hitProbability: probability }
+  }
+  if (!spell.saveAbility || monster.spellcasting?.saveDc == null) return undefined
+  const modifier = targetSavingThrowModifier(target, characters, spell.saveAbility)
+  const successProbability = Math.max(
+    0.05,
+    Math.min(0.95, (21 + modifier - monster.spellcasting.saveDc) / 20),
+  )
+  const damageFactor = 1 - successProbability +
+    (spell.damageOnSuccessfulSave === 'half' ? successProbability / 2 : 0)
+  return {
+    expectedDamage: averageDamage * damageFactor,
+    hitProbability: 1 - successProbability,
+  }
+}
+
 function attackPreview(
   action: Dnd5eMonsterAction,
   monster: Dnd5eMonsterStatBlock,
@@ -352,6 +461,13 @@ function monsterTacticalRole(monster: Dnd5eMonsterStatBlock): MonsterDecisionCon
     .filter((action) => dnd5eMonsterActionAutomation(action) === 'headless')
     .flatMap((action) => actionSequence(monster, action))
   const hasRanged = attacks.some((action) => (action.attack?.rangeFeet?.normal ?? 0) >= 20)
+    || (monster.spellcasting?.spells ?? []).some((listedSpell) => {
+      const spell = getDnd5eSrdCombatSpell(listedSpell.id)
+      return !!spell &&
+        dnd5eMonsterCoreSpellCompatibility(spell).automation === 'full' &&
+        ['spell-attack', 'saving-throw', 'power-word-kill', 'power-word-stun'].includes(spell.effect) &&
+        spell.rangeFeet >= 20
+    })
   const hasMelee = attacks.some((action) => (action.attack?.reachFeet ?? 0) > 0 && action.attack?.mode !== 'ranged')
   if (hasRanged && hasMelee) return 'skirmisher'
   return hasRanged ? 'ranged' : 'melee'
@@ -366,6 +482,14 @@ function preferredDistanceFeet(
   const shortestNormalRange = monster.actions
     .flatMap((action) => actionSequence(monster, action))
     .flatMap((action) => action.attack?.rangeFeet?.normal ? [action.attack.rangeFeet.normal] : [])
+    .concat((monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
+      const spell = getDnd5eSrdCombatSpell(listedSpell.id)
+      return spell &&
+        dnd5eMonsterCoreSpellCompatibility(spell).automation === 'full' &&
+        ['spell-attack', 'saving-throw', 'power-word-kill', 'power-word-stun'].includes(spell.effect)
+        ? [spell.rangeFeet]
+        : []
+    }))
     .sort((left, right) => left - right)[0] ?? 30
   const base = Math.max(15, Math.min(30, shortestNormalRange / 2))
   if (style === 'aggressive') return Math.max(10, base - 10)
@@ -480,6 +604,71 @@ function actionExpectedValue(input: {
   }
 }
 
+interface MonsterAreaPlacement {
+  targetCell: GridCell
+  targetTokenIds: string[]
+  hostileCount: number
+  expectedDamage: number
+}
+
+function bestMonsterAreaPlacement(input: {
+  map: BattleMap
+  attacker: Token
+  focusTarget: Token
+  spell: Dnd5eSrdSpellDefinition
+  slotLevel: number
+  casterLevel: number
+  characters: readonly Character[]
+}): MonsterAreaPlacement | undefined {
+  const { map, attacker, focusTarget, spell } = input
+  const area = spell.area
+  if (!area) return undefined
+  const casterCell = tokenAnchorCellFromPixel(attacker.x, attacker.y, attacker, map)
+  const columns = Math.max(1, Math.floor((map.width - map.gridOffsetX) / Math.max(1, map.gridSize)))
+  const rows = Math.max(1, Math.floor((map.height - map.gridOffsetY) / Math.max(1, map.gridSize)))
+  const anchors: GridCell[] = area.origin === 'self'
+    ? area.shape === 'circle'
+      ? [casterCell]
+      : Array.from({ length: rows }, (_, row) =>
+          Array.from({ length: columns }, (_, col) => ({ col, row }))).flat()
+    : Array.from({ length: rows }, (_, row) =>
+        Array.from({ length: columns }, (_, col) => ({ col, row }))).flat()
+  const averageDamage = dnd5eSpellDiceCount(
+    spell,
+    input.casterLevel,
+    input.slotLevel,
+  ) * (spell.dice.sides + 1) / 2 + spell.dice.bonus
+  let best: (MonsterAreaPlacement & { score: number; key: string }) | undefined
+  for (const targetCell of anchors) {
+    if (!canPlaceAoe(area, casterCell, targetCell)) continue
+    const orientFrom = aoeOrientFromCell(area, casterCell, targetCell)
+    const cells = cellsForAoe(area, orientFrom, targetCell)
+    const affected = tokensInCells(map, map.tokens, cells).filter((token) =>
+      token.type !== 'obstacle' && (token.id !== attacker.id || spell.areaIncludesSelf))
+    const friendlies = affected.filter((token) =>
+      token.id !== attacker.id && !areOpposedCombatTokens(attacker, token))
+    if (friendlies.length > 0) continue
+    const hostiles = affected.filter((token) =>
+      areOpposedCombatTokens(attacker, token) && targetHitPoints(token, input.characters).current > 0)
+    if (hostiles.length < 1 || !hostiles.some((token) => token.id === focusTarget.id)) continue
+    const expectedDamage = averageDamage * hostiles.length * (spell.effect === 'saving-throw' ? 0.75 : 1)
+    const focusBonus = hostiles.some((token) => token.id === focusTarget.id) ? 24 : 0
+    const score = expectedDamage + hostiles.length * 40 + focusBonus
+    const key = `${targetCell.col},${targetCell.row}`
+    if (!best || score > best.score || (score === best.score && key < best.key)) {
+      best = {
+        targetCell,
+        targetTokenIds: affected.map((token) => token.id),
+        hostileCount: hostiles.length,
+        expectedDamage,
+        score,
+        key,
+      }
+    }
+  }
+  return best
+}
+
 interface ExactMonsterRoute {
   movementCostFeet: number
   points: Array<{ x: number; y: number }>
@@ -546,6 +735,7 @@ function createTacticalCandidates(input: {
   target: Token
   characters: readonly Character[]
   canUseBonusAction: boolean
+  canUseAction: boolean
   preferredTargetId?: string
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
   const { map, enemy, monster, target, characters } = input
@@ -632,6 +822,18 @@ function createTacticalCandidates(input: {
     .filter(({ action }) =>
       action.usage?.kind !== 'per-day' ||
       (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ?? action.usage.max) > 0)
+  const legalSpells = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
+    const spell = getDnd5eSrdCombatSpell(listedSpell.id)
+    if (
+      !spell ||
+      dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full' ||
+      spell.castingTime === 'reaction' ||
+      (spell.castingTime === 'action' && !input.canUseAction) ||
+      (spell.castingTime === 'bonus-action' && !input.canUseBonusAction)
+    ) return []
+    return dnd5eAvailableMonsterSpellSlotLevels({ monster, token: enemy, spell: listedSpell })
+      .map((slotLevel) => ({ listedSpell, spell, slotLevel }))
+  })
 
   for (const reachable of normalPositions) {
     const moved = reachable.steps > 0 || desiredElevationFeet !== currentElevationFeet
@@ -683,6 +885,107 @@ function createTacticalCandidates(input: {
           targetConcentrating: targetIsConcentrating,
           targetSupportCount: supportCount,
           hitProbability: attackValue.hitProbability,
+          targetDistanceFeet: distanceFeet,
+          preferredDistanceFeet: preferred,
+          movementFeet: route.movementCostFeet,
+          distanceImprovementFeet: tacticalDistanceImprovement(
+            role, startDistanceFeet, distanceFeet, preferred,
+          ),
+          defensiveCoverBonus: coverBonus,
+          opportunityAttackRisk: usesNimbleEscape ? 0 : opportunityRisk,
+          attacksThisTurn: true,
+          consumesAction: true,
+          dodges: false,
+          dashes: false,
+          usesNimbleEscape,
+          usesPreciseCoverRoute: moved && coverBonus > 0,
+        },
+      })
+    }
+    for (const { spell, slotLevel } of legalSpells) {
+      const areaPlacement = spell.area ? bestMonsterAreaPlacement({
+        map,
+        attacker: at,
+        focusTarget: target,
+        spell,
+        slotLevel,
+        casterLevel: Math.max(1, monster.spellcasting?.casterLevel ?? 1),
+        characters,
+      }) : undefined
+      if (spell.area && !areaPlacement) continue
+      const spellValue = areaPlacement
+        ? {
+            expectedDamage: areaPlacement.expectedDamage,
+            hitProbability: spell.effect === 'saving-throw' ? 0.75 : 1,
+            controlValue: areaPlacement.hostileCount > 1 ? areaPlacement.hostileCount * 2 : 0,
+          }
+        : offensiveMonsterSpellExpectedValue({
+            map,
+            attacker: at,
+            target,
+            monster,
+            spell,
+            slotLevel,
+            characters,
+          })
+      if (!spellValue) continue
+      const opportunityRisk = moved ? opportunityAttackRisk(map, enemy, at) : 0
+      const usesNimbleEscape = hasNimbleEscape && opportunityRisk > 0 &&
+        spell.castingTime !== 'bonus-action'
+      const plan: Dnd5eMonsterTurnPlan = {
+        moved,
+        newPosition: moved ? reachable.position : undefined,
+        newElevationFeet: shouldFly && moved ? desiredElevationFeet : undefined,
+        movementMode: moved ? movementProfile.mode : undefined,
+        attacked: false,
+        attackerTokenId: enemy.id,
+        targetTokenId: target.id,
+        targetCharacterId: target.characterId,
+        nimbleEscape: usesNimbleEscape ? 'disengage' : undefined,
+        spellCast: {
+          spellId: spell.id,
+          spellName: spell.name,
+          slotLevel,
+          targetTokenIds: areaPlacement?.targetTokenIds ?? [target.id],
+          effect: spell.effect,
+          diceCount: dnd5eSpellDiceCount(
+            spell,
+            Math.max(1, monster.spellcasting?.casterLevel ?? 1),
+            slotLevel,
+          ),
+          diceSides: spell.dice.sides,
+          castingTime: spell.castingTime,
+          saveAbility: spell.saveAbility,
+          area: spell.area,
+          areaTargetCell: areaPlacement?.targetCell,
+        },
+        message: areaPlacement
+          ? `${enemy.label}${moved ? '移动后' : ''}施放${spell.name}，范围覆盖 ${areaPlacement.hostileCount} 名敌人。`
+          : `${enemy.label}${moved ? '移动后' : ''}施放${spell.name}，目标为 ${target.label}。`,
+      }
+      const route = exactRoute(plan)
+      if (!route) continue
+      const coverBonus = defensiveCoverBonusAgainstTarget(map, at, target)
+      const supportCount = targetSupportCount(map, at, target)
+      const kind = !moved ? 'spell'
+        : distanceFeet > startDistanceFeet ? 'retreat-spell'
+          : 'move-spell'
+      candidates.push({
+        id: `${kind}:${target.id}:${spell.id}:${slotLevel}:${areaPlacement ? `${areaPlacement.targetCell.col},${areaPlacement.targetCell.row}` : 'single'}:${reachable.cell.col},${reachable.cell.row}:${desiredElevationFeet}`,
+        kind,
+        payload: plan,
+        metrics: {
+          expectedDamage: spellValue.expectedDamage,
+          targetCurrentHp: targetHp.current,
+          targetMaximumHp: targetHp.maximum,
+          targetArmorClass: targetAc,
+          targetPriorityWeight,
+          targetThreat,
+          targetConcentrating: targetIsConcentrating,
+          targetSupportCount: supportCount,
+          hitProbability: spellValue.hitProbability,
+          controlValue: spellValue.controlValue,
+          resourceCost: spell.level === 0 ? 0 : slotLevel * 3,
           targetDistanceFeet: distanceFeet,
           preferredDistanceFeet: preferred,
           movementFeet: route.movementCostFeet,
@@ -820,6 +1123,109 @@ function createTacticalCandidates(input: {
   return candidates
 }
 
+function createMonsterHealingCandidates(input: {
+  map: BattleMap
+  enemy: Token
+  monster: Dnd5eMonsterStatBlock
+  characters: readonly Character[]
+  canUseAction: boolean
+  canUseBonusAction: boolean
+}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
+  const { map, enemy, monster, characters } = input
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  const healingSpells = (monster.spellcasting?.spells ?? []).flatMap((listedSpell) => {
+    const spell = getDnd5eSrdCombatSpell(listedSpell.id)
+    if (
+      !spell ||
+      dnd5eMonsterCoreSpellCompatibility(spell).automation !== 'full' ||
+      spell.effect !== 'healing' ||
+      spell.castingTime === 'reaction' ||
+      (spell.castingTime === 'action' && !input.canUseAction) ||
+      (spell.castingTime === 'bonus-action' && !input.canUseBonusAction)
+    ) return []
+    return dnd5eAvailableMonsterSpellSlotLevels({ monster, token: enemy, spell: listedSpell })
+      .map((slotLevel) => ({ spell, slotLevel }))
+  })
+  if (healingSpells.length === 0) return []
+  const allies = map.tokens.filter((target) => {
+    if (target.type === 'obstacle' || areOpposedCombatTokens(enemy, target)) return false
+    const hp = targetHitPoints(target, characters)
+    if (hp.current <= 0 || hp.current >= hp.maximum) return false
+    const targetMonster = target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
+    const creatureType = (targetMonster?.creatureType ?? '').toLowerCase()
+    return !['undead', 'construct'].includes(creatureType) &&
+      !creatureType.includes('亡灵') &&
+      !creatureType.includes('构装')
+  })
+  return allies.flatMap((target) => healingSpells.flatMap(({ spell, slotLevel }) => {
+    const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
+    if (distanceFeet > spell.rangeFeet) return []
+    const cover = target.id === enemy.id
+      ? undefined
+      : mapGeometryCoverBetween(geometry, enemy, target, map)
+    if (cover?.blocksLineOfEffect) return []
+    const hp = targetHitPoints(target, characters)
+    const diceCount = dnd5eSpellDiceCount(
+      spell,
+      Math.max(1, monster.spellcasting?.casterLevel ?? 1),
+      slotLevel,
+    )
+    const modifier = spell.addSpellcastingModifier && monster.spellcasting?.ability
+      ? rules.abilityModifier(monster.abilities[monster.spellcasting.ability])
+      : 0
+    const expectedHealing = Math.min(
+      hp.maximum - hp.current,
+      diceCount * (spell.dice.sides + 1) / 2 + spell.dice.bonus + modifier,
+    )
+    const missingRatio = 1 - hp.current / hp.maximum
+    const plan: Dnd5eMonsterTurnPlan = {
+      moved: false,
+      attacked: false,
+      attackerTokenId: enemy.id,
+      targetTokenId: target.id,
+      targetCharacterId: target.characterId,
+      spellCast: {
+        spellId: spell.id,
+        spellName: spell.name,
+        slotLevel,
+        targetTokenIds: [target.id],
+        effect: spell.effect,
+        diceCount,
+        diceSides: spell.dice.sides,
+        castingTime: spell.castingTime,
+      },
+      message: `${enemy.label}施放${spell.name}治疗 ${target.label}。`,
+    }
+    return [{
+      id: `heal:${target.id}:${spell.id}:${slotLevel}`,
+      kind: 'heal' as const,
+      payload: plan,
+      metrics: {
+        expectedDamage: 0,
+        targetCurrentHp: hp.current,
+        targetMaximumHp: hp.maximum,
+        targetArmorClass: targetArmorClass(target, characters),
+        targetPriorityWeight: 0,
+        hitProbability: 1,
+        supportValue: expectedHealing * 4 + missingRatio * 140,
+        resourceCost: spell.level === 0 ? 0 : slotLevel * 3,
+        targetDistanceFeet: distanceFeet,
+        preferredDistanceFeet: 0,
+        movementFeet: 0,
+        distanceImprovementFeet: 0,
+        defensiveCoverBonus: 0,
+        opportunityAttackRisk: 0,
+        attacksThisTurn: false,
+        consumesAction: true,
+        dodges: false,
+        dashes: false,
+        usesNimbleEscape: false,
+        usesPreciseCoverRoute: false,
+      },
+    }]
+  }))
+}
+
 /** 规划 SRD 怪物的 5e 回合；所有候选仍须由地图几何与 Headless 权威复核。 */
 export function planDnd5eMonsterTurn(
   map: BattleMap,
@@ -864,15 +1270,26 @@ export function planDnd5eMonsterTurn(
   const role = monsterTacticalRole(monster)
   const behaviorStyle = dnd5eMonsterEffectiveBehaviorStyle(enemy, role)
   const hp = targetHitPoints(enemy, characters)
-  const candidates = targets.flatMap((target) => createTacticalCandidates({
+  const candidates = [
+    ...targets.flatMap((target) => createTacticalCandidates({
     map,
     enemy,
     monster,
     target,
     characters,
     canUseBonusAction: (options.turnEconomy?.bonusAction.current ?? 1) > 0,
+    canUseAction: (options.turnEconomy?.action.current ?? 1) > 0,
     preferredTargetId: preferredTarget.id,
-  }))
+    })),
+    ...createMonsterHealingCandidates({
+      map,
+      enemy,
+      monster,
+      characters,
+      canUseAction: (options.turnEconomy?.action.current ?? 1) > 0,
+      canUseBonusAction: (options.turnEconomy?.bonusAction.current ?? 1) > 0,
+    }),
+  ]
   const provider = options.decisionProvider ?? DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3
   const ranked = rankMonsterDecisionCandidates(provider, {
     monsterId: monster.id,

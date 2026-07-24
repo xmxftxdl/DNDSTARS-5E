@@ -348,7 +348,8 @@ export default function Dnd5eCombatSimulationPanel() {
               <p className="mt-3 text-3xl font-black text-cyan-200">{percent(result.coverage.percentage)}</p>
               <p className="mt-1 text-xs text-slate-500">
                 玩家武器配置 {result.coverage.playerBasicAttackProfiles}/{result.coverage.playerCount} ·
-                怪物动作 {result.coverage.automatedMonsterActions}/{result.coverage.totalMonsterActions}
+                怪物动作 {result.coverage.automatedMonsterActions}/{result.coverage.totalMonsterActions} ·
+                怪物法术 {result.coverage.automatedMonsterSpells}/{result.coverage.totalMonsterSpells}
               </p>
               <ul className="mt-4 space-y-2 text-xs leading-5 text-slate-500">
                 {result.coverage.limitations.map((limitation) => <li key={limitation}>• {limitation}</li>)}
@@ -360,4 +361,3 @@ export default function Dnd5eCombatSimulationPanel() {
     </section>
   )
 }
-

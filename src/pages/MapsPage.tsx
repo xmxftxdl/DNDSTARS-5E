@@ -345,6 +345,7 @@ import {
   dnd5eCanCastShieldSpell,
   dnd5eCounterspellSlotLevels,
   dnd5eCounterspellCastingAbility,
+  dnd5eCombatantCanSee,
   dnd5eCombatantPairKey,
   dnd5eSavingThrowRerollFeature,
   dnd5eSavingThrowMode,
@@ -389,6 +390,7 @@ import {
   prepareDnd5eHunterMultiattack,
   prepareDnd5eMonsterAttack,
   prepareDnd5eMonsterAfterHitMechanics,
+  prepareDnd5eMonsterCoreSpell,
   prepareDnd5eOpportunityAttack,
   prepareDnd5ePlayerEndTurn,
   prepareDnd5ePlayerMove,
@@ -451,6 +453,7 @@ import {
   resolvePreparedDnd5ePlayerBasicAction,
   triggerDnd5eReadiedAction,
   resolvePreparedDnd5eSpellCast,
+  resolvePreparedDnd5eMonsterCoreSpell,
   resolvePreparedDnd5eCoreSpellAreaMove,
   resolvePreparedDnd5eAdjudicatedSpell,
   resolveDnd5eMonsterMapMove,
@@ -7010,6 +7013,16 @@ export default function MapsPage() {
               )
             : [])
         }
+        if (attackHit && preview.critical) {
+          for (const component of attackEntry.attack.criticalExtraDamage ?? []) {
+            componentRolls.push(await rollDiceBoxValues(
+              component.count,
+              component.sides,
+              `${monsterAttack.monster.name}·${attackEntry.name}重击追加伤害`,
+              targetChar.name,
+            ))
+          }
+        }
         const sizeDamageRolls = attackHit && monsterAttack.sizeDamageD4Mode
           ? await rollDiceBoxValues(
               preview.critical ? 2 : 1,
@@ -7018,9 +7031,12 @@ export default function MapsPage() {
               targetChar.name,
             )
           : []
+        const damageDefinitions = preview.critical
+          ? [...attackEntry.attack.damage, ...(attackEntry.attack.criticalExtraDamage ?? [])]
+          : attackEntry.attack.damage
         const baseRawDamageTotal = componentRolls.reduce((sum, rolls, componentIndex) =>
           sum + Math.max(0, rolls.reduce((subtotal, value) => subtotal + value, 0) +
-            (attackEntry.attack.damage[componentIndex]?.bonus ?? 0)), 0)
+            (damageDefinitions[componentIndex]?.bonus ?? 0)), 0)
         const sizeDamageTotal = sizeDamageRolls.reduce((sum, value) => sum + value, 0)
         const rawDamageTotal = monsterAttack.sizeDamageD4Mode === 'subtract'
           ? Math.max(1, baseRawDamageTotal - sizeDamageTotal)
@@ -7569,6 +7585,260 @@ export default function MapsPage() {
     }
   }, [activeMapId, assignedCharacterId, isDM, characters, playerChar?.id, playerSlot])
 
+  async function finishEnemyCoreSpell(
+    plan: ReturnType<typeof planDnd5eMonsterTurn>,
+  ): Promise<boolean> {
+    if (!activeMap || !plan.spellCast || !plan.attackerTokenId) return false
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: combatIdRef.current || `map-${latestMap.id}`,
+      round: roundRef.current,
+      map: latestMap,
+      characters: useCharacterStore.getState().characters,
+      initiativeOrder: initiativeOrderRef.current,
+      actorTokenId: plan.attackerTokenId,
+      targetTokenIds: plan.spellCast.targetTokenIds,
+      spellId: plan.spellCast.spellId,
+      slotLevel: plan.spellCast.slotLevel,
+      turnEconomy: currentDnd5eTurnEconomy(plan.attackerTokenId),
+      turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
+    })
+    if (!prepared.ok) {
+      pushCombatLog(`${plan.message} Host 复核拒绝：${prepared.reason}。`, 'system')
+      return false
+    }
+    const casting = prepared.prepared
+    const caster = casting.state.combatants[casting.actorToken.id]
+    if (!caster) return false
+
+    let counterspellReaction: Dnd5eCounterspellReaction | undefined
+    const counterspellCandidate = Object.values(casting.state.combatants).flatMap((combatant) => {
+      if (combatant.controller === caster.controller || combatant.currentHp <= 0) return []
+      if (!dnd5eCombatantCanSee(casting.state, combatant.id, caster.id)) return []
+      const distance = casting.state.distanceFeetByCombatantPair?.[
+        dnd5eCombatantPairKey(combatant.id, caster.id)
+      ] ?? Number.POSITIVE_INFINITY
+      if (distance > 60) return []
+      const slotLevels = dnd5eCounterspellSlotLevels(combatant)
+      if (slotLevels.length === 0) return []
+      const characterId = casting.characterIdByCombatantId[combatant.id]
+      const character = characterId
+        ? casting.characters.find((candidate) => candidate.id === characterId)
+        : undefined
+      if (!character) return []
+      const automaticSlot = slotLevels.find((level) => level >= casting.slotLevel)
+      return [{ combatant, character, slotLevel: automaticSlot ?? slotLevels[0] }]
+    })[0]
+    if (counterspellCandidate) {
+      const abilityCheckDc = counterspellCandidate.slotLevel < casting.slotLevel
+        ? 10 + casting.slotLevel
+        : undefined
+      const accepted = await requestSharedCounterspellChoice(counterspellCandidate.character, {
+        casterName: casting.actorToken.label,
+        spellName: casting.spell.name,
+        spellLevel: casting.slotLevel,
+        counterspellSlotLevel: counterspellCandidate.slotLevel,
+        abilityCheckDc,
+      })
+      if (accepted) {
+        const ability = dnd5eCounterspellCastingAbility(
+          counterspellCandidate.combatant,
+          counterspellCandidate.slotLevel,
+        ) ?? 'cha'
+        const checkD20 = abilityCheckDc == null
+          ? undefined
+          : await rollDiceBoxD20('法术反制·施法属性检定', counterspellCandidate.character.name)
+        counterspellReaction = {
+          actorId: counterspellCandidate.combatant.id,
+          slotLevel: counterspellCandidate.slotLevel,
+          abilityCheckTotal: checkD20 == null
+            ? undefined
+            : checkD20 + Math.floor((counterspellCandidate.combatant.abilities[ability] - 10) / 2),
+        }
+      }
+    }
+    const counterspellSucceeded = !!counterspellReaction && (
+      counterspellReaction.slotLevel >= casting.slotLevel ||
+      (counterspellReaction.abilityCheckTotal ?? Number.NEGATIVE_INFINITY) >= 10 + casting.slotLevel
+    )
+
+    let d20: number | undefined
+    let d20Second: number | undefined
+    let critical = false
+    let targetSavingThrows: Dnd5eSpellTargetSavingThrowRoll[] | undefined
+    if (!counterspellSucceeded && casting.spell.effect === 'spell-attack') {
+      d20 = await rollDiceBoxD20(`${casting.spell.name}·法术攻击`, casting.targetTokens[0].label)
+      if (casting.spellAttackMode !== 'normal') {
+        d20Second = await rollDiceBoxD20(
+          `${casting.spell.name}·法术攻击（${casting.spellAttackMode === 'advantage' ? '优势' : '劣势'}）`,
+          casting.targetTokens[0].label,
+        )
+      }
+      const selectedD20 = casting.spellAttackMode === 'advantage'
+        ? Math.max(d20, d20Second ?? d20)
+        : casting.spellAttackMode === 'disadvantage'
+          ? Math.min(d20, d20Second ?? d20)
+          : d20
+      const targetArmorClass = dnd5eTargetArmorClassForAttack(
+        casting.state,
+        casting.actorToken.id,
+        casting.targetTokens[0].id,
+      )
+      const attackHit = selectedD20 === 20 ||
+        (selectedD20 !== 1 &&
+          selectedD20 + (casting.monster.spellcasting?.attackBonus ?? 0) >= targetArmorClass)
+      if (attackHit) {
+        const confirmed = await confirmSuccessfulEnemyD20({
+          map: latestMap,
+          characters: casting.characters,
+          label: `${casting.spell.name}·法术攻击`,
+          targetName: casting.targetTokens[0].label,
+          originalValue: selectedD20,
+        })
+        if (confirmed !== selectedD20) {
+          d20 = confirmed
+          d20Second = casting.spellAttackMode === 'normal' ? undefined : confirmed
+        }
+      }
+      const resolvedD20 = d20Second == null
+        ? d20
+        : casting.spellAttackMode === 'advantage'
+          ? Math.max(d20, d20Second)
+          : Math.min(d20, d20Second)
+      const resolvedHit = resolvedD20 === 20 ||
+        (resolvedD20 !== 1 &&
+          resolvedD20 + (casting.monster.spellcasting?.attackBonus ?? 0) >= targetArmorClass)
+      critical = resolvedHit && (
+        resolvedD20 === 20 || casting.spellAttackAutomaticCritical === true
+      )
+    } else if (
+      !counterspellSucceeded &&
+      casting.spell.effect === 'saving-throw' &&
+      casting.spell.saveAbility
+    ) {
+      targetSavingThrows = []
+      for (const targetToken of casting.targetTokens) {
+        const target = casting.state.combatants[targetToken.id]
+        if (!target) return false
+        const saveMode = dnd5eSavingThrowMode(target, casting.spell.saveAbility, {
+          effectVisible: true,
+          sourceCreatureType: caster.creatureType,
+          sourceIsSpell: true,
+        })
+        const saveD20 = await rollDiceBoxD20(
+          `${casting.spell.name}·${casting.spell.saveAbility.toUpperCase()} 豁免`,
+          targetToken.label,
+        )
+        const saveD20Second = saveMode === 'normal'
+          ? undefined
+          : await rollDiceBoxD20(
+              `${casting.spell.name}·豁免（${saveMode === 'advantage' ? '优势' : '劣势'}）`,
+              targetToken.label,
+            )
+        const blessRoll = dnd5eCombatantHasConcentrationEffect(
+          casting.state,
+          target.id,
+          'bless',
+        ) ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', targetToken.label))[0] : undefined
+        const baneRoll = dnd5eCombatantHasConcentrationEffect(
+          casting.state,
+          target.id,
+          'bane',
+        ) ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', targetToken.label))[0] : undefined
+        targetSavingThrows.push({
+          targetId: target.id,
+          d20: saveD20,
+          d20Second: saveD20Second,
+          blessRoll,
+          baneRoll,
+        })
+      }
+    }
+
+    const usesEffectDice = ['spell-attack', 'saving-throw', 'healing'].includes(casting.spell.effect)
+    const effectDiceCount = casting.spell.effect === 'spell-attack' && critical
+      ? casting.diceCount * 2
+      : casting.diceCount
+    const effectRolls = usesEffectDice
+      ? [counterspellSucceeded
+          ? Array.from({ length: casting.diceCount }, () => 1)
+          : await rollDiceBoxValues(
+              effectDiceCount,
+              casting.spell.dice.sides,
+              `${casting.spell.name}·${casting.spell.effect === 'healing' ? '治疗' : '伤害'}`,
+              casting.targetTokens.map((target) => target.label).join('、'),
+            )]
+      : []
+    const initial = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: casting,
+      counterspellReaction,
+      resolution: {
+        d20,
+        d20Second,
+        targetSavingThrows,
+        effectRolls,
+      },
+    })
+    if (!initial.result.ok || !initial.application) {
+      pushCombatLog(`${casting.actorToken.label} 的${casting.spell.name}未通过 Headless 结算。`, 'system')
+      return false
+    }
+    const settled = await settleDnd5eConcentrationChecks({
+      result: initial.result,
+      map: initial.application.map,
+      characters: initial.application.characters,
+      characterIdByCombatantId: casting.characterIdByCombatantId,
+      rollD20: rollDiceBoxD20,
+      rollD4: async (label, targetName) => (await rollDiceBoxValues(1, 4, label, targetName))[0],
+      rollDice: rollDiceBoxValues,
+      requestHellishRebuke: requestSharedHellishRebukeChoice,
+      requestSavingThrowReroll: requestDnd5eSavingThrowRerollDice,
+      requestBardicInspiration: requestDnd5eBardicInspirationRoll,
+      requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
+    })
+    applyDnd5eCombatApplication(settled.application)
+    for (const tokenId of new Set(settled.result.events.flatMap((event) =>
+      event.type === 'turn-resource-spent' && event.resource === 'reaction' ? [event.actorId] : [],
+    ))) {
+      updateDnd5eTurnEconomy(
+        tokenId,
+        (economy) => spendDnd5eTurnResource(economy, 'reaction').economy,
+      )
+    }
+    const actorTurn = settled.result.state.combatants[casting.actorToken.id]?.turn
+    if (actorTurn) {
+      updateDnd5eTurnEconomy(casting.actorToken.id, (economy) => ({
+        ...economy,
+        action: {
+          ...economy.action,
+          current: actorTurn.actionAvailable ? economy.action.current : 0,
+        },
+        bonusAction: {
+          ...economy.bonusAction,
+          current: actorTurn.bonusActionAvailable ? economy.bonusAction.current : 0,
+        },
+      }))
+    }
+    const damage = settled.result.events
+      .filter((event) => event.type === 'damage-applied')
+      .reduce((total, event) => total + event.amount, 0)
+    const wasCounterspelled = settled.result.events.some((event) =>
+      event.type === 'counterspell-resolved' && event.success)
+    pushHeadlessCombatLog(
+      wasCounterspelled
+        ? `${casting.actorToken.label}施放${casting.spell.name}，但法术被反制。`
+        : `${casting.actorToken.label}施放${casting.spell.name}${damage > 0 ? `，共造成 ${damage} 点伤害` : ''}。`,
+      damage > 0 ? 'damage' : 'system',
+      settled.result.events,
+      [
+        `怪物核心法术：${casting.spell.name}`,
+        `施法环位：${casting.slotLevel === 0 ? '戏法' : `${casting.slotLevel} 环`}`,
+        `目标：${casting.targetTokens.map((target) => target.label).join('、')}`,
+      ],
+    )
+    return true
+  }
+
   function applyEnemyAttack(result: EnemyTurnResult, onComplete: () => void) {
     if (!activeMap || !result.attacked || !result.targetTokenId) {
       onComplete()
@@ -7902,6 +8172,9 @@ export default function MapsPage() {
           if (outcome.kind === 'healing') return `恢复 ${outcome.amount ?? 0} 点生命值`
           if (outcome.kind === 'temporary-hit-points') return `获得 ${outcome.amount ?? 0} 点临时生命值`
           if (outcome.kind === 'damage') return `造成 ${outcome.amount ?? 0} 点伤害`
+          if (outcome.kind === 'remove-standard-condition') {
+            return `${outcome.applied ? '移除' : '未找到'}状态 ${outcome.condition ?? ''}`
+          }
           return `${outcome.applied ? '施加' : '未能施加'}状态 ${outcome.condition ?? ''}`
         }).join('，')
         pushCombatLog(`${actorName} 触发“${event.mechanicName}”${details ? `：${details}` : ''}。`, 'system')
@@ -8138,6 +8411,18 @@ export default function MapsPage() {
     const pushTimer = (fn: () => void, ms: number) => {
       const id = window.setTimeout(fn, ms)
       enemyTurnTimersRef.current.add(id)
+    }
+
+    if (result.spellCast) {
+      const castSpell = () => {
+        if (!isStillEnemyTurn()) return
+        void finishEnemyCoreSpell(result).then(() => {
+          pushTimer(() => { void advanceEnemyIfCurrent() }, ADVANCE_DELAY_MS)
+        })
+      }
+      if (result.moved) pushTimer(castSpell, TOKEN_MOVE_MS)
+      else castSpell()
+      return
     }
 
     if (!result.attacked) {
@@ -10210,6 +10495,7 @@ export default function MapsPage() {
       }
       const counterspellCandidate = sustainedSpellUse ? undefined : Object.values(spellCast.state.combatants).flatMap((combatant) => {
         if (combatant.controller === spellActorCombatant.controller || combatant.currentHp <= 0) return []
+        if (!dnd5eCombatantCanSee(spellCast.state, combatant.id, spellActorCombatant.id)) return []
         const distance = spellCast.state.distanceFeetByCombatantPair?.[
           dnd5eCombatantPairKey(combatant.id, spellActorCombatant.id)
         ] ?? Number.POSITIVE_INFINITY
@@ -13390,6 +13676,16 @@ export default function MapsPage() {
                 )
               : [])
           }
+          if (attackHit && preview.critical) {
+            for (const component of attackEntry.attack.criticalExtraDamage ?? []) {
+              damageRolls.push(await rollDiceBoxValues(
+                component.count,
+                component.sides,
+                `${wildShapeAttack.monster.name}·${attackEntry.name}重击追加伤害`,
+                wildShapeAttack.targetToken.label,
+              ))
+            }
+          }
           const sizeDamageRolls = attackHit && wildShapeAttack.sizeDamageD4Mode
             ? await rollDiceBoxValues(
                 preview.critical ? 2 : 1,
@@ -13398,9 +13694,12 @@ export default function MapsPage() {
                 wildShapeAttack.targetToken.label,
               )
             : []
+          const damageDefinitions = preview.critical
+            ? [...attackEntry.attack.damage, ...(attackEntry.attack.criticalExtraDamage ?? [])]
+            : attackEntry.attack.damage
           const baseRawDamageTotal = damageRolls.reduce((sum, rolls, componentIndex) =>
             sum + Math.max(0, rolls.reduce((subtotal, value) => subtotal + value, 0) +
-              (attackEntry.attack.damage[componentIndex]?.bonus ?? 0)), 0)
+              (damageDefinitions[componentIndex]?.bonus ?? 0)), 0)
           const sizeDamageTotal = sizeDamageRolls.reduce((sum, value) => sum + value, 0)
           const rawDamageTotal = wildShapeAttack.sizeDamageD4Mode === 'subtract'
             ? Math.max(1, baseRawDamageTotal - sizeDamageTotal)

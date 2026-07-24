@@ -71,6 +71,23 @@ describe('D&D 5e combat simulator', () => {
     expect(result.participantSummaries.some((entry) => entry.name === '地精')).toBe(true)
   })
 
+  it('includes safely automatable monster spells in decisions and coverage', () => {
+    const result = simulateDnd5eCombats({
+      characters: [fighter()],
+      monsters: [{ monsterId: 'srd-5.1:mage', count: 1 }],
+      trials: 50,
+      seed: 51,
+      initialDistanceFeet: 60,
+    })
+
+    expect(result.coverage.automatedMonsterSpells).toBeGreaterThan(0)
+    expect(result.coverage.totalMonsterSpells).toBeGreaterThan(
+      result.coverage.automatedMonsterSpells,
+    )
+    expect(result.participantSummaries.find((entry) => entry.side === 'monsters')?.averageDamage)
+      .toBeGreaterThan(0)
+  })
+
   it('rejects empty teams, unknown monsters and trial counts above the safe cap', () => {
     expect(validateDnd5eCombatSimulationRequest({
       characters: [],
