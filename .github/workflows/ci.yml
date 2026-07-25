@@ -1,6 +1,5 @@
-# [T-P1-422/AC1·AC2] CI-safe gate: type-check, unit tests, and an eslint RATCHET.
-# Deliberately CI-safe ONLY: NO two/three-server stack, NO local Qwen, NO Playwright e2e.
-# e2e (incl. the ~38% flaky-by-design dice specs) is local-soak-only — see docs/verification-boundary.md.
+# Pull-request and release gate. The complete browser soak remains local, while
+# deterministic account/plugin production paths run in CI.
 name: CI
 
 on:
@@ -16,7 +15,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install (clean, lockfile-pinned)
@@ -28,5 +27,52 @@ jobs:
       - name: Unit tests (vitest, environment:node, no external deps)
         run: npx vitest run
 
+      - name: SRD 5.1 publication audit
+        run: npm run audit:srd-content
+
       - name: ESLint ratchet (no-new-errors vs .eslint-ratchet.json)
         run: npm run lint:ratchet
+
+      - name: Production dependency audit
+        run: npm run audit:production
+
+      - name: Production build and bundle budget
+        run: npm run build:check
+
+      - name: Docker production image
+        run: docker build --build-arg "STARS_BUILD_ID=ci-${GITHUB_SHA}" --tag dndstars-5e:ci .
+
+  browser-release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (clean, lockfile-pinned)
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Account and plugin release E2E
+        run: >-
+          npx playwright test
+          e2e/account-auth-lifecycle.spec.ts
+          e2e/plugin-catalog-lifecycle.spec.ts
+          e2e/plugin-moderation-lifecycle.spec.ts
+          --reporter=line
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-e2e-diagnostics
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
