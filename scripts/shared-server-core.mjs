@@ -69,6 +69,8 @@ export const SHARED_STATE_SCHEMA_VERSION = 1
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 export const ACCOUNT_SESSION_LIMIT = 12
 export const ACCOUNT_CHARACTER_LIMIT = 100
+export const ACCOUNT_PLUGIN_VERSION_LIMIT = 100
+export const ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT = 128 * 1024 * 1024
 export const ACCOUNT_AUTH_SCHEMA_VERSION = 1
 export const ACCOUNT_VERIFICATION_TTL_MS = 10 * 60 * 1000
 export const ACCOUNT_VERIFICATION_ATTEMPT_LIMIT = 5
@@ -983,8 +985,8 @@ export function applyCors(req, res, env = process.env) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
-  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description')
+  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description')
   return true
 }
 
@@ -4604,6 +4606,15 @@ function accountVerificationDirectory(ctx) {
   return path.join(accountDirectory(ctx), 'verifications')
 }
 
+function accountPluginBlobDirectory(ctx) {
+  return path.join(lobbyRoot(ctx), 'account-plugins', 'blobs')
+}
+
+function accountPluginBlobFile(ctx, integrity) {
+  const digest = createHash('sha256').update(String(integrity)).digest('hex')
+  return path.join(accountPluginBlobDirectory(ctx), `${digest}.dndstars5e`)
+}
+
 function accountAuthLockFile(ctx) {
   return path.join(accountDirectory(ctx), '.auth-registry')
 }
@@ -5185,6 +5196,98 @@ function normalizedAccountCharacterRecord(value, accountId, expectedId, now = Da
   }
 }
 
+function normalizeAccountPluginVersion(value) {
+  if (!plainObject(value)) return null
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  const version = typeof value.version === 'string' ? value.version.trim() : ''
+  const integrity = typeof value.integrity === 'string' ? value.integrity.trim() : ''
+  const name = normalizedLabel(value.name, 100)
+  const publisher = normalizedLabel(value.publisher, 100)
+  const license = normalizedLabel(value.license, 120)
+  const description = normalizedLabel(value.description, 2_000)
+  const fileName = normalizedLabel(value.fileName, 180)
+  const apiVersion = Number(value.apiVersion)
+  const stateSchemaVersion = Number(value.stateSchemaVersion ?? 1)
+  const sizeBytes = Number(value.sizeBytes)
+  if (
+    !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(id) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(version) ||
+    !/^sha256-[A-Za-z0-9+/]+={0,2}$/.test(integrity) ||
+    !name || !publisher || !license || !fileName ||
+    ![1, 2].includes(apiVersion) ||
+    value.rulesetId !== DND5E_2014_RULESET_ID ||
+    !Number.isInteger(stateSchemaVersion) || stateSchemaVersion < 1 || stateSchemaVersion > 1_000 ||
+    !Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > STATE_MAX_BYTES ||
+    !Number.isFinite(value.createdAt) || !Number.isFinite(value.updatedAt)
+  ) return null
+  return {
+    schemaVersion: 1,
+    id,
+    name,
+    version,
+    apiVersion,
+    rulesetId: DND5E_2014_RULESET_ID,
+    stateSchemaVersion,
+    publisher,
+    license,
+    ...(description ? { description } : {}),
+    fileName,
+    integrity,
+    sizeBytes,
+    visibility: 'private',
+    createdAt: Number(value.createdAt),
+    updatedAt: Number(value.updatedAt),
+  }
+}
+
+function accountPluginVersions(account) {
+  return (Array.isArray(account?.pluginLibrary) ? account.pluginLibrary : [])
+    .map(normalizeAccountPluginVersion)
+    .filter(Boolean)
+}
+
+function accountPluginVersionFromUpload(req, pluginId, pluginVersion, sizeBytes, now = Date.now()) {
+  const stateSchemaVersion = Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1)
+  const apiVersion = Number(req?.headers?.['x-stars-plugin-api-version'])
+  const rulesetId = typeof req?.headers?.['x-stars-plugin-ruleset'] === 'string'
+    ? req.headers['x-stars-plugin-ruleset'].trim()
+    : ''
+  const integrity = typeof req?.headers?.['x-stars-plugin-integrity'] === 'string'
+    ? req.headers['x-stars-plugin-integrity'].trim()
+    : ''
+  const name = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
+  const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
+  const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+  const description = decodedPluginHeader(req, 'x-stars-plugin-description', 2_000)
+  const encodedFileName = typeof req?.headers?.['x-stars-plugin-filename'] === 'string'
+    ? req.headers['x-stars-plugin-filename']
+    : ''
+  let fileName = `${pluginId}.dndstars5e`
+  try {
+    fileName = normalizedLabel(decodeURIComponent(encodedFileName), 180) || fileName
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-account-plugin')
+  }
+  const record = normalizeAccountPluginVersion({
+    id: pluginId,
+    name,
+    version: pluginVersion,
+    apiVersion,
+    rulesetId,
+    stateSchemaVersion,
+    publisher,
+    license,
+    description,
+    fileName,
+    integrity,
+    sizeBytes,
+    createdAt: now,
+    updatedAt: now,
+  })
+  if (!record) throw new RoomProtocolError(400, 'invalid-account-plugin')
+  return record
+}
+
 function roomPluginDirectory(ctx, roomId) {
   return path.join(lobbyRoot(ctx), 'plugins', roomId)
 }
@@ -5542,6 +5645,143 @@ async function handleAccountApi(req, res, parsed, ctx) {
     const account = await authenticateAccount(req, ctx)
     writeJson(res, 200, { characters: Array.isArray(account.characters) ? account.characters : [] })
     return true
+  }
+
+  if (parsed.pathname === '/api/accounts/me/plugins' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    writeJson(res, 200, {
+      plugins: accountPluginVersions(account)
+        .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id)),
+      limits: {
+        maxVersions: ACCOUNT_PLUGIN_VERSION_LIMIT,
+        maxTotalBytes: ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT,
+        maxPackageBytes: STATE_MAX_BYTES,
+      },
+    })
+    return true
+  }
+
+  const accountPluginMatch = parsed.pathname.match(
+    /^\/api\/accounts\/me\/plugins\/([^/]+)\/versions\/([^/]+)$/,
+  )
+  if (accountPluginMatch) {
+    const account = await authenticateAccount(req, ctx)
+    const pluginId = decodeURIComponent(accountPluginMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(accountPluginMatch[2] ?? '')
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(pluginId) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(pluginVersion)
+    ) throw new RoomProtocolError(400, 'invalid-account-plugin')
+
+    const currentVersions = accountPluginVersions(account)
+    const current = currentVersions.find((candidate) =>
+      candidate.id === pluginId && candidate.version === pluginVersion)
+
+    if (req.method === 'PUT') {
+      const bytes = await readBody(req, STATE_MAX_BYTES)
+      if (bytes.length < 1) throw new RoomProtocolError(400, 'account-plugin-file-empty')
+      const now = Date.now()
+      const record = accountPluginVersionFromUpload(req, pluginId, pluginVersion, bytes.length, now)
+      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+      if (actualIntegrity !== record.integrity) {
+        throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
+      }
+      if (current) {
+        if (current.integrity !== record.integrity) {
+          throw new RoomProtocolError(409, 'account-plugin-version-conflict')
+        }
+        writeJson(res, 200, current)
+        return true
+      }
+      if (currentVersions.length >= ACCOUNT_PLUGIN_VERSION_LIMIT) {
+        throw new RoomProtocolError(409, 'account-plugin-version-limit')
+      }
+      const totalBytes = currentVersions.reduce((total, candidate) => total + candidate.sizeBytes, 0)
+      if (totalBytes + record.sizeBytes > ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT) {
+        throw new RoomProtocolError(409, 'account-plugin-storage-limit')
+      }
+      await mkdir(accountPluginBlobDirectory(ctx), { recursive: true })
+      const blobPath = accountPluginBlobFile(ctx, record.integrity)
+      try {
+        await writeFile(blobPath, bytes, { flag: 'wx', mode: 0o600 })
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error
+        const stored = await readFile(blobPath)
+        const storedIntegrity = `sha256-${createHash('sha256').update(stored).digest('base64')}`
+        if (storedIntegrity !== record.integrity) {
+          throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
+        }
+      }
+      await mutateAccount(ctx, account.accountId, (latest) => {
+        const versions = accountPluginVersions(latest)
+        const conflict = versions.find((candidate) =>
+          candidate.id === pluginId && candidate.version === pluginVersion)
+        if (conflict && conflict.integrity !== record.integrity) {
+          throw new RoomProtocolError(409, 'account-plugin-version-conflict')
+        }
+        if (conflict) return latest
+        if (versions.length >= ACCOUNT_PLUGIN_VERSION_LIMIT) {
+          throw new RoomProtocolError(409, 'account-plugin-version-limit')
+        }
+        const latestBytes = versions.reduce((total, candidate) => total + candidate.sizeBytes, 0)
+        if (latestBytes + record.sizeBytes > ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT) {
+          throw new RoomProtocolError(409, 'account-plugin-storage-limit')
+        }
+        return {
+          ...latest,
+          pluginLibrary: [...versions, record],
+          updatedAt: now,
+        }
+      })
+      writeJson(res, 201, record)
+      return true
+    }
+
+    if (req.method === 'GET') {
+      if (!current) throw new RoomProtocolError(404, 'account-plugin-not-found')
+      let bytes
+      try {
+        bytes = await readFile(accountPluginBlobFile(ctx, current.integrity))
+      } catch (error) {
+        if (error?.code === 'ENOENT') throw new RoomProtocolError(404, 'account-plugin-file-not-found')
+        throw error
+      }
+      const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+      if (actualIntegrity !== current.integrity) {
+        throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(bytes.length),
+        'Cache-Control': 'private, no-store',
+        'X-Stars-Plugin-Version': current.version,
+        'X-Stars-Plugin-Integrity': current.integrity,
+        'X-Stars-Plugin-Filename': encodeURIComponent(current.fileName),
+        'X-Stars-Plugin-Name': encodeURIComponent(current.name),
+        'X-Stars-Plugin-Publisher': encodeURIComponent(current.publisher),
+        'X-Stars-Plugin-License': encodeURIComponent(current.license),
+        'X-Stars-Plugin-State-Schema': String(current.stateSchemaVersion),
+        'X-Stars-Plugin-Api-Version': String(current.apiVersion),
+        'X-Stars-Plugin-Ruleset': current.rulesetId,
+      })
+      res.end(bytes)
+      return true
+    }
+
+    if (req.method === 'DELETE') {
+      if (!current) throw new RoomProtocolError(404, 'account-plugin-not-found')
+      const now = Date.now()
+      await mutateAccount(ctx, account.accountId, (latest) => ({
+        ...latest,
+        pluginLibrary: accountPluginVersions(latest).filter((candidate) =>
+          candidate.id !== pluginId || candidate.version !== pluginVersion),
+        updatedAt: now,
+      }))
+      writeJson(res, 200, { ok: true })
+      return true
+    }
+
+    throw new RoomProtocolError(405, 'method-not-allowed')
   }
 
   const characterMatch = parsed.pathname.match(/^\/api\/accounts\/me\/characters\/([^/]+)$/)

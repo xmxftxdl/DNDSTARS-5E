@@ -5,6 +5,7 @@ import {
   Copy,
   Crown,
   LogOut,
+  PackageOpen,
   PanelLeftClose,
   Settings,
   Sparkles,
@@ -125,6 +126,16 @@ export default function Sidebar({
 
       {/* Footer */}
       <div className="space-y-1 border-t border-white/10 p-3">
+        {roomSession?.role !== 'spectator' && <NavLink
+          to="/plugins"
+          className={({ isActive }) => [
+            'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
+            isActive ? 'bg-arcane-500/15 text-arcane-200' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
+          ].join(' ')}
+        >
+          <PackageOpen className="h-5 w-5 text-slate-500" />
+          插件中心
+        </NavLink>}
         {roomSession?.role !== 'spectator' && <NavLink
           to="/settings"
           className={({ isActive }) => [

@@ -58,6 +58,36 @@ export interface AccountVerificationChallenge {
   debugCode?: string
 }
 
+export interface AccountPluginVersion {
+  schemaVersion: 1
+  id: string
+  name: string
+  version: string
+  apiVersion: 1 | 2
+  rulesetId: typeof DND5E_2014_RULESET_ID
+  stateSchemaVersion: number
+  publisher: string
+  license: string
+  description?: string
+  fileName: string
+  integrity: string
+  sizeBytes: number
+  visibility: 'private'
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AccountPluginLibraryLimits {
+  maxVersions: number
+  maxTotalBytes: number
+  maxPackageBytes: number
+}
+
+export interface AccountPluginLibrary {
+  plugins: AccountPluginVersion[]
+  limits: AccountPluginLibraryLimits
+}
+
 export interface CharacterCompatibilityResult {
   compatible: boolean
   errors: string[]
@@ -91,6 +121,30 @@ async function accountRequest<T>(path: string, init?: RequestInit, session = get
       reachedServer = true
       const body = await response.json().catch(() => ({})) as { error?: string }
       if (response.ok) return body as T
+      throw new AccountApiError(body.error ?? 'account-request-failed', response.status)
+    } catch (error) {
+      if (error instanceof AccountApiError) throw error
+      void error
+    }
+  }
+  throw new AccountApiError(reachedServer ? 'account-request-failed' : 'server-unavailable', 0)
+}
+
+async function accountBinaryRequest(path: string, init?: RequestInit): Promise<Response> {
+  const session = getAccountSession()
+  let reachedServer = false
+  for (const api of sharedLobbyApiCandidates()) {
+    try {
+      const response = await fetch(`${api}${path}`, {
+        ...init,
+        headers: {
+          ...(session ? { 'X-Stars-Account-Token': session.sessionToken } : {}),
+          ...(init?.headers ?? {}),
+        },
+      })
+      reachedServer = true
+      if (response.ok) return response
+      const body = await response.json().catch(() => ({})) as { error?: string }
       throw new AccountApiError(body.error ?? 'account-request-failed', response.status)
     } catch (error) {
       if (error instanceof AccountApiError) throw error
@@ -183,6 +237,85 @@ export async function deleteAccountCharacter(characterId: string): Promise<void>
   })
 }
 
+export async function loadAccountPlugins(): Promise<AccountPluginLibrary> {
+  const response = await accountRequest<AccountPluginLibrary>('/accounts/me/plugins', { method: 'GET' })
+  return {
+    plugins: Array.isArray(response.plugins) ? response.plugins : [],
+    limits: response.limits,
+  }
+}
+
+export async function uploadAccountPlugin(input: {
+  manifest: {
+    id: string
+    name: string
+    version: string
+    apiVersion: 1 | 2
+    rulesetId: typeof DND5E_2014_RULESET_ID
+    stateSchemaVersion?: number
+    publisher: string
+    license: string
+    description?: string
+  }
+  fileName: string
+  integrity: string
+  bytes: ArrayBuffer
+}): Promise<AccountPluginVersion> {
+  const response = await accountBinaryRequest(
+    `/accounts/me/plugins/${encodeURIComponent(input.manifest.id)}/versions/${encodeURIComponent(input.manifest.version)}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Stars-Plugin-Version': input.manifest.version,
+        'X-Stars-Plugin-Integrity': input.integrity,
+        'X-Stars-Plugin-Filename': encodeURIComponent(input.fileName),
+        'X-Stars-Plugin-Name': encodeURIComponent(input.manifest.name),
+        'X-Stars-Plugin-Publisher': encodeURIComponent(input.manifest.publisher),
+        'X-Stars-Plugin-License': encodeURIComponent(input.manifest.license),
+        'X-Stars-Plugin-State-Schema': String(input.manifest.stateSchemaVersion ?? 1),
+        'X-Stars-Plugin-Api-Version': String(input.manifest.apiVersion),
+        'X-Stars-Plugin-Ruleset': input.manifest.rulesetId,
+        ...(input.manifest.description
+          ? { 'X-Stars-Plugin-Description': encodeURIComponent(input.manifest.description) }
+          : {}),
+      },
+      body: input.bytes,
+    },
+  )
+  return response.json() as Promise<AccountPluginVersion>
+}
+
+export async function downloadAccountPlugin(
+  plugin: Pick<AccountPluginVersion, 'id' | 'version' | 'integrity'>,
+): Promise<{ bytes: ArrayBuffer; fileName: string }> {
+  const response = await accountBinaryRequest(
+    `/accounts/me/plugins/${encodeURIComponent(plugin.id)}/versions/${encodeURIComponent(plugin.version)}`,
+    { method: 'GET' },
+  )
+  if (
+    response.headers.get('X-Stars-Plugin-Version') !== plugin.version ||
+    response.headers.get('X-Stars-Plugin-Integrity') !== plugin.integrity
+  ) throw new AccountApiError('account-plugin-integrity-mismatch', 409)
+  const encodedName = response.headers.get('X-Stars-Plugin-Filename') ?? ''
+  let fileName = `${plugin.id}.dndstars5e`
+  try {
+    fileName = decodeURIComponent(encodedName) || fileName
+  } catch {
+    // 文件名不参与权威校验；损坏时回退到插件 ID。
+  }
+  return { bytes: await response.arrayBuffer(), fileName }
+}
+
+export async function deleteAccountPluginVersion(
+  plugin: Pick<AccountPluginVersion, 'id' | 'version'>,
+): Promise<void> {
+  await accountRequest<{ ok: true }>(
+    `/accounts/me/plugins/${encodeURIComponent(plugin.id)}/versions/${encodeURIComponent(plugin.version)}`,
+    { method: 'DELETE' },
+  )
+}
+
 export function characterCompatibilityForRoom(
   record: Pick<AccountCharacterRecord, 'compatibility'>,
   rules: RoomRulesSnapshot | null,
@@ -245,6 +378,14 @@ export function accountApiErrorMessage(error: unknown): string {
     'invalid-account-session': '账号会话已经失效，请重新输入用户名和密码登录。',
     'account-character-not-found': '账号角色库中没有找到这个角色。',
     'invalid-account-character': '角色数据或兼容性清单无效，未写入账号角色库。',
+    'invalid-account-plugin': '插件清单或版本格式无效，未写入账号插件库。',
+    'account-plugin-file-empty': '插件文件为空。',
+    'account-plugin-not-found': '账号插件库中没有找到这个版本。',
+    'account-plugin-file-not-found': '插件文件已经丢失，请重新上传。',
+    'account-plugin-integrity-mismatch': '插件文件的 SHA-256 与版本记录不一致。',
+    'account-plugin-version-conflict': '同一个插件版本已经存在不同文件；请提升插件版本号。',
+    'account-plugin-version-limit': '账号插件版本数量已达到上限。',
+    'account-plugin-storage-limit': '账号插件库空间已达到上限。',
     'account-request-failed': '账号操作失败，请稍后重试。',
   }
   return messages[code] ?? messages['account-request-failed']

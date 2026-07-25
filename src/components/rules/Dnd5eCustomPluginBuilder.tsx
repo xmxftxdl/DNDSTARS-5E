@@ -271,6 +271,7 @@ interface Props {
   defaultPublisher?: string
   busy?: boolean
   onInstall(file: File): Promise<void>
+  installLabel?: string
 }
 
 const emptyBonuses = (): Record<AbilityKey, number> => ({ str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 })
@@ -791,7 +792,12 @@ function toItemDefinition(item: ItemDraft): Dnd5ePluginItemDefinition {
   }
 }
 
-export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM', busy = false, onInstall }: Props) {
+export default function Dnd5eCustomPluginBuilder({
+  defaultPublisher = '房间 DM',
+  busy = false,
+  onInstall,
+  installLabel = '保存、启用并发布',
+}: Props) {
   const [open, setOpen] = useState(false)
   const [activeSection, setActiveSection] = useState<BuilderSection>('races')
   const [metadata, setMetadata] = useState({
@@ -1206,7 +1212,7 @@ export default function Dnd5eCustomPluginBuilder({ defaultPublisher = '房间 DM
             <button type="button" disabled={busy} onClick={loadDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><FolderOpen className="h-4 w-4" /> 载入本地草稿</button>
             <button type="button" disabled={busy} onClick={saveDraft} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Save className="h-4 w-4" /> 保存本地草稿</button>
             <button type="button" disabled={busy} onClick={download} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-slate-200 disabled:opacity-50"><Download className="h-4 w-4" /> 下载插件文件</button>
-            <button type="button" disabled={busy} onClick={() => void install()} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? '正在保存…' : '保存、启用并发布'}</button>
+            <button type="button" disabled={busy} onClick={() => void install()} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> {busy ? '正在保存…' : installLabel}</button>
           </div>
         </div>
       )}

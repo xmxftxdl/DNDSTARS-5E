@@ -510,6 +510,95 @@ describe('账号恢复与账号角色库协议', () => {
   })
 })
 
+describe('账号插件库协议', () => {
+  it('按账号保存不可变插件版本、校验哈希并隔离其他账号', async () => {
+    const createAccount = async (displayName: string, clientId: string) => {
+      const response = await fetch(`${offServer.base}/api/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName, clientId }),
+      })
+      expect(response.status).toBe(201)
+      return response.json() as Promise<{ session: { sessionToken: string } }>
+    }
+    const owner = await createAccount('插件作者', 'plugin-owner-client')
+    const stranger = await createAccount('其他玩家', 'plugin-stranger-client')
+    const bytes = Buffer.from('export default { manifest: { id: "com.example.cloud" } }', 'utf8')
+    const integrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+    const path = '/api/accounts/me/plugins/com.example.cloud/versions/1.0.0'
+    const uploadHeaders = {
+      'Content-Type': 'application/octet-stream',
+      'X-Stars-Account-Token': owner.session.sessionToken,
+      'X-Stars-Plugin-Version': '1.0.0',
+      'X-Stars-Plugin-Integrity': integrity,
+      'X-Stars-Plugin-Filename': encodeURIComponent('cloud-rules.dndstars5e'),
+      'X-Stars-Plugin-Name': encodeURIComponent('云端规则'),
+      'X-Stars-Plugin-Publisher': encodeURIComponent('插件作者'),
+      'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+      'X-Stars-Plugin-State-Schema': '1',
+      'X-Stars-Plugin-Api-Version': '2',
+      'X-Stars-Plugin-Ruleset': 'dnd5e-2014-srd-5.1',
+      'X-Stars-Plugin-Description': encodeURIComponent('账号私有规则包'),
+    }
+    const upload = await fetch(`${offServer.base}${path}`, {
+      method: 'PUT',
+      headers: uploadHeaders,
+      body: bytes,
+    })
+    expect(upload.status).toBe(201)
+    expect(await upload.json()).toMatchObject({
+      id: 'com.example.cloud',
+      version: '1.0.0',
+      integrity,
+      visibility: 'private',
+      sizeBytes: bytes.length,
+    })
+
+    const list = await fetch(`${offServer.base}/api/accounts/me/plugins`, {
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    })
+    expect(list.status).toBe(200)
+    expect(await list.json()).toMatchObject({
+      plugins: [{ id: 'com.example.cloud', version: '1.0.0', integrity }],
+      limits: { maxVersions: 100 },
+    })
+
+    const download = await fetch(`${offServer.base}${path}`, {
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    })
+    expect(download.status).toBe(200)
+    expect(download.headers.get('X-Stars-Plugin-Integrity')).toBe(integrity)
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
+
+    const forbiddenDownload = await fetch(`${offServer.base}${path}`, {
+      headers: { 'X-Stars-Account-Token': stranger.session.sessionToken },
+    })
+    expect(forbiddenDownload.status).toBe(404)
+
+    const conflictingBytes = Buffer.from('different immutable package', 'utf8')
+    const conflict = await fetch(`${offServer.base}${path}`, {
+      method: 'PUT',
+      headers: {
+        ...uploadHeaders,
+        'X-Stars-Plugin-Integrity': `sha256-${createHash('sha256').update(conflictingBytes).digest('base64')}`,
+      },
+      body: conflictingBytes,
+    })
+    expect(conflict.status).toBe(409)
+    await expect(conflict.json()).resolves.toMatchObject({ error: 'account-plugin-version-conflict' })
+
+    const remove = await fetch(`${offServer.base}${path}`, {
+      method: 'DELETE',
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    })
+    expect(remove.status).toBe(200)
+    const after = await fetch(`${offServer.base}/api/accounts/me/plugins`, {
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    }).then((response) => response.json()) as { plugins: unknown[] }
+    expect(after.plugins).toEqual([])
+  })
+})
+
 describe('账号验证码注册与密码登录协议', () => {
   it('邮箱验证码注册后可按用户名或邮箱登录，并可撤销当前会话', async () => {
     const configResponse = await fetch(`${offServer.base}/api/accounts/auth/config`)

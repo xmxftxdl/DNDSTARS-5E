@@ -23,6 +23,7 @@ const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
 const MapsPage = lazy(() => import('./pages/MapsPage'))
 const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
+const PluginsPage = lazy(() => import('./pages/PluginsPage'))
 const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
@@ -57,6 +58,8 @@ export default function App() {
   const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
   const isSpectator = roomSession?.role === 'spectator'
   const roomReady = !!roomSession || bypassRoomLobby
+  const standalonePluginCenter = window.location.pathname === '/plugin' ||
+    window.location.pathname.startsWith('/plugins')
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
   useEffect(() => {
@@ -157,6 +160,15 @@ export default function App() {
     return startAccountCharacterVaultSync()
   }, [roomSession])
 
+  if (!forceRoomLobby && standalonePluginCenter && !roomReady) return (
+    <div className="min-h-screen w-screen overflow-y-auto px-5 py-8">
+      <ServerCompatibilityBanner mode={endpointMode} />
+      <SharedIntegrityBanner />
+      <SharedSyncRecoveryBanner />
+      {lazyPage('插件中心', <PluginsPage />)}
+    </div>
+  )
+
   if (forceRoomLobby || (!roomSession && !bypassRoomLobby)) return (
     <>
       <ServerCompatibilityBanner mode={endpointMode} />
@@ -251,6 +263,8 @@ export default function App() {
           {!isSpectator && <Route path="/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
           {!isSpectator && <Route path="/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
           {!isSpectator && <Route path="/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
+          {!isSpectator && <Route path="/plugin" element={<Navigate to="/plugins" replace />} />}
+          {!isSpectator && <Route path="/plugins" element={lazyPage('插件中心', <PluginsPage />)} />}
           {!isSpectator && <Route path="/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
           {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}
         </Routes>

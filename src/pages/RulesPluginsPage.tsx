@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Link } from 'react-router-dom'
 import { Activity, AlertTriangle, CheckCircle2, Download, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
@@ -12,14 +13,12 @@ import {
   type Dnd5eRulesPluginManifest,
 } from '../rulesets/dnd5e'
 import {
-  activateStagedRoomPlugin,
   deleteRoomPlugin,
   heartbeatRoom,
-  loadRoomPluginMigrationState,
   loadRoomRules,
   roomApiErrorMessage,
-  stageRoomPlugin,
 } from '../lib/roomApi'
+import { activateRoomPluginPackage } from '../lib/roomPluginActivation'
 import { getRoomSession } from '../lib/roomSession'
 import { synchronizeRoomPlugins } from '../lib/roomPluginSync'
 import {
@@ -77,39 +76,10 @@ export default function RulesPluginsPage() {
     if (!roomSession || roomSession.role !== 'dm' || !host) {
       throw new Error('只有 DM 可以发布房间规则包')
     }
-    const stateSchemaVersion = input.manifest.stateSchemaVersion ?? 1
-    await stageRoomPlugin({
+    return activateRoomPluginPackage({
       session: roomSession,
-      id: input.manifest.id,
-      version: input.manifest.version,
-      stateSchemaVersion,
-      integrity: input.integrity,
-      name: input.manifest.name,
-      publisher: input.manifest.publisher,
-      license: input.manifest.license,
-      fileName: input.fileName,
-      bytes: input.bytes,
-    })
-    const previous = await loadRoomPluginMigrationState(roomSession, input.manifest.id)
-    let data = previous.data
-    if (previous.hasState && stateSchemaVersion !== previous.stateSchemaVersion) {
-      const migrated = await host.migrateState({
-        bytes: input.bytes,
-        fromVersion: previous.stateSchemaVersion,
-        state: previous.data,
-      })
-      if (migrated.toVersion !== stateSchemaVersion) throw new Error('规则包状态迁移没有到达目标版本')
-      data = migrated.state
-    }
-    return activateStagedRoomPlugin({
-      session: roomSession,
-      pluginId: input.manifest.id,
-      expectedRulesRevision: previous.rulesRevision,
-      expectedActive: previous.active,
-      stagedVersion: input.manifest.version,
-      stagedIntegrity: input.integrity,
-      stateSchemaVersion,
-      data,
+      host,
+      package: input,
     })
   }
 
@@ -286,6 +256,20 @@ export default function RulesPluginsPage() {
       </nav>
 
       {settingsSection === 'plugins' && <div className="contents">
+      <section className="mb-5 flex flex-col gap-4 rounded-2xl border border-arcane-400/20 bg-arcane-500/[0.05] p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-semibold text-slate-100">账号插件中心已经开放</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-400">
+            在独立页面跨设备保存、创建和管理插件版本；本页继续负责当前房间握手与高级诊断。
+          </p>
+        </div>
+        <Link
+          to="/plugins"
+          className="shrink-0 rounded-xl bg-arcane-500/15 px-4 py-2.5 text-center text-sm font-semibold text-arcane-100 hover:bg-arcane-500/20"
+        >
+          打开插件中心
+        </Link>
+      </section>
       <section className="mb-5 rounded-2xl border border-white/8 bg-black/15 p-5">
         <h2 className="font-semibold text-slate-100">SRD 5.1 来源与许可</h2>
         <p className="mt-2 text-sm leading-6 text-slate-400">{DND5E_SRD_5_1_TRANSLATION_NOTICE}</p>
