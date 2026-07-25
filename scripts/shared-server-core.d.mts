@@ -25,6 +25,11 @@ export const SHARED_STATE_SCHEMA_VERSION: number
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION: number
 export const ACCOUNT_SESSION_LIMIT: number
 export const ACCOUNT_CHARACTER_LIMIT: number
+export const ACCOUNT_AUTH_SCHEMA_VERSION: number
+export const ACCOUNT_VERIFICATION_TTL_MS: number
+export const ACCOUNT_VERIFICATION_ATTEMPT_LIMIT: number
+export const ACCOUNT_PASSWORD_MIN_LENGTH: number
+export const ACCOUNT_PASSWORD_MAX_LENGTH: number
 export const CAMPAIGN_BUNDLE_FORMAT: 'dndstars5e-campaign'
 export const CAMPAIGN_BUNDLE_SCHEMA_VERSION: number
 export const CAMPAIGN_SNAPSHOT_LIMIT: number
@@ -261,6 +266,9 @@ export function roomHostIsOnline(room: unknown, now?: number): boolean
 export function roomHostPresence(room: unknown, now?: number): 'online' | 'grace' | 'offline' | 'closed'
 export function roomPlayerPresence(player: unknown, now?: number): 'online' | 'temporarily-offline' | 'left' | 'removed'
 export function normalizeAccountRecoveryCode(value: unknown): { accountId: string; secret: string; formatted: string } | null
+export function normalizeAccountUsername(value: unknown): { value: string; key: string } | null
+export function normalizeAccountEmail(value: unknown): string | null
+export function normalizeAccountPhone(value: unknown): string | null
 export interface RoomPluginRequirement {
   id: string
   version: string

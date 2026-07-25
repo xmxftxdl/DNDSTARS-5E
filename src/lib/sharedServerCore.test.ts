@@ -792,6 +792,19 @@ describe('room lobby allocation', () => {
     expect(normalizeAccountRecoveryCode('not-a-code')).toBeNull()
   })
 
+  it('normalizes account usernames, emails and Chinese phone numbers deterministically', () => {
+    expect(sharedServerCore.normalizeAccountUsername(' 星痕_Player-1 ')).toEqual({
+      value: '星痕_Player-1',
+      key: '星痕_player-1',
+    })
+    expect(sharedServerCore.normalizeAccountUsername('two words')).toBeNull()
+    expect(sharedServerCore.normalizeAccountUsername('13800138000')).toBeNull()
+    expect(sharedServerCore.normalizeAccountEmail(' Adventurer@Example.COM ')).toBe('adventurer@example.com')
+    expect(sharedServerCore.normalizeAccountEmail('not-an-email')).toBeNull()
+    expect(sharedServerCore.normalizeAccountPhone('138 0013 8000')).toBe('+8613800138000')
+    expect(sharedServerCore.normalizeAccountPhone('+1 (312) 555-0100')).toBe('+13125550100')
+  })
+
   it('rejects joining when the creator heartbeat has expired', () => {
     const room = baseRoom()
     room.host.lastSeenAt = now - ROOM_HOST_TTL_MS - 1

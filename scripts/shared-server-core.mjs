@@ -65,6 +65,11 @@ export const SHARED_STATE_SCHEMA_VERSION = 1
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 export const ACCOUNT_SESSION_LIMIT = 12
 export const ACCOUNT_CHARACTER_LIMIT = 100
+export const ACCOUNT_AUTH_SCHEMA_VERSION = 1
+export const ACCOUNT_VERIFICATION_TTL_MS = 10 * 60 * 1000
+export const ACCOUNT_VERIFICATION_ATTEMPT_LIMIT = 5
+export const ACCOUNT_PASSWORD_MIN_LENGTH = 8
+export const ACCOUNT_PASSWORD_MAX_LENGTH = 128
 export const CAMPAIGN_BUNDLE_FORMAT = 'dndstars5e-campaign'
 export const CAMPAIGN_BUNDLE_SCHEMA_VERSION = 1
 export const CAMPAIGN_SNAPSHOT_LIMIT = 10
@@ -4587,6 +4592,30 @@ function accountFile(ctx, accountId) {
   return path.join(accountDirectory(ctx), `${accountId}.json`)
 }
 
+function accountIdentityDirectory(ctx) {
+  return path.join(accountDirectory(ctx), 'identities')
+}
+
+function accountVerificationDirectory(ctx) {
+  return path.join(accountDirectory(ctx), 'verifications')
+}
+
+function accountAuthLockFile(ctx) {
+  return path.join(accountDirectory(ctx), '.auth-registry')
+}
+
+function accountIdentityDigest(kind, value) {
+  return createHash('sha256').update(`${kind}:${value}`).digest('hex')
+}
+
+function accountIdentityFile(ctx, kind, value) {
+  return path.join(accountIdentityDirectory(ctx), `${kind}-${accountIdentityDigest(kind, value)}.json`)
+}
+
+function accountVerificationFile(ctx, challengeId) {
+  return path.join(accountVerificationDirectory(ctx), `${challengeId}.json`)
+}
+
 function randomLobbyCode(length) {
   const bytes = randomBytes(length)
   return [...bytes].map((value) => ROOM_CODE_ALPHABET[value & 31]).join('')
@@ -4603,6 +4632,142 @@ export function normalizeAccountRecoveryCode(value) {
   const secret = normalized.slice(16)
   if (!/^[A-HJ-NP-Z2-9]{12}$/.test(accountId) || !/^[A-HJ-NP-Z2-9]{20}$/.test(secret)) return null
   return { accountId, secret, formatted: `DS5E-${accountId}-${secret.slice(0, 5)}-${secret.slice(5, 10)}-${secret.slice(10, 15)}-${secret.slice(15)}` }
+}
+
+export function normalizeAccountUsername(value) {
+  const normalized = String(value ?? '').trim().normalize('NFKC')
+  if (normalized.length < 3 || normalized.length > 24) return null
+  if (!/^[\p{L}\p{N}_-]+$/u.test(normalized)) return null
+  // Purely numeric names are ambiguous with phone-number login identifiers.
+  if (/^\d+$/.test(normalized)) return null
+  return {
+    value: normalized,
+    key: normalized.toLocaleLowerCase('en-US'),
+  }
+}
+
+export function normalizeAccountEmail(value) {
+  const normalized = String(value ?? '').trim().normalize('NFKC').toLocaleLowerCase('en-US')
+  if (normalized.length < 5 || normalized.length > 254) return null
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return null
+  return normalized
+}
+
+export function normalizeAccountPhone(value) {
+  let normalized = String(value ?? '').trim().normalize('NFKC').replace(/[\s().-]/g, '')
+  if (/^1[3-9]\d{9}$/.test(normalized)) normalized = `+86${normalized}`
+  if (!/^\+[1-9]\d{7,14}$/.test(normalized)) return null
+  return normalized
+}
+
+function normalizeAccountContact(channel, value) {
+  if (channel === 'email') return normalizeAccountEmail(value)
+  if (channel === 'phone') return normalizeAccountPhone(value)
+  return null
+}
+
+function normalizeAccountPassword(value) {
+  if (typeof value !== 'string') return null
+  if (value.length < ACCOUNT_PASSWORD_MIN_LENGTH || value.length > ACCOUNT_PASSWORD_MAX_LENGTH) return null
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null
+  return value
+}
+
+function normalizeLoginIdentity(value) {
+  const raw = String(value ?? '').trim().normalize('NFKC')
+  if (!raw) return null
+  if (raw.includes('@')) {
+    const email = normalizeAccountEmail(raw)
+    return email ? { kind: 'email', key: email } : null
+  }
+  const phone = normalizeAccountPhone(raw)
+  if (phone && (/^\+/.test(raw) || /^\d{8,15}$/.test(raw.replace(/[\s().-]/g, '')))) {
+    return { kind: 'phone', key: phone }
+  }
+  const username = normalizeAccountUsername(raw)
+  return username ? { kind: 'username', key: username.key } : null
+}
+
+function maskedAccountContact(channel, destination) {
+  if (channel === 'email') {
+    const [local = '', domain = ''] = String(destination).split('@')
+    return `${local.slice(0, 1)}***@${domain}`
+  }
+  const value = String(destination)
+  return `${value.slice(0, Math.min(3, Math.max(1, value.length - 4)))}***${value.slice(-4)}`
+}
+
+function verificationWebhookUrl(channel, env = process.env) {
+  const value = channel === 'email'
+    ? env.STARS_EMAIL_VERIFICATION_WEBHOOK_URL || env.STARS_VERIFICATION_WEBHOOK_URL
+    : env.STARS_SMS_VERIFICATION_WEBHOOK_URL || env.STARS_VERIFICATION_WEBHOOK_URL
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const parsed = new URL(value.trim())
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && !productionSecurityEnabled(env))) return null
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function verificationDeliveryConfigured(channel, env = process.env) {
+  if (!verificationWebhookUrl(channel, env)) return false
+  if (!productionSecurityEnabled(env)) return true
+  return typeof env.STARS_VERIFICATION_WEBHOOK_SECRET === 'string' &&
+    env.STARS_VERIFICATION_WEBHOOK_SECRET.trim().length >= 16
+}
+
+function accountAuthCapabilities(env = process.env) {
+  const developmentDelivery = !productionSecurityEnabled(env)
+  return {
+    schemaVersion: ACCOUNT_AUTH_SCHEMA_VERSION,
+    channels: {
+      email: developmentDelivery || verificationDeliveryConfigured('email', env),
+      phone: developmentDelivery || verificationDeliveryConfigured('phone', env),
+    },
+    developmentDelivery,
+    verificationExpiresInSeconds: Math.floor(ACCOUNT_VERIFICATION_TTL_MS / 1000),
+    passwordMinLength: ACCOUNT_PASSWORD_MIN_LENGTH,
+  }
+}
+
+async function deliverAccountVerification(channel, destination, code, env = process.env) {
+  const webhookUrl = verificationWebhookUrl(channel, env)
+  if (!webhookUrl) {
+    if (!productionSecurityEnabled(env)) {
+      console.info(`[account-verification:${channel}] ${destination} => ${code}`)
+      return { debugCode: code }
+    }
+    throw new RoomProtocolError(503, 'verification-provider-unavailable')
+  }
+  if (productionSecurityEnabled(env) && !verificationDeliveryConfigured(channel, env)) {
+    throw new RoomProtocolError(503, 'verification-provider-unavailable')
+  }
+  const headers = { 'Content-Type': 'application/json' }
+  const secret = String(env.STARS_VERIFICATION_WEBHOOK_SECRET ?? '').trim()
+  if (secret) headers.Authorization = `Bearer ${secret}`
+  let response
+  try {
+    response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        schemaVersion: 1,
+        brand: 'Astral Trace VTT',
+        purpose: 'register',
+        channel,
+        destination,
+        code,
+        expiresInSeconds: Math.floor(ACCOUNT_VERIFICATION_TTL_MS / 1000),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch {
+    throw new RoomProtocolError(503, 'verification-delivery-failed')
+  }
+  if (!response.ok) throw new RoomProtocolError(503, 'verification-delivery-failed')
+  return { debugCode: null }
 }
 
 function secretRecord(secret) {
@@ -4634,6 +4799,13 @@ function accountPublicProfile(account) {
   return {
     accountId: account.accountId,
     displayName: account.displayName,
+    ...(account.auth?.username ? { username: account.auth.username } : {}),
+    ...(account.auth?.channel && account.auth?.destination
+      ? {
+          contactChannel: account.auth.channel,
+          contactLabel: maskedAccountContact(account.auth.channel, account.auth.destination),
+        }
+      : {}),
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
   }
@@ -4643,6 +4815,13 @@ function accountSessionResponse(account, token) {
   return {
     accountId: account.accountId,
     displayName: account.displayName,
+    ...(account.auth?.username ? { username: account.auth.username } : {}),
+    ...(account.auth?.channel && account.auth?.destination
+      ? {
+          contactChannel: account.auth.channel,
+          contactLabel: maskedAccountContact(account.auth.channel, account.auth.destination),
+        }
+      : {}),
     sessionToken: token,
     createdAt: account.createdAt,
   }
@@ -4724,6 +4903,239 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
     }
   }
   throw new RoomProtocolError(503, 'account-id-exhausted')
+}
+
+async function readAccountIdentity(ctx, kind, key) {
+  try {
+    const value = JSON.parse(await readFile(accountIdentityFile(ctx, kind, key), 'utf8'))
+    if (!plainObject(value) || normalizeAccountId(value.accountId) !== value.accountId) return null
+    return value.accountId
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+function applyAccountAuthRateLimit(ctx, key, limit, windowMs, now = Date.now()) {
+  if (!ctx.rateLimits) ctx.rateLimits = new Map()
+  const result = consumeRateLimit(ctx.rateLimits, `account-auth:${key}`, now, limit, windowMs)
+  if (!result.ok) throw new RoomProtocolError(429, 'account-auth-rate-limit')
+}
+
+async function requestAccountVerification(ctx, req, payload, now = Date.now()) {
+  const channel = payload?.channel === 'email' || payload?.channel === 'phone' ? payload.channel : null
+  const destination = normalizeAccountContact(channel, payload?.destination)
+  if (!channel || !destination) throw new RoomProtocolError(400, 'invalid-verification-destination')
+  if (!accountAuthCapabilities().channels[channel]) {
+    throw new RoomProtocolError(503, 'verification-provider-unavailable')
+  }
+  const destinationDigest = accountIdentityDigest(channel, destination)
+  const ip = req.socket?.remoteAddress ?? 'local'
+  applyAccountAuthRateLimit(ctx, `verification-ip:${ip}`, 8, 10 * 60 * 1000, now)
+  applyAccountAuthRateLimit(ctx, `verification-destination:${destinationDigest}`, 3, 10 * 60 * 1000, now)
+  await mkdir(accountIdentityDirectory(ctx), { recursive: true })
+  await mkdir(accountVerificationDirectory(ctx), { recursive: true })
+  if (await readAccountIdentity(ctx, channel, destination)) {
+    throw new RoomProtocolError(409, 'account-contact-exists')
+  }
+
+  const challengeId = randomUUID()
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
+  const delivery = await deliverAccountVerification(channel, destination, code)
+  const challenge = {
+    version: 1,
+    challengeId,
+    purpose: 'register',
+    channel,
+    destination,
+    destinationDigest,
+    code: secretRecord(code),
+    failedAttempts: 0,
+    createdAt: now,
+    expiresAt: now + ACCOUNT_VERIFICATION_TTL_MS,
+  }
+  await writeFile(accountVerificationFile(ctx, challengeId), JSON.stringify(challenge), { flag: 'wx', mode: 0o600 })
+  return {
+    challengeId,
+    channel,
+    destinationLabel: maskedAccountContact(channel, destination),
+    expiresAt: challenge.expiresAt,
+    ...(delivery.debugCode ? { debugCode: delivery.debugCode } : {}),
+  }
+}
+
+function normalizeVerificationChallengeId(value) {
+  const challengeId = String(value ?? '').trim().toLowerCase()
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(challengeId)
+    ? challengeId
+    : null
+}
+
+async function readVerificationChallenge(ctx, challengeId) {
+  try {
+    const challenge = JSON.parse(await readFile(accountVerificationFile(ctx, challengeId), 'utf8'))
+    if (!plainObject(challenge) || challenge.challengeId !== challengeId) {
+      throw new RoomProtocolError(400, 'invalid-verification-code')
+    }
+    return challenge
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new RoomProtocolError(400, 'invalid-verification-code')
+    throw error
+  }
+}
+
+async function createRegisteredAccount(ctx, payload, now = Date.now()) {
+  const username = normalizeAccountUsername(payload?.username)
+  const password = normalizeAccountPassword(payload?.password)
+  const challengeId = normalizeVerificationChallengeId(payload?.challengeId)
+  const verificationCode = typeof payload?.verificationCode === 'string'
+    ? payload.verificationCode.trim()
+    : ''
+  const clientId = payload?.clientId
+  if (!username) throw new RoomProtocolError(400, 'invalid-account-username')
+  if (!password) throw new RoomProtocolError(400, 'invalid-account-password')
+  if (!challengeId || !/^\d{6}$/.test(verificationCode)) {
+    throw new RoomProtocolError(400, 'invalid-verification-code')
+  }
+  if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
+
+  await mkdir(accountDirectory(ctx), { recursive: true })
+  await mkdir(accountIdentityDirectory(ctx), { recursive: true })
+  await mkdir(accountVerificationDirectory(ctx), { recursive: true })
+  return withWriteLock(accountAuthLockFile(ctx), async () => {
+    const challenge = await readVerificationChallenge(ctx, challengeId)
+    if (challenge.purpose !== 'register' || challenge.consumedAt || Number(challenge.expiresAt) < now) {
+      throw new RoomProtocolError(400, 'verification-code-expired')
+    }
+    if (Number(challenge.failedAttempts ?? 0) >= ACCOUNT_VERIFICATION_ATTEMPT_LIMIT) {
+      throw new RoomProtocolError(429, 'verification-attempt-limit')
+    }
+    if (!secretMatches(challenge.code, verificationCode)) {
+      await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify({
+        ...challenge,
+        failedAttempts: Number(challenge.failedAttempts ?? 0) + 1,
+        updatedAt: now,
+      }))
+      throw new RoomProtocolError(400, 'invalid-verification-code')
+    }
+    if (await readAccountIdentity(ctx, 'username', username.key)) {
+      throw new RoomProtocolError(409, 'account-username-exists')
+    }
+    if (await readAccountIdentity(ctx, challenge.channel, challenge.destination)) {
+      throw new RoomProtocolError(409, 'account-contact-exists')
+    }
+
+    const recoverySecret = randomLobbyCode(20)
+    const tokenSeed = randomLobbyCode(20)
+    let account = null
+    let token = null
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const accountId = randomLobbyCode(12)
+      token = accountSessionToken(accountId)
+      account = {
+        version: 2,
+        accountId,
+        displayName: username.value,
+        auth: {
+          schemaVersion: ACCOUNT_AUTH_SCHEMA_VERSION,
+          username: username.value,
+          usernameKey: username.key,
+          channel: challenge.channel,
+          destination: challenge.destination,
+          destinationVerifiedAt: now,
+          password: secretRecord(password),
+        },
+        recovery: secretRecord(`${recoverySecret}${tokenSeed}`),
+        sessions: [{ tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now }],
+        characters: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+      try {
+        await writeFile(accountFile(ctx, accountId), JSON.stringify(account), { flag: 'wx', mode: 0o600 })
+        break
+      } catch (error) {
+        account = null
+        token = null
+        if (error?.code !== 'EEXIST') throw error
+      }
+    }
+    if (!account || !token) throw new RoomProtocolError(503, 'account-id-exhausted')
+
+    const indexRecords = [
+      ['username', username.key],
+      [challenge.channel, challenge.destination],
+    ]
+    const writtenIndexes = []
+    try {
+      for (const [kind, key] of indexRecords) {
+        const filePath = accountIdentityFile(ctx, kind, key)
+        await writeFile(filePath, JSON.stringify({ version: 1, accountId: account.accountId, createdAt: now }), {
+          flag: 'wx',
+          mode: 0o600,
+        })
+        writtenIndexes.push(filePath)
+      }
+      const consumed = { ...challenge, consumedAt: now, updatedAt: now }
+      delete consumed.code
+      await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify(consumed))
+    } catch (error) {
+      await Promise.allSettled([
+        rm(accountFile(ctx, account.accountId), { force: true }),
+        ...writtenIndexes.map((filePath) => rm(filePath, { force: true })),
+      ])
+      if (error?.code === 'EEXIST') throw new RoomProtocolError(409, 'account-identity-exists')
+      throw error
+    }
+    return { account, token }
+  })
+}
+
+async function loginRegisteredAccount(ctx, req, payload, now = Date.now()) {
+  const identity = normalizeLoginIdentity(payload?.identifier)
+  const password = normalizeAccountPassword(payload?.password)
+  const clientId = payload?.clientId
+  if (!identity || !password || !validClientId(clientId)) {
+    throw new RoomProtocolError(401, 'invalid-account-credentials')
+  }
+  const ip = req.socket?.remoteAddress ?? 'local'
+  const identityDigest = accountIdentityDigest(identity.kind, identity.key)
+  applyAccountAuthRateLimit(ctx, `login-ip:${ip}`, 20, 10 * 60 * 1000, now)
+  applyAccountAuthRateLimit(ctx, `login-identity:${identityDigest}`, 10, 10 * 60 * 1000, now)
+
+  const accountId = await readAccountIdentity(ctx, identity.kind, identity.key)
+  const account = accountId ? await readAccount(ctx, accountId).catch(() => null) : null
+  const passwordRecord = account?.auth?.password ?? {
+    salt: 'tyP2VRO4rUkF4N7mM7utOw==',
+    hash: 'n5J5vRJh2g/A6DDsS7E2p5g08tLcZlC2HqH+Ua9lBFQ=',
+  }
+  if (!secretMatches(passwordRecord, password) || !account?.auth) {
+    throw new RoomProtocolError(401, 'invalid-account-credentials')
+  }
+
+  const token = accountSessionToken(account.accountId)
+  const next = await mutateAccount(ctx, account.accountId, (current) => ({
+    ...current,
+    sessions: [
+      ...(Array.isArray(current.sessions) ? current.sessions : []),
+      { tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now },
+    ].slice(-ACCOUNT_SESSION_LIMIT),
+    updatedAt: now,
+  }))
+  return { account: next, token }
+}
+
+async function logoutAccount(req, ctx) {
+  const account = await authenticateAccount(req, ctx)
+  const token = req?.headers?.['x-stars-account-token']
+  const hash = tokenHash(token)
+  const now = Date.now()
+  await mutateAccount(ctx, account.accountId, (current) => ({
+    ...current,
+    sessions: (Array.isArray(current.sessions) ? current.sessions : [])
+      .filter((session) => session?.tokenHash !== hash),
+    updatedAt: now,
+  }))
 }
 
 function normalizedAccountCharacterRecord(value, accountId, expectedId, now = Date.now()) {
@@ -5042,7 +5454,42 @@ async function handleAccountApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/accounts')) return false
   if (!applyLobbyRateLimit(req, res, ctx)) return true
 
+  if (parsed.pathname === '/api/accounts/auth/config' && req.method === 'GET') {
+    writeJson(res, 200, accountAuthCapabilities())
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/auth/verification' && req.method === 'POST') {
+    const payload = await readJsonRequest(req)
+    const challenge = await requestAccountVerification(ctx, req, payload)
+    writeJson(res, 201, challenge)
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/auth/register' && req.method === 'POST') {
+    const payload = await readJsonRequest(req)
+    const { account, token } = await createRegisteredAccount(ctx, payload)
+    writeJson(res, 201, { session: accountSessionResponse(account, token) })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/auth/login' && req.method === 'POST') {
+    const payload = await readJsonRequest(req)
+    const { account, token } = await loginRegisteredAccount(ctx, req, payload)
+    writeJson(res, 200, { session: accountSessionResponse(account, token) })
+    return true
+  }
+
+  if (parsed.pathname === '/api/accounts/auth/logout' && req.method === 'POST') {
+    await logoutAccount(req, ctx)
+    writeJson(res, 200, { ok: true })
+    return true
+  }
+
   if (parsed.pathname === '/api/accounts' && req.method === 'POST') {
+    if (productionSecurityEnabled() && process.env.STARS_ALLOW_LEGACY_ACCOUNT_CREATION !== 'true') {
+      throw new RoomProtocolError(410, 'legacy-account-creation-disabled')
+    }
     const payload = await readJsonRequest(req)
     const { account, token, recoveryCode } = await createAccountRecord(ctx, payload)
     writeJson(res, 201, { session: accountSessionResponse(account, token), recoveryCode })

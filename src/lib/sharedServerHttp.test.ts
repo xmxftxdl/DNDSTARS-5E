@@ -106,6 +106,7 @@ describe('production same-origin and room authentication boundary', () => {
       STARS_SECURITY_MODE: 'production',
       STARS_PUBLIC_ORIGIN: 'http://127.0.0.1:5394',
       STARS_ALLOWED_ORIGINS: '',
+      STARS_ALLOW_LEGACY_ACCOUNT_CREATION: 'true',
     })
   }, 30000)
 
@@ -189,6 +190,44 @@ describe('production same-origin and room authentication boundary', () => {
     }
     expect((await fetch(`${server.base}/api/state/maps${query}`, { headers })).status).toBe(404)
     expect((await fetch(`${server.base}/api/state/maps${query}`)).status).toBe(403)
+  })
+})
+
+describe('production account registration fail-closed boundary', () => {
+  let server: Running
+
+  beforeAll(async () => {
+    server = await startServer(5395, {
+      STARS_SECURITY_MODE: 'production',
+      STARS_PUBLIC_ORIGIN: 'http://127.0.0.1:5395',
+      STARS_ALLOWED_ORIGINS: '',
+      STARS_ALLOW_LEGACY_ACCOUNT_CREATION: 'false',
+      STARS_EMAIL_VERIFICATION_WEBHOOK_URL: '',
+      STARS_SMS_VERIFICATION_WEBHOOK_URL: '',
+    })
+  }, 30000)
+
+  afterAll(async () => {
+    if (server) await stopServer(server)
+  })
+
+  it('disables unverified legacy creation and unavailable verification channels', async () => {
+    expect(await (await fetch(`${server.base}/api/accounts/auth/config`)).json()).toMatchObject({
+      channels: { email: false, phone: false },
+      developmentDelivery: false,
+    })
+    const legacy = await fetch(`${server.base}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'bypass', clientId: 'legacy-bypass-client' }),
+    })
+    expect(legacy.status).toBe(410)
+    const verification = await fetch(`${server.base}/api/accounts/auth/verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'email', destination: 'user@example.com' }),
+    })
+    expect(verification.status).toBe(503)
   })
 })
 
@@ -433,6 +472,96 @@ describe('账号恢复与账号角色库协议', () => {
     })
     expect(rejoinResponse.status).toBe(200)
     expect(await rejoinResponse.json()).toMatchObject({ member: { memberId: joined.member.memberId, role: 'player' } })
+  })
+})
+
+describe('账号验证码注册与密码登录协议', () => {
+  it('邮箱验证码注册后可按用户名或邮箱登录，并可撤销当前会话', async () => {
+    const configResponse = await fetch(`${offServer.base}/api/accounts/auth/config`)
+    expect(configResponse.status).toBe(200)
+    expect(await configResponse.json()).toMatchObject({
+      channels: { email: true, phone: true },
+      developmentDelivery: true,
+      passwordMinLength: 8,
+    })
+
+    const verificationResponse = await fetch(`${offServer.base}/api/accounts/auth/verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'email', destination: 'Adventurer@Example.com' }),
+    })
+    expect(verificationResponse.status).toBe(201)
+    const verification = await verificationResponse.json() as {
+      challengeId: string
+      debugCode: string
+      destinationLabel: string
+    }
+    expect(verification.debugCode).toMatch(/^\d{6}$/)
+    expect(verification.destinationLabel).toBe('a***@example.com')
+
+    const registerResponse = await fetch(`${offServer.base}/api/accounts/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeId: verification.challengeId,
+        verificationCode: verification.debugCode,
+        username: '星痕玩家',
+        password: 'CorrectHorse42',
+        clientId: 'registered-device-one',
+      }),
+    })
+    expect(registerResponse.status).toBe(201)
+    const registered = await registerResponse.json() as {
+      session: { accountId: string; sessionToken: string; username: string; contactLabel: string }
+    }
+    expect(registered.session).toMatchObject({
+      username: '星痕玩家',
+      contactLabel: 'a***@example.com',
+    })
+
+    const duplicateContact = await fetch(`${offServer.base}/api/accounts/auth/verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'email', destination: 'adventurer@example.com' }),
+    })
+    expect(duplicateContact.status).toBe(409)
+
+    const logoutResponse = await fetch(`${offServer.base}/api/accounts/auth/logout`, {
+      method: 'POST',
+      headers: { 'X-Stars-Account-Token': registered.session.sessionToken },
+    })
+    expect(logoutResponse.status).toBe(200)
+    expect((await fetch(`${offServer.base}/api/accounts/me`, {
+      headers: { 'X-Stars-Account-Token': registered.session.sessionToken },
+    })).status).toBe(401)
+
+    for (const identifier of ['星痕玩家', 'ADVENTURER@example.com']) {
+      const loginResponse = await fetch(`${offServer.base}/api/accounts/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier,
+          password: 'CorrectHorse42',
+          clientId: `login-device-${identifier.includes('@') ? 'email' : 'username'}`,
+        }),
+      })
+      expect(loginResponse.status).toBe(200)
+      expect(await loginResponse.json()).toMatchObject({
+        session: { accountId: registered.session.accountId, username: '星痕玩家' },
+      })
+    }
+
+    const wrongPassword = await fetch(`${offServer.base}/api/accounts/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: '星痕玩家',
+        password: 'DefinitelyWrong',
+        clientId: 'wrong-password-device',
+      }),
+    })
+    expect(wrongPassword.status).toBe(401)
+    expect(await wrongPassword.json()).toEqual({ error: 'invalid-account-credentials' })
   })
 })
 

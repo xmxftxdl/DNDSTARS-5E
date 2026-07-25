@@ -5,6 +5,9 @@ export const ACCOUNT_SESSION_EVENT = 'stars-account-session-changed'
 export interface AccountSession {
   accountId: string
   displayName: string
+  username?: string
+  contactChannel?: 'email' | 'phone'
+  contactLabel?: string
   sessionToken: string
   createdAt: number
 }
@@ -23,6 +26,9 @@ export function isAccountSession(value: unknown): value is AccountSession {
   const session = value as Partial<AccountSession>
   return /^[A-HJ-NP-Z2-9]{12}$/.test(session.accountId ?? '') &&
     typeof session.displayName === 'string' && session.displayName.length > 0 &&
+    (session.username == null || (typeof session.username === 'string' && session.username.length > 0)) &&
+    (session.contactChannel == null || session.contactChannel === 'email' || session.contactChannel === 'phone') &&
+    (session.contactLabel == null || typeof session.contactLabel === 'string') &&
     typeof session.sessionToken === 'string' && session.sessionToken.length >= 32 &&
     Number.isFinite(session.createdAt)
 }

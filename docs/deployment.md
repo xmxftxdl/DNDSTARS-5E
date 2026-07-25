@@ -54,7 +54,11 @@ $env:STARS_ALLOWED_ORIGINS = "https://dm.example.com,https://players.example.com
 
 生产模式执行以下规则：
 
-- 创建或加入房间前必须先创建或恢复平台账号；
+- 创建或加入房间前必须先注册或登录平台账号；
+- 新账号必须先完成邮箱或手机号验证码校验，再设置唯一用户名和密码；
+- 登录可使用用户名、已验证邮箱或已验证手机号；
+- 密码只以带随机盐的 scrypt 摘要保存，验证码同样不以明文落盘；
+- 旧恢复码接口仅用于历史账号迁移，生产环境默认禁止通过旧接口创建未验证账号；
 - 默认的无房间共享状态入口被禁用；
 - 房间资源必须携带不可猜测的成员 ID 与房间会话 token；
 - 服务端根据房间记录重新判断 DM、玩家或观战者权限；
@@ -63,6 +67,36 @@ $env:STARS_ALLOWED_ORIGINS = "https://dm.example.com,https://players.example.com
 - 房间外访问返回 `room-session-required` 或 `forbidden`。
 
 不要设置 `VITE_STARS_SHARED_SECRET` 或 `VITE_STARS_ACCESS_TOKEN`。所有 `VITE_*` 值都会进入公开浏览器包，不能作为秘密。旧的 `STARS_SHARED_SECRET`、`STARS_DM_TOKEN` 和 `STARS_PLAYER_TOKEN` 只为本地旧流程兼容，不是生产鉴权方案。
+
+### 4.1 邮箱与短信验证码提供器
+
+服务端通过受保护的 Webhook 发送验证码。可分别配置邮件与短信提供器：
+
+```text
+STARS_EMAIL_VERIFICATION_WEBHOOK_URL=https://mailer.example.com/stars/verification
+STARS_SMS_VERIFICATION_WEBHOOK_URL=https://sms.example.com/stars/verification
+STARS_VERIFICATION_WEBHOOK_SECRET=至少16字符的随机密钥
+STARS_ALLOW_LEGACY_ACCOUNT_CREATION=false
+```
+
+两种渠道也可指向同一个统一入口 `STARS_VERIFICATION_WEBHOOK_URL`。服务端发送：
+
+```json
+{
+  "schemaVersion": 1,
+  "brand": "Astral Trace VTT",
+  "purpose": "register",
+  "channel": "email",
+  "destination": "player@example.com",
+  "code": "123456",
+  "expiresInSeconds": 600
+}
+```
+
+请求使用 `Authorization: Bearer <STARS_VERIFICATION_WEBHOOK_SECRET>`。Webhook 只有返回
+2xx 才视为发送成功。生产环境缺少 HTTPS Webhook 或密钥时对应注册渠道会被禁用，并且
+验证码绝不会返回浏览器。开发／测试模式没有配置提供器时会把验证码输出到服务端日志，
+同时在响应中返回 `debugCode`，仅用于本机调试。
 
 ## 5. 安全响应头
 
@@ -89,7 +123,7 @@ npm audit
 
 还应从真实 HTTPS 域名验证：
 
-1. 创建账号并保存恢复码；
+1. 分别使用邮箱和手机号验证码注册，退出后再使用用户名和联系方式登录；
 2. DM 创建房间，玩家从另一设备加入；
 3. 上传地图、立绘、规则包和场景音频；
 4. 进行一轮战斗并刷新、断线重连；

@@ -7,20 +7,16 @@ import {
   Eye,
   Dices,
   LoaderCircle,
-  Copy,
-  KeyRound,
   Network,
   ShieldCheck,
   Sparkles,
   Users,
 } from 'lucide-react'
-import { accountApiErrorMessage, createAccount, recoverAccount } from '../lib/accountApi'
 import {
-  clearAccountSession,
   getAccountSession,
-  saveAccountSession,
   subscribeAccountSession,
 } from '../lib/accountSession'
+import AccountAuthPanel from '../components/AccountAuthPanel'
 import {
   createRoom,
   joinRoom,
@@ -32,7 +28,6 @@ import {
   DND5E_2014_RULESET_ID,
   DND5E_2014_RULESET_LABEL,
   getRecentRoomPlayerResumeIdentity,
-  getRoomClientId,
   getRoomPlayerResumeIdentity,
   saveRoomSession,
 } from '../lib/roomSession'
@@ -69,10 +64,6 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [account, setAccount] = useState(() => getAccountSession())
-  const [accountBusy, setAccountBusy] = useState(false)
-  const [recoveryInput, setRecoveryInput] = useState('')
-  const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState<string | null>(null)
-  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(true)
   const resumeIdentity = mode === 'join' ? getRoomPlayerResumeIdentity(roomCode) : null
 
   useEffect(() => subscribeAccountSession(setAccount), [])
@@ -118,16 +109,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
     setError(null)
     try {
       if (!account) {
-        const identityName = (mode === 'create' ? dmName : playerName).trim()
-        const receipt = await createAccount(identityName, getRoomClientId())
-        saveAccountSession(receipt.session)
-        setGeneratedRecoveryCode(receipt.recoveryCode)
-        setRecoveryAcknowledged(false)
-        setBusy(false)
-        return
-      }
-      if (!recoveryAcknowledged) {
-        setError('请先保存账号恢复码，再继续创建或加入房间。')
+        setError('请先注册或登录星痕账号。')
         setBusy(false)
         return
       }
@@ -146,25 +128,6 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
     } catch (cause) {
       setError(roomApiErrorMessage(cause))
       setBusy(false)
-    }
-  }
-
-  const restoreAccount = async () => {
-    if (accountBusy || !recoveryInput.trim()) return
-    setAccountBusy(true)
-    setError(null)
-    try {
-      const session = await recoverAccount(recoveryInput, getRoomClientId())
-      saveAccountSession(session)
-      setRecoveryInput('')
-      setGeneratedRecoveryCode(null)
-      setRecoveryAcknowledged(true)
-      if (mode === 'join' && !playerName.trim()) setPlayerName(session.displayName)
-      if (mode === 'create' && !dmName.trim()) setDmName(session.displayName)
-    } catch (cause) {
-      setError(accountApiErrorMessage(cause))
-    } finally {
-      setAccountBusy(false)
     }
   }
 
@@ -256,80 +219,15 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                 </p>
               </div>
 
-              <div className="mb-6 rounded-2xl border border-arcane-400/15 bg-arcane-500/[0.055] p-4" data-testid="account-identity-panel">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-xl bg-arcane-500/15 p-2.5 text-arcane-300"><KeyRound className="h-5 w-5" /></div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-slate-100">账号身份与角色库</p>
-                    {account ? (
-                      <>
-                        <p className="mt-1 text-xs text-emerald-300">已连接：{account.displayName}</p>
-                        <p className="mt-1 font-mono text-[11px] text-slate-500">账号 ID：{account.accountId}</p>
-                        <button
-                          type="button"
-                          className="mt-2 text-xs text-slate-500 underline decoration-slate-700 underline-offset-2 hover:text-slate-300"
-                          onClick={() => {
-                            if (!window.confirm('切换账号不会删除云端角色，但当前浏览器需要恢复码才能再次登录。确定继续吗？')) return
-                            clearAccountSession()
-                            setGeneratedRecoveryCode(null)
-                            setRecoveryAcknowledged(true)
-                          }}
-                        >
-                          使用其他恢复码
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <p className="mt-1 text-xs leading-5 text-slate-400">
-                          首次继续时会创建独立账号并生成恢复码。角色归属于账号，不再依赖浏览器、房间码或玩家同名匹配。
-                        </p>
-                        <div className="mt-3 flex gap-2">
-                          <input
-                            value={recoveryInput}
-                            onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())}
-                            placeholder="已有恢复码：DS5E-…"
-                            autoComplete="off"
-                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 font-mono text-xs text-slate-200 outline-none focus:border-arcane-400/50"
-                          />
-                          <button
-                            type="button"
-                            disabled={accountBusy || !recoveryInput.trim()}
-                            onClick={() => void restoreAccount()}
-                            className="rounded-lg border border-arcane-400/25 px-3 py-2 text-xs font-semibold text-arcane-200 hover:bg-arcane-500/10 disabled:opacity-40"
-                          >
-                            {accountBusy ? '恢复中…' : '恢复账号'}
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {generatedRecoveryCode && (
-                  <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3" data-testid="generated-recovery-code">
-                    <p className="text-xs font-semibold text-amber-200">恢复码只在创建账号时显示，请立即保存</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <code className="min-w-0 flex-1 break-all rounded-lg bg-black/25 px-3 py-2 text-xs text-amber-100">{generatedRecoveryCode}</code>
-                      <button
-                        type="button"
-                        onClick={() => void navigator.clipboard?.writeText(generatedRecoveryCode)}
-                        className="flex items-center gap-1.5 rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-100 hover:bg-amber-400/10"
-                      >
-                        <Copy className="h-3.5 w-3.5" />复制
-                      </button>
-                    </div>
-                    {!recoveryAcknowledged ? (
-                      <button
-                        type="button"
-                        onClick={() => setRecoveryAcknowledged(true)}
-                        className="mt-3 w-full rounded-lg bg-amber-400/15 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-400/20"
-                      >
-                        我已保存恢复码，允许继续
-                      </button>
-                    ) : <p className="mt-2 text-[11px] text-emerald-300">恢复码已确认保存。</p>}
-                  </div>
-                )}
-              </div>
+              <AccountAuthPanel
+                account={account}
+                onAuthenticated={(session) => {
+                  if (!playerName.trim()) setPlayerName(session.displayName)
+                  if (!dmName.trim() || dmName === '地下城主') setDmName(session.displayName)
+                }}
+                onLoggedOut={() => setError(null)}
+                onError={setError}
+              />
 
               {mode === 'create' ? (
                 <div className="space-y-5">
@@ -539,14 +437,14 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
 
               <button
                 type="submit"
-                disabled={busy || accountBusy || !recoveryAcknowledged || (mode === 'join' && preview?.locked === true)}
+                disabled={busy || !account || (mode === 'join' && preview?.locked === true)}
                 className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-arcane-600 to-arcane-500 px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-arcane-900/30 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
               >
                 {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                 {busy
                   ? '正在连接…'
                   : !account
-                    ? '创建账号并生成恢复码'
+                    ? '请先注册或登录'
                     : mode === 'create' ? '创建并以 DM 身份进入' : joinRole === 'spectator' ? '以观战者身份进入' : '加入并进入玩家端'}
               </button>
             </form>

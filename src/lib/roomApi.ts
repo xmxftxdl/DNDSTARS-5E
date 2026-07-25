@@ -592,8 +592,8 @@ export async function leaveRoom(session: RoomSession): Promise<void> {
 export function roomApiErrorMessage(error: unknown): string {
   const code = error instanceof RoomApiError ? error.code : 'request-failed'
   const messages: Record<string, string> = {
-    'account-required': '请先创建账号身份或使用恢复码登录，再创建或加入房间。',
-    'invalid-account-session': '账号会话已经失效，请返回大厅使用恢复码重新登录。',
+    'account-required': '请先注册或登录星痕账号，再创建或加入房间。',
+    'invalid-account-session': '账号会话已经失效，请返回大厅重新登录。',
     'invalid-room-session': '房间会话已经失效，请重新加入房间。',
     'member-removed': '你已被 DM 移出这个房间；需要 DM 恢复席位后才能重新加入。',
     'server-unavailable': '无法连接共享服务。请确认 DM 服务端口 5273 已启动。',
