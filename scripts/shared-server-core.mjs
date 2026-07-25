@@ -6,6 +6,10 @@ import { createReadStream } from 'node:fs'
 import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
 import {
+  deliverTencentVerification,
+  tencentVerificationCapabilities,
+} from './tencent-verification-provider.mjs'
+import {
   compileGeometryCached,
   doorOpenState,
   raycastGeometry,
@@ -4720,11 +4724,12 @@ function verificationDeliveryConfigured(channel, env = process.env) {
 
 function accountAuthCapabilities(env = process.env) {
   const developmentDelivery = !productionSecurityEnabled(env)
+  const tencent = tencentVerificationCapabilities(env)
   return {
     schemaVersion: ACCOUNT_AUTH_SCHEMA_VERSION,
     channels: {
-      email: developmentDelivery || verificationDeliveryConfigured('email', env),
-      phone: developmentDelivery || verificationDeliveryConfigured('phone', env),
+      email: developmentDelivery || verificationDeliveryConfigured('email', env) || tencent.email,
+      phone: developmentDelivery || verificationDeliveryConfigured('phone', env) || tencent.phone,
     },
     developmentDelivery,
     verificationExpiresInSeconds: Math.floor(ACCOUNT_VERIFICATION_TTL_MS / 1000),
@@ -4739,7 +4744,15 @@ async function deliverAccountVerification(channel, destination, code, env = proc
       console.info(`[account-verification:${channel}] ${destination} => ${code}`)
       return { debugCode: code }
     }
-    throw new RoomProtocolError(503, 'verification-provider-unavailable')
+    const tencent = tencentVerificationCapabilities(env)
+    if (!tencent[channel]) throw new RoomProtocolError(503, 'verification-provider-unavailable')
+    try {
+      await deliverTencentVerification(channel, destination, code, { env })
+      return { debugCode: null }
+    } catch (error) {
+      console.error('[account-verification] Tencent Cloud delivery failed:', error?.message ?? error)
+      throw new RoomProtocolError(503, 'verification-delivery-failed')
+    }
   }
   if (productionSecurityEnabled(env) && !verificationDeliveryConfigured(channel, env)) {
     throw new RoomProtocolError(503, 'verification-provider-unavailable')

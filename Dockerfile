@@ -34,6 +34,7 @@ LABEL org.opencontainers.image.title="DNDSTARS-5E" \
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/scripts/static-server.mjs ./scripts/static-server.mjs
 COPY --from=build --chown=node:node /app/scripts/shared-server-core.mjs ./scripts/shared-server-core.mjs
+COPY --from=build --chown=node:node /app/scripts/tencent-verification-provider.mjs ./scripts/tencent-verification-provider.mjs
 COPY --from=build --chown=node:node /app/shared ./shared
 
 RUN mkdir -p /data && chown -R node:node /data

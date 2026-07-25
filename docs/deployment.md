@@ -98,6 +98,38 @@ STARS_ALLOW_LEGACY_ACCOUNT_CREATION=false
 验证码绝不会返回浏览器。开发／测试模式没有配置提供器时会把验证码输出到服务端日志，
 同时在响应中返回 `debugCode`，仅用于本机调试。
 
+### 4.2 腾讯云国际版直连
+
+部署在腾讯云国际账号时，也可以不运行额外 Webhook，直接由共享服务调用腾讯云
+SES 与 Global SMS。两个渠道共用一组仅具备发信权限的 CAM 子用户密钥：
+
+```text
+STARS_TENCENTCLOUD_EDITION=international
+STARS_TENCENTCLOUD_SECRET_ID=AKID...
+STARS_TENCENTCLOUD_SECRET_KEY=...
+
+STARS_TENCENT_SES_FROM_EMAIL=Astral Trace <no-reply@mail.astraltracevtt.com>
+STARS_TENCENT_SES_TEMPLATE_ID=已审核通过的数字模板ID
+STARS_TENCENT_SES_SUBJECT=Astral Trace 账号验证码
+
+STARS_TENCENT_SMS_SDK_APP_ID=Global SMS应用ID
+STARS_TENCENT_SMS_TEMPLATE_ID=已审核通过的模板ID
+STARS_TENCENT_SMS_SIGN_NAME=已审核签名；Global SMS允许不填时可留空
+```
+
+邮件通过 `ses.intl.tencentcloudapi.com` 的 `ap-singapore` 地域发送。邮件模板只声明
+`{{code}}` 一个变量；验证码有效期“10 分钟”应写成模板固定正文，避免模板变量数量不匹配。
+短信通过 `sms.intl.tencentcloudapi.com` 发送，模板只声明 `{1}` 一个变量。服务端使用
+TC3-HMAC-SHA256 签名，SecretKey 不进入请求正文、日志或浏览器。
+
+建议使用 `mail.astraltracevtt.com` 作为独立发信子域名，避免其 MX、SPF、DKIM 与网站根域
+或未来企业邮箱冲突。腾讯云 SES 控制台会为该子域名给出精确 DNS 记录，应以控制台显示值
+为准配置 Namecheap Advanced DNS。域名和模板审核通过前，不要在生产 `.env` 填模板 ID。
+
+生产服务器上的 `.env` 应由 `root` 拥有并设置为 `chmod 600`。CAM 密钥不要使用主账号密钥；
+子用户只授予 SES `SendEmail` 与 SMS `SendSms` 所需权限，并在可用时把密钥调用来源限制为
+服务器公网 IP。
+
 ## 5. 安全响应头
 
 生产服务器默认发送：

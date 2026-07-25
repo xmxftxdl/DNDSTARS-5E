@@ -204,6 +204,9 @@ describe('production account registration fail-closed boundary', () => {
       STARS_ALLOW_LEGACY_ACCOUNT_CREATION: 'false',
       STARS_EMAIL_VERIFICATION_WEBHOOK_URL: '',
       STARS_SMS_VERIFICATION_WEBHOOK_URL: '',
+      STARS_TENCENTCLOUD_EDITION: '',
+      STARS_TENCENTCLOUD_SECRET_ID: '',
+      STARS_TENCENTCLOUD_SECRET_KEY: '',
     })
   }, 30000)
 
@@ -228,6 +231,38 @@ describe('production account registration fail-closed boundary', () => {
       body: JSON.stringify({ channel: 'email', destination: 'user@example.com' }),
     })
     expect(verification.status).toBe(503)
+  })
+})
+
+describe('production Tencent Cloud account registration capability', () => {
+  let server: Running
+
+  beforeAll(async () => {
+    server = await startServer(5396, {
+      STARS_SECURITY_MODE: 'production',
+      STARS_PUBLIC_ORIGIN: 'http://127.0.0.1:5396',
+      STARS_ALLOWED_ORIGINS: '',
+      STARS_TENCENTCLOUD_EDITION: 'international',
+      STARS_TENCENTCLOUD_SECRET_ID: 'AKIDINTEGRATIONTEST',
+      STARS_TENCENTCLOUD_SECRET_KEY: 'integration-test-secret-key',
+      STARS_TENCENT_SES_FROM_EMAIL: 'Astral Trace <no-reply@mail.astraltracevtt.com>',
+      STARS_TENCENT_SES_TEMPLATE_ID: '10001',
+      STARS_TENCENT_SMS_SDK_APP_ID: '',
+      STARS_TENCENT_SMS_TEMPLATE_ID: '',
+    })
+  }, 30000)
+
+  afterAll(async () => {
+    if (server) await stopServer(server)
+  })
+
+  it('只开放配置完整的腾讯云验证码渠道', async () => {
+    const response = await fetch(`${server.base}/api/accounts/auth/config`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      channels: { email: true, phone: false },
+      developmentDelivery: false,
+    })
   })
 })
 
