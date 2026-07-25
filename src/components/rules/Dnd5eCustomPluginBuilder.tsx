@@ -14,6 +14,9 @@ import {
   type Dnd5ePluginAbilityGenerationDefinition,
   type Dnd5ePluginBackgroundDefinition,
   type Dnd5ePluginFeatureDefinition,
+  type Dnd5ePluginContentCategory,
+  type Dnd5ePluginDeclaredCapability,
+  type Dnd5ePluginDistributionPolicy,
   type Dnd5ePluginItemDefinition,
   type Dnd5ePluginRaceDefinition,
   type Dnd5ePluginSpellDefinition,
@@ -208,7 +211,20 @@ interface ItemDraft {
 type BuilderSection = 'races' | 'backgrounds' | 'features' | 'subclasses' | 'spells' | 'items' | 'methods'
 
 interface SavedBuilderDraft {
-  metadata: { id: string; name: string; version: string; publisher: string; license: string; description: string }
+  metadata: {
+    id: string
+    name: string
+    version: string
+    publisher: string
+    license: string
+    description: string
+    minimumGameProtocolVersion: number
+    dependencies: string
+    conflicts: string
+    declaredCapabilities: Dnd5ePluginDeclaredCapability[]
+    distributionPolicy: Dnd5ePluginDistributionPolicy
+    contentCategory: Dnd5ePluginContentCategory
+  }
   races: RaceDraft[]
   backgrounds: BackgroundDraft[]
   features: FeatureDraft[]
@@ -219,6 +235,19 @@ interface SavedBuilderDraft {
 }
 
 const DRAFT_STORAGE_KEY = 'dndstars5e:custom-rules-workshop:v1'
+const PLUGIN_DISTRIBUTION_POLICIES = [
+  ['room-distributable', '可随房间分发'],
+  ['account-entitled', '每个账号需单独授权'],
+  ['local-only', '仅本机使用'],
+] as const
+const PLUGIN_CONTENT_CATEGORIES = [
+  ['mixed', '混合内容'], ['rules', '规则'], ['subclasses', '子职'], ['spells', '法术'],
+  ['items', '物品'], ['monsters', '怪物'], ['adventure', '冒险'],
+] as const
+const PLUGIN_CAPABILITIES: readonly Dnd5ePluginDeclaredCapability[] = [
+  'damage', 'healing', 'temporary-hit-points', 'standard-condition', 'movement',
+  'resource', 'summon', 'persistent-area', 'spell-transaction', 'interrupt',
+]
 const SPELL_SCHOOLS = [['abjuration', '防护'], ['conjuration', '咒法'], ['divination', '预言'], ['enchantment', '惑控'], ['evocation', '塑能'], ['illusion', '幻术'], ['necromancy', '死灵'], ['transmutation', '变化']] as const
 const CASTING_UNITS = [['action', '动作'], ['bonus-action', '附赠动作'], ['reaction', '反应'], ['minute', '分钟'], ['hour', '小时']] as const
 const RANGE_TYPES = [['self', '自身'], ['touch', '触及'], ['distance', '距离'], ['sight', '视线'], ['unlimited', '无限'], ['special', '特殊']] as const
@@ -807,6 +836,12 @@ export default function Dnd5eCustomPluginBuilder({
     publisher: defaultPublisher || '房间 DM',
     license: '自定义内容；由房间 DM 负责授权',
     description: '由 DNDSTARS DM 规则包工作室生成。',
+    minimumGameProtocolVersion: 5,
+    dependencies: '',
+    conflicts: '',
+    declaredCapabilities: [] as Dnd5ePluginDeclaredCapability[],
+    distributionPolicy: 'room-distributable' as Dnd5ePluginDistributionPolicy,
+    contentCategory: 'mixed' as Dnd5ePluginContentCategory,
   })
   const [races, setRaces] = useState<RaceDraft[]>([])
   const [backgrounds, setBackgrounds] = useState<BackgroundDraft[]>([])
@@ -824,6 +859,16 @@ export default function Dnd5eCustomPluginBuilder({
       apiVersion: 2,
       rulesetId: 'dnd5e-2014-srd-5.1',
       stateSchemaVersion: 1,
+      manifestSchemaVersion: 1,
+      minimumGameProtocolVersion: metadata.minimumGameProtocolVersion,
+      dependencies: metadata.dependencies.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+        const [id = '', versionRange = '*', marker = ''] = entry.split(/\s+/)
+        return { id, versionRange, ...(marker === 'optional' ? { optional: true } : {}) }
+      }),
+      conflicts: metadata.conflicts.split(',').map((entry) => entry.trim()).filter(Boolean),
+      declaredCapabilities: metadata.declaredCapabilities,
+      distributionPolicy: metadata.distributionPolicy,
+      contentCategory: metadata.contentCategory,
     },
     races: races.map(toRaceDefinition),
     backgrounds: backgrounds.map(toBackgroundDefinition),
@@ -864,7 +909,7 @@ export default function Dnd5eCustomPluginBuilder({
       if (!saved.metadata || !Array.isArray(saved.races) || !Array.isArray(saved.methods)) {
         return setLocalError('本地草稿格式无效。')
       }
-      setMetadata(saved.metadata)
+      setMetadata((current) => ({ ...current, ...saved.metadata }))
       setRaces(saved.races)
       setBackgrounds(Array.isArray(saved.backgrounds) ? saved.backgrounds : [])
       setFeatures(Array.isArray(saved.features)
@@ -957,6 +1002,74 @@ export default function Dnd5eCustomPluginBuilder({
                 />
               </label>
             ))}
+          </div>
+          <div className="grid gap-3 rounded-2xl border border-white/8 bg-black/10 p-4 md:grid-cols-2 lg:grid-cols-3">
+            <BuilderNumber
+              label="最低游戏协议版本"
+              value={metadata.minimumGameProtocolVersion}
+              min={1}
+              max={10_000}
+              onChange={(minimumGameProtocolVersion) => setMetadata((current) => ({
+                ...current,
+                minimumGameProtocolVersion,
+              }))}
+            />
+            <BuilderSelect
+              label="分发策略"
+              value={metadata.distributionPolicy}
+              options={PLUGIN_DISTRIBUTION_POLICIES}
+              onChange={(distributionPolicy) => setMetadata((current) => ({
+                ...current,
+                distributionPolicy: distributionPolicy as Dnd5ePluginDistributionPolicy,
+              }))}
+            />
+            <BuilderSelect
+              label="内容分类"
+              value={metadata.contentCategory}
+              options={PLUGIN_CONTENT_CATEGORIES}
+              onChange={(contentCategory) => setMetadata((current) => ({
+                ...current,
+                contentCategory: contentCategory as Dnd5ePluginContentCategory,
+              }))}
+            />
+            <BuilderInput
+              label="依赖（逗号分隔：插件ID 版本范围 [optional]）"
+              value={metadata.dependencies}
+              onChange={(dependencies) => setMetadata((current) => ({ ...current, dependencies }))}
+            />
+            <BuilderInput
+              label="冲突插件 ID（逗号分隔）"
+              value={metadata.conflicts}
+              onChange={(conflicts) => setMetadata((current) => ({ ...current, conflicts }))}
+            />
+            <fieldset>
+              <legend className="mb-1.5 text-xs font-semibold text-slate-500">声明的 Headless capability</legend>
+              <div className="flex flex-wrap gap-1.5">
+                {PLUGIN_CAPABILITIES.map((capability) => {
+                  const selected = metadata.declaredCapabilities.includes(capability)
+                  return (
+                    <button
+                      key={capability}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setMetadata((current) => ({
+                        ...current,
+                        declaredCapabilities: selected
+                          ? current.declaredCapabilities.filter((entry) => entry !== capability)
+                          : [...current.declaredCapabilities, capability],
+                      }))}
+                      className={`rounded-lg border px-2 py-1 text-[10px] ${
+                        selected
+                          ? 'border-emerald-400/35 bg-emerald-500/10 text-emerald-100'
+                          : 'border-white/8 text-slate-500'
+                      }`}
+                    >
+                      {capability}
+                    </button>
+                  )
+                })}
+              </div>
+            </fieldset>
           </div>
 
           <nav className="flex flex-wrap gap-2" aria-label="规则内容分类">

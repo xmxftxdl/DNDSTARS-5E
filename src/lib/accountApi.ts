@@ -11,6 +11,12 @@ import {
   type AccountRecoveryReceipt,
   type AccountSession,
 } from './accountSession'
+import type {
+  Dnd5ePluginContentCategory,
+  Dnd5ePluginDeclaredCapability,
+  Dnd5ePluginDependency,
+  Dnd5ePluginDistributionPolicy,
+} from '../rulesets/dnd5e/pluginApi'
 
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 
@@ -66,6 +72,13 @@ export interface AccountPluginVersion {
   apiVersion: 1 | 2
   rulesetId: typeof DND5E_2014_RULESET_ID
   stateSchemaVersion: number
+  manifestSchemaVersion: 1
+  minimumGameProtocolVersion: number
+  dependencies: Dnd5ePluginDependency[]
+  conflicts: string[]
+  declaredCapabilities: Dnd5ePluginDeclaredCapability[]
+  distributionPolicy: Dnd5ePluginDistributionPolicy
+  contentCategory: Dnd5ePluginContentCategory
   publisher: string
   license: string
   description?: string
@@ -253,6 +266,13 @@ export async function uploadAccountPlugin(input: {
     apiVersion: 1 | 2
     rulesetId: typeof DND5E_2014_RULESET_ID
     stateSchemaVersion?: number
+    manifestSchemaVersion?: 1
+    minimumGameProtocolVersion?: number
+    dependencies?: readonly Dnd5ePluginDependency[]
+    conflicts?: readonly string[]
+    declaredCapabilities?: readonly Dnd5ePluginDeclaredCapability[]
+    distributionPolicy?: Dnd5ePluginDistributionPolicy
+    contentCategory?: Dnd5ePluginContentCategory
     publisher: string
     license: string
     description?: string
@@ -276,6 +296,15 @@ export async function uploadAccountPlugin(input: {
         'X-Stars-Plugin-State-Schema': String(input.manifest.stateSchemaVersion ?? 1),
         'X-Stars-Plugin-Api-Version': String(input.manifest.apiVersion),
         'X-Stars-Plugin-Ruleset': input.manifest.rulesetId,
+        'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+          manifestSchemaVersion: input.manifest.manifestSchemaVersion ?? 1,
+          minimumGameProtocolVersion: input.manifest.minimumGameProtocolVersion ?? 1,
+          dependencies: input.manifest.dependencies ?? [],
+          conflicts: input.manifest.conflicts ?? [],
+          declaredCapabilities: input.manifest.declaredCapabilities ?? [],
+          distributionPolicy: input.manifest.distributionPolicy ?? 'room-distributable',
+          contentCategory: input.manifest.contentCategory ?? 'mixed',
+        })),
         ...(input.manifest.description
           ? { 'X-Stars-Plugin-Description': encodeURIComponent(input.manifest.description) }
           : {}),
@@ -386,6 +415,7 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-plugin-version-conflict': '同一个插件版本已经存在不同文件；请提升插件版本号。',
     'account-plugin-version-limit': '账号插件版本数量已达到上限。',
     'account-plugin-storage-limit': '账号插件库空间已达到上限。',
+    'account-plugin-in-use': '该插件版本仍被账号角色或发布记录引用，不能删除。',
     'account-request-failed': '账号操作失败，请稍后重试。',
   }
   return messages[code] ?? messages['account-request-failed']

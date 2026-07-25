@@ -57,6 +57,32 @@ export const DND5E_RULES_PLUGIN_RULESET_ID = 'dnd5e-2014-srd-5.1' as const
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type Dnd5eRulesPluginApiVersion = typeof DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS[number]
+export type Dnd5ePluginDistributionPolicy = 'room-distributable' | 'account-entitled' | 'local-only'
+export type Dnd5ePluginContentCategory =
+  | 'rules'
+  | 'subclasses'
+  | 'spells'
+  | 'items'
+  | 'monsters'
+  | 'adventure'
+  | 'mixed'
+export type Dnd5ePluginDeclaredCapability =
+  | 'damage'
+  | 'healing'
+  | 'temporary-hit-points'
+  | 'standard-condition'
+  | 'movement'
+  | 'resource'
+  | 'summon'
+  | 'persistent-area'
+  | 'spell-transaction'
+  | 'interrupt'
+
+export interface Dnd5ePluginDependency {
+  id: string
+  versionRange: string
+  optional?: boolean
+}
 
 export interface Dnd5eRulesPluginManifest {
   /** Reverse-domain IDs are recommended, for example com.example.fighter-options. */
@@ -76,6 +102,15 @@ export interface Dnd5eRulesPluginManifest {
    * migration for every intermediate version.
    */
   stateSchemaVersion?: number
+  /** Versioned management metadata; omitted by legacy packages and treated as v1. */
+  manifestSchemaVersion?: 1
+  /** Shared game protocol required before this package can be enabled. */
+  minimumGameProtocolVersion?: number
+  dependencies?: readonly Dnd5ePluginDependency[]
+  conflicts?: readonly string[]
+  declaredCapabilities?: readonly Dnd5ePluginDeclaredCapability[]
+  distributionPolicy?: Dnd5ePluginDistributionPolicy
+  contentCategory?: Dnd5ePluginContentCategory
 }
 
 export interface Dnd5eRulesPluginStateMigration {
@@ -908,6 +943,47 @@ function assertManifest(manifest: Dnd5eRulesPluginManifest): void {
     manifest.stateSchemaVersion != null &&
     (!Number.isInteger(manifest.stateSchemaVersion) || manifest.stateSchemaVersion < 1 || manifest.stateSchemaVersion > 1_000)
   ) throw new Error(`Invalid plugin state schema version: ${manifest.id}`)
+  if (manifest.manifestSchemaVersion != null && manifest.manifestSchemaVersion !== 1) {
+    throw new Error(`Unsupported plugin manifest schema: ${manifest.id}`)
+  }
+  if (
+    manifest.minimumGameProtocolVersion != null &&
+    (!Number.isInteger(manifest.minimumGameProtocolVersion) || manifest.minimumGameProtocolVersion < 1)
+  ) throw new Error(`Invalid minimum game protocol: ${manifest.id}`)
+  if (
+    manifest.dependencies != null && (
+      !Array.isArray(manifest.dependencies) || manifest.dependencies.length > 32 ||
+      manifest.dependencies.some((dependency) =>
+        !dependency || !validId(dependency.id) || dependency.id === manifest.id ||
+        typeof dependency.versionRange !== 'string' || dependency.versionRange.length < 1 ||
+        dependency.versionRange.length > 120 ||
+        (dependency.optional != null && typeof dependency.optional !== 'boolean'))
+    )
+  ) throw new Error(`Invalid plugin dependencies: ${manifest.id}`)
+  if (
+    manifest.conflicts != null && (
+      !Array.isArray(manifest.conflicts) || manifest.conflicts.length > 32 ||
+      manifest.conflicts.some((pluginId) => !validId(pluginId) || pluginId === manifest.id)
+    )
+  ) throw new Error(`Invalid plugin conflicts: ${manifest.id}`)
+  const capabilities = new Set<Dnd5ePluginDeclaredCapability>([
+    'damage', 'healing', 'temporary-hit-points', 'standard-condition', 'movement',
+    'resource', 'summon', 'persistent-area', 'spell-transaction', 'interrupt',
+  ])
+  if (
+    manifest.declaredCapabilities != null && (
+      !Array.isArray(manifest.declaredCapabilities) || manifest.declaredCapabilities.length > capabilities.size ||
+      manifest.declaredCapabilities.some((capability) => !capabilities.has(capability))
+    )
+  ) throw new Error(`Invalid plugin capabilities: ${manifest.id}`)
+  if (
+    manifest.distributionPolicy != null &&
+    !['room-distributable', 'account-entitled', 'local-only'].includes(manifest.distributionPolicy)
+  ) throw new Error(`Invalid plugin distribution policy: ${manifest.id}`)
+  if (
+    manifest.contentCategory != null &&
+    !['rules', 'subclasses', 'spells', 'items', 'monsters', 'adventure', 'mixed'].includes(manifest.contentCategory)
+  ) throw new Error(`Invalid plugin content category: ${manifest.id}`)
   if (!(DND5E_RULES_PLUGIN_SUPPORTED_API_VERSIONS as readonly number[]).includes(manifest.apiVersion)) {
     throw new Error(`Unsupported rules plugin API version: ${manifest.apiVersion}`)
   }

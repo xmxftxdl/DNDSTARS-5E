@@ -179,6 +179,13 @@ export interface Dnd5eDeclarativeRulesPackageV1 {
     apiVersion: 2
     rulesetId: 'dnd5e-2014-srd-5.1'
     stateSchemaVersion?: number
+    manifestSchemaVersion?: 1
+    minimumGameProtocolVersion?: number
+    dependencies?: readonly import('./pluginApi').Dnd5ePluginDependency[]
+    conflicts?: readonly string[]
+    declaredCapabilities?: readonly import('./pluginApi').Dnd5ePluginDeclaredCapability[]
+    distributionPolicy?: import('./pluginApi').Dnd5ePluginDistributionPolicy
+    contentCategory?: import('./pluginApi').Dnd5ePluginContentCategory
   }
   subclasses: readonly DeclarativeSubclassDefinitionV1[]
   /** Existing data-only builder contributions. They are validated by their v2 validators. */
@@ -546,12 +553,49 @@ export function parseDnd5eDeclarativeRulesPackageV1(bytes: ArrayBuffer): Dnd5eDe
   assertKeys(parsed, ['format', 'schemaVersion', 'manifest', 'subclasses', 'legacy'], '规则包')
   if (parsed.schemaVersion !== 1) throw new Error('声明式规则包 schemaVersion 不受支持')
   if (!record(parsed.manifest)) throw new Error('声明式规则包清单无效')
-  assertKeys(parsed.manifest, ['id', 'name', 'version', 'publisher', 'license', 'description', 'apiVersion', 'rulesetId', 'stateSchemaVersion'], '规则包清单')
+  assertKeys(parsed.manifest, [
+    'id', 'name', 'version', 'publisher', 'license', 'description', 'apiVersion', 'rulesetId',
+    'stateSchemaVersion', 'manifestSchemaVersion', 'minimumGameProtocolVersion', 'dependencies',
+    'conflicts', 'declaredCapabilities', 'distributionPolicy', 'contentCategory',
+  ], '规则包清单')
   assertId(parsed.manifest.id, '规则包清单')
   for (const key of ['name', 'version', 'publisher', 'license'] as const) assertText(parsed.manifest[key], `规则包${key}`, 200)
   if (parsed.manifest.description != null && typeof parsed.manifest.description !== 'string') throw new Error('规则包说明无效')
   if (parsed.manifest.apiVersion !== 2 || parsed.manifest.rulesetId !== 'dnd5e-2014-srd-5.1') throw new Error('规则包 API 或 Ruleset 不兼容')
   if (parsed.manifest.stateSchemaVersion != null && !finiteInteger(parsed.manifest.stateSchemaVersion, 1, 1_000)) throw new Error('规则包状态版本无效')
+  if (parsed.manifest.manifestSchemaVersion != null && parsed.manifest.manifestSchemaVersion !== 1) throw new Error('规则包清单版本无效')
+  if (parsed.manifest.minimumGameProtocolVersion != null && !finiteInteger(parsed.manifest.minimumGameProtocolVersion, 1, 10_000)) throw new Error('规则包最低游戏协议无效')
+  const manifestId = parsed.manifest.id
+  if (parsed.manifest.dependencies != null && (
+    !Array.isArray(parsed.manifest.dependencies) || parsed.manifest.dependencies.length > 32 ||
+    parsed.manifest.dependencies.some((dependency) =>
+      !record(dependency) || !ID.test(String(dependency.id ?? '')) ||
+      dependency.id === manifestId ||
+      typeof dependency.versionRange !== 'string' || dependency.versionRange.length < 1 ||
+      dependency.versionRange.length > 120 ||
+      (dependency.optional != null && typeof dependency.optional !== 'boolean'))
+  )) throw new Error('规则包依赖声明无效')
+  if (parsed.manifest.conflicts != null && (
+    !Array.isArray(parsed.manifest.conflicts) || parsed.manifest.conflicts.length > 32 ||
+    parsed.manifest.conflicts.some((pluginId) =>
+      typeof pluginId !== 'string' || !ID.test(pluginId) || pluginId === manifestId)
+  )) throw new Error('规则包冲突声明无效')
+  const declaredCapabilities = new Set([
+    'damage', 'healing', 'temporary-hit-points', 'standard-condition', 'movement',
+    'resource', 'summon', 'persistent-area', 'spell-transaction', 'interrupt',
+  ])
+  if (parsed.manifest.declaredCapabilities != null && (
+    !Array.isArray(parsed.manifest.declaredCapabilities) ||
+    parsed.manifest.declaredCapabilities.length > declaredCapabilities.size ||
+    parsed.manifest.declaredCapabilities.some((capability) =>
+      typeof capability !== 'string' || !declaredCapabilities.has(capability))
+  )) throw new Error('规则包 capability 声明无效')
+  if (parsed.manifest.distributionPolicy != null && ![
+    'room-distributable', 'account-entitled', 'local-only',
+  ].includes(String(parsed.manifest.distributionPolicy))) throw new Error('规则包分发策略无效')
+  if (parsed.manifest.contentCategory != null && ![
+    'rules', 'subclasses', 'spells', 'items', 'monsters', 'adventure', 'mixed',
+  ].includes(String(parsed.manifest.contentCategory))) throw new Error('规则包内容分类无效')
   if (!Array.isArray(parsed.subclasses) || parsed.subclasses.length > 64) throw new Error('声明式子职列表无效')
   const subclassIds = new Set<string>()
   for (const subclass of parsed.subclasses) {

@@ -539,6 +539,15 @@ describe('账号插件库协议', () => {
       'X-Stars-Plugin-Api-Version': '2',
       'X-Stars-Plugin-Ruleset': 'dnd5e-2014-srd-5.1',
       'X-Stars-Plugin-Description': encodeURIComponent('账号私有规则包'),
+      'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+        manifestSchemaVersion: 1,
+        minimumGameProtocolVersion: 5,
+        dependencies: [{ id: 'com.example.core', versionRange: '^1.0.0', optional: true }],
+        conflicts: ['com.example.legacy'],
+        declaredCapabilities: ['damage', 'standard-condition'],
+        distributionPolicy: 'room-distributable',
+        contentCategory: 'rules',
+      })),
     }
     const upload = await fetch(`${offServer.base}${path}`, {
       method: 'PUT',
@@ -552,6 +561,12 @@ describe('账号插件库协议', () => {
       integrity,
       visibility: 'private',
       sizeBytes: bytes.length,
+      minimumGameProtocolVersion: 5,
+      dependencies: [{ id: 'com.example.core', versionRange: '^1.0.0', optional: true }],
+      conflicts: ['com.example.legacy'],
+      declaredCapabilities: ['damage', 'standard-condition'],
+      distributionPolicy: 'room-distributable',
+      contentCategory: 'rules',
     })
 
     const list = await fetch(`${offServer.base}/api/accounts/me/plugins`, {
@@ -568,6 +583,10 @@ describe('账号插件库协议', () => {
     })
     expect(download.status).toBe(200)
     expect(download.headers.get('X-Stars-Plugin-Integrity')).toBe(integrity)
+    expect(JSON.parse(decodeURIComponent(download.headers.get('X-Stars-Plugin-Metadata') ?? ''))).toMatchObject({
+      minimumGameProtocolVersion: 5,
+      declaredCapabilities: ['damage', 'standard-condition'],
+    })
     expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
 
     const forbiddenDownload = await fetch(`${offServer.base}${path}`, {

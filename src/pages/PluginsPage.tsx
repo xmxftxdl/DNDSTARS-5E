@@ -40,6 +40,7 @@ import {
   setRoomRulesSnapshot,
   subscribeRoomRules,
 } from '../lib/roomRulesState'
+import { dnd5ePluginCompatibilityReport } from '../rulesets/dnd5e/pluginCompatibility'
 
 const EMPTY_LIBRARY: AccountPluginLibrary = {
   plugins: [],
@@ -253,6 +254,11 @@ export default function PluginsPage() {
 
   const usedBytes = library.plugins.reduce((total, plugin) => total + plugin.sizeBytes, 0)
   const activePins = new Map((roomRules?.requiredPlugins ?? []).map((plugin) => [plugin.id, plugin]))
+  const roomPluginMetadata = (roomRules?.requiredPlugins ?? []).map((pin) =>
+    library.plugins.find((candidate) =>
+      candidate.id === pin.id &&
+      candidate.version === pin.version &&
+      candidate.integrity === pin.integrity) ?? { id: pin.id, version: pin.version })
   const localPending = (host?.listInstalled() ?? []).flatMap((installed) => {
     const manifest = host?.listActive().find((candidate) => candidate.id === installed.id)
     if (!manifest || library.plugins.some((candidate) =>
@@ -432,6 +438,14 @@ export default function PluginsPage() {
                     const roomPin = activePins.get(plugin.id)
                     const activeExact = roomPin?.version === plugin.version && roomPin.integrity === plugin.integrity
                     const activeOther = !!roomPin && !activeExact
+                    const previous = activeOther
+                      ? roomPluginMetadata.find((candidate) => candidate.id === plugin.id)
+                      : undefined
+                    const compatibility = dnd5ePluginCompatibilityReport({
+                      candidate: plugin,
+                      installed: roomPluginMetadata.filter((candidate) => candidate.id !== plugin.id),
+                      previous,
+                    })
                     return (
                       <article key={key} className="rounded-2xl border border-white/8 bg-black/15 p-5">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -457,22 +471,54 @@ export default function PluginsPage() {
                               <div><dt className="inline text-slate-600">发布者：</dt><dd className="inline">{plugin.publisher}</dd></div>
                               <div><dt className="inline text-slate-600">许可证：</dt><dd className="inline">{plugin.license}</dd></div>
                               <div><dt className="inline text-slate-600">状态版本：</dt><dd className="inline">v{plugin.stateSchemaVersion}</dd></div>
+                              <div><dt className="inline text-slate-600">最低协议：</dt><dd className="inline">v{plugin.minimumGameProtocolVersion}</dd></div>
+                              <div><dt className="inline text-slate-600">内容分类：</dt><dd className="inline">{plugin.contentCategory}</dd></div>
+                              <div><dt className="inline text-slate-600">分发策略：</dt><dd className="inline">{plugin.distributionPolicy}</dd></div>
                               <div><dt className="inline text-slate-600">大小：</dt><dd className="inline">{formatBytes(plugin.sizeBytes)}</dd></div>
                               <div><dt className="inline text-slate-600">保存时间：</dt><dd className="inline">{formatDate(plugin.createdAt)}</dd></div>
                               <div><dt className="inline text-slate-600">规则集：</dt><dd className="inline">D&D 5e 2014 / SRD 5.1</dd></div>
                               <div className="sm:col-span-2"><dt className="inline text-slate-600">SHA-256：</dt><dd className="break-all font-mono text-[10px]">{plugin.integrity}</dd></div>
                             </dl>
+                            {(plugin.dependencies.length > 0 || plugin.conflicts.length > 0 || plugin.declaredCapabilities.length > 0) && (
+                              <div className="mt-3 space-y-1 text-xs text-slate-500">
+                                {plugin.dependencies.length > 0 && (
+                                  <p>依赖：{plugin.dependencies.map((dependency) =>
+                                    `${dependency.id} ${dependency.versionRange}${dependency.optional ? '（可选）' : ''}`).join('、')}</p>
+                                )}
+                                {plugin.conflicts.length > 0 && <p>冲突：{plugin.conflicts.join('、')}</p>}
+                                {plugin.declaredCapabilities.length > 0 && (
+                                  <p>Headless capability：{plugin.declaredCapabilities.join('、')}</p>
+                                )}
+                              </div>
+                            )}
+                            {(compatibility.errors.length > 0 || compatibility.warnings.length > 0) && (
+                              <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+                                compatibility.compatible
+                                  ? 'border-amber-400/15 bg-amber-500/5 text-amber-100'
+                                  : 'border-rose-400/20 bg-rose-500/5 text-rose-100'
+                              }`}>
+                                {[...compatibility.errors, ...compatibility.warnings].map((issue) => (
+                                  <p key={`${issue.code}:${issue.pluginId ?? issue.message}`}>• {issue.message}</p>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className="flex shrink-0 flex-wrap gap-2">
                             {roomSession?.role === 'dm' && (
                               <button
                                 type="button"
-                                disabled={busyKey != null || activeExact}
+                                disabled={busyKey != null || activeExact || !compatibility.compatible}
                                 onClick={() => void enableInRoom(plugin)}
                                 className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-45"
                               >
                                 <Users className="h-4 w-4" />
-                                {busyKey === `${key}:enable` ? '正在激活…' : activeExact ? '房间已启用' : '启用到房间'}
+                                {busyKey === `${key}:enable`
+                                  ? '正在激活…'
+                                  : activeExact
+                                    ? '房间已启用'
+                                    : activeOther
+                                      ? '回滚/切换到此版本'
+                                      : '启用到房间'}
                               </button>
                             )}
                             <button

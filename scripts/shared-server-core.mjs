@@ -71,6 +71,9 @@ export const ACCOUNT_SESSION_LIMIT = 12
 export const ACCOUNT_CHARACTER_LIMIT = 100
 export const ACCOUNT_PLUGIN_VERSION_LIMIT = 100
 export const ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT = 128 * 1024 * 1024
+export const PLUGIN_MANIFEST_SCHEMA_VERSION = 1
+export const PLUGIN_DEPENDENCY_LIMIT = 32
+export const PLUGIN_CONFLICT_LIMIT = 32
 export const ACCOUNT_AUTH_SCHEMA_VERSION = 1
 export const ACCOUNT_VERIFICATION_TTL_MS = 10 * 60 * 1000
 export const ACCOUNT_VERIFICATION_ATTEMPT_LIMIT = 5
@@ -985,8 +988,8 @@ export function applyCors(req, res, env = process.env) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description')
-  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   return true
 }
 
@@ -5208,7 +5211,14 @@ function normalizeAccountPluginVersion(value) {
   const fileName = normalizedLabel(value.fileName, 180)
   const apiVersion = Number(value.apiVersion)
   const stateSchemaVersion = Number(value.stateSchemaVersion ?? 1)
+  const manifestSchemaVersion = Number(value.manifestSchemaVersion ?? 1)
+  const minimumGameProtocolVersion = Number(value.minimumGameProtocolVersion ?? 1)
   const sizeBytes = Number(value.sizeBytes)
+  const dependencies = normalizePluginDependencies(value.dependencies)
+  const conflicts = normalizePluginIds(value.conflicts, PLUGIN_CONFLICT_LIMIT)
+  const declaredCapabilities = normalizePluginCapabilities(value.declaredCapabilities)
+  const distributionPolicy = normalizePluginDistributionPolicy(value.distributionPolicy)
+  const contentCategory = normalizePluginContentCategory(value.contentCategory)
   if (
     !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(id) ||
     !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(version) ||
@@ -5217,6 +5227,10 @@ function normalizeAccountPluginVersion(value) {
     ![1, 2].includes(apiVersion) ||
     value.rulesetId !== DND5E_2014_RULESET_ID ||
     !Number.isInteger(stateSchemaVersion) || stateSchemaVersion < 1 || stateSchemaVersion > 1_000 ||
+    manifestSchemaVersion !== PLUGIN_MANIFEST_SCHEMA_VERSION ||
+    !Number.isInteger(minimumGameProtocolVersion) || minimumGameProtocolVersion < 1 ||
+    minimumGameProtocolVersion > 10_000 ||
+    !dependencies || !conflicts || !declaredCapabilities || !distributionPolicy || !contentCategory ||
     !Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > STATE_MAX_BYTES ||
     !Number.isFinite(value.createdAt) || !Number.isFinite(value.updatedAt)
   ) return null
@@ -5228,6 +5242,13 @@ function normalizeAccountPluginVersion(value) {
     apiVersion,
     rulesetId: DND5E_2014_RULESET_ID,
     stateSchemaVersion,
+    manifestSchemaVersion,
+    minimumGameProtocolVersion,
+    dependencies,
+    conflicts,
+    declaredCapabilities,
+    distributionPolicy,
+    contentCategory,
     publisher,
     license,
     ...(description ? { description } : {}),
@@ -5240,6 +5261,76 @@ function normalizeAccountPluginVersion(value) {
   }
 }
 
+function normalizePluginIds(value, limit) {
+  if (value == null) return []
+  if (!Array.isArray(value) || value.length > limit) return null
+  const result = []
+  for (const candidate of value) {
+    const id = typeof candidate === 'string' ? candidate.trim() : ''
+    if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(id) || result.includes(id)) return null
+    result.push(id)
+  }
+  return result
+}
+
+function normalizePluginDependencies(value) {
+  if (value == null) return []
+  if (!Array.isArray(value) || value.length > PLUGIN_DEPENDENCY_LIMIT) return null
+  const result = []
+  for (const candidate of value) {
+    if (!plainObject(candidate)) return null
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : ''
+    const versionRange = normalizedLabel(candidate.versionRange, 120)
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(id) ||
+      !versionRange || result.some((dependency) => dependency.id === id) ||
+      (candidate.optional != null && typeof candidate.optional !== 'boolean')
+    ) return null
+    result.push({ id, versionRange, ...(candidate.optional ? { optional: true } : {}) })
+  }
+  return result
+}
+
+function normalizePluginCapabilities(value) {
+  const allowed = new Set([
+    'damage', 'healing', 'temporary-hit-points', 'standard-condition', 'movement',
+    'resource', 'summon', 'persistent-area', 'spell-transaction', 'interrupt',
+  ])
+  if (value == null) return []
+  if (!Array.isArray(value) || value.length > allowed.size) return null
+  const result = []
+  for (const candidate of value) {
+    if (typeof candidate !== 'string' || !allowed.has(candidate) || result.includes(candidate)) return null
+    result.push(candidate)
+  }
+  return result
+}
+
+function normalizePluginDistributionPolicy(value) {
+  if (value == null) return 'room-distributable'
+  return ['room-distributable', 'account-entitled', 'local-only'].includes(value) ? value : null
+}
+
+function normalizePluginContentCategory(value) {
+  if (value == null) return 'mixed'
+  return ['rules', 'subclasses', 'spells', 'items', 'monsters', 'adventure', 'mixed'].includes(value)
+    ? value
+    : null
+}
+
+function decodedPluginMetadataHeader(req) {
+  const raw = req?.headers?.['x-stars-plugin-metadata']
+  if (raw == null || raw === '') return {}
+  if (typeof raw !== 'string' || raw.length > 16_000) throw new RoomProtocolError(400, 'invalid-account-plugin')
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw))
+    if (!plainObject(parsed)) throw new Error('metadata must be an object')
+    return parsed
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-account-plugin')
+  }
+}
+
 function accountPluginVersions(account) {
   return (Array.isArray(account?.pluginLibrary) ? account.pluginLibrary : [])
     .map(normalizeAccountPluginVersion)
@@ -5247,6 +5338,7 @@ function accountPluginVersions(account) {
 }
 
 function accountPluginVersionFromUpload(req, pluginId, pluginVersion, sizeBytes, now = Date.now()) {
+  const metadata = decodedPluginMetadataHeader(req)
   const stateSchemaVersion = Number(req?.headers?.['x-stars-plugin-state-schema'] ?? 1)
   const apiVersion = Number(req?.headers?.['x-stars-plugin-api-version'])
   const rulesetId = typeof req?.headers?.['x-stars-plugin-ruleset'] === 'string'
@@ -5275,6 +5367,13 @@ function accountPluginVersionFromUpload(req, pluginId, pluginVersion, sizeBytes,
     apiVersion,
     rulesetId,
     stateSchemaVersion,
+    manifestSchemaVersion: metadata.manifestSchemaVersion,
+    minimumGameProtocolVersion: metadata.minimumGameProtocolVersion,
+    dependencies: metadata.dependencies,
+    conflicts: metadata.conflicts,
+    declaredCapabilities: metadata.declaredCapabilities,
+    distributionPolicy: metadata.distributionPolicy,
+    contentCategory: metadata.contentCategory,
     publisher,
     license,
     description,
@@ -5763,6 +5862,15 @@ async function handleAccountApi(req, res, parsed, ctx) {
         'X-Stars-Plugin-State-Schema': String(current.stateSchemaVersion),
         'X-Stars-Plugin-Api-Version': String(current.apiVersion),
         'X-Stars-Plugin-Ruleset': current.rulesetId,
+        'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+          manifestSchemaVersion: current.manifestSchemaVersion,
+          minimumGameProtocolVersion: current.minimumGameProtocolVersion,
+          dependencies: current.dependencies,
+          conflicts: current.conflicts,
+          declaredCapabilities: current.declaredCapabilities,
+          distributionPolicy: current.distributionPolicy,
+          contentCategory: current.contentCategory,
+        })),
       })
       res.end(bytes)
       return true
@@ -5770,6 +5878,13 @@ async function handleAccountApi(req, res, parsed, ctx) {
 
     if (req.method === 'DELETE') {
       if (!current) throw new RoomProtocolError(404, 'account-plugin-not-found')
+      const usedByCharacter = (Array.isArray(account.characters) ? account.characters : []).some((character) =>
+        Array.isArray(character?.compatibility?.requiredPlugins) &&
+        character.compatibility.requiredPlugins.some((requirement) =>
+          requirement?.id === current.id &&
+          requirement?.version === current.version &&
+          requirement?.integrity === current.integrity))
+      if (usedByCharacter) throw new RoomProtocolError(409, 'account-plugin-in-use')
       const now = Date.now()
       await mutateAccount(ctx, account.accountId, (latest) => ({
         ...latest,
