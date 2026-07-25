@@ -17,6 +17,9 @@ export interface AccountRecoveryReceipt {
   recoveryCode: string
 }
 
+let cachedSessionRaw: string | null | undefined
+let cachedSession: AccountSession | null = null
+
 function storageAvailable(): boolean {
   return typeof window !== 'undefined' && !!window.localStorage
 }
@@ -37,19 +40,33 @@ export function getAccountSession(): AccountSession | null {
   if (!storageAvailable()) return null
   try {
     const raw = window.localStorage.getItem(ACCOUNT_SESSION_STORAGE_KEY)
-    if (!raw) return null
+    if (raw === cachedSessionRaw) return cachedSession
+    if (!raw) {
+      cachedSessionRaw = null
+      cachedSession = null
+      return null
+    }
     const parsed: unknown = JSON.parse(raw)
-    if (isAccountSession(parsed)) return parsed
+    if (isAccountSession(parsed)) {
+      cachedSessionRaw = raw
+      cachedSession = parsed
+      return cachedSession
+    }
+    window.localStorage.removeItem(ACCOUNT_SESSION_STORAGE_KEY)
   } catch {
-    // Invalid browser state is discarded below.
+    // Unavailable or invalid browser state is discarded below.
   }
-  window.localStorage.removeItem(ACCOUNT_SESSION_STORAGE_KEY)
+  cachedSessionRaw = null
+  cachedSession = null
   return null
 }
 
 export function saveAccountSession(session: AccountSession): void {
   if (!storageAvailable() || !isAccountSession(session)) return
-  window.localStorage.setItem(ACCOUNT_SESSION_STORAGE_KEY, JSON.stringify(session))
+  const raw = JSON.stringify(session)
+  window.localStorage.setItem(ACCOUNT_SESSION_STORAGE_KEY, raw)
+  cachedSessionRaw = raw
+  cachedSession = session
   window.localStorage.setItem(ACCOUNT_RECOVERY_HINT_STORAGE_KEY, session.accountId)
   window.dispatchEvent(new Event(ACCOUNT_SESSION_EVENT))
 }
@@ -57,6 +74,8 @@ export function saveAccountSession(session: AccountSession): void {
 export function clearAccountSession(): void {
   if (!storageAvailable()) return
   window.localStorage.removeItem(ACCOUNT_SESSION_STORAGE_KEY)
+  cachedSessionRaw = null
+  cachedSession = null
   window.dispatchEvent(new Event(ACCOUNT_SESSION_EVENT))
 }
 
