@@ -42,6 +42,7 @@ export interface AccountProfile {
   username?: string
   contactChannel?: 'email' | 'phone'
   contactLabel?: string
+  pluginAdmin?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -416,6 +417,14 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-plugin-version-limit': '账号插件版本数量已达到上限。',
     'account-plugin-storage-limit': '账号插件库空间已达到上限。',
     'account-plugin-in-use': '该插件版本仍被账号角色或发布记录引用，不能删除。',
+    'public-plugin-must-be-declarative-json': '公开目录只接受声明式 JSON 规则包，不接受 JavaScript 插件。',
+    'invalid-public-plugin-package': '规则包未通过公开发布结构校验。',
+    'plugin-not-publicly-distributable': '该版本的分发策略不允许发布到公共目录。',
+    'plugin-id-owned-by-other-publisher': '这个插件 ID 已由其他发布者登记。',
+    'public-plugin-not-found': '公开目录中没有找到这个插件版本。',
+    'public-plugin-integrity-mismatch': '公开插件文件的 SHA-256 校验失败。',
+    'plugin-admin-required': '当前账号没有插件审核权限。',
+    'plugin-catalog-request-failed': '插件目录请求失败，请稍后再试。',
     'account-request-failed': '账号操作失败，请稍后重试。',
   }
   return messages[code] ?? messages['account-request-failed']

@@ -616,6 +616,138 @@ describe('账号插件库协议', () => {
     }).then((response) => response.json()) as { plugins: unknown[] }
     expect(after.plugins).toEqual([])
   })
+
+  it('只将声明式规则包发布到可搜索目录，并支持公开下载、发布者页和举报', async () => {
+    const createAccount = async (displayName: string, clientId: string) => {
+      const response = await fetch(`${offServer.base}/api/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName, clientId }),
+      })
+      expect(response.status).toBe(201)
+      return response.json() as Promise<{ session: { accountId: string; sessionToken: string } }>
+    }
+    const owner = await createAccount('公开作者', 'catalog-owner-client')
+    const reporter = await createAccount('举报测试者', 'catalog-reporter-client')
+    const pluginId = 'com.example.catalog'
+    const pluginVersion = '1.2.0'
+    const packageValue = {
+      format: 'dndstars5e-declarative',
+      schemaVersion: 1,
+      manifest: {
+        id: pluginId,
+        name: '目录规则包',
+        version: pluginVersion,
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        stateSchemaVersion: 1,
+        manifestSchemaVersion: 1,
+        minimumGameProtocolVersion: 5,
+        dependencies: [],
+        conflicts: [],
+        declaredCapabilities: ['damage'],
+        distributionPolicy: 'room-distributable',
+        contentCategory: 'rules',
+        publisher: '公开作者',
+        license: 'CC0-1.0',
+      },
+      subclasses: [],
+      legacy: {
+        manifest: { id: pluginId },
+        races: [],
+        backgrounds: [],
+        features: [],
+        spells: [],
+        items: [],
+        abilityGenerationMethods: [],
+      },
+    }
+    const bytes = Buffer.from(JSON.stringify(packageValue), 'utf8')
+    const integrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+    const accountPath = `/api/accounts/me/plugins/${pluginId}/versions/${pluginVersion}`
+    const upload = await fetch(`${offServer.base}${accountPath}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Stars-Account-Token': owner.session.sessionToken,
+        'X-Stars-Plugin-Version': pluginVersion,
+        'X-Stars-Plugin-Integrity': integrity,
+        'X-Stars-Plugin-Filename': encodeURIComponent(`${pluginId}.dndstars5e`),
+        'X-Stars-Plugin-Name': encodeURIComponent('目录规则包'),
+        'X-Stars-Plugin-Publisher': encodeURIComponent('公开作者'),
+        'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+        'X-Stars-Plugin-State-Schema': '1',
+        'X-Stars-Plugin-Api-Version': '2',
+        'X-Stars-Plugin-Ruleset': 'dnd5e-2014-srd-5.1',
+        'X-Stars-Plugin-Description': encodeURIComponent('可以搜索的安全规则包'),
+        'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+          manifestSchemaVersion: 1,
+          minimumGameProtocolVersion: 5,
+          dependencies: [],
+          conflicts: [],
+          declaredCapabilities: ['damage'],
+          distributionPolicy: 'room-distributable',
+          contentCategory: 'rules',
+        })),
+      },
+      body: bytes,
+    })
+    expect(upload.status).toBe(201)
+
+    const publication = await fetch(`${offServer.base}${accountPath}/publication`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': owner.session.sessionToken,
+      },
+      body: JSON.stringify({ visibility: 'public', changelog: '初次发布', tags: ['战斗', '规则'] }),
+    })
+    expect(publication.status).toBe(201)
+    await expect(publication.json()).resolves.toMatchObject({ status: 'published' })
+
+    const catalog = await fetch(`${offServer.base}/api/plugins/catalog?q=目录&category=rules`)
+    expect(catalog.status).toBe(200)
+    await expect(catalog.json()).resolves.toMatchObject({
+      plugins: [{
+        id: pluginId,
+        publisher: { accountId: owner.session.accountId, displayName: '公开作者' },
+        versions: [{ version: pluginVersion, integrity, status: 'published' }],
+      }],
+    })
+
+    const publisher = await fetch(
+      `${offServer.base}/api/plugins/publishers/${owner.session.accountId}`,
+    )
+    expect(publisher.status).toBe(200)
+    await expect(publisher.json()).resolves.toMatchObject({
+      publisher: { accountId: owner.session.accountId },
+      plugins: [{ id: pluginId }],
+    })
+
+    const download = await fetch(
+      `${offServer.base}/api/plugins/catalog/${pluginId}/versions/${pluginVersion}/download`,
+    )
+    expect(download.status).toBe(200)
+    expect(download.headers.get('X-Stars-Plugin-Integrity')).toBe(integrity)
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
+
+    const report = await fetch(`${offServer.base}/api/plugins/catalog/${pluginId}/reports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': reporter.session.sessionToken,
+      },
+      body: JSON.stringify({ version: pluginVersion, category: 'other', details: '审核流程测试' }),
+    })
+    expect(report.status).toBe(201)
+
+    const removePublished = await fetch(`${offServer.base}${accountPath}`, {
+      method: 'DELETE',
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    })
+    expect(removePublished.status).toBe(409)
+    await expect(removePublished.json()).resolves.toMatchObject({ error: 'account-plugin-in-use' })
+  })
 })
 
 describe('账号验证码注册与密码登录协议', () => {

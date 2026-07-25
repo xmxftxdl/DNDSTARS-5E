@@ -4618,6 +4618,144 @@ function accountPluginBlobFile(ctx, integrity) {
   return path.join(accountPluginBlobDirectory(ctx), `${digest}.dndstars5e`)
 }
 
+function pluginRegistryFile(ctx) {
+  return path.join(lobbyRoot(ctx), 'plugin-registry.json')
+}
+
+function emptyPluginRegistry() {
+  return { schemaVersion: 1, entries: [], reports: [] }
+}
+
+function normalizePluginRegistry(value) {
+  if (!plainObject(value) || value.schemaVersion !== 1) return emptyPluginRegistry()
+  return {
+    schemaVersion: 1,
+    entries: Array.isArray(value.entries) ? value.entries.filter(plainObject).slice(0, 5_000) : [],
+    reports: Array.isArray(value.reports) ? value.reports.filter(plainObject).slice(-10_000) : [],
+  }
+}
+
+async function readPluginRegistry(ctx) {
+  try {
+    return normalizePluginRegistry(JSON.parse(await readFile(pluginRegistryFile(ctx), 'utf8')))
+  } catch {
+    return emptyPluginRegistry()
+  }
+}
+
+async function mutatePluginRegistry(ctx, updater) {
+  await mkdir(lobbyRoot(ctx), { recursive: true })
+  const result = await atomicMutateJsonStateLocked(pluginRegistryFile(ctx), (current) => {
+    const registry = normalizePluginRegistry(current)
+    const next = updater(registry)
+    return { ok: true, changed: true, next }
+  })
+  if (!result?.ok) throw new RoomProtocolError(result?.status ?? 500, result?.error ?? 'plugin-registry-write-failed')
+  return normalizePluginRegistry(result.next)
+}
+
+function pluginRegistryAdministrator(account, env = process.env) {
+  const configured = String(env.STARS_PLUGIN_ADMIN_ACCOUNT_IDS ?? '')
+    .split(',').map((value) => value.trim()).filter(Boolean)
+  return configured.includes(account?.accountId) ||
+    (!productionSecurityEnabled(env) && configured.includes('*'))
+}
+
+function pluginRegistryPublicVersion(version) {
+  return {
+    version: version.version,
+    integrity: version.integrity,
+    stateSchemaVersion: version.stateSchemaVersion,
+    manifestSchemaVersion: version.manifestSchemaVersion,
+    minimumGameProtocolVersion: version.minimumGameProtocolVersion,
+    dependencies: version.dependencies,
+    conflicts: version.conflicts,
+    declaredCapabilities: version.declaredCapabilities,
+    distributionPolicy: version.distributionPolicy,
+    contentCategory: version.contentCategory,
+    license: version.license,
+    fileName: version.fileName,
+    sizeBytes: version.sizeBytes,
+    changelog: version.changelog,
+    visibility: version.visibility,
+    status: version.status,
+    submittedAt: version.submittedAt,
+    ...(version.publishedAt ? { publishedAt: version.publishedAt } : {}),
+    ...(version.moderationNote ? { moderationNote: version.moderationNote } : {}),
+  }
+}
+
+function pluginRegistryPublicEntry(entry, includeUnlisted = false) {
+  if (!plainObject(entry)) return null
+  const versions = (Array.isArray(entry.versions) ? entry.versions : [])
+    .filter((version) =>
+      version?.status === 'published' &&
+      (includeUnlisted || version.visibility === 'public'))
+    .sort((left, right) => Number(right.publishedAt ?? 0) - Number(left.publishedAt ?? 0))
+    .map(pluginRegistryPublicVersion)
+  if (versions.length === 0) return null
+  return {
+    schemaVersion: 1,
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    publisher: entry.publisher,
+    contentCategory: entry.contentCategory,
+    tags: Array.isArray(entry.tags) ? entry.tags : [],
+    versions,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+  }
+}
+
+function validateDeclarativePackageForPublication(bytes, plugin) {
+  let parsed
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'))
+  } catch {
+    throw new RoomProtocolError(400, 'public-plugin-must-be-declarative-json')
+  }
+  if (
+    !plainObject(parsed) ||
+    parsed.format !== 'dndstars5e-declarative' ||
+    parsed.schemaVersion !== 1 ||
+    !plainObject(parsed.manifest) ||
+    parsed.manifest.id !== plugin.id ||
+    parsed.manifest.name !== plugin.name ||
+    parsed.manifest.version !== plugin.version ||
+    parsed.manifest.publisher !== plugin.publisher ||
+    parsed.manifest.license !== plugin.license ||
+    parsed.manifest.apiVersion !== 2 ||
+    parsed.manifest.rulesetId !== DND5E_2014_RULESET_ID ||
+    parsed.manifest.distributionPolicy === 'local-only' ||
+    parsed.manifest.distributionPolicy === 'account-entitled'
+  ) throw new RoomProtocolError(400, 'invalid-public-plugin-package')
+  if (!Array.isArray(parsed.subclasses) || !plainObject(parsed.legacy)) {
+    throw new RoomProtocolError(400, 'invalid-public-plugin-package')
+  }
+  const packageMetadata = {
+    stateSchemaVersion: Number(parsed.manifest.stateSchemaVersion ?? 1),
+    manifestSchemaVersion: Number(parsed.manifest.manifestSchemaVersion ?? 1),
+    minimumGameProtocolVersion: Number(parsed.manifest.minimumGameProtocolVersion ?? 1),
+    dependencies: normalizePluginDependencies(parsed.manifest.dependencies),
+    conflicts: normalizePluginIds(parsed.manifest.conflicts, PLUGIN_CONFLICT_LIMIT),
+    declaredCapabilities: normalizePluginCapabilities(parsed.manifest.declaredCapabilities),
+    distributionPolicy: normalizePluginDistributionPolicy(parsed.manifest.distributionPolicy),
+    contentCategory: normalizePluginContentCategory(parsed.manifest.contentCategory),
+  }
+  if (
+    packageMetadata.stateSchemaVersion !== plugin.stateSchemaVersion ||
+    packageMetadata.manifestSchemaVersion !== plugin.manifestSchemaVersion ||
+    packageMetadata.minimumGameProtocolVersion !== plugin.minimumGameProtocolVersion ||
+    JSON.stringify(packageMetadata.dependencies) !== JSON.stringify(plugin.dependencies) ||
+    JSON.stringify(packageMetadata.conflicts) !== JSON.stringify(plugin.conflicts) ||
+    JSON.stringify(packageMetadata.declaredCapabilities) !== JSON.stringify(plugin.declaredCapabilities) ||
+    packageMetadata.distributionPolicy !== plugin.distributionPolicy ||
+    packageMetadata.contentCategory !== plugin.contentCategory
+  ) throw new RoomProtocolError(409, 'public-plugin-metadata-mismatch')
+  return parsed
+}
+
 function accountAuthLockFile(ctx) {
   return path.join(accountDirectory(ctx), '.auth-registry')
 }
@@ -4835,6 +4973,7 @@ function accountPublicProfile(account) {
       : {}),
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
+    pluginAdmin: pluginRegistryAdministrator(account),
   }
 }
 
@@ -5665,6 +5804,182 @@ function applyLobbyRateLimit(req, res, ctx) {
   return false
 }
 
+async function handlePluginCatalogApi(req, res, parsed, ctx) {
+  if (!parsed.pathname.startsWith('/api/plugins')) return false
+  if (!applyLobbyRateLimit(req, res, ctx)) return true
+
+  if (parsed.pathname === '/api/plugins/catalog' && req.method === 'GET') {
+    const query = normalizedLabel(parsed.searchParams.get('q'), 100).toLocaleLowerCase()
+    const category = normalizedLabel(parsed.searchParams.get('category'), 40)
+    const publisher = normalizedLabel(parsed.searchParams.get('publisher'), 40)
+    const registry = await readPluginRegistry(ctx)
+    const plugins = registry.entries
+      .map((entry) => pluginRegistryPublicEntry(entry))
+      .filter(Boolean)
+      .filter((entry) => !category || entry.contentCategory === category)
+      .filter((entry) => !publisher || entry.publisher?.accountId === publisher)
+      .filter((entry) => !query || [
+        entry.id, entry.name, entry.description, entry.publisher?.displayName, ...(entry.tags ?? []),
+      ].some((value) => String(value ?? '').toLocaleLowerCase().includes(query)))
+      .sort((left, right) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0))
+      .slice(0, 200)
+    writeJson(res, 200, { plugins })
+    return true
+  }
+
+  if (parsed.pathname === '/api/plugins/moderation' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(account)) throw new RoomProtocolError(403, 'plugin-admin-required')
+    const registry = await readPluginRegistry(ctx)
+    const pending = registry.entries.flatMap((entry) =>
+      (Array.isArray(entry.versions) ? entry.versions : [])
+        .filter((version) => version.status === 'pending')
+        .map((version) => ({ plugin: { id: entry.id, name: entry.name, publisher: entry.publisher }, version })))
+    writeJson(res, 200, { pending, reports: registry.reports.slice(-500).reverse() })
+    return true
+  }
+
+  const publisherMatch = parsed.pathname.match(/^\/api\/plugins\/publishers\/([^/]+)$/)
+  if (publisherMatch && req.method === 'GET') {
+    const accountId = decodeURIComponent(publisherMatch[1] ?? '')
+    const registry = await readPluginRegistry(ctx)
+    const plugins = registry.entries
+      .filter((entry) => entry.publisher?.accountId === accountId)
+      .map((entry) => pluginRegistryPublicEntry(entry))
+      .filter(Boolean)
+    const displayName = plugins[0]?.publisher?.displayName
+    if (!displayName) throw new RoomProtocolError(404, 'plugin-publisher-not-found')
+    writeJson(res, 200, { publisher: { accountId, displayName }, plugins })
+    return true
+  }
+
+  const downloadMatch = parsed.pathname.match(
+    /^\/api\/plugins\/catalog\/([^/]+)\/versions\/([^/]+)\/download$/,
+  )
+  if (downloadMatch && req.method === 'GET') {
+    const pluginId = decodeURIComponent(downloadMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(downloadMatch[2] ?? '')
+    const registry = await readPluginRegistry(ctx)
+    const entry = registry.entries.find((candidate) => candidate.id === pluginId)
+    const version = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+      candidate.version === pluginVersion && candidate.status === 'published' &&
+      ['public', 'unlisted'].includes(candidate.visibility))
+    if (!entry || !version) throw new RoomProtocolError(404, 'public-plugin-not-found')
+    const bytes = await readFile(accountPluginBlobFile(ctx, version.integrity))
+    const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+    if (actualIntegrity !== version.integrity) throw new RoomProtocolError(409, 'public-plugin-integrity-mismatch')
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Stars-Plugin-Version': version.version,
+      'X-Stars-Plugin-Integrity': version.integrity,
+      'X-Stars-Plugin-Filename': encodeURIComponent(version.fileName),
+      'X-Stars-Plugin-Name': encodeURIComponent(entry.name),
+      'X-Stars-Plugin-Publisher': encodeURIComponent(entry.publisher?.displayName ?? ''),
+      'X-Stars-Plugin-License': encodeURIComponent(version.license),
+      'X-Stars-Plugin-State-Schema': String(version.stateSchemaVersion),
+      'X-Stars-Plugin-Api-Version': '2',
+      'X-Stars-Plugin-Ruleset': DND5E_2014_RULESET_ID,
+    })
+    res.end(bytes)
+    return true
+  }
+
+  const reportMatch = parsed.pathname.match(/^\/api\/plugins\/catalog\/([^/]+)\/reports$/)
+  if (reportMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const pluginId = decodeURIComponent(reportMatch[1] ?? '')
+    const payload = await readJsonRequest(req)
+    const version = normalizedLabel(payload?.version, 64)
+    const category = normalizedLabel(payload?.category, 40)
+    const details = normalizedLabel(payload?.details, 4_000)
+    if (!version || !['security', 'copyright', 'malware', 'misleading', 'other'].includes(category) || !details) {
+      throw new RoomProtocolError(400, 'invalid-plugin-report')
+    }
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entry = current.entries.find((candidate) => candidate.id === pluginId)
+      const published = (Array.isArray(entry?.versions) ? entry.versions : []).some((candidate) =>
+        candidate.version === version && candidate.status === 'published')
+      if (!published) throw new RoomProtocolError(404, 'public-plugin-not-found')
+      return {
+        ...current,
+        reports: [...current.reports, {
+          id: randomUUID(),
+          pluginId,
+          version,
+          category,
+          details,
+          reporterAccountId: account.accountId,
+          status: 'open',
+          createdAt: now,
+        }].slice(-10_000),
+      }
+    })
+    writeJson(res, 201, { report: registry.reports.at(-1) })
+    return true
+  }
+
+  const moderationMatch = parsed.pathname.match(
+    /^\/api\/plugins\/catalog\/([^/]+)\/versions\/([^/]+)\/moderate$/,
+  )
+  if (moderationMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    if (!pluginRegistryAdministrator(account)) throw new RoomProtocolError(403, 'plugin-admin-required')
+    const pluginId = decodeURIComponent(moderationMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(moderationMatch[2] ?? '')
+    const payload = await readJsonRequest(req)
+    const action = payload?.action
+    if (!['approve', 'reject', 'suspend'].includes(action)) {
+      throw new RoomProtocolError(400, 'invalid-plugin-moderation')
+    }
+    const now = Date.now()
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      let found = false
+      const entries = current.entries.map((entry) => {
+        if (entry.id !== pluginId) return entry
+        return {
+          ...entry,
+          updatedAt: now,
+          versions: (Array.isArray(entry.versions) ? entry.versions : []).map((version) => {
+            if (version.version !== pluginVersion) return version
+            found = true
+            return {
+              ...version,
+              status: action === 'approve' ? 'published' : action === 'reject' ? 'rejected' : 'suspended',
+              moderatedAt: now,
+              moderatedBy: account.accountId,
+              moderationNote: normalizedLabel(payload?.note, 2_000),
+              ...(action === 'approve' ? { publishedAt: now } : {}),
+            }
+          }),
+        }
+      })
+      if (!found) throw new RoomProtocolError(404, 'plugin-publication-not-found')
+      return { ...current, entries }
+    })
+    const entry = registry.entries.find((candidate) => candidate.id === pluginId)
+    writeJson(res, 200, { publication: entry })
+    return true
+  }
+
+  const detailMatch = parsed.pathname.match(/^\/api\/plugins\/catalog\/([^/]+)$/)
+  if (detailMatch && req.method === 'GET') {
+    const pluginId = decodeURIComponent(detailMatch[1] ?? '')
+    const registry = await readPluginRegistry(ctx)
+    const entry = pluginRegistryPublicEntry(
+      registry.entries.find((candidate) => candidate.id === pluginId),
+      true,
+    )
+    if (!entry) throw new RoomProtocolError(404, 'public-plugin-not-found')
+    writeJson(res, 200, { plugin: entry })
+    return true
+  }
+
+  throw new RoomProtocolError(404, 'plugin-catalog-not-found')
+}
+
 async function handleAccountApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/accounts')) return false
   if (!applyLobbyRateLimit(req, res, ctx)) return true
@@ -5757,6 +6072,93 @@ async function handleAccountApi(req, res, parsed, ctx) {
         maxPackageBytes: STATE_MAX_BYTES,
       },
     })
+    return true
+  }
+
+  const accountPluginPublicationMatch = parsed.pathname.match(
+    /^\/api\/accounts\/me\/plugins\/([^/]+)\/versions\/([^/]+)\/publication$/,
+  )
+  if (accountPluginPublicationMatch) {
+    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+    const account = await authenticateAccount(req, ctx)
+    const pluginId = decodeURIComponent(accountPluginPublicationMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(accountPluginPublicationMatch[2] ?? '')
+    const plugin = accountPluginVersions(account).find((candidate) =>
+      candidate.id === pluginId && candidate.version === pluginVersion)
+    if (!plugin) throw new RoomProtocolError(404, 'account-plugin-not-found')
+    const payload = await readJsonRequest(req)
+    const visibility = payload?.visibility
+    if (!['public', 'unlisted', 'private'].includes(visibility)) {
+      throw new RoomProtocolError(400, 'invalid-plugin-publication')
+    }
+    const now = Date.now()
+    if (visibility === 'private') {
+      const registry = await mutatePluginRegistry(ctx, (current) => ({
+        ...current,
+        entries: current.entries.map((entry) => entry.id === pluginId && entry.publisher?.accountId === account.accountId
+          ? {
+              ...entry,
+              updatedAt: now,
+              versions: (Array.isArray(entry.versions) ? entry.versions : []).map((version) =>
+                version.version === pluginVersion
+                  ? { ...version, status: 'withdrawn', visibility: 'private', moderatedAt: now }
+                  : version),
+            }
+          : entry),
+      }))
+      const entry = registry.entries.find((candidate) => candidate.id === pluginId)
+      writeJson(res, 200, { publication: entry ?? null })
+      return true
+    }
+    if (plugin.distributionPolicy !== 'room-distributable') {
+      throw new RoomProtocolError(409, 'plugin-not-publicly-distributable')
+    }
+    const bytes = await readFile(accountPluginBlobFile(ctx, plugin.integrity))
+    validateDeclarativePackageForPublication(bytes, plugin)
+    const changelog = normalizedLabel(payload?.changelog, 4_000)
+    const tags = Array.isArray(payload?.tags)
+      ? [...new Set(payload.tags.map((tag) => normalizedLabel(tag, 32)).filter(Boolean))].slice(0, 12)
+      : []
+    const status = productionSecurityEnabled() ? 'pending' : 'published'
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const existing = current.entries.find((entry) => entry.id === pluginId)
+      if (existing && existing.publisher?.accountId !== account.accountId) {
+        throw new RoomProtocolError(409, 'plugin-id-owned-by-other-publisher')
+      }
+      const versionRecord = {
+        ...plugin,
+        visibility,
+        status,
+        changelog,
+        submittedAt: now,
+        ...(status === 'published' ? { publishedAt: now } : {}),
+      }
+      const entry = {
+        schemaVersion: 1,
+        id: plugin.id,
+        name: plugin.name,
+        description: plugin.description ?? '',
+        publisher: {
+          accountId: account.accountId,
+          displayName: account.auth?.username ?? account.displayName,
+        },
+        contentCategory: plugin.contentCategory,
+        tags,
+        versions: [
+          ...(Array.isArray(existing?.versions) ? existing.versions : [])
+            .filter((candidate) => candidate.version !== plugin.version),
+          versionRecord,
+        ],
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      }
+      return {
+        ...current,
+        entries: [...current.entries.filter((candidate) => candidate.id !== pluginId), entry],
+      }
+    })
+    const entry = registry.entries.find((candidate) => candidate.id === pluginId)
+    writeJson(res, status === 'pending' ? 202 : 201, { publication: entry, status })
     return true
   }
 
@@ -5885,6 +6287,15 @@ async function handleAccountApi(req, res, parsed, ctx) {
           requirement?.version === current.version &&
           requirement?.integrity === current.integrity))
       if (usedByCharacter) throw new RoomProtocolError(409, 'account-plugin-in-use')
+      const registry = await readPluginRegistry(ctx)
+      const usedByPublication = registry.entries.some((entry) =>
+        entry.publisher?.accountId === account.accountId &&
+        entry.id === current.id &&
+        (Array.isArray(entry.versions) ? entry.versions : []).some((version) =>
+          version.version === current.version &&
+          version.integrity === current.integrity &&
+          ['pending', 'published'].includes(version.status)))
+      if (usedByPublication) throw new RoomProtocolError(409, 'account-plugin-in-use')
       const now = Date.now()
       await mutateAccount(ctx, account.accountId, (latest) => ({
         ...latest,
@@ -6884,6 +7295,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   }
 
   try {
+    if (await handlePluginCatalogApi(req, res, parsed, ctx)) return true
     if (await handleAccountApi(req, res, parsed, ctx)) return true
     if (await handleRoomLobbyApi(req, res, parsed, ctx)) return true
   } catch (error) {

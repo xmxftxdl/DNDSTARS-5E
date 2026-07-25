@@ -24,6 +24,7 @@ const MapsPage = lazy(() => import('./pages/MapsPage'))
 const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
 const PluginsPage = lazy(() => import('./pages/PluginsPage'))
+const PluginPublisherPage = lazy(() => import('./pages/PluginPublisherPage'))
 const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
@@ -264,6 +265,7 @@ export default function App() {
           {!isSpectator && <Route path="/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
           {!isSpectator && <Route path="/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
           {!isSpectator && <Route path="/plugin" element={<Navigate to="/plugins" replace />} />}
+          {!isSpectator && <Route path="/plugins/publishers/:publisherId" element={lazyPage('插件发布者', <PluginPublisherPage />)} />}
           {!isSpectator && <Route path="/plugins" element={lazyPage('插件中心', <PluginsPage />)} />}
           {!isSpectator && <Route path="/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
           {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}

@@ -6,10 +6,13 @@ import {
   Cloud,
   Download,
   FileUp,
+  Flag,
+  Globe2,
   LockKeyhole,
   PackageCheck,
   Puzzle,
   RefreshCw,
+  Search,
   ShieldCheck,
   Trash2,
   Upload,
@@ -24,6 +27,7 @@ import {
   AccountApiError,
   deleteAccountPluginVersion,
   downloadAccountPlugin,
+  loadAccountProfile,
   loadAccountPlugins,
   uploadAccountPlugin,
   type AccountPluginLibrary,
@@ -41,6 +45,17 @@ import {
   subscribeRoomRules,
 } from '../lib/roomRulesState'
 import { dnd5ePluginCompatibilityReport } from '../rulesets/dnd5e/pluginCompatibility'
+import {
+  downloadPublicPlugin,
+  loadPluginCatalog,
+  loadPluginModerationQueue,
+  moderatePluginVersion,
+  publishAccountPluginVersion,
+  reportPublicPlugin,
+  type PluginCatalogEntry,
+  type PluginCatalogVersion,
+  type PluginModerationQueue,
+} from '../lib/pluginCatalogApi'
 
 const EMPTY_LIBRARY: AccountPluginLibrary = {
   plugins: [],
@@ -80,6 +95,295 @@ function downloadBytes(bytes: ArrayBuffer, fileName: string) {
   URL.revokeObjectURL(url)
 }
 
+function PluginCatalogBrowser({
+  accountId,
+  busy,
+  onBusy,
+  onError,
+  onNotice,
+  onSaved,
+}: {
+  accountId?: string
+  busy: boolean
+  onBusy: (key: string | null) => void
+  onError: (message: string | null) => void
+  onNotice: (message: string | null) => void
+  onSaved: () => Promise<void>
+}) {
+  const [plugins, setPlugins] = useState<PluginCatalogEntry[]>([])
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const search = async () => {
+    setLoading(true)
+    try {
+      setPlugins(await loadPluginCatalog({ query, category }))
+      onError(null)
+    } catch (cause) {
+      onError(accountApiErrorMessage(cause))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void search()
+    // Initial public catalog load; later searches are explicitly submitted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const downloadVersion = async (plugin: PluginCatalogEntry, version: PluginCatalogVersion) => {
+    const key = `catalog:${plugin.id}@${version.version}`
+    onBusy(key)
+    onError(null)
+    onNotice(null)
+    try {
+      const downloaded = await downloadPublicPlugin(plugin.id, version)
+      if (accountId) {
+        await uploadAccountPlugin({
+          manifest: {
+            id: plugin.id,
+            name: plugin.name,
+            version: version.version,
+            apiVersion: 2,
+            rulesetId: 'dnd5e-2014-srd-5.1',
+            stateSchemaVersion: version.stateSchemaVersion,
+            manifestSchemaVersion: version.manifestSchemaVersion,
+            minimumGameProtocolVersion: version.minimumGameProtocolVersion,
+            dependencies: version.dependencies,
+            conflicts: version.conflicts,
+            declaredCapabilities: version.declaredCapabilities,
+            distributionPolicy: version.distributionPolicy,
+            contentCategory: version.contentCategory,
+            publisher: plugin.publisher.displayName,
+            license: version.license,
+            description: plugin.description,
+          },
+          integrity: version.integrity,
+          fileName: downloaded.fileName,
+          bytes: downloaded.bytes,
+        })
+        await onSaved()
+        onNotice(`已将 ${plugin.name} v${version.version} 保存到账号插件库。`)
+      } else {
+        downloadBytes(downloaded.bytes, downloaded.fileName)
+        onNotice(`已下载 ${plugin.name} v${version.version}；登录后可跨设备保存。`)
+      }
+    } catch (cause) {
+      onError(accountApiErrorMessage(cause))
+    } finally {
+      onBusy(null)
+    }
+  }
+
+  const report = async (plugin: PluginCatalogEntry, version: PluginCatalogVersion) => {
+    if (!accountId) return onError('请登录后举报插件。')
+    const details = window.prompt('请说明举报原因（安全、版权、误导或其他问题）：')?.trim()
+    if (!details) return
+    onBusy(`report:${plugin.id}`)
+    try {
+      await reportPublicPlugin({ pluginId: plugin.id, version: version.version, category: 'other', details })
+      onNotice('举报已提交，审核人员可以在管理队列中查看。')
+      onError(null)
+    } catch (cause) {
+      onError(accountApiErrorMessage(cause))
+    } finally {
+      onBusy(null)
+    }
+  }
+
+  return (
+    <section>
+      <form
+        className="mb-5 grid gap-2 rounded-2xl border border-white/8 bg-black/15 p-3 sm:grid-cols-[1fr_180px_auto]"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void search()
+        }}
+      >
+        <label className="relative">
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-600" />
+          <input
+            aria-label="搜索插件"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索名称、ID、发布者或标签"
+            className="w-full rounded-xl border border-white/10 bg-void-900/80 py-2.5 pl-9 pr-3 text-sm text-slate-100"
+          />
+        </label>
+        <select
+          aria-label="插件分类"
+          value={category}
+          onChange={(event) => setCategory(event.target.value)}
+          className="rounded-xl border border-white/10 bg-void-900/80 px-3 py-2.5 text-sm text-slate-200"
+        >
+          <option value="">全部分类</option>
+          <option value="rules">规则</option>
+          <option value="subclasses">子职</option>
+          <option value="spells">法术</option>
+          <option value="items">物品</option>
+          <option value="monsters">怪物</option>
+          <option value="adventure">冒险</option>
+          <option value="mixed">混合内容</option>
+        </select>
+        <button type="submit" disabled={loading} className="rounded-xl bg-arcane-500/15 px-4 py-2.5 text-sm font-semibold text-arcane-100">
+          {loading ? '正在搜索…' : '搜索'}
+        </button>
+      </form>
+      {loading ? (
+        <div className="flex min-h-52 items-center justify-center gap-2 text-sm text-slate-400">
+          <RefreshCw className="h-4 w-4 animate-spin" />正在读取公开目录…
+        </div>
+      ) : plugins.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-white/10 px-6 py-16 text-center text-sm text-slate-500">
+          暂时没有符合条件的已审核插件。
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {plugins.map((plugin) => {
+            const latest = plugin.versions[0]
+            if (!latest) return null
+            return (
+              <article key={plugin.id} className="rounded-2xl border border-white/8 bg-black/15 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="font-semibold text-slate-100">{plugin.name}</h2>
+                      <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
+                        v{latest.version}
+                      </span>
+                      <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200">
+                        {plugin.contentCategory}
+                      </span>
+                    </div>
+                    <p className="mt-1 font-mono text-xs text-slate-600">{plugin.id}</p>
+                  </div>
+                  <Globe2 className="h-5 w-5 shrink-0 text-emerald-300" />
+                </div>
+                <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-400">{plugin.description || '发布者未填写说明。'}</p>
+                <p className="mt-3 text-xs text-slate-500">
+                  发布者：
+                  <Link
+                    to={`/plugins/publishers/${encodeURIComponent(plugin.publisher.accountId)}`}
+                    className="text-arcane-300 hover:text-arcane-200"
+                  >
+                    {plugin.publisher.displayName}
+                  </Link>
+                  {' '}· 许可证：{latest.license}
+                </p>
+                {latest.changelog && <p className="mt-2 text-xs text-slate-600">更新：{latest.changelog}</p>}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void downloadVersion(plugin, latest)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-50"
+                  >
+                    {accountId ? <Cloud className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                    {accountId ? '保存到我的插件' : '下载'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void report(plugin, latest)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs text-slate-500 disabled:opacity-50"
+                  >
+                    <Flag className="h-3.5 w-3.5" />举报
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function PluginModerationPanel({
+  onError,
+  onNotice,
+}: {
+  onError: (message: string | null) => void
+  onNotice: (message: string | null) => void
+}) {
+  const [queue, setQueue] = useState<PluginModerationQueue>({ pending: [], reports: [] })
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const refresh = async () => {
+    setLoading(true)
+    try {
+      setQueue(await loadPluginModerationQueue())
+      onError(null)
+    } catch (cause) {
+      onError(accountApiErrorMessage(cause))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const decide = async (
+    pluginId: string,
+    version: string,
+    action: 'approve' | 'reject' | 'suspend',
+  ) => {
+    const note = action === 'approve' ? '' : window.prompt('填写审核说明：')?.trim()
+    if (action !== 'approve' && !note) return
+    setBusy(`${pluginId}@${version}`)
+    try {
+      await moderatePluginVersion({ pluginId, version, action, note })
+      onNotice(action === 'approve' ? '插件版本已通过审核。' : '审核决定已保存。')
+      await refresh()
+    } catch (cause) {
+      onError(accountApiErrorMessage(cause))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (loading) return <div className="py-16 text-center text-sm text-slate-500">正在读取审核队列…</div>
+  return (
+    <div className="space-y-5">
+      <section>
+        <h2 className="mb-3 font-semibold text-slate-100">待审核版本（{queue.pending.length}）</h2>
+        <div className="space-y-3">
+          {queue.pending.length === 0 && <p className="rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-600">当前没有待审核版本。</p>}
+          {queue.pending.map(({ plugin, version }) => (
+            <article key={`${plugin.id}@${version.version}`} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+              <h3 className="font-semibold text-slate-100">{plugin.name} v{version.version}</h3>
+              <p className="mt-1 text-xs text-slate-500">{plugin.id} · {plugin.publisher.displayName} · {version.license}</p>
+              <p className="mt-3 text-sm text-slate-400">{version.changelog || '未填写更新说明。'}</p>
+              <div className="mt-4 flex gap-2">
+                <button type="button" disabled={busy != null} onClick={() => void decide(plugin.id, version.version, 'approve')} className="rounded-xl bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100">通过</button>
+                <button type="button" disabled={busy != null} onClick={() => void decide(plugin.id, version.version, 'reject')} className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-200">拒绝</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section>
+        <h2 className="mb-3 font-semibold text-slate-100">举报（{queue.reports.length}）</h2>
+        <div className="space-y-2">
+          {queue.reports.slice(0, 50).map((report) => (
+            <article key={report.id} className="rounded-xl border border-white/8 bg-black/10 p-3 text-sm">
+              <p className="font-mono text-xs text-slate-500">{report.pluginId}@{report.version} · {report.category}</p>
+              <p className="mt-2 text-slate-300">{report.details}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export default function PluginsPage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const account = useSyncExternalStore(
@@ -93,7 +397,8 @@ export default function PluginsPage() {
     getRoomRulesSnapshot,
   )
   const [roomSession] = useState(() => getRoomSession())
-  const [section, setSection] = useState<'library' | 'create'>('library')
+  const [section, setSection] = useState<'library' | 'catalog' | 'create' | 'moderation'>('library')
+  const [pluginAdmin, setPluginAdmin] = useState(false)
   const [library, setLibrary] = useState<AccountPluginLibrary>(EMPTY_LIBRARY)
   const [loading, setLoading] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
@@ -124,6 +429,13 @@ export default function PluginsPage() {
     // Account identity is the complete cache key for this cloud library.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.accountId])
+
+  useEffect(() => {
+    if (!account) return
+    void loadAccountProfile().then((profile) => setPluginAdmin(profile.pluginAdmin === true)).catch(() => {
+      setPluginAdmin(false)
+    })
+  }, [account])
 
   const saveFileToLibrary = async (file: File) => {
     if (!account) return setError('请先登录账号')
@@ -252,6 +564,30 @@ export default function PluginsPage() {
     }
   }
 
+  const publishVersion = async (plugin: AccountPluginVersion) => {
+    const changelog = window.prompt('填写本版本更新说明（可留空）：') ?? ''
+    const tags = (window.prompt('填写搜索标签，用逗号分隔（可留空）：') ?? '')
+      .split(',').map((tag) => tag.trim()).filter(Boolean)
+    const key = `${plugin.id}@${plugin.version}:publish`
+    setBusyKey(key)
+    setNotice(null)
+    setError(null)
+    try {
+      const result = await publishAccountPluginVersion(plugin, {
+        visibility: 'public',
+        changelog,
+        tags,
+      })
+      setNotice(result.status === 'pending'
+        ? `${plugin.name} v${plugin.version} 已提交审核；通过前不会出现在公开搜索中。`
+        : `${plugin.name} v${plugin.version} 已发布到公开目录。`)
+    } catch (cause) {
+      setError(accountApiErrorMessage(cause))
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
   const usedBytes = library.plugins.reduce((total, plugin) => total + plugin.sizeBytes, 0)
   const activePins = new Map((roomRules?.requiredPlugins ?? []).map((plugin) => [plugin.id, plugin]))
   const roomPluginMetadata = (roomRules?.requiredPlugins ?? []).map((pin) =>
@@ -306,24 +642,45 @@ export default function PluginsPage() {
         </div>
       )}
 
+      {!account && notice && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-sm text-emerald-100">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{notice}
+        </div>
+      )}
+      {!account && error && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{error}
+        </div>
+      )}
+
       {!account ? (
-        <div className="grid gap-5 lg:grid-cols-[1fr_0.9fr]">
-          <section className="rounded-2xl border border-arcane-400/15 bg-arcane-500/[0.04] p-6">
-            <Cloud className="h-9 w-9 text-arcane-300" />
-            <h2 className="mt-4 text-xl font-bold text-slate-100">登录后使用云端插件库</h2>
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              插件将与账号绑定，不再依赖某个浏览器或某个房间。每个版本按 SHA-256 不可变保存，
-              房间只锁定经过校验的精确版本。
-            </p>
-            <div className="mt-5 grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
-              <div className="rounded-xl border border-white/8 bg-black/15 p-3"><LockKeyhole className="mb-2 h-4 w-4 text-emerald-300" />默认私有，不进入公共索引</div>
-              <div className="rounded-xl border border-white/8 bg-black/15 p-3"><ShieldCheck className="mb-2 h-4 w-4 text-cyan-300" />下载后仍由 Worker 沙箱复核</div>
-            </div>
-          </section>
-          <AccountAuthPanel
-            account={account}
-            onAuthenticated={() => void refresh()}
+        <div className="space-y-6">
+          <div className="grid gap-5 lg:grid-cols-[1fr_0.9fr]">
+            <section className="rounded-2xl border border-arcane-400/15 bg-arcane-500/[0.04] p-6">
+              <Cloud className="h-9 w-9 text-arcane-300" />
+              <h2 className="mt-4 text-xl font-bold text-slate-100">登录后使用云端插件库</h2>
+              <p className="mt-3 text-sm leading-7 text-slate-400">
+                插件将与账号绑定，不再依赖某个浏览器或某个房间。每个版本按 SHA-256 不可变保存，
+                房间只锁定经过校验的精确版本。
+              </p>
+              <div className="mt-5 grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
+                <div className="rounded-xl border border-white/8 bg-black/15 p-3"><LockKeyhole className="mb-2 h-4 w-4 text-emerald-300" />默认私有，不进入公共索引</div>
+                <div className="rounded-xl border border-white/8 bg-black/15 p-3"><ShieldCheck className="mb-2 h-4 w-4 text-cyan-300" />下载后仍由 Worker 沙箱复核</div>
+              </div>
+            </section>
+            <AccountAuthPanel
+              account={account}
+              onAuthenticated={() => void refresh()}
+              onError={setError}
+            />
+          </div>
+          <h2 className="text-lg font-semibold text-slate-100">浏览公开插件</h2>
+          <PluginCatalogBrowser
+            busy={busyKey != null}
+            onBusy={setBusyKey}
             onError={setError}
+            onNotice={setNotice}
+            onSaved={refresh}
           />
         </div>
       ) : (
@@ -331,7 +688,9 @@ export default function PluginsPage() {
           <nav className="mb-5 flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/15 p-2">
             {[
               { id: 'library' as const, label: '我的插件', icon: Puzzle },
+              { id: 'catalog' as const, label: '公开目录', icon: Globe2 },
               { id: 'create' as const, label: '创建插件', icon: Wrench },
+              ...(pluginAdmin ? [{ id: 'moderation' as const, label: '审核管理', icon: ShieldCheck }] : []),
             ].map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -362,7 +721,18 @@ export default function PluginsPage() {
             </div>
           )}
 
-          {section === 'create' ? (
+          {section === 'moderation' ? (
+            <PluginModerationPanel onError={setError} onNotice={setNotice} />
+          ) : section === 'catalog' ? (
+            <PluginCatalogBrowser
+              accountId={account.accountId}
+              busy={busyKey != null}
+              onBusy={setBusyKey}
+              onError={setError}
+              onNotice={setNotice}
+              onSaved={refresh}
+            />
+          ) : section === 'create' ? (
             <Dnd5eCustomPluginBuilder
               defaultPublisher={account.username ?? account.displayName}
               busy={busyKey != null}
@@ -519,6 +889,17 @@ export default function PluginsPage() {
                                     : activeOther
                                       ? '回滚/切换到此版本'
                                       : '启用到房间'}
+                              </button>
+                            )}
+                            {plugin.distributionPolicy === 'room-distributable' && (
+                              <button
+                                type="button"
+                                disabled={busyKey != null}
+                                onClick={() => void publishVersion(plugin)}
+                                className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 disabled:opacity-50"
+                              >
+                                <Globe2 className="h-4 w-4" />
+                                {busyKey === `${key}:publish` ? '正在提交…' : '发布到目录'}
                               </button>
                             )}
                             <button
