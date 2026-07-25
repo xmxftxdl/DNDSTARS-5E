@@ -1,0 +1,11 @@
+[Unit]
+Description=Run an isolated Astral Trace VTT restore drill every week
+
+[Timer]
+OnCalendar=Sun *-*-* 05:30:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=astraltrace-restore-drill.service
+
+[Install]
+WantedBy=timers.target

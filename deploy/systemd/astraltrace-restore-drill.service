@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify the latest Astral Trace VTT backup in an isolated container
+Requires=docker.service
+After=docker.service astraltrace-backup.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/astraltrace/app
+Environment=STARS_BACKUP_DIR=/opt/astraltrace/backups
+ExecStart=/opt/astraltrace/app/scripts/verify-docker-backup.sh --latest

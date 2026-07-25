@@ -167,7 +167,7 @@ npm audit
 
 - 文件系统是唯一持久化后端，因此当前只允许一个权威服务实例。
 - SSE backlog 和在线状态保存在进程内存中，进程重启后客户端会通过完整状态恢复。
-- 尚未提供自动备份、跨区域容灾、集中日志、指标告警和数据库迁移。
+- 仓库已提供单机定时备份和隔离恢复演练；跨区域容灾、集中日志、指标告警和数据库迁移仍未提供。
 - 房间 token 目前由浏览器保存；部署必须防止 XSS、使用 HTTPS，并避免代理访问日志记录 SSE 查询字符串。
 
 ## 8. Docker 单实例部署
@@ -244,27 +244,55 @@ Compose 网络中，应直接转发到 `http://dndstars:8080`，无需把应用�
 
 ### 8.4 备份、升级与恢复
 
-升级前先停止权威服务，避免复制到一半的 JSON 状态：
+Ubuntu 公网服务器使用仓库内脚本建立完整 `/data` 命名卷备份。脚本会短暂停止
+`dndstars` 写入，生成 `tar.gz`、SHA-256 和构建元数据，完成后自动恢复服务：
 
-```powershell
-docker compose stop
-$backup = ".\backups\$(Get-Date -Format yyyyMMdd-HHmmss)"
-New-Item -ItemType Directory -Force $backup | Out-Null
-docker compose cp dndstars:/data "$backup\data"
-# 更新 Git 工作树或切换到待发布版本后重新构建：
-docker compose up --build -d
+```bash
+cd /opt/astraltrace/app
+sudo STARS_BACKUP_DIR=/opt/astraltrace/backups \
+  STARS_BACKUP_RETENTION_DAYS=14 \
+  ./scripts/backup-docker-data.sh
 ```
 
-恢复前同样停止服务，保留当前数据副本，再把已核验的备份复制回容器 `/data`。不要使用
-`docker compose down -v`，该命令会删除账号、角色、房间和地图所在的数据卷。
+恢复前先做非破坏性演练。演练会把备份解压到临时 Docker Volume，并用当前应用镜像
+启动隔离容器；不会改动线上数据：
+
+```bash
+sudo ./scripts/verify-docker-backup.sh /opt/astraltrace/backups/astraltrace-data-YYYYMMDDTHHMMSSZ.tar.gz
+```
+
+确认需要覆盖线上数据后显式传入 `--yes`。恢复脚本会先自动创建 `pre-restore` 完整备份，
+校验 SHA-256 和归档路径，再停止应用、恢复并等待健康检查：
+
+```bash
+sudo ./scripts/restore-docker-data.sh \
+  /opt/astraltrace/backups/astraltrace-data-YYYYMMDDTHHMMSSZ.tar.gz \
+  --yes
+```
+
+不要使用 `docker compose down -v`，该命令会删除账号、角色、房间、插件和地图所在的数据卷。
+
+生产服务器可安装仓库中的 systemd 单元：
+
+```bash
+sudo install -m 0644 deploy/systemd/astraltrace-backup.* /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/astraltrace-restore-drill.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now astraltrace-backup.timer astraltrace-restore-drill.timer
+sudo systemctl list-timers 'astraltrace-*'
+```
+
+默认每天建立备份、保留 14 天，并在每周日用最新备份执行隔离恢复演练。服务器本地归档
+不能防止整机或云盘损坏；应另外使用腾讯云 COS、另一区域对象存储或受限 `rsync` 任务，
+只同步已经生成并通过 SHA-256 校验的归档与校验文件。对象存储凭据不得写入仓库。
 
 升级后至少检查：
 
-```powershell
+```bash
 docker compose ps
 docker compose logs --tail 200 dndstars
-Invoke-RestMethod http://127.0.0.1:8080/api/healthz
-Invoke-RestMethod http://127.0.0.1:8080/api/meta
+curl --fail http://127.0.0.1:8080/api/healthz
+curl --fail http://127.0.0.1:8080/api/meta
 ```
 
 `healthz` 只证明进程与权威 API 可响应；发布验收仍需使用 DM 与玩家两个账号完成

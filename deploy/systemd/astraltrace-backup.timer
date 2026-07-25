@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Astral Trace VTT backup every day
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=astraltrace-backup.service
+
+[Install]
+WantedBy=timers.target
