@@ -3,7 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 
 export default async function globalSetup() {
-  const sharedRoot = path.join(os.tmpdir(), 'stars-app-e2e-shared')
-  await rm(sharedRoot, { recursive: true, force: true })
-  await mkdir(sharedRoot, { recursive: true })
+  const roots = [
+    path.join(os.tmpdir(), 'stars-app-e2e-shared'),
+    path.join(os.tmpdir(), 'stars-app-e2e-plugin-review'),
+  ]
+  await Promise.all(roots.map(async (root) => {
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+  }))
 }

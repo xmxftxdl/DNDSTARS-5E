@@ -4661,6 +4661,10 @@ function pluginRegistryAdministrator(account, env = process.env) {
     (!productionSecurityEnabled(env) && configured.includes('*'))
 }
 
+function pluginCatalogReviewRequired(env = process.env) {
+  return productionSecurityEnabled(env) || env.STARS_PLUGIN_REVIEW_REQUIRED === 'true'
+}
+
 function pluginRegistryPublicVersion(version) {
   return {
     version: version.version,
@@ -6119,7 +6123,7 @@ async function handleAccountApi(req, res, parsed, ctx) {
     const tags = Array.isArray(payload?.tags)
       ? [...new Set(payload.tags.map((tag) => normalizedLabel(tag, 32)).filter(Boolean))].slice(0, 12)
       : []
-    const status = productionSecurityEnabled() ? 'pending' : 'published'
+    const status = pluginCatalogReviewRequired() ? 'pending' : 'published'
     const registry = await mutatePluginRegistry(ctx, (current) => {
       const existing = current.entries.find((entry) => entry.id === pluginId)
       if (existing && existing.publisher?.accountId !== account.accountId) {

@@ -376,6 +376,14 @@ function PluginModerationPanel({
             <article key={report.id} className="rounded-xl border border-white/8 bg-black/10 p-3 text-sm">
               <p className="font-mono text-xs text-slate-500">{report.pluginId}@{report.version} · {report.category}</p>
               <p className="mt-2 text-slate-300">{report.details}</p>
+              <button
+                type="button"
+                disabled={busy != null}
+                onClick={() => void decide(report.pluginId, report.version, 'suspend')}
+                className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100 disabled:opacity-50"
+              >
+                暂停该版本
+              </button>
             </article>
           ))}
         </div>
@@ -651,6 +659,19 @@ export default function PluginsPage() {
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{error}
         </div>
+      )}
+
+      {account && (
+        <AccountAuthPanel
+          account={account}
+          onLoggedOut={() => {
+            setLibrary(EMPTY_LIBRARY)
+            setPluginAdmin(false)
+            setNotice('已退出账号。')
+            setError(null)
+          }}
+          onError={setError}
+        />
       )}
 
       {!account ? (
