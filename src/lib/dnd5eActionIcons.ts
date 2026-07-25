@@ -185,6 +185,14 @@ const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = {
   augury: '/assets/icons/augury-spell-action.png',
   'continual-flame': '/assets/icons/continual-flame-spell-action.png',
   silence: '/assets/icons/silence-spell-action.png',
+  'zone-of-truth': '/assets/icons/zone-of-truth-spell-action.png',
+  'flaming-sphere': '/assets/icons/flaming-sphere-spell-action.png',
+  'lesser-restoration': '/assets/icons/lesser-restoration-spell-action.png',
+  'animal-messenger': '/assets/icons/animal-messenger-spell-action.png',
+  'locate-animals-or-plants': '/assets/icons/locate-animals-or-plants-spell-action.png',
+  'protection-from-poison': '/assets/icons/protection-from-poison-spell-action.png',
+  'flame-blade': '/assets/icons/flame-blade-spell-action.png',
+  'spike-growth': '/assets/icons/spike-growth-spell-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [

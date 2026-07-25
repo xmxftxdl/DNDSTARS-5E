@@ -219,6 +219,26 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
+  'adult-green-dragon': {
+    emoji: '🐉',
+    color: '#166534',
+    tokenPortrait: '/assets/portraits/adult-green-dragon-poison-forest-throne-token.png',
+    initiativePortrait: '/assets/portraits/adult-green-dragon-poison-forest-throne-initiative.png',
+    visualVariants: [
+      {
+        id: 'poison-forest-throne',
+        label: '毒雾林王',
+        tokenPortrait: '/assets/portraits/adult-green-dragon-poison-forest-throne-token.png',
+        initiativePortrait: '/assets/portraits/adult-green-dragon-poison-forest-throne-initiative.png',
+      },
+      {
+        id: 'moonlit-stalker',
+        label: '古林潜猎',
+        tokenPortrait: '/assets/portraits/adult-green-dragon-moonlit-stalker-token.png',
+        initiativePortrait: '/assets/portraits/adult-green-dragon-moonlit-stalker-initiative.png',
+      },
+    ],
+  },
   bandit: { emoji: '🗡️', color: '#78716c' },
   bugbear: {
     emoji: '👹',

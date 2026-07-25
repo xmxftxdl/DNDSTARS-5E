@@ -11,11 +11,11 @@ import type { RoomSession } from '../lib/roomSession'
 
 const navItems = [
   { to: '/', label: '战役总览', icon: LayoutDashboard, end: true },
-  { to: '/simulation', label: '战斗 AI 模拟', icon: FlaskConical },
   { to: '/maps', label: '战斗地图', icon: Swords },
   { to: '/characters', label: '角色', icon: Users },
   { to: '/spellbook', label: '法术书', icon: BookOpen },
   { to: '/communications', label: '通讯与日志', icon: MessageSquareText },
+  { to: '/simulation', label: '战斗 AI 模拟', icon: FlaskConical },
 ]
 
 const playerNavItems = navItems.filter((item) =>
