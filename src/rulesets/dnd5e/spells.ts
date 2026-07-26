@@ -2,15 +2,23 @@ import type { AbilityKey } from '../../lib/dnd'
 import type { Dnd5eMetamagicId } from '../../lib/sharedCombatTypes'
 import type { Character } from '../../types/character'
 import type { SkillAoeTargeting } from '../../lib/skillTargeting'
+import type { D20RollMode } from '../contracts'
 import { dnd5eClassDefinition, dnd5eClassDefinitionForCharacter, dnd5eClassProgression, dnd5ePactSlotLevel, dnd5ePreparedSpellCount, type Dnd5eClassId } from './classes'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import type { Dnd5eDamageType } from './monsters'
 import { dnd5eBardMagicalSecretsOptions } from './spellCatalog'
-import { imposeDnd5eRollDisadvantage } from './rollMode'
+import { imposeDnd5eRollAdvantage, imposeDnd5eRollDisadvantage } from './rollMode'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
 
 export type Dnd5eSpellSchool = '防护' | '咒法' | '预言' | '附魔' | '塑能' | '幻术' | '死灵' | '变化'
 export type Dnd5eSpellCastingTime = 'action' | 'bonus-action' | 'reaction'
+export type Dnd5eEnhanceAbilityChoice =
+  | 'bear-endurance'
+  | 'bull-strength'
+  | 'cat-grace'
+  | 'eagle-splendor'
+  | 'fox-cunning'
+  | 'owl-wisdom'
 export type Dnd5eSpellEffectKind =
   | 'spell-attack'
   | 'saving-throw'
@@ -32,6 +40,7 @@ export type Dnd5eSpellEffectKind =
   | 'power-word-stun'
   | 'counterspell'
   | 'dispel-magic'
+  | 'teleport'
   | 'persistent-area'
 
 export interface Dnd5eSpellDamageComponentDefinition {
@@ -113,6 +122,7 @@ export interface Dnd5eSrdSpellDefinition {
     | 'sunburst-blindness'
     | 'blindness-deafness'
     | 'hideous-laughter'
+    | 'charm-person'
     | 'hold-person'
     | 'hold-monster'
     | 'banishment'
@@ -130,15 +140,20 @@ export interface Dnd5eSrdSpellDefinition {
     | 'mage-armor'
     | 'divine-favor'
     | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
     | 'fly'
     | 'heroism'
     | 'enlarge-reduce'
+    | 'enhance-ability'
     | 'flame-blade'
     | 'shillelagh'
+    | 'magic-weapon'
     | 'sanctuary'
   /** 法术持续期间授予的重复攻击。Host 会从 ActiveEffect 中恢复原始施法环位。 */
   sustainedAttack?: Dnd5eSustainedSpellAttackDefinition
   enlargeReduceOptions?: readonly ('enlarge' | 'reduce')[]
+  enhanceAbilityOptions?: readonly Dnd5eEnhanceAbilityChoice[]
   effectDamageTypeOptions?: readonly Dnd5eDamageType[]
   effectDurationRounds?: number
   conditionOptions?: readonly ('blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease')[]
@@ -156,6 +171,14 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
     appliedEffect: 'shillelagh', effectDurationRounds: 10,
     description: '你手持的短棒或长棍获得自然魔力，持续1分钟。其伤害骰变为d8；以它进行近战攻击时，你可以选择使用施法关键属性或力量进行攻击检定和伤害掷骰。',
+  },
+  {
+    id: 'magic-weapon', name: '魔化武器', englishName: 'Magic Weapon', level: 2, school: '变化',
+    classes: ['paladin', 'wizard'], castingTime: 'bonus-action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 600,
+    maximumTargets: 1, appliedEffect: 'magic-weapon',
+    description: '触碰一件非魔法武器。持续至多1小时，该武器成为魔法武器，并使以它进行的攻击检定和伤害掷骰获得+1加值。使用4环或5环法术位时加值为+2，使用6环或更高环法术位时加值为+3。',
   },
   {
     id: 'sanctuary', name: '庇护术', englishName: 'Sanctuary', level: 1, school: '防护',
@@ -194,6 +217,27 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     description: '触碰一个生物。目标的跳跃距离在法术持续期间变为三倍。持续1分钟。',
   },
   {
+    id: 'darkvision', name: '黑暗视觉', englishName: 'Darkvision', level: 2, school: '变化',
+    classes: ['druid', 'ranger', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'darkvision', effectDurationRounds: 4_800,
+    description: '触摸一个自愿生物，使其在法术持续期间获得60尺黑暗视觉。持续8小时，无需专注。',
+  },
+  {
+    id: 'see-invisibility', name: '识破隐形', englishName: 'See Invisibility', level: 2, school: '预言',
+    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0,
+    target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    appliedEffect: 'see-invisibility', effectDurationRounds: 600,
+    description: '持续1小时，你能如同看见普通生物和物件般看见隐形生物和物件，并能看入以太位面。以太位面中的生物和物件呈半透明的幽灵状。',
+  },
+  {
+    id: 'misty-step', name: '迷踪步', englishName: 'Misty Step', level: 2, school: '咒法',
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'bonus-action', rangeFeet: 0,
+    target: 'area', effect: 'teleport', dice: { count: 0, sides: 4, bonus: 0 },
+    area: { shape: 'circle', origin: 'point', radiusFeet: 0, placeRangeFeet: 30 },
+    description: '你被银色薄雾短暂包围，传送至多30尺，到达一处你能看见的未占据空间。',
+  },
+  {
     id: 'fly', name: '飞行术', englishName: 'Fly', level: 3, school: '变化',
     classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 5,
     target: 'ally', effect: 'active-effect', dice: { count: 0, sides: 4, bonus: 0 },
@@ -217,6 +261,22 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     unwillingSaveAbility: 'con', appliedEffect: 'enlarge-reduce',
     enlargeReduceOptions: ['enlarge', 'reduce'],
     description: '选择一个生物，使其变巨或缩小，持续至多1分钟并需要专注。敌对目标进行体质豁免，成功则不受影响。变巨使体型增大一级、力量检定和力量豁免具有优势，武器攻击额外造成1d4伤害；缩小产生相反的体型与力量效果，武器攻击少造成1d4伤害（最低1点）。物件目标仍由DM裁定。',
+  },
+  {
+    id: 'enhance-ability', name: '强化属性', englishName: 'Enhance Ability', level: 2, school: '变化',
+    classes: ['bard', 'cleric', 'druid', 'sorcerer'], castingTime: 'action', rangeFeet: 5,
+    target: 'ally', effect: 'active-effect', dice: { count: 2, sides: 6, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 600,
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, appliedEffect: 'enhance-ability',
+    enhanceAbilityOptions: [
+      'bear-endurance',
+      'bull-strength',
+      'cat-grace',
+      'eagle-splendor',
+      'fox-cunning',
+      'owl-wisdom',
+    ],
+    description: '触碰一个自愿生物并选择一种强化：熊之坚韧使体质检定具有优势并获得2d6临时生命值；公牛之力使力量检定具有优势且负重能力翻倍；猫之优雅使敏捷检定具有优势，并在未失能时免疫20尺或更短坠落的伤害；雄鹰之辉、狐狸之狡与枭之睿分别使魅力、智力与感知检定具有优势。需要专注，持续至多1小时；每升一环可额外指定一个目标。',
   },
   {
     id: 'flame-blade', name: '火焰刀', englishName: 'Flame Blade', level: 2, school: '塑能',
@@ -357,6 +417,15 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
       placeRangeFeet: 120, rotatable: true,
     },
     description: '在射程内实体表面创造一道至多60尺长、20尺高、1尺厚的火墙，持续至多1分钟并需要专注。火墙出现时，墙体内生物进行敏捷豁免，失败受到5d8火焰伤害，成功减半。施法时选择墙的一侧；生物在一个回合内首次进入墙体，或在该侧10尺内结束回合时，受到同样伤害且无豁免。每使用高于4环一环的法术位，伤害增加1d8。',
+  },
+  {
+    id: 'charm-person', name: '魅惑人类', englishName: 'Charm Person', level: 1, school: '附魔',
+    classes: ['bard', 'druid', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action',
+    rangeFeet: 30, target: 'hostile', effect: 'saving-throw', saveAbility: 'wis',
+    dice: { count: 0, sides: 4, bonus: 0 },
+    maximumTargets: 1, additionalTargetsPerHigherSlot: 1, maximumTargetSeparationFeet: 30,
+    onFailedSaveEffect: 'charm-person', effectDurationRounds: 600,
+    description: '一名类人生物进行感知豁免；如果施法者或其同伴正在与目标战斗，目标的豁免具有优势。失败则被施法者魅惑1小时。施法者或其同伴对目标做出任何有害行为时，法术提前结束。每升一环可多选择一个类人生物。',
   },
   {
     id: 'hideous-laughter', name: '狂笑术', englishName: 'Hideous Laughter', level: 1, school: '附魔',
@@ -1154,6 +1223,21 @@ export function dnd5eHeightenedSavingThrowMode(
   heightened: boolean,
 ): 'normal' | 'advantage' | 'disadvantage' {
   return heightened ? imposeDnd5eRollDisadvantage(mode, 'heightened-spell').mode : mode
+}
+
+export function dnd5eSpellSpecificSavingThrowMode(input: {
+  spellId: string
+  mode: D20RollMode
+  casterAndTargetAreFighting: boolean
+}): D20RollMode {
+  return input.spellId === 'charm-person' && input.casterAndTargetAreFighting
+    ? imposeDnd5eRollAdvantage(input.mode, 'charm-person-combat').mode
+    : input.mode
+}
+
+export function dnd5eCharmPersonEligibleCreatureType(creatureType: string | undefined): boolean {
+  const normalized = (creatureType ?? '').trim().toLowerCase()
+  return normalized === 'humanoid' || normalized.includes('类人')
 }
 
 export function dnd5eDraconicAncestorDamageType(

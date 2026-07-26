@@ -40,6 +40,25 @@ function inventoryEntry(character: Character, templateId: string) {
 }
 
 describe('SRD 5.1 inventory', () => {
+  it('doubles carrying capacity from Bull Strength without changing encumbrance thresholds', () => {
+    const hero = character('bull-strength')
+    hero.abilities.str = 10
+    hero.dnd5eCombatState = {
+      activeEffects: [createDnd5eMechanicalEffect({
+        definitionId: 'srd-5.1:spell:enhance-ability',
+        label: '强化属性：公牛之力',
+        source: { kind: 'spell', actorId: 'cleric' },
+        targetId: hero.id,
+        modifiers: { abilityCheckAdvantages: ['str'], carryingCapacityMultiplier: 2 },
+      })],
+    }
+    expect(dnd5eInventoryLoad(hero)).toMatchObject({
+      carryingCapacityLb: 300,
+      encumberedThresholdLb: 50,
+      heavilyEncumberedThresholdLb: 100,
+    })
+  })
+
   it('publishes equipment and adventuring item templates with attribution', () => {
     expect(DND5E_SRD_ITEM_TEMPLATES.some((item) => item.category === 'equipment')).toBe(true)
     expect(DND5E_SRD_GEAR_ITEM_TEMPLATES.some((item) => item.id === 'srd-5.1:item:potion-of-healing')).toBe(true)

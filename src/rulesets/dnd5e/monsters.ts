@@ -191,9 +191,31 @@ export interface Dnd5eMonsterWeaponAttack {
     kind: 'saving-throw-condition'
     ability: AbilityKey
     dc: number
-    condition: Dnd5eStandardConditionId
+    condition: Dnd5eStandardConditionId | 'disease'
   }
 }
+
+export type Dnd5eMonsterSpecialActionRule =
+  | {
+      kind: 'ability-check'
+      ability: AbilityKey
+      skillKey?: string
+    }
+  | {
+      kind: 'saving-throw-condition'
+      rangeFeet: number
+      ability: AbilityKey
+      dc: number
+      condition: Dnd5eStandardConditionId
+      preventReactions?: boolean
+      repeatSaveOnDamage?: boolean
+    }
+  | {
+      kind: 'conditioned-damage-and-healing'
+      requiredCondition: Dnd5eStandardConditionId
+      requireSameSource: boolean
+      damage: Dnd5eMonsterDamage
+    }
 
 export interface Dnd5eMonsterTrait {
   name: string
@@ -276,6 +298,8 @@ export interface Dnd5eMonsterAction {
   sequence?: readonly string[]
   usage?: Dnd5eMonsterActionUsage | Dnd5eMonsterActionPerDayUsage
   legendaryCost?: number
+  /** Structured non-weapon rule resolved entirely by the Headless engine. */
+  rule?: Dnd5eMonsterSpecialActionRule
   /** 传奇动作直接调用普通武器动作时指向其 ID。 */
   referencedActionId?: string
   movement?: {
@@ -469,6 +493,76 @@ function applyReviewedMonsterTranslation(
  * structured rules required by the engine without depending on English text.
  */
 function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eMonsterStatBlock {
+  if (monster.slug === 'aboleth') {
+    const actions = monster.actions.map((action) => {
+      if (action.id === 'multiattack') return { ...action, automation: 'headless' as const }
+      if (action.id === 'tentacle' && action.attack) {
+        return {
+          ...action,
+          automation: 'headless' as const,
+          attack: {
+            ...action.attack,
+            // The delayed one-minute transformation is preserved as a durable
+            // disease marker; map environment rules decide underwater effects.
+            onHit: 'DC 14 Constitution save; on a failure the target contracts the aboleth tentacle disease.',
+            onHitRule: {
+              kind: 'saving-throw-condition' as const,
+              ability: 'con' as const,
+              dc: 14,
+              condition: 'disease' as const,
+            },
+            // The SRD's later 1d12 acid damage is not part of the initial hit.
+            damage: action.attack.damage.filter((component) => component.type !== 'acid'),
+          },
+        }
+      }
+      if (action.id === 'enslave') {
+        return {
+          ...action,
+          automation: 'headless' as const,
+          usage: { kind: 'per-day' as const, max: 3 },
+          rule: {
+            kind: 'saving-throw-condition' as const,
+            rangeFeet: 30,
+            ability: 'wis' as const,
+            dc: 14,
+            condition: 'charmed' as const,
+            preventReactions: true,
+            repeatSaveOnDamage: true,
+          },
+        }
+      }
+      return action
+    })
+    return {
+      ...monster,
+      actions,
+      legendaryActionPoints: 3,
+      legendaryActions: monster.legendaryActions?.map((action) => {
+        if (action.id === 'detect') {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            rule: { kind: 'ability-check' as const, ability: 'wis' as const, skillKey: 'perception' },
+          }
+        }
+        if (action.id === 'psychic-drain-costs-2-actions') {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            rule: {
+              kind: 'conditioned-damage-and-healing' as const,
+              requiredCondition: 'charmed' as const,
+              requireSameSource: true,
+              damage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'psychic' as const },
+            },
+          }
+        }
+        return action
+      }),
+    }
+  }
+
   if (monster.slug === 'zombie') {
     return {
       ...monster,

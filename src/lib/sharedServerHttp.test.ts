@@ -20,8 +20,12 @@ interface Running {
   sharedRoot: string
 }
 
-async function startServer(port: number, extraEnv: Record<string, string>): Promise<Running> {
-  const sharedRoot = await mkdtemp(path.join(os.tmpdir(), 'stars-http-'))
+async function startServer(
+  port: number,
+  extraEnv: Record<string, string>,
+  existingSharedRoot?: string,
+): Promise<Running> {
+  const sharedRoot = existingSharedRoot ?? await mkdtemp(path.join(os.tmpdir(), 'stars-http-'))
   const distRoot = path.join(sharedRoot, 'dist')
   await mkdir(distRoot, { recursive: true })
   await writeFile(path.join(distRoot, 'index.html'), '<!doctype html><title>stars</title>')
@@ -47,9 +51,14 @@ async function startServer(port: number, extraEnv: Record<string, string>): Prom
   return { proc, base, sharedRoot }
 }
 
-async function stopServer(r: Running): Promise<void> {
+async function stopServer(r: Running, removeRoot = true): Promise<void> {
+  const exited = new Promise<void>((resolve) => r.proc.once('exit', () => resolve()))
   r.proc.kill('SIGTERM')
-  await rm(r.sharedRoot, { recursive: true, force: true }).catch(() => {})
+  await Promise.race([
+    exited,
+    new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+  ])
+  if (removeRoot) await rm(r.sharedRoot, { recursive: true, force: true }).catch(() => {})
 }
 
 function putState(base: string, name: string, body: unknown, headers: Record<string, string> = {}) {
@@ -507,6 +516,334 @@ describe('账号恢复与账号角色库协议', () => {
     })
     expect(rejoinResponse.status).toBe(200)
     expect(await rejoinResponse.json()).toMatchObject({ member: { memberId: joined.member.memberId, role: 'player' } })
+  })
+})
+
+describe('账号级战役与临时房间协议', () => {
+  it('让同一战役跨多次房间继续读取共享状态，并拒绝并行开房', async () => {
+    const accountResponse = await fetch(`${offServer.base}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: '长期战役 DM', clientId: 'campaign-owner-client' }),
+    })
+    expect(accountResponse.status).toBe(201)
+    const account = await accountResponse.json() as {
+      session: { accountId: string; sessionToken: string }
+    }
+    const accountHeaders = {
+      'Content-Type': 'application/json',
+      'X-Stars-Account-Token': account.session.sessionToken,
+    }
+
+    const createCampaignResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, {
+      method: 'POST',
+      headers: accountHeaders,
+      body: JSON.stringify({
+        name: '跨房间测试战役',
+        description: '地图与角色状态应归战役长期保存。',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+      }),
+    })
+    expect(createCampaignResponse.status).toBe(201)
+    const campaign = await createCampaignResponse.json() as { campaignId: string; roomCount: number }
+    expect(campaign.campaignId).toMatch(/^[A-HJ-NP-Z2-9]{12}$/)
+    expect(campaign.roomCount).toBe(0)
+
+    const forgedBinding = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: accountHeaders,
+      body: JSON.stringify({
+        campaignId: campaign.campaignId,
+        roomName: '绕过战役入口',
+        displayName: '长期战役 DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: 'campaign-owner-client',
+        activePlugins: [],
+      }),
+    })
+    expect(forgedBinding.status).toBe(400)
+    await expect(forgedBinding.json()).resolves.toMatchObject({ error: 'campaign-room-launch-required' })
+
+    const launch = () => fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/rooms`,
+      {
+        method: 'POST',
+        headers: accountHeaders,
+        body: JSON.stringify({
+          roomName: '临时游戏房间',
+          displayName: '长期战役 DM',
+          clientId: 'campaign-owner-client',
+          accountId: account.session.accountId,
+          activePlugins: [],
+          maxPlayers: 4,
+        }),
+      },
+    )
+    const firstRoomResponse = await launch()
+    expect(firstRoomResponse.status).toBe(201)
+    const firstRoom = await firstRoomResponse.json() as {
+      roomId: string
+      campaignId: string
+      member: { memberId: string; roomToken: string }
+    }
+    expect(firstRoom.campaignId).toBe(campaign.campaignId)
+
+    const parallelRoomResponse = await launch()
+    expect(parallelRoomResponse.status).toBe(409)
+    await expect(parallelRoomResponse.json()).resolves.toMatchObject({ error: 'campaign-room-active' })
+
+    const firstQuery = `?room=${firstRoom.roomId}`
+    const firstRoomHeaders = {
+      'Content-Type': 'application/json',
+      'X-Stars-Protocol': '5',
+      'X-Stars-Expected-Revision': '0',
+      'X-Stars-Member': firstRoom.member.memberId,
+      'X-Stars-Room-Token': firstRoom.member.roomToken,
+    }
+    const mapsState = {
+      maps: [{ id: 'persistent-map', name: '长期地图', visibleToPlayers: true }],
+      activeMapId: 'persistent-map',
+      updatedAt: Date.now(),
+    }
+    expect((await fetch(`${offServer.base}/api/state/maps${firstQuery}`, {
+      method: 'PUT',
+      headers: firstRoomHeaders,
+      body: JSON.stringify(mapsState),
+    })).status).toBe(200)
+
+    expect((await fetch(`${offServer.base}/api/rooms/${firstRoom.roomId}/leave`, {
+      method: 'POST',
+      headers: { ...firstRoomHeaders, 'X-Stars-Account-Token': account.session.sessionToken },
+      body: JSON.stringify({ memberId: firstRoom.member.memberId }),
+    })).status).toBe(200)
+
+    const secondRoomResponse = await launch()
+    expect(secondRoomResponse.status).toBe(201)
+    const secondRoom = await secondRoomResponse.json() as {
+      roomId: string
+      campaignId: string
+      member: { memberId: string; roomToken: string }
+    }
+    expect(secondRoom.roomId).not.toBe(firstRoom.roomId)
+    expect(secondRoom.campaignId).toBe(campaign.campaignId)
+
+    const closedRoomRead = await fetch(`${offServer.base}/api/state/maps?room=${firstRoom.roomId}`, {
+      headers: firstRoomHeaders,
+    })
+    expect(closedRoomRead.status).toBe(409)
+    await expect(closedRoomRead.json()).resolves.toMatchObject({ error: 'room-closed' })
+
+    const persisted = await fetch(`${offServer.base}/api/state/maps?room=${secondRoom.roomId}`, {
+      headers: {
+        'X-Stars-Protocol': '5',
+        'X-Stars-Member': secondRoom.member.memberId,
+        'X-Stars-Room-Token': secondRoom.member.roomToken,
+      },
+    })
+    expect(persisted.status).toBe(200)
+    await expect(persisted.json()).resolves.toMatchObject({
+      maps: [{ id: 'persistent-map', name: '长期地图' }],
+      activeMapId: 'persistent-map',
+    })
+
+    const campaignListResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, {
+      headers: { 'X-Stars-Account-Token': account.session.sessionToken },
+    })
+    expect(campaignListResponse.status).toBe(200)
+    await expect(campaignListResponse.json()).resolves.toMatchObject({
+      campaigns: [{
+        campaignId: campaign.campaignId,
+        roomCount: 2,
+        latestRoom: { roomId: secondRoom.roomId, status: 'online' },
+      }],
+    })
+  })
+
+  it('允许战役所有者跨设备重新签发 DM 凭证，并立即撤销旧凭证', async () => {
+    const createAccount = async (displayName: string, clientId: string) => {
+      const response = await fetch(`${offServer.base}/api/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName, clientId }),
+      })
+      expect(response.status).toBe(201)
+      return response.json() as Promise<{
+        session: { accountId: string; sessionToken: string; displayName: string }
+      }>
+    }
+    const owner = await createAccount('跨设备 DM', 'campaign-resume-device-1')
+    const outsider = await createAccount('其他账号', 'campaign-resume-outsider')
+    const ownerHeaders = {
+      'Content-Type': 'application/json',
+      'X-Stars-Account-Token': owner.session.sessionToken,
+    }
+    const campaignResponse = await fetch(`${offServer.base}/api/accounts/me/campaigns`, {
+      method: 'POST',
+      headers: ownerHeaders,
+      body: JSON.stringify({
+        name: '跨设备恢复战役',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+      }),
+    })
+    const campaign = await campaignResponse.json() as { campaignId: string }
+    const roomResponse = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/rooms`,
+      {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          roomName: '保持开启的房间',
+          displayName: '跨设备 DM',
+          clientId: 'campaign-resume-device-1',
+          activePlugins: [],
+        }),
+      },
+    )
+    expect(roomResponse.status).toBe(201)
+    const original = await roomResponse.json() as {
+      roomId: string
+      campaignId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const oldCredentialHeaders = {
+      'X-Stars-Protocol': '5',
+      'X-Stars-Member': original.member.memberId,
+      'X-Stars-Room-Token': original.member.roomToken,
+    }
+
+    const outsiderResume = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/rooms/current`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': outsider.session.sessionToken,
+        },
+        body: JSON.stringify({
+          displayName: '伪造 DM',
+          clientId: 'campaign-resume-outsider',
+          activePlugins: [],
+        }),
+      },
+    )
+    expect(outsiderResume.status).toBe(404)
+
+    const resumedResponse = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/rooms/current`,
+      {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          displayName: '跨设备 DM',
+          clientId: 'campaign-resume-device-2',
+          activePlugins: [],
+        }),
+      },
+    )
+    expect(resumedResponse.status).toBe(200)
+    const resumed = await resumedResponse.json() as {
+      roomId: string
+      campaignId: string
+      member: { memberId: string; roomToken: string; clientId: string }
+    }
+    expect(resumed).toMatchObject({
+      roomId: original.roomId,
+      campaignId: campaign.campaignId,
+      member: {
+        memberId: original.member.memberId,
+        clientId: 'campaign-resume-device-2',
+      },
+    })
+    expect(resumed.member.roomToken).not.toBe(original.member.roomToken)
+
+    expect((await fetch(`${offServer.base}/api/state/maps?room=${original.roomId}`, {
+      headers: oldCredentialHeaders,
+    })).status).toBe(403)
+    expect((await fetch(`${offServer.base}/api/state/maps?room=${resumed.roomId}`, {
+      headers: {
+        'X-Stars-Protocol': '5',
+        'X-Stars-Member': resumed.member.memberId,
+        'X-Stars-Room-Token': resumed.member.roomToken,
+      },
+    })).status).toBe(404)
+
+    expect((await fetch(`${offServer.base}/api/rooms/${resumed.roomId}/leave`, {
+      method: 'POST',
+      headers: {
+        ...ownerHeaders,
+        'X-Stars-Member': resumed.member.memberId,
+        'X-Stars-Room-Token': resumed.member.roomToken,
+      },
+      body: JSON.stringify({ memberId: resumed.member.memberId }),
+    })).status).toBe(200)
+    const closedResume = await fetch(
+      `${offServer.base}/api/accounts/me/campaigns/${campaign.campaignId}/rooms/current`,
+      {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          displayName: '跨设备 DM',
+          clientId: 'campaign-resume-device-3',
+          activePlugins: [],
+        }),
+      },
+    )
+    expect(closedResume.status).toBe(409)
+    await expect(closedResume.json()).resolves.toMatchObject({ error: 'room-closed' })
+  })
+})
+
+describe('SQLite 账号存储 HTTP 集成', () => {
+  it('服务重启且 JSON 回滚副本缺失时，仍从 SQLite 恢复账号和战役', async () => {
+    const sharedRoot = await mkdtemp(path.join(os.tmpdir(), 'stars-http-sqlite-'))
+    const storageEnv = {
+      STARS_ACCOUNT_STORAGE: 'sqlite',
+      STARS_DATABASE_PATH: path.join(sharedRoot, 'astraltrace.sqlite'),
+      STARS_ALLOW_LEGACY_ACCOUNT_CREATION: 'true',
+    }
+    let server = await startServer(5397, storageEnv, sharedRoot)
+    try {
+      const accountResponse = await fetch(`${server.base}/api/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: 'SQLite DM', clientId: 'sqlite-owner-client' }),
+      })
+      expect(accountResponse.status).toBe(201)
+      const account = await accountResponse.json() as {
+        session: { accountId: string; sessionToken: string }
+      }
+      const accountHeaders = {
+        'Content-Type': 'application/json',
+        'X-Stars-Account-Token': account.session.sessionToken,
+      }
+      const campaignResponse = await fetch(`${server.base}/api/accounts/me/campaigns`, {
+        method: 'POST',
+        headers: accountHeaders,
+        body: JSON.stringify({
+          name: 'SQLite 长期战役',
+          rulesetId: 'dnd5e-2014-srd-5.1',
+        }),
+      })
+      expect(campaignResponse.status).toBe(201)
+      const campaign = await campaignResponse.json() as { campaignId: string }
+
+      await stopServer(server, false)
+      await rm(
+        path.join(server.sharedRoot, 'lobby', 'accounts', `${account.session.accountId}.json`),
+        { force: true },
+      )
+      server = await startServer(5397, storageEnv, server.sharedRoot)
+
+      const listResponse = await fetch(`${server.base}/api/accounts/me/campaigns`, {
+        headers: { 'X-Stars-Account-Token': account.session.sessionToken },
+      })
+      expect(listResponse.status).toBe(200)
+      await expect(listResponse.json()).resolves.toMatchObject({
+        campaigns: [{ campaignId: campaign.campaignId, name: 'SQLite 长期战役' }],
+      })
+    } finally {
+      await stopServer(server)
+    }
   })
 })
 

@@ -14,6 +14,7 @@ import type {
 } from '../../types/inventory'
 import { DND5E_INVENTORY_SCHEMA_VERSION } from '../../types/inventory'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import { dnd5eActiveCarryingCapacityMultiplier } from './activeEffects'
 import {
   appendRollLedgerEntry,
   commitCombatTransaction,
@@ -409,7 +410,9 @@ export function dnd5eInventoryLoad(character: Character): Dnd5eInventoryLoad {
   const currencyWeightLb = Object.values(inventory.currency ?? EMPTY_CURRENCY).reduce((sum, amount) => sum + amount, 0) / 50
   const strength = Math.max(1, Math.floor(character.abilities?.str ?? 10))
   const totalWeightLb = itemWeightLb + currencyWeightLb
-  const carryingCapacityLb = strength * 15
+  const carryingCapacityLb = strength * 15 * dnd5eActiveCarryingCapacityMultiplier(
+    character.dnd5eCombatState?.activeEffects,
+  )
   const encumberedThresholdLb = strength * 5
   const heavilyEncumberedThresholdLb = strength * 10
   const status = totalWeightLb > carryingCapacityLb

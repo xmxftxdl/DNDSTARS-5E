@@ -239,6 +239,78 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
+  'adult-red-dragon': {
+    emoji: '🐉',
+    color: '#b91c1c',
+    tokenPortrait: '/assets/portraits/adult-red-dragon-selected-flight-token.png',
+    initiativePortrait: '/assets/portraits/adult-red-dragon-selected-flight-initiative.png',
+    visualVariants: [
+      {
+        id: 'volcanic-sky-raid',
+        label: '火山掠空',
+        tokenPortrait: '/assets/portraits/adult-red-dragon-selected-flight-token.png',
+        initiativePortrait: '/assets/portraits/adult-red-dragon-selected-flight-initiative.png',
+      },
+      {
+        id: 'burning-citadel',
+        label: '焚城践踏',
+        tokenPortrait: '/assets/portraits/adult-red-dragon-burning-citadel-token.png',
+        initiativePortrait: '/assets/portraits/adult-red-dragon-burning-citadel-initiative.png',
+      },
+      {
+        id: 'inferno-breath',
+        label: '烈焰吐息',
+        tokenPortrait: '/assets/portraits/adult-red-dragon-inferno-breath-token.png',
+        initiativePortrait: '/assets/portraits/adult-red-dragon-inferno-breath-initiative.png',
+      },
+    ],
+  },
+  'adult-silver-dragon': {
+    emoji: '🐉',
+    color: '#94a3b8',
+    tokenPortrait: '/assets/portraits/adult-silver-dragon-cloud-crown-citadel-token.png',
+    initiativePortrait: '/assets/portraits/adult-silver-dragon-cloud-crown-citadel-initiative.png',
+    visualVariants: [
+      {
+        id: 'cloud-crown-citadel',
+        label: '云巅冰宫',
+        tokenPortrait: '/assets/portraits/adult-silver-dragon-cloud-crown-citadel-token.png',
+        initiativePortrait: '/assets/portraits/adult-silver-dragon-cloud-crown-citadel-initiative.png',
+      },
+      {
+        id: 'moonlit-guardian',
+        label: '月夜护航',
+        tokenPortrait: '/assets/portraits/adult-silver-dragon-moonlit-guardian-token.png',
+        initiativePortrait: '/assets/portraits/adult-silver-dragon-moonlit-guardian-initiative.png',
+      },
+    ],
+  },
+  'adult-white-dragon': {
+    emoji: '🐉',
+    color: '#cbd5e1',
+    tokenPortrait: '/assets/portraits/adult-white-dragon-glacial-cavern-apex-token.png',
+    initiativePortrait: '/assets/portraits/adult-white-dragon-glacial-cavern-apex-initiative.png',
+    visualVariants: [
+      {
+        id: 'glacial-cavern-apex',
+        label: '冰窟霸主',
+        tokenPortrait: '/assets/portraits/adult-white-dragon-glacial-cavern-apex-token.png',
+        initiativePortrait: '/assets/portraits/adult-white-dragon-glacial-cavern-apex-initiative.png',
+      },
+      {
+        id: 'blizzard-hunter',
+        label: '暴雪猎杀',
+        tokenPortrait: '/assets/portraits/adult-white-dragon-blizzard-hunter-token.png',
+        initiativePortrait: '/assets/portraits/adult-white-dragon-blizzard-hunter-initiative.png',
+      },
+    ],
+  },
+  'air-elemental': {
+    emoji: '🌪️',
+    color: '#bae6fd',
+    tokenPortrait: '/assets/portraits/air-elemental-storm-canyon-token.png',
+    initiativePortrait: '/assets/portraits/air-elemental-storm-canyon-initiative.png',
+  },
   bandit: { emoji: '🗡️', color: '#78716c' },
   bugbear: {
     emoji: '👹',

@@ -28,6 +28,7 @@ interface RoomMemberResponse {
 
 interface RoomResponse {
   roomId: string
+  campaignId?: string
   roomName: string
   rulesetId: typeof DND5E_2014_RULESET_ID
   createdAt: number
@@ -255,6 +256,7 @@ function responseToSession(response: RoomResponse): RoomSession {
   if (!roomToken) throw new RoomApiError('invalid-room-session', 401)
   return {
     roomId: response.roomId,
+    ...(response.campaignId ? { campaignId: response.campaignId } : {}),
     roomName: response.roomName,
     rulesetId: response.rulesetId,
     memberId: response.member.memberId,
@@ -301,6 +303,55 @@ export async function createRoom(input: {
       maxPlayers: input.maxPlayers ?? 3,
     }),
   })
+  return { session: responseToSession(response), rules: response.rules }
+}
+
+export async function launchCampaignRoom(input: {
+  campaignId: string
+  roomName: string
+  displayName: string
+  password?: string
+  maxPlayers?: number
+  activePlugins?: readonly { id: string; version: string; integrity?: string; stateSchemaVersion?: number }[]
+}): Promise<RoomConnection> {
+  const account = getAccountSession()
+  if (!account) throw new RoomApiError('account-required', 401)
+  const response = await roomRequest<RoomResponse>(
+    `/accounts/me/campaigns/${encodeURIComponent(input.campaignId)}/rooms`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        roomName: input.roomName,
+        displayName: input.displayName,
+        clientId: getRoomClientId(),
+        accountId: account.accountId,
+        activePlugins: exactRoomPluginRequirements(input.activePlugins ?? []),
+        password: input.password ?? '',
+        maxPlayers: input.maxPlayers ?? 3,
+      }),
+    },
+  )
+  return { session: responseToSession(response), rules: response.rules }
+}
+
+export async function resumeCampaignRoom(input: {
+  campaignId: string
+  displayName: string
+  activePlugins?: readonly { id: string; version: string; integrity?: string; stateSchemaVersion?: number }[]
+}): Promise<RoomConnection> {
+  const account = getAccountSession()
+  if (!account) throw new RoomApiError('account-required', 401)
+  const response = await roomRequest<RoomResponse>(
+    `/accounts/me/campaigns/${encodeURIComponent(input.campaignId)}/rooms/current`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: input.displayName,
+        clientId: getRoomClientId(),
+        activePlugins: exactRoomPluginRequirements(input.activePlugins ?? []),
+      }),
+    },
+  )
   return { session: responseToSession(response), rules: response.rules }
 }
 
@@ -600,6 +651,10 @@ export function roomApiErrorMessage(error: unknown): string {
     'room-not-found': '没有找到这个房间，请检查房间码。',
     'room-offline': '房间创建者当前不在线，暂时无法加入。',
     'room-closed': '这个房间已经关闭。',
+    'account-campaign-not-found': '账号中没有找到这个战役。',
+    'campaign-archived': '这个战役已归档，不能创建新的游戏房间。',
+    'campaign-room-not-found': '这个战役还没有可恢复的游戏房间。',
+    'campaign-room-active': '这个战役已经有一场正在进行的游戏，请先回到当前房间或结束该场游戏。',
     'room-full': '房间的玩家席位已满。',
     'spectator-full': '房间的观战席位已满。',
     'room-locked': '房间当前已锁定，暂不接受新玩家。',

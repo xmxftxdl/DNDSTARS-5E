@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { Activity, AlertTriangle, CheckCircle2, Download, Plug, Puzzle, RefreshCw, Shield, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import CampaignSafetyPanel from '../components/CampaignSafetyPanel'
@@ -35,6 +35,7 @@ import {
 } from '../rulesets/dnd5e/srdContent'
 
 export default function RulesPluginsPage() {
+  const { campaignId } = useParams()
   const fileRef = useRef<HTMLInputElement>(null)
   const [roomSession] = useState(() => getRoomSession())
   const roomRules = useSyncExternalStore(
@@ -264,7 +265,7 @@ export default function RulesPluginsPage() {
           </p>
         </div>
         <Link
-          to="/plugins"
+          to={campaignId ? `/campaign/${encodeURIComponent(campaignId)}/extensions` : '/app/extensions'}
           className="shrink-0 rounded-xl bg-arcane-500/15 px-4 py-2.5 text-center text-sm font-semibold text-arcane-100 hover:bg-arcane-500/20"
         >
           打开插件中心

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
+import { dnd5eCombatantCanSee, dnd5eTargetArmorClassForAttack, resolveDnd5eHeadlessAction } from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication } from './mapBridge'
 import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
@@ -213,6 +213,70 @@ describe('D&D 5e map bridge', () => {
       attackModifier: 99, d20: 20, damage: { count: 1, sides: 8, bonus: 3, rolls: [8] },
     })
     expect(naturalTwenty).toMatchObject({ ok: true, state: { combatants: { [enemy.id]: { currentHp: 10 } } } })
+  })
+
+  it('compiles character Darkvision ActiveEffects into ordinary-darkness visibility', () => {
+    const heroToken = token({
+      id: 'hero-token',
+      type: 'player',
+      characterId: 'char',
+      x: 10,
+      y: 50,
+      hp: 20,
+      maxHp: 20,
+    })
+    const enemy = token({ id: 'enemy-token', x: 90, y: 50 })
+    const darkvision = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:darkvision',
+      label: '黑暗视觉',
+      targetId: heroToken.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'darkvision' },
+      duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      modifiers: { darkvisionRangeFeet: 60 },
+    })
+    const hero = {
+      ...character(),
+      dnd5eCombatState: { schemaVersion: 2 as const, activeEffects: [darkvision] },
+    }
+    const map: BattleMap = {
+      id: 'darkvision-map',
+      name: 'Darkvision',
+      width: 120,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [heroToken, enemy],
+    }
+    setMapGeometryRuntime([{
+      mapId: map.id,
+      walls: [],
+      doors: [],
+      obstacles: [],
+      vision: {
+        enabled: true,
+        defaultRangeFeet: 60,
+        sharePartyVision: true,
+        ambientLight: 'darkness',
+      },
+      updatedAt: 1,
+    }])
+    const initiativeOrder = [heroToken, enemy].map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: '',
+      color: '',
+      roll: 20 - index,
+    }))
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'darkvision-map',
+      map,
+      characters: [hero],
+      initiativeOrder,
+    })
+    expect(dnd5eCombatantCanSee(snapshot.state, heroToken.id, enemy.id)).toBe(true)
   })
 
   it('preserves native effect instances across reconnect snapshots', () => {

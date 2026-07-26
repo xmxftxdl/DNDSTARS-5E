@@ -9,13 +9,14 @@ import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import {
   mapGeometryCanSeeToken,
   mapGeometryCoverBetween,
+  mapGeometryIlluminationAtPoint,
   mapGeometryLineOfSightBlocked,
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
 } from '../../lib/mapGeometry'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e } from './character'
-import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, dnd5eEffectiveSizeRank, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
+import { createDnd5eCombatant, dnd5eCombatantClassLevel, dnd5eCombatantHasSubclass, dnd5eCombatantPairKey, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, startDnd5eHeadlessCombat, type Dnd5eCombatant, type Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterMapSpeed, dnd5eMonsterProficiencyBonus, getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
 import { dnd5eCanThreatenRangedAttacker, dnd5eClassPassiveDefenses, dnd5eConditionImmuneFromSource, dnd5eIsIncapacitated } from './passiveDefenses'
@@ -100,6 +101,15 @@ function tokenSpecialSenses(token: Token): Dnd5eSpecialSense[] {
     token.tremorsenseRangeFeet ? { kind: 'tremorsense' as const, rangeFeet: token.tremorsenseRangeFeet } : undefined,
     token.truesightRangeFeet ? { kind: 'truesight' as const, rangeFeet: token.truesightRangeFeet } : undefined,
   ].filter((sense): sense is Dnd5eSpecialSense => !!sense && sense.rangeFeet > 0)
+}
+
+function monsterDarkvisionRangeFeet(monster: Dnd5eMonsterStatBlock | undefined): number {
+  return Math.max(0, ...(monster?.senses ?? []).flatMap((sense) => {
+    const name = sense.name.trim().toLowerCase()
+    return name.includes('darkvision') || name.includes('黑暗视觉')
+      ? [Math.max(0, sense.distanceFeet ?? 0)]
+      : []
+  }))
 }
 
 function mergeSpecialSenses(...groups: readonly Dnd5eSpecialSense[][]): Dnd5eSpecialSense[] {
@@ -285,6 +295,10 @@ export function createDnd5eMapCombatSnapshot(input: {
       return [{
         ...combatant,
         mainWeaponId: character.equipment?.mainWeapon?.id,
+        mainWeaponMagical: !!character.equipment?.mainWeapon && (
+          character.equipment.mainWeapon.baseEquipmentId != null ||
+          character.equipment.mainWeapon.effects != null
+        ),
         id: token.id,
         name: token.label,
         initiative,
@@ -292,6 +306,7 @@ export function createDnd5eMapCombatSnapshot(input: {
         elevationFeet: mapGeometryTokenElevation(geometry, token),
         airborne: mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
+        darkvisionRangeFeet: token.darkvisionRangeFeet,
         specialSenses: tokenSpecialSenses(token),
       }]
     }
@@ -332,10 +347,12 @@ export function createDnd5eMapCombatSnapshot(input: {
       airborne: !!monster?.speed.fly &&
         mapGeometryTokenElevation(geometry, token) >
           mapGeometryTerrainElevationAtPoint(geometry, token),
+      darkvisionRangeFeet: Math.max(token.darkvisionRangeFeet ?? 0, monsterDarkvisionRangeFeet(monster)) || undefined,
       specialSenses: mergeSpecialSenses(normalizeDnd5eSpecialSenses(monster?.senses), tokenSpecialSenses(token)),
       magicResistance: dnd5eMonsterHasMagicResistance(monster),
       shapechanger: monster?.capabilities?.shapechanger === true ||
         (!!monster && dnd5eMonsterHasStructuredShapechange(monster.id)),
+      mainWeaponId: monster?.actions.find((action) => action.kind === 'weapon-attack')?.id,
       concentrating: !!tokenClassState.concentrationSpellId,
       classState: {
         ...tokenClassState,
@@ -399,6 +416,7 @@ export function createDnd5eMapCombatSnapshot(input: {
   state.lineOfEffectBlockedByCombatantPair = {}
   state.lineOfSightBlockedByCombatantPair = {}
   state.physicalLineOfSightBlockedByCombatantPair = {}
+  state.magicalDarknessByCombatantPair = {}
   for (let leftIndex = 0; leftIndex < combatantTokens.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < combatantTokens.length; rightIndex += 1) {
       const left = combatantTokens[leftIndex]
@@ -412,15 +430,30 @@ export function createDnd5eMapCombatSnapshot(input: {
         else if (cover.armorClassBonus === 2 || cover.armorClassBonus === 5) {
           state.coverBonusByCombatantPair[directedKey] = cover.armorClassBonus
         }
+        const effectiveViewer = {
+          ...attacker,
+          darkvisionRangeFeet: Math.max(
+            attacker.darkvisionRangeFeet ?? 0,
+            dnd5eEffectiveDarkvisionRangeFeet(state.combatants[attacker.id]),
+          ),
+        }
         const physicalLineOfSightBlocked = mapGeometryLineOfSightBlocked({
           geometry,
-          from: attacker,
+          from: effectiveViewer,
           to: target,
           fromElevationFeet: attacker.elevationFeet ?? 0,
           toElevationFeet: target.elevationFeet ?? 0,
         })
         if (physicalLineOfSightBlocked) state.physicalLineOfSightBlockedByCombatantPair[directedKey] = true
-        const lineOfSightBlocked = physicalLineOfSightBlocked || !mapGeometryCanSeeToken({ geometry, map: input.map, viewer: attacker, target })
+        if (mapGeometryIlluminationAtPoint({
+          geometry,
+          map: input.map,
+          tokens: input.map.tokens,
+          point: target,
+          elevationFeet: target.elevationFeet ?? 0,
+        }) === 'magical-darkness') state.magicalDarknessByCombatantPair[directedKey] = true
+        const lineOfSightBlocked = physicalLineOfSightBlocked ||
+          !mapGeometryCanSeeToken({ geometry, map: input.map, viewer: effectiveViewer, target })
         if (lineOfSightBlocked) state.lineOfSightBlockedByCombatantPair[directedKey] = true
       }
     }

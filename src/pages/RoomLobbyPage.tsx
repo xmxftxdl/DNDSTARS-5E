@@ -18,12 +18,17 @@ import {
 } from '../lib/accountSession'
 import AccountAuthPanel from '../components/AccountAuthPanel'
 import {
-  createRoom,
   joinRoom,
+  launchCampaignRoom,
   loadRoomPreview,
   roomApiErrorMessage,
   type RoomPreview,
 } from '../lib/roomApi'
+import {
+  accountApiErrorMessage,
+  loadAccountCampaigns,
+  type AccountCampaign,
+} from '../lib/accountApi'
 import {
   DND5E_2014_RULESET_ID,
   DND5E_2014_RULESET_LABEL,
@@ -39,13 +44,22 @@ import {
   type RoomLobbyMode,
 } from '../lib/campaignNavigation'
 
-export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
+export default function RoomLobbyPage({
+  notice,
+  embedded = false,
+}: {
+  notice?: string | null
+  embedded?: boolean
+}) {
   const recentResume = typeof window === 'undefined' ? null : getRecentRoomPlayerResumeIdentity()
   const requestedMode = typeof window === 'undefined' ? null : requestedRoomLobbyMode(window.location.search)
   const invitedRoomCode = typeof window === 'undefined'
     ? ''
     : (new URLSearchParams(window.location.search).get('join') ?? '').toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6)
   const initialRoomCode = requestedMode === 'create' ? '' : invitedRoomCode || recentResume?.roomId || ''
+  const requestedCampaignId = typeof window === 'undefined'
+    ? ''
+    : (new URLSearchParams(window.location.search).get('campaign') ?? '').toUpperCase()
   const [mode, setMode] = useState<RoomLobbyMode>(
     requestedMode ?? (initialRoomCode.length === 6 ? 'join' : 'create'),
   )
@@ -64,9 +78,44 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [account, setAccount] = useState(() => getAccountSession())
+  const [campaigns, setCampaigns] = useState<AccountCampaign[]>([])
+  const [campaignsLoading, setCampaignsLoading] = useState(false)
+  const [selectedCampaignId, setSelectedCampaignId] = useState(requestedCampaignId)
   const resumeIdentity = mode === 'join' ? getRoomPlayerResumeIdentity(roomCode) : null
 
   useEffect(() => subscribeAccountSession(setAccount), [])
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      await Promise.resolve()
+      if (disposed) return
+      if (!account) {
+        setCampaigns([])
+        setSelectedCampaignId('')
+        setCampaignsLoading(false)
+        return
+      }
+      setCampaignsLoading(true)
+      try {
+        const loaded = await loadAccountCampaigns()
+        if (disposed) return
+        const available = loaded.filter((campaign) => !campaign.archived)
+        setCampaigns(available)
+        setSelectedCampaignId((current) =>
+          available.some((campaign) => campaign.campaignId === current)
+            ? current
+            : available[0]?.campaignId ?? '')
+      } catch (cause) {
+        if (!disposed) setError(accountApiErrorMessage(cause))
+      } finally {
+        if (!disposed) setCampaignsLoading(false)
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [account])
 
   useEffect(() => {
     if (mode !== 'join' || roomCode.length !== 6) return
@@ -115,15 +164,23 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
       }
       const activePlugins = activeDnd5eRulesPluginRequirements()
       const connection = mode === 'create'
-        ? await createRoom({ roomName, displayName: dmName, password: roomPassword, maxPlayers, activePlugins })
+        ? await launchCampaignRoom({
+            campaignId: selectedCampaignId,
+            roomName,
+            displayName: dmName,
+            password: roomPassword,
+            maxPlayers,
+            activePlugins,
+          })
         : await joinRoom({ roomId: roomCode, displayName: playerName, password: roomPassword, activePlugins, role: joinRole })
       if (mode === 'create') clearLocalRoomCampaignCache(window.localStorage)
       saveRoomSession(connection.session)
       setRoomRulesSnapshot(connection.rules)
+      const campaignBase = `/campaign/${encodeURIComponent(connection.session.campaignId ?? connection.session.roomId)}`
       window.location.assign(
         connection.session.role === 'dm'
-          ? '/'
-          : connection.rules.member.ready ? '/maps' : '/settings',
+          ? `${campaignBase}/overview`
+          : connection.rules.member.ready ? `${campaignBase}/maps` : `${campaignBase}/settings`,
       )
     } catch (cause) {
       setError(roomApiErrorMessage(cause))
@@ -132,12 +189,12 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-8 lg:px-12">
+    <main className={`relative overflow-hidden ${embedded ? 'min-h-[calc(100vh-12rem)] rounded-3xl border border-white/8 px-5' : 'min-h-screen px-5 py-8 sm:px-8 lg:px-12'}`}>
       <div className="pointer-events-none absolute left-[-12rem] top-[-14rem] h-[34rem] w-[34rem] rounded-full bg-arcane-600/20 blur-[120px]" />
       <div className="pointer-events-none absolute bottom-[-16rem] right-[-10rem] h-[36rem] w-[36rem] rounded-full bg-ember-500/10 blur-[130px]" />
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col">
-        <header className="flex items-center gap-3">
+      <div className={`relative mx-auto flex max-w-6xl flex-col ${embedded ? 'min-h-[calc(100vh-12rem)]' : 'min-h-[calc(100vh-4rem)]'}`}>
+        {!embedded && <header className="flex items-center gap-3">
           <div className="glow-arcane flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-arcane-500 to-arcane-600">
             <Sparkles className="h-6 w-6 text-white" />
           </div>
@@ -145,7 +202,7 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
             <h1 className="text-xl font-bold text-gradient">星界</h1>
             <p className="text-xs text-slate-500">D&D 5e 跑团助手</p>
           </div>
-        </header>
+        </header>}
 
         <section className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1.02fr_0.98fr] lg:gap-16">
           <div className="max-w-xl">
@@ -219,18 +276,52 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
                 </p>
               </div>
 
-              <AccountAuthPanel
-                account={account}
-                onAuthenticated={(session) => {
-                  if (!playerName.trim()) setPlayerName(session.displayName)
-                  if (!dmName.trim() || dmName === '地下城主') setDmName(session.displayName)
-                }}
-                onLoggedOut={() => setError(null)}
-                onError={setError}
-              />
+              {!account && (
+                <AccountAuthPanel
+                  account={account}
+                  onAuthenticated={(session) => {
+                    if (!playerName.trim()) setPlayerName(session.displayName)
+                    if (!dmName.trim() || dmName === '地下城主') setDmName(session.displayName)
+                  }}
+                  onLoggedOut={() => setError(null)}
+                  onError={setError}
+                />
+              )}
 
               {mode === 'create' ? (
                 <div className="space-y-5">
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">长期战役</span>
+                    {campaignsLoading ? (
+                      <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-400">
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                        正在读取账号战役……
+                      </div>
+                    ) : campaigns.length > 0 ? (
+                      <select
+                        value={selectedCampaignId}
+                        onChange={(event) => {
+                          const campaignId = event.target.value
+                          setSelectedCampaignId(campaignId)
+                          const selected = campaigns.find((campaign) => campaign.campaignId === campaignId)
+                          if (selected) setRoomName(`${selected.name} · 游戏房间`)
+                        }}
+                        required
+                        className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200 outline-none focus:border-arcane-400/50"
+                      >
+                        {campaigns.map((campaign) => (
+                          <option key={campaign.campaignId} value={campaign.campaignId}>
+                            {campaign.name}（已开团 {campaign.roomCount} 次）
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+                        还没有可用的长期战役。请先在战役页建立战役档案。
+                        <a href="/app" className="ml-2 font-bold underline">返回新建战役</a>
+                      </div>
+                    )}
+                  </label>
                   <label className="block">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">房间名称</span>
                     <input
@@ -437,7 +528,12 @@ export default function RoomLobbyPage({ notice }: { notice?: string | null }) {
 
               <button
                 type="submit"
-                disabled={busy || !account || (mode === 'join' && preview?.locked === true)}
+                disabled={
+                  busy ||
+                  !account ||
+                  (mode === 'create' && (!selectedCampaignId || campaignsLoading)) ||
+                  (mode === 'join' && preview?.locked === true)
+                }
                 className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-arcane-600 to-arcane-500 px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-arcane-900/30 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60"
               >
                 {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}

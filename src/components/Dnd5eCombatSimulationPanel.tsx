@@ -11,6 +11,7 @@ import {
   Users,
 } from 'lucide-react'
 import {
+  DND5E_COMBAT_SIMULATION_DEFAULT_TRIALS,
   DND5E_COMBAT_SIMULATION_MAX_TRIALS,
   DND5E_COMBAT_SIMULATION_MONSTERS,
   validateDnd5eCombatSimulationRequest,
@@ -50,7 +51,7 @@ export default function Dnd5eCombatSimulationPanel() {
     DND5E_COMBAT_SIMULATION_MONSTERS[0]?.id ?? '',
   )
   const [monsterSelections, setMonsterSelections] = useState<Dnd5eCombatSimulationMonsterSelection[]>([])
-  const [trials, setTrials] = useState(DND5E_COMBAT_SIMULATION_MAX_TRIALS)
+  const [trials, setTrials] = useState(DND5E_COMBAT_SIMULATION_DEFAULT_TRIALS)
   const [initialDistanceFeet, setInitialDistanceFeet] = useState(30)
   const [seed, setSeed] = useState(20240724)
   const [busy, setBusy] = useState(false)
@@ -190,7 +191,7 @@ export default function Dnd5eCombatSimulationPanel() {
             <h3 className="font-semibold text-slate-100">遭遇模拟器</h3>
           </div>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-            在 Web Worker 中复用 Tactical Planner V3 与 Headless 战斗事务，最多运行 1000 场；
+            在 Web Worker 中复用 Tactical Planner V3 与 Headless 战斗事务，单次最多运行 100,000 场；
             可直接载入怪物工坊和当前地图遭遇，且不会写入角色、地图或房间资源。
           </p>
         </div>
@@ -211,7 +212,9 @@ export default function Dnd5eCombatSimulationPanel() {
             className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Play className={`h-4 w-4 ${busy ? 'animate-pulse' : ''}`} />
-            {busy ? `正在模拟 ${trials} 场…` : `模拟 ${trials} 场`}
+            {busy
+              ? `正在模拟 ${trials.toLocaleString('zh-CN')} 场…`
+              : `模拟 ${trials.toLocaleString('zh-CN')} 场`}
           </button>
         </div>
       </div>
@@ -542,18 +545,109 @@ export default function Dnd5eCombatSimulationPanel() {
               </summary>
               <div className="mt-3 max-h-96 space-y-2 overflow-auto">
                 {result.decisionLog.map((entry, index) => (
-                  <div key={`${entry.round}:${entry.actorName}:${index}`} className="rounded-lg bg-black/15 px-3 py-2 text-xs">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-slate-300">
-                      <span className="font-semibold text-violet-200">第 {entry.round} 轮</span>
-                      <span>{entry.actorName}</span>
-                      <span>→ {entry.targetName ?? '无目标'}</span>
-                      <span>· {entry.actionName ?? '闪避/移动'}</span>
-                      <span className="text-slate-500">评分 {decimal(entry.score)}</span>
+                  <details key={`${entry.round}:${entry.actorName}:${index}`} className="rounded-lg bg-black/15 px-3 py-2 text-xs">
+                    <summary className="cursor-pointer list-none">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-slate-300">
+                        <span className="font-semibold text-violet-200">第 {entry.round} 轮 · 顺位 {entry.turn}</span>
+                        <span>{entry.actorName}（HP {entry.actorHp}/{entry.actorMaxHp}）</span>
+                        {entry.controlledByName && (
+                          <span className="text-fuchsia-300">受 {entry.controlledByName} 奴役</span>
+                        )}
+                        <span>→ {entry.targetName ?? '无目标'}</span>
+                        <span>· {entry.actionName ?? '闪避/移动'}</span>
+                        <span className="text-slate-500">评分 {decimal(entry.score)}</span>
+                        <span className={entry.outcome.executed ? 'text-emerald-300' : 'text-amber-300'}>
+                          {entry.outcome.executed ? `命中 ${entry.outcome.hits} · 伤害 ${entry.outcome.damage}` : '未执行动作'}
+                        </span>
+                      </div>
+                    </summary>
+                    <div className="mt-3 space-y-3 border-t border-white/5 pt-3 text-slate-400">
+                      <div className="grid gap-1 sm:grid-cols-2">
+                        <p>决策器：<span className="text-slate-300">{entry.providerId}</span></p>
+                        <p>行为/目标策略：<span className="text-slate-300">{entry.behaviorStyle} / {entry.targetPriority}</span></p>
+                        <p>位置：<span className="text-slate-300">{entry.actorPositionBefore} → {entry.actorPositionAfter} 尺</span></p>
+                        <p>候选数量：<span className="text-slate-300">{entry.candidateCount}</span></p>
+                        <p>选中候选：<span className="break-all text-slate-300">{entry.candidateId}</span></p>
+                        <p>
+                          目标 HP：
+                          <span className="text-slate-300">
+                            {entry.outcome.targetHpBefore == null
+                              ? '—'
+                              : `${entry.outcome.targetHpBefore} → ${entry.outcome.targetHpAfter ?? '—'}`}
+                          </span>
+                        </p>
+                        <p>Headless 事务：<span className="text-slate-300">{entry.outcome.headlessTransactions}</span></p>
+                      </div>
+                      <p>
+                        最终评分依据：{entry.reasons.join('；') || '无附加评分原因'}
+                      </p>
+                      <div className="rounded-lg border border-cyan-300/10 bg-cyan-950/10 p-3">
+                        <p className="font-semibold text-cyan-100">实际执行日志</p>
+                        <ol className="mt-2 space-y-1.5">
+                          {entry.executionSteps.map((step, stepIndex) => (
+                            <li
+                              key={`${stepIndex}:${step.kind}`}
+                              className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2 leading-5"
+                            >
+                              <span className="text-right font-mono text-cyan-500">{stepIndex + 1}.</span>
+                              <span className={
+                                step.kind === 'damage'
+                                  ? 'text-rose-200'
+                                  : step.kind === 'roll'
+                                    ? 'text-amber-100'
+                                    : step.kind === 'transaction'
+                                      ? 'text-emerald-200'
+                                      : 'text-slate-300'
+                              }>
+                                {step.text}
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="font-semibold text-slate-300">完整候选排名</p>
+                        {entry.candidates.map((candidate) => (
+                          <div
+                            key={candidate.candidateId}
+                            className={`rounded-md border px-2.5 py-2 ${
+                              candidate.selected
+                                ? 'border-violet-300/25 bg-violet-500/10'
+                                : 'border-white/5 bg-black/10'
+                            }`}
+                          >
+                            <div className="flex flex-wrap gap-x-2 gap-y-1 text-slate-300">
+                              <span className="font-semibold">#{candidate.rank}</span>
+                              <span>{candidate.kind}</span>
+                              <span>{candidate.actionName ?? '闪避/疾走'}</span>
+                              <span>→ {candidate.targetName ?? '无目标'}</span>
+                              <span>位置 {candidate.nextPosition} 尺</span>
+                              <span className={candidate.selected ? 'text-violet-200' : 'text-slate-500'}>
+                                {decimal(candidate.score)} 分{candidate.selected ? ' · 已选择' : ''}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                              <span>期望伤害 {decimal(candidate.metrics.expectedDamage)}</span>
+                              <span>命中率 {percent(candidate.metrics.hitProbability)}</span>
+                              <span>目标 HP {candidate.metrics.targetCurrentHp}/{candidate.metrics.targetMaximumHp ?? candidate.metrics.targetCurrentHp}</span>
+                              <span>目标 AC {candidate.metrics.targetArmorClass ?? '—'}</span>
+                              <span>距离 {candidate.metrics.targetDistanceFeet} 尺</span>
+                              <span>移动 {candidate.metrics.movementFeet} 尺</span>
+                              <span>距离改善 {candidate.metrics.distanceImprovementFeet} 尺</span>
+                              <span>目标优先度 {percent(candidate.metrics.targetPriorityWeight ?? 0)}</span>
+                              <span>控制收益 {decimal(candidate.metrics.controlValue ?? 0)}</span>
+                              <span>资源成本 {decimal(candidate.metrics.resourceCost ?? 0)}</span>
+                              <span>借机攻击风险 {candidate.metrics.opportunityAttackRisk}</span>
+                            </div>
+                            <p className="mt-1 break-all text-[11px] text-slate-600">{candidate.candidateId}</p>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              {candidate.reasons.join('；') || '无附加评分原因'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <p className="mt-1 text-slate-500">
-                      {entry.candidateId} · {entry.reasons.join('；') || '无附加评分原因'}
-                    </p>
-                  </div>
+                  </details>
                 ))}
               </div>
             </details>

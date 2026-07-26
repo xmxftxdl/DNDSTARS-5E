@@ -208,6 +208,7 @@ export function prepareDnd5eHunterMultiattack(input: {
         distanceFeet: targetDistance,
         normalRangeFeet: profile.rangeFeet?.normal,
         longRangeFeet: profile.rangeFeet?.long,
+        weaponId: profile.weaponId,
         finesse: profile.finesse,
         strengthBased: profile.attackAbility === 'str',
         monkMartialArtsEligible: dnd5eMonkMartialArtsEligible(actor),

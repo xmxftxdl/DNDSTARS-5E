@@ -21,7 +21,8 @@ import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5e
 import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
 import { dnd5eFallingDamageDice, dnd5eTraversalMovementCost } from './traversal'
 import { dnd5eClimbingMovementCost, dnd5eRunningJumpBonusFeet } from './classes'
-import { dnd5eActiveJumpDistanceMultiplier } from './activeEffects'
+import { dnd5eActiveJumpDistanceMultiplier, dnd5eActiveSafeFallFeet } from './activeEffects'
+import { dnd5eIsIncapacitated } from './passiveDefenses'
 
 export type Dnd5ePlayerMoveRejectReason =
   | 'invalid-action'
@@ -136,6 +137,11 @@ export function prepareDnd5ePlayerMove(input: {
     reactionAvailable: input.turnEconomy.reaction.current > 0,
     movementRemaining: input.turnEconomy.movement.current,
   }
+  const fallDistanceFeet = traversalMode === 'fall'
+    ? Math.max(0, fromElevationFeet - toElevationFeet)
+    : 0
+  const safeFall = fallDistanceFeet <= dnd5eActiveSafeFallFeet(actorCombatant.classState.activeEffects) &&
+    !dnd5eIsIncapacitated(actorCombatant)
   return {
     ok: true,
     prepared: {
@@ -149,7 +155,7 @@ export function prepareDnd5ePlayerMove(input: {
       movementCostFeet,
       toElevationFeet,
       fallingDamageDice: traversalMode === 'fall'
-        ? dnd5eFallingDamageDice(Math.max(0, fromElevationFeet - toElevationFeet))
+        ? safeFall ? 0 : dnd5eFallingDamageDice(fallDistanceFeet)
         : 0,
       path: path.points,
       pathElevationsFeet: path.elevationsFeet,

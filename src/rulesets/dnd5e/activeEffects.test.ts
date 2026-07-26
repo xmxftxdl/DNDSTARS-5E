@@ -3,11 +3,16 @@ import {
   applyDnd5eActiveEffect,
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
+  dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveCarryingCapacityMultiplier,
   dnd5eActiveConditionImmunities,
+  dnd5eActiveDarkvisionRangeFeet,
   dnd5eActiveEffectsPreventReactions,
+  dnd5eActiveEffectsSeeInvisible,
   dnd5eActiveFlySpeed,
   dnd5eActiveJumpDistanceMultiplier,
   dnd5eActiveSizeRankDelta,
+  dnd5eActiveSafeFallFeet,
   dnd5eActiveSpeedPenalty,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveWeaponDamageD4Mode,
@@ -24,6 +29,57 @@ import {
 } from './legacyActiveEffectMigration'
 
 describe('D&D 5e ActiveEffectInstance', () => {
+  it('normalizes the reusable see-invisible sight modifier', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:see-invisibility',
+      label: '识破隐形',
+      source: { kind: 'spell', actorId: 'wizard' },
+      targetId: 'wizard',
+      modifiers: { seeInvisible: true },
+    })
+    expect(dnd5eActiveEffectsSeeInvisible([effect])).toBe(true)
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: { seeInvisible: 'yes' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('seeInvisible')]),
+    })
+  })
+
+  it('normalizes reusable Enhance Ability modifiers and rejects malformed values', () => {
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'test:enhance-ability',
+      label: '强化属性',
+      source: { kind: 'spell', actorId: 'caster' },
+      targetId: 'target',
+      modifiers: {
+        abilityCheckAdvantages: ['dex', 'dex'],
+        carryingCapacityMultiplier: 2,
+        safeFallFeet: 20,
+      },
+    })
+    expect(dnd5eActiveAbilityCheckAdvantages([effect])).toEqual(['dex'])
+    expect(dnd5eActiveCarryingCapacityMultiplier([effect])).toBe(2)
+    expect(dnd5eActiveSafeFallFeet([effect])).toBe(20)
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: { ...effect.modifiers, abilityCheckAdvantages: ['luck'] },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('abilityCheckAdvantages')]),
+    })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      modifiers: { ...effect.modifiers, safeFallFeet: 2_000 },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('safeFallFeet')]),
+    })
+  })
+
   it('deterministically migrates legacy standard and plugin condition strings', () => {
     const first = migrateLegacyDnd5eConditions({ targetId: 'hero', conditions: ['目盲', 'plugin:marked', 'blinded'] })
     const second = migrateLegacyDnd5eConditions({ targetId: 'hero', conditions: ['目盲', 'plugin:marked', 'blinded'] })
@@ -95,6 +151,25 @@ describe('D&D 5e ActiveEffectInstance', () => {
     }])).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('jumpDistanceMultiplier')]),
+    })
+  })
+
+  it('normalizes Darkvision as a maximum-range mechanical modifier', () => {
+    const darkvision = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:darkvision',
+      label: '黑暗视觉',
+      targetId: 'target',
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'darkvision' },
+      modifiers: { darkvisionRangeFeet: 60 },
+    })
+    expect(dnd5eActiveDarkvisionRangeFeet([darkvision])).toBe(60)
+    expect(validateDnd5eActiveEffectsStrict([darkvision])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...darkvision,
+      modifiers: { darkvisionRangeFeet: -1 },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('darkvisionRangeFeet')]),
     })
   })
 

@@ -266,7 +266,7 @@ function PluginCatalogBrowser({
                 <p className="mt-3 text-xs text-slate-500">
                   发布者：
                   <Link
-                    to={`/plugins/publishers/${encodeURIComponent(plugin.publisher.accountId)}`}
+                    to={`/app/extensions/publishers/${encodeURIComponent(plugin.publisher.accountId)}`}
                     className="text-arcane-300 hover:text-arcane-200"
                   >
                     {plugin.publisher.displayName}
@@ -645,8 +645,7 @@ export default function PluginsPage() {
 
       {!roomSession && (
         <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-white/8 bg-black/15 px-4 py-3 text-sm">
-          <span className="text-slate-400">当前未进入房间。你仍可跨设备管理插件，之后以 DM 身份进入房间即可启用。</span>
-          <Link to="/" className="shrink-0 font-semibold text-arcane-300 hover:text-arcane-200">返回房间入口</Link>
+          <span className="text-slate-400">插件与账号绑定，不依赖某个房间。进入冒险后，DM 可把这里保存的精确版本启用到房间。</span>
         </div>
       )}
 

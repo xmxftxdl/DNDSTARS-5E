@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   Crown,
+  LibraryBig,
   LogOut,
   PackageOpen,
   PanelLeftClose,
@@ -20,18 +21,20 @@ export default function Sidebar({
   onCollapse,
   mode,
   roomSession,
+  campaignBasePath = '',
   connection = 'online',
   onLeaveRoom,
 }: {
   onCollapse?: () => void
   mode?: AppMode
   roomSession?: RoomSession
+  campaignBasePath?: string
   connection?: 'online' | 'reconnecting'
   onLeaveRoom?: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const unreadHandouts = useRoomCommunicationsStore((state) => state.unreadHandoutIds.length)
-  const items = sidebarNavItems(mode, roomSession?.role)
+  const items = sidebarNavItems(mode, roomSession?.role, campaignBasePath)
   const copyRoomCode = async () => {
     if (!roomSession) return
     await navigator.clipboard?.writeText(roomSession.roomId)
@@ -85,7 +88,7 @@ export default function Sidebar({
                   ].join(' ')}
                 />
                 <span className="flex-1">{label}</span>
-                {to === '/communications' && unreadHandouts > 0 && (
+                {to.endsWith('/communications') && unreadHandouts > 0 && (
                   <span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-slate-950">
                     {unreadHandouts}
                   </span>
@@ -126,18 +129,25 @@ export default function Sidebar({
 
       {/* Footer */}
       <div className="space-y-1 border-t border-white/10 p-3">
+        <NavLink
+          to="/app"
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition-all hover:bg-white/5 hover:text-slate-100"
+        >
+          <LibraryBig className="h-5 w-5 text-slate-500" />
+          战役列表
+        </NavLink>
         {roomSession?.role !== 'spectator' && <NavLink
-          to="/plugins"
+          to={`${campaignBasePath}/extensions`}
           className={({ isActive }) => [
             'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
             isActive ? 'bg-arcane-500/15 text-arcane-200' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
           ].join(' ')}
         >
           <PackageOpen className="h-5 w-5 text-slate-500" />
-          插件中心
+          规则与扩展
         </NavLink>}
         {roomSession?.role !== 'spectator' && <NavLink
-          to="/settings"
+          to={`${campaignBasePath}/settings`}
           className={({ isActive }) => [
             'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
             isActive ? 'bg-arcane-500/15 text-arcane-200' : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',

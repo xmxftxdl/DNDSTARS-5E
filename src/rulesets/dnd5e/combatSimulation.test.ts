@@ -54,14 +54,81 @@ describe('D&D 5e combat simulator', () => {
     } as const
     const first = simulateDnd5eCombats(request)
     const second = simulateDnd5eCombats(request)
-    expect(first.trials).toBe(DND5E_COMBAT_SIMULATION_MAX_TRIALS)
+    expect(first.trials).toBe(1_000)
     expect(first.playerWins + first.monsterWins + first.draws).toBe(1_000)
     expect(second).toEqual(first)
     expect(first.coverage.automatedMonsterActions).toBeGreaterThan(0)
     expect(first.roundSummaries.length).toBeGreaterThan(0)
     expect(first.actionUsage.length).toBeGreaterThan(0)
     expect(first.decisionLog.length).toBeGreaterThan(0)
+    expect(first.decisionLog[0]).toMatchObject({
+      providerId: 'dnd5e:deterministic-tactical-v3',
+      candidateCount: expect.any(Number),
+      candidates: expect.any(Array),
+      executionSteps: expect.any(Array),
+      outcome: {
+        executed: expect.any(Boolean),
+        hits: expect.any(Number),
+        damage: expect.any(Number),
+        headlessTransactions: expect.any(Number),
+      },
+    })
+    expect(first.decisionLog[0].candidateCount).toBe(first.decisionLog[0].candidates.length)
+    const executionTexts = first.decisionLog.flatMap((entry) =>
+      entry.executionSteps.map((step) => step.text))
+    expect(executionTexts.some((text) => text.includes('D20='))).toBe(true)
+    expect(executionTexts.some((text) => text.includes('受到') && text.includes('HP'))).toBe(true)
+    expect(executionTexts.some((text) => text.includes('Headless 事务已提交'))).toBe(true)
+    expect(first.decisionLog[0].candidates[0]).toMatchObject({
+      rank: 1,
+      selected: true,
+      metrics: {
+        expectedDamage: expect.any(Number),
+        hitProbability: expect.any(Number),
+      },
+    })
     expect(first.headlessTransactionCount).toBeGreaterThan(0)
+  })
+
+  it('scores and resolves Aboleth Enslave as a control candidate', () => {
+    const result = simulateDnd5eCombats({
+      characters: [fighter()],
+      monsters: [{ monsterId: 'srd-5.1:aboleth', count: 1 }],
+      trials: 1,
+      seed: 71,
+      initialDistanceFeet: 30,
+    })
+
+    expect(result.coverage.automatedMonsterActions).toBe(4)
+    expect(result.coverage.totalMonsterActions).toBe(4)
+    expect(result.decisionLog.flatMap((entry) => entry.candidates)
+      .some((candidate) =>
+        candidate.actionId === 'enslave' &&
+        (candidate.metrics.controlValue ?? 0) > 0)).toBe(true)
+    expect(result.actionUsage.some((entry) =>
+      entry.actionId === 'enslave' && entry.headlessTransactions > 0)).toBe(true)
+  })
+
+  it('lets an enslaved character take later turns for the Aboleth side', () => {
+    const result = simulateDnd5eCombats({
+      characters: [fighter(), fighter({ id: 'fighter-2', name: '第二名战士' })],
+      monsters: [{ monsterId: 'srd-5.1:aboleth', count: 1 }],
+      trials: 1,
+      seed: 1,
+      initialDistanceFeet: 30,
+    })
+
+    const controlledTurn = result.decisionLog.find((entry) =>
+      entry.controlledByName === '底栖魔鱼')
+    expect(controlledTurn).toMatchObject({
+      providerId: 'dnd5e:deterministic-tactical-v3',
+      controlledByName: '底栖魔鱼',
+      outcome: { executed: true },
+    })
+    expect(['测试战士', '第二名战士']).toContain(controlledTurn?.actorName)
+    expect(result.actionUsage.some((entry) =>
+      entry.side === 'monsters' &&
+      ['测试战士', '第二名战士'].includes(entry.actorName))).toBe(true)
   })
 
   it('reports a stronger party as more likely to beat a single goblin', () => {
@@ -99,12 +166,17 @@ describe('D&D 5e combat simulator', () => {
     expect(validateDnd5eCombatSimulationRequest({
       characters: [],
       monsters: [{ monsterId: 'not-a-monster', count: 1 }],
-      trials: 1_001,
+      trials: DND5E_COMBAT_SIMULATION_MAX_TRIALS + 1,
     })).toEqual(expect.arrayContaining([
       '至少选择一名玩家角色。',
       '找不到怪物：not-a-monster',
-      '模拟次数必须是 1 至 1000 的整数。',
+      '模拟次数必须是 1 至 100000 的整数。',
     ]))
+    expect(validateDnd5eCombatSimulationRequest({
+      characters: [fighter()],
+      monsters: [{ monsterId: 'srd-5.1:goblin', count: 1 }],
+      trials: 100_000,
+    })).toEqual([])
   })
 
   it('loads a workshop monster into the shared simulation catalog', () => {
@@ -130,5 +202,39 @@ describe('D&D 5e combat simulator', () => {
     const result = simulateDnd5eCombats(request)
     expect(result.participantSummaries.some((entry) => entry.name === workshopMonster.name)).toBe(true)
     expect(result.actionUsage.some((entry) => entry.actorName === workshopMonster.name)).toBe(true)
+  })
+
+  it('runs automatic-damage monster spells through committed Headless transactions', () => {
+    const mage = getDnd5eSrdMonster('srd-5.1:mage')
+    expect(mage).toBeDefined()
+    const missileMage = {
+      ...mage!,
+      id: 'dm-custom:missile-mage',
+      slug: 'missile-mage',
+      name: '飞弹法师',
+      englishName: 'Missile Mage',
+      source: 'DM 自定义',
+      actions: [],
+      spellcasting: {
+        ...mage!.spellcasting!,
+        slots: { 1: 1 },
+        spells: mage!.spellcasting!.spells!.filter((spell) => spell.id === 'magic-missile'),
+      },
+    } as const
+    const result = simulateDnd5eCombats({
+      characters: [fighter()],
+      monsters: [{ monsterId: missileMage.id, count: 1 }],
+      customMonsters: [missileMage],
+      trials: 20,
+      seed: 314,
+      initialDistanceFeet: 60,
+    })
+    expect(result.actionUsage).toContainEqual(expect.objectContaining({
+      actorName: missileMage.name,
+      actionId: 'spell:magic-missile:1',
+      headlessTransactions: expect.any(Number),
+    }))
+    expect(result.actionUsage.find((entry) => entry.actionId === 'spell:magic-missile:1')
+      ?.headlessTransactions).toBeGreaterThan(0)
   })
 })

@@ -7,7 +7,7 @@ import {
   Bot,
   Dices,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import CampaignAdvancedAnalyticsPanel from '../components/CampaignAdvancedAnalyticsPanel'
@@ -26,6 +26,11 @@ const stats = [
 ]
 
 export default function Dashboard({ onCreateCampaign, creatingCampaign = false }: DashboardProps) {
+  const { campaignId } = useParams()
+  const simulationPath = campaignId
+    ? `/campaign/${encodeURIComponent(campaignId)}/simulation`
+    : '/simulation'
+
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
@@ -81,7 +86,7 @@ export default function Dashboard({ onCreateCampaign, creatingCampaign = false }
             </div>
           </div>
           <Link
-            to="/simulation"
+            to={simulationPath}
             className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-400"
           >
             打开模拟器

@@ -1,5 +1,14 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { DND_FEET_PER_CELL, tokenAnchorCellFromPixel, tokenFootprintDistanceCells, type GridCell } from '../../lib/gridCombat'
+import {
+  DND_FEET_PER_CELL,
+  cellKey,
+  occupiedCells,
+  tokenAnchorCellFromPixel,
+  tokenCenterForAnchorCell,
+  tokenFootprintDistanceCells,
+  tokenOccupiedCellsAt,
+  type GridCell,
+} from '../../lib/gridCombat'
 import { areOpposedCombatTokens } from '../../lib/opportunityAttacks'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells } from '../../lib/skillTargeting'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
@@ -14,6 +23,7 @@ import {
   type Dnd5eCounterspellReaction,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterCoreSpellResolutionV1,
+  type Dnd5eSpellTeleportDestination,
 } from './headlessCombatEngine'
 import {
   createDnd5eMapCombatSnapshot,
@@ -33,7 +43,9 @@ import {
   type Dnd5eSrdSpellDefinition,
 } from './spells'
 import {
+  mapGeometryCanSeeToken,
   mapGeometryLineOfEffectBlocked,
+  mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
@@ -70,6 +82,7 @@ export interface PreparedDnd5eMonsterCoreSpell {
   spellAttackAutomaticCritical?: boolean
   areaTargetCell?: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
+  teleportDestination?: Dnd5eSpellTeleportDestination
 }
 
 function applyTurnEconomy(
@@ -169,6 +182,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
   const maximumTargets = dnd5eSpellMaximumTargets(spell, input.slotLevel, casterLevel)
   if (targetIds.length !== input.targetTokenIds.length) return { ok: false, reason: 'invalid-target' }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
+  let teleportDestination: Dnd5eSpellTeleportDestination | undefined
   if (spell.area) {
     const casterCell = tokenAnchorCellFromPixel(actorToken.x, actorToken.y, actorToken, input.map)
     const targetCell = spell.area.shape === 'circle' && spell.area.origin === 'self'
@@ -216,13 +230,48 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       : mapGeometryTokenElevation(geometry, actorToken)
     if (
       spell.area.origin === 'point' &&
-      mapGeometryLineOfEffectBlocked({
-        geometry,
-        from: actorToken,
-        to: effectOrigin,
-        fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
-        toElevationFeet: effectOriginElevation,
-      })
+      (spell.effect === 'teleport'
+        ? (() => {
+            const destination = tokenCenterForAnchorCell(targetCell, actorToken, input.map)
+            const footprint = tokenOccupiedCellsAt(actorToken, input.map, destination)
+            const occupied = occupiedCells(input.map.tokens, input.map, actorToken.id)
+            const blocked = footprint.some((cell) =>
+              cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows ||
+              occupied.has(cellKey(cell))) ||
+              mapGeometryPlacementBlocked({
+                geometry,
+                map: input.map,
+                token: actorToken,
+                at: destination,
+                elevationFeet: effectOriginElevation,
+              }).blocked ||
+              !mapGeometryCanSeeToken({
+                geometry,
+                map: input.map,
+                viewer: actorToken,
+                target: { ...actorToken, ...destination, elevationFeet: effectOriginElevation },
+                forceEnabled: true,
+                fallbackRangeFeet: 30,
+              })
+            if (!blocked) {
+              teleportDestination = {
+                to: destination,
+                distanceFeet: Math.max(
+                  Math.abs(targetCell.col - casterCell.col),
+                  Math.abs(targetCell.row - casterCell.row),
+                ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL),
+                toElevationFeet: effectOriginElevation,
+              }
+            }
+            return blocked
+          })()
+        : mapGeometryLineOfEffectBlocked({
+            geometry,
+            from: actorToken,
+            to: effectOrigin,
+            fromElevationFeet: mapGeometryTokenElevation(geometry, actorToken),
+            toElevationFeet: effectOriginElevation,
+          }))
     ) return { ok: false, reason: 'line-of-effect-blocked' }
     const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cells).filter((candidate) => {
       if (candidate.type === 'obstacle' || (candidate.id === actorToken.id && !spell.areaIncludesSelf)) return false
@@ -237,15 +286,22 @@ export function prepareDnd5eMonsterCoreSpell(input: {
         toElevationFeet: mapGeometryTokenElevation(geometry, candidate),
       })
     })
-    if (authoritativeTargets.length < 1 || authoritativeTargets.length > maximumTargets) {
+    if (
+      (spell.effect !== 'teleport' && authoritativeTargets.length < 1) ||
+      authoritativeTargets.length > maximumTargets
+    ) {
       return { ok: false, reason: 'invalid-target' }
     }
     const supplied = [...targetIds].sort()
-    const authoritative = authoritativeTargets.map((target) => target.id).sort()
+    const authoritative = spell.effect === 'teleport'
+      ? []
+      : authoritativeTargets.map((target) => target.id).sort()
     if (supplied.length !== authoritative.length || supplied.some((id, index) => id !== authoritative[index])) {
       return { ok: false, reason: 'invalid-target' }
     }
-    targetIds = authoritativeTargets.map((target) => target.id)
+    targetIds = spell.effect === 'teleport'
+      ? []
+      : authoritativeTargets.map((target) => target.id)
   } else if (targetIds.length < 1 || targetIds.length > maximumTargets) {
     return { ok: false, reason: 'invalid-target' }
   }
@@ -320,6 +376,7 @@ export function prepareDnd5eMonsterCoreSpell(input: {
         : undefined,
       areaTargetCell: input.areaTargetCell,
       areaTargetOrientation: input.areaTargetOrientation,
+      teleportDestination,
     },
   }
 }
@@ -340,6 +397,7 @@ export function resolvePreparedDnd5eMonsterCoreSpell(input: {
       ...input.resolution,
       schemaVersion: 1,
       targetIds: prepared.targetTokens.map((target) => target.id),
+      teleportDestination: prepared.teleportDestination,
     },
   })
   if (!result.ok) return { result }

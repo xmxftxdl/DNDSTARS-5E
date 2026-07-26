@@ -351,6 +351,7 @@ import {
   dnd5eCombatantPairKey,
   dnd5eSavingThrowRerollFeature,
   dnd5eSavingThrowMode,
+  dnd5eSpellSpecificSavingThrowMode,
   dnd5eHeldBardicInspirationDie,
   dnd5eBardicInspirationDie,
   dnd5eDarkOnesOwnLuckAvailable,
@@ -927,6 +928,7 @@ export default function MapsPage() {
     conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
     effectDamageType?: NonNullable<Dnd5eSpellCastPayload['effectDamageType']>
     enlargeReduceChoice?: NonNullable<Dnd5eSpellCastPayload['enlargeReduceChoice']>
+    enhanceAbilityChoice?: NonNullable<Dnd5eSpellCastPayload['enhanceAbilityChoice']>
     sustainedEffectAttack?: NonNullable<Dnd5eSpellCastPayload['sustainedEffectAttack']>
     sustainedEffectAreaId?: string
     areaOriginCell?: GridCell
@@ -1898,11 +1900,17 @@ export default function MapsPage() {
     const token = displayTokensById.get(entry.tokenId)
     const character = token?.characterId ? displayCharactersById.get(token.characterId) : undefined
     const initiativePortrait = character?.initiativePortrait ?? token?.portrait
+    const turnGlowColor = token?.type === 'enemy'
+      ? '#ef4444'
+      : character
+        ? dnd5eCharacterPresentationColors(character).glowColor
+        : entry.color
     if (!token || (
       token.emoji === entry.emoji &&
       token.label === entry.label &&
       initiativePortrait === entry.portrait &&
-      token.portraitImageId === entry.portraitImageId
+      token.portraitImageId === entry.portraitImageId &&
+      turnGlowColor === entry.turnGlowColor
     )) return entry
     return {
       ...entry,
@@ -1910,6 +1918,7 @@ export default function MapsPage() {
       label: token.label,
       portrait: initiativePortrait,
       portraitImageId: token.portraitImageId,
+      turnGlowColor,
     }
   })
   const activeMapId = activeMap?.id
@@ -2878,9 +2887,9 @@ export default function MapsPage() {
   const myPlayerTokenElevationFeet = myPlayerToken
     ? mapGeometryTokenElevation(activeGeometry, myPlayerToken)
     : 0
-  const fogGeometryProjection = activeMap
+  const fogGeometryProjection = displayActiveMap
     ? buildMapsFogGeometryProjection({
-        map: activeMap,
+        map: displayActiveMap,
         fogMaps,
         geometryMaps,
         explorationMaps,
@@ -2896,8 +2905,9 @@ export default function MapsPage() {
   useEffect(() => {
     if (!isDM || !activeMap || !activeGeometry ||
       (!activeGeometry.vision.enabled && !manualFogExplorationEnabled)) return
+    const explorationTokens = projectCharacterTokenPresentations(activeMap.tokens, characters)
     const updates = buildMapExplorationUpdates({
-      map: activeMap,
+      map: explorationTokens === activeMap.tokens ? activeMap : { ...activeMap, tokens: explorationTokens },
       geometry: activeGeometry,
       characters,
       forceEnabled: manualFogExplorationEnabled,
@@ -4351,6 +4361,7 @@ export default function MapsPage() {
         conditionChoice: nextTargeting.conditionChoice,
         effectDamageType: nextTargeting.effectDamageType,
         enlargeReduceChoice: nextTargeting.enlargeReduceChoice,
+        enhanceAbilityChoice: nextTargeting.enhanceAbilityChoice,
         overchannel: nextTargeting.overchannel || undefined,
         empowered: nextTargeting.empowered || undefined,
         draconicResistance: nextTargeting.draconicResistance || undefined,
@@ -4654,6 +4665,7 @@ export default function MapsPage() {
         conditionChoice: dnd5eSpellTargeting.conditionChoice,
         effectDamageType: dnd5eSpellTargeting.effectDamageType,
         enlargeReduceChoice: dnd5eSpellTargeting.enlargeReduceChoice,
+        enhanceAbilityChoice: dnd5eSpellTargeting.enhanceAbilityChoice,
         sustainedEffectAttack: dnd5eSpellTargeting.sustainedEffectAttack,
         sustainedEffectAreaId: dnd5eSpellTargeting.sustainedEffectAreaId,
         higherSlotDamageType: dnd5eSpellTargeting.higherSlotDamageType,
@@ -7747,10 +7759,14 @@ export default function MapsPage() {
       for (const targetToken of casting.targetTokens) {
         const target = casting.state.combatants[targetToken.id]
         if (!target) return false
-        const saveMode = dnd5eSavingThrowMode(target, casting.spell.saveAbility, {
-          effectVisible: true,
-          sourceCreatureType: caster.creatureType,
-          sourceIsSpell: true,
+        const saveMode = dnd5eSpellSpecificSavingThrowMode({
+          spellId: casting.spell.id,
+          mode: dnd5eSavingThrowMode(target, casting.spell.saveAbility, {
+            effectVisible: true,
+            sourceCreatureType: caster.creatureType,
+            sourceIsSpell: true,
+          }),
+          casterAndTargetAreFighting: caster.controller !== target.controller,
         })
         const saveD20 = await rollDiceBoxD20(
           `${casting.spell.name}·${casting.spell.saveAbility.toUpperCase()} 豁免`,
@@ -7782,12 +7798,41 @@ export default function MapsPage() {
       }
     }
 
+    const shieldSpellReactionTargetIds: string[] = []
+    if (!counterspellSucceeded && casting.spell.id === 'magic-missile') {
+      for (const targetToken of casting.targetTokens) {
+        const targetCombatant = casting.state.combatants[targetToken.id]
+        const targetCharacter = targetToken.characterId
+          ? casting.characters.find((character) => character.id === targetToken.characterId)
+          : undefined
+        if (
+          targetCombatant &&
+          targetCharacter &&
+          dnd5eCanCastShieldSpell(targetCombatant) &&
+          await requestSharedShieldSpellChoice(targetCharacter, {
+            attackerName: casting.actorToken.label,
+            attackName: casting.spell.name,
+            magicMissile: true,
+          })
+        ) shieldSpellReactionTargetIds.push(targetToken.id)
+      }
+    }
+
     const usesEffectDice = ['spell-attack', 'saving-throw', 'healing'].includes(casting.spell.effect)
     const effectDiceCount = casting.spell.effect === 'spell-attack' && critical
       ? casting.diceCount * 2
       : casting.diceCount
-    const effectRolls = usesEffectDice
-      ? [counterspellSucceeded
+    const effectRolls = casting.spell.effect === 'automatic-damage'
+      ? (counterspellSucceeded
+          ? Array.from({ length: casting.diceCount }, () => [1])
+          : (await rollDiceBoxValues(
+              casting.diceCount,
+              casting.spell.dice.sides,
+              `${casting.spell.name}·投射物伤害`,
+              casting.targetTokens.map((target) => target.label).join('、'),
+            )).map((roll) => [roll]))
+      : usesEffectDice
+        ? [counterspellSucceeded
           ? Array.from({ length: casting.diceCount }, () => 1)
           : await rollDiceBoxValues(
               effectDiceCount,
@@ -7795,7 +7840,7 @@ export default function MapsPage() {
               `${casting.spell.name}·${casting.spell.effect === 'healing' ? '治疗' : '伤害'}`,
               casting.targetTokens.map((target) => target.label).join('、'),
             )]
-      : []
+        : []
     const initial = resolvePreparedDnd5eMonsterCoreSpell({
       prepared: casting,
       counterspellReaction,
@@ -7803,6 +7848,8 @@ export default function MapsPage() {
         d20,
         d20Second,
         targetSavingThrows,
+        projectileTargetIds: plan.spellCast.projectileTargetIds,
+        shieldSpellReactionTargetIds,
         effectRolls,
       },
     })
@@ -15107,6 +15154,7 @@ export default function MapsPage() {
       conditionChoice: dnd5eSpellTargeting.conditionChoice,
       effectDamageType: dnd5eSpellTargeting.effectDamageType,
       enlargeReduceChoice: dnd5eSpellTargeting.enlargeReduceChoice,
+      enhanceAbilityChoice: dnd5eSpellTargeting.enhanceAbilityChoice,
       sustainedEffectAttack: dnd5eSpellTargeting.sustainedEffectAttack,
       sustainedEffectAreaId: dnd5eSpellTargeting.sustainedEffectAreaId,
       healingAllocations,
@@ -15458,6 +15506,7 @@ export default function MapsPage() {
     let conditionChoice: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease' | undefined
     let effectDamageType: NonNullable<Dnd5eSpellCastPayload['effectDamageType']> | undefined
     let enlargeReduceChoice: NonNullable<Dnd5eSpellCastPayload['enlargeReduceChoice']> | undefined
+    let enhanceAbilityChoice: NonNullable<Dnd5eSpellCastPayload['enhanceAbilityChoice']> | undefined
     let higherSlotDamageType: Dnd5eDamageType | undefined
     if (spell.id === 'blindness-deafness') {
       const selected = window.prompt('选择法术效果：输入 1 造成目盲，输入 2 造成耳聋。', '1')
@@ -15504,6 +15553,27 @@ export default function MapsPage() {
       }
       enlargeReduceChoice = selected === '1' ? 'enlarge' : 'reduce'
     }
+    if (spell.id === 'enhance-ability') {
+      const selected = window.prompt(
+        '选择强化属性：1 熊之坚韧，2 公牛之力，3 猫之优雅，4 雄鹰之辉，5 狐狸之狡，6 枭之睿。',
+        '1',
+      )
+      const choices = [
+        'bear-endurance',
+        'bull-strength',
+        'cat-grace',
+        'eagle-splendor',
+        'fox-cunning',
+        'owl-wisdom',
+      ] as const
+      const selectedIndex = Number(selected) - 1
+      if (selected == null) return
+      if (!Number.isInteger(selectedIndex) || !choices[selectedIndex]) {
+        void showCombatNotice('法术选项无效', '强化属性必须选择六种受控效果之一。', 'amber')
+        return
+      }
+      enhanceAbilityChoice = choices[selectedIndex]
+    }
     if (spell.id === 'flame-strike' && slotLevel > spell.level) {
       const selected = window.prompt('焰击术升环伤害加入哪一种类型？输入 1 选择火焰，输入 2 选择光耀。', '1')
       if (selected == null) return
@@ -15523,6 +15593,7 @@ export default function MapsPage() {
         conditionChoice,
         effectDamageType,
         enlargeReduceChoice,
+        enhanceAbilityChoice,
         higherSlotDamageType,
         overchannel: validatedOptions.overchannel,
         metamagic: validatedOptions.metamagic,
@@ -15578,6 +15649,7 @@ export default function MapsPage() {
       conditionChoice,
       effectDamageType,
       enlargeReduceChoice,
+      enhanceAbilityChoice,
       higherSlotDamageType,
       autoSubmitOnAreaSelection: validatedOptions.autoSubmitOnTargetSelection === true,
       autoSculpt,
@@ -17672,6 +17744,7 @@ export default function MapsPage() {
                       let conditionChoice: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease' | undefined
                       let effectDamageType: NonNullable<Dnd5eSpellCastPayload['effectDamageType']> | undefined
                       let enlargeReduceChoice: NonNullable<Dnd5eSpellCastPayload['enlargeReduceChoice']> | undefined
+                      let enhanceAbilityChoice: NonNullable<Dnd5eSpellCastPayload['enhanceAbilityChoice']> | undefined
                       let higherSlotDamageType: Dnd5eDamageType | undefined
                       if (spell.id === 'blindness-deafness') {
                         const selected = window.prompt('选择法术效果：输入 1 造成目盲，输入 2 造成耳聋。', '1')
@@ -17718,6 +17791,27 @@ export default function MapsPage() {
                         }
                         enlargeReduceChoice = selected === '1' ? 'enlarge' : 'reduce'
                       }
+                      if (spell.id === 'enhance-ability') {
+                        const selected = window.prompt(
+                          '选择强化属性：1 熊之坚韧，2 公牛之力，3 猫之优雅，4 雄鹰之辉，5 狐狸之狡，6 枭之睿。',
+                          '1',
+                        )
+                        const choices = [
+                          'bear-endurance',
+                          'bull-strength',
+                          'cat-grace',
+                          'eagle-splendor',
+                          'fox-cunning',
+                          'owl-wisdom',
+                        ] as const
+                        const selectedIndex = Number(selected) - 1
+                        if (selected == null) return
+                        if (!Number.isInteger(selectedIndex) || !choices[selectedIndex]) {
+                          void showCombatNotice('法术选项无效', '强化属性必须选择六种受控效果之一。', 'amber')
+                          return
+                        }
+                        enhanceAbilityChoice = choices[selectedIndex]
+                      }
                       if (spell.id === 'flame-strike' && slotLevel > spell.level) {
                         const selected = window.prompt('焰击术升环伤害加入哪一种类型？输入 1 选择火焰，输入 2 选择光耀。', '1')
                         if (selected == null) return
@@ -17737,6 +17831,7 @@ export default function MapsPage() {
                           conditionChoice,
                           effectDamageType,
                           enlargeReduceChoice,
+                          enhanceAbilityChoice,
                           higherSlotDamageType,
                           overchannel: options?.overchannel,
                           metamagic: options?.metamagic,
@@ -17792,6 +17887,7 @@ export default function MapsPage() {
                         conditionChoice,
                         effectDamageType,
                         enlargeReduceChoice,
+                        enhanceAbilityChoice,
                         higherSlotDamageType,
                       })
                     }}

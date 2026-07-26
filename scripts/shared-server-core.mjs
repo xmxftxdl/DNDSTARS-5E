@@ -9,6 +9,7 @@ import {
   deliverTencentVerification,
   tencentVerificationCapabilities,
 } from './tencent-verification-provider.mjs'
+import { openSqliteAccountStore } from './account-storage-sqlite.mjs'
 import {
   compileGeometryCached,
   doorOpenState,
@@ -69,6 +70,9 @@ export const SHARED_STATE_SCHEMA_VERSION = 1
 export const ACCOUNT_CHARACTER_SCHEMA_VERSION = 1
 export const ACCOUNT_SESSION_LIMIT = 12
 export const ACCOUNT_CHARACTER_LIMIT = 100
+export const ACCOUNT_CAMPAIGN_SCHEMA_VERSION = 1
+export const ACCOUNT_CAMPAIGN_LIMIT = 100
+export const ACCOUNT_CAMPAIGN_ROOM_HISTORY_LIMIT = 100
 export const ACCOUNT_PLUGIN_VERSION_LIMIT = 100
 export const ACCOUNT_PLUGIN_TOTAL_BYTES_LIMIT = 128 * 1024 * 1024
 export const PLUGIN_MANIFEST_SCHEMA_VERSION = 1
@@ -1451,6 +1455,16 @@ export function parseRoomChatRollCommand(value) {
     modifier,
     label: boundedText(match[5], 160) || undefined,
   }
+}
+
+function campaignScopedContext(ctx, roomId, campaignId, ownerAccountId) {
+  const normalizedOwnerAccountId = normalizeAccountId(ownerAccountId)
+  const normalizedCampaignId = normalizeCampaignId(campaignId)
+  const storageKey = normalizedOwnerAccountId.length === 12
+    ? `campaign-${normalizedOwnerAccountId}-${normalizedCampaignId}`
+    : `campaign-${normalizedCampaignId}`
+  const storage = scopedContext(ctx, storageKey)
+  return { ...storage, roomId, campaignId }
 }
 
 /** 观战者不占玩家槽位，但仍是可恢复、可被 DM 移除的房间成员。 */
@@ -4601,6 +4615,54 @@ function accountFile(ctx, accountId) {
   return path.join(accountDirectory(ctx), `${accountId}.json`)
 }
 
+function accountStorageBackend(ctx) {
+  const configured = String(
+    ctx.accountStorageBackend ??
+    process.env.STARS_ACCOUNT_STORAGE ??
+    'json',
+  ).trim().toLowerCase()
+  if (configured !== 'json' && configured !== 'sqlite') {
+    throw new Error(`Unsupported STARS_ACCOUNT_STORAGE: ${configured}`)
+  }
+  return configured
+}
+
+function accountDatabaseFile(ctx) {
+  return path.resolve(
+    ctx.accountDatabasePath ??
+    process.env.STARS_DATABASE_PATH ??
+    path.join(path.dirname(lobbyRoot(ctx)), 'astraltrace.sqlite'),
+  )
+}
+
+async function accountSqliteStore(ctx) {
+  if (accountStorageBackend(ctx) !== 'sqlite') return null
+  if (!ctx.accountSqliteStorePromise) {
+    ctx.accountSqliteStorePromise = openSqliteAccountStore(accountDatabaseFile(ctx))
+  }
+  return ctx.accountSqliteStorePromise
+}
+
+export async function initializeAccountStorage(ctx) {
+  const store = await accountSqliteStore(ctx)
+  if (!store) return { backend: 'json' }
+  return { backend: 'sqlite', ...store.diagnostics() }
+}
+
+export async function closeAccountStorage(ctx) {
+  if (!ctx.accountSqliteStorePromise) return
+  const store = await ctx.accountSqliteStorePromise
+  store.close()
+  ctx.accountSqliteStorePromise = null
+}
+
+async function syncAccountToSqlite(ctx, account, options = {}) {
+  const store = await accountSqliteStore(ctx)
+  if (!store) return
+  if (options.createOnly) store.createAccount(account, options)
+  else store.writeAccount(account, options)
+}
+
 function accountIdentityDirectory(ctx) {
   return path.join(accountDirectory(ctx), 'identities')
 }
@@ -4782,6 +4844,10 @@ function randomLobbyCode(length) {
 }
 
 function normalizeAccountId(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 12)
+}
+
+function normalizeCampaignId(value) {
   return String(value ?? '').trim().toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 12)
 }
 
@@ -4981,6 +5047,76 @@ function accountPublicProfile(account) {
   }
 }
 
+function normalizeCampaignDescription(value) {
+  if (value == null || value === '') return ''
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  return normalized.length <= 800 ? normalized : null
+}
+
+function accountCampaigns(account) {
+  return (Array.isArray(account?.campaigns) ? account.campaigns : []).filter((campaign) =>
+    plainObject(campaign) &&
+    campaign.schemaVersion === ACCOUNT_CAMPAIGN_SCHEMA_VERSION &&
+    normalizeCampaignId(campaign.campaignId) === campaign.campaignId &&
+    campaign.campaignId.length === 12 &&
+    campaign.ownerAccountId === account.accountId &&
+    campaign.rulesetId === DND5E_2014_RULESET_ID &&
+    typeof campaign.name === 'string' &&
+    Number.isFinite(campaign.createdAt) &&
+    Number.isFinite(campaign.updatedAt))
+}
+
+async function readLobbyRoomOptional(ctx, roomId) {
+  const normalized = normalizeLobbyRoomCode(roomId)
+  if (normalized.length !== 6) return null
+  try {
+    const room = JSON.parse(await readFile(roomLobbyFile(ctx, normalized), 'utf8'))
+    return plainObject(room) && room.id === normalized ? room : null
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+async function accountCampaignResponse(ctx, campaign) {
+  const history = Array.isArray(campaign.roomHistory) ? campaign.roomHistory : []
+  const lastRoomId = normalizeLobbyRoomCode(campaign.lastRoomId)
+  const room = lastRoomId.length === 6 ? await readLobbyRoomOptional(ctx, lastRoomId) : null
+  const hostStatus = room ? roomHostPresence(room) : 'closed'
+  return {
+    schemaVersion: ACCOUNT_CAMPAIGN_SCHEMA_VERSION,
+    campaignId: campaign.campaignId,
+    name: campaign.name,
+    description: typeof campaign.description === 'string' ? campaign.description : '',
+    rulesetId: campaign.rulesetId,
+    archived: campaign.archived === true,
+    roomCount: Number.isSafeInteger(campaign.roomCount) && campaign.roomCount >= history.length
+      ? campaign.roomCount
+      : history.length,
+    createdAt: campaign.createdAt,
+    updatedAt: campaign.updatedAt,
+    ...(room
+      ? {
+          latestRoom: {
+            roomId: room.id,
+            roomName: room.name,
+            createdAt: room.createdAt,
+            ...(Number.isFinite(room.closedAt) ? { closedAt: room.closedAt } : {}),
+            hostOnline: roomHostIsOnline(room),
+            status: hostStatus,
+          },
+        }
+      : {}),
+  }
+}
+
+async function accountCampaignListResponse(ctx, account) {
+  return Promise.all(accountCampaigns(account)
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
+    .map((campaign) => accountCampaignResponse(ctx, campaign)))
+}
+
 function accountSessionResponse(account, token) {
   return {
     accountId: account.accountId,
@@ -5000,9 +5136,24 @@ function accountSessionResponse(account, token) {
 async function readAccount(ctx, accountId) {
   const normalized = normalizeAccountId(accountId)
   if (normalized !== accountId || normalized.length !== 12) throw new RoomProtocolError(401, 'invalid-account-session')
+  const store = await accountSqliteStore(ctx)
+  if (store) {
+    const persisted = store.readAccount(normalized)
+    if (persisted) {
+      if (!plainObject(persisted) || persisted.accountId !== normalized) {
+        throw new Error('invalid SQLite account record')
+      }
+      return persisted
+    }
+  }
   try {
     const account = JSON.parse(await readFile(accountFile(ctx, normalized), 'utf8'))
     if (!plainObject(account) || account.accountId !== normalized) throw new Error('invalid account record')
+    // SQLite rollout is deliberately lazy-compatible: an account not present in
+    // the new index is imported from the untouched JSON rollback source once.
+    if (store) {
+      store.writeAccount(account, { sourcePath: accountFile(ctx, normalized) })
+    }
     return account
   } catch (error) {
     if (error?.code === 'ENOENT') throw new RoomProtocolError(401, 'invalid-account-session')
@@ -5031,14 +5182,19 @@ async function mutateAccount(ctx, accountId, updater) {
   const filePath = accountFile(ctx, accountId)
   return withWriteLock(filePath, async () => {
     let account
-    try {
-      account = JSON.parse(await readFile(filePath, 'utf8'))
-    } catch (error) {
-      if (error?.code === 'ENOENT') throw new RoomProtocolError(401, 'invalid-account-session')
-      throw error
+    const store = await accountSqliteStore(ctx)
+    if (store) account = store.readAccount(accountId)
+    if (!account) {
+      try {
+        account = JSON.parse(await readFile(filePath, 'utf8'))
+      } catch (error) {
+        if (error?.code === 'ENOENT') throw new RoomProtocolError(401, 'invalid-account-session')
+        throw error
+      }
     }
     const next = await updater(account)
     if (!plainObject(next) || next.accountId !== accountId) throw new RoomProtocolError(400, 'account-operation-failed')
+    if (store) store.writeAccount(next)
     await atomicRename(filePath, JSON.stringify(next))
     return next
   })
@@ -5062,11 +5218,19 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
       recovery: secretRecord(recoverySecret),
       sessions: [{ tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now }],
       characters: [],
+      campaigns: [],
       createdAt: now,
       updatedAt: now,
     }
     try {
       await writeFile(accountFile(ctx, accountId), JSON.stringify(account), { flag: 'wx' })
+      try {
+        await syncAccountToSqlite(ctx, account, { createOnly: true })
+      } catch (error) {
+        await rm(accountFile(ctx, accountId), { force: true })
+        if (error?.code === 'ACCOUNT_EXISTS') continue
+        throw error
+      }
       return { account, token, recoveryCode }
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error
@@ -5076,6 +5240,11 @@ async function createAccountRecord(ctx, payload, now = Date.now()) {
 }
 
 async function readAccountIdentity(ctx, kind, key) {
+  const store = await accountSqliteStore(ctx)
+  if (store) {
+    const accountId = store.findIdentity(kind, accountIdentityDigest(kind, key))
+    if (accountId) return accountId
+  }
   try {
     const value = JSON.parse(await readFile(accountIdentityFile(ctx, kind, key), 'utf8'))
     if (!plainObject(value) || normalizeAccountId(value.accountId) !== value.accountId) return null
@@ -5218,6 +5387,7 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
         recovery: secretRecord(`${recoverySecret}${tokenSeed}`),
         sessions: [{ tokenHash: tokenHash(token), clientId, createdAt: now, lastSeenAt: now }],
         characters: [],
+        campaigns: [],
         createdAt: now,
         updatedAt: now,
       }
@@ -5237,6 +5407,7 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
       [challenge.channel, challenge.destination],
     ]
     const writtenIndexes = []
+    let sqliteCreated = false
     try {
       for (const [kind, key] of indexRecords) {
         const filePath = accountIdentityFile(ctx, kind, key)
@@ -5246,10 +5417,16 @@ async function createRegisteredAccount(ctx, payload, now = Date.now()) {
         })
         writtenIndexes.push(filePath)
       }
+      await syncAccountToSqlite(ctx, account, { createOnly: true })
+      sqliteCreated = accountStorageBackend(ctx) === 'sqlite'
       const consumed = { ...challenge, consumedAt: now, updatedAt: now }
       delete consumed.code
       await atomicRename(accountVerificationFile(ctx, challengeId), JSON.stringify(consumed))
     } catch (error) {
+      if (sqliteCreated) {
+        const store = await accountSqliteStore(ctx).catch(() => null)
+        store?.deleteAccount(account.accountId)
+      }
       await Promise.allSettled([
         rm(accountFile(ctx, account.accountId), { force: true }),
         ...writtenIndexes.map((filePath) => rm(filePath, { force: true })),
@@ -5693,6 +5870,7 @@ function samePluginRequirement(left, right) {
 function roomMemberResponse(room, member, role, roomToken = undefined) {
   return {
     roomId: room.id,
+    ...(room.campaignId ? { campaignId: room.campaignId } : {}),
     roomName: room.name,
     rulesetId: room.rulesetId,
     createdAt: room.createdAt,
@@ -5713,7 +5891,7 @@ function roomMemberResponse(room, member, role, roomToken = undefined) {
   }
 }
 
-async function createLobbyRoom(ctx, payload, account = null, now = Date.now()) {
+async function createLobbyRoom(ctx, payload, account = null, now = Date.now(), campaignId = null) {
   const rulesetId = String(payload?.rulesetId ?? '')
   const roomName = normalizedLabel(payload?.roomName, 40)
   const displayName = normalizedLabel(payload?.displayName, 24)
@@ -5748,6 +5926,7 @@ async function createLobbyRoom(ctx, payload, account = null, now = Date.now()) {
     const room = {
       version: 1,
       id: roomId,
+      ...(campaignId ? { campaignId, campaignOwnerAccountId: account?.accountId } : {}),
       name: roomName,
       rulesetId,
       requiredPlugins: [],
@@ -6059,6 +6238,242 @@ async function handleAccountApi(req, res, parsed, ctx) {
     return true
   }
 
+  if (parsed.pathname === '/api/accounts/me/campaigns') {
+    const account = await authenticateAccount(req, ctx)
+    if (req.method === 'GET') {
+      writeJson(res, 200, { campaigns: await accountCampaignListResponse(ctx, account) })
+      return true
+    }
+    if (req.method === 'POST') {
+      const payload = await readJsonRequest(req)
+      const name = normalizedLabel(payload?.name, 60)
+      const description = normalizeCampaignDescription(payload?.description)
+      const rulesetId = String(payload?.rulesetId ?? '')
+      if (!name) throw new RoomProtocolError(400, 'invalid-campaign-name')
+      if (description == null) throw new RoomProtocolError(400, 'invalid-campaign-description')
+      if (rulesetId !== DND5E_2014_RULESET_ID) throw new RoomProtocolError(400, 'invalid-ruleset')
+      const now = Date.now()
+      let created = null
+      const next = await mutateAccount(ctx, account.accountId, (current) => {
+        const campaigns = accountCampaigns(current)
+        if (campaigns.length >= ACCOUNT_CAMPAIGN_LIMIT) {
+          throw new RoomProtocolError(409, 'account-campaign-limit')
+        }
+        let campaignId = ''
+        for (let attempt = 0; attempt < 32; attempt += 1) {
+          const candidate = randomLobbyCode(12)
+          if (!campaigns.some((campaign) => campaign.campaignId === candidate)) {
+            campaignId = candidate
+            break
+          }
+        }
+        if (!campaignId) throw new RoomProtocolError(503, 'campaign-id-exhausted')
+        created = {
+          schemaVersion: ACCOUNT_CAMPAIGN_SCHEMA_VERSION,
+          campaignId,
+          ownerAccountId: current.accountId,
+          name,
+          description,
+          rulesetId,
+          archived: false,
+          roomCount: 0,
+          roomHistory: [],
+          createdAt: now,
+          updatedAt: now,
+        }
+        return {
+          ...current,
+          campaigns: [...campaigns, created],
+          updatedAt: now,
+        }
+      })
+      const persisted = accountCampaigns(next).find((campaign) => campaign.campaignId === created?.campaignId)
+      writeJson(res, 201, await accountCampaignResponse(ctx, persisted))
+      return true
+    }
+    throw new RoomProtocolError(405, 'method-not-allowed')
+  }
+
+  const accountCampaignResumeRoomMatch = parsed.pathname.match(
+    /^\/api\/accounts\/me\/campaigns\/([^/]+)\/rooms\/current$/,
+  )
+  if (accountCampaignResumeRoomMatch) {
+    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+    const account = await authenticateAccount(req, ctx)
+    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignResumeRoomMatch[1] ?? ''))
+    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
+    const campaign = accountCampaigns(account).find((candidate) => candidate.campaignId === campaignId)
+    if (!campaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
+    if (campaign.archived === true) throw new RoomProtocolError(409, 'campaign-archived')
+    const roomId = normalizeLobbyRoomCode(campaign.lastRoomId)
+    if (roomId.length !== 6) throw new RoomProtocolError(404, 'campaign-room-not-found')
+    const payload = await readJsonRequest(req)
+    const clientId = payload?.clientId
+    const activePlugins = normalizeRoomPluginRequirements(payload?.activePlugins ?? [])
+    const displayName = normalizedLabel(payload?.displayName, 24) || account.displayName
+    if (!validClientId(clientId)) throw new RoomProtocolError(400, 'invalid-client')
+    if (!activePlugins) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+    if (!displayName) throw new RoomProtocolError(400, 'invalid-display-name')
+    const roomToken = createRoomSessionToken()
+    const now = Date.now()
+    const result = await mutateLobbyRoom(ctx, roomId, (room) => {
+      if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
+      if (
+        room.campaignId !== campaignId ||
+        room.campaignOwnerAccountId !== account.accountId ||
+        room.host?.accountId !== account.accountId
+      ) {
+        return { ok: false, status: 403, error: 'forbidden' }
+      }
+      const host = {
+        ...room.host,
+        clientId,
+        displayName,
+        activePlugins,
+        lastSeenAt: now,
+        roomTokenHash: roomSessionTokenHash(roomToken),
+      }
+      return {
+        ok: true,
+        member: host,
+        next: {
+          ...room,
+          host,
+          updatedAt: now,
+        },
+      }
+    })
+    writeJson(res, 200, roomMemberResponse(result.room, result.member, 'dm', roomToken))
+    return true
+  }
+
+  const accountCampaignRoomMatch = parsed.pathname.match(/^\/api\/accounts\/me\/campaigns\/([^/]+)\/rooms$/)
+  if (accountCampaignRoomMatch) {
+    if (req.method !== 'POST') throw new RoomProtocolError(405, 'method-not-allowed')
+    const account = await authenticateAccount(req, ctx)
+    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignRoomMatch[1] ?? ''))
+    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
+    const payload = await readJsonRequest(req)
+    if (payload?.accountId != null && payload.accountId !== account.accountId) {
+      throw new RoomProtocolError(401, 'invalid-account-session')
+    }
+    const now = Date.now()
+    let createdRoom = null
+    let createdMember = null
+    let createdRoomToken = null
+    try {
+      await mutateAccount(ctx, account.accountId, async (current) => {
+        const campaigns = accountCampaigns(current)
+        const campaignIndex = campaigns.findIndex((campaign) => campaign.campaignId === campaignId)
+        if (campaignIndex < 0) throw new RoomProtocolError(404, 'account-campaign-not-found')
+        const campaign = campaigns[campaignIndex]
+        if (campaign.archived === true) throw new RoomProtocolError(409, 'campaign-archived')
+        const previousRoom = await readLobbyRoomOptional(ctx, campaign.lastRoomId)
+        if (
+          previousRoom &&
+          previousRoom.campaignId === campaignId &&
+          previousRoom.campaignOwnerAccountId === current.accountId &&
+          !previousRoom.closedAt
+        ) {
+          if (roomHostIsOnline(previousRoom, now)) {
+            throw new RoomProtocolError(409, 'campaign-room-active')
+          }
+          await mutateLobbyRoom(ctx, previousRoom.id, (room) => ({
+            ok: true,
+            next: {
+              ...room,
+              closedAt: now,
+              updatedAt: now,
+              host: { ...room.host, lastSeenAt: 0 },
+            },
+          }))
+        }
+        const roomNumber = (Array.isArray(campaign.roomHistory) ? campaign.roomHistory.length : 0) + 1
+        const roomPayload = {
+          ...payload,
+          roomName: normalizedLabel(payload?.roomName, 40) || `${campaign.name} · 第 ${roomNumber} 场`,
+          rulesetId: campaign.rulesetId,
+        }
+        const created = await createLobbyRoom(ctx, roomPayload, current, now, campaignId)
+        createdRoom = created.room
+        createdMember = created.member
+        createdRoomToken = created.roomToken
+        const history = [
+          ...(Array.isArray(campaign.roomHistory) ? campaign.roomHistory : []),
+          { roomId: created.room.id, createdAt: now },
+        ].slice(-ACCOUNT_CAMPAIGN_ROOM_HISTORY_LIMIT)
+        const updatedCampaign = {
+          ...campaign,
+          roomCount: (Number.isSafeInteger(campaign.roomCount)
+            ? campaign.roomCount
+            : Array.isArray(campaign.roomHistory) ? campaign.roomHistory.length : 0) + 1,
+          roomHistory: history,
+          lastRoomId: created.room.id,
+          updatedAt: now,
+        }
+        return {
+          ...current,
+          campaigns: campaigns.map((candidate, index) => index === campaignIndex ? updatedCampaign : candidate),
+          updatedAt: now,
+        }
+      })
+    } catch (error) {
+      if (createdRoom?.id) await rm(roomLobbyFile(ctx, createdRoom.id), { force: true }).catch(() => {})
+      throw error
+    }
+    writeJson(res, 201, roomMemberResponse(createdRoom, createdMember, 'dm', createdRoomToken))
+    return true
+  }
+
+  const accountCampaignMatch = parsed.pathname.match(/^\/api\/accounts\/me\/campaigns\/([^/]+)$/)
+  if (accountCampaignMatch) {
+    const account = await authenticateAccount(req, ctx)
+    const campaignId = normalizeCampaignId(decodeURIComponent(accountCampaignMatch[1] ?? ''))
+    if (campaignId.length !== 12) throw new RoomProtocolError(400, 'invalid-campaign-id')
+    const currentCampaign = accountCampaigns(account).find((campaign) => campaign.campaignId === campaignId)
+    if (!currentCampaign) throw new RoomProtocolError(404, 'account-campaign-not-found')
+    if (req.method === 'GET') {
+      writeJson(res, 200, await accountCampaignResponse(ctx, currentCampaign))
+      return true
+    }
+    if (req.method === 'PATCH') {
+      const payload = await readJsonRequest(req)
+      const name = payload?.name == null ? currentCampaign.name : normalizedLabel(payload.name, 60)
+      const description = payload?.description == null
+        ? (currentCampaign.description ?? '')
+        : normalizeCampaignDescription(payload.description)
+      if (!name) throw new RoomProtocolError(400, 'invalid-campaign-name')
+      if (description == null) throw new RoomProtocolError(400, 'invalid-campaign-description')
+      if (payload?.archived != null && typeof payload.archived !== 'boolean') {
+        throw new RoomProtocolError(400, 'invalid-campaign-archive-state')
+      }
+      const now = Date.now()
+      const next = await mutateAccount(ctx, account.accountId, (current) => {
+        const campaigns = accountCampaigns(current)
+        if (!campaigns.some((campaign) => campaign.campaignId === campaignId)) {
+          throw new RoomProtocolError(404, 'account-campaign-not-found')
+        }
+        return {
+          ...current,
+          campaigns: campaigns.map((campaign) => campaign.campaignId === campaignId
+            ? {
+                ...campaign,
+                name,
+                description,
+                archived: payload?.archived ?? campaign.archived === true,
+                updatedAt: now,
+              }
+            : campaign),
+          updatedAt: now,
+        }
+      })
+      const updated = accountCampaigns(next).find((campaign) => campaign.campaignId === campaignId)
+      writeJson(res, 200, await accountCampaignResponse(ctx, updated))
+      return true
+    }
+    throw new RoomProtocolError(405, 'method-not-allowed')
+  }
+
   if (parsed.pathname === '/api/accounts/me/characters' && req.method === 'GET') {
     const account = await authenticateAccount(req, ctx)
     writeJson(res, 200, { characters: Array.isArray(account.characters) ? account.characters : [] })
@@ -6366,6 +6781,9 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
 
   if (parsed.pathname === '/api/rooms' && req.method === 'POST') {
     const payload = await readJsonRequest(req)
+    if (payload?.campaignId != null) {
+      throw new RoomProtocolError(400, 'campaign-room-launch-required')
+    }
     const account = await authenticateAccount(req, ctx, !productionSecurityEnabled())
     if (payload?.accountId != null && account?.accountId !== payload.accountId) {
       throw new RoomProtocolError(401, 'invalid-account-session')
@@ -7308,6 +7726,7 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     return true
   }
 
+  const rootContext = ctx
   const roomId = normalizeRoomId(parsed.searchParams.get('room'))
   if (productionSecurityEnabled() && roomId === 'default') {
     writeJson(res, 403, { error: 'room-session-required' })
@@ -7323,9 +7742,15 @@ export async function handleSharedApi(req, res, parsed, ctx) {
   }
   ctx = { ...ctx, accessRole: access.role }
   let authenticatedRoomMember = null
+  let authenticatedRoom = null
   if ((ctx.roomId ?? 'default') !== 'default') {
     try {
       const room = await readRoomForCampaign(ctx)
+      authenticatedRoom = room
+      if (room.closedAt) {
+        writeJson(res, 409, { error: 'room-closed' })
+        return true
+      }
       const requestMemberId = req?.headers?.['x-stars-member'] ?? parsed.searchParams.get('member')
       const requestRoomToken = req?.headers?.['x-stars-room-token'] ?? parsed.searchParams.get('roomToken')
       authenticatedRoomMember = lobbyRoomMember(room, requestMemberId)
@@ -7343,6 +7768,29 @@ export async function handleSharedApi(req, res, parsed, ctx) {
     } catch {
       writeJson(res, 403, { error: 'forbidden' })
       return true
+    }
+  }
+  if (authenticatedRoom?.campaignId) {
+    const normalizedCampaign = normalizeCampaignId(authenticatedRoom.campaignId)
+    const normalizedOwner = normalizeAccountId(authenticatedRoom.campaignOwnerAccountId)
+    if (
+      normalizedCampaign.length !== 12 ||
+      normalizedCampaign !== authenticatedRoom.campaignId ||
+      normalizedOwner.length !== 12 ||
+      normalizedOwner !== authenticatedRoom.campaignOwnerAccountId
+    ) {
+      writeJson(res, 403, { error: 'forbidden' })
+      return true
+    }
+    const accessRole = ctx.accessRole
+    ctx = {
+      ...campaignScopedContext(
+        rootContext,
+        roomId,
+        authenticatedRoom.campaignId,
+        authenticatedRoom.campaignOwnerAccountId,
+      ),
+      accessRole,
     }
   }
   if (ctx.accessRole === 'player') {

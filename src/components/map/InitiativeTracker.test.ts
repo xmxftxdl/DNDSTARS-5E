@@ -9,6 +9,7 @@ const entry: InitiativeEntry = {
   emoji: '👤',
   portrait: 'data:image/png;base64,cG9ydHJhaXQ=',
   color: '#22d3ee',
+  turnGlowColor: '#60a5fa',
   roll: 18,
 }
 
@@ -33,9 +34,10 @@ describe('先攻头像队列', () => {
     expect(html).toContain('data-testid="initiative-health-hero-token"')
     expect(html).toContain('width:50%')
     expect(html).toContain('data-active-turn="true"')
-    expect(html).toContain('width:87px;height:114px')
-    expect(html).toContain('h-[7px]')
-    expect(html).toContain('style="width:87px"')
+    expect(html).toContain('width:97px;height:125px')
+    expect(html).toContain('h-2')
+    expect(html).toContain('style="width:97px"')
+    expect(html).toContain('--initiative-turn-color:#60a5fa')
   })
 
   it('不再把角色名称渲染为可见文本', () => {
