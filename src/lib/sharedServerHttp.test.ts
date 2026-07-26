@@ -1485,13 +1485,20 @@ describe('房间大厅协议', () => {
       }),
     ))
     expect(joins.map((response) => response.status).sort()).toEqual([200, 200, 200, 409])
-    const successful = await Promise.all(joins.filter((response) => response.ok).map((response) => response.json())) as Array<{
-      member: { memberId: string; roomToken: string; role: string; slot: string }
-      rules: { member: { ready: boolean } }
-    }>
+    const successful = await Promise.all(joins
+      .map((response, requestIndex) => ({ response, requestIndex }))
+      .filter(({ response }) => response.ok)
+      .map(async ({ response, requestIndex }) => ({
+        requestIndex,
+        ...await response.json() as {
+          member: { memberId: string; roomToken: string; role: string; slot: string }
+          rules: { member: { ready: boolean } }
+        },
+      })))
     expect(successful.map((result) => result.member.slot).sort()).toEqual(['player1', 'player2', 'player3'])
     expect(successful.every((result) => result.member.role === 'player')).toBe(true)
-    expect(successful.filter((result) => result.rules.member.ready)).toHaveLength(1)
+    expect(successful.every((result) =>
+      result.rules.member.ready === (result.requestIndex === 0))).toBe(true)
 
     const downloadResponse = await fetch(
       `${offServer.base}/api/rooms/${created.roomId}/plugins/${roomPlugin.id}`,
