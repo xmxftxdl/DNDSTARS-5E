@@ -183,6 +183,14 @@ export interface Dnd5eSpellCastPayload {
   effectDamageType?: 'acid' | 'cold' | 'fire' | 'lightning' | 'thunder'
   /** 变巨/缩小术的受控形态选择；DM Host 会按法术白名单复核。 */
   enlargeReduceChoice?: 'enlarge' | 'reduce'
+  /** 强化属性的受控分支选择；DM Host 会按法术白名单复核。 */
+  enhanceAbilityChoice?:
+    | 'bear-endurance'
+    | 'bull-strength'
+    | 'cat-grace'
+    | 'eagle-splendor'
+    | 'fox-cunning'
+    | 'owl-wisdom'
   /** 使用一个仍在维持的核心法术效果；不会再次施法或消费新的法术位。 */
   sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
   /** 独立法术实体或固定持续区域授予后续动作时，指向 Host 已创建并同步的地图实体。 */

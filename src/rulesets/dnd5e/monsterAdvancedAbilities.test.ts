@@ -45,6 +45,21 @@ describe('advanced monster Headless declarations', () => {
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('fireball')!)).toMatchObject({
       automation: 'full',
     })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('magic-missile')!)).toMatchObject({
+      automation: 'full',
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('darkvision')!)).toMatchObject({
+      automation: 'full',
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('see-invisibility')!)).toMatchObject({
+      automation: 'full',
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('misty-step')!)).toMatchObject({
+      automation: 'full',
+    })
+    expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('magic-weapon')!)).toMatchObject({
+      automation: 'full',
+    })
     expect(dnd5eMonsterCoreSpellCompatibility(getDnd5eSrdCombatSpell('blight')!)).toMatchObject({
       automation: 'manual',
       reason: expect.stringContaining('亡灵'),

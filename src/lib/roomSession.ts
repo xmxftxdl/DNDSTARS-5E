@@ -43,6 +43,7 @@ export interface RoomRulesSnapshot {
 
 export interface RoomSession {
   roomId: string
+  campaignId?: string
   roomName: string
   rulesetId: typeof DND5E_2014_RULESET_ID
   memberId: string
@@ -83,6 +84,7 @@ export function isRoomSession(value: unknown): value is RoomSession {
   const session = value as Partial<RoomSession>
   if (
     !/^[A-HJ-NP-Z2-9]{6}$/.test(session.roomId ?? '') ||
+    (session.campaignId != null && !/^[A-HJ-NP-Z2-9]{12}$/.test(session.campaignId)) ||
     session.rulesetId !== DND5E_2014_RULESET_ID ||
     (session.role !== 'dm' && session.role !== 'player' && session.role !== 'spectator') ||
     typeof session.memberId !== 'string' ||

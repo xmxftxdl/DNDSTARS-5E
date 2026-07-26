@@ -81,10 +81,13 @@ export function dnd5eMonsterCoreSpellCompatibility(
     }
   }
   if (
-    spell.concentration ||
-    spell.appliedEffect ||
+    (spell.concentration && spell.id !== 'magic-weapon') ||
+    (spell.appliedEffect &&
+      spell.appliedEffect !== 'darkvision' &&
+      spell.appliedEffect !== 'see-invisibility' &&
+      spell.appliedEffect !== 'magic-weapon') ||
     spell.onHitEffect ||
-    spell.onFailedSaveEffect ||
+    (spell.onFailedSaveEffect && spell.onFailedSaveEffect !== 'charm-person') ||
     spell.sustainedAttack ||
     spell.delayedDamage ||
     spell.spellAttackMissDamage
@@ -97,8 +100,11 @@ export function dnd5eMonsterCoreSpellCompatibility(
   if ([
     'spell-attack',
     'saving-throw',
+    'automatic-damage',
     'healing',
     'stabilize',
+    'active-effect',
+    'teleport',
     'power-word-kill',
     'power-word-stun',
   ].includes(spell.effect)) return { automation: 'full' }

@@ -259,7 +259,7 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
     expect(result).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
   })
 
-  it('runs generated plain attacks but refuses actions explicitly assigned to DM adjudication', () => {
+  it('runs generated plain attacks and the structured aboleth tentacle rider', () => {
     const acolyte = startDnd5eHeadlessCombat('generated', [
       combatant('monster', 20, { statBlockId: 'srd-5.1:acolyte' }),
       combatant('hero', 10, { currentHp: 20, maxHp: 20 }),
@@ -274,9 +274,27 @@ describe('SRD monster actions in the D&D 5e Headless engine', () => {
       combatant('monster', 20, { statBlockId: 'srd-5.1:aboleth' }),
       combatant('hero', 10),
     ])
-    expect(resolveDnd5eHeadlessAction(aboleth, {
+    aboleth.distanceFeetByCombatantPair = { ['monster\u0000hero']: 10 }
+    const tentacle = resolveDnd5eHeadlessAction(aboleth, {
       type: 'monster-action', actorId: 'monster', actionId: 'tentacle',
-      rolls: [{ targetId: 'hero', d20: 12, damageRolls: [[3, 3], [6]] }],
-    })).toMatchObject({ ok: false, reason: 'invalid-monster-action' })
+      rolls: [{ targetId: 'hero', d20: 12, damageRolls: [[3, 3]] }],
+    })
+    expect(tentacle.ok, tentacle.ok ? undefined : tentacle.reason).toBe(true)
+    expect(tentacle.state.combatants.hero.classState.monsterOnHitSavePending).toMatchObject({
+      sourceId: 'monster',
+      actionId: 'tentacle',
+      ability: 'con',
+      dc: 14,
+      condition: 'disease',
+    })
+    const disease = resolveDnd5eHeadlessAction(tentacle.state, {
+      type: 'monster-on-hit-save',
+      actorId: 'hero',
+      sourceId: 'monster',
+      actionId: 'tentacle',
+      d20: 1,
+    })
+    expect(disease.ok, disease.ok ? undefined : disease.reason).toBe(true)
+    expect(disease.state.combatants.hero.conditions).toContain('disease')
   })
 })

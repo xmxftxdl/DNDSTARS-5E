@@ -25,7 +25,7 @@ import { collectDnd5ePersistentAreaTriggers, dnd5ePersistentAreaDifficultTerrain
 import { prepareDnd5ePersistentAreaTrigger, resolvePreparedDnd5ePersistentAreaTrigger } from './pluginAreaTransactions'
 import { createDnd5eTurnEconomyCounts } from './turnEconomy'
 import { createDnd5eMechanicalEffect } from './activeEffects'
-import { DND5E_CLUB, DND5E_LEATHER_ARMOR } from './equipment'
+import { DND5E_CLUB, DND5E_LEATHER_ARMOR, DND5E_LONGSWORD } from './equipment'
 
 function character(id: string, charClass: string, patch: Partial<Character> = {}): Character {
   return {
@@ -79,6 +79,116 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       ok: false,
       reason: 'armor-proficiency-required',
     })
+  })
+
+  it('prepares Charm Person with combat advantage and resolves its authoritative condition', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            selections: { 'spell-prepared': ['charm-person'] },
+          },
+        },
+      },
+      classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 1 } },
+    })
+    const targetCharacter = character('target', '战士', {
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 8, cha: 10 },
+    })
+    const targetToken = token('target-token', 'enemy', 125, targetCharacter.id)
+    const prepared = prepareDnd5eSpellCast(
+      fixture(wizard, 'charm-person', 1, targetToken, [targetCharacter]),
+    )
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.savingThrow?.mode).toBe('advantage')
+
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      savingThrowD20: 1,
+      savingThrowD20Second: 2,
+      effectRolls: [],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.state.combatants[targetToken.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        standardCondition: 'charmed',
+        source: expect.objectContaining({ actorId: 'wizard-token', rulesId: 'charm-person' }),
+      }),
+    )
+  })
+
+  it('persists Darkvision as an 8-hour non-concentration map effect', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: {
+        classes: {
+          wizard: {
+            selections: { 'spell-prepared': ['darkvision'] },
+          },
+        },
+      },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const ally = character('ally', '战士')
+    const allyToken = token('ally-token', 'player', 75, ally.id)
+    const prepared = prepareDnd5eSpellCast(
+      fixture(wizard, 'darkvision', 2, allyToken, [ally]),
+    )
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      effectRolls: [],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.state.combatants[allyToken.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:darkvision',
+        modifiers: expect.objectContaining({ darkvisionRangeFeet: 60 }),
+        duration: { type: 'rounds', remainingRounds: 4_800, tickOn: 'target-turn-end' },
+      }),
+    )
+    expect(resolved.application?.characters.find((candidate) => candidate.id === ally.id)
+      ?.dnd5eCombatState?.activeEffects).toContainEqual(
+        expect.objectContaining({ definitionId: 'srd-5.1:spell:darkvision' }),
+      )
+  })
+
+  it('revalidates Misty Step visibility and occupancy before applying its map position', () => {
+    const wizard = character('wizard', '法师', {
+      dnd5eClassChoices: {
+        classes: {
+          wizard: { selections: { 'spell-prepared': ['misty-step'] } },
+        },
+      },
+      classResources: { 'dnd5e-spell-slot-2': { current: 1, max: 1 } },
+    })
+    const input = fixture(wizard, 'misty-step', 2, token('enemy', 'enemy', 425))
+    input.action.dnd5eSpellCast!.targetTokenIds = []
+    input.action.dnd5eSpellCast!.areaTargetCell = { col: 4, row: 0 }
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.teleportDestination).toMatchObject({
+      to: { x: 225, y: 25 },
+      distanceFeet: 20,
+    })
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      effectRolls: [],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === 'wizard-token'))
+      .toMatchObject({ x: 225, y: 25 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'teleported',
+      actorId: 'wizard-token',
+      spellId: 'misty-step',
+    }))
+
+    const occupiedInput = fixture(wizard, 'misty-step', 2, token('enemy', 'enemy', 225))
+    occupiedInput.action.dnd5eSpellCast!.targetTokenIds = []
+    expect(prepareDnd5eSpellCast(occupiedInput)).toEqual({ ok: false, reason: 'invalid-target' })
   })
 
   it('revalidates unproficient armor inside Headless against a forged cast action', () => {
@@ -891,6 +1001,44 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
       targetTokenId: invalid.action.actorTokenId,
     }
     expect(prepareDnd5eSpellCast(invalid)).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('casts Magic Weapon on an ally main weapon and rejects an already magical weapon', () => {
+    const wizard = character('wizard', '法师', {
+      level: 7,
+      dnd5eClassChoices: { classes: { wizard: { selections: { 'spell-prepared': ['magic-weapon'] } } } },
+      classResources: { 'dnd5e-spell-slot-4': { current: 1, max: 1 } },
+    })
+    const ally = character('ally', '战士', {
+      equipment: { mainWeapon: DND5E_LONGSWORD },
+    })
+    const allyToken = token('ally-token', 'player', 75, ally.id)
+    const prepared = prepareDnd5eSpellCast(fixture(wizard, 'magic-weapon', 4, allyToken, [ally]))
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const cast = resolvePreparedDnd5eSpellCast({ prepared: prepared.prepared, effectRolls: [] })
+    expect(cast.result.ok).toBe(true)
+    if (!cast.result.ok) return
+    expect(cast.result.state.combatants[allyToken.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'srd-5.1:spell:magic-weapon',
+        modifiers: { magicWeapon: { weaponId: DND5E_LONGSWORD.id, bonus: 2 } },
+      }),
+    )
+
+    const magicalAlly = character('magic-ally', '战士', {
+      equipment: {
+        mainWeapon: {
+          ...DND5E_LONGSWORD,
+          id: 'magic-longsword',
+          baseEquipmentId: DND5E_LONGSWORD.id,
+          effects: { weaponAttackBonus: 1, weaponDamageBonus: 1 },
+        },
+      },
+    })
+    const magicalToken = token('magic-ally-token', 'player', 75, magicalAlly.id)
+    expect(prepareDnd5eSpellCast(fixture(wizard, 'magic-weapon', 4, magicalToken, [magicalAlly])))
+      .toEqual({ ok: false, reason: 'invalid-target' })
   })
 
   it('casts Sanctuary as a bonus-action ward using the original caster spell save DC', () => {

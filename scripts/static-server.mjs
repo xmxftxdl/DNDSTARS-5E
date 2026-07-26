@@ -6,7 +6,9 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   applySecurityHeaders,
+  closeAccountStorage,
   handleSharedApi,
+  initializeAccountStorage,
   productionSecurityEnabled,
   validateProductionSecurityConfig,
 } from './shared-server-core.mjs'
@@ -52,6 +54,8 @@ const apiCtx = {
   serverStartedAt: Date.now(),
   serverBuildId: process.env.STARS_BUILD_ID ?? 'static-development',
 }
+const accountStorage = await initializeAccountStorage(apiCtx)
+console.log(`Account storage: ${accountStorage.backend}${accountStorage.databasePath ? ` (${accountStorage.databasePath})` : ''}`)
 
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -128,7 +132,9 @@ let closing = false
 const close = () => {
   if (closing) return
   closing = true
-  server.close(() => process.exit(0))
+  server.close(() => {
+    void closeAccountStorage(apiCtx).finally(() => process.exit(0))
+  })
   const forceExit = setTimeout(() => process.exit(1), 10_000)
   forceExit.unref()
 }

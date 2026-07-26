@@ -161,6 +161,8 @@ function eventDetails(event: Dnd5eCombatEvent, resolveName: (id: string) => stri
       return [`${resolveName(event.targetId)}｜死亡防护触发（${event.trigger === 'damage' ? '伤害' : '即死效果'}）`]
     case 'moved':
       return [`${resolveName(event.actorId)}｜移动 ${event.distance} 尺｜(${event.from.x}, ${event.from.y}) → (${event.to.x}, ${event.to.y})`]
+    case 'teleported':
+      return [`${resolveName(event.actorId)}｜${event.spellId}传送 ${event.distanceFeet} 尺｜(${event.from.x}, ${event.from.y}) → (${event.to.x}, ${event.to.y})`]
     case 'legendary-resistance-used':
       return [`${resolveName(event.targetId)}｜使用传奇抗性｜剩余 ${event.remainingUses} 次`]
     case 'counterspell-resolved':

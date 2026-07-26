@@ -194,6 +194,7 @@ export function prepareDnd5eOpportunityAttack(input: {
   }
   const classDamageContext: Dnd5eWeaponClassDamageContext | undefined = isPlayerMelee
     ? {
+        weaponId: playerProfile.weaponId,
         mode: 'melee',
         finesse: playerProfile.finesse,
         strengthBased: playerProfile.attackAbility === 'str',

@@ -51,3 +51,13 @@ export function imposeDnd5eRollDisadvantage(
     disadvantage: [{ active: true, reason }],
   })
 }
+
+export function imposeDnd5eRollAdvantage(
+  mode: D20RollMode,
+  reason: string,
+): Dnd5eRollModeResolution {
+  return resolveDnd5eRollMode({
+    requestedMode: mode,
+    advantage: [{ active: true, reason }],
+  })
+}

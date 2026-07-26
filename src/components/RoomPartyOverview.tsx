@@ -106,7 +106,9 @@ export default function RoomPartyOverview() {
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <Link
-            to="/characters"
+            to={roomSession
+              ? `/campaign/${encodeURIComponent(roomSession.campaignId ?? roomSession.roomId)}/characters`
+              : '/characters'}
             className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-arcane-300 transition hover:bg-arcane-500/10 hover:text-arcane-200"
           >
             查看角色页

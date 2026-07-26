@@ -70,7 +70,6 @@ export default defineConfig({
         STARS_PLUGIN_REVIEW_REQUIRED: 'true',
         STARS_PLUGIN_ADMIN_ACCOUNT_IDS: '*',
         VITE_APP_MODE: 'dm',
-        VITE_BYPASS_ROOM_LOBBY: '1',
         VITE_SHARED_API_BASES: `${reviewUrl}/api`,
       },
     },

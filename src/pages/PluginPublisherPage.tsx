@@ -64,7 +64,7 @@ export default function PluginPublisherPage() {
       <PageHeader
         title={publisher?.displayName ?? '插件发布者'}
         description="查看该发布者已经通过审核的 DNDSTARS 规则包。"
-        actions={<Link to="/plugins" className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">返回插件中心</Link>}
+        actions={<Link to="/app/extensions" className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">返回我的扩展</Link>}
       />
       {error && <div className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">{error}</div>}
       {loading ? (

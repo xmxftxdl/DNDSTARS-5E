@@ -47,6 +47,28 @@ export interface AccountProfile {
   updatedAt: number
 }
 
+export interface AccountCampaignRoomSummary {
+  roomId: string
+  roomName: string
+  createdAt: number
+  closedAt?: number
+  hostOnline: boolean
+  status: 'online' | 'grace' | 'offline' | 'closed'
+}
+
+export interface AccountCampaign {
+  schemaVersion: 1
+  campaignId: string
+  name: string
+  description: string
+  rulesetId: typeof DND5E_2014_RULESET_ID
+  archived: boolean
+  roomCount: number
+  createdAt: number
+  updatedAt: number
+  latestRoom?: AccountCampaignRoomSummary
+}
+
 export type AccountVerificationChannel = 'email' | 'phone'
 
 export interface AccountAuthConfig {
@@ -231,6 +253,38 @@ export async function loadAccountProfile(): Promise<AccountProfile> {
   return accountRequest<AccountProfile>('/accounts/me', { method: 'GET' })
 }
 
+export async function loadAccountCampaigns(): Promise<AccountCampaign[]> {
+  const response = await accountRequest<{ campaigns: AccountCampaign[] }>('/accounts/me/campaigns', {
+    method: 'GET',
+  })
+  return Array.isArray(response.campaigns) ? response.campaigns : []
+}
+
+export async function createAccountCampaign(input: {
+  name: string
+  description?: string
+  rulesetId?: typeof DND5E_2014_RULESET_ID
+}): Promise<AccountCampaign> {
+  return accountRequest<AccountCampaign>('/accounts/me/campaigns', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description ?? '',
+      rulesetId: input.rulesetId ?? DND5E_2014_RULESET_ID,
+    }),
+  })
+}
+
+export async function updateAccountCampaign(
+  campaignId: string,
+  patch: { name?: string; description?: string; archived?: boolean },
+): Promise<AccountCampaign> {
+  return accountRequest<AccountCampaign>(
+    `/accounts/me/campaigns/${encodeURIComponent(campaignId)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  )
+}
+
 export async function loadAccountCharacters(): Promise<AccountCharacterRecord[]> {
   const response = await accountRequest<{ characters: AccountCharacterRecord[] }>('/accounts/me/characters', {
     method: 'GET',
@@ -408,6 +462,12 @@ export function accountApiErrorMessage(error: unknown): string {
     'invalid-account-session': '账号会话已经失效，请重新输入用户名和密码登录。',
     'account-character-not-found': '账号角色库中没有找到这个角色。',
     'invalid-account-character': '角色数据或兼容性清单无效，未写入账号角色库。',
+    'invalid-campaign-name': '战役名称必须为 1～60 个字符。',
+    'invalid-campaign-description': '战役简介不能超过 800 个字符。',
+    'invalid-campaign-id': '战役标识无效。',
+    'account-campaign-not-found': '账号中没有找到这个战役。',
+    'account-campaign-limit': '账号保存的战役数量已达到上限。',
+    'campaign-archived': '这个战役已归档，请先恢复后再开房。',
     'invalid-account-plugin': '插件清单或版本格式无效，未写入账号插件库。',
     'account-plugin-file-empty': '插件文件为空。',
     'account-plugin-not-found': '账号插件库中没有找到这个版本。',

@@ -134,6 +134,156 @@ describe('monster core spell map action', () => {
     }))
   })
 
+  it('prepares Magic Missile and applies its repeated projectile targets through the map bridge', () => {
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: {
+        monsterSpellSlots: { 1: { current: 1, max: 1 } },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: '英雄',
+      type: 'player',
+      characterId: 'hero',
+      x: 35,
+    })
+    const map = battleMap([mage, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'magic-missile-map',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'magic-missile',
+      slotLevel: 1,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        projectileTargetIds: [heroToken.id, heroToken.id, heroToken.id],
+        effectRolls: [[4], [3], [2]],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.characters[0].currentHp).toBe(28)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id)
+      ?.dnd5eCombatState?.monsterSpellSlots?.['1'].current).toBe(0)
+  })
+
+  it('prepares and resolves a monster Misty Step into a visible unoccupied cell', () => {
+    const mage = token({
+      id: 'mage',
+      label: '法师',
+      poolId: 'srd-5.1:mage',
+      dnd5eCombatState: {
+        monsterSpellSlots: { 2: { current: 1, max: 1 } },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: '英雄',
+      type: 'player',
+      characterId: 'hero',
+      x: 85,
+    })
+    const map = battleMap([mage, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'monster-misty-step',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: mage.id,
+      targetTokenIds: [],
+      areaTargetCell: { col: 4, row: 0 },
+      spellId: 'misty-step',
+      slotLevel: 2,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: { effectRolls: [] },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id))
+      .toMatchObject({ x: 45, y: 5 })
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'teleported',
+      actorId: mage.id,
+      spellId: 'misty-step',
+      distanceFeet: 20,
+    }))
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === mage.id)
+      ?.dnd5eCombatState?.monsterSpellSlots?.['2'].current).toBe(0)
+  })
+
+  it('prepares and resolves a monster Charm Person with combat advantage and per-day usage', () => {
+    const lamia = token({
+      id: 'lamia',
+      label: '拉米亚',
+      poolId: 'srd-5.1:lamia',
+      dnd5eCombatState: {
+        monsterSpellUsesBySpellId: {
+          'charm-person': { current: 3, max: 3 },
+        },
+      },
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: '英雄',
+      type: 'player',
+      characterId: 'hero',
+      x: 35,
+    })
+    const map = battleMap([lamia, heroToken])
+    const prepared = prepareDnd5eMonsterCoreSpell({
+      combatId: 'monster-charm-person',
+      map,
+      characters: [character()],
+      initiativeOrder: initiative(map.tokens),
+      actorTokenId: lamia.id,
+      targetTokenIds: [heroToken.id],
+      spellId: 'charm-person',
+      slotLevel: 1,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+
+    const resolved = resolvePreparedDnd5eMonsterCoreSpell({
+      prepared: prepared.prepared,
+      resolution: {
+        targetSavingThrows: [{
+          targetId: heroToken.id,
+          d20: 1,
+          d20Second: 2,
+        }],
+        effectRolls: [],
+      },
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    expect(resolved.result.events).toContainEqual(expect.objectContaining({
+      type: 'saving-throw-resolved',
+      targetId: heroToken.id,
+      d20: 2,
+      success: false,
+    }))
+    expect(resolved.result.state.combatants[heroToken.id].classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        standardCondition: 'charmed',
+        source: expect.objectContaining({ actorId: lamia.id, rulesId: 'charm-person' }),
+        duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      }),
+    )
+    expect(resolved.application?.map.tokens.find((entry) => entry.id === lamia.id)
+      ?.dnd5eCombatState?.monsterSpellUsesBySpellId?.['charm-person'].current).toBe(2)
+  })
+
   it('rejects a spell when a wall blocks line of effect', () => {
     const mage = token({ id: 'mage', poolId: 'srd-5.1:mage' })
     const heroToken = token({
@@ -191,9 +341,10 @@ describe('monster core spell map action', () => {
       attackerTokenId: mage.id,
       targetTokenId: heroToken.id,
       spellCast: {
-        spellId: 'fire-bolt',
-        slotLevel: 0,
+        spellId: 'magic-missile',
+        slotLevel: 5,
         targetTokenIds: [heroToken.id],
+        projectileTargetIds: Array.from({ length: 7 }, () => heroToken.id),
       },
       decision: {
         providerId: 'dnd5e:deterministic-tactical-v3',

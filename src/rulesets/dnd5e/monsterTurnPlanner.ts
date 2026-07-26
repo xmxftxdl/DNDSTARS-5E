@@ -36,6 +36,7 @@ import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import { dnd5eAvailableMonsterSpellSlotLevels } from './monsterCoreSpellAction'
 import {
+  dnd5eCharmPersonEligibleCreatureType,
   dnd5eSpellDiceCount,
   getDnd5eSrdCombatSpell,
   type Dnd5eSrdSpellDefinition,
@@ -87,6 +88,8 @@ export interface Dnd5eMonsterTurnPlan {
     spellName: string
     slotLevel: number
     targetTokenIds: readonly string[]
+    /** 自动命中法术逐枚投射物的目标；同一目标可重复。 */
+    projectileTargetIds?: readonly string[]
     effect: Dnd5eSrdSpellDefinition['effect']
     diceCount: number
     diceSides: number
@@ -333,9 +336,25 @@ function offensiveMonsterSpellExpectedValue(input: {
 }): { expectedDamage: number; hitProbability: number; controlValue?: number } | undefined {
   const { map, attacker, target, monster, spell, slotLevel, characters } = input
   if (
-    !['spell-attack', 'saving-throw', 'power-word-kill', 'power-word-stun'].includes(spell.effect) ||
+    !['spell-attack', 'saving-throw', 'automatic-damage', 'power-word-kill', 'power-word-stun'].includes(spell.effect) ||
     !['hostile', 'creature'].includes(spell.target)
   ) return undefined
+  if (spell.id === 'charm-person') {
+    const targetIsCharacter = target.characterId != null &&
+      characters.some((character) => character.id === target.characterId)
+    const targetMonster = target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
+    if (!targetIsCharacter && !dnd5eCharmPersonEligibleCreatureType(targetMonster?.creatureType)) {
+      return undefined
+    }
+    if (
+      targetMonster?.conditionImmunities?.some((condition) =>
+        ['charmed', '魅惑'].includes(condition.trim().toLowerCase())
+      ) ||
+      target.dnd5eCombatState?.activeEffects?.some((effect) =>
+        effect.standardCondition === 'charmed'
+      )
+    ) return undefined
+  }
   const geometry = mapGeometryRuntimeForMap(map.id)
   const distanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, attacker, target)
   if (distanceFeet > spell.rangeFeet) return undefined
@@ -363,6 +382,12 @@ function offensiveMonsterSpellExpectedValue(input: {
     slotLevel,
   )
   const averageDamage = diceCount * (spell.dice.sides + 1) / 2 + spell.dice.bonus
+  if (spell.effect === 'automatic-damage') {
+    return {
+      expectedDamage: averageDamage + (spell.bonusPerDie ? diceCount : 0),
+      hitProbability: 1,
+    }
+  }
   if (spell.effect === 'spell-attack') {
     const ac = targetArmorClass(target, characters) + cover.armorClassBonus
     const baseProbability = Math.max(
@@ -384,6 +409,15 @@ function offensiveMonsterSpellExpectedValue(input: {
     0.05,
     Math.min(0.95, (21 + modifier - monster.spellcasting.saveDc) / 20),
   )
+  if (spell.id === 'charm-person') {
+    const combatAdvantageSuccessProbability = 1 - (1 - successProbability) ** 2
+    const failureProbability = 1 - combatAdvantageSuccessProbability
+    return {
+      expectedDamage: 0,
+      hitProbability: failureProbability,
+      controlValue: 24 * failureProbability,
+    }
+  }
   const damageFactor = 1 - successProbability +
     (spell.damageOnSuccessfulSave === 'half' ? successProbability / 2 : 0)
   return {
@@ -466,7 +500,7 @@ function monsterTacticalRole(monster: Dnd5eMonsterStatBlock): MonsterDecisionCon
       const spell = getDnd5eSrdCombatSpell(listedSpell.id)
       return !!spell &&
         dnd5eMonsterCoreSpellCompatibility(spell).automation === 'full' &&
-        ['spell-attack', 'saving-throw', 'power-word-kill', 'power-word-stun'].includes(spell.effect) &&
+        ['spell-attack', 'saving-throw', 'automatic-damage', 'power-word-kill', 'power-word-stun'].includes(spell.effect) &&
         spell.rangeFeet >= 20
     })
   const hasMelee = attacks.some((action) => (action.attack?.reachFeet ?? 0) > 0 && action.attack?.mode !== 'ranged')
@@ -487,7 +521,7 @@ function preferredDistanceFeet(
       const spell = getDnd5eSrdCombatSpell(listedSpell.id)
       return spell &&
         dnd5eMonsterCoreSpellCompatibility(spell).automation === 'full' &&
-        ['spell-attack', 'saving-throw', 'power-word-kill', 'power-word-stun'].includes(spell.effect)
+        ['spell-attack', 'saving-throw', 'automatic-damage', 'power-word-kill', 'power-word-stun'].includes(spell.effect)
         ? [spell.rangeFeet]
         : []
     }))
@@ -1005,6 +1039,15 @@ function createTacticalCandidates(input: {
           spellName: spell.name,
           slotLevel,
           targetTokenIds: areaPlacement?.targetTokenIds ?? [target.id],
+          projectileTargetIds: spell.effect === 'automatic-damage'
+            ? Array.from({
+                length: dnd5eSpellDiceCount(
+                  spell,
+                  Math.max(1, monster.spellcasting?.casterLevel ?? 1),
+                  slotLevel,
+                ),
+              }, () => target.id)
+            : undefined,
           effect: spell.effect,
           diceCount: dnd5eSpellDiceCount(
             spell,

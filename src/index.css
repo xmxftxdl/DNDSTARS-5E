@@ -507,23 +507,75 @@ body > .dice-box-canvas {
 }
 
 /* 先攻轨道：当前回合头像闪烁描边 */
-@keyframes initiative-ring-pulse {
-  0%,
-  100% {
+@property --initiative-ring-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes initiative-ring-flow {
+  to { --initiative-ring-angle: 360deg; }
+}
+
+@keyframes initiative-ring-glow {
+  0%, 100% {
     box-shadow:
-      0 0 0 2px rgba(167, 139, 250, 0.95),
-      0 0 14px rgba(139, 92, 246, 0.55);
+      0 0 0 1px color-mix(in srgb, var(--initiative-turn-color) 72%, transparent),
+      0 0 13px color-mix(in srgb, var(--initiative-turn-color) 52%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 3px rgba(244, 114, 182, 0.9),
-      0 0 22px rgba(167, 139, 250, 0.75);
+      0 0 0 2px color-mix(in srgb, var(--initiative-turn-color) 88%, white 12%),
+      0 0 24px color-mix(in srgb, var(--initiative-turn-color) 76%, transparent);
   }
 }
 
 .initiative-active-ring {
-  animation: initiative-ring-pulse 1.2s ease-in-out infinite;
-  border-color: rgba(167, 139, 250, 0.9) !important;
+  --initiative-turn-color: #a78bfa;
+  isolation: isolate;
+  border-color: transparent !important;
+  animation: initiative-ring-glow 1.6s ease-in-out infinite;
+}
+
+.initiative-active-ring::before {
+  content: "";
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  padding: 3px;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    conic-gradient(
+      from var(--initiative-ring-angle),
+      color-mix(in srgb, var(--initiative-turn-color) 68%, transparent) 0deg,
+      var(--initiative-turn-color) 54deg,
+      white 72deg,
+      var(--initiative-turn-color) 90deg,
+      color-mix(in srgb, var(--initiative-turn-color) 40%, transparent) 138deg,
+      color-mix(in srgb, var(--initiative-turn-color) 74%, transparent) 180deg,
+      var(--initiative-turn-color) 234deg,
+      white 252deg,
+      var(--initiative-turn-color) 270deg,
+      color-mix(in srgb, var(--initiative-turn-color) 40%, transparent) 318deg,
+      color-mix(in srgb, var(--initiative-turn-color) 68%, transparent) 360deg
+    );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: initiative-ring-flow 8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .initiative-active-ring,
+  .initiative-active-ring::before {
+    animation: none;
+  }
 }
 
 @keyframes combat-banner-open {

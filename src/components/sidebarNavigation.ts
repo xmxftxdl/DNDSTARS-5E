@@ -24,7 +24,18 @@ const playerNavItems = navItems.filter((item) =>
   item.to === '/spellbook' ||
   item.to === '/communications')
 
-export function sidebarNavItems(mode?: AppMode, roomRole?: RoomSession['role']) {
-  if (roomRole === 'spectator') return navItems.filter((item) => item.to === '/maps')
-  return mode === 'player' ? playerNavItems : navItems
+export function sidebarNavItems(
+  mode?: AppMode,
+  roomRole?: RoomSession['role'],
+  campaignBasePath = '',
+) {
+  const selected = roomRole === 'spectator'
+    ? navItems.filter((item) => item.to === '/maps')
+    : mode === 'player' ? playerNavItems : navItems
+  if (!campaignBasePath) return selected
+  return selected.map((item) => ({
+    ...item,
+    to: item.to === '/' ? `${campaignBasePath}/overview` : `${campaignBasePath}${item.to}`,
+    end: item.to === '/',
+  }))
 }

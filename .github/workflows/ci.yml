@@ -62,6 +62,7 @@ jobs:
         run: >-
           npx playwright test
           e2e/account-auth-lifecycle.spec.ts
+          e2e/account-campaign-workspace.spec.ts
           e2e/plugin-catalog-lifecycle.spec.ts
           e2e/plugin-moderation-lifecycle.spec.ts
           --reporter=line

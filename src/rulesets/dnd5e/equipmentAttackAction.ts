@@ -55,6 +55,7 @@ import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage,
 import { consumeDnd5eWeaponAmmunition } from './items'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
+import { dnd5eActiveMagicWeaponBonus } from './activeEffects'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -279,6 +280,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL) <= 5
   })
   const classDamageContext: Dnd5eWeaponClassDamageContext = {
+    weaponId: profile.weaponId,
     mode: profile.mode,
     distanceFeet,
     normalRangeFeet: profile.rangeFeet?.normal,
@@ -383,11 +385,16 @@ export function previewDnd5eEquipmentAttack(
   baneRoll?: number,
 ) {
   const mode = dnd5eAttackModeWithProtection(prepared.attackMode, protectedAttack)
+  const magicWeaponBonus = dnd5eActiveMagicWeaponBonus(
+    prepared.state.combatants[prepared.actorToken.id]?.classState.activeEffects,
+    prepared.classDamageContext.weaponId,
+  )
   const rolls = mode === 'normal' ? [d20] : [d20, d20Second ?? d20]
   const resolved = rules.resolveAttack({
     rolls,
     mode,
-    modifier: prepared.profile.attackModifier + prepared.foeSlayerAttackBonus + (blessRoll ?? 0) - (baneRoll ?? 0),
+    modifier: prepared.profile.attackModifier + magicWeaponBonus +
+      prepared.foeSlayerAttackBonus + (blessRoll ?? 0) - (baneRoll ?? 0),
     targetAc: prepared.targetArmorClass,
   })
   return resolveDnd5eAttackOutcome({

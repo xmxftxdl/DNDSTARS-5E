@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
+const DM = 'http://127.0.0.1:6176'
 
 for (const registration of [
   {
@@ -24,7 +24,7 @@ for (const registration of [
     const firstContext = await browser.newContext()
     const firstPage = await firstContext.newPage()
 
-    await firstPage.goto(`${DM}/plugins`, { waitUntil: 'domcontentloaded' })
+    await firstPage.goto(`${DM}/app/extensions`, { waitUntil: 'domcontentloaded' })
     const auth = firstPage.getByTestId('account-identity-panel')
     await auth.getByRole('button', { name: '注册', exact: true }).click()
     await auth.getByRole('button', { name: registration.channelButton }).click()
@@ -38,6 +38,13 @@ for (const registration of [
     await auth.getByRole('button', { name: '创建账号' }).click()
     await expect(auth.getByText(username, { exact: true })).toBeVisible()
 
+    await firstPage.getByTestId('account-nav-campaigns').click()
+    await expect(firstPage).toHaveURL(`${DM}/app`)
+    await expect(firstPage.getByTestId('account-nav-extensions')).toBeVisible()
+    await firstPage.getByTestId('account-nav-extensions').click()
+    await expect(firstPage).toHaveURL(`${DM}/app/extensions`)
+    await expect(firstPage.getByTestId('account-nav-extensions')).toHaveAttribute('aria-current', 'page')
+
     firstPage.once('dialog', (dialog) => dialog.accept())
     await auth.getByRole('button', { name: '退出' }).click()
     await expect(auth.getByRole('button', { name: '登录账号' })).toBeVisible()
@@ -45,7 +52,7 @@ for (const registration of [
 
     const secondContext = await browser.newContext()
     const secondPage = await secondContext.newPage()
-    await secondPage.goto(`${DM}/plugins`, { waitUntil: 'domcontentloaded' })
+    await secondPage.goto(`${DM}/app/extensions`, { waitUntil: 'domcontentloaded' })
     const secondAuth = secondPage.getByTestId('account-identity-panel')
     await secondAuth.getByPlaceholder('用户名、邮箱或手机号').fill(destination)
     await secondAuth.getByPlaceholder('密码').fill(password)

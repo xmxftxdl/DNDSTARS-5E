@@ -2,7 +2,11 @@ import { createServer } from 'vite'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { handleSharedApi } from './shared-server-core.mjs'
+import {
+  closeAccountStorage,
+  handleSharedApi,
+  initializeAccountStorage,
+} from './shared-server-core.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -40,6 +44,8 @@ const apiCtx = {
   serverStartedAt: Date.now(),
   serverBuildId: process.env.STARS_BUILD_ID ?? 'vite-development',
 }
+const accountStorage = await initializeAccountStorage(apiCtx)
+console.log(`Account storage: ${accountStorage.backend}${accountStorage.databasePath ? ` (${accountStorage.databasePath})` : ''}`)
 
 const server = await createServer({
   clearScreen: false,
@@ -79,6 +85,7 @@ const close = async () => {
   forceExit.unref()
   try {
     await server.close()
+    await closeAccountStorage(apiCtx)
     process.exit(0)
   } catch {
     process.exit(1)

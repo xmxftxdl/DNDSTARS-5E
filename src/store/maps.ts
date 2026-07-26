@@ -23,7 +23,7 @@ import { canWriteSharedState, isPlayerPort } from '../lib/appMode'
 import { getRoomSession } from '../lib/roomSession'
 import { decideApply, type MonotonicState } from '../lib/monotonicGuard'
 import type { Dnd5eTimedEffect } from '../rulesets/dnd5e/timedEffects'
-import type { Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
+import { dnd5eActiveDarkvisionRangeFeet, type Dnd5eActiveEffectInstance } from '../rulesets/dnd5e/activeEffects'
 import type { Dnd5eMonsterMechanicTriggerSnapshot } from '../rulesets/dnd5e/headlessCombatEngine'
 import type {
   Dnd5eDamageType,
@@ -434,11 +434,11 @@ export interface Token {
       actionId: string
       ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
       dc: number
-      condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+      condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious' | 'disease'
     }
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
-    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' }
+    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
@@ -994,6 +994,9 @@ type CharacterTokenPresentation = {
   avatar: string
   portrait?: string
   tokenPortrait?: string
+  dnd5eCombatState?: {
+    activeEffects?: Dnd5eActiveEffectInstance[]
+  }
 }
 
 /** 角色资料与内置怪物素材只在渲染时投影，不写入地图存档。 */
@@ -1005,25 +1008,37 @@ export function projectCharacterTokenPresentations(
   let changed = false
   const projected = tokens.map((token) => {
     if (!token.characterId) {
+      const grantedDarkvision = dnd5eActiveDarkvisionRangeFeet(token.dnd5eCombatState?.activeEffects)
+      const effectiveDarkvision = Math.max(token.darkvisionRangeFeet ?? 0, grantedDarkvision)
+      const visionToken = effectiveDarkvision > (token.darkvisionRangeFeet ?? 0)
+        ? { ...token, darkvisionRangeFeet: effectiveDarkvision }
+        : token
       const presentation = token.poolId
         ? getEnemyVisualPresentation(token.poolId, token.visualVariantId)
         : undefined
-      if (!presentation) return token
+      if (!presentation) {
+        if (visionToken !== token) changed = true
+        return visionToken
+      }
 
       // A room-specific upload always overrides the bundled monster artwork.
       if (token.portraitImageId) {
-        if (!token.portrait && !token.tokenPortrait) return token
+        if (!token.portrait && !token.tokenPortrait) {
+          if (visionToken !== token) changed = true
+          return visionToken
+        }
         changed = true
-        return { ...token, portrait: undefined, tokenPortrait: undefined }
+        return { ...visionToken, portrait: undefined, tokenPortrait: undefined }
       }
 
       if (
         token.portrait === presentation.initiativePortrait &&
-        token.tokenPortrait === presentation.tokenPortrait
+        token.tokenPortrait === presentation.tokenPortrait &&
+        visionToken === token
       ) return token
       changed = true
       return {
-        ...token,
+        ...visionToken,
         portrait: presentation.initiativePortrait,
         tokenPortrait: presentation.tokenPortrait,
       }
@@ -1034,14 +1049,24 @@ export function projectCharacterTokenPresentations(
     const label = character.name || token.label
     const portrait = character.portrait
     const tokenPortrait = character.tokenPortrait
+    const grantedDarkvision = dnd5eActiveDarkvisionRangeFeet(character.dnd5eCombatState?.activeEffects)
+    const darkvisionRangeFeet = Math.max(token.darkvisionRangeFeet ?? 0, grantedDarkvision)
     if (
       emoji === token.emoji &&
       label === token.label &&
       portrait === token.portrait &&
-      tokenPortrait === token.tokenPortrait
+      tokenPortrait === token.tokenPortrait &&
+      darkvisionRangeFeet === (token.darkvisionRangeFeet ?? 0)
     ) return token
     changed = true
-    return { ...token, emoji, label, portrait, tokenPortrait }
+    return {
+      ...token,
+      emoji,
+      label,
+      portrait,
+      tokenPortrait,
+      darkvisionRangeFeet: darkvisionRangeFeet > 0 ? darkvisionRangeFeet : undefined,
+    }
   })
   return changed ? projected : tokens
 }

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
-import { Navigate, Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { PanelLeftOpen } from 'lucide-react'
+import AccountAppShell from './components/AccountAppShell'
 import Sidebar from './components/Sidebar'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
@@ -16,7 +17,10 @@ import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e/pluginApi'
 import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
 import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
+import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 
+const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
+const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
@@ -49,22 +53,43 @@ function lazyPage(scope: string, content: ReactNode) {
 }
 
 export default function App() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const bypassRoomLobby = import.meta.env.VITE_BYPASS_ROOM_LOBBY === '1'
   const [collapsed, setCollapsed] = useState(false)
+  const [account, setAccount] = useState(() => getAccountSession())
   const [roomSession, setRoomSession] = useState(() => getRoomSession())
   const [roomNotice, setRoomNotice] = useState<string | null>(null)
   const [connection, setConnection] = useState<'online' | 'reconnecting'>('online')
   const [roomTransition, setRoomTransition] = useState<'leave' | 'new-campaign' | null>(null)
-  const [forceRoomLobby, setForceRoomLobby] = useState(false)
   const endpointMode = roomSession?.role === 'spectator' ? 'player' : roomSession?.role ?? modeFromPort()
   const isSpectator = roomSession?.role === 'spectator'
   const roomReady = !!roomSession || bypassRoomLobby
-  const standalonePluginCenter = window.location.pathname === '/plugin' ||
-    window.location.pathname.startsWith('/plugins')
+  const campaignId = roomSession?.campaignId ?? roomSession?.roomId ?? 'local'
+  const campaignBasePath = `/campaign/${encodeURIComponent(campaignId)}`
+  const defaultCampaignPath = `${campaignBasePath}/${endpointMode === 'player' ? 'maps' : 'overview'}`
+  const campaignRouteMatch = location.pathname.match(/^\/campaign\/([^/]+)(?:\/|$)/)
+  const campaignSectionMatch = location.pathname.match(/^\/campaign\/[^/]+\/([^/]+)(?:\/|$)/)
+  const publicWebsitePaths = new Set(['/', '/combat', '/extensions', '/blog', '/pricing'])
+  const publicWebsiteRequested = publicWebsitePaths.has(location.pathname) &&
+    !(bypassRoomLobby && location.pathname === '/')
+  const legacyWorkspacePaths = new Set([
+    '/maps',
+    '/characters',
+    '/spellbook',
+    '/communications',
+    '/simulation',
+    '/settings',
+  ])
+  const workspaceRequested = campaignRouteMatch != null ||
+    legacyWorkspacePaths.has(location.pathname) ||
+    (bypassRoomLobby && location.pathname === '/')
+
+  useEffect(() => subscribeAccountSession(setAccount), [])
   useEffect(() => subscribeRoomSession(setRoomSession), [])
 
   useEffect(() => {
-    if (!roomSession) return
+    if (publicWebsiteRequested || !roomSession) return
     let disposed = false
     let pulsing = false
     const pulse = async () => {
@@ -111,6 +136,7 @@ export default function App() {
           setRoomRulesSnapshot(null)
           setRoomPluginSyncError(null)
           setRoomNotice(roomApiErrorMessage(error))
+          navigate('/app', { replace: true })
           return
         }
         setConnection('reconnecting')
@@ -134,10 +160,10 @@ export default function App() {
       window.removeEventListener('online', wake)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [roomSession])
+  }, [navigate, publicWebsiteRequested, roomSession])
 
   useEffect(() => {
-    if (!roomReady) return
+    if (publicWebsiteRequested || !roomReady) return
     let disposed = false
     let stop: (() => void) | undefined
     void import('./lib/roomSharedStateSync').then(({ startRoomSharedStateSync }) => {
@@ -148,38 +174,105 @@ export default function App() {
       disposed = true
       stop?.()
     }
-  }, [endpointMode, roomReady, roomSession])
+  }, [endpointMode, publicWebsiteRequested, roomReady, roomSession])
 
   useEffect(() => {
-    if (!roomReady || roomSession?.role === 'spectator') return
+    if (publicWebsiteRequested || !roomReady || roomSession?.role === 'spectator') return
     const stopInventory = startDnd5eInventoryAuthoritySync()
     return () => stopInventory()
-  }, [endpointMode, roomReady, roomSession])
+  }, [endpointMode, publicWebsiteRequested, roomReady, roomSession])
 
   useEffect(() => {
-    if (roomSession?.role !== 'player') return
+    if (publicWebsiteRequested || roomSession?.role !== 'player') return
     return startAccountCharacterVaultSync()
-  }, [roomSession])
+  }, [publicWebsiteRequested, roomSession])
 
-  if (!forceRoomLobby && standalonePluginCenter && !roomReady) return (
-    <div className="min-h-screen w-screen overflow-y-auto px-5 py-8">
-      <ServerCompatibilityBanner mode={endpointMode} />
-      <SharedIntegrityBanner />
-      <SharedSyncRecoveryBanner />
-      {lazyPage('插件中心', <PluginsPage />)}
-    </div>
-  )
+  if (publicWebsiteRequested) {
+    return (
+      <Routes>
+        {Array.from(publicWebsitePaths).map((path) => (
+          <Route
+            key={path}
+            path={path}
+            element={lazyPage('星痕产品网站', <PublicLandingPage />)}
+          />
+        ))}
+      </Routes>
+    )
+  }
 
-  if (forceRoomLobby || (!roomSession && !bypassRoomLobby)) return (
+  if (!workspaceRequested) {
+    const activeCampaignPath = roomSession
+      ? `/campaign/${encodeURIComponent(roomSession.campaignId ?? roomSession.roomId)}/${roomSession.role === 'player' || roomSession.role === 'spectator' ? 'maps' : 'overview'}`
+      : undefined
+    return (
+      <>
+        <ServerCompatibilityBanner mode={endpointMode} />
+        <SharedIntegrityBanner />
+        <SharedSyncRecoveryBanner />
+        <AccountAppShell
+          accountName={account?.username ?? account?.displayName}
+          activeCampaignPath={activeCampaignPath}
+        >
+          <Routes>
+            <Route
+              path="/app"
+              element={lazyPage('我的战役', <AccountCampaignsPage account={account} roomSession={roomSession} />)}
+            />
+            <Route
+              path="/app/rooms"
+              element={lazyPage('创建或加入房间', <RoomLobbyPage notice={roomNotice} embedded />)}
+            />
+            <Route path="/app/extensions" element={lazyPage('我的扩展', <PluginsPage />)} />
+            <Route
+              path="/app/extensions/publishers/:publisherId"
+              element={lazyPage('扩展发布者', <PluginPublisherPage />)}
+            />
+            <Route path="/plugin" element={<Navigate to="/app/extensions" replace />} />
+            <Route path="/plugins" element={<Navigate to="/app/extensions" replace />} />
+            <Route
+              path="/plugins/publishers/:publisherId"
+              element={<Navigate to={`/app/extensions${location.pathname.slice('/plugins'.length)}`} replace />}
+            />
+            <Route path="*" element={<Navigate to="/app" replace />} />
+          </Routes>
+        </AccountAppShell>
+      </>
+    )
+  }
+
+  if (!roomReady) return (
     <>
       <ServerCompatibilityBanner mode={endpointMode} />
       <SharedIntegrityBanner />
       <SharedSyncRecoveryBanner />
-      <Suspense fallback={<PageLoadingFallback />}>
-        <RoomLobbyPage notice={roomNotice} />
-      </Suspense>
+      <Navigate to="/app" replace />
     </>
   )
+
+  if (campaignRouteMatch && decodeURIComponent(campaignRouteMatch[1]) !== campaignId) {
+    const bootstrapSection = decodeURIComponent(campaignRouteMatch[1]) === 'local'
+      ? campaignSectionMatch?.[1]
+      : undefined
+    const compatibleBootstrapSections = new Set([
+      'overview',
+      'maps',
+      'characters',
+      'spellbook',
+      'communications',
+      'simulation',
+      'extensions',
+      'settings',
+    ])
+    return (
+      <Navigate
+        to={bootstrapSection && compatibleBootstrapSections.has(bootstrapSection)
+          ? `${campaignBasePath}/${bootstrapSection}`
+          : defaultCampaignPath}
+        replace
+      />
+    )
+  }
 
   const handleLeaveRoom = async (intent: 'leave' | 'new-campaign' = 'leave') => {
     if (!roomSession || roomTransition) return
@@ -197,12 +290,11 @@ export default function App() {
     setRoomRulesSnapshot(null)
     setRoomPluginSyncError(null)
     if (intent === 'new-campaign') {
-      window.history.replaceState(null, '', '/?mode=create')
-      setForceRoomLobby(true)
+      navigate('/app/rooms?mode=create', { replace: true })
       setRoomTransition(null)
       return
     }
-    window.location.assign('/')
+    navigate('/app', { replace: true })
   }
 
   return (
@@ -227,6 +319,7 @@ export default function App() {
         <Sidebar
           mode={endpointMode ?? undefined}
           roomSession={roomSession ?? undefined}
+          campaignBasePath={campaignBasePath}
           connection={connection}
           onCollapse={() => setCollapsed(true)}
           onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
@@ -244,9 +337,9 @@ export default function App() {
         )}
         <Routes>
           <Route
-            path="/"
+            path="/campaign/:campaignId/overview"
             element={endpointMode === 'player'
-              ? <Navigate to="/maps" replace />
+              ? <Navigate to={`${campaignBasePath}/maps`} replace />
               : lazyPage('战役总览', (
                   <Dashboard
                     onCreateCampaign={() => void handleLeaveRoom('new-campaign')}
@@ -256,19 +349,25 @@ export default function App() {
           />
           {endpointMode !== 'player' && (
             <Route
-              path="/simulation"
+              path="/campaign/:campaignId/simulation"
               element={lazyPage('战斗 AI 模拟', <CombatSimulationPage />)}
             />
           )}
-          <Route path="/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
-          {!isSpectator && <Route path="/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
-          {!isSpectator && <Route path="/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
-          {!isSpectator && <Route path="/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
-          {!isSpectator && <Route path="/plugin" element={<Navigate to="/plugins" replace />} />}
-          {!isSpectator && <Route path="/plugins/publishers/:publisherId" element={lazyPage('插件发布者', <PluginPublisherPage />)} />}
-          {!isSpectator && <Route path="/plugins" element={lazyPage('插件中心', <PluginsPage />)} />}
-          {!isSpectator && <Route path="/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
-          {endpointMode === 'player' && <Route path="*" element={<Navigate to="/maps" replace />} />}
+          <Route path="/campaign/:campaignId/maps" element={lazyPage('地图与战斗', <MapsPage />)} />
+          {!isSpectator && <Route path="/campaign/:campaignId/characters" element={lazyPage('角色页面', <CharactersPage />)} />}
+          {!isSpectator && <Route path="/campaign/:campaignId/spellbook" element={lazyPage('法术书', <SpellbookPage />)} />}
+          {!isSpectator && <Route path="/campaign/:campaignId/communications" element={lazyPage('通讯与日志', <CommunicationsPage />)} />}
+          {!isSpectator && <Route path="/campaign/:campaignId/extensions" element={lazyPage('规则与扩展', <PluginsPage />)} />}
+          {!isSpectator && <Route path="/campaign/:campaignId/settings" element={lazyPage('设置页面', <RulesPluginsPage />)} />}
+          <Route path="/campaign/:campaignId" element={<Navigate to={defaultCampaignPath} replace />} />
+          <Route path="/" element={<Navigate to={defaultCampaignPath} replace />} />
+          <Route path="/maps" element={<Navigate to={`${campaignBasePath}/maps`} replace />} />
+          <Route path="/characters" element={<Navigate to={`${campaignBasePath}/characters`} replace />} />
+          <Route path="/spellbook" element={<Navigate to={`${campaignBasePath}/spellbook`} replace />} />
+          <Route path="/communications" element={<Navigate to={`${campaignBasePath}/communications`} replace />} />
+          <Route path="/simulation" element={<Navigate to={`${campaignBasePath}/simulation`} replace />} />
+          <Route path="/settings" element={<Navigate to={`${campaignBasePath}/settings`} replace />} />
+          <Route path="*" element={<Navigate to={defaultCampaignPath} replace />} />
         </Routes>
       </main>
     </div>

@@ -157,7 +157,7 @@ export default function RoomManagementPanel() {
                       if (!window.confirm(`确定把 DM 权限转让给「${player.displayName}」吗？你会变为 ${roomRosterMemberLabel(player)}。`)) return
                       void run(`transfer:${player.memberId}`, async () => {
                         await transferRoomDm(session, player.memberId)
-                        window.location.assign('/maps')
+                        window.location.assign(`/campaign/${encodeURIComponent(session.campaignId ?? session.roomId)}/maps`)
                       }, 'DM 权限已转让。')
                     }}
                     className="rounded-lg border border-arcane-400/20 p-2 text-arcane-300 hover:bg-arcane-500/10 disabled:opacity-30"

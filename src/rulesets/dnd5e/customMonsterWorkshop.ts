@@ -72,7 +72,7 @@ export interface Dnd5eCustomMonsterActionDraft {
   onHitSaveEnabled: boolean
   onHitSaveAbility: AbilityKey
   onHitSaveDc: number
-  onHitCondition: Dnd5eStandardConditionId
+  onHitCondition: Dnd5eStandardConditionId | 'disease'
   attacksPerAction: number
   category: 'action' | 'bonus-action' | 'reaction' | 'legendary' | 'lair'
   usageKind: 'at-will' | 'per-day' | 'recharge'

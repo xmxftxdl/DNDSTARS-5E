@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getImage } from '../../lib/imageStore'
 
@@ -15,12 +15,14 @@ export interface InitiativeEntry {
   portraitImageId?: string
   color: string
   accent?: string
+  /** Current-turn flowing border color, normally sourced from the actor's class palette. */
+  turnGlowColor?: string
   roll: number
 }
 
 const VISIBLE_MAX = 7
-const PORTRAIT_WIDTH = Math.round(72 * 1.05)
-const PORTRAIT_HEIGHT = Math.round(94 * 1.05)
+const PORTRAIT_WIDTH = Math.round(Math.round(72 * 1.05) * 1.1)
+const PORTRAIT_HEIGHT = Math.round(Math.round(94 * 1.05) * 1.1)
 const ACTIVE_PORTRAIT_SCALE = 1.15
 
 function InitiativePortrait({ entry, active }: { entry: InitiativeEntry; active: boolean }) {
@@ -84,9 +86,9 @@ export default function InitiativeTracker({
   const canNext = clampedScroll < maxScroll
 
   return (
-    <div className="relative flex items-center gap-1.5 px-1 pb-1 pt-5 drop-shadow-[0_8px_14px_rgba(0,0,0,0.72)]">
+    <div className="relative flex items-center gap-[7px] px-1 pb-1 pt-[22px] drop-shadow-[0_8px_14px_rgba(0,0,0,0.72)]">
       {round != null && (
-        <span className="pointer-events-none absolute left-1 top-0 rounded-full border border-amber-300/55 bg-amber-950/75 px-2 py-1 text-[11px] font-black leading-none tabular-nums text-amber-100 shadow-lg backdrop-blur-sm">
+        <span className="pointer-events-none absolute left-1 top-0 rounded-full border border-amber-300/55 bg-amber-950/75 px-[9px] py-1 text-xs font-black leading-none tabular-nums text-amber-100 shadow-lg backdrop-blur-sm">
           R{round}
         </span>
       )}
@@ -95,16 +97,16 @@ export default function InitiativeTracker({
         disabled={!canPrev}
         onClick={() => onScroll(Math.max(0, clampedScroll - 1))}
         className={[
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
+          'flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
           canPrev ? 'text-slate-200 hover:border-white/25 hover:bg-void-900/80 hover:text-white' : 'cursor-not-allowed opacity-35 text-slate-500',
         ].join(' ')}
         title="查看靠前的先攻"
         aria-label="先攻向左"
       >
-        <ChevronLeft className="h-5 w-5" />
+        <ChevronLeft className="h-[22px] w-[22px]" />
       </button>
 
-      <div className="flex items-end gap-1.5 px-0.5">
+      <div className="flex items-end gap-[7px] px-0.5">
         {visible.map((entry, i) => {
           const globalIndex = clampedScroll + i
           const isActive = globalIndex === activeIndex
@@ -148,14 +150,17 @@ export default function InitiativeTracker({
                     width: portraitWidth,
                     height: portraitHeight,
                     borderColor: defeated ? '#64748b' : isActive ? undefined : entry.color,
-                  }}
+                    ...(isActive && !defeated
+                      ? { '--initiative-turn-color': entry.turnGlowColor ?? entry.color }
+                      : {}),
+                  } as CSSProperties}
                 >
                   <InitiativePortrait entry={entry} active={isActive} />
                 </div>
                 <span
                   data-testid={`initiative-roll-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
                   className={[
-                    'absolute -right-1.5 -top-2 z-20 flex min-w-7 items-center justify-center rounded-full border px-1.5 py-1 text-sm font-black leading-none tabular-nums shadow-[0_3px_8px_rgba(0,0,0,0.8)]',
+                    'absolute -right-[7px] -top-[9px] z-20 flex min-w-[31px] items-center justify-center rounded-full border px-[7px] py-1 text-[15px] font-black leading-none tabular-nums shadow-[0_3px_8px_rgba(0,0,0,0.8)]',
                     defeated
                       ? 'border-slate-500/70 bg-slate-900 text-slate-500'
                       : isActive
@@ -169,7 +174,7 @@ export default function InitiativeTracker({
               </div>
               <div
                 data-testid={`initiative-health-${entry.tokenId}${entry.turnKind ? `-${entry.turnKind}` : ''}`}
-                className="h-[7px] overflow-hidden rounded-full bg-slate-950/90 shadow-md ring-1 ring-white/15 transition-[width] duration-200"
+                className="h-2 overflow-hidden rounded-full bg-slate-950/90 shadow-md ring-1 ring-white/15 transition-[width] duration-200"
                 style={{ width: portraitWidth }}
                 title={hp ? `HP ${hp.hp}/${hp.max}${tempHp > 0 ? ` + ${tempHp} 临时生命` : ''}` : '无生命值数据'}
               >
@@ -211,13 +216,13 @@ export default function InitiativeTracker({
         disabled={!canNext}
         onClick={() => onScroll(Math.min(maxScroll, clampedScroll + 1))}
         className={[
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
+          'flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-void-950/55 shadow-lg backdrop-blur-sm transition-colors',
           canNext ? 'text-slate-200 hover:border-white/25 hover:bg-void-900/80 hover:text-white' : 'cursor-not-allowed opacity-35 text-slate-500',
         ].join(' ')}
         title="查看靠后的先攻"
         aria-label="先攻向右"
       >
-        <ChevronRight className="h-5 w-5" />
+        <ChevronRight className="h-[22px] w-[22px]" />
       </button>
 
       {entries.length > VISIBLE_MAX && (

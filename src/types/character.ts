@@ -150,11 +150,11 @@ export interface Character {
       actionId: string
       ability: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
       dc: number
-      condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
+      condition: 'blinded' | 'charmed' | 'deafened' | 'frightened' | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified' | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious' | 'disease'
     }
     activeEffectDamageSavePendingIds?: string[]
     /** 当前临时生命值若由英雄气概提供，记录来源以便法术结束时精确撤销。 */
-    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' }
+    temporaryHitPointsSource?: { actorId: string; rulesId: 'heroism' | 'enhance-ability' }
     intimidatingPresenceSourceId?: string
     intimidatingPresenceRoundsRemaining?: number
     intimidatingPresenceImmunityRoundsBySource?: Record<string, number>

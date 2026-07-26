@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { projectCharacterTokenPresentations, type Token } from './maps'
+import { createDnd5eMechanicalEffect } from '../rulesets/dnd5e/activeEffects'
 
 function token(patch: Partial<Token> = {}): Token {
   return {
@@ -42,6 +43,32 @@ describe('character token presentation', () => {
     })
   })
 
+  it('projects temporary Darkvision without overwriting the stored token range', () => {
+    const original = token({ darkvisionRangeFeet: 30 })
+    const effect = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:spell:darkvision',
+      label: '黑暗视觉',
+      targetId: original.id,
+      source: { kind: 'spell', actorId: 'caster', rulesId: 'darkvision' },
+      modifiers: { darkvisionRangeFeet: 60 },
+    })
+    const projected = projectCharacterTokenPresentations([original], [{
+      id: 'character-1',
+      name: original.label,
+      avatar: original.emoji,
+      dnd5eCombatState: { activeEffects: [effect] },
+    }])
+    expect(projected[0].darkvisionRangeFeet).toBe(60)
+    expect(original.darkvisionRangeFeet).toBe(30)
+    const withoutEffect = [original]
+    expect(projectCharacterTokenPresentations(withoutEffect, [{
+      id: 'character-1',
+      name: original.label,
+      avatar: original.emoji,
+    }])).toBe(withoutEffect)
+    expect(original.darkvisionRangeFeet).toBe(30)
+  })
+
   it('projects bundled initiative portraits and map tokens for new and legacy monster ids', () => {
     const cases = [
       {
@@ -63,6 +90,15 @@ describe('character token presentation', () => {
           tokenPortrait: `/assets/portraits/${asset}-token.png`,
         })
       }
+    }
+    for (const poolId of ['srd-5.1:air-elemental', 'air-elemental']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/air-elemental-storm-canyon-initiative.png',
+        tokenPortrait: '/assets/portraits/air-elemental-storm-canyon-token.png',
+      })
     }
   })
 

@@ -85,6 +85,30 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
   }
   if (action.legendaryCost != null && !finiteInteger(action.legendaryCost, 1, 10)) return false
   if (action.referencedActionId != null && !requiredText(action.referencedActionId, 120)) return false
+  if (action.rule != null) {
+    if (!isRecord(action.rule) || typeof action.rule.kind !== 'string') return false
+    if (action.rule.kind === 'ability-check') {
+      if (
+        !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
+        (action.rule.skillKey != null && !requiredText(action.rule.skillKey, 120))
+      ) return false
+    } else if (action.rule.kind === 'saving-throw-condition') {
+      if (
+        !finiteInteger(action.rule.rangeFeet, 0, 100_000) ||
+        !ABILITY_KEYS.includes(action.rule.ability as typeof ABILITY_KEYS[number]) ||
+        !finiteInteger(action.rule.dc, 1, 100) ||
+        !STANDARD_CONDITIONS.has(String(action.rule.condition)) ||
+        (action.rule.preventReactions != null && typeof action.rule.preventReactions !== 'boolean') ||
+        (action.rule.repeatSaveOnDamage != null && typeof action.rule.repeatSaveOnDamage !== 'boolean')
+      ) return false
+    } else if (action.rule.kind === 'conditioned-damage-and-healing') {
+      if (
+        !STANDARD_CONDITIONS.has(String(action.rule.requiredCondition)) ||
+        typeof action.rule.requireSameSource !== 'boolean' ||
+        !validateDamage(action.rule.damage)
+      ) return false
+    } else return false
+  }
   if (action.movement != null) {
     if (!isRecord(action.movement) ||
       action.movement.kind !== 'straight-toward-visible-hostile' ||
@@ -115,7 +139,8 @@ function actionShapeIsValid(action: unknown): action is Dnd5eMonsterAction {
     if (!isRecord(attack.onHitRule) || attack.onHitRule.kind !== 'saving-throw-condition' ||
       !ABILITY_KEYS.includes(attack.onHitRule.ability as typeof ABILITY_KEYS[number]) ||
       !finiteInteger(attack.onHitRule.dc, 1, 100) ||
-      !STANDARD_CONDITIONS.has(String(attack.onHitRule.condition))) return false
+      !STANDARD_CONDITIONS.has(String(attack.onHitRule.condition)) &&
+      attack.onHitRule.condition !== 'disease') return false
   }
   return true
 }
@@ -259,7 +284,7 @@ function mechanicShapeIsValid(raw: unknown): boolean {
 
 export function dnd5eMonsterActionAutomation(action: Dnd5eMonsterAction): Dnd5eMonsterActionAutomation {
   if (action.automation === 'dm-adjudication') return 'dm-adjudication'
-  if (action.kind === 'other') return action.automation === 'headless' ? 'invalid' : 'dm-adjudication'
+  if (action.kind === 'other') return action.automation === 'headless' && action.rule ? 'headless' : action.automation === 'headless' ? 'invalid' : 'dm-adjudication'
   if (action.kind === 'multiattack') return action.sequence?.length ? 'headless' : 'invalid'
   if (!action.attack || action.attack.damage.length < 1) return 'invalid'
   if (action.attack.onHit && !action.attack.onHitRule) return 'invalid'

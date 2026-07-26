@@ -207,11 +207,14 @@ export function dnd5eUnseenTargetImposesDisadvantage(
   attacker: Pick<Dnd5eDefensiveCreature, 'classId' | 'level' | 'classLevels' | 'creatureType'> & { conditions?: readonly string[] },
   target: Pick<Dnd5eDefensiveCreature, 'classId' | 'subclassId' | 'level' | 'classLevels' | 'subclassIds' | 'classState'> &
     Partial<Pick<Dnd5eDefensiveCreature, 'conditions'>>,
+  options?: { targetVisible?: boolean },
 ): boolean {
   if (dnd5eConditionImposesAttackDisadvantage({ attacker })) return true
   const targetIsOutlined = hasMechanicalEffect(target, 'srd-5.1:spell:faerie-fire')
-  const targetIsUnseen = (!targetIsOutlined && dnd5eHasStandardCondition(target, 'invisible')) ||
-    (target.classState.emptyBodyRoundsRemaining ?? 0) > 0
+  const targetIsUnseen = options?.targetVisible === true
+    ? false
+    : (!targetIsOutlined && dnd5eHasStandardCondition(target, 'invisible')) ||
+      (target.classState.emptyBodyRoundsRemaining ?? 0) > 0
   const unseenDisadvantage = targetIsUnseen && !(defensiveClassLevel(attacker as Dnd5eDefensiveCreature, 'ranger') >= 18)
   const purityOfSpirit = defensiveClassLevel(target as Dnd5eDefensiveCreature, 'paladin') >= 15 &&
     defensiveHasSubclass(target as Dnd5eDefensiveCreature, 'paladin', 'devotion') &&

@@ -33,6 +33,7 @@ import {
   type Dnd5eDispelMagicCheck,
   type Dnd5eEmpoweredSpellReroll,
   type Dnd5eSpellForcedMovement,
+  type Dnd5eSpellTeleportDestination,
   type Dnd5eHeadlessCombatState,
   type Dnd5eSpellTargetAttackRoll,
   type Dnd5eSpellTargetSavingThrowRoll,
@@ -41,16 +42,18 @@ import {
   type Dnd5eStandAgainstTideUse,
 } from './headlessCombatEngine'
 import { applyDnd5eAttackCoverOverride, createDnd5eMapCombatSnapshot, dnd5eMapTokenCanThreatenRangedAttacker, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
-import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
+import { dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eCanSculptSpell, dnd5eCarefulSpellMaximumTargets, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eHeightenedSavingThrowMode, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eSculptSpellMaximumTargets, dnd5eSpellcastingClassIdForSpell, dnd5eSpellAllowsRepeatedTargets, dnd5eSpellConcentrationDurationRounds, dnd5eSpellDamageDiceCounts, dnd5eSpellDelayedDamageDiceCount, dnd5eSpellDiceCount, dnd5eSpellHigherSlotDamageChoices, dnd5eSpellMaximumTargets, dnd5eSpellProjectileCount, dnd5eSpellSpecificSavingThrowMode, dnd5eSpellUsesSequencedAttacks, dnd5eSustainedSpellAttackDiceCount, getDnd5eSrdCombatSpell, type Dnd5eSrdSpellDefinition } from './spells'
 import { normalizeDnd5eActiveEffects } from './activeEffects'
 import { dnd5eWearingUnproficientArmor } from './equipment'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import { dnd5eHasViciousMockeryAttackDisadvantage, dnd5ePreventsAttackAdvantage, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eTargetIsDodging } from './passiveDefenses'
 import { dnd5eConditionSavingThrowAutomaticallyFails } from './conditions'
 import {
+  mapGeometryCanSeeToken,
   mapGeometryCoverFromPoint,
   mapGeometryLineOfEffectBlocked,
   mapGeometryMovementBlocked,
+  mapGeometryPlacementBlocked,
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
   mapGeometryTokenElevation,
@@ -124,11 +127,13 @@ export interface PreparedDnd5eSpellCast {
   conditionChoice?: 'blinded' | 'deafened' | 'paralyzed' | 'poisoned' | 'disease'
   effectDamageType?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['effectDamageType']
   enlargeReduceChoice?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['enlargeReduceChoice']
+  enhanceAbilityChoice?: NonNullable<SharedPlayerActionState['dnd5eSpellCast']>['enhanceAbilityChoice']
   healingAllocations?: readonly { targetId: string; amount: number }[]
   areaCells?: readonly { col: number; row: number }[]
   areaAnchorCell?: { col: number; row: number }
   areaTargetOrientation?: 0 | 1 | 2 | 3
   areaDurationRounds?: number
+  teleportDestination?: Dnd5eSpellTeleportDestination
   /** 当前事务是在使用既有持续法术效果，而不是再次施法。 */
   sustainedEffectAttack?: 'flame-blade' | 'spiritual-weapon' | 'call-lightning'
   sustainedEffectAreaId?: string
@@ -316,7 +321,8 @@ export function prepareDnd5eSpellCast(input: {
   if (sustainedAttack && (
     overchannel || payload.empowered || payload.draconicResistance || payload.repellingBlast ||
     payload.metamagic || payload.higherSlotDamageType || payload.conditionChoice ||
-    payload.effectDamageType || payload.enlargeReduceChoice || payload.healingAllocations?.length ||
+    payload.effectDamageType || payload.enlargeReduceChoice || payload.enhanceAbilityChoice ||
+    payload.healingAllocations?.length ||
     (sustainedAttack.origin === 'caster' && payload.areaTargetCell) ||
     payload.areaTargetOrientation != null ||
     payload.projectileTargetIds?.length || payload.sculptedTargetIds?.length ||
@@ -404,6 +410,12 @@ export function prepareDnd5eSpellCast(input: {
       (!enlargeReduceChoice || !spell.enlargeReduceOptions.includes(enlargeReduceChoice))) ||
     (!spell.enlargeReduceOptions?.length && enlargeReduceChoice != null)
   ) return { ok: false, reason: 'invalid-action' }
+  const enhanceAbilityChoice = payload.enhanceAbilityChoice
+  if (
+    (spell.enhanceAbilityOptions?.length &&
+      (!enhanceAbilityChoice || !spell.enhanceAbilityOptions.includes(enhanceAbilityChoice))) ||
+    (!spell.enhanceAbilityOptions?.length && enhanceAbilityChoice != null)
+  ) return { ok: false, reason: 'invalid-action' }
   const maximumTargets = sustainedAttack
     ? sustainedAttack.resolution === 'saving-throw'
       ? dnd5eSpellMaximumTargets(spell, slotLevel, actor.level)
@@ -429,6 +441,7 @@ export function prepareDnd5eSpellCast(input: {
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   let areaCells: readonly { col: number; row: number }[] | undefined
   let areaAnchorCell: { col: number; row: number } | undefined
+  let teleportDestination: Dnd5eSpellTeleportDestination | undefined
   const areaTargeting = spell.area && sustainedUsesArea
     ? {
         ...spell.area,
@@ -461,7 +474,39 @@ export function prepareDnd5eSpellCast(input: {
         y: input.map.gridOffsetY + (areaCell.row + 0.5) * input.map.gridSize,
       }
       const areaPointElevation = mapGeometryTerrainElevationAtPoint(geometry, areaPoint)
-      if (sustainedAttack?.origin !== 'effect-token' && mapGeometryLineOfEffectBlocked({
+      if (spell.effect === 'teleport') {
+        const destination = tokenCenterForAnchorCell(areaCell, actorToken, input.map)
+        const destinationFootprint = tokenOccupiedCellsAt(actorToken, input.map, destination)
+        const occupied = occupiedCells(input.map.tokens, input.map, actorToken.id)
+        if (
+          destinationFootprint.some((cell) =>
+            cell.col < 0 || cell.row < 0 || cell.col >= columns || cell.row >= rows ||
+            occupied.has(cellKey(cell))) ||
+          mapGeometryPlacementBlocked({
+            geometry,
+            map: input.map,
+            token: actorToken,
+            at: destination,
+            elevationFeet: areaPointElevation,
+          }).blocked ||
+          !mapGeometryCanSeeToken({
+            geometry,
+            map: input.map,
+            viewer: actorToken,
+            target: { ...actorToken, ...destination, elevationFeet: areaPointElevation },
+            forceEnabled: true,
+            fallbackRangeFeet: 30,
+          })
+        ) return { ok: false, reason: 'invalid-target' }
+        teleportDestination = {
+          to: destination,
+          distanceFeet: Math.max(
+            Math.abs(areaCell.col - casterCell.col),
+            Math.abs(areaCell.row - casterCell.row),
+          ) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL),
+          toElevationFeet: areaPointElevation,
+        }
+      } else if (sustainedAttack?.origin !== 'effect-token' && mapGeometryLineOfEffectBlocked({
         geometry,
         from: actorToken,
         to: areaPoint,
@@ -508,7 +553,9 @@ export function prepareDnd5eSpellCast(input: {
         // The player submits only the point/template. The DM Host owns target
         // discovery, including hidden creatures and line-of-effect changes that
         // may not exist in the player's projected or slightly stale map.
-        requestedTargetIds = authoritativeTargets.map((candidate) => candidate.id)
+        requestedTargetIds = spell.effect === 'teleport'
+          ? []
+          : authoritativeTargets.map((candidate) => candidate.id)
         if (requestedTargetIds.length > maximumTargets) return { ok: false, reason: 'invalid-target' }
         validTargetTokens = [...authoritativeTargets]
       }
@@ -640,6 +687,10 @@ export function prepareDnd5eSpellCast(input: {
     actor.equipment?.mainWeapon?.id !== 'dnd5e-club' &&
     actor.equipment?.mainWeapon?.id !== 'dnd5e-quarterstaff'
   ) return { ok: false, reason: 'invalid-target' }
+  if (
+    spell.id === 'magic-weapon' &&
+    (!targetCombatant.mainWeaponId || targetCombatant.mainWeaponMagical)
+  ) return { ok: false, reason: 'invalid-target' }
   const healingAllocations = payload.healingAllocations?.map((allocation) => ({
     targetId: allocation.targetTokenId,
     amount: allocation.amount,
@@ -732,7 +783,7 @@ export function prepareDnd5eSpellCast(input: {
     }
   }
   const abilityModifier = rules.abilityModifier(actor.abilities[definition.spellcasting.ability])
-  const damageDiceCounts = sustainedAttack || spell.sustainedAttack?.immediateAttack
+  const baseDamageDiceCounts = sustainedAttack || spell.sustainedAttack?.immediateAttack
     ? [dnd5eSustainedSpellAttackDiceCount(spell, slotLevel)]
     : dnd5eSpellDamageDiceCounts(
         spell,
@@ -740,6 +791,9 @@ export function prepareDnd5eSpellCast(input: {
         slotLevel,
         payload.higherSlotDamageType,
       )
+  const damageDiceCounts = spell.id === 'enhance-ability'
+    ? [enhanceAbilityChoice === 'bear-endurance' ? 2 : 0]
+    : baseDamageDiceCounts
   const usesSpellAttackRoll = spell.effect === 'spell-attack' ||
     sustainedAttack?.resolution === 'spell-attack' ||
     (sustainedAttack != null && sustainedAttack.resolution == null)
@@ -811,6 +865,11 @@ export function prepareDnd5eSpellCast(input: {
       }),
       heightenedTargetId === targetId,
     )
+    mode = dnd5eSpellSpecificSavingThrowMode({
+      spellId: spell.id,
+      mode,
+      casterAndTargetAreFighting: actorCombatant.controller !== combatant.controller,
+    })
     const creatureType = (combatant.creatureType ?? '').trim().toLowerCase()
     if (spell.id === 'blight' && (creatureType === 'plant' || creatureType.includes('植物'))) {
       mode = dnd5eHeightenedSavingThrowMode(mode, true)
@@ -919,12 +978,14 @@ export function prepareDnd5eSpellCast(input: {
       conditionChoice,
       effectDamageType,
       enlargeReduceChoice,
+      enhanceAbilityChoice,
       healingAllocations,
       areaCells,
       areaAnchorCell,
       areaTargetOrientation: payload.areaTargetOrientation,
       sustainedEffectAttack,
       sustainedEffectAreaId: authorizedSustainedEffectAreaId,
+      teleportDestination,
       areaDurationRounds: spell.concentration
         ? Math.min(
             14_400,
@@ -1074,6 +1135,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     conditionChoice: prepared.conditionChoice,
     effectDamageType: prepared.effectDamageType,
     enlargeReduceChoice: prepared.enlargeReduceChoice,
+    enhanceAbilityChoice: prepared.enhanceAbilityChoice,
     sustainedEffectAttack: prepared.sustainedEffectAttack,
     sustainedEffectAreaId: prepared.sustainedEffectAreaId,
     healingAllocations: prepared.healingAllocations,
@@ -1103,6 +1165,7 @@ export function resolvePreparedDnd5eSpellCast(input: {
     savingThrowBaneRoll: input.savingThrowBaneRoll,
     targetSavingThrows: input.targetSavingThrows,
     forcedMovements: input.forcedMovements,
+    teleportDestination: prepared.teleportDestination,
     savingThrowRerollD20: input.savingThrowRerollD20,
     savingThrowRerollD20Second: input.savingThrowRerollD20Second,
     bardicInspirationRoll: input.bardicInspirationRoll,

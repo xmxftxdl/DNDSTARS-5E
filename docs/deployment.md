@@ -27,6 +27,8 @@ node scripts/static-server.mjs --host 127.0.0.1 --port 8080 --root dist
 - `STARS_PUBLIC_ORIGIN`：玩家实际访问的 HTTPS 源，只能包含协议、主机和可选端口。
 - `STARS_SHARED_ROOT`：账号、房间、角色、地图、图片、规则包和快照的持久化目录。不得指向临时目录。
 - `STARS_BUILD_ID`：可选部署版本号，会出现在 `/api/meta` 与 `/api/healthz`。
+- `STARS_ACCOUNT_STORAGE=sqlite`：账号、会话、身份与战役索引使用 SQLite。Docker Compose 默认启用。
+- `STARS_DATABASE_PATH`：SQLite 文件位置；容器默认是 `/data/astraltrace.sqlite`，必须位于持久化卷。
 
 生产模式缺少公开源或持久化目录时，服务器会拒绝启动。除 localhost 测试外，公开源必须使用 HTTPS。
 
@@ -271,6 +273,44 @@ sudo ./scripts/restore-docker-data.sh \
 ```
 
 不要使用 `docker compose down -v`，该命令会删除账号、角色、房间、插件和地图所在的数据卷。
+
+#### 从旧 JSON 账号索引迁移到 SQLite
+
+SQLite 只接管账号、会话、登录身份和账号级战役索引。房间实时资源、地图、角色、插件包、
+图片与快照继续保存在现有 `/data` 目录。迁移器不会删除或改写旧 JSON，因此旧文件可以在
+回滚时继续使用。
+
+升级镜像前先停止写入并完成 `/data` 备份。新镜像构建完成后，先执行只读检查：
+
+```bash
+cd /opt/astraltrace/app
+docker compose run --rm --no-deps dndstars \
+  node scripts/migrate-json-indexes-to-sqlite.mjs \
+  --root /data \
+  --database /data/astraltrace.sqlite \
+  --dry-run
+```
+
+确认账号、身份和战役数量正确后执行正式迁移。该命令可安全重复执行：内容未变化的账号会
+记为 `unchanged`，SQLite 中更新时间更晚的账号不会被旧 JSON 覆盖；同一时间戳但内容冲突
+会 fail closed。
+
+```bash
+docker compose stop dndstars
+docker compose run --rm --no-deps dndstars \
+  node scripts/migrate-json-indexes-to-sqlite.mjs \
+  --root /data \
+  --database /data/astraltrace.sqlite
+docker compose up -d dndstars
+docker compose logs --tail 100 dndstars
+curl -fsS http://127.0.0.1:8080/api/healthz
+curl -fsS https://astraltracevtt.com/api/healthz
+```
+
+启动日志应包含 `Account storage: sqlite (/data/astraltrace.sqlite)`。SQLite 初始化、结构迁移
+或完整性检查失败时，服务拒绝启动，不会静默降级到 JSON。正常运行期间仍同步保留账号 JSON
+作为阶段性回滚副本；不要单独删除 SQLite 的 `-wal`/`-shm` 文件，完整备份应继续覆盖整个
+Docker Volume。
 
 生产服务器可安装仓库中的 systemd 单元：
 

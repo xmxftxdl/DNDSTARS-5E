@@ -68,7 +68,7 @@ export type Dnd5eActiveEffectDuration =
 export interface Dnd5eActiveEffectRepeatSave {
   ability: AbilityKey
   dc: number
-  timing: 'target-turn-start' | 'target-turn-end'
+  timing: 'target-turn-start' | 'target-turn-end' | 'on-damage'
   /** 受到伤害后额外触发一次豁免；由 Headless 记录待结算项，客户端不能自行伪造。 */
   onDamage?: { mode: 'normal' | 'advantage' }
   /** 部分持续法术会在重复豁免失败时造成伤害；骰池由 Host 校验并结算。 */
@@ -108,11 +108,21 @@ export interface Dnd5eActiveEffectSavingThrowRoll {
 export interface Dnd5eActiveEffectModifiers {
   speedPenaltyFeet?: number
   speedBonusFeet?: number
+  /** Grants darkvision to at least this range without replacing a longer innate range. */
+  darkvisionRangeFeet?: number
+  /** Allows ordinary sight to perceive invisible creatures and objects. */
+  seeInvisible?: boolean
   /** 授予飞行速度，但不改写生物的固有移动资料。 */
   flySpeedFeet?: number
   jumpDistanceMultiplier?: number
   sizeRankDelta?: -1 | 1
   strengthRollMode?: 'advantage' | 'disadvantage'
+  /** Grants advantage on checks using the listed abilities. */
+  abilityCheckAdvantages?: readonly AbilityKey[]
+  /** Multiplies carrying capacity without changing optional encumbrance thresholds. */
+  carryingCapacityMultiplier?: number
+  /** Prevents damage and prone from falls no longer than this distance while not incapacitated. */
+  safeFallFeet?: number
   weaponDamageD4?: 'add' | 'subtract'
   preventReactions?: boolean
   damageResistance?: Dnd5eDamageType
@@ -122,6 +132,11 @@ export interface Dnd5eActiveEffectModifiers {
     weaponId: string
     spellcastingAbility: AbilityKey
     spellcastingModifier: number
+  }
+  /** 魔化武器只跟随施法时触碰的那一把武器；bonus 同时用于命中与伤害。 */
+  magicWeapon?: {
+    weaponId: string
+    bonus: 1 | 2 | 3
   }
 }
 
@@ -265,8 +280,14 @@ export function createDnd5eMechanicalEffect(input: {
     modifiers: input.modifiers
       ? {
           ...input.modifiers,
+          abilityCheckAdvantages: input.modifiers.abilityCheckAdvantages
+            ? [...new Set(input.modifiers.abilityCheckAdvantages)]
+            : undefined,
           shillelagh: input.modifiers.shillelagh
             ? { ...input.modifiers.shillelagh }
+            : undefined,
+          magicWeapon: input.modifiers.magicWeapon
+            ? { ...input.modifiers.magicWeapon }
             : undefined,
         }
       : undefined,
@@ -351,7 +372,9 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
     const repeatSave = isRecord(rawRepeatSave) &&
       ABILITIES.has(rawRepeatSave.ability as AbilityKey) &&
       typeof rawRepeatSave.dc === 'number' && Number.isInteger(rawRepeatSave.dc) && rawRepeatSave.dc > 0 &&
-      (rawRepeatSave.timing === 'target-turn-start' || rawRepeatSave.timing === 'target-turn-end') &&
+      (rawRepeatSave.timing === 'target-turn-start' || rawRepeatSave.timing === 'target-turn-end' ||
+        rawRepeatSave.timing === 'on-damage') &&
+      (rawRepeatSave.timing !== 'on-damage' || rawRepeatSave.onDamage != null) &&
       damageOnFailure !== null &&
       (rawRepeatSave.onDamage == null || (
         isRecord(rawRepeatSave.onDamage) &&
@@ -360,7 +383,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       ? {
           ability: rawRepeatSave.ability as AbilityKey,
           dc: rawRepeatSave.dc,
-          timing: rawRepeatSave.timing as 'target-turn-start' | 'target-turn-end',
+          timing: rawRepeatSave.timing as 'target-turn-start' | 'target-turn-end' | 'on-damage',
           onDamage: isRecord(rawRepeatSave.onDamage) &&
             (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
             ? { mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage' }
@@ -408,6 +431,17 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           spellcastingModifier: rawShillelagh.spellcastingModifier,
         }
       : undefined
+    const rawMagicWeapon = isRecord(rawModifiers) ? rawModifiers.magicWeapon : undefined
+    const magicWeapon = isRecord(rawMagicWeapon) &&
+      typeof rawMagicWeapon.weaponId === 'string' &&
+      rawMagicWeapon.weaponId.trim().length > 0 &&
+      rawMagicWeapon.weaponId.length <= 200 &&
+      (rawMagicWeapon.bonus === 1 || rawMagicWeapon.bonus === 2 || rawMagicWeapon.bonus === 3)
+      ? {
+          weaponId: rawMagicWeapon.weaponId.trim(),
+          bonus: rawMagicWeapon.bonus as 1 | 2 | 3,
+        }
+      : undefined
     const modifiers = isRecord(rawModifiers)
       ? {
           speedPenaltyFeet: typeof rawModifiers.speedPenaltyFeet === 'number' &&
@@ -417,6 +451,15 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           speedBonusFeet: typeof rawModifiers.speedBonusFeet === 'number' &&
             Number.isFinite(rawModifiers.speedBonusFeet) && rawModifiers.speedBonusFeet >= 0
             ? rawModifiers.speedBonusFeet
+            : undefined,
+          darkvisionRangeFeet: typeof rawModifiers.darkvisionRangeFeet === 'number' &&
+            Number.isFinite(rawModifiers.darkvisionRangeFeet) &&
+            rawModifiers.darkvisionRangeFeet > 0 &&
+            rawModifiers.darkvisionRangeFeet <= 10_000
+            ? rawModifiers.darkvisionRangeFeet
+            : undefined,
+          seeInvisible: typeof rawModifiers.seeInvisible === 'boolean'
+            ? rawModifiers.seeInvisible
             : undefined,
           flySpeedFeet: typeof rawModifiers.flySpeedFeet === 'number' &&
             Number.isFinite(rawModifiers.flySpeedFeet) &&
@@ -437,6 +480,22 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             rawModifiers.strengthRollMode === 'disadvantage'
             ? rawModifiers.strengthRollMode as 'advantage' | 'disadvantage'
             : undefined,
+          abilityCheckAdvantages: Array.isArray(rawModifiers.abilityCheckAdvantages) &&
+            rawModifiers.abilityCheckAdvantages.every((entry) => ABILITIES.has(entry as AbilityKey))
+            ? [...new Set(rawModifiers.abilityCheckAdvantages)] as AbilityKey[]
+            : undefined,
+          carryingCapacityMultiplier: typeof rawModifiers.carryingCapacityMultiplier === 'number' &&
+            Number.isFinite(rawModifiers.carryingCapacityMultiplier) &&
+            rawModifiers.carryingCapacityMultiplier >= 1 &&
+            rawModifiers.carryingCapacityMultiplier <= 10
+            ? rawModifiers.carryingCapacityMultiplier
+            : undefined,
+          safeFallFeet: typeof rawModifiers.safeFallFeet === 'number' &&
+            Number.isFinite(rawModifiers.safeFallFeet) &&
+            rawModifiers.safeFallFeet >= 0 &&
+            rawModifiers.safeFallFeet <= 1_000
+            ? rawModifiers.safeFallFeet
+            : undefined,
           weaponDamageD4: rawModifiers.weaponDamageD4 === 'add' ||
             rawModifiers.weaponDamageD4 === 'subtract'
             ? rawModifiers.weaponDamageD4 as 'add' | 'subtract'
@@ -454,6 +513,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             ? [...new Set(rawModifiers.conditionImmunities)] as Dnd5eStandardConditionId[]
             : undefined,
           shillelagh,
+          magicWeapon,
         }
       : undefined
     effects.push({
@@ -480,15 +540,21 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       modifiers: modifiers && (
         modifiers.speedPenaltyFeet != null ||
         modifiers.speedBonusFeet != null ||
+        modifiers.darkvisionRangeFeet != null ||
+        modifiers.seeInvisible != null ||
         modifiers.flySpeedFeet != null ||
         modifiers.jumpDistanceMultiplier != null ||
         modifiers.sizeRankDelta != null ||
         modifiers.strengthRollMode != null ||
+        modifiers.abilityCheckAdvantages != null ||
+        modifiers.carryingCapacityMultiplier != null ||
+        modifiers.safeFallFeet != null ||
         modifiers.weaponDamageD4 != null ||
         modifiers.preventReactions != null ||
         modifiers.damageResistance != null ||
         modifiers.conditionImmunities != null ||
-        modifiers.shillelagh != null
+        modifiers.shillelagh != null ||
+        modifiers.magicWeapon != null
       )
         ? modifiers
         : undefined,
@@ -545,6 +611,15 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           typeof raw.modifiers.speedBonusFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.speedBonusFeet) || raw.modifiers.speedBonusFeet < 0
         )) issues.push(`activeEffects[${index}].modifiers.speedBonusFeet 无效`)
+        if (raw.modifiers.darkvisionRangeFeet != null && (
+          typeof raw.modifiers.darkvisionRangeFeet !== 'number' ||
+          !Number.isFinite(raw.modifiers.darkvisionRangeFeet) ||
+          raw.modifiers.darkvisionRangeFeet <= 0 ||
+          raw.modifiers.darkvisionRangeFeet > 10_000
+        )) issues.push(`activeEffects[${index}].modifiers.darkvisionRangeFeet 无效`)
+        if (raw.modifiers.seeInvisible != null && typeof raw.modifiers.seeInvisible !== 'boolean') {
+          issues.push(`activeEffects[${index}].modifiers.seeInvisible 无效`)
+        }
         if (raw.modifiers.flySpeedFeet != null && (
           typeof raw.modifiers.flySpeedFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.flySpeedFeet) ||
@@ -566,6 +641,22 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           raw.modifiers.strengthRollMode !== 'disadvantage') {
           issues.push(`activeEffects[${index}].modifiers.strengthRollMode 无效`)
         }
+        if (raw.modifiers.abilityCheckAdvantages != null && (
+          !Array.isArray(raw.modifiers.abilityCheckAdvantages) ||
+          raw.modifiers.abilityCheckAdvantages.some((entry) => !ABILITIES.has(entry as AbilityKey))
+        )) issues.push(`activeEffects[${index}].modifiers.abilityCheckAdvantages 无效`)
+        if (raw.modifiers.carryingCapacityMultiplier != null && (
+          typeof raw.modifiers.carryingCapacityMultiplier !== 'number' ||
+          !Number.isFinite(raw.modifiers.carryingCapacityMultiplier) ||
+          raw.modifiers.carryingCapacityMultiplier < 1 ||
+          raw.modifiers.carryingCapacityMultiplier > 10
+        )) issues.push(`activeEffects[${index}].modifiers.carryingCapacityMultiplier 无效`)
+        if (raw.modifiers.safeFallFeet != null && (
+          typeof raw.modifiers.safeFallFeet !== 'number' ||
+          !Number.isFinite(raw.modifiers.safeFallFeet) ||
+          raw.modifiers.safeFallFeet < 0 ||
+          raw.modifiers.safeFallFeet > 1_000
+        )) issues.push(`activeEffects[${index}].modifiers.safeFallFeet 无效`)
         if (raw.modifiers.weaponDamageD4 != null &&
           raw.modifiers.weaponDamageD4 !== 'add' &&
           raw.modifiers.weaponDamageD4 !== 'subtract') {
@@ -594,6 +685,15 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           raw.modifiers.shillelagh.spellcastingModifier < -10 ||
           raw.modifiers.shillelagh.spellcastingModifier > 20
         )) issues.push(`activeEffects[${index}].modifiers.shillelagh 无效`)
+        if (raw.modifiers.magicWeapon != null && (
+          !isRecord(raw.modifiers.magicWeapon) ||
+          typeof raw.modifiers.magicWeapon.weaponId !== 'string' ||
+          raw.modifiers.magicWeapon.weaponId.trim().length === 0 ||
+          raw.modifiers.magicWeapon.weaponId.length > 200 ||
+          (raw.modifiers.magicWeapon.bonus !== 1 &&
+            raw.modifiers.magicWeapon.bonus !== 2 &&
+            raw.modifiers.magicWeapon.bonus !== 3)
+        )) issues.push(`activeEffects[${index}].modifiers.magicWeapon 无效`)
       }
     }
   }
@@ -615,6 +715,23 @@ export function dnd5eActiveSpeedBonus(
   return normalizeDnd5eActiveEffects(effects).reduce(
     (total, effect) => total + Math.max(0, effect.modifiers?.speedBonusFeet ?? 0),
     0,
+  )
+}
+
+export function dnd5eActiveDarkvisionRangeFeet(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (maximum, effect) => Math.max(maximum, effect.modifiers?.darkvisionRangeFeet ?? 0),
+    0,
+  )
+}
+
+export function dnd5eActiveEffectsSeeInvisible(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): boolean {
+  return normalizeDnd5eActiveEffects(effects).some(
+    (effect) => effect.modifiers?.seeInvisible === true,
   )
 }
 
@@ -656,6 +773,32 @@ export function dnd5eActiveStrengthRollFlags(
   }
 }
 
+export function dnd5eActiveAbilityCheckAdvantages(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): AbilityKey[] {
+  return [...new Set(normalizeDnd5eActiveEffects(effects).flatMap(
+    (effect) => effect.modifiers?.abilityCheckAdvantages ?? [],
+  ))]
+}
+
+export function dnd5eActiveCarryingCapacityMultiplier(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (multiplier, effect) => Math.max(multiplier, effect.modifiers?.carryingCapacityMultiplier ?? 1),
+    1,
+  )
+}
+
+export function dnd5eActiveSafeFallFeet(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (maximum, effect) => Math.max(maximum, effect.modifiers?.safeFallFeet ?? 0),
+    0,
+  )
+}
+
 export function dnd5eActiveWeaponDamageD4Mode(
   effects: readonly Dnd5eActiveEffectInstance[] | undefined,
 ): 'add' | 'subtract' | undefined {
@@ -664,6 +807,20 @@ export function dnd5eActiveWeaponDamageD4Mode(
     .filter((mode): mode is 'add' | 'subtract' => mode != null)
   if (modes.includes('add') && modes.includes('subtract')) return undefined
   return modes[0]
+}
+
+/** 返回指定武器当前获得的最高“魔化武器”加值。 */
+export function dnd5eActiveMagicWeaponBonus(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+  weaponId: string | undefined,
+): 0 | 1 | 2 | 3 {
+  if (!weaponId) return 0
+  return normalizeDnd5eActiveEffects(effects).reduce<0 | 1 | 2 | 3>((highest, effect) => {
+    const magicWeapon = effect.modifiers?.magicWeapon
+    return magicWeapon?.weaponId === weaponId && magicWeapon.bonus > highest
+      ? magicWeapon.bonus
+      : highest
+  }, 0)
 }
 
 export function dnd5eActiveConditionImmunities(
