@@ -495,9 +495,10 @@ export function dnd5eCombatantCanSee(
     (!hasBlindsight && !hasTruesight && !seesInvisible && dnd5eAttackerIsUnseen(target)) ||
     target.classState.hiddenCheckTotal != null
   )) return false
-  return hasBlindsight || hasTruesight ||
-    (hasDarkvision && state.magicalDarknessByCombatantPair?.[pairKey] !== true) ||
-    state.lineOfSightBlockedByCombatantPair?.[pairKey] !== true
+  return hasBlindsight || hasTruesight || (
+    state.magicalDarknessByCombatantPair?.[pairKey] !== true &&
+    (hasDarkvision || state.lineOfSightBlockedByCombatantPair?.[pairKey] !== true)
+  )
 }
 
 export function dnd5eEffectiveDarkvisionRangeFeet(
