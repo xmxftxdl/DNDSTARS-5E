@@ -31,6 +31,12 @@ describe('腾讯云验证码发送适配器', () => {
     })).toEqual({ email: true, phone: false })
     expect(tencentVerificationCapabilities({
       ...MAINLAND_ENV,
+      STARS_TENCENTCLOUD_SECRET_ID: 'IKIDEXAMPLE',
+      STARS_TENCENT_SES_FROM_EMAIL: 'Astral Trace <no-reply@mail.astraltracevtt.com>',
+      STARS_TENCENT_SES_TEMPLATE_ID: '10001',
+    })).toEqual({ email: true, phone: false })
+    expect(tencentVerificationCapabilities({
+      ...MAINLAND_ENV,
       STARS_TENCENT_SES_FROM_EMAIL: 'no-reply@mail.astraltracevtt.com',
       STARS_TENCENT_SES_TEMPLATE_ID: '10001',
       STARS_TENCENT_SES_REGION: 'ap-singapore',
