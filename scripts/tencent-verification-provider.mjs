@@ -44,7 +44,7 @@ function credentialConfig(env) {
     !edition ||
     !TENCENT_CLOUD_EDITIONS[edition] ||
     !secretId ||
-    !/^AKID[A-Za-z0-9]+$/.test(secretId) ||
+    /\s/.test(secretId) ||
     !secretKey ||
     secretKey.length < 16
   ) return null
