@@ -1,6 +1,6 @@
 import type { Character } from '../types/character'
 import { sharedLobbyApiCandidates } from './sharedApi'
-import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocol'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 import {
   DND5E_2014_RULESET_ID,
   type RoomPluginRequirement,

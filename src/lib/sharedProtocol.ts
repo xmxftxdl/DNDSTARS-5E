@@ -1,6 +1,7 @@
 import { sharedEventApiCandidates } from './sharedApi'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 
-export const CLIENT_SHARED_PROTOCOL_VERSION = 5
+export { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 
 export interface SharedServerMeta {
   service: 'dndstars-5e-shared'

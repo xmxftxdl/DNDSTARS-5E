@@ -8,7 +8,7 @@ import {
 import { getAccountSession } from './accountSession'
 import { getRoomRulesSnapshot } from './roomRulesState'
 import { getRoomSession } from './roomSession'
-import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocol'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 
 function detachedCharacter(character: Character, accountId: string): Character {
   const detached = { ...character, ownerAccountId: accountId }

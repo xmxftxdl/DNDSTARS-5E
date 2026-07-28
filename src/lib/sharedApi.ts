@@ -1,6 +1,6 @@
 import { canWriteSharedState } from './appMode'
 import { getRoomClientId, getRoomSession } from './roomSession'
-import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocol'
+import { CLIENT_SHARED_PROTOCOL_VERSION } from './sharedProtocolVersion'
 import {
   reportSharedIntegrityIssue,
   validateAndMigrateSharedResource,
