@@ -1378,6 +1378,58 @@ describe('map geometry player projection', () => {
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })
+    for (const spellId of [
+      'jump',
+      'darkvision',
+      'see-invisibility',
+      'warding-bond',
+      'fly',
+      'heroism',
+      'enlarge-reduce',
+      'enhance-ability',
+      'divine-favor',
+      'hunters-mark',
+      'magic-weapon',
+      'flame-blade',
+      'invisibility',
+      'blur',
+      'barkskin',
+      'protection-from-poison',
+      'longstrider',
+      'protection-from-energy',
+      'death-ward',
+      'greater-invisibility',
+      'charm-person',
+      'hideous-laughter',
+      'hold-person',
+      'blindness-deafness',
+    ]) {
+      const normalized = normalizeCombatPresentationEvent(
+        {
+          ...payload,
+          id: `${spellId}-transaction-1`,
+          spellId,
+          sourceTokenId: 'caster',
+          accentColor: '#8b5cf6',
+          glowColor: '#c4b5fd',
+        },
+        { role: 'dm' },
+        timestamp,
+      )
+      expect(normalized).toMatchObject({
+        ok: true,
+        event: {
+          spellId,
+          targetTokenId: 'guardian',
+          accentColor: '#8b5cf6',
+          glowColor: '#c4b5fd',
+          createdAt: timestamp,
+          expiresAt: timestamp + 1_600,
+        },
+      })
+      if (!normalized.ok) throw new Error(`expected ${spellId} presentation normalization`)
+      expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    }
   })
 
   it('authors bounded Fireball presentation events with an authoritative lifetime', () => {
@@ -1430,6 +1482,46 @@ describe('map geometry player projection', () => {
     )).toMatchObject({ ok: false, status: 400 })
     expect(normalizeCombatPresentationEvent(
       { ...payload, radiusFeet: 201 },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('authors Thunderwave area effects for cross-client playback', () => {
+    const timestamp = 31_000
+    const payload = {
+      schemaVersion: 1,
+      id: 'thunderwave-transaction-1:area-effect',
+      type: 'spell-area-effect',
+      mapId: 'map-1',
+      transactionId: 'thunderwave-transaction-1',
+      spellId: 'thunderwave',
+      sourceTokenId: 'bard',
+      targetCell: { col: 7, row: 4 },
+      shape: 'line',
+      lengthFeet: 15,
+      widthFeet: 15,
+    }
+    expect(normalizeCombatPresentationEvent(payload, { role: 'player' }, timestamp))
+      .toMatchObject({ ok: false, status: 403 })
+    const normalized = normalizeCombatPresentationEvent(payload, { role: 'dm' }, timestamp)
+    expect(normalized).toEqual({
+      ok: true,
+      event: {
+        ...payload,
+        createdAt: timestamp,
+        expiresAt: timestamp + 1_600,
+      },
+    })
+    if (!normalized.ok) throw new Error('expected Thunderwave presentation normalization')
+    expect(parseCombatPresentationEvent(normalized.event)).toEqual(normalized.event)
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, shape: 'circle' },
+      { role: 'dm' },
+      timestamp,
+    )).toMatchObject({ ok: false, status: 400 })
+    expect(normalizeCombatPresentationEvent(
+      { ...payload, widthFeet: 10 },
       { role: 'dm' },
       timestamp,
     )).toMatchObject({ ok: false, status: 400 })

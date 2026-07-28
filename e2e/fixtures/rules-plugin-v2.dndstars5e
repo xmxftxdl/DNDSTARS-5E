@@ -15,6 +15,7 @@ const plugin = {
     stateSchemaVersion: 1,
     publisher: '本地用户',
     license: 'CC0-1.0（仅模板与原创演示内容）',
+    distributionPolicy: 'room-distributable',
     description: '仅用于自动化测试的 Rules Plugin API V2 纵向切片。',
   },
 
@@ -191,5 +192,4 @@ const plugin = {
 }
 
 export default plugin
-
 

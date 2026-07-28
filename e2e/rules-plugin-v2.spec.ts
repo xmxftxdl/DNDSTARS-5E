@@ -132,7 +132,7 @@ async function enterRoom(page: Page, origin: string, membership: RoomMembershipR
 }
 
 async function uploadTemplateFromDm(page: Page) {
-  await page.locator('input[type="file"]').setInputFiles(TEMPLATE_PATH)
+  await page.locator('input[type="file"][accept*=".dndstars5e"]').setInputFiles(TEMPLATE_PATH)
   await expect(page.getByText(`已原子激活 ${PLUGIN_ID}；房间玩家将自动下载并激活。`)).toBeVisible({ timeout: 20_000 })
   await expect(page.getByTestId('room-rules-status').getByText('本机已就绪')).toBeVisible({ timeout: 20_000 })
 }

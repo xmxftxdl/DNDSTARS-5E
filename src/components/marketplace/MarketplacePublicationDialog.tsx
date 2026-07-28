@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BadgeDollarSign, ShieldCheck, Sparkles, X } from 'lucide-react'
 import {
   MARKETPLACE_CREATOR_AGREEMENT_VERSION,
@@ -7,6 +7,7 @@ import {
   type MarketplaceRightsManifestV1,
 } from '../../../shared/marketplace-publication.mjs'
 import type { AccountPluginVersion } from '../../lib/accountApi'
+import { loadMarketplaceCapabilities } from '../../lib/pluginCatalogApi'
 
 export interface MarketplacePublicationInput {
   visibility: 'public'
@@ -53,11 +54,25 @@ export default function MarketplacePublicationDialog({
   const [aiDisclosure, setAiDisclosure] = useState('')
   const [declared, setDeclared] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [paidPublishingEnabled, setPaidPublishingEnabled] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void loadMarketplaceCapabilities()
+      .then((capabilities) => {
+        if (active) setPaidPublishingEnabled(capabilities.paidPublishingEnabled)
+      })
+      .catch(() => {
+        if (active) setPaidPublishingEnabled(false)
+      })
+    return () => { active = false }
+  }, [])
 
   const amountMinor = useMemo(() => Math.round(Number(price) * 100), [price])
   const validPrice = !paid || (Number.isSafeInteger(amountMinor) && amountMinor >= 100 && amountMinor <= 9_900)
 
   const submit = async () => {
+    if (paid && !paidPublishingEnabled) return setError('付费发布尚未开放；当前免费扩展市场 Beta 只接受免费扩展。')
     if (!declared) return setError('必须确认你拥有发布和销售这些内容所需的权利。')
     if (!validPrice) return setError('付费商品价格应在 ¥1.00 至 ¥99.00 之间。')
     if (storeDescription.trim().length < 20) return setError('商品详情至少需要 20 个字符。')
@@ -120,11 +135,15 @@ export default function MarketplacePublicationDialog({
             <div className="mt-4 grid gap-3 sm:grid-cols-[180px_1fr]">
               <select value={paid ? 'paid' : 'free'} onChange={(event) => setPaid(event.target.value === 'paid')} className="rounded-xl border border-white/10 bg-void-900 px-3 py-2.5 text-sm text-white">
                 <option value="free">免费发布</option>
-                <option value="paid">付费商品</option>
+                <option value="paid" disabled={!paidPublishingEnabled}>付费商品（尚未开放）</option>
               </select>
               {paid && <label className="flex items-center rounded-xl border border-white/10 bg-void-900 px-3"><span className="mr-2 text-slate-500">¥</span><input aria-label="商品价格" type="number" min="1" max="99" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} className="w-full bg-transparent py-2.5 text-sm text-white outline-none" /></label>}
             </div>
-            <p className="mt-3 text-xs leading-5 text-slate-500">创作者获得可分配净收入的 60%，平台获得 40%。当前为市场预览阶段，不会发生真实扣款或提现。</p>
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              {paidPublishingEnabled
+                ? '付费商品将使用平台已启用的支付与结算通道。'
+                : '当前为免费扩展市场 Beta。支付、实名认证服务商和结算通道全部就绪前，服务端会拒绝付费发布。'}
+            </p>
           </section>
 
           <section className="rounded-2xl border border-white/8 bg-white/[0.025] p-5">

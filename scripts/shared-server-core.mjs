@@ -65,10 +65,20 @@ import {
   marketplacePayoutRecordValid,
   marketplacePayoutTransitionAllowed,
 } from '../shared/marketplace-payout.mjs'
+import {
+  buildMarketplaceCreatorAnalytics,
+  normalizeMarketplaceAnalyticsDaily,
+  normalizeMarketplaceInstallation,
+  recordMarketplaceDailyMetric,
+  updateMarketplaceInstallation,
+} from '../shared/marketplace-analytics.mjs'
 
 // ── AC3：PUT body 上限 + backlog 回放上限 ────────────────────────────────────
 // 单次 PUT 请求体上限（8 MiB）。超过 → 413。图片走单独更宽的上限（见 IMAGE_MAX_BYTES）。
 export const STATE_MAX_BYTES = 8 * 1024 * 1024
+export const ROOM_EPHEMERAL_PLUGIN_MAX_BYTES = 40 * 1024 * 1024
+export const ROOM_RUNTIME_PROJECTION = 'room-runtime-mechanics'
+export const ROOM_RUNTIME_PROSE_PLACEHOLDER = '房间临时机械数据；原始规则正文未传输。'
 export const CHARACTER_PORTRAIT_MAX_DATA_URL_LENGTH = 600_000
 export const CHARACTER_PORTRAIT_MAX_TOTAL_DATA_URL_LENGTH = 4_000_000
 // 单张图片上限（24 MiB）。
@@ -1059,8 +1069,8 @@ export function applyCors(req, res, env = process.env) {
     res.setHeader('Access-Control-Allow-Origin', '*')
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
-  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Stars-Secret, X-Stars-Token, X-Stars-Account-Token, X-Stars-Member, X-Stars-Room-Token, X-Stars-Protocol, X-Stars-Writer, X-Stars-Expected-Revision, X-Stars-Undo-Group, X-Stars-Undo-Label, X-Stars-Image-Purpose, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
+  res.setHeader('Access-Control-Expose-Headers', 'X-Stars-State-Revision, X-Stars-Plugin-Version, X-Stars-Plugin-Integrity, X-Stars-Plugin-Filename, X-Stars-Plugin-Name, X-Stars-Plugin-Publisher, X-Stars-Plugin-License, X-Stars-Plugin-Distribution-Policy, X-Stars-Plugin-State-Schema, X-Stars-Plugin-Api-Version, X-Stars-Plugin-Ruleset, X-Stars-Plugin-Description, X-Stars-Plugin-Metadata')
   return true
 }
 
@@ -1673,11 +1683,32 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
 
   if (
     common.type === 'spell-projectile' &&
-    ['fire-bolt', 'ray-of-frost', 'eldritch-blast', 'produce-flame'].includes(common.spellId)
+    [
+      'fire-bolt',
+      'ray-of-frost',
+      'eldritch-blast',
+      'produce-flame',
+      'acid-splash',
+      'poison-spray',
+      'vicious-mockery',
+      'magic-missile',
+      'scorching-ray',
+      'guiding-bolt',
+      'acid-arrow',
+      'healing-word',
+      'inflict-wounds',
+    ].includes(common.spellId)
   ) {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const outcome = payload?.outcome
-    if (!targetTokenId || (outcome != null && outcome !== 'hit' && outcome !== 'miss')) {
+    const accentColor = payload?.accentColor
+    const glowColor = payload?.glowColor
+    if (
+      !targetTokenId ||
+      (outcome != null && outcome !== 'hit' && outcome !== 'miss') ||
+      (accentColor != null && (typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor))) ||
+      (glowColor != null && (typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)))
+    ) {
       return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     }
     return {
@@ -1686,6 +1717,8 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         ...common,
         targetTokenId,
         ...(outcome ? { outcome } : {}),
+        ...(accentColor ? { accentColor } : {}),
+        ...(glowColor ? { glowColor } : {}),
         createdAt: now,
         expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
       },
@@ -1694,24 +1727,98 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
 
   if (
     common.type === 'spell-target-effect' &&
-    ['shocking-grasp', 'guidance', 'resistance', 'sanctuary'].includes(common.spellId)
+    [
+      'shocking-grasp',
+      'guidance',
+      'resistance',
+      'sanctuary',
+      'spare-the-dying',
+      'cure-wounds',
+      'hellish-rebuke',
+      'bless',
+      'bane',
+      'shield-of-faith',
+      'mage-armor',
+      'jump',
+      'darkvision',
+      'see-invisibility',
+      'warding-bond',
+      'fly',
+      'heroism',
+      'enlarge-reduce',
+      'enhance-ability',
+      'divine-favor',
+      'hunters-mark',
+      'magic-weapon',
+      'flame-blade',
+      'invisibility',
+      'blur',
+      'barkskin',
+      'protection-from-poison',
+      'longstrider',
+      'protection-from-energy',
+      'death-ward',
+      'greater-invisibility',
+      'charm-person',
+      'hideous-laughter',
+      'hold-person',
+      'blindness-deafness',
+    ].includes(common.spellId)
   ) {
     const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
     const accentColor = payload?.accentColor
     const glowColor = payload?.glowColor
     if (
       !targetTokenId ||
-      common.spellId === 'resistance' && (
+      ['resistance', 'spare-the-dying'].includes(common.spellId) && (
         typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor) ||
         typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)
-      )
+      ) ||
+      (accentColor != null && (typeof accentColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(accentColor))) ||
+      (glowColor != null && (typeof glowColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(glowColor)))
     ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
     return {
       ok: true,
       event: {
         ...common,
         targetTokenId,
-        ...(common.spellId === 'resistance' ? { accentColor, glowColor } : {}),
+        ...(accentColor ? { accentColor } : {}),
+        ...(glowColor ? { glowColor } : {}),
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'spell-persistent-target-effect' && common.spellId === 'chill-touch') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    if (!targetTokenId) {
+      return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (common.type === 'spell-save-target-effect' && common.spellId === 'sacred-flame') {
+    const targetTokenId = normalizedLabel(payload?.targetTokenId, 160)
+    const outcome = payload?.outcome
+    if (
+      !targetTokenId ||
+      (outcome != null && outcome !== 'failed-save' && outcome !== 'successful-save')
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetTokenId,
+        ...(outcome ? { outcome } : {}),
         createdAt: now,
         expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
       },
@@ -1789,6 +1896,42 @@ export function normalizeCombatPresentationEvent(payload, actor, now = Date.now(
         createdAt: now,
         animationStartsAt: now + FIREBALL_ANIMATION_START_DELAY_MS,
         expiresAt: now + FIREBALL_PRESENTATION_LIFETIME_MS,
+      },
+    }
+  }
+
+  if (
+    common.type === 'spell-area-effect' &&
+    ['burning-hands', 'thunderwave', 'shatter', 'lightning-bolt'].includes(common.spellId)
+  ) {
+    const expected = {
+      'burning-hands': { shape: 'cone', lengthFeet: 15, widthFeet: 15 },
+      thunderwave: { shape: 'line', lengthFeet: 15, widthFeet: 15 },
+      shatter: { shape: 'circle', radiusFeet: 10 },
+      'lightning-bolt': { shape: 'line', lengthFeet: 100, widthFeet: 5 },
+    }[common.spellId]
+    const col = payload?.targetCell?.col
+    const row = payload?.targetCell?.row
+    if (
+      !expected ||
+      payload?.shape !== expected.shape ||
+      payload?.lengthFeet !== expected.lengthFeet ||
+      payload?.widthFeet !== expected.widthFeet ||
+      payload?.radiusFeet !== expected.radiusFeet ||
+      !Number.isInteger(col) || col < 0 || col > 10_000 ||
+      !Number.isInteger(row) || row < 0 || row > 10_000
+    ) return { ok: false, status: 400, error: 'invalid-combat-presentation-event' }
+    return {
+      ok: true,
+      event: {
+        ...common,
+        targetCell: { col, row },
+        shape: expected.shape,
+        ...(expected.lengthFeet != null ? { lengthFeet: expected.lengthFeet } : {}),
+        ...(expected.widthFeet != null ? { widthFeet: expected.widthFeet } : {}),
+        ...(expected.radiusFeet != null ? { radiusFeet: expected.radiusFeet } : {}),
+        createdAt: now,
+        expiresAt: now + COMBAT_PRESENTATION_LIFETIME_MS,
       },
     }
   }
@@ -4820,13 +4963,14 @@ function campaignRoomManifest(room) {
     pluginFiles: {},
     pluginRuntimeState: {},
   }
+  const persistentRoom = withoutRoomEphemeralPlugins(room)
   return {
-    id: room.id,
-    name: room.name,
-    rulesetId: room.rulesetId,
-    requiredPlugins: Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [],
-    pluginFiles: plainObject(room.pluginFiles) ? room.pluginFiles : {},
-    pluginRuntimeState: plainObject(room.pluginRuntimeState) ? room.pluginRuntimeState : {},
+    id: persistentRoom.id,
+    name: persistentRoom.name,
+    rulesetId: persistentRoom.rulesetId,
+    requiredPlugins: Array.isArray(persistentRoom.requiredPlugins) ? persistentRoom.requiredPlugins : [],
+    pluginFiles: plainObject(persistentRoom.pluginFiles) ? persistentRoom.pluginFiles : {},
+    pluginRuntimeState: plainObject(persistentRoom.pluginRuntimeState) ? persistentRoom.pluginRuntimeState : {},
   }
 }
 
@@ -4851,7 +4995,7 @@ async function collectCampaignPlugins(ctx, room) {
   const plugins = []
   for (const requirement of Array.isArray(room.requiredPlugins) ? room.requiredPlugins : []) {
     const hosted = room.pluginFiles?.[requirement.id]
-    if (!hosted) continue
+    if (!hosted || hosted.distributionPolicy === 'room-ephemeral') continue
     const bytes = await readFile(roomHostedPluginFile(ctx, room.id, requirement.id, hosted))
     plugins.push({ ...hosted, ...requirement, data: bytes.toString('base64') })
   }
@@ -5221,6 +5365,8 @@ function emptyPluginRegistry() {
     paymentEvents: [],
     ledgerEntries: [],
     payouts: [],
+    analyticsDaily: [],
+    installations: [],
   }
 }
 
@@ -5243,6 +5389,12 @@ function normalizePluginRegistry(value) {
       : [],
     payouts: Array.isArray(value.payouts)
       ? value.payouts.filter(marketplacePayoutRecordValid).slice(-1_000_000)
+      : [],
+    analyticsDaily: Array.isArray(value.analyticsDaily)
+      ? value.analyticsDaily.map(normalizeMarketplaceAnalyticsDaily).filter(Boolean).slice(-500_000)
+      : [],
+    installations: Array.isArray(value.installations)
+      ? value.installations.map(normalizeMarketplaceInstallation).filter(Boolean).slice(-1_000_000)
       : [],
   }
 }
@@ -5287,24 +5439,26 @@ async function readPluginRegistry(ctx) {
 
 async function assertMarketplacePackageEntitlement(ctx, accountId, integrity) {
   const registry = await readPluginRegistry(ctx)
-  const paidMatch = registry.entries.flatMap((entry) =>
+  const publishedMatch = registry.entries.flatMap((entry) =>
     (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
     .find(({ version }) =>
       version.integrity === integrity &&
-      version.status === 'published' &&
-      version.marketplace?.pricing?.kind === 'paid')
-  if (!paidMatch) return null
+      version.status === 'published')
+  if (!publishedMatch) return null
+  if (publishedMatch.version.marketplace?.pricing?.kind !== 'paid') {
+    return { productId: publishedMatch.entry.id, version: publishedMatch.version.version, entitlement: null }
+  }
   const entitled = accountId
     ? activeMarketplaceEntitlement(registry.entitlements, {
         accountId,
-        productId: paidMatch.entry.id,
-        version: paidMatch.version.version,
+        productId: publishedMatch.entry.id,
+        version: publishedMatch.version.version,
       })
     : null
-  if (!entitled && paidMatch.entry.publisher?.accountId !== accountId) {
+  if (!entitled && publishedMatch.entry.publisher?.accountId !== accountId) {
     throw new RoomProtocolError(403, 'marketplace-entitlement-required')
   }
-  return { productId: paidMatch.entry.id, version: paidMatch.version.version, entitlement: entitled }
+  return { productId: publishedMatch.entry.id, version: publishedMatch.version.version, entitlement: entitled }
 }
 
 async function mutatePluginRegistry(ctx, updater) {
@@ -5326,6 +5480,39 @@ async function mutatePluginRegistry(ctx, updater) {
   return normalizePluginRegistry(result.next)
 }
 
+async function syncMarketplaceAccountInstallation(ctx, input) {
+  const now = Number.isFinite(input?.timestamp) ? Number(input.timestamp) : Date.now()
+  return mutatePluginRegistry(ctx, (current) => {
+    const match = current.entries.flatMap((entry) =>
+      (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
+      .find(({ version }) =>
+        version.integrity === input.integrity &&
+        version.status === 'published')
+    if (!match) return current
+    const updated = updateMarketplaceInstallation(current.installations, {
+      accountId: input.accountId,
+      productId: match.entry.id,
+      version: match.version.version,
+      publisherAccountId: match.entry.publisher?.accountId,
+      active: input.active === true,
+      timestamp: now,
+    })
+    return {
+      ...current,
+      installations: updated.installations,
+      analyticsDaily: updated.transition
+        ? recordMarketplaceDailyMetric(current.analyticsDaily, {
+            metric: updated.transition === 'installed' ? 'installs' : 'uninstalls',
+            productId: match.entry.id,
+            version: match.version.version,
+            publisherAccountId: match.entry.publisher?.accountId,
+            timestamp: now,
+          })
+        : current.analyticsDaily,
+    }
+  })
+}
+
 function pluginRegistryAdministrator(account, env = process.env) {
   const configured = String(env.STARS_PLUGIN_ADMIN_ACCOUNT_IDS ?? '')
     .split(',').map((value) => value.trim()).filter(Boolean)
@@ -5335,6 +5522,32 @@ function pluginRegistryAdministrator(account, env = process.env) {
 
 function pluginCatalogReviewRequired(env = process.env) {
   return productionSecurityEnabled(env) || env.STARS_PLUGIN_REVIEW_REQUIRED === 'true'
+}
+
+export function marketplacePaidPublishingEnabled(env = process.env) {
+  if (!productionSecurityEnabled(env)) return true
+  return env.STARS_MARKETPLACE_PAID_PUBLISHING_ENABLED === 'true' &&
+    env.STARS_MARKETPLACE_KYC_PROVIDER_READY === 'true' &&
+    Boolean(env.STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET) &&
+    Boolean(marketplaceCheckoutAdapter(env))
+}
+
+export function marketplaceCapabilities(env = process.env) {
+  const checkout = marketplaceCheckoutAdapter(env)
+  const paidPublishingEnabled = marketplacePaidPublishingEnabled(env)
+  const configuredAdministrators = String(env.STARS_PLUGIN_ADMIN_ACCOUNT_IDS ?? '')
+    .split(',').map((value) => value.trim()).filter((value) => value && value !== '*')
+  return {
+    schemaVersion: 1,
+    marketMode: paidPublishingEnabled ? 'live' : 'free-beta',
+    freePublishingEnabled: true,
+    paidPublishingEnabled,
+    checkoutAvailable: paidPublishingEnabled && Boolean(checkout),
+    creatorVerificationMode: env.STARS_MARKETPLACE_KYC_PROVIDER_READY === 'true'
+      ? 'provider'
+      : 'manual-review',
+    moderationConfigured: configuredAdministrators.length > 0,
+  }
 }
 
 function marketplaceOrderProduct(registry, productId, version) {
@@ -5583,8 +5796,13 @@ async function handleMarketplaceCommerceApi(req, res, parsed, ctx) {
   if (!parsed.pathname.startsWith('/api/marketplace/')) return false
   if (!applyLobbyRateLimit(req, res, ctx)) return true
 
+  if (parsed.pathname === '/api/marketplace/capabilities' && req.method === 'GET') {
+    writeJson(res, 200, marketplaceCapabilities())
+    return true
+  }
+
   if (parsed.pathname === '/api/marketplace/payment-methods' && req.method === 'GET') {
-    const adapter = marketplaceCheckoutAdapter()
+    const adapter = marketplacePaidPublishingEnabled() ? marketplaceCheckoutAdapter() : null
     writeJson(res, 200, {
       methods: [
         ...(!productionSecurityEnabled()
@@ -5620,6 +5838,53 @@ async function handleMarketplaceCommerceApi(req, res, parsed, ctx) {
       ],
       entries,
       settlementHoldDays: Math.round(MARKETPLACE_SETTLEMENT_HOLD_MS / 86_400_000),
+    })
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/analytics' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    const creator = registry.creators.find((candidate) =>
+      candidate.accountId === account.accountId)
+    const ownsPublication = registry.entries.some((entry) =>
+      entry.publisher?.accountId === account.accountId)
+    if (!creator && !ownsPublication) {
+      throw new RoomProtocolError(403, 'marketplace-creator-required')
+    }
+    writeJson(res, 200, buildMarketplaceCreatorAnalytics({
+      publisherAccountId: account.accountId,
+      periodDays: Number(parsed.searchParams.get('days')) || 30,
+      entries: registry.entries,
+      daily: registry.analyticsDaily,
+      installations: registry.installations,
+      orders: registry.orders,
+      ledgerEntries: registry.ledgerEntries,
+    }))
+    return true
+  }
+
+  if (parsed.pathname === '/api/marketplace/creators/me/publications' && req.method === 'GET') {
+    const account = await authenticateAccount(req, ctx)
+    const registry = await readPluginRegistry(ctx)
+    writeJson(res, 200, {
+      publications: registry.entries
+        .filter((entry) => entry.publisher?.accountId === account.accountId)
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          versions: (Array.isArray(entry.versions) ? entry.versions : [])
+            .map((version) => ({
+              version: version.version,
+              status: version.status,
+              visibility: version.visibility,
+              submittedAt: version.submittedAt,
+              ...(Number.isFinite(version.publishedAt) ? { publishedAt: version.publishedAt } : {}),
+              ...(version.moderationNote ? { moderationNote: version.moderationNote } : {}),
+            }))
+            .sort((left, right) => Number(right.submittedAt ?? 0) - Number(left.submittedAt ?? 0)),
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
     })
     return true
   }
@@ -5801,6 +6066,9 @@ async function handleMarketplaceCommerceApi(req, res, parsed, ctx) {
 
   if (parsed.pathname === '/api/marketplace/orders' && req.method === 'POST') {
     const account = await authenticateAccount(req, ctx)
+    if (!marketplacePaidPublishingEnabled()) {
+      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
+    }
     const payload = await readJsonRequest(req)
     const productId = normalizedLabel(payload?.productId, 160)
     const version = normalizedLabel(payload?.version, 64)
@@ -5910,6 +6178,9 @@ async function handleMarketplaceCommerceApi(req, res, parsed, ctx) {
     /^\/api\/marketplace\/orders\/([^/]+)\/checkout$/,
   )
   if (checkoutMatch && req.method === 'POST') {
+    if (!marketplacePaidPublishingEnabled()) {
+      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
+    }
     const account = await authenticateAccount(req, ctx)
     const orderId = decodeURIComponent(checkoutMatch[1] ?? '')
     const current = await readPluginRegistry(ctx)
@@ -6183,8 +6454,7 @@ function validateDeclarativePackageForPublication(bytes, plugin) {
     parsed.manifest.license !== plugin.license ||
     parsed.manifest.apiVersion !== 2 ||
     parsed.manifest.rulesetId !== DND5E_2014_RULESET_ID ||
-    parsed.manifest.distributionPolicy === 'local-only' ||
-    parsed.manifest.distributionPolicy === 'account-entitled'
+    parsed.manifest.distributionPolicy !== 'room-distributable'
   ) throw new RoomProtocolError(400, 'invalid-public-plugin-package')
   if (!Array.isArray(parsed.subclasses) || !plainObject(parsed.legacy)) {
     throw new RoomProtocolError(400, 'invalid-public-plugin-package')
@@ -7026,7 +7296,9 @@ function normalizePluginCapabilities(value) {
 
 function normalizePluginDistributionPolicy(value) {
   if (value == null) return 'room-distributable'
-  return ['room-distributable', 'account-entitled', 'local-only'].includes(value) ? value : null
+  return ['room-distributable', 'room-ephemeral', 'account-entitled', 'local-only'].includes(value)
+    ? value
+    : null
 }
 
 function normalizePluginContentCategory(value) {
@@ -7126,6 +7398,50 @@ function roomHostedPluginFile(ctx, roomId, pluginId, hosted) {
   return roomPluginFile(ctx, roomId, pluginId)
 }
 
+function roomEphemeralPluginStoragePaths(ctx, roomId, room, onlyPluginId = null) {
+  const paths = new Set()
+  for (const collection of [room?.pluginFiles, room?.stagedPluginFiles]) {
+    if (!plainObject(collection)) continue
+    for (const [pluginId, hosted] of Object.entries(collection)) {
+      if (onlyPluginId && pluginId !== onlyPluginId) continue
+      if (hosted?.distributionPolicy !== 'room-ephemeral') continue
+      paths.add(roomHostedPluginFile(ctx, roomId, pluginId, hosted))
+    }
+  }
+  return [...paths]
+}
+
+function withoutRoomEphemeralPlugins(room) {
+  const ephemeralIds = new Set()
+  for (const collection of [room?.pluginFiles, room?.stagedPluginFiles]) {
+    if (!plainObject(collection)) continue
+    for (const [pluginId, hosted] of Object.entries(collection)) {
+      if (hosted?.distributionPolicy === 'room-ephemeral') ephemeralIds.add(pluginId)
+    }
+  }
+  if (ephemeralIds.size === 0) return room
+  const pluginFiles = { ...(room.pluginFiles ?? {}) }
+  const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
+  const pluginRuntimeState = { ...(room.pluginRuntimeState ?? {}) }
+  for (const pluginId of ephemeralIds) {
+    delete pluginFiles[pluginId]
+    delete stagedPluginFiles[pluginId]
+    delete pluginRuntimeState[pluginId]
+  }
+  return {
+    ...room,
+    requiredPlugins: (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
+      .filter((requirement) => !ephemeralIds.has(requirement.id)),
+    pluginFiles,
+    stagedPluginFiles,
+    pluginRuntimeState,
+  }
+}
+
+async function removeRoomEphemeralPluginStorage(paths) {
+  await Promise.all(paths.map((filePath) => rm(filePath, { force: true }).catch(() => {})))
+}
+
 function lobbyRoomMember(room, memberId) {
   if (room?.host?.memberId === memberId) return room.host
   return (Array.isArray(room?.players) ? room.players : []).find((player) => player.memberId === memberId)
@@ -7219,6 +7535,8 @@ function roomRulesResponse(room, member) {
         name: normalizedLabel(hosted.name, 100) || requirement.id,
         publisher: normalizedLabel(hosted.publisher, 100) || '未知发布者',
         license: normalizedLabel(hosted.license, 120) || '未声明',
+        distributionPolicy: normalizePluginDistributionPolicy(hosted.distributionPolicy) ??
+          'room-distributable',
       }
     }),
     member: roomPluginReadiness(requiredPlugins, member?.activePlugins),
@@ -7232,6 +7550,113 @@ function decodedPluginHeader(req, headerName, maxLength) {
     return normalizedLabel(decodeURIComponent(value), maxLength)
   } catch {
     throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+  }
+}
+
+function roomPluginDistributionPolicy(req) {
+  const value = req?.headers?.['x-stars-plugin-distribution-policy']
+  if (!['room-distributable', 'room-ephemeral'].includes(value)) {
+    throw new RoomProtocolError(403, 'plugin-not-room-distributable')
+  }
+  return value
+}
+
+const ROOM_RUNTIME_PROSE_KEYS = new Set([
+  'description',
+  'summary',
+  'sourceLabel',
+  'rulesText',
+  'higherLevels',
+  'materialText',
+  'reactionTrigger',
+  'text',
+  'prompt',
+  'adjudication',
+  'note',
+  'automationReasons',
+  'reasons',
+])
+
+function assertRoomRuntimeProjectionValue(value, key = '', depth = 0) {
+  if (depth > 64) throw new RoomProtocolError(400, 'invalid-room-runtime-projection')
+  if (typeof value === 'string') {
+    if (ROOM_RUNTIME_PROSE_KEYS.has(key) && value !== ROOM_RUNTIME_PROSE_PLACEHOLDER) {
+      throw new RoomProtocolError(403, 'room-runtime-prose-not-reduced')
+    }
+    if (
+      !['dataBase64', 'tokenPortrait', 'initiativePortrait'].includes(key) &&
+      (value.length > 240 || /https?:\/\//i.test(value))
+    ) throw new RoomProtocolError(403, 'room-runtime-prose-not-reduced')
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) assertRoomRuntimeProjectionValue(entry, key, depth + 1)
+    return
+  }
+  if (!plainObject(value)) return
+  for (const [childKey, entry] of Object.entries(value)) {
+    assertRoomRuntimeProjectionValue(entry, childKey, depth + 1)
+  }
+}
+
+function assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy) {
+  const source = bytes.toString('utf8').trimStart()
+  if (!source.startsWith('{')) {
+    if (distributionPolicy === 'room-ephemeral') {
+      throw new RoomProtocolError(403, 'room-ephemeral-must-be-content-v2')
+    }
+    return
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-plugin-manifest')
+  }
+  if (!['dndstars5e-content', 'dndstars5e-declarative'].includes(parsed?.format)) {
+    if (distributionPolicy === 'room-ephemeral') {
+      throw new RoomProtocolError(403, 'room-ephemeral-must-be-content-v2')
+    }
+    return
+  }
+  if (
+    parsed?.manifest?.id !== pluginId ||
+    parsed?.manifest?.version !== version ||
+    parsed?.manifest?.distributionPolicy !== distributionPolicy
+  ) throw new RoomProtocolError(403, 'plugin-not-room-distributable')
+  if (distributionPolicy === 'room-ephemeral') {
+    if (
+      parsed.format !== 'dndstars5e-content' ||
+      parsed.schemaVersion !== 2 ||
+      parsed?.provenance?.projection !== ROOM_RUNTIME_PROJECTION ||
+      parsed?.provenance?.sourceFingerprint != null ||
+      parsed?.manifest?.description !== ROOM_RUNTIME_PROSE_PLACEHOLDER ||
+      parsed?.provenance?.sourceTitle !== ROOM_RUNTIME_PROSE_PLACEHOLDER
+    ) throw new RoomProtocolError(403, 'invalid-room-runtime-projection')
+    assertRoomRuntimeProjectionValue(parsed)
+  }
+}
+
+function assertAccountPluginPackagePolicy(bytes, pluginId, version, distributionPolicy) {
+  const source = bytes.toString('utf8').trimStart()
+  if (!source.startsWith('{')) return
+  let parsed
+  try {
+    parsed = JSON.parse(source)
+  } catch {
+    throw new RoomProtocolError(400, 'invalid-account-plugin')
+  }
+  if (!['dndstars5e-content', 'dndstars5e-declarative'].includes(parsed?.format)) return
+  if (
+    parsed?.manifest?.id !== pluginId ||
+    parsed?.manifest?.version !== version ||
+    parsed?.manifest?.distributionPolicy !== distributionPolicy
+  ) throw new RoomProtocolError(409, 'account-plugin-metadata-mismatch')
+  if (parsed.manifest.distributionPolicy === 'local-only') {
+    throw new RoomProtocolError(409, 'plugin-local-only')
+  }
+  if (parsed.manifest.distributionPolicy === 'room-ephemeral') {
+    throw new RoomProtocolError(409, 'plugin-ephemeral-room-only')
   }
 }
 
@@ -7527,6 +7952,15 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
     const bytes = await readFile(accountPluginBlobFile(ctx, version.integrity))
     const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
     if (actualIntegrity !== version.integrity) throw new RoomProtocolError(409, 'public-plugin-integrity-mismatch')
+    await mutatePluginRegistry(ctx, (current) => ({
+      ...current,
+      analyticsDaily: recordMarketplaceDailyMetric(current.analyticsDaily, {
+        metric: 'downloads',
+        productId: entry.id,
+        version: version.version,
+        publisherAccountId: entry.publisher?.accountId,
+      }),
+    }))
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(bytes.length),
@@ -7542,6 +7976,65 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       'X-Stars-Plugin-Ruleset': DND5E_2014_RULESET_ID,
     })
     res.end(bytes)
+    return true
+  }
+
+  const installationMatch = parsed.pathname.match(
+    /^\/api\/plugins\/catalog\/([^/]+)\/versions\/([^/]+)\/installation$/,
+  )
+  if (installationMatch && req.method === 'POST') {
+    const account = await authenticateAccount(req, ctx)
+    const pluginId = decodeURIComponent(installationMatch[1] ?? '')
+    const pluginVersion = decodeURIComponent(installationMatch[2] ?? '')
+    const payload = await readJsonRequest(req)
+    if (typeof payload?.active !== 'boolean') {
+      throw new RoomProtocolError(400, 'invalid-marketplace-installation')
+    }
+    const now = Date.now()
+    let transition = null
+    const registry = await mutatePluginRegistry(ctx, (current) => {
+      const entry = current.entries.find((candidate) => candidate.id === pluginId)
+      const version = (Array.isArray(entry?.versions) ? entry.versions : []).find((candidate) =>
+        candidate.version === pluginVersion &&
+        candidate.status === 'published' &&
+        ['public', 'unlisted'].includes(candidate.visibility))
+      if (!entry || !version) throw new RoomProtocolError(404, 'public-plugin-not-found')
+      if (version.marketplace?.pricing?.kind === 'paid') {
+        const entitlement = activeMarketplaceEntitlement(current.entitlements, {
+          accountId: account.accountId,
+          productId: pluginId,
+          version: pluginVersion,
+        }, now)
+        if (!entitlement && entry.publisher?.accountId !== account.accountId) {
+          throw new RoomProtocolError(403, 'marketplace-entitlement-required')
+        }
+      }
+      const updated = updateMarketplaceInstallation(current.installations, {
+        accountId: account.accountId,
+        productId: pluginId,
+        version: pluginVersion,
+        publisherAccountId: entry.publisher?.accountId,
+        active: payload.active,
+        timestamp: now,
+      })
+      transition = updated.transition
+      return {
+        ...current,
+        installations: updated.installations,
+        analyticsDaily: transition
+          ? recordMarketplaceDailyMetric(current.analyticsDaily, {
+              metric: transition === 'installed' ? 'installs' : 'uninstalls',
+              productId: pluginId,
+              version: pluginVersion,
+              publisherAccountId: entry.publisher?.accountId,
+              timestamp: now,
+            })
+          : current.analyticsDaily,
+      }
+    })
+    const installation = registry.installations.find((candidate) =>
+      candidate.accountId === account.accountId && candidate.productId === pluginId)
+    writeJson(res, 200, { installation, transition })
     return true
   }
 
@@ -7729,6 +8222,32 @@ async function handlePluginCatalogApi(req, res, parsed, ctx) {
       true,
     )
     if (!entry) throw new RoomProtocolError(404, 'public-plugin-not-found')
+    const latest = entry.versions?.[0]
+    if (latest) {
+      const ip = req.socket?.remoteAddress ?? 'local'
+      const viewer = await authenticateAccount(req, ctx, true).catch(() => null)
+      const day = new Date().toISOString().slice(0, 10)
+      const viewKey = createHash('sha256')
+        .update(`${day}:${pluginId}:${viewer?.accountId ?? ip}`)
+        .digest('base64url')
+      if (!ctx.marketplaceViewDedupe) ctx.marketplaceViewDedupe = new Map()
+      if (!ctx.marketplaceViewDedupe.has(viewKey)) {
+        ctx.marketplaceViewDedupe.set(viewKey, Date.now())
+        if (ctx.marketplaceViewDedupe.size > 100_000) {
+          const oldest = ctx.marketplaceViewDedupe.keys().next().value
+          if (oldest) ctx.marketplaceViewDedupe.delete(oldest)
+        }
+        await mutatePluginRegistry(ctx, (current) => ({
+          ...current,
+          analyticsDaily: recordMarketplaceDailyMetric(current.analyticsDaily, {
+            metric: 'views',
+            productId: entry.id,
+            version: latest.version,
+            publisherAccountId: entry.publisher?.accountId,
+          }),
+        }))
+      }
+    }
     writeJson(res, 200, { plugin: entry })
     return true
   }
@@ -7999,15 +8518,21 @@ async function handleAccountApi(req, res, parsed, ctx) {
           if (roomHostIsOnline(previousRoom, now)) {
             throw new RoomProtocolError(409, 'campaign-room-active')
           }
-          await mutateLobbyRoom(ctx, previousRoom.id, (room) => ({
-            ok: true,
-            next: {
-              ...room,
-              closedAt: now,
-              updatedAt: now,
-              host: { ...room.host, lastSeenAt: 0 },
-            },
-          }))
+          const closed = await mutateLobbyRoom(ctx, previousRoom.id, (room) => {
+            const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, previousRoom.id, room)
+            const withoutEphemeral = withoutRoomEphemeralPlugins(room)
+            return {
+              ok: true,
+              ephemeralStoragePaths,
+              next: {
+                ...withoutEphemeral,
+                closedAt: now,
+                updatedAt: now,
+                host: { ...room.host, lastSeenAt: 0 },
+              },
+            }
+          })
+          await removeRoomEphemeralPluginStorage(closed.ephemeralStoragePaths ?? [])
         }
         const roomNumber = (Array.isArray(campaign.roomHistory) ? campaign.roomHistory.length : 0) + 1
         const roomPayload = {
@@ -8217,6 +8742,9 @@ async function handleAccountApi(req, res, parsed, ctx) {
     if (!marketplaceResult.ok) throw new RoomProtocolError(400, marketplaceResult.error)
     const creatorRegistry = await readPluginRegistry(ctx)
     const creator = creatorRegistry.creators.find((candidate) => candidate.accountId === account.accountId)
+    if (marketplaceResult.value.pricing.kind === 'paid' && !marketplacePaidPublishingEnabled()) {
+      throw new RoomProtocolError(503, 'marketplace-paid-commerce-disabled')
+    }
     if (marketplaceResult.value.pricing.kind === 'paid' && creator?.status !== 'verified') {
       throw new RoomProtocolError(403, 'verified-creator-required')
     }
@@ -8319,18 +8847,44 @@ async function handleAccountApi(req, res, parsed, ctx) {
       candidate.id === pluginId && candidate.version === pluginVersion)
 
     if (req.method === 'PUT') {
+      const uploadMetadata = decodedPluginMetadataHeader(req)
+      const uploadDistributionPolicy = normalizePluginDistributionPolicy(uploadMetadata.distributionPolicy)
+      if (uploadDistributionPolicy === 'local-only') {
+        throw new RoomProtocolError(409, 'plugin-local-only')
+      }
+      if (uploadDistributionPolicy === 'room-ephemeral') {
+        throw new RoomProtocolError(409, 'plugin-ephemeral-room-only')
+      }
       const bytes = await readBody(req, STATE_MAX_BYTES)
       if (bytes.length < 1) throw new RoomProtocolError(400, 'account-plugin-file-empty')
+      assertAccountPluginPackagePolicy(
+        bytes,
+        pluginId,
+        pluginVersion,
+        uploadDistributionPolicy ?? 'room-distributable',
+      )
       const now = Date.now()
       const record = accountPluginVersionFromUpload(req, pluginId, pluginVersion, bytes.length, now)
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== record.integrity) {
         throw new RoomProtocolError(409, 'account-plugin-integrity-mismatch')
       }
-      await assertMarketplacePackageEntitlement(ctx, account.accountId, record.integrity)
+      const marketplaceProduct = await assertMarketplacePackageEntitlement(
+        ctx,
+        account.accountId,
+        record.integrity,
+      )
       if (current) {
         if (current.integrity !== record.integrity) {
           throw new RoomProtocolError(409, 'account-plugin-version-conflict')
+        }
+        if (marketplaceProduct) {
+          await syncMarketplaceAccountInstallation(ctx, {
+            accountId: account.accountId,
+            integrity: record.integrity,
+            active: true,
+            timestamp: now,
+          })
         }
         writeJson(res, 200, current)
         return true
@@ -8375,6 +8929,14 @@ async function handleAccountApi(req, res, parsed, ctx) {
           updatedAt: now,
         }
       })
+      if (marketplaceProduct) {
+        await syncMarketplaceAccountInstallation(ctx, {
+          accountId: account.accountId,
+          integrity: record.integrity,
+          active: true,
+          timestamp: now,
+        })
+      }
       writeJson(res, 201, record)
       return true
     }
@@ -8429,6 +8991,11 @@ async function handleAccountApi(req, res, parsed, ctx) {
           requirement?.integrity === current.integrity))
       if (usedByCharacter) throw new RoomProtocolError(409, 'account-plugin-in-use')
       const registry = await readPluginRegistry(ctx)
+      const marketplaceProduct = registry.entries.flatMap((entry) =>
+        (Array.isArray(entry.versions) ? entry.versions : []).map((version) => ({ entry, version })))
+        .find(({ version }) =>
+          version.integrity === current.integrity &&
+          version.status === 'published')
       const usedByPublication = registry.entries.some((entry) =>
         entry.publisher?.accountId === account.accountId &&
         entry.id === current.id &&
@@ -8444,6 +9011,23 @@ async function handleAccountApi(req, res, parsed, ctx) {
           candidate.id !== pluginId || candidate.version !== pluginVersion),
         updatedAt: now,
       }))
+      if (marketplaceProduct) {
+        const remainingMarketplaceVersion = currentVersions
+          .filter((candidate) =>
+            candidate.id !== pluginId || candidate.version !== pluginVersion)
+          .find((candidate) =>
+            registry.entries.some((entry) =>
+              entry.id === marketplaceProduct.entry.id &&
+              (Array.isArray(entry.versions) ? entry.versions : []).some((version) =>
+                version.integrity === candidate.integrity &&
+                version.status === 'published')))
+        await syncMarketplaceAccountInstallation(ctx, {
+          accountId: account.accountId,
+          integrity: remainingMarketplaceVersion?.integrity ?? current.integrity,
+          active: Boolean(remainingMarketplaceVersion),
+          timestamp: now,
+        })
+      }
       writeJson(res, 200, { ok: true })
       return true
     }
@@ -8626,6 +9210,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
       const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
       const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+      const distributionPolicy = roomPluginDistributionPolicy(req)
       if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
       let fileName = `${pluginId}.dndstars5e`
       try {
@@ -8646,8 +9231,12 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
         return { ok: true }
       })
-      const bytes = await readBody(req, STATE_MAX_BYTES)
+      const bytes = await readBody(
+        req,
+        distributionPolicy === 'room-ephemeral' ? ROOM_EPHEMERAL_PLUGIN_MAX_BYTES : STATE_MAX_BYTES,
+      )
       if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
+      assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy)
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
       await assertMarketplacePackageEntitlement(
@@ -8674,6 +9263,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
                 name: pluginName,
                 publisher,
                 license,
+                distributionPolicy,
                 fileName,
                 storageFile: path.basename(storagePath),
                 size: bytes.length,
@@ -8818,6 +9408,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         'X-Stars-Plugin-Name': encodeURIComponent(result.hosted.name ?? pluginId),
         'X-Stars-Plugin-Publisher': encodeURIComponent(result.hosted.publisher ?? '未知发布者'),
         'X-Stars-Plugin-License': encodeURIComponent(result.hosted.license ?? '未声明'),
+        'X-Stars-Plugin-Distribution-Policy': result.hosted.distributionPolicy ?? 'room-distributable',
       })
       res.end(bytes)
       return true
@@ -8837,6 +9428,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       const pluginName = decodedPluginHeader(req, 'x-stars-plugin-name', 100)
       const publisher = decodedPluginHeader(req, 'x-stars-plugin-publisher', 100)
       const license = decodedPluginHeader(req, 'x-stars-plugin-license', 120)
+      const distributionPolicy = roomPluginDistributionPolicy(req)
       if (!pluginName || !publisher || !license) throw new RoomProtocolError(400, 'invalid-plugin-manifest')
       let fileName = `${pluginId}.dndstars5e`
       try {
@@ -8857,8 +9449,12 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
         return { ok: true, member: room.host }
       })
-      const bytes = await readBody(req, STATE_MAX_BYTES)
+      const bytes = await readBody(
+        req,
+        distributionPolicy === 'room-ephemeral' ? ROOM_EPHEMERAL_PLUGIN_MAX_BYTES : STATE_MAX_BYTES,
+      )
       if (bytes.length < 1) throw new RoomProtocolError(400, 'plugin-file-empty')
+      assertDeclarativeRoomPluginManifest(bytes, pluginId, version, distributionPolicy)
       const actualIntegrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
       if (actualIntegrity !== requirement.integrity) throw new RoomProtocolError(409, 'plugin-integrity-mismatch')
       await assertMarketplacePackageEntitlement(
@@ -8891,6 +9487,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
                 name: pluginName,
                 publisher,
                 license,
+                distributionPolicy,
                 fileName,
                 size: bytes.length,
                 uploadedAt: now,
@@ -8918,25 +9515,31 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       const result = await mutateLobbyRoom(ctx, roomId, (room) => {
         if (room.closedAt) return { ok: false, status: 409, error: 'room-closed' }
         if (room.host?.memberId !== memberId) return { ok: false, status: 403, error: 'forbidden' }
+        const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room, pluginId)
         const pluginFiles = { ...(room.pluginFiles ?? {}) }
         delete pluginFiles[pluginId]
         const stagedPluginFiles = { ...(room.stagedPluginFiles ?? {}) }
         delete stagedPluginFiles[pluginId]
+        const pluginRuntimeState = { ...(room.pluginRuntimeState ?? {}) }
+        delete pluginRuntimeState[pluginId]
         return {
           ok: true,
           member: room.host,
+          ephemeralStoragePaths,
           next: {
             ...room,
             requiredPlugins: (Array.isArray(room.requiredPlugins) ? room.requiredPlugins : [])
               .filter((plugin) => plugin.id !== pluginId),
             pluginFiles,
             stagedPluginFiles,
+            pluginRuntimeState,
             rulesRevision: (Number.isFinite(room.rulesRevision) ? room.rulesRevision : 1) + 1,
             rulesUpdatedAt: now,
             updatedAt: now,
           },
         }
       })
+      await removeRoomEphemeralPluginStorage(result.ephemeralStoragePaths ?? [])
       writeJson(res, 200, roomRulesResponse(result.room, result.member))
       return true
     }
@@ -9243,13 +9846,21 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
     return true
   }
 
-  await mutateLobbyRoom(ctx, roomId, (room) => {
+  const leaveResult = await mutateLobbyRoom(ctx, roomId, (room) => {
     const now = Date.now()
     if (room.host?.memberId === memberId) {
       if (!roomMemberAccountAuthorized(room.host, account)) return { ok: false, status: 403, error: 'forbidden' }
+      const ephemeralStoragePaths = roomEphemeralPluginStoragePaths(ctx, roomId, room)
+      const withoutEphemeral = withoutRoomEphemeralPlugins(room)
       return {
         ok: true,
-        next: { ...room, closedAt: now, updatedAt: now, host: { ...room.host, lastSeenAt: 0 } },
+        ephemeralStoragePaths,
+        next: {
+          ...withoutEphemeral,
+          closedAt: now,
+          updatedAt: now,
+          host: { ...room.host, lastSeenAt: 0 },
+        },
       }
     }
     const players = Array.isArray(room.players) ? room.players : []
@@ -9271,6 +9882,7 @@ async function handleRoomLobbyApi(req, res, parsed, ctx) {
       },
     }
   })
+  await removeRoomEphemeralPluginStorage(leaveResult.ephemeralStoragePaths ?? [])
   writeJson(res, 200, { ok: true })
   return true
 }

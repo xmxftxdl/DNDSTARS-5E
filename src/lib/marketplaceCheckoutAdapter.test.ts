@@ -3,7 +3,9 @@ import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createMarketplaceCheckout,
+  marketplaceCapabilities,
   marketplaceCheckoutAdapter,
+  marketplacePaidPublishingEnabled,
 } from '../../scripts/shared-server-core.mjs'
 
 describe('市场支付适配器', () => {
@@ -72,5 +74,42 @@ describe('市场支付适配器', () => {
       STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL: endpoint,
       STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET: 'checkout-test-secret',
     })).toBeNull()
+  })
+
+  it('生产环境在支付、回调与实名服务未全部就绪时保持免费 Beta', () => {
+    expect(marketplacePaidPublishingEnabled({
+      STARS_SECURITY_MODE: 'production',
+      STARS_MARKETPLACE_PAID_PUBLISHING_ENABLED: 'true',
+      STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL: 'https://pay.example.com/checkout',
+      STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET: 'checkout-test-secret',
+    })).toBe(false)
+    expect(marketplaceCapabilities({
+      STARS_SECURITY_MODE: 'production',
+      STARS_PLUGIN_ADMIN_ACCOUNT_IDS: 'admin-1',
+    })).toMatchObject({
+      marketMode: 'free-beta',
+      paidPublishingEnabled: false,
+      checkoutAvailable: false,
+      moderationConfigured: true,
+    })
+  })
+
+  it('只有显式启用完整生产依赖后才开放付费发布', () => {
+    const env = {
+      STARS_SECURITY_MODE: 'production',
+      STARS_MARKETPLACE_PAID_PUBLISHING_ENABLED: 'true',
+      STARS_MARKETPLACE_KYC_PROVIDER_READY: 'true',
+      STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET: 'webhook-secret',
+      STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL: 'https://pay.example.com/checkout',
+      STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET: 'checkout-test-secret',
+      STARS_MARKETPLACE_CHECKOUT_PROVIDER: 'mock-pay',
+    }
+    expect(marketplacePaidPublishingEnabled(env)).toBe(true)
+    expect(marketplaceCapabilities(env)).toMatchObject({
+      marketMode: 'live',
+      paidPublishingEnabled: true,
+      checkoutAvailable: true,
+      creatorVerificationMode: 'provider',
+    })
   })
 })

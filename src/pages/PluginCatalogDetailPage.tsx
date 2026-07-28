@@ -20,11 +20,13 @@ import {
   completeSandboxMarketplaceOrder,
   createMarketplaceOrder,
   downloadPublicPlugin,
+  loadMarketplaceCapabilities,
   loadPluginCatalogEntry,
   loadMarketplaceEntitlements,
   reportPublicPlugin,
   startMarketplaceCheckout,
   type PluginCatalogEntry,
+  type MarketplaceCapabilities,
 } from '../lib/pluginCatalogApi'
 
 function downloadBytes(bytes: ArrayBuffer, fileName: string) {
@@ -45,6 +47,7 @@ export default function PluginCatalogDetailPage() {
   const [entitlements, setEntitlements] = useState<MarketplaceEntitlementV1[]>([])
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [capabilities, setCapabilities] = useState<MarketplaceCapabilities | null>(null)
 
   useEffect(() => {
     let active = true
@@ -53,6 +56,9 @@ export default function PluginCatalogDetailPage() {
       .catch((cause) => { if (active) setError(accountApiErrorMessage(cause)) })
     void loadMarketplaceEntitlements().then((values) => {
       if (active) setEntitlements(values)
+    }).catch(() => undefined)
+    void loadMarketplaceCapabilities().then((value) => {
+      if (active) setCapabilities(value)
     }).catch(() => undefined)
     return () => { active = false }
   }, [pluginId])
@@ -84,6 +90,10 @@ export default function PluginCatalogDetailPage() {
 
   const purchase = async () => {
     if (!plugin || !version || version.marketplace?.pricing.kind !== 'paid') return
+    if (!capabilities?.checkoutAvailable) {
+      setNotice('当前为免费扩展市场 Beta，付费购买尚未开放。')
+      return
+    }
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -156,9 +166,9 @@ export default function PluginCatalogDetailPage() {
           </Link>
           <p className="mt-2 text-xs text-slate-600">许可证：{version.license}</p>
           {version.marketplace?.pricing.kind === 'paid' && !entitlement ? (
-            <button type="button" disabled={busy} onClick={() => void purchase()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-arcane-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
+            <button type="button" disabled={busy || !capabilities?.checkoutAvailable} onClick={() => void purchase()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-arcane-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">
               {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
-              创建购买订单
+              {capabilities?.checkoutAvailable ? '创建购买订单' : '付费购买尚未开放'}
             </button>
           ) : (
             <button type="button" disabled={busy} onClick={() => void download()} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-arcane-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"><Download className="h-4 w-4" />{version.marketplace?.pricing.kind === 'paid' ? '下载已购内容' : '下载扩展'}</button>

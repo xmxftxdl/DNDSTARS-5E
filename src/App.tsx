@@ -97,7 +97,7 @@ export default function App() {
       if (pulsing) return
       pulsing = true
       try {
-        const [{ useCharacterStore }, { activeDnd5eRulesPluginRequirements }] = await Promise.all([
+        const [{ useCharacterStore }, { roomActiveDnd5eRulesPluginRequirements }] = await Promise.all([
           import('./store/characters'),
           import('./rulesets/dnd5e/pluginApi'),
         ])
@@ -115,7 +115,7 @@ export default function App() {
             : undefined
         let rules = await heartbeatRoom(
           roomSession,
-          activeDnd5eRulesPluginRequirements(),
+          roomActiveDnd5eRulesPluginRequirements(),
           activeCharacter
             ? { activeCharacterId: activeCharacter.id, activeCharacterName: activeCharacter.name }
             : undefined,
@@ -138,6 +138,7 @@ export default function App() {
         if (disposed) return
         const terminal = roomHeartbeatErrorIsTerminal(error)
         if (terminal) {
+          await window.DNDSTARS_5E_RULES_PLUGINS?.clearEphemeral()
           clearRoomSession()
           setRoomRulesSnapshot(null)
           setRoomPluginSyncError(null)
@@ -317,6 +318,7 @@ export default function App() {
     } catch {
       // 即使共享服务暂时不可达，也清除本机会话；房主心跳超时后房间会自动离线。
     }
+    await window.DNDSTARS_5E_RULES_PLUGINS?.clearEphemeral()
     clearRoomSession()
     setRoomRulesSnapshot(null)
     setRoomPluginSyncError(null)

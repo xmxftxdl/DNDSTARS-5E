@@ -20,6 +20,7 @@ export interface RoomPluginMetadata extends RoomPluginRequirement {
   name: string
   publisher: string
   license: string
+  distributionPolicy: import('../rulesets/dnd5e/pluginApi').Dnd5ePluginDistributionPolicy
 }
 
 export interface RoomPluginReadiness {

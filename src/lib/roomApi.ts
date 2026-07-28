@@ -479,6 +479,7 @@ export async function uploadRoomPlugin(input: {
   name: string
   publisher: string
   license: string
+  distributionPolicy: 'room-distributable' | 'room-ephemeral'
   fileName: string
   bytes: ArrayBuffer
 }): Promise<RoomRulesSnapshot> {
@@ -496,6 +497,7 @@ export async function uploadRoomPlugin(input: {
         'X-Stars-Plugin-Name': encodeURIComponent(input.name),
         'X-Stars-Plugin-Publisher': encodeURIComponent(input.publisher),
         'X-Stars-Plugin-License': encodeURIComponent(input.license),
+        'X-Stars-Plugin-Distribution-Policy': input.distributionPolicy,
       },
       body: input.bytes,
     },
@@ -521,6 +523,7 @@ export async function stageRoomPlugin(input: {
   name: string
   publisher: string
   license: string
+  distributionPolicy: 'room-distributable' | 'room-ephemeral'
   fileName: string
   bytes: ArrayBuffer
 }): Promise<RoomRulesSnapshot> {
@@ -539,6 +542,7 @@ export async function stageRoomPlugin(input: {
         'X-Stars-Plugin-Name': encodeURIComponent(input.name),
         'X-Stars-Plugin-Publisher': encodeURIComponent(input.publisher),
         'X-Stars-Plugin-License': encodeURIComponent(input.license),
+        'X-Stars-Plugin-Distribution-Policy': input.distributionPolicy,
       },
       body: input.bytes,
     },

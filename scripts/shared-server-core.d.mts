@@ -49,6 +49,16 @@ export function marketplaceCheckoutAdapter(env?: Record<string, string | undefin
   secret: string
   provider: string
 } | null
+export function marketplacePaidPublishingEnabled(env?: Record<string, string | undefined>): boolean
+export function marketplaceCapabilities(env?: Record<string, string | undefined>): {
+  schemaVersion: 1
+  marketMode: 'free-beta' | 'live'
+  freePublishingEnabled: boolean
+  paidPublishingEnabled: boolean
+  checkoutAvailable: boolean
+  creatorVerificationMode: 'manual-review' | 'provider'
+  moderationConfigured: boolean
+}
 export function createMarketplaceCheckout(
   order: {
     orderId: string

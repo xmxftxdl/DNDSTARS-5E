@@ -25,6 +25,7 @@ import MarketplacePublicationDialog, {
   type MarketplacePublicationInput,
 } from '../components/marketplace/MarketplacePublicationDialog'
 import CreatorOnboardingPanel from '../components/marketplace/CreatorOnboardingPanel'
+import CreatorAnalyticsPanel from '../components/marketplace/CreatorAnalyticsPanel'
 import CreatorEarningsPanel from '../components/marketplace/CreatorEarningsPanel'
 import MarketplaceOrdersPanel from '../components/marketplace/MarketplaceOrdersPanel'
 import PageHeader from '../components/PageHeader'
@@ -55,15 +56,18 @@ import { dnd5ePluginCompatibilityReport } from '../rulesets/dnd5e/pluginCompatib
 import { dnd5ePluginCapabilityLabel } from '../rulesets/dnd5e/pluginCapabilityLabels'
 import {
   downloadPublicPlugin,
+  loadMarketplaceCapabilities,
   loadPluginCatalog,
   loadPluginModerationQueue,
   moderateMarketplaceCreator,
   moderateMarketplacePayout,
   moderatePluginVersion,
   publishAccountPluginVersion,
+  recordMarketplaceInstallation,
   reportPublicPlugin,
   type PluginCatalogEntry,
   type PluginCatalogVersion,
+  type MarketplaceCapabilities,
   type PluginModerationQueue,
 } from '../lib/pluginCatalogApi'
 import { formatMarketplacePrice } from '../../shared/marketplace-publication.mjs'
@@ -131,6 +135,7 @@ function PluginCatalogBrowser({
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('')
   const [loading, setLoading] = useState(true)
+  const [capabilities, setCapabilities] = useState<MarketplaceCapabilities | null>(null)
 
   const search = async () => {
     setLoading(true)
@@ -147,6 +152,7 @@ function PluginCatalogBrowser({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void search()
+    void loadMarketplaceCapabilities().then(setCapabilities).catch(() => undefined)
     // Initial public catalog load; later searches are explicitly submitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -218,6 +224,12 @@ function PluginCatalogBrowser({
 
   return (
     <section>
+      {capabilities?.marketMode === 'free-beta' && (
+        <div className="mb-4 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.05] px-4 py-3 text-sm text-cyan-50/90">
+          <strong>免费扩展市场 Beta</strong>
+          <span className="ml-2 text-cyan-100/60">当前只开放免费扩展；付费发布、购买和提现不会产生真实交易。</span>
+        </div>
+      )}
       <form
         className="mb-5 grid gap-2 rounded-2xl border border-white/8 bg-black/15 p-3 sm:grid-cols-[1fr_180px_auto]"
         onSubmit={(event) => {
@@ -314,15 +326,24 @@ function PluginCatalogBrowser({
                   </div>
                 )}
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void downloadVersion(plugin, latest)}
-                    className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-50"
-                  >
-                    {accountId ? <Cloud className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-                    {accountId ? '安装并激活' : '下载'}
-                  </button>
+                  {latest.marketplace?.pricing.kind === 'paid' ? (
+                    <Link
+                      to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`}
+                      className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100"
+                    >
+                      <ReceiptText className="h-4 w-4" />查看付费商品
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void downloadVersion(plugin, latest)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-50"
+                    >
+                      {accountId ? <Cloud className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                      {accountId ? '安装并激活' : '下载'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy}
@@ -524,17 +545,36 @@ function PluginModerationPanel({
           {queue.pending.map(({ plugin, version }) => (
             <article key={`${plugin.id}@${version.version}`} className="rounded-2xl border border-white/8 bg-black/15 p-4">
               <h3 className="font-semibold text-slate-100">{plugin.name} v{version.version}</h3>
-              <p className="mt-1 text-xs text-slate-500">{plugin.id} · {plugin.publisher.displayName} · {version.license}</p>
+              <p className="mt-1 text-xs text-slate-500">{plugin.id} · {plugin.publisher.displayName} · {version.license} · {formatBytes(version.sizeBytes)}</p>
               <p className="mt-3 text-sm text-slate-400">{version.changelog || '未填写更新说明。'}</p>
+              <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-3">
+                <p className="text-xs font-semibold text-slate-300">商店正文</p>
+                <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-slate-500">{version.storeDescription || '未填写商店正文。'}</p>
+              </div>
               {version.marketplace && (
                 <div className="mt-3 grid gap-2 rounded-xl border border-white/8 bg-black/15 p-3 text-xs text-slate-400 sm:grid-cols-2">
                   <p>价格：<strong className="text-slate-200">{formatMarketplacePrice(version.marketplace.pricing)}</strong></p>
                   <p>分成：创作者 60% · 平台 40%</p>
                   <p>权利状态：{version.marketplace.rightsStatus === 'creator-declared' ? '作者已声明' : '旧版未核验'}</p>
                   <p>AI 内容：{version.marketplace.rightsManifest?.containsAi ? '包含，需检查披露' : '未声明包含'}</p>
+                  <p className="sm:col-span-2">SHA-256：<span className="break-all font-mono text-slate-500">{version.integrity}</span></p>
+                  <p>声明能力：{version.declaredCapabilities.length > 0 ? version.declaredCapabilities.join('、') : '无'}</p>
+                  <p>依赖/冲突：{version.dependencies.length} / {version.conflicts.length}</p>
+                  {version.marketplace.rightsManifest?.assets.map((asset, index) => (
+                    <div key={`${asset.category}:${index}`} className="rounded-lg border border-white/6 p-2 sm:col-span-2">
+                      <p>{asset.category} · {asset.sourceType} · {asset.license}</p>
+                      {asset.sourceUrl && <p className="mt-1 break-all text-slate-600">来源：{asset.sourceUrl}</p>}
+                      {asset.evidenceReference && <p className="mt-1 text-amber-100/70">审核证据：{asset.evidenceReference}</p>}
+                    </div>
+                  ))}
                   {version.automatedAnalysis && (
                     <div className="sm:col-span-2">
                       <p>自动解析：{version.automatedAnalysis.riskLevel === 'review' ? '需要人工复核' : '已阻止'}</p>
+                      <p className="mt-1 text-slate-500">
+                        内容摘要：{Object.entries(version.automatedAnalysis.summary)
+                          .map(([name, count]) => `${name} ${count}`)
+                          .join(' · ') || '未识别结构化内容'}
+                      </p>
                       {version.automatedAnalysis.findings.map((finding) => <p key={finding}>• {finding}</p>)}
                     </div>
                   )}
@@ -637,6 +677,12 @@ export default function PluginsPage() {
     setError(null)
     try {
       const inspected = await host.inspectFile(file)
+      if (inspected.manifest.distributionPolicy === 'local-only') {
+        throw new AccountApiError('plugin-local-only', 409)
+      }
+      if (inspected.manifest.distributionPolicy === 'room-ephemeral') {
+        throw new AccountApiError('plugin-ephemeral-room-only', 409)
+      }
       const saved = await uploadAccountPlugin(inspected)
       await refresh()
       setNotice(`已将 ${saved.name} v${saved.version} 保存到账号插件库。`)
@@ -654,6 +700,12 @@ export default function PluginsPage() {
     const installed = host.listInstalled().find((candidate) => candidate.id === pluginId)
     const manifest = host.listActive().find((candidate) => candidate.id === pluginId)
     if (!installed || !manifest) return setError('本机插件尚未通过沙箱激活，不能保存到云端。')
+    if (manifest.distributionPolicy === 'local-only') {
+      return setError(accountApiErrorMessage(new AccountApiError('plugin-local-only', 409)))
+    }
+    if (manifest.distributionPolicy === 'room-ephemeral') {
+      return setError(accountApiErrorMessage(new AccountApiError('plugin-ephemeral-room-only', 409)))
+    }
     setBusyKey(`${pluginId}:cloud`)
     setNotice(null)
     setError(null)
@@ -662,7 +714,7 @@ export default function PluginsPage() {
       const saved = await uploadAccountPlugin({
         manifest,
         integrity: installed.integrity,
-        fileName: installed.source === 'file' ? installed.fileName : `${pluginId}.dndstars5e`,
+        fileName: installed.source === 'url' ? `${pluginId}.dndstars5e` : installed.fileName,
         bytes,
       })
       await refresh()
@@ -755,6 +807,11 @@ export default function PluginsPage() {
     const manifest = host.listActive().find((candidate) =>
       candidate.id === saved.id && candidate.version === saved.version)
     if (!manifest) throw new Error('插件已保存，但未通过沙箱激活检查')
+    await recordMarketplaceInstallation({
+      productId: plugin.id,
+      version: version.version,
+      active: true,
+    }).catch(() => undefined)
     if (roomSession?.role === 'dm') {
       const next = await activateRoomPluginPackage({
         session: roomSession,
@@ -803,6 +860,13 @@ export default function PluginsPage() {
     setError(null)
     try {
       await deleteAccountPluginVersion(plugin)
+      const remainingVersion = library.plugins.find((candidate) =>
+        candidate.id === plugin.id && candidate.version !== plugin.version)
+      await recordMarketplaceInstallation({
+        productId: plugin.id,
+        version: remainingVersion?.version ?? plugin.version,
+        active: Boolean(remainingVersion),
+      }).catch(() => undefined)
       await refresh()
       setNotice(`已从账号插件库移除 ${plugin.name} v${plugin.version}。`)
     } catch (cause) {
@@ -839,7 +903,7 @@ export default function PluginsPage() {
       candidate.integrity === pin.integrity) ?? { id: pin.id, version: pin.version })
   const localPending = (host?.listInstalled() ?? []).flatMap((installed) => {
     const manifest = host?.listActive().find((candidate) => candidate.id === installed.id)
-    if (!manifest || library.plugins.some((candidate) =>
+    if (!manifest || manifest.distributionPolicy === 'local-only' || library.plugins.some((candidate) =>
       candidate.id === manifest.id &&
       candidate.version === manifest.version &&
       candidate.integrity === installed.integrity)) return []
@@ -856,7 +920,7 @@ export default function PluginsPage() {
             <input
               ref={fileRef}
               type="file"
-              accept=".dndstars5e,.mjs,.js,text/javascript,application/javascript"
+              accept=".dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
               className="hidden"
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0]
@@ -992,6 +1056,7 @@ export default function PluginsPage() {
               <CreatorOnboardingPanel onChanged={(profile) => {
                 setNotice(profile.status === 'pending' ? '创作者认证申请已提交。' : null)
               }} />
+              <CreatorAnalyticsPanel />
               <CreatorEarningsPanel />
             </>
           ) : section === 'orders' ? (

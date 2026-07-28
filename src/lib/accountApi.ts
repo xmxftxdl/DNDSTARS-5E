@@ -357,6 +357,12 @@ export async function uploadAccountPlugin(input: {
   integrity: string
   bytes: ArrayBuffer
 }): Promise<AccountPluginVersion> {
+  if (input.manifest.distributionPolicy === 'local-only') {
+    throw new AccountApiError('plugin-local-only', 409)
+  }
+  if (input.manifest.distributionPolicy === 'room-ephemeral') {
+    throw new AccountApiError('plugin-ephemeral-room-only', 409)
+  }
   const response = await accountBinaryRequest(
     `/accounts/me/plugins/${encodeURIComponent(input.manifest.id)}/versions/${encodeURIComponent(input.manifest.version)}`,
     {
@@ -501,6 +507,8 @@ export function accountApiErrorMessage(error: unknown): string {
     'account-plugin-version-limit': '账号插件版本数量已达到上限。',
     'account-plugin-storage-limit': '账号插件库空间已达到上限。',
     'account-plugin-in-use': '该插件版本仍被账号角色或发布记录引用，不能删除。',
+    'plugin-local-only': 'local-only 内容包只能保存在当前设备，不能上传到账号云库、房间或市场。',
+    'plugin-ephemeral-room-only': 'room-ephemeral 合集只能临时导入当前房间，不能保存到账号云库或市场。',
     'public-plugin-must-be-declarative-json': '公开目录只接受声明式 JSON 规则包，不接受 JavaScript 插件。',
     'invalid-public-plugin-package': '规则包未通过公开发布结构校验。',
     'plugin-not-publicly-distributable': '该版本的分发策略不允许发布到公共目录。',
@@ -516,6 +524,8 @@ export function accountApiErrorMessage(error: unknown): string {
     'invalid-marketplace-rights-manifest': '权利清单不完整，请检查来源、许可证和创作者声明。',
     'marketplace-ai-disclosure-required': '包含 AI 辅助内容时必须填写公开披露说明。',
     'invalid-marketplace-price': '商品价格无效；付费商品价格范围为 ¥1～¥99。',
+    'marketplace-paid-commerce-disabled': '当前为免费扩展市场 Beta，付费发布和购买尚未开放。',
+    'invalid-marketplace-installation': '插件安装状态无效，未写入市场统计。',
     'marketplace-store-description-required': '商品详情至少需要 20 个字符。',
     'marketplace-automated-analysis-blocked': '自动解析发现疑似可执行内容，不能提交市场审核。',
     'marketplace-entitlement-required': '当前账号没有这个付费商品的有效使用许可。',

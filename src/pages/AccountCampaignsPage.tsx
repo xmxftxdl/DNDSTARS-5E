@@ -31,7 +31,7 @@ import {
 } from '../lib/roomSession'
 import { resumeCampaignRoom, roomApiErrorMessage } from '../lib/roomApi'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
-import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
+import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
 import type { AccountSession } from '../lib/accountSession'
 
 function campaignStatusLabel(campaign: AccountCampaign): string {
@@ -131,7 +131,7 @@ export default function AccountCampaignsPage({
       const connection = await resumeCampaignRoom({
         campaignId: campaign.campaignId,
         displayName: accountSession.displayName,
-        activePlugins: activeDnd5eRulesPluginRequirements(),
+        activePlugins: roomActiveDnd5eRulesPluginRequirements(),
       })
       saveRoomSession(connection.session)
       setRoomRulesSnapshot(connection.rules)

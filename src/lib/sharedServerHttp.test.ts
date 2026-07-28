@@ -4,7 +4,7 @@
 // 另验：DM 权威资源 combat 的鉴权三分支、未匹配 /api/* → 404、超大 PUT → 413、并发写锁。
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, createHmac } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -1010,6 +1010,32 @@ describe('账号插件库协议', () => {
         contentCategory: 'rules',
       })),
     }
+    const rejectedLocalOnly = await fetch(
+      `${offServer.base}/api/accounts/me/plugins/com.example.local-only/versions/1.0.0`,
+      {
+        method: 'PUT',
+        headers: {
+          ...uploadHeaders,
+          'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+            manifestSchemaVersion: 1,
+            minimumGameProtocolVersion: 5,
+            dependencies: [],
+            conflicts: [],
+            declaredCapabilities: [],
+            distributionPolicy: 'local-only',
+            contentCategory: 'mixed',
+          })),
+        },
+        body: bytes,
+      },
+    )
+    expect(rejectedLocalOnly.status).toBe(409)
+    await expect(rejectedLocalOnly.json()).resolves.toMatchObject({ error: 'plugin-local-only' })
+    const afterRejectedLocalOnly = await fetch(`${offServer.base}/api/accounts/me/plugins`, {
+      headers: { 'X-Stars-Account-Token': owner.session.sessionToken },
+    }).then((response) => response.json()) as { plugins: unknown[] }
+    expect(afterRejectedLocalOnly.plugins).toEqual([])
+
     const upload = await fetch(`${offServer.base}${path}`, {
       method: 'PUT',
       headers: uploadHeaders,
@@ -1216,6 +1242,81 @@ describe('账号插件库协议', () => {
     expect(download.status).toBe(200)
     expect(download.headers.get('X-Stars-Plugin-Integrity')).toBe(integrity)
     expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
+
+    const detail = await fetch(`${offServer.base}/api/plugins/catalog/${pluginId}`, {
+      headers: { 'X-Stars-Account-Token': reporter.session.sessionToken },
+    })
+    expect(detail.status).toBe(200)
+
+    const reporterInstall = await fetch(`${offServer.base}${accountPath}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Stars-Account-Token': reporter.session.sessionToken,
+        'X-Stars-Plugin-Version': pluginVersion,
+        'X-Stars-Plugin-Integrity': integrity,
+        'X-Stars-Plugin-Filename': encodeURIComponent(`${pluginId}.dndstars5e`),
+        'X-Stars-Plugin-Name': encodeURIComponent('目录规则包'),
+        'X-Stars-Plugin-Publisher': encodeURIComponent('公开作者'),
+        'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+        'X-Stars-Plugin-State-Schema': '1',
+        'X-Stars-Plugin-Api-Version': '2',
+        'X-Stars-Plugin-Ruleset': 'dnd5e-2014-srd-5.1',
+        'X-Stars-Plugin-Description': encodeURIComponent('可以搜索的安全规则包'),
+        'X-Stars-Plugin-Metadata': encodeURIComponent(JSON.stringify({
+          manifestSchemaVersion: 1,
+          minimumGameProtocolVersion: 5,
+          dependencies: [],
+          conflicts: [],
+          declaredCapabilities: ['damage'],
+          distributionPolicy: 'room-distributable',
+          contentCategory: 'rules',
+        })),
+      },
+      body: bytes,
+    })
+    expect(reporterInstall.status).toBe(201)
+
+    const installation = await fetch(
+      `${offServer.base}/api/plugins/catalog/${pluginId}/versions/${pluginVersion}/installation`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Stars-Account-Token': reporter.session.sessionToken,
+        },
+        body: JSON.stringify({ active: true }),
+      },
+    )
+    expect(installation.status).toBe(200)
+    await expect(installation.json()).resolves.toMatchObject({ transition: null })
+
+    const analytics = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/analytics?days=30`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    expect(analytics.status).toBe(200)
+    await expect(analytics.json()).resolves.toMatchObject({
+      totals: {
+        views: 1,
+        downloads: 1,
+        installs: 1,
+        activeInstallations: 1,
+      },
+      products: [{ productId: pluginId, activeInstallations: 1 }],
+    })
+
+    const publicationStatuses = await fetch(
+      `${offServer.base}/api/marketplace/creators/me/publications`,
+      { headers: { 'X-Stars-Account-Token': owner.session.sessionToken } },
+    )
+    expect(publicationStatuses.status).toBe(200)
+    await expect(publicationStatuses.json()).resolves.toMatchObject({
+      publications: [{
+        id: pluginId,
+        versions: [{ version: pluginVersion, status: 'published' }],
+      }],
+    })
 
     const report = await fetch(`${offServer.base}/api/plugins/catalog/${pluginId}/reports`, {
       method: 'POST',
@@ -1851,6 +1952,7 @@ describe('P2 — 房间规则包原子升级', () => {
             'X-Stars-Plugin-Name': encodeURIComponent('原子升级测试包'),
             'X-Stars-Plugin-Publisher': encodeURIComponent('测试发布者'),
             'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+            'X-Stars-Plugin-Distribution-Policy': 'room-distributable',
           },
           body: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
         },
@@ -1979,6 +2081,94 @@ describe('P2 — 房间规则包原子升级', () => {
   })
 })
 
+describe('房间临时内容合集', () => {
+  it('只接受正文裁剪后的 V2 包，并在 DM 关闭房间时删除托管文件', async () => {
+    const createResponse = await fetch(`${offServer.base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: '临时合集测试',
+        displayName: '临时合集 DM',
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        clientId: `ephemeral-dm-${Date.now()}`,
+        activePlugins: [],
+      }),
+    })
+    expect(createResponse.status).toBe(201)
+    const created = await createResponse.json() as {
+      roomId: string
+      member: { memberId: string; roomToken: string }
+    }
+    const pluginId = 'local.example.room-runtime'
+    const placeholder = '房间临时机械数据；原始规则正文未传输。'
+    const runtimePackage = {
+      format: 'dndstars5e-content',
+      schemaVersion: 2,
+      manifest: {
+        id: pluginId,
+        name: 'Room Runtime',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Local DM',
+        license: 'Private local use',
+        description: placeholder,
+        distributionPolicy: 'room-ephemeral',
+        contentCategory: 'mixed',
+      },
+      provenance: {
+        edition: '2014',
+        contentMode: 'incremental',
+        sourceTitle: placeholder,
+        projection: 'room-runtime-mechanics',
+      },
+      assets: [],
+      content: {
+        races: [], backgrounds: [], features: [], feats: [], spells: [], items: [],
+        abilityGenerationMethods: [], headlessActions: [], subclasses: [], monsters: [],
+      },
+    }
+    const bytes = Buffer.from(JSON.stringify(runtimePackage))
+    const integrity = `sha256-${createHash('sha256').update(bytes).digest('base64')}`
+    const memberHeaders = {
+      'X-Stars-Member': created.member.memberId,
+      'X-Stars-Room-Token': created.member.roomToken,
+    }
+    const upload = await fetch(
+      `${offServer.base}/api/rooms/${created.roomId}/plugins/${pluginId}`,
+      {
+        method: 'PUT',
+        headers: {
+          ...memberHeaders,
+          'Content-Type': 'application/json',
+          'X-Stars-Plugin-Version': '1.0.0',
+          'X-Stars-Plugin-Integrity': integrity,
+          'X-Stars-Plugin-Filename': encodeURIComponent('room-runtime.dndstars5e'),
+          'X-Stars-Plugin-Name': encodeURIComponent('Room Runtime'),
+          'X-Stars-Plugin-Publisher': encodeURIComponent('Local DM'),
+          'X-Stars-Plugin-License': encodeURIComponent('Private local use'),
+          'X-Stars-Plugin-Distribution-Policy': 'room-ephemeral',
+        },
+        body: bytes,
+      },
+    )
+    expect(upload.status).toBe(200)
+    expect(await upload.json()).toMatchObject({
+      plugins: [{ id: pluginId, distributionPolicy: 'room-ephemeral' }],
+    })
+    const pluginDirectory = path.join(offServer.sharedRoot, 'lobby', 'plugins', created.roomId)
+    expect(await readdir(pluginDirectory)).toHaveLength(1)
+
+    const close = await fetch(`${offServer.base}/api/rooms/${created.roomId}/leave`, {
+      method: 'POST',
+      headers: { ...memberHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberId: created.member.memberId }),
+    })
+    expect(close.status).toBe(200)
+    expect(await readdir(pluginDirectory)).toEqual([])
+  })
+})
+
 describe('房间大厅协议', () => {
   it('玩家离开后可用浏览器恢复身份重新加入，DM 名册只显示当前成员', async () => {
     const createResponse = await fetch(`${offServer.base}/api/rooms`, {
@@ -2070,6 +2260,7 @@ describe('房间大厅协议', () => {
           'X-Stars-Plugin-Name': encodeURIComponent('HTTP 测试规则包'),
           'X-Stars-Plugin-Publisher': encodeURIComponent('测试发布者'),
           'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+          'X-Stars-Plugin-Distribution-Policy': 'room-distributable',
         },
         body: pluginBytes,
       },
@@ -2090,6 +2281,7 @@ describe('房间大厅协议', () => {
           'X-Stars-Plugin-Name': encodeURIComponent('HTTP 测试规则包'),
           'X-Stars-Plugin-Publisher': encodeURIComponent('测试发布者'),
           'X-Stars-Plugin-License': encodeURIComponent('CC0-1.0'),
+          'X-Stars-Plugin-Distribution-Policy': 'room-distributable',
         },
         body: pluginBytes,
       },

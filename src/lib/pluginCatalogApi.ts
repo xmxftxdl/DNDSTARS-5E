@@ -79,6 +79,53 @@ export interface PluginCatalogEntry {
   updatedAt: number
 }
 
+export interface MarketplaceCapabilities {
+  schemaVersion: 1
+  marketMode: 'free-beta' | 'live'
+  freePublishingEnabled: boolean
+  paidPublishingEnabled: boolean
+  checkoutAvailable: boolean
+  creatorVerificationMode: 'manual-review' | 'provider'
+  moderationConfigured: boolean
+}
+
+export interface MarketplaceCreatorAnalyticsPoint {
+  day: string
+  views: number
+  downloads: number
+  installs: number
+  sales: number
+  revenueMinor: Record<string, number>
+}
+
+export interface MarketplaceCreatorProductAnalytics {
+  productId: string
+  name: string
+  views: number
+  downloads: number
+  installs: number
+  activeInstallations: number
+  sales: number
+  installConversionRate: number
+  revenueMinor: Record<string, number>
+}
+
+export interface MarketplaceCreatorAnalytics {
+  schemaVersion: 1
+  generatedAt: number
+  periodDays: number
+  totals: Omit<MarketplaceCreatorProductAnalytics, 'productId' | 'name'>
+  series: MarketplaceCreatorAnalyticsPoint[]
+  products: MarketplaceCreatorProductAnalytics[]
+}
+
+export interface MarketplaceCreatorPublication {
+  id: string
+  name: string
+  versions: Array<Pick<PluginCatalogVersion,
+    'version' | 'status' | 'submittedAt' | 'publishedAt' | 'moderationNote' | 'visibility'>>
+}
+
 async function catalogRequest<T>(path: string, init?: RequestInit, accountRequired = false): Promise<T> {
   const session = getAccountSession()
   if (accountRequired && !session) throw new AccountApiError('invalid-account-session', 401)
@@ -128,6 +175,10 @@ export async function loadPluginCatalog(input: {
     `/plugins/catalog${params.size ? `?${params.toString()}` : ''}`,
   )
   return Array.isArray(response.plugins) ? response.plugins : []
+}
+
+export async function loadMarketplaceCapabilities(): Promise<MarketplaceCapabilities> {
+  return catalogRequest('/marketplace/capabilities', { method: 'GET' })
 }
 
 export async function loadPluginCatalogEntry(pluginId: string): Promise<PluginCatalogEntry> {
@@ -375,6 +426,38 @@ export async function loadMarketplaceCreatorLedger(): Promise<{
   return catalogRequest(
     '/marketplace/creators/me/ledger',
     { method: 'GET' },
+    true,
+  )
+}
+
+export async function loadMarketplaceCreatorAnalytics(
+  periodDays = 30,
+): Promise<MarketplaceCreatorAnalytics> {
+  const days = Math.max(7, Math.min(365, Math.round(periodDays)))
+  return catalogRequest(
+    `/marketplace/creators/me/analytics?days=${days}`,
+    { method: 'GET' },
+    true,
+  )
+}
+
+export async function loadMarketplaceCreatorPublications(): Promise<MarketplaceCreatorPublication[]> {
+  const response = await catalogRequest<{ publications: MarketplaceCreatorPublication[] }>(
+    '/marketplace/creators/me/publications',
+    { method: 'GET' },
+    true,
+  )
+  return Array.isArray(response.publications) ? response.publications : []
+}
+
+export async function recordMarketplaceInstallation(input: {
+  productId: string
+  version: string
+  active: boolean
+}): Promise<void> {
+  await catalogRequest(
+    `/plugins/catalog/${encodeURIComponent(input.productId)}/versions/${encodeURIComponent(input.version)}/installation`,
+    { method: 'POST', body: JSON.stringify({ active: input.active }) },
     true,
   )
 }

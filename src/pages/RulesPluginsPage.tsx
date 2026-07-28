@@ -9,6 +9,11 @@ import { SharedSyncDiagnosticsPanel } from '../components/SharedSyncStatus'
 import Dnd5eCustomPluginBuilder from '../components/rules/Dnd5eCustomPluginBuilder'
 import {
   activeDnd5eRulesPluginRequirements,
+  compileDnd5eLocalContentCollection,
+  dnd5eRoomRuntimeProjectionBytesV2,
+  roomActiveDnd5eRulesPluginRequirements,
+  type Dnd5eContentAutomationCoverageReportV2,
+  type Dnd5eLocalContentCollectionAudit,
   type InstalledDnd5eRulesPlugin,
   type Dnd5eRulesPluginManifest,
 } from '../rulesets/dnd5e'
@@ -37,6 +42,7 @@ import {
 export default function RulesPluginsPage() {
   const { campaignId } = useParams()
   const fileRef = useRef<HTMLInputElement>(null)
+  const collectionRef = useRef<HTMLInputElement>(null)
   const [roomSession] = useState(() => getRoomSession())
   const roomRules = useSyncExternalStore(
     subscribeRoomRules,
@@ -53,6 +59,10 @@ export default function RulesPluginsPage() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [automationCoverage, setAutomationCoverage] =
+    useState<Dnd5eContentAutomationCoverageReportV2 | null>(null)
+  const [collectionAudit, setCollectionAudit] =
+    useState<Dnd5eLocalContentCollectionAudit | null>(null)
   const [settingsSection, setSettingsSection] = useState<'plugins' | 'room' | 'diagnostics'>('plugins')
   const installed = host?.listInstalled() ?? []
   const activeById = new Map((host?.listActive() ?? []).map((plugin) => [plugin.id, plugin]))
@@ -63,7 +73,7 @@ export default function RulesPluginsPage() {
 
   const reportLocalRules = async () => {
     if (!roomSession) return
-    let next = await heartbeatRoom(roomSession, activeDnd5eRulesPluginRequirements())
+    let next = await heartbeatRoom(roomSession, roomActiveDnd5eRulesPluginRequirements())
     if (!next.member.ready) next = (await synchronizeRoomPlugins(roomSession, next)).rules
     setRoomRulesSnapshot(next)
   }
@@ -101,8 +111,51 @@ export default function RulesPluginsPage() {
     setNotice(null)
     setError(null)
     try {
+      const inspected = await host.inspectFile(file)
+      setAutomationCoverage(inspected.automationCoverage ?? null)
+      if (inspected.contentSummary) {
+        const summary = inspected.contentSummary
+        const coverage = inspected.automationCoverage
+        const accepted = window.confirm([
+          `安装内容包：${inspected.manifest.name} v${inspected.manifest.version}`,
+          `来源：${inspected.provenance?.sourceTitle ?? inspected.manifest.publisher}`,
+          `许可：${inspected.manifest.license}`,
+          `分发策略：${inspected.manifest.distributionPolicy ?? '未声明'}`,
+          `内容：种族 ${summary.races}、背景 ${summary.backgrounds}、特性 ${summary.features}、专长 ${summary.feats}、法术 ${summary.spells}、物品 ${summary.items}、子职 ${summary.subclasses}、怪物 ${summary.monsters}、图标 ${summary.imageAssets}`,
+          ...(coverage ? [
+            `自动化：完整 ${coverage.totals.full}、部分 ${coverage.totals.partial}、手动 ${coverage.totals.manual}、仅资料 ${coverage.totals.referenceOnly}`,
+          ] : []),
+        ].join('\n'))
+        if (!accepted) return
+      }
       if (roomSession?.role === 'dm') {
-        const inspected = await host.inspectFile(file)
+        if (!['room-distributable', 'room-ephemeral'].includes(
+          inspected.manifest.distributionPolicy ?? '',
+        )) {
+          throw new Error('当前位于联网房间；内容包必须明确声明 room-distributable 或 room-ephemeral。')
+        }
+        if (inspected.manifest.distributionPolicy === 'room-ephemeral') {
+          const runtimeBytes = dnd5eRoomRuntimeProjectionBytesV2(inspected.bytes)
+          const runtimeFile = new File(
+            [new Uint8Array(runtimeBytes)],
+            inspected.fileName,
+            { type: 'application/json' },
+          )
+          const runtime = await host.inspectFile(runtimeFile)
+          const next = await activateRoomPlugin(runtime)
+          await host.installEphemeralBytes({
+            id: runtime.manifest.id,
+            version: runtime.manifest.version,
+            fileName: runtime.fileName,
+            integrity: runtime.integrity,
+            bytes: runtime.bytes,
+          })
+          refresh()
+          setRoomRulesSnapshot(next)
+          await reportLocalRules()
+          setNotice(`已临时导入 ${runtime.manifest.id}；原始 JSON/CSV、提示词和规则正文未传输，关闭房间后需重新导入。`)
+          return
+        }
         const next = await activateRoomPlugin(inspected)
         await host.installBytes({
           id: inspected.manifest.id,
@@ -116,11 +169,55 @@ export default function RulesPluginsPage() {
         await reportLocalRules()
         setNotice(`已原子激活 ${inspected.manifest.id}；房间玩家将自动下载并激活。`)
       } else {
-        const descriptor = await host.installFile(file)
+        if (inspected.manifest.distributionPolicy === 'room-ephemeral') {
+          throw new Error('room-ephemeral 合集只能由 DM 在已连接的房间内临时导入。')
+        }
+        const descriptor = await host.installBytes({
+          id: inspected.manifest.id,
+          version: inspected.manifest.version,
+          fileName: inspected.fileName,
+          integrity: inspected.integrity,
+          bytes: inspected.bytes,
+        })
         refresh()
         await reportLocalRules()
-        setNotice(`已安装 ${descriptor.id}。`)
+        setNotice(inspected.manifest.distributionPolicy === 'local-only'
+          ? `已仅在当前设备安装 ${descriptor.id}；不会上传到账号云库、房间或市场。`
+          : `已安装 ${descriptor.id}。`)
       }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const installLocalCollection = async (files: readonly File[]) => {
+    setBusy(true)
+    setNotice(null)
+    setError(null)
+    try {
+      if (!roomSession || roomSession.role !== 'dm') {
+        throw new Error('本地合集只能由 DM 导入当前房间')
+      }
+      const compiled = await compileDnd5eLocalContentCollection(files)
+      setCollectionAudit(compiled.audit)
+      if (!compiled.audit.complete) {
+        const accepted = window.confirm([
+          '本地合集缺口审计未通过，仍要临时导入吗？',
+          `条目：${compiled.audit.totals.entries}`,
+          `数量缺口：${compiled.audit.totals.countShortfall}`,
+          `缺失稳定 ID：${compiled.audit.totals.missingIds}`,
+          `缺失图片：${compiled.audit.totals.missingImages}`,
+        ].join('\n'))
+        if (!accepted) return
+      }
+      const file = new File(
+        [new Uint8Array(compiled.bytes)],
+        compiled.fileName,
+        { type: 'application/json' },
+      )
+      await installFile(file)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -197,6 +294,34 @@ export default function RulesPluginsPage() {
     }
   }
 
+  const downloadAutomationCoverage = () => {
+    if (!automationCoverage) return
+    const bytes = new TextEncoder().encode(`${JSON.stringify(automationCoverage, null, 2)}\n`)
+    const blob = new Blob([bytes], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${automationCoverage.package.id}-${automationCoverage.package.version}-automation-coverage.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadCollectionAudit = () => {
+    if (!collectionAudit) return
+    const bytes = new TextEncoder().encode(`${JSON.stringify(collectionAudit, null, 2)}\n`)
+    const blob = new Blob([bytes], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${collectionAudit.package.id}-${collectionAudit.package.version}-collection-audit.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
@@ -209,14 +334,31 @@ export default function RulesPluginsPage() {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".dndstars5e,.mjs,.js,text/javascript,application/javascript"
+                  accept=".dndstars5e,.json,.mjs,.js,application/json,text/javascript,application/javascript"
                   className="hidden"
                   onChange={(event) => {
                     const file = event.currentTarget.files?.[0]
-                    if (file) void installFile(file)
+                    if (file) {
+                      setCollectionAudit(null)
+                      void installFile(file)
+                    }
                     event.currentTarget.value = ''
                   }}
                 />
+                {roomSession?.role === 'dm' && (
+                  <input
+                    ref={collectionRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+                    onChange={(event) => {
+                      const files = [...(event.currentTarget.files ?? [])]
+                      if (files.length > 0) void installLocalCollection(files)
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                )}
                 <button
                   type="button"
                   disabled={busy || !host}
@@ -226,6 +368,17 @@ export default function RulesPluginsPage() {
                   <Upload className="h-4 w-4" />
                   {busy ? '正在处理…' : roomSession?.role === 'dm' ? '上传房间规则包' : '安装本地插件'}
                 </button>
+                {roomSession?.role === 'dm' && (
+                  <button
+                    type="button"
+                    disabled={busy || !host}
+                    onClick={() => collectionRef.current?.click()}
+                    className="flex items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/8 px-4 py-2.5 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" />
+                    导入房间临时合集
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -280,6 +433,36 @@ export default function RulesPluginsPage() {
           <a href={DND5E_SRD_5_1_LICENSE_URL} target="_blank" rel="noreferrer" className="text-violet-300 hover:text-violet-200">查看 CC BY 4.0 许可证</a>
         </div>
       </section>
+      <section className="mb-5 rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.04] p-5">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-300" />
+          <div>
+            <h2 className="font-semibold text-cyan-100">设备本地私有导入</h2>
+            <p className="mt-1 text-sm leading-6 text-cyan-100/65">
+              将清单的 <code>distributionPolicy</code> 设为 <code>local-only</code> 后，包字节只写入当前浏览器的
+              IndexedDB。客户端与服务器都会拒绝账号云库、房间托管和市场发布；房间心跳也不会发送该包的
+              ID、版本或 SHA-256；存在联网房间会话时也不会激活本地私有包。请勿在包外手动上传或分享原文、
+              扫描页与官方美术。
+            </p>
+          </div>
+        </div>
+      </section>
+      {roomSession?.role === 'dm' && (
+        <section className="mb-5 rounded-2xl border border-amber-400/20 bg-amber-500/[0.04] p-5">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+            <div>
+              <h2 className="font-semibold text-amber-100">单房间临时 JSON/CSV 合集</h2>
+              <p className="mt-1 text-sm leading-6 text-amber-100/65">
+                选择含 <code>collection.json</code> 的本地目录后，浏览器会合并 JSON、CSV 和你提供的
+                PNG/JPEG/WebP 图片。原始合集、AI 提示词和模型记录不会上传；发送给房间的 V2 运行包只保留名称、
+                结构化结算字段和图片，长篇规则正文会被统一占位文本替换。包只驻留客户端内存并由当前房间临时托管，
+                DM 关闭房间后服务端删除文件，下次开房必须重新选择合集。
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
       {roomSession && (
         <section
           data-testid="room-rules-status"
@@ -380,6 +563,59 @@ export default function RulesPluginsPage() {
           {notice}
         </div>
       )}
+      {automationCoverage && (
+        <section className="mb-4 rounded-xl border border-sky-400/20 bg-sky-500/[0.05] px-4 py-3 text-sm text-sky-100">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold">本地自动化覆盖报告</p>
+              <p className="mt-1 text-xs leading-5 text-sky-100/65">
+                完整 {automationCoverage.totals.full} · 部分 {automationCoverage.totals.partial} ·
+                手动 {automationCoverage.totals.manual} · 仅资料 {automationCoverage.totals.referenceOnly}。
+                报告仅含计数、稳定 ID 和平台兼容性说明，不含规则原文、内容名称或图片数据。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={downloadAutomationCoverage}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-sky-300/20 bg-sky-400/8 px-3 py-2 text-xs font-semibold text-sky-100"
+            >
+              <Download className="h-4 w-4" />
+              下载报告
+            </button>
+          </div>
+        </section>
+      )}
+      {collectionAudit && (
+        <section className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+          collectionAudit.complete
+            ? 'border-emerald-400/20 bg-emerald-500/[0.05] text-emerald-100'
+            : 'border-amber-400/20 bg-amber-500/[0.05] text-amber-100'
+        }`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold">
+                本地合集缺口审计：{collectionAudit.complete ? '完整' : '存在缺口'}
+              </p>
+              <p className="mt-1 text-xs leading-5 opacity-65">
+                实际条目 {collectionAudit.totals.entries} ·
+                预期条目 {collectionAudit.totals.expectedEntries} ·
+                数量缺口 {collectionAudit.totals.countShortfall} ·
+                缺失 ID {collectionAudit.totals.missingIds} ·
+                缺失图片 {collectionAudit.totals.missingImages}。
+                报告不含正文、内容名称、图片数据或 AI 提示词。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={downloadCollectionAudit}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-current/20 bg-black/10 px-3 py-2 text-xs font-semibold"
+            >
+              <Download className="h-4 w-4" />
+              下载缺口报告
+            </button>
+          </div>
+        </section>
+      )}
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-sm text-rose-100">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -418,19 +654,35 @@ export default function RulesPluginsPage() {
                         {active ? `已启用 · v${active.version}` : '加载失败'}
                       </span>
                       <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
-                        {plugin.source === 'file' ? '本地文件' : '固定 URL'}
+                        {plugin.source === 'file'
+                          ? '本地文件'
+                          : plugin.source === 'ephemeral'
+                            ? '房间临时内存'
+                            : '固定 URL'}
                       </span>
+                      {active?.distributionPolicy === 'local-only' && (
+                        <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-200">
+                          仅此设备
+                        </span>
+                      )}
+                      {active?.distributionPolicy === 'room-ephemeral' && (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
+                          关闭房间即失效
+                        </span>
+                      )}
                     </div>
                     <p className="mt-1 break-all font-mono text-xs text-slate-500">{plugin.id}</p>
                     {active?.description && <p className="mt-3 text-sm leading-6 text-slate-400">{active.description}</p>}
                     <dl className="mt-3 grid gap-x-6 gap-y-1 text-xs text-slate-500 sm:grid-cols-2">
-                      <div><dt className="inline text-slate-600">来源：</dt><dd className="inline">{plugin.source === 'file' ? plugin.fileName : plugin.moduleUrl}</dd></div>
+                      <div><dt className="inline text-slate-600">来源：</dt><dd className="inline">{
+                        plugin.source === 'url' ? plugin.moduleUrl : plugin.fileName
+                      }</dd></div>
                       <div><dt className="inline text-slate-600">许可：</dt><dd className="inline">{active?.license ?? '等待插件加载'}</dd></div>
                       <div className="sm:col-span-2"><dt className="inline text-slate-600">SHA-256：</dt><dd className="break-all font-mono text-[11px]">{plugin.integrity}</dd></div>
                     </dl>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {roomSession?.role !== 'player' && (
+                    {roomSession?.role !== 'player' && plugin.source !== 'ephemeral' && (
                       <button
                         type="button"
                         disabled={busy}
@@ -441,7 +693,7 @@ export default function RulesPluginsPage() {
                         导出文件
                       </button>
                     )}
-                    {roomSession?.role === 'dm' && !hosted && (
+                    {roomSession?.role === 'dm' && !hosted && active?.distributionPolicy === 'room-distributable' && (
                       <button
                         type="button"
                         disabled={busy || !active}

@@ -9,7 +9,9 @@ import { accountApiErrorMessage } from '../../lib/accountApi'
 import {
   loadMarketplaceCreatorLedger,
   loadMarketplaceCreatorPayouts,
+  loadMarketplaceCapabilities,
   requestMarketplaceCreatorPayout,
+  type MarketplaceCapabilities,
 } from '../../lib/pluginCatalogApi'
 
 function money(amountMinor: number, currency: string) {
@@ -44,19 +46,22 @@ export default function CreatorEarningsPanel() {
   const [requestingPayout, setRequestingPayout] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [capabilities, setCapabilities] = useState<MarketplaceCapabilities | null>(null)
 
   useEffect(() => {
     let active = true
     void Promise.all([
       loadMarketplaceCreatorLedger(),
       loadMarketplaceCreatorPayouts(),
+      loadMarketplaceCapabilities(),
     ])
-      .then(([result, payoutRecords]) => {
+      .then(([result, payoutRecords, marketCapabilities]) => {
         if (!active) return
         setBalances(result.balances)
         setEntries(result.entries)
         setHoldDays(result.settlementHoldDays)
         setPayouts(payoutRecords)
+        setCapabilities(marketCapabilities)
       })
       .catch((cause) => {
         if (active) setError(accountApiErrorMessage(cause))
@@ -117,8 +122,14 @@ export default function CreatorEarningsPanel() {
       </div>
       <div className="mt-5 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
         <h3 className="font-semibold text-slate-100">申请提现</h3>
-        <p className="mt-1 text-xs text-slate-500">人民币最低 ¥100，美元最低 $20；提交后立即预占可结算余额。</p>
-        <div className="mt-3 flex flex-wrap gap-2">
+        {capabilities?.marketMode === 'free-beta' ? (
+          <p className="mt-2 rounded-xl border border-cyan-400/15 bg-cyan-500/[0.04] px-3 py-3 text-xs leading-5 text-cyan-100/70">
+            免费扩展市场 Beta 不产生真实销售收入，因此提现暂未开放。
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-xs text-slate-500">人民币最低 ¥100，美元最低 $20；提交后立即预占可结算余额。</p>
+            <div className="mt-3 flex flex-wrap gap-2">
           <select
             value={payoutCurrency}
             onChange={(event) => setPayoutCurrency(event.target.value as 'CNY' | 'USD')}
@@ -147,7 +158,9 @@ export default function CreatorEarningsPanel() {
               : <Send className="h-4 w-4" />}
             提交申请
           </button>
-        </div>
+            </div>
+          </>
+        )}
         {payouts.length > 0 && (
           <div className="mt-4 space-y-2">
             {payouts.slice(0, 20).map((payout) => (

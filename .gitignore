@@ -19,6 +19,7 @@ playwright-report
 test-results
 backups/
 tmp/
+local-content/
 __pycache__/
 *.pyc
 *.local

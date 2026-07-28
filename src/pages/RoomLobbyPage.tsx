@@ -37,7 +37,7 @@ import {
   saveRoomSession,
 } from '../lib/roomSession'
 import { setRoomRulesSnapshot } from '../lib/roomRulesState'
-import { activeDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
+import { roomActiveDnd5eRulesPluginRequirements } from '../rulesets/dnd5e/pluginApi'
 import {
   clearLocalRoomCampaignCache,
   requestedRoomLobbyMode,
@@ -162,7 +162,7 @@ export default function RoomLobbyPage({
         setBusy(false)
         return
       }
-      const activePlugins = activeDnd5eRulesPluginRequirements()
+      const activePlugins = roomActiveDnd5eRulesPluginRequirements()
       const connection = mode === 'create'
         ? await launchCampaignRoom({
             campaignId: selectedCampaignId,
