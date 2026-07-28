@@ -6481,7 +6481,7 @@ function applyDnd5eBattleMasterAfterHit(input: {
       distance! < 0 ||
       distance! > Math.floor(dnd5eEffectiveSpeed(ally) / 2) ||
       dnd5eReactionsPrevented(ally) ||
-      !spend(ally, 'reaction')
+      !spendReaction(ally, input.events)
     ) return false
     const from = { ...ally.position }
     ally.position = { ...payload.destination }
@@ -6776,7 +6776,10 @@ function resolveWeaponAttack(state: Dnd5eHeadlessCombatState, action: Extract<Dn
   const shouldSpendResource = action.type === 'opportunity-attack' || action.spendBonusAction === true || action.spendAction !== false
   if (shouldSpendResource) {
     if (resource === 'reaction' && dnd5eReactionsPrevented(actor)) return fail(state, events, 'reaction-unavailable')
-    if (!spend(actor, resource)) return fail(state, events, resource === 'reaction' ? 'reaction-unavailable' : resource === 'bonusAction' ? 'bonus-action-unavailable' : 'action-unavailable')
+    const spentResource = resource === 'reaction'
+      ? spendReaction(actor, events)
+      : spend(actor, resource)
+    if (!spentResource) return fail(state, events, resource === 'reaction' ? 'reaction-unavailable' : resource === 'bonusAction' ? 'bonus-action-unavailable' : 'action-unavailable')
     events.push({ type: 'turn-resource-spent', actorId: actor.id, resource })
   }
   endTranquilityForHostileAction(actor, events, 'makes-attack')
@@ -10409,7 +10412,7 @@ function resolveDnd5ePendingMonsterMechanicTrigger(
         return fail(state, events, 'invalid-target')
       }
       if ((effect.economy ?? 'none') === 'reaction') {
-        if (!spend(owner, 'reaction')) return fail(state, events, 'reaction-unavailable')
+        if (!spendReaction(owner, events)) return fail(state, events, 'reaction-unavailable')
         events.push({ type: 'turn-resource-spent', actorId: owner.id, resource: 'reaction' })
       }
       const critical = supplied.d20 === 20
@@ -16702,7 +16705,7 @@ function resolveDnd5eHeadlessActionInternal(
   }
   if (action.type === 'trigger-readied-action') {
     const readied = actor.classState.readiedAction
-    if (!readied || dnd5eReactionsPrevented(actor) || !spend(actor, 'reaction')) {
+    if (!readied || dnd5eReactionsPrevented(actor) || !spendReaction(actor, events)) {
       return fail(state, events, 'reaction-unavailable')
     }
     actor.classState.readiedAction = undefined

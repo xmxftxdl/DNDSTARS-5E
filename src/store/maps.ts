@@ -8,6 +8,7 @@ import {
 } from '../lib/gridCombat'
 import { applyGridDetectPatch, type GridDetectResult } from '../lib/gridDetect'
 import {
+  assignEnemyVisualVariants,
   enemyTemplateToTokenPatch,
   getEnemyVisualPresentation,
   type EnemyTemplate,
@@ -436,6 +437,9 @@ export interface Token {
     /** 权威状态实例；由 DM/Headless 写入并通过房间资源同步。 */
     activeEffects?: Dnd5eActiveEffectInstance[]
     caltropsSpeedPenaltyFeet?: number
+    /** Stable per-turn attack count used by effects such as Slowing Breath. */
+    attacksMadeTurnKey?: string
+    attacksMadeThisTurn?: number
     temporaryHp?: number
     undeadFortitudePending?: { dc: number; damage: number; sourceId?: string }
     monsterOnHitSavePending?: {
@@ -451,6 +455,12 @@ export interface Token {
     bardicInspirationDie?: number
     bardicInspirationSourceId?: string
     bardicInspirationRoundsRemaining?: number
+    /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
+    turnStartResolvedTurnKey?: string
+    /** Reckless is active until this creature's next authoritative turn start. */
+    recklessAttackTurnKey?: string
+    monsterReactiveAvailableTurnKey?: string
+    monsterReactiveUsedTurnKey?: string
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
     countercharmRoundsRemaining?: number
@@ -1313,7 +1323,10 @@ export const useMapStore = create<MapState>()(
       addEncounterFromPool: (mapId, entries) => {
         const map = get().maps.find((candidate) => candidate.id === mapId)
         if (!map) return []
-        const roster = dnd5eEncounterRoster(entries)
+        const roster = assignEnemyVisualVariants(
+          dnd5eEncounterRoster(entries),
+          map.tokens,
+        )
         if (roster.length === 0) return []
         const tokens = roster.map((template, index): Token => {
           const patch = enemyTemplateToTokenPatch(template)

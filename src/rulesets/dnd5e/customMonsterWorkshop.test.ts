@@ -636,6 +636,7 @@ describe('D&D 5e custom monster workshop', () => {
       triggerRadiusFeet: 30,
       effectKind: 'attack',
       effectTarget: 'selected-subject',
+      attackMode: 'ranged',
       attackToHit: 13,
       healingDice: '5d6+12',
       damageType: 'piercing',
@@ -647,12 +648,14 @@ describe('D&D 5e custom monster workshop', () => {
       effects: [{
         kind: 'attack',
         target: 'selected-subject',
+        attackMode: 'ranged',
         toHit: 13,
         damage: { average: 29, count: 5, sides: 6, bonus: 12, type: 'piercing' },
       }],
     })
     expect(dnd5eCustomMonsterDraftFromStatBlock(monster).headlessMechanics[0]).toMatchObject({
       effectKind: 'attack',
+      attackMode: 'ranged',
       attackToHit: 13,
       healingDice: '5d6+12',
       damageType: 'piercing',

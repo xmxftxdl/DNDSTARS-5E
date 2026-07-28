@@ -70,6 +70,9 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
     setNote: setDmAdjudicationNote,
     onDecision: handleSharedDmAdjudicationChoice,
   } = props
+  const contextKind = sharedDmAdjudicationPrompt?.payload.contextKind
+  const isBasicActionAdjudication = contextKind === 'basic-action'
+  const supportsDirectEffects = contextKind !== 'map-interaction' && !isBasicActionAdjudication
 
   return (
     <>
@@ -90,6 +93,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                       ? '区域触发中断'
                       : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                         ? '地图交互中断'
+                        : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
+                          ? '其他行动裁定'
                         : 'DM 裁定'} · {sharedDmAdjudicationPrompt.payload.spellName}
                   </h3>
                   <p className="mt-1 text-xs text-slate-400">
@@ -97,6 +102,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                       ? ({ 'on-create': '首次创建', 'on-enter': '进入区域', 'on-move-distance': '区域内移动', 'on-area-move-impact': '区域移动撞击', 'turn-start': '回合开始', 'turn-end': '回合结束' } as const)[sharedDmAdjudicationPrompt.payload.triggerTiming ?? 'on-enter']
                       : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                         ? 'DM 权威地图事务'
+                        : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
+                          ? <>玩家声明 · {sharedDmAdjudicationPrompt.payload.castingTime === 'bonus-action' ? '附赠动作' : '动作'}</>
                       : <>{
                       sharedDmAdjudicationPrompt.payload.spellLevel === 0
                         ? '戏法'
@@ -105,7 +112,9 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                   </p>
                 </div>
                 <span className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-100">
-                  未批准前：不消费资源
+                  {isBasicActionAdjudication
+                    ? `已经消耗${sharedDmAdjudicationPrompt.payload.castingTime === 'bonus-action' ? '附赠动作' : '动作'}`
+                    : '未批准前：不消费资源'}
                 </span>
               </div>
             </div>
@@ -121,7 +130,9 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                   <div className="rounded-xl border border-sky-400/15 bg-sky-500/[0.04] p-3 text-xs leading-5 text-sky-100/75">
                     {sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                       ? '批准后由 DM Host 使用当前角色与地图快照掷骰和结算。可调整 DC 或直接指定成功／失败；事务完成前玩家无法重复提交。'
-                      : '数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。'}
+                      : isBasicActionAdjudication
+                        ? '该行动的动作或附赠动作已由 Host 权威扣除。请根据玩家声明确认是否允许，并在备注中记录检定、DC、结果或后续效果；无论批准或驳回，都不会返还行动资源。'
+                        : '数值应填写完成命中、豁免、抗性、易伤等裁定后的最终值。玩家请求中不含效果；下列内容由 DM 提交后才进入 Headless。'}
                   </div>
                   {sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction' && (
                     <div className="grid gap-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 sm:grid-cols-2">
@@ -166,7 +177,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                       </select>
                     </label>
                   )}
-                  {sharedDmAdjudicationPrompt.payload.contextKind !== 'map-interaction' && dmAdjudicationEffects.map((effect, index) => (
+                  {supportsDirectEffects && dmAdjudicationEffects.map((effect, index) => (
                     <div key={effect.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <h4 className="text-xs font-semibold text-slate-300">效果 {index + 1}</h4>
@@ -253,7 +264,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                       </div>
                     </div>
                   ))}
-                  {sharedDmAdjudicationPrompt.payload.contextKind !== 'map-interaction' && <button
+                  {supportsDirectEffects && <button
                     type="button"
                     onClick={() => setDmAdjudicationEffects((current) => [...current, newDmAdjudicationEffectDraft()])}
                     className="w-full rounded-lg border border-dashed border-amber-400/25 bg-amber-500/[0.04] px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-500/10"
@@ -299,6 +310,8 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                   ? '跳过本次触发'
                   : sharedDmAdjudicationPrompt.payload.contextKind === 'map-interaction'
                     ? '拒绝交互'
+                    : sharedDmAdjudicationPrompt.payload.contextKind === 'basic-action'
+                      ? '驳回裁定（不返还）'
                     : '取消施法（不消费）'}
               </button>
               <button
@@ -312,7 +325,7 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
                 onClick={() => void handleSharedDmAdjudicationChoice(true)}
                 className="rounded-lg bg-amber-500/25 px-4 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-500/35 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                批准并提交 Headless 事务
+                {isBasicActionAdjudication ? '确认裁定' : '批准并提交 Headless 事务'}
               </button>
             </div>
           </div>
@@ -322,4 +335,3 @@ export default function DmAdjudicationPanel(props: DmAdjudicationPanelProps) {
     </>
   )
 }
-

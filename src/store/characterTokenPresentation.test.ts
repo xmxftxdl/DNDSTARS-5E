@@ -1894,6 +1894,302 @@ describe('character token presentation', () => {
         tokenPortrait: '/assets/portraits/owl-moonlit-roadside-watch-token.png',
       })
     }
+    for (const poolId of ['srd-5.1:owlbear', 'owlbear']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/owlbear-storm-forest-charge-initiative.png',
+        tokenPortrait: '/assets/portraits/owlbear-storm-forest-charge-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:panther', 'panther']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/panther-sunlit-jungle-pounce-initiative.png',
+        tokenPortrait: '/assets/portraits/panther-sunlit-jungle-pounce-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:pegasus', 'pegasus']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/pegasus-alpine-sunrise-flight-initiative.png',
+        tokenPortrait: '/assets/portraits/pegasus-alpine-sunrise-flight-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:phase-spider', 'phase-spider']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/phase-spider-moonlit-library-jaunt-initiative.png',
+        tokenPortrait: '/assets/portraits/phase-spider-moonlit-library-jaunt-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:pit-fiend', 'pit-fiend']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/pit-fiend-infernal-throne-mace-initiative.png',
+        tokenPortrait: '/assets/portraits/pit-fiend-infernal-throne-mace-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:planetar', 'planetar']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/planetar-sky-temple-greatsword-initiative.png',
+        tokenPortrait: '/assets/portraits/planetar-sky-temple-greatsword-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:plesiosaurus', 'plesiosaurus']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/plesiosaurus-arctic-longship-hunt-initiative.png',
+        tokenPortrait: '/assets/portraits/plesiosaurus-arctic-longship-hunt-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:poisonous-snake', 'poisonous-snake']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/poisonous-snake-rainforest-branch-strike-initiative.png',
+        tokenPortrait: '/assets/portraits/poisonous-snake-rainforest-branch-strike-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:polar-bear', 'polar-bear']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/polar-bear-blizzard-ice-charge-initiative.png',
+        tokenPortrait: '/assets/portraits/polar-bear-blizzard-ice-charge-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:pony', 'pony']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/pony-highland-pack-trail-initiative.png',
+        tokenPortrait: '/assets/portraits/pony-highland-pack-trail-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:priest', 'priest']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/priest-ruined-chapel-holy-book-initiative.png',
+        tokenPortrait: '/assets/portraits/priest-ruined-chapel-holy-book-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:pseudodragon', 'pseudodragon']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/pseudodragon-candlelit-study-telepathy-initiative.png',
+        tokenPortrait: '/assets/portraits/pseudodragon-candlelit-study-telepathy-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:purple-worm', 'purple-worm']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/purple-worm-desert-canyon-eruption-initiative.png',
+        tokenPortrait: '/assets/portraits/purple-worm-desert-canyon-eruption-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:quasit', 'quasit']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/quasit-candlelit-crypt-scare-initiative.png',
+        tokenPortrait: '/assets/portraits/quasit-candlelit-crypt-scare-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:quipper', 'quipper']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/quipper-jungle-river-bite-initiative.png',
+        tokenPortrait: '/assets/portraits/quipper-jungle-river-bite-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:rakshasa', 'rakshasa']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/rakshasa-moonlit-palace-illusion-initiative.png',
+        tokenPortrait: '/assets/portraits/rakshasa-moonlit-palace-illusion-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:rat', 'rat']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/rat-candlelit-pantry-scent-initiative.png',
+        tokenPortrait: '/assets/portraits/rat-candlelit-pantry-scent-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:raven', 'raven']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/raven-moonlit-belltower-mimicry-initiative.png',
+        tokenPortrait: '/assets/portraits/raven-moonlit-belltower-mimicry-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:red-dragon-wyrmling', 'red-dragon-wyrmling']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/red-dragon-wyrmling-volcanic-ravine-glide-initiative.png',
+        tokenPortrait: '/assets/portraits/red-dragon-wyrmling-volcanic-ravine-glide-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:reef-shark', 'reef-shark']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/reef-shark-sunlit-coral-canyon-initiative.png',
+        tokenPortrait: '/assets/portraits/reef-shark-sunlit-coral-canyon-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:remorhaz', 'remorhaz']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/remorhaz-glacier-pass-eruption-initiative.png',
+        tokenPortrait: '/assets/portraits/remorhaz-glacier-pass-eruption-token.png',
+      })
+    }
+    for (const [slug, asset] of [
+      ['rhinoceros', 'rhinoceros-savanna-charge'],
+      ['riding-horse', 'riding-horse-highland-road-trot'],
+      ['roc', 'roc-storm-peak-flight'],
+      ['roper', 'roper-limestone-cavern-reveal'],
+      ['rug-of-smothering', 'rug-of-smothering-palace-corridor-spring'],
+      ['rust-monster', 'rust-monster-dwarven-forge-corrosion'],
+      ['saber-toothed-tiger', 'saber-toothed-tiger-alpine-pounce'],
+      ['sahuagin', 'sahuagin-sunken-coral-temple-spear'],
+      ['salamander', 'salamander-obsidian-foundry-spear'],
+      ['satyr', 'satyr-autumn-woodland-archer'],
+      ['scorpion', 'scorpion-desert-ruins-sting'],
+      ['scout', 'scout-highland-longbow'],
+      ['sea-hag', 'sea-hag-moonlit-shipwreck-claws'],
+      ['sea-horse', 'sea-horse-sunlit-coral-cling'],
+      ['shadow', 'shadow-candlelit-crypt-drain'],
+      ['shambling-mound', 'shambling-mound-storm-swamp-lightning'],
+      ['shield-guardian', 'shield-guardian-storm-castle-defense'],
+      ['shrieker', 'shrieker-violet-underdark-alarm'],
+      ['silver-dragon-wyrmling', 'silver-dragon-wyrmling-alpine-sunrise-flight'],
+      ['solar', 'solar-celestial-citadel-longbow'],
+      ['specter', 'specter-flooded-manor-life-drain'],
+      ['spider', 'spider-attic-web-sense'],
+      ['spirit-naga', 'spirit-naga-jungle-temple-lightning'],
+      ['sprite', 'sprite-autumn-garden-shortbow'],
+      ['spy', 'spy-palace-coded-letter'],
+      ['steam-mephit', 'steam-mephit-hot-springs-breath'],
+      ['stirge', 'stirge-dungeon-dive'],
+      ['stone-giant', 'stone-giant-underdark-rock-throw'],
+      ['stone-golem', 'stone-golem-mountain-temple-slam'],
+      ['storm-giant', 'storm-giant-sea-cliff-lightning'],
+      ['succubus-incubus', 'succubus-incubus-infernal-embassy-contract'],
+      ['swarm-of-bats', 'swarm-of-bats-twilight-cave-eruption'],
+      ['swarm-of-beetles', 'swarm-of-beetles-crypt-carrion-tide'],
+      ['swarm-of-centipedes', 'swarm-of-centipedes-monastery-cellar'],
+      ['swarm-of-insects', 'swarm-of-insects-red-sunset-locusts'],
+      ['swarm-of-poisonous-snakes', 'swarm-of-poisonous-snakes-jungle-shrine'],
+      ['swarm-of-quippers', 'swarm-of-quippers-flooded-dungeon-rush'],
+      ['swarm-of-rats', 'swarm-of-rats-city-sewer-surge'],
+      ['swarm-of-ravens', 'swarm-of-ravens-misty-battlefield'],
+      ['swarm-of-spiders', 'swarm-of-spiders-alchemist-laboratory'],
+      ['swarm-of-wasps', 'swarm-of-wasps-forest-chapel'],
+      ['tarrasque', 'tarrasque-capital-plaza-rampage'],
+      ['thug', 'thug-foggy-dock-enforcer'],
+      ['tiger', 'tiger-jungle-pounce'],
+      ['treant', 'treant-hill-fortress-rock-throw'],
+      ['tribal-warrior', 'tribal-warrior-river-village-guard'],
+      ['triceratops', 'triceratops-fern-floodplain-charge'],
+      ['troll', 'troll-moonlit-swamp-bridge'],
+      ['tyrannosaurus-rex', 'tyrannosaurus-rex-storm-rainforest-bite'],
+      ['unicorn', 'unicorn-sunlit-forest-healing-touch'],
+      ['vampire-spawn', 'vampire-spawn-monastery-spider-climb'],
+      ['vampire-bat', 'vampire-bat-bell-tower-flight'],
+      ['vampire-mist', 'vampire-mist-crypt-gate-passage'],
+      ['vampire-vampire', 'vampire-vampire-throne-hall-grapple'],
+      ['veteran', 'veteran-burning-gate-dual-blades'],
+      ['violet-fungus', 'violet-fungus-glowing-grotto-rotting-touch'],
+      ['vrock', 'vrock-abyssal-spore-screech'],
+      ['vulture', 'vulture-desert-canyon-flight'],
+      ['warhorse', 'warhorse-rainy-lists-charge'],
+      ['warhorse-skeleton', 'warhorse-skeleton-moonlit-graveyard-gallop'],
+      ['water-elemental', 'water-elemental-storm-harbor-double-slam'],
+      ['weasel', 'weasel-sunlit-forest-leap'],
+      ['werebear-bear', 'werebear-bear-storm-cliff-climb'],
+      ['werebear-human', 'werebear-human-moonlit-camp-greataxe'],
+      ['werebear-hybrid', 'werebear-hybrid-ruined-inn-claws'],
+      ['wereboar-boar', 'wereboar-boar-autumn-orchard-charge'],
+      ['wereboar-human', 'wereboar-human-rainy-forge-maul'],
+      ['wereboar-hybrid', 'wereboar-hybrid-ruined-village-charge'],
+      ['wererat-human', 'wererat-human-rainy-canal-crossbow'],
+      ['wererat-hybrid', 'wererat-hybrid-green-sewer-crossbow'],
+      ['wererat-rat', 'wererat-rat-moonlit-sewer-leap'],
+      ['weretiger-human', 'weretiger-human-monsoon-temple-longbow'],
+      ['weretiger-hybrid', 'weretiger-hybrid-rainy-temple-pounce'],
+      ['weretiger-tiger', 'weretiger-tiger-jungle-ravine-pounce'],
+      ['werewolf-human', 'werewolf-human-moonlit-road-spear'],
+      ['werewolf-hybrid', 'werewolf-hybrid-moonlit-barn-lunge'],
+      ['werewolf-wolf', 'werewolf-wolf-snowy-forest-sprint'],
+      ['white-dragon-wyrmling', 'white-dragon-wyrmling-glacier-cavern-bite'],
+      ['wight', 'wight-moonlit-barrow-life-drain'],
+      ['will-o-wisp', 'will-o-wisp-moonlit-marsh-lure'],
+      ['winter-wolf', 'winter-wolf-blizzard-pass-charge'],
+      ['worg', 'worg-goblin-camp-chainbreak'],
+      ['wraith', 'wraith-crypt-stair-life-drain'],
+      ['wyvern', 'wyvern-volcanic-sky-bank'],
+      ['xorn', 'xorn-geode-chamber-gem-harvest'],
+      ['young-black-dragon', 'young-black-dragon-moonlit-swamp-prowl'],
+      ['young-blue-dragon', 'young-blue-dragon-sandstorm-ruins-stride'],
+      ['young-brass-dragon', 'young-brass-dragon-sunrise-arches-stride'],
+      ['young-bronze-dragon', 'young-bronze-dragon-dawn-coast-watch'],
+      ['young-copper-dragon', 'young-copper-dragon-autumn-highland-crouch'],
+      ['young-gold-dragon', 'young-gold-dragon-mountain-monastery-watch'],
+      ['young-green-dragon', 'young-green-dragon-rainy-forest-prowl'],
+      ['young-red-dragon', 'young-red-dragon-night-caldera-stand'],
+      ['young-silver-dragon', 'young-silver-dragon-aurora-observatory-watch'],
+      ['young-white-dragon', 'young-white-dragon-glacier-cavern-stalk'],
+    ] as const) {
+      for (const poolId of [`srd-5.1:${slug}`, slug]) {
+        const projected = projectCharacterTokenPresentations([
+          token({ type: 'enemy', characterId: undefined, poolId }),
+        ], [])
+        expect(projected[0]).toMatchObject({
+          portrait: `/assets/portraits/${asset}-initiative.png`,
+          tokenPortrait: `/assets/portraits/${asset}-token.png`,
+        })
+      }
+    }
     for (const poolId of ['srd-5.1:axe-beak', 'axe-beak']) {
       const projected = projectCharacterTokenPresentations([
         token({ type: 'enemy', characterId: undefined, poolId }),
@@ -2878,6 +3174,586 @@ describe('character token presentation', () => {
         poolId: 'srd-5.1:owl',
         visualVariantId: 'snow-barn-flyby',
         asset: 'owl-snow-barn-flyby',
+      },
+      {
+        poolId: 'srd-5.1:owlbear',
+        visualVariantId: 'aurora-ice-cave-guard',
+        asset: 'owlbear-aurora-ice-cave-guard',
+      },
+      {
+        poolId: 'srd-5.1:panther',
+        visualVariantId: 'moonlit-temple-climb',
+        asset: 'panther-moonlit-temple-climb',
+      },
+      {
+        poolId: 'srd-5.1:pegasus',
+        visualVariantId: 'moonlit-sacred-spring',
+        asset: 'pegasus-moonlit-sacred-spring',
+      },
+      {
+        poolId: 'srd-5.1:phase-spider',
+        visualVariantId: 'desert-bridge-phase',
+        asset: 'phase-spider-desert-bridge-phase',
+      },
+      {
+        poolId: 'srd-5.1:pit-fiend',
+        visualVariantId: 'sulfur-plain-tailstrike',
+        asset: 'pit-fiend-sulfur-plain-tailstrike',
+      },
+      {
+        poolId: 'srd-5.1:planetar',
+        visualVariantId: 'twilight-sanctuary-healing',
+        asset: 'planetar-twilight-sanctuary-healing',
+      },
+      {
+        poolId: 'srd-5.1:plesiosaurus',
+        visualVariantId: 'tropical-lagoon-surface',
+        asset: 'plesiosaurus-tropical-lagoon-surface',
+      },
+      {
+        poolId: 'srd-5.1:poisonous-snake',
+        visualVariantId: 'moonlit-marsh-swim',
+        asset: 'poisonous-snake-moonlit-marsh-swim',
+      },
+      {
+        poolId: 'srd-5.1:polar-bear',
+        visualVariantId: 'underice-swim',
+        asset: 'polar-bear-underice-swim',
+      },
+      {
+        poolId: 'srd-5.1:pony',
+        visualVariantId: 'snow-stable-kick',
+        asset: 'pony-snow-stable-kick',
+      },
+      {
+        poolId: 'srd-5.1:priest',
+        visualVariantId: 'storm-hospice-guiding-bolt',
+        asset: 'priest-storm-hospice-guiding-bolt',
+      },
+      {
+        poolId: 'srd-5.1:pseudodragon',
+        visualVariantId: 'autumn-orchard-flight',
+        asset: 'pseudodragon-autumn-orchard-flight',
+      },
+      {
+        poolId: 'srd-5.1:purple-worm',
+        visualVariantId: 'crystal-cavern-tailstrike',
+        asset: 'purple-worm-crystal-cavern-tailstrike',
+      },
+      {
+        poolId: 'srd-5.1:quasit',
+        visualVariantId: 'rainy-rooftop-invisibility',
+        asset: 'quasit-rainy-rooftop-invisibility',
+      },
+      {
+        poolId: 'srd-5.1:quipper',
+        visualVariantId: 'flooded-dungeon-key',
+        asset: 'quipper-flooded-dungeon-key',
+      },
+      {
+        poolId: 'srd-5.1:rakshasa',
+        visualVariantId: 'rainy-bazaar-disguise',
+        asset: 'rakshasa-rainy-bazaar-disguise',
+      },
+      {
+        poolId: 'srd-5.1:rat',
+        visualVariantId: 'dawn-bridge-dash',
+        asset: 'rat-dawn-bridge-dash',
+      },
+      {
+        poolId: 'srd-5.1:raven',
+        visualVariantId: 'winter-forest-flight',
+        asset: 'raven-winter-forest-flight',
+      },
+      {
+        poolId: 'srd-5.1:red-dragon-wyrmling',
+        visualVariantId: 'moonlit-fortress-firebreath',
+        asset: 'red-dragon-wyrmling-moonlit-fortress-firebreath',
+      },
+      {
+        poolId: 'srd-5.1:reef-shark',
+        visualVariantId: 'dusk-shipwreck-bite',
+        asset: 'reef-shark-dusk-shipwreck-bite',
+      },
+      {
+        poolId: 'srd-5.1:remorhaz',
+        visualVariantId: 'geothermal-ice-cavern',
+        asset: 'remorhaz-geothermal-ice-cavern',
+      },
+      {
+        poolId: 'srd-5.1:rhinoceros',
+        visualVariantId: 'jungle-watering-hole',
+        asset: 'rhinoceros-jungle-watering-hole',
+      },
+      {
+        poolId: 'srd-5.1:riding-horse',
+        visualVariantId: 'rainy-inn-courtyard',
+        asset: 'riding-horse-rainy-inn-courtyard',
+      },
+      {
+        poolId: 'srd-5.1:roc',
+        visualVariantId: 'dawn-watchtower-perch',
+        asset: 'roc-dawn-watchtower-perch',
+      },
+      {
+        poolId: 'srd-5.1:roper',
+        visualVariantId: 'red-crystal-ceiling-climb',
+        asset: 'roper-red-crystal-ceiling-climb',
+      },
+      {
+        poolId: 'srd-5.1:rug-of-smothering',
+        visualVariantId: 'flooded-library-smother',
+        asset: 'rug-of-smothering-flooded-library-smother',
+      },
+      {
+        poolId: 'srd-5.1:rust-monster',
+        visualVariantId: 'flooded-armory-scent',
+        asset: 'rust-monster-flooded-armory-scent',
+      },
+      {
+        poolId: 'srd-5.1:saber-toothed-tiger',
+        visualVariantId: 'redwood-scent',
+        asset: 'saber-toothed-tiger-redwood-scent',
+      },
+      {
+        poolId: 'srd-5.1:sahuagin',
+        visualVariantId: 'storm-coast-claws',
+        asset: 'sahuagin-storm-coast-claws',
+      },
+      {
+        poolId: 'srd-5.1:salamander',
+        visualVariantId: 'moonlit-desert-tail-grapple',
+        asset: 'salamander-moonlit-desert-tail-grapple',
+      },
+      {
+        poolId: 'srd-5.1:satyr',
+        visualVariantId: 'moonlit-amphitheater-sword',
+        asset: 'satyr-moonlit-amphitheater-sword',
+      },
+      {
+        poolId: 'srd-5.1:scorpion',
+        visualVariantId: 'wine-cellar-crawl',
+        asset: 'scorpion-wine-cellar-crawl',
+      },
+      {
+        poolId: 'srd-5.1:scout',
+        visualVariantId: 'rainy-village-shortsword',
+        asset: 'scout-rainy-village-shortsword',
+      },
+      {
+        poolId: 'srd-5.1:sea-hag',
+        visualVariantId: 'storm-tidepool-death-glare',
+        asset: 'sea-hag-storm-tidepool-death-glare',
+      },
+      {
+        poolId: 'srd-5.1:sea-horse',
+        visualVariantId: 'moonlit-mosaic-swim',
+        asset: 'sea-horse-moonlit-mosaic-swim',
+      },
+      {
+        poolId: 'srd-5.1:shadow',
+        visualVariantId: 'dawn-monastery-recoil',
+        asset: 'shadow-dawn-monastery-recoil',
+      },
+      {
+        poolId: 'srd-5.1:shambling-mound',
+        visualVariantId: 'flooded-sewer-engulf',
+        asset: 'shambling-mound-flooded-sewer-engulf',
+      },
+      {
+        poolId: 'srd-5.1:shield-guardian',
+        visualVariantId: 'dawn-observatory-spell',
+        asset: 'shield-guardian-dawn-observatory-spell',
+      },
+      {
+        poolId: 'srd-5.1:shrieker',
+        visualVariantId: 'flooded-crypt-alarm',
+        asset: 'shrieker-flooded-crypt-alarm',
+      },
+      {
+        poolId: 'srd-5.1:silver-dragon-wyrmling',
+        visualVariantId: 'moonlit-glacier-cold-breath',
+        asset: 'silver-dragon-wyrmling-moonlit-glacier-cold-breath',
+      },
+      {
+        poolId: 'srd-5.1:solar',
+        visualVariantId: 'dawn-battlefield-greatsword',
+        asset: 'solar-dawn-battlefield-greatsword',
+      },
+      {
+        poolId: 'srd-5.1:specter',
+        visualVariantId: 'dawn-memorial-sunlight',
+        asset: 'specter-dawn-memorial-sunlight',
+      },
+      {
+        poolId: 'srd-5.1:spider',
+        visualVariantId: 'moonlit-herb-web',
+        asset: 'spider-moonlit-herb-web',
+      },
+      {
+        poolId: 'srd-5.1:spirit-naga',
+        visualVariantId: 'moonlit-necropolis-bite',
+        asset: 'spirit-naga-moonlit-necropolis-bite',
+      },
+      {
+        poolId: 'srd-5.1:sprite',
+        visualVariantId: 'moonlit-library-heart-sight',
+        asset: 'sprite-moonlit-library-heart-sight',
+      },
+      {
+        poolId: 'srd-5.1:spy',
+        visualVariantId: 'harbor-tavern-dead-drop',
+        asset: 'spy-harbor-tavern-dead-drop',
+      },
+      {
+        poolId: 'srd-5.1:steam-mephit',
+        visualVariantId: 'dwarven-boiler-sabotage',
+        asset: 'steam-mephit-dwarven-boiler-sabotage',
+      },
+      {
+        poolId: 'srd-5.1:stirge',
+        visualVariantId: 'moonlit-swamp-fed',
+        asset: 'stirge-moonlit-swamp-fed',
+      },
+      {
+        poolId: 'srd-5.1:stone-giant',
+        visualVariantId: 'sunrise-canyon-greatclub',
+        asset: 'stone-giant-sunrise-canyon-greatclub',
+      },
+      {
+        poolId: 'srd-5.1:stone-golem',
+        visualVariantId: 'catacomb-slow',
+        asset: 'stone-golem-catacomb-slow',
+      },
+      {
+        poolId: 'srd-5.1:storm-giant',
+        visualVariantId: 'underwater-palace-greatsword',
+        asset: 'storm-giant-underwater-palace-greatsword',
+      },
+      {
+        poolId: 'srd-5.1:succubus-incubus',
+        visualVariantId: 'cathedral-incubus-reliquary',
+        asset: 'succubus-incubus-cathedral-incubus-reliquary',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-bats',
+        visualVariantId: 'storm-bell-tower',
+        asset: 'swarm-of-bats-storm-bell-tower',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-beetles',
+        visualVariantId: 'jungle-ruin-jewel-stream',
+        asset: 'swarm-of-beetles-jungle-ruin-jewel-stream',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-centipedes',
+        visualVariantId: 'moonlit-caravanserai',
+        asset: 'swarm-of-centipedes-moonlit-caravanserai',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-insects',
+        visualVariantId: 'underdark-cave-crickets',
+        asset: 'swarm-of-insects-underdark-cave-crickets',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-poisonous-snakes',
+        visualVariantId: 'desert-watchtower',
+        asset: 'swarm-of-poisonous-snakes-desert-watchtower',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-quippers',
+        visualVariantId: 'jungle-river-canoe',
+        asset: 'swarm-of-quippers-jungle-river-canoe',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-rats',
+        visualVariantId: 'winter-granary',
+        asset: 'swarm-of-rats-winter-granary',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-ravens',
+        visualVariantId: 'sunset-observatory',
+        asset: 'swarm-of-ravens-sunset-observatory',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-spiders',
+        visualVariantId: 'morning-greenhouse',
+        asset: 'swarm-of-spiders-morning-greenhouse',
+      },
+      {
+        poolId: 'srd-5.1:swarm-of-wasps',
+        visualVariantId: 'storm-orchard',
+        asset: 'swarm-of-wasps-storm-orchard',
+      },
+      {
+        poolId: 'srd-5.1:tarrasque',
+        visualVariantId: 'volcanic-caldera-awakening',
+        asset: 'tarrasque-volcanic-caldera-awakening',
+      },
+      {
+        poolId: 'srd-5.1:thug',
+        visualVariantId: 'roadside-tavern-heavy-crossbow',
+        asset: 'thug-roadside-tavern-heavy-crossbow',
+      },
+      {
+        poolId: 'srd-5.1:tiger',
+        visualVariantId: 'snowy-bamboo-stalk',
+        asset: 'tiger-snowy-bamboo-stalk',
+      },
+      {
+        poolId: 'srd-5.1:treant',
+        visualVariantId: 'autumn-marsh-animate-trees',
+        asset: 'treant-autumn-marsh-animate-trees',
+      },
+      {
+        poolId: 'srd-5.1:tribal-warrior',
+        visualVariantId: 'snow-pass-spear-throw',
+        asset: 'tribal-warrior-snow-pass-spear-throw',
+      },
+      {
+        poolId: 'srd-5.1:triceratops',
+        visualVariantId: 'red-canyon-defense',
+        asset: 'triceratops-red-canyon-defense',
+      },
+      {
+        poolId: 'srd-5.1:troll',
+        visualVariantId: 'sunlit-alpine-claw',
+        asset: 'troll-sunlit-alpine-claw',
+      },
+      {
+        poolId: 'srd-5.1:tyrannosaurus-rex',
+        visualVariantId: 'sunrise-badlands-tail',
+        asset: 'tyrannosaurus-rex-sunrise-badlands-tail',
+      },
+      {
+        poolId: 'srd-5.1:unicorn',
+        visualVariantId: 'moonlit-alpine-charge',
+        asset: 'unicorn-moonlit-alpine-charge',
+      },
+      {
+        poolId: 'srd-5.1:vampire-spawn',
+        visualVariantId: 'flooded-crypt-grapple',
+        asset: 'vampire-spawn-flooded-crypt-grapple',
+      },
+      {
+        poolId: 'srd-5.1:vampire-bat',
+        visualVariantId: 'cemetery-launch',
+        asset: 'vampire-bat-cemetery-launch',
+      },
+      {
+        poolId: 'srd-5.1:vampire-mist',
+        visualVariantId: 'underground-river',
+        asset: 'vampire-mist-underground-river',
+      },
+      {
+        poolId: 'srd-5.1:vampire-vampire',
+        visualVariantId: 'castle-wall-charm',
+        asset: 'vampire-vampire-castle-wall-charm',
+      },
+      {
+        poolId: 'srd-5.1:veteran',
+        visualVariantId: 'snowy-battlement-crossbow',
+        asset: 'veteran-snowy-battlement-crossbow',
+      },
+      {
+        poolId: 'srd-5.1:violet-fungus',
+        visualVariantId: 'ruined-shrine-false-appearance',
+        asset: 'violet-fungus-ruined-shrine-false-appearance',
+      },
+      {
+        poolId: 'srd-5.1:vrock',
+        visualVariantId: 'shattered-cathedral-talons',
+        asset: 'vrock-shattered-cathedral-talons',
+      },
+      {
+        poolId: 'srd-5.1:vulture',
+        visualVariantId: 'sunset-marsh-perch',
+        asset: 'vulture-sunset-marsh-perch',
+      },
+      {
+        poolId: 'srd-5.1:warhorse',
+        visualVariantId: 'coastal-cliff-rear',
+        asset: 'warhorse-coastal-cliff-rear',
+      },
+      {
+        poolId: 'srd-5.1:warhorse-skeleton',
+        visualVariantId: 'salt-flat-charge',
+        asset: 'warhorse-skeleton-salt-flat-charge',
+      },
+      {
+        poolId: 'srd-5.1:water-elemental',
+        visualVariantId: 'sunken-temple-whelm',
+        asset: 'water-elemental-sunken-temple-whelm',
+      },
+      {
+        poolId: 'srd-5.1:weasel',
+        visualVariantId: 'winter-granary-listen',
+        asset: 'weasel-winter-granary-listen',
+      },
+      {
+        poolId: 'srd-5.1:werebear-bear',
+        visualVariantId: 'snowmelt-river-charge',
+        asset: 'werebear-bear-snowmelt-river-charge',
+      },
+      {
+        poolId: 'srd-5.1:werebear-human',
+        visualVariantId: 'alpine-shrine-scent',
+        asset: 'werebear-human-alpine-shrine-scent',
+      },
+      {
+        poolId: 'srd-5.1:werebear-hybrid',
+        visualVariantId: 'alpine-bridge-greataxe',
+        asset: 'werebear-hybrid-alpine-bridge-greataxe',
+      },
+      {
+        poolId: 'srd-5.1:wereboar-boar',
+        visualVariantId: 'storm-swamp-relentless',
+        asset: 'wereboar-boar-storm-swamp-relentless',
+      },
+      {
+        poolId: 'srd-5.1:wereboar-human',
+        visualVariantId: 'red-rock-caravan',
+        asset: 'wereboar-human-red-rock-caravan',
+      },
+      {
+        poolId: 'srd-5.1:wereboar-hybrid',
+        visualVariantId: 'moonlit-quarry-maul',
+        asset: 'wereboar-hybrid-moonlit-quarry-maul',
+      },
+      {
+        poolId: 'srd-5.1:wererat-human',
+        visualVariantId: 'dawn-market-shortsword',
+        asset: 'wererat-human-dawn-market-shortsword',
+      },
+      {
+        poolId: 'srd-5.1:wererat-hybrid',
+        visualVariantId: 'dawn-granary-shortsword',
+        asset: 'wererat-hybrid-dawn-granary-shortsword',
+      },
+      {
+        poolId: 'srd-5.1:wererat-rat',
+        visualVariantId: 'monastery-cellar-scent',
+        asset: 'wererat-rat-monastery-cellar-scent',
+      },
+      {
+        poolId: 'srd-5.1:weretiger-human',
+        visualVariantId: 'sunset-ruins-scimitar',
+        asset: 'weretiger-human-sunset-ruins-scimitar',
+      },
+      {
+        poolId: 'srd-5.1:weretiger-hybrid',
+        visualVariantId: 'snowy-roof-scimitar',
+        asset: 'weretiger-hybrid-snowy-roof-scimitar',
+      },
+      {
+        poolId: 'srd-5.1:weretiger-tiger',
+        visualVariantId: 'aurora-observatory-stalk',
+        asset: 'weretiger-tiger-aurora-observatory-stalk',
+      },
+      {
+        poolId: 'srd-5.1:werewolf-human',
+        visualVariantId: 'dawn-marsh-spear-throw',
+        asset: 'werewolf-human-dawn-marsh-spear-throw',
+      },
+      {
+        poolId: 'srd-5.1:werewolf-hybrid',
+        visualVariantId: 'dawn-chapel-claws',
+        asset: 'werewolf-hybrid-dawn-chapel-claws',
+      },
+      {
+        poolId: 'srd-5.1:werewolf-wolf',
+        visualVariantId: 'crimson-coast-prowl',
+        asset: 'werewolf-wolf-crimson-coast-prowl',
+      },
+      {
+        poolId: 'srd-5.1:white-dragon-wyrmling',
+        visualVariantId: 'aurora-cold-breath',
+        asset: 'white-dragon-wyrmling-aurora-cold-breath',
+      },
+      {
+        poolId: 'srd-5.1:wight',
+        visualVariantId: 'rainy-battlement-longbow',
+        asset: 'wight-rainy-battlement-longbow',
+      },
+      {
+        poolId: 'srd-5.1:will-o-wisp',
+        visualVariantId: 'flooded-cathedral-hunt',
+        asset: 'will-o-wisp-flooded-cathedral-hunt',
+      },
+      {
+        poolId: 'srd-5.1:winter-wolf',
+        visualVariantId: 'aurora-lake-cold-breath',
+        asset: 'winter-wolf-aurora-lake-cold-breath',
+      },
+      {
+        poolId: 'srd-5.1:worg',
+        visualVariantId: 'misty-ravine-stalk',
+        asset: 'worg-misty-ravine-stalk',
+      },
+      {
+        poolId: 'srd-5.1:wraith',
+        visualVariantId: 'red-dawn-standing-stones',
+        asset: 'wraith-red-dawn-standing-stones',
+      },
+      {
+        poolId: 'srd-5.1:wyvern',
+        visualVariantId: 'sunset-seacliff-nest',
+        asset: 'wyvern-sunset-seacliff-nest',
+      },
+      {
+        poolId: 'srd-5.1:xorn',
+        visualVariantId: 'volcanic-mine-ore-carry',
+        asset: 'xorn-volcanic-mine-ore-carry',
+      },
+      {
+        poolId: 'srd-5.1:young-black-dragon',
+        visualVariantId: 'rainy-causeway-acid',
+        asset: 'young-black-dragon-rainy-causeway-acid',
+      },
+      {
+        poolId: 'srd-5.1:young-blue-dragon',
+        visualVariantId: 'storm-temple-lightning',
+        asset: 'young-blue-dragon-storm-temple-lightning',
+      },
+      {
+        poolId: 'srd-5.1:young-brass-dragon',
+        visualVariantId: 'moonlit-canyon-sleep',
+        asset: 'young-brass-dragon-moonlit-canyon-sleep',
+      },
+      {
+        poolId: 'srd-5.1:young-bronze-dragon',
+        visualVariantId: 'night-lighthouse-lightning',
+        asset: 'young-bronze-dragon-night-lighthouse-lightning',
+      },
+      {
+        poolId: 'srd-5.1:young-copper-dragon',
+        visualVariantId: 'rainy-gorge-acid',
+        asset: 'young-copper-dragon-rainy-gorge-acid',
+      },
+      {
+        poolId: 'srd-5.1:young-gold-dragon',
+        visualVariantId: 'crimson-cloud-fire',
+        asset: 'young-gold-dragon-crimson-cloud-fire',
+      },
+      {
+        poolId: 'srd-5.1:young-green-dragon',
+        visualVariantId: 'jungle-ruin-poison',
+        asset: 'young-green-dragon-jungle-ruin-poison',
+      },
+      {
+        poolId: 'srd-5.1:young-red-dragon',
+        visualVariantId: 'obsidian-fortress-fire',
+        asset: 'young-red-dragon-obsidian-fortress-fire',
+      },
+      {
+        poolId: 'srd-5.1:young-silver-dragon',
+        visualVariantId: 'sunrise-peaks-cold',
+        asset: 'young-silver-dragon-sunrise-peaks-cold',
+      },
+      {
+        poolId: 'srd-5.1:young-white-dragon',
+        visualVariantId: 'aurora-fjord-cold',
+        asset: 'young-white-dragon-aurora-fjord-cold',
       },
       {
         poolId: 'srd-5.1:ancient-black-dragon',

@@ -14,7 +14,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react'
-import { ABILITIES, type AbilityKey } from '../../lib/dnd'
+import { ABILITIES, SKILLS, type AbilityKey } from '../../lib/dnd'
 import {
   DND5E_2014_ALIGNMENT_OPTIONS,
   DND5E_2014_BACKGROUND_OPTIONS,
@@ -59,10 +59,16 @@ import {
   dnd5eRulesPluginRegistrySnapshot,
   registeredDnd5ePluginAbilityGenerationMethods,
   registeredDnd5ePluginBackgrounds,
+  registeredDnd5ePluginFeats,
   registeredDnd5ePluginRaces,
   subscribeDnd5eRulesPluginRegistry,
 } from '../../rulesets/dnd5e/pluginApi'
 import type { Abilities } from '../../types/character'
+import { dnd5eCoreRaceMechanics } from '../../rulesets/dnd5e/coreRaceMechanics'
+import {
+  DND5E_DRAGONBORN_ANCESTRIES,
+  type Dnd5eDragonbornAncestryId,
+} from '../../rulesets/dnd5e/racialAutomation'
 
 type SetupStage = 'experience' | 'beginner-preferences' | 'identity' | 'ability-method' | 'abilities' | 'equipment' | 'review'
 
@@ -82,6 +88,9 @@ export interface CharacterSetupResult extends SetupIdentity {
   dnd5eRaceId?: string
   dnd5eBackgroundId?: string
   backgroundSkillProficiencies?: string[]
+  racialSkillProficiencies?: string[]
+  racialFeatIds?: string[]
+  dragonbornAncestry?: Dnd5eDragonbornAncestryId
   racialBonusChoices: AbilityKey[]
   startingEquipment: Dnd5eStartingEquipmentSelection
   recommendation?: {
@@ -383,10 +392,14 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   )
   const pluginRaces = registeredDnd5ePluginRaces()
   const pluginBackgrounds = registeredDnd5ePluginBackgrounds()
+  const pluginFeats = registeredDnd5ePluginFeats()
   const pluginMethods = registeredDnd5ePluginAbilityGenerationMethods()
   const raceOptions = [
     ...DND5E_2014_RACE_OPTIONS.map((value) => ({ value, label: value })),
-    ...pluginRaces.map((race) => ({ value: race.id, label: `${race.name} · ${race.ownerPluginName}` })),
+    ...pluginRaces.map((race) => ({
+      value: race.id,
+      label: `${race.parentRace ? `${race.parentRace.name} › ` : ''}${race.name} · ${race.ownerPluginName}`,
+    })),
   ]
   const backgroundOptions = [
     ...DND5E_2014_BACKGROUND_OPTIONS.map((value) => ({ value, label: value })),
@@ -422,6 +435,9 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   const [method, setMethod] = useState<Dnd5eAbilityGenerationMethod>('standard-array')
   const [baseAbilities, setBaseAbilities] = useState<Abilities>(recommendedDnd5eBaseAbilities('战士'))
   const [racialBonusChoices, setRacialBonusChoices] = useState<AbilityKey[]>([])
+  const [racialSkillProficiencies, setRacialSkillProficiencies] = useState<string[]>([])
+  const [racialFeatIds, setRacialFeatIds] = useState<string[]>([])
+  const [dragonbornAncestry, setDragonbornAncestry] = useState<Dnd5eDragonbornAncestryId>('black')
   const [currentRoll, setCurrentRoll] = useState<Dnd5eAbilityRoll | null>(null)
   const [rolls, setRolls] = useState<Array<Dnd5eAbilityRoll & { ability: AbilityKey }>>([])
 
@@ -436,6 +452,12 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     ? { diceCount: 4, dieSides: 6, dropLowest: 1 }
     : pluginMethod?.kind === 'roll' ? pluginMethod : undefined
   const methodKind = standardScores ? 'standard-array' : pointBuyRule ? 'point-buy' : rollRule ? 'roll' : undefined
+  const selectedPluginRace = dnd5ePluginRaceDefinition(identity.race)
+  const selectedCoreRace = dnd5eCoreRaceMechanics(identity.race)
+  const racialSkillChoiceCount =
+    selectedPluginRace?.skillProficiencyChoiceCount ?? selectedCoreRace?.skillProficiencyChoiceCount ?? 0
+  const racialFeatChoiceCount = selectedPluginRace?.featChoiceCount ?? 0
+  const requiresDragonbornAncestry = selectedCoreRace?.id === 'dragonborn'
   const flexibleRacialBonus = dnd5eFlexibleRacialAbilityBonus(identity.race)
 
   const racialBonuses = useMemo(
@@ -446,6 +468,21 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     () => applyDnd5eRacialAbilityBonuses(baseAbilities, racialBonuses),
     [baseAbilities, racialBonuses],
   )
+  const racialFeatOptions = pluginFeats.filter((feat) => {
+    const prerequisite = feat.prerequisite
+    if ((prerequisite?.minimumLevel ?? 1) > 1) return false
+    if (Object.entries(prerequisite?.abilityScores ?? {}).some(([ability, minimum]) =>
+      finalAbilities[ability as AbilityKey] < (minimum ?? 0))) return false
+    if (prerequisite?.raceIds?.length) {
+      const identities = new Set([
+        identity.race,
+        selectedPluginRace?.id,
+        selectedPluginRace?.name,
+      ].filter((value): value is string => !!value))
+      if (!prerequisite.raceIds.some((raceId) => identities.has(raceId))) return false
+    }
+    return true
+  })
   const liveRecommendation = recommendDnd5eCharacter(preferences)
   const raceRecommendations = recommendDnd5eRaces(
     identity.charClass,
@@ -476,6 +513,10 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       ? pointBuyRemaining === 0
       : !!standardScores && sameScoreMultiset(baseAbilities, standardScores)
   const racialBonusChoicesComplete = !flexibleRacialBonus || racialBonusChoices.length === flexibleRacialBonus.count
+  const racialSkillChoicesComplete =
+    racialSkillProficiencies.length === racialSkillChoiceCount
+  const racialFeatChoicesComplete =
+    racialFeatIds.length === racialFeatChoiceCount
 
   const updateIdentity = (patch: Partial<SetupIdentity>) => {
     const next = { ...identity, ...patch }
@@ -488,6 +529,11 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     }
     if (patch.race || patch.charClass) {
       setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(next.race, next.charClass, nextBaseAbilities))
+    }
+    if (patch.race) {
+      setRacialSkillProficiencies([])
+      setRacialFeatIds([])
+      setDragonbornAncestry('black')
     }
     if (patch.charClass || patch.background) {
       setStartingEquipment(defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan(next.charClass, next.background)))
@@ -516,6 +562,9 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
     const recommendedBase = recommendedDnd5eBaseAbilities(nextIdentity.charClass)
     setBaseAbilities(recommendedBase)
     setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(nextIdentity.race, nextIdentity.charClass, recommendedBase))
+    setRacialSkillProficiencies([])
+    setRacialFeatIds([])
+    setDragonbornAncestry('black')
     setStartingEquipment(defaultDnd5eStartingEquipmentSelection(dnd5eStartingEquipmentPlan(nextIdentity.charClass, nextIdentity.background)))
     setStage('equipment')
   }
@@ -565,6 +614,22 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
       : current.length < flexibleRacialBonus.count ? [...current, ability] : current)
   }
 
+  const toggleRacialSkillChoice = (skill: string) => {
+    const count = racialSkillChoiceCount
+    if (count < 1) return
+    setRacialSkillProficiencies((current) => current.includes(skill)
+      ? current.filter((entry) => entry !== skill)
+      : current.length < count ? [...current, skill] : current)
+  }
+
+  const toggleRacialFeatChoice = (featId: string) => {
+    const count = racialFeatChoiceCount
+    if (count < 1) return
+    setRacialFeatIds((current) => current.includes(featId)
+      ? current.filter((entry) => entry !== featId)
+      : current.length < count ? [...current, featId] : current)
+  }
+
   const goBack = () => {
     if (stage === 'beginner-preferences' || stage === 'identity') setStage('experience')
     else if (stage === 'ability-method') setStage('identity')
@@ -574,7 +639,12 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
   }
 
   const complete = () => {
-    if (!name.trim() || !racialBonusChoicesComplete) return
+    if (
+      !name.trim() ||
+      !racialBonusChoicesComplete ||
+      !racialSkillChoicesComplete ||
+      !racialFeatChoicesComplete
+    ) return
     const pluginRace = dnd5ePluginRaceDefinition(identity.race)
     const pluginBackground = dnd5ePluginBackgroundDefinition(identity.background)
     onComplete({
@@ -586,6 +656,11 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
         dnd5eBackgroundId: pluginBackground.id,
         backgroundSkillProficiencies: [...pluginBackground.skillProficiencies],
       } : {}),
+      ...(racialSkillProficiencies.length ? {
+        racialSkillProficiencies: [...racialSkillProficiencies],
+      } : {}),
+      ...(racialFeatIds.length ? { racialFeatIds: [...racialFeatIds] } : {}),
+      ...(requiresDragonbornAncestry ? { dragonbornAncestry } : {}),
       name: name.trim(),
       method,
       baseAbilities,
@@ -842,6 +917,93 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
                   </p>
                 </div>
               </div>
+              {(racialSkillChoiceCount || racialFeatChoiceCount || requiresDragonbornAncestry) ? (
+                <div className="rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.04] p-4">
+                  <h3 className="text-sm font-semibold text-cyan-100">种族选择</h3>
+                  {requiresDragonbornAncestry ? (
+                    <div className="mt-3">
+                      <p className="text-xs text-slate-400">选择龙族血统；该选择会决定吐息的伤害类型、区域、豁免属性与对应抗性。</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                        {DND5E_DRAGONBORN_ANCESTRIES.map((ancestry) => (
+                          <button
+                            key={ancestry.id}
+                            type="button"
+                            aria-pressed={dragonbornAncestry === ancestry.id}
+                            onClick={() => setDragonbornAncestry(ancestry.id)}
+                            className={`rounded-xl border px-3 py-2 text-left ${
+                              dragonbornAncestry === ancestry.id
+                                ? 'border-cyan-300/40 bg-cyan-400/15 text-cyan-100'
+                                : 'border-white/8 bg-black/10 text-slate-400'
+                            }`}
+                          >
+                            <span className="block text-xs font-semibold">{ancestry.name}</span>
+                            <span className="mt-1 block text-[10px] opacity-70">
+                              {ancestry.damageType} · {ancestry.area.shape === 'cone' ? '15 尺锥形' : '5×30 尺线形'} · {ancestry.saveAbility.toUpperCase()}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {racialSkillChoiceCount ? (
+                    <div className="mt-3">
+                      <p className="text-xs text-slate-400">
+                        选择 {racialSkillChoiceCount} 项技能熟练
+                        （已选 {racialSkillProficiencies.length}）
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {SKILLS.map((skill) => (
+                          <button
+                            key={skill.key}
+                            type="button"
+                            aria-pressed={racialSkillProficiencies.includes(skill.key)}
+                            onClick={() => toggleRacialSkillChoice(skill.key)}
+                            className={`rounded-lg border px-2.5 py-1.5 text-xs ${
+                              racialSkillProficiencies.includes(skill.key)
+                                ? 'border-cyan-300/40 bg-cyan-400/15 text-cyan-100'
+                                : 'border-white/8 text-slate-500'
+                            }`}
+                          >
+                            {skill.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {racialFeatChoiceCount ? (
+                    <div className="mt-4">
+                      <p className="text-xs text-slate-400">
+                        选择 {racialFeatChoiceCount} 项专长
+                        （已选 {racialFeatIds.length}）
+                      </p>
+                      {racialFeatOptions.length > 0 ? (
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          {racialFeatOptions.map((feat) => (
+                            <button
+                              key={feat.id}
+                              type="button"
+                              aria-pressed={racialFeatIds.includes(feat.id)}
+                              onClick={() => toggleRacialFeatChoice(feat.id)}
+                              className={`rounded-xl border px-3 py-2 text-left ${
+                                racialFeatIds.includes(feat.id)
+                                  ? 'border-amber-300/40 bg-amber-400/10 text-amber-100'
+                                  : 'border-white/8 bg-black/10 text-slate-400'
+                              }`}
+                            >
+                              <span className="block text-sm font-semibold">{feat.name}</span>
+                              <span className="mt-1 block text-[11px] leading-4 opacity-70">{feat.summary}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 rounded-xl border border-amber-400/15 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                          当前房间没有满足条件的本地专长。请先把专长条目加入同一合集后重新导入。
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div data-testid="starting-equipment-review" className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.04] p-4">
                 <div className="flex items-center gap-2"><Backpack className="h-4 w-4 text-violet-300" /><h3 className="text-sm font-semibold text-violet-100">起始装备确认</h3></div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -902,7 +1064,7 @@ export default function CharacterSetupDialog({ onCancel, onComplete }: Character
             {stage === 'ability-method' && <button type="button" onClick={startAbilityMethod} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white">开始分配 <ArrowRight className="h-4 w-4" /></button>}
             {stage === 'abilities' && <button type="button" disabled={!abilityAllocationComplete} onClick={() => { setRacialBonusChoices(recommendedDnd5eRacialBonusChoices(identity.race, identity.charClass, baseAbilities)); setStage('equipment') }} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">加入种族调整并选择装备 <ArrowRight className="h-4 w-4" /></button>}
             {stage === 'equipment' && <button type="button" onClick={() => setStage('review')} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-arcane-500 px-5 py-2.5 text-sm font-semibold text-white">确认起始装备 <ArrowRight className="h-4 w-4" /></button>}
-            {stage === 'review' && <button type="button" disabled={!name.trim() || !racialBonusChoicesComplete} onClick={complete} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-arcane-600 to-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" /> 创建角色</button>}
+            {stage === 'review' && <button type="button" disabled={!name.trim() || !racialBonusChoicesComplete || !racialSkillChoicesComplete || !racialFeatChoicesComplete} onClick={complete} className="glow-arcane inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-arcane-600 to-arcane-500 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"><Check className="h-4 w-4" /> 创建角色</button>}
           </footer>
         )}
       </div>

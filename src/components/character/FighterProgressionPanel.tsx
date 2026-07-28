@@ -18,7 +18,10 @@ import {
   registeredFighterSubclasses,
   subscribeFighterSubclassRegistry,
   dnd5eArmorClass,
+  dnd5ePluginResourceDieSides,
+  dnd5ePluginSubclassDefinition,
   dnd5eWeaponAttackProfile,
+  registeredDnd5ePluginResources,
   type FighterFightingStyleId,
   type FighterSubclassId,
 } from '../../rulesets/dnd5e'
@@ -35,6 +38,9 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
   const subclass = fighter.subclass
   const subclassOptions = registeredFighterSubclasses()
   const subclassOption = fighterSubclassDefinition(subclass)
+  const pluginSubclass = subclass ? dnd5ePluginSubclassDefinition(subclass) : undefined
+  const pluginResourceDice = registeredDnd5ePluginResources()
+    .filter((resource) => resource.subclassId === subclass && resource.declarativeDie)
   const fightingStyles = fighterSelectedFightingStyles(character)
   const fightingStyleLimit = fighterFightingStyleSelectionLimit(character)
   const progression = fighterProgression(subclass)
@@ -134,6 +140,34 @@ export default function FighterProgressionPanel({ character, onChange }: Fighter
         <Summary icon={Shield} label="不屈" value={`${fighterIndomitableUses(character.level)} 次／长休`} />
         <Summary icon={Sparkles} label="战斗风格" value={fightingStyles.map(fighterFightingStyleName).join('、') || '尚未选择'} />
       </div>
+
+      {(pluginSubclass?.declarativeSpellcasting || pluginResourceDice.length > 0) && (
+        <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-500/5 p-4">
+          <h4 className="text-sm font-semibold text-violet-100">子职扩展协议</h4>
+          {pluginSubclass?.declarativeSpellcasting && (() => {
+            const spellcasting = pluginSubclass.declarativeSpellcasting
+            const levelIndex = Math.max(0, Math.min(19, character.level - 1))
+            return (
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                三分之一施法者 · {spellcasting.ability.toUpperCase()} 施法 ·
+                当前已知 {spellcasting.cantripsKnownByClassLevel[levelIndex] ?? 0} 个戏法、
+                {spellcasting.spellsKnownByClassLevel[levelIndex] ?? 0} 个法术 ·
+                法术表：{spellcasting.spellListClassId}
+              </p>
+            )
+          })()}
+          {pluginResourceDice.length > 0 && (
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              资源骰：{pluginResourceDice.map((resource) =>
+                `${resource.label} d${dnd5ePluginResourceDieSides(resource, character) ?? '—'}`
+              ).join('、')}
+            </p>
+          )}
+          <p className="mt-2 text-[11px] text-amber-200/70">
+            这里只显示已注册的纯数据协议；实际法术和战斗选项仍由房间目录与 Headless 再校验。
+          </p>
+        </div>
+      )}
 
       {subclassOption?.choiceGroups?.filter((group) => character.level >= (group.minLevel ?? 1)).map((group) => {
         const selected = fighterSelectedSubclassChoices(character, subclassOption.id, group)

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, LockKeyhole, PackageOpen, Sparkles, Swords, X } from 'lucide-react'
+import { Backpack, ChevronLeft, ChevronRight, LockKeyhole, PackageOpen, Sparkles, Swords, X } from 'lucide-react'
 import type { Character } from '../../types/character'
+import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 import { useSpellbookStore } from '../../store/spellbook'
 import { getClassResource } from '../../lib/classResources'
 import {
@@ -38,11 +39,20 @@ import {
 } from '../../lib/dnd5eCombatActionDescriptors'
 import Dnd5eActionIcon from './Dnd5eActionIcon'
 import { dnd5eCombatSpellSlotSummary } from './combatSpellSlotSummary'
+import EquipmentTab from '../character/EquipmentTab'
+import {
+  assignCombatItemQuickbarSlot,
+  clearCombatItemQuickbarSlot,
+  COMBAT_ITEM_QUICK_SLOT_COUNT,
+  reconcileCombatItemQuickbarPreference,
+  type CombatItemQuickbarPreferenceV1,
+} from './combatItemQuickbar'
 
 const STORAGE_PREFIX = 'dndstars5e:combat-hotbar:v1:'
+const ITEM_QUICKBAR_STORAGE_PREFIX = 'dndstars5e:combat-item-quickbar:v1:'
+const ITEM_BACKPACK_OPEN_PREFIX = 'dndstars5e:combat-backpack-open:v1:'
 const SPELL_PAGE_SIZE = 12
 const FEATURE_PAGE_SIZE = 3
-const ITEM_PAGE_SIZE = 6
 const EMPTY_ARMED_SPELL_MODIFIERS = new Set<Dnd5eCombatSpellModifier>()
 
 const ECONOMY_LABELS: Record<Dnd5eCombatActionEconomy, string> = {
@@ -113,6 +123,42 @@ function savePreference(characterId: string, preference: Dnd5eCombatHotbarPrefer
   }
 }
 
+function readItemQuickbarPreference(characterId: string): CombatItemQuickbarPreferenceV1 | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(`${ITEM_QUICKBAR_STORAGE_PREFIX}${characterId}`) ?? 'null',
+    ) as Partial<CombatItemQuickbarPreferenceV1> | null
+    if (parsed?.schemaVersion !== 1 || !Array.isArray(parsed.slots)) return undefined
+    return {
+      schemaVersion: 1,
+      slots: parsed.slots.map((instanceId) => typeof instanceId === 'string' ? instanceId : null),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function saveItemQuickbarPreference(
+  characterId: string,
+  preference: CombatItemQuickbarPreferenceV1,
+) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(
+      `${ITEM_QUICKBAR_STORAGE_PREFIX}${characterId}`,
+      JSON.stringify(preference),
+    )
+  } catch {
+    // 本地存储不可用时仅失去快捷槽偏好，权威库存数据不受影响。
+  }
+}
+
+function readBackpackOpen(characterId: string): boolean {
+  if (typeof window === 'undefined') return false
+  return window.sessionStorage.getItem(`${ITEM_BACKPACK_OPEN_PREFIX}${characterId}`) === '1'
+}
+
 export default function PlayerCombatHotbar({
   character,
   canAct,
@@ -127,6 +173,7 @@ export default function PlayerCombatHotbar({
   const movementRemaining = turnEconomy.movement.current
   const importedSpells = useSpellbookStore((state) => state.spells)
   const spellSlots = useMemo(() => dnd5eCombatSpellSlotSummary(character), [character])
+  const inventory = useMemo(() => normalizeDnd5eInventory(character), [character])
   const spellSlotLabel = spellSlots.map((slot) => `${slot.label} ${slot.current}/${slot.max}`).join('，')
   const spellModifierIntents = useMemo(
     () => dnd5eAvailableSpellModifierIntents(character),
@@ -204,6 +251,7 @@ export default function PlayerCombatHotbar({
             damageType: combat?.damageType ?? imported?.mechanics?.damage?.type,
             tags: imported?.tags,
             castingClassId: definition.id,
+            iconAssetId: entry.iconAssetId,
           }),
           level: entry.level,
           castingTime,
@@ -230,7 +278,6 @@ export default function PlayerCombatHotbar({
       available,
       unavailableReason,
     }))
-    const inventory = normalizeDnd5eInventory(character)
     const itemSources = inventory.entries.flatMap((entry) => {
       if (!entry.item.use) return []
       const resource = Object.values(entry.resources ?? {})[0]
@@ -270,6 +317,7 @@ export default function PlayerCombatHotbar({
     canAct,
     character,
     importedSpells,
+    inventory,
     movementRemaining,
     pending,
     spellModifierIntents,
@@ -278,7 +326,31 @@ export default function PlayerCombatHotbar({
   const [storedPreference, setPreference] = useState<Dnd5eCombatHotbarPreferenceV1>(() =>
     reconcileDnd5eCombatHotbarPreference(readPreference(character.id), descriptors),
   )
+  const quickbarCandidateIds = useMemo(() => {
+    const usable = inventory.entries
+      .filter((entry) => !!entry.item.use)
+      .map((entry) => entry.instanceId)
+    const remaining = inventory.entries
+      .filter((entry) => !entry.item.use)
+      .map((entry) => entry.instanceId)
+    return [...usable, ...remaining]
+  }, [inventory.entries])
+  const [itemQuickbarStoredPreference, setItemQuickbarPreference] = useState<CombatItemQuickbarPreferenceV1>(
+    () => reconcileCombatItemQuickbarPreference(
+      readItemQuickbarPreference(character.id),
+      quickbarCandidateIds,
+    ),
+  )
   const [draggedActionId, setDraggedActionId] = useState<string | null>(null)
+  const [draggedItemInstanceId, setDraggedItemInstanceId] = useState<string | null>(null)
+  const [backpackOpen, setBackpackOpen] = useState(() => readBackpackOpen(character.id))
+  const setBackpackVisible = useCallback((open: boolean) => {
+    setBackpackOpen(open)
+    if (typeof window === 'undefined') return
+    const key = `${ITEM_BACKPACK_OPEN_PREFIX}${character.id}`
+    if (open) window.sessionStorage.setItem(key, '1')
+    else window.sessionStorage.removeItem(key)
+  }, [character.id])
   const [spellConfiguration, setSpellConfiguration] = useState<{
     entry: Dnd5eCombatActionDescriptorV1
     slotLevel: number
@@ -293,8 +365,16 @@ export default function PlayerCombatHotbar({
     () => reconcileDnd5eCombatHotbarPreference(storedPreference, descriptors),
     [descriptors, storedPreference],
   )
+  const itemQuickbarPreference = useMemo(
+    () => reconcileCombatItemQuickbarPreference(itemQuickbarStoredPreference, quickbarCandidateIds),
+    [itemQuickbarStoredPreference, quickbarCandidateIds],
+  )
 
   useEffect(() => savePreference(character.id, preference), [character.id, preference])
+  useEffect(
+    () => saveItemQuickbarPreference(character.id, itemQuickbarPreference),
+    [character.id, itemQuickbarPreference],
+  )
 
   const orderedDescriptors = useMemo(() => {
     const byId = new Map(descriptors.map((entry) => [entry.id, entry]))
@@ -307,10 +387,19 @@ export default function PlayerCombatHotbar({
   const spellPageCount = Math.max(1, Math.ceil(grouped.spells.length / SPELL_PAGE_SIZE))
   const activeSpellPage = Math.min(spellPageCount - 1, preference.activePage)
   const visibleSpells = grouped.spells.slice(activeSpellPage * SPELL_PAGE_SIZE, (activeSpellPage + 1) * SPELL_PAGE_SIZE)
-  const [itemPage, setItemPage] = useState(0)
-  const itemPageCount = Math.max(1, Math.ceil(grouped.items.length / ITEM_PAGE_SIZE))
-  const activeItemPage = Math.min(itemPageCount - 1, itemPage)
-  const visibleItems = grouped.items.slice(activeItemPage * ITEM_PAGE_SIZE, (activeItemPage + 1) * ITEM_PAGE_SIZE)
+  const inventoryEntryById = useMemo(
+    () => new Map(inventory.entries.map((entry) => [entry.instanceId, entry])),
+    [inventory.entries],
+  )
+  const itemDescriptorByInstanceId = useMemo(() => {
+    const byInstanceId = new Map<string, Dnd5eCombatActionDescriptorV1>()
+    for (const descriptor of grouped.items) {
+      if (descriptor.command.kind === 'use-item') {
+        byInstanceId.set(descriptor.command.instanceId, descriptor)
+      }
+    }
+    return byInstanceId
+  }, [grouped.items])
   const [featurePage, setFeaturePage] = useState(0)
   const featurePageCount = Math.max(1, Math.ceil(grouped.features.length / FEATURE_PAGE_SIZE))
   const activeFeaturePage = Math.min(featurePageCount - 1, featurePage)
@@ -376,13 +465,14 @@ export default function PlayerCombatHotbar({
   }, [armedSpellModifiers, character, onCommand, onUnavailable])
 
   useEffect(() => {
-    if (!spellConfiguration) return
+    if (!spellConfiguration && !backpackOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setSpellConfiguration(null)
+      if (event.key === 'Escape') setBackpackVisible(false)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [spellConfiguration])
+  }, [backpackOpen, setBackpackVisible, spellConfiguration])
 
   const spellConfigurationResolution = useMemo(() => {
     if (!spellConfiguration || spellConfiguration.entry.command.kind !== 'cast-spell') return undefined
@@ -474,15 +564,137 @@ export default function PlayerCombatHotbar({
     </button>
   }
 
-  const portrait = character.tokenPortrait || character.portrait
+  const assignItemToQuickbar = (instanceId: string, slotIndex: number) => {
+    setItemQuickbarPreference((current) => {
+      const reconciled = reconcileCombatItemQuickbarPreference(current, quickbarCandidateIds)
+      return {
+        schemaVersion: 1,
+        slots: assignCombatItemQuickbarSlot(reconciled.slots, instanceId, slotIndex),
+      }
+    })
+  }
+
+  const clearItemQuickbarSlot = (slotIndex: number) => {
+    setItemQuickbarPreference((current) => {
+      const reconciled = reconcileCombatItemQuickbarPreference(current, quickbarCandidateIds)
+      return {
+        schemaVersion: 1,
+        slots: clearCombatItemQuickbarSlot(reconciled.slots, slotIndex),
+      }
+    })
+  }
+
+  const useBackpackItem = (instanceId: string): boolean => {
+    const descriptor = itemDescriptorByInstanceId.get(instanceId)
+    if (!descriptor) return false
+    if (!descriptor.enabled) {
+      onUnavailable?.(descriptor)
+      return false
+    }
+    activate(descriptor)
+    setBackpackVisible(false)
+    return true
+  }
+
+  const quickbarItemButton = (instanceId: string | null, slotIndex: number) => {
+    const entry = instanceId ? inventoryEntryById.get(instanceId) : undefined
+    const descriptor = entry ? itemDescriptorByInstanceId.get(entry.instanceId) : undefined
+    const primaryResource = entry ? Object.values(entry.resources ?? {})[0] : undefined
+    if (!entry) {
+      return (
+        <button
+          key={`empty-quick-item-${slotIndex}`}
+          type="button"
+          data-testid={`combat-item-quick-slot-${slotIndex + 1}`}
+          aria-label={`道具快捷槽 ${slotIndex + 1}：空`}
+          onClick={() => setBackpackVisible(true)}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={() => {
+            if (draggedItemInstanceId) assignItemToQuickbar(draggedItemInstanceId, slotIndex)
+            setDraggedItemInstanceId(null)
+          }}
+          className="relative h-12 w-12 shrink-0 rounded-lg border border-dashed border-amber-200/[0.1] bg-black/10 hover:border-amber-200/25 hover:bg-amber-400/[0.06]"
+        >
+          <span className="text-[9px] font-black text-amber-100/25">{slotIndex + 1}</span>
+        </button>
+      )
+    }
+
+    const directlyUsable = !!descriptor
+    return (
+      <button
+        key={entry.instanceId}
+        type="button"
+        draggable
+        data-testid={`combat-item-quick-slot-${slotIndex + 1}`}
+        aria-label={`${entry.item.name}${directlyUsable ? '' : '（打开背包查看）'}`}
+        title={directlyUsable
+          ? `${entry.item.name}\n${descriptor.description}`
+          : `${entry.item.name}\n该物品没有可直接执行的战斗使用动作，点击查看背包详情。`}
+        onDragStart={() => {
+          suppressClickAfterDragRef.current = true
+          setDraggedItemInstanceId(entry.instanceId)
+        }}
+        onDragEnd={() => {
+          setDraggedItemInstanceId(null)
+          window.setTimeout(() => { suppressClickAfterDragRef.current = false }, 0)
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={() => {
+          if (draggedItemInstanceId) assignItemToQuickbar(draggedItemInstanceId, slotIndex)
+          setDraggedItemInstanceId(null)
+        }}
+        onClick={() => {
+          if (suppressClickAfterDragRef.current) return
+          if (descriptor) activate(descriptor)
+          else setBackpackVisible(true)
+        }}
+        className={[
+          'group relative h-12 w-12 shrink-0 rounded-lg border p-px transition',
+          descriptor && activeActionId === descriptor.id
+            ? 'border-amber-300/70 bg-amber-400/15 shadow-[0_0_14px_rgba(251,191,36,0.28)]'
+            : descriptor?.enabled
+              ? 'border-white/10 bg-white/[0.035] hover:-translate-y-0.5 hover:border-amber-300/50 hover:bg-amber-500/10'
+              : 'border-white/[0.06] bg-black/20 hover:border-white/15',
+        ].join(' ')}
+      >
+        <Dnd5eActionIcon
+          spec={dnd5eItemActionIcon(entry.item)}
+          active={descriptor ? activeActionId === descriptor.id : false}
+          disabled={entry.identified === false || (!!descriptor && !descriptor.enabled)}
+          badge={primaryResource
+            ? primaryResource.current
+            : entry.quantity > 1
+              ? entry.quantity
+              : undefined}
+          className="w-full"
+        />
+        <span className="absolute left-0.5 top-0 text-[8px] font-black text-amber-100/65">
+          {slotIndex + 1}
+        </span>
+        {!directlyUsable ? (
+          <span className="absolute inset-x-1 bottom-0.5 rounded bg-black/75 px-0.5 text-[7px] font-semibold text-slate-300">
+            查看
+          </span>
+        ) : null}
+        {descriptor && !descriptor.enabled ? (
+          <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
+            <LockKeyhole className="h-4 w-4 text-slate-300/75 drop-shadow" />
+          </span>
+        ) : null}
+      </button>
+    )
+  }
+
+  const portrait = resolveMapTokenPortrait(character)
   const hpPercentage = Math.max(0, Math.min(100, character.maxHp > 0 ? character.currentHp / character.maxHp * 100 : 0))
 
   return (<>
     <section
       data-testid="player-combat-hotbar"
-      className="pointer-events-auto w-full max-w-[1320px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
+      className="pointer-events-auto w-full max-w-[1480px] overflow-x-auto rounded-xl border border-amber-200/20 bg-gradient-to-b from-[#171712]/95 to-[#090a0d]/95 p-1.5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl"
     >
-      <div className="grid min-w-[1100px] grid-cols-[82px_minmax(330px,1fr)_218px_minmax(190px,0.55fr)_218px] gap-1.5">
+      <div className="grid min-w-[1290px] grid-cols-[82px_minmax(330px,1fr)_218px_406px_218px] gap-1.5">
         <aside className="flex flex-col items-center justify-between rounded-lg border border-amber-100/10 bg-black/25 p-1.5">
           <div className="relative h-12 w-12 overflow-hidden rounded-full border-2 border-amber-200/55 bg-violet-950 shadow-[0_0_16px_rgba(245,189,80,0.18)]">
             {portrait
@@ -558,16 +770,25 @@ export default function PlayerCombatHotbar({
         <div data-testid="combat-hotbar-items" className="rounded-lg border border-amber-300/15 bg-amber-950/10 p-1.5">
           <div className="mb-1 flex h-4 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-amber-100/80">
             <PackageOpen className="h-3 w-3" />道具
-            <span className="ml-auto font-normal tracking-normal text-slate-500">{grouped.items.length} 项 · {activeItemPage + 1}/{itemPageCount}</span>
+            <span className="ml-auto font-normal tracking-normal text-slate-500">
+              快捷 {itemQuickbarPreference.slots.filter(Boolean).length}/{COMBAT_ITEM_QUICK_SLOT_COUNT} · 背包 {inventory.entries.length}
+            </span>
           </div>
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setItemPage(Math.max(0, activeItemPage - 1))} disabled={activeItemPage <= 0} aria-label="上一页道具" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronLeft className="h-3.5 w-3.5" /></button>
-            <div className="grid min-w-0 flex-1 grid-cols-3 gap-1">
-              {Array.from({ length: ITEM_PAGE_SIZE }, (_, index) => visibleItems[index]
-                ? actionButton(visibleItems[index])
-                : <div key={`empty-item-${index}`} className="h-12 w-12 shrink-0 rounded-lg border border-dashed border-amber-200/[0.07] bg-black/10" />)}
-            </div>
-            <button type="button" onClick={() => setItemPage(Math.min(itemPageCount - 1, activeItemPage + 1))} disabled={activeItemPage >= itemPageCount - 1} aria-label="下一页道具" className="flex h-12 w-5 shrink-0 items-center justify-center rounded border border-white/5 bg-black/20 text-slate-400 hover:bg-white/10 disabled:opacity-20"><ChevronRight className="h-3.5 w-3.5" /></button>
+          <div className="grid grid-cols-8 gap-1">
+            {itemQuickbarPreference.slots.map(quickbarItemButton)}
+            <button
+              type="button"
+              data-testid="combat-item-backpack"
+              aria-label="打开完整背包"
+              title={`打开完整背包（${inventory.entries.length} 个物品栏位）`}
+              onClick={() => setBackpackVisible(true)}
+              className="group relative flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-amber-300/30 bg-gradient-to-br from-amber-400/15 to-orange-950/25 text-amber-100 transition hover:-translate-y-0.5 hover:border-amber-200/60 hover:bg-amber-400/25"
+            >
+              <Backpack className="h-6 w-6 drop-shadow" />
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-amber-100/40 bg-amber-500 px-1 text-[8px] font-black text-void-950">
+                {inventory.entries.length}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -582,6 +803,56 @@ export default function PlayerCombatHotbar({
         </div>
       </div>
     </section>
+    {backpackOpen && typeof document !== 'undefined' ? createPortal(
+      <div
+        className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setBackpackVisible(false)
+        }}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="combat-backpack-title"
+          data-testid="combat-backpack-dialog"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-amber-300/20 bg-[#0b0d14]/98 shadow-[0_30px_100px_rgba(0,0,0,0.8)]"
+        >
+          <header className="flex shrink-0 items-start gap-3 border-b border-white/10 px-5 py-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-300/20 bg-amber-400/10 text-amber-100">
+              <Backpack className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 id="combat-backpack-title" className="text-base font-bold text-white">战斗背包</h3>
+              <p className="mt-1 text-xs leading-5 text-slate-400">
+                背包包含角色的全部装备与道具。可直接使用已接入 Headless 的物品，也可选择物品后放入或交换 1–7 号快捷槽。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBackpackVisible(false)}
+              aria-label="关闭战斗背包"
+              className="rounded-lg border border-white/10 p-2 text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <EquipmentTab
+              charId={character.id}
+              compact
+              pending={pending}
+              onUseItem={useBackpackItem}
+              quickbarSlots={itemQuickbarPreference.slots}
+              onAssignQuickbarSlot={assignItemToQuickbar}
+              onClearQuickbarSlot={clearItemQuickbarSlot}
+            />
+          </div>
+        </section>
+      </div>,
+      document.body,
+    ) : null}
     {tooltip && typeof document !== 'undefined' ? createPortal(
       <div
         id="combat-hotbar-action-tooltip"

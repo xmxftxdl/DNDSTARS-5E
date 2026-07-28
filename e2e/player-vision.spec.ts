@@ -146,6 +146,10 @@ test('a player token cuts a 30-foot view through filled fog without a separate v
   const page = await context.newPage()
   await page.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
   const canvas = page.getByTestId('map-canvas')
+  await page.evaluate(async () => {
+    const { useMapStore } = await import('/src/store/maps.ts')
+    await useMapStore.getState().loadShared()
+  })
   await expect.poll(() => page.evaluate(async () => {
     const { useMapStore } = await import('/src/store/maps.ts')
     return useMapStore.getState().maps

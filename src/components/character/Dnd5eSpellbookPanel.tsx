@@ -285,6 +285,7 @@ function SpellChoice({ spell, castingClassId, wizard, inWizardBook, selected, di
     damageType: spell.combat?.damageType ?? spell.imported?.mechanics?.damage?.type,
     tags: spell.imported?.tags,
     castingClassId,
+    iconAssetId: spell.iconAssetId,
   })
   return <div className={`rounded-xl border p-3 ${selected ? 'border-violet-300/30 bg-violet-500/[0.08]' : 'border-white/8 bg-black/10'}`}>
     <div className="flex items-start gap-3">
@@ -395,6 +396,7 @@ function SpellIconPreviewDialog({ spell, castingClassId, onClose }: { spell: Dnd
     damageType: spell.combat?.damageType ?? spell.imported?.mechanics?.damage?.type,
     tags: spell.imported?.tags,
     castingClassId,
+    iconAssetId: spell.iconAssetId,
   })
 
   return createPortal(<div role="presentation" className="fixed inset-0 z-[110] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md" onMouseDown={(event) => {
@@ -454,6 +456,7 @@ function SpellDetailsDialog({ spell, castingClassId, previewOpen, onPreview, onC
     damageType: combat?.damageType ?? imported?.mechanics?.damage?.type,
     tags: imported?.tags,
     castingClassId,
+    iconAssetId: spell.iconAssetId,
   })
 
   return createPortal(<div role="presentation" className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm" onMouseDown={(event) => {

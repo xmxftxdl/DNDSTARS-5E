@@ -87,6 +87,8 @@ import { useSpellbookStore } from '../store/spellbook'
 import { getRoomSession } from '../lib/roomSession'
 import { loadRoomRoster } from '../lib/roomApi'
 import { getRoomRulesSnapshot, subscribeRoomRules } from '../lib/roomRulesState'
+import { getClassResource } from '../lib/classResources'
+import { resolveInitiativePortrait } from '../lib/portraitPresentation'
 import {
   clearSharedEventBacklog,
   clearSharedResource,
@@ -138,24 +140,61 @@ import {
   combatPresentationServerNow,
   combatPresentationSavingThrowAbilityLabel,
   publishAttackBannerPresentation,
+  publishAreaSpellPresentation,
+  publishAcidArrowPresentation,
   publishAcidSplashPresentation,
+  publishBanePresentation,
+  publishBarkskinPresentation,
+  publishBlessPresentation,
+  publishBlindnessDeafnessPresentation,
+  publishBlurPresentation,
+  publishCharmPersonPresentation,
   publishChillTouchPresentation,
+  publishCureWoundsPresentation,
+  publishDarkvisionPresentation,
+  publishDeathWardPresentation,
+  publishDivineFavorPresentation,
   publishSavingThrowPresentation,
   publishEldritchBlastPresentation,
+  publishEnhanceAbilityPresentation,
+  publishEnlargeReducePresentation,
   publishFireBoltPresentation,
   publishFireballPresentation,
+  publishFlameBladePresentation,
+  publishFlyPresentation,
   publishGuidancePresentation,
+  publishGuidingBoltPresentation,
+  publishGreaterInvisibilityPresentation,
+  publishHealingWordPresentation,
+  publishHeroismPresentation,
+  publishHuntersMarkPresentation,
+  publishHideousLaughterPresentation,
+  publishHoldPersonPresentation,
+  publishHellishRebukePresentation,
   publishKillStreakPresentation,
+  publishInflictWoundsPresentation,
+  publishInvisibilityPresentation,
+  publishLongstriderPresentation,
+  publishMagicMissilePresentation,
+  publishMagicWeaponPresentation,
+  publishMageArmorPresentation,
+  publishJumpPresentation,
   publishProduceFlamePresentation,
   publishPoisonSprayPresentation,
+  publishProtectionFromPoisonPresentation,
+  publishProtectionFromEnergyPresentation,
   publishRayOfFrostPresentation,
   publishResistancePresentation,
   publishSanctuaryPresentation,
+  publishSeeInvisibilityPresentation,
   publishSacredFlamePresentation,
+  publishScorchingRayPresentation,
   publishShockingGraspPresentation,
+  publishShieldOfFaithPresentation,
   publishSpareTheDyingPresentation,
   publishSpellBannerPresentation,
   publishViciousMockeryPresentation,
+  publishWardingBondPresentation,
 } from '../lib/combatPresentation'
 import {
   advanceCombatKillStreak,
@@ -169,8 +208,8 @@ import { useCombatPresentationCoordinator } from './maps/useCombatPresentationCo
 import { usePlayerMovementController } from './maps/usePlayerMovementController'
 import { coordinateCombatEnd } from './maps/combatEndCoordinator'
 import {
+  claimPlayerTurnBanner,
   playerTurnBannerKey,
-  shouldPresentPlayerTurnBanner,
 } from './maps/turnBannerPresentation'
 import { dnd5eCuttingWordsCanSeeAttacker } from './maps/cuttingWordsVisibility'
 import {
@@ -178,11 +217,40 @@ import {
   mapSpellTargetIdsForAuthoritySubmission,
 } from './maps/aoeTargetingSession'
 import {
+  areaSpellPresentationForSettlement,
   fireballPresentationForSettlement,
   guidancePresentationsForTargets,
+  hasBanePresentationEffect,
+  hasBarkskinPresentationEffect,
+  hasBlessPresentationEffect,
+  hasBlindnessDeafnessPresentationEffect,
+  hasBlurPresentationEffect,
+  hasCharmPersonPresentationEffect,
+  hasDarkvisionPresentationEffect,
+  hasDeathWardPresentationEffect,
+  hasDivineFavorPresentationEffect,
+  hasEnhanceAbilityPresentationEffect,
+  hasEnlargeReducePresentationEffect,
+  hasFlameBladePresentationEffect,
   hasGuidancePresentationEffect,
+  hasGreaterInvisibilityPresentationEffect,
+  hasFlyPresentationEffect,
+  hasMageArmorPresentationEffect,
+  hasHeroismPresentationEffect,
+  hasHuntersMarkPresentationEffect,
+  hasHideousLaughterPresentationEffect,
+  hasHoldPersonPresentationEffect,
+  hasJumpPresentationEffect,
+  hasInvisibilityPresentationEffect,
+  hasLongstriderPresentationEffect,
+  hasMagicWeaponPresentationEffect,
   hasResistancePresentationEffect,
+  hasProtectionFromEnergyPresentationEffect,
+  hasProtectionFromPoisonPresentationEffect,
   hasSanctuaryPresentationEffect,
+  hasSeeInvisibilityPresentationEffect,
+  hasShieldOfFaithPresentationEffect,
+  hasWardingBondPresentationEffect,
   mergeDnd5eSpellAreaDelta,
   resistancePresentationsForTargets,
   sanctuaryPresentationsForTargets,
@@ -330,7 +398,11 @@ import {
   type Dnd5eMonsterActionRoll,
   type Dnd5eMonsterOnHitEffect,
   type Dnd5eMonsterOnHitEffectRoll,
+  type Dnd5eMonsterRechargeRoll,
   type Dnd5eActionResult,
+  type Dnd5eBattleMasterAttackIntentPayload,
+  type Dnd5eBattleMasterReactionWeaponAttack,
+  type Dnd5eBattleMasterTargetReaction,
   type Dnd5eCombatEvent,
   type Dnd5eMapResultPlan,
   type Dnd5eCombatant,
@@ -350,6 +422,9 @@ import {
   type Dnd5eSpellForcedMovement,
   type Dnd5eTargetTranquilitySaveRoll,
   type Dnd5eActiveEffectSavingThrowRoll,
+  type Dnd5eTurnStartGazeResolution,
+  type PreparedDnd5eBeginTurn,
+  type PreparedDnd5ePlayerEndTurn,
   type Dnd5eActiveEffectInstance,
   type Dnd5ePluginDiceRollResult,
   type Dnd5ePluginTargeting,
@@ -368,11 +443,13 @@ import {
   type PreparedDnd5ePluginFeatureAction,
   applyDnd5eInitiativeResourceFeatures,
   createDnd5eTurnEconomyCounts,
+  refreshDnd5eReactiveReactionEconomies,
   createDnd5eMapCombatSnapshot,
   restoreDnd5eEffectiveRulesContextForCombat,
   applyDnd5eAttackCoverOverride,
   dnd5eAttackCoverForPair,
   dnd5eClassDefinition,
+  dnd5eClassDefinitionForCharacter,
   dnd5eCharacterClassLevel,
   dnd5eClassFeatureLabel,
   dnd5eCarefulSpellMaximumTargets,
@@ -400,6 +477,8 @@ import {
   dnd5eTranquilityWardCheck,
   dnd5eEffectiveWalkingSpeed,
   dnd5eActiveFlySpeed,
+  dnd5eActiveSpeedBonus,
+  dnd5eActiveSpeedMultiplier,
   dnd5eActiveSpeedPenalty,
   dnd5eActiveStandardConditions,
   dnd5eConditionLabel,
@@ -407,6 +486,11 @@ import {
   findDnd5eOpportunityAttackersForMove,
   grantDnd5eActionSurge,
   dnd5eMonsterMapSpeed,
+  dnd5eMonsterAreaForcedMovementPlans,
+  DND5E_RACIAL_RESOURCE_KEYS,
+  dnd5eDragonbornBreathArea,
+  dnd5eDragonbornBreathDiceCount,
+  dnd5eRacialRulesForCharacter,
   getDnd5eSrdMonster,
   normalizeDnd5eTurnEconomyCounts,
   planDnd5eMonsterTurn,
@@ -415,6 +499,12 @@ import {
   prepareDnd5eClassFeature,
   prepareDnd5ePluginFeatureAction,
   prepareDnd5ePluginSpellCast,
+  dnd5eDeclarativeAttackIntentDefinition,
+  dnd5eDeclarativeBattleMasterManeuverDefinition,
+  dnd5eDeclarativeBattleMasterRollPlan,
+  dnd5eDeclarativeAttackIntentRollPlan,
+  dnd5eDeclarativePluginFeatureRollPlan,
+  dnd5eDeclarativeAttackIntentResolution,
   dnd5ePluginFeatureDefinition,
   dnd5eEnemyD20ModifierFeaturesForCharacter,
   dnd5ePluginSpellDefinition,
@@ -431,8 +521,10 @@ import {
   prepareDnd5eMonsterAttack,
   prepareDnd5eMonsterAfterHitMechanics,
   prepareDnd5eMonsterAreaAction,
+  prepareDnd5eDragonbornBreathAction,
   prepareDnd5eMonsterCoreSpell,
   prepareDnd5eOpportunityAttack,
+  prepareDnd5eBeginTurn,
   prepareDnd5ePlayerEndTurn,
   prepareDnd5ePlayerMove,
   prepareDnd5ePlayerBasicAction,
@@ -442,10 +534,11 @@ import {
   dnd5eSpellbookEntries,
   dnd5eForcedMovementFall,
   dnd5eRepellingBlastPushDestination,
+  dnd5eForcedPushDestination,
   previewDnd5eEquipmentAttack,
   previewPreparedDnd5eAbilityCheck,
   previewDnd5eHunterMultiattack,
-  dnd5eAttackModeWithProtection,
+  dnd5ePreparedEquipmentAttackMode,
   dnd5eMonsterAttackModeWithProtection,
   dnd5eOpportunityAttackClassDamageDefinitions,
   dnd5eMetamagicCost,
@@ -479,7 +572,13 @@ import {
   resolveDnd5ePlayerDisengage,
   resolveDnd5ePlayerDodge,
   resolveDnd5eMonsterDodge,
+  resolveDnd5eMonsterReleaseGrapple,
+  prepareDnd5eMonsterEscapeActiveEffect,
+  prepareDnd5eMonsterEscapeGrapple,
+  resolvePreparedDnd5eMonsterEscapeActiveEffect,
+  resolvePreparedDnd5eMonsterEscapeGrapple,
   resolveDnd5ePlayerEndTurn,
+  resolveDnd5eBeginTurn,
   resolvePreparedDnd5eClassFeature,
   resolvePreparedDnd5ePluginFeatureAction,
   planDnd5eSummonedCreature,
@@ -497,6 +596,7 @@ import {
   triggerDnd5eReadiedAction,
   resolvePreparedDnd5eSpellCast,
   resolvePreparedDnd5eMonsterAreaAction,
+  resolvePreparedDnd5eDragonbornBreathAction,
   resolvePreparedDnd5eMonsterCoreSpell,
   resolvePreparedDnd5eCoreSpellAreaMove,
   resolvePreparedDnd5eAdjudicatedSpell,
@@ -521,6 +621,7 @@ import {
   dnd5eClimbingMovementCost,
   dnd5eRunningJumpBonusFeet,
 } from '../rulesets/dnd5e'
+import { settleDnd5eMovementTracesSequentially } from '../rulesets/dnd5e/mapMovementHazards'
 import {
   createDnd5eLearnedMonsterDecisionProvider,
   dnd5eStrategyScopeId,
@@ -586,6 +687,7 @@ import {
 import type {
   Dnd5eClassFeaturePayload,
   Dnd5eBasicActionPayload,
+  Dnd5eRacialActionPayload,
   Dnd5ePluginActionPayload,
   Dnd5eItemUsePayload,
   Dnd5eAbilityCheckPayload,
@@ -711,6 +813,17 @@ const runtimeId = (prefix?: string) =>
   prefix ? `${prefix}-${runtimeNow()}-${runtimeRandomSuffix()}` : `${runtimeNow()}-${runtimeRandomSuffix()}`
 const runtimeNumericId = () => runtimeNow() + Math.random()
 const randomDieValue = (sides: number) => 1 + Math.floor(Math.random() * sides)
+const dnd5eMonsterTokenEffectiveSpeed = (token: Token, baseSpeed: number) => {
+  const effects = token.dnd5eCombatState?.activeEffects
+  const adjusted = Math.max(
+    0,
+    Math.floor(baseSpeed) -
+      dnd5eActiveSpeedPenalty(effects) -
+      Math.max(0, token.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) +
+      dnd5eActiveSpeedBonus(effects),
+  )
+  return Math.max(0, Math.floor(adjusted * dnd5eActiveSpeedMultiplier(effects)))
+}
 const dnd5eCharacterPresentationColors = (character: Character | undefined) => {
   const classId = Object.entries(character?.dnd5eClassLevels ?? {})
     .sort(([, left], [, right]) => Number(right ?? 0) - Number(left ?? 0))[0]?.[0]
@@ -947,6 +1060,75 @@ export default function MapsPage() {
   } | null>(null)
   const [manualMonsterActionPendingKey, setManualMonsterActionPendingKey] = useState<string | null>(null)
   const [dnd5eWeaponAttackOptions, setDnd5eWeaponAttackOptions] = useState<Dnd5eWeaponAttackOptions | undefined>()
+  const [armedDeclarativeAttackIntents, setArmedDeclarativeAttackIntents] = useState<{
+    characterId: string | null
+    combatId: string
+    turnKey: string
+    featureIds: Set<string>
+  }>({ characterId: null, combatId: '', turnKey: '', featureIds: new Set() })
+  const currentDeclarativeAttackIntentTurnKey = `${combatId}:${round}:${initiativeIndex}`
+  const activeDeclarativeAttackIntentFeatureIds = (characterId: string): Set<string> => {
+    if (
+      armedDeclarativeAttackIntents.characterId !== characterId ||
+      armedDeclarativeAttackIntents.combatId !== combatId
+    ) return new Set()
+    return new Set([...armedDeclarativeAttackIntents.featureIds].filter((featureId) => {
+      const retention = dnd5eDeclarativeAttackIntentDefinition(featureId)?.hook.retention
+      return retention !== 'until-turn-end' ||
+        armedDeclarativeAttackIntents.turnKey === currentDeclarativeAttackIntentTurnKey
+    }))
+  }
+  const toggleDeclarativeAttackIntent = (characterId: string, featureId: string) => {
+    setArmedDeclarativeAttackIntents((current) => {
+      const featureIds = current.characterId === characterId && current.combatId === combatId
+        ? new Set([...current.featureIds].filter((currentFeatureId) => {
+            const retention = dnd5eDeclarativeAttackIntentDefinition(currentFeatureId)?.hook.retention
+            return retention !== 'until-turn-end' ||
+              current.turnKey === currentDeclarativeAttackIntentTurnKey
+          }))
+        : new Set<string>()
+      if (featureIds.has(featureId)) featureIds.delete(featureId)
+      else {
+        const exclusiveGroup = dnd5eDeclarativeAttackIntentDefinition(featureId)?.hook.exclusiveGroup
+        if (exclusiveGroup) {
+          for (const armedFeatureId of featureIds) {
+            if (
+              dnd5eDeclarativeAttackIntentDefinition(armedFeatureId)?.hook.exclusiveGroup ===
+              exclusiveGroup
+            ) featureIds.delete(armedFeatureId)
+          }
+        }
+        featureIds.add(featureId)
+      }
+      return {
+        characterId,
+        combatId,
+        turnKey: currentDeclarativeAttackIntentTurnKey,
+        featureIds,
+      }
+    })
+  }
+  const reconcileDeclarativeAttackIntents = (
+    characterId: string,
+    result?: SharedPlayerActionAckState['dnd5eDeclarativeAttackIntents'],
+  ) => {
+    if (!result?.consumedFeatureIds.length) return
+    const consumed = new Set(result.consumedFeatureIds)
+    setArmedDeclarativeAttackIntents((current) => {
+      if (current.characterId !== characterId) return current
+      const featureIds = new Set([...current.featureIds].filter((featureId) => !consumed.has(featureId)))
+      return featureIds.size === current.featureIds.size ? current : { ...current, featureIds }
+    })
+  }
+  const withDeclarativeAttackIntents = (
+    characterId: string,
+    options?: Dnd5eWeaponAttackOptions,
+  ): Dnd5eWeaponAttackOptions | undefined => {
+    const featureIds = [...activeDeclarativeAttackIntentFeatureIds(characterId)]
+    return featureIds.length > 0
+      ? { ...options, declarativeIntentFeatureIds: featureIds }
+      : options
+  }
   const [dnd5eWeaponAttackConfirmation, setDnd5eWeaponAttackConfirmation] =
     useState<Dnd5eWeaponAttackConfirmation | null>(null)
   const pendingDmCoverOverrideRef = useRef<{
@@ -965,7 +1147,8 @@ export default function MapsPage() {
   }
   const [dnd5eSpellTargeting, setDnd5eSpellTargeting] = useState<{
     characterId: string
-    castingClassId: Dnd5eClassId
+    castingClassId?: Dnd5eClassId
+    racialInnate?: boolean
     spellId: string
     slotLevel: number
     maximumTargets: number
@@ -1007,6 +1190,7 @@ export default function MapsPage() {
     targeting: Extract<Dnd5eInventoryTargeting, { kind: 'map-area' }>
   } | null>(null)
   const [dnd5ePluginAreaTargeting, setDnd5ePluginAreaTargeting] = useState<{
+    source: 'plugin' | 'dragonborn-breath'
     characterId: string
     featureId: string
     featureName: string
@@ -1453,6 +1637,7 @@ export default function MapsPage() {
   }, [dnd5eTurnEconomyByToken])
   const multiStrikeHitsRef = useRef<Record<string, number>>({})
   const combatActiveRef = useRef(false)
+  const combatStartingRef = useRef(false)
   const combatEndingRef = useRef(false)
   const locallyEndedCombatIdRef = useRef('')
   const combatOutcomeNoticeCombatIdRef = useRef('')
@@ -1903,8 +2088,10 @@ export default function MapsPage() {
       : token?.poolId
         ? (() => {
             const monster = getDnd5eSrdMonster(token.poolId)
-            return Math.max(0, (monster ? dnd5eMonsterMapSpeed(monster) : 30) -
-              dnd5eActiveSpeedPenalty(token.dnd5eCombatState?.activeEffects))
+            return dnd5eMonsterTokenEffectiveSpeed(
+              token,
+              monster ? dnd5eMonsterMapSpeed(monster) : 30,
+            )
           })()
         : 30
     const stored = dnd5eTurnEconomyByTokenRef.current[tokenId]
@@ -1926,6 +2113,32 @@ export default function MapsPage() {
     dnd5eTurnEconomyByTokenRef.current = next
     setDnd5eTurnEconomyByToken(next)
     return nextEconomy
+  }
+
+  const syncDnd5eReactiveReactionEconomy = (
+    state: Dnd5eHeadlessCombatState,
+    events: readonly Dnd5eCombatEvent[],
+  ) => {
+    const refreshes = events.flatMap((event) => {
+      if (event.type !== 'monster-reactive-refreshed') return []
+      const combatant = state.combatants[event.actorId]
+      if (!combatant) return []
+      return [{
+        actorId: event.actorId,
+        turnKey: event.turnKey,
+        reactionAvailable:
+          combatant.turn.reactionAvailable &&
+          combatant.classState.monsterReactiveUsedTurnKey !== event.turnKey,
+        speed: combatant.speed,
+      }]
+    })
+    if (refreshes.length === 0) return
+    const next = refreshDnd5eReactiveReactionEconomies(
+      dnd5eTurnEconomyByTokenRef.current,
+      refreshes,
+    )
+    dnd5eTurnEconomyByTokenRef.current = next
+    setDnd5eTurnEconomyByToken(next)
   }
 
   const applySharedCombatState = (state: SharedCombatState | null) => {
@@ -2079,7 +2292,7 @@ export default function MapsPage() {
   const displayInitiativeOrder = initiativeOrder.map((entry) => {
     const token = displayTokensById.get(entry.tokenId)
     const character = token?.characterId ? displayCharactersById.get(token.characterId) : undefined
-    const initiativePortrait = character?.initiativePortrait ?? token?.portrait
+    const initiativePortrait = resolveInitiativePortrait(character, token)
     const turnGlowColor = token?.type === 'enemy'
       ? DND5E_CLASS_ICON_PALETTES.monster[3]
       : character
@@ -2336,6 +2549,10 @@ export default function MapsPage() {
     pushCombatLog(`DM 为 ${linked?.name ?? token.label} ${changes || '更新状态标签'}。`, 'system')
   }
   const activeChar = characters.find((c) => c.id === activeCharId) ?? null
+  const activeCharRacialRules = activeChar ? dnd5eRacialRulesForCharacter(activeChar) : undefined
+  const activeCharBreathResource = activeChar
+    ? getClassResource(activeChar, DND5E_RACIAL_RESOURCE_KEYS.dragonbornBreath)
+    : undefined
   const activeCharToken = activeChar
     ? activeMap?.tokens.find((token) => token.characterId === activeChar.id)
     : undefined
@@ -2804,8 +3021,10 @@ export default function MapsPage() {
     if (dnd5eTurnEconomyByTokenRef.current[currentInitiativeToken.id]?.turnKey === turnKey) return
     const speed = turnCharacter
       ? dnd5eEffectiveWalkingSpeed(turnCharacter)
-      : Math.max(0, (turnMonster ? dnd5eMonsterMapSpeed(turnMonster) : 30) -
-          dnd5eActiveSpeedPenalty(currentInitiativeToken.dnd5eCombatState?.activeEffects))
+      : dnd5eMonsterTokenEffectiveSpeed(
+          currentInitiativeToken,
+          turnMonster ? dnd5eMonsterMapSpeed(turnMonster) : 30,
+        )
     const next = {
       ...dnd5eTurnEconomyByTokenRef.current,
       [currentInitiativeToken.id]: createDnd5eTurnEconomyCounts(turnKey, speed),
@@ -2869,7 +3088,14 @@ export default function MapsPage() {
       round,
       slotId: currentInitiativeEntry?.slotId ?? currentInitiativeToken.id,
     })
-    if (!shouldPresentPlayerTurnBanner(playerTurnBannerShownKeyRef.current, key)) return
+    if (!claimPlayerTurnBanner(
+      window.sessionStorage,
+      playerTurnBannerShownKeyRef.current,
+      key,
+    )) {
+      playerTurnBannerShownKeyRef.current = key
+      return
+    }
     // Mark synchronously. A move can replace the player/character snapshot
     // before the show timer fires, but it must not schedule a second banner.
     playerTurnBannerShownKeyRef.current = key
@@ -3292,7 +3518,66 @@ export default function MapsPage() {
       hasGuidancePresentationEffect(combatState) ? 'guidance' : undefined,
       hasResistancePresentationEffect(combatState) ? 'resistance' : undefined,
       hasSanctuaryPresentationEffect(combatState) ? 'sanctuary' : undefined,
-    ] as const).filter((statusId): statusId is 'guidance' | 'resistance' | 'sanctuary' =>
+      hasBlessPresentationEffect(combatState) ? 'bless' : undefined,
+      hasBanePresentationEffect(combatState) ? 'bane' : undefined,
+      hasShieldOfFaithPresentationEffect(combatState) ? 'shield-of-faith' : undefined,
+      hasMageArmorPresentationEffect(combatState) ? 'mage-armor' : undefined,
+      hasJumpPresentationEffect(combatState) ? 'jump' : undefined,
+      hasDarkvisionPresentationEffect(combatState) ? 'darkvision' : undefined,
+      hasSeeInvisibilityPresentationEffect(combatState) ? 'see-invisibility' : undefined,
+      hasWardingBondPresentationEffect(combatState) ? 'warding-bond' : undefined,
+      hasFlyPresentationEffect(combatState) ? 'fly' : undefined,
+      hasHeroismPresentationEffect(combatState) ? 'heroism' : undefined,
+      hasEnlargeReducePresentationEffect(combatState) ? 'enlarge-reduce' : undefined,
+      hasEnhanceAbilityPresentationEffect(combatState) ? 'enhance-ability' : undefined,
+      hasDivineFavorPresentationEffect(combatState) ? 'divine-favor' : undefined,
+      hasHuntersMarkPresentationEffect(combatState) ? 'hunters-mark' : undefined,
+      hasMagicWeaponPresentationEffect(combatState) ? 'magic-weapon' : undefined,
+      hasFlameBladePresentationEffect(combatState) ? 'flame-blade' : undefined,
+      hasInvisibilityPresentationEffect(combatState) ? 'invisibility' : undefined,
+      hasBlurPresentationEffect(combatState) ? 'blur' : undefined,
+      hasBarkskinPresentationEffect(combatState) ? 'barkskin' : undefined,
+      hasProtectionFromPoisonPresentationEffect(combatState) ? 'protection-from-poison' : undefined,
+      hasLongstriderPresentationEffect(combatState) ? 'longstrider' : undefined,
+      hasProtectionFromEnergyPresentationEffect(combatState) ? 'protection-from-energy' : undefined,
+      hasDeathWardPresentationEffect(combatState) ? 'death-ward' : undefined,
+      hasGreaterInvisibilityPresentationEffect(combatState) ? 'greater-invisibility' : undefined,
+      hasCharmPersonPresentationEffect(combatState) ? 'charm-person' : undefined,
+      hasHideousLaughterPresentationEffect(combatState) ? 'hideous-laughter' : undefined,
+      hasHoldPersonPresentationEffect(combatState) ? 'hold-person' : undefined,
+      hasBlindnessDeafnessPresentationEffect(combatState) ? 'blindness-deafness' : undefined,
+    ] as const).filter((statusId): statusId is
+      | 'guidance'
+      | 'resistance'
+      | 'sanctuary'
+      | 'bless'
+      | 'bane'
+      | 'shield-of-faith'
+      | 'mage-armor'
+      | 'jump'
+      | 'darkvision'
+      | 'see-invisibility'
+      | 'warding-bond'
+      | 'fly'
+      | 'heroism'
+      | 'enlarge-reduce'
+      | 'enhance-ability'
+      | 'divine-favor'
+      | 'hunters-mark'
+      | 'magic-weapon'
+      | 'flame-blade'
+      | 'invisibility'
+      | 'blur'
+      | 'barkskin'
+      | 'protection-from-poison'
+      | 'longstrider'
+      | 'protection-from-energy'
+      | 'death-ward'
+      | 'greater-invisibility'
+      | 'charm-person'
+      | 'hideous-laughter'
+      | 'hold-person'
+      | 'blindness-deafness' =>
       statusId != null)
     return statusIds.map((statusId) => {
       const sourceActorId = spellPresentationEffectSourceActorId(combatState, statusId)
@@ -3780,7 +4065,7 @@ export default function MapsPage() {
     characterIdByCombatantId: Readonly<Record<string, string>>
     token: Token
     to: { x: number; y: number }
-    path?: Array<{ x: number; y: number }>
+    path?: readonly { x: number; y: number }[]
     carefulMovement?: boolean
   }): Promise<{
     state: Dnd5eHeadlessCombatState
@@ -3789,7 +4074,12 @@ export default function MapsPage() {
     finalPosition: { x: number; y: number }
     logs: string[]
   }> => {
-    const entered = dnd5eItemAreasEnteredByMove({ map: input.map, token: input.token, to: input.to, path: input.path })
+    const entered = dnd5eItemAreasEnteredByMove({
+      map: input.map,
+      token: input.token,
+      to: input.to,
+      path: input.path ? [...input.path] : undefined,
+    })
     let state = input.state
     let map = input.map
     let finalPosition = input.to
@@ -3807,6 +4097,12 @@ export default function MapsPage() {
       const d20Second = mode !== 'normal'
         ? await rollDiceBoxD20(`${areaLabels[entry.area.kind]}·敏捷豁免（${mode === 'advantage' ? '优势' : '劣势'}）`, combatant.name)
         : undefined
+      const halflingLuckyD20 = combatant.racialRules?.halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·物品区域豁免重投', combatant.name)
+        : undefined
+      const halflingLuckyD20Second = combatant.racialRules?.halflingLucky && d20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·物品区域豁免重投', combatant.name)
+        : undefined
       const damageRolls = entry.area.kind === 'hunting-trap'
         ? await rollDiceBoxValues(1, 4, '捕猎陷阱·穿刺伤害', combatant.name)
         : undefined
@@ -3817,6 +4113,8 @@ export default function MapsPage() {
         areaKind: entry.area.kind,
         d20,
         d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
         damageRolls,
       })
       if (!triggered.ok) {
@@ -3845,19 +4143,22 @@ export default function MapsPage() {
       characters: input.characters,
       characterIdByCombatantId: input.characterIdByCombatantId,
     })
+    const traversedPath = input.path
+      ? truncateTokenMovementPath(input.path, finalPosition)
+      : undefined
     const pluginCandidates = collectDnd5ePersistentAreaTriggers({
       map: baseApplication.map,
       timing: 'on-enter',
       round: roundRef.current,
       turnKey: `${roundRef.current}:${currentInitiativeToken?.id ?? input.token.id}`,
-      movement: { token: input.token, to: finalPosition, path: input.path },
+      movement: { token: input.token, to: finalPosition, path: traversedPath },
     })
     const movementDistanceCandidates = collectDnd5ePersistentAreaTriggers({
       map: baseApplication.map,
       timing: 'on-move-distance',
       round: roundRef.current,
       turnKey: `${roundRef.current}:${currentInitiativeToken?.id ?? input.token.id}`,
-      movement: { token: input.token, to: finalPosition, path: input.path },
+      movement: { token: input.token, to: finalPosition, path: traversedPath },
     })
     const pluginAreas = await settleDnd5ePersistentAreaCandidates({
       candidates: [...pluginCandidates, ...movementDistanceCandidates]
@@ -3886,6 +4187,110 @@ export default function MapsPage() {
         changedCharacterIds,
         changedTokenIds,
       },
+    }
+  }
+
+  const settleDnd5eMovementHazards = async (input: {
+    state: Dnd5eHeadlessCombatState
+    map: BattleMap
+    characters: readonly Character[]
+    characterIdByCombatantId: Readonly<Record<string, string>>
+    movements: readonly {
+      tokenId: string
+      to: { x: number; y: number }
+      path: readonly { x: number; y: number }[]
+    }[]
+    carefulMovementActorId?: string
+  }): Promise<{
+    state: Dnd5eHeadlessCombatState
+    map: BattleMap
+    application: Dnd5eMapResultPlan
+    finalPositionByCombatantId: Readonly<Record<string, { x: number; y: number }>>
+    logs: string[]
+  }> => {
+    const sequential = await settleDnd5eMovementTracesSequentially({
+      initialContext: {
+        state: input.state,
+        map: input.map,
+        characters: [...input.characters],
+        characterIdByCombatantId: input.characterIdByCombatantId,
+        logs: [] as string[],
+      },
+      movements: input.movements.filter((movement) =>
+        input.map.tokens.some((token) => token.id === movement.tokenId)),
+      settle: async ({ context, movement }) => {
+        const token = input.map.tokens.find((candidate) => candidate.id === movement.tokenId)!
+        const movedCombatant = context.state.combatants[movement.tokenId]
+        const movementState = movedCombatant &&
+          (movedCombatant.position.x !== movement.to.x || movedCombatant.position.y !== movement.to.y)
+          ? {
+              ...context.state,
+              combatants: {
+                ...context.state.combatants,
+                [movement.tokenId]: {
+                  ...movedCombatant,
+                  position: { ...movement.to },
+                },
+              },
+            }
+          : context.state
+        const settled = await settleDnd5eItemAreasForMove({
+          state: movementState,
+          map: context.map,
+          characters: context.characters,
+          characterIdByCombatantId: context.characterIdByCombatantId,
+          token,
+          to: movement.to,
+          path: movement.path,
+          carefulMovement: movement.tokenId === input.carefulMovementActorId,
+        })
+        // Persistent-area settlement rebuilds its own Headless transaction.
+        // Persist and rehydrate it before the next dragged creature so item,
+        // concentration, area-consumption and HP changes remain cumulative.
+        const map = settled.application.map
+        const characters = settled.application.characters
+        const refreshed = createDnd5eMapCombatSnapshot({
+          combatId: input.state.combatId,
+          round: input.state.round,
+          turnSlotId: input.state.turnSlotId,
+          map,
+          characters,
+          initiativeOrder: initiativeOrderRef.current,
+        })
+        const activeActorId = input.state.initiativeOrder[input.state.initiativeIndex]
+        const refreshedInitiativeIndex = refreshed.state.initiativeOrder.indexOf(activeActorId)
+        return {
+          context: {
+            state: {
+              ...refreshed.state,
+              initiativeIndex: refreshedInitiativeIndex >= 0
+                ? refreshedInitiativeIndex
+                : refreshed.state.initiativeIndex,
+            },
+            map,
+            characters,
+            characterIdByCombatantId: refreshed.characterIdByCombatantId,
+            logs: [...context.logs, ...settled.logs],
+          },
+          finalPosition: settled.finalPosition,
+        }
+      },
+    })
+    const { state, map, characters, logs } = sequential.context
+    const changedCharacterIds = characters.flatMap((character) => {
+      const before = input.characters.find((candidate) => candidate.id === character.id)
+      return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+    })
+    const changedTokenIds = map.tokens.flatMap((token) => {
+      const before = input.map.tokens.find((candidate) => candidate.id === token.id)
+      return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+    })
+    return {
+      state,
+      map,
+      finalPositionByCombatantId: sequential.finalPositionByCombatantId,
+      logs,
+      application: { map, characters, changedCharacterIds, changedTokenIds },
     }
   }
 
@@ -3921,14 +4326,18 @@ export default function MapsPage() {
       pushCombatLog(`${enemy.label} 的移动被 Headless 拒绝：${resolved.result.ok ? 'missing-application' : resolved.result.reason}。`, 'system')
       return false
     }
-    const hazards = await settleDnd5eItemAreasForMove({
+    const monsterMovements = resolved.movementTraces ?? [{
+      tokenId: enemy.id,
+      to: targetPosition,
+      path: resolved.path,
+      pathElevationsFeet: [],
+    }]
+    const hazards = await settleDnd5eMovementHazards({
       state: resolved.result.state,
       map: latestMap,
       characters: useCharacterStore.getState().characters,
       characterIdByCombatantId: {},
-      token: enemy,
-      to: targetPosition,
-      path: resolved.path,
+      movements: monsterMovements,
     })
     for (const doorId of resolved.doorsToOpen) setGeometryDoorState(latestMap.id, doorId, 'open')
     const resolvedTurn = resolved.result.state.combatants[enemy.id]?.turn
@@ -3956,13 +4365,15 @@ export default function MapsPage() {
       map: {
         ...hazards.application.map,
         tokens: hazards.application.map.tokens.map((token) => {
-          if (token.id !== enemy.id || !hazards.application.changedTokenIds.includes(token.id)) return token
+          const movement = monsterMovements.find((candidate) => candidate.tokenId === token.id)
+          if (!movement || !hazards.application.changedTokenIds.includes(token.id)) return token
+          const finalPosition = hazards.finalPositionByCombatantId[token.id] ?? movement.to
           return {
             ...token,
             movementAnimation: createTokenMovementAnimation({
-              id: `monster-move:${combatIdRef.current}:${roundRef.current}:${enemy.id}:${runtimeNow()}`,
-              path: truncateTokenMovementPath(resolved.path, hazards.finalPosition),
-              finalPosition: hazards.finalPosition,
+              id: `monster-move:${combatIdRef.current}:${roundRef.current}:${token.id}:${runtimeNow()}`,
+              path: truncateTokenMovementPath(movement.path, finalPosition),
+              finalPosition,
               issuedAt: runtimeNow() + 100,
             }),
           }
@@ -4037,6 +4448,219 @@ export default function MapsPage() {
     return true
   }
 
+  const resolveSrd5eMonsterReleaseGrappleThroughHeadless = async (
+    enemy: Token,
+    targetTokenId: string,
+    effectId: string,
+  ) => {
+    if (!activeMap) return false
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const resolved = resolveDnd5eMonsterReleaseGrapple({
+      combatId: combatIdRef.current || `map-${latestMap.id}`,
+      round: roundRef.current,
+      map: latestMap,
+      characters: useCharacterStore.getState().characters,
+      initiativeOrder: initiativeOrderRef.current,
+      actorTokenId: enemy.id,
+      targetTokenId,
+      effectId,
+    })
+    if (!resolved.ok) {
+      pushCombatLog(`${enemy.label} 无法松开擒抱：${resolved.reason}。`, 'system')
+      return false
+    }
+    if (!resolved.result.ok || !resolved.application) {
+      pushCombatLog(
+        `${enemy.label} 松开擒抱被 Headless 拒绝：${
+          resolved.result.ok ? 'missing-application' : resolved.result.reason
+        }。`,
+        'system',
+      )
+      return false
+    }
+    applyCoordinatedDnd5eCombatResult({
+      application: resolved.application,
+      mapId: latestMap.id,
+      applyCharacter: applyAuthorityCharacterUpdate,
+      applyToken: updateToken,
+    })
+    const targetName = latestMap.tokens.find((token) =>
+      token.id === targetTokenId)?.label ?? targetTokenId
+    pushHeadlessCombatLog(
+      `${enemy.label} 主动松开了对 ${targetName} 的擒抱。`,
+      'turn',
+      resolved.result.events,
+    )
+    await persistDnd5eAuthorityState()
+    return true
+  }
+
+  const resolveSrd5eMonsterEscapeThroughHeadless = async (
+    enemy: Token,
+    escape: {
+      activeEffect?: { effectId: string; dc: number }
+      grapple?: { grapplerId: string }
+    },
+    isStillEnemyTurn: () => boolean,
+  ) => {
+    if (!activeMap || !isStillEnemyTurn()) return false
+    const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+    const characters = useCharacterStore.getState().characters
+    const common = {
+      combatId: combatIdRef.current || `map-${latestMap.id}`,
+      round: roundRef.current,
+      map: latestMap,
+      characters,
+      initiativeOrder: initiativeOrderRef.current,
+      actorTokenId: enemy.id,
+      turnEconomy: currentDnd5eTurnEconomy(enemy.id, roundRef.current),
+    }
+    const preparedActiveEffect = escape.activeEffect
+      ? prepareDnd5eMonsterEscapeActiveEffect({
+          ...common,
+          effectId: escape.activeEffect.effectId,
+        })
+      : undefined
+    const preparedGrapple = escape.grapple
+      ? prepareDnd5eMonsterEscapeGrapple({
+          ...common,
+          grapplerId: escape.grapple.grapplerId,
+        })
+      : undefined
+    if (preparedActiveEffect && !preparedActiveEffect.ok) {
+      pushCombatLog(`${enemy.label} 的挣脱未执行：${preparedActiveEffect.reason}。`, 'system')
+      return false
+    }
+    if (preparedGrapple && !preparedGrapple.ok) {
+      pushCombatLog(`${enemy.label} 的挣脱未执行：${preparedGrapple.reason}。`, 'system')
+      return false
+    }
+    if (!preparedActiveEffect?.ok && !preparedGrapple?.ok) return false
+
+    let result: ReturnType<typeof resolvePreparedDnd5eMonsterEscapeActiveEffect>['result']
+    let application: ReturnType<typeof resolvePreparedDnd5eMonsterEscapeActiveEffect>['application']
+    let detail: string
+    if (preparedActiveEffect?.ok) {
+      const prepared = preparedActiveEffect.prepared
+      const label = `${enemy.label}·挣脱检定`
+      const d20 = await rollDiceBoxD20(label, enemy.label)
+      if (!isStillEnemyTurn()) return false
+      const d20Second = prepared.rollMode === 'normal'
+        ? undefined
+        : await rollDiceBoxD20(
+            `${label}（${prepared.rollMode === 'advantage' ? '优势' : '劣势'}）`,
+            enemy.label,
+          )
+      if (!isStillEnemyTurn()) return false
+      const resolved = resolvePreparedDnd5eMonsterEscapeActiveEffect({
+        prepared,
+        d20,
+        d20Second,
+      })
+      result = resolved.result
+      application = resolved.application
+      detail = `固定 DC ${prepared.dc}；${prepared.ability.toUpperCase()}${prepared.skill ? `（${prepared.skill}）` : ''}`
+    } else {
+      const prepared = preparedGrapple!.prepared
+      const actorLabel = `${enemy.label}·挣脱擒抱`
+      const actorD20 = await rollDiceBoxD20(actorLabel, enemy.label)
+      if (!isStillEnemyTurn()) return false
+      const actorD20Second = prepared.actorRollMode === 'normal'
+        ? undefined
+        : await rollDiceBoxD20(
+            `${actorLabel}（${prepared.actorRollMode === 'advantage' ? '优势' : '劣势'}）`,
+            enemy.label,
+          )
+      if (!isStillEnemyTurn()) return false
+      const grapplerLabel = `${prepared.grappler.label}·维持擒抱`
+      const grapplerD20 = await rollDiceBoxD20(grapplerLabel, prepared.grappler.label)
+      if (!isStillEnemyTurn()) return false
+      const grapplerD20Second = prepared.grapplerRollMode === 'normal'
+        ? undefined
+        : await rollDiceBoxD20(
+            `${grapplerLabel}（${prepared.grapplerRollMode === 'advantage' ? '优势' : '劣势'}）`,
+            prepared.grappler.label,
+          )
+      if (!isStillEnemyTurn()) return false
+      const actorCombatant = prepared.state.combatants[prepared.actor.id]
+      const grapplerCombatant = prepared.state.combatants[prepared.grappler.id]
+      const actorHalflingLuckyD20 = actorCombatant?.racialRules?.halflingLucky && actorD20 === 1
+        ? await rollDiceBoxD20('半身人幸运·挣脱擒抱重投', enemy.label)
+        : undefined
+      const actorHalflingLuckyD20Second = actorCombatant?.racialRules?.halflingLucky && actorD20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·挣脱擒抱重投', enemy.label)
+        : undefined
+      const grapplerHalflingLuckyD20 = grapplerCombatant?.racialRules?.halflingLucky && grapplerD20 === 1
+        ? await rollDiceBoxD20('半身人幸运·维持擒抱重投', prepared.grappler.label)
+        : undefined
+      const grapplerHalflingLuckyD20Second = grapplerCombatant?.racialRules?.halflingLucky && grapplerD20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·维持擒抱重投', prepared.grappler.label)
+        : undefined
+      if (!isStillEnemyTurn()) return false
+      const resolved = resolvePreparedDnd5eMonsterEscapeGrapple({
+        prepared,
+        actorD20,
+        actorD20Second,
+        actorHalflingLuckyD20,
+        actorHalflingLuckyD20Second,
+        grapplerD20,
+        grapplerD20Second,
+        grapplerHalflingLuckyD20,
+        grapplerHalflingLuckyD20Second,
+      })
+      result = resolved.result
+      application = resolved.application
+      detail = `${prepared.actorSkill} 对抗 ${prepared.grappler.label} 的 athletics`
+    }
+    if (!result.ok || !application) {
+      pushCombatLog(
+        `${enemy.label} 的挣脱被 Headless 拒绝：${result.ok ? 'missing-application' : result.reason}。`,
+        'system',
+      )
+      return false
+    }
+    const resolvedTurn = result.state.combatants[enemy.id]?.turn
+    if (resolvedTurn) {
+      updateDnd5eTurnEconomy(enemy.id, (economy) => ({
+        ...economy,
+        action: { ...economy.action, current: resolvedTurn.actionAvailable ? economy.action.current : 0 },
+        bonusAction: { ...economy.bonusAction, current: resolvedTurn.bonusActionAvailable ? economy.bonusAction.current : 0 },
+        reaction: { ...economy.reaction, current: resolvedTurn.reactionAvailable ? economy.reaction.current : 0 },
+        objectInteraction: {
+          current: resolvedTurn.objectInteractionAvailable === false ? 0 : (economy.objectInteraction?.current ?? 1),
+          max: economy.objectInteraction?.max ?? 1,
+        },
+        movement: { ...economy.movement, current: resolvedTurn.movementRemaining },
+      }), roundRef.current)
+    }
+    applyCoordinatedDnd5eCombatResult({
+      application,
+      mapId: latestMap.id,
+      applyCharacter: applyAuthorityCharacterUpdate,
+      applyToken: updateToken,
+    })
+    const check = [...result.events].reverse().find((event) =>
+      event.type === 'ability-check-resolved' || event.type === 'contest-resolved')
+    const succeeded = check?.type === 'ability-check-resolved'
+      ? check.success
+      : check?.type === 'contest-resolved'
+        ? check.success
+        : false
+    const totals = check?.type === 'ability-check-resolved'
+      ? `${check.total} vs DC ${check.dc}`
+      : check?.type === 'contest-resolved'
+        ? `${check.actorTotal} vs ${check.targetTotal}`
+        : '未记录检定结果'
+    pushHeadlessCombatLog(
+      `${enemy.label} 尝试挣脱：${totals}，${succeeded ? '成功' : '失败'}。`,
+      'turn',
+      result.events,
+      [detail],
+    )
+    await persistDnd5eAuthorityState()
+    return true
+  }
+
   const resolveDnd5eOpportunityAttackForMove = async (
     attackerToken: Token,
     targetToken: Token,
@@ -4103,7 +4727,19 @@ export default function MapsPage() {
     const baneRoll = tranquility.passed && attack.baned
       ? (await rollDiceBoxValues(1, 4, '灾祸术·借机攻击减值', attack.actorName))[0]
       : undefined
-    let preview = previewDnd5eOpportunityAttack(attack, d20, d20Second, blessRoll, baneRoll)
+    const halflingLuckyD20 = tranquility.passed && attackerCombatant.racialRules?.halflingLucky && d20 === 1
+      ? await rollDiceBoxD20('半身人幸运·借机攻击重投', attack.actorName)
+      : undefined
+    const halflingLuckyD20Second = tranquility.passed && attackerCombatant.racialRules?.halflingLucky && d20Second === 1
+      ? await rollDiceBoxD20('半身人幸运·借机攻击重投', attack.actorName)
+      : undefined
+    let preview = previewDnd5eOpportunityAttack(
+      attack,
+      halflingLuckyD20 ?? d20,
+      halflingLuckyD20Second ?? d20Second,
+      blessRoll,
+      baneRoll,
+    )
     if (tranquility.passed && attackerToken.type === 'enemy' && preview.hit) {
       const confirmedD20 = await confirmSuccessfulEnemyD20({
         map: latestMap,
@@ -4212,6 +4848,17 @@ export default function MapsPage() {
           attack.targetName,
         )
       : []
+    const savageAttacksRoll = attackHit && preview.critical &&
+      attackerCombatant.racialRules?.halfOrcSavageAttacks &&
+      attack.classDamageContext?.mode === 'melee' &&
+      attack.classDamageContext.weaponId
+      ? (await rollDiceBoxValues(
+          1,
+          attack.damage.sides,
+          '半兽人凶蛮攻击·额外武器伤害',
+          attack.targetName,
+        ))[0]
+      : undefined
     const classDamageDefinitions = attackHit
       ? dnd5eOpportunityAttackClassDamageDefinitions(attack, preview.critical)
       : []
@@ -4246,7 +4893,8 @@ export default function MapsPage() {
     }
     const opportunityDamageTotal = attackHit
       ? dnd5eWeaponDamagePreviewTotal(
-          damageRolls.reduce((total, value) => total + value, 0) + attack.damage.bonus,
+          damageRolls.reduce((total, value) => total + value, 0) + attack.damage.bonus +
+            (savageAttacksRoll ?? 0),
           classDamageDefinitions,
           classDamageRolls,
         )
@@ -4273,9 +4921,10 @@ export default function MapsPage() {
       ? await rollDiceBoxValues(10, 10, '坠入地狱·返回伤害', attack.targetName)
       : undefined
     const initialResolved = resolvePreparedDnd5eOpportunityAttack({
-      prepared: attack, d20, d20Second, blessRoll, baneRoll, bardicInspirationRoll, cuttingWords, cuttingWordsDamage, strokeOfLuck,
+      prepared: attack, d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+      blessRoll, baneRoll, bardicInspirationRoll, cuttingWords, cuttingWordsDamage, strokeOfLuck,
       shieldSpellReaction, uncannyDodge,
-      tranquilitySave: tranquility.roll, damageRolls, classDamageRolls,
+      tranquilitySave: tranquility.roll, damageRolls, savageAttacksRoll, classDamageRolls,
       hurlThroughHellDamageRolls, standAgainstTide,
     })
     if (!initialResolved.result.ok) return false
@@ -4645,6 +5294,7 @@ export default function MapsPage() {
       const payload: Dnd5eSpellCastPayload = {
         spellId: nextTargeting.spellId,
         castingClassId: nextTargeting.castingClassId,
+        racialInnate: nextTargeting.racialInnate,
         slotLevel: nextTargeting.slotLevel,
         targetTokenId: submittedTargetIds[0] ?? actorToken?.id ?? '',
         targetTokenIds: submittedTargetIds,
@@ -4698,6 +5348,7 @@ export default function MapsPage() {
       const payload: Dnd5eSpellCastPayload = {
         spellId: dnd5eSpellTargeting.spellId,
         castingClassId: dnd5eSpellTargeting.castingClassId,
+        racialInnate: dnd5eSpellTargeting.racialInnate,
         slotLevel: dnd5eSpellTargeting.slotLevel,
         targetTokenId: visibleTarget?.id ?? '',
         targetTokenIds: visibleTarget ? [visibleTarget.id] : [],
@@ -4770,10 +5421,14 @@ export default function MapsPage() {
         })
         .map((token) => token.id)
         .slice(0, dnd5ePluginAreaTargeting.targeting.maximumTargets ?? 64)
-      const persistentArea = dnd5ePluginFeatureDefinition(
-        dnd5ePluginAreaTargeting.featureId,
-      )?.action?.persistentArea
-      if (targetTokenIds.length < 1 && !persistentArea) {
+      const persistentArea = dnd5ePluginAreaTargeting.source === 'plugin'
+        ? dnd5ePluginFeatureDefinition(dnd5ePluginAreaTargeting.featureId)?.action?.persistentArea
+        : undefined
+      if (
+        dnd5ePluginAreaTargeting.source === 'plugin' &&
+        targetTokenIds.length < 1 &&
+        !persistentArea
+      ) {
         void showCombatNotice('范围内没有目标', '请重新放置扩展规则的范围模板。', 'amber')
         return
       }
@@ -4782,11 +5437,16 @@ export default function MapsPage() {
         targetCell: cell,
         targetOrientation: aoeRectRotation as 0 | 1 | 2 | 3,
       }
-      const submitted = sendPlayerDnd5ePluginActionRequest(
-        { featureId: dnd5ePluginAreaTargeting.featureId },
-        undefined,
-        target,
-      )
+      const submitted = dnd5ePluginAreaTargeting.source === 'dragonborn-breath'
+        ? sendPlayerDnd5eRacialActionRequest(
+            { feature: 'dragonborn-breath' },
+            target,
+          )
+        : sendPlayerDnd5ePluginActionRequest(
+            { featureId: dnd5ePluginAreaTargeting.featureId },
+            undefined,
+            target,
+          )
       if (submitted) {
         setDnd5ePluginAreaTargeting(null)
         setAoePreviewCell(null)
@@ -5006,6 +5666,7 @@ export default function MapsPage() {
       const payload: Dnd5eSpellCastPayload = {
         spellId: dnd5eSpellTargeting.spellId,
         castingClassId: dnd5eSpellTargeting.castingClassId,
+        racialInnate: dnd5eSpellTargeting.racialInnate,
         slotLevel: dnd5eSpellTargeting.slotLevel,
         targetTokenId: targetToken.id,
         conditionChoice: dnd5eSpellTargeting.conditionChoice,
@@ -5310,7 +5971,9 @@ export default function MapsPage() {
     surprisedTokenIds: readonly string[] = [],
     options?: { clearStatuses?: boolean },
   ) => {
-    if (!activeMap) return
+    if (!activeMap || combatStartingRef.current) return
+    combatStartingRef.current = true
+    try {
     const combatMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     setShowSurpriseSetup(false)
     const surprisedSet = new Set(surprisedTokenIds)
@@ -5323,7 +5986,6 @@ export default function MapsPage() {
     setCombatExperienceBusy(false)
     combatIdRef.current = nextCombatId
     setCombatId(nextCombatId)
-    startCombatStatistics(nextCombatId, combatMap.id)
     clearEnemyTurnTimers()
     setCombatLog([])
     setCombatLogOpen(true)
@@ -5425,23 +6087,69 @@ export default function MapsPage() {
       characters: recoveredCharacters,
       initiativeOrder: order,
     })
-    effectiveRulesRef.current = started.state.effectiveRules ?? null
-    combatActiveRef.current = true
     roundRef.current = started.state.round
     initiativeIndexRef.current = started.state.initiativeIndex
     initiativeOrderRef.current = order
+    const firstSlot = order[started.state.initiativeIndex]
+    const firstToken = firstSlot
+      ? latestMap.tokens.find((token) => token.id === firstSlot.tokenId)
+      : undefined
+    const firstCharacter = firstToken?.characterId
+      ? recoveredCharacters.find((character) => character.id === firstToken.characterId)
+      : undefined
+    const firstUsesHeadless = !!(firstCharacter && dnd5eClassDefinitionForCharacter(firstCharacter)) ||
+      !!(firstToken?.poolId && getDnd5eSrdMonster(firstToken.poolId))
+    if (
+      firstUsesHeadless &&
+      !await settleDnd5eBeginTurn({
+        combatId: nextCombatId,
+        round: started.state.round,
+        initiativeIndex: started.state.initiativeIndex,
+        map: latestMap,
+        characters: recoveredCharacters,
+        initiativeOrder: order,
+      })
+    ) {
+      await showCombatNotice(
+        '战斗尚未开始',
+        '首个先攻槽位的 Headless 回合开始事务未能提交；未发布战斗状态，请重试。',
+        'rose',
+      )
+      return
+    }
+    effectiveRulesRef.current = started.state.effectiveRules ?? null
+    roundRef.current = started.state.round
+    initiativeIndexRef.current = started.state.initiativeIndex
+    initiativeOrderRef.current = order
+    const firstTokenId = order[started.state.initiativeIndex]?.tokenId
+    if (firstTokenId) {
+      updateDnd5eTurnEconomy(
+        firstTokenId,
+        () => createDnd5eTurnEconomyCounts(`${started.state.round}:${firstTokenId}`),
+        started.state.round,
+      )
+    }
+    try {
+      await publishCombatState({
+        active: true,
+        round: started.state.round,
+        initiativeIndex: started.state.initiativeIndex,
+        initiativeOrder: order,
+      })
+    } catch {
+      await showCombatNotice(
+        '战斗尚未开始',
+        '首回合已经安全结算，但共享战斗状态发布失败；本地 AI 与回合横幅未启动，请重试。',
+        'rose',
+      )
+      return
+    }
+    startCombatStatistics(nextCombatId, combatMap.id)
+    combatActiveRef.current = true
     setCombatActive(true)
     setRound(started.state.round)
     setInitiativeIndex(started.state.initiativeIndex)
     setInitiativeOrder(order)
-    const firstTokenId = order[started.state.initiativeIndex]?.tokenId
-    if (firstTokenId) updateDnd5eTurnEconomy(firstTokenId, () => createDnd5eTurnEconomyCounts(`${started.state.round}:${firstTokenId}`), started.state.round)
-    void publishCombatState({
-      active: true,
-      round: started.state.round,
-      initiativeIndex: started.state.initiativeIndex,
-      initiativeOrder: order,
-    })
     const combatantCount = new Set(order.map((entry) => entry.tokenId)).size
     const extraTurnCount = order.filter((entry) => entry.turnKind === 'thief-reflexes').length
     pushCombatLog(
@@ -5449,6 +6157,9 @@ export default function MapsPage() {
       'system',
       1,
     )
+    } finally {
+      combatStartingRef.current = false
+    }
   }
 
   const endCombat = async () => {
@@ -5813,6 +6524,62 @@ export default function MapsPage() {
     })
   }
 
+  const requestSharedBasicActionAdjudication = async (
+    action: SharedPlayerActionState,
+    actorName: string,
+    payload: Extract<Dnd5eBasicActionPayload, { kind: 'other-action' | 'other-bonus-action' }>,
+  ): Promise<DmAdjudicationInterruptResponse> => {
+    if (!activeMap || !isDM) return { decision: 'cancelled', effects: [] }
+    const id = `dm-adjudication:${action.id}`
+    const description = payload.description?.trim() ||
+      (payload.kind === 'other-bonus-action' ? '玩家声明一个其他附赠动作。' : '玩家声明一个其他动作。')
+    return requestAndWaitForCombatInterrupt({
+      id,
+      channel: pendingSharedDmAdjudicationRef,
+      metadata: { actionId: action.id },
+      loadExisting: () => loadCombatInterrupt(activeMap.id, id),
+      decideExisting: (existing) => {
+        if (!existing || !isCombatInterruptKind(existing, 'dm-adjudication')) return { type: 'publish' }
+        if (existing.status === 'pending' || existing.status === 'waiting-for-dm') return { type: 'wait' }
+        if (existing.status === 'answered' || existing.status === 'done') {
+          const response = existing.response as DmAdjudicationInterruptResponse | undefined
+          return {
+            type: 'resolve',
+            value: response?.decision === 'approved'
+              ? { ...response, effects: [] }
+              : {
+                  decision: 'cancelled',
+                  effects: [],
+                  ...(response?.note ? { note: response.note } : {}),
+                },
+          }
+        }
+        return { type: 'resolve', value: { decision: 'cancelled', effects: [] } }
+      },
+      create: () => createCombatInterrupt<DmAdjudicationInterruptPayload, DmAdjudicationInterruptResponse>({
+        id,
+        transactionId: action.id,
+        mapId: activeMap.id,
+        kind: 'dm-adjudication',
+        actorCharId: action.characterId,
+        payload: {
+          contextKind: 'basic-action',
+          actionId: action.id,
+          casterName: actorName,
+          spellId: `basic-action:${payload.kind}`,
+          spellName: payload.kind === 'other-bonus-action' ? '其他（附赠动作）' : '其他（动作）',
+          spellLevel: 0,
+          slotLevel: 0,
+          castingTime: payload.kind === 'other-bonus-action' ? 'bonus-action' : 'action',
+          description,
+          concentration: false,
+        },
+        expiresAt: runtimeNow() + 10 * 60 * 1000,
+      }),
+      publish: publishCombatInterrupt,
+    })
+  }
+
   async function requestSharedPersistentAreaAdjudication(input: {
     prepared: PreparedDnd5ePersistentAreaTrigger
     proposedDamage: number
@@ -5954,8 +6721,108 @@ export default function MapsPage() {
     })
   }
 
+  const buildDnd5eBattleMasterReactionWeaponAttack = async (input: {
+    map: BattleMap
+    actorToken: Token
+    targetToken: Token
+    label: string
+  }): Promise<{
+    weaponAttack: Dnd5eBattleMasterReactionWeaponAttack
+    hit: boolean
+    critical: boolean
+  } | undefined> => {
+    const characters = useCharacterStore.getState().characters
+    const prepared = prepareDnd5eOpportunityAttack({
+      combatId: combatIdRef.current || `map-${input.map.id}`,
+      round: roundRef.current,
+      map: input.map,
+      characters,
+      initiativeOrder: initiativeOrderRef.current,
+      actorTokenId: input.actorToken.id,
+      targetTokenId: input.targetToken.id,
+      turnEconomy: currentDnd5eTurnEconomy(input.actorToken.id),
+      targetTurnEconomy: currentDnd5eTurnEconomy(input.targetToken.id),
+    })
+    if (!prepared.ok) return undefined
+    const attack = prepared.prepared
+    const actorCombatant = attack.state.combatants[input.actorToken.id]
+    if (!actorCombatant) return undefined
+    const d20 = await rollDiceBoxD20(`${input.label}·${attack.weaponName}命中检定`, attack.targetName)
+    const d20Second = attack.attackMode !== 'normal'
+      ? await rollDiceBoxD20(
+          `${input.label}·${attack.weaponName}命中检定（${attack.attackMode === 'advantage' ? '优势' : '劣势'}）`,
+          attack.targetName,
+        )
+      : undefined
+    const halflingLuckyD20 = actorCombatant.racialRules?.halflingLucky && d20 === 1
+      ? await rollDiceBoxD20('半身人幸运·反应攻击重投', attack.actorName)
+      : undefined
+    const halflingLuckyD20Second = actorCombatant.racialRules?.halflingLucky && d20Second === 1
+      ? await rollDiceBoxD20('半身人幸运·反应攻击重投', attack.actorName)
+      : undefined
+    const blessRoll = attack.blessed
+      ? (await rollDiceBoxValues(1, 4, `祝福术·${input.label}攻击加值`, attack.actorName))[0]
+      : undefined
+    const baneRoll = attack.baned
+      ? (await rollDiceBoxValues(1, 4, `灾祸术·${input.label}攻击减值`, attack.actorName))[0]
+      : undefined
+    const preview = previewDnd5eOpportunityAttack(
+      attack,
+      halflingLuckyD20 ?? d20,
+      halflingLuckyD20Second ?? d20Second,
+      blessRoll,
+      baneRoll,
+    )
+    const damageRolls = preview.hit
+      ? await rollDiceBoxValues(
+          attack.damage.count * (preview.critical ? 2 : 1),
+          attack.damage.sides,
+          `${input.label}·${attack.weaponName}伤害`,
+          attack.targetName,
+        )
+      : []
+    const classDamageDefinitions = preview.hit
+      ? dnd5eOpportunityAttackClassDamageDefinitions(attack, preview.critical)
+      : []
+    const classDamageRolls: Dnd5eClassDamageRolls[] = []
+    for (const definition of classDamageDefinitions) {
+      const count = definition.count * (preview.critical && definition.doubleOnCritical ? 2 : 1)
+      classDamageRolls.push({
+        source: definition.source,
+        rolls: count > 0
+          ? await rollDiceBoxValues(
+              count,
+              definition.sides,
+              `${input.label}·${definition.source}`,
+              attack.targetName,
+            )
+          : [],
+      })
+    }
+    return {
+      hit: preview.hit,
+      critical: preview.critical,
+      weaponAttack: {
+        attackModifier: attack.attackModifier,
+        criticalThreshold: attack.criticalThreshold,
+        d20,
+        d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
+        blessRoll,
+        baneRoll,
+        mode: attack.attackMode,
+        damage: { ...attack.damage, rolls: damageRolls },
+        classDamageContext: attack.classDamageContext,
+        classDamageRolls,
+      },
+    }
+  }
+
   const requestSharedHellishRebukeChoice = async (input: {
     reactor: Character
+    reactorTokenId: string
+    targetTokenId: string
     sourceName: string
     damage: number
     slotLevel: number
@@ -5977,7 +6844,21 @@ export default function MapsPage() {
       defaultOptionId: 'decline',
       timeoutMs: 15_000,
     })
-    return option === 'cast'
+    if (option !== 'cast') return false
+    if (activeMap) {
+      const schedule = await publishHellishRebukePresentation({
+        id: `${id}:vfx`,
+        mapId: activeMap.id,
+        transactionId: activeInterruptTransactionIdRef.current ?? id,
+        sourceTokenId: input.reactorTokenId,
+        targetTokenId: input.targetTokenId,
+      })
+      await new Promise<void>((resolve) => window.setTimeout(
+        resolve,
+        Math.max(0, schedule.completesAt - combatPresentationServerNow()),
+      ))
+    }
+    return true
   }
 
   const requestSharedOpportunityAttackChoice = (
@@ -6731,9 +7612,17 @@ export default function MapsPage() {
     const baneRoll = ward.baned
       ? (await rollDiceBoxValues(1, 4, `灾祸术·${wardName}豁免减值`, input.attackerName))[0]
       : undefined
+    const halflingLuckyD20 = input.attacker.racialRules?.halflingLucky && d20 === 1
+      ? await rollDiceBoxD20('半身人幸运·宁静防护豁免重投', input.attackerName)
+      : undefined
+    const halflingLuckyD20Second = input.attacker.racialRules?.halflingLucky && d20Second === 1
+      ? await rollDiceBoxD20('半身人幸运·宁静防护豁免重投', input.attackerName)
+      : undefined
     const saveModifier = ward.saveModifier + (blessRoll ?? 0) - (baneRoll ?? 0)
     const initial = previewDnd5eSavingThrowRoll({
-      rolls: ward.saveMode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      rolls: ward.saveMode === 'normal'
+        ? [halflingLuckyD20 ?? d20]
+        : [halflingLuckyD20 ?? d20, halflingLuckyD20Second ?? d20Second ?? 0],
       mode: ward.saveMode,
       modifier: saveModifier,
       dc: ward.saveDc,
@@ -6793,7 +7682,18 @@ export default function MapsPage() {
     }
     return {
       passed,
-      roll: { d20, d20Second, blessRoll, baneRoll, rerollD20, rerollD20Second, bardicInspirationRoll, darkOnesOwnLuckRoll },
+      roll: {
+        d20,
+        d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
+        blessRoll,
+        baneRoll,
+        rerollD20,
+        rerollD20Second,
+        bardicInspirationRoll,
+        darkOnesOwnLuckRoll,
+      },
     }
   }
 
@@ -6822,6 +7722,10 @@ export default function MapsPage() {
     const rolls: Dnd5eMonsterOnHitEffectRoll[] = []
     let effectiveDamageTotal = 0
     for (const effect of input.effects) {
+      if (effect.kind === 'source-linked-condition') {
+        rolls.push({ effectId: effect.id })
+        continue
+      }
       const mode = dnd5eSavingThrowMode(input.target, effect.ability, {
         effectVisible: true,
         condition: effect.conditionOnFailedSave?.condition,
@@ -6874,6 +7778,22 @@ export default function MapsPage() {
             dc: effect.dc,
           })
         }
+      }
+      const halflingLuckyD20 = input.target.racialRules?.halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·怪物命中附加豁免重投', input.targetToken.label)
+        : undefined
+      const halflingLuckyD20Second = input.target.racialRules?.halflingLucky && d20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·怪物命中附加豁免重投', input.targetToken.label)
+        : undefined
+      if (halflingLuckyD20 != null || halflingLuckyD20Second != null) {
+        preview = previewDnd5eSavingThrowRoll({
+          rolls: mode === 'normal'
+            ? [halflingLuckyD20 ?? d20]
+            : [halflingLuckyD20 ?? d20, halflingLuckyD20Second ?? d20Second ?? 0],
+          mode,
+          modifier,
+          dc: effect.dc,
+        })
       }
       if (automaticallyFails) preview = { ...preview, success: false }
 
@@ -6984,8 +7904,11 @@ export default function MapsPage() {
         : false
       if (legendaryResistance) input.resourceUsage.legendaryResistance += 1
 
+      const damageDefinitions = effect.kind === 'saving-throw-damage'
+        ? effect.damage
+        : []
       const damageRolls: number[][] = []
-      for (const component of effect.damage) {
+      for (const component of damageDefinitions) {
         damageRolls.push(component.count > 0
           ? await rollDiceBoxValues(
               component.count,
@@ -6995,7 +7918,7 @@ export default function MapsPage() {
             )
           : [])
       }
-      const rawDamageTotal = effect.damage.reduce(
+      const rawDamageTotal = damageDefinitions.reduce(
         (sum, component, componentIndex) => sum + Math.max(
           0,
           (damageRolls[componentIndex] ?? []).reduce(
@@ -7005,17 +7928,21 @@ export default function MapsPage() {
         ),
         0,
       )
-      effectiveDamageTotal += dnd5eDamageAfterSavingThrow({
-        creature: input.target,
-        ability: effect.ability,
-        damage: rawDamageTotal,
-        success: preview.success || legendaryResistance,
-        successfulSave: effect.damageOnSuccessfulSave,
-      })
+      if (effect.kind === 'saving-throw-damage') {
+        effectiveDamageTotal += dnd5eDamageAfterSavingThrow({
+          creature: input.target,
+          ability: effect.ability,
+          damage: rawDamageTotal,
+          success: preview.success || legendaryResistance,
+          successfulSave: effect.damageOnSuccessfulSave,
+        })
+      }
       rolls.push({
         effectId: effect.id,
         d20,
         d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
         blessRoll,
         baneRoll,
         rerollD20,
@@ -7023,7 +7950,9 @@ export default function MapsPage() {
         bardicInspirationRoll,
         darkOnesOwnLuckRoll,
         legendaryResistance,
-        damageRolls,
+        damageRolls: effect.kind === 'saving-throw-damage'
+          ? damageRolls
+          : undefined,
       })
     }
     return { rolls, effectiveDamageTotal }
@@ -7208,6 +8137,12 @@ export default function MapsPage() {
     const d20Second = tranquility.passed && mode !== 'normal'
       ? await rollDiceBoxD20(`逆流反击·${input.attackName}命中检定（${mode === 'advantage' ? '优势' : '劣势'}）`, redirectToken.label)
       : undefined
+    const halflingLuckyD20 = tranquility.passed && attacker.racialRules?.halflingLucky && d20 === 1
+      ? await rollDiceBoxD20('半身人幸运·逆流反击重投', input.attackerName)
+      : undefined
+    const halflingLuckyD20Second = tranquility.passed && attacker.racialRules?.halflingLucky && d20Second === 1
+      ? await rollDiceBoxD20('半身人幸运·逆流反击重投', input.attackerName)
+      : undefined
     const blessed = dnd5eCombatantHasConcentrationEffect(input.state, attacker.id, 'bless')
     const baned = dnd5eCombatantHasConcentrationEffect(input.state, attacker.id, 'bane')
     const blessRoll = tranquility.passed && blessed
@@ -7217,10 +8152,10 @@ export default function MapsPage() {
       ? (await rollDiceBoxValues(1, 4, '灾祸术·逆流反击攻击减值', input.attackerName))[0]
       : undefined
     const selectedD20 = mode === 'advantage'
-      ? Math.max(d20, d20Second ?? d20)
+      ? Math.max(halflingLuckyD20 ?? d20, halflingLuckyD20Second ?? d20Second ?? d20)
       : mode === 'disadvantage'
-        ? Math.min(d20, d20Second ?? d20)
-        : d20
+        ? Math.min(halflingLuckyD20 ?? d20, halflingLuckyD20Second ?? d20Second ?? d20)
+        : halflingLuckyD20 ?? d20
     const baseAttackTotal = selectedD20 + input.attackModifier + (blessRoll ?? 0) - (baneRoll ?? 0)
     let armorClass = dnd5eTargetArmorClassForAttack(input.state, attacker.id, redirectTarget.id)
     const criticalThreshold = Math.min(20, Math.max(18, input.criticalThreshold ?? 20))
@@ -7399,6 +8334,8 @@ export default function MapsPage() {
       distanceFeet: tokenFootprintDistanceCells(redirectToken, input.attackerToken, input.map) * feetPerCell,
       d20,
       d20Second,
+      halflingLuckyD20,
+      halflingLuckyD20Second,
       blessRoll,
       baneRoll,
       bardicInspirationRoll,
@@ -7741,7 +8678,7 @@ export default function MapsPage() {
         }
         displayedDamageRolls.push([
           ...componentRolls.flat(),
-          ...onHitEffectRolls.flatMap((effectRoll) => effectRoll.damageRolls.flat()),
+          ...onHitEffectRolls.flatMap((effectRoll) => effectRoll.damageRolls?.flat() ?? []),
         ])
         actionRolls.push({
           d20,
@@ -8340,6 +9277,7 @@ export default function MapsPage() {
       variantId: plan.areaAction.variantId,
       targetTokenIds: plan.areaAction.targetTokenIds,
       areaTargetCell: plan.areaAction.areaTargetCell,
+      areaTargetOrientation: plan.areaAction.areaTargetOrientation,
       turnEconomy: currentDnd5eTurnEconomy(plan.attackerTokenId),
       turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
     })
@@ -8376,7 +9314,21 @@ export default function MapsPage() {
       const baneRoll = dnd5eCombatantHasConcentrationEffect(casting.state, target.id, 'bane')
         ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', targetToken.label))[0]
         : undefined
-      targetSavingThrows.push({ targetId: target.id, d20, d20Second, blessRoll, baneRoll })
+      const halflingLuckyD20 = target.racialRules?.halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·范围豁免重投', targetToken.label)
+        : undefined
+      const halflingLuckyD20Second = target.racialRules?.halflingLucky && d20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·范围豁免重投', targetToken.label)
+        : undefined
+      targetSavingThrows.push({
+        targetId: target.id,
+        d20,
+        d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
+        blessRoll,
+        baneRoll,
+      })
       savingThrowTraceDetails.push(...formatDnd5eSavingThrowResolutionTrace({
         targetName: targetToken.label,
         ability: plan.areaAction.saveAbility,
@@ -8394,9 +9346,33 @@ export default function MapsPage() {
           casting.actorToken.label,
         )
       : []
+    const forcedMovements: Dnd5eSpellForcedMovement[] = await Promise.all(
+      dnd5eMonsterAreaForcedMovementPlans(casting).map(async (movement) => {
+        const fallingDice = dnd5eFallingDamageDice(movement.fallDistanceFeet)
+        // The Host signs every potential fall before the transaction. Headless
+        // consumes the dice only for the target's final failed save, after all
+        // rerolls and Legendary Resistance have been resolved.
+        const fallingDamageRolls = movement.toElevationFeet != null && fallingDice > 0
+          ? await rollDiceBoxValues(
+            fallingDice,
+            6,
+            '排斥吐息·坠落伤害',
+            casting.targetTokens.find((token) => token.id === movement.targetId)?.label ??
+              movement.targetId,
+          )
+          : undefined
+        return {
+          targetId: movement.targetId,
+          to: movement.to,
+          distanceFeet: movement.distanceFeet,
+          toElevationFeet: movement.toElevationFeet,
+          fallingDamageRolls,
+        }
+      }),
+    )
     const initial = resolvePreparedDnd5eMonsterAreaAction({
       prepared: casting,
-      resolution: { targetSavingThrows, damageRolls },
+      resolution: { targetSavingThrows, damageRolls, forcedMovements },
     })
     if (!initial.result.ok || !initial.application) {
       pushCombatLog(
@@ -8421,7 +9397,47 @@ export default function MapsPage() {
       requestBardicInspiration: requestDnd5eBardicInspirationRoll,
       requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
     })
-    applyDnd5eCombatApplication(settled.application)
+    let areaApplication = settled.application
+    for (const tokenId of new Set(forcedMovements.map((movement) => movement.targetId))) {
+      const areaSettlement = await settleDnd5ePersistentAreasForForcedMovement({
+        beforeMap: latestMap,
+        afterMap: areaApplication.map,
+        characters: areaApplication.characters,
+        tokenId,
+        round: roundRef.current,
+        turnKey: `${roundRef.current}:${plan.attackerTokenId}`,
+      })
+      for (const log of areaSettlement.logs) pushCombatLog(log, 'system')
+      areaApplication = {
+        map: areaSettlement.map,
+        characters: areaSettlement.characters,
+        changedCharacterIds: areaSettlement.characters.flatMap((character) => {
+          const before = useCharacterStore.getState().characters.find(
+            (candidate) => candidate.id === character.id,
+          )
+          return JSON.stringify(before) === JSON.stringify(character) ? [] : [character.id]
+        }),
+        changedTokenIds: areaSettlement.map.tokens.flatMap((token) => {
+          const before = latestMap.tokens.find((candidate) => candidate.id === token.id)
+          return JSON.stringify(before) === JSON.stringify(token) ? [] : [token.id]
+        }),
+      }
+    }
+    areaApplication = withForcedMovementPresentation({
+      application: areaApplication,
+      beforeMap: latestMap,
+      events: settled.result.events.filter((event) => event.type === 'moved'),
+      transactionId: [
+        'monster-area',
+        combatIdRef.current || latestMap.id,
+        roundRef.current,
+        casting.actorToken.id,
+        casting.action.id,
+        casting.variant.id,
+      ].join(':'),
+      issuedAt: runtimeNow() + 100,
+    })
+    applyDnd5eCombatApplication(areaApplication)
     const actorTurn = settled.result.state.combatants[casting.actorToken.id]?.turn
     if (actorTurn) {
       updateDnd5eTurnEconomy(casting.actorToken.id, (economy) => ({
@@ -8618,6 +9634,12 @@ export default function MapsPage() {
           target.id,
           'bane',
         ) ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', targetToken.label))[0] : undefined
+        const halflingLuckyD20 = target.racialRules?.halflingLucky && saveD20 === 1
+          ? await rollDiceBoxD20('半身人幸运·法术豁免重投', targetToken.label)
+          : undefined
+        const halflingLuckyD20Second = target.racialRules?.halflingLucky && saveD20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·法术豁免重投', targetToken.label)
+          : undefined
         savingThrowTraceDetails.push(...formatDnd5eSavingThrowResolutionTrace({
           targetName: targetToken.label,
           ability: casting.spell.saveAbility,
@@ -8633,6 +9655,8 @@ export default function MapsPage() {
           targetId: target.id,
           d20: saveD20,
           d20Second: saveD20Second,
+          halflingLuckyD20,
+          halflingLuckyD20Second,
           blessRoll,
           baneRoll,
         })
@@ -9086,6 +10110,120 @@ export default function MapsPage() {
     return results
   }
 
+  const rollDnd5eTurnStartGazes = async (
+    prepared: Pick<
+      PreparedDnd5ePlayerEndTurn | PreparedDnd5eBeginTurn,
+      'state' | 'characterIdByCombatantId' | 'turnStartGazeRequirements'
+    >,
+    transactionId: string,
+  ): Promise<Dnd5eTurnStartGazeResolution[]> => {
+    const results: Dnd5eTurnStartGazeResolution[] = []
+    const characters = useCharacterStore.getState().characters
+    for (const requirement of prepared.turnStartGazeRequirements) {
+      const source = prepared.state.combatants[requirement.sourceId]
+      const target = prepared.state.combatants[requirement.targetId]
+      if (!source || !target) continue
+      const sourceUsesGaze = source.controller !== target.controller
+      if (!sourceUsesGaze) {
+        results.push({
+          sourceId: requirement.sourceId,
+          targetId: requirement.targetId,
+          ruleId: requirement.ruleId,
+          sourceUsesGaze: false,
+        })
+        continue
+      }
+
+      let choice: 'avert-eyes' | 'face-gaze' = 'face-gaze'
+      if (requirement.canAvertEyes) {
+        const characterId = prepared.characterIdByCombatantId[requirement.targetId]
+        const targetCharacter = characterId
+          ? characters.find((candidate) => candidate.id === characterId)
+          : undefined
+        if (targetCharacter) {
+          const selected = await requestSharedChoiceWindow({
+            id: `turn-start-gaze:${transactionId}:${requirement.sourceId}:${requirement.targetId}:${requirement.ruleId}`,
+            transactionId,
+            actor: targetCharacter,
+            targetCharId: targetCharacter.id,
+            pluginId: 'srd-5.1',
+            featureId: `${source.statBlockId ?? source.id}:${requirement.ruleId}`,
+            featureName: '石化凝视',
+            prompt: `${requirement.sourceName}正以石化凝视逼视你。要移开目光，还是直视并进行 DC ${requirement.dc} ${requirement.ability.toUpperCase()} 豁免？`,
+            audience: 'actor',
+            options: [
+              {
+                id: 'avert-eyes',
+                label: '移开目光',
+                description: `本回合无法看见${requirement.sourceName}，但无需进行本次豁免。`,
+              },
+              {
+                id: 'face-gaze',
+                label: '直视凝视',
+                description: `进行 DC ${requirement.dc} 豁免；失败将开始石化。`,
+              },
+            ],
+            defaultOptionId: 'avert-eyes',
+            phase: 'before-condition',
+          })
+          choice = selected === 'face-gaze' ? 'face-gaze' : 'avert-eyes'
+        } else {
+          // DM-controlled creatures use the same deterministic defensive policy
+          // as simulation AI; surprise is already represented by canAvertEyes.
+          choice = 'avert-eyes'
+        }
+      }
+
+      if (choice === 'avert-eyes') {
+        results.push({
+          sourceId: requirement.sourceId,
+          targetId: requirement.targetId,
+          ruleId: requirement.ruleId,
+          sourceUsesGaze: true,
+          choice,
+        })
+        continue
+      }
+
+      const d20 = await rollDiceBoxD20('石化凝视·体质豁免', requirement.targetName)
+      const d20Second = requirement.mode !== 'normal'
+        ? await rollDiceBoxD20(
+            `石化凝视·体质豁免（${requirement.mode === 'advantage' ? '优势' : '劣势'}）`,
+            requirement.targetName,
+          )
+        : undefined
+      const halflingLucky = target.racialRules?.halflingLucky === true
+      const halflingLuckyD20 = halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·石化凝视重投', requirement.targetName)
+        : undefined
+      const halflingLuckyD20Second = halflingLucky && d20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·石化凝视重投', requirement.targetName)
+        : undefined
+      const blessRoll = requirement.blessed
+        ? (await rollDiceBoxValues(1, 4, '祝福术·石化凝视豁免加值', requirement.targetName))[0]
+        : undefined
+      const baneRoll = requirement.baned
+        ? (await rollDiceBoxValues(1, 4, '灾祸术·石化凝视豁免减值', requirement.targetName))[0]
+        : undefined
+      results.push({
+        sourceId: requirement.sourceId,
+        targetId: requirement.targetId,
+        ruleId: requirement.ruleId,
+        sourceUsesGaze: true,
+        choice,
+        save: {
+          d20,
+          d20Second,
+          halflingLuckyD20,
+          halflingLuckyD20Second,
+          blessRoll,
+          baneRoll,
+        },
+      })
+    }
+    return results
+  }
+
   const logDnd5eMonsterMechanics = (events: readonly Dnd5eCombatEvent[]) => {
     for (const event of events) {
       if (event.type === 'monster-mechanic-triggered') {
@@ -9105,27 +10243,171 @@ export default function MapsPage() {
           return `${outcome.applied ? '施加' : '未能施加'}状态 ${outcome.condition ?? ''}`
         }).join('，')
         pushCombatLog(`${actorName} 触发“${event.mechanicName}”${details ? `：${details}` : ''}。`, 'system')
+      } else if (event.type === 'monster-turn-start-gaze-averted') {
+        const map = useMapStore.getState().maps.find((candidate) => candidate.id === activeMap?.id)
+        const sourceName = map?.tokens.find((token) => token.id === event.sourceId)?.label ?? '凝视来源'
+        const targetName = map?.tokens.find((token) => token.id === event.targetId)?.label ?? '目标'
+        pushCombatLog(`${targetName}移开目光，暂时无法看见${sourceName}。`, 'system')
+      } else if (event.type === 'monster-turn-start-gaze-save-resolved') {
+        const map = useMapStore.getState().maps.find((candidate) => candidate.id === activeMap?.id)
+        const sourceName = map?.tokens.find((token) => token.id === event.sourceId)?.label ?? '凝视来源'
+        const targetName = map?.tokens.find((token) => token.id === event.targetId)?.label ?? '目标'
+        pushCombatLog(
+          `${targetName}直视${sourceName}：体质豁免 ${event.total} vs DC ${event.dc}，${
+            event.success
+              ? '成功'
+              : event.immediatelyPetrified
+                ? '失败并立即石化'
+                : '失败，开始石化并陷入束缚'
+          }。`,
+          'system',
+        )
       }
     }
+  }
+
+  const settleDnd5eBeginTurn = async (input: {
+    combatId: string
+    round: number
+    initiativeIndex: number
+    map: BattleMap
+    characters: readonly Character[]
+    initiativeOrder: readonly InitiativeEntry[]
+  }): Promise<boolean> => {
+    const prepared = prepareDnd5eBeginTurn(input)
+    if (!prepared.ok) return false
+    if (prepared.prepared.alreadyResolved) return true
+    const transactionId = [
+      'dm-headless-begin',
+      input.combatId,
+      input.round,
+      prepared.prepared.turnSlotId,
+    ].join(':')
+    const turnStartActiveEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
+    for (const requirement of prepared.prepared.turnStartActiveEffectSavingThrows) {
+      const effectName = requirement.effect.label || '持续状态'
+      const d20 = await rollDiceBoxD20(
+        `${effectName}·回合开始豁免`,
+        requirement.targetName,
+      )
+      const d20Second = requirement.mode !== 'normal'
+        ? await rollDiceBoxD20(
+            `${effectName}·回合开始豁免（${
+              requirement.mode === 'advantage' ? '优势' : '劣势'
+            }）`,
+            requirement.targetName,
+          )
+        : undefined
+      const targetCombatant = prepared.prepared.state.combatants[requirement.targetId]
+      const halflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
+        : undefined
+      const halflingLuckyD20Second =
+        targetCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
+          : undefined
+      const blessRoll = requirement.blessed
+        ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', requirement.targetName))[0]
+        : undefined
+      const baneRoll = requirement.baned
+        ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', requirement.targetName))[0]
+        : undefined
+      const failureDamage = requirement.effect.repeatSave?.damageOnFailure
+      const damageRolls = failureDamage
+        ? await rollDiceBoxValues(
+            failureDamage.count,
+            failureDamage.sides,
+            `${effectName}·豁免失败伤害`,
+            requirement.targetName,
+          )
+        : undefined
+      turnStartActiveEffectSavingThrows.push({
+        effectId: requirement.effect.id,
+        targetId: requirement.targetId,
+        d20,
+        d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
+        damageRolls,
+        blessRoll,
+        baneRoll,
+      })
+    }
+    const turnStartGazeResolutions = await rollDnd5eTurnStartGazes(
+      prepared.prepared,
+      transactionId,
+    )
+    const monsterRechargeRolls: Dnd5eMonsterRechargeRoll[] = []
+    for (const requirement of prepared.prepared.monsterRechargeRolls) {
+      const roll = (await rollDiceBoxValues(
+        1,
+        requirement.dieSides,
+        `${requirement.actionName}·充能（${requirement.minimum}–${requirement.dieSides}）`,
+        requirement.actorName,
+      ))[0]
+      monsterRechargeRolls.push({
+        actorId: requirement.actorId,
+        actionId: requirement.actionId,
+        roll,
+      })
+    }
+    const monsterMechanicRolls = await rollDnd5eMonsterMechanics(
+      prepared.prepared.monsterMechanicRolls,
+    )
+    const resolved = resolveDnd5eBeginTurn({
+      ...input,
+      turnStartActiveEffectSavingThrows,
+      turnStartGazeResolutions,
+      monsterRechargeRolls,
+      monsterMechanicRolls,
+    })
+    if (!resolved.ok || !resolved.result.ok) return false
+    const settled = await settleDnd5eConcentrationChecks({
+      result: resolved.result,
+      map: input.map,
+      characters: input.characters,
+      characterIdByCombatantId: prepared.prepared.characterIdByCombatantId,
+      rollD20: rollDiceBoxD20,
+      rollD4: async (label, targetName) =>
+        (await rollDiceBoxValues(1, 4, label, targetName))[0],
+      rollDice: rollDiceBoxValues,
+      requestHellishRebuke: requestSharedHellishRebukeChoice,
+      requestSavingThrowReroll: requestDnd5eSavingThrowRerollDice,
+      requestBardicInspiration: requestDnd5eBardicInspirationRoll,
+      requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
+    })
+    applyDnd5eCombatApplication(settled.application)
+    syncDnd5eReactiveReactionEconomy(settled.result.state, settled.result.events)
+    logDnd5eMonsterMechanics(settled.result.events)
+    await persistDnd5eAuthorityState()
+    return true
   }
 
   const settleDnd5eMonsterEndTurn = async (enemy: Token): Promise<boolean> => {
     if (!activeMap || dnd5eMonsterEndTurnSettlingRef.current) return false
     const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
     const latestEnemy = latestMap.tokens.find((token) => token.id === enemy.id)
-    if (!latestEnemy?.poolId || !getDnd5eSrdMonster(latestEnemy.poolId)) return false
+    if (!latestEnemy) return false
+    const linkedCharacter = latestEnemy.characterId
+      ? useCharacterStore.getState().characters.find(
+          (character) => character.id === latestEnemy.characterId,
+        )
+      : undefined
+    if (!linkedCharacter && (!latestEnemy.poolId || !getDnd5eSrdMonster(latestEnemy.poolId))) {
+      return false
+    }
     dnd5eMonsterEndTurnSettlingRef.current = true
     try {
       playerActionSeqRef.current += 1
       const action: SharedPlayerActionState = {
-        id: `dm-monster-end-${combatIdRef.current}-${roundRef.current}-${latestEnemy.id}-${playerActionSeqRef.current}`,
+        id: `dm-headless-end-${combatIdRef.current}-${roundRef.current}-${latestEnemy.id}-${playerActionSeqRef.current}`,
         mapId: latestMap.id,
         combatId: combatIdRef.current,
         sourceMode: 'dm',
         status: 'pending',
         type: 'end-turn',
         actorTokenId: latestEnemy.id,
-        characterId: '',
+        characterId: linkedCharacter?.id ?? '',
         round: roundRef.current,
         initiativeIndex: initiativeIndexRef.current,
         seq: playerActionSeqRef.current,
@@ -9139,12 +10421,19 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
       })
       if (!prepared.ok) return false
+      const endTurnCombatant = prepared.prepared.state.combatants[latestEnemy.id]
       const activeEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
       for (const requirement of prepared.prepared.activeEffectSavingThrows) {
         const effectName = requirement.effect.label || '持续状态'
         const d20 = await rollDiceBoxD20(`${effectName}·回合结束豁免`, latestEnemy.label)
         const d20Second = requirement.mode !== 'normal'
           ? await rollDiceBoxD20(`${effectName}·回合结束豁免（${requirement.mode === 'advantage' ? '优势' : '劣势'}）`, latestEnemy.label)
+          : undefined
+        const halflingLuckyD20 = endTurnCombatant?.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', latestEnemy.label)
+          : undefined
+        const halflingLuckyD20Second = endTurnCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', latestEnemy.label)
           : undefined
         const blessRoll = requirement.blessed
           ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', latestEnemy.label))[0]
@@ -9162,7 +10451,9 @@ export default function MapsPage() {
             )
           : undefined
         activeEffectSavingThrows.push({
-          effectId: requirement.effect.id, d20, d20Second, damageRolls, blessRoll, baneRoll,
+          effectId: requirement.effect.id, targetId: endTurnCombatant?.id,
+          d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+          damageRolls, blessRoll, baneRoll,
         })
       }
       const turnStartActiveEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
@@ -9171,6 +10462,13 @@ export default function MapsPage() {
         const d20 = await rollDiceBoxD20(`${effectName}·回合开始豁免`, requirement.targetName)
         const d20Second = requirement.mode !== 'normal'
           ? await rollDiceBoxD20(`${effectName}·回合开始豁免（${requirement.mode === 'advantage' ? '优势' : '劣势'}）`, requirement.targetName)
+          : undefined
+        const targetCombatant = prepared.prepared.state.combatants[requirement.targetId]
+        const halflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
+          : undefined
+        const halflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
           : undefined
         const blessRoll = requirement.blessed ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', requirement.targetName))[0] : undefined
         const baneRoll = requirement.baned ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', requirement.targetName))[0] : undefined
@@ -9184,9 +10482,12 @@ export default function MapsPage() {
             )
           : undefined
         turnStartActiveEffectSavingThrows.push({
-          effectId: requirement.effect.id, d20, d20Second, damageRolls, blessRoll, baneRoll,
+          effectId: requirement.effect.id, targetId: requirement.targetId,
+          d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+          damageRolls, blessRoll, baneRoll,
         })
       }
+      const turnStartGazeResolutions = await rollDnd5eTurnStartGazes(prepared.prepared, action.id)
       const nextMonsterRechargeRolls = [] as Array<{ actorId: string; actionId: string; roll: number }>
       for (const requirement of prepared.prepared.nextMonsterRechargeRolls) {
         const roll = (await rollDiceBoxValues(
@@ -9206,6 +10507,7 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        turnStartGazeResolutions,
         currentMonsterMechanicRolls,
         nextMonsterRechargeRolls,
         nextMonsterMechanicRolls,
@@ -9294,6 +10596,8 @@ export default function MapsPage() {
     const learnedStrategy = loadDnd5eLearnedStrategy(dnd5eStrategyScopeId(roomSession))
     const result = planDnd5eMonsterTurn(activeMap, enemy, chars, {
       turnEconomy: currentDnd5eTurnEconomy(enemy.id, roundRef.current),
+      combatId: combatIdRef.current,
+      round: roundRef.current,
       decisionProvider: learnedStrategy
         ? createDnd5eLearnedMonsterDecisionProvider(learnedStrategy)
         : undefined,
@@ -9311,6 +10615,18 @@ export default function MapsPage() {
           ...result.decision.reasons,
         ],
       )
+    }
+    if (result.releaseGrapple) {
+      const released = await resolveSrd5eMonsterReleaseGrappleThroughHeadless(
+        enemy,
+        result.releaseGrapple.targetId,
+        result.releaseGrapple.effectId,
+      )
+      if (!released || !isStillEnemyTurn()) {
+        const id = window.setTimeout(() => { void advanceEnemyIfCurrent() }, ADVANCE_DELAY_MS)
+        enemyTurnTimersRef.current.add(id)
+        return
+      }
     }
     if (result.newPosition && !isTokenMovementLocked(enemy)) {
       // a restrained/no-move enemy may still attack but cannot reposition.
@@ -9345,6 +10661,23 @@ export default function MapsPage() {
       enemyTurnTimersRef.current.add(id)
     }
 
+    if (result.escapeActiveEffect || result.escapeGrapple) {
+      const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
+      const latestEnemy = latestMap.tokens.find((token) => token.id === enemy.id) ?? enemy
+      await resolveSrd5eMonsterEscapeThroughHeadless(
+        latestEnemy,
+        {
+          activeEffect: result.escapeActiveEffect,
+          grapple: result.escapeGrapple,
+        },
+        isStillEnemyTurn,
+      )
+      if (isStillEnemyTurn()) {
+        pushTimer(() => { void advanceEnemyIfCurrent() }, ADVANCE_DELAY_MS)
+      }
+      return
+    }
+
     if (result.areaAction) {
       const enemyAreaAction = result.areaAction
       const showAreaAction = () => {
@@ -9352,7 +10685,12 @@ export default function MapsPage() {
         const latestMap = useMapStore.getState().maps.find((map) => map.id === activeMap.id) ?? activeMap
         const latestCaster = latestMap.tokens.find((token) => token.id === enemy.id) ?? enemy
         const casterCell = tokenAnchorCellFromPixel(latestCaster.x, latestCaster.y, latestCaster, latestMap)
-        const orientFrom = aoeOrientFromCell(enemyAreaAction.area, casterCell, enemyAreaAction.areaTargetCell)
+        const orientFrom = aoeOrientFromCell(
+          enemyAreaAction.area,
+          casterCell,
+          enemyAreaAction.areaTargetCell,
+          { rectRotation: enemyAreaAction.areaTargetOrientation },
+        )
         setEnemySpellAoeWarning({
           spellName: enemyAreaAction.actionName,
           highlight: {
@@ -9490,26 +10828,6 @@ export default function MapsPage() {
     return state?.surprisedCombatId === combatIdRef.current && state.surpriseResolvedCombatId !== combatIdRef.current
   }, [])
 
-  const resolveSurpriseForToken = useCallback((token: Token): void => {
-    if (!tokenIsStillSurprised(token)) return
-    const character = token.characterId
-      ? useCharacterStore.getState().characters.find((candidate) => candidate.id === token.characterId)
-      : undefined
-    if (character) {
-      applyAuthorityCharacterUpdate(character.id, {
-        ...character,
-        dnd5eCombatState: { ...character.dnd5eCombatState, surpriseResolvedCombatId: combatIdRef.current },
-      })
-    } else if (activeMapId) {
-      const currentToken = useMapStore.getState().maps
-        .find((map) => map.id === activeMapId)?.tokens.find((candidate) => candidate.id === token.id) ?? token
-      applyAuthorityTokenUpdate(activeMapId, token.id, {
-        ...currentToken,
-        dnd5eCombatState: { ...currentToken.dnd5eCombatState, surpriseResolvedCombatId: combatIdRef.current },
-      })
-    }
-  }, [activeMapId, applyAuthorityCharacterUpdate, applyAuthorityTokenUpdate, tokenIsStillSurprised])
-
   // Single reentrancy-guarded entry point for ALL automatic advances
   // (death-skip effects, prune timers, enemy-turn completion, npc auto-skip in T1).
   // Previously advancingTurnRef only protected the manual wrapper below, so a manual
@@ -9531,17 +10849,25 @@ export default function MapsPage() {
 
   const advanceInitiative = () => {
     if (isAutomatedEnemyTurn && usesAutomatedMonsterSettlement(settlementModeRef.current)) return
-    if (isEnemyTurn && currentInitiativeToken?.poolId && getDnd5eSrdMonster(currentInitiativeToken.poolId)) {
+    const currentHasHeadlessRules = !!currentInitiativeToken && (
+      (
+        !!currentInitiativeToken.poolId &&
+        !!getDnd5eSrdMonster(currentInitiativeToken.poolId)
+      ) ||
+      (
+        !!currentInitiativeToken.characterId &&
+        useCharacterStore.getState().characters.some(
+          (character) => character.id === currentInitiativeToken.characterId,
+        )
+      )
+    )
+    if (currentHasHeadlessRules && currentInitiativeToken) {
       if (dnd5eMonsterEndTurnSettlingRef.current) return
       void (async () => {
         await settleDnd5eMonsterEndTurn(currentInitiativeToken)
         return
       })()
       return
-    }
-    if (currentInitiativeToken && tokenIsStillSurprised(currentInitiativeToken)) {
-      resolveSurpriseForToken(currentInitiativeToken)
-      pushCombatLog(`${currentInitiativeToken.label} 的受突袭回合结束；现在可以进行反应。`, 'turn')
     }
     requestAdvance()
   }
@@ -9551,6 +10877,7 @@ export default function MapsPage() {
     status: SharedPlayerActionAckState['status'],
     reason?: string,
     acceptedPosition?: { x: number; y: number },
+    dnd5eDeclarativeAttackIntents?: SharedPlayerActionAckState['dnd5eDeclarativeAttackIntents'],
   ) => {
     if (!activeMap || mode !== 'dm') return
     playerActionTransactionOutcomeRef.current.set(
@@ -9576,12 +10903,16 @@ export default function MapsPage() {
       status,
       reason,
       acceptedPosition,
+      dnd5eDeclarativeAttackIntents,
       round,
       initiativeIndex,
       appliedAt,
       before: baseline,
       after: afterBaseline,
     })
+    if (status === 'accepted') {
+      reconcileDeclarativeAttackIntents(action.characterId, dnd5eDeclarativeAttackIntents)
+    }
     const snapshots =
       status === 'accepted'
         ? {
@@ -9659,7 +10990,11 @@ export default function MapsPage() {
     if (!sendPlayerBasicActionRequest(payload)) {
       void showCombatNotice(
         pendingPlayerActionRef.current ? '等待 DM 确认' : '动作不可用',
-        pendingPlayerActionRef.current ? '正在等待 DM 结算上一动作。' : '该基础动作需要一个可用动作和合法目标。',
+        pendingPlayerActionRef.current
+          ? '正在等待 DM 结算上一动作。'
+          : payload.kind === 'other-bonus-action'
+            ? '该行动需要一个可用附赠动作。'
+            : '该基础动作需要一个可用动作和合法目标。',
         'amber',
       )
     }
@@ -10043,7 +11378,12 @@ export default function MapsPage() {
                 tokenId: token.id,
                 label: token.label,
                 emoji: token.emoji,
-                portrait: token.portrait,
+                portrait: resolveInitiativePortrait(
+                  token.characterId
+                    ? authorityCharacters.find((character) => character.id === token.characterId)
+                    : undefined,
+                  token,
+                ),
                 portraitImageId: token.portraitImageId,
                 color: token.color,
                 roll: Math.max(1, 20 - index),
@@ -10300,7 +11640,8 @@ export default function MapsPage() {
       }
       const payload = action.dnd5eBasicAction
       const needsActorRoll = payload.kind === 'hide' || payload.kind === 'grapple' || payload.kind === 'shove' || payload.kind === 'escape-grapple' || payload.kind === 'escape-effect'
-      const needsTargetRoll = payload.kind === 'grapple' || payload.kind === 'shove' || payload.kind === 'escape-grapple'
+      const needsTargetRoll = payload.kind === 'grapple' || payload.kind === 'shove' ||
+        (payload.kind === 'escape-grapple' && !prepared.prepared.escapeEffectId)
       const actorD20 = needsActorRoll
         ? await rollDiceBoxD20(`${dnd5eActionActor.name}·${payload.kind === 'hide'
             ? '躲藏检定'
@@ -10321,12 +11662,32 @@ export default function MapsPage() {
       const targetD20Second = needsTargetRoll && prepared.prepared.targetRollMode !== 'normal'
         ? await rollDiceBoxD20(`${targetName}·优势／劣势第二枚`, targetName)
         : undefined
+      const actorCombatant = prepared.prepared.state.combatants[prepared.prepared.actorTokenId]
+      const targetCombatant = targetTokenId
+        ? prepared.prepared.state.combatants[targetTokenId]
+        : undefined
+      const actorHalflingLuckyD20 = actorCombatant?.racialRules?.halflingLucky && actorD20 === 1
+        ? await rollDiceBoxD20('半身人幸运·战斗检定重投', dnd5eActionActor.name)
+        : undefined
+      const actorHalflingLuckyD20Second = actorCombatant?.racialRules?.halflingLucky && actorD20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·战斗检定重投', dnd5eActionActor.name)
+        : undefined
+      const targetHalflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && targetD20 === 1
+        ? await rollDiceBoxD20('半身人幸运·对抗检定重投', targetName)
+        : undefined
+      const targetHalflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && targetD20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·对抗检定重投', targetName)
+        : undefined
       let resolved = resolvePreparedDnd5ePlayerBasicAction({
         prepared: prepared.prepared,
         actorD20,
         actorD20Second,
+        actorHalflingLuckyD20,
+        actorHalflingLuckyD20Second,
         targetD20,
         targetD20Second,
+        targetHalflingLuckyD20,
+        targetHalflingLuckyD20Second,
       })
       const shovePushSucceeded = payload.kind === 'shove' && payload.outcome === 'push' &&
         resolved.result.events.some((event) =>
@@ -10346,8 +11707,12 @@ export default function MapsPage() {
             prepared: prepared.prepared,
             actorD20,
             actorD20Second,
+            actorHalflingLuckyD20,
+            actorHalflingLuckyD20Second,
             targetD20,
             targetD20Second,
+            targetHalflingLuckyD20,
+            targetHalflingLuckyD20Second,
             pushToElevationFeet: 0,
             fallingDamageRolls: await rollDiceBoxValues(
               dnd5eFallingDamageDice(fromElevationFeet), 6, '推撞·坠落伤害', pushedToken.label,
@@ -10411,9 +11776,12 @@ export default function MapsPage() {
           const afterAction = prepared.prepared.spendsAction
             ? spendDnd5eTurnResource(economy, 'action').economy
             : economy
-          const afterAttackReplacement = payload.kind === 'grapple' || payload.kind === 'shove'
-            ? { ...afterAction, attacksUsed: prepared.prepared.attackNumber ?? afterAction.attacksUsed }
+          const afterBonusAction = prepared.prepared.spendsBonusAction
+            ? spendDnd5eTurnResource(afterAction, 'bonusAction').economy
             : afterAction
+          const afterAttackReplacement = payload.kind === 'grapple' || payload.kind === 'shove'
+            ? { ...afterBonusAction, attacksUsed: prepared.prepared.attackNumber ?? afterBonusAction.attacksUsed }
+            : afterBonusAction
           return grantedMovement > 0
             ? {
                 ...afterAttackReplacement,
@@ -10433,10 +11801,30 @@ export default function MapsPage() {
               : payload.kind === 'use-object' ? '使用物件'
                 : payload.kind === 'grapple' ? '擒抱'
                   : payload.kind === 'shove' ? `推撞（${payload.outcome === 'prone' ? '击倒' : '推开'}）`
-                    : payload.kind === 'escape-grapple' ? '挣脱擒抱'
-                      : payload.kind === 'escape-effect' ? '挣脱法术束缚'
-                        : '唤醒睡眠生物'
+                    : payload.kind === 'release-grapple' ? '松开擒抱'
+                      : payload.kind === 'escape-grapple' ? '挣脱擒抱'
+                        : payload.kind === 'escape-effect' ? '挣脱法术束缚'
+                          : payload.kind === 'wake' ? '唤醒睡眠生物'
+                            : payload.kind === 'other-bonus-action' ? '其他（附赠动作）'
+                              : '其他（动作）'
       pushHeadlessCombatLog(`${dnd5eActionActor.name} 执行${label}。`, 'turn', resolved.result.events)
+      if (payload.kind === 'other-action' || payload.kind === 'other-bonus-action') {
+        const description = payload.description?.trim() ||
+          (payload.kind === 'other-bonus-action' ? '其他附赠动作' : '其他动作')
+        pushCombatLog(
+          `${dnd5eActionActor.name} 提交“${description}”，已消耗${payload.kind === 'other-bonus-action' ? '附赠动作' : '动作'}，等待 DM 裁定。`,
+          'turn',
+        )
+        const adjudication = await requestSharedBasicActionAdjudication(action, dnd5eActionActor.name, payload)
+        const interruptId = `dm-adjudication:${action.id}`
+        await finishSharedCombatInterrupt(interruptId, adjudication)
+        pushCombatLog(
+          adjudication.decision === 'approved'
+            ? `DM 已确认 ${dnd5eActionActor.name} 的“${description}”裁定${adjudication.note ? `：${adjudication.note}` : '。'}`
+            : `DM 未批准 ${dnd5eActionActor.name} 的“${description}”裁定；已消耗的行动资源不会返还${adjudication.note ? `。备注：${adjudication.note}` : '。'}`,
+          'system',
+        )
+      }
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
       return
@@ -10459,11 +11847,18 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      const actorCombatant = preparedTurn.prepared.state.combatants[dnd5eActionActorToken.id]
       const activeEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
       for (const requirement of preparedTurn.prepared.activeEffectSavingThrows) {
         const d20 = await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合结束豁免`, preparedTurn.prepared.actorName)
         const d20Second = requirement.mode !== 'normal'
           ? await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合结束豁免`, preparedTurn.prepared.actorName)
+          : undefined
+        const halflingLuckyD20 = actorCombatant?.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', preparedTurn.prepared.actorName)
+          : undefined
+        const halflingLuckyD20Second = actorCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', preparedTurn.prepared.actorName)
           : undefined
         const blessRoll = requirement.blessed
           ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', preparedTurn.prepared.actorName))[0]
@@ -10481,7 +11876,9 @@ export default function MapsPage() {
             )
           : undefined
         activeEffectSavingThrows.push({
-          effectId: requirement.effect.id, d20, d20Second, damageRolls, blessRoll, baneRoll,
+          effectId: requirement.effect.id, targetId: actorCombatant?.id,
+          d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+          damageRolls, blessRoll, baneRoll,
         })
       }
       const turnStartActiveEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
@@ -10489,6 +11886,13 @@ export default function MapsPage() {
         const d20 = await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合开始豁免`, requirement.targetName)
         const d20Second = requirement.mode !== 'normal'
           ? await rollDiceBoxD20(`${requirement.effect.label || '持续状态'}·回合开始豁免`, requirement.targetName)
+          : undefined
+        const targetCombatant = preparedTurn.prepared.state.combatants[requirement.targetId]
+        const halflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
+          : undefined
+        const halflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
           : undefined
         const blessRoll = requirement.blessed
           ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', requirement.targetName))[0]
@@ -10506,9 +11910,12 @@ export default function MapsPage() {
             )
           : undefined
         turnStartActiveEffectSavingThrows.push({
-          effectId: requirement.effect.id, d20, d20Second, damageRolls, blessRoll, baneRoll,
+          effectId: requirement.effect.id, targetId: requirement.targetId,
+          d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+          damageRolls, blessRoll, baneRoll,
         })
       }
+      const turnStartGazeResolutions = await rollDnd5eTurnStartGazes(preparedTurn.prepared, action.id)
       const nextMonsterRechargeRolls = [] as Array<{ actorId: string; actionId: string; roll: number }>
       for (const requirement of preparedTurn.prepared.nextMonsterRechargeRolls) {
         const roll = (await rollDiceBoxValues(
@@ -10520,8 +11927,10 @@ export default function MapsPage() {
         nextMonsterRechargeRolls.push({ actorId: requirement.actorId, actionId: requirement.actionId, roll })
       }
       const nextMonsterMechanicRolls = await rollDnd5eMonsterMechanics(preparedTurn.prepared.nextMonsterMechanicRolls)
-      const actorCombatant = preparedTurn.prepared.state.combatants[dnd5eActionActorToken.id]
       const deathSaveD20 = await rollDiceBoxD20('死亡豁免', dnd5eActionActor.name)
+      const deathSaveHalflingLuckyD20 = actorCombatant?.racialRules?.halflingLucky && deathSaveD20 === 1
+        ? await rollDiceBoxD20('半身人幸运·死亡豁免重投', dnd5eActionActor.name)
+        : undefined
       const blessRoll = actorCombatant && dnd5eCombatantHasConcentrationEffect(
         preparedTurn.prepared.state,
         actorCombatant.id,
@@ -10536,10 +11945,13 @@ export default function MapsPage() {
         type: 'death-save-turn',
         actorId: dnd5eActionActorToken.id,
         d20: deathSaveD20,
+        halflingLuckyD20: deathSaveHalflingLuckyD20,
         blessRoll,
         baneRoll,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        turnStartGazeResolutions,
+        nextTurnSlotId: preparedTurn.prepared.nextTurnSlotId,
         nextMonsterRechargeRolls,
         nextMonsterMechanicRolls,
       }, { transactionId: action.id, mapId: authorityMap.id })
@@ -10600,6 +12012,7 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      const endTurnCombatant = preparedEndTurn.prepared.state.combatants[preparedEndTurn.prepared.actorToken.id]
       const activeEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
       for (const requirement of preparedEndTurn.prepared.activeEffectSavingThrows) {
         const effectName = requirement.effect.label || '持续状态'
@@ -10616,6 +12029,12 @@ export default function MapsPage() {
         const baneRoll = requirement.baned
           ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', preparedEndTurn.prepared.actorName))[0]
           : undefined
+        const halflingLuckyD20 = endTurnCombatant?.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', preparedEndTurn.prepared.actorName)
+          : undefined
+        const halflingLuckyD20Second = endTurnCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', preparedEndTurn.prepared.actorName)
+          : undefined
         const failureDamage = requirement.effect.repeatSave?.damageOnFailure
         const damageRolls = failureDamage
           ? await rollDiceBoxValues(
@@ -10626,7 +12045,9 @@ export default function MapsPage() {
             )
           : undefined
         activeEffectSavingThrows.push({
-          effectId: requirement.effect.id, d20, d20Second, damageRolls, blessRoll, baneRoll,
+          effectId: requirement.effect.id, targetId: endTurnCombatant?.id,
+          d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+          damageRolls, blessRoll, baneRoll,
         })
       }
       const turnStartActiveEffectSavingThrows: Dnd5eActiveEffectSavingThrowRoll[] = []
@@ -10645,6 +12066,13 @@ export default function MapsPage() {
         const baneRoll = requirement.baned
           ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', requirement.targetName))[0]
           : undefined
+        const targetCombatant = preparedEndTurn.prepared.state.combatants[requirement.targetId]
+        const halflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
+          : undefined
+        const halflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·持续状态豁免重投', requirement.targetName)
+          : undefined
         const failureDamage = requirement.effect.repeatSave?.damageOnFailure
         const damageRolls = failureDamage
           ? await rollDiceBoxValues(
@@ -10655,9 +12083,12 @@ export default function MapsPage() {
             )
           : undefined
         turnStartActiveEffectSavingThrows.push({
-          effectId: requirement.effect.id, d20, d20Second, damageRolls, blessRoll, baneRoll,
+          effectId: requirement.effect.id, targetId: requirement.targetId,
+          d20, d20Second, halflingLuckyD20, halflingLuckyD20Second,
+          damageRolls, blessRoll, baneRoll,
         })
       }
+      const turnStartGazeResolutions = await rollDnd5eTurnStartGazes(preparedEndTurn.prepared, action.id)
       const nextMonsterRechargeRolls = [] as Array<{ actorId: string; actionId: string; roll: number }>
       for (const requirement of preparedEndTurn.prepared.nextMonsterRechargeRolls) {
         const roll = (await rollDiceBoxValues(
@@ -10677,6 +12108,7 @@ export default function MapsPage() {
         initiativeOrder: initiativeOrderRef.current,
         activeEffectSavingThrows,
         turnStartActiveEffectSavingThrows,
+        turnStartGazeResolutions,
         currentMonsterMechanicRolls,
         nextMonsterRechargeRolls,
         nextMonsterMechanicRolls,
@@ -10900,13 +12332,23 @@ export default function MapsPage() {
       const d20Second = effectiveMode !== 'normal'
         ? await rollDiceBoxD20(`${checkLabel}（${effectiveMode === 'advantage' ? '优势' : '劣势'}）`, check.actor.name)
         : undefined
-      const preview = previewPreparedDnd5eAbilityCheck(check, d20, d20Second)
+      const actorCombatant = check.state.combatants[check.actorToken.id]
+      const halflingLuckyD20 = actorCombatant.racialRules?.halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·属性检定重投', check.actor.name)
+        : undefined
+      const halflingLuckyD20Second = actorCombatant.racialRules?.halflingLucky && d20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·属性检定重投', check.actor.name)
+        : undefined
+      const preview = previewPreparedDnd5eAbilityCheck(
+        check,
+        halflingLuckyD20 ?? d20,
+        halflingLuckyD20Second ?? d20Second,
+      )
       if (!preview) {
         acknowledgePlayerAction(action, 'rejected', 'invalid-dice')
         completePlayerActionRequest(action)
         return
       }
-      const actorCombatant = check.state.combatants[check.actorToken.id]
       let runningTotal = preview.total
       const heldInspirationDie = dnd5eHeldBardicInspirationDie(actorCombatant)
       const bardicInspirationRoll = runningTotal < check.payload.dc && heldInspirationDie &&
@@ -11429,6 +12871,8 @@ export default function MapsPage() {
         spellCast.spell.sustainedAttack?.resolution !== 'saving-throw'
       let d20: number | undefined
       let d20Second: number | undefined
+      let halflingLuckyD20: number | undefined
+      let halflingLuckyD20Second: number | undefined
       let attackBlessRoll: number | undefined
       let attackBaneRoll: number | undefined
       let savingThrowD20: number | undefined
@@ -11599,9 +13043,9 @@ export default function MapsPage() {
           transactionId: action.id,
           sourceTokenId: spellCast.actorToken.id,
           spellId: spellCast.spell.id,
-          casterName: spellCast.actor.name,
+          casterName: spellCast.actor.name ?? spellCast.actorToken.label,
           spellName: spellCast.spell.name,
-          castingClassId: spellCast.castingClassId,
+          castingClassId: spellCast.castingClassId ?? 'racial-innate',
         })
       }
       const fireballPresentation = spellResolutionContinues
@@ -11619,15 +13063,31 @@ export default function MapsPage() {
       if (fireballPresentation) {
         const schedule = await publishFireballPresentation({
           ...fireballPresentation,
-          casterName: spellCast.actor.name,
+          casterName: spellCast.actor.name ?? spellCast.actorToken.label,
           spellName: spellCast.spell.name,
-          castingClassId: spellCast.castingClassId,
+          castingClassId: spellCast.castingClassId ?? 'racial-innate',
         })
         const presentationDelay = Math.max(
           0,
           schedule.completesAt - combatPresentationServerNow(),
         )
         await new Promise<void>((resolve) => window.setTimeout(resolve, presentationDelay))
+      }
+      const areaSpellPresentation = spellResolutionContinues
+        ? areaSpellPresentationForSettlement({
+            spellId: spellCast.spell.id,
+            transactionId: action.id,
+            mapId: authorityMap.id,
+            actorTokenId: spellCast.actorToken.id,
+            areaAnchorCell: spellCast.areaAnchorCell,
+          })
+        : null
+      if (areaSpellPresentation) {
+        const schedule = await publishAreaSpellPresentation(areaSpellPresentation)
+        await new Promise<void>((resolve) => window.setTimeout(
+          resolve,
+          Math.max(0, schedule.completesAt - combatPresentationServerNow()),
+        ))
       }
       const preRollPresentations = spellResolutionContinues
         ? spellPresentationsBeforeRoll({
@@ -11661,6 +13121,41 @@ export default function MapsPage() {
           case 'acid-splash': return publishAcidSplashPresentation({ ...input, ...classColors })
           case 'poison-spray': return publishPoisonSprayPresentation({ ...input, ...classColors })
           case 'vicious-mockery': return publishViciousMockeryPresentation({ ...input, ...classColors })
+          case 'magic-missile': return publishMagicMissilePresentation(input)
+          case 'scorching-ray': return publishScorchingRayPresentation(input)
+          case 'guiding-bolt': return publishGuidingBoltPresentation(input)
+          case 'acid-arrow': return publishAcidArrowPresentation(input)
+          case 'cure-wounds': return publishCureWoundsPresentation(input)
+          case 'healing-word': return publishHealingWordPresentation(input)
+          case 'inflict-wounds': return publishInflictWoundsPresentation(input)
+          case 'bless': return publishBlessPresentation({ ...input, ...classColors })
+          case 'bane': return publishBanePresentation({ ...input, ...classColors })
+          case 'shield-of-faith': return publishShieldOfFaithPresentation({ ...input, ...classColors })
+          case 'mage-armor': return publishMageArmorPresentation({ ...input, ...classColors })
+          case 'jump': return publishJumpPresentation({ ...input, ...classColors })
+          case 'darkvision': return publishDarkvisionPresentation({ ...input, ...classColors })
+          case 'see-invisibility': return publishSeeInvisibilityPresentation({ ...input, ...classColors })
+          case 'warding-bond': return publishWardingBondPresentation({ ...input, ...classColors })
+          case 'fly': return publishFlyPresentation({ ...input, ...classColors })
+          case 'heroism': return publishHeroismPresentation({ ...input, ...classColors })
+          case 'enlarge-reduce': return publishEnlargeReducePresentation({ ...input, ...classColors })
+          case 'enhance-ability': return publishEnhanceAbilityPresentation({ ...input, ...classColors })
+          case 'divine-favor': return publishDivineFavorPresentation({ ...input, ...classColors })
+          case 'hunters-mark': return publishHuntersMarkPresentation({ ...input, ...classColors })
+          case 'magic-weapon': return publishMagicWeaponPresentation({ ...input, ...classColors })
+          case 'flame-blade': return publishFlameBladePresentation({ ...input, ...classColors })
+          case 'invisibility': return publishInvisibilityPresentation({ ...input, ...classColors })
+          case 'blur': return publishBlurPresentation({ ...input, ...classColors })
+          case 'barkskin': return publishBarkskinPresentation({ ...input, ...classColors })
+          case 'protection-from-poison': return publishProtectionFromPoisonPresentation({ ...input, ...classColors })
+          case 'longstrider': return publishLongstriderPresentation({ ...input, ...classColors })
+          case 'protection-from-energy': return publishProtectionFromEnergyPresentation({ ...input, ...classColors })
+          case 'death-ward': return publishDeathWardPresentation({ ...input, ...classColors })
+          case 'greater-invisibility': return publishGreaterInvisibilityPresentation({ ...input, ...classColors })
+          case 'charm-person': return publishCharmPersonPresentation({ ...input, ...classColors })
+          case 'hideous-laughter': return publishHideousLaughterPresentation({ ...input, ...classColors })
+          case 'hold-person': return publishHoldPersonPresentation({ ...input, ...classColors })
+          case 'blindness-deafness': return publishBlindnessDeafnessPresentation({ ...input, ...classColors })
         }
       }))
       const preRollCompletesAt = Math.max(
@@ -11768,6 +13263,12 @@ export default function MapsPage() {
                 targetAttackDisplayName,
               )
             : undefined
+          const targetHalflingLuckyD20 = spellActorCombatant.racialRules?.halflingLucky && targetD20 === 1
+            ? await rollDiceBoxD20('半身人幸运·法术攻击重投', spellCast.actor.name)
+            : undefined
+          const targetHalflingLuckyD20Second = spellActorCombatant.racialRules?.halflingLucky && targetD20Second === 1
+            ? await rollDiceBoxD20('半身人幸运·法术攻击重投', spellCast.actor.name)
+            : undefined
           const targetBlessRoll = spellCast.attackBlessed
             ? (await rollDiceBoxValues(1, 4, '祝福术·法术攻击加值', spellCast.actorToken.label))[0]
             : undefined
@@ -11777,8 +13278,8 @@ export default function MapsPage() {
           const preview = previewDnd5eSpellTargetAttack(
             spellCast,
             targetIndex,
-            targetD20,
-            targetD20Second,
+            targetHalflingLuckyD20 ?? targetD20,
+            targetHalflingLuckyD20Second ?? targetD20Second,
             protectedAttack,
             targetBlessRoll,
             targetBaneRoll,
@@ -11904,6 +13405,8 @@ export default function MapsPage() {
             targetId: targetAttack.targetToken.id,
             d20: targetD20,
             d20Second: targetD20Second,
+            halflingLuckyD20: targetHalflingLuckyD20,
+            halflingLuckyD20Second: targetHalflingLuckyD20Second,
             attackBlessRoll: targetBlessRoll,
             attackBaneRoll: targetBaneRoll,
             bardicInspirationRoll: targetBardicInspirationRoll,
@@ -11950,13 +13453,26 @@ export default function MapsPage() {
         d20Second = attackMode !== 'normal' || spellCast.guessedTargetCell
           ? await rollDiceBoxD20(`${spellCast.spell.name}·${sustainedSpellAttack ? '持续效果攻击' : '法术攻击'}（第二枚）`, spellAttackDisplayTarget)
           : undefined
+        halflingLuckyD20 = spellActorCombatant.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·法术攻击重投', spellCast.actor.name)
+          : undefined
+        halflingLuckyD20Second = spellActorCombatant.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·法术攻击重投', spellCast.actor.name)
+          : undefined
         attackBlessRoll = spellCast.attackBlessed
           ? (await rollDiceBoxValues(1, 4, '祝福术·法术攻击加值', spellCast.actorToken.label))[0]
           : undefined
         attackBaneRoll = spellCast.attackBaned
           ? (await rollDiceBoxValues(1, 4, '灾祸术·法术攻击减值', spellCast.actorToken.label))[0]
           : undefined
-        const preview = previewDnd5eSpellAttack(spellCast, d20, d20Second, useProtection, attackBlessRoll, attackBaneRoll)
+        const preview = previewDnd5eSpellAttack(
+          spellCast,
+          halflingLuckyD20 ?? d20,
+          halflingLuckyD20Second ?? d20Second,
+          useProtection,
+          attackBlessRoll,
+          attackBaneRoll,
+        )
         const inspirationDie = tranquility.roll?.bardicInspirationRoll == null
           ? dnd5eHeldBardicInspirationDie(spellActorCombatant)
           : undefined
@@ -12141,6 +13657,22 @@ export default function MapsPage() {
               )
             }
           }
+          const saveHalflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && saveD20 === 1
+            ? await rollDiceBoxD20('半身人幸运·法术豁免重投', targetSave.targetToken.label)
+            : undefined
+          const saveHalflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && saveD20Second === 1
+            ? await rollDiceBoxD20('半身人幸运·法术豁免重投', targetSave.targetToken.label)
+            : undefined
+          if (saveHalflingLuckyD20 != null || saveHalflingLuckyD20Second != null) {
+            preview = previewDnd5eSpellTargetSavingThrow(
+              spellCast,
+              targetIndex,
+              saveHalflingLuckyD20 ?? saveD20,
+              saveHalflingLuckyD20Second ?? saveD20Second,
+              blessRoll,
+              baneRoll,
+            )
+          }
           const targetCharacter = targetSave.targetToken.characterId
             ? spellCast.characters.find((character) => character.id === targetSave.targetToken.characterId)
             : undefined
@@ -12252,6 +13784,8 @@ export default function MapsPage() {
             targetId: targetSave.targetToken.id,
             d20: saveD20,
             d20Second: saveD20Second,
+            halflingLuckyD20: saveHalflingLuckyD20,
+            halflingLuckyD20Second: saveHalflingLuckyD20Second,
             blessRoll,
             baneRoll,
             rerollD20,
@@ -12387,6 +13921,21 @@ export default function MapsPage() {
               savingThrowBaneRoll,
             )
           }
+        }
+        halflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && savingThrowD20 === 1
+          ? await rollDiceBoxD20('半身人幸运·法术豁免重投', spellCast.targetToken.label)
+          : undefined
+        halflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && savingThrowD20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·法术豁免重投', spellCast.targetToken.label)
+          : undefined
+        if (halflingLuckyD20 != null || halflingLuckyD20Second != null) {
+          preview = previewDnd5eSpellSavingThrow(
+            spellCast,
+            halflingLuckyD20 ?? savingThrowD20,
+            halflingLuckyD20Second ?? savingThrowD20Second,
+            savingThrowBlessRoll,
+            savingThrowBaneRoll,
+          )
         }
         const targetCharacter = spellCast.targetToken.characterId
           ? spellCast.characters.find((character) => character.id === spellCast.targetToken.characterId)
@@ -12771,6 +14320,8 @@ export default function MapsPage() {
         prepared: spellCast,
         d20,
         d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
         attackBlessRoll,
         attackBaneRoll,
         cuttingWords,
@@ -13271,6 +14822,138 @@ export default function MapsPage() {
       return
     }
 
+    if (authorityPlan.route === 'dnd5e-racial-action' && action.type === 'dnd5e-racial-action') {
+      const prepared = prepareDnd5eDragonbornBreathAction({
+        action,
+        combatId: action.combatId ?? combatIdRef.current ?? `map-${authorityMap.id}`,
+        map: authorityMap,
+        characters: useCharacterStore.getState().characters,
+        initiativeOrder: initiativeOrderRef.current,
+        turnEconomy: currentDnd5eTurnEconomy(action.actorTokenId, liveRound),
+        turnEconomyByToken: dnd5eTurnEconomyByTokenRef.current,
+      })
+      if (!prepared.ok) {
+        acknowledgePlayerAction(action, 'rejected', prepared.reason)
+        completePlayerActionRequest(action)
+        return
+      }
+      const casting = prepared.prepared
+      const caster = casting.state.combatants[casting.actorToken.id]
+      if (!caster) {
+        acknowledgePlayerAction(action, 'rejected', 'combatant-missing')
+        completePlayerActionRequest(action)
+        return
+      }
+      const targetSavingThrows: Dnd5eSpellTargetSavingThrowRoll[] = []
+      for (const targetToken of casting.targetTokens) {
+        const target = casting.state.combatants[targetToken.id]
+        if (!target) {
+          acknowledgePlayerAction(action, 'rejected', 'combatant-missing')
+          completePlayerActionRequest(action)
+          return
+        }
+        const saveMode = dnd5eSavingThrowModeExplanation(target, casting.ancestry.saveAbility, {
+          effectVisible: true,
+          sourceCreatureType: caster.creatureType,
+          sourceIsSpell: false,
+          damageType: casting.ancestry.damageType,
+        })
+        const d20 = await rollDiceBoxD20(
+          `龙裔吐息·${casting.ancestry.saveAbility.toUpperCase()} 豁免`,
+          targetToken.label,
+        )
+        const d20Second = saveMode.mode === 'normal'
+          ? undefined
+          : await rollDiceBoxD20(
+              `龙裔吐息·豁免（${saveMode.mode === 'advantage' ? '优势' : '劣势'}）`,
+              targetToken.label,
+            )
+        const blessRoll = dnd5eCombatantHasConcentrationEffect(casting.state, target.id, 'bless')
+          ? (await rollDiceBoxValues(1, 4, '祝福术·豁免加值', targetToken.label))[0]
+          : undefined
+        const baneRoll = dnd5eCombatantHasConcentrationEffect(casting.state, target.id, 'bane')
+          ? (await rollDiceBoxValues(1, 4, '灾祸术·豁免减值', targetToken.label))[0]
+          : undefined
+        const halflingLuckyD20 = target.racialRules?.halflingLucky && d20 === 1
+          ? await rollDiceBoxD20('半身人幸运·吐息豁免重投', targetToken.label)
+          : undefined
+        const halflingLuckyD20Second = target.racialRules?.halflingLucky && d20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·吐息豁免重投', targetToken.label)
+          : undefined
+        targetSavingThrows.push({
+          targetId: target.id,
+          d20,
+          d20Second,
+          halflingLuckyD20,
+          halflingLuckyD20Second,
+          blessRoll,
+          baneRoll,
+        })
+      }
+      const damageRolls = await rollDiceBoxValues(
+        dnd5eDragonbornBreathDiceCount(caster.level),
+        6,
+        `龙裔吐息·${casting.ancestry.damageType}伤害`,
+        casting.actor.name,
+      )
+      const initial = resolvePreparedDnd5eDragonbornBreathAction({
+        prepared: casting,
+        resolution: { targetSavingThrows, damageRolls },
+      })
+      if (!initial.result.ok || !initial.application) {
+        acknowledgePlayerAction(
+          action,
+          'rejected',
+          initial.result.ok ? 'missing-application' : initial.result.reason,
+        )
+        completePlayerActionRequest(action)
+        return
+      }
+      const settled = await settleDnd5eConcentrationChecks({
+        result: initial.result,
+        map: initial.application.map,
+        characters: initial.application.characters,
+        priorApplication: initial.application,
+        characterIdByCombatantId: casting.characterIdByCombatantId,
+        rollD20: rollDiceBoxD20,
+        rollD4: async (label, targetName) =>
+          (await rollDiceBoxValues(1, 4, label, targetName))[0],
+        rollDice: rollDiceBoxValues,
+        requestHellishRebuke: requestSharedHellishRebukeChoice,
+        requestSavingThrowReroll: requestDnd5eSavingThrowRerollDice,
+        requestBardicInspiration: requestDnd5eBardicInspirationRoll,
+        requestDarkOnesOwnLuck: requestDnd5eDarkOnesOwnLuckRoll,
+      })
+      applyDnd5eCombatApplication(settled.application)
+      updateDnd5eTurnEconomy(
+        action.actorTokenId,
+        (economy) => spendDnd5eTurnResource(economy, 'action').economy,
+        liveRound,
+      )
+      const breathEvent = settled.result.events.find((event) =>
+        event.type === 'dragonborn-breath-resolved')
+      const damage = settled.result.events
+        .filter((event) => event.type === 'damage-applied')
+        .reduce((total, event) => total + event.amount, 0)
+      pushHeadlessCombatLog(
+        `${casting.actor.name} 使用${casting.ancestry.name}血统吐息${
+          damage > 0 ? `，共造成 ${damage} 点伤害。` : '。'
+        }`,
+        damage > 0 ? 'damage' : 'system',
+        settled.result.events,
+        [
+          `种族动作：龙裔吐息（${casting.ancestry.damageType}）`,
+          `目标：${casting.targetTokens.map((target) => target.label).join('、') || '无'}`,
+          breathEvent?.type === 'dragonborn-breath-resolved'
+            ? `伤害骰总值 ${breathEvent.damage}，豁免 DC ${breathEvent.dc}`
+            : '',
+        ].filter(Boolean),
+      )
+      completePlayerActionRequest(action)
+      acknowledgePlayerAction(action, 'accepted')
+      return
+    }
+
     if (authorityPlan.route === 'dnd5e-plugin-action' && action.type === 'dnd5e-plugin-action') {
       const turnEconomy = currentDnd5eTurnEconomy(action.actorTokenId, liveRound)
       const prepared = prepareDnd5ePluginFeatureAction({
@@ -13306,9 +14989,109 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      const battleMasterAction = dnd5eDeclarativeBattleMasterManeuverDefinition(
+        prepared.prepared.feature.id,
+      )
+      const isCommandersStrike = battleMasterAction?.mechanic.maneuver === 'commanders-strike'
+      let authoritativePayload = prepared.prepared.headlessAction.payload
+      let commanderCritical: boolean | undefined
+      if (isCommandersStrike) {
+        const playerPayload = prepared.prepared.headlessAction.payload
+        const enemyTargetId = playerPayload && typeof playerPayload === 'object' &&
+          !Array.isArray(playerPayload) && typeof playerPayload.enemyTargetId === 'string'
+          ? playerPayload.enemyTargetId
+          : undefined
+        const allyToken = prepared.prepared.targetToken
+        const enemyToken = enemyTargetId
+          ? authorityMap.tokens.find((token) => token.id === enemyTargetId)
+          : undefined
+        const allyCombatant = prepared.prepared.state.combatants[allyToken.id]
+        const enemyCombatant = enemyToken
+          ? prepared.prepared.state.combatants[enemyToken.id]
+          : undefined
+        if (
+          !enemyToken || enemyToken.type === 'obstacle' || !allyCombatant || !enemyCombatant ||
+          allyCombatant.currentHp <= 0 || enemyCombatant.currentHp <= 0 ||
+          areOpposedCombatTokens(prepared.prepared.actorToken, allyToken) ||
+          !areOpposedCombatTokens(prepared.prepared.actorToken, enemyToken)
+        ) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-target')
+          completePlayerActionRequest(action)
+          return
+        }
+        const allyCharacter = allyToken.characterId
+          ? prepared.prepared.characters.find((character) => character.id === allyToken.characterId)
+          : undefined
+        const allyChoice = await requestSharedChoiceWindow({
+          id: `battle-master-command:${action.id}`,
+          transactionId: action.id,
+          actor: prepared.prepared.actor,
+          targetCharId: allyCharacter?.id,
+          pluginId: prepared.prepared.feature.ownerPluginId,
+          featureId: prepared.prepared.feature.id,
+          featureName: prepared.prepared.feature.name,
+          prompt: `${prepared.prepared.actor.name} 指示你攻击 ${enemyToken.label}。是否消耗反应进行一次近战武器攻击？`,
+          audience: allyCharacter ? 'target' : 'dm',
+          options: [
+            { id: 'attack', label: '接受指令并攻击' },
+            { id: 'decline', label: '拒绝并保留反应' },
+          ],
+          defaultOptionId: 'decline',
+          phase: 'before-action',
+        })
+        if (allyChoice !== 'attack') {
+          acknowledgePlayerAction(action, 'rejected', 'interrupt-cancelled')
+          completePlayerActionRequest(action)
+          return
+        }
+        const commandedAttack = await buildDnd5eBattleMasterReactionWeaponAttack({
+          map: authorityMap,
+          actorToken: allyToken,
+          targetToken: enemyToken,
+          label: prepared.prepared.feature.name,
+        })
+        if (!commandedAttack) {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-target')
+          completePlayerActionRequest(action)
+          return
+        }
+        // The generic plugin preflight only imports the acting fighter's live economy.
+        // The Host just validated the ally through the reaction-attack preflight, so
+        // mirror that authoritative result into the shared Headless snapshot.
+        allyCombatant.turn.reactionAvailable = true
+        commanderCritical = commandedAttack.critical
+        authoritativePayload = JSON.parse(JSON.stringify({
+          enemyTargetId: enemyToken.id,
+          weaponAttack: JSON.parse(JSON.stringify(commandedAttack.weaponAttack)),
+        }))
+      }
+      const usesDeclarativeHostRoll = prepared.prepared.feature.declarativeAbility?.rolls?.some((roll) =>
+        (roll.kind === 'damage' || roll.kind === 'healing') && roll.hostRoll != null
+      ) === true
+      const declarativeRollPlan = isCommandersStrike && battleMasterAction
+        ? dnd5eDeclarativeBattleMasterRollPlan(
+            prepared.prepared.state.combatants[prepared.prepared.actorToken.id],
+            battleMasterAction.feature.id,
+            commanderCritical,
+          )
+        : usesDeclarativeHostRoll
+          ? dnd5eDeclarativePluginFeatureRollPlan(
+            prepared.prepared.state.combatants[prepared.prepared.actorToken.id],
+            prepared.prepared.feature.id,
+          )
+          : undefined
+      if (declarativeRollPlan && !declarativeRollPlan.ok) {
+        acknowledgePlayerAction(action, 'rejected', declarativeRollPlan.reason)
+        completePlayerActionRequest(action)
+        return
+      }
       let pluginRolls: Record<string, Dnd5ePluginDiceRollResult>
       try {
-        pluginRolls = await executeDnd5ePluginDiceRolls(pluginActionDefinition ?? {}, async (declaration) =>
+        pluginRolls = await executeDnd5ePluginDiceRolls(
+          declarativeRollPlan?.ok
+            ? { rolls: declarativeRollPlan.declarations }
+            : pluginActionDefinition ?? {},
+          async (declaration) =>
           rollDiceBoxValues(
             declaration.count,
             declaration.sides,
@@ -13328,6 +15111,7 @@ export default function MapsPage() {
       const resolved = await resolvePreparedDnd5ePluginFeatureAction({
         prepared: prepared.prepared,
         rolls: pluginRolls,
+        authoritativePayload,
         interruptChoiceId: pluginChoiceId,
         summonInitiativeD20,
       })
@@ -13605,13 +15389,27 @@ export default function MapsPage() {
           const d20Second = tranquility.passed && attackMode !== 'normal'
             ? await rollDiceBoxD20(`武僧徒手攻击命中检定（${attackMode === 'advantage' ? '优势' : '劣势'}）`, target.token.label)
             : undefined
+          const halflingLuckyD20 = tranquility.passed && actorCombatant.racialRules?.halflingLucky && d20 === 1
+            ? await rollDiceBoxD20('半身人幸运·武僧徒手攻击重投', feature.actor.name)
+            : undefined
+          const halflingLuckyD20Second = tranquility.passed && actorCombatant.racialRules?.halflingLucky && d20Second === 1
+            ? await rollDiceBoxD20('半身人幸运·武僧徒手攻击重投', feature.actor.name)
+            : undefined
           const blessRoll = tranquility.passed && feature.monkBonusAttack.blessed
             ? (await rollDiceBoxValues(1, 4, '祝福术·攻击加值', feature.actor.name))[0]
             : undefined
           const baneRoll = tranquility.passed && feature.monkBonusAttack.baned
             ? (await rollDiceBoxValues(1, 4, '灾祸术·攻击减值', feature.actor.name))[0]
             : undefined
-          const preview = previewDnd5eMonkBonusAttack(feature, index, d20, d20Second, attackMode, blessRoll, baneRoll)
+          const preview = previewDnd5eMonkBonusAttack(
+            feature,
+            index,
+            halflingLuckyD20 ?? d20,
+            halflingLuckyD20Second ?? d20Second,
+            attackMode,
+            blessRoll,
+            baneRoll,
+          )
           const armorClassBeforeReaction = target.armorClass + (shieldSpellReactionTokenIds.has(target.token.id) ? 5 : 0)
           const hitBeforeInspiration = preview.critical || (!preview.roll.naturalOne && preview.roll.total >= armorClassBeforeReaction)
           const bardicInspirationRoll = tranquility.passed && !bardicInspirationCommitted && !hitBeforeInspiration && !preview.roll.naturalOne &&
@@ -13690,6 +15488,14 @@ export default function MapsPage() {
           const stunningStrikeSaveD20Second = attackHit && target.stunningStrike?.saveMode === 'disadvantage'
             ? await rollDiceBoxD20('震慑拳·体质豁免（劣势）', target.token.label)
             : undefined
+          const stunningStrikeSaveHalflingLuckyD20 = shieldTargetCombatant?.racialRules?.halflingLucky &&
+            stunningStrikeSaveD20 === 1
+            ? await rollDiceBoxD20('半身人幸运·震慑拳豁免重投', target.token.label)
+            : undefined
+          const stunningStrikeSaveHalflingLuckyD20Second = shieldTargetCombatant?.racialRules?.halflingLucky &&
+            stunningStrikeSaveD20Second === 1
+            ? await rollDiceBoxD20('半身人幸运·震慑拳豁免重投', target.token.label)
+            : undefined
           const stunningStrikeSaveBlessRoll = stunningStrikeSaveD20 != null && target.stunningStrike?.blessed
             ? (await rollDiceBoxValues(1, 4, '祝福术·震慑拳豁免加值', target.token.label))[0]
             : undefined
@@ -13703,8 +15509,11 @@ export default function MapsPage() {
           if (stunningStrikeSaveD20 != null && target.stunningStrike) {
             const initialSave = previewDnd5eSavingThrowRoll({
               rolls: target.stunningStrike.saveMode === 'normal'
-                ? [stunningStrikeSaveD20]
-                : [stunningStrikeSaveD20, stunningStrikeSaveD20Second ?? 0],
+                ? [stunningStrikeSaveHalflingLuckyD20 ?? stunningStrikeSaveD20]
+                : [
+                    stunningStrikeSaveHalflingLuckyD20 ?? stunningStrikeSaveD20,
+                    stunningStrikeSaveHalflingLuckyD20Second ?? stunningStrikeSaveD20Second ?? 0,
+                  ],
               mode: target.stunningStrike.saveMode,
               modifier: target.stunningStrike.saveModifier + (stunningStrikeSaveBlessRoll ?? 0) -
                 (stunningStrikeSaveBaneRoll ?? 0),
@@ -13765,6 +15574,8 @@ export default function MapsPage() {
           }
           let openHandSavingThrowD20: number | undefined
           let openHandSavingThrowD20Second: number | undefined
+          let openHandHalflingLuckyD20: number | undefined
+          let openHandHalflingLuckyD20Second: number | undefined
           let openHandBlessRoll: number | undefined
           let openHandBaneRoll: number | undefined
           let openHandSavingThrowRerollD20: number | undefined
@@ -13784,6 +15595,14 @@ export default function MapsPage() {
                   target.token.label,
                 )
               : undefined
+            openHandHalflingLuckyD20 = shieldTargetCombatant?.racialRules?.halflingLucky &&
+              openHandSavingThrowD20 === 1
+              ? await rollDiceBoxD20('半身人幸运·散打技法豁免重投', target.token.label)
+              : undefined
+            openHandHalflingLuckyD20Second = shieldTargetCombatant?.racialRules?.halflingLucky &&
+              openHandSavingThrowD20Second === 1
+              ? await rollDiceBoxD20('半身人幸运·散打技法豁免重投', target.token.label)
+              : undefined
             openHandBlessRoll = openHandTechnique.blessed
               ? (await rollDiceBoxValues(1, 4, '祝福术·散打技法豁免加值', target.token.label))[0]
               : undefined
@@ -13792,8 +15611,11 @@ export default function MapsPage() {
               : undefined
             const initialSave = previewDnd5eSavingThrowRoll({
               rolls: openHandTechnique.saveMode === 'normal'
-                ? [openHandSavingThrowD20]
-                : [openHandSavingThrowD20, openHandSavingThrowD20Second ?? 0],
+                ? [openHandHalflingLuckyD20 ?? openHandSavingThrowD20]
+                : [
+                    openHandHalflingLuckyD20 ?? openHandSavingThrowD20,
+                    openHandHalflingLuckyD20Second ?? openHandSavingThrowD20Second ?? 0,
+                  ],
               mode: openHandTechnique.saveMode,
               modifier: openHandTechnique.saveModifier + (openHandBlessRoll ?? 0) - (openHandBaneRoll ?? 0),
               dc: openHandTechnique.saveDc,
@@ -13903,6 +15725,8 @@ export default function MapsPage() {
           monkAttackRolls.push({
             d20,
             d20Second,
+            halflingLuckyD20,
+            halflingLuckyD20Second,
             blessRoll,
             baneRoll,
             bardicInspirationRoll,
@@ -13911,6 +15735,8 @@ export default function MapsPage() {
             shieldSpellReaction,
             stunningStrikeSaveD20,
             stunningStrikeSaveD20Second,
+            stunningStrikeSaveHalflingLuckyD20,
+            stunningStrikeSaveHalflingLuckyD20Second,
             stunningStrikeSaveBlessRoll,
             stunningStrikeSaveBaneRoll,
             stunningStrikeSaveRerollD20,
@@ -13919,6 +15745,8 @@ export default function MapsPage() {
             stunningStrikeDarkOnesOwnLuckRoll,
             openHandSavingThrowD20,
             openHandSavingThrowD20Second,
+            openHandHalflingLuckyD20,
+            openHandHalflingLuckyD20Second,
             openHandBlessRoll,
             openHandBaneRoll,
             openHandSavingThrowRerollD20,
@@ -13933,6 +15761,8 @@ export default function MapsPage() {
       }
       let savingThrowD20: number | undefined
       let savingThrowD20Second: number | undefined
+      let savingThrowHalflingLuckyD20: number | undefined
+      let savingThrowHalflingLuckyD20Second: number | undefined
       let savingThrowBlessRoll: number | undefined
       let savingThrowBaneRoll: number | undefined
       let savingThrowRerollD20: number | undefined
@@ -14057,15 +15887,24 @@ export default function MapsPage() {
         savingThrowBaneRoll = presence.baned
           ? (await rollDiceBoxValues(1, 4, '灾祸术·威吓气势豁免减值', presence.targetName))[0]
           : undefined
+        const targetCombatant = feature.state.combatants[presence.target.id]
+        savingThrowHalflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && savingThrowD20 === 1
+          ? await rollDiceBoxD20('半身人幸运·威吓气势豁免重投', presence.targetName)
+          : undefined
+        savingThrowHalflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && savingThrowD20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·威吓气势豁免重投', presence.targetName)
+          : undefined
         const initialSave = previewDnd5eSavingThrowRoll({
           rolls: presence.saveMode === 'normal'
-            ? [savingThrowD20]
-            : [savingThrowD20, savingThrowD20Second ?? 0],
+            ? [savingThrowHalflingLuckyD20 ?? savingThrowD20]
+            : [
+                savingThrowHalflingLuckyD20 ?? savingThrowD20,
+                savingThrowHalflingLuckyD20Second ?? savingThrowD20Second ?? 0,
+              ],
           mode: presence.saveMode,
           modifier: presence.saveModifier + (savingThrowBlessRoll ?? 0) - (savingThrowBaneRoll ?? 0),
           dc: presence.saveDc,
         })
-        const targetCombatant = feature.state.combatants[presence.target.id]
         const targetCharacter = presence.target.characterId
           ? feature.characters.find((character) => character.id === presence.target.characterId)
           : undefined
@@ -14121,15 +15960,24 @@ export default function MapsPage() {
         savingThrowBaneRoll = release.baned
           ? (await rollDiceBoxValues(1, 4, '灾祸术·渗透劲豁免减值', release.targetName))[0]
           : undefined
+        const targetCombatant = feature.state.combatants[release.target.id]
+        savingThrowHalflingLuckyD20 = targetCombatant?.racialRules?.halflingLucky && savingThrowD20 === 1
+          ? await rollDiceBoxD20('半身人幸运·渗透劲豁免重投', release.targetName)
+          : undefined
+        savingThrowHalflingLuckyD20Second = targetCombatant?.racialRules?.halflingLucky && savingThrowD20Second === 1
+          ? await rollDiceBoxD20('半身人幸运·渗透劲豁免重投', release.targetName)
+          : undefined
         const initialSave = previewDnd5eSavingThrowRoll({
           rolls: release.saveMode === 'normal'
-            ? [savingThrowD20]
-            : [savingThrowD20, savingThrowD20Second ?? 0],
+            ? [savingThrowHalflingLuckyD20 ?? savingThrowD20]
+            : [
+                savingThrowHalflingLuckyD20 ?? savingThrowD20,
+                savingThrowHalflingLuckyD20Second ?? savingThrowD20Second ?? 0,
+              ],
           mode: release.saveMode,
           modifier: release.saveModifier + (savingThrowBlessRoll ?? 0) - (savingThrowBaneRoll ?? 0),
           dc: release.saveDc,
         })
-        const targetCombatant = feature.state.combatants[release.target.id]
         const targetCharacter = release.target.characterId
           ? feature.characters.find((character) => character.id === release.target.characterId)
           : undefined
@@ -14191,6 +16039,8 @@ export default function MapsPage() {
         turnUndeadSavingThrows,
         savingThrowD20,
         savingThrowD20Second,
+        savingThrowHalflingLuckyD20,
+        savingThrowHalflingLuckyD20Second,
         savingThrowBlessRoll,
         savingThrowBaneRoll,
         savingThrowRerollD20,
@@ -14586,13 +16436,27 @@ export default function MapsPage() {
                 target.token.label,
               )
             : undefined
+          const halflingLuckyD20 = tranquility.passed && actorCombatant.racialRules?.halflingLucky && d20 === 1
+            ? await rollDiceBoxD20('半身人幸运·猎人多重攻击重投', multiattack.actor.name)
+            : undefined
+          const halflingLuckyD20Second = tranquility.passed && actorCombatant.racialRules?.halflingLucky && d20Second === 1
+            ? await rollDiceBoxD20('半身人幸运·猎人多重攻击重投', multiattack.actor.name)
+            : undefined
           const blessRoll = tranquility.passed && multiattack.blessed
             ? (await rollDiceBoxValues(1, 4, '祝福术·攻击加值', multiattack.actor.name))[0]
             : undefined
           const baneRoll = tranquility.passed && multiattack.baned
             ? (await rollDiceBoxValues(1, 4, '灾祸术·攻击减值', multiattack.actor.name))[0]
             : undefined
-          const preview = previewDnd5eHunterMultiattack(multiattack, index, d20, d20Second, useProtection, blessRoll, baneRoll)
+          const preview = previewDnd5eHunterMultiattack(
+            multiattack,
+            index,
+            halflingLuckyD20 ?? d20,
+            halflingLuckyD20Second ?? d20Second,
+            useProtection,
+            blessRoll,
+            baneRoll,
+          )
           const bardicInspirationRoll = tranquility.passed && !bardicInspirationCommitted && !preview.hit && !preview.roll.naturalOne &&
             inspirationDie && preview.roll.total + inspirationDie >= target.armorClass
             ? await requestDnd5eBardicInspirationRoll({
@@ -14777,6 +16641,8 @@ export default function MapsPage() {
           rolls.push({
             d20,
             d20Second,
+            halflingLuckyD20,
+            halflingLuckyD20Second,
             blessRoll,
             baneRoll,
             bardicInspirationRoll,
@@ -15384,6 +17250,12 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
+      const battleMasterIntent = attack.declarativeIntentFeatureIds
+        .map((featureId) => ({
+          featureId,
+          definition: dnd5eDeclarativeBattleMasterManeuverDefinition(featureId),
+        }))
+        .find((entry) => entry.definition != null)
       await publishAttackBannerPresentation({
         id: `${action.id}:attack-banner`,
         mapId: authorityMap.id,
@@ -15410,7 +17282,7 @@ export default function MapsPage() {
         targetName: attack.targetToken.label,
         attackName: attack.profile.weaponName,
       }))
-      const attackMode = dnd5eAttackModeWithProtection(attack.attackMode, useProtection)
+      const attackMode = dnd5ePreparedEquipmentAttackMode(attack, useProtection)
       let d20 = tranquility.passed ? await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定`, attack.targetToken.label) : 1
       let d20Second = tranquility.passed && attackMode !== 'normal'
         ? await rollDiceBoxD20(`${attack.profile.weaponName} 命中检定（${attackMode === 'advantage' ? '优势' : '劣势'}）`, attack.targetToken.label)
@@ -15517,13 +17389,68 @@ export default function MapsPage() {
           }
         }
       }
+      const halflingLuckyD20 = tranquility.passed && actorCombatant.racialRules?.halflingLucky && d20 === 1
+        ? await rollDiceBoxD20('半身人幸运·重掷攻击骰', attack.targetToken.label)
+        : undefined
+      const halflingLuckyD20Second = tranquility.passed && actorCombatant.racialRules?.halflingLucky && d20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·重掷第二枚攻击骰', attack.targetToken.label)
+        : undefined
+      const effectiveAttackD20 = halflingLuckyD20 ?? d20
+      const effectiveAttackD20Second = d20Second == null
+        ? undefined
+        : halflingLuckyD20Second ?? d20Second
       const blessRoll = tranquility.passed && attack.blessed
         ? (await rollDiceBoxValues(1, 4, '祝福术·攻击加值', attack.actorToken.label))[0]
         : undefined
       const baneRoll = tranquility.passed && attack.baned
         ? (await rollDiceBoxValues(1, 4, '灾祸术·攻击减值', attack.actorToken.label))[0]
         : undefined
-      const preview = previewDnd5eEquipmentAttack(attack, d20, d20Second, useProtection, blessRoll, baneRoll)
+      const declarativeIntentRolls:
+        Record<string, Record<string, Dnd5ePluginDiceRollResult>> = {}
+      let battleMasterPrecisionBonus = 0
+      if (
+        tranquility.passed &&
+        battleMasterIntent?.definition?.mechanic.maneuver === 'precision-attack'
+      ) {
+        const rollPlan = dnd5eDeclarativeAttackIntentRollPlan(
+          actorCombatant,
+          battleMasterIntent.featureId,
+          false,
+        )
+        if (!rollPlan.ok) {
+          acknowledgePlayerAction(action, 'rejected', rollPlan.reason)
+          completePlayerActionRequest(action)
+          return
+        }
+        try {
+          const rolls = await executeDnd5ePluginDiceRolls(
+            { rolls: rollPlan.declarations },
+            async (declaration) => rollDiceBoxValues(
+              declaration.count,
+              declaration.sides,
+              `${rollPlan.featureName}·${declaration.label}`,
+              attack.targetToken.label,
+            ),
+          )
+          declarativeIntentRolls[battleMasterIntent.featureId] = rolls
+          battleMasterPrecisionBonus = Object.values(rolls)
+            .flatMap((roll) => roll.values)
+            .reduce((sum, value) => sum + value, 0)
+        } catch {
+          acknowledgePlayerAction(action, 'rejected', 'invalid-dice')
+          completePlayerActionRequest(action)
+          return
+        }
+      }
+      const preview = previewDnd5eEquipmentAttack(
+        attack,
+        effectiveAttackD20,
+        effectiveAttackD20Second,
+        useProtection,
+        blessRoll,
+        baneRoll,
+        battleMasterPrecisionBonus,
+      )
       const inspirationDie = tranquility.roll?.bardicInspirationRoll == null
         ? dnd5eHeldBardicInspirationDie(actorCombatant)
         : undefined
@@ -15596,7 +17523,116 @@ export default function MapsPage() {
       if (shieldSpellReaction && !preview.critical && !strokeOfLuck) {
         attackHit = effectiveAttackTotal >= attack.targetArmorClass + 5
       }
-      const standAgainstTide = !attackHit && !shieldSpellReaction && tranquility.passed && attack.profile.mode === 'melee'
+      const battleMasterTargetReactionDefinition = shieldTargetCombatant?.pluginFeatureIds
+        .map((featureId) => dnd5eDeclarativeBattleMasterManeuverDefinition(featureId))
+        .find((definition) => definition?.mechanic.maneuver === (attackHit ? 'parry' : 'riposte'))
+      let declarativeTargetReaction: Dnd5eBattleMasterTargetReaction | undefined
+      if (
+        battleMasterTargetReactionDefinition &&
+        shieldTargetCombatant &&
+        shieldTargetCharacter &&
+        attack.profile.mode === 'melee' &&
+        shieldTargetCombatant.turn.reactionAvailable &&
+        !shieldSpellReaction &&
+        cuttingWords?.bardId !== attack.targetToken.id &&
+        (shieldTargetCombatant.classResources[battleMasterTargetReactionDefinition.resourceId]?.current ?? 0) > 0
+      ) {
+        const maneuver = battleMasterTargetReactionDefinition.mechanic.maneuver
+        const accepted = await requestSharedChoiceWindow({
+          id: `battle-master-reaction:${action.id}:${maneuver}`,
+          transactionId: action.id,
+          actor: attack.actor,
+          targetCharId: shieldTargetCharacter.id,
+          pluginId: battleMasterTargetReactionDefinition.feature.ownerPluginId,
+          featureId: battleMasterTargetReactionDefinition.feature.id,
+          featureName: battleMasterTargetReactionDefinition.feature.name,
+          prompt: attackHit
+            ? `${attack.actor.name} 的近战攻击命中。是否消耗反应和一枚卓越骰发动招架？`
+            : `${attack.actor.name} 的近战攻击未命中。是否消耗反应和一枚卓越骰发动反击？`,
+          audience: 'target',
+          options: [
+            { id: 'use', label: maneuver === 'parry' ? '发动招架' : '发动反击' },
+            { id: 'decline', label: '保留反应' },
+          ],
+          defaultOptionId: 'decline',
+          phase: 'before-damage',
+        })
+        if (accepted === 'use') {
+          if (maneuver === 'parry') {
+            const rollPlan = dnd5eDeclarativeBattleMasterRollPlan(
+              shieldTargetCombatant,
+              battleMasterTargetReactionDefinition.feature.id,
+            )
+            if (!rollPlan.ok) {
+              acknowledgePlayerAction(action, 'rejected', rollPlan.reason)
+              completePlayerActionRequest(action)
+              return
+            }
+            try {
+              declarativeTargetReaction = {
+                featureId: battleMasterTargetReactionDefinition.feature.id,
+                rolls: await executeDnd5ePluginDiceRolls(
+                  { rolls: rollPlan.declarations },
+                  async (declaration) => rollDiceBoxValues(
+                    declaration.count,
+                    declaration.sides,
+                    `${battleMasterTargetReactionDefinition.feature.name}·${declaration.label}`,
+                    attack.targetToken.label,
+                  ),
+                ),
+              }
+            } catch {
+              acknowledgePlayerAction(action, 'rejected', 'invalid-dice')
+              completePlayerActionRequest(action)
+              return
+            }
+          } else {
+            const riposteAttack = await buildDnd5eBattleMasterReactionWeaponAttack({
+              map: authorityMap,
+              actorToken: attack.targetToken,
+              targetToken: attack.actorToken,
+              label: battleMasterTargetReactionDefinition.feature.name,
+            })
+            if (riposteAttack) {
+              const rollPlan = riposteAttack.hit
+                ? dnd5eDeclarativeBattleMasterRollPlan(
+                    shieldTargetCombatant,
+                    battleMasterTargetReactionDefinition.feature.id,
+                    riposteAttack.critical,
+                  )
+                : undefined
+              if (rollPlan && !rollPlan.ok) {
+                acknowledgePlayerAction(action, 'rejected', rollPlan.reason)
+                completePlayerActionRequest(action)
+                return
+              }
+              try {
+                declarativeTargetReaction = {
+                  featureId: battleMasterTargetReactionDefinition.feature.id,
+                  rolls: rollPlan?.ok
+                    ? await executeDnd5ePluginDiceRolls(
+                        { rolls: rollPlan.declarations },
+                        async (declaration) => rollDiceBoxValues(
+                          declaration.count,
+                          declaration.sides,
+                          `${battleMasterTargetReactionDefinition.feature.name}·${declaration.label}`,
+                          attack.actorToken.label,
+                        ),
+                      )
+                    : {},
+                  weaponAttack: riposteAttack.weaponAttack,
+                }
+              } catch {
+                acknowledgePlayerAction(action, 'rejected', 'invalid-dice')
+                completePlayerActionRequest(action)
+                return
+              }
+            }
+          }
+        }
+      }
+      const standAgainstTide = !attackHit && !shieldSpellReaction && !declarativeTargetReaction &&
+        tranquility.passed && attack.profile.mode === 'melee'
         ? await buildDnd5eStandAgainstTideUse({
             map: authorityMap,
             state: attack.state,
@@ -15635,6 +17671,14 @@ export default function MapsPage() {
       const stunningStrikeSaveD20Second = attackHit && attack.stunningStrike?.saveMode === 'disadvantage'
         ? await rollDiceBoxD20('震慑拳·体质豁免（劣势）', attack.targetToken.label)
         : undefined
+      const stunningStrikeSaveHalflingLuckyD20 = shieldTargetCombatant?.racialRules?.halflingLucky &&
+        stunningStrikeSaveD20 === 1
+        ? await rollDiceBoxD20('半身人幸运·震慑拳豁免重投', attack.targetToken.label)
+        : undefined
+      const stunningStrikeSaveHalflingLuckyD20Second = shieldTargetCombatant?.racialRules?.halflingLucky &&
+        stunningStrikeSaveD20Second === 1
+        ? await rollDiceBoxD20('半身人幸运·震慑拳豁免重投', attack.targetToken.label)
+        : undefined
       const stunningStrikeSaveBlessRoll = stunningStrikeSaveD20 != null && attack.stunningStrike?.blessed
         ? (await rollDiceBoxValues(1, 4, '祝福术·震慑拳豁免加值', attack.targetToken.label))[0]
         : undefined
@@ -15648,8 +17692,11 @@ export default function MapsPage() {
       if (stunningStrikeSaveD20 != null && attack.stunningStrike) {
         const initialSave = previewDnd5eSavingThrowRoll({
           rolls: attack.stunningStrike.saveMode === 'normal'
-            ? [stunningStrikeSaveD20]
-            : [stunningStrikeSaveD20, stunningStrikeSaveD20Second ?? 0],
+            ? [stunningStrikeSaveHalflingLuckyD20 ?? stunningStrikeSaveD20]
+            : [
+                stunningStrikeSaveHalflingLuckyD20 ?? stunningStrikeSaveD20,
+                stunningStrikeSaveHalflingLuckyD20Second ?? stunningStrikeSaveD20Second ?? 0,
+              ],
           mode: attack.stunningStrike.saveMode,
           modifier: attack.stunningStrike.saveModifier + (stunningStrikeSaveBlessRoll ?? 0) -
             (stunningStrikeSaveBaneRoll ?? 0),
@@ -15700,6 +17747,394 @@ export default function MapsPage() {
           stunningStrikeSaveRerollD20Second = reroll?.d20Second
         }
       }
+      let resolvedDeclarativeIntentFeatureIds = [...attack.declarativeIntentFeatureIds]
+      if (attackHit) {
+        for (const featureId of attack.declarativeIntentFeatureIds) {
+          if (declarativeIntentRolls[featureId]) continue
+          const rollPlan = dnd5eDeclarativeAttackIntentRollPlan(
+            actorCombatant,
+            featureId,
+            preview.critical,
+          )
+          if (!rollPlan.ok) {
+            acknowledgePlayerAction(action, 'rejected', rollPlan.reason)
+            completePlayerActionRequest(action)
+            return
+          }
+          if (rollPlan.declarations.length === 0) continue
+          try {
+            declarativeIntentRolls[featureId] = await executeDnd5ePluginDiceRolls(
+              { rolls: rollPlan.declarations },
+              async (declaration) => rollDiceBoxValues(
+                declaration.count,
+                declaration.sides,
+                `${rollPlan.featureName}·${declaration.label}`,
+                attack.targetToken.label,
+              ),
+            )
+          } catch {
+            acknowledgePlayerAction(action, 'rejected', 'invalid-dice')
+            completePlayerActionRequest(action)
+            return
+          }
+        }
+      }
+      const declarativeIntentPayloads:
+        Record<string, Dnd5eBattleMasterAttackIntentPayload> = {}
+      if (attackHit && battleMasterIntent?.definition) {
+        const maneuver = battleMasterIntent.definition.mechanic.maneuver
+        const saveAbility = (
+          ['disarming-attack', 'pushing-attack', 'trip-attack'].includes(maneuver)
+            ? 'str'
+            : ['goading-attack', 'menacing-attack'].includes(maneuver)
+              ? 'wis'
+              : undefined
+        ) as 'str' | 'wis' | undefined
+        const payload: Dnd5eBattleMasterAttackIntentPayload = {}
+        if (saveAbility && shieldTargetCombatant) {
+          const saveCondition = maneuver === 'trip-attack'
+            ? 'prone' as const
+            : maneuver === 'menacing-attack'
+              ? 'frightened' as const
+              : undefined
+          const saveMode = dnd5eSavingThrowMode(shieldTargetCombatant, saveAbility, {
+            effectVisible: true,
+            condition: saveCondition,
+          })
+          const saveDc = 8 + actorCombatant.proficiencyBonus + Math.max(
+            Math.floor((actorCombatant.abilities.str - 10) / 2),
+            Math.floor((actorCombatant.abilities.dex - 10) / 2),
+          )
+          const saveModifier = (
+            shieldTargetCombatant.savingThrowBonuses[saveAbility] ??
+            Math.floor((shieldTargetCombatant.abilities[saveAbility] - 10) / 2)
+          ) + dnd5eActiveSavingThrowBonus(shieldTargetCombatant.classState.activeEffects)
+          const saveD20 = await rollDiceBoxD20(
+            `${battleMasterIntent.definition.feature.name}·${saveAbility.toUpperCase()}豁免`,
+            attack.targetToken.label,
+          )
+          const saveD20Second = saveMode !== 'normal'
+            ? await rollDiceBoxD20(
+                `${battleMasterIntent.definition.feature.name}·豁免（${saveMode === 'advantage' ? '优势' : '劣势'}）`,
+                attack.targetToken.label,
+              )
+            : undefined
+          const saveHalflingLuckyD20 = shieldTargetCombatant.racialRules?.halflingLucky && saveD20 === 1
+            ? await rollDiceBoxD20('半身人幸运·战技豁免重投', attack.targetToken.label)
+            : undefined
+          const saveHalflingLuckyD20Second = shieldTargetCombatant.racialRules?.halflingLucky &&
+            saveD20Second === 1
+            ? await rollDiceBoxD20('半身人幸运·战技豁免重投', attack.targetToken.label)
+            : undefined
+          const saveBlessRoll = dnd5eCombatantHasConcentrationEffect(
+            attack.state,
+            shieldTargetCombatant.id,
+            'bless',
+          )
+            ? (await rollDiceBoxValues(1, 4, '祝福术·战技豁免加值', attack.targetToken.label))[0]
+            : undefined
+          const saveBaneRoll = dnd5eCombatantHasConcentrationEffect(
+            attack.state,
+            shieldTargetCombatant.id,
+            'bane',
+          )
+            ? (await rollDiceBoxValues(1, 4, '灾祸术·战技豁免减值', attack.targetToken.label))[0]
+            : undefined
+          let savePreview = previewDnd5eSavingThrowRoll({
+            rolls: saveMode === 'normal'
+              ? [saveHalflingLuckyD20 ?? saveD20]
+              : [
+                  saveHalflingLuckyD20 ?? saveD20,
+                  saveHalflingLuckyD20Second ?? saveD20Second ?? 0,
+                ],
+            mode: saveMode,
+            modifier: saveModifier + (saveBlessRoll ?? 0) - (saveBaneRoll ?? 0),
+            dc: saveDc,
+          })
+          const targetCharacter = attack.targetToken.characterId
+            ? attack.characters.find((character) => character.id === attack.targetToken.characterId)
+            : undefined
+          const inspirationDie = dnd5eHeldBardicInspirationDie(shieldTargetCombatant)
+          const saveBardicInspirationRoll = inspirationDie != null && canBonusDieChangeFailure({
+            success: savePreview.success,
+            currentTotal: savePreview.roll.total,
+            targetNumber: saveDc,
+            dieSides: inspirationDie,
+          })
+            ? await requestDnd5eBardicInspirationRoll({
+                target: targetCharacter,
+                targetName: attack.targetToken.label,
+                dieSides: inspirationDie,
+                rollType: '豁免',
+                total: savePreview.roll.total,
+                targetNumber: saveDc,
+              })
+            : undefined
+          if (saveBardicInspirationRoll != null) {
+            savePreview = {
+              ...savePreview,
+              roll: {
+                ...savePreview.roll,
+                modifier: savePreview.roll.modifier + saveBardicInspirationRoll,
+                total: savePreview.roll.total + saveBardicInspirationRoll,
+              },
+              success: savePreview.roll.total + saveBardicInspirationRoll >= saveDc,
+            }
+          }
+          const saveDarkOnesOwnLuckRoll = !savePreview.success &&
+            dnd5eDarkOnesOwnLuckAvailable(shieldTargetCombatant)
+            ? await requestDnd5eDarkOnesOwnLuckRoll({
+                target: targetCharacter,
+                targetName: attack.targetToken.label,
+                rollType: '豁免',
+                total: savePreview.roll.total,
+                targetNumber: saveDc,
+              })
+            : undefined
+          if (saveDarkOnesOwnLuckRoll != null) {
+            savePreview = {
+              ...savePreview,
+              roll: {
+                ...savePreview.roll,
+                modifier: savePreview.roll.modifier + saveDarkOnesOwnLuckRoll,
+                total: savePreview.roll.total + saveDarkOnesOwnLuckRoll,
+              },
+              success: savePreview.roll.total + saveDarkOnesOwnLuckRoll >= saveDc,
+            }
+          }
+          let saveRerollD20: number | undefined
+          let saveRerollD20Second: number | undefined
+          const saveRerollFeature = dnd5eSavingThrowRerollFeature(shieldTargetCombatant)
+          if (!savePreview.success && targetCharacter && saveRerollFeature) {
+            const reroll = await requestDnd5eSavingThrowRerollDice({
+              target: targetCharacter,
+              targetName: attack.targetToken.label,
+              featureName: saveRerollFeature.name,
+              total: savePreview.roll.total,
+              dc: saveDc,
+              mode: saveMode,
+            })
+            saveRerollD20 = reroll?.d20
+            saveRerollD20Second = reroll?.d20Second
+            if (saveRerollD20 != null) {
+              savePreview = previewDnd5eSavingThrowRoll({
+                rolls: saveMode === 'normal'
+                  ? [saveRerollD20]
+                  : [saveRerollD20, saveRerollD20Second ?? 0],
+                mode: saveMode,
+                modifier: saveModifier + (saveBlessRoll ?? 0) - (saveBaneRoll ?? 0) +
+                  (saveBardicInspirationRoll ?? 0) + (saveDarkOnesOwnLuckRoll ?? 0),
+                dc: saveDc,
+              })
+            }
+          }
+          const legendaryResistance = !savePreview.success &&
+            (shieldTargetCombatant.classState.legendaryResistanceUses ?? 0) > 0
+            ? await requestSharedLegendaryResistanceChoice({
+                targetTokenId: attack.targetToken.id,
+                targetName: attack.targetToken.label,
+                effectName: battleMasterIntent.definition.feature.name,
+                total: savePreview.roll.total,
+                dc: saveDc,
+                remainingUses: shieldTargetCombatant.classState.legendaryResistanceUses!,
+              })
+            : undefined
+          payload.savingThrow = {
+            d20: saveD20,
+            d20Second: saveD20Second,
+            halflingLuckyD20: saveHalflingLuckyD20,
+            halflingLuckyD20Second: saveHalflingLuckyD20Second,
+            blessRoll: saveBlessRoll,
+            baneRoll: saveBaneRoll,
+            rerollD20: saveRerollD20,
+            rerollD20Second: saveRerollD20Second,
+            bardicInspirationRoll: saveBardicInspirationRoll,
+            darkOnesOwnLuckRoll: saveDarkOnesOwnLuckRoll,
+            legendaryResistance,
+          }
+        }
+        if (maneuver === 'pushing-attack') {
+          const push = dnd5eForcedPushDestination(
+            authorityMap,
+            attack.actorToken,
+            attack.targetToken,
+            15,
+          )
+          payload.destination = push.to
+          payload.distanceFeet = push.distanceFeet
+        }
+        if (maneuver === 'sweeping-attack') {
+          const feetPerCell = Math.max(1, authorityMap.feetPerCell ?? DND_FEET_PER_CELL)
+          const candidates = authorityMap.tokens.filter((token) =>
+            token.id !== attack.actorToken.id &&
+            token.id !== attack.targetToken.id &&
+            token.type !== 'obstacle' &&
+            areOpposedCombatTokens(attack.actorToken, token) &&
+            (attack.state.combatants[token.id]?.currentHp ?? 0) > 0 &&
+            tokenFootprintDistanceCells(attack.targetToken, token, authorityMap) * feetPerCell <= 5 &&
+            tokenFootprintDistanceCells(attack.actorToken, token, authorityMap) * feetPerCell <=
+              (attack.profile.reachFeet ?? 5)
+          )
+          if (candidates.length > 0) {
+            const selectedId = candidates.length === 1
+              ? candidates[0].id
+              : await requestSharedChoiceWindow({
+                  id: `battle-master-sweep:${action.id}`,
+                  transactionId: action.id,
+                  actor: attack.actor,
+                  pluginId: battleMasterIntent.definition.feature.ownerPluginId,
+                  featureId: battleMasterIntent.featureId,
+                  featureName: battleMasterIntent.definition.feature.name,
+                  prompt: '选择横扫攻击的第二个目标。',
+                  audience: 'actor',
+                  options: candidates.map((candidate) => ({
+                    id: candidate.id,
+                    label: candidate.label,
+                  })),
+                  defaultOptionId: candidates[0].id,
+                  phase: 'before-damage',
+                })
+            if (selectedId) payload.secondaryTargetId = selectedId
+          }
+        }
+        if (maneuver === 'maneuvering-attack') {
+          let maneuveringAccepted = false
+          const alliedCandidates = authorityMap.tokens.filter((token) => {
+            if (
+              token.id === attack.actorToken.id ||
+              token.type === 'obstacle' ||
+              !token.characterId ||
+              areOpposedCombatTokens(attack.actorToken, token)
+            ) return false
+            const combatant = attack.state.combatants[token.id]
+            return !!combatant && combatant.currentHp > 0 &&
+              currentDnd5eTurnEconomy(token.id).reaction.current > 0
+          })
+          const selectedAllyId = alliedCandidates.length === 1
+            ? alliedCandidates[0].id
+            : alliedCandidates.length > 1
+              ? await requestSharedChoiceWindow({
+                  id: `battle-master-maneuvering-ally:${action.id}`,
+                  transactionId: action.id,
+                  actor: attack.actor,
+                  pluginId: battleMasterIntent.definition.feature.ownerPluginId,
+                  featureId: battleMasterIntent.featureId,
+                  featureName: battleMasterIntent.definition.feature.name,
+                  prompt: '选择一名愿意消耗反应移动的盟友。',
+                  audience: 'actor',
+                  options: [
+                    ...alliedCandidates.map((candidate) => ({
+                      id: candidate.id,
+                      label: candidate.label,
+                    })),
+                    { id: 'decline', label: '本次不发动' },
+                  ],
+                  defaultOptionId: 'decline',
+                  phase: 'before-damage',
+                })
+              : undefined
+          const selectedAlly = alliedCandidates.find((candidate) => candidate.id === selectedAllyId)
+          const selectedAllyCharacter = selectedAlly?.characterId
+            ? attack.characters.find((character) => character.id === selectedAlly.characterId)
+            : undefined
+          if (selectedAlly && selectedAllyCharacter) {
+            const maximumMovementFeet = Math.max(
+              0,
+              Math.floor(dnd5eEffectiveWalkingSpeed(selectedAllyCharacter) / 2),
+            )
+            const feetPerCell = Math.max(1, authorityMap.feetPerCell ?? DND_FEET_PER_CELL)
+            const radiusCells = Math.floor(maximumMovementFeet / feetPerCell)
+            const origin = tokenAnchorCellFromPixel(
+              selectedAlly.x,
+              selectedAlly.y,
+              selectedAlly,
+              authorityMap,
+            )
+            const extent = mapCellExtent(authorityMap)
+            const destinations: Array<{
+              id: string
+              label: string
+              description: string
+              position: { x: number; y: number }
+              distanceFeet: number
+            }> = []
+            for (let dc = -radiusCells; dc <= radiusCells; dc += 1) {
+              for (let dr = -radiusCells; dr <= radiusCells; dr += 1) {
+                const cell = { col: origin.col + dc, row: origin.row + dr }
+                if (
+                  (dc === 0 && dr === 0) ||
+                  cell.col < 0 || cell.row < 0 ||
+                  cell.col >= extent.cols || cell.row >= extent.rows
+                ) continue
+                const position = tokenCenterForAnchorCell(cell, selectedAlly, authorityMap)
+                const path = findMapGeometryPath({
+                  map: authorityMap,
+                  geometry: activeGeometry,
+                  token: selectedAlly,
+                  to: position,
+                  additionalDifficultTerrainMultiplier: (token, at) =>
+                    dnd5ePersistentAreaDifficultTerrainMultiplierAt({
+                      map: authorityMap,
+                      token,
+                      position: at,
+                    }),
+                  additionalSpeedCostMultiplier: (token, at) =>
+                    dnd5ePersistentAreaSpeedCostMultiplierAt({
+                      map: authorityMap,
+                      token,
+                      position: at,
+                    }),
+                })
+                if (!path || path.movementCostFeet > maximumMovementFeet) continue
+                destinations.push({
+                  id: `cell:${cell.col}:${cell.row}`,
+                  label: `移动到（${cell.col + 1}, ${cell.row + 1}）`,
+                  description: `路径 ${path.distanceFeet} 尺，消耗 ${path.movementCostFeet} 尺移动`,
+                  position,
+                  distanceFeet: path.distanceFeet,
+                })
+              }
+            }
+            destinations.sort((left, right) =>
+              left.distanceFeet - right.distanceFeet || left.id.localeCompare(right.id),
+            )
+            const destinationChoice = destinations.length > 0
+              ? await requestSharedChoiceWindow({
+                  id: `battle-master-maneuvering-destination:${action.id}`,
+                  transactionId: action.id,
+                  actor: attack.actor,
+                  targetCharId: selectedAllyCharacter.id,
+                  pluginId: battleMasterIntent.definition.feature.ownerPluginId,
+                  featureId: battleMasterIntent.featureId,
+                  featureName: battleMasterIntent.definition.feature.name,
+                  prompt: `${attack.actor.name} 让你借机移动。请选择合法落点，或保留反应。`,
+                  audience: 'target',
+                  options: [
+                    { id: 'decline', label: '保留反应，不移动' },
+                    ...destinations.map(({ id, label, description }) => ({ id, label, description })),
+                  ],
+                  defaultOptionId: 'decline',
+                  phase: 'before-damage',
+                })
+              : undefined
+            const destination = destinations.find((candidate) => candidate.id === destinationChoice)
+            if (destination) {
+              payload.secondaryTargetId = selectedAlly.id
+              payload.destination = destination.position
+              payload.distanceFeet = destination.distanceFeet
+              maneuveringAccepted = true
+            }
+          }
+          if (!maneuveringAccepted) {
+            resolvedDeclarativeIntentFeatureIds = resolvedDeclarativeIntentFeatureIds
+              .filter((featureId) => featureId !== battleMasterIntent.featureId)
+            delete declarativeIntentRolls[battleMasterIntent.featureId]
+          }
+        }
+        if (Object.keys(payload).length > 0) {
+          declarativeIntentPayloads[battleMasterIntent.featureId] = payload
+        }
+      }
       let damageRolls = attackHit
         ? await rollDiceBoxValues(
             attack.profile.damage.count * (preview.critical ? 2 : 1),
@@ -15708,6 +18143,17 @@ export default function MapsPage() {
             attack.targetToken.label,
           )
         : []
+      const savageAttacksRoll = attackHit && preview.critical &&
+        actorCombatant.racialRules?.halfOrcSavageAttacks &&
+        attack.classDamageContext.mode === 'melee' &&
+        attack.classDamageContext.weaponId
+        ? (await rollDiceBoxValues(
+            1,
+            attack.profile.damage.sides,
+            '半兽人凶蛮攻击·额外武器伤害',
+            attack.targetToken.label,
+          ))[0]
+        : undefined
       const hurlThroughHellDamageRolls = attackHit && actorCombatant.classState.hurlThroughHellReady
         ? await rollDiceBoxValues(10, 10, '坠入地狱·返回伤害', attack.targetToken.label)
         : undefined
@@ -15749,7 +18195,8 @@ export default function MapsPage() {
       }
       const rawDamageTotal = attackHit
         ? dnd5eWeaponDamagePreviewTotal(
-            damageRolls.reduce((total, value) => total + value, 0) + attack.profile.damage.bonus,
+            damageRolls.reduce((total, value) => total + value, 0) + attack.profile.damage.bonus +
+              (savageAttacksRoll ?? 0),
             classDamageDefinitions,
             classDamageRolls,
           )
@@ -15758,6 +18205,7 @@ export default function MapsPage() {
         ...(useProtection && protectionCandidate ? [protectionCandidate.token.id] : []),
         ...(cuttingWords ? [cuttingWords.bardId] : []),
         ...(shieldSpellReaction || useDeflectMissiles ? [attack.targetToken.id] : []),
+        ...(declarativeTargetReaction ? [attack.targetToken.id] : []),
       ])
       const cuttingWordsDamageCandidate = attackHit && rawDamageTotal > 0 && !cuttingWords
         ? findDnd5eCuttingWordsCandidate(
@@ -15778,9 +18226,13 @@ export default function MapsPage() {
           })
         : undefined
       const initialResolved = resolvePreparedDnd5eEquipmentAttack({
-        prepared: attack,
+        prepared: resolvedDeclarativeIntentFeatureIds.length === attack.declarativeIntentFeatureIds.length
+          ? attack
+          : { ...attack, declarativeIntentFeatureIds: resolvedDeclarativeIntentFeatureIds },
         d20,
         d20Second,
+        halflingLuckyD20,
+        halflingLuckyD20Second,
         blessRoll,
         baneRoll,
         bardicInspirationRoll,
@@ -15793,6 +18245,8 @@ export default function MapsPage() {
         tranquilitySave: tranquility.roll,
         stunningStrikeSaveD20,
         stunningStrikeSaveD20Second,
+        stunningStrikeSaveHalflingLuckyD20,
+        stunningStrikeSaveHalflingLuckyD20Second,
         stunningStrikeSaveBlessRoll,
         stunningStrikeSaveBaneRoll,
         stunningStrikeSaveRerollD20,
@@ -15801,7 +18255,15 @@ export default function MapsPage() {
         stunningStrikeDarkOnesOwnLuckRoll,
         hurlThroughHellDamageRolls,
         standAgainstTide,
+        declarativeTargetReaction,
+        declarativeIntentRolls: Object.keys(declarativeIntentRolls).length > 0
+          ? declarativeIntentRolls
+          : undefined,
+        declarativeIntentPayloads: Object.keys(declarativeIntentPayloads).length > 0
+          ? declarativeIntentPayloads
+          : undefined,
         damageRolls,
+        savageAttacksRoll,
         classDamageRolls,
         transaction: attackTransaction,
       })
@@ -16029,6 +18491,9 @@ export default function MapsPage() {
           shieldSpellReaction ? `${attack.targetToken.label} 施放护盾术，消耗反应，AC +5` : '',
           useDeflectMissiles ? `${attack.targetToken.label} 使用拨挡飞弹，消耗反应，减伤 d10=${deflectMissilesD10}` : '',
           standAgainstTide ? `${attack.targetToken.label} 触发逆流反击，消耗反应` : '',
+          declarativeTargetReaction
+            ? `${attack.targetToken.label} 发动${battleMasterTargetReactionDefinition?.feature.name ?? '战斗大师反应战技'}，消耗反应`
+            : '',
         ],
       })
       pushHeadlessCombatLog(
@@ -16048,8 +18513,18 @@ export default function MapsPage() {
           ...equipmentAttackTraceDetails,
         ],
       )
+      const declarativeAttackIntentResolution = dnd5eDeclarativeAttackIntentResolution(
+        action.dnd5eWeaponAttackOptions?.declarativeIntentFeatureIds,
+        resolved.result.events,
+      )
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted')
+      acknowledgePlayerAction(
+        action,
+        'accepted',
+        undefined,
+        undefined,
+        declarativeAttackIntentResolution,
+      )
       return
     }
 
@@ -16110,25 +18585,32 @@ export default function MapsPage() {
         completePlayerActionRequest(action)
         return
       }
-      const fallingDamageRolls = finalPrepared.prepared.fallingDamageDice > 0
-        ? await rollDiceBoxValues(finalPrepared.prepared.fallingDamageDice, 6, '坠落伤害', finalPrepared.prepared.actor.name)
-        : undefined
-      const resolved = resolvePreparedDnd5ePlayerMove({ prepared: finalPrepared.prepared, fallingDamageRolls })
+      const fallingDamageRollsByCombatantId: Record<string, readonly number[]> = {}
+      for (const [combatantId, dice] of Object.entries(finalPrepared.prepared.fallingDamageDiceByCombatantId)) {
+        if (dice < 1) continue
+        const label = latestMap.tokens.find((token) => token.id === combatantId)?.label ?? combatantId
+        fallingDamageRollsByCombatantId[combatantId] =
+          await rollDiceBoxValues(dice, 6, '坠落伤害', label)
+      }
+      const resolved = resolvePreparedDnd5ePlayerMove({
+        prepared: finalPrepared.prepared,
+        fallingDamageRollsByCombatantId,
+      })
       if (!resolved.result.ok || !resolved.application) {
         acknowledgePlayerAction(action, 'rejected', resolved.result.ok ? 'missing-application' : resolved.result.reason)
         completePlayerActionRequest(action)
         return
       }
       const finalMove = finalPrepared.prepared
-      const hazards = await settleDnd5eItemAreasForMove({
+      const hazards = await settleDnd5eMovementHazards({
         state: resolved.result.state,
         map: latestMap,
         characters: finalMove.characters,
         characterIdByCombatantId: finalMove.characterIdByCombatantId,
-        token: finalMove.actorToken,
-        to: finalMove.to,
-        path: finalMove.path,
-        carefulMovement: action.dnd5eCarefulMovement,
+        movements: finalMove.movementTraces,
+        carefulMovementActorId: action.dnd5eCarefulMovement
+          ? finalMove.actorToken.id
+          : undefined,
       })
       if (JSON.stringify(hazards.map.dnd5eItemAreas ?? []) !== JSON.stringify(latestMap.dnd5eItemAreas ?? [])) {
         applyAuthorityMapUpdate(latestMap.id, { dnd5eItemAreas: hazards.map.dnd5eItemAreas })
@@ -16136,21 +18618,24 @@ export default function MapsPage() {
       if (JSON.stringify(hazards.map.dnd5ePluginAreas ?? []) !== JSON.stringify(latestMap.dnd5ePluginAreas ?? [])) {
         applyAuthorityMapUpdate(latestMap.id, { dnd5ePluginAreas: hazards.map.dnd5ePluginAreas })
       }
-      const traversedPath = truncateTokenMovementPath(finalMove.path, hazards.finalPosition)
+      const actorFinalPosition = hazards.finalPositionByCombatantId[finalMove.actorToken.id] ?? finalMove.to
+      const traversedPath = truncateTokenMovementPath(finalMove.path, actorFinalPosition)
       applyDnd5eCombatApplication({
         ...hazards.application,
         map: {
           ...hazards.application.map,
           tokens: hazards.application.map.tokens.map((token) => {
-            if (token.id !== finalMove.actorToken.id || !hazards.application.changedTokenIds.includes(token.id)) {
+            const movement = finalMove.movementTraces.find((candidate) => candidate.tokenId === token.id)
+            if (!movement || !hazards.application.changedTokenIds.includes(token.id)) {
               return token
             }
+            const finalPosition = hazards.finalPositionByCombatantId[token.id] ?? movement.to
             return {
               ...token,
               movementAnimation: createTokenMovementAnimation({
-                id: `player-move:${action.id}`,
-                path: traversedPath,
-                finalPosition: hazards.finalPosition,
+                id: `player-move:${action.id}:${token.id}`,
+                path: truncateTokenMovementPath(movement.path, finalPosition),
+                finalPosition,
                 issuedAt: runtimeNow() + 100,
               }),
             }
@@ -16189,11 +18674,11 @@ export default function MapsPage() {
         finalMove.actorToken.x, finalMove.actorToken.y, finalMove.actorToken, latestMap,
       )
       const finalAnchor = tokenAnchorCellFromPixel(
-        hazards.finalPosition.x, hazards.finalPosition.y, finalMove.actorToken, latestMap,
+        actorFinalPosition.x, actorFinalPosition.y, finalMove.actorToken, latestMap,
       )
       const reachedPlannedDestination = Math.hypot(
-        hazards.finalPosition.x - finalMove.to.x,
-        hazards.finalPosition.y - finalMove.to.y,
+        actorFinalPosition.x - finalMove.to.x,
+        actorFinalPosition.y - finalMove.to.y,
       ) < 1
       const actualDistanceFeet = reachedPlannedDestination
         ? finalMove.distanceFeet
@@ -16225,7 +18710,7 @@ export default function MapsPage() {
         ],
       )
       completePlayerActionRequest(action)
-      acknowledgePlayerAction(action, 'accepted', undefined, hazards.finalPosition)
+      acknowledgePlayerAction(action, 'accepted', undefined, actorFinalPosition)
       return
     }
 
@@ -16453,6 +18938,21 @@ export default function MapsPage() {
     return submitPlayerActionRequest(action, `${playerChar.name} 请求地图交互`)
   }
 
+  const sendPlayerDnd5eRacialActionRequest = (
+    payload: Dnd5eRacialActionPayload,
+    area: { targetTokenIds: string[]; targetCell: GridCell },
+  ) => {
+    if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
+    const action = createPlayerActionRequest({
+      type: 'dnd5e-racial-action',
+      targetTokenIds: area.targetTokenIds,
+      targetCell: area.targetCell,
+      dnd5eRacialAction: payload,
+    })
+    if (!action) return false
+    return submitPlayerActionRequest(action, `${turnCharacter.name} 请求使用龙裔吐息`)
+  }
+
   const handleSceneInteractionPointClick = (interactionPointId: string) => {
     if (isDM || isSpectator || !activeMap) return
     const point = sceneInteractionPoints.find((candidate) => candidate.id === interactionPointId)
@@ -16550,6 +19050,7 @@ export default function MapsPage() {
     const payload: Dnd5eSpellCastPayload = {
       spellId: dnd5eSpellTargeting.spellId,
       castingClassId: dnd5eSpellTargeting.castingClassId,
+      racialInnate: dnd5eSpellTargeting.racialInnate,
       slotLevel: dnd5eSpellTargeting.slotLevel,
       targetTokenId: committedTargetIds[0] ?? currentInitiativeToken?.id ?? '',
       targetTokenIds: committedTargetIds,
@@ -16659,7 +19160,11 @@ export default function MapsPage() {
   const sendPlayerBasicActionRequest = (payload: Dnd5eBasicActionPayload) => {
     if (!canSendPlayerCombatAction() || !activeMap || !turnCharacter || !currentInitiativeToken) return false
     const replacesAttack = payload.kind === 'grapple' || payload.kind === 'shove'
-    if (!replacesAttack && currentDnd5eTurnEconomy(currentInitiativeToken.id).action.current < 1) return false
+    const freeAction = payload.kind === 'release-grapple'
+    const spendsBonusAction = payload.kind === 'other-bonus-action'
+    const economy = currentDnd5eTurnEconomy(currentInitiativeToken.id)
+    if (spendsBonusAction && economy.bonusAction.current < 1) return false
+    if (!replacesAttack && !freeAction && !spendsBonusAction && economy.action.current < 1) return false
     const action = createPlayerActionRequest({ type: 'dnd5e-basic-action', dnd5eBasicAction: payload })
     if (!action) return false
     const label = payload.kind === 'dash' ? '疾走'
@@ -16669,9 +19174,12 @@ export default function MapsPage() {
             : payload.kind === 'use-object' ? '使用物件'
               : payload.kind === 'grapple' ? '擒抱'
                 : payload.kind === 'shove' ? '推撞'
-                  : payload.kind === 'escape-grapple' ? '挣脱擒抱'
-                    : payload.kind === 'escape-effect' ? '挣脱法术束缚'
-                      : '唤醒睡眠生物'
+                  : payload.kind === 'release-grapple' ? '松开擒抱'
+                    : payload.kind === 'escape-grapple' ? '挣脱擒抱'
+                      : payload.kind === 'escape-effect' ? '挣脱法术束缚'
+                        : payload.kind === 'wake' ? '唤醒睡眠生物'
+                          : payload.kind === 'other-bonus-action' ? '其他（附赠动作）'
+                            : '其他（动作）'
     return submitPlayerActionRequest(action, `${turnCharacter.name} 请求执行${label}`)
   }
 
@@ -16690,9 +19198,21 @@ export default function MapsPage() {
       const notice = playerActionRejectionNotice(reason)
       void showCombatNotice(notice.title, notice.message, 'amber')
     },
+    onActionAccepted: (ack) => {
+      const characterId = ack.result?.actorCharacterId ?? armedDeclarativeAttackIntents.characterId
+      if (characterId) {
+        reconcileDeclarativeAttackIntents(
+          characterId,
+          ack.dnd5eDeclarativeAttackIntents,
+        )
+      }
+    },
   })
 
   const requestAdvanceEvent = useEffectEvent(() => requestAdvance())
+  const settleOrAdvanceHeadlessTurnEvent = useEffectEvent(async (token: Token) => {
+    if (!await settleDnd5eMonsterEndTurn(token)) requestAdvance()
+  })
   const pushCombatLogEvent = useEffectEvent(
     (...args: Parameters<typeof pushCombatLog>) => pushCombatLog(...args),
   )
@@ -16746,9 +19266,10 @@ export default function MapsPage() {
         const skipKey = `surprised-${combatIdRef.current}-${token.id}`
         if (incapacitatedSkippedKeysRef.current.has(skipKey)) return
         incapacitatedSkippedKeysRef.current.add(skipKey)
-        resolveSurpriseForToken(token)
         pushCombatLogEvent(`${token.label} 受突袭：首回合不能移动或采取动作，跳过该回合。`, 'turn')
-        const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
+        const timer = window.setTimeout(() => {
+          void settleOrAdvanceHeadlessTurnEvent(token)
+        }, 50)
         return () => window.clearTimeout(timer)
       }
     }
@@ -16759,7 +19280,9 @@ export default function MapsPage() {
       const skipToken = token!
       // 死亡 token：直接定时推进（无去重 key，与原死亡分支一致）。
       if (!isTokenAlive(skipToken, chars)) {
-        const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
+        const timer = window.setTimeout(() => {
+          void settleOrAdvanceHeadlessTurnEvent(skipToken)
+        }, 50)
         return () => window.clearTimeout(timer)
       }
 
@@ -16769,7 +19292,9 @@ export default function MapsPage() {
         if (incapacitatedSkippedKeysRef.current.has(skipKey)) return
         incapacitatedSkippedKeysRef.current.add(skipKey)
         pushCombatLogEvent(`${skipToken.label} 当前无法行动，跳过本回合。`, 'turn')
-        const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
+        const timer = window.setTimeout(() => {
+          void settleOrAdvanceHeadlessTurnEvent(skipToken)
+        }, 50)
         return () => window.clearTimeout(timer)
       }
 
@@ -16796,7 +19321,7 @@ export default function MapsPage() {
 
     enemyAppliedKeysRef.current.add(actKey)
     void scheduleEnemyTurnEvent(token)
-  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey, resolveSurpriseForToken, tokenIsStillSurprised])
+  }, [combatActive, initiativeIndex, round, activeMapId, currentInitiativeToken?.id, isDM, settlementMode, isAutomatedEnemyTurn, initiativeOrderKey, tokenIsStillSurprised])
 
   useEffect(() => {
     if (isDM) return
@@ -16820,7 +19345,9 @@ export default function MapsPage() {
       !isTokenAlive(latestToken, characters) &&
       !(latestToken.type === 'player' && turnCharacter && characterNeedsDeathSave(turnCharacter))
     ) {
-      const timer = window.setTimeout(() => requestAdvanceEvent(), 50)
+      const timer = window.setTimeout(() => {
+        void settleOrAdvanceHeadlessTurnEvent(latestToken)
+      }, 50)
       return () => window.clearTimeout(timer)
     }
   }, [combatActive, activeMapId, currentInitiativeToken?.id, characters, defeatedTokenIds.length, isDM, turnCharacter])
@@ -17086,7 +19613,7 @@ export default function MapsPage() {
       setDnd5eSpellTargeting(null)
       setDnd5eItemAreaTargeting(null)
       setDnd5eItemCreatureTargeting(null)
-      setDnd5eWeaponAttackOptions(undefined)
+      setDnd5eWeaponAttackOptions(withDeclarativeAttackIntents(activeChar.id))
       setDnd5eWeaponTargeting(activeChar.id)
       return
     }
@@ -18965,9 +21492,57 @@ export default function MapsPage() {
                   />
                 )}
                 {charPanel === 'features' && (
-                  <p className="rounded-xl border border-white/10 bg-void-950/50 p-4 text-sm leading-6 text-slate-300">
-                    D&amp;D 5e 职业特性的主动操作已统一放在“技能”页；被动特性由 Headless 自动结算。
-                  </p>
+                  <div className="space-y-3">
+                    {activeCharRacialRules?.dragonbornAncestry && (
+                      <section className="rounded-xl border border-amber-300/20 bg-amber-500/[0.06] p-4">
+                        <h4 className="text-sm font-semibold text-amber-100">龙裔吐息</h4>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          {activeCharRacialRules.dragonbornAncestry.name}血统 ·
+                          {' '}{activeCharRacialRules.dragonbornAncestry.damageType}伤害 ·
+                          {' '}{activeCharRacialRules.dragonbornAncestry.saveAbility.toUpperCase()} 豁免 ·
+                          {' '}{activeCharBreathResource?.current ?? 0}/{activeCharBreathResource?.max ?? 1}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={
+                            !!pendingPlayerAction ||
+                            !combatActive ||
+                            !canControlPlayerTurn ||
+                            activeChar.id !== turnCharacter?.id ||
+                            activeCharDnd5eTurnEconomy.action.current < 1 ||
+                            (activeCharBreathResource?.current ?? 0) < 1
+                          }
+                          onClick={() => {
+                            const ancestry = activeCharRacialRules.dragonbornAncestry
+                            if (!ancestry) return
+                            setDnd5eWeaponTargeting(null)
+                            setDnd5eSpellTargeting(null)
+                            setDnd5eItemAreaTargeting(null)
+                            setDnd5eItemCreatureTargeting(null)
+                            setDnd5ePluginAreaTargeting({
+                              source: 'dragonborn-breath',
+                              characterId: activeChar.id,
+                              featureId: 'dragonborn-breath',
+                              featureName: '龙裔吐息',
+                              targeting: {
+                                kind: 'area',
+                                relation: 'any',
+                                includeSelf: false,
+                                template: dnd5eDragonbornBreathArea(ancestry),
+                              },
+                            })
+                            setAoePreviewCell(null)
+                          }}
+                          className="mt-3 w-full rounded-lg border border-amber-300/25 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          选择吐息方向
+                        </button>
+                      </section>
+                    )}
+                    <p className="rounded-xl border border-white/10 bg-void-950/50 p-4 text-sm leading-6 text-slate-300">
+                      D&amp;D 5e 职业特性的主动操作已统一放在“技能”页；种族被动与战斗触发由 Headless 自动结算。
+                    </p>
+                  </div>
                 )}
                 {charPanel === 'spells' && (
                   <MapSpellsPanel
@@ -19201,6 +21776,7 @@ export default function MapsPage() {
                       setDnd5eWeaponAttackOptions(undefined)
                       const pluginSpell = dnd5ePluginSpellDefinition(spellId)
                       if (pluginSpell) {
+                        if (!castingClassId) return
                         setAoePreviewCell(null)
                         const casterToken = activeMap?.tokens.find((token) => token.characterId === activeChar.id)
                         if (pluginSpell.range.type === 'self' && casterToken) {
@@ -19305,6 +21881,7 @@ export default function MapsPage() {
                         const payload: Dnd5eSpellCastPayload = {
                           spellId,
                           castingClassId,
+                          racialInnate: options?.racialInnate,
                           slotLevel,
                           targetTokenId: casterToken.id,
                           conditionChoice,
@@ -19327,8 +21904,10 @@ export default function MapsPage() {
                       } else {
                         setAoePreviewCell(null)
                       }
-                      const classDefinition = dnd5eClassDefinition(castingClassId)
-                      const castingClassLevel = dnd5eCharacterClassLevel(activeChar, castingClassId)
+                      const classDefinition = castingClassId ? dnd5eClassDefinition(castingClassId) : undefined
+                      const castingClassLevel = castingClassId
+                        ? dnd5eCharacterClassLevel(activeChar, castingClassId)
+                        : activeChar.level
                       const canSculpt = dnd5eCanSculptSpell({
                         classId: classDefinition?.id,
                         subclassId: classDefinition
@@ -19339,6 +21918,7 @@ export default function MapsPage() {
                       setDnd5eSpellTargeting({
                         characterId: activeChar.id,
                         castingClassId,
+                        racialInnate: options?.racialInnate,
                         spellId,
                         slotLevel,
                         maximumTargets: options?.metamagic?.kind === 'twinned'
@@ -19401,7 +21981,7 @@ export default function MapsPage() {
                       basicActionTargets={activeCharDnd5eFeatureTargets}
                       onAttack={(options) => {
                         setDnd5eWeaponAttackConfirmation(null)
-                        setDnd5eWeaponAttackOptions(options)
+                        setDnd5eWeaponAttackOptions(withDeclarativeAttackIntents(activeChar.id, options))
                         setDnd5eWeaponTargeting((current) => current === activeChar.id ? null : activeChar.id)
                       }}
                       onDisengage={handleDisengage}
@@ -19423,7 +22003,7 @@ export default function MapsPage() {
                       featureTargets={activeCharDnd5eFeatureTargets}
                       onAttack={(options) => {
                         setDnd5eWeaponAttackConfirmation(null)
-                        setDnd5eWeaponAttackOptions(options)
+                        setDnd5eWeaponAttackOptions(withDeclarativeAttackIntents(activeChar.id, options))
                         setDnd5eWeaponTargeting((current) => current === activeChar.id ? null : activeChar.id)
                       }}
                       onDisengage={handleDisengage}
@@ -19444,6 +22024,10 @@ export default function MapsPage() {
                       canAct={canControlPlayerTurn && activeChar.id === turnCharacter?.id}
                       pending={!!pendingPlayerAction}
                       turnEconomy={activeCharDnd5eTurnEconomy}
+                      armedAttackIntentFeatureIds={activeDeclarativeAttackIntentFeatureIds(activeChar.id)}
+                      onToggleAttackIntent={(featureId) =>
+                        toggleDeclarativeAttackIntent(activeChar.id, featureId)
+                      }
                       onAction={({ payload, targetTokenId }) => {
                         setDnd5eWeaponTargeting(null)
                         setDnd5eWeaponAttackOptions(undefined)
@@ -19456,6 +22040,7 @@ export default function MapsPage() {
                         setDnd5eItemAreaTargeting(null)
                         setDnd5eItemCreatureTargeting(null)
                         setDnd5ePluginAreaTargeting({
+                          source: 'plugin',
                           characterId: activeChar.id,
                           featureId,
                           featureName,

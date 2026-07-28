@@ -33,8 +33,24 @@ type ResourceMap = {
 }
 
 async function putState(request: APIRequestContext, name: string, payload: unknown) {
-  const response = await request.put(`${DM}/api/state/${name}`, { data: payload })
+  const current = await request.get(`${DM}/api/state/${name}`)
+  const currentBody = current.ok()
+    ? await current.json() as { updatedAt?: number }
+    : null
+  const nextPayload = payload && typeof payload === 'object'
+    ? {
+        ...payload,
+        updatedAt: Math.max(
+          Date.now(),
+          Number((payload as { updatedAt?: number }).updatedAt ?? 0),
+          Number(currentBody?.updatedAt ?? 0) + 1,
+        ),
+      }
+    : payload
+  const response = await request.put(`${DM}/api/state/${name}`, { data: nextPayload })
   expect(response.ok(), `${name}: ${response.status()}`).toBeTruthy()
+  const result = await response.json() as { applied?: boolean }
+  expect(result.applied, `${name} should be applied`).not.toBe(false)
 }
 
 async function getState<T>(request: APIRequestContext, name: string): Promise<T> {

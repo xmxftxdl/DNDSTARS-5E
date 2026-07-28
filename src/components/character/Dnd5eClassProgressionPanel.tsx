@@ -40,6 +40,7 @@ import {
   DND5E_BARD_MAGICAL_SECRETS_KEY,
   DND5E_LORE_ADDITIONAL_MAGICAL_SECRETS_KEY,
   dnd5ePluginSubclassDefinition,
+  dnd5ePluginSubclassChoiceLimit,
   registeredDnd5ePluginSubclasses,
   type Dnd5eClassChoiceGroup,
   type Dnd5eClassId,
@@ -118,6 +119,9 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
   const pluginChoiceGroups: Dnd5eClassChoiceGroup[] = (selectedPluginSubclass?.choiceGroups ?? []).map((group) => ({
     ...group,
     id: `${selectedPluginSubclass!.id}/${group.id}`,
+    maxSelections: group.maxSelectionsByLevel?.length
+      ? (level) => dnd5ePluginSubclassChoiceLimit(group, level)
+      : group.maxSelections,
     options: group.options.map((option) => ({ ...option })),
   }))
   const groups = [classSkillGroup, ...dnd5eAllClassChoiceGroups(definition), ...pluginChoiceGroups]
@@ -270,6 +274,32 @@ export default function Dnd5eClassProgressionPanel({ character, onChange, isStar
           <p className="mt-2 text-[11px] text-amber-200/70">第三方规则包内容；平台核心包不将其标记为 SRD 5.1。</p>
         </div>
       )}
+
+      {selectedPluginSubclass?.declarativeSpellcasting && (() => {
+        const spellcasting = selectedPluginSubclass.declarativeSpellcasting
+        const levelIndex = Math.max(0, Math.min(19, character.level - 1))
+        return (
+          <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-500/5 p-4">
+            <h4 className="text-sm font-semibold text-violet-100">子职施法协议</h4>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              三分之一施法者（已知法术） · 施法属性：{abilityLabel(spellcasting.ability)} ·
+              法术表：{spellcasting.spellListClassId} · 法器：{spellcasting.focus} ·
+              仪式施法：{spellcasting.ritualCasting ? '可以' : '不可以'}
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <InfoBlock title="当前已知戏法" text={`${spellcasting.cantripsKnownByClassLevel[levelIndex] ?? 0}`} />
+              <InfoBlock title="当前已知法术" text={`${spellcasting.spellsKnownByClassLevel[levelIndex] ?? 0}`} />
+              <InfoBlock
+                title="不限学派名额"
+                text={`${spellcasting.unrestrictedSpellsKnownByClassLevel?.[levelIndex] ?? spellcasting.spellsKnownByClassLevel[levelIndex] ?? 0}`}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-amber-200/70">
+              该区块只显示并持久化协议元数据；法术仍必须来自房间已注册目录，且 Headless 会再次校验施法资格。
+            </p>
+          </div>
+        )
+      })()}
 
       {subclassSpellLists.map((list) => (
         <div key={list.id} className="mt-3 rounded-xl border border-violet-400/20 bg-violet-500/5 p-4">

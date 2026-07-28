@@ -7,6 +7,7 @@ import { getAc } from '../../lib/combatStats'
 import Dnd5eConditionEditor, { Dnd5eConditionTags } from './Dnd5eConditionEditor'
 import type { Dnd5eActiveEffectInstance } from '../../rulesets/dnd5e/activeEffects'
 import { parseLiveHitPointDraft } from './characterHitPoints'
+import { resolveMapTokenPortrait } from '../../lib/portraitPresentation'
 
 interface CharacterDetailPanelProps {
   token: Token
@@ -33,7 +34,7 @@ export default function CharacterDetailPanel({
   conditionSourceOptions,
   onClose,
 }: CharacterDetailPanelProps) {
-  const portrait = character.tokenPortrait || token.tokenPortrait || character.portrait
+  const portrait = resolveMapTokenPortrait(character, token)
   const hpPct =
     character.maxHp > 0 ? Math.max(0, Math.min(100, (character.currentHp / character.maxHp) * 100)) : 0
   const tempHp = character.tempHp ?? 0

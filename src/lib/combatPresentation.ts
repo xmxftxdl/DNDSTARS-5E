@@ -2,6 +2,7 @@ import {
   publishSharedEvent as publishSharedTransportEvent,
   sampleSharedServerClock,
 } from './sharedApi'
+import { preloadBrowserImage } from './browserImageCache'
 
 export const COMBAT_PRESENTATION_CHANNEL = 'combat-presentation'
 export const FIRE_BOLT_ANIMATION_DURATION_MS = 980
@@ -22,6 +23,46 @@ export const SPARE_THE_DYING_ANIMATION_DURATION_MS = 1_100
 export const ACID_SPLASH_ANIMATION_DURATION_MS = 1_050
 export const POISON_SPRAY_ANIMATION_DURATION_MS = 1_150
 export const VICIOUS_MOCKERY_ANIMATION_DURATION_MS = 1_100
+export const MAGIC_MISSILE_ANIMATION_DURATION_MS = 1_000
+export const SCORCHING_RAY_ANIMATION_DURATION_MS = 1_000
+export const GUIDING_BOLT_ANIMATION_DURATION_MS = 1_050
+export const ACID_ARROW_ANIMATION_DURATION_MS = 1_050
+export const CURE_WOUNDS_ANIMATION_DURATION_MS = 1_050
+export const HEALING_WORD_ANIMATION_DURATION_MS = 1_050
+export const INFLICT_WOUNDS_ANIMATION_DURATION_MS = 1_050
+export const HELLISH_REBUKE_ANIMATION_DURATION_MS = 1_150
+export const BURNING_HANDS_ANIMATION_DURATION_MS = 1_150
+export const THUNDERWAVE_ANIMATION_DURATION_MS = 1_100
+export const SHATTER_ANIMATION_DURATION_MS = 1_100
+export const LIGHTNING_BOLT_ANIMATION_DURATION_MS = 1_150
+export const BLESS_MANIFESTATION_DURATION_MS = 1_000
+export const BANE_MANIFESTATION_DURATION_MS = 1_000
+export const SHIELD_OF_FAITH_MANIFESTATION_DURATION_MS = 1_000
+export const MAGE_ARMOR_MANIFESTATION_DURATION_MS = 1_000
+export const JUMP_MANIFESTATION_DURATION_MS = 1_000
+export const DARKVISION_MANIFESTATION_DURATION_MS = 1_000
+export const SEE_INVISIBILITY_MANIFESTATION_DURATION_MS = 1_000
+export const WARDING_BOND_MANIFESTATION_DURATION_MS = 1_000
+export const FLY_MANIFESTATION_DURATION_MS = 1_000
+export const HEROISM_MANIFESTATION_DURATION_MS = 1_000
+export const ENLARGE_REDUCE_MANIFESTATION_DURATION_MS = 1_000
+export const ENHANCE_ABILITY_MANIFESTATION_DURATION_MS = 1_000
+export const DIVINE_FAVOR_MANIFESTATION_DURATION_MS = 1_000
+export const HUNTERS_MARK_MANIFESTATION_DURATION_MS = 1_000
+export const MAGIC_WEAPON_MANIFESTATION_DURATION_MS = 1_000
+export const FLAME_BLADE_MANIFESTATION_DURATION_MS = 1_000
+export const INVISIBILITY_MANIFESTATION_DURATION_MS = 1_000
+export const BLUR_MANIFESTATION_DURATION_MS = 1_000
+export const BARKSKIN_MANIFESTATION_DURATION_MS = 1_000
+export const PROTECTION_FROM_POISON_MANIFESTATION_DURATION_MS = 1_000
+export const LONGSTRIDER_MANIFESTATION_DURATION_MS = 1_000
+export const PROTECTION_FROM_ENERGY_MANIFESTATION_DURATION_MS = 1_000
+export const DEATH_WARD_MANIFESTATION_DURATION_MS = 1_000
+export const GREATER_INVISIBILITY_MANIFESTATION_DURATION_MS = 1_000
+export const CHARM_PERSON_MANIFESTATION_DURATION_MS = 1_000
+export const HIDEOUS_LAUGHTER_MANIFESTATION_DURATION_MS = 1_000
+export const HOLD_PERSON_MANIFESTATION_DURATION_MS = 1_000
+export const BLINDNESS_DEAFNESS_MANIFESTATION_DURATION_MS = 1_000
 export const COMBAT_PRESENTATION_EVENT_TTL_MS = 1_600
 export const FIREBALL_ANIMATION_START_DELAY_MS = 1_000
 export const SPELL_BANNER_TOTAL_DURATION_MS = 3_000
@@ -65,6 +106,10 @@ export function combatPresentationServerNow(localNow = Date.now()): number {
   return localNow + combatPresentationClockOffsetMs
 }
 
+function combatPresentationLocalTime(serverTimestamp: number): number {
+  return serverTimestamp - combatPresentationClockOffsetMs
+}
+
 export async function refreshCombatPresentationClock(force = false): Promise<number> {
   if (!force && Date.now() - combatPresentationClockSampledAt < 60_000) {
     return combatPresentationClockOffsetMs
@@ -98,6 +143,12 @@ export interface CombatPresentationSpellProjectileEventV1 {
     | 'acid-splash'
     | 'poison-spray'
     | 'vicious-mockery'
+    | 'magic-missile'
+    | 'scorching-ray'
+    | 'guiding-bolt'
+    | 'acid-arrow'
+    | 'healing-word'
+    | 'inflict-wounds'
   sourceTokenId: string
   targetTokenId: string
   accentColor?: string
@@ -123,6 +174,23 @@ export interface CombatPresentationFireballEventV1 {
   radiusFeet: number
   createdAt: number
   animationStartsAt: number
+  expiresAt: number
+}
+
+export interface CombatPresentationAreaSpellEventV1 {
+  schemaVersion: 1
+  id: string
+  type: 'spell-area-effect'
+  mapId: string
+  transactionId: string
+  spellId: 'burning-hands' | 'thunderwave' | 'shatter' | 'lightning-bolt'
+  sourceTokenId: string
+  targetCell: { col: number; row: number }
+  shape: 'cone' | 'line' | 'circle'
+  lengthFeet?: number
+  widthFeet?: number
+  radiusFeet?: number
+  createdAt: number
   expiresAt: number
 }
 
@@ -162,7 +230,42 @@ export interface CombatPresentationShockingGraspEventV1 {
   type: 'spell-target-effect'
   mapId: string
   transactionId: string
-  spellId: 'shocking-grasp' | 'guidance' | 'resistance' | 'sanctuary' | 'spare-the-dying'
+  spellId:
+    | 'shocking-grasp'
+    | 'guidance'
+    | 'resistance'
+    | 'sanctuary'
+    | 'spare-the-dying'
+    | 'cure-wounds'
+    | 'hellish-rebuke'
+    | 'bless'
+    | 'bane'
+    | 'shield-of-faith'
+    | 'mage-armor'
+    | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
+    | 'warding-bond'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'enhance-ability'
+    | 'divine-favor'
+    | 'hunters-mark'
+    | 'magic-weapon'
+    | 'flame-blade'
+    | 'invisibility'
+    | 'blur'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'longstrider'
+    | 'protection-from-energy'
+    | 'death-ward'
+    | 'greater-invisibility'
+    | 'charm-person'
+    | 'hideous-laughter'
+    | 'hold-person'
+    | 'blindness-deafness'
   sourceTokenId: string
   targetTokenId: string
   accentColor?: string
@@ -268,6 +371,7 @@ export interface CombatPresentationSavingThrowEventV1 {
 export type CombatPresentationEventV1 =
   | CombatPresentationSpellProjectileEventV1
   | CombatPresentationFireballEventV1
+  | CombatPresentationAreaSpellEventV1
   | CombatPresentationSpellBannerEventV1
   | CombatPresentationShockingGraspEventV1
   | CombatPresentationChillTouchEventV1
@@ -300,10 +404,51 @@ export interface CombatPresentationMapProjectile {
     | 'acid-splash'
     | 'poison-spray'
     | 'vicious-mockery'
+    | 'magic-missile'
+    | 'scorching-ray'
+    | 'guiding-bolt'
+    | 'acid-arrow'
+    | 'cure-wounds'
+    | 'healing-word'
+    | 'inflict-wounds'
+    | 'hellish-rebuke'
+    | 'burning-hands'
+    | 'thunderwave'
+    | 'shatter'
+    | 'lightning-bolt'
+    | 'bless'
+    | 'bane'
+    | 'shield-of-faith'
+    | 'mage-armor'
+    | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
+    | 'warding-bond'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'enhance-ability'
+    | 'divine-favor'
+    | 'hunters-mark'
+    | 'magic-weapon'
+    | 'flame-blade'
+    | 'invisibility'
+    | 'blur'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'longstrider'
+    | 'protection-from-energy'
+    | 'death-ward'
+    | 'greater-invisibility'
+    | 'charm-person'
+    | 'hideous-laughter'
+    | 'hold-person'
+    | 'blindness-deafness'
   hit: boolean
   issuedAt: number
   durationMs: number
   radiusPx?: number
+  areaWidthPx?: number
   accentColor?: string
   glowColor?: string
 }
@@ -407,6 +552,12 @@ export function parseCombatPresentationEvent(
         'acid-splash',
         'poison-spray',
         'vicious-mockery',
+        'magic-missile',
+        'scorching-ray',
+        'guiding-bolt',
+        'acid-arrow',
+        'healing-word',
+        'inflict-wounds',
       ].includes(String(event.spellId)) ||
       !boundedId(event.targetTokenId, 160) ||
       (event.accentColor != null && !hexColor(event.accentColor)) ||
@@ -435,6 +586,28 @@ export function parseCombatPresentationEvent(
     ) return null
     return fireball as CombatPresentationFireballEventV1
   }
+  if (event.type === 'spell-area-effect') {
+    const area = event as Partial<CombatPresentationAreaSpellEventV1>
+    const expected = {
+      'burning-hands': { shape: 'cone', lengthFeet: 15, widthFeet: 15 },
+      thunderwave: { shape: 'line', lengthFeet: 15, widthFeet: 15 },
+      shatter: { shape: 'circle', radiusFeet: 10 },
+      'lightning-bolt': { shape: 'line', lengthFeet: 100, widthFeet: 5 },
+    }[String(area.spellId)]
+    if (
+      !expected ||
+      area.shape !== expected.shape ||
+      area.lengthFeet !== expected.lengthFeet ||
+      area.widthFeet !== expected.widthFeet ||
+      area.radiusFeet !== expected.radiusFeet ||
+      !area.targetCell ||
+      !Number.isInteger(area.targetCell.col) ||
+      !Number.isInteger(area.targetCell.row) ||
+      area.targetCell.col < 0 || area.targetCell.row < 0 ||
+      area.targetCell.col > 10_000 || area.targetCell.row > 10_000
+    ) return null
+    return area as CombatPresentationAreaSpellEventV1
+  }
   if (event.type === 'spell-banner') {
     const banner = event as Partial<CombatPresentationSpellBannerEventV1>
     if (
@@ -462,7 +635,37 @@ export function parseCombatPresentationEvent(
       effect.spellId !== 'guidance' &&
         effect.spellId !== 'resistance' &&
         effect.spellId !== 'sanctuary' &&
-        effect.spellId !== 'spare-the-dying' ||
+        effect.spellId !== 'spare-the-dying' &&
+        effect.spellId !== 'cure-wounds' &&
+        effect.spellId !== 'hellish-rebuke' &&
+        effect.spellId !== 'bless' &&
+        effect.spellId !== 'bane' &&
+        effect.spellId !== 'shield-of-faith' &&
+        effect.spellId !== 'mage-armor' &&
+        effect.spellId !== 'jump' &&
+        effect.spellId !== 'darkvision' &&
+        effect.spellId !== 'see-invisibility' &&
+        effect.spellId !== 'warding-bond' &&
+        effect.spellId !== 'fly' &&
+        effect.spellId !== 'heroism' &&
+        effect.spellId !== 'enlarge-reduce' &&
+        effect.spellId !== 'enhance-ability' &&
+        effect.spellId !== 'divine-favor' &&
+        effect.spellId !== 'hunters-mark' &&
+        effect.spellId !== 'magic-weapon' &&
+        effect.spellId !== 'flame-blade' &&
+        effect.spellId !== 'invisibility' &&
+        effect.spellId !== 'blur' &&
+        effect.spellId !== 'barkskin' &&
+        effect.spellId !== 'protection-from-poison' &&
+        effect.spellId !== 'longstrider' &&
+        effect.spellId !== 'protection-from-energy' &&
+        effect.spellId !== 'death-ward' &&
+        effect.spellId !== 'greater-invisibility' &&
+        effect.spellId !== 'charm-person' &&
+        effect.spellId !== 'hideous-laughter' &&
+        effect.spellId !== 'hold-person' &&
+        effect.spellId !== 'blindness-deafness' ||
       !boundedId(effect.targetTokenId, 160) ||
       (effect.spellId === 'resistance' || effect.spellId === 'spare-the-dying') &&
         (!hexColor(effect.accentColor) || !hexColor(effect.glowColor))
@@ -580,6 +783,86 @@ export function combatPresentationProjectilesForMap(
             ? POISON_SPRAY_ANIMATION_DURATION_MS
           : event.spellId === 'vicious-mockery'
             ? VICIOUS_MOCKERY_ANIMATION_DURATION_MS
+          : event.spellId === 'magic-missile'
+            ? MAGIC_MISSILE_ANIMATION_DURATION_MS
+          : event.spellId === 'scorching-ray'
+            ? SCORCHING_RAY_ANIMATION_DURATION_MS
+          : event.spellId === 'guiding-bolt'
+            ? GUIDING_BOLT_ANIMATION_DURATION_MS
+          : event.spellId === 'acid-arrow'
+            ? ACID_ARROW_ANIMATION_DURATION_MS
+          : event.spellId === 'cure-wounds'
+            ? CURE_WOUNDS_ANIMATION_DURATION_MS
+          : event.spellId === 'healing-word'
+            ? HEALING_WORD_ANIMATION_DURATION_MS
+          : event.spellId === 'inflict-wounds'
+            ? INFLICT_WOUNDS_ANIMATION_DURATION_MS
+          : event.spellId === 'hellish-rebuke'
+            ? HELLISH_REBUKE_ANIMATION_DURATION_MS
+          : event.spellId === 'burning-hands'
+            ? BURNING_HANDS_ANIMATION_DURATION_MS
+          : event.spellId === 'thunderwave'
+            ? THUNDERWAVE_ANIMATION_DURATION_MS
+          : event.spellId === 'shatter'
+            ? SHATTER_ANIMATION_DURATION_MS
+          : event.spellId === 'lightning-bolt'
+            ? LIGHTNING_BOLT_ANIMATION_DURATION_MS
+          : event.spellId === 'bless'
+            ? BLESS_MANIFESTATION_DURATION_MS
+          : event.spellId === 'bane'
+            ? BANE_MANIFESTATION_DURATION_MS
+          : event.spellId === 'shield-of-faith'
+            ? SHIELD_OF_FAITH_MANIFESTATION_DURATION_MS
+          : event.spellId === 'mage-armor'
+            ? MAGE_ARMOR_MANIFESTATION_DURATION_MS
+          : event.spellId === 'jump'
+            ? JUMP_MANIFESTATION_DURATION_MS
+          : event.spellId === 'darkvision'
+            ? DARKVISION_MANIFESTATION_DURATION_MS
+          : event.spellId === 'see-invisibility'
+            ? SEE_INVISIBILITY_MANIFESTATION_DURATION_MS
+          : event.spellId === 'warding-bond'
+            ? WARDING_BOND_MANIFESTATION_DURATION_MS
+          : event.spellId === 'fly'
+            ? FLY_MANIFESTATION_DURATION_MS
+          : event.spellId === 'heroism'
+            ? HEROISM_MANIFESTATION_DURATION_MS
+          : event.spellId === 'enlarge-reduce'
+            ? ENLARGE_REDUCE_MANIFESTATION_DURATION_MS
+          : event.spellId === 'enhance-ability'
+            ? ENHANCE_ABILITY_MANIFESTATION_DURATION_MS
+          : event.spellId === 'divine-favor'
+            ? DIVINE_FAVOR_MANIFESTATION_DURATION_MS
+          : event.spellId === 'hunters-mark'
+            ? HUNTERS_MARK_MANIFESTATION_DURATION_MS
+          : event.spellId === 'magic-weapon'
+            ? MAGIC_WEAPON_MANIFESTATION_DURATION_MS
+          : event.spellId === 'flame-blade'
+            ? FLAME_BLADE_MANIFESTATION_DURATION_MS
+          : event.spellId === 'invisibility'
+            ? INVISIBILITY_MANIFESTATION_DURATION_MS
+          : event.spellId === 'blur'
+            ? BLUR_MANIFESTATION_DURATION_MS
+          : event.spellId === 'barkskin'
+            ? BARKSKIN_MANIFESTATION_DURATION_MS
+          : event.spellId === 'protection-from-poison'
+            ? PROTECTION_FROM_POISON_MANIFESTATION_DURATION_MS
+          : event.spellId === 'longstrider'
+            ? LONGSTRIDER_MANIFESTATION_DURATION_MS
+          : event.spellId === 'protection-from-energy'
+            ? PROTECTION_FROM_ENERGY_MANIFESTATION_DURATION_MS
+          : event.spellId === 'death-ward'
+            ? DEATH_WARD_MANIFESTATION_DURATION_MS
+          : event.spellId === 'greater-invisibility'
+            ? GREATER_INVISIBILITY_MANIFESTATION_DURATION_MS
+          : event.spellId === 'charm-person'
+            ? CHARM_PERSON_MANIFESTATION_DURATION_MS
+          : event.spellId === 'hideous-laughter'
+            ? HIDEOUS_LAUGHTER_MANIFESTATION_DURATION_MS
+          : event.spellId === 'hold-person'
+            ? HOLD_PERSON_MANIFESTATION_DURATION_MS
+          : event.spellId === 'blindness-deafness'
+            ? BLINDNESS_DEAFNESS_MANIFESTATION_DURATION_MS
         : event.spellId === 'chill-touch'
           ? CHILL_TOUCH_ANIMATION_DURATION_MS
           : event.spellId === 'ray-of-frost'
@@ -611,7 +894,7 @@ export function combatPresentationProjectilesForMap(
         to: { x: target.x, y: target.y },
         kind: event.spellId,
         hit: true,
-        issuedAt: Date.now() - Math.max(0, now - event.createdAt),
+        issuedAt: combatPresentationLocalTime(event.createdAt),
         durationMs: animationDuration,
         radiusPx: gridSize * Math.max(1, target.size ?? 1) * (
           event.spellId === 'guidance'
@@ -636,7 +919,7 @@ export function combatPresentationProjectilesForMap(
         to: { x: target.x, y: target.y },
         kind: 'chill-touch' as const,
         hit: true,
-        issuedAt: Date.now() - Math.max(0, now - event.createdAt),
+        issuedAt: combatPresentationLocalTime(event.createdAt),
         durationMs: CHILL_TOUCH_ANIMATION_DURATION_MS,
         radiusPx: gridSize * Math.max(1, target.size ?? 1) * 0.58,
       } satisfies CombatPresentationMapProjectile]
@@ -651,7 +934,7 @@ export function combatPresentationProjectilesForMap(
         to: { x: target.x, y: target.y },
         kind: 'sacred-flame' as const,
         hit: true,
-        issuedAt: Date.now() - Math.max(0, now - event.createdAt),
+        issuedAt: combatPresentationLocalTime(event.createdAt),
         durationMs: SACRED_FLAME_ANIMATION_DURATION_MS,
         radiusPx: gridSize * Math.max(1, target.size ?? 1) * 0.64,
       } satisfies CombatPresentationMapProjectile]
@@ -681,9 +964,51 @@ export function combatPresentationProjectilesForMap(
         hit: true,
         // Konva uses the local clock. Translate the calibrated server timestamp
         // back into a local issuedAt while preserving elapsed time.
-        issuedAt: Date.now() - Math.max(0, now - animationStartsAt),
+        issuedAt: combatPresentationLocalTime(animationStartsAt),
         durationMs: FIREBALL_ANIMATION_DURATION_MS,
         radiusPx: event.radiusFeet / Math.max(1, map.feetPerCell ?? 5) * gridSize,
+      } satisfies CombatPresentationMapProjectile]
+    }
+    if (event.type === 'spell-area-effect') {
+      const gridSize = Math.max(1, map.gridSize)
+      const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+      const targetPoint = {
+        x: (map.gridOffsetX ?? 0) + (event.targetCell.col + 0.5) * gridSize,
+        y: (map.gridOffsetY ?? 0) + (event.targetCell.row + 0.5) * gridSize,
+      }
+      if (event.shape === 'circle') {
+        return [{
+          id: event.id,
+          from: targetPoint,
+          to: targetPoint,
+          kind: event.spellId,
+          hit: true,
+          issuedAt: combatPresentationLocalTime(event.createdAt),
+          durationMs: animationDuration,
+          radiusPx: (event.radiusFeet ?? 10) / feetPerCell * gridSize,
+        } satisfies CombatPresentationMapProjectile]
+      }
+      const aimDx = targetPoint.x - source.x
+      const aimDy = targetPoint.y - source.y
+      const aimDistance = Math.hypot(aimDx, aimDy)
+      // Match skillTargeting.aimVector: selecting the caster's own cell means
+      // a valid default direction to the right, never a zero-length texture.
+      const aimUnit = aimDistance <= 0.0001
+        ? { x: 1, y: 0 }
+        : { x: aimDx / aimDistance, y: aimDy / aimDistance }
+      const lengthPx = (event.lengthFeet ?? 15) / feetPerCell * gridSize
+      return [{
+        id: event.id,
+        from: { x: source.x, y: source.y },
+        to: {
+          x: source.x + aimUnit.x * lengthPx,
+          y: source.y + aimUnit.y * lengthPx,
+        },
+        kind: event.spellId,
+        hit: true,
+        issuedAt: combatPresentationLocalTime(event.createdAt),
+        durationMs: animationDuration,
+        areaWidthPx: (event.widthFeet ?? 5) / feetPerCell * gridSize,
       } satisfies CombatPresentationMapProjectile]
     }
     const target = map.tokens.find((token) => token.id === event.targetTokenId)
@@ -707,7 +1032,7 @@ export function combatPresentationProjectilesForMap(
       to,
       kind: event.spellId,
       hit,
-      issuedAt: Date.now() - Math.max(0, now - event.createdAt),
+      issuedAt: combatPresentationLocalTime(event.createdAt),
       durationMs: animationDuration,
       accentColor: event.accentColor,
       glowColor: event.glowColor,
@@ -938,6 +1263,74 @@ export async function publishProduceFlamePresentation(input: {
   return { completesAt: combatPresentationServerNow() + PRODUCE_FLAME_ANIMATION_DURATION_MS }
 }
 
+type MaterialProjectilePresentationInput = {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  targetTokenId: string
+}
+
+async function publishMaterialProjectile(
+  spellId:
+    | 'magic-missile'
+    | 'scorching-ray'
+    | 'guiding-bolt'
+    | 'acid-arrow'
+    | 'healing-word'
+    | 'inflict-wounds',
+  durationMs: number,
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-projectile',
+    spellId,
+    ...input,
+    createdAt,
+    expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+  })
+  return { completesAt: combatPresentationServerNow() + durationMs }
+}
+
+export function publishMagicMissilePresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialProjectile('magic-missile', MAGIC_MISSILE_ANIMATION_DURATION_MS, input)
+}
+
+export function publishScorchingRayPresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialProjectile('scorching-ray', SCORCHING_RAY_ANIMATION_DURATION_MS, input)
+}
+
+export function publishGuidingBoltPresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialProjectile('guiding-bolt', GUIDING_BOLT_ANIMATION_DURATION_MS, input)
+}
+
+export function publishAcidArrowPresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialProjectile('acid-arrow', ACID_ARROW_ANIMATION_DURATION_MS, input)
+}
+
+export function publishHealingWordPresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialProjectile('healing-word', HEALING_WORD_ANIMATION_DURATION_MS, input)
+}
+
+export function publishInflictWoundsPresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialProjectile('inflict-wounds', INFLICT_WOUNDS_ANIMATION_DURATION_MS, input)
+}
+
 type ColoredCantripPresentationInput = {
   id: string
   mapId: string
@@ -1010,6 +1403,330 @@ export async function publishSpareTheDyingPresentation(
     expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
   })
   return { completesAt: combatPresentationServerNow() + SPARE_THE_DYING_ANIMATION_DURATION_MS }
+}
+
+async function publishMaterialTargetEffect(
+  spellId: 'cure-wounds' | 'hellish-rebuke',
+  durationMs: number,
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-target-effect',
+    spellId,
+    ...input,
+    createdAt,
+    expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+  })
+  return { completesAt: combatPresentationServerNow() + durationMs }
+}
+
+export function publishCureWoundsPresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialTargetEffect('cure-wounds', CURE_WOUNDS_ANIMATION_DURATION_MS, input)
+}
+
+export function publishHellishRebukePresentation(
+  input: MaterialProjectilePresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishMaterialTargetEffect('hellish-rebuke', HELLISH_REBUKE_ANIMATION_DURATION_MS, input)
+}
+
+async function publishStatusSpellManifestation(
+  spellId:
+    | 'bless'
+    | 'bane'
+    | 'shield-of-faith'
+    | 'mage-armor'
+    | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
+    | 'warding-bond'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'enhance-ability'
+    | 'divine-favor'
+    | 'hunters-mark'
+    | 'magic-weapon'
+    | 'flame-blade'
+    | 'invisibility'
+    | 'blur'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'longstrider'
+    | 'protection-from-energy'
+    | 'death-ward'
+    | 'greater-invisibility'
+    | 'charm-person'
+    | 'hideous-laughter'
+    | 'hold-person'
+    | 'blindness-deafness',
+  durationMs: number,
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-target-effect',
+    spellId,
+    ...input,
+    createdAt,
+    expiresAt: createdAt + COMBAT_PRESENTATION_EVENT_TTL_MS,
+  })
+  return { completesAt: combatPresentationServerNow() + durationMs }
+}
+
+export function publishBlessPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('bless', BLESS_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishBanePresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('bane', BANE_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishShieldOfFaithPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'shield-of-faith',
+    SHIELD_OF_FAITH_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishMageArmorPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'mage-armor',
+    MAGE_ARMOR_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishJumpPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('jump', JUMP_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishDarkvisionPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('darkvision', DARKVISION_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishSeeInvisibilityPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'see-invisibility',
+    SEE_INVISIBILITY_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishWardingBondPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'warding-bond',
+    WARDING_BOND_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishFlyPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('fly', FLY_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishHeroismPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('heroism', HEROISM_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishEnlargeReducePresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'enlarge-reduce',
+    ENLARGE_REDUCE_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishEnhanceAbilityPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'enhance-ability',
+    ENHANCE_ABILITY_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishDivineFavorPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'divine-favor',
+    DIVINE_FAVOR_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishHuntersMarkPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'hunters-mark',
+    HUNTERS_MARK_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishMagicWeaponPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'magic-weapon',
+    MAGIC_WEAPON_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishFlameBladePresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'flame-blade',
+    FLAME_BLADE_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishInvisibilityPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'invisibility',
+    INVISIBILITY_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishBlurPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('blur', BLUR_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishBarkskinPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation('barkskin', BARKSKIN_MANIFESTATION_DURATION_MS, input)
+}
+
+export function publishProtectionFromPoisonPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'protection-from-poison',
+    PROTECTION_FROM_POISON_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishLongstriderPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'longstrider',
+    LONGSTRIDER_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishProtectionFromEnergyPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'protection-from-energy',
+    PROTECTION_FROM_ENERGY_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishDeathWardPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'death-ward',
+    DEATH_WARD_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishGreaterInvisibilityPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'greater-invisibility',
+    GREATER_INVISIBILITY_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishCharmPersonPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'charm-person',
+    CHARM_PERSON_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishHideousLaughterPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'hideous-laughter',
+    HIDEOUS_LAUGHTER_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishHoldPersonPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'hold-person',
+    HOLD_PERSON_MANIFESTATION_DURATION_MS,
+    input,
+  )
+}
+
+export function publishBlindnessDeafnessPresentation(
+  input: ColoredCantripPresentationInput,
+): Promise<{ completesAt: number }> {
+  return publishStatusSpellManifestation(
+    'blindness-deafness',
+    BLINDNESS_DEAFNESS_MANIFESTATION_DURATION_MS,
+    input,
+  )
 }
 
 export async function publishShockingGraspPresentation(input: {
@@ -1170,6 +1887,46 @@ export async function publishFireballPresentation(input: {
         FIREBALL_ANIMATION_START_DELAY_MS + FIREBALL_ANIMATION_DURATION_MS,
       ),
   }
+}
+
+export async function publishAreaSpellPresentation(input: {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  spellId: 'burning-hands' | 'thunderwave' | 'shatter' | 'lightning-bolt'
+  targetCell: { col: number; row: number }
+  shape: 'cone' | 'line' | 'circle'
+  lengthFeet?: number
+  widthFeet?: number
+  radiusFeet?: number
+}): Promise<{ completesAt: number }> {
+  const asset = {
+    'burning-hands': '/assets/vfx/burning-hands-fluid.png',
+    thunderwave: '/assets/vfx/thunderwave-fluid.webp',
+    shatter: '/assets/vfx/shatter-fluid.png',
+    'lightning-bolt': '/assets/vfx/lightning-bolt-fluid.png',
+  }[input.spellId]
+  // Start the presentation clock only after the material texture is available.
+  // On a cold route load these PNGs can otherwise finish downloading after the
+  // entire one-second event has expired.
+  await preloadBrowserImage(asset)
+  await refreshCombatPresentationClock()
+  const createdAt = combatPresentationServerNow()
+  const duration = {
+    'burning-hands': BURNING_HANDS_ANIMATION_DURATION_MS,
+    thunderwave: THUNDERWAVE_ANIMATION_DURATION_MS,
+    shatter: SHATTER_ANIMATION_DURATION_MS,
+    'lightning-bolt': LIGHTNING_BOLT_ANIMATION_DURATION_MS,
+  }[input.spellId]
+  await publishSharedEvent(COMBAT_PRESENTATION_CHANNEL, {
+    schemaVersion: 1,
+    type: 'spell-area-effect',
+    ...input,
+    createdAt,
+    expiresAt: createdAt + Math.max(COMBAT_PRESENTATION_EVENT_TTL_MS, duration + 500),
+  })
+  return { completesAt: combatPresentationServerNow() + duration }
 }
 
 export async function publishKillStreakPresentation(input: {

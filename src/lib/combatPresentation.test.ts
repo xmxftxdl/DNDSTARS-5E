@@ -399,6 +399,59 @@ describe('combat presentation events', () => {
     })
   })
 
+  it('accepts and projects the next Headless active-effect manifestations', () => {
+    for (const spellId of [
+      'jump',
+      'darkvision',
+      'see-invisibility',
+      'warding-bond',
+      'fly',
+      'heroism',
+      'enlarge-reduce',
+      'enhance-ability',
+      'divine-favor',
+      'hunters-mark',
+      'magic-weapon',
+      'flame-blade',
+      'invisibility',
+      'blur',
+      'barkskin',
+      'protection-from-poison',
+      'longstrider',
+      'protection-from-energy',
+      'death-ward',
+      'greater-invisibility',
+      'charm-person',
+      'hideous-laughter',
+      'hold-person',
+      'blindness-deafness',
+    ] as const) {
+      const event = {
+        ...shockingGrasp,
+        id: `${spellId}-manifestation`,
+        transactionId: `${spellId}-transaction`,
+        spellId,
+        accentColor: '#8b5cf6',
+        glowColor: '#c4b5fd',
+      }
+      expect(parseCombatPresentationEvent(event)).toEqual(event)
+      const state = reduceCombatPresentationState(
+        EMPTY_COMBAT_PRESENTATION_STATE,
+        event,
+        1_100,
+      )
+      expect(combatPresentationProjectilesForMap(state, map, 1_100)).toEqual([
+        expect.objectContaining({
+          kind: spellId,
+          to: { x: 250, y: 100 },
+          durationMs: 1_000,
+          accentColor: '#8b5cf6',
+          glowColor: '#c4b5fd',
+        }),
+      ])
+    }
+  })
+
   it('projects the same sacred golden flame before the saving throw result is known', () => {
     expect(parseCombatPresentationEvent(sacredFlame)).toEqual(sacredFlame)
     const state = reduceCombatPresentationState(
@@ -489,6 +542,40 @@ describe('combat presentation events', () => {
       ...map,
       tokens: map.tokens.filter((token) => token.id !== 'wizard'),
     }, fireball.animationStartsAt)).toEqual([])
+  })
+
+  it('projects same-cell Thunderwave with the Headless default direction', () => {
+    const thunderwave = {
+      schemaVersion: 1 as const,
+      id: 'thunderwave-same-cell',
+      type: 'spell-area-effect' as const,
+      mapId: map.id,
+      transactionId: 'thunderwave-same-cell-transaction',
+      spellId: 'thunderwave' as const,
+      sourceTokenId: 'wizard',
+      targetCell: { col: 0, row: 0 },
+      shape: 'line' as const,
+      lengthFeet: 15,
+      widthFeet: 15,
+      createdAt: 1_000,
+      expiresAt: 2_600,
+    }
+    const state = reduceCombatPresentationState(
+      EMPTY_COMBAT_PRESENTATION_STATE,
+      thunderwave,
+      1_100,
+    )
+    const [effect] = combatPresentationProjectilesForMap(state, {
+      ...map,
+      gridOffsetX: 25,
+      gridOffsetY: 75,
+    }, 1_100)
+    expect(effect).toMatchObject({
+      kind: 'thunderwave',
+      from: { x: 50, y: 100 },
+      to: { x: 200, y: 100 },
+      areaWidthPx: 150,
+    })
   })
 
   it('projects a synchronized banner-only spell without creating a map projectile', () => {

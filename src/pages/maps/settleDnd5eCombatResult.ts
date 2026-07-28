@@ -7,12 +7,14 @@ import {
   dnd5eDarkOnesOwnLuckAvailable,
   dnd5eHeldBardicInspirationDie,
   dnd5eHellishRebukeSlotLevel,
+  dnd5eRacialInnateSpellGrant,
   dnd5eSavingThrowMode,
   dnd5eSavingThrowRerollFeature,
   planDnd5eMapResultApplication,
   previewDnd5eSavingThrowRoll,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
+  type Dnd5eCombatant,
   type Dnd5eMapResultPlan,
 } from '../../rulesets/dnd5e'
 import { resolveDnd5eRollMode } from '../../rulesets/dnd5e/rollMode'
@@ -51,6 +53,8 @@ export async function settleDnd5eConcentrationChecks(input: {
   }) => Promise<number | undefined>
   requestHellishRebuke?: (input: {
     reactor: Character
+    reactorTokenId: string
+    targetTokenId: string
     sourceName: string
     damage: number
     slotLevel: number
@@ -58,6 +62,20 @@ export async function settleDnd5eConcentrationChecks(input: {
 }): Promise<{ result: Extract<Dnd5eActionResult, { ok: true }>; application: Dnd5eMapResultPlan }> {
   let state = input.result.state
   const events = [...input.result.events]
+  const rollHalflingLucky = async (
+    combatant: Dnd5eCombatant,
+    d20: number,
+    d20Second: number | undefined,
+    label: string,
+    targetName: string,
+  ) => ({
+    first: combatant.racialRules?.halflingLucky && d20 === 1
+      ? await input.rollD20(`半身人幸运·${label}重投`, targetName)
+      : undefined,
+    second: combatant.racialRules?.halflingLucky && d20Second === 1
+      ? await input.rollD20(`半身人幸运·${label}重投`, targetName)
+      : undefined,
+  })
   const pendingRelentlessRage = input.result.events.filter((event) => event.type === 'relentless-rage-save-required')
   for (const check of pendingRelentlessRage) {
     const combatant = state.combatants[check.targetId]
@@ -67,6 +85,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const d20Second = combatant.exhaustionLevel >= 3
       ? await input.rollD20('坚韧狂暴·体质豁免（劣势）', targetName)
       : undefined
+    const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '坚韧狂暴豁免', targetName)
     const mode = combatant.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const
     const modifier = combatant.savingThrowBonuses.con ?? Math.floor((combatant.abilities.con - 10) / 2)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
@@ -76,7 +95,9 @@ export async function settleDnd5eConcentrationChecks(input: {
       ? await input.rollD4('灾祸术·坚韧狂暴豁免减值', targetName)
       : undefined
     const initial = previewDnd5eSavingThrowRoll({
-      rolls: mode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      rolls: mode === 'normal'
+        ? [halflingLucky.first ?? d20]
+        : [halflingLucky.first ?? d20, halflingLucky.second ?? d20Second ?? 0],
       mode,
       modifier: modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       dc: check.dc,
@@ -92,6 +113,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       : undefined
     const resolved = resolveDnd5eHeadlessAction(state, {
       type: 'barbarian-relentless-rage-save', actorId: check.targetId, d20, d20Second,
+      halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       blessRoll, baneRoll, bardicInspirationRoll, dc: check.dc,
     })
     if (!resolved.ok) continue
@@ -142,6 +164,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const d20Second = mode !== 'normal'
       ? await input.rollD20(`怪物命中特效豁免（${mode === 'advantage' ? '优势' : '劣势'}）`, targetName)
       : undefined
+    const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '命中特效豁免', targetName)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
       ? await input.rollD4('祝福术·怪物命中特效豁免加值', targetName)
       : undefined
@@ -151,7 +174,9 @@ export async function settleDnd5eConcentrationChecks(input: {
     const modifier = combatant.savingThrowBonuses[check.ability] ??
       Math.floor((combatant.abilities[check.ability] - 10) / 2)
     const initial = previewDnd5eSavingThrowRoll({
-      rolls: mode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      rolls: mode === 'normal'
+        ? [halflingLucky.first ?? d20]
+        : [halflingLucky.first ?? d20, halflingLucky.second ?? d20Second ?? 0],
       mode,
       modifier: modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       dc: check.dc,
@@ -185,6 +210,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       type: 'monster-on-hit-save', actorId: check.targetId,
       sourceId: check.sourceId, actionId: check.actionId,
       d20, d20Second, blessRoll, baneRoll,
+      halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       rerollD20: reroll?.d20, rerollD20Second: reroll?.d20Second,
       bardicInspirationRoll, darkOnesOwnLuckRoll,
     })
@@ -205,6 +231,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const d20Second = mode !== 'normal'
       ? await input.rollD20(`${label}（${mode === 'advantage' ? '优势' : '劣势'}）`, targetName)
       : undefined
+    const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '龙威豁免', targetName)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
       ? await input.rollD4('祝福术·龙威豁免加值', targetName)
       : undefined
@@ -213,7 +240,9 @@ export async function settleDnd5eConcentrationChecks(input: {
       : undefined
     const modifier = combatant.savingThrowBonuses.wis ?? Math.floor((combatant.abilities.wis - 10) / 2)
     const initial = previewDnd5eSavingThrowRoll({
-      rolls: mode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      rolls: mode === 'normal'
+        ? [halflingLucky.first ?? d20]
+        : [halflingLucky.first ?? d20, halflingLucky.second ?? d20Second ?? 0],
       mode,
       modifier: modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       dc: check.dc,
@@ -246,6 +275,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const resolved = resolveDnd5eHeadlessAction(state, {
       type: 'sorcerer-draconic-presence-save', actorId: combatant.id, sourceId: source.id,
       d20, d20Second, blessRoll, baneRoll,
+      halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       rerollD20: reroll?.d20, rerollD20Second: reroll?.d20Second,
       bardicInspirationRoll, darkOnesOwnLuckRoll,
     })
@@ -281,6 +311,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const d20Second = mode !== 'normal'
       ? await input.rollD20(`受伤触发豁免（${mode === 'advantage' ? '优势' : '劣势'}）`, targetName)
       : undefined
+    const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '受伤触发豁免', targetName)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
       ? await input.rollD4('祝福术·受伤触发豁免加值', targetName)
       : undefined
@@ -290,7 +321,9 @@ export async function settleDnd5eConcentrationChecks(input: {
     const modifier = combatant.savingThrowBonuses[check.ability] ??
       Math.floor((combatant.abilities[check.ability] - 10) / 2)
     const initial = previewDnd5eSavingThrowRoll({
-      rolls: mode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      rolls: mode === 'normal'
+        ? [halflingLucky.first ?? d20]
+        : [halflingLucky.first ?? d20, halflingLucky.second ?? d20Second ?? 0],
       mode,
       modifier: modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       dc: check.dc,
@@ -323,6 +356,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const resolved = resolveDnd5eHeadlessAction(state, {
       type: 'active-effect-damage-save', actorId: combatant.id, effectId: check.effectId,
       d20, d20Second, blessRoll, baneRoll,
+      halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       rerollD20: reroll?.d20, rerollD20Second: reroll?.d20Second,
       bardicInspirationRoll, darkOnesOwnLuckRoll,
     })
@@ -339,6 +373,7 @@ export async function settleDnd5eConcentrationChecks(input: {
     const d20Second = combatant.exhaustionLevel >= 3
       ? await input.rollD20('专注·体质豁免（劣势）', targetName)
       : undefined
+    const halflingLucky = await rollHalflingLucky(combatant, d20, d20Second, '专注豁免', targetName)
     const mode = combatant.exhaustionLevel >= 3 ? 'disadvantage' as const : 'normal' as const
     const modifier = combatant.savingThrowBonuses.con ?? Math.floor((combatant.abilities.con - 10) / 2)
     const blessRoll = dnd5eCombatantHasConcentrationEffect(state, combatant.id, 'bless')
@@ -348,7 +383,9 @@ export async function settleDnd5eConcentrationChecks(input: {
       ? await input.rollD4('灾祸术·专注豁免减值', targetName)
       : undefined
     const initial = previewDnd5eSavingThrowRoll({
-      rolls: mode === 'normal' ? [d20] : [d20, d20Second ?? 0],
+      rolls: mode === 'normal'
+        ? [halflingLucky.first ?? d20]
+        : [halflingLucky.first ?? d20, halflingLucky.second ?? d20Second ?? 0],
       mode,
       modifier: modifier + (blessRoll ?? 0) - (baneRoll ?? 0),
       dc: check.dc,
@@ -387,6 +424,7 @@ export async function settleDnd5eConcentrationChecks(input: {
       : undefined
     const resolved = resolveDnd5eHeadlessAction(state, {
       type: 'concentration-save', actorId: check.targetId, d20, d20Second,
+      halflingLuckyD20: halflingLucky.first, halflingLuckyD20Second: halflingLucky.second,
       blessRoll,
       baneRoll,
       rerollD20: reroll?.d20, rerollD20Second: reroll?.d20Second,
@@ -420,6 +458,8 @@ export async function settleDnd5eConcentrationChecks(input: {
       ) continue
       const accepted = await input.requestHellishRebuke({
         reactor: reactorCharacter,
+        reactorTokenId: damageEvent.targetId,
+        targetTokenId: damageEvent.sourceId,
         sourceName: input.map.tokens.find((token) => token.id === damageSource.id)?.label ?? damageSource.name,
         damage: damageEvent.amount,
         slotLevel,
@@ -435,6 +475,13 @@ export async function settleDnd5eConcentrationChecks(input: {
       const savingThrowD20Second = mode !== 'normal'
         ? await input.rollD20(`炼狱叱喝·敏捷豁免（${mode === 'advantage' ? '优势' : '劣势'}）`, sourceName)
         : undefined
+      const halflingLucky = await rollHalflingLucky(
+        damageSource,
+        savingThrowD20,
+        savingThrowD20Second,
+        '炼狱叱喝豁免',
+        sourceName,
+      )
       const savingThrowBlessRoll = dnd5eCombatantHasConcentrationEffect(state, damageSource.id, 'bless')
         ? await input.rollD4('祝福术·炼狱叱喝豁免加值', sourceName)
         : undefined
@@ -447,10 +494,14 @@ export async function settleDnd5eConcentrationChecks(input: {
         '炼狱叱喝·火焰伤害',
         sourceName,
       )
+      const racialInnate = dnd5eRacialInnateSpellGrant(reactor.racialRules, 'hellish-rebuke')?.castAtLevel === slotLevel
       const reaction = resolveDnd5eHeadlessAction(state, {
         type: 'hellish-rebuke', actorId: reactor.id, targetId: damageSource.id,
+        racialInnate,
         slotLevel, triggerDamageAmount: damageEvent.amount,
         savingThrowD20, savingThrowD20Second, savingThrowBlessRoll, savingThrowBaneRoll,
+        halflingLuckyD20: halflingLucky.first,
+        halflingLuckyD20Second: halflingLucky.second,
         effectRolls,
       })
       if (!reaction.ok) continue

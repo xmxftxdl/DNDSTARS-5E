@@ -13,7 +13,7 @@ export interface MapAoeTargetingSessionInput {
   } | null
   spellArea?: {
     characterId: string
-    castingClassId: string
+    castingClassId?: string
     spellId: string
     slotLevel: number
     sustainedEffectAreaId?: string
@@ -40,7 +40,7 @@ export function mapAoeTargetingSessionKey(input: MapAoeTargetingSessionInput): s
     return [
       'spell',
       spell.characterId,
-      spell.castingClassId,
+      spell.castingClassId ?? 'racial-innate',
       spell.spellId,
       spell.slotLevel,
       spell.sustainedEffectAreaId ?? '',

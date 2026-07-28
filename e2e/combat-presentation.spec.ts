@@ -1,11 +1,34 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
 
 async function putState(request: APIRequestContext, name: string, payload: unknown) {
-  const response = await request.put(`${DM}/api/state/${name}`, { data: payload })
+  const current = await request.get(`${DM}/api/state/${name}`)
+  const currentBody = current.ok()
+    ? await current.json() as { updatedAt?: number }
+    : null
+  const nextPayload = payload && typeof payload === 'object'
+    ? {
+        ...payload,
+        updatedAt: Math.max(
+          Date.now(),
+          Number((payload as { updatedAt?: number }).updatedAt ?? 0),
+          Number(currentBody?.updatedAt ?? 0) + 1,
+        ),
+      }
+    : payload
+  const response = await request.put(`${DM}/api/state/${name}`, { data: nextPayload })
   expect(response.ok(), `${name} should save`).toBeTruthy()
+  const result = await response.json() as { applied?: boolean }
+  expect(result.applied, `${name} should be applied`).not.toBe(false)
+}
+
+async function hydrateMaps(page: Page) {
+  await page.evaluate(async () => {
+    const { useMapStore } = await import('/src/store/maps.ts')
+    await useMapStore.getState().loadShared()
+  })
 }
 
 test('DM publishes a Fire Bolt presentation through SSE and the player renders it', async ({ browser, request }) => {
@@ -37,6 +60,11 @@ test('DM publishes a Fire Bolt presentation through SSE and the player renders i
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await Promise.all([
+    dm.waitForURL(/\/campaign\/local\/maps$/),
+    player.waitForURL(/\/campaign\/local\/maps$/),
+  ])
+  await Promise.all([hydrateMaps(dm), hydrateMaps(player)])
   await Promise.all([
     expect(dm.getByTestId('map-canvas')).toBeVisible(),
     expect(player.getByTestId('map-canvas')).toBeVisible(),
@@ -88,6 +116,11 @@ test('DM publishes Fireball flight and area explosion through SSE', async ({ bro
     dm.goto(`${DM}/maps`, { waitUntil: 'domcontentloaded' }),
     player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' }),
   ])
+  await Promise.all([
+    dm.waitForURL(/\/campaign\/local\/maps$/),
+    player.waitForURL(/\/campaign\/local\/maps$/),
+  ])
+  await Promise.all([hydrateMaps(dm), hydrateMaps(player)])
   await Promise.all([
     expect(dm.getByTestId('map-canvas')).toBeVisible(),
     expect(player.getByTestId('map-canvas')).toBeVisible(),
@@ -233,5 +266,638 @@ test('four class-colored cantrip animations render before settlement', async ({
   await expect.poll(async () =>
     Number(await canvas.getAttribute('data-combat-projectile-count')),
   ).toBe(0)
+  await context.close()
+})
+
+test('material spell VFX render from texture assets', async ({ browser, request }, testInfo) => {
+  const now = Date.now()
+  const mapId = `material-spell-vfx-${now}`
+  const spellKinds = [
+    'fire-bolt',
+    'produce-flame',
+    'ray-of-frost',
+    'eldritch-blast',
+    'sacred-flame',
+    'chill-touch',
+  ] as const
+  const tokens = spellKinds.flatMap((kind, index) => {
+    const y = 90 + index * 95
+    return [
+      {
+        id: `${kind}-caster`,
+        label: kind,
+        x: 105,
+        y,
+        color: '#8b5cf6',
+        emoji: '🧙',
+        size: 1,
+        type: 'player',
+      },
+      {
+        id: `${kind}-target`,
+        label: `${kind} target`,
+        x: 490,
+        y,
+        color: '#ef4444',
+        emoji: '👹',
+        size: 1,
+        type: 'enemy',
+      },
+    ]
+  })
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Material Spell VFX E2E',
+      width: 700,
+      height: 660,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens,
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_050, height: 920 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await player.waitForTimeout(1_500)
+
+  await player.evaluate(async ({ activeMapId, kinds }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
+    const stamp = Date.now()
+    const publish = {
+      'fire-bolt': presentation.publishFireBoltPresentation,
+      'produce-flame': presentation.publishProduceFlamePresentation,
+      'ray-of-frost': presentation.publishRayOfFrostPresentation,
+      'eldritch-blast': presentation.publishEldritchBlastPresentation,
+      'sacred-flame': presentation.publishSacredFlamePresentation,
+      'chill-touch': presentation.publishChillTouchPresentation,
+    }
+    void Promise.all(kinds.map((kind) =>
+      publish[kind]({
+        id: `e2e-${kind}-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-${kind}-tx-${stamp}`,
+        sourceTokenId: `${kind}-caster`,
+        targetTokenId: `${kind}-target`,
+      }),
+    ))
+  }, { activeMapId: mapId, kinds: spellKinds })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return spellKinds.every((kind) => kinds.includes(kind))
+  }).toBe(true)
+  await player.waitForTimeout(80)
+  await player.getByTestId('map-canvas').screenshot({
+    path: process.env.MATERIAL_SPELL_VFX_SCREENSHOT_PATH ??
+      testInfo.outputPath('material-spell-vfx.png'),
+  })
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
+test('next ranged spell VFX render from texture assets', async ({ browser, request }, testInfo) => {
+  const now = Date.now()
+  const mapId = `next-ranged-spell-vfx-${now}`
+  const spellKinds = [
+    'magic-missile',
+    'scorching-ray',
+    'guiding-bolt',
+    'acid-arrow',
+  ] as const
+  const tokens = spellKinds.flatMap((kind, index) => {
+    const y = 110 + index * 135
+    return [
+      {
+        id: `${kind}-caster`,
+        label: kind,
+        x: 110,
+        y,
+        color: '#8b5cf6',
+        emoji: '🧙',
+        size: 1,
+        type: 'player',
+      },
+      {
+        id: `${kind}-target`,
+        label: `${kind} target`,
+        x: 560,
+        y,
+        color: '#ef4444',
+        emoji: '👹',
+        size: 1,
+        type: 'enemy',
+      },
+    ]
+  })
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Next Ranged Spell VFX E2E',
+      width: 760,
+      height: 650,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens,
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_100, height: 900 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await player.waitForTimeout(1_500)
+
+  await player.evaluate(async ({ activeMapId, kinds }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
+    const stamp = Date.now()
+    const publish = {
+      'magic-missile': presentation.publishMagicMissilePresentation,
+      'scorching-ray': presentation.publishScorchingRayPresentation,
+      'guiding-bolt': presentation.publishGuidingBoltPresentation,
+      'acid-arrow': presentation.publishAcidArrowPresentation,
+    }
+    void Promise.all(kinds.map((kind) =>
+      publish[kind]({
+        id: `e2e-${kind}-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-${kind}-tx-${stamp}`,
+        sourceTokenId: `${kind}-caster`,
+        targetTokenId: `${kind}-target`,
+      }),
+    ))
+  }, { activeMapId: mapId, kinds: spellKinds })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return spellKinds.every((kind) => kinds.includes(kind))
+  }).toBe(true)
+  await player.waitForTimeout(100)
+  await canvas.screenshot({
+    path: process.env.NEXT_SPELL_VFX_SCREENSHOT_PATH ??
+      testInfo.outputPath('next-ranged-spell-vfx.png'),
+  })
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
+test('healing and necrotic spell VFX render from texture assets', async ({ browser, request }, testInfo) => {
+  const now = Date.now()
+  const mapId = `healing-necrotic-spell-vfx-${now}`
+  const spellKinds = [
+    'cure-wounds',
+    'healing-word',
+    'inflict-wounds',
+    'hellish-rebuke',
+  ] as const
+  const tokens = spellKinds.flatMap((kind, index) => {
+    const y = 110 + index * 135
+    return [
+      {
+        id: `${kind}-caster`,
+        label: kind,
+        x: 110,
+        y,
+        color: '#8b5cf6',
+        emoji: '🧙',
+        size: 1,
+        type: 'player',
+      },
+      {
+        id: `${kind}-target`,
+        label: `${kind} target`,
+        x: 560,
+        y,
+        color: kind === 'cure-wounds' || kind === 'healing-word' ? '#22c55e' : '#ef4444',
+        emoji: kind === 'cure-wounds' || kind === 'healing-word' ? '🧝' : '👹',
+        size: 1,
+        type: kind === 'cure-wounds' || kind === 'healing-word' ? 'player' : 'enemy',
+      },
+    ]
+  })
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Healing and Necrotic Spell VFX E2E',
+      width: 760,
+      height: 650,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens,
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_100, height: 900 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await player.waitForTimeout(1_500)
+
+  await player.evaluate(async ({ activeMapId, kinds }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
+    const stamp = Date.now()
+    const publish = {
+      'cure-wounds': presentation.publishCureWoundsPresentation,
+      'healing-word': presentation.publishHealingWordPresentation,
+      'inflict-wounds': presentation.publishInflictWoundsPresentation,
+      'hellish-rebuke': presentation.publishHellishRebukePresentation,
+    }
+    void Promise.all(kinds.map((kind) =>
+      publish[kind]({
+        id: `e2e-${kind}-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-${kind}-tx-${stamp}`,
+        sourceTokenId: `${kind}-caster`,
+        targetTokenId: `${kind}-target`,
+      }),
+    ))
+  }, { activeMapId: mapId, kinds: spellKinds })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return spellKinds.every((kind) => kinds.includes(kind))
+  }).toBe(true)
+  await player.waitForTimeout(100)
+  await canvas.screenshot({
+    path: process.env.HEALING_NECROTIC_VFX_SCREENSHOT_PATH ??
+      testInfo.outputPath('healing-necrotic-spell-vfx.png'),
+  })
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
+test('area spell VFX follow selected map geometry', async ({ browser, request }, testInfo) => {
+  const now = Date.now()
+  const mapId = `area-spell-vfx-${now}`
+  const spellKinds = [
+    'burning-hands',
+    'thunderwave',
+    'shatter',
+    'lightning-bolt',
+  ] as const
+  const tokens = spellKinds.map((kind, index) => ({
+    id: `${kind}-caster`,
+    label: kind,
+    x: 140,
+    y: 100 + index * 160,
+    color: '#8b5cf6',
+    emoji: '🧙',
+    size: 1,
+    type: 'player',
+  }))
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Area Spell VFX E2E',
+      width: 1_100,
+      height: 720,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens,
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_350, height: 950 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await player.waitForTimeout(1_500)
+
+  await player.evaluate(async ({ activeMapId, kinds }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
+    const stamp = Date.now()
+    const geometry = {
+      'burning-hands': {
+        targetCell: { col: 5, row: 1 },
+        shape: 'cone' as const,
+        lengthFeet: 15,
+        widthFeet: 15,
+      },
+      thunderwave: {
+        targetCell: { col: 5, row: 3 },
+        shape: 'line' as const,
+        lengthFeet: 15,
+        widthFeet: 15,
+      },
+      shatter: {
+        targetCell: { col: 7, row: 6 },
+        shape: 'circle' as const,
+        radiusFeet: 10,
+      },
+      'lightning-bolt': {
+        targetCell: { col: 5, row: 8 },
+        shape: 'line' as const,
+        lengthFeet: 100,
+        widthFeet: 5,
+      },
+    }
+    await Promise.all(kinds.map((kind) =>
+      presentation.publishAreaSpellPresentation({
+        id: `e2e-${kind}-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-${kind}-tx-${stamp}`,
+        sourceTokenId: `${kind}-caster`,
+        spellId: kind,
+        ...geometry[kind],
+      }),
+    ))
+  }, { activeMapId: mapId, kinds: spellKinds })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return spellKinds.every((kind) => kinds.includes(kind))
+  }).toBe(true)
+  await player.waitForTimeout(110)
+  await canvas.screenshot({
+    path: process.env.AREA_SPELL_VFX_SCREENSHOT_PATH ??
+      testInfo.outputPath('area-spell-vfx.png'),
+  })
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
+test('persistent buff and debuff spell badges stack without overlap', async ({ browser, request }, testInfo) => {
+  const now = Date.now()
+  const mapId = `persistent-spell-badges-${now}`
+  const statusKinds = [
+    'bless',
+    'bane',
+    'shield-of-faith',
+    'mage-armor',
+    'jump',
+    'darkvision',
+    'see-invisibility',
+    'warding-bond',
+    'fly',
+    'heroism',
+    'enlarge-reduce',
+    'enhance-ability',
+    'divine-favor',
+    'hunters-mark',
+    'magic-weapon',
+    'flame-blade',
+    'invisibility',
+    'blur',
+    'barkskin',
+    'protection-from-poison',
+    'longstrider',
+    'protection-from-energy',
+    'death-ward',
+    'greater-invisibility',
+    'charm-person',
+    'hideous-laughter',
+    'hold-person',
+    'blindness-deafness',
+  ] as const
+  const manifestationKinds = [
+    'charm-person',
+    'hideous-laughter',
+    'hold-person',
+    'blindness-deafness',
+  ] as const
+  const sourceTokens = statusKinds.map((kind, index) => ({
+    id: `${kind}-source`,
+    label: `${kind} source`,
+    x: 80 + Math.floor(index / 7) * 105,
+    y: 45 + (index % 7) * 78,
+    color: '#8b5cf6',
+    emoji: '🧙',
+    size: 1,
+    type: 'player',
+  }))
+  const targetToken = {
+    id: 'persistent-status-target',
+    label: 'Persistent Status Target',
+    x: 610,
+    y: 320,
+    color: '#38bdf8',
+    emoji: '🛡️',
+    size: 1,
+    type: 'player',
+    dnd5eCombatState: {
+      schemaVersion: 2,
+      concentrationEffectsBySource: {
+        'bless-source': 'bless',
+        'bane-source': 'bane',
+        'shield-of-faith-source': 'shield-of-faith',
+        'hunters-mark-source': 'hunters-mark',
+      },
+      activeEffects: [{
+        schemaVersion: 1,
+        id: 'mage-armor-e2e-effect',
+        definitionId: 'srd-5.1:spell:mage-armor',
+        label: 'Mage Armor',
+        kind: 'buff',
+        source: {
+          kind: 'spell',
+          actorId: 'mage-armor-source',
+          actorName: 'Mage Armor Source',
+          rulesId: 'mage-armor',
+        },
+        appliedAt: now,
+        appliedRound: 1,
+        duration: {
+          type: 'rounds',
+          remainingRounds: 4_800,
+          tickOn: 'target-turn-end',
+        },
+        stackingKey: 'srd-5.1:spell:mage-armor',
+        stackingPolicy: 'refresh-duration',
+        visibility: 'public',
+      }, ...([
+        'jump',
+        'darkvision',
+        'see-invisibility',
+        'warding-bond',
+        'fly',
+        'heroism',
+        'enlarge-reduce',
+        'enhance-ability',
+        'divine-favor',
+        'magic-weapon',
+        'flame-blade',
+        'invisibility',
+        'blur',
+        'barkskin',
+        'protection-from-poison',
+        'longstrider',
+        'protection-from-energy',
+        'death-ward',
+        'greater-invisibility',
+        'charm-person',
+        'hideous-laughter',
+        'hold-person',
+        'blindness-deafness',
+      ] as const)
+        .map((spellId) => ({
+          schemaVersion: 1 as const,
+          id: `${spellId}-e2e-effect`,
+          definitionId: `srd-5.1:spell:${spellId}`,
+          label: spellId,
+          kind: 'buff' as const,
+          source: {
+            kind: 'spell' as const,
+            actorId: `${spellId}-source`,
+            actorName: `${spellId} Source`,
+            rulesId: spellId,
+          },
+          appliedAt: now,
+          appliedRound: 1,
+          duration: {
+            type: 'rounds' as const,
+            remainingRounds: 100,
+            tickOn: 'target-turn-end' as const,
+          },
+          stackingKey: `srd-5.1:spell:${spellId}`,
+          stackingPolicy: 'refresh-duration' as const,
+          visibility: 'public' as const,
+        }))],
+    },
+  }
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Persistent Spell Badges E2E',
+      width: 760,
+      height: 620,
+      gridSize: 100,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [...sourceTokens, targetToken],
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_100, height: 900 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await expect(canvas).toHaveAttribute('data-spell-status-token-count', '28')
+
+  await player.evaluate(async ({ activeMapId, kinds, targetTokenId }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
+    const publish = {
+      bless: presentation.publishBlessPresentation,
+      bane: presentation.publishBanePresentation,
+      'shield-of-faith': presentation.publishShieldOfFaithPresentation,
+      'mage-armor': presentation.publishMageArmorPresentation,
+      jump: presentation.publishJumpPresentation,
+      darkvision: presentation.publishDarkvisionPresentation,
+      'see-invisibility': presentation.publishSeeInvisibilityPresentation,
+      'warding-bond': presentation.publishWardingBondPresentation,
+      fly: presentation.publishFlyPresentation,
+      heroism: presentation.publishHeroismPresentation,
+      'enlarge-reduce': presentation.publishEnlargeReducePresentation,
+      'enhance-ability': presentation.publishEnhanceAbilityPresentation,
+      'divine-favor': presentation.publishDivineFavorPresentation,
+      'hunters-mark': presentation.publishHuntersMarkPresentation,
+      'magic-weapon': presentation.publishMagicWeaponPresentation,
+      'flame-blade': presentation.publishFlameBladePresentation,
+      invisibility: presentation.publishInvisibilityPresentation,
+      blur: presentation.publishBlurPresentation,
+      barkskin: presentation.publishBarkskinPresentation,
+      'protection-from-poison': presentation.publishProtectionFromPoisonPresentation,
+      longstrider: presentation.publishLongstriderPresentation,
+      'protection-from-energy': presentation.publishProtectionFromEnergyPresentation,
+      'death-ward': presentation.publishDeathWardPresentation,
+      'greater-invisibility': presentation.publishGreaterInvisibilityPresentation,
+      'charm-person': presentation.publishCharmPersonPresentation,
+      'hideous-laughter': presentation.publishHideousLaughterPresentation,
+      'hold-person': presentation.publishHoldPersonPresentation,
+      'blindness-deafness': presentation.publishBlindnessDeafnessPresentation,
+    }
+    const stamp = Date.now()
+    void Promise.all(kinds.map((kind, index) =>
+      publish[kind]({
+        id: `e2e-${kind}-${stamp}`,
+        mapId: activeMapId,
+        transactionId: `e2e-${kind}-tx-${stamp}`,
+        sourceTokenId: `${kind}-source`,
+        targetTokenId,
+        accentColor: ['#22c55e', '#7c3aed', '#f59e0b', '#3b82f6', '#16a34a', '#1d4ed8', '#9333ea', '#dc2626', '#0891b2', '#ea580c', '#65a30d', '#c026d3', '#eab308', '#15803d', '#2563eb', '#f97316'][index],
+        glowColor: ['#dcfce7', '#ede9fe', '#fef3c7', '#dbeafe', '#bbf7d0', '#bfdbfe', '#e9d5ff', '#fecaca', '#cffafe', '#ffedd5', '#ecfccb', '#fae8ff', '#fef9c3', '#dcfce7', '#dbeafe', '#ffedd5'][index],
+      }),
+    ))
+  }, {
+    activeMapId: mapId,
+    kinds: manifestationKinds,
+    targetTokenId: targetToken.id,
+  })
+
+  await expect.poll(async () => {
+    const kinds = (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return manifestationKinds.every((kind) => kinds.includes(kind))
+  }).toBe(true)
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await expect(canvas).toHaveAttribute('data-spell-status-token-count', '28')
+  await canvas.screenshot({
+    path: process.env.PERSISTENT_SPELL_BADGES_SCREENSHOT_PATH ??
+      testInfo.outputPath('persistent-spell-badges.png'),
+  })
   await context.close()
 })

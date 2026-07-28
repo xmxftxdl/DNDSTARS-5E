@@ -207,32 +207,72 @@ async function sendPlayer2Action(page: Page, action: Record<string, unknown>) {
       'X-Stars-Protocol': '5',
       'X-Stars-Writer': 'e2e-player2-direct-client',
     }
-    const queueRes = await fetch('http://127.0.0.1:6173/api/state/player-action-requests')
-    const queue = queueRes.ok
-      ? ((await queueRes.json()) as { requests?: Record<string, unknown>[]; _sync?: { revision?: number } })
-      : { requests: [] }
-    const revision = Number(queueRes.headers.get('X-Stars-State-Revision') ?? queue._sync?.revision ?? 0)
-    const put = await fetch('http://127.0.0.1:6173/api/state/player-action-requests', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...protocolHeaders,
-        'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0),
-      },
-      body: JSON.stringify({
-        mapId: payload.mapId,
-        combatId: payload.combatId,
-        requests: [...(queue.requests ?? []), payload],
-        updatedAt: Date.now(),
-      }),
-    })
-    if (!put.ok) throw new Error(`player-action request queue PUT failed: ${put.status}`)
-    const post = await fetch('http://127.0.0.1:6173/api/events/player-action-player-to-dm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...protocolHeaders },
-      body: JSON.stringify(payload),
-    })
-    if (!post.ok) throw new Error(`player-action event failed: ${post.status}`)
+    let queued = false
+    let queueError = ''
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const queueRes = await fetch('http://127.0.0.1:6173/api/state/player-action-requests')
+        const queue = queueRes.ok
+          ? ((await queueRes.json()) as { requests?: Record<string, unknown>[]; _sync?: { revision?: number } })
+          : { requests: [] }
+        if (!queueRes.ok && queueRes.status !== 404) {
+          queueError = `GET ${queueRes.status}`
+        } else {
+          const requests = queue.requests ?? []
+          if (requests.some((request) => request.id === payload.id)) {
+            queued = true
+            break
+          }
+          const revision = Number(queueRes.headers.get('X-Stars-State-Revision') ?? queue._sync?.revision ?? 0)
+          const put = await fetch('http://127.0.0.1:6173/api/state/player-action-requests', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...protocolHeaders,
+              'X-Stars-Expected-Revision': String(Number.isInteger(revision) ? revision : 0),
+            },
+            body: JSON.stringify({
+              mapId: payload.mapId,
+              combatId: payload.combatId,
+              requests: [...requests, payload],
+              updatedAt: Date.now(),
+            }),
+          })
+          if (put.ok) {
+            queued = true
+            break
+          }
+          queueError = `${put.status}: ${await put.text()}`
+          if (put.status < 500 && put.status !== 409) break
+        }
+      } catch (error) {
+        queueError = error instanceof Error ? error.message : String(error)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80 * 2 ** attempt))
+    }
+    if (!queued) throw new Error(`player-action request queue PUT failed: ${queueError}`)
+
+    let posted = false
+    let postError = ''
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const post = await fetch('http://127.0.0.1:6173/api/events/player-action-player-to-dm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...protocolHeaders },
+          body: JSON.stringify(payload),
+        })
+        if (post.ok) {
+          posted = true
+          break
+        }
+        postError = `${post.status}: ${await post.text()}`
+        if (post.status < 500) break
+      } catch (error) {
+        postError = error instanceof Error ? error.message : String(error)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80 * 2 ** attempt))
+    }
+    if (!posted) throw new Error(`player-action event failed: ${postError}`)
   }, action)
 }
 

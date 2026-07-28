@@ -7,6 +7,7 @@ import { getEnemyStatBlock } from '../lib/enemyStatBlocks'
 import type { Token } from '../store/maps'
 import type { Character } from '../types/character'
 import type { RoomSession } from '../lib/roomSession'
+import { resolveInitiativePortrait } from '../lib/portraitPresentation'
 
 export function placeableRoomCharacters(
   characters: readonly Character[],
@@ -68,7 +69,7 @@ export function buildInitiativeOrder(tokens: Token[], characters: Character[]): 
         tokenId: token.id,
         label: ch?.name || token.label,
         emoji: ch?.avatar || token.emoji,
-        portrait: ch?.initiativePortrait ?? ch?.portrait ?? token.portrait,
+        portrait: resolveInitiativePortrait(ch, token),
         portraitImageId: token.portraitImageId,
         color: token.color,
         accent: ch?.accent,

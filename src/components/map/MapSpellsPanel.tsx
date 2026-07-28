@@ -6,7 +6,7 @@ import Dnd5eActionIcon from './Dnd5eActionIcon'
 import { dnd5eSpellActionIcon } from '../../lib/dnd5eActionIcons'
 
 import { classResourceDefinitions, getClassResource } from '../../lib/classResources'
-import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_SRD_CLASS_DEFINITIONS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, normalizeDnd5eClassLevels, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
+import { DND5E_IMPLEMENTED_METAMAGIC_IDS, DND5E_RACIAL_RESOURCE_KEYS, DND5E_SRD_CLASS_DEFINITIONS, dnd5eCanEmpowerSpell, dnd5eCanOverchannelSpell, dnd5eClassProgression, dnd5eDraconicElementalResistanceType, dnd5eFreeSpellCastSource, dnd5eMetamagicAvailableForSpell, dnd5eMetamagicCost, dnd5eMetamagicLabel, dnd5ePactSlotLevel, dnd5ePluginSpellAutomationSupported, dnd5ePluginSpellDefinition, dnd5eRacialRulesForCharacter, dnd5eSelectedSpellIdsForClass, dnd5eSpellAreaLabel, dnd5eSpellbookEntriesWithPlugins, dnd5eSpellbookEntryCastingTime, dnd5eSpellbookEntryDescription, getDnd5eSrdCombatSpell, normalizeDnd5eClassLevels, registeredDnd5ePluginSpells, type Dnd5eClassId } from '../../rulesets/dnd5e'
 
 const DAMAGE_TYPE_LABELS: Record<string, string> = {
   acid: '强酸', cold: '冷冻', fire: '火焰', lightning: '闪电', poison: '毒素',
@@ -50,7 +50,7 @@ interface MapSpellsPanelProps {
   }[]
   movingPersistentAreaId?: string
   requestedFocusedSpellId?: string
-  onCastSpell?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId, options?: { overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
+  onCastSpell?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId | undefined, options?: { racialInnate?: boolean; overchannel?: boolean; metamagic?: Dnd5eSpellMetamagicPayload; empowered?: boolean; draconicResistance?: boolean; repellingBlast?: boolean }) => void
   onRequestAdjudication?: (spellId: string, slotLevel: number, castingClassId: Dnd5eClassId) => void
   onConfirmSpellTargets?: () => void
   onUndoSpellTarget?: () => void
@@ -111,8 +111,40 @@ export default function MapSpellsPanel({
       !!candidate.spellcasting && (classLevels[candidate.id] ?? 0) > 0,
     )
     const definition = castingDefinitions.find((candidate) => candidate.id === selectedCastingClassId) ?? castingDefinitions[0]
+    const racialInnateSpells = dnd5eRacialRulesForCharacter(c).innateSpells.flatMap((grant) => {
+      const spell = getDnd5eSrdCombatSpell(grant.spellId)
+      return spell ? [{ grant, spell }] : []
+    })
+    const racialInnatePanel = racialInnateSpells.length > 0 ? <section className="rounded-2xl border border-amber-300/20 bg-amber-500/[0.05] p-3">
+      <div>
+        <h4 className="text-sm font-semibold text-amber-100">种族先天法术</h4>
+        <p className="mt-1 text-[11px] text-slate-500">使用种族施法属性与独立次数；不会消耗职业法术位。</p>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {racialInnateSpells.map(({ grant, spell }) => {
+          const resource = grant.resetOn === 'long-rest'
+            ? getClassResource(c, DND5E_RACIAL_RESOURCE_KEYS.innateSpell(spell.id))
+            : undefined
+          const reaction = spell.castingTime === 'reaction'
+          const unavailable = grant.resetOn === 'long-rest' && (resource?.current ?? 0) < 1
+          return <button
+            key={`racial:${spell.id}`}
+            type="button"
+            disabled={!canAct || pending || reaction || unavailable}
+            onClick={() => onCastSpell?.(spell.id, grant.castAtLevel, undefined, { racialInnate: true })}
+            className="rounded-xl border border-amber-300/20 bg-black/20 px-3 py-2 text-left transition hover:border-amber-300/40 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <span className="block text-xs font-semibold text-amber-100">{spell.name}</span>
+            <span className="mt-1 block text-[10px] text-slate-400">
+              {grant.castAtLevel === 0 ? '戏法 · 随意施放' : `${grant.castAtLevel}环 · ${resource?.current ?? 0}/${resource?.max ?? 1}`}
+              {reaction ? ' · 触发受伤时自动询问' : ' · Headless'}
+            </span>
+          </button>
+        })}
+      </div>
+    </section> : null
     if (!definition?.spellcasting) {
-      return <p className="py-6 text-center text-sm text-slate-500">该职业在 SRD 5.1 中没有施法或契约魔法。</p>
+      return racialInnatePanel ?? <p className="py-6 text-center text-sm text-slate-500">该职业在 SRD 5.1 中没有施法或契约魔法。</p>
     }
     const classLevel = classLevels[definition.id] ?? 0
     const progression = dnd5eClassProgression(definition)[Math.max(0, Math.min(19, classLevel - 1))]
@@ -143,6 +175,7 @@ export default function MapSpellsPanel({
         school: spell.school,
         effect: spell.effect,
         damageType: spell.damageType,
+        iconAssetId: undefined,
         automation: 'headless' as const,
         economy: spell.castingTime,
       })),
@@ -155,6 +188,7 @@ export default function MapSpellsPanel({
         effect: entry.imported?.mechanics?.resolution,
         damageType: entry.imported?.mechanics?.damage?.type,
         tags: entry.imported?.tags,
+        iconAssetId: entry.iconAssetId,
         automation: 'headless' as const,
         economy: entry.imported?.castingTime.unit ?? 'action',
       })),
@@ -165,6 +199,7 @@ export default function MapSpellsPanel({
         level: entry.level,
         school: entry.imported?.school ?? entry.reference?.school,
         tags: entry.imported?.tags,
+        iconAssetId: entry.iconAssetId,
         automation: 'manual' as const,
         economy: dnd5eSpellbookEntryCastingTime(entry),
       })),
@@ -181,6 +216,7 @@ export default function MapSpellsPanel({
       (definition.id !== 'druid' || classLevel < 18)
     return (
       <div className="space-y-3 py-2">
+        {racialInnatePanel}
         {castingDefinitions.length > 1 ? <label className="flex items-center justify-between gap-3 rounded-xl border border-violet-400/15 bg-violet-500/[0.04] p-3 text-xs text-slate-400">
           <span>施法职业</span>
           <select
@@ -232,7 +268,7 @@ export default function MapSpellsPanel({
                 className={`group rounded-xl border p-1.5 text-center transition ${active ? 'border-amber-300/60 bg-amber-400/10 shadow-[0_0_22px_rgba(251,191,36,0.15)]' : 'border-white/8 bg-white/[0.025] hover:-translate-y-0.5 hover:border-violet-300/30 hover:bg-violet-500/[0.07]'}`}
               >
                 <Dnd5eActionIcon
-                  spec={dnd5eSpellActionIcon({ ...spell, castingClassId: definition.id })}
+                  spec={dnd5eSpellActionIcon({ ...spell, castingClassId: definition.id, iconAssetId: spell.iconAssetId })}
                   level={spell.level}
                   active={active}
                   disabled={wildShapeBlocksSpellcasting || unsupported}

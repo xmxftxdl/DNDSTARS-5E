@@ -122,4 +122,44 @@ describe('PlayerCombatHotbar', () => {
     expect(html).toContain('aria-label="强效法术"')
     expect(html).toContain('5 项 · 1/2')
   })
+
+  it('道具栏固定显示七个快捷槽，并将第八格保留为完整背包入口', () => {
+    const inventoryCharacter: Character = {
+      ...character(),
+      dnd5eInventory: {
+        schemaVersion: 3,
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        entries: Array.from({ length: 9 }, (_, index) => ({
+          instanceId: `item-${index + 1}`,
+          templateId: `template-${index + 1}`,
+          quantity: 1,
+          acquiredAt: index + 1,
+          identified: true,
+          item: {
+            id: `template-${index + 1}`,
+            name: `道具-${index + 1}`,
+            category: 'adventuring-gear' as const,
+            icon: 'generic' as const,
+            description: `第 ${index + 1} 件道具`,
+            rulesText: '由背包查看详情。',
+            stackable: false,
+            source: { book: 'SRD 5.1', license: 'CC BY 4.0' },
+          },
+        })),
+      },
+    }
+    const html = renderToStaticMarkup(createElement(PlayerCombatHotbar, {
+      character: inventoryCharacter,
+      canAct: true,
+      pending: false,
+      turnEconomy: { action: { current: 1 }, bonusAction: { current: 1 }, movement: { current: 30 } },
+      onCommand: () => undefined,
+    }))
+
+    expect(html.match(/data-testid="combat-item-quick-slot-/g)).toHaveLength(7)
+    expect(html).toContain('data-testid="combat-item-backpack"')
+    expect(html).toContain('快捷 7/7 · 背包 9')
+    expect(html).toContain('aria-label="道具-7（打开背包查看）"')
+    expect(html).not.toContain('aria-label="道具-8（打开背包查看）"')
+  })
 })

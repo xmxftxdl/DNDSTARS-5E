@@ -122,6 +122,7 @@ export function useMapsPlayerActionTransport(input: {
   onAction: (action: SharedPlayerActionState) => Promise<void>
   clearPendingAction: () => void
   onActionRejected: (reason: string) => void
+  onActionAccepted?: (ack: SharedPlayerActionAckState) => void
 }): void {
   const {
     isDm,
@@ -135,15 +136,18 @@ export function useMapsPlayerActionTransport(input: {
     onAction,
     clearPendingAction,
     onActionRejected,
+    onActionAccepted,
   } = input
   const actionHandlerRef = useRef(onAction)
   const actionRejectedRef = useRef(onActionRejected)
+  const actionAcceptedRef = useRef(onActionAccepted)
   const getCombatIdRef = useRef(getCombatId)
   const clearPendingActionRef = useRef(clearPendingAction)
 
   useEffect(() => {
     actionHandlerRef.current = onAction
     actionRejectedRef.current = onActionRejected
+    actionAcceptedRef.current = onActionAccepted
     getCombatIdRef.current = getCombatId
     clearPendingActionRef.current = clearPendingAction
   })
@@ -186,11 +190,12 @@ export function useMapsPlayerActionTransport(input: {
     let cancelled = false
     const applyAck = (ack: SharedPlayerActionAckState | null) => {
       if (
-        ack?.status === 'rejected' &&
+        ack &&
         pendingActionRef.current?.id === ack.actionId &&
         !seenAckIdsRef.current.has(ack.id)
       ) {
-        actionRejectedRef.current(ack.reason ?? 'unknown')
+        if (ack.status === 'rejected') actionRejectedRef.current(ack.reason ?? 'unknown')
+        else actionAcceptedRef.current?.(ack)
       }
       void consumePlayerActionAck({
         ack,

@@ -10,6 +10,19 @@ export interface FireballPresentationSettlement {
   radiusFeet: number
 }
 
+export interface AreaSpellPresentationSettlement {
+  id: string
+  mapId: string
+  transactionId: string
+  sourceTokenId: string
+  spellId: 'burning-hands' | 'thunderwave' | 'shatter' | 'lightning-bolt'
+  targetCell: { col: number; row: number }
+  shape: 'cone' | 'line' | 'circle'
+  lengthFeet?: number
+  widthFeet?: number
+  radiusFeet?: number
+}
+
 export interface GuidancePresentationSettlement {
   id: string
   mapId: string
@@ -32,6 +45,41 @@ export type PreRollSpellPresentation = {
     | 'acid-splash'
     | 'poison-spray'
     | 'vicious-mockery'
+    | 'magic-missile'
+    | 'scorching-ray'
+    | 'guiding-bolt'
+    | 'acid-arrow'
+    | 'cure-wounds'
+    | 'healing-word'
+    | 'inflict-wounds'
+    | 'bless'
+    | 'bane'
+    | 'shield-of-faith'
+    | 'mage-armor'
+    | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
+    | 'warding-bond'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'enhance-ability'
+    | 'divine-favor'
+    | 'hunters-mark'
+    | 'magic-weapon'
+    | 'flame-blade'
+    | 'invisibility'
+    | 'blur'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'longstrider'
+    | 'protection-from-energy'
+    | 'death-ward'
+    | 'greater-invisibility'
+    | 'charm-person'
+    | 'hideous-laughter'
+    | 'hold-person'
+    | 'blindness-deafness'
   id: string
   mapId: string
   transactionId: string
@@ -63,6 +111,41 @@ export function spellPresentationsBeforeRoll(input: {
     'acid-splash',
     'poison-spray',
     'vicious-mockery',
+    'magic-missile',
+    'scorching-ray',
+    'guiding-bolt',
+    'acid-arrow',
+    'cure-wounds',
+    'healing-word',
+    'inflict-wounds',
+    'bless',
+    'bane',
+    'shield-of-faith',
+    'mage-armor',
+    'jump',
+    'darkvision',
+    'see-invisibility',
+    'warding-bond',
+    'fly',
+    'heroism',
+    'enlarge-reduce',
+    'enhance-ability',
+    'divine-favor',
+    'hunters-mark',
+    'magic-weapon',
+    'flame-blade',
+    'invisibility',
+    'blur',
+    'barkskin',
+    'protection-from-poison',
+    'longstrider',
+    'protection-from-energy',
+    'death-ward',
+    'greater-invisibility',
+    'charm-person',
+    'hideous-laughter',
+    'hold-person',
+    'blindness-deafness',
   ])
   if (!supported.has(input.spellId as PreRollSpellPresentation['spellId'])) return []
   const spellId = input.spellId as PreRollSpellPresentation['spellId']
@@ -101,6 +184,41 @@ export function fireballPresentationForSettlement(input: {
     sourceTokenId: input.actorTokenId,
     targetCell: { ...input.areaAnchorCell },
     radiusFeet: input.radiusFeet!,
+  }
+}
+
+export function areaSpellPresentationForSettlement(input: {
+  spellId: string
+  transactionId: string
+  mapId: string
+  actorTokenId: string
+  areaAnchorCell?: { col: number; row: number }
+}): AreaSpellPresentationSettlement | null {
+  if (
+    !input.areaAnchorCell ||
+    !Number.isInteger(input.areaAnchorCell.col) ||
+    !Number.isInteger(input.areaAnchorCell.row) ||
+    input.areaAnchorCell.col < 0 ||
+    input.areaAnchorCell.row < 0
+  ) return null
+  const area = {
+    'burning-hands': { shape: 'cone', lengthFeet: 15, widthFeet: 15 },
+    thunderwave: { shape: 'line', lengthFeet: 15, widthFeet: 15 },
+    shatter: { shape: 'circle', radiusFeet: 10 },
+    'lightning-bolt': { shape: 'line', lengthFeet: 100, widthFeet: 5 },
+  }[input.spellId] as Pick<
+    AreaSpellPresentationSettlement,
+    'shape' | 'lengthFeet' | 'widthFeet' | 'radiusFeet'
+  > | undefined
+  if (!area) return null
+  return {
+    id: `${input.transactionId}:${input.spellId}:area`,
+    mapId: input.mapId,
+    transactionId: input.transactionId,
+    sourceTokenId: input.actorTokenId,
+    spellId: input.spellId as AreaSpellPresentationSettlement['spellId'],
+    targetCell: { ...input.areaAnchorCell },
+    ...area,
   }
 }
 
@@ -180,6 +298,212 @@ export function hasSanctuaryPresentationEffect(combatState: {
   )
 }
 
+export function hasBlessPresentationEffect(combatState: {
+  concentrationEffectsBySource?: Readonly<Record<string, string>>
+} | undefined): boolean {
+  return Object.values(combatState?.concentrationEffectsBySource ?? {}).includes('bless')
+}
+
+export function hasBanePresentationEffect(combatState: {
+  concentrationEffectsBySource?: Readonly<Record<string, string>>
+} | undefined): boolean {
+  return Object.values(combatState?.concentrationEffectsBySource ?? {}).includes('bane')
+}
+
+export function hasShieldOfFaithPresentationEffect(combatState: {
+  concentrationEffectsBySource?: Readonly<Record<string, string>>
+} | undefined): boolean {
+  return Object.values(combatState?.concentrationEffectsBySource ?? {}).includes('shield-of-faith')
+}
+
+export function hasMageArmorPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return (combatState?.activeEffects ?? []).some((effect) =>
+    effect.source.rulesId === 'mage-armor' ||
+    effect.definitionId === 'srd-5.1:spell:mage-armor',
+  )
+}
+
+function hasActiveSpellPresentationEffect(
+  combatState: {
+    activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+  } | undefined,
+  spellId:
+    | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
+    | 'warding-bond'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'enhance-ability'
+    | 'divine-favor'
+    | 'magic-weapon'
+    | 'flame-blade'
+    | 'invisibility'
+    | 'blur'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'longstrider'
+    | 'protection-from-energy'
+    | 'death-ward'
+    | 'greater-invisibility'
+    | 'charm-person'
+    | 'hideous-laughter'
+    | 'hold-person'
+    | 'blindness-deafness',
+): boolean {
+  return (combatState?.activeEffects ?? []).some((effect) =>
+    effect.source.rulesId === spellId ||
+    effect.definitionId === `srd-5.1:spell:${spellId}`,
+  )
+}
+
+export function hasJumpPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'jump')
+}
+
+export function hasDarkvisionPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'darkvision')
+}
+
+export function hasSeeInvisibilityPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'see-invisibility')
+}
+
+export function hasWardingBondPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'warding-bond')
+}
+
+export function hasFlyPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'fly')
+}
+
+export function hasHeroismPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'heroism')
+}
+
+export function hasEnlargeReducePresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'enlarge-reduce')
+}
+
+export function hasEnhanceAbilityPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'enhance-ability')
+}
+
+export function hasDivineFavorPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'divine-favor')
+}
+
+export function hasHuntersMarkPresentationEffect(combatState: {
+  concentrationEffectsBySource?: Readonly<Record<string, string>>
+} | undefined): boolean {
+  return Object.values(combatState?.concentrationEffectsBySource ?? {}).includes('hunters-mark')
+}
+
+export function hasMagicWeaponPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'magic-weapon')
+}
+
+export function hasFlameBladePresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'flame-blade')
+}
+
+export function hasInvisibilityPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'invisibility')
+}
+
+export function hasBlurPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'blur')
+}
+
+export function hasBarkskinPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'barkskin')
+}
+
+export function hasProtectionFromPoisonPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'protection-from-poison')
+}
+
+export function hasLongstriderPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'longstrider')
+}
+
+export function hasProtectionFromEnergyPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'protection-from-energy')
+}
+
+export function hasDeathWardPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'death-ward')
+}
+
+export function hasGreaterInvisibilityPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'greater-invisibility')
+}
+
+export function hasCharmPersonPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'charm-person')
+}
+
+export function hasHideousLaughterPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'hideous-laughter')
+}
+
+export function hasHoldPersonPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'hold-person')
+}
+
+export function hasBlindnessDeafnessPresentationEffect(combatState: {
+  activeEffects?: readonly { source: { rulesId?: string }; definitionId?: string }[]
+} | undefined): boolean {
+  return hasActiveSpellPresentationEffect(combatState, 'blindness-deafness')
+}
+
 export function spellPresentationEffectSourceActorId(
   combatState: {
     concentrationEffectsBySource?: Readonly<Record<string, string>>
@@ -188,7 +512,38 @@ export function spellPresentationEffectSourceActorId(
       definitionId?: string
     }[]
   } | undefined,
-  spellId: 'guidance' | 'resistance' | 'sanctuary',
+  spellId:
+    | 'guidance'
+    | 'resistance'
+    | 'sanctuary'
+    | 'bless'
+    | 'bane'
+    | 'shield-of-faith'
+    | 'mage-armor'
+    | 'jump'
+    | 'darkvision'
+    | 'see-invisibility'
+    | 'warding-bond'
+    | 'fly'
+    | 'heroism'
+    | 'enlarge-reduce'
+    | 'enhance-ability'
+    | 'divine-favor'
+    | 'hunters-mark'
+    | 'magic-weapon'
+    | 'flame-blade'
+    | 'invisibility'
+    | 'blur'
+    | 'barkskin'
+    | 'protection-from-poison'
+    | 'longstrider'
+    | 'protection-from-energy'
+    | 'death-ward'
+    | 'greater-invisibility'
+    | 'charm-person'
+    | 'hideous-laughter'
+    | 'hold-person'
+    | 'blindness-deafness',
 ): string | undefined {
   const activeEffect = (combatState?.activeEffects ?? []).find((effect) =>
     effect.source.rulesId === spellId ||

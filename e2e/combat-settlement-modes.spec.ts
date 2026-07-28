@@ -9,9 +9,18 @@ async function putState(request: APIRequestContext, name: string, payload: unkno
 }
 
 async function getState<T>(request: APIRequestContext, name: string): Promise<T> {
-  const response = await request.get(`${DM}/api/state/${name}`)
-  expect(response.ok()).toBeTruthy()
-  return (await response.json()) as T
+  let lastError: unknown
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const response = await request.get(`${DM}/api/state/${name}`)
+      if (response.ok()) return (await response.json()) as T
+      lastError = new Error(`${name} returned ${response.status()}`)
+    } catch (error) {
+      lastError = error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80 * 2 ** attempt))
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${name} could not be loaded`)
 }
 
 async function seedManualCombat(request: APIRequestContext, mapId: string) {

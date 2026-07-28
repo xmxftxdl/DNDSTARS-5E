@@ -20,7 +20,9 @@ const thunderwaveCliffReplay = {
   },
   caster: { x: 175, y: 175 },
   target: { x: 315, y: 175 },
-  areaTargetCell: { col: 4, row: 2 },
+  // Thunderwave permits choosing the caster's own cell; Headless resolves
+  // that zero-vector selection with its documented default direction.
+  areaTargetCell: { col: 2, row: 2 },
   expectedTarget: { x: 455, y: 175, elevationFeet: 0 },
 } as const
 
@@ -129,7 +131,9 @@ test('replays Thunderwave through the player action protocol and synchronizes a 
     background: '',
     experience: 0,
     reputation: 0,
-    abilities: { str: 8, dex: 14, con: 14, int: 18, wis: 12, cha: 10 },
+    // A DC 21 replay fixture makes the cliff-push branch deterministic; D&D
+    // saving throws do not automatically succeed on a natural 20.
+    abilities: { str: 8, dex: 14, con: 14, int: 30, wis: 12, cha: 10 },
     savingThrows: ['int', 'wis'],
     skills: [],
     maxHp: 32,
@@ -139,7 +143,7 @@ test('replays Thunderwave through the player action protocol and synchronizes a 
     ac: 13,
     speed: 30,
     initiativeBonus: 2,
-    saveDC: 15,
+    saveDC: 21,
     passivePerception: 11,
     inspiration: 0,
     conditions: [],
@@ -258,11 +262,23 @@ test('replays Thunderwave through the player action protocol and synchronizes a 
       expect(player.getByTestId(`initiative-token-${wizardToken.id}`)).toBeVisible({ timeout: 20_000 }),
       expect(dm.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 }),
       expect(player.getByTestId('map-canvas')).toBeVisible({ timeout: 20_000 }),
-      expect(player.getByTestId('player-combat-hotbar')).toBeVisible(),
+      expect(player.getByTestId('player-combat-hotbar')).toBeVisible({ timeout: 20_000 }),
     ])
     await expect(dm.getByTestId('map-canvas')).toHaveAttribute('data-vision-enabled', 'false', { timeout: 20_000 })
 
     await installSeededRandom(dm, replay.seed)
+    const transparentCanvasBaseline = await player.getByTestId('map-canvas').locator('canvas').evaluateAll(
+      (canvases) => canvases.map((canvas) => {
+        const context = (canvas as HTMLCanvasElement).getContext('2d')
+        if (!context) return 0
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+        let visible = 0
+        for (let index = 3; index < pixels.length; index += 16) {
+          if (pixels[index] > 8) visible += 1
+        }
+        return visible
+      }),
+    )
     const actionId = `${mapId}:thunderwave:${replay.seed}`
     await submitReplayAction(player, {
       id: actionId,
@@ -291,10 +307,40 @@ test('replays Thunderwave through the player action protocol and synchronizes a 
     })
 
     await Promise.all([
+      expect.poll(async () => {
+        const current = await player.getByTestId('map-canvas').locator('canvas').evaluateAll(
+          (canvases) => canvases.map((canvas) => {
+            const context = (canvas as HTMLCanvasElement).getContext('2d')
+            if (!context) return 0
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+            let visible = 0
+            for (let index = 3; index < pixels.length; index += 16) {
+              if (pixels[index] > 8) visible += 1
+            }
+            return visible
+          }),
+        )
+        return current.some((visible, index) =>
+          transparentCanvasBaseline[index] === 0 && visible > 100)
+      }).toBe(true),
       expect(dm.locator('[data-combat-banner="spell"]')).toBeVisible({ timeout: 20_000 }),
       expect(player.locator('[data-combat-banner="spell"]')).toBeVisible({ timeout: 20_000 }),
+      expect.poll(async () =>
+        (await dm.getByTestId('map-canvas').getAttribute('data-combat-projectile-kinds') ?? '')
+          .split(',')
+          .includes('thunderwave'),
+      ).toBe(true),
+      expect.poll(async () =>
+        (await player.getByTestId('map-canvas').getAttribute('data-combat-projectile-kinds') ?? '')
+          .split(',')
+          .includes('thunderwave'),
+      ).toBe(true),
     ])
-
+    if (process.env.THUNDERWAVE_VFX_SCREENSHOT_PATH) {
+      await player.getByTestId('map-canvas').screenshot({
+        path: process.env.THUNDERWAVE_VFX_SCREENSHOT_PATH,
+      })
+    }
     await expect.poll(async () => {
       const ack = await getState<{ actionId?: string; status?: string; reason?: string }>(request, 'player-action-ack')
       return ack.actionId === actionId ? `${ack.status}:${ack.reason ?? ''}` : ''

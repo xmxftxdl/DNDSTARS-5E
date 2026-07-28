@@ -1,11 +1,36 @@
 import { describe, expect, it } from 'vitest'
 import {
+  areaSpellPresentationForSettlement,
   fireballPresentationForSettlement,
   guidancePresentationsForTargets,
   hasSpellActionBannerPresentation,
+  hasBarkskinPresentationEffect,
+  hasBlindnessDeafnessPresentationEffect,
+  hasBlurPresentationEffect,
+  hasCharmPersonPresentationEffect,
   hasGuidancePresentationEffect,
+  hasDarkvisionPresentationEffect,
+  hasDeathWardPresentationEffect,
+  hasDivineFavorPresentationEffect,
+  hasEnhanceAbilityPresentationEffect,
+  hasEnlargeReducePresentationEffect,
+  hasFlameBladePresentationEffect,
+  hasFlyPresentationEffect,
+  hasGreaterInvisibilityPresentationEffect,
+  hasHeroismPresentationEffect,
+  hasHideousLaughterPresentationEffect,
+  hasHoldPersonPresentationEffect,
+  hasHuntersMarkPresentationEffect,
+  hasJumpPresentationEffect,
+  hasInvisibilityPresentationEffect,
+  hasLongstriderPresentationEffect,
+  hasMagicWeaponPresentationEffect,
   hasResistancePresentationEffect,
+  hasProtectionFromEnergyPresentationEffect,
+  hasProtectionFromPoisonPresentationEffect,
   hasSanctuaryPresentationEffect,
+  hasSeeInvisibilityPresentationEffect,
+  hasWardingBondPresentationEffect,
   mergeDnd5eSpellAreaDelta,
   resistancePresentationsForTargets,
   sanctuaryPresentationsForTargets,
@@ -53,6 +78,41 @@ describe('SpellSettlementCoordinator', () => {
       'acid-splash',
       'poison-spray',
       'vicious-mockery',
+      'magic-missile',
+      'scorching-ray',
+      'guiding-bolt',
+      'acid-arrow',
+      'cure-wounds',
+      'healing-word',
+      'inflict-wounds',
+      'bless',
+      'bane',
+      'shield-of-faith',
+      'mage-armor',
+      'jump',
+      'darkvision',
+      'see-invisibility',
+      'warding-bond',
+      'fly',
+      'heroism',
+      'enlarge-reduce',
+      'enhance-ability',
+      'divine-favor',
+      'hunters-mark',
+      'magic-weapon',
+      'flame-blade',
+      'invisibility',
+      'blur',
+      'barkskin',
+      'protection-from-poison',
+      'longstrider',
+      'protection-from-energy',
+      'death-ward',
+      'greater-invisibility',
+      'charm-person',
+      'hideous-laughter',
+      'hold-person',
+      'blindness-deafness',
     ]) {
       expect(spellPresentationsBeforeRoll({
         spellId,
@@ -99,6 +159,46 @@ describe('SpellSettlementCoordinator', () => {
       actorTokenId: 'wizard',
       targetTokenIds: ['goblin'],
     })).toEqual([])
+  })
+
+  it('derives authoritative area VFX geometry from the selected anchor cell', () => {
+    const common = {
+      transactionId: 'area-vfx-tx',
+      mapId: 'map',
+      actorTokenId: 'caster',
+      areaAnchorCell: { col: 6, row: 4 },
+    }
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'burning-hands',
+    })).toMatchObject({
+      spellId: 'burning-hands',
+      shape: 'cone',
+      lengthFeet: 15,
+      widthFeet: 15,
+      targetCell: { col: 6, row: 4 },
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'shatter',
+    })).toMatchObject({
+      spellId: 'shatter',
+      shape: 'circle',
+      radiusFeet: 10,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'lightning-bolt',
+    })).toMatchObject({
+      spellId: 'lightning-bolt',
+      shape: 'line',
+      lengthFeet: 100,
+      widthFeet: 5,
+    })
+    expect(areaSpellPresentationForSettlement({
+      ...common,
+      spellId: 'fireball',
+    })).toBeNull()
   })
 
   it('derives Guidance manifestations and recognizes its authoritative duration marker', () => {
@@ -181,6 +281,49 @@ describe('SpellSettlementCoordinator', () => {
       concentrationEffectsBySource: { 'druid-token': 'guidance' },
     }, 'guidance')).toBe('druid-token')
     expect(spellPresentationEffectSourceActorId(undefined, 'resistance')).toBeUndefined()
+  })
+
+  it('recognizes the next active-effect status markers from Headless state', () => {
+    const stateFor = (spellId: string) => ({
+      activeEffects: [{
+        definitionId: `srd-5.1:spell:${spellId}`,
+        source: { actorId: 'caster-token', rulesId: spellId },
+      }],
+    })
+    expect(hasJumpPresentationEffect(stateFor('jump'))).toBe(true)
+    expect(hasDarkvisionPresentationEffect(stateFor('darkvision'))).toBe(true)
+    expect(hasSeeInvisibilityPresentationEffect(stateFor('see-invisibility'))).toBe(true)
+    expect(hasWardingBondPresentationEffect(stateFor('warding-bond'))).toBe(true)
+    expect(hasFlyPresentationEffect(stateFor('fly'))).toBe(true)
+    expect(hasHeroismPresentationEffect(stateFor('heroism'))).toBe(true)
+    expect(hasEnlargeReducePresentationEffect(stateFor('enlarge-reduce'))).toBe(true)
+    expect(hasEnhanceAbilityPresentationEffect(stateFor('enhance-ability'))).toBe(true)
+    expect(hasDivineFavorPresentationEffect(stateFor('divine-favor'))).toBe(true)
+    expect(hasHuntersMarkPresentationEffect({
+      concentrationEffectsBySource: { 'ranger-token': 'hunters-mark' },
+    })).toBe(true)
+    expect(hasMagicWeaponPresentationEffect(stateFor('magic-weapon'))).toBe(true)
+    expect(hasFlameBladePresentationEffect(stateFor('flame-blade'))).toBe(true)
+    expect(hasInvisibilityPresentationEffect(stateFor('invisibility'))).toBe(true)
+    expect(hasBlurPresentationEffect(stateFor('blur'))).toBe(true)
+    expect(hasBarkskinPresentationEffect(stateFor('barkskin'))).toBe(true)
+    expect(hasProtectionFromPoisonPresentationEffect(stateFor('protection-from-poison'))).toBe(true)
+    expect(hasLongstriderPresentationEffect(stateFor('longstrider'))).toBe(true)
+    expect(hasProtectionFromEnergyPresentationEffect(stateFor('protection-from-energy'))).toBe(true)
+    expect(hasDeathWardPresentationEffect(stateFor('death-ward'))).toBe(true)
+    expect(hasGreaterInvisibilityPresentationEffect(stateFor('greater-invisibility'))).toBe(true)
+    expect(hasCharmPersonPresentationEffect(stateFor('charm-person'))).toBe(true)
+    expect(hasHideousLaughterPresentationEffect(stateFor('hideous-laughter'))).toBe(true)
+    expect(hasHoldPersonPresentationEffect(stateFor('hold-person'))).toBe(true)
+    expect(hasBlindnessDeafnessPresentationEffect(stateFor('blindness-deafness'))).toBe(true)
+    expect(spellPresentationEffectSourceActorId({
+      concentrationEffectsBySource: { 'ranger-token': 'hunters-mark' },
+    }, 'hunters-mark')).toBe('ranger-token')
+    expect(spellPresentationEffectSourceActorId(
+      stateFor('warding-bond'),
+      'warding-bond',
+    )).toBe('caster-token')
+    expect(hasJumpPresentationEffect(undefined)).toBe(false)
   })
 
   it('derives Fireball presentation from the Host-validated area anchor', () => {

@@ -22,6 +22,8 @@ import {
 import { subscribeSharedEvent } from '../../lib/sharedApi'
 import type { BattleMap } from '../../store/maps'
 
+const PRESENTATION_PROJECTION_TICK_MS = 125
+
 export interface CombatPresentationCoordinator {
   state: CombatPresentationState
   projectiles: CombatPresentationMapProjectile[]
@@ -66,35 +68,50 @@ export function useCombatPresentationCoordinator(
 
   useEffect(() => {
     if (state.spellProjectiles.length === 0) return
-    const timer = window.setInterval(() => setClockRevision((value) => value + 1), 50)
+    const timer = window.setInterval(
+      () => setClockRevision((value) => value + 1),
+      PRESENTATION_PROJECTION_TICK_MS,
+    )
     return () => window.clearInterval(timer)
   }, [state.spellProjectiles.length])
 
   const projectiles = useMemo(
-    () => map
-      ? combatPresentationProjectilesForMap(state, map, combatPresentationServerNow())
-      : [],
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationProjectilesForMap(state, map, combatPresentationServerNow())
+        : []
+    },
     [clockRevision, map, state],
   )
 
   const spellBanner = useMemo(
-    () => map
-      ? combatPresentationSpellBannerForMap(state, map.id, combatPresentationServerNow())
-      : null,
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationSpellBannerForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
     [clockRevision, map, state],
   )
 
   const killStreak = useMemo(
-    () => map
-      ? combatPresentationKillStreakForMap(state, map.id, combatPresentationServerNow())
-      : null,
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationKillStreakForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
     [clockRevision, map, state],
   )
 
   const attackBanner = useMemo(
-    () => map
-      ? combatPresentationAttackBannerForMap(state, map.id, combatPresentationServerNow())
-      : null,
+    () => {
+      void clockRevision
+      return map
+        ? combatPresentationAttackBannerForMap(state, map.id, combatPresentationServerNow())
+        : null
+    },
     [clockRevision, map, state],
   )
 
