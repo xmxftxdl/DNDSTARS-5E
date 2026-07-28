@@ -31,6 +31,8 @@ jobs:
         run: npm run audit:srd-content
 
       - name: ESLint ratchet (no-new-errors vs .eslint-ratchet.json)
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run lint:ratchet
 
       - name: Production dependency audit
