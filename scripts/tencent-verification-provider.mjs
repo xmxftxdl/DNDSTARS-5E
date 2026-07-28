@@ -44,7 +44,7 @@ function credentialConfig(env) {
     !edition ||
     !TENCENT_CLOUD_EDITIONS[edition] ||
     !secretId ||
-    !/^AKID[A-Za-z0-9]+$/.test(secretId) ||
+    /\s/.test(secretId) ||
     !secretKey ||
     secretKey.length < 16
   ) return null
@@ -205,10 +205,10 @@ export async function deliverTencentVerification(
     const config = emailConfig(env)
     if (!config) throw new Error('tencent-email-not-configured')
     await callTencentCloud({
+      endpoint: config.provider.sesEndpoint,
       service: 'ses',
       action: 'SendEmail',
       version: '2020-10-02',
-      endpoint: config.provider.sesEndpoint,
       region: config.region,
       secretId: config.secretId,
       secretKey: config.secretKey,
