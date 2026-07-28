@@ -17,6 +17,7 @@ dist
 dist-ssr
 playwright-report
 test-results
+backups/
 tmp/
 __pycache__/
 *.pyc

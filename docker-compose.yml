@@ -1,6 +1,28 @@
 name: "${COMPOSE_PROJECT_NAME:-dndstars-5e}"
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${STARS_POSTGRES_DB:-astraltrace}"
+      POSTGRES_USER: "${STARS_POSTGRES_USER:-astraltrace}"
+      POSTGRES_PASSWORD: "${STARS_POSTGRES_PASSWORD:-development-only-change-me}"
+    volumes:
+      - dndstars-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "pg_isready -U ${STARS_POSTGRES_USER:-astraltrace} -d ${STARS_POSTGRES_DB:-astraltrace}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "${STARS_LOG_MAX_SIZE:-10m}"
+        max-file: "${STARS_LOG_MAX_FILES:-3}"
+
   dndstars:
     build:
       context: .
@@ -23,22 +45,37 @@ services:
       STARS_ALLOWED_ORIGINS: "${STARS_ALLOWED_ORIGINS:-}"
       STARS_BUILD_ID: "${STARS_BUILD_ID:-docker-local}"
       STARS_SHARED_ROOT: /data
-      STARS_ACCOUNT_STORAGE: "${STARS_ACCOUNT_STORAGE:-sqlite}"
+      STARS_ACCOUNT_STORAGE: "${STARS_ACCOUNT_STORAGE:-postgres}"
       STARS_DATABASE_PATH: "${STARS_DATABASE_PATH:-/data/astraltrace.sqlite}"
+      STARS_DATABASE_URL: "postgresql://${STARS_POSTGRES_USER:-astraltrace}:${STARS_POSTGRES_PASSWORD:-development-only-change-me}@postgres:5432/${STARS_POSTGRES_DB:-astraltrace}"
+      STARS_DATABASE_POOL_SIZE: "${STARS_DATABASE_POOL_SIZE:-10}"
       STARS_VERIFICATION_WEBHOOK_URL: "${STARS_VERIFICATION_WEBHOOK_URL:-}"
       STARS_EMAIL_VERIFICATION_WEBHOOK_URL: "${STARS_EMAIL_VERIFICATION_WEBHOOK_URL:-}"
       STARS_SMS_VERIFICATION_WEBHOOK_URL: "${STARS_SMS_VERIFICATION_WEBHOOK_URL:-}"
       STARS_VERIFICATION_WEBHOOK_SECRET: "${STARS_VERIFICATION_WEBHOOK_SECRET:-}"
+      STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET: "${STARS_MARKETPLACE_PAYMENT_WEBHOOK_SECRET:-}"
+      STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL: "${STARS_MARKETPLACE_CHECKOUT_ADAPTER_URL:-}"
+      STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET: "${STARS_MARKETPLACE_CHECKOUT_ADAPTER_SECRET:-}"
+      STARS_MARKETPLACE_CHECKOUT_PROVIDER: "${STARS_MARKETPLACE_CHECKOUT_PROVIDER:-}"
       STARS_TENCENTCLOUD_EDITION: "${STARS_TENCENTCLOUD_EDITION:-}"
       STARS_TENCENTCLOUD_SECRET_ID: "${STARS_TENCENTCLOUD_SECRET_ID:-}"
       STARS_TENCENTCLOUD_SECRET_KEY: "${STARS_TENCENTCLOUD_SECRET_KEY:-}"
       STARS_TENCENT_SES_FROM_EMAIL: "${STARS_TENCENT_SES_FROM_EMAIL:-}"
       STARS_TENCENT_SES_TEMPLATE_ID: "${STARS_TENCENT_SES_TEMPLATE_ID:-}"
+      STARS_TENCENT_SES_REGION: "${STARS_TENCENT_SES_REGION:-}"
       STARS_TENCENT_SES_SUBJECT: "${STARS_TENCENT_SES_SUBJECT:-}"
       STARS_TENCENT_SMS_SDK_APP_ID: "${STARS_TENCENT_SMS_SDK_APP_ID:-}"
       STARS_TENCENT_SMS_TEMPLATE_ID: "${STARS_TENCENT_SMS_TEMPLATE_ID:-}"
       STARS_TENCENT_SMS_SIGN_NAME: "${STARS_TENCENT_SMS_SIGN_NAME:-}"
+      STARS_TENCENT_SMS_REGION: "${STARS_TENCENT_SMS_REGION:-}"
       STARS_ALLOW_LEGACY_ACCOUNT_CREATION: "${STARS_ALLOW_LEGACY_ACCOUNT_CREATION:-false}"
+      STARS_LOG_CLIENT_IP: "${STARS_LOG_CLIENT_IP:-false}"
+      STARS_METRICS_TOKEN: "${STARS_METRICS_TOKEN:-}"
+      STARS_ALERT_WEBHOOK_URL: "${STARS_ALERT_WEBHOOK_URL:-}"
+      STARS_ALERT_WEBHOOK_SECRET: "${STARS_ALERT_WEBHOOK_SECRET:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - dndstars-data:/data
     read_only: true
@@ -58,11 +95,55 @@ services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:8080/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:8080/api/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       start_period: 15s
       retries: 3
 
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dndstars:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: "${STARS_POSTGRES_DB:-astraltrace}"
+      PGUSER: "${STARS_POSTGRES_USER:-astraltrace}"
+      PGPASSWORD: "${STARS_POSTGRES_PASSWORD:-development-only-change-me}"
+      STARS_BACKUP_ROOT: /backups
+      STARS_BACKUP_INTERVAL_SECONDS: "${STARS_BACKUP_INTERVAL_SECONDS:-86400}"
+      STARS_BACKUP_RETENTION_DAYS: "${STARS_BACKUP_RETENTION_DAYS:-14}"
+    command:
+      - /bin/sh
+      - /opt/astraltrace/postgres-backup-loop.sh
+    volumes:
+      - ./scripts/postgres-backup-loop.sh:/opt/astraltrace/postgres-backup-loop.sh:ro
+      - dndstars-data:/data:ro
+      - "${STARS_BACKUP_HOST_PATH:-./backups}:/backups"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "test -f /backups/.last-success && test $$(($$(date +%s)-$$(cat /backups/.last-success))) -lt 172800"
+      interval: 1h
+      timeout: 5s
+      start_period: 5m
+      retries: 2
+    logging:
+      driver: json-file
+      options:
+        max-size: "${STARS_LOG_MAX_SIZE:-10m}"
+        max-file: "${STARS_LOG_MAX_FILES:-3}"
+
 volumes:
   dndstars-data:
+  dndstars-postgres:

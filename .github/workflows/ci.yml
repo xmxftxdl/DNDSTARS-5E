@@ -42,6 +42,16 @@ jobs:
       - name: Docker production image
         run: docker build --build-arg "STARS_BUILD_ID=ci-${GITHUB_SHA}" --tag dndstars-5e:ci .
 
+      - name: Complete PostgreSQL and shared-data restore drill
+        env:
+          STARS_APP_IMAGE: dndstars-5e:ci
+        run: bash scripts/run-disaster-recovery-integration.sh
+
+      - name: Live restore and automatic rollback drill
+        env:
+          STARS_APP_IMAGE: dndstars-5e:ci
+        run: bash scripts/run-live-restore-integration.sh
+
   browser-release-gate:
     runs-on: ubuntu-latest
     steps:
@@ -77,3 +87,35 @@ jobs:
             test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  postgres-release-gate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: astraltrace_ci
+          POSTGRES_USER: astraltrace_ci
+          POSTGRES_PASSWORD: astraltrace-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U astraltrace_ci -d astraltrace_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      STARS_TEST_DATABASE_URL: postgresql://astraltrace_ci:astraltrace-ci-password@127.0.0.1:5432/astraltrace_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (clean, lockfile-pinned)
+        run: npm ci
+
+      - name: PostgreSQL migration, campaign index and finance invariants
+        run: npm run test:postgres
