@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { Navigate, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { PanelLeftOpen } from 'lucide-react'
 import AccountAppShell from './components/AccountAppShell'
-import Sidebar from './components/Sidebar'
 import ServerCompatibilityBanner from './components/ServerCompatibilityBanner'
 import SharedIntegrityBanner from './components/SharedIntegrityBanner'
 import PageErrorBoundary from './components/PageErrorBoundary'
@@ -11,15 +10,11 @@ import { modeFromPort } from './lib/appMode'
 import { heartbeatRoom, leaveRoom, roomApiErrorMessage, roomHeartbeatErrorIsTerminal } from './lib/roomApi'
 import { clearRoomSession, getRoomSession, subscribeRoomSession } from './lib/roomSession'
 import { setRoomPluginSyncError, setRoomRulesSnapshot } from './lib/roomRulesState'
-import { synchronizeRoomPlugins } from './lib/roomPluginSync'
-import { useCharacterStore } from './store/characters'
-import { activeDnd5eRulesPluginRequirements } from './rulesets/dnd5e/pluginApi'
-import { startDnd5eInventoryAuthoritySync } from './lib/inventoryAuthority'
 import { getAssignedPlayerCharacterId, getPlayerCharacter } from './lib/playerView'
-import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
+const Sidebar = lazy(() => import('./components/Sidebar'))
 const AccountProfilePage = lazy(() => import('./pages/AccountProfilePage'))
 const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
 const PublicCombatPage = lazy(() => import('./pages/PublicCombatPage'))
@@ -102,6 +97,10 @@ export default function App() {
       if (pulsing) return
       pulsing = true
       try {
+        const [{ useCharacterStore }, { activeDnd5eRulesPluginRequirements }] = await Promise.all([
+          import('./store/characters'),
+          import('./rulesets/dnd5e/pluginApi'),
+        ])
         const characterState = useCharacterStore.getState()
         const assignedCharacterId = roomSession.role === 'player'
           ? getAssignedPlayerCharacterId(roomSession.slot)
@@ -123,6 +122,7 @@ export default function App() {
         )
         if (!rules.member.ready) {
           try {
+            const { synchronizeRoomPlugins } = await import('./lib/roomPluginSync')
             rules = (await synchronizeRoomPlugins(roomSession, rules)).rules
             setRoomPluginSyncError(null)
           } catch (pluginError) {
@@ -184,13 +184,30 @@ export default function App() {
 
   useEffect(() => {
     if (publicWebsiteRequested || !roomReady || roomSession?.role === 'spectator') return
-    const stopInventory = startDnd5eInventoryAuthoritySync()
-    return () => stopInventory()
+    let disposed = false
+    let stopInventory: (() => void) | undefined
+    void import('./lib/inventoryAuthority').then(({ startDnd5eInventoryAuthoritySync }) => {
+      if (disposed) return
+      stopInventory = startDnd5eInventoryAuthoritySync()
+    })
+    return () => {
+      disposed = true
+      stopInventory?.()
+    }
   }, [endpointMode, publicWebsiteRequested, roomReady, roomSession])
 
   useEffect(() => {
     if (publicWebsiteRequested || roomSession?.role !== 'player') return
-    return startAccountCharacterVaultSync()
+    let disposed = false
+    let stopVault: (() => void) | undefined
+    void import('./lib/accountCharacterVault').then(({ startAccountCharacterVaultSync }) => {
+      if (disposed) return
+      stopVault = startAccountCharacterVaultSync()
+    })
+    return () => {
+      disposed = true
+      stopVault?.()
+    }
   }, [publicWebsiteRequested, roomSession])
 
   if (publicWebsiteRequested) {
@@ -330,14 +347,16 @@ export default function App() {
         aria-hidden="true"
       />
       {!collapsed && (
-        <Sidebar
-          mode={endpointMode ?? undefined}
-          roomSession={roomSession ?? undefined}
-          campaignBasePath={campaignBasePath}
-          connection={connection}
-          onCollapse={() => setCollapsed(true)}
-          onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
-        />
+        <Suspense fallback={null}>
+          <Sidebar
+            mode={endpointMode ?? undefined}
+            roomSession={roomSession ?? undefined}
+            campaignBasePath={campaignBasePath}
+            connection={connection}
+            onCollapse={() => setCollapsed(true)}
+            onLeaveRoom={roomSession ? () => void handleLeaveRoom('leave') : undefined}
+          />
+        </Suspense>
       )}
       <main className={`relative flex-1 overflow-y-auto py-6 pr-6 ${collapsed ? 'pl-16' : 'pl-6'}`}>
         {collapsed && (
