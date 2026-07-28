@@ -305,4 +305,24 @@ describe('D&D 5e combat action icon registry', () => {
       })
     }
   })
+
+  it('为屠戮之箭与三种魔法袋绑定独立绘制图标', () => {
+    const cases = [
+      ['arrow-of-slaying', 'arrow-of-slaying-item-action.png', 'very-rare', '#7138A8'],
+      ['bag-of-beans', 'bag-of-beans-item-action.png', 'rare', '#2563A8'],
+      ['bag-of-devouring', 'bag-of-devouring-item-action.png', 'very-rare', '#7138A8'],
+      ['bag-of-holding', 'bag-of-holding-item-action.png', 'uncommon', '#237A4A'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
 })

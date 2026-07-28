@@ -1688,6 +1688,9 @@ export function applyDnd5eStandardConditionEffect(
   })
   if (mutation.status === 'rejected-immune') return false
   commitDnd5eActiveEffects(target, mutation.effects)
+  const persistedEffect = mutation.effects.find(
+    (effect) => effect.stackingKey === incoming.stackingKey,
+  )
   if (!alreadyActive) {
     events.push({
       type: 'condition-applied', actorId: source?.id ?? target.id,
@@ -1695,8 +1698,10 @@ export function applyDnd5eStandardConditionEffect(
     })
   }
   events.push({
-    type: 'active-effect-applied', targetId: target.id,
-    effectId: incoming.id, definitionId: incoming.definitionId,
+    type: mutation.status === 'refreshed' ? 'active-effect-refreshed' : 'active-effect-applied',
+    targetId: target.id,
+    effectId: persistedEffect?.id ?? incoming.id,
+    definitionId: persistedEffect?.definitionId ?? incoming.definitionId,
   })
   events.push({
     type: 'class-state-changed', actorId: source?.id ?? target.id, targetId: target.id,
@@ -8461,7 +8466,7 @@ function resolveDnd5eMonsterOnHitEffects(input: {
     resolvedComponents.push(...scaleDnd5eDamageComponents(damageComponents, finalDamage))
     if (!save.success && effect.conditionOnFailedSave) {
       const condition = effect.conditionOnFailedSave
-      const rulesId = `monster:${input.actor.id}:${input.actionId}:${effect.id}`
+      const rulesId = `monster:${input.actor.statBlockId ?? 'custom'}:${input.actor.id}:${input.actionId}:${effect.id}`
       applyDnd5eStandardConditionEffect(input.target, input.actor, {
         id: dnd5eActiveEffectId(
           'monster-on-hit-save',
@@ -8529,7 +8534,7 @@ function applyDnd5eMonsterOnHitZeroOutcome(
 ): void {
   const outcome = effect.onEffectDamageReducesTargetToZero
   if (!outcome) return
-  const rulesId = `monster:${actor.id}:${actionId}:${effect.id}:zero`
+  const rulesId = `monster:${actor.statBlockId ?? 'custom'}:${actor.id}:${actionId}:${effect.id}:zero`
   const effectIdByCondition = new Map<Dnd5eStandardConditionId, string>()
   const pending = [...outcome.conditions]
   while (pending.length > 0) {
@@ -8550,9 +8555,10 @@ function applyDnd5eMonsterOnHitZeroOutcome(
       target.id,
       condition.condition,
     )
+    const definitionId = `${rulesId}:${condition.condition}`
     const applied = applyDnd5eStandardConditionEffect(target, actor, {
       id: effectId,
-      definitionId: `${rulesId}:${condition.condition}`,
+      definitionId,
       rulesId,
       condition: condition.condition,
       duration: {
@@ -8563,7 +8569,12 @@ function applyDnd5eMonsterOnHitZeroOutcome(
       dependsOnEffectId,
       sourceKind: 'monster',
     }, events)
-    if (applied) effectIdByCondition.set(condition.condition, effectId)
+    if (applied) {
+      const persistedEffect = reconciledDnd5eActiveEffects(target).find(
+        (candidate) => candidate.stackingKey === definitionId,
+      )
+      if (persistedEffect) effectIdByCondition.set(condition.condition, persistedEffect.id)
+    }
   }
 }
 
@@ -11630,6 +11641,7 @@ function resolveDnd5eHeadlessActionInternal(
   if (
     dnd5eIsIncapacitated(actor) &&
     action.type !== 'move' && action.type !== 'end-turn' && action.type !== 'death-save' && action.type !== 'death-save-turn' && action.type !== 'concentration-save' &&
+    action.type !== 'barbarian-relentless-rage-save' &&
     action.type !== 'monster-undead-fortitude-save' && action.type !== 'monster-on-hit-save' &&
     action.type !== 'active-effect-damage-save'
   ) return fail(state, events, 'invalid-actor')

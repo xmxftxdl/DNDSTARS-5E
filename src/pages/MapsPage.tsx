@@ -362,6 +362,7 @@ import {
   dnd5eActiveSavingThrowBonus,
   dnd5eConditionSavingThrowAutomaticallyFails,
   dnd5eConditionsFromActiveEffects,
+  dnd5eDamageAfterSavingThrow,
   normalizeDnd5eActiveEffects,
   type PreparedDnd5eAdjudicatedSpell,
   type PreparedDnd5ePluginFeatureAction,
@@ -6814,8 +6815,12 @@ export default function MapsPage() {
     attackName: string
     effects: readonly Dnd5eMonsterOnHitEffect[]
     resourceUsage: Dnd5eMonsterOnHitResourceUsage
-  }): Promise<Dnd5eMonsterOnHitEffectRoll[]> => {
+  }): Promise<{
+    rolls: Dnd5eMonsterOnHitEffectRoll[]
+    effectiveDamageTotal: number
+  }> => {
     const rolls: Dnd5eMonsterOnHitEffectRoll[] = []
+    let effectiveDamageTotal = 0
     for (const effect of input.effects) {
       const mode = dnd5eSavingThrowMode(input.target, effect.ability, {
         effectVisible: true,
@@ -6990,6 +6995,23 @@ export default function MapsPage() {
             )
           : [])
       }
+      const rawDamageTotal = effect.damage.reduce(
+        (sum, component, componentIndex) => sum + Math.max(
+          0,
+          (damageRolls[componentIndex] ?? []).reduce(
+            (subtotal, value) => subtotal + value,
+            0,
+          ) + component.bonus,
+        ),
+        0,
+      )
+      effectiveDamageTotal += dnd5eDamageAfterSavingThrow({
+        creature: input.target,
+        ability: effect.ability,
+        damage: rawDamageTotal,
+        success: preview.success || legendaryResistance,
+        successfulSave: effect.damageOnSuccessfulSave,
+      })
       rolls.push({
         effectId: effect.id,
         d20,
@@ -7004,7 +7026,7 @@ export default function MapsPage() {
         damageRolls,
       })
     }
-    return rolls
+    return { rolls, effectiveDamageTotal }
   }
 
   const requestSharedStrokeOfLuckChoice = (
@@ -7654,7 +7676,7 @@ export default function MapsPage() {
             ))
           }
         }
-        const onHitEffectRolls = attackHit && (attackEntry.attack.onHitEffects?.length ?? 0) > 0
+        const onHitEffectResolution = attackHit && (attackEntry.attack.onHitEffects?.length ?? 0) > 0
           ? targetCombatant
             ? await rollDnd5eMonsterOnHitEffects({
                 map: latestMap,
@@ -7668,8 +7690,9 @@ export default function MapsPage() {
                 effects: attackEntry.attack.onHitEffects ?? [],
                 resourceUsage: onHitResourceUsage,
               })
-            : []
-          : []
+            : { rolls: [], effectiveDamageTotal: 0 }
+          : { rolls: [], effectiveDamageTotal: 0 }
+        const onHitEffectRolls = onHitEffectResolution.rolls
         const sizeDamageRolls = attackHit && monsterAttack.sizeDamageD4Mode
           ? await rollDiceBoxValues(
               preview.critical ? 2 : 1,
@@ -7684,17 +7707,7 @@ export default function MapsPage() {
         const baseRawDamageTotal = componentRolls.reduce((sum, rolls, componentIndex) =>
           sum + Math.max(0, rolls.reduce((subtotal, value) => subtotal + value, 0) +
             (damageDefinitions[componentIndex]?.bonus ?? 0)), 0)
-        const onHitRawDamageTotal = (attackEntry.attack.onHitEffects ?? []).reduce(
-          (effectSum, effect, effectIndex) => effectSum + effect.damage.reduce(
-            (damageSum, damage, damageIndex) => damageSum + Math.max(
-              0,
-              (onHitEffectRolls[effectIndex]?.damageRolls[damageIndex] ?? [])
-                .reduce((sum, value) => sum + value, 0) + damage.bonus,
-            ),
-            0,
-          ),
-          0,
-        )
+        const onHitRawDamageTotal = onHitEffectResolution.effectiveDamageTotal
         const sizeDamageTotal = sizeDamageRolls.reduce((sum, value) => sum + value, 0)
         const weaponRawDamageTotal = monsterAttack.sizeDamageD4Mode === 'subtract'
           ? Math.max(1, baseRawDamageTotal - sizeDamageTotal)
@@ -15148,7 +15161,7 @@ export default function MapsPage() {
               ))
             }
           }
-          const onHitEffectRolls = attackHit && (attackEntry.attack.onHitEffects?.length ?? 0) > 0
+          const onHitEffectResolution = attackHit && (attackEntry.attack.onHitEffects?.length ?? 0) > 0
             ? wildShapeTargetCombatant
               ? await rollDnd5eMonsterOnHitEffects({
                   map: authorityMap,
@@ -15162,8 +15175,9 @@ export default function MapsPage() {
                   effects: attackEntry.attack.onHitEffects ?? [],
                   resourceUsage: onHitResourceUsage,
                 })
-              : []
-            : []
+              : { rolls: [], effectiveDamageTotal: 0 }
+            : { rolls: [], effectiveDamageTotal: 0 }
+          const onHitEffectRolls = onHitEffectResolution.rolls
           const sizeDamageRolls = attackHit && wildShapeAttack.sizeDamageD4Mode
             ? await rollDiceBoxValues(
                 preview.critical ? 2 : 1,
@@ -15178,17 +15192,7 @@ export default function MapsPage() {
           const baseRawDamageTotal = damageRolls.reduce((sum, rolls, componentIndex) =>
             sum + Math.max(0, rolls.reduce((subtotal, value) => subtotal + value, 0) +
               (damageDefinitions[componentIndex]?.bonus ?? 0)), 0)
-          const onHitRawDamageTotal = (attackEntry.attack.onHitEffects ?? []).reduce(
-            (effectSum, effect, effectIndex) => effectSum + effect.damage.reduce(
-              (damageSum, damage, damageIndex) => damageSum + Math.max(
-                0,
-                (onHitEffectRolls[effectIndex]?.damageRolls[damageIndex] ?? [])
-                  .reduce((sum, value) => sum + value, 0) + damage.bonus,
-              ),
-              0,
-            ),
-            0,
-          )
+          const onHitRawDamageTotal = onHitEffectResolution.effectiveDamageTotal
           const sizeDamageTotal = sizeDamageRolls.reduce((sum, value) => sum + value, 0)
           const weaponRawDamageTotal = wildShapeAttack.sizeDamageD4Mode === 'subtract'
             ? Math.max(1, baseRawDamageTotal - sizeDamageTotal)

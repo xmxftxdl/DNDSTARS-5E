@@ -1840,6 +1840,33 @@ describe('character token presentation', () => {
         tokenPortrait: '/assets/portraits/octopus-coral-wreck-camouflage-token.png',
       })
     }
+    for (const poolId of ['srd-5.1:ogre', 'ogre']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/ogre-rainy-toll-bridge-greatclub-initiative.png',
+        tokenPortrait: '/assets/portraits/ogre-rainy-toll-bridge-greatclub-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:ogre-zombie', 'ogre-zombie']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/ogre-zombie-moonlit-ossuary-morningstar-initiative.png',
+        tokenPortrait: '/assets/portraits/ogre-zombie-moonlit-ossuary-morningstar-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:oni', 'oni']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/oni-storm-shrine-glaive-initiative.png',
+        tokenPortrait: '/assets/portraits/oni-storm-shrine-glaive-token.png',
+      })
+    }
     for (const poolId of ['srd-5.1:axe-beak', 'axe-beak']) {
       const projected = projectCharacterTokenPresentations([
         token({ type: 'enemy', characterId: undefined, poolId }),
@@ -2794,6 +2821,21 @@ describe('character token presentation', () => {
         poolId: 'srd-5.1:octopus',
         visualVariantId: 'moonlit-kelp-ink-cloud',
         asset: 'octopus-moonlit-kelp-ink-cloud',
+      },
+      {
+        poolId: 'srd-5.1:ogre',
+        visualVariantId: 'snow-quarry-javelin',
+        asset: 'ogre-snow-quarry-javelin',
+      },
+      {
+        poolId: 'srd-5.1:ogre-zombie',
+        visualVariantId: 'dawn-swamp-drag',
+        asset: 'ogre-zombie-dawn-swamp-drag',
+      },
+      {
+        poolId: 'srd-5.1:oni',
+        visualVariantId: 'snow-city-cone-of-cold',
+        asset: 'oni-snow-city-cone-of-cold',
       },
       {
         poolId: 'srd-5.1:ancient-black-dragon',

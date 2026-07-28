@@ -395,6 +395,10 @@ interface SimulationActor {
   id: string
   name: string
   side: 'players' | 'monsters'
+  deathSaves: {
+    stable: boolean
+    dead: boolean
+  }
   controlledById?: string
   controlImmunities: Set<string>
   maxHp: number
@@ -921,6 +925,8 @@ function simulationActiveEffects(
 function playerActor(character: Character, token?: Token): SimulationActor {
   const actions = simulationPlayerActions(character)
   const runtimeCharacter = migrateCharacterToDnd5e(character)
+  const maxHp = Math.max(1, Math.floor(character.maxHp))
+  const hp = Math.max(0, Math.floor(token?.hp ?? character.currentHp ?? character.maxHp))
   const defenseSnapshot = createCombatantFromDnd5eCharacter({
     character: runtimeCharacter,
     controller: 'player',
@@ -957,9 +963,10 @@ function playerActor(character: Character, token?: Token): SimulationActor {
     id: token?.id ?? `player:${character.id}`,
     name: character.name,
     side: 'players',
+    deathSaves: { stable: false, dead: hp === 0 },
     controlImmunities: new Set(),
-    maxHp: Math.max(1, Math.floor(character.maxHp)),
-    hp: Math.max(1, Math.floor(token?.hp ?? character.currentHp ?? character.maxHp)),
+    maxHp,
+    hp,
     ac: dnd5eArmorClass(character),
     initiativeBonus: rules.abilityModifier(character.abilities.dex) + character.initiativeBonus,
     speed: Math.max(0, character.speed),
@@ -1013,13 +1020,19 @@ function monsterActor(
   token?: Token,
 ): SimulationActor {
   const actions = simulationMonsterActions(monster)
+  const hp = Math.max(0, Math.floor(token?.hp ?? monster.hitPoints.average))
+  const stableAtZero = hp === 0 && token?.dnd5eCombatState?.stableAtZero === true
   return {
     id: token?.id ?? `monster:${monster.id}:${index}`,
     name: monster.name,
     side: 'monsters',
+    deathSaves: {
+      stable: stableAtZero,
+      dead: hp === 0 && !stableAtZero,
+    },
     controlImmunities: new Set(),
     maxHp: Math.max(1, monster.hitPoints.average),
-    hp: Math.max(1, Math.floor(token?.hp ?? monster.hitPoints.average)),
+    hp,
     ac: monster.armorClass.value,
     initiativeBonus: rules.abilityModifier(monster.abilities.dex),
     speed: Math.max(monster.speed.walk, monster.speed.fly ?? 0, monster.speed.swim ?? 0),
@@ -2360,8 +2373,23 @@ function applyDamage(
 ): number {
   const damage = resolveSimulationDamage(target, rawDamage, type, source)
   target.hp = Math.max(0, target.hp - damage)
+  if (target.hp === 0) {
+    target.deathSaves = { stable: false, dead: true }
+  }
   if (damage > 0) target.damageTypesSinceTurn.add(type)
   return damage
+}
+
+function synchronizeSimulationActorFromHeadless(
+  actor: SimulationActor,
+  combatant: Dnd5eHeadlessCombatState['combatants'][string],
+): void {
+  actor.hp = Math.max(0, combatant.currentHp)
+  actor.deathSaves = {
+    stable: combatant.deathSaves.stable,
+    dead: combatant.deathSaves.dead,
+  }
+  actor.activeEffects = normalizeDnd5eActiveEffects(combatant.classState.activeEffects)
 }
 
 function synchronizeHeadlessActors(
@@ -2379,6 +2407,14 @@ function synchronizeHeadlessActors(
     if (!combatant) continue
     combatant.currentHp = actor.hp
     combatant.maxHp = actor.maxHp
+    combatant.deathSaves = actor.hp > 0
+      ? { successes: 0, failures: 0, stable: false, dead: false }
+      : {
+          successes: 0,
+          failures: actor.deathSaves.dead ? 3 : 0,
+          stable: actor.deathSaves.stable,
+          dead: actor.deathSaves.dead,
+        }
     replaceDnd5eCombatantActiveEffects(combatant, actor.activeEffects)
     combatant.position = { x: actor.position, y: actor.positionY }
     combatant.elevationFeet = actor.elevationFeet
@@ -2612,8 +2648,7 @@ function executeHeadlessControlAction(input: {
   for (const candidate of actors) {
     const resolved = holder.state.combatants[candidate.id]
     if (resolved) {
-      candidate.hp = Math.max(0, resolved.currentHp)
-      candidate.activeEffects = normalizeDnd5eActiveEffects(resolved.classState.activeEffects)
+      synchronizeSimulationActorFromHeadless(candidate, resolved)
     }
   }
   synchronizeControlledActors(holder, actors)
@@ -2873,8 +2908,7 @@ function executeHeadlessWeaponAction(input: {
   for (const candidate of actors) {
     const resolved = holder.state.combatants[candidate.id]
     if (resolved) {
-      candidate.hp = Math.max(0, resolved.currentHp)
-      candidate.activeEffects = normalizeDnd5eActiveEffects(resolved.classState.activeEffects)
+      synchronizeSimulationActorFromHeadless(candidate, resolved)
     }
   }
   const resolvedActor = holder.state.combatants[actor.id]
@@ -3002,8 +3036,7 @@ function executeHeadlessSpellAction(input: {
   for (const candidate of actors) {
     const resolved = holder.state.combatants[candidate.id]
     if (!resolved) continue
-    candidate.hp = Math.max(0, resolved.currentHp)
-    candidate.activeEffects = normalizeDnd5eActiveEffects(resolved.classState.activeEffects)
+    synchronizeSimulationActorFromHeadless(candidate, resolved)
     candidate.position = resolved.position.x
     candidate.positionY = resolved.position.y
     candidate.elevationFeet = resolved.elevationFeet ?? candidate.elevationFeet
@@ -3150,6 +3183,7 @@ function executeAction(
       if (target.hp <= 100) {
         const dealt = target.hp
         target.hp = 0
+        target.deathSaves = { stable: false, dead: true }
         return { action, target, hits: 1, damage: dealt, transactions: 0 }
       }
       return { action, target, hits: 1, damage: 0, transactions: 0 }
@@ -3278,8 +3312,7 @@ function resolveControlRepeatSaves(
       headless.state = result.state
       const resolvedActor = headless.state.combatants[actor.id]
       if (resolvedActor) {
-        actor.hp = Math.max(0, resolvedActor.currentHp)
-        actor.activeEffects = normalizeDnd5eActiveEffects(resolvedActor.classState.activeEffects)
+        synchronizeSimulationActorFromHeadless(actor, resolvedActor)
       }
       const committed = result.transaction?.status === 'committed'
       if (committed) transactions += 1
@@ -3473,8 +3506,7 @@ function settleSimulationEndTurn(input: {
   for (const candidate of actors) {
     const resolved = holder.state.combatants[candidate.id]
     if (!resolved) continue
-    candidate.hp = Math.max(0, resolved.currentHp)
-    candidate.activeEffects = normalizeDnd5eActiveEffects(resolved.classState.activeEffects)
+    synchronizeSimulationActorFromHeadless(candidate, resolved)
     candidate.position = resolved.position.x
     candidate.positionY = resolved.position.y
     candidate.elevationFeet = resolved.elevationFeet ?? candidate.elevationFeet
@@ -3523,6 +3555,12 @@ function simulationHeadlessCombatant(
       conditions: dnd5eConditionsFromActiveEffects(actor.activeEffects),
       elevationFeet: actor.elevationFeet,
       usesDeathSaves: false,
+      deathSaves: {
+        successes: 0,
+        failures: actor.deathSaves.dead ? 3 : 0,
+        stable: actor.deathSaves.stable,
+        dead: actor.deathSaves.dead,
+      },
       mainWeaponId: actor.character.equipment?.mainWeapon?.id,
       weaponDamageSources: actor.weaponDamageSources
         ? Object.fromEntries(Object.entries(actor.weaponDamageSources)
@@ -3539,7 +3577,7 @@ function simulationHeadlessCombatant(
       })),
     }
   }
-  return createDnd5eCombatant({
+  const combatant = createDnd5eCombatant({
     id: actor.id,
     name: actor.name,
     controller: actor.side === 'players' ? 'player' : 'dm',
@@ -3588,6 +3626,13 @@ function simulationHeadlessCombatant(
     conditionImmunities: actor.monster?.conditionImmunities,
     magicResistance: actor.monster ? dnd5eMonsterHasMagicResistance(actor.monster) : undefined,
   })
+  combatant.deathSaves = {
+    successes: 0,
+    failures: actor.deathSaves.dead ? 3 : 0,
+    stable: actor.deathSaves.stable,
+    dead: actor.deathSaves.dead,
+  }
+  return combatant
 }
 
 function simulateTrial(
@@ -3696,6 +3741,10 @@ function simulateTrial(
       const selectedTarget = actors.find((candidate) => candidate.id === decision.targetId)
       if (decision.dodges) dodgingIds.add(actor.id)
       const targetHpBefore = selectedTarget?.hp ?? 0
+      const deadBeforeByActorId = new Map(actors.map((candidate) => [
+        candidate.id,
+        candidate.deathSaves.dead,
+      ]))
       const executed = executeAction(
         actor,
         decision,
@@ -3850,7 +3899,12 @@ function simulateTrial(
         if (actingSide === 'players') roundTotal.playerDamage += executed.damage
         else roundTotal.monsterDamage += executed.damage
       }
-      if (executed.target && targetHpBefore > 0 && executed.target.hp <= 0 && executed.action) {
+      if (
+        executed.target &&
+        executed.action &&
+        !deadBeforeByActorId.get(executed.target.id) &&
+        executed.target.deathSaves.dead
+      ) {
         if (executed.target.side === 'players') roundTotal.playerDeaths += 1
         else roundTotal.monsterDeaths += 1
         const key = `${executed.target.name}\u0000${actor.name}\u0000${executed.action.name}`
@@ -4218,8 +4272,10 @@ function* simulateDnd5eCombatsGenerator(
     else if (outcome.winner === 'monsters') monsterWins += 1
     else draws += 1
     totalRounds += outcome.rounds
-    totalPlayerSurvivors += actors.filter((actor) => actor.side === 'players' && actor.hp > 0).length
-    totalMonsterSurvivors += actors.filter((actor) => actor.side === 'monsters' && actor.hp > 0).length
+    totalPlayerSurvivors += actors.filter((actor) =>
+      actor.side === 'players' && !actor.deathSaves.dead).length
+    totalMonsterSurvivors += actors.filter((actor) =>
+      actor.side === 'monsters' && !actor.deathSaves.dead).length
     for (const actor of actors) {
       const key = actor.side === 'players'
         ? actor.id
@@ -4233,7 +4289,7 @@ function* simulateDnd5eCombatsGenerator(
         remainingHp: 0,
       }
       total.appearances += 1
-      total.survivals += actor.hp > 0 ? 1 : 0
+      total.survivals += actor.deathSaves.dead ? 0 : 1
       total.damage += actor.damageDealt
       total.remainingHp += actor.hp
       participantTotals.set(key, total)

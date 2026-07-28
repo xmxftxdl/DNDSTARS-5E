@@ -428,6 +428,11 @@ export interface Token {
   /** 未关联角色的生物在 5e Headless 战斗中的持久状态。 */
   dnd5eCombatState?: {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
+    /**
+     * An unlinked creature at 0 HP is alive and stable.
+     * Literal `true` keeps malformed/legacy falsey values out of persisted state.
+     */
+    stableAtZero?: true
     /** 权威状态实例；由 DM/Headless 写入并通过房间资源同步。 */
     activeEffects?: Dnd5eActiveEffectInstance[]
     caltropsSpeedPenaltyFeet?: number
@@ -634,8 +639,8 @@ export interface Dnd5ePluginArea {
   triggerReceipts?: Dnd5ePersistentAreaTriggerReceipt[]
 }
 
-/** 地图存档 V15：持续区域增加经白名单校验的法术光照声明。 */
-export const MAPS_PERSIST_VERSION = 15
+/** 地图存档 V16：未关联角色的 0 HP 生物可持久保存 Headless 的稳定/存活结算。 */
+export const MAPS_PERSIST_VERSION = 16
 
 const TOKEN_TYPES: ReadonlyArray<Token['type']> = ['player', 'enemy', 'npc', 'obstacle']
 
@@ -721,7 +726,14 @@ function normalizeToken(raw: unknown): Token {
         conditions: legacyCombatState.conditions,
       })
     : undefined
-  const { timedEffects: _legacyTimedEffects, ...nativeCombatState } = legacyCombatState ?? {}
+  const {
+    timedEffects: _legacyTimedEffects,
+    stableAtZero: _legacyStableAtZero,
+    ...nativeCombatState
+  } = legacyCombatState ?? {}
+  const stableAtZero = !t.characterId && t.hp === 0 && _legacyStableAtZero === true
+    ? true as const
+    : undefined
   const monsterThreatByTargetId = legacyCombatState?.monsterThreatByTargetId &&
     typeof legacyCombatState.monsterThreatByTargetId === 'object'
     ? Object.fromEntries(Object.entries(legacyCombatState.monsterThreatByTargetId).flatMap(([targetId, value]) =>
@@ -805,13 +817,21 @@ function normalizeToken(raw: unknown): Token {
     dnd5eCombatState: legacyCombatState && !invalidCurrentEffects
       ? {
           ...nativeCombatState,
+          stableAtZero,
           monsterThreatByTargetId,
           schemaVersion: migratedEffects!.schemaVersion,
           activeEffects: migratedEffects!.activeEffects,
           conditions: migratedEffects!.conditions.length > 0 ? migratedEffects!.conditions : undefined,
       }
       : invalidCurrentEffects
-        ? { ...nativeCombatState, monsterThreatByTargetId, schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION, activeEffects: undefined, conditions: undefined }
+        ? {
+            ...nativeCombatState,
+            stableAtZero,
+            monsterThreatByTargetId,
+            schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+            activeEffects: undefined,
+            conditions: undefined,
+          }
         : undefined,
   }
 }

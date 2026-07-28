@@ -176,6 +176,7 @@ test('four class-colored cantrip animations render before settlement', async ({
 
   await player.evaluate(async ({ activeMapId, sourceTokenId, targetIds }) => {
     const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.refreshCombatPresentationClock(true)
     const common = {
       mapId: activeMapId,
       sourceTokenId,
@@ -222,7 +223,9 @@ test('four class-colored cantrip animations render before settlement', async ({
       .sort()
     return kinds
   }).toEqual(['acid-splash', 'poison-spray', 'spare-the-dying', 'vicious-mockery'])
-  await player.waitForTimeout(120)
+  // Once all four local presentations are mounted, let their expanding bodies
+  // reach an early-mid frame and capture before the short effects fade.
+  await player.waitForTimeout(180)
   await canvas.screenshot({
     path: process.env.CANTRIP_ANIMATIONS_SCREENSHOT_PATH ??
       testInfo.outputPath('four-cantrip-animations.png'),

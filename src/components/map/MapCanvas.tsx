@@ -4263,7 +4263,8 @@ function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile }) {
 
 function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
-  const streamRef = useRef<Konva.Line>(null)
+  const coneRefs = useRef<Array<Konva.Line | null>>([])
+  const sprayRefs = useRef<Array<Konva.Circle | null>>([])
   const impactRef = useRef<Konva.Group>(null)
   const dropRefs = useRef<Array<Konva.Circle | null>>([])
   const accent = projectile.accentColor ?? '#84cc16'
@@ -4278,35 +4279,77 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
     const dx = projectile.to.x - projectile.from.x
     const dy = projectile.to.y - projectile.from.y
     const distance = Math.max(1, Math.hypot(dx, dy))
+    const ux = dx / distance
+    const uy = dy / distance
     const nx = -dy / distance
     const ny = dx / distance
+    const maximumWidth = Math.min(44, Math.max(22, distance * 0.14))
     const animation = new Konva.Animation((frame) => {
       const elapsed = initialElapsed + (frame?.time ?? 0)
       const raw = Math.min(1, elapsed / duration)
-      const travel = Math.min(1, raw / 0.62)
+      const travel = Math.min(1, raw / 0.58)
       const eased = 1 - Math.pow(1 - travel, 2.2)
-      const headX = projectile.from.x + dx * eased
-      const headY = projectile.from.y + dy * eased
-      const wobble = Math.sin(elapsed * 0.028) * 8
-      streamRef.current?.points([
-        projectile.from.x,
-        projectile.from.y,
-        projectile.from.x + dx * eased * 0.52 + nx * wobble,
-        projectile.from.y + dy * eased * 0.52 + ny * wobble,
-        headX - nx * wobble * 0.35,
-        headY - ny * wobble * 0.35,
-      ])
-      streamRef.current?.opacity(raw < 0.62 ? 0.9 : Math.max(0, (1 - raw) / 0.38))
+      const headDistance = distance * eased
+      const headX = projectile.from.x + ux * headDistance
+      const headY = projectile.from.y + uy * headDistance
+      const width = maximumWidth * Math.min(1, eased * 1.7)
+      const wobble = Math.sin(elapsed * 0.022) * width * 0.12
+      const fade = raw < 0.68 ? 1 : Math.max(0, (1 - raw) / 0.32)
+      coneRefs.current.forEach((cone, index) => {
+        if (!cone) return
+        const layerScale = [1, 0.62, 0.3][index] ?? 1
+        const layerWidth = width * layerScale
+        cone.points([
+          projectile.from.x - nx * 2,
+          projectile.from.y - ny * 2,
+          projectile.from.x + ux * headDistance * 0.48 + nx * (layerWidth * 0.48 + wobble),
+          projectile.from.y + uy * headDistance * 0.48 + ny * (layerWidth * 0.48 + wobble),
+          headX + nx * layerWidth,
+          headY + ny * layerWidth,
+          headX + ux * (5 + index * 2),
+          headY + uy * (5 + index * 2),
+          headX - nx * layerWidth,
+          headY - ny * layerWidth,
+          projectile.from.x + ux * headDistance * 0.48 - nx * (layerWidth * 0.48 - wobble),
+          projectile.from.y + uy * headDistance * 0.48 - ny * (layerWidth * 0.48 - wobble),
+          projectile.from.x + nx * 2,
+          projectile.from.y + ny * 2,
+        ])
+        cone.opacity(fade * [0.34, 0.5, 0.85][index])
+      })
+      sprayRefs.current.forEach((drop, index) => {
+        if (!drop) return
+        const along = (index + 1) / 29
+        const visible = along <= eased + 0.04
+        const turbulence = Math.sin(index * 7.31 + elapsed * 0.018) *
+          maximumWidth * along * (0.28 + (index % 5) * 0.08)
+        drop.position({
+          x: projectile.from.x + dx * along + nx * turbulence,
+          y: projectile.from.y + dy * along + ny * turbulence,
+        })
+        drop.scaleX(0.7 + along * 1.15)
+        drop.scaleY(1.35 + along * 0.9)
+        drop.rotation(Math.atan2(dy, dx) * 180 / Math.PI + index * 17)
+        drop.opacity(visible ? fade * (0.5 + (index % 4) * 0.12) : 0)
+      })
       impactRef.current?.position(projectile.to)
-      impactRef.current?.opacity(raw < 0.5 ? 0 : Math.min(1, (raw - 0.5) / 0.14) * Math.max(0, (1 - raw) / 0.18))
-      const impactPhase = Math.max(0, (raw - 0.5) / 0.5)
+      impactRef.current?.opacity(
+        raw < 0.48
+          ? 0
+          : Math.min(1, (raw - 0.48) / 0.12) * Math.max(0, (1 - raw) / 0.16),
+      )
+      const impactPhase = Math.max(0, (raw - 0.48) / 0.52)
+      impactRef.current?.scale({
+        x: 0.65 + impactPhase * 0.75,
+        y: 0.65 + impactPhase * 0.75,
+      })
       dropRefs.current.forEach((drop, index) => {
         if (!drop) return
-        const angle = -Math.PI * 0.9 + index * (Math.PI * 1.8 / 8)
-        const spread = (8 + (index % 3) * 5) * impactPhase
+        const angle = index * 2.399 + Math.atan2(dy, dx)
+        const spread = (12 + (index % 5) * 6) * impactPhase
         drop.position({
           x: Math.cos(angle) * spread,
-          y: Math.sin(angle) * spread + impactPhase * impactPhase * 13,
+          y: Math.sin(angle) * spread + impactPhase * impactPhase * 11,
         })
         drop.opacity(Math.sin(Math.min(1, impactPhase) * Math.PI) * 0.9)
       })
@@ -4320,48 +4363,68 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
 
   return (
     <Group ref={effectRef} listening={false}>
-      <Line
-        ref={streamRef}
-        points={[projectile.from.x, projectile.from.y, projectile.from.x, projectile.from.y]}
-        stroke="#a3e635"
-        strokeWidth={6}
-        dash={[13, 5, 4, 7]}
-        lineCap="round"
-        lineJoin="round"
-        tension={0.45}
-        shadowColor={glow}
-        shadowBlur={14}
-        perfectDrawEnabled={false}
-      />
-      <Line
-        points={[projectile.from.x, projectile.from.y, projectile.to.x, projectile.to.y]}
-        stroke={accent}
-        strokeWidth={2}
-        dash={[3, 13]}
-        opacity={0.34}
-        shadowColor={glow}
-        shadowBlur={8}
-        perfectDrawEnabled={false}
-      />
+      {[
+        { fill: '#3f6212', stroke: accent, shadow: glow, blur: 28 },
+        { fill: '#84cc16', stroke: '#bef264', shadow: '#84cc16', blur: 20 },
+        { fill: '#d9f99d', stroke: '#f7fee7', shadow: '#d9f99d', blur: 14 },
+      ].map((style, index) => (
+        <Line
+          key={index}
+          ref={(node) => { coneRefs.current[index] = node }}
+          points={[projectile.from.x, projectile.from.y]}
+          closed
+          fill={style.fill}
+          stroke={style.stroke}
+          strokeWidth={index === 0 ? 2.2 : index === 1 ? 1.5 : 1}
+          lineJoin="round"
+          tension={0.24}
+          shadowColor={style.shadow}
+          shadowBlur={style.blur}
+          perfectDrawEnabled={false}
+        />
+      ))}
+      {Array.from({ length: 28 }, (_, index) => (
+        <Circle
+          key={index}
+          ref={(node) => { sprayRefs.current[index] = node }}
+          x={projectile.from.x}
+          y={projectile.from.y}
+          radius={1.5 + index % 5 * 0.65}
+          fill={index % 6 === 0 ? accent : index % 3 === 0 ? '#f7fee7' : '#bef264'}
+          stroke={index % 4 === 0 ? '#ecfccb' : '#65a30d'}
+          strokeWidth={0.7}
+          shadowColor={index % 6 === 0 ? glow : '#a3e635'}
+          shadowBlur={6 + index % 4 * 2}
+          perfectDrawEnabled={false}
+        />
+      ))}
       <Group ref={impactRef} x={projectile.to.x} y={projectile.to.y}>
         <Circle
-          radius={18}
-          fill="#65a30d"
-          opacity={0.28}
-          stroke={accent}
-          strokeWidth={2}
+          radius={25}
+          fill="#84cc16"
+          opacity={0.32}
+          stroke="#d9f99d"
+          strokeWidth={2.5}
           shadowColor={glow}
+          shadowBlur={30}
+          perfectDrawEnabled={false}
+        />
+        <Circle
+          radius={12}
+          fill="#ecfccb"
+          opacity={0.75}
+          shadowColor="#d9f99d"
           shadowBlur={18}
           perfectDrawEnabled={false}
         />
-        {Array.from({ length: 9 }, (_, index) => (
+        {Array.from({ length: 16 }, (_, index) => (
           <Circle
             key={index}
             ref={(node) => { dropRefs.current[index] = node }}
-            radius={2.5 + index % 3}
-            fill={index % 3 === 0 ? accent : '#bef264'}
+            radius={2 + index % 4}
+            fill={index % 5 === 0 ? accent : index % 2 === 0 ? '#ecfccb' : '#a3e635'}
             shadowColor={glow}
-            shadowBlur={7}
+            shadowBlur={9}
             perfectDrawEnabled={false}
           />
         ))}
@@ -4372,6 +4435,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
 
 function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
+  const plumeRefs = useRef<Array<Konva.Line | null>>([])
   const cloudRefs = useRef<Array<Konva.Circle | null>>([])
   const accent = projectile.accentColor ?? '#22c55e'
   const glow = projectile.glowColor ?? '#86efac'
@@ -4385,24 +4449,58 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
     const dx = projectile.to.x - projectile.from.x
     const dy = projectile.to.y - projectile.from.y
     const distance = Math.max(1, Math.hypot(dx, dy))
+    const ux = dx / distance
+    const uy = dy / distance
     const nx = -dy / distance
     const ny = dx / distance
+    const maximumWidth = Math.min(52, Math.max(26, distance * 0.18))
     const animation = new Konva.Animation((frame) => {
       const elapsed = initialElapsed + (frame?.time ?? 0)
       const raw = Math.min(1, elapsed / duration)
+      const travel = Math.min(1, raw / 0.68)
+      const eased = 1 - Math.pow(1 - travel, 1.9)
+      const headDistance = distance * eased
+      const headX = projectile.from.x + ux * headDistance
+      const headY = projectile.from.y + uy * headDistance
+      const width = maximumWidth * Math.min(1, eased * 1.5)
+      const fade = raw > 0.82 ? Math.max(0, (1 - raw) / 0.18) : 1
+      plumeRefs.current.forEach((plume, index) => {
+        if (!plume) return
+        const scale = index === 0 ? 1 : 0.62
+        const roll = Math.sin(elapsed * 0.01 + index * 2.4) * width * 0.16
+        plume.points([
+          projectile.from.x,
+          projectile.from.y,
+          projectile.from.x + ux * headDistance * 0.42 + nx * (width * 0.42 * scale + roll),
+          projectile.from.y + uy * headDistance * 0.42 + ny * (width * 0.42 * scale + roll),
+          headX + nx * width * scale,
+          headY + ny * width * scale,
+          headX + ux * 8,
+          headY + uy * 8,
+          headX - nx * width * scale,
+          headY - ny * width * scale,
+          projectile.from.x + ux * headDistance * 0.42 - nx * (width * 0.42 * scale - roll),
+          projectile.from.y + uy * headDistance * 0.42 - ny * (width * 0.42 * scale - roll),
+        ])
+        plume.opacity(fade * (index === 0 ? 0.3 : 0.42))
+      })
       cloudRefs.current.forEach((cloud, index) => {
         if (!cloud) return
-        const delay = index * 0.055
-        const local = Math.max(0, Math.min(1, (raw - delay) / Math.max(0.1, 0.72 - delay)))
-        const drift = Math.sin(elapsed * 0.009 + index * 2.1) * (5 + index % 3)
+        const along = ((index + 1) / 22) * eased
+        const localWidth = maximumWidth * along
+        const drift = Math.sin(index * 8.73 + elapsed * (0.006 + index % 4 * 0.001)) *
+          localWidth * (0.32 + index % 3 * 0.17)
         cloud.position({
-          x: projectile.from.x + dx * local + nx * drift,
-          y: projectile.from.y + dy * local + ny * drift - Math.sin(local * Math.PI) * 8,
+          x: projectile.from.x + dx * along + nx * drift,
+          y: projectile.from.y + dy * along + ny * drift -
+            Math.sin(along * Math.PI + index) * (5 + index % 4 * 2),
         })
-        cloud.radius(7 + local * 10 + (index % 3) * 2)
-        cloud.opacity(local <= 0 ? 0 : Math.sin(local * Math.PI) * 0.52)
+        cloud.radius(7 + along * 17 + (index % 4) * 2)
+        cloud.scaleX(0.75 + Math.sin(elapsed * 0.005 + index) * 0.14)
+        cloud.scaleY(0.9 + Math.cos(elapsed * 0.004 + index * 1.7) * 0.18)
+        cloud.opacity(eased <= 0.03 ? 0 : fade * (0.22 + index % 5 * 0.075))
       })
-      effect.opacity(raw > 0.84 ? Math.max(0, (1 - raw) / 0.16) : 1)
+      effect.opacity(fade)
       if (raw >= 1) animation.stop()
     }, layer)
     animation.start()
@@ -4413,18 +4511,36 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
 
   return (
     <Group ref={effectRef} listening={false}>
-      {Array.from({ length: 11 }, (_, index) => (
+      {[
+        { fill: '#052e16', stroke: accent, shadow: glow, blur: 30 },
+        { fill: '#166534', stroke: '#86efac', shadow: '#22c55e', blur: 20 },
+      ].map((style, index) => (
+        <Line
+          key={index}
+          ref={(node) => { plumeRefs.current[index] = node }}
+          points={[projectile.from.x, projectile.from.y]}
+          closed
+          fill={style.fill}
+          stroke={style.stroke}
+          strokeWidth={index === 0 ? 2.2 : 1.2}
+          tension={0.3}
+          shadowColor={style.shadow}
+          shadowBlur={style.blur}
+          perfectDrawEnabled={false}
+        />
+      ))}
+      {Array.from({ length: 21 }, (_, index) => (
         <Circle
           key={index}
           ref={(node) => { cloudRefs.current[index] = node }}
           x={projectile.from.x}
           y={projectile.from.y}
           radius={8}
-          fill={index % 4 === 0 ? accent : index % 2 === 0 ? '#166534' : '#4d7c0f'}
-          stroke={index % 3 === 0 ? glow : '#84cc16'}
-          strokeWidth={index % 3 === 0 ? 1.5 : 0.6}
-          shadowColor={index % 4 === 0 ? glow : '#22c55e'}
-          shadowBlur={12}
+          fill={index % 6 === 0 ? accent : index % 3 === 0 ? '#4d7c0f' : index % 2 === 0 ? '#14532d' : '#166534'}
+          stroke={index % 4 === 0 ? glow : '#65a30d'}
+          strokeWidth={index % 4 === 0 ? 1.6 : 0.7}
+          shadowColor={index % 6 === 0 ? glow : '#22c55e'}
+          shadowBlur={14 + index % 4 * 3}
           perfectDrawEnabled={false}
         />
       ))}

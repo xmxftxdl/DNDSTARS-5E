@@ -330,6 +330,10 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:armor-of-resistance': '/assets/icons/armor-of-resistance-item-action.png',
   'srd-5.1:magic-item:armor-of-vulnerability': '/assets/icons/armor-of-vulnerability-item-action.png',
   'srd-5.1:magic-item:arrow-catching-shield': '/assets/icons/arrow-catching-shield-item-action.png',
+  'srd-5.1:magic-item:arrow-of-slaying': '/assets/icons/arrow-of-slaying-item-action.png',
+  'srd-5.1:magic-item:bag-of-beans': '/assets/icons/bag-of-beans-item-action.png',
+  'srd-5.1:magic-item:bag-of-devouring': '/assets/icons/bag-of-devouring-item-action.png',
+  'srd-5.1:magic-item:bag-of-holding': '/assets/icons/bag-of-holding-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [

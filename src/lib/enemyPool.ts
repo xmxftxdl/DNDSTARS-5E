@@ -4164,6 +4164,66 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
+  ogre: {
+    emoji: '👹',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/ogre-rainy-toll-bridge-greatclub-token.png',
+    initiativePortrait: '/assets/portraits/ogre-rainy-toll-bridge-greatclub-initiative.png',
+    visualVariants: [
+      {
+        id: 'rainy-toll-bridge-greatclub',
+        label: '雨林桥头巨棒',
+        tokenPortrait: '/assets/portraits/ogre-rainy-toll-bridge-greatclub-token.png',
+        initiativePortrait: '/assets/portraits/ogre-rainy-toll-bridge-greatclub-initiative.png',
+      },
+      {
+        id: 'snow-quarry-javelin',
+        label: '雪岭石场标枪',
+        tokenPortrait: '/assets/portraits/ogre-snow-quarry-javelin-token.png',
+        initiativePortrait: '/assets/portraits/ogre-snow-quarry-javelin-initiative.png',
+      },
+    ],
+  },
+  'ogre-zombie': {
+    emoji: '🧟',
+    color: '#3f6212',
+    tokenPortrait: '/assets/portraits/ogre-zombie-moonlit-ossuary-morningstar-token.png',
+    initiativePortrait: '/assets/portraits/ogre-zombie-moonlit-ossuary-morningstar-initiative.png',
+    visualVariants: [
+      {
+        id: 'moonlit-ossuary-morningstar',
+        label: '月夜墓场晨星',
+        tokenPortrait: '/assets/portraits/ogre-zombie-moonlit-ossuary-morningstar-token.png',
+        initiativePortrait: '/assets/portraits/ogre-zombie-moonlit-ossuary-morningstar-initiative.png',
+      },
+      {
+        id: 'dawn-swamp-drag',
+        label: '黎明沼泽拖行',
+        tokenPortrait: '/assets/portraits/ogre-zombie-dawn-swamp-drag-token.png',
+        initiativePortrait: '/assets/portraits/ogre-zombie-dawn-swamp-drag-initiative.png',
+      },
+    ],
+  },
+  oni: {
+    emoji: '👺',
+    color: '#1e3a8a',
+    tokenPortrait: '/assets/portraits/oni-storm-shrine-glaive-token.png',
+    initiativePortrait: '/assets/portraits/oni-storm-shrine-glaive-initiative.png',
+    visualVariants: [
+      {
+        id: 'storm-shrine-glaive',
+        label: '雷雨神社薙刀',
+        tokenPortrait: '/assets/portraits/oni-storm-shrine-glaive-token.png',
+        initiativePortrait: '/assets/portraits/oni-storm-shrine-glaive-initiative.png',
+      },
+      {
+        id: 'snow-city-cone-of-cold',
+        label: '雪城飞行冰锥',
+        tokenPortrait: '/assets/portraits/oni-snow-city-cone-of-cold-token.png',
+        initiativePortrait: '/assets/portraits/oni-snow-city-cone-of-cold-initiative.png',
+      },
+    ],
+  },
   'axe-beak': {
     emoji: '🐦',
     color: '#713f12',
@@ -4373,7 +4433,6 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
     ],
   },
   orc: { emoji: '👹', color: '#ef4444' },
-  ogre: { emoji: '🧌', color: '#ea580c' },
   owlbear: { emoji: '🦉', color: '#78350f' },
 }
 

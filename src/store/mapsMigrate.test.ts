@@ -149,6 +149,35 @@ describe('T10/AC3 — maps store version + migrate', () => {
     })
   })
 
+  it('keeps the literal stable-at-zero marker only for unlinked zero-HP tokens', () => {
+    const result = migrateMapsState({
+      maps: [{
+        id: 'map',
+        name: 'Map',
+        width: 100,
+        height: 100,
+        tokens: [
+          { id: 'stable', hp: 0, dnd5eCombatState: { stableAtZero: true } },
+          { id: 'alive', hp: 1, dnd5eCombatState: { stableAtZero: true } },
+          {
+            id: 'linked',
+            hp: 0,
+            characterId: 'character',
+            dnd5eCombatState: { stableAtZero: true },
+          },
+          { id: 'false-value', hp: 0, dnd5eCombatState: { stableAtZero: false } },
+          { id: 'string-value', hp: 0, dnd5eCombatState: { stableAtZero: 'true' } },
+        ],
+      }],
+    })
+
+    const tokens = result.maps[0].tokens
+    expect(tokens.find((token) => token.id === 'stable')?.dnd5eCombatState?.stableAtZero).toBe(true)
+    for (const id of ['alive', 'linked', 'false-value', 'string-value']) {
+      expect(tokens.find((token) => token.id === id)?.dnd5eCombatState?.stableAtZero).toBeUndefined()
+    }
+  })
+
   it('keeps valid core spell effect tokens and drops malformed metadata', () => {
     const effect = {
       schemaVersion: 1, spellId: 'flaming-sphere', sourceCharacterId: 'wizard',

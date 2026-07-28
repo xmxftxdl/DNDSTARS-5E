@@ -356,9 +356,10 @@ export function createDnd5eMapCombatSnapshot(input: {
     const {
       conditions: tokenConditions,
       temporaryHp: tokenTemporaryHp,
+      stableAtZero: tokenStableAtZero,
       ...tokenClassState
     } = token.dnd5eCombatState ?? {}
-    return [createDnd5eCombatant({
+    const combatant = createDnd5eCombatant({
       id: token.id,
       name: token.label,
       controller: dnd5eCombatTokenSide(token) === 'player' ? 'player' : 'dm',
@@ -444,7 +445,16 @@ export function createDnd5eMapCombatSnapshot(input: {
       damageDefenseRules: monster?.damageDefenseRules,
       moralAlignment: normalizeDnd5eMoralAlignment(monster?.alignment),
       conditionImmunities: dnd5eMonsterConditionImmunities(monster),
-    })]
+    })
+    if (!token.characterId && combatant.currentHp === 0 && tokenStableAtZero === true) {
+      combatant.deathSaves = {
+        successes: 0,
+        failures: 0,
+        stable: true,
+        dead: false,
+      }
+    }
+    return [combatant]
   })
   applyClassPassiveDefenses(combatants)
   applyPaladinAuras(input.map, combatants)
@@ -542,6 +552,11 @@ export function planDnd5eMapResultApplication(input: {
       const nextTokenClassState = !token.characterId
           ? compactOptionalRecord({
             schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+            stableAtZero: combatant.currentHp === 0 &&
+              combatant.deathSaves.stable &&
+              !combatant.deathSaves.dead
+                ? true as const
+                : undefined,
             temporaryHp: combatant.temporaryHp > 0 ? combatant.temporaryHp : undefined,
             undeadFortitudePending: combatant.classState.undeadFortitudePending
               ? { ...combatant.classState.undeadFortitudePending }

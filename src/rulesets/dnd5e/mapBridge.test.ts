@@ -585,6 +585,137 @@ describe('D&D 5e map bridge', () => {
     expect(reconnected.state.combatants[enemy.id].classState.helpedAttackSourceId).toBe(helper.id)
   })
 
+  it('round-trips a Giant Spider stable-at-zero poison outcome for an unlinked monster', () => {
+    const spider = token({
+      id: 'spider',
+      poolId: 'srd-5.1:giant-spider',
+      hp: 26,
+      maxHp: 26,
+      x: 0,
+      y: 0,
+    })
+    const victim = token({
+      id: 'victim',
+      poolId: 'srd-5.1:goblin',
+      hp: 8,
+      maxHp: 8,
+      x: 0,
+      y: 0,
+    })
+    const ordinaryZeroHpMonster = token({
+      id: 'ordinary-zero',
+      poolId: 'srd-5.1:goblin',
+      hp: 0,
+      maxHp: 7,
+      x: 50,
+      y: 0,
+    })
+    const map: BattleMap = {
+      id: 'stable-poison-map',
+      name: 'Stable poison',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [spider, victim, ordinaryZeroHpMonster],
+    }
+    const initiativeOrder = [
+      { tokenId: spider.id, label: spider.label, emoji: '', color: '', roll: 20 },
+      { tokenId: victim.id, label: victim.label, emoji: '', color: '', roll: 10 },
+      {
+        tokenId: ordinaryZeroHpMonster.id,
+        label: ordinaryZeroHpMonster.label,
+        emoji: '',
+        color: '',
+        roll: 5,
+      },
+    ]
+    const snapshot = createDnd5eMapCombatSnapshot({
+      combatId: 'stable-poison',
+      map,
+      characters: [],
+      initiativeOrder,
+    })
+
+    expect(snapshot.state.combatants[ordinaryZeroHpMonster.id].deathSaves).toMatchObject({
+      stable: false,
+      dead: true,
+    })
+
+    const poisoned = resolveDnd5eHeadlessAction(snapshot.state, {
+      type: 'monster-action',
+      actorId: spider.id,
+      actionId: 'bite',
+      rolls: [{
+        targetId: victim.id,
+        d20: 10,
+        damageRolls: [[1]],
+        onHitEffectRolls: [{
+          effectId: 'poison-save-damage',
+          d20: 1,
+          damageRolls: [[2, 2]],
+        }],
+      }],
+    })
+    expect(poisoned.ok, poisoned.ok ? undefined : poisoned.reason).toBe(true)
+    if (!poisoned.ok) return
+    expect(poisoned.state.combatants[victim.id]).toMatchObject({
+      currentHp: 0,
+      deathSaves: { stable: true, dead: false },
+    })
+
+    const plan = planDnd5eMapResultApplication({
+      state: poisoned.state,
+      map,
+      characters: [],
+      characterIdByCombatantId: snapshot.characterIdByCombatantId,
+    })
+    const persistedVictim = plan.map.tokens.find((entry) => entry.id === victim.id)
+    const persistedOrdinary = plan.map.tokens.find((entry) => entry.id === ordinaryZeroHpMonster.id)
+    expect(persistedVictim?.dnd5eCombatState?.stableAtZero).toBe(true)
+    expect(persistedOrdinary?.dnd5eCombatState?.stableAtZero).toBeUndefined()
+
+    const poisonedEffect = persistedVictim?.dnd5eCombatState?.activeEffects?.find(
+      (effect) => effect.standardCondition === 'poisoned',
+    )
+    const paralyzedEffect = persistedVictim?.dnd5eCombatState?.activeEffects?.find(
+      (effect) => effect.standardCondition === 'paralyzed',
+    )
+    expect(poisonedEffect).toBeDefined()
+    expect(paralyzedEffect?.dependsOnEffectId).toBe(poisonedEffect?.id)
+
+    const reconnected = createDnd5eMapCombatSnapshot({
+      combatId: 'stable-poison',
+      map: plan.map,
+      characters: [],
+      initiativeOrder,
+    })
+    const reconnectedVictim = reconnected.state.combatants[victim.id]
+    expect(reconnectedVictim).toMatchObject({
+      currentHp: 0,
+      deathSaves: {
+        successes: 0,
+        failures: 0,
+        stable: true,
+        dead: false,
+      },
+    })
+    const reconnectedPoison = reconnectedVictim.classState.activeEffects?.find(
+      (effect) => effect.standardCondition === 'poisoned',
+    )
+    const reconnectedParalysis = reconnectedVictim.classState.activeEffects?.find(
+      (effect) => effect.standardCondition === 'paralyzed',
+    )
+    expect(reconnectedParalysis?.dependsOnEffectId).toBe(reconnectedPoison?.id)
+    expect(reconnected.state.combatants[ordinaryZeroHpMonster.id].deathSaves).toMatchObject({
+      stable: false,
+      dead: true,
+    })
+  })
+
   it('persists pending monster saving-throw transactions across map reconnect snapshots', () => {
     const hero: Character = {
       ...character(),
