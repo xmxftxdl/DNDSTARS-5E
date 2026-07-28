@@ -392,6 +392,8 @@ function pluginFailure(reason: string): Dnd5eActionFailure {
 export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   prepared: PreparedDnd5ePluginFeatureAction
   rolls?: Dnd5ePluginAction['rolls']
+  /** Host-validated replacement for any untrusted player-supplied action payload. */
+  authoritativePayload?: Dnd5ePluginAction['payload']
   interruptChoiceId?: string
   summonInitiativeD20?: number
 }): Promise<{
@@ -430,6 +432,7 @@ export async function resolvePreparedDnd5ePluginFeatureAction(input: {
   )
   const headlessAction: Dnd5ePluginAction = {
     ...input.prepared.headlessAction,
+    payload: input.authoritativePayload ?? input.prepared.headlessAction.payload,
     rolls: input.rolls,
     interruptChoiceId: input.interruptChoiceId,
   }

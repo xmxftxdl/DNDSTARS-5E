@@ -10,7 +10,9 @@ import type {
 } from './pluginApi'
 import type { Dnd5eDeclarativeRulesPackageV1 } from './declarativeSubclassAbility'
 
-function legacyHeadlessAction(definition: Dnd5eCustomHeadlessActionDraft): Dnd5ePluginHeadlessActionDefinition {
+export function dnd5eHeadlessActionFromDeclarativeDraft(
+  definition: Dnd5eCustomHeadlessActionDraft,
+): Dnd5ePluginHeadlessActionDefinition {
   return {
     id: definition.id,
     execution: 'trusted',
@@ -51,7 +53,7 @@ function legacyHeadlessAction(definition: Dnd5eCustomHeadlessActionDraft): Dnd5e
 }
 
 function registerLegacyContributions(api: Dnd5eRulesPluginApi, draft: Dnd5eCustomRulesPluginDraft): void {
-  for (const action of draft.headlessActions ?? []) api.registerHeadlessAction(legacyHeadlessAction(action))
+  for (const action of draft.headlessActions ?? []) api.registerHeadlessAction(dnd5eHeadlessActionFromDeclarativeDraft(action))
   for (const race of draft.races) api.registerRace(race)
   for (const background of draft.backgrounds) api.registerBackground(background)
   for (const feature of draft.features) api.registerFeature(feature)

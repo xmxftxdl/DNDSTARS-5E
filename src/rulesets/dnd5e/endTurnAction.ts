@@ -4,7 +4,18 @@ import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
 import { DND_FEET_PER_CELL, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import { dnd5eClassDefinitionForCharacter } from './classes'
-import { dnd5eCombatantHasConcentrationEffect, resolveDnd5eHeadlessAction, type Dnd5eActionResult, type Dnd5eHeadlessCombatState, type Dnd5eMonsterMechanicRoll, type Dnd5eMonsterRechargeRoll } from './headlessCombatEngine'
+import {
+  dnd5eCombatantHasConcentrationEffect,
+  prepareDnd5eTurnStartGazeRequirements,
+  previewDnd5eTurnStartBoundary,
+  resolveDnd5eHeadlessAction,
+  type Dnd5eActionResult,
+  type Dnd5eHeadlessCombatState,
+  type Dnd5eMonsterMechanicRoll,
+  type Dnd5eMonsterRechargeRoll,
+  type Dnd5eTurnStartGazeRequirement,
+  type Dnd5eTurnStartGazeResolution,
+} from './headlessCombatEngine'
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import { dnd5eHeightenedSavingThrowMode } from './spells'
@@ -57,6 +68,8 @@ export interface PreparedDnd5ePlayerEndTurn {
     blessed: boolean
     baned: boolean
   }[]
+  turnStartGazeRequirements: readonly Dnd5eTurnStartGazeRequirement[]
+  nextTurnSlotId?: string
   nextMonsterRechargeRolls: readonly {
     actorId: string
     actorName: string
@@ -94,8 +107,12 @@ export function prepareDnd5ePlayerEndTurn(input: {
     characters: input.characters,
     initiativeOrder: input.initiativeOrder,
   })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const requestedSlot = input.initiativeOrder[input.action.initiativeIndex]
+  const actorIndex = requestedSlot?.tokenId === actorToken.id
+    ? input.action.initiativeIndex
+    : snapshot.state.initiativeOrder.indexOf(actorToken.id)
   if (actorIndex < 0 || !snapshot.state.combatants[actorToken.id]) return { ok: false, reason: 'combatant-missing' }
+  snapshot.state.initiativeIndex = actorIndex
   const actorCombatant = snapshot.state.combatants[actorToken.id]
   const fearSourceId = actorCombatant.classState.intimidatingPresenceSourceId
   const fearSourceToken = fearSourceId ? input.map.tokens.find((token) => token.id === fearSourceId) : undefined
@@ -139,6 +156,10 @@ export function prepareDnd5ePlayerEndTurn(input: {
   })
   const nextCombatantId = snapshot.state.initiativeOrder[(actorIndex + 1) % snapshot.state.initiativeOrder.length]
   const nextCombatant = snapshot.state.combatants[nextCombatantId]
+  const nextInitiativeIndex = (actorIndex + 1) % input.initiativeOrder.length
+  const nextTurnSlotId = input.initiativeOrder[nextInitiativeIndex]?.slotId
+  const nextTurnRound = snapshot.state.round +
+    (actorIndex + 1 >= snapshot.state.initiativeOrder.length ? 1 : 0)
   const nextMonster = nextCombatant?.statBlockId ? getDnd5eSrdMonster(nextCombatant.statBlockId) : undefined
   const nextMonsterRechargeRolls = nextCombatant ? dnd5eMonsterRechargeActions(nextMonster).flatMap((monsterAction) => {
     const usage = monsterAction.usage
@@ -168,7 +189,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
   }))
   const nextMonsterMechanicRolls = nextCombatant ? dnd5eEligibleMonsterMechanics(nextMonster, 'turn-start', {
     combatId: snapshot.state.combatId,
-    round: actorIndex + 1 >= snapshot.state.initiativeOrder.length ? snapshot.state.round + 1 : snapshot.state.round,
+    round: nextTurnRound,
     actorId: nextCombatant.id,
     currentHp: nextCombatant.currentHp,
     maxHp: nextCombatant.maxHp,
@@ -180,27 +201,53 @@ export function prepareDnd5ePlayerEndTurn(input: {
     mechanicName: mechanic.name,
     effects: dnd5eMonsterMechanicDiceRequirements(mechanic),
   })) : []
-  const turnStartActiveEffectSavingThrows = (nextCombatant?.classState.activeEffects ?? []).flatMap((effect) => {
+  const turnStartPreview = nextCombatant
+    ? previewDnd5eTurnStartBoundary(
+        snapshot.state,
+        nextCombatant.id,
+        nextTurnSlotId,
+        nextTurnRound,
+      )
+    : undefined
+  const previewNextCombatant = nextCombatant
+    ? turnStartPreview?.combatants[nextCombatant.id]
+    : undefined
+  const turnStartActiveEffectSavingThrows = (previewNextCombatant?.classState.activeEffects ?? []).flatMap((effect) => {
     if (effect.repeatSave?.timing !== 'target-turn-start') return []
     const repeatSave = effect.repeatSave
-    const source = effect.source.actorId ? snapshot.state.combatants[effect.source.actorId] : undefined
+    const source = effect.source.actorId
+      ? turnStartPreview?.combatants[effect.source.actorId]
+      : undefined
     return [{
       effect,
-      targetId: nextCombatant.id,
-      targetName: nextCombatant.name,
-      modifier: nextCombatant.savingThrowBonuses[repeatSave.ability] ??
-        Math.floor((nextCombatant.abilities[repeatSave.ability] - 10) / 2),
+      targetId: previewNextCombatant!.id,
+      targetName: previewNextCombatant!.name,
+      modifier: previewNextCombatant!.savingThrowBonuses[repeatSave.ability] ??
+        Math.floor((previewNextCombatant!.abilities[repeatSave.ability] - 10) / 2),
       dc: repeatSave.dc,
-      mode: dnd5eSavingThrowMode(nextCombatant, repeatSave.ability, {
+      mode: dnd5eSavingThrowMode(previewNextCombatant!, repeatSave.ability, {
         effectVisible: effect.visibility !== 'dm-only',
         condition: effect.standardCondition,
         sourceCreatureType: source?.creatureType,
         sourceIsSpell: effect.source.kind === 'spell',
+        sourceIsMagical: effect.source.magical === true,
       }),
-      blessed: dnd5eCombatantHasConcentrationEffect(snapshot.state, nextCombatant.id, 'bless'),
-      baned: dnd5eCombatantHasConcentrationEffect(snapshot.state, nextCombatant.id, 'bane'),
+      blessed: turnStartPreview
+        ? dnd5eCombatantHasConcentrationEffect(turnStartPreview, previewNextCombatant!.id, 'bless')
+        : false,
+      baned: turnStartPreview
+        ? dnd5eCombatantHasConcentrationEffect(turnStartPreview, previewNextCombatant!.id, 'bane')
+        : false,
     }]
   })
+  const turnStartGazeRequirements = nextCombatant
+    ? prepareDnd5eTurnStartGazeRequirements(
+        snapshot.state,
+        nextCombatant.id,
+        nextTurnSlotId,
+        nextTurnRound,
+      )
+    : []
   return {
     ok: true,
     prepared: {
@@ -211,6 +258,8 @@ export function prepareDnd5ePlayerEndTurn(input: {
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
       activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows,
+      turnStartGazeRequirements,
+      nextTurnSlotId,
       nextMonsterRechargeRolls,
       currentMonsterMechanicRolls,
       nextMonsterMechanicRolls,
@@ -225,6 +274,7 @@ export function resolveDnd5ePlayerEndTurn(input: {
   initiativeOrder: readonly InitiativeEntry[]
   activeEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
   turnStartActiveEffectSavingThrows?: readonly Dnd5eActiveEffectSavingThrowRoll[]
+  turnStartGazeResolutions?: readonly Dnd5eTurnStartGazeResolution[]
   nextMonsterRechargeRolls?: readonly Dnd5eMonsterRechargeRoll[]
   currentMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
   nextMonsterMechanicRolls?: readonly Dnd5eMonsterMechanicRoll[]
@@ -245,6 +295,8 @@ export function resolveDnd5ePlayerEndTurn(input: {
       type: 'end-turn', actorId: actorToken.id,
       activeEffectSavingThrows: input.activeEffectSavingThrows,
       turnStartActiveEffectSavingThrows: input.turnStartActiveEffectSavingThrows,
+      turnStartGazeResolutions: input.turnStartGazeResolutions,
+      nextTurnSlotId: prepared.prepared.nextTurnSlotId,
       currentMonsterMechanicRolls: input.currentMonsterMechanicRolls,
       nextMonsterRechargeRolls: input.nextMonsterRechargeRolls,
       nextMonsterMechanicRolls: input.nextMonsterMechanicRolls,

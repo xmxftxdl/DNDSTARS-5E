@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest'
-import { createDnd5eCombatant, dnd5eAttackerIsUnseenForAttack, dnd5eCombatantCanSee, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveSizeRank, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
-import { createDnd5eMechanicalEffect, dnd5eConditionsFromActiveEffects } from './activeEffects'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createDnd5eCombatant, dnd5eAbilityCheckRollMode, dnd5eAttackerIsUnseenForAttack, dnd5eCombatantCanSee, dnd5eCombatantPairKey, dnd5eDarkOnesOwnLuckAvailable, dnd5eDirectedCombatantPairKey, dnd5eEffectiveDarkvisionRangeFeet, dnd5eEffectiveFlySpeed, dnd5eEffectiveSizeRank, dnd5eEffectiveSpeed, dnd5eGrappleDragExtraMovementFeet, dnd5eTargetArmorClassForAttack, dnd5eWeaponClassDamageDefinitions, resolveDnd5eHeadlessAction, resolveDnd5ePersistentAreaTrigger, setDnd5eHeadlessResolutionObserver, startDnd5eHeadlessCombat } from './headlessCombatEngine'
+import {
+  createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  dnd5eConditionsFromActiveEffects,
+  type Dnd5eActiveEffectInstance,
+} from './activeEffects'
 import { migrateLegacyDnd5eConditions } from './legacyActiveEffectMigration'
 import { dnd5eAttackerIsUnseen, dnd5eSavingThrowMode, dnd5eTargetGrantsAttackAdvantage, dnd5eUnseenTargetImposesDisadvantage } from './passiveDefenses'
+import { getDnd5eSrdMonster, type Dnd5eMonsterStatBlock } from './monsters'
+import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
 
 const abilities = { str: 16, dex: 14, con: 14, int: 10, wis: 12, cha: 8 } as const
 
@@ -30,6 +37,74 @@ function fighter(id: string, initiative: number, patch = {}) {
 }
 
 describe('D&D 5e 2014 headless combat engine', () => {
+  afterEach(() => {
+    setDnd5eRoomMonsterCatalog([])
+  })
+
+  it.each([
+    {
+      label: 'one Tail and two Claws',
+      actionId: 'multiattack',
+      targetPosition: { x: 5, y: 0 },
+      rolls: [
+        { targetId: 'target', d20: 10, damageRolls: [[4, 4]] },
+        { targetId: 'target', d20: 10, damageRolls: [[4]] },
+        { targetId: 'target', d20: 10, damageRolls: [[4]] },
+      ],
+      expectedDamage: 25,
+      expectedAttackCount: 3,
+    },
+    {
+      label: 'two Hurl Flame attacks',
+      actionId: 'multiattack-hurl-flame',
+      targetPosition: { x: 30, y: 0 },
+      rolls: [
+        { targetId: 'target', d20: 10, damageRolls: [[4, 4, 4]] },
+        { targetId: 'target', d20: 10, damageRolls: [[4, 4, 4]] },
+      ],
+      expectedDamage: 24,
+      expectedAttackCount: 2,
+    },
+  ])('resolves the Barbed Devil Multiattack alternative: $label', ({
+    actionId,
+    targetPosition,
+    rolls,
+    expectedDamage,
+    expectedAttackCount,
+  }) => {
+    const devil = fighter('barbed-devil', 20, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:barbed-devil',
+      armorClass: 15,
+      currentHp: 110,
+      maxHp: 110,
+      position: { x: 0, y: 0 },
+    })
+    const target = fighter('target', 10, {
+      armorClass: 10,
+      currentHp: 100,
+      maxHp: 100,
+      position: targetPosition,
+    })
+    const result = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat(`barbed-devil-${actionId}`, [devil, target]),
+      {
+        type: 'monster-action',
+        actorId: devil.id,
+        actionId,
+        rolls,
+      },
+    )
+
+    expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+    if (!result.ok) return
+    expect(result.state.combatants[target.id].currentHp).toBe(100 - expectedDamage)
+    expect(result.state.combatants[devil.id].turn.actionAvailable).toBe(false)
+    expect(result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(
+      expectedAttackCount,
+    )
+  })
+
   it('resolves Warding Bond benefits, damage transfer, saves, and range termination', () => {
     const cleric = fighter('cleric', 20, {
       classId: 'cleric',
@@ -2587,6 +2662,34 @@ describe('D&D 5e 2014 headless combat engine', () => {
     })).toMatchObject({ ok: true })
   })
 
+  it('rejects grapple and shove through total cover even at five-foot grid distance', () => {
+    const state = startDnd5eHeadlessCombat('blocked-contest', [
+      fighter('a', 20),
+      fighter('b', 10, { controller: 'dm' }),
+    ])
+    state.distanceFeetByCombatantPair = { [dnd5eCombatantPairKey('a', 'b')]: 5 }
+    state.lineOfEffectBlockedByCombatantPair = {
+      [dnd5eDirectedCombatantPairKey('a', 'b')]: true,
+    }
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'grapple',
+      actorId: 'a',
+      targetId: 'b',
+      actorD20: 20,
+      targetD20: 1,
+      targetDefense: 'athletics',
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'shove',
+      actorId: 'a',
+      targetId: 'b',
+      actorD20: 20,
+      targetD20: 1,
+      targetDefense: 'athletics',
+      outcome: 'prone',
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+  })
+
   it('lets a grappled creature spend its action to escape the grappler contest', () => {
     const state = startDnd5eHeadlessCombat('escape-grapple', [
       fighter('a', 20), fighter('b', 10, { controller: 'dm' }),
@@ -2611,6 +2714,103 @@ describe('D&D 5e 2014 headless combat engine', () => {
     }))
     expect(escaped.state.combatants.b.conditions).not.toContain('grappled')
     expect(escaped.state.combatants.b.turn.actionAvailable).toBe(false)
+  })
+
+  it('limits basic grapples by free hands and lets the grappler release one without an action', () => {
+    const actor = fighter('a', 20, { grappleFreeHandCapacity: 1 })
+    const state = startDnd5eHeadlessCombat('grapple-capacity', [
+      actor,
+      fighter('b', 10, { controller: 'dm' }),
+      fighter('c', 5, { controller: 'dm' }),
+    ])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('a', 'b')]: 5,
+      [dnd5eCombatantPairKey('a', 'c')]: 5,
+    }
+    const first = resolveDnd5eHeadlessAction(state, {
+      type: 'grapple', actorId: 'a', targetId: 'b', actorD20: 20, targetD20: 1,
+      targetDefense: 'athletics', spendAction: false,
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(resolveDnd5eHeadlessAction(first.state, {
+      type: 'grapple', actorId: 'a', targetId: 'c', actorD20: 20, targetD20: 1,
+      targetDefense: 'athletics', spendAction: false,
+    })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    const released = resolveDnd5eHeadlessAction(first.state, {
+      type: 'release-grapple', actorId: 'a', targetId: 'b',
+    })
+    expect(released.ok).toBe(true)
+    if (!released.ok) return
+    expect(released.state.combatants.b.conditions).not.toContain('grappled')
+    expect(released.state.combatants.a.turn.actionAvailable).toBe(true)
+    expect(released.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed',
+      targetId: 'b',
+      reason: 'released',
+    }))
+    expect(resolveDnd5eHeadlessAction(released.state, {
+      type: 'grapple', actorId: 'a', targetId: 'c', actorD20: 20, targetD20: 1,
+      targetDefense: 'athletics', spendAction: false,
+    })).toMatchObject({ ok: true })
+  })
+
+  it('reconciles persisted basic grapples against the grappler current free hands', () => {
+    const state = startDnd5eHeadlessCombat('persisted-basic-grapple-capacity', [
+      fighter('a', 20, { grappleFreeHandCapacity: 1 }),
+      fighter('b', 10, { controller: 'dm' }),
+      fighter('c', 5, { controller: 'dm' }),
+    ])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('a', 'b')]: 5,
+      [dnd5eCombatantPairKey('a', 'c')]: 5,
+    }
+    const first = resolveDnd5eHeadlessAction(state, {
+      type: 'grapple',
+      actorId: 'a',
+      targetId: 'b',
+      actorD20: 20,
+      targetD20: 1,
+      targetDefense: 'athletics',
+      spendAction: false,
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const persistedGrapple = first.state.combatants.b.classState.activeEffects?.find(
+      (effect) => effect.source.rulesId === 'basic-action:grapple',
+    )
+    expect(persistedGrapple).toBeDefined()
+    if (!persistedGrapple) return
+    const persistedDuplicate = structuredClone(persistedGrapple)
+    persistedDuplicate.id = 'zz-persisted-extra-grapple'
+    first.state.combatants.c.classState.activeEffects = [persistedDuplicate]
+    first.state.combatants.c.conditions =
+      dnd5eConditionsFromActiveEffects([persistedDuplicate])
+
+    const capacityCleaned = resolveDnd5eHeadlessAction(first.state, {
+      type: 'end-turn',
+      actorId: 'a',
+    })
+    expect(capacityCleaned.ok).toBe(true)
+    if (!capacityCleaned.ok) return
+    expect(capacityCleaned.state.combatants.b.conditions).toContain('grappled')
+    expect(capacityCleaned.state.combatants.c.conditions).not.toContain('grappled')
+    expect(capacityCleaned.events).toContainEqual(expect.objectContaining({
+      type: 'active-effect-removed',
+      targetId: 'c',
+      effectId: 'zz-persisted-extra-grapple',
+      reason: 'invalid-relation',
+    }))
+
+    capacityCleaned.state.combatants.a.grappleFreeHandCapacity = 0
+    const noFreeHands = resolveDnd5eHeadlessAction(capacityCleaned.state, {
+      type: 'end-turn',
+      actorId: 'b',
+    })
+    expect(noFreeHands.ok).toBe(true)
+    if (!noFreeHands.ok) return
+    expect(noFreeHands.state.combatants.b.conditions).not.toContain('grappled')
   })
 
   it('rejects an opportunity attack when the reactor cannot see the moving target', () => {
@@ -5948,5 +6148,1750 @@ describe('D&D 5e 2014 headless combat engine', () => {
       expect(state.combatants[target.id].currentHp).toBe(100)
       expect(state.combatants[assassin.id].turn.actionAvailable).toBe(true)
     })
+  })
+
+  describe('Bone Devil indexed Sting condition effect', () => {
+    function boneDevilCombat(targetPatch = {}) {
+      const devil = fighter('bone-devil', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:bone-devil',
+        abilities: { str: 18, dex: 16, con: 18, int: 13, wis: 14, cha: 16 },
+        armorClass: 19,
+        currentHp: 142,
+        maxHp: 142,
+        position: { x: 0, y: 0 },
+      })
+      const target = fighter('target', 10, {
+        armorClass: 10,
+        currentHp: 100,
+        maxHp: 100,
+        position: { x: 5, y: 0 },
+        ...targetPatch,
+      })
+      return {
+        devil,
+        target,
+        state: startDnd5eHeadlessCombat('bone-devil-sting', [devil, target]),
+      }
+    }
+
+    const stingHit = (savingThrowD20: number) => ({
+      targetId: 'target',
+      d20: 10,
+      damageRolls: [
+        [4, 4],
+        [3, 3, 3, 3, 3],
+      ],
+      onHitEffectRolls: [{
+        effectId: 'sting-poisoned',
+        d20: savingThrowD20,
+      }],
+    })
+
+    it('applies a ten-round poisoned effect on a failed Sting save and removes it on a repeat save', () => {
+      const { state, devil, target } = boneDevilCombat()
+      const failed = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: devil.id,
+        actionId: 'sting',
+        rolls: [stingHit(1)],
+      })
+
+      expect(failed.ok, failed.ok ? undefined : failed.reason).toBe(true)
+      if (!failed.ok) return
+      expect(failed.state.combatants[target.id].currentHp).toBe(73)
+      expect(failed.events).toContainEqual(expect.objectContaining({
+        type: 'saving-throw-resolved',
+        targetId: target.id,
+        ability: 'con',
+        dc: 14,
+        success: false,
+      }))
+      const poisoned = failed.state.combatants[target.id].classState.activeEffects?.find((effect) =>
+        effect.standardCondition === 'poisoned')
+      expect(poisoned).toMatchObject({
+        standardCondition: 'poisoned',
+        source: {
+          kind: 'monster',
+          actorId: devil.id,
+          rulesId: 'monster:srd-5.1:bone-devil:bone-devil:sting:sting-poisoned',
+        },
+        duration: {
+          type: 'rounds',
+          remainingRounds: 10,
+          tickOn: 'target-turn-end',
+        },
+        repeatSave: {
+          ability: 'con',
+          dc: 14,
+          timing: 'target-turn-end',
+          onSuccess: 'remove',
+        },
+      })
+      expect(failed.state.combatants[target.id].conditions).toContain('poisoned')
+
+      if (!poisoned) return
+      failed.state.initiativeIndex = failed.state.initiativeOrder.indexOf(target.id)
+      const recovered = resolveDnd5eHeadlessAction(failed.state, {
+        type: 'end-turn',
+        actorId: target.id,
+        activeEffectSavingThrows: [{
+          effectId: poisoned.id,
+          d20: 20,
+        }],
+      })
+      expect(recovered.ok, recovered.ok ? undefined : recovered.reason).toBe(true)
+      if (!recovered.ok) return
+      expect(recovered.state.combatants[target.id].conditions).not.toContain('poisoned')
+      expect(recovered.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-save-resolved',
+        targetId: target.id,
+        effectId: poisoned.id,
+        success: true,
+      }))
+    })
+
+    it('does not apply poisoned when the target succeeds on the initial Sting save', () => {
+      const { state, devil, target } = boneDevilCombat()
+      const saved = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: devil.id,
+        actionId: 'sting',
+        rolls: [stingHit(20)],
+      })
+
+      expect(saved.ok, saved.ok ? undefined : saved.reason).toBe(true)
+      if (!saved.ok) return
+      expect(saved.state.combatants[target.id].currentHp).toBe(73)
+      expect(saved.state.combatants[target.id].conditions).not.toContain('poisoned')
+      expect(saved.state.combatants[target.id].classState.activeEffects ?? [])
+        .not.toContainEqual(expect.objectContaining({ standardCondition: 'poisoned' }))
+      expect(saved.events).toContainEqual(expect.objectContaining({
+        type: 'saving-throw-resolved',
+        targetId: target.id,
+        ability: 'con',
+        dc: 14,
+        success: true,
+      }))
+    })
+
+    it('resolves Claw, Claw, Sting once each and binds the condition save only to Sting', () => {
+      const { state, devil, target } = boneDevilCombat({
+        currentHp: 200,
+        maxHp: 200,
+      })
+      const result = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: devil.id,
+        actionId: 'multiattack',
+        rolls: [
+          { targetId: target.id, d20: 10, damageRolls: [[4]] },
+          { targetId: target.id, d20: 10, damageRolls: [[5]] },
+          stingHit(20),
+        ],
+      }, {
+        transactionId: 'bone-devil-three-attacks',
+        now: 1,
+      })
+
+      expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
+      if (!result.ok) return
+      expect(result.state.combatants[target.id].currentHp).toBe(156)
+      expect(result.events.filter((event) => event.type === 'attack-resolved')).toHaveLength(3)
+      expect(result.events.filter((event) => event.type === 'saving-throw-resolved')).toEqual([
+        expect.objectContaining({
+          targetId: target.id,
+          ability: 'con',
+          dc: 14,
+          success: true,
+        }),
+      ])
+      const stingLedgerIds = result.transaction?.rollLedger.entries
+        .map((entry) => entry.id)
+        .filter((id) => id.includes('on-hit:sting-poisoned')) ?? []
+      expect(stingLedgerIds).toEqual([
+        expect.stringContaining(':monster:2:on-hit:sting-poisoned:save'),
+      ])
+
+      const forged = boneDevilCombat({ currentHp: 200, maxHp: 200 })
+      const rejected = resolveDnd5eHeadlessAction(forged.state, {
+        type: 'monster-action',
+        actorId: forged.devil.id,
+        actionId: 'multiattack',
+        rolls: [
+          {
+            targetId: forged.target.id,
+            d20: 10,
+            damageRolls: [[4]],
+            onHitEffectRolls: [{ effectId: 'sting-poisoned', d20: 20 }],
+          },
+          { targetId: forged.target.id, d20: 10, damageRolls: [[5]] },
+          stingHit(20),
+        ],
+      })
+      expect(rejected).toMatchObject({
+        ok: false,
+        reason: 'invalid-dice',
+        transaction: {
+          status: 'rolled-back',
+          rollbackReason: 'invalid-dice',
+        },
+      })
+      expect(forged.state.combatants[forged.target.id].currentHp).toBe(200)
+      expect(forged.state.combatants[forged.devil.id].turn.actionAvailable).toBe(true)
+    })
+  })
+
+  describe('source-linked monster grapple relations', () => {
+    function ankhegGrappleState(includeSecondTarget = false) {
+      const ankheg = fighter('ankheg', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:ankheg',
+        abilities: { str: 17, dex: 11, con: 13, int: 1, wis: 13, cha: 6 },
+        armorClass: 14,
+        currentHp: 39,
+        maxHp: 39,
+        sizeRank: 3,
+        position: { x: 0, y: 0 },
+      })
+      const target = fighter('target', 10, {
+        armorClass: 14,
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 3,
+        position: { x: 5, y: 0 },
+      })
+      const secondTarget = fighter('second-target', 5, {
+        armorClass: 14,
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 2,
+        position: { x: 0, y: 5 },
+      })
+      const state = startDnd5eHeadlessCombat(
+        'ankheg-source-linked-grapple',
+        includeSecondTarget ? [ankheg, target, secondTarget] : [ankheg, target],
+      )
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(ankheg.id, target.id)]: 5,
+        ...(includeSecondTarget
+          ? { [dnd5eCombatantPairKey(ankheg.id, secondTarget.id)]: 5 }
+          : {}),
+      }
+      const hit = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: ankheg.id,
+        actionId: 'bite',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[3, 4], [3]],
+          onHitEffectRolls: [{ effectId: 'bite-grapple' }],
+        }],
+      })
+      expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+      if (!hit.ok) throw new Error(hit.reason)
+      return { hit, ankheg, target, secondTarget }
+    }
+
+    it('links Ankheg Bite to its source and grants advantage only against the linked target', () => {
+      const { hit } = ankhegGrappleState()
+      const grapple = hit.state.combatants.target.classState.activeEffects?.find((effect) =>
+        effect.standardCondition === 'grappled')
+      expect(grapple).toMatchObject({
+        source: {
+          kind: 'monster',
+          actorId: 'ankheg',
+        },
+        escapeCheck: {
+          ability: 'str',
+          skill: 'athletics',
+          alternativeAbility: 'dex',
+          alternativeSkill: 'acrobatics',
+          dc: 13,
+          economy: 'action',
+        },
+        relation: {
+          schemaVersion: 1,
+          kind: 'grapple',
+          sourceActorId: 'ankheg',
+          sourceActionId: 'bite',
+          slotGroup: 'bite',
+          maxDistanceFeet: 5,
+          movement: 'drag-target',
+          endsOnSourceIncapacitated: true,
+        },
+      })
+      expect(hit.state.combatants.target.conditions).toContain('grappled')
+
+      hit.state.combatants.ankheg.turn.actionAvailable = true
+      const advantaged = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'monster-action',
+        actorId: 'ankheg',
+        actionId: 'bite',
+        rolls: [{
+          targetId: 'target',
+          d20: 1,
+          d20Second: 15,
+          damageRolls: [[1, 1], [1]],
+          onHitEffectRolls: [{ effectId: 'bite-grapple' }],
+        }],
+      })
+      expect(advantaged.ok, advantaged.ok ? undefined : advantaged.reason).toBe(true)
+      if (!advantaged.ok) return
+      expect(advantaged.events).toContainEqual(expect.objectContaining({
+        type: 'attack-resolved',
+        actorId: 'ankheg',
+        targetId: 'target',
+        d20: 15,
+        hit: true,
+      }))
+      expect(advantaged.state.combatants.target.classState.activeEffects?.filter((effect) =>
+        effect.relation?.slotGroup === 'bite')).toHaveLength(1)
+    })
+
+    it('lets a monster release its own grapple for free and outside its turn', () => {
+      const { hit } = ankhegGrappleState()
+      hit.state.initiativeIndex = hit.state.initiativeOrder.indexOf('target')
+      const actionAvailable = hit.state.combatants.ankheg.turn.actionAvailable
+      const released = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'release-grapple',
+        actorId: 'ankheg',
+        targetId: 'target',
+      })
+      expect(released.ok, released.ok ? undefined : released.reason).toBe(true)
+      if (!released.ok) return
+      expect(released.state.combatants.target.conditions).not.toContain('grappled')
+      expect(released.state.combatants.ankheg.turn.actionAvailable).toBe(actionAvailable)
+      expect(released.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: 'target',
+        reason: 'released',
+      }))
+    })
+
+    it('requires an exact root id when one source-target pair has two legal grapple slots', () => {
+      const base = getDnd5eSrdMonster('srd-5.1:ankheg')!
+      const bite = base.actions.find((action) => action.id === 'bite')
+      const biteRelation = bite?.attack?.onHitEffects?.find((effect) =>
+        effect.kind === 'source-linked-condition')
+      if (!bite?.attack || !biteRelation) throw new Error('Ankheg Bite relation is missing')
+      const tailRelation = {
+        ...biteRelation,
+        id: 'tail-grapple',
+        relation: {
+          ...biteRelation.relation,
+          slotGroup: 'tail',
+        },
+      }
+      const monster = {
+        ...base,
+        id: 'room-monster:dual-slot-grappler',
+        slug: 'dual-slot-grappler',
+        actions: [
+          bite,
+          {
+            ...bite,
+            id: 'tail-grapple-attack',
+            name: 'Tail Grapple',
+            attack: {
+              ...bite.attack,
+              onHitEffects: [tailRelation],
+            },
+          },
+        ],
+      } as Dnd5eMonsterStatBlock
+      setDnd5eRoomMonsterCatalog([monster])
+      const source = fighter('dual-source', 20, {
+        controller: 'dm',
+        statBlockId: monster.id,
+        abilities: { ...monster.abilities },
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 3,
+      })
+      const target = fighter('dual-target', 10, {
+        armorClass: 14,
+        currentHp: 200,
+        maxHp: 200,
+        sizeRank: 2,
+        position: { x: 5, y: 0 },
+      })
+      const state = startDnd5eHeadlessCombat('dual-slot-release', [source, target])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(source.id, target.id)]: 5,
+      }
+      const first = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: source.id,
+        actionId: bite.id,
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1]],
+          onHitEffectRolls: [{ effectId: biteRelation.id }],
+        }],
+      })
+      expect(first.ok, first.ok ? undefined : first.reason).toBe(true)
+      if (!first.ok) return
+      first.state.combatants[source.id].turn.actionAvailable = true
+      const second = resolveDnd5eHeadlessAction(first.state, {
+        type: 'monster-action',
+        actorId: source.id,
+        actionId: 'tail-grapple-attack',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1]],
+          onHitEffectRolls: [{ effectId: tailRelation.id }],
+        }],
+      })
+      expect(second.ok, second.ok ? undefined : second.reason).toBe(true)
+      if (!second.ok) return
+      const roots = second.state.combatants[target.id].classState.activeEffects
+        ?.filter((effect) =>
+          effect.standardCondition === 'grappled' &&
+          effect.dependsOnEffectId == null) ?? []
+      expect(roots).toHaveLength(2)
+      const biteRoot = roots.find((effect) => effect.relation?.slotGroup === 'bite')
+      const tailRoot = roots.find((effect) => effect.relation?.slotGroup === 'tail')
+      if (!biteRoot || !tailRoot) throw new Error('Dual grapple roots were not created')
+
+      const ambiguous = resolveDnd5eHeadlessAction(second.state, {
+        type: 'release-grapple',
+        actorId: source.id,
+        targetId: target.id,
+      })
+      expect(ambiguous).toMatchObject({ ok: false, reason: 'invalid-target' })
+      expect(ambiguous.state.combatants[target.id].classState.activeEffects
+        ?.filter((effect) => effect.standardCondition === 'grappled')).toHaveLength(2)
+
+      const exact = resolveDnd5eHeadlessAction(ambiguous.state, {
+        type: 'release-grapple',
+        actorId: source.id,
+        targetId: target.id,
+        effectId: biteRoot.id,
+      })
+      expect(exact.ok, exact.ok ? undefined : exact.reason).toBe(true)
+      if (!exact.ok) return
+      expect(exact.state.combatants[target.id].conditions).toContain('grappled')
+      expect(exact.state.combatants[target.id].classState.activeEffects)
+        .toContainEqual(expect.objectContaining({ id: tailRoot.id }))
+      expect(exact.state.combatants[target.id].classState.activeEffects ?? [])
+        .not.toContainEqual(expect.objectContaining({ id: biteRoot.id }))
+      expect(exact.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: target.id,
+        effectId: biteRoot.id,
+        reason: 'released',
+      }))
+    })
+
+    it.each([
+      {
+        name: 'forged source kind',
+        mutate: (effect: Dnd5eActiveEffectInstance) => {
+          effect.source.kind = 'spell'
+        },
+      },
+      {
+        name: 'forged source rules id',
+        mutate: (effect: Dnd5eActiveEffectInstance) => {
+          effect.source.rulesId = 'monster:srd-5.1:ankheg:bite:other-effect'
+        },
+      },
+      {
+        name: 'forged stable root id',
+        mutate: (effect: Dnd5eActiveEffectInstance) => {
+          effect.id = 'forged-root'
+          effect.stackingKey = 'forged-root'
+        },
+      },
+    ])('fails closed for a persisted monster relation with $name', ({ mutate }) => {
+      const { hit } = ankhegGrappleState()
+      const grapple = hit.state.combatants.target.classState.activeEffects?.find((effect) =>
+        effect.relation?.slotGroup === 'bite')
+      if (!grapple) throw new Error('missing grapple')
+      mutate(grapple)
+      const cleaned = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'end-turn',
+        actorId: 'ankheg',
+      })
+      expect(cleaned.ok, cleaned.ok ? undefined : cleaned.reason).toBe(true)
+      if (!cleaned.ok) return
+      expect(cleaned.state.combatants.target.conditions).not.toContain('grappled')
+      expect(cleaned.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: 'target',
+        reason: 'invalid-relation',
+      }))
+    })
+
+    it('ends a physical grapple when total cover separates source and target', () => {
+      const { hit } = ankhegGrappleState()
+      hit.state.lineOfEffectBlockedByCombatantPair = {
+        [dnd5eDirectedCombatantPairKey('ankheg', 'target')]: true,
+      }
+      const cleaned = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'end-turn',
+        actorId: 'ankheg',
+      })
+      expect(cleaned.ok, cleaned.ok ? undefined : cleaned.reason).toBe(true)
+      if (!cleaned.ok) return
+      expect(cleaned.state.combatants.target.conditions).not.toContain('grappled')
+      expect(cleaned.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: 'target',
+        reason: 'invalid-relation',
+      }))
+    })
+
+    it('does not end an established grapple merely because the target later changes size', () => {
+      const { hit } = ankhegGrappleState()
+      hit.state.combatants.target.sizeRank = 5
+      const retained = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'end-turn',
+        actorId: 'ankheg',
+      })
+      expect(retained.ok, retained.ok ? undefined : retained.reason).toBe(true)
+      if (!retained.ok) return
+      expect(retained.state.combatants.target.conditions).toContain('grappled')
+    })
+
+    it.each([
+      {
+        name: 'Ankheg Bite',
+        statBlockId: 'srd-5.1:ankheg',
+        actionId: 'bite',
+        effectId: 'bite-grapple',
+        slotGroup: 'bite',
+        sizeRank: 3,
+        abilities: { str: 17, dex: 11, con: 13, int: 1, wis: 13, cha: 6 },
+        damageRolls: [[1, 1], [1]],
+        expectedConditions: ['grappled'],
+      },
+      {
+        name: 'Behir Constrict',
+        statBlockId: 'srd-5.1:behir',
+        actionId: 'constrict',
+        effectId: 'constrict-grapple',
+        slotGroup: 'constrict',
+        sizeRank: 4,
+        abilities: { str: 23, dex: 16, con: 18, int: 7, wis: 14, cha: 12 },
+        damageRolls: [[1, 1], [1, 1]],
+        expectedConditions: ['grappled', 'restrained'],
+      },
+    ])(
+      'keeps two independent $name relations on one target and removes only the incapacitated source',
+      ({
+        statBlockId,
+        actionId,
+        effectId,
+        slotGroup,
+        sizeRank,
+        abilities: monsterAbilities,
+        damageRolls,
+        expectedConditions,
+      }) => {
+        const first = fighter('first-source', 30, {
+          controller: 'dm',
+          statBlockId,
+          abilities: monsterAbilities,
+          sizeRank,
+          currentHp: 200,
+          maxHp: 200,
+          position: { x: 0, y: 0 },
+        })
+        const second = fighter('second-source', 20, {
+          controller: 'dm',
+          statBlockId,
+          abilities: monsterAbilities,
+          sizeRank,
+          currentHp: 200,
+          maxHp: 200,
+          position: { x: 0, y: 5 },
+        })
+        const target = fighter('shared-target', 10, {
+          armorClass: 10,
+          currentHp: 200,
+          maxHp: 200,
+          sizeRank: 3,
+          position: { x: 5, y: 0 },
+        })
+        const state = startDnd5eHeadlessCombat(
+          `parallel-${slotGroup}-relations`,
+          [first, second, target],
+        )
+        state.distanceFeetByCombatantPair = {
+          [dnd5eCombatantPairKey(first.id, target.id)]: 5,
+          [dnd5eCombatantPairKey(second.id, target.id)]: 5,
+        }
+        const firstHit = resolveDnd5eHeadlessAction(state, {
+          type: 'monster-action',
+          actorId: first.id,
+          actionId,
+          rolls: [{
+            targetId: target.id,
+            d20: 10,
+            damageRolls,
+            onHitEffectRolls: [{ effectId }],
+          }],
+        })
+        expect(firstHit.ok, firstHit.ok ? undefined : firstHit.reason).toBe(true)
+        if (!firstHit.ok) return
+
+        firstHit.state.initiativeIndex = firstHit.state.initiativeOrder.indexOf(second.id)
+        firstHit.state.combatants[second.id].turn.actionAvailable = true
+        const secondHit = resolveDnd5eHeadlessAction(firstHit.state, {
+          type: 'monster-action',
+          actorId: second.id,
+          actionId,
+          rolls: [{
+            targetId: target.id,
+            d20: 10,
+            damageRolls,
+            onHitEffectRolls: [{ effectId }],
+          }],
+        })
+        expect(secondHit.ok, secondHit.ok ? undefined : secondHit.reason).toBe(true)
+        if (!secondHit.ok) return
+        expect(secondHit.state.combatants[target.id].classState.activeEffects?.filter((effect) =>
+          effect.relation?.slotGroup === slotGroup).map((effect) =>
+          effect.relation?.sourceActorId).sort()).toEqual([first.id, second.id])
+
+        const incapacitatingEffects = migrateLegacyDnd5eConditions({
+          targetId: first.id,
+          conditions: ['stunned'],
+        })
+        secondHit.state.combatants[first.id].classState.activeEffects = incapacitatingEffects
+        secondHit.state.combatants[first.id].conditions =
+          dnd5eConditionsFromActiveEffects(incapacitatingEffects)
+        secondHit.state.initiativeIndex = secondHit.state.initiativeOrder.indexOf(first.id)
+        const cleaned = resolveDnd5eHeadlessAction(secondHit.state, {
+          type: 'end-turn',
+          actorId: first.id,
+        })
+        expect(cleaned.ok, cleaned.ok ? undefined : cleaned.reason).toBe(true)
+        if (!cleaned.ok) return
+        const remainingEffects =
+          cleaned.state.combatants[target.id].classState.activeEffects ?? []
+        expect(remainingEffects.filter((effect) =>
+          effect.relation?.slotGroup === slotGroup)).toEqual([
+          expect.objectContaining({
+            relation: expect.objectContaining({ sourceActorId: second.id }),
+          }),
+        ])
+        expect(remainingEffects.some((effect) => effect.source.actorId === first.id)).toBe(false)
+        expect(cleaned.state.combatants[target.id].conditions).toEqual(
+          expect.arrayContaining(expectedConditions),
+        )
+      },
+    )
+
+    it('does not let a dependent grapple relation occupy capacity or enable dragging', () => {
+      const source = fighter('ankheg', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:ankheg',
+        abilities: { str: 17, dex: 11, con: 13, int: 1, wis: 13, cha: 6 },
+        sizeRank: 3,
+        currentHp: 39,
+        maxHp: 39,
+        position: { x: 0, y: 0 },
+      })
+      const malformedTarget = fighter('malformed-target', 10, {
+        armorClass: 10,
+        currentHp: 100,
+        maxHp: 100,
+        position: { x: 5, y: 0 },
+      })
+      const validTarget = fighter('valid-target', 5, {
+        armorClass: 10,
+        currentHp: 100,
+        maxHp: 100,
+        position: { x: 0, y: 5 },
+      })
+      const anchor = createDnd5eConditionEffect({
+        id: 'malformed-anchor',
+        condition: 'prone',
+        targetId: malformedTarget.id,
+        source: { kind: 'monster', actorId: source.id, rulesId: 'bite' },
+      })
+      const malformedRelation = createDnd5eConditionEffect({
+        id: 'malformed-dependent-relation',
+        condition: 'grappled',
+        targetId: malformedTarget.id,
+        source: { kind: 'monster', actorId: source.id, rulesId: 'bite' },
+        dependsOnEffectId: anchor.id,
+        escapeCheck: {
+          ability: 'str',
+          skill: 'athletics',
+          alternativeAbility: 'dex',
+          alternativeSkill: 'acrobatics',
+          dc: 13,
+          economy: 'action',
+        },
+        relation: {
+          schemaVersion: 1,
+          kind: 'grapple',
+          sourceActorId: source.id,
+          sourceActionId: 'bite',
+          slotGroup: 'bite',
+          maxDistanceFeet: 5,
+          movement: 'drag-target',
+          endsOnSourceIncapacitated: true,
+        },
+      })
+      malformedTarget.classState.activeEffects = [anchor, malformedRelation]
+      malformedTarget.conditions =
+        dnd5eConditionsFromActiveEffects(malformedTarget.classState.activeEffects)
+      const state = startDnd5eHeadlessCombat(
+        'malformed-relation-fail-closed',
+        [source, malformedTarget, validTarget],
+      )
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(source.id, malformedTarget.id)]: 5,
+        [dnd5eCombatantPairKey(source.id, validTarget.id)]: 5,
+      }
+
+      expect(dnd5eGrappleDragExtraMovementFeet(state, source.id, 5)).toBe(0)
+      const hit = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: source.id,
+        actionId: 'bite',
+        rolls: [{
+          targetId: validTarget.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1]],
+          onHitEffectRolls: [{ effectId: 'bite-grapple' }],
+        }],
+      })
+      expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+    })
+
+    it('removes a source-linked relation in the same shove transaction that breaks reach', () => {
+      const { hit } = ankhegGrappleState()
+      const shover = fighter('shover', 30, {
+        abilities: { ...abilities, str: 20 },
+        position: { x: 5, y: 0 },
+      })
+      hit.state.combatants[shover.id] = shover
+      hit.state.initiativeOrder = [shover.id, ...hit.state.initiativeOrder]
+      hit.state.initiativeIndex = 0
+      hit.state.distanceFeetByCombatantPair = {
+        ...hit.state.distanceFeetByCombatantPair,
+        [dnd5eCombatantPairKey(shover.id, 'ankheg')]: 5,
+      }
+
+      const pushed = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'shove',
+        actorId: shover.id,
+        targetId: 'ankheg',
+        actorD20: 20,
+        targetD20: 1,
+        targetDefense: 'athletics',
+        outcome: 'push',
+        pushTo: { x: -5, y: 0 },
+      })
+      expect(pushed.ok, pushed.ok ? undefined : pushed.reason).toBe(true)
+      if (!pushed.ok) return
+      expect(pushed.state.combatants.target.conditions).not.toContain('grappled')
+      expect(pushed.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: 'target',
+        reason: 'out-of-range',
+      }))
+    })
+
+    it('removes a source-linked relation when Thunderwave pushes its source out of reach', () => {
+      const { hit } = ankhegGrappleState()
+      const caster = fighter('caster', 30, {
+        classId: 'wizard',
+        level: 5,
+        abilities: { ...abilities, int: 16 },
+        classSelections: { 'spell-prepared': ['thunderwave'] },
+        classResources: { 'dnd5e-spell-slot-1': { current: 1, max: 4 } },
+        position: { x: 5, y: 0 },
+      })
+      hit.state.combatants[caster.id] = caster
+      hit.state.initiativeOrder = [caster.id, ...hit.state.initiativeOrder]
+      hit.state.initiativeIndex = 0
+      hit.state.distanceFeetByCombatantPair = {
+        ...hit.state.distanceFeetByCombatantPair,
+        [dnd5eCombatantPairKey(caster.id, 'ankheg')]: 5,
+      }
+
+      const pushed = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'cast-spell',
+        actorId: caster.id,
+        castingClassId: 'wizard',
+        targetId: 'ankheg',
+        targetIds: ['ankheg'],
+        spellId: 'thunderwave',
+        slotLevel: 1,
+        savingThrowD20: 1,
+        forcedMovements: [{
+          targetId: 'ankheg',
+          to: { x: -10, y: 0 },
+          distanceFeet: 10,
+        }],
+        effectRolls: [1, 1],
+      })
+      expect(pushed.ok, pushed.ok ? undefined : pushed.reason).toBe(true)
+      if (!pushed.ok) return
+      expect(pushed.state.combatants.target.conditions).not.toContain('grappled')
+      expect(pushed.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: 'target',
+        reason: 'out-of-range',
+      }))
+    })
+
+    it('rejects another Ankheg Bite target and Acid Spray while its bite slot is occupied', () => {
+      const { hit } = ankhegGrappleState(true)
+      hit.state.combatants.ankheg.turn.actionAvailable = true
+      expect(resolveDnd5eHeadlessAction(hit.state, {
+        type: 'monster-action',
+        actorId: 'ankheg',
+        actionId: 'bite',
+        rolls: [{
+          targetId: 'second-target',
+          d20: 10,
+          damageRolls: [[3, 4], [3]],
+          onHitEffectRolls: [{ effectId: 'bite-grapple' }],
+        }],
+      })).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+      expect(resolveDnd5eHeadlessAction(hit.state, {
+        type: 'monster-area-action',
+        actorId: 'ankheg',
+        actionId: 'acid-spray',
+        resolution: {
+          schemaVersion: 1,
+          targetIds: ['second-target'],
+          targetSavingThrows: [{ targetId: 'second-target', d20: 1 }],
+          damageRolls: [1, 1, 1],
+        },
+      })).toMatchObject({ ok: false, reason: 'invalid-target' })
+    })
+
+    it('applies dependent Behir restraint and escapes with the better proficient skill', () => {
+      const behir = fighter('behir', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:behir',
+        abilities: { str: 23, dex: 16, con: 18, int: 7, wis: 14, cha: 12 },
+        armorClass: 17,
+        currentHp: 168,
+        maxHp: 168,
+        sizeRank: 4,
+      })
+      const target = fighter('target', 10, {
+        armorClass: 16,
+        currentHp: 100,
+        maxHp: 100,
+        abilities: { ...abilities, str: 18, dex: 14 },
+        proficiencyBonus: 3,
+        skillProficiencies: ['acrobatics'],
+        classSelections: { expertise: ['acrobatics'] },
+        sizeRank: 3,
+      })
+      const state = startDnd5eHeadlessCombat('behir-constrict-relation', [behir, target])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(behir.id, target.id)]: 5,
+      }
+      const hit = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'constrict',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1, 1]],
+          onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+        }],
+      })
+      expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+      if (!hit.ok) return
+      const grapple = hit.state.combatants.target.classState.activeEffects?.find((effect) =>
+        effect.standardCondition === 'grappled')
+      const restrained = hit.state.combatants.target.classState.activeEffects?.find((effect) =>
+        effect.standardCondition === 'restrained')
+      expect(grapple).toMatchObject({
+        escapeCheck: {
+          dc: 16,
+          skill: 'athletics',
+          alternativeSkill: 'acrobatics',
+        },
+        relation: {
+          sourceActorId: 'behir',
+          sourceActionId: 'constrict',
+          slotGroup: 'constrict',
+        },
+      })
+      expect(restrained).toMatchObject({ dependsOnEffectId: grapple?.id })
+      expect(hit.state.combatants.target.conditions).toEqual(
+        expect.arrayContaining(['grappled', 'restrained']),
+      )
+
+      const targetTurn = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'end-turn',
+        actorId: behir.id,
+      })
+      expect(targetTurn.ok, targetTurn.ok ? undefined : targetTurn.reason).toBe(true)
+      if (!targetTurn.ok || !grapple) return
+      const escaped = resolveDnd5eHeadlessAction(targetTurn.state, {
+        type: 'escape-active-effect',
+        actorId: target.id,
+        effectId: grapple.id,
+        d20: 8,
+      })
+      expect(escaped.ok, escaped.ok ? undefined : escaped.reason).toBe(true)
+      if (!escaped.ok) return
+      expect(escaped.events).toContainEqual(expect.objectContaining({
+        type: 'ability-check-resolved',
+        actorId: target.id,
+        ability: 'dex',
+        skill: 'acrobatics',
+        modifier: 8,
+        total: 16,
+        dc: 16,
+        success: true,
+      }))
+      expect(escaped.state.combatants.target.conditions).not.toContain('grappled')
+      expect(escaped.state.combatants.target.conditions).not.toContain('restrained')
+      expect(escaped.state.combatants.target.classState.activeEffects ?? []).not.toContainEqual(
+        expect.objectContaining({ id: restrained?.id }),
+      )
+    })
+
+    it('rejects Behir Constrict and a Multiattack containing it against a Huge target', () => {
+      const behir = fighter('behir', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:behir',
+        abilities: { str: 23, dex: 16, con: 18, int: 7, wis: 14, cha: 12 },
+        currentHp: 168,
+        maxHp: 168,
+        sizeRank: 4,
+      })
+      const huge = fighter('huge-target', 10, {
+        controller: 'player',
+        armorClass: 10,
+        currentHp: 200,
+        maxHp: 200,
+        sizeRank: 4,
+      })
+      const state = startDnd5eHeadlessCombat('behir-size-restriction', [behir, huge])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(behir.id, huge.id)]: 5,
+      }
+      expect(resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'constrict',
+        rolls: [{
+          targetId: huge.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1, 1]],
+          onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+        }],
+      })).toMatchObject({ ok: false, reason: 'invalid-target' })
+      expect(resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'multiattack',
+        rolls: [
+          {
+            targetId: huge.id,
+            d20: 10,
+            damageRolls: [[1, 1, 1]],
+          },
+          {
+            targetId: huge.id,
+            d20: 10,
+            damageRolls: [[1, 1], [1, 1]],
+            onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+          },
+        ],
+      })).toMatchObject({ ok: false, reason: 'invalid-target' })
+    })
+
+    it('fails closed when a persisted Behir grapple is missing its dependent restraint', () => {
+      const behir = fighter('behir', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:behir',
+        abilities: { str: 23, dex: 16, con: 18, int: 7, wis: 14, cha: 12 },
+        currentHp: 168,
+        maxHp: 168,
+        sizeRank: 4,
+      })
+      const target = fighter('target', 10, {
+        armorClass: 10,
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 3,
+      })
+      const state = startDnd5eHeadlessCombat('behir-missing-dependent', [behir, target])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(behir.id, target.id)]: 5,
+      }
+      const hit = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'constrict',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1, 1]],
+          onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+        }],
+      })
+      expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+      if (!hit.ok) return
+      hit.state.combatants[target.id].classState.activeEffects =
+        hit.state.combatants[target.id].classState.activeEffects?.filter((effect) =>
+          effect.standardCondition !== 'restrained')
+      hit.state.combatants[target.id].conditions = ['grappled']
+
+      const reconciled = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'release-grapple',
+        actorId: behir.id,
+        targetId: target.id,
+      })
+      expect(reconciled).toMatchObject({ ok: false, reason: 'invalid-target' })
+      expect(reconciled.state.combatants[target.id].conditions).not.toContain('grappled')
+      expect(reconciled.state.combatants[target.id].classState.activeEffects ?? []).toEqual([])
+      expect(reconciled.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: target.id,
+        reason: 'invalid-relation',
+      }))
+    })
+
+    it('keeps a valid Behir grapple when the target is immune to its dependent restraint', () => {
+      const behir = fighter('behir', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:behir',
+        abilities: { str: 23, dex: 16, con: 18, int: 7, wis: 14, cha: 12 },
+        currentHp: 168,
+        maxHp: 168,
+        sizeRank: 4,
+      })
+      const target = fighter('target', 10, {
+        armorClass: 10,
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 3,
+        conditionImmunities: ['restrained'],
+      })
+      const state = startDnd5eHeadlessCombat('behir-restraint-immunity', [behir, target])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(behir.id, target.id)]: 5,
+      }
+      const hit = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'constrict',
+        rolls: [{
+          targetId: target.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1, 1]],
+          onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+        }],
+      })
+      expect(hit.ok, hit.ok ? undefined : hit.reason).toBe(true)
+      if (!hit.ok) return
+      expect(hit.state.combatants[target.id].conditions).toContain('grappled')
+      expect(hit.state.combatants[target.id].conditions).not.toContain('restrained')
+
+      const next = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'end-turn',
+        actorId: behir.id,
+      })
+      expect(next.ok, next.ok ? undefined : next.reason).toBe(true)
+      if (!next.ok) return
+      expect(next.state.combatants[target.id].conditions).toContain('grappled')
+      expect(next.events).not.toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: target.id,
+        reason: 'invalid-relation',
+      }))
+    })
+
+    it('lets an occupied Behir Constrict damage another target without creating a second relation', () => {
+      const behir = fighter('behir', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:behir',
+        abilities: { str: 23, dex: 16, con: 18, int: 7, wis: 14, cha: 12 },
+        armorClass: 17,
+        currentHp: 168,
+        maxHp: 168,
+        sizeRank: 4,
+      })
+      const first = fighter('first', 10, {
+        armorClass: 14,
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 3,
+      })
+      const second = fighter('second', 5, {
+        armorClass: 14,
+        currentHp: 100,
+        maxHp: 100,
+        sizeRank: 3,
+      })
+      const state = startDnd5eHeadlessCombat('behir-constrict-capacity', [behir, first, second])
+      state.distanceFeetByCombatantPair = {
+        [dnd5eCombatantPairKey(behir.id, first.id)]: 5,
+        [dnd5eCombatantPairKey(behir.id, second.id)]: 5,
+      }
+      const held = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'constrict',
+        rolls: [{
+          targetId: first.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1, 1]],
+          onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+        }],
+      })
+      expect(held.ok, held.ok ? undefined : held.reason).toBe(true)
+      if (!held.ok) return
+      held.state.combatants.behir.turn.actionAvailable = true
+      const attacked = resolveDnd5eHeadlessAction(held.state, {
+        type: 'monster-action',
+        actorId: behir.id,
+        actionId: 'constrict',
+        rolls: [{
+          targetId: second.id,
+          d20: 10,
+          damageRolls: [[1, 1], [1, 1]],
+          onHitEffectRolls: [{ effectId: 'constrict-grapple' }],
+        }],
+      })
+      expect(attacked.ok, attacked.ok ? undefined : attacked.reason).toBe(true)
+      if (!attacked.ok) return
+      expect(attacked.state.combatants.second.currentHp).toBe(84)
+      expect(attacked.state.combatants.second.conditions).not.toContain('grappled')
+      expect(attacked.state.combatants.first.conditions).toEqual(
+        expect.arrayContaining(['grappled', 'restrained']),
+      )
+    })
+
+    it.each(['incapacitated', 'dead'] as const)(
+      'cleans source-linked grapples on the next transaction when the source is %s',
+      (sourceState) => {
+        const { hit } = ankhegGrappleState()
+        const source = hit.state.combatants.ankheg
+        if (sourceState === 'dead') {
+          source.currentHp = 0
+          source.deathSaves.dead = true
+        } else {
+          const effects = migrateLegacyDnd5eConditions({
+            targetId: source.id,
+            conditions: ['stunned'],
+          })
+          source.classState.activeEffects = effects
+          source.conditions = dnd5eConditionsFromActiveEffects(effects)
+        }
+        const cleaned = resolveDnd5eHeadlessAction(hit.state, {
+          type: 'end-turn',
+          actorId: source.id,
+        })
+        expect(cleaned.ok, cleaned.ok ? undefined : cleaned.reason).toBe(true)
+        if (!cleaned.ok) return
+        expect(cleaned.state.combatants.target.conditions).not.toContain('grappled')
+        expect(cleaned.events).toContainEqual(expect.objectContaining({
+          type: 'active-effect-removed',
+          targetId: 'target',
+          reason: 'source-incapacitated',
+        }))
+      },
+    )
+
+    it('fails closed when persisted source-linked escape metadata no longer matches its declaration', () => {
+      const { hit } = ankhegGrappleState()
+      const grapple = hit.state.combatants.target.classState.activeEffects?.find((effect) =>
+        effect.relation?.slotGroup === 'bite')
+      if (!grapple?.escapeCheck) throw new Error('missing bite grapple')
+      grapple.escapeCheck.dc = 99
+
+      const cleaned = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'end-turn',
+        actorId: 'ankheg',
+      })
+      expect(cleaned.ok, cleaned.ok ? undefined : cleaned.reason).toBe(true)
+      if (!cleaned.ok) return
+      expect(cleaned.state.combatants.target.conditions).not.toContain('grappled')
+      expect(cleaned.events).toContainEqual(expect.objectContaining({
+        type: 'active-effect-removed',
+        targetId: 'target',
+        effectId: grapple.id,
+        reason: 'invalid-relation',
+      }))
+    })
+
+    it.each([
+      { targetSizeRank: 3, expectedMovementCost: 10 },
+      { targetSizeRank: 1, expectedMovementCost: 5 },
+    ])(
+      'drags a linked target and spends $expectedMovementCost feet for a 5-foot move',
+      ({ targetSizeRank, expectedMovementCost }) => {
+        const { hit } = ankhegGrappleState()
+        hit.state.combatants.target.sizeRank = targetSizeRank
+        const moved = resolveDnd5eHeadlessAction(hit.state, {
+          type: 'move',
+          actorId: 'ankheg',
+          to: { x: 5, y: 0 },
+          distance: 5,
+        })
+        expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+        if (!moved.ok) return
+        expect(moved.state.combatants.ankheg.position).toEqual({ x: 5, y: 0 })
+        expect(moved.state.combatants.target.position).toEqual({ x: 10, y: 0 })
+        expect(moved.state.combatants.ankheg.turn.movementRemaining)
+          .toBe(30 - expectedMovementCost)
+        expect(moved.events.filter((event) => event.type === 'moved')).toEqual([
+          expect.objectContaining({
+            actorId: 'ankheg',
+            from: { x: 0, y: 0 },
+            to: { x: 5, y: 0 },
+            distance: 5,
+          }),
+          expect.objectContaining({
+            actorId: 'target',
+            from: { x: 5, y: 0 },
+            to: { x: 10, y: 0 },
+            distance: 5,
+          }),
+        ])
+        expect(moved.events).toContainEqual({
+          type: 'turn-resource-spent',
+          actorId: 'ankheg',
+          resource: 'movement',
+          amount: expectedMovementCost,
+        })
+      },
+    )
+
+    it('applies independently supplied fall rolls to the grappler and its linked target', () => {
+      const { hit } = ankhegGrappleState()
+      hit.state.combatants.ankheg.elevationFeet = 20
+      hit.state.combatants.target.elevationFeet = 20
+      const moved = resolveDnd5eHeadlessAction(hit.state, {
+        type: 'move',
+        actorId: 'ankheg',
+        to: { x: 5, y: 0 },
+        distance: 5,
+        traversalMode: 'fall',
+        toElevationFeet: 0,
+        fallingDamageRollsByCombatantId: {
+          ankheg: [3, 4],
+          target: [2, 5],
+        },
+      })
+      expect(moved.ok, moved.ok ? undefined : moved.reason).toBe(true)
+      if (!moved.ok) return
+      expect(moved.state.combatants.ankheg.currentHp).toBe(32)
+      expect(moved.state.combatants.target.currentHp).toBe(80)
+      expect(moved.state.combatants.ankheg.conditions).toContain('prone')
+      expect(moved.state.combatants.target.conditions).toContain('prone')
+      expect(moved.events.filter((event) =>
+        event.type === 'falling-damage-resolved' && event.distanceFeet === 20))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ actorId: 'ankheg', damage: 7, landedProne: true }),
+          expect.objectContaining({ actorId: 'target', damage: 7, landedProne: true }),
+        ]))
+    })
+
+    it('does not reuse the grappler legacy fall dice for a dragged target', () => {
+      const { hit } = ankhegGrappleState()
+      hit.state.combatants.ankheg.elevationFeet = 20
+      hit.state.combatants.target.elevationFeet = 20
+      expect(resolveDnd5eHeadlessAction(hit.state, {
+        type: 'move',
+        actorId: 'ankheg',
+        to: { x: 5, y: 0 },
+        distance: 5,
+        traversalMode: 'fall',
+        toElevationFeet: 0,
+        fallingDamageRolls: [3, 4],
+      })).toMatchObject({ ok: false, reason: 'invalid-dice' })
+    })
+
+    it('fills both Giant Scorpion claw slots and skips a third new grapple', () => {
+      const scorpion = fighter('scorpion', 20, {
+        controller: 'dm',
+        statBlockId: 'srd-5.1:giant-scorpion',
+        abilities: { str: 15, dex: 13, con: 15, int: 1, wis: 9, cha: 3 },
+        armorClass: 15,
+        currentHp: 52,
+        maxHp: 52,
+        sizeRank: 3,
+      })
+      const targets = ['first', 'second', 'third'].map((id, index) => fighter(id, 10 - index, {
+        armorClass: 14,
+        currentHp: 100,
+        maxHp: 100,
+        position: { x: 5 * (index + 1), y: 0 },
+      }))
+      const state = startDnd5eHeadlessCombat('giant-scorpion-claw-capacity', [
+        scorpion,
+        ...targets,
+      ])
+      state.distanceFeetByCombatantPair = Object.fromEntries(targets.map((target) => [
+        dnd5eCombatantPairKey(scorpion.id, target.id),
+        5,
+      ]))
+      const multiattack = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-action',
+        actorId: scorpion.id,
+        actionId: 'multiattack',
+        rolls: [
+          {
+            targetId: 'first',
+            d20: 10,
+            damageRolls: [[4]],
+            onHitEffectRolls: [{ effectId: 'claw-grapple' }],
+          },
+          {
+            targetId: 'second',
+            d20: 10,
+            damageRolls: [[4]],
+            onHitEffectRolls: [{ effectId: 'claw-grapple' }],
+          },
+          {
+            targetId: 'third',
+            d20: 1,
+            damageRolls: [],
+          },
+        ],
+      })
+      expect(multiattack.ok, multiattack.ok ? undefined : multiattack.reason).toBe(true)
+      if (!multiattack.ok) return
+      expect(multiattack.state.combatants.first.conditions).toContain('grappled')
+      expect(multiattack.state.combatants.second.conditions).toContain('grappled')
+      expect(multiattack.state.combatants.third.conditions).not.toContain('grappled')
+
+      multiattack.state.combatants.scorpion.turn.actionAvailable = true
+      const thirdClaw = resolveDnd5eHeadlessAction(multiattack.state, {
+        type: 'monster-action',
+        actorId: scorpion.id,
+        actionId: 'claw',
+        rolls: [{
+          targetId: 'third',
+          d20: 10,
+          damageRolls: [[4]],
+          onHitEffectRolls: [{ effectId: 'claw-grapple' }],
+        }],
+      })
+      expect(thirdClaw.ok, thirdClaw.ok ? undefined : thirdClaw.reason).toBe(true)
+      if (!thirdClaw.ok) return
+      expect(thirdClaw.state.combatants.third.currentHp).toBe(94)
+      expect(thirdClaw.state.combatants.third.conditions).not.toContain('grappled')
+      expect(['first', 'second', 'third'].flatMap((id) =>
+        thirdClaw.state.combatants[id].classState.activeEffects?.filter((effect) =>
+          effect.relation?.slotGroup === 'claw') ?? [])).toHaveLength(2)
+    })
+  })
+
+  it('applies Bronze Dragon Repulsion Breath only to failed saves, including allied and downed targets', () => {
+    const dragon = fighter('dragon', 30, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:adult-bronze-dragon',
+      currentHp: 200,
+      maxHp: 200,
+      position: { x: 0, y: 0 },
+    })
+    const ally = fighter('ally', 20, {
+      controller: 'dm',
+      position: { x: 5, y: 0 },
+    })
+    const enemy = fighter('enemy', 10, {
+      position: { x: 10, y: 0 },
+    })
+    const downed = fighter('downed', 5, {
+      currentHp: 0,
+      maxHp: 20,
+      usesDeathSaves: true,
+      conditions: ['unconscious'],
+      position: { x: 15, y: 0 },
+    })
+    const state = startDnd5eHeadlessCombat('bronze-repulsion', [
+      dragon, ally, enemy, downed,
+    ])
+    const resolution = {
+      schemaVersion: 1 as const,
+      variantId: 'repulsion-breath',
+      targetIds: ['ally', 'enemy', 'downed'],
+      targetSavingThrows: [
+        { targetId: 'ally', d20: 20 },
+        { targetId: 'enemy', d20: 1 },
+        { targetId: 'downed', d20: 1 },
+      ],
+      damageRolls: [],
+      forcedMovements: [
+        { targetId: 'ally', to: { x: 65, y: 0 }, distanceFeet: 60 },
+        { targetId: 'enemy', to: { x: 70, y: 0 }, distanceFeet: 60 },
+        { targetId: 'downed', to: { x: 75, y: 0 }, distanceFeet: 60 },
+      ],
+    }
+
+    const pushed = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'breath-weapons',
+      resolution,
+    })
+    expect(pushed.ok, pushed.ok ? undefined : pushed.reason).toBe(true)
+    if (!pushed.ok) return
+    expect(pushed.state.combatants.ally.position).toEqual({ x: 5, y: 0 })
+    expect(pushed.state.combatants.enemy.position).toEqual({ x: 70, y: 0 })
+    expect(pushed.state.combatants.downed.position).toEqual({ x: 75, y: 0 })
+    expect(pushed.events.filter((event) => event.type === 'moved').map((event) =>
+      event.actorId)).toEqual(['enemy', 'downed'])
+    expect(pushed.state.combatants.dragon.classState.monsterRechargeReadyByActionId)
+      .toMatchObject({ 'breath-weapons': false })
+
+    const missingCandidate = resolveDnd5eHeadlessAction(state, {
+      type: 'monster-area-action',
+      actorId: 'dragon',
+      actionId: 'breath-weapons',
+      resolution: {
+        ...resolution,
+        forcedMovements: resolution.forcedMovements.slice(0, 2),
+      },
+    })
+    expect(missingCandidate).toMatchObject({ ok: false, reason: 'invalid-target' })
+
+    for (const forgedEnemyMovement of [
+      { targetId: 'enemy', to: { x: 1_000, y: 0 }, distanceFeet: 60 },
+      { targetId: 'enemy', to: { x: 10, y: 60 }, distanceFeet: 60 },
+    ]) {
+      const forged = resolveDnd5eHeadlessAction(state, {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          ...resolution,
+          forcedMovements: resolution.forcedMovements.map((movement) =>
+            movement.targetId === 'enemy' ? forgedEnemyMovement : movement),
+        },
+      })
+      expect(forged).toMatchObject({ ok: false, reason: 'invalid-target' })
+    }
+  })
+
+  it('enforces every mechanical restriction from Copper Dragon Slowing Breath and repeats the save', () => {
+    const dragon = fighter('dragon', 30, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:copper-dragon-wyrmling',
+      currentHp: 100,
+      maxHp: 100,
+    })
+    const target = fighter('target', 20, {
+      classId: 'fighter',
+      level: 1,
+      currentHp: 10,
+      maxHp: 20,
+      classResources: { fighterSecondWind: { current: 1, max: 1 } },
+      movementSpeeds: { walk: 30, fly: 60, swim: 40, climb: 20 },
+      position: { x: 5, y: 0 },
+    })
+    const ally = fighter('ally', 10, {
+      controller: 'dm',
+      position: { x: 10, y: 0 },
+    })
+    const slowed = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('copper-slowing', [dragon, target, ally]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          schemaVersion: 1,
+          variantId: 'slowing-breath',
+          targetIds: ['target', 'ally'],
+          targetSavingThrows: [
+            { targetId: 'target', d20: 1 },
+            { targetId: 'ally', d20: 20 },
+          ],
+          damageRolls: [],
+        },
+      },
+    )
+    expect(slowed.ok, slowed.ok ? undefined : slowed.reason).toBe(true)
+    if (!slowed.ok) return
+    const slowedTarget = slowed.state.combatants.target
+    const slowEffect = slowedTarget.classState.activeEffects?.find((effect) =>
+      effect.definitionId === 'monster-area:slowing-breath-effect')
+    expect(slowEffect).toMatchObject({
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      repeatSave: { ability: 'con', dc: 11, timing: 'target-turn-end', onSuccess: 'remove' },
+      stackingKey: 'monster-area:slowing-breath-effect',
+      stackingPolicy: 'refresh-duration',
+      modifiers: {
+        speedMultiplier: 0.5,
+        preventReactions: true,
+        maximumAttacksPerTurn: 1,
+        actionOrBonusActionOnly: true,
+      },
+    })
+    expect(slowed.state.combatants.ally.classState.activeEffects?.some((effect) =>
+      effect.definitionId === 'monster-area:slowing-breath-effect')).not.toBe(true)
+    expect(dnd5eEffectiveSpeed(slowedTarget)).toBe(15)
+    expect(dnd5eEffectiveFlySpeed(slowedTarget)).toBe(30)
+    expect(slowedTarget.turn.movementRemaining).toBe(15)
+    expect(slowedTarget.turn.reactionAvailable).toBe(false)
+
+    const bonusFirstState = structuredClone(slowed.state)
+    bonusFirstState.initiativeIndex = bonusFirstState.initiativeOrder.indexOf('target')
+    const secondWind = resolveDnd5eHeadlessAction(bonusFirstState, {
+      type: 'fighter-second-wind',
+      actorId: 'target',
+      resourceKey: 'fighterSecondWind',
+      d10: 1,
+    })
+    expect(secondWind.ok, secondWind.ok ? undefined : secondWind.reason).toBe(true)
+    if (!secondWind.ok) return
+    expect(resolveDnd5eHeadlessAction(secondWind.state, {
+      type: 'attack',
+      actorId: 'target',
+      targetId: 'dragon',
+      attackModifier: 20,
+      d20: 10,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [1], type: 'slashing' },
+      classDamageContext: meleeWeaponContext('test-sword'),
+    })).toMatchObject({ ok: false, reason: 'action-unavailable' })
+
+    const attackLimitState = structuredClone(slowed.state)
+    attackLimitState.initiativeIndex = attackLimitState.initiativeOrder.indexOf('target')
+    const firstAttack = resolveDnd5eHeadlessAction(attackLimitState, {
+      type: 'attack',
+      actorId: 'target',
+      targetId: 'dragon',
+      attackModifier: 20,
+      d20: 10,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [1], type: 'slashing' },
+      classDamageContext: meleeWeaponContext('test-sword'),
+    })
+    expect(firstAttack.ok, firstAttack.ok ? undefined : firstAttack.reason).toBe(true)
+    if (!firstAttack.ok) return
+    expect(resolveDnd5eHeadlessAction(firstAttack.state, {
+      type: 'attack',
+      actorId: 'target',
+      targetId: 'dragon',
+      attackModifier: 20,
+      d20: 10,
+      spendAction: false,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [1], type: 'slashing' },
+      classDamageContext: meleeWeaponContext('test-sword'),
+    })).toMatchObject({ ok: false, reason: 'action-unavailable' })
+
+    if (!slowEffect) return
+    const repeatSaveState = structuredClone(slowed.state)
+    repeatSaveState.initiativeIndex = repeatSaveState.initiativeOrder.indexOf('target')
+    const recovered = resolveDnd5eHeadlessAction(repeatSaveState, {
+      type: 'end-turn',
+      actorId: 'target',
+      activeEffectSavingThrows: [{ effectId: slowEffect.id, d20: 20 }],
+    })
+    expect(recovered.ok, recovered.ok ? undefined : recovered.reason).toBe(true)
+    if (!recovered.ok) return
+    expect(recovered.state.combatants.target.classState.activeEffects?.some((effect) =>
+      effect.definitionId === 'monster-area:slowing-breath-effect')).not.toBe(true)
+    expect(dnd5eEffectiveSpeed(recovered.state.combatants.target)).toBe(30)
+  })
+
+  it('applies Gold Dragon Weakening Breath to Strength attacks, checks, saves, and failed targets only', () => {
+    const dragon = fighter('dragon', 30, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:gold-dragon-wyrmling',
+      armorClass: 18,
+      currentHp: 100,
+      maxHp: 100,
+    })
+    const target = fighter('target', 20, {
+      position: { x: 5, y: 0 },
+    })
+    const ally = fighter('ally', 10, {
+      controller: 'dm',
+      position: { x: 10, y: 0 },
+    })
+    const weakened = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('gold-weakening', [dragon, target, ally]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          schemaVersion: 1,
+          variantId: 'weakening-breath',
+          targetIds: ['target', 'ally'],
+          targetSavingThrows: [
+            { targetId: 'target', d20: 1 },
+            { targetId: 'ally', d20: 20 },
+          ],
+          damageRolls: [],
+        },
+      },
+    )
+    expect(weakened.ok, weakened.ok ? undefined : weakened.reason).toBe(true)
+    if (!weakened.ok) return
+    expect(weakened.state.combatants.target.classState.activeEffects).toContainEqual(
+      expect.objectContaining({
+        definitionId: 'monster-area:weakening-breath-effect',
+        modifiers: expect.objectContaining({ strengthRollMode: 'disadvantage' }),
+      }),
+    )
+    expect(weakened.state.combatants.ally.classState.activeEffects?.some((effect) =>
+      effect.definitionId === 'monster-area:weakening-breath-effect')).not.toBe(true)
+    expect(dnd5eSavingThrowMode(weakened.state.combatants.target, 'str')).toBe('disadvantage')
+    expect(dnd5eAbilityCheckRollMode(weakened.state.combatants.target, {
+      ability: 'str',
+      skill: 'athletics',
+    })).toBe('disadvantage')
+
+    weakened.state.initiativeIndex = weakened.state.initiativeOrder.indexOf('target')
+    const attack = resolveDnd5eHeadlessAction(weakened.state, {
+      type: 'attack',
+      actorId: 'target',
+      targetId: 'dragon',
+      attackModifier: 5,
+      d20: 20,
+      d20Second: 1,
+      damage: { count: 1, sides: 6, bonus: 0, rolls: [], type: 'slashing' },
+      classDamageContext: meleeWeaponContext('test-sword'),
+    })
+    expect(attack.ok, attack.ok ? undefined : attack.reason).toBe(true)
+    if (!attack.ok) return
+    expect(attack.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: 'target',
+      targetId: 'dragon',
+      d20: 1,
+      hit: false,
+    }))
+  })
+
+  it('applies Weakening Breath by a monster weapon actual ability, not by melee/ranged mode', () => {
+    const dragon = fighter('dragon', 40, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:gold-dragon-wyrmling',
+      currentHp: 100,
+      maxHp: 100,
+    })
+    const spy = fighter('spy', 30, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:spy',
+      currentHp: 50,
+      maxHp: 50,
+      position: { x: 5, y: 0 },
+    })
+    const ogre = fighter('ogre', 20, {
+      controller: 'dm',
+      statBlockId: 'srd-5.1:ogre',
+      currentHp: 80,
+      maxHp: 80,
+      position: { x: 10, y: 0 },
+    })
+    const hero = fighter('hero', 10, {
+      armorClass: 16,
+      currentHp: 100,
+      maxHp: 100,
+      position: { x: 30, y: 0 },
+    })
+    const weakened = resolveDnd5eHeadlessAction(
+      startDnd5eHeadlessCombat('monster-weakening-ability', [dragon, spy, ogre, hero]),
+      {
+        type: 'monster-area-action',
+        actorId: 'dragon',
+        actionId: 'breath-weapons',
+        resolution: {
+          schemaVersion: 1,
+          variantId: 'weakening-breath',
+          targetIds: ['spy', 'ogre'],
+          targetSavingThrows: [
+            { targetId: 'spy', d20: 1 },
+            { targetId: 'ogre', d20: 1 },
+          ],
+          damageRolls: [],
+        },
+      },
+    )
+    expect(weakened.ok, weakened.ok ? undefined : weakened.reason).toBe(true)
+    if (!weakened.ok) return
+
+    const dexMeleeState = structuredClone(weakened.state)
+    dexMeleeState.initiativeIndex = dexMeleeState.initiativeOrder.indexOf('spy')
+    dexMeleeState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('spy', 'hero')]: 5,
+    }
+    const dexMelee = resolveDnd5eHeadlessAction(dexMeleeState, {
+      type: 'monster-action',
+      actorId: 'spy',
+      actionId: 'shortsword',
+      rolls: [{
+        targetId: 'hero',
+        d20: 19,
+        d20Second: 1,
+        damageRolls: [[1]],
+      }],
+    })
+    expect(dexMelee.ok, dexMelee.ok ? undefined : dexMelee.reason).toBe(true)
+    if (!dexMelee.ok) return
+    expect(dexMelee.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: 'spy',
+      d20: 19,
+    }))
+
+    const strengthThrownState = structuredClone(weakened.state)
+    strengthThrownState.initiativeIndex = strengthThrownState.initiativeOrder.indexOf('ogre')
+    strengthThrownState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('ogre', 'hero')]: 30,
+    }
+    const strengthThrown = resolveDnd5eHeadlessAction(strengthThrownState, {
+      type: 'monster-action',
+      actorId: 'ogre',
+      actionId: 'javelin',
+      rolls: [{
+        targetId: 'hero',
+        d20: 19,
+        d20Second: 1,
+        damageRolls: [],
+      }],
+    })
+    expect(strengthThrown.ok, strengthThrown.ok ? undefined : strengthThrown.reason).toBe(true)
+    if (!strengthThrown.ok) return
+    expect(strengthThrown.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: 'ogre',
+      d20: 1,
+      hit: false,
+    }))
+
+    const dexRangedState = structuredClone(weakened.state)
+    dexRangedState.initiativeIndex = dexRangedState.initiativeOrder.indexOf('spy')
+    dexRangedState.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey('spy', 'hero')]: 30,
+    }
+    const dexRanged = resolveDnd5eHeadlessAction(dexRangedState, {
+      type: 'monster-action',
+      actorId: 'spy',
+      actionId: 'hand-crossbow',
+      rolls: [{
+        targetId: 'hero',
+        d20: 19,
+        d20Second: 1,
+        damageRolls: [[1]],
+      }],
+    })
+    expect(dexRanged.ok, dexRanged.ok ? undefined : dexRanged.reason).toBe(true)
+    if (!dexRanged.ok) return
+    expect(dexRanged.events).toContainEqual(expect.objectContaining({
+      type: 'attack-resolved',
+      actorId: 'spy',
+      d20: 19,
+    }))
   })
 })

@@ -11,6 +11,8 @@ import {
 } from './classes'
 import { dnd5eEquippedEffectTotal, dnd5eWeaponEffectTotal } from './equipmentEffects'
 import { dnd5eCharacterClassLevel, normalizeDnd5eClassLevels } from './multiclass'
+import { dnd5ePluginRaceDefinition } from './pluginApi'
+import { dnd5eCoreRaceMechanics } from './coreRaceMechanics'
 import { normalizeDnd5eActiveEffects } from './activeEffects'
 
 export const DND5E_LONGSWORD: EquipmentItem = {
@@ -391,6 +393,10 @@ export function dnd5eArmorProficiencies(character: Character): ReadonlySet<Dnd5e
   ) {
     proficiencies.add('heavy')
   }
+  for (const proficiency of dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+    ?.armorProficiencies ?? []) {
+    proficiencies.add(proficiency)
+  }
   return proficiencies
 }
 
@@ -481,13 +487,18 @@ export function dnd5eShillelaghAttackChoice(character: Character): Dnd5eShillela
 
 export function dnd5eWeaponAttackProfile(
   character: Character,
-  options?: { shillelaghAbility?: 'str' | 'spellcasting' },
+  options?: {
+    shillelaghAbility?: 'str' | 'spellcasting'
+    /** A maintained grapple occupies one hand, so versatile weapons use one hand and true two-handed weapons cannot attack. */
+    forceOneHanded?: boolean
+  },
 ): Dnd5eWeaponAttackProfile | undefined {
   const weapon = character.equipment?.mainWeapon
   const data = weapon?.dnd5e
   if (!weapon || !data || data.kind !== 'weapon') return undefined
   const properties = data.properties ?? []
   if (properties.some((property) => property.includes('双手')) && character.equipment?.offHand) return undefined
+  if (options?.forceOneHanded && properties.some((property) => property.includes('双手'))) return undefined
   const strengthModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.str)))
   const dexterityModifier = rules.abilityModifier(Math.min(30, Math.max(1, character.abilities.dex)))
   const shillelagh = dnd5eShillelaghAttackChoice(character)
@@ -509,8 +520,10 @@ export function dnd5eWeaponAttackProfile(
   const styles = dnd5eSelectedFightingStyles(character)
   const versatileProperty = properties.find((property) => property.includes('多才多艺'))
   const versatileSides = Number(versatileProperty?.match(/1d(\d+)/i)?.[1] ?? 0)
-  const usesTwoHands = properties.some((property) => property.includes('双手')) ||
+  const usesTwoHands = !options?.forceOneHanded && (
+    properties.some((property) => property.includes('双手')) ||
     (!!versatileProperty && !character.equipment?.offHand)
+  )
   const attackStyleBonus = data.mode === 'ranged' && styles.includes('archery') ? 2 : 0
   const duelingBonus = data.mode === 'melee' && !usesTwoHands && styles.includes('dueling') && character.equipment?.offHand?.dnd5e?.kind !== 'weapon' ? 2 : 0
   const armor = character.equipment?.armor?.dnd5e
@@ -622,6 +635,11 @@ export function dnd5eWeaponRangeFeet(profile: Dnd5eWeaponAttackProfile): number 
 export function dnd5eWeaponProficient(character: Character, weapon: EquipmentItem): boolean {
   const data = weapon.dnd5e
   if (!data || data.kind !== 'weapon') return false
+  const weaponId = (weapon.baseEquipmentId ?? weapon.id).replace(/-offhand$/, '')
+  if (dnd5eCoreRaceMechanics(character.race, character.dnd5eRaceId)
+    ?.weaponProficiencies?.includes(weaponId)) return true
+  if (dnd5ePluginRaceDefinition(character.dnd5eRaceId ?? character.race)
+    ?.weaponProficiencies?.includes(weaponId)) return true
   const classIds = Object.keys(normalizeDnd5eClassLevels(character))
   if (classIds.length === 0) return false
   const primaryClassId = dnd5eClassDefinitionForCharacter(character)?.id
@@ -632,7 +650,6 @@ export function dnd5eWeaponProficient(character: Character, weapon: EquipmentIte
     !!primaryClassId && new Set(['bard', 'cleric', 'monk', 'rogue', 'warlock']).has(primaryClassId) ||
     multiclassIds.some((classId) => new Set(['barbarian', 'fighter', 'monk', 'paladin', 'ranger', 'warlock']).has(classId))
   )) return true
-  const weaponId = (weapon.baseEquipmentId ?? weapon.id).replace(/-offhand$/, '')
   const special: Partial<Record<string, ReadonlySet<string>>> = {
     bard: new Set(['dnd5e-hand-crossbow', 'dnd5e-longsword', 'dnd5e-rapier', 'dnd5e-shortsword']),
     rogue: new Set(['dnd5e-hand-crossbow', 'dnd5e-longsword', 'dnd5e-rapier', 'dnd5e-shortsword']),

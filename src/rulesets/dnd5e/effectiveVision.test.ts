@@ -8,6 +8,8 @@ import {
 describe('D&D 5e effective vision profile', () => {
   it('derives core racial Darkvision without trusting a map-token duplicate', () => {
     expect(dnd5eCoreRaceDarkvisionRangeFeet({ race: '精灵' })).toBe(60)
+    expect(dnd5eCoreRaceDarkvisionRangeFeet({ race: '丘陵矮人' })).toBe(60)
+    expect(dnd5eCoreRaceDarkvisionRangeFeet({ dnd5eRaceId: 'local.phb:drow' })).toBe(120)
     expect(dnd5eCoreRaceDarkvisionRangeFeet({ dnd5eRaceId: 'half-orc' })).toBe(60)
     expect(dnd5eCoreRaceDarkvisionRangeFeet({ race: '人类' })).toBe(0)
   })

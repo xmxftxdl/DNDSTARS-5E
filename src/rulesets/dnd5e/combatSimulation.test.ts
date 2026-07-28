@@ -11,7 +11,17 @@ import {
   getDnd5eSrdMonster,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
-import { createDnd5eConditionEffect } from './activeEffects'
+import {
+  createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  dnd5eActiveEffectId,
+} from './activeEffects'
+import {
+  createDnd5eCombatant,
+  dnd5eCombatantPairKey,
+  resolveDnd5eHeadlessAction,
+  startDnd5eHeadlessCombat,
+} from './headlessCombatEngine'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import type { BattleMap } from '../../store/maps'
 
@@ -168,6 +178,100 @@ function fighterWithWeaponSource(
   }
 }
 
+function sourceLinkedMappedSimulationFixture(
+  slug: 'ankheg' | 'constrictor-snake',
+  actionId: 'bite' | 'constrict',
+) {
+  const catalogMonster = getDnd5eSrdMonster(`srd-5.1:${slug}`)!
+  const action = catalogMonster.actions.find((candidate) => candidate.id === actionId)!
+  if (action.kind !== 'weapon-attack' || !action.attack) {
+    throw new Error(`${catalogMonster.englishName} ${actionId} fixture is not a weapon attack`)
+  }
+  const monster: Dnd5eMonsterStatBlock = {
+    ...catalogMonster,
+    id: `room-monster:simulation-${slug}`,
+    slug: `simulation-${slug}`,
+    name: `Simulation ${catalogMonster.englishName}`,
+    englishName: `Simulation ${catalogMonster.englishName}`,
+    abilities: { ...catalogMonster.abilities, dex: 30 },
+    armorClass: { value: 30, note: 'simulation fixture' },
+    hitPoints: { average: 1_000, dice: '1000' },
+    speed: { ...catalogMonster.speed, walk: 0 },
+    actions: [{
+      ...action,
+      attack: {
+        ...action.attack,
+        toHit: 100,
+      },
+    }],
+    bonusActions: [],
+    reactions: [],
+    legendaryActions: [],
+    lairActions: [],
+  }
+  const hero = fighter({
+    id: `source-linked-target-${slug}`,
+    name: `Source-linked target ${slug}`,
+    initiativeBonus: -100,
+    speed: 0,
+    ac: 1,
+    maxHp: 1_000,
+    currentHp: 1_000,
+    equipment: {},
+  })
+  const map: BattleMap = {
+    id: `source-linked-${slug}-map`,
+    name: `Source-linked ${slug} map`,
+    width: 150,
+    height: 100,
+    gridSize: 50,
+    gridOffsetX: 0,
+    gridOffsetY: 0,
+    showGrid: true,
+    feetPerCell: 5,
+    tokens: [
+      {
+        id: `${slug}-token`,
+        label: monster.name,
+        x: 25,
+        y: 25,
+        color: '#f00',
+        emoji: '',
+        size: 1,
+        type: 'enemy',
+        poolId: monster.id,
+        hp: monster.hitPoints.average,
+        maxHp: monster.hitPoints.average,
+      },
+      {
+        id: `${slug}-target-token`,
+        label: hero.name,
+        x: 75,
+        y: 25,
+        color: '#fff',
+        emoji: '',
+        size: 1,
+        type: 'player',
+        characterId: hero.id,
+      },
+    ],
+  }
+  return {
+    monster,
+    hero,
+    request: {
+      characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 7,
+      maxRounds: 2,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    } as const,
+  }
+}
+
 describe('D&D 5e combat simulator', () => {
   it('runs a current-map encounter with two-dimensional wall-aware tactical movement', () => {
     const hero = fighter()
@@ -312,7 +416,7 @@ describe('D&D 5e combat simulator', () => {
       characters: [hero],
       monsters: [{ monsterId: bugbear.id, count: 1 }],
       trials: 1,
-      seed: 2,
+      seed: 20260728,
       maxRounds: 1,
       battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
       strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
@@ -417,6 +521,890 @@ describe('D&D 5e combat simulator', () => {
     expect(decision?.executionSteps.some((step) =>
       step.text.includes('集群战术'))).toBe(true)
     expect(decision?.outcome.headlessTransactions).toBe(1)
+  })
+
+  it.each([
+    ['ankheg', 'bite'],
+    ['constrictor-snake', 'constrict'],
+  ] as const)(
+    'carries a landed %s %s relation into the next mapped planner snapshot',
+    (slug, actionId) => {
+      const { monster, request } = sourceLinkedMappedSimulationFixture(slug, actionId)
+      const result = simulateDnd5eCombats(request)
+      const turns = result.decisionLog.filter((entry) => entry.actorName === monster.name)
+      const firstSelected = turns[0]?.candidates.find((candidate) => candidate.selected)
+      const secondSelected = turns[1]?.candidates.find((candidate) => candidate.selected)
+
+      expect(turns).toHaveLength(2)
+      expect(turns[0]).toMatchObject({
+        round: 1,
+        outcome: { hits: 1, headlessTransactions: 1 },
+      })
+      expect(turns[1]).toMatchObject({
+        round: 2,
+        outcome: { headlessTransactions: 1 },
+      })
+      expect(firstSelected).toMatchObject({
+        actionId,
+        metrics: { controlValue: expect.any(Number) },
+      })
+      expect(firstSelected!.metrics.controlValue).toBeGreaterThan(0)
+      expect(secondSelected).toMatchObject({
+        actionId,
+        metrics: { controlValue: 0 },
+      })
+      if (slug === 'ankheg') {
+        expect(secondSelected!.metrics.hitProbability)
+          .toBeGreaterThan(firstSelected!.metrics.hitProbability)
+      }
+    },
+  )
+
+  it('releases an owned Ankheg grapple and resolves Acid Spray in the same simulated turn', () => {
+    const catalog = getDnd5eSrdMonster('srd-5.1:ankheg')!
+    const catalogBite = catalog.actions.find((action) => action.id === 'bite')
+    const declaration = catalogBite?.attack?.onHitEffects?.find((effect) =>
+      effect.kind === 'source-linked-condition')
+    if (!catalogBite?.attack || !declaration) {
+      throw new Error('Ankheg Bite relation fixture is missing')
+    }
+    const tailDeclaration = {
+      ...declaration,
+      id: 'tail-grapple',
+      relation: {
+        ...declaration.relation,
+        slotGroup: 'tail',
+      },
+    }
+    const monster = {
+      ...catalog,
+      id: 'room-monster:release-acid-ankheg',
+      slug: 'release-acid-ankheg',
+      name: 'Release Acid Ankheg',
+      englishName: 'Release Acid Ankheg',
+      abilities: { ...catalog.abilities, dex: 30 },
+      armorClass: { value: 30, note: 'release fixture' },
+      hitPoints: { average: 1_000, dice: '1000' },
+      speed: { ...catalog.speed, walk: 0 },
+      actions: [
+        ...catalog.actions.map((action) =>
+          action.id === 'acid-spray' &&
+          action.rule?.kind === 'area-saving-throw' &&
+          'damage' in action.rule &&
+          action.rule.damage
+            ? {
+                ...action,
+                rule: {
+                  ...action.rule,
+                  damage: {
+                    ...action.rule.damage,
+                    count: 40,
+                    average: 140,
+                  },
+                },
+              }
+            : action),
+        {
+          ...catalogBite,
+          id: 'tail-grapple-attack',
+          name: 'Tail Grapple',
+          attack: {
+            ...catalogBite.attack,
+            onHitEffects: [tailDeclaration],
+          },
+        },
+      ],
+    } as Dnd5eMonsterStatBlock
+    const monsterTokenId = 'release-acid-ankheg-token'
+    const heldTokenId = 'release-acid-held-token'
+    const freeTokenId = 'release-acid-free-token'
+    const rootId = dnd5eActiveEffectId(
+      'relation',
+      'grapple',
+      monsterTokenId,
+      declaration.relation.slotGroup,
+      heldTokenId,
+    )
+    const grapple = createDnd5eConditionEffect({
+      id: rootId,
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: monsterTokenId,
+        rulesId: `monster:${monster.id}:bite:${declaration.id}`,
+      },
+      targetId: heldTokenId,
+      stackingKey: rootId,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: declaration.escapeDc,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: monsterTokenId,
+        sourceActionId: 'bite',
+        slotGroup: declaration.relation.slotGroup,
+        maxDistanceFeet: declaration.relation.maxDistanceFeet,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const tailRootId = dnd5eActiveEffectId(
+      'relation',
+      'grapple',
+      monsterTokenId,
+      tailDeclaration.relation.slotGroup,
+      heldTokenId,
+    )
+    const tailGrapple = createDnd5eConditionEffect({
+      id: tailRootId,
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: monsterTokenId,
+        rulesId: `monster:${monster.id}:tail-grapple-attack:${tailDeclaration.id}`,
+      },
+      targetId: heldTokenId,
+      stackingKey: tailRootId,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: tailDeclaration.escapeDc,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: monsterTokenId,
+        sourceActionId: 'tail-grapple-attack',
+        slotGroup: tailDeclaration.relation.slotGroup,
+        maxDistanceFeet: tailDeclaration.relation.maxDistanceFeet,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const held = fighter({
+      id: 'release-acid-held',
+      name: 'Held target',
+      initiativeBonus: -100,
+      ac: 10,
+      currentHp: 500,
+      maxHp: 500,
+      equipment: {},
+      conditions: ['grappled'],
+      dnd5eCombatState: { schemaVersion: 2, activeEffects: [grapple, tailGrapple] },
+    })
+    const free = fighter({
+      id: 'release-acid-free',
+      name: 'Free target',
+      initiativeBonus: -100,
+      ac: 10,
+      currentHp: 500,
+      maxHp: 500,
+      equipment: {},
+    })
+    const battleMap: BattleMap = {
+      id: 'release-acid-map',
+      name: 'Release acid map',
+      width: 200,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: monsterTokenId, label: monster.name, x: 25, y: 25,
+          color: '#f00', emoji: '', size: 1, type: 'enemy', poolId: monster.id,
+          hp: monster.hitPoints.average, maxHp: monster.hitPoints.average,
+          dnd5eCombatState: { monsterRechargeReadyByActionId: { 'acid-spray': true } },
+        },
+        {
+          id: heldTokenId, label: held.name, x: 75, y: 25,
+          color: '#fff', emoji: '', size: 1, type: 'player', characterId: held.id,
+          hp: held.currentHp, maxHp: held.maxHp,
+        },
+        {
+          id: freeTokenId, label: free.name, x: 125, y: 25,
+          color: '#fff', emoji: '', size: 1, type: 'player', characterId: free.id,
+          hp: free.currentHp, maxHp: free.maxHp,
+        },
+      ],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [held, free],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 2,
+      maxRounds: 1,
+      battlefield: { map: battleMap, geometry: createEmptyMapGeometry(battleMap.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    })
+    const turn = result.decisionLog.find((entry) => entry.actorName === monster.name)
+
+    expect(turn).toMatchObject({
+      actionName: monster.actions.find((action) => action.id === 'acid-spray')!.name,
+      outcome: {
+        executed: true,
+        headlessTransactions: 2,
+      },
+    })
+    expect(turn?.candidateId).toContain(`release-grapple:${heldTokenId}:`)
+    expect(turn?.candidateId).toContain(grapple.id)
+    expect(turn?.candidateId).not.toContain(tailGrapple.id)
+    expect(turn?.outcome.damage).toBeGreaterThan(0)
+    expect(turn?.executionSteps.filter((step) => step.kind === 'transaction').length)
+      .toBeGreaterThanOrEqual(2)
+  })
+
+  it('rejects Behir Constrict and a containing Multiattack against a mapped Huge target', () => {
+    const catalog = getDnd5eSrdMonster('srd-5.1:behir')!
+    const constrict = catalog.actions.find((action) => action.id === 'constrict')
+    const multiattack = catalog.actions.find((action) =>
+      action.kind === 'multiattack' && action.sequence?.includes('constrict'))
+    if (!constrict?.attack || !multiattack) {
+      throw new Error('Behir Constrict fixture is missing')
+    }
+    const sizeLimitedConstrict = {
+      ...constrict,
+      attack: { ...constrict.attack, targetMaxSizeRank: 3 },
+    }
+    const monster = {
+      ...catalog,
+      id: 'room-monster:size-limited-behir',
+      slug: 'size-limited-behir',
+      name: 'Size-limited Behir',
+      englishName: 'Size-limited Behir',
+      abilities: { ...catalog.abilities, dex: 30 },
+      actions: [sizeLimitedConstrict, multiattack],
+    } as Dnd5eMonsterStatBlock
+    const hero = fighter({
+      id: 'huge-simulation-target',
+      name: 'Huge simulation target',
+      initiativeBonus: -100,
+      currentHp: 500,
+      maxHp: 500,
+      equipment: {},
+    })
+    const battleMap: BattleMap = {
+      id: 'size-limited-behir-map',
+      name: 'Size-limited Behir map',
+      width: 150,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: 'size-limited-behir-token', label: monster.name, x: 25, y: 25,
+          color: '#f00', emoji: '', size: 2, type: 'enemy', poolId: monster.id,
+          hp: monster.hitPoints.average, maxHp: monster.hitPoints.average,
+        },
+        {
+          id: 'huge-simulation-target-token', label: hero.name, x: 75, y: 25,
+          color: '#fff', emoji: '', size: 3, creatureSize: '超大型',
+          type: 'player', characterId: hero.id, hp: hero.currentHp, maxHp: hero.maxHp,
+        },
+      ],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 8675309,
+      maxRounds: 1,
+      battlefield: { map: battleMap, geometry: createEmptyMapGeometry(battleMap.id) },
+    })
+    const turn = result.decisionLog.find((entry) => entry.actorName === monster.name)
+
+    expect(turn?.candidates.some((candidate) =>
+      candidate.actionId === constrict.id ||
+      candidate.actionId === multiattack.id)).toBe(false)
+    expect(turn?.actionName).toBeUndefined()
+  })
+
+  it('does not consume hidden random rolls for source-linked on-hit conditions', () => {
+    const { monster, hero } = sourceLinkedMappedSimulationFixture('ankheg', 'bite')
+    const bite = monster.actions[0]
+    if (bite.kind !== 'weapon-attack' || !bite.attack) {
+      throw new Error('Ankheg Bite fixture is not a weapon attack')
+    }
+    const withoutRelation: Dnd5eMonsterStatBlock = {
+      ...monster,
+      actions: [{
+        ...bite,
+        attack: {
+          ...bite.attack,
+          onHitEffects: bite.attack.onHitEffects?.filter((effect) =>
+            effect.kind !== 'source-linked-condition'),
+        },
+      }],
+    }
+    const armedHero = fighter({
+      ...hero,
+      equipment: defaultEquipmentForDnd5eCharacter({ charClass: '鎴樺＋' }),
+    })
+    const run = (source: Dnd5eMonsterStatBlock) => simulateDnd5eCombats({
+      characters: [armedHero],
+      monsters: [{ monsterId: source.id, count: 1 }],
+      customMonsters: [source],
+      trials: 1,
+      seed: 2,
+      maxRounds: 1,
+      initialDistanceFeet: 5,
+    })
+    const withRelation = run(monster)
+    const withoutRelationResult = run(withoutRelation)
+    const rollTrace = (result: ReturnType<typeof simulateDnd5eCombats>) =>
+      result.decisionLog.flatMap((entry) =>
+        entry.executionSteps.filter((step) => step.kind === 'roll').map((step) => step.text))
+
+    expect(withRelation.decisionLog.find((entry) => entry.actorName === monster.name)
+      ?.outcome.hits).toBe(1)
+    expect(rollTrace(withRelation)).toEqual(rollTrace(withoutRelationResult))
+    expect(withRelation.participantSummaries.map((entry) => entry.averageDamage))
+      .toEqual(withoutRelationResult.participantSummaries.map((entry) => entry.averageDamage))
+  })
+
+  it('moves a source-linked target through the authoritative Headless drag transaction', () => {
+    const source = createDnd5eCombatant({
+      id: 'drag-source',
+      name: 'Drag source',
+      controller: 'dm',
+      initiative: 20,
+      abilities: { str: 18, dex: 10, con: 14, int: 8, wis: 10, cha: 8 },
+      proficiencyBonus: 2,
+      armorClass: 15,
+      currentHp: 30,
+      maxHp: 30,
+      temporaryHp: 0,
+      speed: 30,
+      sizeRank: 3,
+      position: { x: 0, y: 0 },
+      concentrating: false,
+      statBlockId: 'srd-5.1:ankheg',
+    })
+    const ankheg = getDnd5eSrdMonster('srd-5.1:ankheg')!
+    const declaration = ankheg.actions
+      .find((action) => action.id === 'bite')
+      ?.attack?.onHitEffects?.find((effect) => effect.kind === 'source-linked-condition')
+    if (!declaration) throw new Error('Ankheg Bite relation fixture is missing')
+    const grappleId = dnd5eActiveEffectId(
+      'relation',
+      'grapple',
+      source.id,
+      declaration.relation.slotGroup,
+      'drag-target',
+    )
+    const grapple = createDnd5eConditionEffect({
+      id: grappleId,
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: source.id,
+        rulesId: `monster:${ankheg.id}:bite:${declaration.id}`,
+      },
+      targetId: 'drag-target',
+      stackingKey: grappleId,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: declaration.escapeDc,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: source.id,
+        sourceActionId: 'bite',
+        slotGroup: declaration.relation.slotGroup,
+        maxDistanceFeet: declaration.relation.maxDistanceFeet,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const target = createDnd5eCombatant({
+      id: 'drag-target',
+      name: 'Drag target',
+      controller: 'player',
+      initiative: 10,
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      proficiencyBonus: 2,
+      armorClass: 10,
+      currentHp: 20,
+      maxHp: 20,
+      temporaryHp: 0,
+      speed: 30,
+      sizeRank: 2,
+      position: { x: 5, y: 0 },
+      concentrating: false,
+      classState: { activeEffects: [grapple] },
+    })
+    const state = startDnd5eHeadlessCombat('simulation-drag', [source, target])
+    state.distanceFeetByCombatantPair = {
+      [dnd5eCombatantPairKey(source.id, target.id)]: 5,
+    }
+    const result = resolveDnd5eHeadlessAction(state, {
+      type: 'move',
+      actorId: source.id,
+      to: { x: 10, y: 0 },
+      distance: 10,
+    }, {
+      transactionId: 'simulation-drag:move',
+      now: 1,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.state.combatants[source.id].position).toEqual({ x: 10, y: 0 })
+    expect(result.state.combatants[target.id].position).toEqual({ x: 15, y: 0 })
+    expect(result.state.combatants[source.id].turn.movementRemaining).toBe(10)
+    expect(result.events.filter((event) => event.type === 'moved').map((event) => event.actorId))
+      .toEqual([source.id, target.id])
+    const retainedEffects = result.state.combatants[target.id].classState.activeEffects
+    expect(retainedEffects, JSON.stringify(result.events, null, 2)).toBeDefined()
+    expect(retainedEffects).toContainEqual(expect.objectContaining({
+        id: grapple.id,
+        relation: expect.objectContaining({ sourceActorId: source.id }),
+      }))
+  })
+
+  it('keeps seeded source-linked mapped simulation identical across sync and async entry points', async () => {
+    const { request } = sourceLinkedMappedSimulationFixture('ankheg', 'bite')
+    const repeatedRequest = { ...request, trials: 3 } as const
+
+    expect(await simulateDnd5eCombatsAsync(repeatedRequest))
+      .toEqual(simulateDnd5eCombats(repeatedRequest))
+  })
+
+  it('keeps a grappled player stationary and offers its fixed-DC escape candidate', () => {
+    const heroTokenId = 'fixed-escape-player-token'
+    const sourceTokenId = 'fixed-escape-monster-token'
+    const ankheg = getDnd5eSrdMonster('srd-5.1:ankheg')!
+    const escapeSource: Dnd5eMonsterStatBlock = {
+      ...ankheg,
+      id: 'room-monster:fixed-player-escape-ankheg',
+      slug: 'fixed-player-escape-ankheg',
+      name: 'Fixed player escape Ankheg',
+      englishName: 'Fixed player escape Ankheg',
+      armorClass: { value: 30, note: 'escape-selection fixture' },
+      hitPoints: { average: 1_000, dice: '1000' },
+    }
+    const declaration = escapeSource.actions
+      .find((action) => action.id === 'bite')
+      ?.attack?.onHitEffects?.find((effect) => effect.kind === 'source-linked-condition')
+    if (!declaration) throw new Error('Ankheg Bite relation fixture is missing')
+    const rootId = dnd5eActiveEffectId(
+      'relation',
+      'grapple',
+      sourceTokenId,
+      declaration.relation.slotGroup,
+      heroTokenId,
+    )
+    const root = createDnd5eConditionEffect({
+      id: rootId,
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: sourceTokenId,
+        rulesId: `monster:${escapeSource.id}:bite:${declaration.id}`,
+      },
+      targetId: heroTokenId,
+      stackingKey: rootId,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: declaration.escapeDc,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: sourceTokenId,
+        sourceActionId: 'bite',
+        slotGroup: declaration.relation.slotGroup,
+        maxDistanceFeet: declaration.relation.maxDistanceFeet,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const hero = fighter({
+      id: 'fixed-escape-player',
+      name: 'Fixed escape player',
+      initiativeBonus: 100,
+      level: 1,
+      abilities: { str: 8, dex: 20, con: 12, int: 10, wis: 10, cha: 10 },
+      skills: ['acrobatics'],
+      equipment: {},
+      conditions: ['grappled'],
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [root],
+      },
+    })
+    const battleMap: BattleMap = {
+      id: 'fixed-player-escape-map',
+      name: 'Fixed player escape',
+      width: 100,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: heroTokenId,
+          label: hero.name,
+          x: 25,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+        {
+          id: sourceTokenId,
+          label: escapeSource.name,
+          x: 75,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: escapeSource.id,
+          hp: escapeSource.hitPoints.average,
+          maxHp: escapeSource.hitPoints.average,
+        },
+      ],
+    }
+    const request = {
+      characters: [hero],
+      monsters: [{ monsterId: escapeSource.id, count: 1 }],
+      customMonsters: [escapeSource],
+      trials: 1,
+      seed: 31415926,
+      maxRounds: 1,
+      battlefield: {
+        map: battleMap,
+        geometry: createEmptyMapGeometry(battleMap.id),
+      },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    } as const
+    const first = simulateDnd5eCombats(request)
+    const repeated = simulateDnd5eCombats(request)
+    const playerTurn = first.decisionLog.find((entry) => entry.actorName === hero.name)
+
+    expect(repeated).toEqual(first)
+    expect(playerTurn?.candidates.map((candidate) => candidate.candidateId))
+      .toContain(`escape-active-effect:${root.id}`)
+    const escapeCandidate = playerTurn?.candidates.find((candidate) =>
+      candidate.candidateId === `escape-active-effect:${root.id}`)
+    expect(escapeCandidate).toMatchObject({
+      targetId: sourceTokenId,
+      nextPosition: { x: 25, y: 25 },
+      metrics: { movementFeet: 0, consumesAction: true },
+    })
+    expect(playerTurn?.actorPositionAfter).toEqual({ x: 25, y: 25 })
+    expect(playerTurn?.candidates.every((candidate) =>
+      candidate.metrics.movementFeet === 0 &&
+      candidate.nextPosition.x === 25 &&
+      candidate.nextPosition.y === 25)).toBe(true)
+  })
+
+  it('resolves a seeded basic grapple escape as an opposed Headless contest', () => {
+    const heroTokenId = 'opposed-escape-player-token'
+    const sourceTokenId = 'opposed-escape-monster-token'
+    const root = createDnd5eConditionEffect({
+      id: 'opposed-escape-player-root',
+      condition: 'grappled',
+      source: { kind: 'feature', actorId: sourceTokenId, rulesId: 'basic-action:grapple' },
+      targetId: heroTokenId,
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: sourceTokenId,
+        sourceActionId: 'basic-action:grapple',
+        slotGroup: 'free-hand',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const restrained = createDnd5eConditionEffect({
+      id: 'opposed-escape-player-restrained',
+      condition: 'restrained',
+      source: { kind: 'system', actorId: sourceTokenId, rulesId: 'basic-action:grapple' },
+      targetId: heroTokenId,
+      dependsOnEffectId: root.id,
+    })
+    const hero = fighter({
+      id: 'opposed-escape-player',
+      name: 'Opposed escape player',
+      initiativeBonus: 100,
+      level: 1,
+      abilities: { str: 8, dex: 30, con: 12, int: 10, wis: 10, cha: 10 },
+      equipment: {},
+      conditions: ['grappled', 'restrained'],
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [root, restrained],
+      },
+    })
+    const catalogGoblin = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const grapplerMonster: Dnd5eMonsterStatBlock = {
+      ...catalogGoblin,
+      id: 'room-monster:opposed-escape-grappler',
+      slug: 'opposed-escape-grappler',
+      name: 'Opposed escape grappler',
+      englishName: 'Opposed escape grappler',
+      abilities: { ...catalogGoblin.abilities, str: 8 },
+      skills: catalogGoblin.skills?.filter((skill) => skill.key !== 'athletics'),
+      armorClass: { value: 30, note: 'escape-selection fixture' },
+      hitPoints: { average: 1_000, dice: '1000' },
+      speed: { walk: 0 },
+      actions: [],
+    }
+    const battleMap: BattleMap = {
+      id: 'opposed-player-escape-map',
+      name: 'Opposed player escape',
+      width: 100,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: heroTokenId,
+          label: hero.name,
+          x: 25,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+        {
+          id: sourceTokenId,
+          label: grapplerMonster.name,
+          x: 75,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: grapplerMonster.id,
+          hp: grapplerMonster.hitPoints.average,
+          maxHp: grapplerMonster.hitPoints.average,
+        },
+      ],
+    }
+    const request = {
+      characters: [hero],
+      monsters: [{ monsterId: grapplerMonster.id, count: 1 }],
+      customMonsters: [grapplerMonster],
+      trials: 1,
+      seed: 16180339,
+      maxRounds: 1,
+      battlefield: {
+        map: battleMap,
+        geometry: createEmptyMapGeometry(battleMap.id),
+      },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    } as const
+    const first = simulateDnd5eCombats(request)
+    const repeated = simulateDnd5eCombats(request)
+    const playerTurn = first.decisionLog.find((entry) => entry.actorName === hero.name)
+    const selected = playerTurn?.candidates.find((candidate) => candidate.selected)
+
+    expect(repeated).toEqual(first)
+    expect(playerTurn?.candidates.map((candidate) => candidate.candidateId))
+      .toContain(`escape-grapple:${root.id}:${sourceTokenId}`)
+    expect(playerTurn).toMatchObject({
+      actionName: '挣脱擒抱',
+      candidateId: `escape-grapple:${root.id}:${sourceTokenId}`,
+      actorPositionAfter: { x: 25, y: 25 },
+      outcome: { executed: true, headlessTransactions: 1 },
+    })
+    expect(selected?.metrics.hitProbability).toBeGreaterThan(0.5)
+    expect(selected?.metrics.hitProbability).not.toBe(0.5)
+    expect(playerTurn?.executionSteps.some((step) =>
+      step.kind === 'roll' && step.text.includes('对抗'))).toBe(true)
+  })
+
+  it('fails closed for a monster fixed-DC relation rejected during simulation reconciliation', () => {
+    const sourceTokenId = 'monster-escape-source-token'
+    const monsterTokenId = 'monster-escape-target-token'
+    const catalogGoblin = getDnd5eSrdMonster('srd-5.1:goblin')!
+    const ankheg = getDnd5eSrdMonster('srd-5.1:ankheg')!
+    const grappledMonster: Dnd5eMonsterStatBlock = {
+      ...catalogGoblin,
+      id: 'room-monster:fixed-escape-goblin',
+      slug: 'fixed-escape-goblin',
+      name: 'Fixed escape goblin',
+      englishName: 'Fixed escape goblin',
+      abilities: { ...catalogGoblin.abilities, dex: 30 },
+      actions: [],
+    }
+    const declaration = ankheg.actions
+      .find((action) => action.id === 'bite')
+      ?.attack?.onHitEffects?.find((effect) => effect.kind === 'source-linked-condition')
+    if (!declaration) throw new Error('Ankheg Bite relation fixture is missing')
+    const rootId = dnd5eActiveEffectId(
+      'relation',
+      'grapple',
+      sourceTokenId,
+      declaration.relation.slotGroup,
+      monsterTokenId,
+    )
+    const root = createDnd5eConditionEffect({
+      id: rootId,
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: sourceTokenId,
+        rulesId: `monster:${ankheg.id}:bite:${declaration.id}`,
+      },
+      targetId: monsterTokenId,
+      stackingKey: rootId,
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: declaration.escapeDc,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: sourceTokenId,
+        sourceActionId: 'bite',
+        slotGroup: declaration.relation.slotGroup,
+        maxDistanceFeet: declaration.relation.maxDistanceFeet,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const hero = fighter({
+      id: 'monster-escape-fallback',
+      name: 'Monster escape fallback',
+      initiativeBonus: -100,
+    })
+    const battleMap: BattleMap = {
+      id: 'fixed-monster-escape-map',
+      name: 'Fixed monster escape',
+      width: 150,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: monsterTokenId,
+          label: grappledMonster.name,
+          x: 25,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: grappledMonster.id,
+          hp: grappledMonster.hitPoints.average,
+          maxHp: grappledMonster.hitPoints.average,
+          dnd5eCombatState: {
+            schemaVersion: 2,
+            activeEffects: [root],
+            conditions: [],
+          },
+        },
+        {
+          id: sourceTokenId,
+          label: ankheg.name,
+          x: 75,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: ankheg.id,
+          hp: ankheg.hitPoints.average,
+          maxHp: ankheg.hitPoints.average,
+        },
+        {
+          id: 'monster-escape-fallback-token',
+          label: hero.name,
+          x: 125,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+      ],
+    }
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [
+        { monsterId: grappledMonster.id, count: 1 },
+        { monsterId: ankheg.id, count: 1 },
+      ],
+      customMonsters: [grappledMonster],
+      trials: 1,
+      seed: 27182818,
+      maxRounds: 1,
+      battlefield: {
+        map: battleMap,
+        geometry: createEmptyMapGeometry(battleMap.id),
+      },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    })
+    const monsterTurn = result.decisionLog.find((entry) =>
+      entry.actorName === grappledMonster.name)
+
+    expect(monsterTurn?.candidates.map((candidate) => candidate.candidateId))
+      .not.toContain(`escape-active-effect:${root.id}`)
+    expect(monsterTurn).toMatchObject({
+      actionName: undefined,
+      candidateId: expect.stringContaining('dodge:'),
+      actorPositionAfter: { x: 25, y: 25 },
+      outcome: { executed: false, headlessTransactions: 0 },
+    })
+    expect(monsterTurn?.candidates.every((candidate) =>
+      candidate.metrics.movementFeet === 0)).toBe(true)
   })
 
   it('treats the Bugbear javelin as a normal melee attack at 5 feet in simulation', () => {
@@ -573,7 +1561,451 @@ describe('D&D 5e combat simulator', () => {
       candidate.actionId === 'multiattack')).toBe(false)
   })
 
-  it('runs exactly 1000 seeded trials and is reproducible', { timeout: 15_000 }, () => {
+  it.each([
+    {
+      label: 'three melee attacks',
+      distanceFeet: 5,
+      actionId: 'multiattack',
+      expectedAttackRolls: 3,
+      expectedDamage: 14.3,
+    },
+    {
+      label: 'two Hurl Flame attacks',
+      distanceFeet: 40,
+      actionId: 'multiattack-hurl-flame',
+      expectedAttackRolls: 2,
+      expectedDamage: 12,
+    },
+  ])(
+    'simulates the Barbed Devil $label through one authoritative Headless transaction',
+    ({ distanceFeet, actionId, expectedAttackRolls, expectedDamage }) => {
+      const hero = fighter({
+        initiativeBonus: -100,
+        speed: 0,
+        ac: 14,
+        maxHp: 100,
+        currentHp: 100,
+        equipment: {},
+      })
+      const catalog = getDnd5eSrdMonster('srd-5.1:barbed-devil')!
+      const monster = {
+        ...catalog,
+        id: `room-monster:barbed-devil-${distanceFeet}`,
+        slug: `barbed-devil-${distanceFeet}`,
+        name: `Barbed Devil ${distanceFeet}`,
+        englishName: `Barbed Devil ${distanceFeet}`,
+        speed: { ...catalog.speed, walk: 0 },
+      } as Dnd5eMonsterStatBlock
+      const gridSize = 50
+      const targetX = gridSize / 2 + distanceFeet / 5 * gridSize
+      const battleMap: BattleMap = {
+        id: `barbed-devil-${distanceFeet}-map`,
+        name: `Barbed Devil ${distanceFeet} feet`,
+        width: targetX + gridSize,
+        height: gridSize,
+        gridSize,
+        gridOffsetX: 0,
+        gridOffsetY: 0,
+        showGrid: true,
+        feetPerCell: 5,
+        tokens: [
+          {
+            id: 'barbed-devil-token',
+            label: monster.name,
+            x: gridSize / 2,
+            y: gridSize / 2,
+            color: '#f00',
+            emoji: '',
+            size: 1,
+            type: 'enemy',
+            poolId: monster.id,
+            hp: monster.hitPoints.average,
+            maxHp: monster.hitPoints.average,
+          },
+          {
+            id: 'hero-token',
+            label: hero.name,
+            x: targetX,
+            y: gridSize / 2,
+            color: '#fff',
+            emoji: '',
+            size: 1,
+            type: 'player',
+            characterId: hero.id,
+            hp: hero.currentHp,
+            maxHp: hero.maxHp,
+          },
+        ],
+      }
+      const result = simulateDnd5eCombats({
+        characters: [hero],
+        monsters: [{ monsterId: monster.id, count: 1 }],
+        customMonsters: [monster],
+        trials: 1,
+        seed: 20260728,
+        maxRounds: 1,
+        battlefield: {
+          map: battleMap,
+          geometry: createEmptyMapGeometry(battleMap.id),
+        },
+        strategyTraining: {
+          enabled: true,
+          explorationRate: 0,
+          terminalRewardWeight: 1,
+        },
+      })
+      const decision = result.decisionLog.find((entry) =>
+        entry.actorName === monster.name)
+      const selected = decision?.candidates.find((candidate) => candidate.selected)
+      const attackRolls = decision?.executionSteps.filter((step) =>
+        step.kind === 'roll' && step.text.includes('D20=')) ?? []
+
+      expect(selected).toMatchObject({
+        actionId,
+        metrics: {
+          targetDistanceFeet: distanceFeet,
+          expectedDamage,
+        },
+      })
+      expect(decision?.outcome).toMatchObject({
+        executed: true,
+        headlessTransactions: 1,
+      })
+      expect(attackRolls).toHaveLength(expectedAttackRolls)
+    },
+  )
+
+  it('keeps a Repulsion Breath forced-movement coordinate for the target next turn', () => {
+    const catalog = getDnd5eSrdMonster('srd-5.1:adult-bronze-dragon')!
+    const breath = catalog.actions.find((action) => action.id === 'breath-weapons')
+    if (breath?.rule?.kind !== 'area-saving-throw' || !breath.rule.variants) {
+      throw new Error('Adult Bronze Dragon Breath Weapons fixture is missing')
+    }
+    const repulsion = breath.rule.variants.find((variant) =>
+      variant.id === 'repulsion-breath')
+    if (!repulsion) throw new Error('Repulsion Breath fixture is missing')
+    const monster: Dnd5eMonsterStatBlock = {
+      ...catalog,
+      id: 'room-monster:repulsion-simulation-dragon',
+      slug: 'repulsion-simulation-dragon',
+      name: 'Repulsion simulation dragon',
+      englishName: 'Repulsion simulation dragon',
+      abilities: { ...catalog.abilities, dex: 30 },
+      armorClass: { value: 30, note: 'simulation fixture' },
+      hitPoints: { average: 1_000, dice: '1000' },
+      speed: { walk: 0 },
+      actions: [{
+        ...breath,
+        rule: {
+          ...breath.rule,
+          variants: [{ ...repulsion, dc: 99 }],
+        },
+      }],
+      bonusActions: [],
+      reactions: [],
+      legendaryActions: [],
+      lairActions: [],
+      spellcasting: undefined,
+    }
+    const hero = fighter({
+      id: 'repulsion-simulation-target',
+      name: 'Repulsion simulation target',
+      initiativeBonus: -100,
+      speed: 0,
+      ac: 30,
+      currentHp: 1_000,
+      maxHp: 1_000,
+      equipment: {},
+    })
+    const map: BattleMap = {
+      id: 'repulsion-simulation-map',
+      name: 'Repulsion simulation map',
+      width: 1_000,
+      height: 100,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: 'repulsion-dragon-token',
+          label: monster.name,
+          x: 25,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: monster.id,
+          hp: monster.hitPoints.average,
+          maxHp: monster.hitPoints.average,
+          dnd5eCombatState: {
+            monsterRechargeReadyByActionId: { 'breath-weapons': true },
+          },
+        },
+        {
+          id: 'repulsion-target-token',
+          label: hero.name,
+          x: 75,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+      ],
+    }
+
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 20260728,
+      maxRounds: 1,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    })
+    const dragonTurn = result.decisionLog.find((entry) => entry.actorName === monster.name)
+    const targetTurn = result.decisionLog.find((entry) => entry.actorName === hero.name)
+
+    expect(dragonTurn).toMatchObject({
+      outcome: { executed: true, headlessTransactions: 1 },
+    })
+    expect(dragonTurn?.actionName).toContain(repulsion.name)
+    expect(dragonTurn?.executionSteps.some((step) => step.kind === 'movement')).toBe(true)
+    expect(targetTurn?.actorPositionBefore).toEqual({ x: 675, y: 25 })
+  })
+
+  it('applies Slowing Breath before the target moves and caps that turn at half speed', () => {
+    const catalog = getDnd5eSrdMonster('srd-5.1:adult-copper-dragon')!
+    const breath = catalog.actions.find((action) => action.id === 'breath-weapons')
+    if (breath?.rule?.kind !== 'area-saving-throw' || !breath.rule.variants) {
+      throw new Error('Adult Copper Dragon Breath Weapons fixture is missing')
+    }
+    const slowing = breath.rule.variants.find((variant) =>
+      variant.id === 'slowing-breath')
+    if (!slowing) throw new Error('Slowing Breath fixture is missing')
+    const monster: Dnd5eMonsterStatBlock = {
+      ...catalog,
+      id: 'room-monster:slowing-simulation-dragon',
+      slug: 'slowing-simulation-dragon',
+      name: 'Slowing simulation dragon',
+      englishName: 'Slowing simulation dragon',
+      abilities: { ...catalog.abilities, dex: 30 },
+      armorClass: { value: 30, note: 'simulation fixture' },
+      hitPoints: { average: 1_000, dice: '1000' },
+      speed: { walk: 0 },
+      actions: [{
+        ...breath,
+        rule: {
+          ...breath.rule,
+          variants: [{ ...slowing, dc: 99 }],
+        },
+      }],
+      bonusActions: [],
+      reactions: [],
+      legendaryActions: [],
+      lairActions: [],
+      spellcasting: undefined,
+    }
+    const hero = fighter({
+      id: 'slowing-simulation-target',
+      name: 'Slowing simulation target',
+      initiativeBonus: -100,
+      speed: 30,
+      ac: 30,
+      currentHp: 1_000,
+      maxHp: 1_000,
+      equipment: {},
+    })
+    const map: BattleMap = {
+      id: 'slowing-simulation-map',
+      name: 'Slowing simulation map',
+      width: 600,
+      height: 100,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: 'slowing-dragon-token',
+          label: monster.name,
+          x: 25,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: monster.id,
+          hp: monster.hitPoints.average,
+          maxHp: monster.hitPoints.average,
+          dnd5eCombatState: {
+            monsterRechargeReadyByActionId: { 'breath-weapons': true },
+          },
+        },
+        {
+          id: 'slowing-target-token',
+          label: hero.name,
+          x: 275,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+      ],
+    }
+
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 20260728,
+      maxRounds: 1,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    })
+    const dragonTurn = result.decisionLog.find((entry) => entry.actorName === monster.name)
+    const targetTurn = result.decisionLog.find((entry) => entry.actorName === hero.name)
+    const movedPixels = targetTurn
+      ? Math.hypot(
+          targetTurn.actorPositionAfter.x - targetTurn.actorPositionBefore.x,
+          targetTurn.actorPositionAfter.y - targetTurn.actorPositionBefore.y,
+        )
+      : 0
+
+    expect(dragonTurn?.actionName).toContain(slowing.name)
+    expect(dragonTurn?.executionSteps.some((step) =>
+      step.text.includes('monster-area:slowing-breath-effect'))).toBe(true)
+    // At 25 feet the unarmed target would need 20 feet of ordinary movement
+    // to attack. Slowing Breath leaves only 15, so it must Dash instead of
+    // producing a seemingly legal move-and-attack candidate.
+    expect(targetTurn).toMatchObject({
+      actionName: undefined,
+      candidateId: 'player:fallback:dash',
+      outcome: { executed: false, headlessTransactions: 1 },
+    })
+    expect(movedPixels).toBe(200)
+  })
+
+  it('makes a Slowing-Breath-capped monster choose one attack instead of Multiattack', () => {
+    const catalog = getDnd5eSrdMonster('srd-5.1:cult-fanatic')!
+    const monster: Dnd5eMonsterStatBlock = {
+      ...catalog,
+      id: 'room-monster:slowed-cult-fanatic',
+      slug: 'slowed-cult-fanatic',
+      name: 'Slowed Cult Fanatic',
+      englishName: 'Slowed Cult Fanatic',
+      abilities: { ...catalog.abilities, dex: 30 },
+      armorClass: { value: 30, note: 'simulation fixture' },
+      hitPoints: { average: 1_000, dice: '1000' },
+      speed: { walk: 0 },
+      actions: catalog.actions.filter((action) =>
+        action.id === 'multiattack' || action.id === 'dagger'),
+      bonusActions: [],
+      reactions: [],
+      spellcasting: undefined,
+    }
+    const hero = fighter({
+      id: 'slowed-cult-fanatic-target',
+      name: 'Slowed Cult Fanatic target',
+      initiativeBonus: -100,
+      speed: 0,
+      ac: 1,
+      currentHp: 1_000,
+      maxHp: 1_000,
+      equipment: {},
+    })
+    const slow = createDnd5eMechanicalEffect({
+      id: 'preexisting-slowing-breath',
+      definitionId: 'monster-area:slowing-breath-effect',
+      label: 'Slowing Breath',
+      source: { kind: 'monster', actorId: 'slow-source', rulesId: 'breath-weapons' },
+      targetId: 'slowed-cult-fanatic-token',
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      modifiers: {
+        speedMultiplier: 0.5,
+        preventReactions: true,
+        maximumAttacksPerTurn: 1,
+        actionOrBonusActionOnly: true,
+      },
+    })
+    const map: BattleMap = {
+      id: 'slowed-cult-fanatic-map',
+      name: 'Slowed Cult Fanatic map',
+      width: 100,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: 'slowed-cult-fanatic-token',
+          label: monster.name,
+          x: 25,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: monster.id,
+          hp: monster.hitPoints.average,
+          maxHp: monster.hitPoints.average,
+          dnd5eCombatState: { activeEffects: [slow] },
+        },
+        {
+          id: 'slowed-cult-fanatic-target-token',
+          label: hero.name,
+          x: 75,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+      ],
+    }
+
+    const result = simulateDnd5eCombats({
+      characters: [hero],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 1,
+      seed: 20260728,
+      maxRounds: 1,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    })
+    const turn = result.decisionLog.find((entry) => entry.actorName === monster.name)
+    const selected = turn?.candidates.find((candidate) => candidate.selected)
+
+    expect(turn).toMatchObject({
+      actionName: catalog.actions.find((action) => action.id === 'dagger')!.name,
+      outcome: { executed: true, headlessTransactions: 1 },
+    })
+    expect(selected?.actionId).toBe('dagger')
+    expect(turn?.candidates.some((candidate) =>
+      candidate.actionId === 'multiattack')).toBe(false)
+    expect(turn?.outcome.hits).toBeLessThanOrEqual(1)
+  })
+
+  it('runs exactly 1000 seeded trials and is reproducible', { timeout: 45_000 }, () => {
     const request = {
       characters: [fighter()],
       monsters: [{ monsterId: 'srd-5.1:goblin', count: 2 }],
@@ -735,8 +2167,8 @@ describe('D&D 5e combat simulator', () => {
     expect(firstPlayerTurn?.executionSteps.some((step) =>
       step.kind === 'condition' && step.text.includes('condition:poisoned'))).toBe(true)
     expect(firstPlayerTurn?.executionSteps.filter((step) =>
-      step.kind === 'transaction')).toHaveLength(2)
-    expect(firstPlayerTurn?.outcome.headlessTransactions).toBe(1)
+      step.kind === 'transaction')).toHaveLength(3)
+    expect(firstPlayerTurn?.outcome.headlessTransactions).toBe(2)
   })
 
   it('lets player spellcasters choose and commit an area spell against clustered enemies', () => {
@@ -781,7 +2213,7 @@ describe('D&D 5e combat simulator', () => {
       actorName: caster.name,
       actionName: '火球术',
       side: 'players',
-      headlessTransactions: 1,
+      headlessTransactions: 2,
     }))
     expect(result.tacticalSummary.playerSpellUses).toBeGreaterThan(0)
     expect(result.tacticalSummary.areaActionUses).toBeGreaterThan(0)
@@ -1482,6 +2914,89 @@ describe('D&D 5e combat simulator', () => {
     expect(spellCandidates.length).toBeGreaterThan(0)
     expect(spellCandidates.every((candidate) => candidate.metrics.expectedDamage === 0)).toBe(true)
     expect(selectedCandidate?.actionId).not.toMatch(/^spell:/)
+  })
+
+  it('keeps a mapped Basilisk gaze encounter deterministic across Headless turn boundaries', () => {
+    const basilisk = getDnd5eSrdMonster('srd-5.1:basilisk')
+    if (!basilisk) throw new Error('Basilisk fixture is missing')
+    const hero = fighter({
+      id: 'basilisk-gaze-simulation-target',
+      name: 'Basilisk gaze simulation target',
+      initiativeBonus: -100,
+      abilities: { str: 18, dex: 14, con: 3, int: 10, wis: 10, cha: 10 },
+      savingThrows: [],
+      maxHp: 500,
+      currentHp: 500,
+      speed: 0,
+      equipment: {},
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        surprisedCombatId: 'simulation:0',
+      },
+    })
+    const map: BattleMap = {
+      id: 'basilisk-gaze-simulation-map',
+      name: 'Basilisk gaze simulation map',
+      width: 150,
+      height: 50,
+      gridSize: 50,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [
+        {
+          id: 'basilisk-gaze-simulation-token',
+          label: basilisk.name,
+          x: 25,
+          y: 25,
+          color: '#f00',
+          emoji: '',
+          size: 1,
+          type: 'enemy',
+          poolId: basilisk.id,
+          hp: basilisk.hitPoints.average,
+          maxHp: basilisk.hitPoints.average,
+        },
+        {
+          id: 'basilisk-gaze-simulation-target-token',
+          label: hero.name,
+          x: 75,
+          y: 25,
+          color: '#fff',
+          emoji: '',
+          size: 1,
+          type: 'player',
+          characterId: hero.id,
+          hp: hero.currentHp,
+          maxHp: hero.maxHp,
+        },
+      ],
+    }
+    const request = {
+      characters: [hero],
+      monsters: [{ monsterId: basilisk.id, count: 1 }],
+      trials: 1,
+      seed: 20260728,
+      maxRounds: 1,
+      battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      strategyTraining: { enabled: true, explorationRate: 0, terminalRewardWeight: 1 },
+    } as const
+
+    const first = simulateDnd5eCombats(request)
+    const second = simulateDnd5eCombats(request)
+    const basiliskTurn = first.decisionLog.find((entry) => entry.actorName === basilisk.name)
+
+    expect(second).toEqual(first)
+    expect(basiliskTurn).toBeDefined()
+    expect(basiliskTurn?.executionSteps).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'roll',
+        text: expect.stringMatching(/CON.*DC 12/),
+      }),
+    ]))
+    expect(basiliskTurn?.executionSteps.some((step) =>
+      step.kind === 'transaction' && step.text.includes('未提交'))).toBe(false)
   })
 
   it('honors a monster Magic Weapons trait against a conditional weapon immunity', () => {

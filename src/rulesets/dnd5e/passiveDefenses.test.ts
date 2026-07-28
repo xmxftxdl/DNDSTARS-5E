@@ -31,6 +31,21 @@ describe('SRD 5.1 passive class defenses', () => {
       .toBe('normal')
   })
 
+  it('applies imported racial saving-throw advantages only to declared contexts', () => {
+    const ancestry = creature({
+      racialSavingThrowAdvantages: {
+        conditions: ['charmed'],
+        damageTypes: ['poison'],
+        magicAbilities: ['int', 'wis', 'cha'],
+      },
+    })
+    expect(dnd5eSavingThrowMode(ancestry, 'con', { damageType: 'poison' })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(ancestry, 'wis', { condition: 'charmed' })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(ancestry, 'int', { sourceIsMagical: true })).toBe('advantage')
+    expect(dnd5eSavingThrowMode(ancestry, 'str', { sourceIsMagical: true })).toBe('normal')
+    expect(dnd5eSavingThrowMode(ancestry, 'wis', { condition: 'frightened' })).toBe('normal')
+  })
+
   it('exposes the rule sources behind a saving throw roll mode', () => {
     const explanation = dnd5eSavingThrowModeExplanation(
       creature({ magicResistance: true, exhaustionLevel: 3 }),

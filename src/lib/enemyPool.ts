@@ -77,6 +77,40 @@ export function selectNextEnemyVisualVariantId(
   return variants[usedVariantIds.length % variants.length]?.id
 }
 
+export interface EnemyVisualVariantUsage {
+  poolId?: string
+  visualVariantId?: string
+}
+
+/**
+ * Assign one explicit bundled-art variant to every template in insertion order.
+ * Existing map tokens and earlier templates in the same batch both count as used,
+ * so encounter and summon insertion follow the same rotation as the manual picker.
+ */
+export function assignEnemyVisualVariants(
+  templates: readonly EnemyTemplate[],
+  existingTokens: readonly EnemyVisualVariantUsage[] = [],
+): EnemyTemplate[] {
+  const usedByPoolId = new Map<string, (string | undefined)[]>()
+  for (const token of existingTokens) {
+    if (!token.poolId) continue
+    const used = usedByPoolId.get(token.poolId) ?? []
+    used.push(token.visualVariantId)
+    usedByPoolId.set(token.poolId, used)
+  }
+
+  return templates.map((template) => {
+    const used = usedByPoolId.get(template.id) ?? []
+    const visualVariantId = template.visualVariantId ??
+      selectNextEnemyVisualVariantId(template, used)
+    used.push(visualVariantId)
+    usedByPoolId.set(template.id, used)
+    return visualVariantId === template.visualVariantId
+      ? template
+      : { ...template, visualVariantId }
+  })
+}
+
 const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
   aboleth: {
     emoji: '🐙',
@@ -4284,6 +4318,1398 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
+  owlbear: {
+    emoji: '🦉',
+    color: '#78350f',
+    tokenPortrait: '/assets/portraits/owlbear-storm-forest-charge-token.png',
+    initiativePortrait: '/assets/portraits/owlbear-storm-forest-charge-initiative.png',
+    visualVariants: [
+      {
+        id: 'storm-forest-charge',
+        label: '雷雨古林冲锋',
+        tokenPortrait: '/assets/portraits/owlbear-storm-forest-charge-token.png',
+        initiativePortrait: '/assets/portraits/owlbear-storm-forest-charge-initiative.png',
+      },
+      {
+        id: 'aurora-ice-cave-guard',
+        label: '极光冰穴守卫',
+        tokenPortrait: '/assets/portraits/owlbear-aurora-ice-cave-guard-token.png',
+        initiativePortrait: '/assets/portraits/owlbear-aurora-ice-cave-guard-initiative.png',
+      },
+    ],
+  },
+  panther: {
+    emoji: '🐈‍⬛',
+    color: '#18181b',
+    tokenPortrait: '/assets/portraits/panther-sunlit-jungle-pounce-token.png',
+    initiativePortrait: '/assets/portraits/panther-sunlit-jungle-pounce-initiative.png',
+    visualVariants: [
+      {
+        id: 'sunlit-jungle-pounce',
+        label: '日照雨林扑跃',
+        tokenPortrait: '/assets/portraits/panther-sunlit-jungle-pounce-token.png',
+        initiativePortrait: '/assets/portraits/panther-sunlit-jungle-pounce-initiative.png',
+      },
+      {
+        id: 'moonlit-temple-climb',
+        label: '月夜神庙攀行',
+        tokenPortrait: '/assets/portraits/panther-moonlit-temple-climb-token.png',
+        initiativePortrait: '/assets/portraits/panther-moonlit-temple-climb-initiative.png',
+      },
+    ],
+  },
+  pegasus: {
+    emoji: '🪽',
+    color: '#e2e8f0',
+    tokenPortrait: '/assets/portraits/pegasus-alpine-sunrise-flight-token.png',
+    initiativePortrait: '/assets/portraits/pegasus-alpine-sunrise-flight-initiative.png',
+    visualVariants: [
+      {
+        id: 'alpine-sunrise-flight',
+        label: '高山朝霞飞翔',
+        tokenPortrait: '/assets/portraits/pegasus-alpine-sunrise-flight-token.png',
+        initiativePortrait: '/assets/portraits/pegasus-alpine-sunrise-flight-initiative.png',
+      },
+      {
+        id: 'moonlit-sacred-spring',
+        label: '月下圣泉休憩',
+        tokenPortrait: '/assets/portraits/pegasus-moonlit-sacred-spring-token.png',
+        initiativePortrait: '/assets/portraits/pegasus-moonlit-sacred-spring-initiative.png',
+      },
+    ],
+  },
+  'phase-spider': {
+    emoji: '🕷️',
+    color: '#4c1d95',
+    tokenPortrait: '/assets/portraits/phase-spider-moonlit-library-jaunt-token.png',
+    initiativePortrait: '/assets/portraits/phase-spider-moonlit-library-jaunt-initiative.png',
+    visualVariants: [
+      {
+        id: 'moonlit-library-jaunt',
+        label: '月夜书库相移',
+        tokenPortrait: '/assets/portraits/phase-spider-moonlit-library-jaunt-token.png',
+        initiativePortrait: '/assets/portraits/phase-spider-moonlit-library-jaunt-initiative.png',
+      },
+      {
+        id: 'desert-bridge-phase',
+        label: '荒漠断桥潜相',
+        tokenPortrait: '/assets/portraits/phase-spider-desert-bridge-phase-token.png',
+        initiativePortrait: '/assets/portraits/phase-spider-desert-bridge-phase-initiative.png',
+      },
+    ],
+  },
+  'pit-fiend': {
+    emoji: '😈',
+    color: '#7f1d1d',
+    tokenPortrait: '/assets/portraits/pit-fiend-infernal-throne-mace-token.png',
+    initiativePortrait: '/assets/portraits/pit-fiend-infernal-throne-mace-initiative.png',
+    visualVariants: [
+      {
+        id: 'infernal-throne-mace',
+        label: '炼狱王阶巨锤',
+        tokenPortrait: '/assets/portraits/pit-fiend-infernal-throne-mace-token.png',
+        initiativePortrait: '/assets/portraits/pit-fiend-infernal-throne-mace-initiative.png',
+      },
+      {
+        id: 'sulfur-plain-tailstrike',
+        label: '硫磺战场尾击',
+        tokenPortrait: '/assets/portraits/pit-fiend-sulfur-plain-tailstrike-token.png',
+        initiativePortrait: '/assets/portraits/pit-fiend-sulfur-plain-tailstrike-initiative.png',
+      },
+    ],
+  },
+  planetar: {
+    emoji: '🪽',
+    color: '#15803d',
+    tokenPortrait: '/assets/portraits/planetar-sky-temple-greatsword-token.png',
+    initiativePortrait: '/assets/portraits/planetar-sky-temple-greatsword-initiative.png',
+    visualVariants: [
+      {
+        id: 'sky-temple-greatsword',
+        label: '天穹神殿巨剑',
+        tokenPortrait: '/assets/portraits/planetar-sky-temple-greatsword-token.png',
+        initiativePortrait: '/assets/portraits/planetar-sky-temple-greatsword-initiative.png',
+      },
+      {
+        id: 'twilight-sanctuary-healing',
+        label: '暮林圣所治愈',
+        tokenPortrait: '/assets/portraits/planetar-twilight-sanctuary-healing-token.png',
+        initiativePortrait: '/assets/portraits/planetar-twilight-sanctuary-healing-initiative.png',
+      },
+    ],
+  },
+  plesiosaurus: {
+    emoji: '🦕',
+    color: '#155e75',
+    tokenPortrait: '/assets/portraits/plesiosaurus-arctic-longship-hunt-token.png',
+    initiativePortrait: '/assets/portraits/plesiosaurus-arctic-longship-hunt-initiative.png',
+    visualVariants: [
+      {
+        id: 'arctic-longship-hunt',
+        label: '冰海沉船巡游',
+        tokenPortrait: '/assets/portraits/plesiosaurus-arctic-longship-hunt-token.png',
+        initiativePortrait: '/assets/portraits/plesiosaurus-arctic-longship-hunt-initiative.png',
+      },
+      {
+        id: 'tropical-lagoon-surface',
+        label: '热带泻湖换气',
+        tokenPortrait: '/assets/portraits/plesiosaurus-tropical-lagoon-surface-token.png',
+        initiativePortrait: '/assets/portraits/plesiosaurus-tropical-lagoon-surface-initiative.png',
+      },
+    ],
+  },
+  'poisonous-snake': {
+    emoji: '🐍',
+    color: '#166534',
+    tokenPortrait: '/assets/portraits/poisonous-snake-rainforest-branch-strike-token.png',
+    initiativePortrait: '/assets/portraits/poisonous-snake-rainforest-branch-strike-initiative.png',
+    visualVariants: [
+      {
+        id: 'rainforest-branch-strike',
+        label: '雨林枝头警戒',
+        tokenPortrait: '/assets/portraits/poisonous-snake-rainforest-branch-strike-token.png',
+        initiativePortrait: '/assets/portraits/poisonous-snake-rainforest-branch-strike-initiative.png',
+      },
+      {
+        id: 'moonlit-marsh-swim',
+        label: '月沼水面游行',
+        tokenPortrait: '/assets/portraits/poisonous-snake-moonlit-marsh-swim-token.png',
+        initiativePortrait: '/assets/portraits/poisonous-snake-moonlit-marsh-swim-initiative.png',
+      },
+    ],
+  },
+  'polar-bear': {
+    emoji: '🐻‍❄️',
+    color: '#cbd5e1',
+    tokenPortrait: '/assets/portraits/polar-bear-blizzard-ice-charge-token.png',
+    initiativePortrait: '/assets/portraits/polar-bear-blizzard-ice-charge-initiative.png',
+    visualVariants: [
+      {
+        id: 'blizzard-ice-charge',
+        label: '暴雪冰原追击',
+        tokenPortrait: '/assets/portraits/polar-bear-blizzard-ice-charge-token.png',
+        initiativePortrait: '/assets/portraits/polar-bear-blizzard-ice-charge-initiative.png',
+      },
+      {
+        id: 'underice-swim',
+        label: '浮冰水下巡游',
+        tokenPortrait: '/assets/portraits/polar-bear-underice-swim-token.png',
+        initiativePortrait: '/assets/portraits/polar-bear-underice-swim-initiative.png',
+      },
+    ],
+  },
+  pony: {
+    emoji: '🐴',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/pony-highland-pack-trail-token.png',
+    initiativePortrait: '/assets/portraits/pony-highland-pack-trail-initiative.png',
+    visualVariants: [
+      {
+        id: 'highland-pack-trail',
+        label: '高地驮运行进',
+        tokenPortrait: '/assets/portraits/pony-highland-pack-trail-token.png',
+        initiativePortrait: '/assets/portraits/pony-highland-pack-trail-initiative.png',
+      },
+      {
+        id: 'snow-stable-kick',
+        label: '雪夜马厩后踢',
+        tokenPortrait: '/assets/portraits/pony-snow-stable-kick-token.png',
+        initiativePortrait: '/assets/portraits/pony-snow-stable-kick-initiative.png',
+      },
+    ],
+  },
+  priest: {
+    emoji: '📖',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/priest-ruined-chapel-holy-book-token.png',
+    initiativePortrait: '/assets/portraits/priest-ruined-chapel-holy-book-initiative.png',
+    visualVariants: [
+      {
+        id: 'ruined-chapel-holy-book',
+        label: '残破礼拜堂圣典',
+        tokenPortrait: '/assets/portraits/priest-ruined-chapel-holy-book-token.png',
+        initiativePortrait: '/assets/portraits/priest-ruined-chapel-holy-book-initiative.png',
+      },
+      {
+        id: 'storm-hospice-guiding-bolt',
+        label: '暴雨救济院导引箭',
+        tokenPortrait: '/assets/portraits/priest-storm-hospice-guiding-bolt-token.png',
+        initiativePortrait: '/assets/portraits/priest-storm-hospice-guiding-bolt-initiative.png',
+      },
+    ],
+  },
+  pseudodragon: {
+    emoji: '🐉',
+    color: '#9f1239',
+    tokenPortrait: '/assets/portraits/pseudodragon-candlelit-study-telepathy-token.png',
+    initiativePortrait: '/assets/portraits/pseudodragon-candlelit-study-telepathy-initiative.png',
+    visualVariants: [
+      {
+        id: 'candlelit-study-telepathy',
+        label: '烛光书房心灵感应',
+        tokenPortrait: '/assets/portraits/pseudodragon-candlelit-study-telepathy-token.png',
+        initiativePortrait: '/assets/portraits/pseudodragon-candlelit-study-telepathy-initiative.png',
+      },
+      {
+        id: 'autumn-orchard-flight',
+        label: '秋日果园飞行',
+        tokenPortrait: '/assets/portraits/pseudodragon-autumn-orchard-flight-token.png',
+        initiativePortrait: '/assets/portraits/pseudodragon-autumn-orchard-flight-initiative.png',
+      },
+    ],
+  },
+  'purple-worm': {
+    emoji: '🪱',
+    color: '#6b21a8',
+    tokenPortrait: '/assets/portraits/purple-worm-desert-canyon-eruption-token.png',
+    initiativePortrait: '/assets/portraits/purple-worm-desert-canyon-eruption-initiative.png',
+    visualVariants: [
+      {
+        id: 'desert-canyon-eruption',
+        label: '荒漠峡谷破土',
+        tokenPortrait: '/assets/portraits/purple-worm-desert-canyon-eruption-token.png',
+        initiativePortrait: '/assets/portraits/purple-worm-desert-canyon-eruption-initiative.png',
+      },
+      {
+        id: 'crystal-cavern-tailstrike',
+        label: '晶洞尾刺突袭',
+        tokenPortrait: '/assets/portraits/purple-worm-crystal-cavern-tailstrike-token.png',
+        initiativePortrait: '/assets/portraits/purple-worm-crystal-cavern-tailstrike-initiative.png',
+      },
+    ],
+  },
+  quasit: {
+    emoji: '👿',
+    color: '#4c1d95',
+    tokenPortrait: '/assets/portraits/quasit-candlelit-crypt-scare-token.png',
+    initiativePortrait: '/assets/portraits/quasit-candlelit-crypt-scare-initiative.png',
+    visualVariants: [
+      {
+        id: 'candlelit-crypt-scare',
+        label: '烛墓恐吓',
+        tokenPortrait: '/assets/portraits/quasit-candlelit-crypt-scare-token.png',
+        initiativePortrait: '/assets/portraits/quasit-candlelit-crypt-scare-initiative.png',
+      },
+      {
+        id: 'rainy-rooftop-invisibility',
+        label: '雨夜屋顶隐形',
+        tokenPortrait: '/assets/portraits/quasit-rainy-rooftop-invisibility-token.png',
+        initiativePortrait: '/assets/portraits/quasit-rainy-rooftop-invisibility-initiative.png',
+      },
+    ],
+  },
+  quipper: {
+    emoji: '🐟',
+    color: '#9f1239',
+    tokenPortrait: '/assets/portraits/quipper-jungle-river-bite-token.png',
+    initiativePortrait: '/assets/portraits/quipper-jungle-river-bite-initiative.png',
+    visualVariants: [
+      {
+        id: 'jungle-river-bite',
+        label: '雨林河湾撕咬',
+        tokenPortrait: '/assets/portraits/quipper-jungle-river-bite-token.png',
+        initiativePortrait: '/assets/portraits/quipper-jungle-river-bite-initiative.png',
+      },
+      {
+        id: 'flooded-dungeon-key',
+        label: '水牢钥匙伏猎',
+        tokenPortrait: '/assets/portraits/quipper-flooded-dungeon-key-token.png',
+        initiativePortrait: '/assets/portraits/quipper-flooded-dungeon-key-initiative.png',
+      },
+    ],
+  },
+  rakshasa: {
+    emoji: '🐯',
+    color: '#b45309',
+    tokenPortrait: '/assets/portraits/rakshasa-moonlit-palace-illusion-token.png',
+    initiativePortrait: '/assets/portraits/rakshasa-moonlit-palace-illusion-initiative.png',
+    visualVariants: [
+      {
+        id: 'moonlit-palace-illusion',
+        label: '月夜宫殿幻术',
+        tokenPortrait: '/assets/portraits/rakshasa-moonlit-palace-illusion-token.png',
+        initiativePortrait: '/assets/portraits/rakshasa-moonlit-palace-illusion-initiative.png',
+      },
+      {
+        id: 'rainy-bazaar-disguise',
+        label: '雨夜市集解伪',
+        tokenPortrait: '/assets/portraits/rakshasa-rainy-bazaar-disguise-token.png',
+        initiativePortrait: '/assets/portraits/rakshasa-rainy-bazaar-disguise-initiative.png',
+      },
+    ],
+  },
+  rat: {
+    emoji: '🐀',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/rat-candlelit-pantry-scent-token.png',
+    initiativePortrait: '/assets/portraits/rat-candlelit-pantry-scent-initiative.png',
+    visualVariants: [
+      {
+        id: 'candlelit-pantry-scent',
+        label: '烛光粮仓嗅探',
+        tokenPortrait: '/assets/portraits/rat-candlelit-pantry-scent-token.png',
+        initiativePortrait: '/assets/portraits/rat-candlelit-pantry-scent-initiative.png',
+      },
+      {
+        id: 'dawn-bridge-dash',
+        label: '黎明桥下疾奔',
+        tokenPortrait: '/assets/portraits/rat-dawn-bridge-dash-token.png',
+        initiativePortrait: '/assets/portraits/rat-dawn-bridge-dash-initiative.png',
+      },
+    ],
+  },
+  raven: {
+    emoji: '🐦‍⬛',
+    color: '#1e293b',
+    tokenPortrait: '/assets/portraits/raven-moonlit-belltower-mimicry-token.png',
+    initiativePortrait: '/assets/portraits/raven-moonlit-belltower-mimicry-initiative.png',
+    visualVariants: [
+      {
+        id: 'moonlit-belltower-mimicry',
+        label: '月夜钟楼拟声',
+        tokenPortrait: '/assets/portraits/raven-moonlit-belltower-mimicry-token.png',
+        initiativePortrait: '/assets/portraits/raven-moonlit-belltower-mimicry-initiative.png',
+      },
+      {
+        id: 'winter-forest-flight',
+        label: '冬林晨光飞行',
+        tokenPortrait: '/assets/portraits/raven-winter-forest-flight-token.png',
+        initiativePortrait: '/assets/portraits/raven-winter-forest-flight-initiative.png',
+      },
+    ],
+  },
+  'red-dragon-wyrmling': {
+    emoji: '🐉',
+    color: '#b91c1c',
+    tokenPortrait: '/assets/portraits/red-dragon-wyrmling-volcanic-ravine-glide-token.png',
+    initiativePortrait: '/assets/portraits/red-dragon-wyrmling-volcanic-ravine-glide-initiative.png',
+    visualVariants: [
+      {
+        id: 'volcanic-ravine-glide',
+        label: '火山峡谷滑翔',
+        tokenPortrait: '/assets/portraits/red-dragon-wyrmling-volcanic-ravine-glide-token.png',
+        initiativePortrait: '/assets/portraits/red-dragon-wyrmling-volcanic-ravine-glide-initiative.png',
+      },
+      {
+        id: 'moonlit-fortress-firebreath',
+        label: '月夜堡垒喷火',
+        tokenPortrait: '/assets/portraits/red-dragon-wyrmling-moonlit-fortress-firebreath-token.png',
+        initiativePortrait: '/assets/portraits/red-dragon-wyrmling-moonlit-fortress-firebreath-initiative.png',
+      },
+    ],
+  },
+  'reef-shark': {
+    emoji: '🦈',
+    color: '#0369a1',
+    tokenPortrait: '/assets/portraits/reef-shark-sunlit-coral-canyon-token.png',
+    initiativePortrait: '/assets/portraits/reef-shark-sunlit-coral-canyon-initiative.png',
+    visualVariants: [
+      {
+        id: 'sunlit-coral-canyon',
+        label: '日光珊瑚峡谷',
+        tokenPortrait: '/assets/portraits/reef-shark-sunlit-coral-canyon-token.png',
+        initiativePortrait: '/assets/portraits/reef-shark-sunlit-coral-canyon-initiative.png',
+      },
+      {
+        id: 'dusk-shipwreck-bite',
+        label: '暮色沉船撕咬',
+        tokenPortrait: '/assets/portraits/reef-shark-dusk-shipwreck-bite-token.png',
+        initiativePortrait: '/assets/portraits/reef-shark-dusk-shipwreck-bite-initiative.png',
+      },
+    ],
+  },
+  remorhaz: {
+    emoji: '🐛',
+    color: '#0f766e',
+    tokenPortrait: '/assets/portraits/remorhaz-glacier-pass-eruption-token.png',
+    initiativePortrait: '/assets/portraits/remorhaz-glacier-pass-eruption-initiative.png',
+    visualVariants: [
+      {
+        id: 'glacier-pass-eruption',
+        label: '冰川隘口破土',
+        tokenPortrait: '/assets/portraits/remorhaz-glacier-pass-eruption-token.png',
+        initiativePortrait: '/assets/portraits/remorhaz-glacier-pass-eruption-initiative.png',
+      },
+      {
+        id: 'geothermal-ice-cavern',
+        label: '地热冰窟潜行',
+        tokenPortrait: '/assets/portraits/remorhaz-geothermal-ice-cavern-token.png',
+        initiativePortrait: '/assets/portraits/remorhaz-geothermal-ice-cavern-initiative.png',
+      },
+    ],
+  },
+  rhinoceros: {
+    emoji: '🦏',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/rhinoceros-savanna-charge-token.png',
+    initiativePortrait: '/assets/portraits/rhinoceros-savanna-charge-initiative.png',
+    visualVariants: [
+      { id: 'savanna-charge', label: '草原冲锋', tokenPortrait: '/assets/portraits/rhinoceros-savanna-charge-token.png', initiativePortrait: '/assets/portraits/rhinoceros-savanna-charge-initiative.png' },
+      { id: 'jungle-watering-hole', label: '雨林水潭警戒', tokenPortrait: '/assets/portraits/rhinoceros-jungle-watering-hole-token.png', initiativePortrait: '/assets/portraits/rhinoceros-jungle-watering-hole-initiative.png' },
+    ],
+  },
+  'riding-horse': {
+    emoji: '🐎',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/riding-horse-highland-road-trot-token.png',
+    initiativePortrait: '/assets/portraits/riding-horse-highland-road-trot-initiative.png',
+    visualVariants: [
+      { id: 'highland-road-trot', label: '高地道路疾行', tokenPortrait: '/assets/portraits/riding-horse-highland-road-trot-token.png', initiativePortrait: '/assets/portraits/riding-horse-highland-road-trot-initiative.png' },
+      { id: 'rainy-inn-courtyard', label: '雨夜旅店庭院', tokenPortrait: '/assets/portraits/riding-horse-rainy-inn-courtyard-token.png', initiativePortrait: '/assets/portraits/riding-horse-rainy-inn-courtyard-initiative.png' },
+    ],
+  },
+  roc: {
+    emoji: '🦅',
+    color: '#78350f',
+    tokenPortrait: '/assets/portraits/roc-storm-peak-flight-token.png',
+    initiativePortrait: '/assets/portraits/roc-storm-peak-flight-initiative.png',
+    visualVariants: [
+      { id: 'storm-peak-flight', label: '雷暴雪峰飞袭', tokenPortrait: '/assets/portraits/roc-storm-peak-flight-token.png', initiativePortrait: '/assets/portraits/roc-storm-peak-flight-initiative.png' },
+      { id: 'dawn-watchtower-perch', label: '黎明海塔栖立', tokenPortrait: '/assets/portraits/roc-dawn-watchtower-perch-token.png', initiativePortrait: '/assets/portraits/roc-dawn-watchtower-perch-initiative.png' },
+    ],
+  },
+  roper: {
+    emoji: '🪨',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/roper-limestone-cavern-reveal-token.png',
+    initiativePortrait: '/assets/portraits/roper-limestone-cavern-reveal-initiative.png',
+    visualVariants: [
+      {
+        id: 'limestone-cavern-reveal',
+        label: '石灰岩洞显形',
+        tokenPortrait: '/assets/portraits/roper-limestone-cavern-reveal-token.png',
+        initiativePortrait: '/assets/portraits/roper-limestone-cavern-reveal-initiative.png',
+      },
+      {
+        id: 'red-crystal-ceiling-climb',
+        label: '赤晶洞顶攀附',
+        tokenPortrait: '/assets/portraits/roper-red-crystal-ceiling-climb-token.png',
+        initiativePortrait: '/assets/portraits/roper-red-crystal-ceiling-climb-initiative.png',
+      },
+    ],
+  },
+  'rug-of-smothering': {
+    emoji: '🧶',
+    color: '#9f1239',
+    tokenPortrait: '/assets/portraits/rug-of-smothering-palace-corridor-spring-token.png',
+    initiativePortrait: '/assets/portraits/rug-of-smothering-palace-corridor-spring-initiative.png',
+    visualVariants: [
+      {
+        id: 'palace-corridor-spring',
+        label: '月夜宫廊卷袭',
+        tokenPortrait: '/assets/portraits/rug-of-smothering-palace-corridor-spring-token.png',
+        initiativePortrait: '/assets/portraits/rug-of-smothering-palace-corridor-spring-initiative.png',
+      },
+      {
+        id: 'flooded-library-smother',
+        label: '水淹书库窒息',
+        tokenPortrait: '/assets/portraits/rug-of-smothering-flooded-library-smother-token.png',
+        initiativePortrait: '/assets/portraits/rug-of-smothering-flooded-library-smother-initiative.png',
+      },
+    ],
+  },
+  'rust-monster': {
+    emoji: '🪲',
+    color: '#c2410c',
+    tokenPortrait: '/assets/portraits/rust-monster-dwarven-forge-corrosion-token.png',
+    initiativePortrait: '/assets/portraits/rust-monster-dwarven-forge-corrosion-initiative.png',
+    visualVariants: [
+      {
+        id: 'dwarven-forge-corrosion',
+        label: '矮人锻炉腐蚀',
+        tokenPortrait: '/assets/portraits/rust-monster-dwarven-forge-corrosion-token.png',
+        initiativePortrait: '/assets/portraits/rust-monster-dwarven-forge-corrosion-initiative.png',
+      },
+      {
+        id: 'flooded-armory-scent',
+        label: '水淹军械库嗅铁',
+        tokenPortrait: '/assets/portraits/rust-monster-flooded-armory-scent-token.png',
+        initiativePortrait: '/assets/portraits/rust-monster-flooded-armory-scent-initiative.png',
+      },
+    ],
+  },
+  'saber-toothed-tiger': {
+    emoji: '🐅',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/saber-toothed-tiger-alpine-pounce-token.png',
+    initiativePortrait: '/assets/portraits/saber-toothed-tiger-alpine-pounce-initiative.png',
+    visualVariants: [
+      { id: 'alpine-pounce', label: '雪岭扑击', tokenPortrait: '/assets/portraits/saber-toothed-tiger-alpine-pounce-token.png', initiativePortrait: '/assets/portraits/saber-toothed-tiger-alpine-pounce-initiative.png' },
+      { id: 'redwood-scent', label: '红杉林嗅猎', tokenPortrait: '/assets/portraits/saber-toothed-tiger-redwood-scent-token.png', initiativePortrait: '/assets/portraits/saber-toothed-tiger-redwood-scent-initiative.png' },
+    ],
+  },
+  sahuagin: {
+    emoji: '🧜‍♂️',
+    color: '#0f766e',
+    tokenPortrait: '/assets/portraits/sahuagin-sunken-coral-temple-spear-token.png',
+    initiativePortrait: '/assets/portraits/sahuagin-sunken-coral-temple-spear-initiative.png',
+    visualVariants: [
+      { id: 'sunken-coral-temple-spear', label: '沉没珊瑚殿持矛', tokenPortrait: '/assets/portraits/sahuagin-sunken-coral-temple-spear-token.png', initiativePortrait: '/assets/portraits/sahuagin-sunken-coral-temple-spear-initiative.png' },
+      { id: 'storm-coast-claws', label: '雷雨海岸利爪', tokenPortrait: '/assets/portraits/sahuagin-storm-coast-claws-token.png', initiativePortrait: '/assets/portraits/sahuagin-storm-coast-claws-initiative.png' },
+    ],
+  },
+  salamander: {
+    emoji: '🔥',
+    color: '#c2410c',
+    tokenPortrait: '/assets/portraits/salamander-obsidian-foundry-spear-token.png',
+    initiativePortrait: '/assets/portraits/salamander-obsidian-foundry-spear-initiative.png',
+    visualVariants: [
+      { id: 'obsidian-foundry-spear', label: '黑曜铸炉火矛', tokenPortrait: '/assets/portraits/salamander-obsidian-foundry-spear-token.png', initiativePortrait: '/assets/portraits/salamander-obsidian-foundry-spear-initiative.png' },
+      { id: 'moonlit-desert-tail-grapple', label: '月夜沙殿尾缠', tokenPortrait: '/assets/portraits/salamander-moonlit-desert-tail-grapple-token.png', initiativePortrait: '/assets/portraits/salamander-moonlit-desert-tail-grapple-initiative.png' },
+    ],
+  },
+  satyr: {
+    emoji: '🐐',
+    color: '#166534',
+    tokenPortrait: '/assets/portraits/satyr-autumn-woodland-archer-token.png',
+    initiativePortrait: '/assets/portraits/satyr-autumn-woodland-archer-initiative.png',
+    visualVariants: [
+      { id: 'autumn-woodland-archer', label: '秋林短弓手', tokenPortrait: '/assets/portraits/satyr-autumn-woodland-archer-token.png', initiativePortrait: '/assets/portraits/satyr-autumn-woodland-archer-initiative.png' },
+      { id: 'moonlit-amphitheater-sword', label: '月夜剧场剑士', tokenPortrait: '/assets/portraits/satyr-moonlit-amphitheater-sword-token.png', initiativePortrait: '/assets/portraits/satyr-moonlit-amphitheater-sword-initiative.png' },
+    ],
+  },
+  scorpion: {
+    emoji: '🦂',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/scorpion-desert-ruins-sting-token.png',
+    initiativePortrait: '/assets/portraits/scorpion-desert-ruins-sting-initiative.png',
+    visualVariants: [
+      { id: 'desert-ruins-sting', label: '荒漠遗迹扬刺', tokenPortrait: '/assets/portraits/scorpion-desert-ruins-sting-token.png', initiativePortrait: '/assets/portraits/scorpion-desert-ruins-sting-initiative.png' },
+      { id: 'wine-cellar-crawl', label: '酒窖暗行', tokenPortrait: '/assets/portraits/scorpion-wine-cellar-crawl-token.png', initiativePortrait: '/assets/portraits/scorpion-wine-cellar-crawl-initiative.png' },
+    ],
+  },
+  scout: {
+    emoji: '🏹',
+    color: '#3f6212',
+    tokenPortrait: '/assets/portraits/scout-highland-longbow-token.png',
+    initiativePortrait: '/assets/portraits/scout-highland-longbow-initiative.png',
+    visualVariants: [
+      { id: 'highland-longbow', label: '高地长弓侦察', tokenPortrait: '/assets/portraits/scout-highland-longbow-token.png', initiativePortrait: '/assets/portraits/scout-highland-longbow-initiative.png' },
+      { id: 'rainy-village-shortsword', label: '雨村短剑警戒', tokenPortrait: '/assets/portraits/scout-rainy-village-shortsword-token.png', initiativePortrait: '/assets/portraits/scout-rainy-village-shortsword-initiative.png' },
+    ],
+  },
+  'sea-hag': {
+    emoji: '🧟‍♀️',
+    color: '#155e75',
+    tokenPortrait: '/assets/portraits/sea-hag-moonlit-shipwreck-claws-token.png',
+    initiativePortrait: '/assets/portraits/sea-hag-moonlit-shipwreck-claws-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-shipwreck-claws', label: '月夜沉船利爪', tokenPortrait: '/assets/portraits/sea-hag-moonlit-shipwreck-claws-token.png', initiativePortrait: '/assets/portraits/sea-hag-moonlit-shipwreck-claws-initiative.png' },
+      { id: 'storm-tidepool-death-glare', label: '风暴潮池死亡凝视', tokenPortrait: '/assets/portraits/sea-hag-storm-tidepool-death-glare-token.png', initiativePortrait: '/assets/portraits/sea-hag-storm-tidepool-death-glare-initiative.png' },
+    ],
+  },
+  'sea-horse': {
+    emoji: '🐠',
+    color: '#0e7490',
+    tokenPortrait: '/assets/portraits/sea-horse-sunlit-coral-cling-token.png',
+    initiativePortrait: '/assets/portraits/sea-horse-sunlit-coral-cling-initiative.png',
+    visualVariants: [
+      { id: 'sunlit-coral-cling', label: '日光珊瑚攀附', tokenPortrait: '/assets/portraits/sea-horse-sunlit-coral-cling-token.png', initiativePortrait: '/assets/portraits/sea-horse-sunlit-coral-cling-initiative.png' },
+      { id: 'moonlit-mosaic-swim', label: '月下马赛克游行', tokenPortrait: '/assets/portraits/sea-horse-moonlit-mosaic-swim-token.png', initiativePortrait: '/assets/portraits/sea-horse-moonlit-mosaic-swim-initiative.png' },
+    ],
+  },
+  shadow: {
+    emoji: '🌑',
+    color: '#312e81',
+    tokenPortrait: '/assets/portraits/shadow-candlelit-crypt-drain-token.png',
+    initiativePortrait: '/assets/portraits/shadow-candlelit-crypt-drain-initiative.png',
+    visualVariants: [
+      { id: 'candlelit-crypt-drain', label: '烛墓吸力', tokenPortrait: '/assets/portraits/shadow-candlelit-crypt-drain-token.png', initiativePortrait: '/assets/portraits/shadow-candlelit-crypt-drain-initiative.png' },
+      { id: 'dawn-monastery-recoil', label: '黎明修院避光', tokenPortrait: '/assets/portraits/shadow-dawn-monastery-recoil-token.png', initiativePortrait: '/assets/portraits/shadow-dawn-monastery-recoil-initiative.png' },
+    ],
+  },
+  'shambling-mound': {
+    emoji: '🌿',
+    color: '#365314',
+    tokenPortrait: '/assets/portraits/shambling-mound-storm-swamp-lightning-token.png',
+    initiativePortrait: '/assets/portraits/shambling-mound-storm-swamp-lightning-initiative.png',
+    visualVariants: [
+      { id: 'storm-swamp-lightning', label: '雷暴沼泽吸电', tokenPortrait: '/assets/portraits/shambling-mound-storm-swamp-lightning-token.png', initiativePortrait: '/assets/portraits/shambling-mound-storm-swamp-lightning-initiative.png' },
+      { id: 'flooded-sewer-engulf', label: '水淹地渠吞没', tokenPortrait: '/assets/portraits/shambling-mound-flooded-sewer-engulf-token.png', initiativePortrait: '/assets/portraits/shambling-mound-flooded-sewer-engulf-initiative.png' },
+    ],
+  },
+  'shield-guardian': {
+    emoji: '🗿',
+    color: '#475569',
+    tokenPortrait: '/assets/portraits/shield-guardian-storm-castle-defense-token.png',
+    initiativePortrait: '/assets/portraits/shield-guardian-storm-castle-defense-initiative.png',
+    visualVariants: [
+      { id: 'storm-castle-defense', label: '雷暴城堡守护', tokenPortrait: '/assets/portraits/shield-guardian-storm-castle-defense-token.png', initiativePortrait: '/assets/portraits/shield-guardian-storm-castle-defense-initiative.png' },
+      { id: 'dawn-observatory-spell', label: '晨光天文台储法', tokenPortrait: '/assets/portraits/shield-guardian-dawn-observatory-spell-token.png', initiativePortrait: '/assets/portraits/shield-guardian-dawn-observatory-spell-initiative.png' },
+    ],
+  },
+  shrieker: {
+    emoji: '🍄',
+    color: '#7e22ce',
+    tokenPortrait: '/assets/portraits/shrieker-violet-underdark-alarm-token.png',
+    initiativePortrait: '/assets/portraits/shrieker-violet-underdark-alarm-initiative.png',
+    visualVariants: [
+      { id: 'violet-underdark-alarm', label: '紫光幽暗地域鸣警', tokenPortrait: '/assets/portraits/shrieker-violet-underdark-alarm-token.png', initiativePortrait: '/assets/portraits/shrieker-violet-underdark-alarm-initiative.png' },
+      { id: 'flooded-crypt-alarm', label: '水淹墓室鸣警', tokenPortrait: '/assets/portraits/shrieker-flooded-crypt-alarm-token.png', initiativePortrait: '/assets/portraits/shrieker-flooded-crypt-alarm-initiative.png' },
+    ],
+  },
+  'silver-dragon-wyrmling': {
+    emoji: '🐉',
+    color: '#94a3b8',
+    tokenPortrait: '/assets/portraits/silver-dragon-wyrmling-alpine-sunrise-flight-token.png',
+    initiativePortrait: '/assets/portraits/silver-dragon-wyrmling-alpine-sunrise-flight-initiative.png',
+    visualVariants: [
+      { id: 'alpine-sunrise-flight', label: '高山晨光飞行', tokenPortrait: '/assets/portraits/silver-dragon-wyrmling-alpine-sunrise-flight-token.png', initiativePortrait: '/assets/portraits/silver-dragon-wyrmling-alpine-sunrise-flight-initiative.png' },
+      { id: 'moonlit-glacier-cold-breath', label: '月夜冰川寒息', tokenPortrait: '/assets/portraits/silver-dragon-wyrmling-moonlit-glacier-cold-breath-token.png', initiativePortrait: '/assets/portraits/silver-dragon-wyrmling-moonlit-glacier-cold-breath-initiative.png' },
+    ],
+  },
+  solar: {
+    emoji: '☀️',
+    color: '#d97706',
+    tokenPortrait: '/assets/portraits/solar-celestial-citadel-longbow-token.png',
+    initiativePortrait: '/assets/portraits/solar-celestial-citadel-longbow-initiative.png',
+    visualVariants: [
+      { id: 'celestial-citadel-longbow', label: '天界城塞斩杀长弓', tokenPortrait: '/assets/portraits/solar-celestial-citadel-longbow-token.png', initiativePortrait: '/assets/portraits/solar-celestial-citadel-longbow-initiative.png' },
+      { id: 'dawn-battlefield-greatsword', label: '黎明战场巨剑', tokenPortrait: '/assets/portraits/solar-dawn-battlefield-greatsword-token.png', initiativePortrait: '/assets/portraits/solar-dawn-battlefield-greatsword-initiative.png' },
+    ],
+  },
+  specter: {
+    emoji: '👻',
+    color: '#0e7490',
+    tokenPortrait: '/assets/portraits/specter-flooded-manor-life-drain-token.png',
+    initiativePortrait: '/assets/portraits/specter-flooded-manor-life-drain-initiative.png',
+    visualVariants: [
+      { id: 'flooded-manor-life-drain', label: '水淹庄园生命汲取', tokenPortrait: '/assets/portraits/specter-flooded-manor-life-drain-token.png', initiativePortrait: '/assets/portraits/specter-flooded-manor-life-drain-initiative.png' },
+      { id: 'dawn-memorial-sunlight', label: '黎明碑地避光', tokenPortrait: '/assets/portraits/specter-dawn-memorial-sunlight-token.png', initiativePortrait: '/assets/portraits/specter-dawn-memorial-sunlight-initiative.png' },
+    ],
+  },
+  spider: {
+    emoji: '🕷️',
+    color: '#44403c',
+    tokenPortrait: '/assets/portraits/spider-attic-web-sense-token.png',
+    initiativePortrait: '/assets/portraits/spider-attic-web-sense-initiative.png',
+    visualVariants: [
+      { id: 'attic-web-sense', label: '阁楼蛛网感知', tokenPortrait: '/assets/portraits/spider-attic-web-sense-token.png', initiativePortrait: '/assets/portraits/spider-attic-web-sense-initiative.png' },
+      { id: 'moonlit-herb-web', label: '月夜香草园结网', tokenPortrait: '/assets/portraits/spider-moonlit-herb-web-token.png', initiativePortrait: '/assets/portraits/spider-moonlit-herb-web-initiative.png' },
+    ],
+  },
+  'spirit-naga': {
+    emoji: '🐍',
+    color: '#6d28d9',
+    tokenPortrait: '/assets/portraits/spirit-naga-jungle-temple-lightning-token.png',
+    initiativePortrait: '/assets/portraits/spirit-naga-jungle-temple-lightning-initiative.png',
+    visualVariants: [
+      { id: 'jungle-temple-lightning', label: '雨林神殿闪电', tokenPortrait: '/assets/portraits/spirit-naga-jungle-temple-lightning-token.png', initiativePortrait: '/assets/portraits/spirit-naga-jungle-temple-lightning-initiative.png' },
+      { id: 'moonlit-necropolis-bite', label: '月夜死城噬咬', tokenPortrait: '/assets/portraits/spirit-naga-moonlit-necropolis-bite-token.png', initiativePortrait: '/assets/portraits/spirit-naga-moonlit-necropolis-bite-initiative.png' },
+    ],
+  },
+  sprite: {
+    emoji: '🧚',
+    color: '#15803d',
+    tokenPortrait: '/assets/portraits/sprite-autumn-garden-shortbow-token.png',
+    initiativePortrait: '/assets/portraits/sprite-autumn-garden-shortbow-initiative.png',
+    visualVariants: [
+      { id: 'autumn-garden-shortbow', label: '秋日花园短弓', tokenPortrait: '/assets/portraits/sprite-autumn-garden-shortbow-token.png', initiativePortrait: '/assets/portraits/sprite-autumn-garden-shortbow-initiative.png' },
+      { id: 'moonlit-library-heart-sight', label: '月夜书库感心术', tokenPortrait: '/assets/portraits/sprite-moonlit-library-heart-sight-token.png', initiativePortrait: '/assets/portraits/sprite-moonlit-library-heart-sight-initiative.png' },
+    ],
+  },
+  spy: {
+    emoji: '🕵️',
+    color: '#7c2d12',
+    tokenPortrait: '/assets/portraits/spy-palace-coded-letter-token.png',
+    initiativePortrait: '/assets/portraits/spy-palace-coded-letter-initiative.png',
+    visualVariants: [
+      { id: 'palace-coded-letter', label: '雨夜宫廷密信', tokenPortrait: '/assets/portraits/spy-palace-coded-letter-token.png', initiativePortrait: '/assets/portraits/spy-palace-coded-letter-initiative.png' },
+      { id: 'harbor-tavern-dead-drop', label: '港口酒馆死信箱', tokenPortrait: '/assets/portraits/spy-harbor-tavern-dead-drop-token.png', initiativePortrait: '/assets/portraits/spy-harbor-tavern-dead-drop-initiative.png' },
+    ],
+  },
+  'steam-mephit': {
+    emoji: '♨️',
+    color: '#64748b',
+    tokenPortrait: '/assets/portraits/steam-mephit-hot-springs-breath-token.png',
+    initiativePortrait: '/assets/portraits/steam-mephit-hot-springs-breath-initiative.png',
+    visualVariants: [
+      { id: 'hot-springs-breath', label: '地热洞窟蒸汽吐息', tokenPortrait: '/assets/portraits/steam-mephit-hot-springs-breath-token.png', initiativePortrait: '/assets/portraits/steam-mephit-hot-springs-breath-initiative.png' },
+      { id: 'dwarven-boiler-sabotage', label: '矮人锅炉房破坏', tokenPortrait: '/assets/portraits/steam-mephit-dwarven-boiler-sabotage-token.png', initiativePortrait: '/assets/portraits/steam-mephit-dwarven-boiler-sabotage-initiative.png' },
+    ],
+  },
+  stirge: {
+    emoji: '🦟',
+    color: '#991b1b',
+    tokenPortrait: '/assets/portraits/stirge-dungeon-dive-token.png',
+    initiativePortrait: '/assets/portraits/stirge-dungeon-dive-initiative.png',
+    visualVariants: [
+      { id: 'dungeon-dive', label: '地牢俯冲吸血', tokenPortrait: '/assets/portraits/stirge-dungeon-dive-token.png', initiativePortrait: '/assets/portraits/stirge-dungeon-dive-initiative.png' },
+      { id: 'moonlit-swamp-fed', label: '月沼饱食停栖', tokenPortrait: '/assets/portraits/stirge-moonlit-swamp-fed-token.png', initiativePortrait: '/assets/portraits/stirge-moonlit-swamp-fed-initiative.png' },
+    ],
+  },
+  'stone-giant': {
+    emoji: '🪨',
+    color: '#475569',
+    tokenPortrait: '/assets/portraits/stone-giant-underdark-rock-throw-token.png',
+    initiativePortrait: '/assets/portraits/stone-giant-underdark-rock-throw-initiative.png',
+    visualVariants: [
+      { id: 'underdark-rock-throw', label: '幽暗洞窟投石', tokenPortrait: '/assets/portraits/stone-giant-underdark-rock-throw-token.png', initiativePortrait: '/assets/portraits/stone-giant-underdark-rock-throw-initiative.png' },
+      { id: 'sunrise-canyon-greatclub', label: '晨光峡谷巨棒', tokenPortrait: '/assets/portraits/stone-giant-sunrise-canyon-greatclub-token.png', initiativePortrait: '/assets/portraits/stone-giant-sunrise-canyon-greatclub-initiative.png' },
+    ],
+  },
+  'stone-golem': {
+    emoji: '🗿',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/stone-golem-mountain-temple-slam-token.png',
+    initiativePortrait: '/assets/portraits/stone-golem-mountain-temple-slam-initiative.png',
+    visualVariants: [
+      { id: 'mountain-temple-slam', label: '山岳神殿猛击', tokenPortrait: '/assets/portraits/stone-golem-mountain-temple-slam-token.png', initiativePortrait: '/assets/portraits/stone-golem-mountain-temple-slam-initiative.png' },
+      { id: 'catacomb-slow', label: '王陵迟缓力场', tokenPortrait: '/assets/portraits/stone-golem-catacomb-slow-token.png', initiativePortrait: '/assets/portraits/stone-golem-catacomb-slow-initiative.png' },
+    ],
+  },
+  'storm-giant': {
+    emoji: '⚡',
+    color: '#1d4ed8',
+    tokenPortrait: '/assets/portraits/storm-giant-sea-cliff-lightning-token.png',
+    initiativePortrait: '/assets/portraits/storm-giant-sea-cliff-lightning-initiative.png',
+    visualVariants: [
+      { id: 'sea-cliff-lightning', label: '怒海悬崖雷击', tokenPortrait: '/assets/portraits/storm-giant-sea-cliff-lightning-token.png', initiativePortrait: '/assets/portraits/storm-giant-sea-cliff-lightning-initiative.png' },
+      { id: 'underwater-palace-greatsword', label: '海底王宫巨剑', tokenPortrait: '/assets/portraits/storm-giant-underwater-palace-greatsword-token.png', initiativePortrait: '/assets/portraits/storm-giant-underwater-palace-greatsword-initiative.png' },
+    ],
+  },
+  'succubus-incubus': {
+    emoji: '😈',
+    color: '#9f1239',
+    tokenPortrait: '/assets/portraits/succubus-incubus-infernal-embassy-contract-token.png',
+    initiativePortrait: '/assets/portraits/succubus-incubus-infernal-embassy-contract-initiative.png',
+    visualVariants: [
+      { id: 'infernal-embassy-contract', label: '炼狱使馆魅魔契约', tokenPortrait: '/assets/portraits/succubus-incubus-infernal-embassy-contract-token.png', initiativePortrait: '/assets/portraits/succubus-incubus-infernal-embassy-contract-initiative.png' },
+      { id: 'cathedral-incubus-reliquary', label: '教堂屋顶梦魔窃宝', tokenPortrait: '/assets/portraits/succubus-incubus-cathedral-incubus-reliquary-token.png', initiativePortrait: '/assets/portraits/succubus-incubus-cathedral-incubus-reliquary-initiative.png' },
+    ],
+  },
+  'swarm-of-bats': {
+    emoji: '🦇',
+    color: '#292524',
+    tokenPortrait: '/assets/portraits/swarm-of-bats-twilight-cave-eruption-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-bats-twilight-cave-eruption-initiative.png',
+    visualVariants: [
+      { id: 'twilight-cave-eruption', label: '暮色洞窟群飞', tokenPortrait: '/assets/portraits/swarm-of-bats-twilight-cave-eruption-token.png', initiativePortrait: '/assets/portraits/swarm-of-bats-twilight-cave-eruption-initiative.png' },
+      { id: 'storm-bell-tower', label: '雷雨钟楼惊群', tokenPortrait: '/assets/portraits/swarm-of-bats-storm-bell-tower-token.png', initiativePortrait: '/assets/portraits/swarm-of-bats-storm-bell-tower-initiative.png' },
+    ],
+  },
+  'swarm-of-beetles': {
+    emoji: '🪲',
+    color: '#365314',
+    tokenPortrait: '/assets/portraits/swarm-of-beetles-crypt-carrion-tide-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-beetles-crypt-carrion-tide-initiative.png',
+    visualVariants: [
+      { id: 'crypt-carrion-tide', label: '古墓黑甲虫潮', tokenPortrait: '/assets/portraits/swarm-of-beetles-crypt-carrion-tide-token.png', initiativePortrait: '/assets/portraits/swarm-of-beetles-crypt-carrion-tide-initiative.png' },
+      { id: 'jungle-ruin-jewel-stream', label: '雨林遗迹彩甲虫流', tokenPortrait: '/assets/portraits/swarm-of-beetles-jungle-ruin-jewel-stream-token.png', initiativePortrait: '/assets/portraits/swarm-of-beetles-jungle-ruin-jewel-stream-initiative.png' },
+    ],
+  },
+  'swarm-of-centipedes': {
+    emoji: '🐛',
+    color: '#7c2d12',
+    tokenPortrait: '/assets/portraits/swarm-of-centipedes-monastery-cellar-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-centipedes-monastery-cellar-initiative.png',
+    visualVariants: [
+      { id: 'monastery-cellar', label: '修道院地窖虫潮', tokenPortrait: '/assets/portraits/swarm-of-centipedes-monastery-cellar-token.png', initiativePortrait: '/assets/portraits/swarm-of-centipedes-monastery-cellar-initiative.png' },
+      { id: 'moonlit-caravanserai', label: '月夜商队驿站', tokenPortrait: '/assets/portraits/swarm-of-centipedes-moonlit-caravanserai-token.png', initiativePortrait: '/assets/portraits/swarm-of-centipedes-moonlit-caravanserai-initiative.png' },
+    ],
+  },
+  'swarm-of-insects': {
+    emoji: '🦗',
+    color: '#854d0e',
+    tokenPortrait: '/assets/portraits/swarm-of-insects-red-sunset-locusts-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-insects-red-sunset-locusts-initiative.png',
+    visualVariants: [
+      { id: 'red-sunset-locusts', label: '赤霞麦田蝗灾', tokenPortrait: '/assets/portraits/swarm-of-insects-red-sunset-locusts-token.png', initiativePortrait: '/assets/portraits/swarm-of-insects-red-sunset-locusts-initiative.png' },
+      { id: 'underdark-cave-crickets', label: '幽暗菌林洞蟋', tokenPortrait: '/assets/portraits/swarm-of-insects-underdark-cave-crickets-token.png', initiativePortrait: '/assets/portraits/swarm-of-insects-underdark-cave-crickets-initiative.png' },
+    ],
+  },
+  'swarm-of-poisonous-snakes': {
+    emoji: '🐍',
+    color: '#166534',
+    tokenPortrait: '/assets/portraits/swarm-of-poisonous-snakes-jungle-shrine-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-poisonous-snakes-jungle-shrine-initiative.png',
+    visualVariants: [
+      { id: 'jungle-shrine', label: '雨林神殿毒蛇群', tokenPortrait: '/assets/portraits/swarm-of-poisonous-snakes-jungle-shrine-token.png', initiativePortrait: '/assets/portraits/swarm-of-poisonous-snakes-jungle-shrine-initiative.png' },
+      { id: 'desert-watchtower', label: '落日荒塔毒蛇群', tokenPortrait: '/assets/portraits/swarm-of-poisonous-snakes-desert-watchtower-token.png', initiativePortrait: '/assets/portraits/swarm-of-poisonous-snakes-desert-watchtower-initiative.png' },
+    ],
+  },
+  'swarm-of-quippers': {
+    emoji: '🐟',
+    color: '#0f766e',
+    tokenPortrait: '/assets/portraits/swarm-of-quippers-flooded-dungeon-rush-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-quippers-flooded-dungeon-rush-initiative.png',
+    visualVariants: [
+      { id: 'flooded-dungeon-rush', label: '水淹地牢鱼群突袭', tokenPortrait: '/assets/portraits/swarm-of-quippers-flooded-dungeon-rush-token.png', initiativePortrait: '/assets/portraits/swarm-of-quippers-flooded-dungeon-rush-initiative.png' },
+      { id: 'jungle-river-canoe', label: '雨林河道舟影', tokenPortrait: '/assets/portraits/swarm-of-quippers-jungle-river-canoe-token.png', initiativePortrait: '/assets/portraits/swarm-of-quippers-jungle-river-canoe-initiative.png' },
+    ],
+  },
+  'swarm-of-rats': {
+    emoji: '🐀',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/swarm-of-rats-city-sewer-surge-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-rats-city-sewer-surge-initiative.png',
+    visualVariants: [
+      { id: 'city-sewer-surge', label: '城下水道鼠潮', tokenPortrait: '/assets/portraits/swarm-of-rats-city-sewer-surge-token.png', initiativePortrait: '/assets/portraits/swarm-of-rats-city-sewer-surge-initiative.png' },
+      { id: 'winter-granary', label: '冬日谷仓盗粮', tokenPortrait: '/assets/portraits/swarm-of-rats-winter-granary-token.png', initiativePortrait: '/assets/portraits/swarm-of-rats-winter-granary-initiative.png' },
+    ],
+  },
+  'swarm-of-ravens': {
+    emoji: '🐦‍⬛',
+    color: '#1e293b',
+    tokenPortrait: '/assets/portraits/swarm-of-ravens-misty-battlefield-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-ravens-misty-battlefield-initiative.png',
+    visualVariants: [
+      { id: 'misty-battlefield', label: '晨雾战场鸦群', tokenPortrait: '/assets/portraits/swarm-of-ravens-misty-battlefield-token.png', initiativePortrait: '/assets/portraits/swarm-of-ravens-misty-battlefield-initiative.png' },
+      { id: 'sunset-observatory', label: '落日观星台群飞', tokenPortrait: '/assets/portraits/swarm-of-ravens-sunset-observatory-token.png', initiativePortrait: '/assets/portraits/swarm-of-ravens-sunset-observatory-initiative.png' },
+    ],
+  },
+  'swarm-of-spiders': {
+    emoji: '🕷️',
+    color: '#3f3f46',
+    tokenPortrait: '/assets/portraits/swarm-of-spiders-alchemist-laboratory-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-spiders-alchemist-laboratory-initiative.png',
+    visualVariants: [
+      { id: 'alchemist-laboratory', label: '炼金实验室蛛潮', tokenPortrait: '/assets/portraits/swarm-of-spiders-alchemist-laboratory-token.png', initiativePortrait: '/assets/portraits/swarm-of-spiders-alchemist-laboratory-initiative.png' },
+      { id: 'morning-greenhouse', label: '晨雾温室结网', tokenPortrait: '/assets/portraits/swarm-of-spiders-morning-greenhouse-token.png', initiativePortrait: '/assets/portraits/swarm-of-spiders-morning-greenhouse-initiative.png' },
+    ],
+  },
+  'swarm-of-wasps': {
+    emoji: '🐝',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/swarm-of-wasps-forest-chapel-token.png',
+    initiativePortrait: '/assets/portraits/swarm-of-wasps-forest-chapel-initiative.png',
+    visualVariants: [
+      { id: 'forest-chapel', label: '林中礼拜堂蜂袭', tokenPortrait: '/assets/portraits/swarm-of-wasps-forest-chapel-token.png', initiativePortrait: '/assets/portraits/swarm-of-wasps-forest-chapel-initiative.png' },
+      { id: 'storm-orchard', label: '暴雨果园蜂群', tokenPortrait: '/assets/portraits/swarm-of-wasps-storm-orchard-token.png', initiativePortrait: '/assets/portraits/swarm-of-wasps-storm-orchard-initiative.png' },
+    ],
+  },
+  tarrasque: {
+    emoji: '🦖',
+    color: '#7f1d1d',
+    tokenPortrait: '/assets/portraits/tarrasque-capital-plaza-rampage-token.png',
+    initiativePortrait: '/assets/portraits/tarrasque-capital-plaza-rampage-initiative.png',
+    visualVariants: [
+      { id: 'capital-plaza-rampage', label: '王都广场践踏', tokenPortrait: '/assets/portraits/tarrasque-capital-plaza-rampage-token.png', initiativePortrait: '/assets/portraits/tarrasque-capital-plaza-rampage-initiative.png' },
+      { id: 'volcanic-caldera-awakening', label: '火山口苏醒', tokenPortrait: '/assets/portraits/tarrasque-volcanic-caldera-awakening-token.png', initiativePortrait: '/assets/portraits/tarrasque-volcanic-caldera-awakening-initiative.png' },
+    ],
+  },
+  thug: {
+    emoji: '👊',
+    color: '#44403c',
+    tokenPortrait: '/assets/portraits/thug-foggy-dock-enforcer-token.png',
+    initiativePortrait: '/assets/portraits/thug-foggy-dock-enforcer-initiative.png',
+    visualVariants: [
+      { id: 'foggy-dock-enforcer', label: '雾港码头打手', tokenPortrait: '/assets/portraits/thug-foggy-dock-enforcer-token.png', initiativePortrait: '/assets/portraits/thug-foggy-dock-enforcer-initiative.png' },
+      { id: 'roadside-tavern-heavy-crossbow', label: '夜间酒馆重弩', tokenPortrait: '/assets/portraits/thug-roadside-tavern-heavy-crossbow-token.png', initiativePortrait: '/assets/portraits/thug-roadside-tavern-heavy-crossbow-initiative.png' },
+    ],
+  },
+  tiger: {
+    emoji: '🐅',
+    color: '#c2410c',
+    tokenPortrait: '/assets/portraits/tiger-jungle-pounce-token.png',
+    initiativePortrait: '/assets/portraits/tiger-jungle-pounce-initiative.png',
+    visualVariants: [
+      { id: 'jungle-pounce', label: '季雨林猛扑', tokenPortrait: '/assets/portraits/tiger-jungle-pounce-token.png', initiativePortrait: '/assets/portraits/tiger-jungle-pounce-initiative.png' },
+      { id: 'snowy-bamboo-stalk', label: '雪夜竹林潜行', tokenPortrait: '/assets/portraits/tiger-snowy-bamboo-stalk-token.png', initiativePortrait: '/assets/portraits/tiger-snowy-bamboo-stalk-initiative.png' },
+    ],
+  },
+  treant: {
+    emoji: '🌳',
+    color: '#3f6212',
+    tokenPortrait: '/assets/portraits/treant-hill-fortress-rock-throw-token.png',
+    initiativePortrait: '/assets/portraits/treant-hill-fortress-rock-throw-initiative.png',
+    visualVariants: [
+      { id: 'hill-fortress-rock-throw', label: '山堡投石', tokenPortrait: '/assets/portraits/treant-hill-fortress-rock-throw-token.png', initiativePortrait: '/assets/portraits/treant-hill-fortress-rock-throw-initiative.png' },
+      { id: 'autumn-marsh-animate-trees', label: '秋沼活化树木', tokenPortrait: '/assets/portraits/treant-autumn-marsh-animate-trees-token.png', initiativePortrait: '/assets/portraits/treant-autumn-marsh-animate-trees-initiative.png' },
+    ],
+  },
+  'tribal-warrior': {
+    emoji: '🛡️',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/tribal-warrior-river-village-guard-token.png',
+    initiativePortrait: '/assets/portraits/tribal-warrior-river-village-guard-initiative.png',
+    visualVariants: [
+      { id: 'river-village-guard', label: '河湾村落守卫', tokenPortrait: '/assets/portraits/tribal-warrior-river-village-guard-token.png', initiativePortrait: '/assets/portraits/tribal-warrior-river-village-guard-initiative.png' },
+      { id: 'snow-pass-spear-throw', label: '雪岭投矛手', tokenPortrait: '/assets/portraits/tribal-warrior-snow-pass-spear-throw-token.png', initiativePortrait: '/assets/portraits/tribal-warrior-snow-pass-spear-throw-initiative.png' },
+    ],
+  },
+  triceratops: {
+    emoji: '🦏',
+    color: '#78350f',
+    tokenPortrait: '/assets/portraits/triceratops-fern-floodplain-charge-token.png',
+    initiativePortrait: '/assets/portraits/triceratops-fern-floodplain-charge-initiative.png',
+    visualVariants: [
+      { id: 'fern-floodplain-charge', label: '蕨原践踏冲锋', tokenPortrait: '/assets/portraits/triceratops-fern-floodplain-charge-token.png', initiativePortrait: '/assets/portraits/triceratops-fern-floodplain-charge-initiative.png' },
+      { id: 'red-canyon-defense', label: '赤岩峡谷戒备', tokenPortrait: '/assets/portraits/triceratops-red-canyon-defense-token.png', initiativePortrait: '/assets/portraits/triceratops-red-canyon-defense-initiative.png' },
+    ],
+  },
+  troll: {
+    emoji: '👺',
+    color: '#3f6212',
+    tokenPortrait: '/assets/portraits/troll-moonlit-swamp-bridge-token.png',
+    initiativePortrait: '/assets/portraits/troll-moonlit-swamp-bridge-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-swamp-bridge', label: '月沼桥下潜伏', tokenPortrait: '/assets/portraits/troll-moonlit-swamp-bridge-token.png', initiativePortrait: '/assets/portraits/troll-moonlit-swamp-bridge-initiative.png' },
+      { id: 'sunlit-alpine-claw', label: '晴日山垒爪击', tokenPortrait: '/assets/portraits/troll-sunlit-alpine-claw-token.png', initiativePortrait: '/assets/portraits/troll-sunlit-alpine-claw-initiative.png' },
+    ],
+  },
+  'tyrannosaurus-rex': {
+    emoji: '🦖',
+    color: '#7c2d12',
+    tokenPortrait: '/assets/portraits/tyrannosaurus-rex-storm-rainforest-bite-token.png',
+    initiativePortrait: '/assets/portraits/tyrannosaurus-rex-storm-rainforest-bite-initiative.png',
+    visualVariants: [
+      { id: 'storm-rainforest-bite', label: '暴雨雨林啃咬', tokenPortrait: '/assets/portraits/tyrannosaurus-rex-storm-rainforest-bite-token.png', initiativePortrait: '/assets/portraits/tyrannosaurus-rex-storm-rainforest-bite-initiative.png' },
+      { id: 'sunrise-badlands-tail', label: '晨曦荒原尾击', tokenPortrait: '/assets/portraits/tyrannosaurus-rex-sunrise-badlands-tail-token.png', initiativePortrait: '/assets/portraits/tyrannosaurus-rex-sunrise-badlands-tail-initiative.png' },
+    ],
+  },
+  unicorn: {
+    emoji: '🦄',
+    color: '#a5b4fc',
+    tokenPortrait: '/assets/portraits/unicorn-sunlit-forest-healing-touch-token.png',
+    initiativePortrait: '/assets/portraits/unicorn-sunlit-forest-healing-touch-initiative.png',
+    visualVariants: [
+      { id: 'sunlit-forest-healing-touch', label: '日照森林治疗之触', tokenPortrait: '/assets/portraits/unicorn-sunlit-forest-healing-touch-token.png', initiativePortrait: '/assets/portraits/unicorn-sunlit-forest-healing-touch-initiative.png' },
+      { id: 'moonlit-alpine-charge', label: '月夜高岭冲锋', tokenPortrait: '/assets/portraits/unicorn-moonlit-alpine-charge-token.png', initiativePortrait: '/assets/portraits/unicorn-moonlit-alpine-charge-initiative.png' },
+    ],
+  },
+  'vampire-spawn': {
+    emoji: '🧛',
+    color: '#7f1d1d',
+    tokenPortrait: '/assets/portraits/vampire-spawn-monastery-spider-climb-token.png',
+    initiativePortrait: '/assets/portraits/vampire-spawn-monastery-spider-climb-initiative.png',
+    visualVariants: [
+      { id: 'monastery-spider-climb', label: '废院穹顶蛛行', tokenPortrait: '/assets/portraits/vampire-spawn-monastery-spider-climb-token.png', initiativePortrait: '/assets/portraits/vampire-spawn-monastery-spider-climb-initiative.png' },
+      { id: 'flooded-crypt-grapple', label: '水淹墓室扑抓', tokenPortrait: '/assets/portraits/vampire-spawn-flooded-crypt-grapple-token.png', initiativePortrait: '/assets/portraits/vampire-spawn-flooded-crypt-grapple-initiative.png' },
+    ],
+  },
+  'vampire-bat': {
+    emoji: '🦇',
+    color: '#581c87',
+    tokenPortrait: '/assets/portraits/vampire-bat-bell-tower-flight-token.png',
+    initiativePortrait: '/assets/portraits/vampire-bat-bell-tower-flight-initiative.png',
+    visualVariants: [
+      { id: 'bell-tower-flight', label: '月夜钟楼飞袭', tokenPortrait: '/assets/portraits/vampire-bat-bell-tower-flight-token.png', initiativePortrait: '/assets/portraits/vampire-bat-bell-tower-flight-initiative.png' },
+      { id: 'cemetery-launch', label: '血暮墓园振翅', tokenPortrait: '/assets/portraits/vampire-bat-cemetery-launch-token.png', initiativePortrait: '/assets/portraits/vampire-bat-cemetery-launch-initiative.png' },
+    ],
+  },
+  'vampire-mist': {
+    emoji: '🌫️',
+    color: '#881337',
+    tokenPortrait: '/assets/portraits/vampire-mist-crypt-gate-passage-token.png',
+    initiativePortrait: '/assets/portraits/vampire-mist-crypt-gate-passage-initiative.png',
+    visualVariants: [
+      { id: 'crypt-gate-passage', label: '墓门穿隙', tokenPortrait: '/assets/portraits/vampire-mist-crypt-gate-passage-token.png', initiativePortrait: '/assets/portraits/vampire-mist-crypt-gate-passage-initiative.png' },
+      { id: 'underground-river', label: '地底流水止步', tokenPortrait: '/assets/portraits/vampire-mist-underground-river-token.png', initiativePortrait: '/assets/portraits/vampire-mist-underground-river-initiative.png' },
+    ],
+  },
+  'vampire-vampire': {
+    emoji: '🧛',
+    color: '#450a0a',
+    tokenPortrait: '/assets/portraits/vampire-vampire-throne-hall-grapple-token.png',
+    initiativePortrait: '/assets/portraits/vampire-vampire-throne-hall-grapple-initiative.png',
+    visualVariants: [
+      { id: 'throne-hall-grapple', label: '残殿擒抱噬咬', tokenPortrait: '/assets/portraits/vampire-vampire-throne-hall-grapple-token.png', initiativePortrait: '/assets/portraits/vampire-vampire-throne-hall-grapple-initiative.png' },
+      { id: 'castle-wall-charm', label: '雨夜城墙魅惑', tokenPortrait: '/assets/portraits/vampire-vampire-castle-wall-charm-token.png', initiativePortrait: '/assets/portraits/vampire-vampire-castle-wall-charm-initiative.png' },
+    ],
+  },
+  'veteran': {
+    emoji: '⚔️',
+    color: '#475569',
+    tokenPortrait: '/assets/portraits/veteran-burning-gate-dual-blades-token.png',
+    initiativePortrait: '/assets/portraits/veteran-burning-gate-dual-blades-initiative.png',
+    visualVariants: [
+      { id: 'burning-gate-dual-blades', label: '雨夜城门双刃', tokenPortrait: '/assets/portraits/veteran-burning-gate-dual-blades-token.png', initiativePortrait: '/assets/portraits/veteran-burning-gate-dual-blades-initiative.png' },
+      { id: 'snowy-battlement-crossbow', label: '雪岭城垛重弩', tokenPortrait: '/assets/portraits/veteran-snowy-battlement-crossbow-token.png', initiativePortrait: '/assets/portraits/veteran-snowy-battlement-crossbow-initiative.png' },
+    ],
+  },
+  'violet-fungus': {
+    emoji: '🍄',
+    color: '#6b21a8',
+    tokenPortrait: '/assets/portraits/violet-fungus-glowing-grotto-rotting-touch-token.png',
+    initiativePortrait: '/assets/portraits/violet-fungus-glowing-grotto-rotting-touch-initiative.png',
+    visualVariants: [
+      { id: 'glowing-grotto-rotting-touch', label: '荧光洞窟腐触', tokenPortrait: '/assets/portraits/violet-fungus-glowing-grotto-rotting-touch-token.png', initiativePortrait: '/assets/portraits/violet-fungus-glowing-grotto-rotting-touch-initiative.png' },
+      { id: 'ruined-shrine-false-appearance', label: '荒林神殿伪装', tokenPortrait: '/assets/portraits/violet-fungus-ruined-shrine-false-appearance-token.png', initiativePortrait: '/assets/portraits/violet-fungus-ruined-shrine-false-appearance-initiative.png' },
+    ],
+  },
+  'vrock': {
+    emoji: '🦅',
+    color: '#3f3f46',
+    tokenPortrait: '/assets/portraits/vrock-abyssal-spore-screech-token.png',
+    initiativePortrait: '/assets/portraits/vrock-abyssal-spore-screech-initiative.png',
+    visualVariants: [
+      { id: 'abyssal-spore-screech', label: '深渊孢子尖啸', tokenPortrait: '/assets/portraits/vrock-abyssal-spore-screech-token.png', initiativePortrait: '/assets/portraits/vrock-abyssal-spore-screech-initiative.png' },
+      { id: 'shattered-cathedral-talons', label: '残破圣堂爪袭', tokenPortrait: '/assets/portraits/vrock-shattered-cathedral-talons-token.png', initiativePortrait: '/assets/portraits/vrock-shattered-cathedral-talons-initiative.png' },
+    ],
+  },
+  'vulture': {
+    emoji: '🦅',
+    color: '#78350f',
+    tokenPortrait: '/assets/portraits/vulture-desert-canyon-flight-token.png',
+    initiativePortrait: '/assets/portraits/vulture-desert-canyon-flight-initiative.png',
+    visualVariants: [
+      { id: 'desert-canyon-flight', label: '荒漠峡谷低翔', tokenPortrait: '/assets/portraits/vulture-desert-canyon-flight-token.png', initiativePortrait: '/assets/portraits/vulture-desert-canyon-flight-initiative.png' },
+      { id: 'sunset-marsh-perch', label: '落日盐沼栖木', tokenPortrait: '/assets/portraits/vulture-sunset-marsh-perch-token.png', initiativePortrait: '/assets/portraits/vulture-sunset-marsh-perch-initiative.png' },
+    ],
+  },
+  'warhorse': {
+    emoji: '🐎',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/warhorse-rainy-lists-charge-token.png',
+    initiativePortrait: '/assets/portraits/warhorse-rainy-lists-charge-initiative.png',
+    visualVariants: [
+      { id: 'rainy-lists-charge', label: '雨中赛场践踏', tokenPortrait: '/assets/portraits/warhorse-rainy-lists-charge-token.png', initiativePortrait: '/assets/portraits/warhorse-rainy-lists-charge-initiative.png' },
+      { id: 'coastal-cliff-rear', label: '晨曦海崖扬蹄', tokenPortrait: '/assets/portraits/warhorse-coastal-cliff-rear-token.png', initiativePortrait: '/assets/portraits/warhorse-coastal-cliff-rear-initiative.png' },
+    ],
+  },
+  'warhorse-skeleton': {
+    emoji: '💀',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/warhorse-skeleton-moonlit-graveyard-gallop-token.png',
+    initiativePortrait: '/assets/portraits/warhorse-skeleton-moonlit-graveyard-gallop-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-graveyard-gallop', label: '月夜墓园疾驰', tokenPortrait: '/assets/portraits/warhorse-skeleton-moonlit-graveyard-gallop-token.png', initiativePortrait: '/assets/portraits/warhorse-skeleton-moonlit-graveyard-gallop-initiative.png' },
+      { id: 'salt-flat-charge', label: '雷暮盐原蓄冲', tokenPortrait: '/assets/portraits/warhorse-skeleton-salt-flat-charge-token.png', initiativePortrait: '/assets/portraits/warhorse-skeleton-salt-flat-charge-initiative.png' },
+    ],
+  },
+  'water-elemental': {
+    emoji: '🌊',
+    color: '#0369a1',
+    tokenPortrait: '/assets/portraits/water-elemental-storm-harbor-double-slam-token.png',
+    initiativePortrait: '/assets/portraits/water-elemental-storm-harbor-double-slam-initiative.png',
+    visualVariants: [
+      { id: 'storm-harbor-double-slam', label: '风暴港湾双重猛击', tokenPortrait: '/assets/portraits/water-elemental-storm-harbor-double-slam-token.png', initiativePortrait: '/assets/portraits/water-elemental-storm-harbor-double-slam-initiative.png' },
+      { id: 'sunken-temple-whelm', label: '沉没神殿覆没', tokenPortrait: '/assets/portraits/water-elemental-sunken-temple-whelm-token.png', initiativePortrait: '/assets/portraits/water-elemental-sunken-temple-whelm-initiative.png' },
+    ],
+  },
+  'weasel': {
+    emoji: '🐾',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/weasel-sunlit-forest-leap-token.png',
+    initiativePortrait: '/assets/portraits/weasel-sunlit-forest-leap-initiative.png',
+    visualVariants: [
+      { id: 'sunlit-forest-leap', label: '日照林地飞跃', tokenPortrait: '/assets/portraits/weasel-sunlit-forest-leap-token.png', initiativePortrait: '/assets/portraits/weasel-sunlit-forest-leap-initiative.png' },
+      { id: 'winter-granary-listen', label: '冬夜粮仓听风', tokenPortrait: '/assets/portraits/weasel-winter-granary-listen-token.png', initiativePortrait: '/assets/portraits/weasel-winter-granary-listen-initiative.png' },
+    ],
+  },
+  'werebear-bear': {
+    emoji: '🐻',
+    color: '#78350f',
+    tokenPortrait: '/assets/portraits/werebear-bear-storm-cliff-climb-token.png',
+    initiativePortrait: '/assets/portraits/werebear-bear-storm-cliff-climb-initiative.png',
+    visualVariants: [
+      { id: 'storm-cliff-climb', label: '暴雨山崖攀行', tokenPortrait: '/assets/portraits/werebear-bear-storm-cliff-climb-token.png', initiativePortrait: '/assets/portraits/werebear-bear-storm-cliff-climb-initiative.png' },
+      { id: 'snowmelt-river-charge', label: '晨光雪溪猛冲', tokenPortrait: '/assets/portraits/werebear-bear-snowmelt-river-charge-token.png', initiativePortrait: '/assets/portraits/werebear-bear-snowmelt-river-charge-initiative.png' },
+    ],
+  },
+  'werebear-human': {
+    emoji: '🪓',
+    color: '#854d0e',
+    tokenPortrait: '/assets/portraits/werebear-human-moonlit-camp-greataxe-token.png',
+    initiativePortrait: '/assets/portraits/werebear-human-moonlit-camp-greataxe-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-camp-greataxe', label: '月夜伐木营巨斧', tokenPortrait: '/assets/portraits/werebear-human-moonlit-camp-greataxe-token.png', initiativePortrait: '/assets/portraits/werebear-human-moonlit-camp-greataxe-initiative.png' },
+      { id: 'alpine-shrine-scent', label: '晨曦高岭嗅风', tokenPortrait: '/assets/portraits/werebear-human-alpine-shrine-scent-token.png', initiativePortrait: '/assets/portraits/werebear-human-alpine-shrine-scent-initiative.png' },
+    ],
+  },
+  'werebear-hybrid': {
+    emoji: '🐻',
+    color: '#713f12',
+    tokenPortrait: '/assets/portraits/werebear-hybrid-ruined-inn-claws-token.png',
+    initiativePortrait: '/assets/portraits/werebear-hybrid-ruined-inn-claws-initiative.png',
+    visualVariants: [
+      { id: 'ruined-inn-claws', label: '残破旅店双爪', tokenPortrait: '/assets/portraits/werebear-hybrid-ruined-inn-claws-token.png', initiativePortrait: '/assets/portraits/werebear-hybrid-ruined-inn-claws-initiative.png' },
+      { id: 'alpine-bridge-greataxe', label: '风暴索桥巨斧', tokenPortrait: '/assets/portraits/werebear-hybrid-alpine-bridge-greataxe-token.png', initiativePortrait: '/assets/portraits/werebear-hybrid-alpine-bridge-greataxe-initiative.png' },
+    ],
+  },
+  'wereboar-boar': {
+    emoji: '🐗',
+    color: '#7c2d12',
+    tokenPortrait: '/assets/portraits/wereboar-boar-autumn-orchard-charge-token.png',
+    initiativePortrait: '/assets/portraits/wereboar-boar-autumn-orchard-charge-initiative.png',
+    visualVariants: [
+      { id: 'autumn-orchard-charge', label: '秋暮果园冲锋', tokenPortrait: '/assets/portraits/wereboar-boar-autumn-orchard-charge-token.png', initiativePortrait: '/assets/portraits/wereboar-boar-autumn-orchard-charge-initiative.png' },
+      { id: 'storm-swamp-relentless', label: '雷雨沼泽不屈', tokenPortrait: '/assets/portraits/wereboar-boar-storm-swamp-relentless-token.png', initiativePortrait: '/assets/portraits/wereboar-boar-storm-swamp-relentless-initiative.png' },
+    ],
+  },
+  'wereboar-human': {
+    emoji: '🔨',
+    color: '#92400e',
+    tokenPortrait: '/assets/portraits/wereboar-human-rainy-forge-maul-token.png',
+    initiativePortrait: '/assets/portraits/wereboar-human-rainy-forge-maul-initiative.png',
+    visualVariants: [
+      { id: 'rainy-forge-maul', label: '雨暮铁匠铺战槌', tokenPortrait: '/assets/portraits/wereboar-human-rainy-forge-maul-token.png', initiativePortrait: '/assets/portraits/wereboar-human-rainy-forge-maul-initiative.png' },
+      { id: 'red-rock-caravan', label: '晨光赤岩商队', tokenPortrait: '/assets/portraits/wereboar-human-red-rock-caravan-token.png', initiativePortrait: '/assets/portraits/wereboar-human-red-rock-caravan-initiative.png' },
+    ],
+  },
+  'wereboar-hybrid': {
+    emoji: '🐗',
+    color: '#7c2d12',
+    tokenPortrait: '/assets/portraits/wereboar-hybrid-ruined-village-charge-token.png',
+    initiativePortrait: '/assets/portraits/wereboar-hybrid-ruined-village-charge-initiative.png',
+    visualVariants: [
+      { id: 'ruined-village-charge', label: '雨夜废村冲锋', tokenPortrait: '/assets/portraits/wereboar-hybrid-ruined-village-charge-token.png', initiativePortrait: '/assets/portraits/wereboar-hybrid-ruined-village-charge-initiative.png' },
+      { id: 'moonlit-quarry-maul', label: '月下采石场战槌', tokenPortrait: '/assets/portraits/wereboar-hybrid-moonlit-quarry-maul-token.png', initiativePortrait: '/assets/portraits/wereboar-hybrid-moonlit-quarry-maul-initiative.png' },
+    ],
+  },
+  'wererat-human': {
+    emoji: '🗡️',
+    color: '#44403c',
+    tokenPortrait: '/assets/portraits/wererat-human-rainy-canal-crossbow-token.png',
+    initiativePortrait: '/assets/portraits/wererat-human-rainy-canal-crossbow-initiative.png',
+    visualVariants: [
+      { id: 'rainy-canal-crossbow', label: '雨夜运河手弩', tokenPortrait: '/assets/portraits/wererat-human-rainy-canal-crossbow-token.png', initiativePortrait: '/assets/portraits/wererat-human-rainy-canal-crossbow-initiative.png' },
+      { id: 'dawn-market-shortsword', label: '晨曦鱼市短剑', tokenPortrait: '/assets/portraits/wererat-human-dawn-market-shortsword-token.png', initiativePortrait: '/assets/portraits/wererat-human-dawn-market-shortsword-initiative.png' },
+    ],
+  },
+  'wererat-hybrid': {
+    emoji: '🐀',
+    color: '#3f3f46',
+    tokenPortrait: '/assets/portraits/wererat-hybrid-green-sewer-crossbow-token.png',
+    initiativePortrait: '/assets/portraits/wererat-hybrid-green-sewer-crossbow-initiative.png',
+    visualVariants: [
+      { id: 'green-sewer-crossbow', label: '绿灯下水道手弩', tokenPortrait: '/assets/portraits/wererat-hybrid-green-sewer-crossbow-token.png', initiativePortrait: '/assets/portraits/wererat-hybrid-green-sewer-crossbow-initiative.png' },
+      { id: 'dawn-granary-shortsword', label: '晨光粮仓短剑', tokenPortrait: '/assets/portraits/wererat-hybrid-dawn-granary-shortsword-token.png', initiativePortrait: '/assets/portraits/wererat-hybrid-dawn-granary-shortsword-initiative.png' },
+    ],
+  },
+  'wererat-rat': {
+    emoji: '🐀',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/wererat-rat-moonlit-sewer-leap-token.png',
+    initiativePortrait: '/assets/portraits/wererat-rat-moonlit-sewer-leap-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-sewer-leap', label: '月照污渠扑咬', tokenPortrait: '/assets/portraits/wererat-rat-moonlit-sewer-leap-token.png', initiativePortrait: '/assets/portraits/wererat-rat-moonlit-sewer-leap-initiative.png' },
+      { id: 'monastery-cellar-scent', label: '修院酒窖嗅探', tokenPortrait: '/assets/portraits/wererat-rat-monastery-cellar-scent-token.png', initiativePortrait: '/assets/portraits/wererat-rat-monastery-cellar-scent-initiative.png' },
+    ],
+  },
+  'weretiger-human': {
+    emoji: '🏹',
+    color: '#b45309',
+    tokenPortrait: '/assets/portraits/weretiger-human-monsoon-temple-longbow-token.png',
+    initiativePortrait: '/assets/portraits/weretiger-human-monsoon-temple-longbow-initiative.png',
+    visualVariants: [
+      { id: 'monsoon-temple-longbow', label: '季风神殿长弓', tokenPortrait: '/assets/portraits/weretiger-human-monsoon-temple-longbow-token.png', initiativePortrait: '/assets/portraits/weretiger-human-monsoon-temple-longbow-initiative.png' },
+      { id: 'sunset-ruins-scimitar', label: '落日荒林弯刀', tokenPortrait: '/assets/portraits/weretiger-human-sunset-ruins-scimitar-token.png', initiativePortrait: '/assets/portraits/weretiger-human-sunset-ruins-scimitar-initiative.png' },
+    ],
+  },
+  'weretiger-hybrid': {
+    emoji: '🐯',
+    color: '#d97706',
+    tokenPortrait: '/assets/portraits/weretiger-hybrid-rainy-temple-pounce-token.png',
+    initiativePortrait: '/assets/portraits/weretiger-hybrid-rainy-temple-pounce-initiative.png',
+    visualVariants: [
+      { id: 'rainy-temple-pounce', label: '雨林神殿扑袭', tokenPortrait: '/assets/portraits/weretiger-hybrid-rainy-temple-pounce-token.png', initiativePortrait: '/assets/portraits/weretiger-hybrid-rainy-temple-pounce-initiative.png' },
+      { id: 'snowy-roof-scimitar', label: '雪岭屋脊弯刀', tokenPortrait: '/assets/portraits/weretiger-hybrid-snowy-roof-scimitar-token.png', initiativePortrait: '/assets/portraits/weretiger-hybrid-snowy-roof-scimitar-initiative.png' },
+    ],
+  },
+  'weretiger-tiger': {
+    emoji: '🐅',
+    color: '#c2410c',
+    tokenPortrait: '/assets/portraits/weretiger-tiger-jungle-ravine-pounce-token.png',
+    initiativePortrait: '/assets/portraits/weretiger-tiger-jungle-ravine-pounce-initiative.png',
+    visualVariants: [
+      { id: 'jungle-ravine-pounce', label: '晨光雨林飞扑', tokenPortrait: '/assets/portraits/weretiger-tiger-jungle-ravine-pounce-token.png', initiativePortrait: '/assets/portraits/weretiger-tiger-jungle-ravine-pounce-initiative.png' },
+      { id: 'aurora-observatory-stalk', label: '极光观星台潜行', tokenPortrait: '/assets/portraits/weretiger-tiger-aurora-observatory-stalk-token.png', initiativePortrait: '/assets/portraits/weretiger-tiger-aurora-observatory-stalk-initiative.png' },
+    ],
+  },
+  'werewolf-human': {
+    emoji: '🗡️',
+    color: '#4b5563',
+    tokenPortrait: '/assets/portraits/werewolf-human-moonlit-road-spear-token.png',
+    initiativePortrait: '/assets/portraits/werewolf-human-moonlit-road-spear-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-road-spear', label: '月夜林道长矛', tokenPortrait: '/assets/portraits/werewolf-human-moonlit-road-spear-token.png', initiativePortrait: '/assets/portraits/werewolf-human-moonlit-road-spear-initiative.png' },
+      { id: 'dawn-marsh-spear-throw', label: '晨雾湿地掷矛', tokenPortrait: '/assets/portraits/werewolf-human-dawn-marsh-spear-throw-token.png', initiativePortrait: '/assets/portraits/werewolf-human-dawn-marsh-spear-throw-initiative.png' },
+    ],
+  },
+  'werewolf-hybrid': {
+    emoji: '🐺',
+    color: '#374151',
+    tokenPortrait: '/assets/portraits/werewolf-hybrid-moonlit-barn-lunge-token.png',
+    initiativePortrait: '/assets/portraits/werewolf-hybrid-moonlit-barn-lunge-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-barn-lunge', label: '月夜谷仓扑袭', tokenPortrait: '/assets/portraits/werewolf-hybrid-moonlit-barn-lunge-token.png', initiativePortrait: '/assets/portraits/werewolf-hybrid-moonlit-barn-lunge-initiative.png' },
+      { id: 'dawn-chapel-claws', label: '晨光残堂爪击', tokenPortrait: '/assets/portraits/werewolf-hybrid-dawn-chapel-claws-token.png', initiativePortrait: '/assets/portraits/werewolf-hybrid-dawn-chapel-claws-initiative.png' },
+    ],
+  },
+  'werewolf-wolf': {
+    emoji: '🐺',
+    color: '#4b5563',
+    tokenPortrait: '/assets/portraits/werewolf-wolf-snowy-forest-sprint-token.png',
+    initiativePortrait: '/assets/portraits/werewolf-wolf-snowy-forest-sprint-initiative.png',
+    visualVariants: [
+      { id: 'snowy-forest-sprint', label: '雪夜密林疾奔', tokenPortrait: '/assets/portraits/werewolf-wolf-snowy-forest-sprint-token.png', initiativePortrait: '/assets/portraits/werewolf-wolf-snowy-forest-sprint-initiative.png' },
+      { id: 'crimson-coast-prowl', label: '血暮海崖巡猎', tokenPortrait: '/assets/portraits/werewolf-wolf-crimson-coast-prowl-token.png', initiativePortrait: '/assets/portraits/werewolf-wolf-crimson-coast-prowl-initiative.png' },
+    ],
+  },
+  'white-dragon-wyrmling': {
+    emoji: '🐉',
+    color: '#bfdbfe',
+    tokenPortrait: '/assets/portraits/white-dragon-wyrmling-glacier-cavern-bite-token.png',
+    initiativePortrait: '/assets/portraits/white-dragon-wyrmling-glacier-cavern-bite-initiative.png',
+    visualVariants: [
+      { id: 'glacier-cavern-bite', label: '冰川洞窟啃咬', tokenPortrait: '/assets/portraits/white-dragon-wyrmling-glacier-cavern-bite-token.png', initiativePortrait: '/assets/portraits/white-dragon-wyrmling-glacier-cavern-bite-initiative.png' },
+      { id: 'aurora-cold-breath', label: '极光冰海寒息', tokenPortrait: '/assets/portraits/white-dragon-wyrmling-aurora-cold-breath-token.png', initiativePortrait: '/assets/portraits/white-dragon-wyrmling-aurora-cold-breath-initiative.png' },
+    ],
+  },
+  wight: {
+    emoji: '🧟',
+    color: '#334155',
+    tokenPortrait: '/assets/portraits/wight-moonlit-barrow-life-drain-token.png',
+    initiativePortrait: '/assets/portraits/wight-moonlit-barrow-life-drain-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-barrow-life-drain', label: '月夜古冢夺命', tokenPortrait: '/assets/portraits/wight-moonlit-barrow-life-drain-token.png', initiativePortrait: '/assets/portraits/wight-moonlit-barrow-life-drain-initiative.png' },
+      { id: 'rainy-battlement-longbow', label: '雨城垛口长弓', tokenPortrait: '/assets/portraits/wight-rainy-battlement-longbow-token.png', initiativePortrait: '/assets/portraits/wight-rainy-battlement-longbow-initiative.png' },
+    ],
+  },
+  'will-o-wisp': {
+    emoji: '🔥',
+    color: '#a3e635',
+    tokenPortrait: '/assets/portraits/will-o-wisp-moonlit-marsh-lure-token.png',
+    initiativePortrait: '/assets/portraits/will-o-wisp-moonlit-marsh-lure-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-marsh-lure', label: '月夜沼泽诱光', tokenPortrait: '/assets/portraits/will-o-wisp-moonlit-marsh-lure-token.png', initiativePortrait: '/assets/portraits/will-o-wisp-moonlit-marsh-lure-initiative.png' },
+      { id: 'flooded-cathedral-hunt', label: '积水教堂猎魂', tokenPortrait: '/assets/portraits/will-o-wisp-flooded-cathedral-hunt-token.png', initiativePortrait: '/assets/portraits/will-o-wisp-flooded-cathedral-hunt-initiative.png' },
+    ],
+  },
+  'winter-wolf': {
+    emoji: '🐺',
+    color: '#bae6fd',
+    tokenPortrait: '/assets/portraits/winter-wolf-blizzard-pass-charge-token.png',
+    initiativePortrait: '/assets/portraits/winter-wolf-blizzard-pass-charge-initiative.png',
+    visualVariants: [
+      { id: 'blizzard-pass-charge', label: '暴雪山口冲锋', tokenPortrait: '/assets/portraits/winter-wolf-blizzard-pass-charge-token.png', initiativePortrait: '/assets/portraits/winter-wolf-blizzard-pass-charge-initiative.png' },
+      { id: 'aurora-lake-cold-breath', label: '极光冰湖寒息', tokenPortrait: '/assets/portraits/winter-wolf-aurora-lake-cold-breath-token.png', initiativePortrait: '/assets/portraits/winter-wolf-aurora-lake-cold-breath-initiative.png' },
+    ],
+  },
+  worg: {
+    emoji: '🐺',
+    color: '#292524',
+    tokenPortrait: '/assets/portraits/worg-goblin-camp-chainbreak-token.png',
+    initiativePortrait: '/assets/portraits/worg-goblin-camp-chainbreak-initiative.png',
+    visualVariants: [
+      { id: 'goblin-camp-chainbreak', label: '暮色战营挣链', tokenPortrait: '/assets/portraits/worg-goblin-camp-chainbreak-token.png', initiativePortrait: '/assets/portraits/worg-goblin-camp-chainbreak-initiative.png' },
+      { id: 'misty-ravine-stalk', label: '晨雾峡谷潜猎', tokenPortrait: '/assets/portraits/worg-misty-ravine-stalk-token.png', initiativePortrait: '/assets/portraits/worg-misty-ravine-stalk-initiative.png' },
+    ],
+  },
+  wraith: {
+    emoji: '👻',
+    color: '#312e81',
+    tokenPortrait: '/assets/portraits/wraith-crypt-stair-life-drain-token.png',
+    initiativePortrait: '/assets/portraits/wraith-crypt-stair-life-drain-initiative.png',
+    visualVariants: [
+      { id: 'crypt-stair-life-drain', label: '幽窟石阶夺命', tokenPortrait: '/assets/portraits/wraith-crypt-stair-life-drain-token.png', initiativePortrait: '/assets/portraits/wraith-crypt-stair-life-drain-initiative.png' },
+      { id: 'red-dawn-standing-stones', label: '赤晓立石游魂', tokenPortrait: '/assets/portraits/wraith-red-dawn-standing-stones-token.png', initiativePortrait: '/assets/portraits/wraith-red-dawn-standing-stones-initiative.png' },
+    ],
+  },
+  wyvern: {
+    emoji: '🐉',
+    color: '#9a3412',
+    tokenPortrait: '/assets/portraits/wyvern-volcanic-sky-bank-token.png',
+    initiativePortrait: '/assets/portraits/wyvern-volcanic-sky-bank-initiative.png',
+    visualVariants: [
+      { id: 'volcanic-sky-bank', label: '火山荒空盘旋', tokenPortrait: '/assets/portraits/wyvern-volcanic-sky-bank-token.png', initiativePortrait: '/assets/portraits/wyvern-volcanic-sky-bank-initiative.png' },
+      { id: 'sunset-seacliff-nest', label: '落日海崖归巢', tokenPortrait: '/assets/portraits/wyvern-sunset-seacliff-nest-token.png', initiativePortrait: '/assets/portraits/wyvern-sunset-seacliff-nest-initiative.png' },
+    ],
+  },
+  xorn: {
+    emoji: '💎',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/xorn-geode-chamber-gem-harvest-token.png',
+    initiativePortrait: '/assets/portraits/xorn-geode-chamber-gem-harvest-initiative.png',
+    visualVariants: [
+      { id: 'geode-chamber-gem-harvest', label: '晶洞采食宝石', tokenPortrait: '/assets/portraits/xorn-geode-chamber-gem-harvest-token.png', initiativePortrait: '/assets/portraits/xorn-geode-chamber-gem-harvest-initiative.png' },
+      { id: 'volcanic-mine-ore-carry', label: '火山矿坑搬矿', tokenPortrait: '/assets/portraits/xorn-volcanic-mine-ore-carry-token.png', initiativePortrait: '/assets/portraits/xorn-volcanic-mine-ore-carry-initiative.png' },
+    ],
+  },
+  'young-black-dragon': {
+    emoji: '🐉',
+    color: '#14532d',
+    tokenPortrait: '/assets/portraits/young-black-dragon-moonlit-swamp-prowl-token.png',
+    initiativePortrait: '/assets/portraits/young-black-dragon-moonlit-swamp-prowl-initiative.png',
+    visualVariants: [
+      { id: 'moonlit-swamp-prowl', label: '月夜沼泽潜行', tokenPortrait: '/assets/portraits/young-black-dragon-moonlit-swamp-prowl-token.png', initiativePortrait: '/assets/portraits/young-black-dragon-moonlit-swamp-prowl-initiative.png' },
+      { id: 'rainy-causeway-acid', label: '雨中古道酸息', tokenPortrait: '/assets/portraits/young-black-dragon-rainy-causeway-acid-token.png', initiativePortrait: '/assets/portraits/young-black-dragon-rainy-causeway-acid-initiative.png' },
+    ],
+  },
+  'young-blue-dragon': {
+    emoji: '🐉',
+    color: '#1d4ed8',
+    tokenPortrait: '/assets/portraits/young-blue-dragon-sandstorm-ruins-stride-token.png',
+    initiativePortrait: '/assets/portraits/young-blue-dragon-sandstorm-ruins-stride-initiative.png',
+    visualVariants: [
+      { id: 'sandstorm-ruins-stride', label: '沙暴遗迹巡行', tokenPortrait: '/assets/portraits/young-blue-dragon-sandstorm-ruins-stride-token.png', initiativePortrait: '/assets/portraits/young-blue-dragon-sandstorm-ruins-stride-initiative.png' },
+      { id: 'storm-temple-lightning', label: '雷云古殿电息', tokenPortrait: '/assets/portraits/young-blue-dragon-storm-temple-lightning-token.png', initiativePortrait: '/assets/portraits/young-blue-dragon-storm-temple-lightning-initiative.png' },
+    ],
+  },
+  'young-brass-dragon': {
+    emoji: '🐉', color: '#ca8a04',
+    tokenPortrait: '/assets/portraits/young-brass-dragon-sunrise-arches-stride-token.png',
+    initiativePortrait: '/assets/portraits/young-brass-dragon-sunrise-arches-stride-initiative.png',
+    visualVariants: [
+      { id: 'sunrise-arches-stride', label: '日出石拱巡行', tokenPortrait: '/assets/portraits/young-brass-dragon-sunrise-arches-stride-token.png', initiativePortrait: '/assets/portraits/young-brass-dragon-sunrise-arches-stride-initiative.png' },
+      { id: 'moonlit-canyon-sleep', label: '月峡沉眠吐息', tokenPortrait: '/assets/portraits/young-brass-dragon-moonlit-canyon-sleep-token.png', initiativePortrait: '/assets/portraits/young-brass-dragon-moonlit-canyon-sleep-initiative.png' },
+    ],
+  },
+  'young-bronze-dragon': {
+    emoji: '🐉', color: '#0f766e',
+    tokenPortrait: '/assets/portraits/young-bronze-dragon-dawn-coast-watch-token.png',
+    initiativePortrait: '/assets/portraits/young-bronze-dragon-dawn-coast-watch-initiative.png',
+    visualVariants: [
+      { id: 'dawn-coast-watch', label: '晨曦海岸守望', tokenPortrait: '/assets/portraits/young-bronze-dragon-dawn-coast-watch-token.png', initiativePortrait: '/assets/portraits/young-bronze-dragon-dawn-coast-watch-initiative.png' },
+      { id: 'night-lighthouse-lightning', label: '夜海灯塔电息', tokenPortrait: '/assets/portraits/young-bronze-dragon-night-lighthouse-lightning-token.png', initiativePortrait: '/assets/portraits/young-bronze-dragon-night-lighthouse-lightning-initiative.png' },
+    ],
+  },
+  'young-copper-dragon': {
+    emoji: '🐉', color: '#b45309',
+    tokenPortrait: '/assets/portraits/young-copper-dragon-autumn-highland-crouch-token.png',
+    initiativePortrait: '/assets/portraits/young-copper-dragon-autumn-highland-crouch-initiative.png',
+    visualVariants: [
+      { id: 'autumn-highland-crouch', label: '秋岭崖顶蹲伏', tokenPortrait: '/assets/portraits/young-copper-dragon-autumn-highland-crouch-token.png', initiativePortrait: '/assets/portraits/young-copper-dragon-autumn-highland-crouch-initiative.png' },
+      { id: 'rainy-gorge-acid', label: '雨峡石桥酸息', tokenPortrait: '/assets/portraits/young-copper-dragon-rainy-gorge-acid-token.png', initiativePortrait: '/assets/portraits/young-copper-dragon-rainy-gorge-acid-initiative.png' },
+    ],
+  },
+  'young-gold-dragon': {
+    emoji: '🐉', color: '#eab308',
+    tokenPortrait: '/assets/portraits/young-gold-dragon-mountain-monastery-watch-token.png',
+    initiativePortrait: '/assets/portraits/young-gold-dragon-mountain-monastery-watch-initiative.png',
+    visualVariants: [
+      { id: 'mountain-monastery-watch', label: '高山古寺守望', tokenPortrait: '/assets/portraits/young-gold-dragon-mountain-monastery-watch-token.png', initiativePortrait: '/assets/portraits/young-gold-dragon-mountain-monastery-watch-initiative.png' },
+      { id: 'crimson-cloud-fire', label: '赤云峰顶火息', tokenPortrait: '/assets/portraits/young-gold-dragon-crimson-cloud-fire-token.png', initiativePortrait: '/assets/portraits/young-gold-dragon-crimson-cloud-fire-initiative.png' },
+    ],
+  },
+  'young-green-dragon': {
+    emoji: '🐉', color: '#15803d',
+    tokenPortrait: '/assets/portraits/young-green-dragon-rainy-forest-prowl-token.png',
+    initiativePortrait: '/assets/portraits/young-green-dragon-rainy-forest-prowl-initiative.png',
+    visualVariants: [
+      { id: 'rainy-forest-prowl', label: '雨林遗迹潜行', tokenPortrait: '/assets/portraits/young-green-dragon-rainy-forest-prowl-token.png', initiativePortrait: '/assets/portraits/young-green-dragon-rainy-forest-prowl-initiative.png' },
+      { id: 'jungle-ruin-poison', label: '晴谷古庭毒息', tokenPortrait: '/assets/portraits/young-green-dragon-jungle-ruin-poison-token.png', initiativePortrait: '/assets/portraits/young-green-dragon-jungle-ruin-poison-initiative.png' },
+    ],
+  },
+  'young-red-dragon': {
+    emoji: '🐉', color: '#dc2626',
+    tokenPortrait: '/assets/portraits/young-red-dragon-night-caldera-stand-token.png',
+    initiativePortrait: '/assets/portraits/young-red-dragon-night-caldera-stand-initiative.png',
+    visualVariants: [
+      { id: 'night-caldera-stand', label: '夜色火山雄踞', tokenPortrait: '/assets/portraits/young-red-dragon-night-caldera-stand-token.png', initiativePortrait: '/assets/portraits/young-red-dragon-night-caldera-stand-initiative.png' },
+      { id: 'obsidian-fortress-fire', label: '黑曜城堡火袭', tokenPortrait: '/assets/portraits/young-red-dragon-obsidian-fortress-fire-token.png', initiativePortrait: '/assets/portraits/young-red-dragon-obsidian-fortress-fire-initiative.png' },
+    ],
+  },
+  'young-silver-dragon': {
+    emoji: '🐉', color: '#cbd5e1',
+    tokenPortrait: '/assets/portraits/young-silver-dragon-aurora-observatory-watch-token.png',
+    initiativePortrait: '/assets/portraits/young-silver-dragon-aurora-observatory-watch-initiative.png',
+    visualVariants: [
+      { id: 'aurora-observatory-watch', label: '极光高台守望', tokenPortrait: '/assets/portraits/young-silver-dragon-aurora-observatory-watch-token.png', initiativePortrait: '/assets/portraits/young-silver-dragon-aurora-observatory-watch-initiative.png' },
+      { id: 'sunrise-peaks-cold', label: '朝霞雪峰寒息', tokenPortrait: '/assets/portraits/young-silver-dragon-sunrise-peaks-cold-token.png', initiativePortrait: '/assets/portraits/young-silver-dragon-sunrise-peaks-cold-initiative.png' },
+    ],
+  },
+  'young-white-dragon': {
+    emoji: '🐉', color: '#e0f2fe',
+    tokenPortrait: '/assets/portraits/young-white-dragon-glacier-cavern-stalk-token.png',
+    initiativePortrait: '/assets/portraits/young-white-dragon-glacier-cavern-stalk-initiative.png',
+    visualVariants: [
+      { id: 'glacier-cavern-stalk', label: '冰川洞窟潜猎', tokenPortrait: '/assets/portraits/young-white-dragon-glacier-cavern-stalk-token.png', initiativePortrait: '/assets/portraits/young-white-dragon-glacier-cavern-stalk-initiative.png' },
+      { id: 'aurora-fjord-cold', label: '极光峡湾寒袭', tokenPortrait: '/assets/portraits/young-white-dragon-aurora-fjord-cold-token.png', initiativePortrait: '/assets/portraits/young-white-dragon-aurora-fjord-cold-initiative.png' },
+    ],
+  },
   'axe-beak': {
     emoji: '🐦',
     color: '#713f12',
@@ -4492,7 +5918,6 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
-  owlbear: { emoji: '🦉', color: '#78350f' },
 }
 
 const SRD_MONSTER_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {

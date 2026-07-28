@@ -57,4 +57,58 @@ describe('D&D 5e class resources', () => {
     expect(synced.classResources?.['dnd5e-spell-slot-4']).toEqual({ current: 1, max: 1 })
     expect(synced.classResources?.['dnd5e-pact-slot']).toEqual({ current: 1, max: 1 })
   })
+
+  it('persists and restores racial combat resources independently', () => {
+    const dragonborn = syncCharacterClassResources(character({
+      race: '龙裔',
+      dnd5eRaceId: 'dragonborn',
+      dnd5eRacialChoices: { dragonbornAncestry: 'red' },
+    }))
+    expect(dragonborn.classResources?.['dnd5e-racial-dragonborn-breath']).toEqual({
+      current: 1,
+      max: 1,
+    })
+    const spentBreath = spendClassResource(
+      dragonborn,
+      'dnd5e-racial-dragonborn-breath',
+      1,
+    )!
+    expect(
+      restoreClassResources(spentBreath, 'short-rest')
+        .classResources?.['dnd5e-racial-dragonborn-breath'].current,
+    ).toBe(1)
+
+    const halfOrc = syncCharacterClassResources(character({
+      race: '半兽人',
+      dnd5eRaceId: 'half-orc',
+    }))
+    const spentEndurance = spendClassResource(
+      halfOrc,
+      'dnd5e-racial-half-orc-relentless-endurance',
+      1,
+    )!
+    expect(
+      restoreClassResources(spentEndurance, 'short-rest')
+        .classResources?.['dnd5e-racial-half-orc-relentless-endurance'].current,
+    ).toBe(0)
+    expect(
+      restoreClassResources(spentEndurance, 'long-rest')
+        .classResources?.['dnd5e-racial-half-orc-relentless-endurance'].current,
+    ).toBe(1)
+
+    const drow = syncCharacterClassResources(character({
+      race: '卓尔',
+      dnd5eRaceId: 'drow',
+      level: 5,
+    }))
+    expect(drow.classResources?.['dnd5e-racial-spell-faerie-fire']).toEqual({
+      current: 1,
+      max: 1,
+    })
+    expect(drow.classResources?.['dnd5e-racial-spell-darkness']).toEqual({
+      current: 1,
+      max: 1,
+    })
+    expect(drow.classResources?.['dnd5e-racial-spell-dancing-lights']).toBeUndefined()
+  })
 })

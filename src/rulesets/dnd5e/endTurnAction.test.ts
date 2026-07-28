@@ -5,6 +5,7 @@ import type { Character } from '../../types/character'
 import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
 import { prepareDnd5ePlayerEndTurn, resolveDnd5ePlayerEndTurn } from './endTurnAction'
+import { DND5E_AVERTED_GAZE_DEFINITION_ID } from './headlessCombatEngine'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
 
 function barbarian(sustained: boolean): Character {
@@ -293,6 +294,79 @@ describe('D&D 5e map end-turn authority bridge', () => {
     })
   })
 
+  it('previews the next round before an expired averted gaze is removed', () => {
+    const actor = barbarian(false)
+    actor.dnd5eCombatState = {
+      schemaVersion: 2,
+      activeEffects: [createDnd5eMechanicalEffect({
+        id: 'averted-basilisk-gaze',
+        definitionId: DND5E_AVERTED_GAZE_DEFINITION_ID,
+        label: 'Averted basilisk gaze',
+        source: {
+          kind: 'monster',
+          actorId: 'enemy-token',
+          rulesId: 'monster:srd-5.1:basilisk:petrifying-gaze:averted-eyes',
+          magical: true,
+        },
+        targetId: 'barbarian-token',
+        appliedRound: 3,
+        appliedTurnKey: 'combat:3:barbarian-token:normal',
+        duration: {
+          type: 'until-turn-boundary',
+          boundary: 'target-turn-start',
+          appliedTurnKey: 'combat:3:barbarian-token:normal',
+        },
+      })],
+    }
+    const input = fixture(actor)
+    input.map.tokens[1].poolId = 'srd-5.1:basilisk'
+    input.map.tokens[1].hp = 52
+    input.map.tokens[1].maxHp = 52
+    input.initiativeOrder = input.initiativeOrder.map((entry) => ({
+      ...entry,
+      slotId: `${entry.tokenId}:normal`,
+    }))
+    input.action = {
+      ...input.action,
+      actorTokenId: 'enemy-token',
+      characterId: '',
+      sourceMode: 'dm',
+      initiativeIndex: 1,
+    }
+
+    const prepared = prepareDnd5ePlayerEndTurn(input)
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.turnStartGazeRequirements).toEqual([
+      expect.objectContaining({
+        sourceId: 'enemy-token',
+        targetId: 'barbarian-token',
+        ruleId: 'petrifying-gaze',
+      }),
+    ])
+
+    const resolved = resolveDnd5ePlayerEndTurn({
+      ...input,
+      turnStartGazeResolutions: [{
+        sourceId: 'enemy-token',
+        targetId: 'barbarian-token',
+        ruleId: 'petrifying-gaze',
+        sourceUsesGaze: true,
+        choice: 'face-gaze',
+        save: { d20: 20 },
+      }],
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok || !resolved.result.ok) return
+    expect(resolved.result.state).toMatchObject({
+      round: 4,
+      initiativeIndex: 0,
+      turnSlotId: 'barbarian-token:normal',
+    })
+    expect(resolved.result.state.combatants['barbarian-token'].classState)
+      .toMatchObject({ turnStartResolvedTurnKey: 'combat:4:barbarian-token:normal' })
+  })
+
   it('ends Stunning Strike on the Monk\'s next turn end and persists the cleared token state', () => {
     const actor = barbarian(false)
     actor.id = 'monk'
@@ -311,7 +385,10 @@ describe('D&D 5e map end-turn authority bridge', () => {
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
     expect(resolved.application.map.tokens.find((entry) => entry.id === 'enemy-token')?.dnd5eCombatState)
-      .toEqual({ schemaVersion: 2 })
+      .toEqual({
+        schemaVersion: 2,
+        turnStartResolvedTurnKey: 'combat:3:enemy-token',
+      })
     expect(resolved.result.events).toContainEqual({ type: 'condition-ended', targetId: 'enemy-token', condition: '震慑' })
   })
 

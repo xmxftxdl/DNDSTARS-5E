@@ -99,6 +99,7 @@ export interface Dnd5eSpellbookEntry {
   sourceKind: 'srd-core' | 'room-import'
   headless: boolean
   catalogOnly: boolean
+  iconAssetId?: string
   visibilityRequirement?: Dnd5eSpellVisibilityRequirement
   translationStatus?: 'context-reviewed' | 'pending-srd-translation'
   reference?: Dnd5eSrdSpellDescriptionZh
@@ -107,6 +108,7 @@ export interface Dnd5eSpellbookEntry {
 }
 
 export interface Dnd5ePluginSpellbookReference extends Omit<Dnd5eImportedSpell, 'automation'> {
+  iconAssetId?: string
   automation:
     | { mode: 'reference-only' }
     | { mode: 'headless-action'; actionId: string }
@@ -396,15 +398,20 @@ export function dnd5eSpellbookEntriesWithPlugins(
   pluginSpells: readonly Dnd5ePluginSpellbookReference[],
 ): Dnd5eSpellbookEntry[] {
   const automation = new Map(pluginSpells.map((spell) => [spell.id, spell.automation]))
+  const iconAssets = new Map(pluginSpells.flatMap((spell) =>
+    spell.iconAssetId ? [[spell.id, spell.iconAssetId] as const] : []))
   const pluginIds = new Set(pluginSpells.map((spell) => spell.id))
   const references: Dnd5eImportedSpell[] = pluginSpells.map((spell) => ({
     ...spell,
     automation: { mode: 'reference-only' },
   }))
-  return dnd5eSpellbookEntries([...imported.filter((spell) => !pluginIds.has(spell.id)), ...references]).map((entry) =>
-    automation.get(entry.id)?.mode === 'headless-action'
+  return dnd5eSpellbookEntries([...imported.filter((spell) => !pluginIds.has(spell.id)), ...references]).map((entry) => {
+    const iconAssetId = iconAssets.get(entry.id)
+    const withAutomation = automation.get(entry.id)?.mode === 'headless-action'
       ? { ...entry, headless: true, catalogOnly: false }
-      : entry)
+      : entry
+    return iconAssetId ? { ...withAutomation, iconAssetId } : withAutomation
+  })
 }
 
 export const DND5E_SPELL_SCHOOL_LABELS: Readonly<Record<Dnd5eSpellbookSchoolId, string>> = {

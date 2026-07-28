@@ -291,6 +291,8 @@ export function dnd5eHunterMultiattackClassDamageDefinitions(
 export interface Dnd5eHunterMultiattackResolutionRoll {
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
@@ -326,6 +328,8 @@ export function resolvePreparedDnd5eHunterMultiattack(input: {
       targetId: prepared.targets[index].token.id,
       d20: roll.d20,
       d20Second: roll.d20Second,
+      halflingLuckyD20: roll.halflingLuckyD20,
+      halflingLuckyD20Second: roll.halflingLuckyD20Second,
       blessRoll: roll.blessRoll,
       baneRoll: roll.baneRoll,
       bardicInspirationRoll: roll.bardicInspirationRoll,

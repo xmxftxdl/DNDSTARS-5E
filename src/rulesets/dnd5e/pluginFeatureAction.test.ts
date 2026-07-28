@@ -340,6 +340,92 @@ describe('D&D 5e plugin feature authority action', () => {
     }
   })
 
+  it('lets the Host replace an untrusted player payload before Headless resolution', async () => {
+    let featureId = ''
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.authoritative-payload',
+        name: 'Authoritative Payload',
+        version: '1.0.0',
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        publisher: 'Example',
+        license: 'CC0-1.0',
+      },
+      setup(api) {
+        api.registerHeadlessAction({
+          id: 'trusted-action',
+          resolve({ action, succeed, fail }) {
+            const payload = action.payload
+            return payload && typeof payload === 'object' && !Array.isArray(payload) &&
+              payload.source === 'host'
+              ? succeed()
+              : fail('invalid-plugin-action')
+          },
+        })
+        featureId = api.registerFeature({
+          id: 'trusted-action',
+          name: '可信动作',
+          summary: '测试 Host 载荷覆盖。',
+          description: '测试 Host 载荷覆盖。',
+          automation: 'full',
+          action: {
+            id: 'trusted-action',
+            label: '使用',
+            economy: 'none',
+            targeting: { kind: 'self' },
+          },
+        })
+      },
+    })
+    try {
+      const hero = character('hero', { dnd5ePluginFeatureIds: [featureId] })
+      const enemy = character('enemy')
+      const map: BattleMap = {
+        id: 'map-1',
+        name: 'Payload map',
+        width: 500,
+        height: 500,
+        gridSize: 50,
+        gridOffsetX: 0,
+        gridOffsetY: 0,
+        feetPerCell: 5,
+        showGrid: true,
+        tokens: [
+          token('hero-token', hero.id, 25),
+          token('enemy-token', enemy.id, 225, 'enemy'),
+        ],
+      }
+      const initiativeOrder: InitiativeEntry[] = [
+        { slotId: 'hero-token:normal', tokenId: 'hero-token', label: 'hero', emoji: 'H', color: '#fff', roll: 20 },
+        { slotId: 'enemy-token:normal', tokenId: 'enemy-token', label: 'enemy', emoji: 'E', color: '#f00', roll: 10 },
+      ]
+      const prepared = prepareDnd5ePluginFeatureAction({
+        action: {
+          ...action(featureId),
+          targetTokenId: 'hero-token',
+          dnd5ePluginAction: { featureId, payload: { source: 'player' } },
+        },
+        map,
+        characters: [hero, enemy],
+        initiativeOrder,
+      })
+      expect(prepared.ok).toBe(true)
+      if (!prepared.ok) return
+      const rejected = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+      })
+      expect(rejected.result).toMatchObject({ ok: false, reason: 'invalid-plugin-action' })
+      const accepted = await resolvePreparedDnd5ePluginFeatureAction({
+        prepared: prepared.prepared,
+        authoritativePayload: { source: 'host' },
+      })
+      expect(accepted.result.ok).toBe(true)
+    } finally {
+      dispose()
+    }
+  })
+
   it('rejects a registered feature that the actor did not select', () => {
     let featureId = ''
     const dispose = registerDnd5eRulesPlugin({

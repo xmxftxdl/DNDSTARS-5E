@@ -9,7 +9,7 @@ import {
   createDnd5eCustomMonsterMechanicDraft,
   createDnd5eCustomMonsterTraitDraft,
 } from './customMonsterWorkshop'
-import { setDnd5eRoomMonsterCatalog } from './monsters'
+import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
 import {
   prepareDnd5eMonsterAfterHitMechanics,
   prepareDnd5eMonsterAttack,
@@ -60,6 +60,241 @@ describe('SRD monster map action adapter', () => {
     expect(swimmingAttack.ok).toBe(true)
     if (!swimmingAttack.ok) return
     expect(swimmingAttack.prepared.attackModes[0]).toBe('normal')
+  })
+
+  it('keeps Ankheg Bite locked to its linked target and prepares that attack with advantage', () => {
+    const grapple = createDnd5eConditionEffect({
+      id: 'relation:grapple:ankheg:bite:linked-hero-token',
+      condition: 'grappled',
+      source: {
+        kind: 'monster',
+        actorId: 'ankheg',
+        rulesId: 'monster:srd-5.1:ankheg:bite:bite-grapple',
+      },
+      targetId: 'linked-hero-token',
+      duration: { type: 'permanent' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'ankheg',
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+      stackingKey: 'relation:grapple:ankheg:bite:linked-hero-token',
+    })
+    const linkedHero: Character = {
+      ...character(),
+      id: 'linked-hero',
+      dnd5eCombatState: {
+        schemaVersion: 2,
+        activeEffects: [grapple],
+      },
+    }
+    const otherHero: Character = {
+      ...character(),
+      id: 'other-hero',
+    }
+    const ankheg = token({
+      id: 'ankheg',
+      label: 'Ankheg',
+      x: 0,
+      y: 0,
+      poolId: 'srd-5.1:ankheg',
+      hp: 39,
+      maxHp: 39,
+    })
+    const linkedTarget = token({
+      id: 'linked-hero-token',
+      label: linkedHero.name,
+      x: 10,
+      y: 0,
+      type: 'player',
+      characterId: linkedHero.id,
+      hp: linkedHero.currentHp,
+      maxHp: linkedHero.maxHp,
+    })
+    const otherTarget = token({
+      id: 'other-hero-token',
+      label: otherHero.name,
+      x: 0,
+      y: 10,
+      type: 'player',
+      characterId: otherHero.id,
+      hp: otherHero.currentHp,
+      maxHp: otherHero.maxHp,
+    })
+    const battleMap: BattleMap = {
+      id: 'ankheg-linked-target-map',
+      name: 'Ankheg linked target',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [ankheg, linkedTarget, otherTarget],
+    }
+    const initiativeOrder = [ankheg, linkedTarget, otherTarget].map((entry, index) => ({
+      tokenId: entry.id,
+      label: entry.label,
+      emoji: '',
+      color: '',
+      roll: 20 - index,
+    }))
+
+    const linkedAttack = prepareDnd5eMonsterAttack({
+      combatId: 'ankheg-linked-target-combat',
+      map: battleMap,
+      characters: [linkedHero, otherHero],
+      initiativeOrder,
+      actorTokenId: ankheg.id,
+      targetTokenId: linkedTarget.id,
+      actionIndex: 0,
+    })
+    expect(linkedAttack.ok).toBe(true)
+    if (!linkedAttack.ok) return
+    expect(linkedAttack.prepared.action.id).toBe('bite')
+    expect(linkedAttack.prepared.targetAttackMode).toBe('normal')
+    expect(linkedAttack.prepared.attackModes).toEqual(['advantage'])
+    expect(previewDnd5eMonsterAttack(linkedAttack.prepared, 0, 2, 18).roll.d20).toBe(18)
+
+    expect(prepareDnd5eMonsterAttack({
+      combatId: 'ankheg-linked-target-combat',
+      map: battleMap,
+      characters: [linkedHero, otherHero],
+      initiativeOrder,
+      actorTokenId: ankheg.id,
+      targetTokenId: otherTarget.id,
+      actionIndex: 0,
+    })).toEqual({ ok: false, reason: 'invalid-target' })
+  })
+
+  it('keeps Behir Bite as a single attack at 10 feet when Constrict is out of range', () => {
+    const hero = character()
+    const behir = token({
+      id: 'behir',
+      label: 'Behir',
+      poolId: 'srd-5.1:behir',
+      hp: 168,
+      maxHp: 168,
+    })
+    const heroToken = token({
+      id: 'hero-token',
+      label: hero.name,
+      x: 20,
+      type: 'player',
+      characterId: hero.id,
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const battleMap: BattleMap = {
+      id: 'behir-ten-feet',
+      name: 'Behir ten feet',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [behir, heroToken],
+    }
+    const monster = getDnd5eSrdMonster('srd-5.1:behir')
+    const biteIndex = monster?.actions.findIndex((action) => action.id === 'bite') ?? -1
+    expect(biteIndex).toBeGreaterThanOrEqual(0)
+    const prepared = prepareDnd5eMonsterAttack({
+      combatId: 'behir-ten-feet',
+      map: battleMap,
+      characters: [hero],
+      initiativeOrder: [
+        { tokenId: behir.id, label: behir.label, emoji: '', color: '', roll: 20 },
+        { tokenId: heroToken.id, label: heroToken.label, emoji: '', color: '', roll: 10 },
+      ],
+      actorTokenId: behir.id,
+      targetTokenId: heroToken.id,
+      actionIndex: biteIndex,
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      distanceFeet: 10,
+      action: { id: 'bite' },
+      attacks: [{ id: 'bite' }],
+    })
+  })
+
+  it('keeps Behir Bite legal but rejects Constrict and its Multiattack against a Huge target', () => {
+    const hero = character()
+    const behir = token({
+      id: 'behir',
+      label: 'Behir',
+      poolId: 'srd-5.1:behir',
+      hp: 168,
+      maxHp: 168,
+    })
+    const hugeTarget = token({
+      id: 'huge-target',
+      label: hero.name,
+      x: 10,
+      type: 'player',
+      characterId: hero.id,
+      creatureSize: '超大型',
+      hp: hero.currentHp,
+      maxHp: hero.maxHp,
+    })
+    const battleMap: BattleMap = {
+      id: 'behir-huge-target',
+      name: 'Behir huge target',
+      width: 100,
+      height: 100,
+      gridSize: 10,
+      feetPerCell: 5,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      tokens: [behir, hugeTarget],
+    }
+    const initiativeOrder = [
+      { tokenId: behir.id, label: behir.label, emoji: '', color: '', roll: 20 },
+      { tokenId: hugeTarget.id, label: hugeTarget.label, emoji: '', color: '', roll: 10 },
+    ]
+    const monster = getDnd5eSrdMonster('srd-5.1:behir')!
+    const biteIndex = monster.actions.findIndex((action) => action.id === 'bite')
+    const constrictIndex = monster.actions.findIndex((action) => action.id === 'constrict')
+    const bite = prepareDnd5eMonsterAttack({
+      combatId: 'behir-huge-target',
+      map: battleMap,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: behir.id,
+      targetTokenId: hugeTarget.id,
+      actionIndex: biteIndex,
+    })
+    expect(bite.ok).toBe(true)
+    if (!bite.ok) return
+    expect(bite.prepared.action.id).toBe('bite')
+    expect(bite.prepared.attacks.map((entry) => entry.id)).toEqual(['bite'])
+    expect(prepareDnd5eMonsterAttack({
+      combatId: 'behir-huge-target',
+      map: battleMap,
+      characters: [hero],
+      initiativeOrder,
+      actorTokenId: behir.id,
+      targetTokenId: hugeTarget.id,
+      actionIndex: constrictIndex,
+    })).toEqual({ ok: false, reason: 'invalid-target' })
   })
 
   it('uses Bugbear javelin melee damage at 5 feet and ranged damage at 30 feet', () => {
@@ -223,8 +458,92 @@ describe('SRD monster map action adapter', () => {
     })
   })
 
+  it('upgrades each Barbed Devil attack mode to its complete Headless Multiattack', () => {
+    const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:barbed-devil')!
+    const barbedDevil = token({
+      id: 'barbed-devil',
+      label: monster.name,
+      x: 0,
+      poolId: monster.id,
+      hp: monster.hitPoints.average,
+      maxHp: monster.hitPoints.average,
+    })
+    const initiativeOrder = [
+      { tokenId: barbedDevil.id, label: barbedDevil.label, emoji: '', color: '', roll: 20 },
+      { tokenId: 'hero-token', label: hero.name, emoji: '', color: '', roll: 10 },
+    ]
+    const actionIndex = (actionId: string) =>
+      monster.actions.findIndex((action) => action.id === actionId)
+    const prepareAt = (x: number, actionId: string) => {
+      const heroToken = token({
+        id: 'hero-token',
+        label: hero.name,
+        x,
+        type: 'player',
+        characterId: hero.id,
+        hp: hero.currentHp,
+        maxHp: hero.maxHp,
+      })
+      const battleMap: BattleMap = {
+        id: `barbed-devil-${actionId}-${x}`,
+        name: 'Barbed Devil Multiattack modes',
+        width: 400,
+        height: 100,
+        gridSize: 10,
+        feetPerCell: 5,
+        gridOffsetX: 0,
+        gridOffsetY: 0,
+        showGrid: true,
+        tokens: [barbedDevil, heroToken],
+      }
+      return prepareDnd5eMonsterAttack({
+        combatId: `barbed-devil-${actionId}-${x}`,
+        map: battleMap,
+        characters: [hero],
+        initiativeOrder,
+        actorTokenId: barbedDevil.id,
+        targetTokenId: heroToken.id,
+        actionIndex: actionIndex(actionId),
+      })
+    }
+
+    for (const actionId of ['tail', 'claw']) {
+      const melee = prepareAt(10, actionId)
+      expect(melee.ok, actionId).toBe(true)
+      if (!melee.ok) continue
+      expect(melee.prepared.action).toMatchObject({
+        id: 'multiattack',
+        kind: 'multiattack',
+        automation: 'headless',
+      })
+      expect(melee.prepared.attacks.map((attack) => attack.id))
+        .toEqual(['tail', 'claw', 'claw'])
+      expect(melee.prepared.attacks.every(({ attack }) => attack.mode === 'melee')).toBe(true)
+    }
+
+    const ranged = prepareAt(100, 'hurl-flame')
+    expect(ranged.ok).toBe(true)
+    if (ranged.ok) {
+      expect(ranged.prepared.action).toMatchObject({
+        id: 'multiattack-hurl-flame',
+        kind: 'multiattack',
+        automation: 'headless',
+      })
+      expect(ranged.prepared.attacks.map((attack) => attack.id))
+        .toEqual(['hurl-flame', 'hurl-flame'])
+      expect(ranged.prepared.attacks.every(({ attack }) => attack.mode === 'ranged')).toBe(true)
+    }
+
+    expect(prepareAt(320, 'hurl-flame')).toEqual({
+      ok: false,
+      reason: 'target-out-of-range',
+    })
+  })
+
   it('aligns the Headless turn to a monster outside the first initiative slot', () => {
     const hero = character()
+    const monster = getDnd5eSrdMonster('srd-5.1:barbed-devil')!
     const heroToken = token({
       id: 'hero-token',
       x: 10,
@@ -261,23 +580,29 @@ describe('SRD monster map action adapter', () => {
       ],
       actorTokenId: barbedDevil.id,
       targetTokenId: heroToken.id,
-      actionIndex: 2,
+      actionIndex: monster.actions.findIndex((action) => action.id === 'tail'),
     })
 
     expect(prepared.ok).toBe(true)
     if (!prepared.ok) return
     expect(prepared.prepared.state.initiativeIndex).toBe(1)
+    expect(prepared.prepared.action.id).toBe('multiattack')
+    expect(prepared.prepared.attacks.map((attack) => attack.id))
+      .toEqual(['tail', 'claw', 'claw'])
 
     const resolved = resolvePreparedDnd5eMonsterAttack({
       prepared: prepared.prepared,
-      rolls: [{ d20: 12, damageRolls: [[3, 4]] }],
+      rolls: [
+        { d20: 12, damageRolls: [[3, 4]] },
+        { d20: 12, damageRolls: [[3]] },
+        { d20: 12, damageRolls: [[4]] },
+      ],
     })
     expect(resolved.result.ok).toBe(true)
-    expect(resolved.result.events).toContainEqual(expect.objectContaining({
-      type: 'attack-resolved',
-      actorId: barbedDevil.id,
-      targetId: heroToken.id,
-    }))
+    expect(resolved.result.events.filter((event) =>
+      event.type === 'attack-resolved' &&
+      event.actorId === barbedDevil.id &&
+      event.targetId === heroToken.id)).toHaveLength(3)
   })
 
   it('applies Pack Tactics only while a conscious ally is within 5 feet of the target', () => {

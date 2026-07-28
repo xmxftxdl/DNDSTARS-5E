@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assignEnemyVisualVariants,
   DND5E_SRD_ENEMY_POOL,
   enemyTemplateToTokenPatch,
   searchEnemyPool,
@@ -16,7 +17,9 @@ import {
 } from './headlessCombatEngine'
 import {
   DND5E_SRD_MONSTERS,
+  dnd5eMonsterAreaSavingThrowVariants,
   dnd5eMonsterProficiencyBonus,
+  dnd5eMonsterWeaponAttackAbility,
   getDnd5eSrdMonster,
   searchDnd5eSrdMonsters,
 } from './monsters'
@@ -180,6 +183,7 @@ describe('SRD 5.1 monster catalog', () => {
     expect(ankheg.actions.find((action) => action.id === 'acid-spray')).toMatchObject({
       automation: 'headless',
       usage: { kind: 'recharge', dieSides: 6, minimum: 6 },
+      relationRequirement: { kind: 'none-from-source', slotGroup: 'bite' },
       rule: {
         kind: 'area-saving-throw',
         area: {
@@ -189,14 +193,14 @@ describe('SRD 5.1 monster catalog', () => {
           widthFeet: 5,
           aimRangeFeet: 30,
         },
-        target: 'hostile',
+        target: 'all-creatures-except-self',
         ability: 'dex',
         dc: 13,
         damage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'acid' },
         damageOnSuccessfulSave: 'half',
       },
     })
-    expect(ankheg.actions.find((action) => action.id === 'bite')?.automation).toBe('dm-adjudication')
+    expect(ankheg.actions.find((action) => action.id === 'bite')?.automation).toBe('headless')
 
     const bugbear = getDnd5eSrdMonster('srd-5.1:bugbear')!
     expect(bugbear.actions.find((action) => action.id === 'javelin')?.attack).toMatchObject({
@@ -265,7 +269,11 @@ describe('SRD 5.1 monster catalog', () => {
         damage: { count: 12, sides: 10, type: 'lightning' },
       },
     })
-    expect(behir.actions.find((action) => action.id === 'constrict')?.automation).toBe('dm-adjudication')
+    expect(behir.actions.find((action) => action.id === 'constrict')?.automation).toBe('headless')
+    expect(behir.actions.find((action) => action.id === 'multiattack')).toMatchObject({
+      automation: 'headless',
+      sequence: ['bite', 'constrict'],
+    })
 
     const brassWyrmling = getDnd5eSrdMonster('srd-5.1:brass-dragon-wyrmling')!
     expect(brassWyrmling.actions.find((action) => action.id === 'breath-weapons')).toMatchObject({
@@ -369,6 +377,16 @@ describe('SRD 5.1 monster catalog', () => {
       },
     })
     const barbedDevil = getDnd5eSrdMonster('srd-5.1:barbed-devil')!
+    expect(barbedDevil.actions.find((action) => action.id === 'multiattack')).toMatchObject({
+      kind: 'multiattack',
+      automation: 'headless',
+      sequence: ['tail', 'claw', 'claw'],
+    })
+    expect(barbedDevil.actions.find((action) => action.id === 'multiattack-hurl-flame')).toMatchObject({
+      kind: 'multiattack',
+      automation: 'headless',
+      sequence: ['hurl-flame', 'hurl-flame'],
+    })
     expect(barbedDevil.actions.find((action) => action.id === 'hurl-flame')).toMatchObject({
       kind: 'weapon-attack',
       automation: 'headless',
@@ -377,6 +395,35 @@ describe('SRD 5.1 monster catalog', () => {
         toHit: 5,
         rangeFeet: { normal: 150, long: 150 },
         damage: [{ count: 3, sides: 6, type: 'fire' }],
+      },
+    })
+
+    const boneDevil = getDnd5eSrdMonster('srd-5.1:bone-devil')!
+    expect(boneDevil.actions.find((action) => action.id === 'multiattack')).toMatchObject({
+      kind: 'multiattack',
+      automation: 'headless',
+      sequence: ['claw', 'claw', 'sting'],
+      sequenceAttackMode: 'melee',
+    })
+    expect(boneDevil.actions.find((action) => action.id === 'sting')).toMatchObject({
+      kind: 'weapon-attack',
+      automation: 'headless',
+      attack: {
+        damage: [
+          { average: 13, count: 2, sides: 8, bonus: 4, type: 'piercing' },
+          { average: 17, count: 5, sides: 6, bonus: 0, type: 'poison' },
+        ],
+        onHitEffects: [{
+          id: 'sting-poisoned',
+          kind: 'saving-throw-condition',
+          ability: 'con',
+          dc: 14,
+          conditionOnFailedSave: {
+            condition: 'poisoned',
+            durationRounds: 10,
+            repeatSaveAtEndOfTargetTurn: true,
+          },
+        }],
       },
     })
 
@@ -392,7 +439,7 @@ describe('SRD 5.1 monster catalog', () => {
       rule: {
         kind: 'area-saving-throw',
         area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-        target: 'hostile',
+        target: 'all-creatures-except-self',
         ability: 'dex',
         dc: 15,
         damage: { average: 31, count: 7, sides: 8, bonus: 0, type: 'fire' },
@@ -416,7 +463,7 @@ describe('SRD 5.1 monster catalog', () => {
       rule: {
         kind: 'area-saving-throw',
         area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-        target: 'hostile',
+        target: 'all-creatures-except-self',
         ability: 'con',
         dc: 18,
         damage: { average: 52, count: 15, sides: 6, bonus: 0, type: 'fire' },
@@ -429,6 +476,30 @@ describe('SRD 5.1 monster catalog', () => {
     expect(blackBear.actions.find((action) => action.id === 'multiattack')?.sequence).toEqual(['bite', 'claws'])
     expect(getDnd5eSrdMonster('srd-5.1:bat')).toMatchObject({ challenge: { rating: '0' }, speed: { fly: 30 } })
     expect(getDnd5eSrdMonster('srd-5.1:frog')).toMatchObject({ challenge: { rating: '0' }, speed: { swim: 20 } })
+  })
+
+  it('gives legacy legendary wrappers stable unique IDs that reference their base actions', () => {
+    for (const expected of [
+      {
+        monsterId: 'srd-5.1:unicorn',
+        baseActionId: 'hooves',
+        legendaryActionId: 'legendary-hooves',
+      },
+      {
+        monsterId: 'srd-5.1:vampire-vampire',
+        baseActionId: 'unarmed-strike',
+        legendaryActionId: 'legendary-unarmed-strike',
+      },
+    ] as const) {
+      const monster = getDnd5eSrdMonster(expected.monsterId)!
+      expect(monster.actions.some((action) => action.id === expected.baseActionId)).toBe(true)
+      expect(monster.legendaryActions).toContainEqual(expect.objectContaining({
+        id: expected.legendaryActionId,
+        referencedActionId: expected.baseActionId,
+      }))
+      expect(monster.legendaryActions?.some((action) =>
+        action.id === expected.baseActionId)).toBe(false)
+    }
   })
 
   it('preserves legendary resistance uses and canonical CR experience', () => {
@@ -541,7 +612,7 @@ describe('SRD 5.1 monster catalog', () => {
             aimRangeFeet: example.lengthFeet,
             ...(example.shape === 'line' ? { widthFeet: 5 } : {}),
           },
-          target: 'hostile',
+          target: 'all-creatures-except-self',
           ability: example.ability,
           dc: example.dc,
           ...('damage' in example
@@ -550,6 +621,27 @@ describe('SRD 5.1 monster catalog', () => {
         },
       })
     }
+  })
+
+  it('does not filter indiscriminate SRD breaths and acid spray down to hostiles', () => {
+    const effects = DND5E_SRD_MONSTERS.flatMap((monster) =>
+      monster.actions.flatMap((action) => {
+        if (
+          action.rule?.kind !== 'area-saving-throw' ||
+          (!action.id.includes('breath') && action.id !== 'acid-spray')
+        ) return []
+        return dnd5eMonsterAreaSavingThrowVariants(action).map((variant) => ({
+          monster: monster.slug,
+          action: action.id,
+          variant: variant.id,
+          target: variant.target,
+        }))
+      }))
+
+    // Chromatic and metallic dragons at four age bands plus the catalog's
+    // other breath users make this broad enough to catch table regressions.
+    expect(effects.length).toBeGreaterThanOrEqual(60)
+    expect(effects.filter((effect) => effect.target !== 'all-creatures-except-self')).toEqual([])
   })
 
   it('structures fixed one-point attacks and the selected catalog weapon gaps exactly', () => {
@@ -797,10 +889,142 @@ describe('SRD 5.1 monster catalog', () => {
       expect(action?.attack?.onHitEffects).toHaveLength(1)
     }
 
-    for (const slug of ['giant-scorpion', 'purple-worm', 'wyvern'] as const) {
+    for (const slug of ['purple-worm', 'wyvern'] as const) {
       expect(getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
         .find((action) => action.id === 'multiattack')?.automation).toBe('dm-adjudication')
     }
+  })
+
+  it('structures the first source-linked grapple and restrained catalog actions', () => {
+    const cases = [
+      {
+        slug: 'ankheg',
+        actionId: 'bite',
+        effectId: 'bite-grapple',
+        slotGroup: 'bite',
+        capacity: 1,
+        maxDistanceFeet: 5,
+        targetMaxSizeRank: 3,
+        whenCapacityFull: 'linked-target-only',
+        attackAdvantageAgainstLinkedTarget: true,
+        escapeDc: 13,
+        conditions: [{ condition: 'grappled' }],
+      },
+      {
+        slug: 'behir',
+        actionId: 'constrict',
+        effectId: 'constrict-grapple',
+        slotGroup: 'constrict',
+        capacity: 1,
+        maxDistanceFeet: 5,
+        targetMaxSizeRank: 3,
+        whenCapacityFull: 'skip-application',
+        escapeDc: 16,
+        conditions: [
+          { condition: 'grappled' },
+          { condition: 'restrained', dependsOnCondition: 'grappled' },
+        ],
+      },
+      {
+        slug: 'constrictor-snake',
+        actionId: 'constrict',
+        effectId: 'constrict-grapple',
+        slotGroup: 'constrict',
+        capacity: 1,
+        maxDistanceFeet: 5,
+        targetMaxSizeRank: 5,
+        whenCapacityFull: 'linked-target-only',
+        escapeDc: 14,
+        conditions: [
+          { condition: 'grappled' },
+          { condition: 'restrained', dependsOnCondition: 'grappled' },
+        ],
+      },
+      {
+        slug: 'giant-constrictor-snake',
+        actionId: 'constrict',
+        effectId: 'constrict-grapple',
+        slotGroup: 'constrict',
+        capacity: 1,
+        maxDistanceFeet: 5,
+        targetMaxSizeRank: 5,
+        whenCapacityFull: 'linked-target-only',
+        escapeDc: 16,
+        conditions: [
+          { condition: 'grappled' },
+          { condition: 'restrained', dependsOnCondition: 'grappled' },
+        ],
+      },
+      {
+        slug: 'giant-octopus',
+        actionId: 'tentacles',
+        effectId: 'tentacles-grapple',
+        slotGroup: 'tentacles',
+        capacity: 1,
+        maxDistanceFeet: 15,
+        targetMaxSizeRank: 5,
+        whenCapacityFull: 'linked-target-only',
+        escapeDc: 16,
+        conditions: [
+          { condition: 'grappled' },
+          { condition: 'restrained', dependsOnCondition: 'grappled' },
+        ],
+      },
+      {
+        slug: 'giant-scorpion',
+        actionId: 'claw',
+        effectId: 'claw-grapple',
+        slotGroup: 'claw',
+        capacity: 2,
+        maxDistanceFeet: 5,
+        targetMaxSizeRank: 5,
+        whenCapacityFull: 'skip-application',
+        escapeDc: 12,
+        conditions: [{ condition: 'grappled' }],
+      },
+    ] as const
+
+    for (const expected of cases) {
+      const action = getDnd5eSrdMonster(`srd-5.1:${expected.slug}`)?.actions
+        .find((candidate) => candidate.id === expected.actionId)
+      expect(action, `${expected.slug}/${expected.actionId}`).toMatchObject({
+        kind: 'weapon-attack',
+        automation: 'headless',
+        attack: {
+          onHitEffects: [{
+            id: expected.effectId,
+            kind: 'source-linked-condition',
+            relation: {
+              kind: 'grapple',
+              slotGroup: expected.slotGroup,
+              capacity: expected.capacity,
+              maxDistanceFeet: expected.maxDistanceFeet,
+              targetMaxSizeRank: expected.targetMaxSizeRank,
+              whenCapacityFull: expected.whenCapacityFull,
+              ...('attackAdvantageAgainstLinkedTarget' in expected
+                ? {
+                    attackAdvantageAgainstLinkedTarget:
+                      expected.attackAdvantageAgainstLinkedTarget,
+                  }
+                : {}),
+            },
+            escapeDc: expected.escapeDc,
+            conditions: expected.conditions,
+          }],
+        },
+      })
+      expect(action?.attack?.onHitEffects).toHaveLength(1)
+    }
+
+    expect(getDnd5eSrdMonster('srd-5.1:behir')?.actions
+      .find((action) => action.id === 'constrict')?.attack?.targetMaxSizeRank).toBe(3)
+    expect(getDnd5eSrdMonster('srd-5.1:ankheg')?.actions
+      .find((action) => action.id === 'bite')?.attack?.targetMaxSizeRank).toBeUndefined()
+    expect(getDnd5eSrdMonster('srd-5.1:giant-scorpion')?.actions
+      .find((action) => action.id === 'multiattack')).toMatchObject({
+      automation: 'headless',
+      sequence: ['claw', 'claw', 'sting'],
+    })
   })
 
   it('structures the selected knockdown, undead fortitude, and Magic Resistance traits', () => {
@@ -865,6 +1089,157 @@ describe('SRD 5.1 monster catalog', () => {
         },
       })
     }
+  })
+
+  it('structures all bronze, copper, and gold dragon breath variants with one shared recharge action', () => {
+    const cases = [
+      ['bronze-dragon-wyrmling', 12, 40, 5, 16, 3, 30, 30],
+      ['young-bronze-dragon', 15, 60, 5, 55, 10, 30, 40],
+      ['adult-bronze-dragon', 19, 90, 5, 66, 12, 30, 60],
+      ['ancient-bronze-dragon', 23, 120, 10, 88, 16, 30, 60],
+    ] as const
+    for (const [slug, dc, lineLength, lineWidth, average, dice, coneLength, push] of cases) {
+      const action = getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
+        .find((candidate) => candidate.id === 'breath-weapons')
+      expect(action, slug).toMatchObject({
+        automation: 'headless',
+        usage: { kind: 'recharge', dieSides: 6, minimum: 5 },
+        rule: {
+          kind: 'area-saving-throw',
+          variants: [
+            {
+              id: 'lightning-breath',
+              target: 'all-creatures-except-self',
+              ability: 'dex',
+              dc,
+              area: { shape: 'line', lengthFeet: lineLength, widthFeet: lineWidth },
+              damage: { average, count: dice, sides: 10, type: 'lightning' },
+              damageOnSuccessfulSave: 'half',
+            },
+            {
+              id: 'repulsion-breath',
+              target: 'all-creatures-except-self',
+              ability: 'str',
+              dc,
+              area: { shape: 'cone', lengthFeet: coneLength },
+              forcedMovementOnFailedSave: {
+                direction: 'away-from-source',
+                maximumDistanceFeet: push,
+              },
+            },
+          ],
+        },
+      })
+    }
+
+    for (const [slug, dc, lineLength, lineWidth, average, dice, coneLength] of [
+      ['copper-dragon-wyrmling', 11, 20, 5, 18, 4, 15],
+      ['young-copper-dragon', 14, 40, 5, 40, 9, 30],
+      ['adult-copper-dragon', 18, 60, 5, 54, 12, 60],
+      ['ancient-copper-dragon', 22, 90, 10, 63, 14, 90],
+    ] as const) {
+      const action = getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
+        .find((candidate) => candidate.id === 'breath-weapons')
+      expect(action, slug).toMatchObject({
+        automation: 'headless',
+        usage: { kind: 'recharge', dieSides: 6, minimum: 5 },
+        rule: {
+          kind: 'area-saving-throw',
+          variants: [
+            {
+              id: 'acid-breath',
+              target: 'all-creatures-except-self',
+              ability: 'dex',
+              dc,
+              area: { shape: 'line', lengthFeet: lineLength, widthFeet: lineWidth },
+              damage: { average, count: dice, sides: 8, type: 'acid' },
+              damageOnSuccessfulSave: 'half',
+            },
+            {
+              id: 'slowing-breath',
+              target: 'all-creatures-except-self',
+              ability: 'con',
+              dc,
+              area: { shape: 'cone', lengthFeet: coneLength },
+              activeEffectOnFailedSave: {
+                durationRounds: 10,
+                repeatSaveAtEndOfTargetTurn: true,
+                modifiers: {
+                  speedMultiplier: 0.5,
+                  preventReactions: true,
+                  maximumAttacksPerTurn: 1,
+                  actionOrBonusActionOnly: true,
+                },
+              },
+            },
+          ],
+        },
+      })
+    }
+
+    for (const [slug, dc, length, average, dice] of [
+      ['gold-dragon-wyrmling', 13, 15, 22, 4],
+      ['young-gold-dragon', 17, 30, 55, 10],
+      ['adult-gold-dragon', 21, 60, 66, 12],
+      ['ancient-gold-dragon', 24, 90, 71, 13],
+    ] as const) {
+      const action = getDnd5eSrdMonster(`srd-5.1:${slug}`)?.actions
+        .find((candidate) => candidate.id === 'breath-weapons')
+      expect(action, slug).toMatchObject({
+        automation: 'headless',
+        usage: { kind: 'recharge', dieSides: 6, minimum: 5 },
+        rule: {
+          kind: 'area-saving-throw',
+          variants: [
+            {
+              id: 'fire-breath',
+              target: 'all-creatures-except-self',
+              ability: 'dex',
+              dc,
+              area: { shape: 'cone', lengthFeet: length },
+              damage: { average, count: dice, sides: 10, type: 'fire' },
+              damageOnSuccessfulSave: 'half',
+            },
+            {
+              id: 'weakening-breath',
+              target: 'all-creatures-except-self',
+              ability: 'str',
+              dc,
+              area: { shape: 'cone', lengthFeet: length },
+              activeEffectOnFailedSave: {
+                durationRounds: 10,
+                repeatSaveAtEndOfTargetTurn: true,
+                modifiers: { strengthRollMode: 'disadvantage' },
+              },
+            },
+          ],
+        },
+      })
+    }
+  })
+
+  it('infers monster weapon abilities without treating every melee attack as Strength', () => {
+    const spy = getDnd5eSrdMonster('srd-5.1:spy')!
+    expect(dnd5eMonsterWeaponAttackAbility(
+      spy,
+      spy.actions.find((action) => action.id === 'shortsword')!.attack!,
+    )).toBe('dex')
+    expect(dnd5eMonsterWeaponAttackAbility(
+      spy,
+      spy.actions.find((action) => action.id === 'hand-crossbow')!.attack!,
+    )).toBe('dex')
+
+    expect(dnd5eMonsterWeaponAttackAbility(
+      {
+        abilities: { str: 16, dex: 12, con: 10, int: 10, wis: 10, cha: 10 },
+        challenge: { rating: '1', xp: 200 },
+      },
+      {
+        mode: 'ranged',
+        toHit: 5,
+        damage: [{ average: 6, count: 1, sides: 6, bonus: 3, type: 'piercing' }],
+      },
+    )).toBe('str')
   })
 
   it('migrates only the Rakshasa Limited Magic Immunity trait exactly', () => {
@@ -970,6 +1345,24 @@ describe('SRD 5.1 monster catalog', () => {
       'cave-skulk',
       'forest-scout',
     ])).toBe('woodland-archer')
+  })
+
+  it('assigns explicit rotating portraits to every monster in a batch insertion', () => {
+    const template = DND5E_SRD_ENEMY_POOL.find((entry) => entry.id === 'srd-5.1:goblin')!
+    const assigned = assignEnemyVisualVariants(
+      [template, template, template],
+      [{ poolId: template.id, visualVariantId: undefined }],
+    )
+    expect(assigned.map((entry) => entry.visualVariantId)).toEqual([
+      'woodland-archer',
+      'ruin-raider',
+      'cave-skulk',
+    ])
+
+    expect(assignEnemyVisualVariants(
+      [{ ...template, visualVariantId: 'ruin-raider' }],
+      [{ poolId: template.id, visualVariantId: 'forest-scout' }],
+    )[0].visualVariantId).toBe('ruin-raider')
   })
 })
 

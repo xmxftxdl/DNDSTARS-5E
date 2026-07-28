@@ -4,6 +4,7 @@ import type {
   Dnd5ePluginBackgroundDefinition,
   Dnd5ePluginDiceRollDeclaration,
   Dnd5ePluginFeatureDefinition,
+  Dnd5ePluginFeatDefinition,
   Dnd5ePluginItemDefinition,
   Dnd5ePluginRaceDefinition,
   Dnd5ePluginResourceDefinition,
@@ -52,6 +53,7 @@ export interface Dnd5ePluginStateMigrationDeclaration {
 interface SandboxContributions {
   manifest: Dnd5eRulesPluginManifest
   features: Dnd5ePluginFeatureDefinition[]
+  feats: Dnd5ePluginFeatDefinition[]
   actions: SandboxActionDeclaration[]
   races: Dnd5ePluginRaceDefinition[]
   backgrounds: Dnd5ePluginBackgroundDefinition[]
@@ -106,6 +108,7 @@ export interface Dnd5ePluginStateMigrationResult {
 export interface Dnd5ePluginSandboxSession {
   readonly manifest: Dnd5eRulesPluginManifest
   readonly features: readonly Dnd5ePluginFeatureDefinition[]
+  readonly feats: readonly Dnd5ePluginFeatDefinition[]
   readonly actions: readonly SandboxActionDeclaration[]
   readonly races: readonly Dnd5ePluginRaceDefinition[]
   readonly backgrounds: readonly Dnd5ePluginBackgroundDefinition[]
@@ -313,6 +316,7 @@ export async function createDnd5ePluginSandbox(bytes: ArrayBuffer): Promise<Dnd5
   const session: Dnd5ePluginSandboxSession = {
     get manifest() { return initialized.manifest },
     get features() { return initialized.features },
+    get feats() { return initialized.feats ?? [] },
     get actions() { return initialized.actions },
     get races() { return initialized.races },
     get backgrounds() { return initialized.backgrounds ?? [] },
@@ -393,6 +397,7 @@ export function activateDnd5ePluginSandbox(session: Dnd5ePluginSandboxSession): 
         api.registerHeadlessAction({ ...action, execution: 'worker' })
       }
       for (const feature of session.features) api.registerFeature(feature)
+      for (const feat of session.feats) api.registerFeat(feat)
       for (const subclass of session.subclasses) api.registerSubclass(subclass)
       for (const resource of session.resources) api.registerResource(resource)
       for (const race of session.races) api.registerRace(race)

@@ -2,6 +2,7 @@ import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
 import type { BattleMap } from '../../store/maps'
 import type { Character } from '../../types/character'
 import type { Dnd5eTurnEconomyCounts } from '../../lib/sharedCombatTypes'
+import { isMovementLocked } from '../../lib/combatStatus'
 import {
   mapGeometryRuntimeForMap,
   mapGeometryTerrainElevationAtPoint,
@@ -10,6 +11,7 @@ import {
 import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import {
   dnd5eEffectiveSpeed,
+  dnd5eGrappleDragExtraMovementFeet,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
   type Dnd5eCombatEvent,
@@ -17,6 +19,13 @@ import {
 import { createDnd5eMapCombatSnapshot, planDnd5eMapResultApplication, type Dnd5eMapResultPlan } from './mapBridge'
 import { getDnd5eSrdMonster } from './monsters'
 import { dnd5ePersistentAreaDifficultTerrainMultiplierAt, dnd5ePersistentAreaSpeedCostMultiplierAt } from './pluginAreas'
+
+export interface Dnd5eMonsterMapMovementTrace {
+  tokenId: string
+  to: { x: number; y: number }
+  path: Array<{ x: number; y: number }>
+  pathElevationsFeet: number[]
+}
 
 export function resolveDnd5eMonsterMapMove(input: {
   combatId: string
@@ -30,10 +39,37 @@ export function resolveDnd5eMonsterMapMove(input: {
   dash?: boolean
   nimbleEscape?: 'disengage'
   turnEconomy?: Dnd5eTurnEconomyCounts
-}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-blocked' | 'object-interaction-unavailable' } {
+  fallingDamageRollsByCombatantId?: Readonly<Record<string, readonly number[]>>
+}): { ok: true; result: Dnd5eActionResult; application?: Dnd5eMapResultPlan; distanceFeet: number; path: Array<{ x: number; y: number }>; doorsToOpen: string[]; movementTraces?: readonly Dnd5eMonsterMapMovementTrace[] } | { ok: false; reason: 'invalid-actor' | 'combatant-missing' | 'movement-locked' | 'movement-blocked' | 'object-interaction-unavailable' } {
   const actorToken = input.map.tokens.find((token) => token.id === input.actorTokenId && token.type === 'enemy')
   const monster = actorToken?.poolId ? getDnd5eSrdMonster(actorToken.poolId) : undefined
   if (!actorToken || !monster) return { ok: false, reason: 'invalid-actor' }
+  const snapshot = createDnd5eMapCombatSnapshot({
+    combatId: input.combatId,
+    round: input.round,
+    map: input.map,
+    characters: input.characters,
+    initiativeOrder: input.initiativeOrder,
+  })
+  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
+  const actorCombatant = snapshot.state.combatants[actorToken.id]
+  if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
+  if (isMovementLocked(actorCombatant.conditions)) return { ok: false, reason: 'movement-locked' }
+  const draggedTargetTokens = input.map.tokens.filter((candidate) => {
+    const targetCombatant = snapshot.state.combatants[candidate.id]
+    return targetCombatant?.classState.activeEffects?.some((effect) =>
+      effect.standardCondition === 'grappled' &&
+      !effect.dependsOnEffectId &&
+      effect.relation?.kind === 'grapple' &&
+      effect.relation.movement === 'drag-target' &&
+      effect.relation.sourceActorId === actorToken.id &&
+      effect.source.actorId === actorToken.id)
+  })
+  const movingIds = new Set([actorToken.id, ...draggedTargetTokens.map((target) => target.id)])
+  const pathfindingMap = {
+    ...input.map,
+    tokens: input.map.tokens.filter((candidate) => !movingIds.has(candidate.id)),
+  }
   const geometry = mapGeometryRuntimeForMap(input.map.id)
   const actorElevationFeet = mapGeometryTokenElevation(geometry, actorToken)
   const actorGroundElevationFeet = mapGeometryTerrainElevationAtPoint(geometry, actorToken)
@@ -49,7 +85,7 @@ export function resolveDnd5eMonsterMapMove(input: {
     targetElevationFeet > targetGroundElevationFeet
   )
   const path = findMapGeometryPath({
-    geometry, map: input.map, token: actorToken, to: input.to,
+    geometry, map: pathfindingMap, token: actorToken, to: input.to,
     allowOpenUnlockedDoors: true,
     canClimb: (monster.speed.climb ?? 0) > 0,
     canSwim: (monster.speed.swim ?? 0) > 0,
@@ -62,16 +98,6 @@ export function resolveDnd5eMonsterMapMove(input: {
   })
   if (!path) return { ok: false, reason: 'movement-blocked' }
   if (path.doorsToOpen.length > 1) return { ok: false, reason: 'movement-blocked' }
-  const snapshot = createDnd5eMapCombatSnapshot({
-    combatId: input.combatId,
-    round: input.round,
-    map: input.map,
-    characters: input.characters,
-    initiativeOrder: input.initiativeOrder,
-  })
-  const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
-  const actorCombatant = snapshot.state.combatants[actorToken.id]
-  if (actorIndex < 0 || !actorCombatant) return { ok: false, reason: 'combatant-missing' }
   if (input.turnEconomy) {
     actorCombatant.turn = {
       actionAvailable: input.turnEconomy.action.current > 0,
@@ -84,6 +110,69 @@ export function resolveDnd5eMonsterMapMove(input: {
   const finalElevationFeet = path.elevationsFeet.at(-1) ?? actorElevationFeet
   const verticalDistanceFeet = Math.abs(finalElevationFeet - actorElevationFeet)
   const distanceFeet = path.distanceFeet + verticalDistanceFeet
+  const draggedMovementTraces: Dnd5eMonsterMapMovementTrace[] = []
+  if (draggedTargetTokens.length > 0) {
+    const openedDoorIds = new Set(path.doorsToOpen)
+    const dragGeometry = geometry && openedDoorIds.size > 0
+      ? {
+          ...geometry,
+          doors: geometry.doors.map((door) => openedDoorIds.has(door.id)
+            ? { ...door, state: 'open' as const, openState: 'open' as const }
+            : door),
+        }
+      : geometry
+    const dragMap = pathfindingMap
+    const sourcePathStart = path.points[0] ?? { x: actorToken.x, y: actorToken.y }
+    const sourceElevationStart = path.elevationsFeet[0] ?? actorElevationFeet
+    for (const draggedTarget of draggedTargetTokens) {
+      const draggedElevationStart = mapGeometryTokenElevation(geometry, draggedTarget)
+      let draggedToken = { ...draggedTarget, elevationFeet: draggedElevationStart }
+      let expectedFrom = { x: draggedTarget.x, y: draggedTarget.y }
+      const translatedPath = [{ ...expectedFrom }]
+      const translatedElevationsFeet = [draggedElevationStart]
+      for (let index = 1; index < path.points.length; index += 1) {
+        const sourcePoint = path.points[index]
+        const expectedTo = {
+          x: draggedTarget.x + sourcePoint.x - sourcePathStart.x,
+          y: draggedTarget.y + sourcePoint.y - sourcePathStart.y,
+        }
+        const expectedElevation = draggedElevationStart +
+          (path.elevationsFeet[index] ?? sourceElevationStart) - sourceElevationStart
+        const draggedSegment = findMapGeometryPath({
+          geometry: dragGeometry,
+          map: dragMap,
+          token: draggedToken,
+          to: expectedTo,
+          allowOpenUnlockedDoors: false,
+          canClimb: (monster.speed.climb ?? 0) > 0,
+          canSwim: (monster.speed.swim ?? 0) > 0,
+          canFly: usesFlight,
+          targetElevationFeet: expectedElevation,
+          additionalDifficultTerrainMultiplier: (token, position) =>
+            dnd5ePersistentAreaDifficultTerrainMultiplierAt({ map: input.map, token, position }),
+          additionalSpeedCostMultiplier: (token, position) =>
+            dnd5ePersistentAreaSpeedCostMultiplierAt({ map: input.map, token, position }),
+        })
+        const followsTranslatedSegment = draggedSegment?.points.length === 2 &&
+          draggedSegment.points[0].x === expectedFrom.x &&
+          draggedSegment.points[0].y === expectedFrom.y &&
+          draggedSegment.points[1].x === expectedTo.x &&
+          draggedSegment.points[1].y === expectedTo.y &&
+          draggedSegment.elevationsFeet.at(-1) === expectedElevation
+        if (!followsTranslatedSegment) return { ok: false, reason: 'movement-blocked' }
+        expectedFrom = expectedTo
+        draggedToken = { ...draggedToken, ...expectedTo, elevationFeet: expectedElevation }
+        translatedPath.push(expectedTo)
+        translatedElevationsFeet.push(expectedElevation)
+      }
+      draggedMovementTraces.push({
+        tokenId: draggedTarget.id,
+        to: { ...expectedFrom },
+        path: translatedPath,
+        pathElevationsFeet: translatedElevationsFeet,
+      })
+    }
+  }
   let actionState = { ...snapshot.state, initiativeIndex: actorIndex }
   const priorEvents: Dnd5eCombatEvent[] = []
   if (path.doorsToOpen.length === 1) {
@@ -132,15 +221,20 @@ export function resolveDnd5eMonsterMapMove(input: {
   // instead crawl (or choose another action), never lose its whole move to an
   // opaque invalid-class-feature rejection.
   const standFromProne = isProne && !standingPrevented && dnd5eEffectiveSpeed(actorCombatant) > 0
-  const movementCostFeet = path.movementCostFeet + verticalDistanceFeet +
-    (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0)
+  const locomotionCostFeet = path.movementCostFeet + verticalDistanceFeet +
+    (isProne && !standFromProne ? path.distanceFeet : 0)
+  const movementCostFeet = locomotionCostFeet +
+    (standFromProne ? Math.floor(dnd5eEffectiveSpeed(actorCombatant) / 2) : 0) +
+    dnd5eGrappleDragExtraMovementFeet(actionState, actorToken.id, locomotionCostFeet)
   const result = resolveDnd5eHeadlessAction(
     actionState,
     {
-      type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet, movementCost: movementCostFeet,
+      type: 'move', actorId: actorToken.id, to: input.to, distance: path.distanceFeet,
+      movementCost: movementCostFeet, movementCostIncludesDrag: true,
       traversalMode: usesFlight ? 'fly' : 'walk',
       toElevationFeet: finalElevationFeet,
       standFromProne,
+      fallingDamageRollsByCombatantId: input.fallingDamageRollsByCombatantId,
     },
   )
   if (!result.ok) return { ok: true, result, distanceFeet, path: path.points, doorsToOpen: path.doorsToOpen }
@@ -154,11 +248,22 @@ export function resolveDnd5eMonsterMapMove(input: {
     distanceFeet,
     path: path.points,
     doorsToOpen: path.doorsToOpen,
+    movementTraces: [
+      {
+        tokenId: actorToken.id,
+        to: input.to,
+        path: path.points,
+        pathElevationsFeet: path.elevationsFeet,
+      },
+      ...draggedMovementTraces,
+    ],
     application: planDnd5eMapResultApplication({
       state: transactionResult.state,
       map: input.map,
       characters: input.characters,
       characterIdByCombatantId: snapshot.characterIdByCombatantId,
+      openedDoorIds: path.doorsToOpen,
+      events: [...transactionResult.events],
     }),
   }
 }

@@ -162,6 +162,7 @@ export interface Dnd5eCustomMonsterMechanicDraft {
   modifierRoll: 'attack' | 'damage' | 'saving-throw'
   modifierMode: 'bonus' | 'advantage' | 'disadvantage'
   modifierBonus: number
+  attackMode: 'melee' | 'ranged'
   attackToHit: number
   attackEconomy: 'none' | 'reaction'
   attackDamageMode: 'dice' | 'fixed'
@@ -334,6 +335,7 @@ export function createDnd5eCustomMonsterMechanicDraft(): Dnd5eCustomMonsterMecha
     modifierRoll: 'attack',
     modifierMode: 'bonus',
     modifierBonus: 2,
+    attackMode: 'melee',
     attackToHit: 5,
     attackEconomy: 'reaction',
     attackDamageMode: 'dice',
@@ -720,6 +722,7 @@ export function buildDnd5eCustomMonster(draft: Dnd5eCustomMonsterDraft): Dnd5eMo
               : mechanic.effectKind === 'attack'
                 ? {
                     id: 'effect-0', kind: 'attack' as const, target: mechanic.effectTarget,
+                    attackMode: mechanic.attackMode,
                     toHit: Math.trunc(mechanic.attackToHit),
                     economy: mechanic.attackEconomy,
                     damage: mechanic.attackDamageMode === 'fixed'
@@ -1075,6 +1078,7 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
         modifierRoll: effect?.kind === 'roll-modifier' ? effect.roll : 'attack',
         modifierMode: effect?.kind === 'roll-modifier' ? effect.mode : 'bonus',
         modifierBonus: effect?.kind === 'roll-modifier' ? effect.bonus ?? 0 : 2,
+        attackMode: effect?.kind === 'attack' ? effect.attackMode ?? 'melee' : 'melee',
         attackToHit: effect?.kind === 'attack' ? effect.toHit : 5,
         attackEconomy: effect?.kind === 'attack' ? effect.economy ?? 'none' : 'reaction',
         attackDamageMode: effect?.kind === 'attack' && effect.damage.count === 0 ? 'fixed' : 'dice',
@@ -1091,7 +1095,23 @@ export function dnd5eCustomMonsterDraftFromStatBlock(monster: Dnd5eMonsterStatBl
       name: trait.name,
       description: trait.description,
       automation: trait.automation ?? 'dm-adjudication',
-      ruleKind: trait.rule?.kind === 'mucous-cloud' ? 'none' : trait.rule?.kind ?? 'none',
+      ruleKind: (() => {
+        const kind = trait.rule?.kind
+        return kind === 'undead-fortitude' ||
+          kind === 'regeneration' ||
+          kind === 'swarm' ||
+          kind === 'nimble-escape' ||
+          kind === 'keen-sense' ||
+          kind === 'ambusher' ||
+          kind === 'charge-damage' ||
+          kind === 'magic-resistance' ||
+          kind === 'limited-magic-immunity' ||
+          kind === 'magic-weapons' ||
+          kind === 'pack-tactics' ||
+          kind === 'conditional-target-bonus'
+          ? kind
+          : 'none'
+      })(),
       amount: trait.rule?.kind === 'regeneration' ? trait.rule.amount : 10,
       dcBase: trait.rule?.kind === 'undead-fortitude' ? trait.rule.dcBase : 5,
       damageTypes: trait.rule?.kind === 'regeneration'

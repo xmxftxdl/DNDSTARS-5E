@@ -43,13 +43,37 @@ describe('D&D 5e summoned creature lifecycle', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.plan.token).toMatchObject({
-      id: 'plugin-summon:action-1', poolId: 'srd-5.1:wolf', type: 'enemy', hp: 11, maxHp: 11,
+      id: 'plugin-summon:action-1', poolId: 'srd-5.1:wolf', visualVariantId: 'rain-stalker',
+      type: 'enemy', hp: 11, maxHp: 11,
       dnd5eSummon: {
         sourceCharacterId: 'actor', createdRound: 2, expiresAfterRound: 11,
         concentrationId: 'plugin-summon:action-1', side: 'player',
       },
     })
     expect(result.plan.initiativeEntry).toMatchObject({ tokenId: 'plugin-summon:action-1', roll: 14 })
+  })
+
+  it('rotates a summon to the next unused portrait for the same monster', () => {
+    const existingWolf: Token = {
+      ...actor,
+      id: 'existing-wolf',
+      label: '狼',
+      x: 225,
+      y: 225,
+      type: 'enemy',
+      characterId: undefined,
+      poolId: 'srd-5.1:wolf',
+      visualVariantId: 'rain-stalker',
+    }
+    const result = planDnd5eSummonedCreature({
+      map: map([actor, existingWolf]), actorToken: actor, sourceCharacterId: 'actor',
+      featureId: 'com.example:wolf', pluginId: 'com.example', actionId: 'action-2', round: 2,
+      targetCell: { col: 2, row: 1 }, initiativeD20: 12,
+      summon: { monsterId: 'srd-5.1:wolf', durationRounds: 10, side: 'ally' },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.plan.token.visualVariantId).toBe('snow-howler')
   })
 
   it('rejects occupied placement before the action can spend resources', () => {

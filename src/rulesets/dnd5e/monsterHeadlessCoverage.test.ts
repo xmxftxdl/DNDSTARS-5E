@@ -1,26 +1,45 @@
 import { describe, expect, it } from 'vitest'
 import { auditDnd5eMonsterHeadlessCoverage } from './monsterHeadlessCoverage'
-import { DND5E_SRD_MONSTERS, type Dnd5eMonsterStatBlock } from './monsters'
+import {
+  DND5E_SRD_MONSTERS,
+  dnd5eMonsterAreaSavingThrowVariants,
+  type Dnd5eMonsterStatBlock,
+} from './monsters'
 
 const ACTION_BASELINE = {
-  total: 952,
-  headlessMinimum: 605,
-  dmAdjudicationMaximum: 102,
-  unstructuredMaximum: 216,
-  blockedByChildMaximum: 29,
+  total: 954,
+  headlessMinimum: 637,
+  // Two legacy legendary wrappers moved from unstructured to explicit DM
+  // adjudication. Twelve metallic composite breaths moved from unstructured
+  // to Headless without changing the total action count. The Barbed Devil's
+  // two legal Multiattack sequences add one action and automate the original
+  // prose parent; its Hurl Flame child was already a complete Headless attack.
+  // Bone Devil's Sting and Multiattack now resolve their condition save, and
+  // Centaur's melee/ranged alternatives add one action while automating the
+  // original parent.
+  dmAdjudicationMaximum: 97,
+  // Six formerly prose-only Parry reactions now use an authoritative
+  // one-attack AC rule.
+  unstructuredMaximum: 194,
+  blockedByChildMaximum: 26,
 } as const
 
 const SPELL_OCCURRENCE_BASELINE = {
   total: 313,
   fullMinimum: 40,
-  manualMaximum: 94,
-  missingMaximum: 179,
+  // A prose-only definition is still forward progress from a missing spell,
+  // even though it must remain manual until its map choices are structured.
+  // Ratchet the combined defined set so missing -> manual -> full is monotonic.
+  definedMinimum: 147,
+  missingMaximum: 166,
 } as const
 
 const TRAIT_BASELINE = {
   total: 551,
-  headlessWithRuleMinimum: 86,
-  dmAdjudicationMaximum: 465,
+  // Relentless, Petrifying Gaze, Blood Frenzy, Surprise Attack,
+  // Doppelganger Ambusher, Reckless and Marilith Reactive are authoritative.
+  headlessWithRuleMinimum: 104,
+  dmAdjudicationMaximum: 447,
 } as const
 
 describe('D&D 5e monster Headless coverage audit', () => {
@@ -51,7 +70,8 @@ describe('D&D 5e monster Headless coverage audit', () => {
     expect(spells.total).toBe(SPELL_OCCURRENCE_BASELINE.total)
     expect(spells.full + spells.manual + spells.missing).toBe(spells.total)
     expect(spells.full).toBeGreaterThanOrEqual(SPELL_OCCURRENCE_BASELINE.fullMinimum)
-    expect(spells.manual).toBeLessThanOrEqual(SPELL_OCCURRENCE_BASELINE.manualMaximum)
+    expect(spells.full + spells.manual)
+      .toBeGreaterThanOrEqual(SPELL_OCCURRENCE_BASELINE.definedMinimum)
     expect(spells.missing).toBeLessThanOrEqual(SPELL_OCCURRENCE_BASELINE.missingMaximum)
     expect(spells.compatibilityRate).toBe(spells.full / spells.total)
 
@@ -68,6 +88,80 @@ describe('D&D 5e monster Headless coverage audit', () => {
       monstersWithUnparsedClauses: 0,
       unparsedClauseCount: 0,
     })
+  })
+
+  it('keeps every metallic composite breath weapon on one shared Headless recharge action', () => {
+    const slugs = [
+      'bronze-dragon-wyrmling',
+      'young-bronze-dragon',
+      'adult-bronze-dragon',
+      'ancient-bronze-dragon',
+      'copper-dragon-wyrmling',
+      'young-copper-dragon',
+      'adult-copper-dragon',
+      'ancient-copper-dragon',
+      'gold-dragon-wyrmling',
+      'young-gold-dragon',
+      'adult-gold-dragon',
+      'ancient-gold-dragon',
+    ] as const
+    const expectedVariantIds = (slug: string) =>
+      slug.includes('bronze')
+        ? ['lightning-breath', 'repulsion-breath']
+        : slug.includes('copper')
+          ? ['acid-breath', 'slowing-breath']
+          : ['fire-breath', 'weakening-breath']
+    const reportRows = new Map(
+      auditDnd5eMonsterHeadlessCoverage().actions.rows
+        .map((row) => [`${row.slug}:${row.actionId}`, row]),
+    )
+
+    for (const slug of slugs) {
+      const monster = DND5E_SRD_MONSTERS.find((candidate) => candidate.slug === slug)
+      const breathWeapons = monster?.actions.find((action) => action.id === 'breath-weapons')
+      expect(breathWeapons, slug).toBeDefined()
+      expect(breathWeapons?.automation, slug).toBe('headless')
+      expect(breathWeapons?.usage, slug).toEqual({
+        kind: 'recharge',
+        dieSides: 6,
+        minimum: 5,
+      })
+      expect(dnd5eMonsterAreaSavingThrowVariants(breathWeapons!)
+        .map((variant) => variant.id), slug).toEqual(expectedVariantIds(slug))
+      expect(reportRows.get(`${slug}:breath-weapons`), slug).toMatchObject({
+        effectiveAutomation: 'headless',
+        reasonCodes: [],
+      })
+    }
+  })
+
+  it('reports both Barbed Devil Multiattack alternatives as complete Headless actions', () => {
+    const monster = DND5E_SRD_MONSTERS.find((candidate) => candidate.slug === 'barbed-devil')
+    expect(monster?.actions.find((action) => action.id === 'multiattack')).toMatchObject({
+      kind: 'multiattack',
+      automation: 'headless',
+      sequence: ['tail', 'claw', 'claw'],
+      sequenceAttackMode: 'melee',
+    })
+    expect(monster?.actions.find((action) => action.id === 'multiattack-hurl-flame')).toMatchObject({
+      kind: 'multiattack',
+      automation: 'headless',
+      sequence: ['hurl-flame', 'hurl-flame'],
+      sequenceAttackMode: 'ranged',
+    })
+
+    const rows = new Map(
+      auditDnd5eMonsterHeadlessCoverage().actions.rows
+        .filter((row) => row.slug === 'barbed-devil')
+        .map((row) => [row.actionId, row]),
+    )
+    for (const actionId of ['multiattack', 'multiattack-hurl-flame', 'hurl-flame']) {
+      expect(rows.get(actionId), actionId).toMatchObject({
+        effectiveAutomation: 'headless',
+        blockedChildIds: [],
+        reasonCodes: [],
+      })
+    }
   })
 
   it('retains every canonical conditional defense and structures key bypass clauses', () => {
@@ -121,6 +215,34 @@ describe('D&D 5e monster Headless coverage audit', () => {
       row.declaredAutomation === 'headless' &&
       row.hasRule &&
       row.effectiveAutomation === 'headless-with-rule')).toBe(true)
+  })
+
+  it('reports every SRD Relentless trait as structured Headless coverage', () => {
+    const expected = new Map([
+      ['boar', 7],
+      ['giant-boar', 10],
+      ['wereboar-boar', 14],
+      ['wereboar-human', 14],
+      ['wereboar-hybrid', 14],
+    ])
+    const reportRows = new Map(
+      auditDnd5eMonsterHeadlessCoverage().traits.rows
+        .filter((row) => expected.has(row.slug))
+        .map((row) => [row.slug, row]),
+    )
+
+    for (const [slug, maximumDamage] of expected) {
+      const monster = DND5E_SRD_MONSTERS.find((candidate) => candidate.slug === slug)!
+      expect(monster.traits.find((trait) => trait.rule?.kind === 'relentless')).toMatchObject({
+        automation: 'headless',
+        rule: { kind: 'relentless', maximumDamage },
+      })
+      expect(reportRows.get(slug), slug).toMatchObject({
+        declaredAutomation: 'headless',
+        hasRule: true,
+        effectiveAutomation: 'headless-with-rule',
+      })
+    }
   })
 
   it('separates explicit DM actions, missing rules, invalid claims and child-blocked Multiattack', () => {

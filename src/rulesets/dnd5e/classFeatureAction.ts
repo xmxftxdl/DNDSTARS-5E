@@ -140,6 +140,8 @@ export interface PreparedDnd5eMonkBonusAttack {
 export interface Dnd5eMonkBonusAttackRoll {
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
@@ -149,6 +151,8 @@ export interface Dnd5eMonkBonusAttackRoll {
   damageRolls: readonly number[]
   stunningStrikeSaveD20?: number
   stunningStrikeSaveD20Second?: number
+  stunningStrikeSaveHalflingLuckyD20?: number
+  stunningStrikeSaveHalflingLuckyD20Second?: number
   stunningStrikeSaveBlessRoll?: number
   stunningStrikeSaveBaneRoll?: number
   stunningStrikeSaveRerollD20?: number
@@ -157,6 +161,8 @@ export interface Dnd5eMonkBonusAttackRoll {
   stunningStrikeDarkOnesOwnLuckRoll?: number
   openHandSavingThrowD20?: number
   openHandSavingThrowD20Second?: number
+  openHandHalflingLuckyD20?: number
+  openHandHalflingLuckyD20Second?: number
   openHandBlessRoll?: number
   openHandBaneRoll?: number
   openHandSavingThrowRerollD20?: number
@@ -790,6 +796,8 @@ export function resolvePreparedDnd5eClassFeature(input: {
   turnUndeadSavingThrows?: readonly Dnd5eSpellTargetSavingThrowRoll[]
   savingThrowD20?: number
   savingThrowD20Second?: number
+  savingThrowHalflingLuckyD20?: number
+  savingThrowHalflingLuckyD20Second?: number
   savingThrowBlessRoll?: number
   savingThrowBaneRoll?: number
   savingThrowRerollD20?: number
@@ -810,6 +818,8 @@ export function resolvePreparedDnd5eClassFeature(input: {
           ...attack,
           d20: input.monkAttackRolls?.[index]?.d20 ?? 0,
           d20Second: input.monkAttackRolls?.[index]?.d20Second,
+          halflingLuckyD20: input.monkAttackRolls?.[index]?.halflingLuckyD20,
+          halflingLuckyD20Second: input.monkAttackRolls?.[index]?.halflingLuckyD20Second,
           blessRoll: input.monkAttackRolls?.[index]?.blessRoll,
           baneRoll: input.monkAttackRolls?.[index]?.baneRoll,
           bardicInspirationRoll: input.monkAttackRolls?.[index]?.bardicInspirationRoll,
@@ -821,6 +831,8 @@ export function resolvePreparedDnd5eClassFeature(input: {
           damageRolls: input.monkAttackRolls?.[index]?.damageRolls ?? [],
           stunningStrikeSaveD20: input.monkAttackRolls?.[index]?.stunningStrikeSaveD20,
           stunningStrikeSaveD20Second: input.monkAttackRolls?.[index]?.stunningStrikeSaveD20Second,
+          stunningStrikeSaveHalflingLuckyD20: input.monkAttackRolls?.[index]?.stunningStrikeSaveHalflingLuckyD20,
+          stunningStrikeSaveHalflingLuckyD20Second: input.monkAttackRolls?.[index]?.stunningStrikeSaveHalflingLuckyD20Second,
           stunningStrikeSaveBlessRoll: input.monkAttackRolls?.[index]?.stunningStrikeSaveBlessRoll,
           stunningStrikeSaveBaneRoll: input.monkAttackRolls?.[index]?.stunningStrikeSaveBaneRoll,
           stunningStrikeSaveRerollD20: input.monkAttackRolls?.[index]?.stunningStrikeSaveRerollD20,
@@ -831,6 +843,8 @@ export function resolvePreparedDnd5eClassFeature(input: {
             ...attack.openHandTechnique,
             savingThrowD20: input.monkAttackRolls?.[index]?.openHandSavingThrowD20,
             savingThrowD20Second: input.monkAttackRolls?.[index]?.openHandSavingThrowD20Second,
+            halflingLuckyD20: input.monkAttackRolls?.[index]?.openHandHalflingLuckyD20,
+            halflingLuckyD20Second: input.monkAttackRolls?.[index]?.openHandHalflingLuckyD20Second,
             blessRoll: input.monkAttackRolls?.[index]?.openHandBlessRoll,
             baneRoll: input.monkAttackRolls?.[index]?.openHandBaneRoll,
             savingThrowRerollD20: input.monkAttackRolls?.[index]?.openHandSavingThrowRerollD20,
@@ -870,6 +884,8 @@ export function resolvePreparedDnd5eClassFeature(input: {
           ...prepared.headlessAction,
           savingThrowD20: input.savingThrowD20,
           savingThrowD20Second: input.savingThrowD20Second,
+          halflingLuckyD20: input.savingThrowHalflingLuckyD20,
+          halflingLuckyD20Second: input.savingThrowHalflingLuckyD20Second,
           savingThrowBlessRoll: input.savingThrowBlessRoll,
           savingThrowBaneRoll: input.savingThrowBaneRoll,
           savingThrowRerollD20: input.savingThrowRerollD20,

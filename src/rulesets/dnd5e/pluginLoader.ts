@@ -17,6 +17,17 @@ import {
   parseDnd5eDeclarativeRulesPackageV1,
   type Dnd5eDeclarativeRulesPackageV1,
 } from './declarativeSubclassAbility'
+import {
+  dnd5eContentPackageAutomationCoverageV2,
+  dnd5eContentPackageSummaryV2,
+  dnd5eRulesPluginFromContentPackageV2,
+  parseDnd5eContentPackageV2,
+  type Dnd5eContentAutomationCoverageReportV2,
+  type Dnd5eContentPackageProvenanceV2,
+  type Dnd5eContentPackageSummaryV2,
+  type Dnd5eContentPackageV2,
+} from './contentPackageV2'
+import { getRoomSession } from '../../lib/roomSession'
 
 const STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v2'
 const LEGACY_STORAGE_KEY = 'dndstars:dnd5e-rules-plugins:v1'
@@ -42,6 +53,14 @@ export type InstalledDnd5eRulesPlugin =
       integrity: string
       enabled: boolean
     }
+  | {
+      id: string
+      source: 'ephemeral'
+      fileName: string
+      /** Required immutable pin, formatted as sha256-<base64>. */
+      integrity: string
+      enabled: true
+    }
 
 export interface Dnd5eRulesPluginLoadFailure {
   id: string
@@ -59,11 +78,21 @@ export interface Dnd5eRulesPluginHost {
     integrity: string
     bytes: ArrayBuffer
   }): Promise<InstalledDnd5eRulesPlugin>
+  installEphemeralBytes(input: {
+    id: string
+    version: string
+    fileName: string
+    integrity: string
+    bytes: ArrayBuffer
+  }): Promise<InstalledDnd5eRulesPlugin>
   inspectFile(file: File): Promise<{
     manifest: Dnd5eRulesPluginManifest
     fileName: string
     integrity: string
     bytes: ArrayBuffer
+    contentSummary?: Dnd5eContentPackageSummaryV2
+    automationCoverage?: Dnd5eContentAutomationCoverageReportV2
+    provenance?: Dnd5eContentPackageProvenanceV2
   }>
   migrateState(input: {
     bytes: ArrayBuffer
@@ -72,9 +101,13 @@ export interface Dnd5eRulesPluginHost {
   }): Promise<{ state: JsonValue; fromVersion: number; toVersion: number }>
   readBytes(pluginId: string): Promise<ArrayBuffer>
   remove(pluginId: string): Promise<void>
+  clearEphemeral(): Promise<void>
   listInstalled(): readonly InstalledDnd5eRulesPlugin[]
   listActive(): ReturnType<typeof registeredDnd5eRulesPlugins>
 }
+
+const ephemeralModuleBytes = new Map<string, ArrayBuffer>()
+const ephemeralDescriptors = new Map<string, Extract<InstalledDnd5eRulesPlugin, { source: 'ephemeral' }>>()
 
 declare global {
   interface Window {
@@ -140,7 +173,10 @@ export function installedDnd5eRulesPlugins(): InstalledDnd5eRulesPlugin[] {
 }
 
 function persistInstalled(descriptors: readonly InstalledDnd5eRulesPlugin[]): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(descriptors))
+  window.localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(descriptors.filter((descriptor) => descriptor.source !== 'ephemeral')),
+  )
 }
 
 function assertPluginId(pluginId: string): void {
@@ -248,6 +284,11 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string) {
       fileName,
       integrity,
       bytes,
+      ...(artifact.kind === 'content-v2' ? {
+        contentSummary: dnd5eContentPackageSummaryV2(artifact.package),
+        automationCoverage: dnd5eContentPackageAutomationCoverageV2(artifact.package, integrity),
+        provenance: structuredClone(artifact.package.provenance),
+      } : {}),
     }
   } finally {
     terminatePluginArtifact(artifact)
@@ -255,6 +296,11 @@ async function inspectPluginBytes(bytes: ArrayBuffer, fileName: string) {
 }
 
 async function descriptorBytes(descriptor: InstalledDnd5eRulesPlugin): Promise<ArrayBuffer> {
+  if (descriptor.source === 'ephemeral') {
+    const bytes = ephemeralModuleBytes.get(descriptor.id)
+    if (!bytes) throw new Error(`房间临时插件文件已经释放：${descriptor.fileName}`)
+    return bytes.slice(0)
+  }
   if (descriptor.source === 'file') {
     const bytes = await loadModuleBytes(descriptor.id)
     if (!bytes) throw new Error(`本机插件文件不存在：${descriptor.fileName}`)
@@ -274,8 +320,19 @@ type LoadedDnd5ePluginArtifact =
       package: Dnd5eDeclarativeRulesPackageV1
       plugin: Dnd5eRulesPlugin
     }
+  | {
+      kind: 'content-v2'
+      manifest: Dnd5eRulesPluginManifest
+      package: Dnd5eContentPackageV2
+      plugin: Dnd5eRulesPlugin
+    }
 
 async function loadPluginArtifact(bytes: ArrayBuffer): Promise<LoadedDnd5ePluginArtifact> {
+  const content = parseDnd5eContentPackageV2(bytes)
+  if (content) {
+    const plugin = dnd5eRulesPluginFromContentPackageV2(content)
+    return { kind: 'content-v2', manifest: { ...content.manifest }, package: content, plugin }
+  }
   const declaration = parseDnd5eDeclarativeRulesPackageV1(bytes)
   if (declaration) {
     // Constructing the Host plugin performs the existing v2 contribution validation too.
@@ -308,6 +365,10 @@ async function importPinnedPlugin(descriptor: InstalledDnd5eRulesPlugin): Promis
 }
 
 function activatePlugin(artifact: LoadedDnd5ePluginArtifact, integrity: string): void {
+  if (artifact.manifest.distributionPolicy === 'local-only' && getRoomSession()) {
+    terminatePluginArtifact(artifact)
+    throw new Error('local-only 内容包只能在未连接联网房间时运行；离开房间并重新加载后可恢复本地使用')
+  }
   unregisterDnd5eRulesPlugin(artifact.manifest.id)
   const plugin = artifact.kind === 'worker'
     ? activateDnd5ePluginSandbox(artifact.session)
@@ -334,6 +395,10 @@ async function installFileBytes(input: {
   }
   const artifact = await loadPluginArtifact(input.bytes)
   assertPluginId(artifact.manifest.id)
+  if (artifact.manifest.distributionPolicy === 'room-ephemeral') {
+    terminatePluginArtifact(artifact)
+    throw new Error('room-ephemeral 内容包不能永久安装；请在房间内使用“导入临时合集”')
+  }
   if (input.expectedId && artifact.manifest.id !== input.expectedId) {
     terminatePluginArtifact(artifact)
     throw new Error(`清单 ID 不匹配：期望 ${input.expectedId}，实际 ${artifact.manifest.id}`)
@@ -387,6 +452,63 @@ async function installFileBytes(input: {
   return cloneDescriptor(descriptor)
 }
 
+async function installEphemeralFileBytes(input: {
+  bytes: ArrayBuffer
+  fileName: string
+  expectedId: string
+  expectedVersion: string
+  expectedIntegrity: string
+}): Promise<InstalledDnd5eRulesPlugin> {
+  if (!getRoomSession()) throw new Error('room-ephemeral 内容包只能在联网房间内临时运行')
+  if (input.bytes.byteLength < 1) throw new Error('插件文件为空')
+  const integrity = await sha256Integrity(input.bytes)
+  if (integrity !== input.expectedIntegrity) {
+    throw new Error(`完整性校验失败；期望 ${input.expectedIntegrity}，实际 ${integrity}`)
+  }
+  const artifact = await loadPluginArtifact(input.bytes)
+  assertPluginId(artifact.manifest.id)
+  if (
+    artifact.manifest.id !== input.expectedId ||
+    artifact.manifest.version !== input.expectedVersion
+  ) {
+    terminatePluginArtifact(artifact)
+    throw new Error('房间临时内容包的清单 ID 或版本与房间锁定值不一致')
+  }
+  if (artifact.manifest.distributionPolicy !== 'room-ephemeral') {
+    terminatePluginArtifact(artifact)
+    throw new Error('内存安装入口只接受 room-ephemeral 内容包')
+  }
+  const descriptor: Extract<InstalledDnd5eRulesPlugin, { source: 'ephemeral' }> = {
+    id: artifact.manifest.id,
+    source: 'ephemeral',
+    fileName: input.fileName,
+    integrity,
+    enabled: true,
+  }
+  try {
+    activatePlugin(artifact, integrity)
+    ephemeralModuleBytes.set(descriptor.id, input.bytes.slice(0))
+    ephemeralDescriptors.set(descriptor.id, descriptor)
+  } catch (error) {
+    ephemeralModuleBytes.delete(descriptor.id)
+    ephemeralDescriptors.delete(descriptor.id)
+    throw error
+  }
+  return cloneDescriptor(descriptor)
+}
+
+async function clearEphemeralPlugins(): Promise<void> {
+  const pluginIds = [...ephemeralDescriptors.keys()]
+  ephemeralDescriptors.clear()
+  ephemeralModuleBytes.clear()
+  for (const pluginId of pluginIds) {
+    unregisterDnd5eRulesPlugin(pluginId)
+    terminateDnd5ePluginSandbox(pluginId)
+    const persistent = installedDnd5eRulesPlugins().find((descriptor) => descriptor.id === pluginId)
+    if (persistent?.enabled) activatePlugin(await importPinnedPlugin(persistent), persistent.integrity)
+  }
+}
+
 export async function loadInstalledDnd5eRulesPlugins(): Promise<Dnd5eRulesPluginLoadFailure[]> {
   const failures: Dnd5eRulesPluginLoadFailure[] = []
   for (const descriptor of installedDnd5eRulesPlugins()) {
@@ -404,6 +526,9 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
   const host: Dnd5eRulesPluginHost = {
     apiVersion: DND5E_RULES_PLUGIN_API_VERSION,
     async install(descriptor) {
+      if (descriptor.source === 'ephemeral') {
+        throw new Error('房间临时插件必须通过 installEphemeralBytes 提供内存字节')
+      }
       const candidate = cloneDescriptor({ ...descriptor, enabled: true })
       const artifact = await importPinnedPlugin(candidate)
       activatePlugin(artifact, candidate.integrity)
@@ -422,15 +547,24 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
         expectedIntegrity: input.integrity,
       })
     },
+    async installEphemeralBytes(input) {
+      return installEphemeralFileBytes({
+        bytes: input.bytes,
+        fileName: input.fileName,
+        expectedId: input.id,
+        expectedVersion: input.version,
+        expectedIntegrity: input.integrity,
+      })
+    },
     async inspectFile(file) {
       return inspectPluginBytes(await file.arrayBuffer(), file.name)
     },
     async migrateState(input) {
       const artifact = await loadPluginArtifact(input.bytes)
       try {
-        if (artifact.kind === 'declarative-v1') {
+        if (artifact.kind === 'declarative-v1' || artifact.kind === 'content-v2') {
           const target = artifact.manifest.stateSchemaVersion ?? 1
-          if (input.fromVersion !== target) throw new Error('声明式 V1 包不包含可执行状态迁移；请保持 stateSchemaVersion 不变')
+          if (input.fromVersion !== target) throw new Error('声明式内容包不包含可执行状态迁移；请保持 stateSchemaVersion 不变')
           return { state: input.state, fromVersion: input.fromVersion, toVersion: target }
         }
         return await artifact.session.migrateState(input.fromVersion, input.state)
@@ -439,17 +573,29 @@ export function exposeDnd5eRulesPluginHost(): Dnd5eRulesPluginHost {
       }
     },
     async readBytes(pluginId) {
-      const descriptor = installedDnd5eRulesPlugins().find((item) => item.id === pluginId)
+      const descriptor = ephemeralDescriptors.get(pluginId) ??
+        installedDnd5eRulesPlugins().find((item) => item.id === pluginId)
       if (!descriptor) throw new Error(`本机未安装插件：${pluginId}`)
       return descriptorBytes(descriptor)
     },
     async remove(pluginId) {
       unregisterDnd5eRulesPlugin(pluginId)
       terminateDnd5ePluginSandbox(pluginId)
+      if (ephemeralDescriptors.has(pluginId)) {
+        ephemeralDescriptors.delete(pluginId)
+        ephemeralModuleBytes.delete(pluginId)
+        const persistent = installedDnd5eRulesPlugins().find((descriptor) => descriptor.id === pluginId)
+        if (persistent?.enabled) activatePlugin(await importPinnedPlugin(persistent), persistent.integrity)
+        return
+      }
       persistInstalled(installedDnd5eRulesPlugins().filter((item) => item.id !== pluginId))
       await deleteModuleBytes(pluginId)
     },
-    listInstalled: () => installedDnd5eRulesPlugins().map(cloneDescriptor),
+    clearEphemeral: clearEphemeralPlugins,
+    listInstalled: () => [
+      ...installedDnd5eRulesPlugins(),
+      ...ephemeralDescriptors.values(),
+    ].map(cloneDescriptor),
     listActive: () => registeredDnd5eRulesPlugins(),
   }
   window.DNDSTARS_5E_RULES_PLUGINS = Object.freeze(host)

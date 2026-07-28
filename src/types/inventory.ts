@@ -133,6 +133,8 @@ export interface Dnd5eInventoryItemTemplate {
   englishName?: string
   category: Dnd5eInventoryCategory
   icon: Dnd5eInventoryIconId
+  /** Optional namespaced bitmap supplied by an installed rules package. */
+  iconAssetId?: string
   description: string
   rulesText: string
   weightLb?: number

@@ -49,6 +49,8 @@ export interface Dnd5eActiveEffectSource {
   rulesId?: string
   /** The authoritative slot level used to create a spell effect. */
   spellLevel?: number
+  /** Non-spell magical effects such as a monster's petrifying gaze. */
+  magical?: boolean
   label?: string
   pluginId?: string
 }
@@ -78,21 +80,48 @@ export interface Dnd5eActiveEffectRepeatSave {
     modifier?: number
     type: Dnd5eDamageType
   }
+  /**
+   * A tightly-scoped, authoritative state transition after a failed repeat
+   * save. This models staged conditions such as restrained -> petrified
+   * without allowing saved content to inject arbitrary Headless operations.
+   */
+  onFailureTransition?: {
+    replaceWithCondition: Dnd5eStandardConditionId
+    duration: 'permanent'
+  }
   onSuccess: 'remove'
 }
 
 export interface Dnd5eActiveEffectEscapeCheck {
   ability: AbilityKey
+  /** Optional skill specialization used by fixed-DC monster escapes. */
+  skill?: 'athletics' | 'acrobatics'
   /** 规则允许目标自行选择另一项属性时，Host 会采用目标更有利的合法选项。 */
   alternativeAbility?: AbilityKey
+  /** Optional skill specialization for alternativeAbility. */
+  alternativeSkill?: 'athletics' | 'acrobatics'
   dc: number
   economy: 'action'
 }
 
+export interface Dnd5eActiveEffectRelation {
+  schemaVersion: 1
+  kind: 'grapple'
+  sourceActorId: string
+  sourceActionId: string
+  slotGroup: string
+  maxDistanceFeet: number
+  movement: 'drag-target'
+  endsOnSourceIncapacitated: true
+}
+
 export interface Dnd5eActiveEffectSavingThrowRoll {
   effectId: string
+  targetId?: string
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   damageRolls?: readonly number[]
   blessRoll?: number
   baneRoll?: number
@@ -108,6 +137,12 @@ export interface Dnd5eActiveEffectSavingThrowRoll {
 export interface Dnd5eActiveEffectModifiers {
   speedPenaltyFeet?: number
   speedBonusFeet?: number
+  /** Multiplies the final speed. Multiple effects use the lowest multiplier. */
+  speedMultiplier?: number
+  /** Caps the number of attacks the creature can make on each of its turns. */
+  maximumAttacksPerTurn?: number
+  /** The creature can use either an action or a bonus action on its turn, but not both. */
+  actionOrBonusActionOnly?: boolean
   /** Grants darkvision to at least this range without replacing a longer innate range. */
   darkvisionRangeFeet?: number
   /** Allows ordinary sight to perceive invisible creatures and objects. */
@@ -125,6 +160,10 @@ export interface Dnd5eActiveEffectModifiers {
   safeFallFeet?: number
   armorClassBonus?: number
   savingThrowBonus?: number
+  /** Goading-style penalty: attacks against creatures other than this effect's source have disadvantage. */
+  attackDisadvantageAgainstOthersThanSource?: boolean
+  /** Distracting-style opening: the next attack by a creature other than this effect's source has advantage. */
+  nextAttackAdvantageByOtherThanSource?: boolean
   resistanceToAllDamage?: boolean
   weaponDamageD4?: 'add' | 'subtract'
   preventReactions?: boolean
@@ -162,6 +201,7 @@ export interface Dnd5eActiveEffectInstance {
   duration: Dnd5eActiveEffectDuration
   repeatSave?: Dnd5eActiveEffectRepeatSave
   escapeCheck?: Dnd5eActiveEffectEscapeCheck
+  relation?: Dnd5eActiveEffectRelation
   breakOn?: Dnd5eActiveEffectBreakTrigger[]
   /** This effect is valid only while the referenced source-specific effect exists. */
   dependsOnEffectId?: string
@@ -208,6 +248,7 @@ export function createDnd5eConditionEffect(input: {
   duration?: Dnd5eActiveEffectDuration
   repeatSave?: Dnd5eActiveEffectRepeatSave
   escapeCheck?: Dnd5eActiveEffectEscapeCheck
+  relation?: Dnd5eActiveEffectRelation
   breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
   dependsOnEffectId?: string
   stackingPolicy?: Dnd5eActiveEffectStackingPolicy
@@ -234,6 +275,7 @@ export function createDnd5eConditionEffect(input: {
     duration: input.duration ?? { type: 'permanent' },
     repeatSave: input.repeatSave ? { ...input.repeatSave } : undefined,
     escapeCheck: input.escapeCheck ? { ...input.escapeCheck } : undefined,
+    relation: input.relation ? { ...input.relation } : undefined,
     breakOn: input.breakOn ? [...new Set(input.breakOn)] : undefined,
     dependsOnEffectId: input.dependsOnEffectId,
     stackingKey: input.stackingKey ?? definitionId,
@@ -253,6 +295,7 @@ export function createDnd5eMechanicalEffect(input: {
   duration?: Dnd5eActiveEffectDuration
   repeatSave?: Dnd5eActiveEffectRepeatSave
   escapeCheck?: Dnd5eActiveEffectEscapeCheck
+  relation?: Dnd5eActiveEffectRelation
   breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
   dependsOnEffectId?: string
   stackingPolicy?: Dnd5eActiveEffectStackingPolicy
@@ -279,6 +322,7 @@ export function createDnd5eMechanicalEffect(input: {
     duration: input.duration ?? { type: 'permanent' },
     repeatSave: input.repeatSave ? { ...input.repeatSave } : undefined,
     escapeCheck: input.escapeCheck ? { ...input.escapeCheck } : undefined,
+    relation: input.relation ? { ...input.relation } : undefined,
     breakOn: input.breakOn ? [...new Set(input.breakOn)] : undefined,
     dependsOnEffectId: input.dependsOnEffectId,
     stackingKey: input.stackingKey ?? input.definitionId,
@@ -313,7 +357,17 @@ const STACKING_POLICIES = new Set<Dnd5eActiveEffectStackingPolicy>(['reject', 'r
 const BREAK_TRIGGERS = new Set<Dnd5eActiveEffectBreakTrigger>(['takes-damage', 'targeted-by-attack', 'hit-by-attack', 'makes-attack', 'casts-spell', 'moves'])
 const TURN_BOUNDARIES = new Set<Dnd5eActiveEffectTurnBoundary>(['source-turn-start', 'source-turn-end', 'target-turn-start', 'target-turn-end'])
 const ABILITIES = new Set<AbilityKey>(['str', 'dex', 'con', 'int', 'wis', 'cha'])
+const ESCAPE_SKILLS = new Set<NonNullable<Dnd5eActiveEffectEscapeCheck['skill']>>(['athletics', 'acrobatics'])
 const MAX_ACTIVE_EFFECT_POTENCY = 1_000_000
+
+function dnd5eEscapeSkillMatchesAbility(
+  skill: Dnd5eActiveEffectEscapeCheck['skill'],
+  ability: AbilityKey,
+): boolean {
+  return skill == null ||
+    (skill === 'athletics' && ability === 'str') ||
+    (skill === 'acrobatics' && ability === 'dex')
+}
 
 /** Rejects malformed remote/plugin values instead of trusting a TypeScript cast. */
 export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectInstance[] {
@@ -363,6 +417,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
     } else continue
     const rawRepeatSave = candidate.repeatSave
     const rawFailureDamage = isRecord(rawRepeatSave) ? rawRepeatSave.damageOnFailure : undefined
+    const rawFailureTransition = isRecord(rawRepeatSave) ? rawRepeatSave.onFailureTransition : undefined
     const damageOnFailure = rawFailureDamage == null
       ? undefined
       : isRecord(rawFailureDamage) &&
@@ -378,6 +433,21 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             type: rawFailureDamage.type as Dnd5eDamageType,
           }
         : null
+    const onFailureTransition = rawFailureTransition == null
+      ? undefined
+      : isRecord(rawFailureTransition) &&
+        Object.keys(rawFailureTransition).every((key) =>
+          key === 'replaceWithCondition' || key === 'duration') &&
+        (DND5E_STANDARD_CONDITION_IDS as readonly unknown[]).includes(
+          rawFailureTransition.replaceWithCondition,
+        ) &&
+        rawFailureTransition.duration === 'permanent'
+        ? {
+            replaceWithCondition:
+              rawFailureTransition.replaceWithCondition as Dnd5eStandardConditionId,
+            duration: 'permanent' as const,
+          }
+        : null
     const repeatSave = isRecord(rawRepeatSave) &&
       ABILITIES.has(rawRepeatSave.ability as AbilityKey) &&
       typeof rawRepeatSave.dc === 'number' && Number.isInteger(rawRepeatSave.dc) && rawRepeatSave.dc > 0 &&
@@ -385,6 +455,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         rawRepeatSave.timing === 'on-damage') &&
       (rawRepeatSave.timing !== 'on-damage' || rawRepeatSave.onDamage != null) &&
       damageOnFailure !== null &&
+      onFailureTransition !== null &&
       (rawRepeatSave.onDamage == null || (
         isRecord(rawRepeatSave.onDamage) &&
         (rawRepeatSave.onDamage.mode === 'normal' || rawRepeatSave.onDamage.mode === 'advantage')
@@ -398,24 +469,110 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             ? { mode: rawRepeatSave.onDamage.mode as 'normal' | 'advantage' }
             : undefined,
           damageOnFailure,
+          onFailureTransition,
           onSuccess: 'remove' as const,
         }
       : undefined
     const rawEscapeCheck = candidate.escapeCheck
     const escapeCheck = isRecord(rawEscapeCheck) &&
-      Object.keys(rawEscapeCheck).every((key) => ['ability', 'alternativeAbility', 'dc', 'economy'].includes(key)) &&
+      Object.keys(rawEscapeCheck).every((key) =>
+        ['ability', 'skill', 'alternativeAbility', 'alternativeSkill', 'dc', 'economy'].includes(key)) &&
       ABILITIES.has(rawEscapeCheck.ability as AbilityKey) &&
+      (rawEscapeCheck.skill == null ||
+        ESCAPE_SKILLS.has(rawEscapeCheck.skill as NonNullable<Dnd5eActiveEffectEscapeCheck['skill']>)) &&
+      dnd5eEscapeSkillMatchesAbility(
+        rawEscapeCheck.skill as Dnd5eActiveEffectEscapeCheck['skill'],
+        rawEscapeCheck.ability as AbilityKey,
+      ) &&
       (rawEscapeCheck.alternativeAbility == null || ABILITIES.has(rawEscapeCheck.alternativeAbility as AbilityKey)) &&
+      (rawEscapeCheck.alternativeSkill == null || (
+        rawEscapeCheck.alternativeAbility != null &&
+        ESCAPE_SKILLS.has(rawEscapeCheck.alternativeSkill as NonNullable<Dnd5eActiveEffectEscapeCheck['skill']>) &&
+        dnd5eEscapeSkillMatchesAbility(
+          rawEscapeCheck.alternativeSkill as Dnd5eActiveEffectEscapeCheck['skill'],
+          rawEscapeCheck.alternativeAbility as AbilityKey,
+        )
+      )) &&
       typeof rawEscapeCheck.dc === 'number' && Number.isInteger(rawEscapeCheck.dc) &&
       rawEscapeCheck.dc > 0 && rawEscapeCheck.dc <= 100 &&
       rawEscapeCheck.economy === 'action'
       ? {
           ability: rawEscapeCheck.ability as AbilityKey,
+          skill: rawEscapeCheck.skill as Dnd5eActiveEffectEscapeCheck['skill'],
           alternativeAbility: rawEscapeCheck.alternativeAbility as AbilityKey | undefined,
+          alternativeSkill: rawEscapeCheck.alternativeSkill as Dnd5eActiveEffectEscapeCheck['skill'],
           dc: rawEscapeCheck.dc,
           economy: 'action' as const,
         }
       : undefined
+    const rawRelation = candidate.relation
+    const relation = isRecord(rawRelation) &&
+      Object.keys(rawRelation).every((key) => [
+        'schemaVersion',
+        'kind',
+        'sourceActorId',
+        'sourceActionId',
+        'slotGroup',
+        'maxDistanceFeet',
+        'movement',
+        'endsOnSourceIncapacitated',
+      ].includes(key)) &&
+      rawRelation.schemaVersion === 1 &&
+      rawRelation.kind === 'grapple' &&
+      typeof rawRelation.sourceActorId === 'string' &&
+      rawRelation.sourceActorId.trim().length > 0 &&
+      rawRelation.sourceActorId.length <= 320 &&
+      typeof candidate.source.actorId === 'string' &&
+      rawRelation.sourceActorId.trim() === candidate.source.actorId.trim() &&
+      typeof rawRelation.sourceActionId === 'string' &&
+      rawRelation.sourceActionId.trim().length > 0 &&
+      rawRelation.sourceActionId.length <= 320 &&
+      typeof rawRelation.slotGroup === 'string' &&
+      rawRelation.slotGroup.trim().length > 0 &&
+      rawRelation.slotGroup.length <= 320 &&
+      typeof rawRelation.maxDistanceFeet === 'number' &&
+      Number.isFinite(rawRelation.maxDistanceFeet) &&
+      rawRelation.maxDistanceFeet > 0 &&
+      rawRelation.maxDistanceFeet <= 1_000 &&
+      rawRelation.movement === 'drag-target' &&
+      rawRelation.endsOnSourceIncapacitated === true
+      ? {
+          schemaVersion: 1 as const,
+          kind: 'grapple' as const,
+          sourceActorId: rawRelation.sourceActorId.trim(),
+          sourceActionId: rawRelation.sourceActionId.trim(),
+          slotGroup: rawRelation.slotGroup.trim(),
+          maxDistanceFeet: rawRelation.maxDistanceFeet,
+          movement: 'drag-target' as const,
+          endsOnSourceIncapacitated: true as const,
+        }
+      : undefined
+    const basicGrappleRelation =
+      relation?.sourceActionId === 'basic-action:grapple' &&
+      relation.slotGroup === 'free-hand' &&
+      relation.maxDistanceFeet === 5 &&
+      candidate.source.kind === 'feature' &&
+      candidate.source.rulesId === 'basic-action:grapple' &&
+      escapeCheck == null
+    const relationRootIsValid = relation == null || (
+      candidate.kind === 'condition' &&
+      standardCondition === 'grappled' &&
+      candidate.dependsOnEffectId == null &&
+      (
+        basicGrappleRelation ||
+        (
+          escapeCheck?.ability === 'str' &&
+          escapeCheck.skill === 'athletics' &&
+          escapeCheck.alternativeAbility === 'dex' &&
+          escapeCheck.alternativeSkill === 'acrobatics' &&
+          escapeCheck.economy === 'action'
+        )
+      )
+    )
+    // A malformed or non-root relation must not degrade into an ordinary
+    // permanent condition: without its lifecycle metadata it could never be
+    // reconciled safely.
+    if (rawRelation != null && (relation == null || !relationRootIsValid)) continue
     const potency = typeof candidate.potency === 'number' &&
       Number.isFinite(candidate.potency) &&
       candidate.potency >= 0 &&
@@ -460,6 +617,19 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           speedBonusFeet: typeof rawModifiers.speedBonusFeet === 'number' &&
             Number.isFinite(rawModifiers.speedBonusFeet) && rawModifiers.speedBonusFeet >= 0
             ? rawModifiers.speedBonusFeet
+            : undefined,
+          speedMultiplier: typeof rawModifiers.speedMultiplier === 'number' &&
+            Number.isFinite(rawModifiers.speedMultiplier) &&
+            rawModifiers.speedMultiplier > 0 && rawModifiers.speedMultiplier <= 10
+            ? rawModifiers.speedMultiplier
+            : undefined,
+          maximumAttacksPerTurn: typeof rawModifiers.maximumAttacksPerTurn === 'number' &&
+            Number.isInteger(rawModifiers.maximumAttacksPerTurn) &&
+            rawModifiers.maximumAttacksPerTurn > 0
+            ? rawModifiers.maximumAttacksPerTurn
+            : undefined,
+          actionOrBonusActionOnly: typeof rawModifiers.actionOrBonusActionOnly === 'boolean'
+            ? rawModifiers.actionOrBonusActionOnly
             : undefined,
           darkvisionRangeFeet: typeof rawModifiers.darkvisionRangeFeet === 'number' &&
             Number.isFinite(rawModifiers.darkvisionRangeFeet) &&
@@ -517,6 +687,14 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
             rawModifiers.savingThrowBonus <= 20
             ? rawModifiers.savingThrowBonus
             : undefined,
+          attackDisadvantageAgainstOthersThanSource:
+            typeof rawModifiers.attackDisadvantageAgainstOthersThanSource === 'boolean'
+              ? rawModifiers.attackDisadvantageAgainstOthersThanSource
+              : undefined,
+          nextAttackAdvantageByOtherThanSource:
+            typeof rawModifiers.nextAttackAdvantageByOtherThanSource === 'boolean'
+              ? rawModifiers.nextAttackAdvantageByOtherThanSource
+              : undefined,
           resistanceToAllDamage: typeof rawModifiers.resistanceToAllDamage === 'boolean'
             ? rawModifiers.resistanceToAllDamage
             : undefined,
@@ -559,10 +737,14 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           Number(candidate.source.spellLevel) <= 9
           ? Number(candidate.source.spellLevel)
           : undefined,
+        magical: typeof candidate.source.magical === 'boolean'
+          ? candidate.source.magical
+          : undefined,
       },
       duration: normalizedDuration,
       repeatSave,
       escapeCheck,
+      relation,
       dependsOnEffectId,
       potency,
       breakOn: Array.isArray(candidate.breakOn)
@@ -571,6 +753,9 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       modifiers: modifiers && (
         modifiers.speedPenaltyFeet != null ||
         modifiers.speedBonusFeet != null ||
+        modifiers.speedMultiplier != null ||
+        modifiers.maximumAttacksPerTurn != null ||
+        modifiers.actionOrBonusActionOnly != null ||
         modifiers.darkvisionRangeFeet != null ||
         modifiers.seeInvisible != null ||
         modifiers.flySpeedFeet != null ||
@@ -582,6 +767,8 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         modifiers.safeFallFeet != null ||
         modifiers.armorClassBonus != null ||
         modifiers.savingThrowBonus != null ||
+        modifiers.attackDisadvantageAgainstOthersThanSource != null ||
+        modifiers.nextAttackAdvantageByOtherThanSource != null ||
         modifiers.resistanceToAllDamage != null ||
         modifiers.weaponDamageD4 != null ||
         modifiers.preventReactions != null ||
@@ -641,9 +828,20 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     const raw = value[index]
     if (!isRecord(raw)) continue
     const effect = effects.find((candidate) => candidate.id === raw.id)
-    if (!effect) continue
+    if (!effect) {
+      if (raw.escapeCheck != null) {
+        const rawWithoutRelation = { ...raw, relation: undefined }
+        const normalizedWithoutRelation = normalizeDnd5eActiveEffects([rawWithoutRelation])[0]
+        if (normalizedWithoutRelation?.escapeCheck == null) {
+          issues.push(`activeEffects[${index}].escapeCheck 损坏`)
+        }
+      }
+      if (raw.relation != null) issues.push(`activeEffects[${index}].relation is invalid`)
+      continue
+    }
     if (raw.repeatSave != null && effect.repeatSave == null) issues.push(`activeEffects[${index}].repeatSave 损坏`)
     if (raw.escapeCheck != null && effect.escapeCheck == null) issues.push(`activeEffects[${index}].escapeCheck 损坏`)
+    if (raw.relation != null && effect.relation == null) issues.push(`activeEffects[${index}].relation is invalid`)
     if (raw.potency != null && effect.potency == null) issues.push(`activeEffects[${index}].potency 无效`)
     if (raw.dependsOnEffectId != null && effect.dependsOnEffectId == null) {
       issues.push(`activeEffects[${index}].dependsOnEffectId is invalid`)
@@ -673,6 +871,20 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           typeof raw.modifiers.speedBonusFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.speedBonusFeet) || raw.modifiers.speedBonusFeet < 0
         )) issues.push(`activeEffects[${index}].modifiers.speedBonusFeet 无效`)
+        if (raw.modifiers.speedMultiplier != null && (
+          typeof raw.modifiers.speedMultiplier !== 'number' ||
+          !Number.isFinite(raw.modifiers.speedMultiplier) ||
+          raw.modifiers.speedMultiplier <= 0 || raw.modifiers.speedMultiplier > 10
+        )) issues.push(`activeEffects[${index}].modifiers.speedMultiplier 无效`)
+        if (raw.modifiers.maximumAttacksPerTurn != null && (
+          typeof raw.modifiers.maximumAttacksPerTurn !== 'number' ||
+          !Number.isInteger(raw.modifiers.maximumAttacksPerTurn) ||
+          raw.modifiers.maximumAttacksPerTurn <= 0
+        )) issues.push(`activeEffects[${index}].modifiers.maximumAttacksPerTurn 无效`)
+        if (raw.modifiers.actionOrBonusActionOnly != null &&
+          typeof raw.modifiers.actionOrBonusActionOnly !== 'boolean') {
+          issues.push(`activeEffects[${index}].modifiers.actionOrBonusActionOnly 无效`)
+        }
         if (raw.modifiers.darkvisionRangeFeet != null && (
           typeof raw.modifiers.darkvisionRangeFeet !== 'number' ||
           !Number.isFinite(raw.modifiers.darkvisionRangeFeet) ||
@@ -731,6 +943,14 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
           raw.modifiers.savingThrowBonus < -20 ||
           raw.modifiers.savingThrowBonus > 20
         )) issues.push(`activeEffects[${index}].modifiers.savingThrowBonus 无效`)
+        if (
+          raw.modifiers.attackDisadvantageAgainstOthersThanSource != null &&
+          typeof raw.modifiers.attackDisadvantageAgainstOthersThanSource !== 'boolean'
+        ) issues.push(`activeEffects[${index}].modifiers.attackDisadvantageAgainstOthersThanSource 无效`)
+        if (
+          raw.modifiers.nextAttackAdvantageByOtherThanSource != null &&
+          typeof raw.modifiers.nextAttackAdvantageByOtherThanSource !== 'boolean'
+        ) issues.push(`activeEffects[${index}].modifiers.nextAttackAdvantageByOtherThanSource 无效`)
         if (
           raw.modifiers.resistanceToAllDamage != null &&
           typeof raw.modifiers.resistanceToAllDamage !== 'boolean'
@@ -793,6 +1013,34 @@ export function dnd5eActiveSpeedBonus(
   return normalizeDnd5eActiveEffects(effects).reduce(
     (total, effect) => total + Math.max(0, effect.modifiers?.speedBonusFeet ?? 0),
     0,
+  )
+}
+
+/** The most restrictive speed multiplier wins, so stacked debuffs cannot weaken each other. */
+export function dnd5eActiveSpeedMultiplier(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number {
+  return normalizeDnd5eActiveEffects(effects).reduce(
+    (multiplier, effect) => Math.min(multiplier, effect.modifiers?.speedMultiplier ?? 1),
+    1,
+  )
+}
+
+/** The smallest active attack cap wins. */
+export function dnd5eActiveMaximumAttacksPerTurn(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): number | undefined {
+  const caps = normalizeDnd5eActiveEffects(effects)
+    .map((effect) => effect.modifiers?.maximumAttacksPerTurn)
+    .filter((cap): cap is number => cap != null)
+  return caps.length > 0 ? Math.min(...caps) : undefined
+}
+
+export function dnd5eActiveActionOrBonusActionOnly(
+  effects: readonly Dnd5eActiveEffectInstance[] | undefined,
+): boolean {
+  return normalizeDnd5eActiveEffects(effects).some(
+    (effect) => effect.modifiers?.actionOrBonusActionOnly === true,
   )
 }
 

@@ -76,6 +76,12 @@ describe('D&D 5e monster resource actions', () => {
     const hero = combatant('hero', 10, {
       controller: 'player',
       position: { x: 30, y: 0 },
+      racialRules: {
+        halflingLucky: true,
+        halfOrcRelentlessEndurance: false,
+        halfOrcSavageAttacks: false,
+        innateSpells: [],
+      },
       turn: { actionAvailable: true, bonusActionAvailable: true, reactionAvailable: true, movementRemaining: 30 },
     })
     const aboleth = combatant('aboleth', 20, {
@@ -88,12 +94,20 @@ describe('D&D 5e monster resource actions', () => {
     })
     const state = startDnd5eHeadlessCombat('aboleth-enslave', [aboleth, hero])
     state.distanceFeetByCombatantPair = { ['aboleth\u0000hero']: 30 }
+    expect(resolveDnd5eHeadlessAction(state, {
+      type: 'monster-special-action',
+      actorId: 'aboleth',
+      actionId: 'enslave',
+      targetId: 'hero',
+      d20: 1,
+    })).toMatchObject({ ok: false, reason: 'invalid-dice' })
     const result = resolveDnd5eHeadlessAction(state, {
       type: 'monster-special-action',
       actorId: 'aboleth',
       actionId: 'enslave',
       targetId: 'hero',
       d20: 1,
+      halflingLuckyD20: 2,
     })
     expect(result.ok, result.ok ? undefined : result.reason).toBe(true)
     expect(result.state.combatants.hero.conditions).toContain('charmed')
@@ -114,6 +128,12 @@ describe('D&D 5e monster resource actions', () => {
     ]))
     expect(result.state.combatants.hero.turn.reactionAvailable).toBe(false)
     expect(result.state.combatants.aboleth.classState.monsterActionUsesByActionId?.enslave.current).toBe(2)
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: 'halfling-lucky-rerolled',
+      actorId: 'hero',
+      original: 1,
+      reroll: 2,
+    }))
 
     result.state.initiativeIndex = 1
     const drained = resolveDnd5eHeadlessAction(result.state, {

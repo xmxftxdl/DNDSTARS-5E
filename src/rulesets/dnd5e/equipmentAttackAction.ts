@@ -22,10 +22,13 @@ import {
 } from './equipment'
 import { dnd5eAttacksPerAttackAction, dnd5eClassDefinitionForCharacter } from './classes'
 import { dnd5eCharacterClassLevel } from './multiclass'
+import { dnd5eDeclarativeBattleMasterManeuverDefinition } from './pluginApi'
 import { imposeDnd5eRollDisadvantage, resolveDnd5eRollMode } from './rollMode'
 import {
   dnd5eBlurImposesAttackDisadvantage,
   dnd5eAttackerIsUnseenForAttack,
+  dnd5eBattleMasterDistractingAdvantage,
+  dnd5eBattleMasterGoadingDisadvantage,
   dnd5eFrightenedAttackDisadvantage,
   dnd5eHelpAttackApplies,
   dnd5eTargetArmorClassForAttack,
@@ -33,9 +36,12 @@ import {
   dnd5eCombatantHasConcentrationEffect,
   dnd5eTranquilityWardCheck,
   dnd5eIsFavoredEnemy,
+  dnd5eSourceLinkedRelations,
   dnd5eWeaponClassDamageDefinitions,
   resolveDnd5eHeadlessAction,
   type Dnd5eActionResult,
+  type Dnd5eBattleMasterAttackIntentPayload,
+  type Dnd5eBattleMasterTargetReaction,
   type Dnd5eClassDamageDefinition,
   type Dnd5eClassDamageRolls,
   type Dnd5eCuttingWordsUse,
@@ -58,6 +64,7 @@ import { consumeDnd5eWeaponAmmunition } from './items'
 import { mapGeometryRuntimeForMap } from '../../lib/mapGeometry'
 import { dnd5eUnderwaterWeaponAttack } from './environmentRules'
 import { dnd5eActiveMagicWeaponBonus } from './activeEffects'
+import type { Dnd5ePluginDiceRollResult } from './pluginApi'
 
 export type Dnd5eEquipmentAttackRejectReason =
   | 'invalid-action'
@@ -98,6 +105,7 @@ export interface PreparedDnd5eEquipmentAttack {
   spendsBonusAction: boolean
   countsTowardAttackAction: boolean
   attackMode: 'normal' | 'advantage' | 'disadvantage'
+  declarativeIntentFeatureIds: readonly string[]
   classDamageContext: Dnd5eWeaponClassDamageContext
   stunningStrike?: {
     saveDc: number
@@ -133,6 +141,16 @@ export function prepareDnd5eEquipmentAttack(input: {
   const actor = input.characters.find((character) => character.id === action.characterId)
   const actorToken = input.map.tokens.find((token) => token.id === action.actorTokenId && token.characterId === action.characterId)
   if (!actor || !actorToken || actor.currentHp <= 0) return { ok: false, reason: 'invalid-actor' }
+  const declarativeIntentFeatureIds =
+    action.dnd5eWeaponAttackOptions?.declarativeIntentFeatureIds ?? []
+  if (
+    !Array.isArray(declarativeIntentFeatureIds) ||
+    declarativeIntentFeatureIds.length > 16 ||
+    declarativeIntentFeatureIds.some((featureId) =>
+      typeof featureId !== 'string' || featureId.length < 1 || featureId.length > 200
+    ) ||
+    new Set(declarativeIntentFeatureIds).size !== declarativeIntentFeatureIds.length
+  ) return { ok: false, reason: 'invalid-action' }
   if (!dnd5eClassDefinitionForCharacter(actor)) return { ok: false, reason: 'not-dnd5e-class' }
   const targetToken = input.map.tokens.find((token) => token.id === action.targetTokenId)
   if (!targetToken || targetToken.id === actorToken.id || targetToken.type === 'obstacle') return { ok: false, reason: 'invalid-target' }
@@ -147,9 +165,27 @@ export function prepareDnd5eEquipmentAttack(input: {
   if (shillelaghAbility != null && (offHandAttack || !shillelagh)) {
     return { ok: false, reason: 'invalid-action' }
   }
+  const handSnapshot = createDnd5eMapCombatSnapshot({
+    combatId: action.combatId ?? `map-${input.map.id}`,
+    round: action.round,
+    map: input.map,
+    characters: input.characters,
+    initiativeOrder: input.initiativeOrder,
+  })
+  const maintainedGrapples = dnd5eSourceLinkedRelations(
+    handSnapshot.state,
+    actorToken.id,
+    'free-hand',
+  ).length
+  if (offHandAttack && maintainedGrapples > 0) {
+    return { ok: false, reason: 'off-hand-attack-unavailable' }
+  }
   const profile = offHandAttack
     ? dnd5eOffHandWeaponAttackProfile(actor)
-    : dnd5eWeaponAttackProfile(actor, { shillelaghAbility })
+    : dnd5eWeaponAttackProfile(actor, {
+        shillelaghAbility,
+        forceOneHanded: maintainedGrapples > 0,
+      })
   if (!profile) return { ok: false, reason: 'no-weapon' }
   const equippedWeapon = offHandAttack ? actor.equipment?.offHand : actor.equipment?.mainWeapon
   const persistedDamageSource = dnd5eWeaponDamageSource(equippedWeapon)
@@ -170,7 +206,12 @@ export function prepareDnd5eEquipmentAttack(input: {
     )
   ) return { ok: false, reason: 'off-hand-attack-unavailable' }
   const distanceFeet = tokenFootprintDistanceCells(actorToken, targetToken, input.map) * Math.max(1, input.map.feetPerCell ?? DND_FEET_PER_CELL)
-  if (distanceFeet > dnd5eWeaponRangeFeet(profile)) return { ok: false, reason: 'target-out-of-range' }
+  const lungingAttack = action.dnd5eWeaponAttackOptions?.declarativeIntentFeatureIds?.some((featureId) =>
+    dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)?.mechanic.maneuver === 'lunging-attack'
+  ) === true
+  const effectiveRangeFeet = dnd5eWeaponRangeFeet(profile) +
+    (profile.mode === 'melee' && lungingAttack ? 5 : 0)
+  if (distanceFeet > effectiveRangeFeet) return { ok: false, reason: 'target-out-of-range' }
   const underwater = dnd5eUnderwaterWeaponAttack({
     environment: mapGeometryRuntimeForMap(input.map.id)?.environment,
     weaponId: profile.weaponId,
@@ -304,6 +345,7 @@ export function prepareDnd5eEquipmentAttack(input: {
     strengthBased: profile.attackAbility === 'str',
     monkMartialArtsEligible: dnd5eMonkMartialArtsEligible(actor),
     weaponDamageSides: profile.damage.sides,
+    reachFeet: profile.reachFeet,
     damageType: profile.damage.type,
     adjacentEnemyOfTarget,
     divineSmiteSlotLevel,
@@ -319,7 +361,8 @@ export function prepareDnd5eEquipmentAttack(input: {
   const targetProne = target.conditions.some((condition) => ['prone', '倒地'].includes(condition.toLowerCase()))
   const attackerHasAdvantage = !dnd5ePreventsAttackAdvantage(target) &&
     (dnd5eTargetGrantsAttackAdvantage(target) || dnd5eHelpAttackApplies(snapshot.state, actorCombatant, target) || actorCombatant.classState.hiddenCheckTotal != null || recklessAttack || recklessAlreadyActive || !!target.classState.stunnedByActorId ||
-      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5))
+      dnd5eAttackerIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) || (targetProne && distanceFeet <= 5) ||
+      dnd5eBattleMasterDistractingAdvantage(actorCombatant, target))
   const attackerHasDisadvantage = underwater.disadvantage || (actor.exhaustionLevel ?? 0) >= 3 ||
     dnd5eWearingUnproficientArmor(actor) ||
     dnd5eHasViciousMockeryAttackDisadvantage(actorCombatant) ||
@@ -336,7 +379,8 @@ export function prepareDnd5eEquipmentAttack(input: {
     ))
   const targetImposesDisadvantage = dnd5eTargetIsDodging(target) ||
     dnd5eBlurImposesAttackDisadvantage(snapshot.state, actorToken.id, targetToken.id) || attackerHasDisadvantage ||
-    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id)
+    dnd5eTargetIsUnseenForAttack(snapshot.state, actorToken.id, targetToken.id) ||
+    dnd5eBattleMasterGoadingDisadvantage(actorCombatant, target)
   const attackMode = resolveDnd5eRollMode({
     advantage: [{ active: attackerHasAdvantage, reason: 'equipment-attack-advantage' }],
     disadvantage: [{ active: targetImposesDisadvantage, reason: 'equipment-attack-disadvantage' }],
@@ -370,6 +414,7 @@ export function prepareDnd5eEquipmentAttack(input: {
       spendsBonusAction: frenzyAttack || offHandAttack,
       countsTowardAttackAction: !specialAttack,
       attackMode,
+      declarativeIntentFeatureIds: [...declarativeIntentFeatureIds],
       classDamageContext,
       stunningStrike: stunningStrikeResolution ? {
         ...stunningStrikeResolution,
@@ -392,6 +437,25 @@ export function dnd5eAttackModeWithProtection(
   return protectedAttack ? imposeDnd5eRollDisadvantage(mode, 'protection').mode : mode
 }
 
+export function dnd5ePreparedEquipmentAttackMode(
+  prepared: PreparedDnd5eEquipmentAttack,
+  protectedAttack: boolean,
+): PreparedDnd5eEquipmentAttack['attackMode'] {
+  const feintingAttack = prepared.declarativeIntentFeatureIds.some((featureId) =>
+    dnd5eDeclarativeBattleMasterManeuverDefinition(featureId)?.mechanic.maneuver === 'feinting-attack'
+  )
+  const maneuverMode = feintingAttack
+    ? resolveDnd5eRollMode({
+        advantage: [
+          { active: prepared.attackMode === 'advantage', reason: 'prepared-attack-advantage' },
+          { active: true, reason: 'feinting-attack' },
+        ],
+        disadvantage: [{ active: prepared.attackMode === 'disadvantage', reason: 'prepared-attack-disadvantage' }],
+      }).mode
+    : prepared.attackMode
+  return dnd5eAttackModeWithProtection(maneuverMode, protectedAttack)
+}
+
 export function previewDnd5eEquipmentAttack(
   prepared: PreparedDnd5eEquipmentAttack,
   d20: number,
@@ -399,8 +463,9 @@ export function previewDnd5eEquipmentAttack(
   protectedAttack = false,
   blessRoll?: number,
   baneRoll?: number,
+  additionalAttackBonus = 0,
 ) {
-  const mode = dnd5eAttackModeWithProtection(prepared.attackMode, protectedAttack)
+  const mode = dnd5ePreparedEquipmentAttackMode(prepared, protectedAttack)
   const magicWeaponBonus = dnd5eActiveMagicWeaponBonus(
     prepared.state.combatants[prepared.actorToken.id]?.classState.activeEffects,
     prepared.classDamageContext.weaponId,
@@ -410,7 +475,8 @@ export function previewDnd5eEquipmentAttack(
     rolls,
     mode,
     modifier: prepared.profile.attackModifier + magicWeaponBonus +
-      prepared.foeSlayerAttackBonus + (blessRoll ?? 0) - (baneRoll ?? 0),
+      prepared.foeSlayerAttackBonus + (blessRoll ?? 0) - (baneRoll ?? 0) +
+      additionalAttackBonus,
     targetAc: prepared.targetArmorClass,
   })
   return resolveDnd5eAttackOutcome({
@@ -433,7 +499,7 @@ export function dnd5eEquipmentClassDamageDefinitions(
     actorId: prepared.actorToken.id,
     targetId: prepared.targetToken.id,
     context: prepared.classDamageContext,
-    effectiveMode: dnd5eAttackModeWithProtection(prepared.attackMode, protectedAttack),
+    effectiveMode: dnd5ePreparedEquipmentAttackMode(prepared, protectedAttack),
     critical,
   })
 }
@@ -442,6 +508,9 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   prepared: PreparedDnd5eEquipmentAttack
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
+  savageAttacksRoll?: number
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
@@ -455,6 +524,8 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   deflectMissilesD10?: number
   stunningStrikeSaveD20?: number
   stunningStrikeSaveD20Second?: number
+  stunningStrikeSaveHalflingLuckyD20?: number
+  stunningStrikeSaveHalflingLuckyD20Second?: number
   stunningStrikeSaveBlessRoll?: number
   stunningStrikeSaveBaneRoll?: number
   stunningStrikeSaveRerollD20?: number
@@ -463,6 +534,9 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
   stunningStrikeDarkOnesOwnLuckRoll?: number
   hurlThroughHellDamageRolls?: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
+  declarativeIntentRolls?: Readonly<Record<string, Readonly<Record<string, Dnd5ePluginDiceRollResult>>>>
+  declarativeIntentPayloads?: Readonly<Record<string, Dnd5eBattleMasterAttackIntentPayload>>
+  declarativeTargetReaction?: Dnd5eBattleMasterTargetReaction
   damageRolls: readonly number[]
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
   transaction?: CombatTransaction
@@ -478,6 +552,9 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     spendBonusAction: prepared.spendsBonusAction,
     d20: input.d20,
     d20Second: input.d20Second,
+    halflingLuckyD20: input.halflingLuckyD20,
+    halflingLuckyD20Second: input.halflingLuckyD20Second,
+    savageAttacksRoll: input.savageAttacksRoll,
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
     bardicInspirationRoll: input.bardicInspirationRoll,
@@ -491,6 +568,8 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     deflectMissilesD10: input.deflectMissilesD10,
     stunningStrikeSaveD20: input.stunningStrikeSaveD20,
     stunningStrikeSaveD20Second: input.stunningStrikeSaveD20Second,
+    stunningStrikeSaveHalflingLuckyD20: input.stunningStrikeSaveHalflingLuckyD20,
+    stunningStrikeSaveHalflingLuckyD20Second: input.stunningStrikeSaveHalflingLuckyD20Second,
     stunningStrikeSaveBlessRoll: input.stunningStrikeSaveBlessRoll,
     stunningStrikeSaveBaneRoll: input.stunningStrikeSaveBaneRoll,
     stunningStrikeSaveRerollD20: input.stunningStrikeSaveRerollD20,
@@ -499,6 +578,10 @@ export function resolvePreparedDnd5eEquipmentAttack(input: {
     stunningStrikeDarkOnesOwnLuckRoll: input.stunningStrikeDarkOnesOwnLuckRoll,
     hurlThroughHellDamageRolls: input.hurlThroughHellDamageRolls,
     standAgainstTide: input.standAgainstTide,
+    declarativeIntentFeatureIds: prepared.declarativeIntentFeatureIds,
+    declarativeIntentRolls: input.declarativeIntentRolls,
+    declarativeIntentPayloads: input.declarativeIntentPayloads,
+    declarativeTargetReaction: input.declarativeTargetReaction,
     mode: prepared.attackMode,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,

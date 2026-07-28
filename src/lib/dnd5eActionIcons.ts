@@ -1,5 +1,6 @@
 import type { Dnd5eInventoryItemTemplate, Dnd5eMagicItemRarity } from '../types/inventory'
 import { DND5E_SRD_SPELL_CATALOG } from '../rulesets/dnd5e/spellCatalog'
+import { dnd5ePluginImageAssetUrl } from '../rulesets/dnd5e/pluginAssets'
 
 export type Dnd5eActionIconMotif =
   | 'acid'
@@ -57,6 +58,7 @@ export interface Dnd5eSpellActionIconInput {
   damageType?: string
   tags?: readonly string[]
   castingClassId?: string
+  iconAssetId?: string
 }
 
 type IconPalette = readonly [background: string, backgroundDeep: string, accent: string, glow: string]
@@ -250,6 +252,7 @@ const DND5E_PAINTED_SPELL_ASSETS: Readonly<Record<string, string>> = Object.free
   knock: '/assets/icons/knock-spell-action.png',
   barkskin: '/assets/icons/barkskin-spell-action.png',
   invisibility: '/assets/icons/invisibility-spell-action.png',
+  'greater-invisibility': '/assets/icons/greater-invisibility-spell-action.png',
   aid: '/assets/icons/aid-spell-action.png',
   moonbeam: '/assets/icons/moonbeam-spell-action.png',
   'animate-dead': '/assets/icons/animate-dead-spell-action.png',
@@ -334,6 +337,50 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:bag-of-beans': '/assets/icons/bag-of-beans-item-action.png',
   'srd-5.1:magic-item:bag-of-devouring': '/assets/icons/bag-of-devouring-item-action.png',
   'srd-5.1:magic-item:bag-of-holding': '/assets/icons/bag-of-holding-item-action.png',
+  'srd-5.1:magic-item:bag-of-tricks': '/assets/icons/bag-of-tricks-item-action.png',
+  'srd-5.1:magic-item:bead-of-force': '/assets/icons/bead-of-force-item-action.png',
+  'srd-5.1:magic-item:belt-of-dwarvenkind': '/assets/icons/belt-of-dwarvenkind-item-action.png',
+  'srd-5.1:magic-item:belt-of-giant-strength': '/assets/icons/belt-of-giant-strength-item-action.png',
+  'srd-5.1:magic-item:berserker-axe': '/assets/icons/berserker-axe-item-action.png',
+  'srd-5.1:magic-item:boots-of-elvenkind': '/assets/icons/boots-of-elvenkind-item-action.png',
+  'srd-5.1:magic-item:boots-of-levitation': '/assets/icons/boots-of-levitation-item-action.png',
+  'srd-5.1:magic-item:boots-of-speed': '/assets/icons/boots-of-speed-item-action.png',
+  'srd-5.1:magic-item:boots-of-striding-and-springing': '/assets/icons/boots-of-striding-and-springing-item-action.png',
+  'srd-5.1:magic-item:boots-of-the-winterlands': '/assets/icons/boots-of-the-winterlands-item-action.png',
+  'srd-5.1:magic-item:bowl-of-commanding-water-elementals': '/assets/icons/bowl-of-commanding-water-elementals-item-action.png',
+  'srd-5.1:magic-item:bracers-of-archery': '/assets/icons/bracers-of-archery-item-action.png',
+  'srd-5.1:magic-item:bracers-of-defense': '/assets/icons/bracers-of-defense-item-action.png',
+  'srd-5.1:magic-item:brazier-of-commanding-fire-elementals': '/assets/icons/brazier-of-commanding-fire-elementals-item-action.png',
+  'srd-5.1:magic-item:brooch-of-shielding': '/assets/icons/brooch-of-shielding-item-action.png',
+  'srd-5.1:magic-item:broom-of-flying': '/assets/icons/broom-of-flying-item-action.png',
+  'srd-5.1:magic-item:candle-of-invocation': '/assets/icons/candle-of-invocation-item-action.png',
+  'srd-5.1:magic-item:cape-of-the-mountebank': '/assets/icons/cape-of-the-mountebank-item-action.png',
+  'srd-5.1:magic-item:carpet-of-flying': '/assets/icons/carpet-of-flying-item-action.png',
+  'srd-5.1:magic-item:censer-of-controlling-air-elementals': '/assets/icons/censer-of-controlling-air-elementals-item-action.png',
+  'srd-5.1:magic-item:chime-of-opening': '/assets/icons/chime-of-opening-item-action.png',
+  'srd-5.1:magic-item:circlet-of-blasting': '/assets/icons/circlet-of-blasting-item-action.png',
+  'srd-5.1:magic-item:cloak-of-arachnida': '/assets/icons/cloak-of-arachnida-item-action.png',
+  'srd-5.1:magic-item:cloak-of-displacement': '/assets/icons/cloak-of-displacement-item-action.png',
+  'srd-5.1:magic-item:cloak-of-elvenkind': '/assets/icons/cloak-of-elvenkind-item-action.png',
+  'srd-5.1:magic-item:cloak-of-protection': '/assets/icons/cloak-of-protection-item-action.png',
+  'srd-5.1:magic-item:cloak-of-the-bat': '/assets/icons/cloak-of-the-bat-item-action.png',
+  'srd-5.1:magic-item:cloak-of-the-manta-ray': '/assets/icons/cloak-of-the-manta-ray-item-action.png',
+  'srd-5.1:magic-item:crystal-ball': '/assets/icons/crystal-ball-item-action.png',
+  'srd-5.1:magic-item:cube-of-force': '/assets/icons/cube-of-force-item-action.png',
+  'srd-5.1:magic-item:cubic-gate': '/assets/icons/cubic-gate-item-action.png',
+  'srd-5.1:magic-item:dagger-of-venom': '/assets/icons/dagger-of-venom-item-action.png',
+  'srd-5.1:magic-item:dancing-sword': '/assets/icons/dancing-sword-item-action.png',
+  'srd-5.1:magic-item:decanter-of-endless-water': '/assets/icons/decanter-of-endless-water-item-action.png',
+  'srd-5.1:magic-item:deck-of-illusions': '/assets/icons/deck-of-illusions-item-action.png',
+  'srd-5.1:magic-item:deck-of-many-things': '/assets/icons/deck-of-many-things-item-action.png',
+  'srd-5.1:magic-item:defender': '/assets/icons/defender-item-action.png',
+  'srd-5.1:magic-item:demon-armor': '/assets/icons/demon-armor-item-action.png',
+  'srd-5.1:magic-item:dimensional-shackles': '/assets/icons/dimensional-shackles-item-action.png',
+  'srd-5.1:magic-item:dragon-scale-mail': '/assets/icons/dragon-scale-mail-item-action.png',
+  'srd-5.1:magic-item:dragon-slayer': '/assets/icons/dragon-slayer-item-action.png',
+  'srd-5.1:magic-item:dust-of-disappearance': '/assets/icons/dust-of-disappearance-item-action.png',
+  'srd-5.1:magic-item:dust-of-dryness': '/assets/icons/dust-of-dryness-item-action.png',
+  'srd-5.1:magic-item:dust-of-sneezing-and-choking': '/assets/icons/dust-of-sneezing-and-choking-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [
@@ -409,7 +456,7 @@ export function dnd5eSpellActionIcon(input: Dnd5eSpellActionIconInput): Dnd5eAct
     .join(' ')
   const motif = explicitDamageMotif ?? motifFromText(searchable) ?? motifFromSchool(input.school)
   const spec = paletteFor(key, motif)
-  const asset = DND5E_PAINTED_SPELL_ASSETS[input.id]
+  const asset = dnd5ePluginImageAssetUrl(input.iconAssetId) ?? DND5E_PAINTED_SPELL_ASSETS[input.id]
   const classPalette = input.castingClassId ? DND5E_CLASS_ICON_PALETTES[input.castingClassId] : undefined
   return {
     ...spec,
@@ -424,7 +471,7 @@ export function dnd5eSpellActionIcon(input: Dnd5eSpellActionIconInput): Dnd5eAct
   }
 }
 
-export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' | 'name' | 'englishName' | 'category' | 'icon' | 'magicItem' | 'use'>): Dnd5eActionIconSpec {
+export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' | 'name' | 'englishName' | 'category' | 'icon' | 'iconAssetId' | 'magicItem' | 'use'>): Dnd5eActionIconSpec {
   const key = `item:${item.id}`
   const searchable = `${item.id} ${item.name} ${item.englishName ?? ''}`
   const textMotif = motifFromText(searchable)
@@ -440,7 +487,7 @@ export function dnd5eItemActionIcon(item: Pick<Dnd5eInventoryItemTemplate, 'id' 
                     : item.category === 'equipment' ? 'weapon' : 'beast')
   const base = paletteFor(key, motif)
   const rarityPalette = item.magicItem ? DND5E_MAGIC_ITEM_RARITY_PALETTES[item.magicItem.rarity] : undefined
-  const asset = DND5E_PAINTED_ITEM_ASSETS[item.id]
+  const asset = dnd5ePluginImageAssetUrl(item.iconAssetId) ?? DND5E_PAINTED_ITEM_ASSETS[item.id]
   return {
     ...base,
     ...(rarityPalette ? {

@@ -119,7 +119,11 @@ function actionRollLedgerEntries(state: Dnd5eHeadlessCombatState, action: Dnd5eA
       }
       for (const resolution of supplied.onHitEffectRolls ?? []) {
         const effect = attack?.onHitEffects?.find((candidate) => candidate.id === resolution.effectId)
-        if (!effect) continue
+        if (
+          !effect ||
+          effect.kind === 'source-linked-condition' ||
+          resolution.d20 == null
+        ) continue
         add({
           id: `${actionKey}:monster:${attackIndex}:on-hit:${effect.id}:save`,
           kind: 'saving-throw',
@@ -130,7 +134,8 @@ function actionRollLedgerEntries(state: Dnd5eHeadlessCombatState, action: Dnd5eA
             : [resolution.d20, resolution.d20Second],
           targetId: supplied.targetId,
         })
-        for (const [damageIndex, values] of resolution.damageRolls.entries()) {
+        if (effect.kind !== 'saving-throw-damage') continue
+        for (const [damageIndex, values] of (resolution.damageRolls ?? []).entries()) {
           const definition = effect.damage[damageIndex]
           if (!definition) continue
           add({

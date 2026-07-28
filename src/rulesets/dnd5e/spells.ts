@@ -42,6 +42,7 @@ export type Dnd5eSpellEffectKind =
   | 'dispel-magic'
   | 'teleport'
   | 'persistent-area'
+  | 'narrative-effect'
 
 export interface Dnd5eSpellDamageComponentDefinition {
   dice: { count: number; sides: number; bonus: number; perHigherSlot?: number }
@@ -55,6 +56,8 @@ export interface Dnd5eSustainedSpellAttackDefinition {
   economy: 'action' | 'bonus-action'
   origin: 'caster' | 'effect-token' | 'persistent-area'
   resolution?: 'spell-attack' | 'saving-throw'
+  /** Required for sustained spell attacks; Parry and close-threat rules depend on it. */
+  spellAttackMode?: 'melee' | 'ranged'
   relation?: 'hostile' | 'any'
   rangeFeet: number
   movementFeet?: number
@@ -80,6 +83,8 @@ export interface Dnd5eSrdSpellDefinition {
   rangeFeet: number
   target: 'hostile' | 'ally' | 'creature' | 'area'
   effect: Dnd5eSpellEffectKind
+  /** Concrete attack delivery for `spell-attack` effects. */
+  spellAttackMode?: 'melee' | 'ranged'
   /** This spell attack may target a guessed cell; the Host resolves occupancy. */
   allowsGuessedTargetCell?: boolean
   /** The SRD text explicitly requires the caster to see each selected target. */
@@ -170,6 +175,25 @@ export interface Dnd5eSrdSpellDefinition {
 }
 
 export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
+  {
+    id: 'dancing-lights', name: '舞光术', englishName: 'Dancing Lights', level: 0, school: '塑能',
+    classes: ['bard', 'sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 0,
+    target: 'ally', effect: 'narrative-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    concentration: true, concentrationDurationRounds: 10,
+    description: '种族先天施法的 Headless 授权入口。光源的具体位置与叙事表现由地图层处理。',
+  },
+  {
+    id: 'minor-illusion', name: '次级幻影', englishName: 'Minor Illusion', level: 0, school: '幻术',
+    classes: ['bard', 'sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 0,
+    target: 'ally', effect: 'narrative-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    description: '种族先天施法的 Headless 授权入口。幻象内容与识破方式由地图层和 DM 处理。',
+  },
+  {
+    id: 'thaumaturgy', name: '奇术', englishName: 'Thaumaturgy', level: 0, school: '变化',
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 0,
+    target: 'ally', effect: 'narrative-effect', dice: { count: 0, sides: 4, bonus: 0 },
+    description: '种族先天施法的 Headless 授权入口。非伤害性的环境表现由地图层处理。',
+  },
   {
     id: 'shillelagh', name: '橡棍术', englishName: 'Shillelagh', level: 0, school: '变化',
     classes: ['druid'], castingTime: 'bonus-action', rangeFeet: 0,
@@ -300,6 +324,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     maximumTargets: 1, appliedEffect: 'flame-blade',
     sustainedAttack: {
       id: 'flame-blade', economy: 'action', origin: 'caster', rangeFeet: 5,
+      spellAttackMode: 'melee',
       dice: { count: 3, sides: 6, additionalDieEverySlotLevels: 2 },
       damageType: 'fire',
     },
@@ -308,7 +333,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   {
     id: 'spiritual-weapon', name: '灵体武器', englishName: 'Spiritual Weapon', level: 2, school: '塑能',
     classes: ['cleric'], castingTime: 'bonus-action', rangeFeet: 60,
-    target: 'hostile', effect: 'spell-attack',
+    target: 'hostile', effect: 'spell-attack', spellAttackMode: 'melee',
     allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'force',
     addSpellcastingModifier: true, maximumTargets: 1,
@@ -316,6 +341,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
     sustainedAttack: {
       id: 'spiritual-weapon', economy: 'bonus-action', origin: 'effect-token',
       rangeFeet: 5, movementFeet: 20, effectDurationRounds: 10, immediateAttack: true,
+      spellAttackMode: 'melee',
       dice: { count: 1, sides: 8, additionalDieEverySlotLevels: 2 },
       damageType: 'force',
     },
@@ -539,13 +565,13 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'guiding-bolt', name: '曳光弹', englishName: 'Guiding Bolt', level: 1, school: '塑能',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
     dice: { count: 4, sides: 6, bonus: 0, perHigherSlot: 1 }, damageType: 'radiant', onHitEffect: 'guiding-bolt',
     description: '进行一次远程法术攻击。命中造成4d6光耀伤害；在你的下一回合结束前，下一次对该目标的攻击检定具有优势。每升一环增加1d6伤害。',
   },
   {
     id: 'acid-arrow', name: '强酸箭', englishName: 'Acid Arrow', level: 2, school: '塑能',
-    classes: ['wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['wizard'], castingTime: 'action', rangeFeet: 90, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
     dice: { count: 4, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', spellAttackMissDamage: 'half',
     delayedDamage: {
       dice: { count: 2, sides: 4, bonus: 0, perHigherSlot: 1 }, damageType: 'acid', timing: 'target-next-turn-end',
@@ -659,41 +685,41 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'fire-bolt', name: '火焰箭', englishName: 'Fire Bolt', level: 0, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 10, bonus: 0 }, damageType: 'fire', cantripScaling: true,
     description: '进行一次远程法术攻击；命中造成火焰伤害。伤害骰在5、11、17级增加。',
   },
   {
     id: 'ray-of-frost', name: '冷冻射线', englishName: 'Ray of Frost', level: 0, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 60, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'cold', cantripScaling: true,
     onHitEffect: 'ray-of-frost',
     description: '进行一次远程法术攻击。命中时目标受到冷冻伤害，且速度降低10尺，直到你的下一回合开始。伤害骰在5、11、17级增加。',
   },
   {
     id: 'shocking-grasp', name: '电爪', englishName: 'Shocking Grasp', level: 0, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'melee', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'lightning', cantripScaling: true,
     onHitEffect: 'shocking-grasp',
     description: '进行一次近战法术攻击；若目标穿戴金属护甲，该攻击具有优势。命中时造成闪电伤害，且目标直到其下一回合开始前不能进行反应。伤害骰在5、11、17级增加。',
   },
   {
     id: 'chill-touch', name: '冻寒之触', englishName: 'Chill Touch', level: 0, school: '死灵',
-    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['sorcerer', 'warlock', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'necrotic', cantripScaling: true,
     onHitEffect: 'chill-touch',
     description: '进行一次远程法术攻击；命中造成黯蚀伤害，且目标在你的下一回合开始前无法恢复生命值。若目标为亡灵，其在此期间对你进行的攻击检定具有劣势。伤害骰在5、11、17级增加。',
   },
   {
     id: 'eldritch-blast', name: '魔能爆', englishName: 'Eldritch Blast', level: 0, school: '塑能',
-    classes: ['warlock'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    classes: ['warlock'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged',
     allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 10, bonus: 0 }, damageType: 'force', cantripScaling: true,
     description: '向射程内生物发射一道爆裂能量并进行远程法术攻击；命中造成1d10力场伤害。5、11、17级时分别增加至2、3、4道射线；每道射线分别进行攻击检定，并可指定同一或不同目标。',
   },
   {
     id: 'produce-flame', name: '燃火术', englishName: 'Produce Flame', level: 0, school: '咒法',
-    classes: ['druid'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['druid'], castingTime: 'action', rangeFeet: 30, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged', allowsGuessedTargetCell: true,
     dice: { count: 1, sides: 8, bonus: 0 }, damageType: 'fire', cantripScaling: true,
     description: '将火焰投向生物并进行一次远程法术攻击；命中造成火焰伤害。伤害骰在5、11、17级增加。',
   },
@@ -762,7 +788,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'inflict-wounds', name: '致伤术', englishName: 'Inflict Wounds', level: 1, school: '死灵',
-    classes: ['cleric'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack', allowsGuessedTargetCell: true,
+    classes: ['cleric'], castingTime: 'action', rangeFeet: 5, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'melee', allowsGuessedTargetCell: true,
     dice: { count: 3, sides: 10, bonus: 0, perHigherSlot: 1 }, damageType: 'necrotic',
     description: '进行一次近战法术攻击；命中造成3d10黯蚀伤害，升环时每高一环增加1d10。',
   },
@@ -776,7 +802,7 @@ export const DND5E_SRD_COMBAT_SPELLS: readonly Dnd5eSrdSpellDefinition[] = [
   },
   {
     id: 'scorching-ray', name: '灼热射线', englishName: 'Scorching Ray', level: 2, school: '塑能',
-    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack',
+    classes: ['sorcerer', 'wizard'], castingTime: 'action', rangeFeet: 120, target: 'hostile', effect: 'spell-attack', spellAttackMode: 'ranged',
     allowsGuessedTargetCell: true,
     dice: { count: 2, sides: 6, bonus: 0 }, damageType: 'fire',
     baseProjectiles: 3, additionalProjectilesPerHigherSlot: 1,
@@ -899,6 +925,20 @@ const spellsById = new Map(DND5E_SRD_COMBAT_SPELLS.map((spell) => [spell.id, spe
 
 export function getDnd5eSrdCombatSpell(id: string): Dnd5eSrdSpellDefinition | undefined {
   return spellsById.get(id)
+}
+
+export function dnd5eSpellAttackDelivery(
+  spell: Dnd5eSrdSpellDefinition,
+  sustainedAttack?: Dnd5eSustainedSpellAttackDefinition,
+): 'melee' | 'ranged' | undefined {
+  if (sustainedAttack) {
+    if (
+      sustainedAttack.resolution === 'saving-throw' ||
+      sustainedAttack.id === 'call-lightning'
+    ) return undefined
+    return sustainedAttack.spellAttackMode
+  }
+  return spell.effect === 'spell-attack' ? spell.spellAttackMode : undefined
 }
 
 export function dnd5eCantripDiceMultiplier(level: number): number {

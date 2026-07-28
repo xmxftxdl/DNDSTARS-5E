@@ -11,7 +11,11 @@ import {
 } from './equipmentAttackAction'
 import { createDnd5eTurnEconomyCounts, spendDnd5eTurnResource } from './turnEconomy'
 import { applyDnd5eInventoryMutation } from './items'
-import { createDnd5eMechanicalEffect, DND5E_COMBAT_STATE_SCHEMA_VERSION } from './activeEffects'
+import {
+  createDnd5eConditionEffect,
+  createDnd5eMechanicalEffect,
+  DND5E_COMBAT_STATE_SCHEMA_VERSION,
+} from './activeEffects'
 
 function fighter(): Character {
   const base: Character = {
@@ -53,6 +57,60 @@ describe('D&D 5e equipment attack authority', () => {
     const resolved = resolvePreparedDnd5eEquipmentAttack({ prepared: prepared.prepared, d20: 15, damageRolls: [5] })
     expect(resolved.result.ok).toBe(true)
     expect(resolved.application?.map.tokens.find((item) => item.id === input.targetToken.id)?.hp).toBe(12)
+  })
+
+  it('uses a versatile weapon one-handed and rejects a true two-handed weapon while maintaining a grapple', () => {
+    const input = fixture()
+    const grapple = createDnd5eConditionEffect({
+      id: 'maintained-grapple',
+      condition: 'grappled',
+      source: { kind: 'feature', actorId: input.actorToken.id, rulesId: 'basic-action:grapple' },
+      targetId: input.targetToken.id,
+      duration: { type: 'permanent' },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: input.actorToken.id,
+        sourceActionId: 'basic-action:grapple',
+        slotGroup: 'free-hand',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    input.actor.equipment = { mainWeapon: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon }
+    input.map = {
+      ...input.map,
+      tokens: input.map.tokens.map((entry) => entry.id === input.targetToken.id
+        ? {
+            ...entry,
+            dnd5eCombatState: {
+              schemaVersion: DND5E_COMBAT_STATE_SCHEMA_VERSION,
+              conditions: ['grappled'],
+              activeEffects: [grapple],
+            },
+          }
+        : entry),
+    }
+    const versatile = prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })
+    expect(versatile.ok).toBe(true)
+    if (!versatile.ok) return
+    expect(versatile.prepared.profile).toMatchObject({
+      weaponId: DND5E_FIGHTER_STARTING_EQUIPMENT.mainWeapon!.id,
+      damage: { sides: 8 },
+      greatWeaponFighting: false,
+    })
+
+    input.actor.equipment = { mainWeapon: DND5E_LONGBOW }
+    expect(prepareDnd5eEquipmentAttack({
+      ...input,
+      characters: [input.actor],
+      attacksUsed: 0,
+    })).toEqual({ ok: false, reason: 'no-weapon' })
   })
 
   it('authorizes the selected Shillelagh ability and rejects it after the enchanted weapon is changed', () => {

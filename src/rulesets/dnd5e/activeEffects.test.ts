@@ -4,6 +4,7 @@ import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
   dnd5eActiveAbilityCheckAdvantages,
+  dnd5eActiveActionOrBonusActionOnly,
   dnd5eActiveArmorClassBonus,
   dnd5eActiveCarryingCapacityMultiplier,
   dnd5eActiveConditionImmunities,
@@ -12,11 +13,13 @@ import {
   dnd5eActiveEffectsSeeInvisible,
   dnd5eActiveFlySpeed,
   dnd5eActiveJumpDistanceMultiplier,
+  dnd5eActiveMaximumAttacksPerTurn,
   dnd5eActiveResistanceToAllDamage,
   dnd5eActiveSavingThrowBonus,
   dnd5eActiveSizeRankDelta,
   dnd5eActiveSafeFallFeet,
   dnd5eActiveSpeedPenalty,
+  dnd5eActiveSpeedMultiplier,
   dnd5eActiveStrengthRollFlags,
   dnd5eActiveWeaponDamageD4Mode,
   dnd5eConditionsFromActiveEffects,
@@ -281,6 +284,41 @@ describe('D&D 5e ActiveEffectInstance', () => {
     })
   })
 
+  it('normalizes and combines conservative slow-breath action modifiers', () => {
+    const slowingBreath = createDnd5eMechanicalEffect({
+      definitionId: 'srd-5.1:slowing-breath', label: '迟缓吐息', targetId: 'target',
+      source: { kind: 'monster', actorId: 'copper-dragon' },
+      modifiers: {
+        speedMultiplier: 0.5,
+        maximumAttacksPerTurn: 1,
+        actionOrBonusActionOnly: true,
+      },
+    })
+    const stricterCap = createDnd5eMechanicalEffect({
+      definitionId: 'test:attack-cap', label: '更严格上限', targetId: 'target',
+      source: { kind: 'system' }, modifiers: { maximumAttacksPerTurn: 1 },
+    })
+    expect(dnd5eActiveSpeedMultiplier([slowingBreath])).toBe(0.5)
+    expect(dnd5eActiveMaximumAttacksPerTurn([slowingBreath, stricterCap])).toBe(1)
+    expect(dnd5eActiveActionOrBonusActionOnly([slowingBreath])).toBe(true)
+    expect(validateDnd5eActiveEffectsStrict([slowingBreath])).toMatchObject({ ok: true })
+    expect(normalizeDnd5eActiveEffects([{
+      ...slowingBreath,
+      modifiers: { speedMultiplier: 0, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
+    }])[0].modifiers).toBeUndefined()
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...slowingBreath,
+      modifiers: { speedMultiplier: 0, maximumAttacksPerTurn: 1.5, actionOrBonusActionOnly: 'yes' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.stringContaining('speedMultiplier'),
+        expect.stringContaining('maximumAttacksPerTurn'),
+        expect.stringContaining('actionOrBonusActionOnly'),
+      ]),
+    })
+  })
+
   it('strictly rejects malformed remote values instead of silently repairing them', () => {
     const effect = createDnd5eConditionEffect({
       id: 'blind', condition: 'blinded', targetId: 'target', source: { kind: 'dm' },
@@ -342,6 +380,151 @@ describe('D&D 5e ActiveEffectInstance', () => {
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('repeatSave')]),
     })
+  })
+
+  it('round-trips source-linked grapple relations and skill-based escape checks', () => {
+    const relation = {
+      schemaVersion: 1,
+      kind: 'grapple',
+      sourceActorId: 'ankheg',
+      sourceActionId: 'bite',
+      slotGroup: 'mandibles',
+      maxDistanceFeet: 5,
+      movement: 'drag-target',
+      endsOnSourceIncapacitated: true,
+    } as const
+    const effect = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation,
+    })
+
+    expect(effect.relation).toEqual(relation)
+    expect(effect.relation).not.toBe(relation)
+    expect(normalizeDnd5eActiveEffects([effect])).toEqual([effect])
+    expect(validateDnd5eActiveEffectsStrict([effect])).toMatchObject({ ok: true })
+  })
+
+  it('rejects malformed source-linked relations and mismatched escape skills', () => {
+    const effect = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'ankheg',
+        sourceActionId: 'bite',
+        slotGroup: 'mandibles',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      relation: { ...effect.relation!, sourceActorId: 'other-monster' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(normalizeDnd5eActiveEffects([{
+      ...effect,
+      relation: { ...effect.relation!, sourceActorId: 'other-monster' },
+    }])).toEqual([])
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      relation: { ...effect.relation!, unexpected: true },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      escapeCheck: { ...effect.escapeCheck!, skill: 'acrobatics' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('escapeCheck')]),
+    })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...effect,
+      escapeCheck: { ...effect.escapeCheck!, alternativeSkill: 'athletics' },
+    }])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('escapeCheck')]),
+    })
+  })
+
+  it('fails closed when a grapple relation is not an independent grappled root', () => {
+    const anchor = createDnd5eConditionEffect({
+      id: 'anchor:prone',
+      condition: 'prone',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+    })
+    const grapple = createDnd5eConditionEffect({
+      id: 'ankheg:bite:hero',
+      condition: 'grappled',
+      targetId: 'hero',
+      source: { kind: 'monster', actorId: 'ankheg', rulesId: 'bite' },
+      escapeCheck: {
+        ability: 'str',
+        skill: 'athletics',
+        alternativeAbility: 'dex',
+        alternativeSkill: 'acrobatics',
+        dc: 13,
+        economy: 'action',
+      },
+      relation: {
+        schemaVersion: 1,
+        kind: 'grapple',
+        sourceActorId: 'ankheg',
+        sourceActionId: 'bite',
+        slotGroup: 'bite',
+        maxDistanceFeet: 5,
+        movement: 'drag-target',
+        endsOnSourceIncapacitated: true,
+      },
+    })
+    const relationOnRestrained = {
+      ...grapple,
+      standardCondition: 'restrained' as const,
+    }
+    const dependentRelation = {
+      ...grapple,
+      dependsOnEffectId: anchor.id,
+    }
+
+    expect(validateDnd5eActiveEffectsStrict([relationOnRestrained])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(normalizeDnd5eActiveEffects([relationOnRestrained])).toEqual([])
+    expect(validateDnd5eActiveEffectsStrict([anchor, dependentRelation])).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.stringContaining('relation')]),
+    })
+    expect(normalizeDnd5eActiveEffects([anchor, dependentRelation])).toEqual([anchor])
   })
 
   it('cascades removal through source-specific effect dependencies', () => {

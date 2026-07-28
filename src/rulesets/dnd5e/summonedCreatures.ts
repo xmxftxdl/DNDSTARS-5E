@@ -1,5 +1,9 @@
 import type { InitiativeEntry } from '../../components/map/InitiativeTracker'
-import { DND5E_SRD_ENEMY_POOL, enemyTemplateToTokenPatch } from '../../lib/enemyPool'
+import {
+  assignEnemyVisualVariants,
+  DND5E_SRD_ENEMY_POOL,
+  enemyTemplateToTokenPatch,
+} from '../../lib/enemyPool'
 import {
   cellKey,
   mapCellExtent,
@@ -74,7 +78,8 @@ export function planDnd5eSummonedCreature(input: {
     input.initiativeD20 < 1 || input.initiativeD20 > 20
   ) return { ok: false, reason: 'invalid-summon' }
 
-  const patch = enemyTemplateToTokenPatch(template)
+  const [templateWithVisual] = assignEnemyVisualVariants([template], input.map.tokens)
+  const patch = enemyTemplateToTokenPatch(templateWithVisual)
   const tokenBase = {
     size: patch.size ?? 1,
     creatureSize: patch.creatureSize,
@@ -122,7 +127,8 @@ export function planDnd5eSummonedCreature(input: {
     type: 'enemy',
     hp: patch.hp,
     maxHp: patch.maxHp,
-    poolId: monster.id,
+    poolId: patch.poolId,
+    visualVariantId: patch.visualVariantId,
     creatureTypes: patch.creatureTypes,
     creatureSize: patch.creatureSize,
     showHpOnToken: true,

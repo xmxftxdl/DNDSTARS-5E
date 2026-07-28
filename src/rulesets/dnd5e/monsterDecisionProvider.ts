@@ -306,9 +306,11 @@ export const DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3: MonsterDecisio
       score += Math.min(12, Math.log2(1 + (metrics.targetThreat ?? 0)) * 2.5) * weights.targetPriority
       reasons.push('目标已对该怪物造成有效威胁')
     }
-    if ((metrics.controlValue ?? 0) > 0) {
+    if ((metrics.controlValue ?? 0) !== 0) {
       score += (metrics.controlValue ?? 0) * weights.control
-      reasons.push('能力具有控制或多目标收益')
+      reasons.push((metrics.controlValue ?? 0) > 0
+        ? '能力具有控制或多目标收益'
+        : '范围控制会对友方造成负面影响')
     }
     if ((metrics.supportValue ?? 0) > 0) {
       score += (metrics.supportValue ?? 0) * weights.support

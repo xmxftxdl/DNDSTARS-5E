@@ -37,6 +37,7 @@ import {
   type Dnd5eMonsterStatBlock,
 } from './monsters'
 import {
+  dnd5eSpellAttackDelivery,
   dnd5eSpellDiceCount,
   dnd5eSpellMaximumTargets,
   getDnd5eSrdCombatSpell,
@@ -365,7 +366,12 @@ export function prepareDnd5eMonsterCoreSpell(input: {
       diceCount: dnd5eSpellDiceCount(spell, casterLevel, input.slotLevel),
       maximumTargets,
       spellAttackMode: spell.effect === 'spell-attack'
-        ? dnd5eMonsterSpellAttackMode(snapshot.state, actorToken.id, targetTokens[0]!.id)
+        ? dnd5eMonsterSpellAttackMode(
+            snapshot.state,
+            actorToken.id,
+            targetTokens[0]!.id,
+            dnd5eSpellAttackDelivery(spell),
+          )
         : undefined,
       spellAttackAutomaticCritical: spell.effect === 'spell-attack'
         ? dnd5eHitIsAutomaticCritical(

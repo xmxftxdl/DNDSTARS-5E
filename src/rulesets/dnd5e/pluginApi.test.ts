@@ -10,6 +10,8 @@ import {
   dnd5ePluginFeatureDefinition,
   dnd5ePluginRaceDefinition,
   registerDnd5eRulesPlugin,
+  roomActiveDnd5eRulesPluginRequirements,
+  roomDistributableDnd5eRulesPluginRequirements,
   registeredDnd5ePluginAbilityGenerationMethods,
   registeredDnd5ePluginBackgrounds,
   registeredDnd5ePluginRaces,
@@ -49,6 +51,52 @@ function character(patch: Partial<Character> = {}): Character {
 }
 
 describe('D&D 5e rules plugin API', () => {
+  it('omits local-only metadata from room handshake requirements', () => {
+    const disposeLocal = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'local.example.private-room-metadata', name: 'Private', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Local', license: 'Private',
+        distributionPolicy: 'local-only',
+      },
+      setup() {},
+    }, { integrity: 'sha256-YWJjZA==' })
+    const disposeRoom = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'com.example.room-metadata', name: 'Room', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Example', license: 'CC0-1.0',
+        distributionPolicy: 'room-distributable',
+      },
+      setup() {},
+    }, { integrity: 'sha256-ZGVmZw==' })
+    try {
+      const ids = roomDistributableDnd5eRulesPluginRequirements().map((requirement) => requirement.id)
+      expect(ids).toContain('com.example.room-metadata')
+      expect(ids).not.toContain('local.example.private-room-metadata')
+    } finally {
+      disposeRoom()
+      disposeLocal()
+    }
+  })
+
+  it('includes room-ephemeral only in the active room handshake', () => {
+    const dispose = registerDnd5eRulesPlugin({
+      manifest: {
+        id: 'local.example.room-ephemeral', name: 'Ephemeral', version: '1.0.0', apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1', publisher: 'Local', license: 'Private',
+        distributionPolicy: 'room-ephemeral',
+      },
+      setup() {},
+    }, { integrity: 'sha256-ZXBoZW1lcmFs' })
+    try {
+      expect(roomActiveDnd5eRulesPluginRequirements().map((entry) => entry.id))
+        .toContain('local.example.room-ephemeral')
+      expect(roomDistributableDnd5eRulesPluginRequirements().map((entry) => entry.id))
+        .not.toContain('local.example.room-ephemeral')
+    } finally {
+      dispose()
+    }
+  })
+
   it('rejects summon actions that bypass the turn economy', () => {
     expect(() => registerDnd5eRulesPlugin({
       manifest: {
@@ -260,8 +308,26 @@ describe('D&D 5e rules plugin API', () => {
       setup(api) {
         expect(api.registerRace({
           id: 'starfolk', name: '星裔测试种族', speedFeet: 35,
+          parentRace: { id: 'human', name: '人类' },
           abilityBonuses: { cha: 2 }, flexibleAbilityBonus: { count: 1, amount: 1, exclude: ['cha'] },
+          skillProficiencyChoiceCount: 1,
+          armorProficiencies: ['light'],
+          weaponProficiencies: ['dnd5e-longsword'],
+          toolProficiencies: ['星图工具'],
+          grantedFeatureIds: ['starlight'],
+          featChoiceCount: 1,
+          hitPointsPerLevelBonus: 1,
+          savingThrowAdvantages: { magicAbilities: ['int', 'wis', 'cha'] },
+          automation: 'partial',
+          automationReasons: ['夜空导航需要 DM 判断。'],
         })).toBe(`${pluginId}:starfolk`)
+        api.registerFeature({
+          id: 'starlight',
+          name: '星光',
+          summary: '测试种族自动授予。',
+          description: '测试。',
+          automation: 'manual',
+        })
         expect(api.registerBackground({
           id: 'sky-sailor', name: '天帆水手', description: '测试背景。',
           skillProficiencies: ['athletics', 'perception'], toolProficiencies: ['导航工具'], languages: 1,
@@ -274,7 +340,24 @@ describe('D&D 5e rules plugin API', () => {
       },
     })
     try {
-      expect(dnd5ePluginRaceDefinition(`${pluginId}:starfolk`)).toMatchObject({ name: '星裔测试种族', speedFeet: 35 })
+      expect(dnd5ePluginRaceDefinition(`${pluginId}:starfolk`)).toMatchObject({
+        name: '星裔测试种族',
+        parentRace: { id: 'human', name: '人类' },
+        speedFeet: 35,
+        skillProficiencyChoiceCount: 1,
+        armorProficiencies: ['light'],
+        weaponProficiencies: ['dnd5e-longsword'],
+        toolProficiencies: ['星图工具'],
+        grantedFeatureIds: [`${pluginId}:starlight`],
+        featChoiceCount: 1,
+        hitPointsPerLevelBonus: 1,
+        savingThrowAdvantages: { magicAbilities: ['int', 'wis', 'cha'] },
+        automation: 'partial',
+      })
+      expect(dnd5eCharacterHasPluginFeature(character({
+        race: '星裔测试种族',
+        dnd5eRaceId: `${pluginId}:starfolk`,
+      }), `${pluginId}:starlight`)).toBe(true)
       expect(dnd5ePluginBackgroundDefinition(`${pluginId}:sky-sailor`)).toMatchObject({
         name: '天帆水手', skillProficiencies: ['athletics', 'perception'], feature: { name: '识风' },
       })

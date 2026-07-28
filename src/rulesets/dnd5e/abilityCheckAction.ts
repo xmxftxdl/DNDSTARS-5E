@@ -121,6 +121,8 @@ function headlessAbilityCheckAction(
   input: {
     d20: number
     d20Second?: number
+    halflingLuckyD20?: number
+    halflingLuckyD20Second?: number
     bardicInspirationRoll?: number
     peerlessSkillRoll?: number
     darkOnesOwnLuckRoll?: number
@@ -154,6 +156,8 @@ export function resolvePreparedDnd5eAbilityCheck(input: {
   prepared: PreparedDnd5eAbilityCheck
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   bardicInspirationRoll?: number
   peerlessSkillRoll?: number
   darkOnesOwnLuckRoll?: number

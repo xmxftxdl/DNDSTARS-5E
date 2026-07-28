@@ -135,6 +135,129 @@ export function dnd5eMonsterEffectiveWeaponAttack(
     : attack
 }
 
+export interface Dnd5eMonsterAttackTraitContext {
+  combatId: string
+  round: number
+  targetCurrentHp: number
+  targetMaxHp: number
+  targetSurprisedCombatId?: string
+  targetSurpriseResolvedCombatId?: string
+  /** Set only after the authoritative turn-start lifecycle activates Reckless. */
+  actorRecklessActive?: boolean
+}
+
+function dnd5eMonsterTargetIsCurrentlySurprised(
+  context: Dnd5eMonsterAttackTraitContext,
+): boolean {
+  return context.targetSurprisedCombatId === context.combatId &&
+    context.targetSurpriseResolvedCombatId !== context.combatId
+}
+
+export type Dnd5eMonsterRecklessRule = Extract<
+  NonNullable<Dnd5eMonsterTrait['rule']>,
+  { kind: 'reckless' }
+>
+
+export function dnd5eMonsterRecklessRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterRecklessRule | undefined {
+  return monster?.traits.find((trait) =>
+    trait.automation === 'headless' && trait.rule?.kind === 'reckless')?.rule as
+    Dnd5eMonsterRecklessRule | undefined
+}
+
+/**
+ * Returns authoritative advantage granted by target-dependent SRD traits.
+ * The attack must already be reduced from `melee-or-ranged` to its concrete
+ * distance-specific mode.
+ */
+export function dnd5eMonsterAttackTraitAdvantage(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  attack: Dnd5eMonsterWeaponAttack,
+  context: Dnd5eMonsterAttackTraitContext,
+): boolean {
+  if (!monster) return false
+  const currentlySurprised = context.round === 1 &&
+    dnd5eMonsterTargetIsCurrentlySurprised(context)
+  return monster.traits.some((trait) => {
+    if (trait.automation !== 'headless') return false
+    if (trait.rule?.kind === 'blood-frenzy') {
+      return attack.mode === trait.rule.attackMode &&
+        context.targetCurrentHp < context.targetMaxHp
+    }
+    if (trait.rule?.kind === 'ambusher-attack-advantage') {
+      return context.round === trait.rule.requiredRound && currentlySurprised
+    }
+    if (trait.rule?.kind === 'reckless') {
+      return context.actorRecklessActive === true &&
+        attack.mode === trait.rule.outgoing.mode
+    }
+    return false
+  })
+}
+
+/**
+ * Appends target-triggered damage components without mutating catalog data.
+ * Surprise Attack intentionally applies to every qualifying hit; Multiattack
+ * callers invoke this once for each concrete child attack.
+ */
+export function dnd5eMonsterWeaponAttackWithTriggeredTraits(
+  monster: Dnd5eMonsterStatBlock | undefined,
+  attack: Dnd5eMonsterWeaponAttack,
+  context: Dnd5eMonsterAttackTraitContext,
+): Dnd5eMonsterWeaponAttack {
+  if (
+    !monster ||
+    context.round !== 1 ||
+    !dnd5eMonsterTargetIsCurrentlySurprised(context)
+  ) return attack
+  const rules = monster.traits.flatMap((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'surprise-attack' &&
+    context.round === trait.rule.requiredRound
+      ? [trait.rule]
+      : [])
+  if (rules.length === 0) return attack
+  const inheritedType = attack.damage[0]?.type
+  if (!inheritedType) return attack
+  return {
+    ...attack,
+    damage: [
+      ...attack.damage,
+      ...rules.map((rule) => ({
+        average: rule.extraDamage.average,
+        count: rule.extraDamage.count,
+        sides: rule.extraDamage.sides,
+        bonus: rule.extraDamage.bonus,
+        type: inheritedType,
+      })),
+    ],
+  }
+}
+
+export type Dnd5eMonsterParryRule = Extract<
+  NonNullable<Dnd5eMonsterAction['rule']>,
+  { kind: 'parry' }
+>
+
+export function dnd5eMonsterParryRule(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): Dnd5eMonsterParryRule | undefined {
+  return monster?.reactions?.find((reaction) =>
+    reaction.automation === 'headless' &&
+    reaction.id === 'parry' &&
+    reaction.rule?.kind === 'parry')?.rule as Dnd5eMonsterParryRule | undefined
+}
+
+export function dnd5eMonsterHasReactive(
+  monster: Dnd5eMonsterStatBlock | undefined,
+): boolean {
+  return monster?.traits.some((trait) =>
+    trait.automation === 'headless' &&
+    trait.rule?.kind === 'reactive' &&
+    trait.rule.reactionRefresh === 'every-turn-start') === true
+}
+
 /**
  * Resolves a hybrid weapon attack to the concrete mode used at an
  * authoritative distance, unless a parent Multiattack explicitly restricts

@@ -1,6 +1,10 @@
 import type { AbilityKey } from '../../lib/dnd'
 import type { Character } from '../../types/character'
 import type { BattleMap, Token } from '../../store/maps'
+import { CREATURE_SIZES } from '../../lib/monsterTypes'
+import { isMovementLocked } from '../../lib/combatStatus'
+import { findMapGeometryPath } from '../../lib/mapPathfinding'
+import { tokenFootprintCells, tokenFootprintDistanceCells } from '../../lib/gridCombat'
 import {
   mapGeometryCoverBetween,
   mapGeometryLineOfSightBlocked,
@@ -28,6 +32,7 @@ import {
 } from './equipment'
 import {
   DND5E_SRD_MONSTERS,
+  dnd5eMonsterAreaSavingThrowEffect,
   getDnd5eSrdMonster,
   type Dnd5eDamageType,
   type Dnd5eMonsterAction,
@@ -39,12 +44,14 @@ import {
 import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import {
+  dnd5eMonsterAttackTraitAdvantage,
   dnd5eMonsterEffectiveWeaponAttack,
   dnd5eMonsterHasMagicResistance,
   dnd5eMonsterLimitedMagicImmunityRule,
   dnd5eMonsterPackTacticsApplies,
   dnd5eMonsterRechargeActions,
   dnd5eMonsterWeaponAttacksAreMagical,
+  dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
 } from './monsterGenericAbilities'
 import {
@@ -57,10 +64,20 @@ import {
   type Dnd5eDamageSourceContext,
   type Dnd5eMoralAlignment,
 } from './damageDefenses'
-import { dnd5eConditionIncapacitated, dnd5eStandardConditionId } from './conditions'
+import {
+  dnd5eConditionImposesAttackDisadvantage,
+  dnd5eConditionIncapacitated,
+  dnd5eStandardConditionId,
+} from './conditions'
 import {
   createDnd5eConditionEffect,
   createDnd5eMechanicalEffect,
+  dnd5eActiveActionOrBonusActionOnly,
+  dnd5eActiveMaximumAttacksPerTurn,
+  dnd5eActiveSizeRankDelta,
+  dnd5eActiveSpeedBonus,
+  dnd5eActiveSpeedMultiplier,
+  dnd5eActiveSpeedPenalty,
   dnd5eActiveMagicWeaponBonus,
   dnd5eActiveEffectId,
   dnd5eConditionsFromActiveEffects,
@@ -70,7 +87,11 @@ import {
 } from './activeEffects'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
-import { dnd5eForcedMovementFall, dnd5eRepellingBlastPushDestination } from './spellAction'
+import {
+  dnd5eForcedMovementFall,
+  dnd5eForcedPushDestination,
+  dnd5eRepellingBlastPushDestination,
+} from './spellAction'
 import { dnd5eFallingDamageDice } from './traversal'
 import {
   dnd5eSpellDiceCount,
@@ -89,24 +110,34 @@ import {
 } from './monsterDecisionProvider'
 import {
   planDnd5eMonsterTurn,
+  type Dnd5eMonsterTurnPlan,
   type Dnd5eMonsterSimulationRuntimeCache,
 } from './monsterTurnPlanner'
 import {
   createDnd5eCombatant,
+  dnd5eAbilityCheckRollMode,
+  dnd5eAbilityCheckSuccessProbability,
+  dnd5eBestActiveEffectEscapeOption,
+  dnd5eBestGrappleDefense,
   dnd5eCombatantHasConcentrationEffect,
   dnd5eCombatantPairKey,
   dnd5eDirectedCombatantPairKey,
+  prepareDnd5eTurnStartGazeRequirements,
+  previewDnd5eTurnStartBoundary,
   dnd5eHitIsAutomaticCritical,
   dnd5eTargetArmorClassForAttack,
   resolveDnd5eHeadlessAction,
   replaceDnd5eCombatantActiveEffects,
+  reconcileDnd5eSourceLinkedRelations,
   startDnd5eHeadlessCombat,
   type Dnd5eCombatEvent,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterMechanicRoll,
   type Dnd5eMonsterRechargeRoll,
+  type Dnd5eTurnStartGazeResolution,
   type Dnd5eSpellForcedMovement,
 } from './headlessCombatEngine'
+import { dnd5eOpposedAbilityCheckSuccessProbability } from './abilityCheckProbability'
 import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
 import {
   createDnd5eStrategyLearningAccumulator,
@@ -356,6 +387,8 @@ interface SimulationAttackPart {
   finesse?: boolean
   strengthBased?: boolean
   monkMartialArtsEligible?: boolean
+  /** Optional whole-target restriction from the source weapon attack. */
+  targetMaxSizeRank?: number
 }
 
 interface SimulationAction {
@@ -409,6 +442,8 @@ interface SimulationActor {
   position: number
   positionY: number
   elevationFeet: number
+  /** Base creature size. Active size modifiers are applied when queried. */
+  sizeRank: number
   actions: readonly SimulationAction[]
   behaviorStyle: Dnd5eMonsterBehaviorStyle
   targetPriority: Dnd5eMonsterTargetPriority
@@ -439,6 +474,11 @@ interface SimulationDecision {
   targetIds?: readonly string[]
   projectileTargetIds?: readonly string[]
   actionId?: string
+  areaAction?: Dnd5eMonsterTurnPlan['areaAction']
+  escapeEffectId?: string
+  escapeGrapplerId?: string
+  releaseGrappleTargetId?: string
+  releaseGrappleEffectId?: string
   nextPosition: number
   nextPositionY?: number
   nextElevationFeet?: number
@@ -497,6 +537,7 @@ interface SimulationExecutionResult {
   hits: number
   damage: number
   healing?: number
+  specialActionName?: string
   transactions: number
   steps?: Dnd5eCombatSimulationExecutionStep[]
 }
@@ -518,6 +559,53 @@ interface SimulationRuntimeCache {
   monsterReachability: Dnd5eMonsterSimulationRuntimeCache
 }
 
+function simulationSourceLinkedGrappleRootEffects(
+  actor: Pick<SimulationActor, 'activeEffects'>,
+): Dnd5eActiveEffectInstance[] {
+  return actor.activeEffects.filter((effect) =>
+    effect.standardCondition === 'grappled' &&
+    effect.dependsOnEffectId == null &&
+    effect.relation?.kind === 'grapple' &&
+    effect.source.actorId === effect.relation.sourceActorId)
+}
+
+function simulationActorMovementLocked(
+  actor: Pick<SimulationActor, 'activeEffects'>,
+): boolean {
+  return isMovementLocked(dnd5eConditionsFromActiveEffects(actor.activeEffects))
+}
+
+function simulationEffectiveSpeed(
+  actor: Pick<SimulationActor, 'speed' | 'activeEffects'>,
+): number {
+  const adjusted = Math.max(
+    0,
+    Math.floor(actor.speed) -
+      dnd5eActiveSpeedPenalty(actor.activeEffects) +
+      dnd5eActiveSpeedBonus(actor.activeEffects),
+  )
+  return Math.max(0, Math.floor(
+    adjusted * dnd5eActiveSpeedMultiplier(actor.activeEffects),
+  ))
+}
+
+function simulationBaseSizeRank(
+  token: Token | undefined,
+  monster?: Dnd5eMonsterStatBlock,
+): number {
+  const size = token?.creatureSize ?? monster?.size
+  const rank = size == null
+    ? -1
+    : CREATURE_SIZES.indexOf(size as (typeof CREATURE_SIZES)[number])
+  return rank >= 0 ? rank : 2
+}
+
+function simulationActorSizeRank(
+  actor: Pick<SimulationActor, 'sizeRank' | 'activeEffects'>,
+): number {
+  return Math.max(0, actor.sizeRank + dnd5eActiveSizeRankDelta(actor.activeEffects))
+}
+
 type SimulationBattlefield = NonNullable<Dnd5eCombatSimulationRequest['battlefield']> & {
   runtimeCache?: SimulationRuntimeCache
 }
@@ -535,13 +623,30 @@ function battlefieldPixelsPerFoot(battlefield?: SimulationBattlefield): number {
 }
 
 function actorDistanceFeet(
-  left: Pick<SimulationActor, 'position' | 'positionY'> & Partial<Pick<SimulationActor, 'elevationFeet'>>,
-  right: Pick<SimulationActor, 'position' | 'positionY'> & Partial<Pick<SimulationActor, 'elevationFeet'>>,
+  left: Pick<SimulationActor, 'position' | 'positionY'> &
+    Partial<Pick<SimulationActor, 'id' | 'elevationFeet'>>,
+  right: Pick<SimulationActor, 'position' | 'positionY'> &
+    Partial<Pick<SimulationActor, 'id' | 'elevationFeet'>>,
   battlefield?: SimulationBattlefield,
 ): number {
-  const planarFeet = Math.hypot(left.position - right.position, left.positionY - right.positionY) /
-    battlefieldPixelsPerFoot(battlefield)
-  return Math.hypot(planarFeet, (left.elevationFeet ?? 0) - (right.elevationFeet ?? 0))
+  const leftToken = left.id
+    ? battlefield?.map.tokens.find((token) => token.id === left.id)
+    : undefined
+  const rightToken = right.id
+    ? battlefield?.map.tokens.find((token) => token.id === right.id)
+    : undefined
+  const planarFeet = battlefield && leftToken && rightToken
+    ? tokenFootprintDistanceCells(
+        { ...leftToken, x: left.position, y: left.positionY },
+        { ...rightToken, x: right.position, y: right.positionY },
+        battlefield.map,
+      ) * Math.max(1, battlefield.map.feetPerCell ?? 5)
+    : Math.hypot(left.position - right.position, left.positionY - right.positionY) /
+      battlefieldPixelsPerFoot(battlefield)
+  return Math.max(
+    planarFeet,
+    Math.abs((left.elevationFeet ?? 0) - (right.elevationFeet ?? 0)),
+  )
 }
 
 function moveTowardActor(
@@ -638,6 +743,14 @@ function simulationMonsterActions(monster: Dnd5eMonsterStatBlock): SimulationAct
           : child.attack!.mode,
         reachFeet: child.attack!.reachFeet ?? 5,
         rangeFeet: child.attack!.rangeFeet,
+        targetMaxSizeRank: (
+          child.attack as Dnd5eMonsterWeaponAttack & { targetMaxSizeRank?: number }
+        ).targetMaxSizeRank ?? (
+          child.id === 'constrict' &&
+          (monster.id === 'srd-5.1:behir' || /\bbehir\b/i.test(monster.englishName))
+            ? 3
+            : undefined
+        ),
       }]
     })
     return parts.length > 0 ? [{
@@ -963,7 +1076,10 @@ function playerActor(character: Character, token?: Token): SimulationActor {
     id: token?.id ?? `player:${character.id}`,
     name: character.name,
     side: 'players',
-    deathSaves: { stable: false, dead: hp === 0 },
+    deathSaves: {
+      stable: hp === 0 && character.deathSaveStable === true,
+      dead: hp === 0 && (character.deathSaveFailures ?? 0) >= 3,
+    },
     controlImmunities: new Set(),
     maxHp,
     hp,
@@ -973,6 +1089,7 @@ function playerActor(character: Character, token?: Token): SimulationActor {
     position: token?.x ?? 0,
     positionY: token?.y ?? 0,
     elevationFeet: token?.elevationFeet ?? 0,
+    sizeRank: simulationBaseSizeRank(token),
     actions,
     behaviorStyle: 'balanced',
     targetPriority: 'lowest-hp-percentage',
@@ -1022,13 +1139,17 @@ function monsterActor(
   const actions = simulationMonsterActions(monster)
   const hp = Math.max(0, Math.floor(token?.hp ?? monster.hitPoints.average))
   const stableAtZero = hp === 0 && token?.dnd5eCombatState?.stableAtZero === true
+  const pendingZeroHpRecovery = hp === 0 && (
+    token?.dnd5eCombatState?.monsterRegenerationPendingAtZero === true ||
+    token?.dnd5eCombatState?.undeadFortitudePending != null
+  )
   return {
     id: token?.id ?? `monster:${monster.id}:${index}`,
     name: monster.name,
     side: 'monsters',
     deathSaves: {
       stable: stableAtZero,
-      dead: hp === 0 && !stableAtZero,
+      dead: hp === 0 && !stableAtZero && !pendingZeroHpRecovery,
     },
     controlImmunities: new Set(),
     maxHp: Math.max(1, monster.hitPoints.average),
@@ -1039,6 +1160,7 @@ function monsterActor(
     position: token?.x ?? initialDistanceFeet,
     positionY: token?.y ?? 0,
     elevationFeet: token?.elevationFeet ?? 0,
+    sizeRank: simulationBaseSizeRank(token, monster),
     actions,
     behaviorStyle: inferMonsterStyle(monster),
     targetPriority: monster.targetingPreference?.priority ?? 'nearest',
@@ -1107,6 +1229,7 @@ function simulationAttackPartAtDistance(
   )
   return {
     ...part,
+    monsterAttack: adjusted,
     toHit: adjusted.toHit,
     damages: adjusted.damage.map(({ count, sides, bonus, type }) => ({
       count,
@@ -1258,6 +1381,11 @@ function actionExpectedDamage(
     }
     return undefined
   }
+  const targetSizeRank = simulationActorSizeRank(target)
+  if (action.parts.some((part) =>
+    part.targetMaxSizeRank != null &&
+    targetSizeRank > part.targetMaxSizeRank
+  )) return undefined
   let expectedDamage = 0
   let totalProbability = 0
   for (const sourcePart of action.parts) {
@@ -1311,6 +1439,7 @@ function targetPriorityWeight(
 }
 
 function availableAction(actor: SimulationActor, action: SimulationAction): boolean {
+  if (!simulationActionWithinAttackCap(actor, action)) return false
   if (
     action.spell?.consumesSpellSlot &&
     (actor.spellSlots.get(action.spell.slotLevel) ?? 0) <= 0
@@ -1318,6 +1447,22 @@ function availableAction(actor: SimulationActor, action: SimulationAction): bool
   if (action.usage?.kind === 'per-day') return (actor.perDayUses.get(action.id) ?? 0) > 0
   if (action.usage?.kind === 'recharge') return actor.rechargeReady.get(action.id) !== false
   return true
+}
+
+function simulationActionWithinAttackCap(
+  actor: SimulationActor,
+  action: SimulationAction,
+): SimulationAction | undefined {
+  const maximum = dnd5eActiveMaximumAttacksPerTurn(actor.activeEffects)
+  if (maximum == null || action.parts.length <= maximum) return action
+  // A catalog monster Multiattack is one indivisible Headless declaration;
+  // select one of its child attacks instead. Player attack actions can submit
+  // only the permitted prefix of otherwise identical weapon attacks.
+  if (actor.monster) return undefined
+  return {
+    ...action,
+    parts: action.parts.slice(0, maximum),
+  }
 }
 
 function actionThreatValue(action: SimulationAction): number {
@@ -1407,6 +1552,117 @@ function elevationAttackMode(
   return 'advantage'
 }
 
+function simulationEscapeSuccessProbability(
+  actor: SimulationActor,
+  effect: Dnd5eActiveEffectInstance,
+): number {
+  const check = effect.escapeCheck
+  if (!check) return 0
+  const combatant = simulationHeadlessCombatant(actor, 10 + actor.initiativeBonus)
+  const option = dnd5eBestActiveEffectEscapeOption(combatant, check)
+  return dnd5eAbilityCheckSuccessProbability(option.modifier, check.dc, option.mode)
+}
+
+function simulationGrappleEscapeSuccessProbability(
+  actor: SimulationActor,
+  grappler: SimulationActor,
+): number {
+  const actorCombatant = simulationHeadlessCombatant(actor, 10 + actor.initiativeBonus)
+  const grapplerCombatant = simulationHeadlessCombatant(
+    grappler,
+    10 + grappler.initiativeBonus,
+  )
+  const actorDefense = dnd5eBestGrappleDefense(actorCombatant)
+  const actorAbility = actorDefense.skill === 'athletics' ? 'str' : 'dex'
+  const targetAthleticsRank = grapplerCombatant.classSelections.expertise
+    ?.includes('athletics')
+    ? 2
+    : (
+        grapplerCombatant.skillProficiencies.includes('athletics') ||
+        grapplerCombatant.classSelections['lore-bonus-skills']
+          ?.includes('athletics')
+      ) ? 1 : 0
+  return dnd5eOpposedAbilityCheckSuccessProbability({
+    actorModifier: actorDefense.modifier,
+    actorMode: dnd5eAbilityCheckRollMode(actorCombatant, {
+      ability: actorAbility,
+      skill: actorDefense.skill,
+    }),
+    targetModifier: rules.abilityModifier(grapplerCombatant.abilities.str) +
+      grapplerCombatant.proficiencyBonus * targetAthleticsRank,
+    targetMode: dnd5eAbilityCheckRollMode(grapplerCombatant, {
+      ability: 'str',
+      skill: 'athletics',
+    }),
+  })
+}
+
+function simulationEscapeCandidates(
+  actor: SimulationActor,
+  actors: readonly SimulationActor[],
+  battlefield?: SimulationBattlefield,
+): MonsterDecisionCandidate<SimulationDecision>[] {
+  return simulationSourceLinkedGrappleRootEffects(actor)
+    .filter((effect) =>
+      effect.escapeCheck?.economy === 'action' ||
+      (
+        effect.source.rulesId === 'basic-action:grapple' &&
+        effect.relation?.sourceActionId === 'basic-action:grapple'
+      ))
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .flatMap((effect): MonsterDecisionCandidate<SimulationDecision>[] => {
+      const source = actors.find((candidate) =>
+        candidate.id === effect.source.actorId &&
+        candidate.hp > 0 &&
+        !candidate.deathSaves.dead)
+      if (!source) return []
+      const fixedDc = effect.escapeCheck?.economy === 'action'
+      const successProbability = fixedDc
+        ? simulationEscapeSuccessProbability(actor, effect)
+        : simulationGrappleEscapeSuccessProbability(actor, source)
+      const restrained = actor.activeEffects.some((candidate) =>
+        candidate.standardCondition === 'restrained' &&
+        candidate.dependsOnEffectId === effect.id)
+      const escapeControlValue = restrained
+        ? fixedDc ? 120 : 180
+        : 45
+      return [{
+        id: fixedDc
+          ? `escape-active-effect:${effect.id}`
+          : `escape-grapple:${effect.id}:${source.id}`,
+        kind: 'control',
+        payload: {
+          targetId: source.id,
+          ...(fixedDc
+            ? { escapeEffectId: effect.id }
+            : { escapeGrapplerId: source.id }),
+          nextPosition: actor.position,
+          nextPositionY: actor.positionY,
+          nextElevationFeet: actor.elevationFeet,
+        },
+        metrics: {
+          expectedDamage: 0,
+          targetCurrentHp: actor.hp,
+          targetMaximumHp: actor.maxHp,
+          hitProbability: successProbability,
+          targetDistanceFeet: actorDistanceFeet(actor, source, battlefield),
+          preferredDistanceFeet: 0,
+          movementFeet: 0,
+          distanceImprovementFeet: 0,
+          defensiveCoverBonus: 0,
+          opportunityAttackRisk: 0,
+          controlValue: successProbability * escapeControlValue,
+          attacksThisTurn: false,
+          consumesAction: true,
+          dodges: false,
+          dashes: false,
+          usesNimbleEscape: false,
+          usesPreciseCoverRoute: false,
+        },
+      }]
+    })
+}
+
 function synchronizeBattlefieldTokens(
   battlefield: NonNullable<SimulationBattlefield>,
   actors: readonly SimulationActor[],
@@ -1421,6 +1677,17 @@ function synchronizeBattlefieldTokens(
           elevationFeet: actor.elevationFeet,
           hp: actor.hp,
           maxHp: actor.maxHp,
+          dnd5eCombatState: {
+            ...token.dnd5eCombatState,
+            activeEffects: actor.activeEffects.map((effect) => ({
+              ...effect,
+              source: { ...effect.source },
+              duration: { ...effect.duration },
+              escapeCheck: effect.escapeCheck ? { ...effect.escapeCheck } : undefined,
+              relation: effect.relation ? { ...effect.relation } : undefined,
+            })),
+            conditions: dnd5eConditionsFromActiveEffects(actor.activeEffects),
+          },
         }
       : token
   })
@@ -1431,6 +1698,8 @@ function mappedMonsterDecision(
   actors: readonly SimulationActor[],
   characters: readonly Character[],
   battlefield: NonNullable<SimulationBattlefield>,
+  combatId: string,
+  round: number,
   decisionProvider?: MonsterDecisionProvider,
   captureCandidates = true,
 ): SimulationDecision | undefined {
@@ -1445,10 +1714,27 @@ function mappedMonsterDecision(
       ? actors.find((candidate) => candidate.id === tokenForCharacter.id)
       : undefined
     return simulated
-      ? { ...character, currentHp: simulated.hp, maxHp: simulated.maxHp }
+      ? {
+          ...character,
+          currentHp: simulated.hp,
+          maxHp: simulated.maxHp,
+          conditions: dnd5eConditionsFromActiveEffects(simulated.activeEffects),
+          dnd5eCombatState: {
+            ...character.dnd5eCombatState,
+            activeEffects: simulated.activeEffects.map((effect) => ({
+              ...effect,
+              source: { ...effect.source },
+              duration: { ...effect.duration },
+              escapeCheck: effect.escapeCheck ? { ...effect.escapeCheck } : undefined,
+              relation: effect.relation ? { ...effect.relation } : undefined,
+            })),
+          },
+        }
       : character
   })
   const plan = planDnd5eMonsterTurn(battlefield.map, token, simulatedCharacters, {
+    combatId,
+    round,
     decisionProvider,
     simulationOptimization: {
       // Representative movement cells are enough for Monte Carlo policy
@@ -1462,6 +1748,8 @@ function mappedMonsterDecision(
   })
   const actionId = plan.spellCast
     ? `spell:${plan.spellCast.spellId}:${plan.spellCast.slotLevel}`
+    : plan.areaAction
+      ? plan.areaAction.actionId
     : plan.actionIndex != null
       ? actor.monster.actions[plan.actionIndex]?.id
       : undefined
@@ -1484,9 +1772,14 @@ function mappedMonsterDecision(
     : undefined
   return {
     targetId,
-    targetIds: plan.spellCast?.targetTokenIds,
+    targetIds: plan.spellCast?.targetTokenIds ?? plan.areaAction?.targetTokenIds,
     projectileTargetIds: plan.spellCast?.projectileTargetIds,
     actionId,
+    areaAction: plan.areaAction,
+    escapeEffectId: plan.escapeActiveEffect?.effectId,
+    escapeGrapplerId: plan.escapeGrapple?.grapplerId,
+    releaseGrappleTargetId: plan.releaseGrapple?.targetId,
+    releaseGrappleEffectId: plan.releaseGrapple?.effectId,
     nextPosition: next.x,
     nextPositionY: next.y,
     nextElevationFeet,
@@ -1502,7 +1795,11 @@ function mappedMonsterDecision(
     candidates: captureCandidates && metrics ? [{
       rank: 1,
       candidateId: plan.decision?.candidateId ?? `mapped:${actionId ?? 'dodge'}`,
-      kind: plan.spellCast ? 'spell' : plan.dodged ? 'dodge' : plan.dashed ? 'dash' : 'attack',
+      kind: plan.areaAction
+        ? 'area-action'
+        : plan.escapeActiveEffect || plan.escapeGrapple || plan.releaseGrapple
+        ? 'control'
+        : plan.spellCast ? 'spell' : plan.dodged ? 'dodge' : plan.dashed ? 'dash' : 'attack',
       targetId: plan.targetTokenId ?? plan.spellCast?.targetTokenIds[0],
       actionId,
       nextPosition: next,
@@ -1520,6 +1817,8 @@ function monsterDecision(
   actors: readonly SimulationActor[],
   characters: readonly Character[],
   battlefield?: SimulationBattlefield,
+  combatId = '',
+  round = 0,
   decisionProvider: MonsterDecisionProvider = DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3,
   captureCandidates = true,
 ): SimulationDecision {
@@ -1529,19 +1828,30 @@ function monsterDecision(
       actors,
       characters,
       battlefield,
+      combatId,
+      round,
       decisionProvider,
       captureCandidates,
     )
     if (mapped) return mapped
   }
-  const candidates: MonsterDecisionCandidate<SimulationDecision>[] = []
-  const hasNimbleEscape = actor.monster?.traits.some((trait) =>
-    trait.automation === 'headless' &&
-    trait.rule?.kind === 'nimble-escape' &&
-    trait.rule.bonusActionOptions.includes('disengage')) === true
+  const movementLocked = simulationActorMovementLocked(actor)
+  const effectiveSpeed = simulationEffectiveSpeed(actor)
+  const candidates: MonsterDecisionCandidate<SimulationDecision>[] = [
+    ...simulationEscapeCandidates(actor, actors, battlefield),
+  ]
+  const hasNimbleEscape =
+    !dnd5eActiveActionOrBonusActionOnly(actor.activeEffects) &&
+    actor.monster?.traits.some((trait) =>
+      trait.automation === 'headless' &&
+      trait.rule?.kind === 'nimble-escape' &&
+      trait.rule.bonusActionOptions.includes('disengage')) === true
   for (const target of opponents) {
     const startDistance = Math.abs(actor.position - target.position)
-    for (const action of actor.actions.filter((candidate) => availableAction(actor, candidate))) {
+    for (const declaredAction of actor.actions.filter((candidate) =>
+      availableAction(actor, candidate))) {
+      const action = simulationActionWithinAttackCap(actor, declaredAction)
+      if (!action) continue
       if (
         action.control?.changesAllegiance &&
         (
@@ -1552,8 +1862,10 @@ function monsterDecision(
       const preferred = Math.min(40, Math.max(5, actionNormalRange(action) / 2))
       const positions = new Set<number>([actor.position])
       const direction = target.position >= actor.position ? 1 : -1
-      positions.add(actor.position + direction * Math.min(actor.speed, Math.max(0, startDistance - preferred)))
-      if (actionNormalRange(action) > 5) positions.add(actor.position - direction * actor.speed)
+      if (!movementLocked) {
+        positions.add(actor.position + direction * Math.min(effectiveSpeed, Math.max(0, startDistance - preferred)))
+        if (actionNormalRange(action) > 5) positions.add(actor.position - direction * effectiveSpeed)
+      }
       for (const nextPosition of positions) {
         const distance = Math.abs(nextPosition - target.position)
         const packTacticsAdvantage = simulationMonsterPackTacticsAdvantage(
@@ -1633,33 +1945,35 @@ function monsterDecision(
         })
       }
     }
-    const direction = target.position >= actor.position ? 1 : -1
-    const nextPosition = actor.position + direction * actor.speed * 2
-    candidates.push({
-      id: `dash:${target.id}:${nextPosition}`,
-      kind: 'dash',
-      payload: { targetId: target.id, nextPosition, dashes: true },
-      metrics: {
-        expectedDamage: 0,
-        targetCurrentHp: target.hp,
-        targetMaximumHp: target.maxHp,
-        targetArmorClass: target.ac,
-        targetPriorityWeight: targetPriorityWeight(actor, target, opponents),
-        hitProbability: 0,
-        targetDistanceFeet: Math.abs(nextPosition - target.position),
-        preferredDistanceFeet: 5,
-        movementFeet: actor.speed * 2,
-        distanceImprovementFeet: Math.min(actor.speed * 2, startDistance),
-        defensiveCoverBonus: 0,
-        opportunityAttackRisk: 0,
-        attacksThisTurn: false,
-        consumesAction: true,
-        dodges: false,
-        dashes: true,
-        usesNimbleEscape: false,
-        usesPreciseCoverRoute: false,
-      },
-    })
+    if (!movementLocked) {
+      const direction = target.position >= actor.position ? 1 : -1
+      const nextPosition = actor.position + direction * effectiveSpeed * 2
+      candidates.push({
+        id: `dash:${target.id}:${nextPosition}`,
+        kind: 'dash',
+        payload: { targetId: target.id, nextPosition, dashes: true },
+        metrics: {
+          expectedDamage: 0,
+          targetCurrentHp: target.hp,
+          targetMaximumHp: target.maxHp,
+          targetArmorClass: target.ac,
+          targetPriorityWeight: targetPriorityWeight(actor, target, opponents),
+          hitProbability: 0,
+          targetDistanceFeet: Math.abs(nextPosition - target.position),
+          preferredDistanceFeet: 5,
+          movementFeet: effectiveSpeed * 2,
+          distanceImprovementFeet: Math.min(effectiveSpeed * 2, startDistance),
+          defensiveCoverBonus: 0,
+          opportunityAttackRisk: 0,
+          attacksThisTurn: false,
+          consumesAction: true,
+          dodges: false,
+          dashes: true,
+          usesNimbleEscape: false,
+          usesPreciseCoverRoute: false,
+        },
+      })
+    }
   }
   candidates.push({
     id: 'dodge',
@@ -1782,6 +2096,14 @@ function reachablePlayerPositions(
   battlefield: NonNullable<SimulationBattlefield>,
   maximumMovementFeet: number,
 ): SimulationReachablePosition[] {
+  if (simulationActorMovementLocked(actor)) {
+    return [{
+      x: actor.position,
+      y: actor.positionY,
+      elevationFeet: actor.elevationFeet,
+      movementFeet: 0,
+    }]
+  }
   const map = battlefield.map
   const cacheKey = playerReachabilityCacheKey(actor, map, maximumMovementFeet)
   const cached = battlefield.runtimeCache?.playerReachability.get(cacheKey)
@@ -2127,18 +2449,25 @@ function playerDecision(
   decisionProvider: MonsterDecisionProvider,
   captureCandidates = true,
 ): SimulationDecision {
+  const movementLocked = simulationActorMovementLocked(actor)
+  const effectiveSpeed = simulationEffectiveSpeed(actor)
   const allies = actors.filter((candidate) =>
     effectiveSide(candidate, actors) === effectiveSide(actor, actors) && candidate.hp > 0)
   const reachable = battlefield
-    ? reachablePlayerPositions(actor, battlefield, actor.speed)
+    ? reachablePlayerPositions(actor, battlefield, effectiveSpeed)
     : [{
         x: actor.position,
         y: actor.positionY,
         elevationFeet: actor.elevationFeet,
         movementFeet: 0,
       }]
-  const candidates: MonsterDecisionCandidate<SimulationDecision>[] = []
-  for (const action of actor.actions.filter((candidate) => availableAction(actor, candidate))) {
+  const candidates: MonsterDecisionCandidate<SimulationDecision>[] = [
+    ...simulationEscapeCandidates(actor, actors, battlefield),
+  ]
+  for (const declaredAction of actor.actions.filter((candidate) =>
+    availableAction(actor, candidate))) {
+    const action = simulationActionWithinAttackCap(actor, declaredAction)
+    if (!action) continue
     const supportSpell = action.spell?.target === 'ally' ||
       action.spell?.healing === true ||
       action.spell?.target === 'creature' && action.spell.effect === 'active-effect'
@@ -2149,9 +2478,11 @@ function playerDecision(
       const targetToken = battlefield?.map.tokens.find((candidate) => candidate.id === target.id)
       const candidatePositions = battlefield
         ? boundedPlayerReachablePositions(reachable, target, battlefield)
+        : movementLocked
+          ? [reachable[0]]
         : (() => {
             const distance = actorDistanceFeet(actor, target, battlefield)
-            const movementFeet = Math.min(actor.speed, Math.max(0, distance - maximum))
+            const movementFeet = Math.min(effectiveSpeed, Math.max(0, distance - maximum))
             const next = moveTowardActor(actor, target, movementFeet, battlefield)
             return [
               reachable[0],
@@ -2165,6 +2496,7 @@ function playerDecision(
           })()
       const legalPositions = candidatePositions.filter((position) => {
         const projected = {
+          id: actor.id,
           position: position.x,
           positionY: position.y,
           elevationFeet: position.elevationFeet,
@@ -2193,12 +2525,22 @@ function playerDecision(
         right.elevationFeet - left.elevationFeet).slice(0, 2)
       for (const position of legalPositions) {
         const projected = {
+          id: actor.id,
           position: position.x,
           positionY: position.y,
           elevationFeet: position.elevationFeet,
         }
         const distance = actorDistanceFeet(projected, target, battlefield)
-        const attackMode = elevationAttackMode(projected, target)
+        const attackMode = simulationAttackRollMode({
+          baseMode: elevationAttackMode(projected, target),
+          packTacticsAdvantage: false,
+          additionalDisadvantage: dnd5eConditionImposesAttackDisadvantage({
+            attacker: {
+              conditions: dnd5eConditionsFromActiveEffects(actor.activeEffects),
+            },
+            targetDistanceFeet: distance,
+          }),
+        }).resolvedMode
         const areaTargets = action.spell?.target === 'area'
           ? spellAreaActors(action, projected, target, actors, battlefield)
           : [target]
@@ -2222,7 +2564,7 @@ function playerDecision(
           : 0
         const supportValue = action.spell?.healing
           ? Math.min(Math.max(0, target.maxHp - target.hp), Math.max(1, averageHealing)) * 2 +
-            (target.hp <= target.maxHp * 0.3 ? 12 : 0)
+            (target.hp <= target.maxHp * 0.3 ? 60 : 0)
           : supportSpell ? 8 : 0
         if (action.spell?.healing && target.hp >= target.maxHp) continue
         const areaDamage = action.spell?.target === 'area'
@@ -2233,7 +2575,7 @@ function playerDecision(
         const thunderwaveImpact = thunderwaveEnvironmentalImpact({
           action,
           sourceActor: actor,
-          caster: { id: actor.id, ...projected },
+          caster: projected,
           targets: hostileAreaTargets,
           actors,
           battlefield,
@@ -2331,9 +2673,9 @@ function playerDecision(
   }
   const target = [...opponents].sort((left, right) =>
     actorDistanceFeet(actor, left, battlefield) - actorDistanceFeet(actor, right, battlefield))[0]
-  const dash = battlefield && target
+  const dash = battlefield && target && !movementLocked
     ? boundedPlayerReachablePositions(
-        reachablePlayerPositions(actor, battlefield, actor.speed * 2),
+        reachablePlayerPositions(actor, battlefield, effectiveSpeed * 2),
         target,
         battlefield,
       )
@@ -2346,11 +2688,14 @@ function playerDecision(
     nextPosition: dash?.x ?? actor.position,
     nextPositionY: dash?.y ?? actor.positionY,
     nextElevationFeet: dash?.elevationFeet ?? actor.elevationFeet,
-    dashes: true,
+    dashes: !movementLocked,
+    dodges: movementLocked,
     providerId: decisionProvider.id,
-    candidateId: 'player:fallback:dash',
+    candidateId: movementLocked ? 'player:fallback:dodge' : 'player:fallback:dash',
     score: 0,
-    reasons: ['没有可执行攻击或法术，向最近敌人疾走。'],
+    reasons: [movementLocked
+      ? '速度为 0，且没有可执行的攻击或挣脱动作，留在原地闪避。'
+      : '没有可执行攻击或法术，向最近敌人疾走。'],
     candidates: [],
   }
 }
@@ -2397,6 +2742,19 @@ function synchronizeHeadlessActors(
   actors: readonly SimulationActor[],
   battlefield?: SimulationBattlefield,
 ): void {
+  holder.state.gridDistance = battlefield
+    ? {
+        cellUnits: Math.max(1, battlefield.map.gridSize),
+        feetPerCell: Math.max(1, battlefield.map.feetPerCell ?? 5),
+        offsetX: battlefield.map.gridOffsetX,
+        offsetY: battlefield.map.gridOffsetY,
+        footprintCellsByCombatantId: Object.fromEntries(
+          battlefield.map.tokens
+            .filter((token) => holder.state.combatants[token.id] != null)
+            .map((token) => [token.id, tokenFootprintCells(token)]),
+        ),
+      }
+    : undefined
   holder.state.distanceFeetByCombatantPair = {}
   holder.state.coverBonusByCombatantPair = {}
   holder.state.lineOfEffectBlockedByCombatantPair = {}
@@ -2459,6 +2817,21 @@ function synchronizeHeadlessActors(
   }
 }
 
+function reconcileSimulationSourceLinkedRelations(input: {
+  holder: { state: Dnd5eHeadlessCombatState }
+  actors: SimulationActor[]
+  battlefield?: SimulationBattlefield
+}): Dnd5eCombatEvent[] {
+  synchronizeHeadlessActors(input.holder, input.actors, input.battlefield)
+  const events: Dnd5eCombatEvent[] = []
+  reconcileDnd5eSourceLinkedRelations(input.holder.state, events)
+  for (const actor of input.actors) {
+    const combatant = input.holder.state.combatants[actor.id]
+    if (combatant) synchronizeSimulationActorFromHeadless(actor, combatant)
+  }
+  return events
+}
+
 function synchronizeControlledActors(
   holder: { state: Dnd5eHeadlessCombatState },
   actors: readonly SimulationActor[],
@@ -2497,6 +2870,18 @@ function executionStepsFromEvents(
         text: `${combatantName(actors, event.actorId)}攻击${combatantName(actors, event.targetId)}：D20=${event.d20} ${modifier >= 0 ? '+' : '−'} ${Math.abs(modifier)} = ${event.total}，对抗 AC ${event.armorClass}，${event.hit ? event.critical ? '重击' : '命中' : '未命中'}`,
       }]
     }
+    if (event.type === 'monster-reckless-activated') {
+      return [{
+        kind: 'result',
+        text: `${combatantName(actors, event.actorId)}发动鲁莽攻击：本回合近战武器攻击具有优势，直到其下回合开始前对它的攻击也具有优势。`,
+      }]
+    }
+    if (event.type === 'monster-parry-used') {
+      return [{
+        kind: 'result',
+        text: `${combatantName(actors, event.actorId)}消耗反应招架，将本次攻击的 AC 提高 ${event.armorClassBonus} 至 ${event.armorClass}。`,
+      }]
+    }
     if (event.type === 'damage-applied') {
       return [{
         kind: 'damage',
@@ -2507,6 +2892,18 @@ function executionStepsFromEvents(
       return [{
         kind: 'roll',
         text: `${combatantName(actors, event.targetId)}进行 ${event.ability.toUpperCase()} 豁免：D20=${event.d20} ${event.modifier >= 0 ? '+' : '−'} ${Math.abs(event.modifier)} = ${event.total}，DC ${event.dc}，${event.success ? '成功' : '失败'}`,
+      }]
+    }
+    if (event.type === 'ability-check-resolved') {
+      return [{
+        kind: 'roll',
+        text: `${combatantName(actors, event.actorId)}进行 ${event.skill ?? event.ability.toUpperCase()} 检定：D20=${event.d20} ${event.modifier >= 0 ? '+' : '−'} ${Math.abs(event.modifier)} = ${event.total}${event.dc == null ? '' : `，DC ${event.dc}，${event.success ? '成功' : '失败'}`}`,
+      }]
+    }
+    if (event.type === 'contest-resolved' && event.contest === 'escape-grapple') {
+      return [{
+        kind: 'roll',
+        text: `${combatantName(actors, event.actorId)}挣脱 ${combatantName(actors, event.targetId)}：${event.actorSkill} ${event.actorTotal} 对抗 Athletics ${event.targetTotal}，${event.success ? '成功' : '失败'}`,
       }]
     }
     if (event.type === 'moved') {
@@ -2671,6 +3068,337 @@ function executeHeadlessControlAction(input: {
   }
 }
 
+function executeHeadlessEscapeActiveEffect(input: {
+  actor: SimulationActor
+  effectId: string
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  captureLog: boolean
+  battlefield?: SimulationBattlefield
+}): SimulationExecutionResult {
+  const { actor, effectId, actors, holder, random } = input
+  const effect = simulationSourceLinkedGrappleRootEffects(actor).find((candidate) =>
+    candidate.id === effectId &&
+    candidate.escapeCheck?.economy === 'action')
+  if (!effect) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  synchronizeHeadlessActors(holder, actors, input.battlefield)
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  const combatant = holder.state.combatants[actor.id]
+  if (actorIndex < 0 || !combatant) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state.initiativeIndex = actorIndex
+  combatant.turn.actionAvailable = true
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'escape-active-effect',
+    actorId: actor.id,
+    effectId,
+    d20: random.die(20),
+    d20Second: random.die(20),
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:escape:${effectId}`,
+    now: holder.state.round,
+  })
+  if (!result.ok) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (resolved) synchronizeSimulationActorFromHeadless(candidate, resolved)
+  }
+  const committed = result.transaction?.status === 'committed'
+  return {
+    handled: true,
+    hits: 0,
+    damage: 0,
+    specialActionName: '挣脱擒抱',
+    transactions: committed ? 1 : 0,
+    steps: input.captureLog
+      ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
+      : undefined,
+  }
+}
+
+function executeHeadlessEscapeGrapple(input: {
+  actor: SimulationActor
+  grapplerId: string
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  captureLog: boolean
+  battlefield?: SimulationBattlefield
+}): SimulationExecutionResult {
+  const { actor, grapplerId, actors, holder, random } = input
+  const effect = simulationSourceLinkedGrappleRootEffects(actor).find((candidate) =>
+    candidate.source.actorId === grapplerId &&
+    candidate.source.rulesId === 'basic-action:grapple' &&
+    candidate.relation?.sourceActionId === 'basic-action:grapple' &&
+    candidate.escapeCheck == null)
+  if (!effect) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  synchronizeHeadlessActors(holder, actors, input.battlefield)
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  const combatant = holder.state.combatants[actor.id]
+  if (actorIndex < 0 || !combatant) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state.initiativeIndex = actorIndex
+  combatant.turn.actionAvailable = true
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'escape-grapple',
+    actorId: actor.id,
+    grapplerId,
+    actorD20: random.die(20),
+    actorD20Second: random.die(20),
+    targetD20: random.die(20),
+    targetD20Second: random.die(20),
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:escape-grapple:${grapplerId}`,
+    now: holder.state.round,
+  })
+  if (!result.ok) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (resolved) synchronizeSimulationActorFromHeadless(candidate, resolved)
+  }
+  const committed = result.transaction?.status === 'committed'
+  return {
+    handled: true,
+    hits: 0,
+    damage: 0,
+    specialActionName: '挣脱擒抱',
+    transactions: committed ? 1 : 0,
+    steps: input.captureLog
+      ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
+      : undefined,
+  }
+}
+
+function executeHeadlessReleaseGrapple(input: {
+  actor: SimulationActor
+  targetId: string
+  effectId: string
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  captureLog: boolean
+  battlefield?: SimulationBattlefield
+}): SimulationExecutionResult {
+  const { actor, targetId, effectId, actors, holder } = input
+  const target = actors.find((candidate) => candidate.id === targetId)
+  if (!target) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  synchronizeHeadlessActors(holder, actors, input.battlefield)
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  if (actorIndex < 0 || !holder.state.combatants[actor.id]) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state.initiativeIndex = actorIndex
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'release-grapple',
+    actorId: actor.id,
+    targetId,
+    effectId,
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:release-grapple:${effectId}`,
+    now: holder.state.round,
+  })
+  if (!result.ok) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (resolved) synchronizeSimulationActorFromHeadless(candidate, resolved)
+  }
+  const committed = result.transaction?.status === 'committed'
+  return {
+    handled: true,
+    hits: 0,
+    damage: 0,
+    specialActionName: '释放擒抱',
+    transactions: committed ? 1 : 0,
+    steps: input.captureLog
+      ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
+      : undefined,
+  }
+}
+
+function executeHeadlessMonsterAreaAction(input: {
+  actor: SimulationActor
+  areaAction: NonNullable<Dnd5eMonsterTurnPlan['areaAction']>
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  captureLog: boolean
+  battlefield?: SimulationBattlefield
+}): SimulationExecutionResult {
+  const { actor, areaAction, actors, holder, random } = input
+  const definition = actor.monster?.actions.find((candidate) =>
+    candidate.id === areaAction.actionId)
+  const rule = definition
+    ? dnd5eMonsterAreaSavingThrowEffect(definition, areaAction.variantId)
+    : undefined
+  if (!actor.monster || !definition || !rule) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  const targets = areaAction.targetTokenIds.flatMap((targetId) => {
+    const target = actors.find((candidate) =>
+      candidate.id === targetId &&
+      !candidate.deathSaves.dead)
+    return target ? [target] : []
+  })
+  if (targets.length !== areaAction.targetTokenIds.length) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  synchronizeHeadlessActors(holder, actors, input.battlefield)
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  const actorCombatant = holder.state.combatants[actor.id]
+  if (actorIndex < 0 || !actorCombatant) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  holder.state.initiativeIndex = actorIndex
+  actorCombatant.turn.actionAvailable = true
+  const hpBefore = new Map(targets.map((target) => [target.id, target.hp]))
+  const targetSavingThrows = targets.map((target) => {
+    const combatant = holder.state.combatants[target.id]!
+    const mode = dnd5eSavingThrowMode(combatant, rule.ability, {
+      effectVisible: true,
+      sourceCreatureType: actorCombatant.creatureType,
+      sourceIsSpell: false,
+    })
+    return {
+      targetId: target.id,
+      d20: random.die(20),
+      d20Second: mode === 'normal' ? undefined : random.die(20),
+      blessRoll: dnd5eCombatantHasConcentrationEffect(holder.state, target.id, 'bless')
+        ? random.die(4)
+        : undefined,
+      baneRoll: dnd5eCombatantHasConcentrationEffect(holder.state, target.id, 'bane')
+        ? random.die(4)
+        : undefined,
+    }
+  })
+  const damageRolls = rule.damage
+    ? Array.from({ length: rule.damage.count }, () => random.die(rule.damage!.sides))
+    : []
+  const forcedMovements = rule.forcedMovementOnFailedSave
+    ? (() => {
+        if (!input.battlefield) return undefined
+        const map = {
+          ...input.battlefield.map,
+          tokens: input.battlefield.map.tokens.map((token) => {
+            const simulationActor = actors.find((candidate) => candidate.id === token.id)
+            return simulationActor
+              ? {
+                  ...token,
+                  x: simulationActor.position,
+                  y: simulationActor.positionY,
+                  elevationFeet: simulationActor.elevationFeet,
+                }
+              : token
+          }),
+        }
+        const actorToken = map.tokens.find((token) => token.id === actor.id)
+        if (!actorToken) return undefined
+        return targets.flatMap((target): Dnd5eSpellForcedMovement[] => {
+          const targetToken = map.tokens.find((token) => token.id === target.id)
+          if (!targetToken) return []
+          const push = dnd5eForcedPushDestination(
+            map,
+            actorToken,
+            targetToken,
+            rule.forcedMovementOnFailedSave!.maximumDistanceFeet,
+          )
+          const fall = dnd5eForcedMovementFall({
+            geometry: input.battlefield!.geometry,
+            target: targetToken,
+            to: push.to,
+          })
+          const fallingDamageRolls = dnd5eFallingDamageDice(fall.fallDistanceFeet) > 0
+            ? Array.from(
+                { length: dnd5eFallingDamageDice(fall.fallDistanceFeet) },
+                () => random.die(6),
+              )
+            : undefined
+          return [{
+            targetId: target.id,
+            to: push.to,
+            distanceFeet: push.distanceFeet,
+            toElevationFeet: fall.toElevationFeet,
+            fallingDamageRolls,
+          }]
+        })
+      })()
+    : undefined
+  if (rule.forcedMovementOnFailedSave && forcedMovements?.length !== targets.length) {
+    return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  }
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'monster-area-action',
+    actorId: actor.id,
+    actionId: areaAction.actionId,
+    resolution: {
+      schemaVersion: 1,
+      variantId: areaAction.variantId,
+      targetIds: targets.map((target) => target.id),
+      targetSavingThrows,
+      damageRolls,
+      forcedMovements,
+    },
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:area:${areaAction.actionId}`,
+    now: holder.state.round,
+  })
+  if (!result.ok) return { handled: false, hits: 0, damage: 0, transactions: 0 }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (!resolved) continue
+    synchronizeSimulationActorFromHeadless(candidate, resolved)
+    candidate.position = resolved.position.x
+    candidate.positionY = resolved.position.y
+    candidate.elevationFeet = resolved.elevationFeet ?? candidate.elevationFeet
+    for (const [actionId, ready] of Object.entries(
+      resolved.classState.monsterRechargeReadyByActionId ?? {},
+    )) {
+      candidate.rechargeReady.set(actionId, ready)
+    }
+    for (const [actionId, uses] of Object.entries(
+      resolved.classState.monsterActionUsesByActionId ?? {},
+    )) {
+      candidate.perDayUses.set(actionId, uses.current)
+    }
+  }
+  const actorSide = effectiveSide(actor, actors)
+  const hits = result.events.filter((event) =>
+    event.type === 'saving-throw-resolved' &&
+    targets.some((target) => target.id === event.targetId) &&
+    actors.some((target) =>
+      target.id === event.targetId &&
+      effectiveSide(target, actors) !== actorSide) &&
+    !event.success).length
+  const damage = targets.reduce((sum, target) =>
+    effectiveSide(target, actors) === actorSide
+      ? sum
+      : sum + Math.max(0, (hpBefore.get(target.id) ?? target.hp) - target.hp), 0)
+  const committed = result.transaction?.status === 'committed'
+  return {
+    handled: true,
+    hits,
+    damage,
+    specialActionName: areaAction.actionName,
+    transactions: committed ? 1 : 0,
+    steps: input.captureLog
+      ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
+      : undefined,
+  }
+}
+
 function executeHeadlessWeaponAction(input: {
   actor: SimulationActor
   target: SimulationActor
@@ -2695,31 +3423,91 @@ function executeHeadlessWeaponAction(input: {
   combatant.turn.actionAvailable = true
   combatant.turn.bonusActionAvailable = true
   combatant.turn.reactionAvailable = true
-  combatant.turn.movementRemaining = actor.speed
+  combatant.turn.movementRemaining = simulationEffectiveSpeed(actor)
   const hpBefore = target.hp
   let hits = 0
   let transactions = 0
   const attackDistanceFeet = actorDistanceFeet(actor, target, input.battlefield)
-  const effectiveParts = action.parts.map((part) =>
+  const targetCombatant = holder.state.combatants[target.id]
+  let effectiveParts = action.parts.map((part) =>
     simulationAttackPartAtDistance(part, attackDistanceFeet, actor.hp / actor.maxHp))
+  const monsterAttackTraitContext = targetCombatant
+    ? {
+        combatId: holder.state.combatId,
+        round: holder.state.round,
+        targetCurrentHp: targetCombatant.currentHp,
+        targetMaxHp: targetCombatant.maxHp,
+        targetSurprisedCombatId: targetCombatant.classState.surprisedCombatId,
+        targetSurpriseResolvedCombatId: targetCombatant.classState.surpriseResolvedCombatId,
+        actorRecklessActive:
+          combatant.classState.recklessAttackTurnKey ===
+          `${holder.state.combatId}:${holder.state.round}:${
+            holder.state.initiativeSlotIds?.[actorIndex] ??
+            holder.state.turnSlotId ??
+            actor.id
+          }`,
+      }
+    : undefined
+  if (actor.monster && monsterAttackTraitContext) {
+    effectiveParts = effectiveParts.map((part) => {
+      if (!part.monsterAttack) return part
+      const attack = dnd5eMonsterWeaponAttackWithTriggeredTraits(
+        actor.monster,
+        part.monsterAttack,
+        monsterAttackTraitContext,
+      )
+      return {
+        ...part,
+        monsterAttack: attack,
+        damages: attack.damage.map(({ count, sides, bonus, type }) => ({
+          count,
+          sides,
+          bonus,
+          type,
+        })),
+      }
+    })
+  }
   const packTacticsAdvantage = simulationMonsterPackTacticsAdvantage(
     actor,
     target,
     actors,
     input.battlefield,
   )
-  const rangeDisadvantage = effectiveParts.some((part) => {
+  const sourceLinkedAdvantage = effectiveParts.some((part) =>
+    part.monsterAttack?.onHitEffects?.some((effect) =>
+      effect.kind === 'source-linked-condition' &&
+      effect.relation.attackAdvantageAgainstLinkedTarget === true &&
+      simulationSourceLinkedGrappleRootEffects(target).some((activeEffect) =>
+        activeEffect.relation!.sourceActorId === actor.id &&
+        activeEffect.relation!.slotGroup === effect.relation.slotGroup &&
+        activeEffect.source.actorId === actor.id)))
+  const rangeDisadvantageByPart = effectiveParts.map((part) => {
     const normal = part.mode === 'melee'
       ? part.reachFeet
       : part.rangeFeet?.normal ?? part.reachFeet
     return attackDistanceFeet > normal ||
       (part.mode !== 'melee' && attackDistanceFeet <= 5)
   })
-  const rollMode = simulationAttackRollMode({
-    baseMode: input.attackMode,
-    packTacticsAdvantage,
-    additionalDisadvantage: rangeDisadvantage,
-  })
+  const rollModes = effectiveParts.map((part, index) =>
+    simulationAttackRollMode({
+      baseMode: input.attackMode,
+      packTacticsAdvantage:
+        packTacticsAdvantage ||
+        sourceLinkedAdvantage ||
+        targetCombatant?.classState.recklessAttackTurnKey != null ||
+        (
+          actor.monster != null &&
+          monsterAttackTraitContext != null &&
+          part.monsterAttack != null &&
+          dnd5eMonsterAttackTraitAdvantage(
+            actor.monster,
+            part.monsterAttack,
+            monsterAttackTraitContext,
+          )
+        ),
+      additionalDisadvantage: rangeDisadvantageByPart[index] ?? false,
+    }))
   const steps: Dnd5eCombatSimulationExecutionStep[] = input.captureLog
     ? [
         ...(input.attackMode !== 'normal'
@@ -2740,9 +3528,9 @@ function executeHeadlessWeaponAction(input: {
     : []
   if (actor.monster) {
     const damageGroups = rollDamageGroups(effectiveParts, random)
-    const targetCombatant = holder.state.combatants[target.id]
     const submittedDamageGroups: Array<readonly (readonly number[])[]> = []
     const submittedRolls = effectiveParts.map((part, index) => {
+      const rollMode = rollModes[index]!
       const d20 = random.die(20)
       const d20Second = rollMode.requiresSecondD20 ? random.die(20) : undefined
       const targetArmorClass = dnd5eTargetArmorClassForAttack(holder.state, actor.id, target.id)
@@ -2780,6 +3568,9 @@ function executeHeadlessWeaponAction(input: {
       submittedDamageGroups.push(damageRolls)
       const onHitEffectRolls = hit && targetCombatant
         ? (part.monsterAttack?.onHitEffects ?? []).map((effect) => {
+            if (effect.kind === 'source-linked-condition') {
+              return { effectId: effect.id }
+            }
             const saveMode = dnd5eSavingThrowMode(targetCombatant, effect.ability, {
               effectVisible: true,
               condition: effect.conditionOnFailedSave?.condition,
@@ -2796,8 +3587,10 @@ function executeHeadlessWeaponAction(input: {
               baneRoll: dnd5eCombatantHasConcentrationEffect(holder.state, target.id, 'bane')
                 ? random.die(4)
                 : undefined,
-              damageRolls: effect.damage.map((damage) =>
-                Array.from({ length: damage.count }, () => random.die(damage.sides))),
+              damageRolls: effect.kind === 'saving-throw-damage'
+                ? effect.damage.map((damage) =>
+                    Array.from({ length: damage.count }, () => random.die(damage.sides)))
+                : undefined,
             }
           })
         : undefined
@@ -2867,7 +3660,7 @@ function executeHeadlessWeaponAction(input: {
         adjacentEnemyOfTarget: false,
       }
       const d20 = random.die(20)
-      const d20Second = rollMode.requiresSecondD20 ? random.die(20) : undefined
+      const d20Second = rollModes[index]?.requiresSecondD20 ? random.die(20) : undefined
       const damageRolls = Array.from({ length: damage.count }, () => random.die(damage.sides))
       const result = resolveDnd5eHeadlessAction(state, {
         type: 'attack',
@@ -3098,6 +3891,97 @@ function executeHeadlessSpellAction(input: {
   }
 }
 
+function simulationMappedMovementPathIsValid(input: {
+  actor: SimulationActor
+  actors: readonly SimulationActor[]
+  battlefield: SimulationBattlefield
+  to: { x: number; y: number }
+  toElevationFeet: number
+}): boolean {
+  const map = {
+    ...input.battlefield.map,
+    tokens: input.battlefield.map.tokens.map((token) => {
+      const actor = input.actors.find((candidate) => candidate.id === token.id)
+      return actor
+        ? {
+            ...token,
+            x: actor.position,
+            y: actor.positionY,
+            elevationFeet: actor.elevationFeet,
+          }
+        : token
+    }),
+  }
+  const actorToken = map.tokens.find((token) => token.id === input.actor.id)
+  if (!actorToken) return false
+  const usesFlight = input.toElevationFeet !== input.actor.elevationFeet
+  const path = findMapGeometryPath({
+    geometry: input.battlefield.geometry,
+    map,
+    token: actorToken,
+    to: input.to,
+    canFly: usesFlight,
+    targetElevationFeet: input.toElevationFeet,
+    maximumTerrainStepFeet: usesFlight ? 10_000 : 10,
+  })
+  if (!path) return false
+  const draggedActors = input.actors.filter((candidate) =>
+    simulationSourceLinkedGrappleRootEffects(candidate).some((effect) =>
+      effect.relation?.movement === 'drag-target' &&
+      effect.relation.sourceActorId === input.actor.id &&
+      effect.source.actorId === input.actor.id))
+  if (draggedActors.length === 0) return true
+
+  const movingIds = new Set([input.actor.id, ...draggedActors.map((actor) => actor.id)])
+  const dragMap = {
+    ...map,
+    tokens: map.tokens.filter((token) => !movingIds.has(token.id)),
+  }
+  const sourceStart = path.points[0] ?? {
+    x: input.actor.position,
+    y: input.actor.positionY,
+  }
+  const sourceElevationStart = path.elevationsFeet[0] ?? input.actor.elevationFeet
+  for (const draggedActor of draggedActors) {
+    const draggedToken = map.tokens.find((token) => token.id === draggedActor.id)
+    if (!draggedToken) return false
+    let translatedToken = { ...draggedToken }
+    let expectedFrom = { x: draggedActor.position, y: draggedActor.positionY }
+    for (let index = 1; index < path.points.length; index += 1) {
+      const sourcePoint = path.points[index]
+      const expectedTo = {
+        x: draggedActor.position + sourcePoint.x - sourceStart.x,
+        y: draggedActor.positionY + sourcePoint.y - sourceStart.y,
+      }
+      const expectedElevation = draggedActor.elevationFeet +
+        (path.elevationsFeet[index] ?? sourceElevationStart) - sourceElevationStart
+      const translated = findMapGeometryPath({
+        geometry: input.battlefield.geometry,
+        map: dragMap,
+        token: translatedToken,
+        to: expectedTo,
+        canFly: usesFlight,
+        targetElevationFeet: expectedElevation,
+        maximumTerrainStepFeet: usesFlight ? 10_000 : 10,
+      })
+      const followsTranslatedSegment = translated?.points.length === 2 &&
+        translated.points[0].x === expectedFrom.x &&
+        translated.points[0].y === expectedFrom.y &&
+        translated.points[1].x === expectedTo.x &&
+        translated.points[1].y === expectedTo.y &&
+        translated.elevationsFeet.at(-1) === expectedElevation
+      if (!followsTranslatedSegment) return false
+      expectedFrom = expectedTo
+      translatedToken = {
+        ...translatedToken,
+        ...expectedTo,
+        elevationFeet: expectedElevation,
+      }
+    }
+  }
+  return true
+}
+
 function executeAction(
   actor: SimulationActor,
   decision: SimulationDecision,
@@ -3113,16 +3997,196 @@ function executeAction(
   hits: number
   damage: number
   healing?: number
+  specialActionName?: string
   transactions: number
   steps?: Dnd5eCombatSimulationExecutionStep[]
 } {
-  actor.position = decision.nextPosition
-  actor.positionY = decision.nextPositionY ?? actor.positionY
-  actor.elevationFeet = decision.nextElevationFeet ?? actor.elevationFeet
-  const action = actor.actions.find((candidate) => candidate.id === decision.actionId)
+  if (decision.escapeEffectId) {
+    const escaped = executeHeadlessEscapeActiveEffect({
+      actor,
+      effectId: decision.escapeEffectId,
+      actors,
+      holder: headless,
+      random,
+      captureLog,
+      battlefield,
+    })
+    if (escaped.handled) {
+      return {
+        target: actors.find((candidate) => candidate.id === decision.targetId),
+        ...escaped,
+      }
+    }
+  }
+  if (decision.escapeGrapplerId) {
+    const escaped = executeHeadlessEscapeGrapple({
+      actor,
+      grapplerId: decision.escapeGrapplerId,
+      actors,
+      holder: headless,
+      random,
+      captureLog,
+      battlefield,
+    })
+    if (escaped.handled) {
+      return {
+        target: actors.find((candidate) => candidate.id === decision.escapeGrapplerId),
+        ...escaped,
+      }
+    }
+  }
+  if (decision.releaseGrappleTargetId && decision.releaseGrappleEffectId) {
+    const released = executeHeadlessReleaseGrapple({
+      actor,
+      targetId: decision.releaseGrappleTargetId,
+      effectId: decision.releaseGrappleEffectId,
+      actors,
+      holder: headless,
+      captureLog,
+      battlefield,
+    })
+    if (!released.handled) {
+      return {
+        target: actors.find((candidate) =>
+          candidate.id === decision.releaseGrappleTargetId),
+        hits: 0,
+        damage: 0,
+        transactions: 0,
+      }
+    }
+    const continued = executeAction(
+      actor,
+      {
+        ...decision,
+        releaseGrappleTargetId: undefined,
+        releaseGrappleEffectId: undefined,
+      },
+      actors,
+      random,
+      dodgingIds,
+      headless,
+      captureLog,
+      battlefield,
+    )
+    return {
+      ...continued,
+      specialActionName: continued.specialActionName ?? released.specialActionName,
+      transactions: released.transactions + continued.transactions,
+      steps: captureLog
+        ? [...(released.steps ?? []), ...(continued.steps ?? [])]
+        : continued.steps,
+    }
+  }
+  let movementTransactions = 0
+  let movementSteps: Dnd5eCombatSimulationExecutionStep[] = []
+  const nextPositionY = decision.nextPositionY ?? actor.positionY
+  const nextElevationFeet = decision.nextElevationFeet ?? actor.elevationFeet
+  const planarMovementFeet = Math.hypot(
+    decision.nextPosition - actor.position,
+    nextPositionY - actor.positionY,
+  ) / battlefieldPixelsPerFoot(battlefield)
+  const chargedMovementFeet = Math.ceil(Math.max(
+    0,
+    decision.metrics?.movementFeet ?? planarMovementFeet,
+  ) - 1e-6)
+  const moved = planarMovementFeet > 1e-6 || nextElevationFeet !== actor.elevationFeet
+  if (moved && simulationActorMovementLocked(actor)) {
+    return { hits: 0, damage: 0, transactions: 0 }
+  }
+  if (
+    moved &&
+    battlefield &&
+    !simulationMappedMovementPathIsValid({
+      actor,
+      actors,
+      battlefield,
+      to: { x: decision.nextPosition, y: nextPositionY },
+      toElevationFeet: nextElevationFeet,
+    })
+  ) {
+    return { hits: 0, damage: 0, transactions: 0 }
+  }
+  if (moved) {
+    synchronizeHeadlessActors(headless, actors, battlefield)
+    const actorIndex = headless.state.initiativeOrder.indexOf(actor.id)
+    const actorCombatant = headless.state.combatants[actor.id]
+    if (actorIndex < 0 || !actorCombatant) {
+      return { hits: 0, damage: 0, transactions: 0 }
+    }
+    headless.state.initiativeIndex = actorIndex
+    actorCombatant.turn.movementRemaining =
+      simulationEffectiveSpeed(actor) * (decision.dashes ? 2 : 1)
+    const movement = resolveDnd5eHeadlessAction(headless.state, {
+      type: 'move',
+      actorId: actor.id,
+      to: { x: decision.nextPosition, y: nextPositionY },
+      distance: chargedMovementFeet,
+      toElevationFeet: nextElevationFeet,
+      traversalMode: nextElevationFeet !== actor.elevationFeet ? 'fly' : 'walk',
+    }, {
+      transactionId: `${headless.state.combatId}:${headless.state.round}:${actor.id}:move`,
+      now: headless.state.round,
+    })
+    if (!movement.ok) return { hits: 0, damage: 0, transactions: 0 }
+    headless.state = movement.state
+    for (const candidate of actors) {
+      const resolved = headless.state.combatants[candidate.id]
+      if (!resolved) continue
+      synchronizeSimulationActorFromHeadless(candidate, resolved)
+      candidate.position = resolved.position.x
+      candidate.positionY = resolved.position.y
+      candidate.elevationFeet = resolved.elevationFeet ?? candidate.elevationFeet
+    }
+    movementTransactions = movement.transaction?.status === 'committed' ? 1 : 0
+    if (captureLog) movementSteps = executionStepsFromEvents(movement.events, actors)
+  }
+  const includeMovement = (result: {
+    action?: SimulationAction
+    target?: SimulationActor
+    hits: number
+    damage: number
+    healing?: number
+    specialActionName?: string
+    transactions: number
+    steps?: Dnd5eCombatSimulationExecutionStep[]
+  }) => ({
+    ...result,
+    transactions: result.transactions + movementTransactions,
+    steps: captureLog
+      ? [...movementSteps, ...(result.steps ?? [])]
+      : result.steps,
+  })
+  if (decision.areaAction) {
+    const areaResult = executeHeadlessMonsterAreaAction({
+      actor,
+      areaAction: decision.areaAction,
+      actors,
+      holder: headless,
+      random,
+      captureLog,
+      battlefield,
+    })
+    if (areaResult.handled) {
+      return includeMovement({
+        target: actors.find((candidate) => candidate.id === decision.targetId),
+        ...areaResult,
+      })
+    }
+  }
+  const declaredAction = actor.actions.find((candidate) => candidate.id === decision.actionId)
+  const action = declaredAction
+    ? simulationActionWithinAttackCap(actor, declaredAction)
+    : undefined
   let target = actors.find((candidate) => candidate.id === decision.targetId && candidate.hp > 0)
   if (!action || !target || !availableAction(actor, action)) {
-    return { hits: 0, damage: 0, transactions: 0 }
+    return includeMovement({ hits: 0, damage: 0, transactions: 0 })
+  }
+  const targetSizeRank = simulationActorSizeRank(target)
+  if (action.parts.some((part) =>
+    part.targetMaxSizeRank != null &&
+    targetSizeRank > part.targetMaxSizeRank
+  )) {
+    return includeMovement({ action, target, hits: 0, damage: 0, transactions: 0 })
   }
   const headlessControlResult = executeHeadlessControlAction({
     actor,
@@ -3134,7 +4198,7 @@ function executeAction(
     captureLog,
     battlefield,
   })
-  if (headlessControlResult.handled) return { action, target, ...headlessControlResult }
+  if (headlessControlResult.handled) return includeMovement({ action, target, ...headlessControlResult })
   const headlessSpellResult = executeHeadlessSpellAction({
     actor,
     target,
@@ -3148,7 +4212,7 @@ function executeAction(
     targetIds: decision.targetIds,
     projectileTargetIds: decision.projectileTargetIds,
   })
-  if (headlessSpellResult.handled) return { action, target, ...headlessSpellResult }
+  if (headlessSpellResult.handled) return includeMovement({ action, target, ...headlessSpellResult })
   const headlessResult = executeHeadlessWeaponAction({
     actor,
     target,
@@ -3160,7 +4224,7 @@ function executeAction(
     captureLog,
     battlefield,
   })
-  if (headlessResult.handled) return { action, target, ...headlessResult }
+  if (headlessResult.handled) return includeMovement({ action, target, ...headlessResult })
   if (action.usage?.kind === 'per-day') {
     actor.perDayUses.set(action.id, Math.max(0, (actor.perDayUses.get(action.id) ?? 0) - 1))
   }
@@ -3175,18 +4239,18 @@ function executeAction(
   if (action.spell) {
     const spell = action.spell
     const distance = actorDistanceFeet(actor, target, battlefield)
-    if (distance > spell.rangeFeet) return { action, target, hits: 0, damage: 0, transactions: 0 }
+    if (distance > spell.rangeFeet) return includeMovement({ action, target, hits: 0, damage: 0, transactions: 0 })
     if (simulationLimitedMagicImmunityNegates(target, spell.slotLevel)) {
-      return { action, target, hits: 0, damage: 0, transactions: 0 }
+      return includeMovement({ action, target, hits: 0, damage: 0, transactions: 0 })
     }
     if (spell.effect === 'power-word-kill') {
       if (target.hp <= 100) {
         const dealt = target.hp
         target.hp = 0
         target.deathSaves = { stable: false, dead: true }
-        return { action, target, hits: 1, damage: dealt, transactions: 0 }
+        return includeMovement({ action, target, hits: 1, damage: dealt, transactions: 0 })
       }
-      return { action, target, hits: 1, damage: 0, transactions: 0 }
+      return includeMovement({ action, target, hits: 1, damage: 0, transactions: 0 })
     }
     let applies = false
     let halfDamage = false
@@ -3211,7 +4275,7 @@ function executeAction(
       applies = total < spell.saveDc
       halfDamage = !applies && spell.damageOnSuccessfulSave === 'half'
     }
-    if (!applies && !halfDamage) return { action, target, hits: 0, damage: 0, transactions: 0 }
+    if (!applies && !halfDamage) return includeMovement({ action, target, hits: 0, damage: 0, transactions: 0 })
     let rawDamage = spell.dice.bonus
     const count = spell.dice.count * (critical ? 2 : 1)
     for (let dieIndex = 0; dieIndex < count; dieIndex += 1) {
@@ -3224,7 +4288,7 @@ function executeAction(
       spell.damageType ?? 'force',
       simulationSpellDamageSource(actor, spell.slotLevel),
     )
-    return { action, target, hits: applies ? 1 : 0, damage: dealt, transactions: 0 }
+    return includeMovement({ action, target, hits: applies ? 1 : 0, damage: dealt, transactions: 0 })
   }
 
   let hits = 0
@@ -3282,7 +4346,7 @@ function executeAction(
       totalDamage += dealt
     }
   }
-  return { action, target, hits, damage: totalDamage, transactions: 0 }
+  return includeMovement({ action, target, hits, damage: totalDamage, transactions: 0 })
 }
 
 function resolveControlRepeatSaves(
@@ -3346,6 +4410,7 @@ function simulationActiveEffectSavingThrows(
         condition: effect.standardCondition,
         sourceCreatureType: source?.creatureType,
         sourceIsSpell: effect.source.kind === 'spell',
+        sourceIsMagical: effect.source.magical === true,
       })
       const failureDamage = repeatSave.damageOnFailure
       return {
@@ -3414,6 +4479,138 @@ function simulationMonsterRechargeRolls(
   })
 }
 
+function simulationTurnStartGazeResolutions(
+  state: Dnd5eHeadlessCombatState,
+  targetId: string,
+  random: SeededRandom,
+  targetRound = state.round,
+): Dnd5eTurnStartGazeResolution[] {
+  return prepareDnd5eTurnStartGazeRequirements(
+    state,
+    targetId,
+    targetId,
+    targetRound,
+  ).map((requirement) => {
+    const source = state.combatants[requirement.sourceId]
+    const target = state.combatants[requirement.targetId]
+    const sourceUsesGaze = !!source && !!target && source.controller !== target.controller
+    if (!sourceUsesGaze) {
+      return {
+        sourceId: requirement.sourceId,
+        targetId: requirement.targetId,
+        ruleId: requirement.ruleId,
+        sourceUsesGaze: false,
+      }
+    }
+    if (requirement.canAvertEyes) {
+      return {
+        sourceId: requirement.sourceId,
+        targetId: requirement.targetId,
+        ruleId: requirement.ruleId,
+        sourceUsesGaze: true,
+        choice: 'avert-eyes',
+      }
+    }
+    const d20 = random.die(20)
+    const d20Second = requirement.mode === 'normal' ? undefined : random.die(20)
+    return {
+      sourceId: requirement.sourceId,
+      targetId: requirement.targetId,
+      ruleId: requirement.ruleId,
+      sourceUsesGaze: true,
+      choice: 'face-gaze',
+      save: {
+        d20,
+        d20Second,
+        halflingLuckyD20: target?.racialRules?.halflingLucky && d20 === 1
+          ? random.die(20)
+          : undefined,
+        halflingLuckyD20Second:
+          target?.racialRules?.halflingLucky && d20Second === 1
+            ? random.die(20)
+            : undefined,
+        blessRoll: requirement.blessed ? random.die(4) : undefined,
+        baneRoll: requirement.baned ? random.die(4) : undefined,
+      },
+    }
+  })
+}
+
+function settleSimulationBeginTurn(input: {
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  battlefield?: SimulationBattlefield
+}): { ok: boolean; transactions: number; steps: Dnd5eCombatSimulationExecutionStep[] } {
+  const { actors, holder, random } = input
+  synchronizeHeadlessActors(holder, actors, input.battlefield)
+  const actorId = holder.state.initiativeOrder[holder.state.initiativeIndex]
+  const actor = actorId ? actors.find((candidate) => candidate.id === actorId) : undefined
+  if (!actorId || !actor || !holder.state.combatants[actorId]) {
+    return { ok: false, transactions: 0, steps: [] }
+  }
+  holder.state.turnSlotId = actorId
+  const preview = previewDnd5eTurnStartBoundary(
+    holder.state,
+    actorId,
+    actorId,
+    holder.state.round,
+  ) ?? holder.state
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'begin-turn',
+    actorId,
+    turnSlotId: actorId,
+    turnStartActiveEffectSavingThrows: simulationActiveEffectSavingThrows(
+      preview,
+      actorId,
+      'target-turn-start',
+      random,
+    ),
+    turnStartGazeResolutions: simulationTurnStartGazeResolutions(
+      holder.state,
+      actorId,
+      random,
+      holder.state.round,
+    ),
+    nextMonsterMechanicRolls: simulationMonsterMechanicRolls(
+      holder.state,
+      actorId,
+      'turn-start',
+      holder.state.round,
+      random,
+    ),
+    nextMonsterRechargeRolls: simulationMonsterRechargeRolls(
+      holder.state,
+      actorId,
+      random,
+    ),
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actorId}:begin-turn`,
+    now: holder.state.round,
+  })
+  if (!result.ok) {
+    return {
+      ok: false,
+      transactions: 0,
+      steps: [{
+        kind: 'result',
+        text: `Headless 回合开始事务回滚：${actor.name}（${result.reason}）`,
+      }, transactionStep(false)],
+    }
+  }
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (resolved) synchronizeSimulationActorFromHeadless(candidate, resolved)
+  }
+  const committed = result.transaction?.status === 'committed'
+  return {
+    ok: true,
+    transactions: committed ? 1 : 0,
+    steps: [...executionStepsFromEvents(result.events, actors), transactionStep(committed)],
+  }
+}
+
 function settleSimulationEndTurn(input: {
   actor: SimulationActor
   actors: SimulationActor[]
@@ -3425,7 +4622,10 @@ function settleSimulationEndTurn(input: {
   const { actor, actors, holder, random } = input
   synchronizeHeadlessActors(holder, actors, input.battlefield)
   const livingActorIds = new Set(
-    actors.filter((candidate) => candidate.hp > 0 || candidate.id === actor.id)
+    actors.filter((candidate) =>
+      candidate.hp > 0 ||
+      candidate.id === actor.id ||
+      holder.state.combatants[candidate.id]?.classState.monsterRegenerationPendingAtZero === true)
       .map((candidate) => candidate.id),
   )
   holder.state.initiativeOrder = holder.state.initiativeOrder.filter((actorId) =>
@@ -3452,6 +4652,12 @@ function settleSimulationEndTurn(input: {
   const nextIndex = (actorIndex + 1) % holder.state.initiativeOrder.length
   const nextActorId = holder.state.initiativeOrder[nextIndex]
   const nextRound = nextIndex === 0 ? holder.state.round + 1 : holder.state.round
+  const nextTurnPreview = previewDnd5eTurnStartBoundary(
+    holder.state,
+    nextActorId,
+    nextActorId,
+    nextRound,
+  ) ?? holder.state
   const result = resolveDnd5eHeadlessAction(holder.state, {
     type: 'end-turn',
     actorId: actor.id,
@@ -3462,11 +4668,18 @@ function settleSimulationEndTurn(input: {
       random,
     ),
     turnStartActiveEffectSavingThrows: simulationActiveEffectSavingThrows(
-      holder.state,
+      nextTurnPreview,
       nextActorId,
       'target-turn-start',
       random,
     ),
+    turnStartGazeResolutions: simulationTurnStartGazeResolutions(
+      holder.state,
+      nextActorId,
+      random,
+      nextRound,
+    ),
+    nextTurnSlotId: nextActorId,
     currentMonsterMechanicRolls: simulationMonsterMechanicRolls(
       holder.state,
       actor.id,
@@ -3552,6 +4765,7 @@ function simulationHeadlessCombatant(
         ...combatant.classState,
         activeEffects: actor.activeEffects.length > 0 ? actor.activeEffects : undefined,
       },
+      sizeRank: actor.sizeRank,
       conditions: dnd5eConditionsFromActiveEffects(actor.activeEffects),
       elevationFeet: actor.elevationFeet,
       usesDeathSaves: false,
@@ -3577,6 +4791,21 @@ function simulationHeadlessCombatant(
       })),
     }
   }
+  const proficiencyBonus = actor.monster
+    ? rules.proficiencyBonus(Math.max(1, Number(actor.monster.challenge.rating) || 1))
+    : 2
+  const monsterEscapeSkills = actor.monster?.skills?.flatMap((skill) => {
+    const ability = skill.key === 'athletics'
+      ? 'str'
+      : skill.key === 'acrobatics' ? 'dex' : undefined
+    if (!ability) return []
+    const proficiencyContribution =
+      skill.bonus - rules.abilityModifier(actor.monster!.abilities[ability])
+    const rank = proficiencyContribution >= proficiencyBonus * 1.5
+      ? 2
+      : proficiencyContribution >= proficiencyBonus * 0.5 ? 1 : 0
+    return rank > 0 ? [{ skill: skill.key, rank }] : []
+  }) ?? []
   const combatant = createDnd5eCombatant({
     id: actor.id,
     name: actor.name,
@@ -3584,7 +4813,13 @@ function simulationHeadlessCombatant(
     initiative,
     abilities: actor.monster ? { ...actor.monster.abilities } : { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
     savingThrowBonuses: actor.savingThrowModifiers,
-    proficiencyBonus: actor.monster ? rules.proficiencyBonus(Math.max(1, Number(actor.monster.challenge.rating) || 1)) : 2,
+    proficiencyBonus,
+    skillProficiencies: monsterEscapeSkills.map((entry) => entry.skill),
+    classSelections: {
+      expertise: monsterEscapeSkills
+        .filter((entry) => entry.rank === 2)
+        .map((entry) => entry.skill),
+    },
     armorClass: actor.ac,
     currentHp: actor.hp,
     maxHp: actor.maxHp,
@@ -3592,6 +4827,7 @@ function simulationHeadlessCombatant(
     speed: actor.speed,
     position: { x: actor.position, y: actor.positionY },
     elevationFeet: actor.elevationFeet,
+    sizeRank: actor.sizeRank,
     concentrating: false,
     usesDeathSaves: false,
     classState: actor.monster ? {
@@ -3696,6 +4932,25 @@ function simulateTrial(
         simulationHeadlessCombatant(actor, initiativeRolls.get(actor.id) ?? 0)),
     ),
   }
+  if (battlefield) {
+    headless.state.coordinateUnitsPerFoot = battlefieldPixelsPerFoot(battlefield)
+  }
+  reconcileSimulationSourceLinkedRelations({
+    holder: headless,
+    actors,
+    battlefield,
+  })
+  if (battlefield) synchronizeBattlefieldTokens(battlefield, actors)
+  const initialTurn = settleSimulationBeginTurn({
+    actors,
+    holder: headless,
+    random,
+    battlefield,
+  })
+  telemetry.headlessTransactionCount += initialTurn.transactions
+  if (!initialTurn.ok) return finish('draw', 0)
+  const initialTurnActorId = headless.state.initiativeOrder[0]
+  const initialTurnSteps = trialIndex === 0 ? initialTurn.steps : []
   const dodgingIds = new Set<string>()
   for (let round = 1; round <= maxRounds; round += 1) {
     headless.state.round = round
@@ -3719,7 +4974,11 @@ function simulateTrial(
         ? [{
             kind: 'turn',
             text: `回合开始：${actor.name}，HP ${actor.hp}/${actor.maxHp}，位置 (${Math.round(actor.position)}, ${Math.round(actor.positionY)})`,
-          }]
+          }, ...(
+            round === 1 && actor.id === initialTurnActorId
+              ? initialTurnSteps
+              : []
+          )]
         : []
       const opponents = actors.filter((candidate) =>
         effectiveSide(candidate, actors) !== actingSide && candidate.hp > 0)
@@ -3733,11 +4992,18 @@ function simulateTrial(
             actors,
             characters,
             battlefield,
+            headless.state.combatId,
+            round,
             decisionProvider,
             captureExecutionLog,
           )
         : playerDecision(actor, opponents, actors, battlefield, decisionProvider, captureExecutionLog)
       const selectedAction = actor.actions.find((action) => action.id === decision.actionId)
+      const selectedActionName = selectedAction?.name ??
+        decision.areaAction?.actionName ??
+        (decision.escapeEffectId || decision.escapeGrapplerId
+          ? '挣脱擒抱'
+          : decision.releaseGrappleTargetId ? '释放擒抱' : undefined)
       const selectedTarget = actors.find((candidate) => candidate.id === decision.targetId)
       if (decision.dodges) dodgingIds.add(actor.id)
       const targetHpBefore = selectedTarget?.hp ?? 0
@@ -3755,6 +5021,17 @@ function simulateTrial(
         captureExecutionLog,
         battlefield,
       )
+      const relationEvents = reconcileSimulationSourceLinkedRelations({
+        holder: headless,
+        actors,
+        battlefield,
+      })
+      if (captureExecutionLog && relationEvents.length > 0) {
+        executed.steps = [
+          ...(executed.steps ?? []),
+          ...executionStepsFromEvents(relationEvents, actors),
+        ]
+      }
       const repeatSaves = resolveControlRepeatSaves(actors, random, headless, captureExecutionLog)
       executed.transactions += repeatSaves.transactions
       if (captureExecutionLog && repeatSaves.steps.length > 0) {
@@ -3785,7 +5062,7 @@ function simulateTrial(
           damage: executed.damage,
           healing: executed.healing,
           hits: executed.hits,
-          executed: Boolean(executed.action),
+          executed: Boolean(executed.action || executed.specialActionName),
           defeatedTarget: targetHpBefore > 0 && (selectedTarget?.hp ?? targetHpBefore) <= 0,
         })
       }
@@ -3834,7 +5111,7 @@ function simulateTrial(
           providerId: decision.providerId ?? 'unknown',
           candidateCount: decision.candidateCount ?? decision.candidates?.length ?? 0,
           targetName: selectedTarget?.name,
-          actionName: selectedAction?.name,
+          actionName: selectedActionName,
           candidateId: decision.candidateId ?? 'unknown',
           score: decision.score ?? 0,
           reasons: decision.reasons ?? [],
@@ -3848,8 +5125,8 @@ function simulateTrial(
               : []),
             {
               kind: 'result',
-              text: selectedAction
-                ? `${actor.name}选择动作：${selectedAction.name}${selectedTarget ? `，目标 ${selectedTarget.name}` : ''}`
+              text: selectedActionName
+                ? `${actor.name}选择动作：${selectedActionName}${selectedTarget ? `，目标 ${selectedTarget.name}` : ''}`
                 : decision.dodges
                   ? `${actor.name}采取闪避`
                   : decision.dashes
@@ -3861,10 +5138,13 @@ function simulateTrial(
           candidates: (decision.candidates ?? []).map((candidate) => ({
             ...candidate,
             targetName: actors.find((entry) => entry.id === candidate.targetId)?.name,
-            actionName: actor.actions.find((entry) => entry.id === candidate.actionId)?.name,
+            actionName: actor.actions.find((entry) => entry.id === candidate.actionId)?.name ??
+              (candidate.actionId === decision.areaAction?.actionId
+                ? decision.areaAction?.actionName
+                : undefined),
           })),
           outcome: {
-            executed: Boolean(executed.action),
+            executed: Boolean(executed.action || executed.specialActionName),
             hits: executed.hits,
             damage: executed.damage,
             headlessTransactions: actionTransactions,

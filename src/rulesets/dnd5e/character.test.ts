@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Character } from '../../types/character'
 import { createCombatantFromDnd5eCharacter, migrateCharacterToDnd5e, normalizeLegacyAbilityScore } from './character'
 import { registerDnd5eRulesPlugin } from './pluginApi'
+import { dnd5eSavingThrowMode } from './passiveDefenses'
 
 function legacyCharacter(): Character {
   return {
@@ -35,6 +36,38 @@ describe('D&D 5e character boundary', () => {
       character, controller: 'player', initiativeD20: 12, position: { x: 5, y: 5 },
     })
     expect(combatant.conditionImmunities).toEqual(expect.arrayContaining(['magical-sleep', '魔法睡眠']))
+  })
+
+  it('projects core halflings and gnomes as Small creatures', () => {
+    expect(migrateCharacterToDnd5e({ ...legacyCharacter(), race: '半身人' }).sizeRank).toBe(1)
+    expect(migrateCharacterToDnd5e({ ...legacyCharacter(), race: '侏儒' }).sizeRank).toBe(1)
+    expect(migrateCharacterToDnd5e({ ...legacyCharacter(), race: '人类' }).sizeRank).toBe(2)
+  })
+
+  it('projects deterministic core racial defenses and proficiencies into Headless', () => {
+    const dwarf = createCombatantFromDnd5eCharacter({
+      character: migrateCharacterToDnd5e({ ...legacyCharacter(), race: '矮人' }),
+      controller: 'player',
+      initiativeD20: 10,
+      position: { x: 0, y: 0 },
+    })
+    expect(dwarf.darkvisionRangeFeet).toBe(60)
+    expect(dwarf.damageResistances).toContain('poison')
+    expect(dnd5eSavingThrowMode(dwarf, 'con', { damageType: 'poison' })).toBe('advantage')
+
+    const elf = createCombatantFromDnd5eCharacter({
+      character: migrateCharacterToDnd5e({ ...legacyCharacter(), race: '精灵' }),
+      controller: 'player',
+      initiativeD20: 10,
+      position: { x: 0, y: 0 },
+    })
+    expect(elf.skillProficiencies).toContain('perception')
+    expect(dnd5eSavingThrowMode(elf, 'wis', { condition: 'charmed' })).toBe('advantage')
+
+    const halfOrc = migrateCharacterToDnd5e({ ...legacyCharacter(), race: '半兽人' })
+    expect(halfOrc.skillProficiencies).toContain('intimidation')
+    expect(migrateCharacterToDnd5e({ ...legacyCharacter(), race: '提夫林' }).damageResistances)
+      .toContain('fire')
   })
 
   it('projects equipped saving-throw effects into every Headless saving throw', () => {

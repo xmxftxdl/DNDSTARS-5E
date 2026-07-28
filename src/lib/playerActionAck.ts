@@ -20,6 +20,7 @@ export interface BuildPlayerActionAckInput {
   appliedAt: number
   reason?: string
   acceptedPosition?: { x: number; y: number }
+  dnd5eDeclarativeAttackIntents?: SharedPlayerActionAckState['dnd5eDeclarativeAttackIntents']
   before?: PlayerActionResultBaseline
   after?: PlayerActionResultBaseline
 }
@@ -41,6 +42,13 @@ export function buildPlayerActionAck(input: BuildPlayerActionAckInput): SharedPl
     acceptedPosition: input.acceptedPosition,
     appliedAt: input.status === 'accepted' ? input.appliedAt : undefined,
     result,
+    dnd5eDeclarativeAttackIntents:
+      input.status === 'accepted' && input.dnd5eDeclarativeAttackIntents
+        ? {
+            triggeredFeatureIds: [...input.dnd5eDeclarativeAttackIntents.triggeredFeatureIds],
+            consumedFeatureIds: [...input.dnd5eDeclarativeAttackIntents.consumedFeatureIds],
+          }
+        : undefined,
     round: input.round,
     initiativeIndex: input.initiativeIndex,
     updatedAt: input.appliedAt,

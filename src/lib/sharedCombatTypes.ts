@@ -98,6 +98,9 @@ export interface Dnd5ePluginActionPayload {
   payload?: SharedJsonValue
 }
 
+export type Dnd5eRacialActionPayload =
+  | { feature: 'dragonborn-breath' }
+
 export interface Dnd5eItemUsePayload {
   /** 名称、数量、骰值与效果由 DM 端当前角色快照重建。 */
   instanceId: string
@@ -110,6 +113,11 @@ export interface Dnd5eItemUsePayload {
 export interface Dnd5eWeaponAttackOptions {
   /** DM-only, single-transaction cover ruling. The Headless authority rejects this field on player requests. */
   coverOverride?: Dnd5eAttackCoverOverride
+  /**
+   * Player-owned prearmed subclass intents. These are only identifiers:
+   * timing, ownership, retention, costs, and effects are rebuilt by the Host.
+   */
+  declarativeIntentFeatureIds?: string[]
   /** 橡棍术生效时，本次主手近战攻击使用力量或施法关键属性。 */
   shillelaghAbility?: 'str' | 'spellcasting'
   /** 荒野变形后使用当前野兽数据块中的动作序号；由 Headless 重新验证。 */
@@ -156,6 +164,8 @@ export interface Dnd5eSpellCastPayload {
   spellId: string
   /** The class whose spellcasting feature authorizes this cast. */
   castingClassId?: Dnd5eClassId
+  /** The character's racial spell grant authorizes this cast instead of a class spellcasting feature. */
+  racialInnate?: boolean
   slotLevel: number
   targetTokenId: string
   targetTokenIds?: string[]
@@ -246,9 +256,12 @@ export type Dnd5eBasicActionPayload =
   | { kind: 'use-object'; interactionId: string }
   | { kind: 'grapple'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics' }
   | { kind: 'shove'; targetTokenId: string; targetDefense: 'athletics' | 'acrobatics'; outcome: 'prone' | 'push' }
+  | { kind: 'release-grapple'; targetTokenId: string }
   | { kind: 'escape-grapple'; targetTokenId: string }
   | { kind: 'escape-effect' }
   | { kind: 'wake'; targetTokenId: string }
+  | { kind: 'other-action'; description?: string }
+  | { kind: 'other-bonus-action'; description?: string }
 
 export interface SharedPlayerActionState {
   id: string
@@ -264,6 +277,7 @@ export interface SharedPlayerActionState {
     | 'dnd5e-weapon-attack'
     | 'dnd5e-fighter-feature'
     | 'dnd5e-class-feature'
+    | 'dnd5e-racial-action'
     | 'dnd5e-plugin-action'
     | 'dnd5e-item-use'
     | 'dnd5e-ability-check'
@@ -292,6 +306,7 @@ export interface SharedPlayerActionState {
   targetElevationFeet?: number
   dnd5eFighterFeature?: 'second-wind' | 'action-surge'
   dnd5eClassFeature?: Dnd5eClassFeaturePayload
+  dnd5eRacialAction?: Dnd5eRacialActionPayload
   dnd5ePluginAction?: Dnd5ePluginActionPayload
   dnd5eItemUse?: Dnd5eItemUsePayload
   dnd5eAbilityCheck?: Dnd5eAbilityCheckPayload
@@ -333,6 +348,11 @@ export interface SharedPlayerActionAckState {
   acceptedPosition?: { x: number; y: number }
   appliedAt?: number
   result?: PlayerActionResultSummary
+  /** Host result used only to reconcile the player's local prearm toggles. */
+  dnd5eDeclarativeAttackIntents?: {
+    triggeredFeatureIds: string[]
+    consumedFeatureIds: string[]
+  }
   round: number
   initiativeIndex: number
   updatedAt: number

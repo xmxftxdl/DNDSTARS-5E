@@ -1,7 +1,7 @@
 import type { Dnd5eHeadlessCombatState } from './headlessCombatEngine'
 import {
-  activeDnd5eRulesPluginRequirements,
   missingDnd5eRulesPluginRequirements,
+  roomActiveDnd5eRulesPluginRequirements,
   type Dnd5eRulesPluginRequirement,
 } from './pluginApi'
 
@@ -61,7 +61,7 @@ export function publishDnd5eCombatState(
       concentrating: combatant.concentrating,
       deathSaves: { ...combatant.deathSaves },
     }])),
-    requiredPlugins: activeDnd5eRulesPluginRequirements(),
+    requiredPlugins: roomActiveDnd5eRulesPluginRequirements(),
     revision: input.revision,
     updatedAt: input.updatedAt ?? Date.now(),
   }

@@ -9,7 +9,7 @@ import {
   endDnd5eConcentration,
   resolveDnd5eHeadlessAction,
 } from './headlessCombatEngine'
-import { dnd5eForcedMovementFall, dnd5eRepellingBlastPushDestination, prepareDnd5eSpellCast, previewDnd5eSpellAttack, previewDnd5eSpellSavingThrow, resolvePreparedDnd5eSpellCast } from './spellAction'
+import { dnd5eForcedMovementFall, dnd5eForcedPushDestination, dnd5eRepellingBlastPushDestination, prepareDnd5eSpellCast, previewDnd5eSpellAttack, previewDnd5eSpellSavingThrow, resolvePreparedDnd5eSpellCast } from './spellAction'
 import {
   dnd5eBardMagicalSecretSpellIds,
   dnd5eCombatSpellSelectionLimits,
@@ -70,6 +70,52 @@ function fixture(actor: Character, spellId: string, slotLevel: number, target: T
 
 describe('SRD 5.1 Headless spell authority bridge', () => {
   afterEach(() => setMapGeometryRuntime([]))
+
+  it('prepares and spends a racial innate spell without a casting class or class slot', () => {
+    const drow = character('drow', '战士', {
+      race: '卓尔',
+      dnd5eRaceId: 'drow',
+      level: 3,
+      classResources: {
+        'dnd5e-racial-spell-faerie-fire': { current: 1, max: 1 },
+      },
+    })
+    const enemy = token('enemy', 'enemy', 125)
+    const input = fixture(drow, 'faerie-fire', 1, enemy)
+    input.action.targetTokenIds = [enemy.id]
+    input.action.dnd5eSpellCast = {
+      spellId: 'faerie-fire',
+      slotLevel: 1,
+      racialInnate: true,
+      targetTokenId: enemy.id,
+      targetTokenIds: [enemy.id],
+      areaTargetCell: { col: 2, row: 0 },
+    }
+
+    const prepared = prepareDnd5eSpellCast(input)
+    expect(prepared.ok, prepared.ok ? undefined : prepared.reason).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared).toMatchObject({
+      castingClassId: undefined,
+      racialInnate: true,
+      spellcastingAbility: 'cha',
+    })
+    expect(prepared.prepared.savingThrow?.mode).toBe('normal')
+    const resolved = resolvePreparedDnd5eSpellCast({
+      prepared: prepared.prepared,
+      savingThrowD20: 2,
+      effectRolls: [],
+    })
+    expect(resolved.result.ok, resolved.result.ok ? undefined : resolved.result.reason).toBe(true)
+    if (!resolved.result.ok) return
+    expect(
+      resolved.result.state.combatants['drow-token']
+        .classResources['dnd5e-racial-spell-faerie-fire'].current,
+    ).toBe(0)
+    expect(
+      resolved.result.state.combatants['drow-token'].classResources['dnd5e-spell-slot-1'],
+    ).toBeUndefined()
+  })
 
   it('binds a guessed spell-attack cell to the Host authoritative token snapshot', () => {
     const wizard = character('wizard', '法师', {
@@ -2148,6 +2194,22 @@ describe('SRD 5.1 Headless spell authority bridge', () => {
     }])
     expect(dnd5eRepellingBlastPushDestination(map, actor, target))
       .toEqual({ to: { x: target.x, y: target.y }, distanceFeet: 0 })
+  })
+
+  it('supports long forced pushes while stopping at the first occupied cell', () => {
+    const actor = token('actor', 'enemy', 25)
+    const target = token('target', 'player', 75, 'hero')
+    const blocker = token('blocker', 'player', 275, 'ally')
+    const map: BattleMap = {
+      id: 'long-push-map', name: 'Long Push', width: 800, height: 200, gridSize: 50,
+      gridOffsetX: 0, gridOffsetY: 0, showGrid: true, feetPerCell: 5,
+      tokens: [actor, target, blocker],
+    }
+
+    expect(dnd5eForcedPushDestination(map, actor, target, 60)).toEqual({
+      to: { x: 225, y: 25 },
+      distanceFeet: 15,
+    })
   })
 
   it('only resolves forced-movement falling after a grounded token actually leaves a higher terrain region', () => {

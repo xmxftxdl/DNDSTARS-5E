@@ -32,6 +32,10 @@ export interface Character {
   race: string
   /** 可选的完整插件命名空间种族 ID；race 保留可读名称。 */
   dnd5eRaceId?: string
+  /** Persistent mechanical choices made for ancestry-specific racial rules. */
+  dnd5eRacialChoices?: {
+    dragonbornAncestry?: import('../rulesets/dnd5e/racialAutomation').Dnd5eDragonbornAncestryId
+  }
   charClass: string
   /**
    * 2014 兼职职业等级。旧存档缺失时由 charClass + level 自动迁移；
@@ -127,6 +131,8 @@ export interface Character {
    * ID 必须保留完整插件命名空间；插件未安装时仍原样保存，不回退为核心规则内容。
    */
   dnd5ePluginFeatureIds?: string[]
+  /** Namespaced feats supplied by installed rules packages. */
+  dnd5eFeatIds?: string[]
   /** 仅由 5e Headless 权威事务写入的战斗中职业状态。 */
   dnd5eCombatState?: {
     schemaVersion?: typeof DND5E_COMBAT_STATE_SCHEMA_VERSION
@@ -134,7 +140,12 @@ export interface Character {
     activeEffects?: Dnd5eActiveEffectInstance[]
     /** 铁蒺藜伤势造成的速度减值；恢复至少 1 点生命值时由 Headless 清除。 */
     caltropsSpeedPenaltyFeet?: number
+    /** Stable per-turn attack count used by effects such as Slowing Breath. */
+    attacksMadeTurnKey?: string
+    attacksMadeThisTurn?: number
     raging?: boolean
+    /** 已权威结算的回合开始键（combatId:round:stable slotId）。 */
+    turnStartResolvedTurnKey?: string
     /** 本场战斗由 DM 判定为受突袭；自身首回合结束后失效。 */
     surprisedCombatId?: string
     surpriseResolvedCombatId?: string
@@ -174,6 +185,8 @@ export interface Character {
     divineStrikeTurnKey?: string
     foeSlayerTurnKey?: string
     recklessAttackTurnKey?: string
+    monsterReactiveAvailableTurnKey?: string
+    monsterReactiveUsedTurnKey?: string
     weaponAttackActionTurnKey?: string
     dodgingTurnKey?: string
     helpedAbilityCheckSourceId?: string
@@ -213,6 +226,7 @@ export interface Character {
     tranquilityActive?: boolean
     declarativeUsedTurnKeys?: Record<string, string>
     declarativeTransactionIds?: string[]
+    battleMasterDroppedWeaponIds?: string[]
     /** 成功躲藏后的检定结果；进行攻击时由 Headless 清除。 */
     hiddenCheckTotal?: number
     /** 游侠10级“隐匿无踪”已完成一分钟伪装；移动或执行其他动作后失效。 */

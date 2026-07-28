@@ -7,6 +7,7 @@ import {
 import { dnd5ePluginClassResourceDefinitions } from '../rulesets/dnd5e/pluginApi'
 import { dnd5eClassDefinition } from '../rulesets/dnd5e/classes'
 import { dnd5eMulticlassPactSlots, dnd5eMulticlassSpellSlots, normalizeDnd5eClassLevels } from '../rulesets/dnd5e/multiclass'
+import { dnd5eRacialResourceDefinitions } from '../rulesets/dnd5e/racialAutomation'
 
 function finiteNonNegative(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
@@ -82,6 +83,9 @@ function registeredResourceDefinitions(character: Character): ClassResourceDefin
     max: () => pact.count,
     resetOn: 'short-rest',
   })
+  for (const definition of dnd5eRacialResourceDefinitions(character)) {
+    deduplicated.set(definition.key, definition)
+  }
   return [...deduplicated.values()]
 }
 

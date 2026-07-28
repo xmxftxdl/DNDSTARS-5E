@@ -53,6 +53,11 @@ export interface Dnd5eDefensiveCreature {
   conditions: readonly string[]
   creatureType?: string
   magicResistance?: boolean
+  racialSavingThrowAdvantages?: {
+    conditions?: readonly string[]
+    damageTypes?: readonly Dnd5eDamageType[]
+    magicAbilities?: readonly AbilityKey[]
+  }
   speed?: number
   dodging?: boolean
   wearingUnproficientArmor?: boolean
@@ -89,6 +94,10 @@ const SAVING_THROW_RULE_REASONS: Record<string, Omit<Dnd5eSavingThrowRuleReason,
   'magic-resistance': {
     label: '魔法抗性',
     detail: '对法术或其他魔法效应的豁免具有优势。',
+  },
+  'racial-save-advantage': {
+    label: '种族适应',
+    detail: '当前种族规则对这次豁免提供优势。',
   },
   'protection-from-poison': {
     label: '防护毒素',
@@ -180,6 +189,7 @@ export function dnd5eSavingThrowModeExplanation(
     sourceCreatureType?: string
     sourceIsSpell?: boolean
     sourceIsMagical?: boolean
+    damageType?: Dnd5eDamageType
   } = {},
 ): Dnd5eSavingThrowModeExplanation {
   const dangerSenseBlocked = dnd5eIsIncapacitated(creature) || hasCondition(creature, new Set([
@@ -202,6 +212,17 @@ export function dnd5eSavingThrowModeExplanation(
   const dodgeDexterity = ability === 'dex' && dnd5eTargetIsDodging(creature)
   const magicResistance = creature.magicResistance === true &&
     (context.sourceIsSpell === true || context.sourceIsMagical === true)
+  const racialSaveAdvantage = !!((
+    context.condition != null &&
+    creature.racialSavingThrowAdvantages?.conditions?.some((condition) =>
+      condition.trim().toLowerCase() === context.condition?.trim().toLowerCase())
+  ) || (
+    context.damageType != null &&
+    creature.racialSavingThrowAdvantages?.damageTypes?.includes(context.damageType)
+  ) || (
+    (context.sourceIsSpell === true || context.sourceIsMagical === true) &&
+    creature.racialSavingThrowAdvantages?.magicAbilities?.includes(ability)
+  ))
   const strengthEffect = ability === 'str'
     ? dnd5eActiveStrengthRollFlags(creature.classState.activeEffects)
     : { advantage: false, disadvantage: false }
@@ -214,6 +235,7 @@ export function dnd5eSavingThrowModeExplanation(
       { active: rageStrength, reason: 'rage-strength-save' },
       { active: holyNimbus, reason: 'holy-nimbus' },
       { active: magicResistance, reason: 'magic-resistance' },
+      { active: racialSaveAdvantage, reason: 'racial-save-advantage' },
       { active: poisonProtection, reason: 'protection-from-poison' },
       { active: dodgeDexterity, reason: 'dodge' },
       { active: strengthEffect.advantage, reason: 'active-effect-strength-advantage' },
@@ -255,6 +277,7 @@ export function dnd5eSavingThrowMode(
     sourceCreatureType?: string
     sourceIsSpell?: boolean
     sourceIsMagical?: boolean
+    damageType?: Dnd5eDamageType
   } = {},
 ): D20RollMode {
   return dnd5eSavingThrowModeExplanation(creature, ability, context).mode

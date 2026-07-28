@@ -6,11 +6,12 @@ import {
   occupiedCells,
   tokenAnchorCellFromPixel,
   tokenCenterForAnchorCell,
+  tokenFootprintCells,
   tokenFootprintDistanceCells,
   tokenOccupiedCellsAt,
   type GridCell,
 } from '../../lib/gridCombat'
-import { isTokenMovementLocked } from '../../lib/combatStatus'
+import { isMovementLocked } from '../../lib/combatStatus'
 import { areOpposedCombatTokens, dnd5eCombatTokenSide } from '../../lib/opportunityAttacks'
 import { aoeOrientFromCell, canPlaceAoe, cellsForAoe, tokensInCells, type SkillAoeTargeting } from '../../lib/skillTargeting'
 import {
@@ -30,13 +31,16 @@ import { findMapGeometryPath } from '../../lib/mapPathfinding'
 import {
   dnd5eMonsterAreaSavingThrowVariants,
   dnd5eMonsterMapSpeed,
+  dnd5eMonsterWeaponAttackAbility,
   getDnd5eSrdMonster,
   type Dnd5eMonsterAction,
+  type Dnd5eMonsterAreaSavingThrowVariant,
   type Dnd5eDamageType,
   type Dnd5eMonsterStatBlock,
   type Dnd5eMonsterWeaponAttack,
 } from './monsters'
 import { dnd5e2014Adapter as rules } from './dnd5e2014Adapter'
+import { dnd5eAttacksPerAttackAction } from './classes'
 import { dnd5eMonsterCoreSpellCompatibility } from './monsterAdvancedAbilities'
 import { dnd5eAvailableMonsterSpellSlotLevels } from './monsterCoreSpellAction'
 import {
@@ -49,13 +53,16 @@ import { dnd5eMonsterActionAutomation } from './monsterSchema'
 import {
   dnd5eConditionIncapacitated,
   dnd5eConditionImposesAttackDisadvantage,
+  dnd5eStandardConditionId,
   type Dnd5eStandardConditionId,
 } from './conditions'
 import {
+  dnd5eMonsterAttackTraitAdvantage,
   dnd5eMonsterEffectiveWeaponAttack,
   dnd5eMonsterLimitedMagicImmunityRule,
   dnd5eMonsterPackTacticsApplies,
   dnd5eMonsterWeaponAttacksAreMagical,
+  dnd5eMonsterWeaponAttackWithTriggeredTraits,
   dnd5eMonsterWeaponAttackAtDistance,
   dnd5eMonsterWeaponAttackAgainstConditions,
 } from './monsterGenericAbilities'
@@ -80,11 +87,57 @@ import {
   dnd5ePersistentAreaDifficultTerrainMultiplierAt,
   dnd5ePersistentAreaSpeedCostMultiplierAt,
 } from './pluginAreas'
+import {
+  dnd5eActiveSizeRankDelta,
+  dnd5eActiveActionOrBonusActionOnly,
+  dnd5eActiveMaximumAttacksPerTurn,
+  dnd5eActiveSpeedBonus,
+  dnd5eActiveSpeedMultiplier,
+  dnd5eActiveSpeedPenalty,
+  dnd5eConditionsFromActiveEffects,
+  type Dnd5eActiveEffectInstance,
+} from './activeEffects'
+import {
+  createDnd5eCombatant,
+  dnd5eAbilityCheckRollMode,
+  dnd5eAbilityCheckSuccessProbability,
+  dnd5eBestGrappleDefense,
+  dnd5eCombatantPairKey,
+  reconcileDnd5eSourceLinkedRelations,
+  startDnd5eHeadlessCombat,
+  type Dnd5eCombatant,
+} from './headlessCombatEngine'
+import {
+  createCombatantFromDnd5eCharacter,
+  migrateCharacterToDnd5e,
+} from './character'
+import { dnd5eOpposedAbilityCheckSuccessProbability } from './abilityCheckProbability'
+import { dnd5eForcedMovementFall, dnd5eForcedPushDestination } from './spellAction'
+import { dnd5eFallingDamageDice } from './traversal'
 
 const monsterTraversalGeometryCache = new WeakMap<
   object,
   NonNullable<ReturnType<typeof mapGeometryRuntimeForMap>>
 >()
+
+function plannerTokenEffectiveSpeed(token: Token, baseSpeed: number): number {
+  const effects = token.dnd5eCombatState?.activeEffects
+  const adjusted = Math.max(
+    0,
+    Math.floor(baseSpeed) -
+      dnd5eActiveSpeedPenalty(effects) -
+      Math.max(0, token.dnd5eCombatState?.caltropsSpeedPenaltyFeet ?? 0) +
+      dnd5eActiveSpeedBonus(effects),
+  )
+  return Math.max(0, Math.floor(adjusted * dnd5eActiveSpeedMultiplier(effects)))
+}
+
+function plannerTokenEffectiveFlySpeed(token: Token, baseSpeed: number): number {
+  return Math.max(0, Math.floor(
+    Math.max(0, baseSpeed) *
+      dnd5eActiveSpeedMultiplier(token.dnd5eCombatState?.activeEffects),
+  ))
+}
 
 function monsterTraversalGeometry(mapId: string) {
   const geometry = mapGeometryRuntimeForMap(mapId)
@@ -144,6 +197,7 @@ export interface Dnd5eMonsterTurnPlan {
     targetTokenIds: readonly string[]
     area: SkillAoeTargeting
     areaTargetCell: GridCell
+    areaTargetOrientation?: 0 | 1 | 2 | 3
     saveAbility: AbilityKey
     saveDc: number
     damage?: {
@@ -156,6 +210,23 @@ export interface Dnd5eMonsterTurnPlan {
       condition: Dnd5eStandardConditionId
       durationRounds: number
     }
+  }
+  /** Fixed-DC escape generated from an authoritative active-effect relation. */
+  escapeActiveEffect?: {
+    effectId: string
+    dc: number
+  }
+  /** Opposed Athletics/Acrobatics escape from a player-created basic grapple. */
+  escapeGrapple?: {
+    grapplerId: string
+  }
+  /**
+   * A source may freely end one of its own grapple relations before resolving
+   * the rest of this plan. This does not consume the action selected below.
+   */
+  releaseGrapple?: {
+    targetId: string
+    effectId: string
   }
   attackerTokenId?: string
   targetTokenId?: string
@@ -195,6 +266,9 @@ export interface Dnd5eMonsterSimulationRuntimeCache {
 export interface Dnd5eMonsterTurnPlannerOptions {
   decisionProvider?: MonsterDecisionProvider
   turnEconomy?: Dnd5eTurnEconomyCounts
+  /** Current authoritative combat identity used by surprise-dependent traits. */
+  combatId?: string
+  round?: number
   simulationOptimization?: {
     /**
      * Simulation-only deterministic search bound. Live turns remain exhaustive,
@@ -496,17 +570,507 @@ function targetArmorClass(target: Token, characters: readonly Character[]): numb
   return target.poolId ? getDnd5eSrdMonster(target.poolId)?.armorClass.value ?? 10 : 10
 }
 
-function targetConditions(target: Token, characters: readonly Character[]): readonly string[] {
+function targetConditions(
+  target: Token,
+  characters: readonly Character[],
+  reconciledActiveEffects?: PlannerReconciledActiveEffects,
+): readonly string[] {
+  if (reconciledActiveEffects?.has(target.id)) {
+    return reconciledActiveEffects.get(target.id)?.conditions ?? []
+  }
   const character = target.characterId
     ? characters.find((candidate) => candidate.id === target.characterId)
     : undefined
   return [...new Set([
     ...(character?.conditions ?? []),
+    ...(target.dnd5eCombatState?.conditions ?? []),
     ...(character?.dnd5eCombatState?.activeEffects?.flatMap((effect) =>
       effect.standardCondition ? [effect.standardCondition] : []) ?? []),
     ...(target.dnd5eCombatState?.activeEffects?.flatMap((effect) =>
       effect.standardCondition ? [effect.standardCondition] : []) ?? []),
   ])]
+}
+
+function tokenActiveEffects(
+  target: Token,
+  characters: readonly Character[],
+) {
+  const character = target.characterId
+    ? characters.find((candidate) => candidate.id === target.characterId)
+    : undefined
+  const byId = new Map([
+    ...(character?.dnd5eCombatState?.activeEffects ?? []),
+    ...(target.dnd5eCombatState?.activeEffects ?? []),
+  ].map((effect) => [effect.id, effect]))
+  return [...byId.values()]
+}
+
+type PlannerReconciledActiveEffects = ReadonlyMap<string, {
+  activeEffects: readonly Dnd5eActiveEffectInstance[]
+  conditions: readonly string[]
+}>
+
+function plannerReconciledActiveEffects(
+  map: BattleMap,
+  characters: readonly Character[],
+): PlannerReconciledActiveEffects | undefined {
+  const hasSourceLinkedRelation = map.tokens.some((target) =>
+    tokenActiveEffects(target, characters).some((effect) =>
+      effect.standardCondition === 'grappled' &&
+      (
+        effect.relation?.kind === 'grapple' ||
+        effect.source.rulesId === 'basic-action:grapple'
+      )))
+  if (!hasSourceLinkedRelation) return undefined
+
+  const combatTokens = map.tokens.filter((token) =>
+    token.type === 'player' || token.type === 'enemy')
+  const state = startDnd5eHeadlessCombat(
+    `monster-planner:${map.id}`,
+    combatTokens.map((token) => plannerTokenCombatant(token, characters)),
+  )
+  const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
+  state.gridDistance = {
+    cellUnits: Math.max(1, map.gridSize),
+    feetPerCell,
+    offsetX: map.gridOffsetX,
+    offsetY: map.gridOffsetY,
+    footprintCellsByCombatantId: Object.fromEntries(
+      combatTokens.map((token) => [token.id, tokenFootprintCells(token)]),
+    ),
+  }
+  state.distanceFeetByCombatantPair = {}
+  const geometry = mapGeometryRuntimeForMap(map.id)
+  for (let left = 0; left < combatTokens.length; left += 1) {
+    for (let right = left + 1; right < combatTokens.length; right += 1) {
+      state.distanceFeetByCombatantPair[
+        dnd5eCombatantPairKey(combatTokens[left].id, combatTokens[right].id)
+      ] = tokenThreeDimensionalDistanceFeet(
+        map,
+        geometry,
+        combatTokens[left],
+        combatTokens[right],
+      )
+    }
+  }
+  reconcileDnd5eSourceLinkedRelations(state)
+  return new Map(combatTokens.map((token) => {
+    const combatant = state.combatants[token.id]
+    const activeEffects = combatant?.classState.activeEffects ?? []
+    const rawEffects = tokenActiveEffects(token, characters)
+    const relationEffectIds = new Set(rawEffects.flatMap((effect) =>
+      effect.standardCondition === 'grappled' &&
+      effect.dependsOnEffectId == null &&
+      (
+        effect.relation?.kind === 'grapple' ||
+        effect.source.rulesId === 'basic-action:grapple'
+      )
+        ? [effect.id]
+        : []))
+    let addedDependent = true
+    while (addedDependent) {
+      addedDependent = false
+      for (const effect of rawEffects) {
+        if (
+          effect.dependsOnEffectId &&
+          relationEffectIds.has(effect.dependsOnEffectId) &&
+          !relationEffectIds.has(effect.id)
+        ) {
+          relationEffectIds.add(effect.id)
+          addedDependent = true
+        }
+      }
+    }
+    const relationConditions = new Set(rawEffects.flatMap((effect) =>
+      relationEffectIds.has(effect.id) && effect.standardCondition
+        ? [effect.standardCondition]
+        : []))
+    const preservedConditions = targetConditions(token, characters).filter((condition) => {
+      const standard = dnd5eStandardConditionId(condition)
+      return standard == null || !relationConditions.has(standard)
+    })
+    return [token.id, {
+      activeEffects,
+      conditions: [...new Set([
+        ...preservedConditions,
+        ...dnd5eConditionsFromActiveEffects(activeEffects),
+      ])],
+    }] as const
+  }))
+}
+
+function sourceLinkedGrappleRootEffects(
+  target: Token,
+  characters: readonly Character[],
+  reconciledActiveEffects?: PlannerReconciledActiveEffects,
+): Dnd5eActiveEffectInstance[] {
+  const effects = reconciledActiveEffects?.has(target.id)
+    ? reconciledActiveEffects.get(target.id)?.activeEffects ?? []
+    : tokenActiveEffects(target, characters)
+  return effects.filter((effect) =>
+    effect.standardCondition === 'grappled' &&
+    effect.dependsOnEffectId == null &&
+    effect.relation?.kind === 'grapple' &&
+    effect.source.actorId === effect.relation.sourceActorId)
+}
+
+function sourceLinkedRelationTargets(input: {
+  map: BattleMap
+  characters: readonly Character[]
+  sourceActorId: string
+  slotGroup?: string
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
+}): Token[] {
+  return input.map.tokens.filter((target) =>
+    sourceLinkedGrappleRootEffects(
+      target,
+      input.characters,
+      input.reconciledActiveEffects,
+    ).some((effect) =>
+      effect.relation!.sourceActorId === input.sourceActorId &&
+      (input.slotGroup == null || effect.relation!.slotGroup === input.slotGroup) &&
+      effect.source.actorId === input.sourceActorId))
+}
+
+function plannerActiveEffectsAfterRelease(
+  reconciledActiveEffects: PlannerReconciledActiveEffects,
+  targetId: string,
+  rootEffectId: string,
+): PlannerReconciledActiveEffects {
+  const current = reconciledActiveEffects.get(targetId)
+  if (!current?.activeEffects.some((effect) => effect.id === rootEffectId)) {
+    return reconciledActiveEffects
+  }
+  const removedIds = new Set([rootEffectId])
+  let discoveredDependent = true
+  while (discoveredDependent) {
+    discoveredDependent = false
+    for (const effect of current.activeEffects) {
+      if (
+        effect.dependsOnEffectId &&
+        removedIds.has(effect.dependsOnEffectId) &&
+        !removedIds.has(effect.id)
+      ) {
+        removedIds.add(effect.id)
+        discoveredDependent = true
+      }
+    }
+  }
+  const removedStandardConditions = new Set(current.activeEffects.flatMap((effect) =>
+    removedIds.has(effect.id) && effect.standardCondition
+      ? [effect.standardCondition]
+      : []))
+  const activeEffects = current.activeEffects.filter((effect) => !removedIds.has(effect.id))
+  const remainingStandardConditions = new Set(activeEffects.flatMap((effect) =>
+    effect.standardCondition ? [effect.standardCondition] : []))
+  const conditions = current.conditions.filter((condition) => {
+    const standard = dnd5eStandardConditionId(condition)
+    return standard == null ||
+      !removedStandardConditions.has(standard) ||
+      remainingStandardConditions.has(standard)
+  })
+  const next = new Map(reconciledActiveEffects)
+  next.set(targetId, {
+    activeEffects,
+    conditions: [...new Set([
+      ...conditions,
+      ...dnd5eConditionsFromActiveEffects(activeEffects),
+    ])],
+  })
+  return next
+}
+
+function plannerTokenSizeRank(
+  target: Token,
+  characters: readonly Character[],
+): number {
+  const monster = target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined
+  const size = target.creatureSize ?? monster?.size ?? '中型'
+  return Math.max(
+    0,
+    ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[size] +
+      dnd5eActiveSizeRankDelta(tokenActiveEffects(target, characters)),
+  )
+}
+
+function plannerMonsterSkillRanks(
+  monster: Dnd5eMonsterStatBlock,
+  proficiencyBonus: number,
+): Array<{ skill: string; rank: 1 | 2 }> {
+  return monster.skills?.flatMap((skill) => {
+    const ability = skill.key === 'athletics'
+      ? 'str'
+      : skill.key === 'acrobatics' ? 'dex' : undefined
+    if (!ability) return []
+    const proficiencyContribution =
+      skill.bonus - rules.abilityModifier(monster.abilities[ability])
+    const rank = proficiencyContribution >= proficiencyBonus * 1.5
+      ? 2
+      : proficiencyContribution >= proficiencyBonus * 0.5 ? 1 : 0
+    return rank === 1 || rank === 2
+      ? [{ skill: skill.key, rank }]
+      : []
+  }) ?? []
+}
+
+function plannerTokenCombatant(
+  target: Token,
+  characters: readonly Character[],
+  monsterOverride?: Dnd5eMonsterStatBlock,
+): Dnd5eCombatant {
+  const effects = tokenActiveEffects(target, characters)
+  const hp = targetHitPoints(target, characters)
+  const character = target.characterId
+    ? characters.find((candidate) => candidate.id === target.characterId)
+    : undefined
+  const tokenSizeRank = (
+    { 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const
+  )[target.creatureSize ?? '中型']
+  if (character) {
+    const combatant = createCombatantFromDnd5eCharacter({
+      character: migrateCharacterToDnd5e(character),
+      controller: dnd5eCombatTokenSide(target) === 'player' ? 'player' : 'dm',
+      initiativeD20: 10,
+      position: { x: target.x, y: target.y },
+    })
+    return {
+      ...combatant,
+      id: target.id,
+      name: target.label,
+      sizeRank: tokenSizeRank,
+      currentHp: hp.current,
+      maxHp: hp.maximum,
+      classState: {
+        ...combatant.classState,
+        activeEffects: effects.length > 0 ? effects : undefined,
+      },
+      conditions: targetConditions(target, characters),
+    }
+  }
+  const monster = monsterOverride ??
+    (target.poolId ? getDnd5eSrdMonster(target.poolId) : undefined)
+  const proficiencyBonus = monster
+    ? rules.proficiencyBonus(
+        Math.max(1, Math.floor(Number(monster.challenge.rating) || 1)),
+      )
+    : 2
+  const skillRanks = monster
+    ? plannerMonsterSkillRanks(monster, proficiencyBonus)
+    : []
+  const combatant = createDnd5eCombatant({
+    id: target.id,
+    name: target.label,
+    controller: dnd5eCombatTokenSide(target) === 'player' ? 'player' : 'dm',
+    initiative: 10,
+    abilities: monster
+      ? { ...monster.abilities }
+      : { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+    proficiencyBonus,
+    skillProficiencies: skillRanks.map((entry) => entry.skill),
+    classSelections: {
+      expertise: skillRanks
+        .filter((entry) => entry.rank === 2)
+        .map((entry) => entry.skill),
+    },
+    armorClass: monster?.armorClass.value ?? targetArmorClass(target, characters),
+    sizeRank: target.creatureSize
+      ? tokenSizeRank
+      : monster
+        ? ({ 微型: 0, 小型: 1, 中型: 2, 大型: 3, 超大型: 4, 巨型: 5 } as const)[monster.size]
+        : tokenSizeRank,
+    currentHp: hp.current,
+    maxHp: hp.maximum,
+    temporaryHp: 0,
+    speed: monster ? dnd5eMonsterMapSpeed(monster) : 30,
+    position: { x: target.x, y: target.y },
+    concentrating: false,
+    statBlockId: monster?.id,
+    classState: { activeEffects: effects.length > 0 ? effects : undefined },
+    conditions: dnd5eConditionsFromActiveEffects(effects),
+  })
+  return {
+    ...combatant,
+    conditions: targetConditions(target, characters),
+  }
+}
+
+function combatantSkillRank(
+  combatant: Dnd5eCombatant,
+  skill: string,
+): 0 | 1 | 2 {
+  if (combatant.classSelections.expertise?.includes(skill)) return 2
+  if (
+    combatant.skillProficiencies.includes(skill) ||
+    combatant.classSelections['lore-bonus-skills']?.includes(skill)
+  ) {
+    return 1
+  }
+  return 0
+}
+
+function monsterGrappleEscapeSuccessProbability(input: {
+  enemy: Token
+  monster: Dnd5eMonsterStatBlock
+  source: Token
+  characters: readonly Character[]
+}): number {
+  const actor = plannerTokenCombatant(
+    input.enemy,
+    input.characters,
+    input.monster,
+  )
+  const grappler = plannerTokenCombatant(input.source, input.characters)
+  const actorDefense = dnd5eBestGrappleDefense(actor)
+  return dnd5eOpposedAbilityCheckSuccessProbability({
+    actorModifier: actorDefense.modifier,
+    actorMode: dnd5eAbilityCheckRollMode(actor, {
+      ability: actorDefense.skill === 'athletics' ? 'str' : 'dex',
+      skill: actorDefense.skill,
+    }),
+    targetModifier: rules.abilityModifier(grappler.abilities.str) +
+      grappler.proficiencyBonus * combatantSkillRank(grappler, 'athletics'),
+    targetMode: dnd5eAbilityCheckRollMode(grappler, {
+      ability: 'str',
+      skill: 'athletics',
+    }),
+  })
+}
+
+function monsterEscapeSuccessProbability(input: {
+  enemy: Token
+  monster: Dnd5eMonsterStatBlock
+  effects: readonly Dnd5eActiveEffectInstance[]
+  effect: Dnd5eActiveEffectInstance
+}): number {
+  const check = input.effect.escapeCheck
+  if (!check) return 0
+  const combatant = createDnd5eCombatant({
+    id: input.enemy.id,
+    name: input.enemy.label,
+    controller: 'dm',
+    initiative: 10,
+    abilities: { ...input.monster.abilities },
+    proficiencyBonus: rules.proficiencyBonus(
+      Math.max(1, Math.floor(Number(input.monster.challenge.rating) || 1)),
+    ),
+    armorClass: input.monster.armorClass.value,
+    currentHp: Math.max(0, input.enemy.hp ?? input.monster.hitPoints.average),
+    maxHp: Math.max(1, input.enemy.maxHp ?? input.monster.hitPoints.average),
+    temporaryHp: 0,
+    speed: dnd5eMonsterMapSpeed(input.monster),
+    position: { x: input.enemy.x, y: input.enemy.y },
+    concentrating: false,
+    classState: { activeEffects: [...input.effects] },
+    conditions: dnd5eConditionsFromActiveEffects(input.effects),
+  })
+  const options = [
+    { ability: check.ability, skill: check.skill },
+    ...(check.alternativeAbility
+      ? [{ ability: check.alternativeAbility, skill: check.alternativeSkill }]
+      : []),
+  ].map((option) => {
+    const modifier = option.skill
+      ? input.monster.skills?.find((skill) => skill.key === option.skill)?.bonus ??
+        rules.abilityModifier(input.monster.abilities[option.ability])
+      : rules.abilityModifier(input.monster.abilities[option.ability])
+    const mode = dnd5eAbilityCheckRollMode(combatant, option)
+    return { ...option, modifier, mode }
+  })
+  return Math.max(...options.map((option) =>
+    dnd5eAbilityCheckSuccessProbability(option.modifier, check.dc, option.mode)))
+}
+
+function createMonsterEscapeCandidates(input: {
+  map: BattleMap
+  enemy: Token
+  monster: Dnd5eMonsterStatBlock
+  characters: readonly Character[]
+  canUseAction: boolean
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
+}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
+  if (!input.canUseAction) return []
+  const effects = tokenActiveEffects(input.enemy, input.characters)
+  const hp = targetHitPoints(input.enemy, input.characters)
+  return sourceLinkedGrappleRootEffects(
+    input.enemy,
+    input.characters,
+    input.reconciledActiveEffects,
+  )
+    .filter((effect) =>
+      (
+        effect.escapeCheck?.economy === 'action' ||
+        (
+          effect.source.rulesId === 'basic-action:grapple' &&
+          effect.relation?.sourceActionId === 'basic-action:grapple'
+        )
+      ) &&
+      input.map.tokens.some((candidate) =>
+        candidate.id === effect.source.actorId &&
+        targetHitPoints(candidate, input.characters).current > 0))
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((effect) => {
+      const source = input.map.tokens.find((candidate) => candidate.id === effect.source.actorId)!
+      const fixedDc = effect.escapeCheck?.economy === 'action'
+      const successProbability = fixedDc
+        ? monsterEscapeSuccessProbability({
+            enemy: input.enemy,
+            monster: input.monster,
+            effects,
+            effect,
+          })
+        : monsterGrappleEscapeSuccessProbability({
+            enemy: input.enemy,
+            monster: input.monster,
+            source,
+            characters: input.characters,
+          })
+      const restrained = effects.some((candidate) =>
+        candidate.standardCondition === 'restrained' &&
+        candidate.dependsOnEffectId === effect.id)
+      const escapeControlValue = restrained
+        ? fixedDc ? 120 : 180
+        : 45
+      return {
+        id: fixedDc
+          ? `escape-active-effect:${effect.id}`
+          : `escape-grapple:${effect.id}:${source.id}`,
+        kind: 'control' as const,
+        payload: {
+          moved: false,
+          attacked: false,
+          attackerTokenId: input.enemy.id,
+          targetTokenId: source.id,
+          ...(fixedDc
+            ? {
+                escapeActiveEffect: {
+                  effectId: effect.id,
+                  dc: effect.escapeCheck!.dc,
+                },
+              }
+            : { escapeGrapple: { grapplerId: source.id } }),
+          message: `${input.enemy.label} 尝试挣脱 ${source.label} 的擒抱。`,
+        },
+        metrics: {
+          expectedDamage: 0,
+          targetCurrentHp: hp.current,
+          targetMaximumHp: hp.maximum,
+          hitProbability: successProbability,
+          controlValue: successProbability * escapeControlValue,
+          targetDistanceFeet: 0,
+          preferredDistanceFeet: 0,
+          movementFeet: 0,
+          distanceImprovementFeet: 0,
+          defensiveCoverBonus: 0,
+          opportunityAttackRisk: 0,
+          attacksThisTurn: false,
+          consumesAction: true,
+          dodges: false,
+          dashes: false,
+          usesNimbleEscape: false,
+          usesPreciseCoverRoute: false,
+        },
+      }
+    })
 }
 
 function targetIsDodging(target: Token, characters: readonly Character[]): boolean {
@@ -865,6 +1429,7 @@ function monsterPackTacticsAdvantage(input: {
   attacker: Token
   target: Token
   characters: readonly Character[]
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
 }): boolean {
   const { map, monster, attacker, target, characters } = input
   const geometry = mapGeometryRuntimeForMap(map.id)
@@ -880,7 +1445,11 @@ function monsterPackTacticsAdvantage(input: {
         alliedWithActor: actorSide != null && dnd5eCombatTokenSide(candidate) === actorSide,
         currentHp: candidate.hp ?? 1,
         incapacitated: dnd5eConditionIncapacitated({
-          conditions: targetConditions(candidate, characters),
+          conditions: targetConditions(
+            candidate,
+            characters,
+            input.reconciledActiveEffects,
+          ),
         }),
         distanceFeetToTarget: tokenThreeDimensionalDistanceFeet(map, geometry, candidate, target),
       }]
@@ -896,6 +1465,9 @@ function actionExpectedValue(input: {
   target: Token
   characters: readonly Character[]
   distanceFeet: number
+  combatId?: string
+  round?: number
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
 }): {
   expectedDamage: number
   hitProbability: number
@@ -917,12 +1489,31 @@ function actionExpectedValue(input: {
   })
   if (lineOfSightBlocked) return undefined
   const targetAc = targetArmorClass(target, characters) + cover.armorClassBonus
+  const targetCharacter = target.characterId
+    ? characters.find((character) => character.id === target.characterId)
+    : undefined
+  const targetState = targetCharacter?.dnd5eCombatState ?? target.dnd5eCombatState
+  const attackerCharacter = attacker.characterId
+    ? characters.find((character) => character.id === attacker.characterId)
+    : undefined
+  const attackerState = attackerCharacter?.dnd5eCombatState ?? attacker.dnd5eCombatState
+  const targetHp = targetHitPoints(target, characters)
+  const monsterAttackTraitContext = {
+    combatId: input.combatId ?? '',
+    round: input.round ?? 0,
+    targetCurrentHp: targetHp.current,
+    targetMaxHp: targetHp.maximum,
+    targetSurprisedCombatId: targetState?.surprisedCombatId,
+    targetSurpriseResolvedCombatId: targetState?.surpriseResolvedCombatId,
+    actorRecklessActive: attackerState?.recklessAttackTurnKey != null,
+  }
   const packTacticsAdvantage = monsterPackTacticsAdvantage({
     map,
     monster,
     attacker,
     target,
     characters,
+    reconciledActiveEffects: input.reconciledActiveEffects,
   })
   const elevationDeltaFeet =
     mapGeometryTokenElevation(geometry, attacker) -
@@ -930,7 +1521,13 @@ function actionExpectedValue(input: {
   const highGroundAdvantage = elevationDeltaFeet >= 10
   const lowGroundDisadvantage = elevationDeltaFeet <= -10
   const attackerConditionDisadvantage = dnd5eConditionImposesAttackDisadvantage({
-    attacker: { conditions: targetConditions(attacker, characters) },
+    attacker: {
+      conditions: targetConditions(
+        attacker,
+        characters,
+        input.reconciledActiveEffects,
+      ),
+    },
     targetDistanceFeet: distanceFeet,
   })
   const targetDodging = targetIsDodging(target, characters)
@@ -950,6 +1547,18 @@ function actionExpectedValue(input: {
   }
   for (const child of sequence) {
     if (!child.attack) return undefined
+    const targetMaxSizeRank = (
+      child.attack as Dnd5eMonsterWeaponAttack & { targetMaxSizeRank?: number }
+    ).targetMaxSizeRank ?? (
+      child.id === 'constrict' &&
+      (monster.id === 'srd-5.1:behir' || /\bbehir\b/i.test(monster.englishName))
+        ? 3
+        : undefined
+    )
+    if (
+      targetMaxSizeRank != null &&
+      plannerTokenSizeRank(target, characters) > targetMaxSizeRank
+    ) return undefined
     const hpAdjustedAttack = dnd5eMonsterEffectiveWeaponAttack(
       child.attack,
       Math.max(0, attacker.hp ?? monster.hitPoints.average),
@@ -960,11 +1569,33 @@ function actionExpectedValue(input: {
       distanceFeet,
       action.kind === 'multiattack' ? action.sequenceAttackMode : undefined,
     )
-    const attack = dnd5eMonsterWeaponAttackAgainstConditions(
+    const attack = dnd5eMonsterWeaponAttackWithTriggeredTraits(
       monster,
-      distanceAdjustedAttack,
-      targetConditions(target, characters),
+      dnd5eMonsterWeaponAttackAgainstConditions(
+        monster,
+        distanceAdjustedAttack,
+        targetConditions(target, characters, input.reconciledActiveEffects),
+      ),
+      monsterAttackTraitContext,
     )
+    const sourceLinkedEffect = attack.onHitEffects?.find(
+      (effect) => effect.kind === 'source-linked-condition',
+    )
+    const sourceLinkedTargets = sourceLinkedEffect
+      ? sourceLinkedRelationTargets({
+          map,
+          characters,
+          sourceActorId: attacker.id,
+          slotGroup: sourceLinkedEffect.relation.slotGroup,
+          reconciledActiveEffects: input.reconciledActiveEffects,
+        })
+      : []
+    const targetAlreadyLinked = sourceLinkedTargets.some((candidate) => candidate.id === target.id)
+    if (
+      sourceLinkedEffect?.relation.whenCapacityFull === 'linked-target-only' &&
+      sourceLinkedTargets.length >= sourceLinkedEffect.relation.capacity &&
+      !targetAlreadyLinked
+    ) return undefined
     firstAttack ??= attack
     const mode = attackModeAtDistance({ ...child, attack }, distanceFeet)
     if (!mode.legal) return undefined
@@ -973,7 +1604,17 @@ function actionExpectedValue(input: {
       tokenThreeDimensionalDistanceFeet(map, geometry, attacker, candidate) <= 5,
     )
     const baseProbability = Math.max(0.05, Math.min(0.95, (21 + attack.toHit - targetAc) / 20))
-    const advantaged = packTacticsAdvantage || highGroundAdvantage
+    const advantaged = packTacticsAdvantage || highGroundAdvantage ||
+      targetState?.recklessAttackTurnKey != null ||
+      dnd5eMonsterAttackTraitAdvantage(
+        monster,
+        attack,
+        monsterAttackTraitContext,
+      ) ||
+      (
+        sourceLinkedEffect?.relation.attackAdvantageAgainstLinkedTarget === true &&
+        targetAlreadyLinked
+      )
     const disadvantaged =
       mode.longRange ||
       nearbyHostile ||
@@ -993,11 +1634,27 @@ function actionExpectedValue(input: {
         weaponDamageSource,
       ), 0)
     const onHitDamage = (attack.onHitEffects ?? []).reduce((effectSum, effect) => {
+      if (effect.kind === 'source-linked-condition') return effectSum
       const modifier = targetSavingThrowModifier(target, characters, effect.ability)
       const successProbability = Math.max(
         0.05,
         Math.min(0.95, (21 + modifier - effect.dc) / 20),
       )
+      if (
+        effect.conditionOnFailedSave &&
+        !targetConditions(
+          target,
+          characters,
+          input.reconciledActiveEffects,
+        ).includes(effect.conditionOnFailedSave.condition)
+      ) {
+        const durationWeight = Math.min(2, Math.max(
+          1,
+          effect.conditionOnFailedSave.durationRounds / 10,
+        ))
+        controlValue += hitProbability * (1 - successProbability) * 6 * durationWeight
+      }
+      if (effect.kind !== 'saving-throw-damage') return effectSum
       const damageOnFailure = effect.damage.reduce((sum, entry) =>
         sum + resolvePlannerDamage(
           target,
@@ -1007,18 +1664,26 @@ function actionExpectedValue(input: {
         ), 0)
       const saveFactor = 1 - successProbability +
         (effect.damageOnSuccessfulSave === 'half' ? successProbability / 2 : 0)
-      if (
-        effect.conditionOnFailedSave &&
-        !targetConditions(target, characters).includes(effect.conditionOnFailedSave.condition)
-      ) {
-        const durationWeight = Math.min(2, Math.max(
-          1,
-          effect.conditionOnFailedSave.durationRounds / 10,
-        ))
-        controlValue += hitProbability * (1 - successProbability) * 6 * durationWeight
-      }
       return effectSum + damageOnFailure * saveFactor
     }, 0)
+    if (
+      sourceLinkedEffect &&
+      !targetAlreadyLinked &&
+      sourceLinkedTargets.length < sourceLinkedEffect.relation.capacity &&
+      plannerTokenSizeRank(target, characters) <= sourceLinkedEffect.relation.targetMaxSizeRank
+    ) {
+      const missingConditions = sourceLinkedEffect.conditions.filter((condition) =>
+        !targetConditions(
+          target,
+          characters,
+          input.reconciledActiveEffects,
+        ).includes(condition.condition))
+      if (missingConditions.length > 0) {
+        controlValue += hitProbability * (
+          missingConditions.some((condition) => condition.condition === 'restrained') ? 16 : 8
+        )
+      }
+    }
     expectedDamage += (weaponDamage + onHitDamage) * hitProbability
     probabilityTotal += hitProbability
   }
@@ -1035,7 +1700,184 @@ interface MonsterAreaPlacement {
   targetCell: GridCell
   targetTokenIds: string[]
   hostileCount: number
+  friendlyCount: number
   expectedDamage: number
+  controlValue: number
+}
+
+function plannerTargetCharacter(
+  target: Token,
+  characters: readonly Character[],
+): Character | undefined {
+  return target.characterId
+    ? characters.find((candidate) => candidate.id === target.characterId)
+    : undefined
+}
+
+function plannerAreaTargetIsEligible(
+  target: Token,
+  characters: readonly Character[],
+): boolean {
+  const character = plannerTargetCharacter(target, characters)
+  if (
+    target.dnd5eCombatState?.hurlThroughHellSourceId ||
+    character?.dnd5eCombatState?.hurlThroughHellSourceId
+  ) return false
+  const conditions = [
+    ...targetConditions(target, characters),
+    ...dnd5eConditionsFromActiveEffects(target.dnd5eCombatState?.activeEffects),
+    ...dnd5eConditionsFromActiveEffects(character?.dnd5eCombatState?.activeEffects),
+  ]
+  if (conditions.some((condition) =>
+    ['banished', '放逐'].includes(condition.trim().toLowerCase()))) return false
+  const hp = targetHitPoints(target, characters).current
+  if (character) return hp > 0 || (character.deathSaveFailures ?? 0) < 3
+  if (target.maxHp != null) {
+    return hp > 0 ||
+      target.dnd5eCombatState?.stableAtZero === true ||
+      target.dnd5eCombatState?.monsterRegenerationPendingAtZero === true ||
+      target.dnd5eCombatState?.undeadFortitudePending != null
+  }
+  return true
+}
+
+function plannerTargetAttackCount(
+  target: Token,
+  characters: readonly Character[],
+): number {
+  const character = plannerTargetCharacter(target, characters)
+  if (character) return dnd5eAttacksPerAttackAction(character)
+  const monster = plannerTargetMonster(target)
+  if (!monster) return 1
+  return Math.max(1, ...monster.actions.map((action) =>
+    actionSequence(monster, action).filter((part) => part.attack != null).length))
+}
+
+function plannerTargetReactionValue(
+  target: Token,
+  characters: readonly Character[],
+): number {
+  const character = plannerTargetCharacter(target, characters)
+  const activeEffects = [
+    ...(target.dnd5eCombatState?.activeEffects ?? []),
+    ...(character?.dnd5eCombatState?.activeEffects ?? []),
+  ]
+  if (activeEffects.some((effect) => effect.modifiers?.preventReactions)) return 0
+  const monster = plannerTargetMonster(target)
+  // Every creature can threaten opportunity attacks; declared reactions make
+  // losing the resource materially more expensive.
+  return 2 + ((monster?.reactions?.length ?? 0) > 0 ? 4 : 0)
+}
+
+function plannerTargetMobilityWeight(
+  target: Token,
+  characters: readonly Character[],
+): number {
+  const character = plannerTargetCharacter(target, characters)
+  const monster = plannerTargetMonster(target)
+  const speed = character?.speed ?? (monster ? dnd5eMonsterMapSpeed(monster) : 30)
+  return Math.max(0.5, Math.min(2, speed / 30))
+}
+
+function plannerTargetStrengthDependency(
+  target: Token,
+  characters: readonly Character[],
+): number {
+  const character = plannerTargetCharacter(target, characters)
+  if (character) {
+    let value = character.abilities.str >= character.abilities.dex
+      ? Math.min(2, dnd5eAttacksPerAttackAction(character) * 0.6)
+      : 0
+    if (character.savingThrows.includes('str')) value += 0.3
+    if (character.skills.includes('athletics')) value += 0.3
+    return value
+  }
+  const monster = plannerTargetMonster(target)
+  if (!monster) return 0.5
+  const strengthBasedMelee = monster.actions.some((action) =>
+    actionSequence(monster, action).some((part) =>
+      part.attack != null &&
+      part.attack.mode !== 'ranged' &&
+      dnd5eMonsterWeaponAttackAbility(monster, part.attack) === 'str'))
+  let value = strengthBasedMelee
+    ? Math.min(2, plannerTargetAttackCount(target, characters) * 0.6)
+    : 0
+  if (monster.savingThrows?.str != null) value += 0.3
+  if (monster.skills?.some((skill) => skill.key === 'athletics')) value += 0.3
+  return value
+}
+
+function monsterAreaFailedSaveOutcomeValue(input: {
+  map: BattleMap
+  attacker: Token
+  target: Token
+  characters: readonly Character[]
+  rule: Dnd5eMonsterAreaSavingThrowVariant
+}): { expectedAdditionalDamage: number; controlValue: number } {
+  const failureProbability = 0.75
+  let expectedAdditionalDamage = 0
+  let controlValue = 0
+  if (input.rule.forcedMovementOnFailedSave) {
+    const mapAtCandidate = {
+      ...input.map,
+      tokens: input.map.tokens.map((token) =>
+        token.id === input.attacker.id ? input.attacker : token),
+    }
+    const push = dnd5eForcedPushDestination(
+      mapAtCandidate,
+      input.attacker,
+      input.target,
+      input.rule.forcedMovementOnFailedSave.maximumDistanceFeet,
+    )
+    if (push.distanceFeet > 0) {
+      const fall = dnd5eForcedMovementFall({
+        geometry: mapGeometryRuntimeForMap(input.map.id),
+        target: input.target,
+        to: push.to,
+      })
+      expectedAdditionalDamage +=
+        dnd5eFallingDamageDice(fall.fallDistanceFeet) * 3.5 * failureProbability
+      controlValue += failureProbability *
+        (4 + push.distanceFeet / 2 + fall.fallDistanceFeet / 2)
+    }
+  }
+  const activeEffect = input.rule.activeEffectOnFailedSave
+  const alreadyHasActiveEffect = activeEffect
+    ? tokenActiveEffects(input.target, input.characters).some((effect) =>
+        effect.definitionId === `monster-area:${activeEffect.id}`)
+    : false
+  if (activeEffect && !alreadyHasActiveEffect) {
+    const modifiers = activeEffect.modifiers
+    let mechanicalValue = 0
+    if ((modifiers.speedMultiplier ?? 1) < 1) {
+      mechanicalValue += (1 - (modifiers.speedMultiplier ?? 1)) * 12 *
+        plannerTargetMobilityWeight(input.target, input.characters)
+    }
+    if (modifiers.preventReactions) {
+      mechanicalValue += plannerTargetReactionValue(input.target, input.characters)
+    }
+    if (modifiers.maximumAttacksPerTurn != null) {
+      mechanicalValue += Math.max(
+        0,
+        plannerTargetAttackCount(input.target, input.characters) -
+          modifiers.maximumAttacksPerTurn,
+      ) * 6
+    }
+    if (modifiers.actionOrBonusActionOnly) mechanicalValue += 8
+    if (modifiers.strengthRollMode === 'disadvantage') {
+      mechanicalValue += 8 * plannerTargetStrengthDependency(input.target, input.characters)
+    }
+    const durationWeight = Math.min(2, Math.max(1, activeEffect.durationRounds / 10))
+    controlValue += mechanicalValue * failureProbability * durationWeight
+  }
+  if (input.rule.conditionOnFailedSave) {
+    const durationWeight = Math.min(
+      2,
+      Math.max(1, input.rule.conditionOnFailedSave.durationRounds / 10),
+    )
+    controlValue += 15.6 * durationWeight
+  }
+  return { expectedAdditionalDamage, controlValue }
 }
 
 function bestMonsterAreaPlacement(input: {
@@ -1046,10 +1888,12 @@ function bestMonsterAreaPlacement(input: {
   areaIncludesSelf?: boolean
   averageDamage: number
   savingThrow: boolean
+  targetMode?: Dnd5eMonsterAreaSavingThrowVariant['target']
   minimumHostiles?: number
   characters: readonly Character[]
   canAffectTarget?: (target: Token) => boolean
   expectedDamageForTarget?: (target: Token) => number
+  controlValueForTarget?: (target: Token) => number
 }): MonsterAreaPlacement | undefined {
   const { map, attacker, focusTarget, area } = input
   const geometry = mapGeometryRuntimeForMap(map.id)
@@ -1115,9 +1959,10 @@ function bestMonsterAreaPlacement(input: {
         toElevationFeet: effectOriginElevation,
       })
     ) continue
-    const affected = tokensInCells(map, map.tokens, cells).filter((token) =>
+    const geometricallyAffected = tokensInCells(map, map.tokens, cells).filter((token) =>
       token.type !== 'obstacle' &&
       (token.id !== attacker.id || input.areaIncludesSelf) &&
+      plannerAreaTargetIsEligible(token, input.characters) &&
       !mapGeometryLineOfEffectBlocked({
         geometry,
         from: effectOrigin,
@@ -1125,28 +1970,48 @@ function bestMonsterAreaPlacement(input: {
         fromElevationFeet: effectOriginElevation,
         toElevationFeet: mapGeometryTokenElevation(geometry, token),
       }))
-    const friendlies = affected.filter((token) =>
+    const geometricallyAffectedFriendlies = geometricallyAffected.filter((token) =>
       token.id !== attacker.id && !areOpposedCombatTokens(attacker, token))
-    if (friendlies.length > 0) continue
+    // Existing point/cone spells keep the conservative no-friendly-fire policy.
+    // Monster area declarations explicitly opt into either hostile-only or
+    // all-creatures-except-self targeting.
+    if (input.targetMode == null && geometricallyAffectedFriendlies.length > 0) continue
+    const affected = input.targetMode === 'all-creatures-except-self'
+      ? geometricallyAffected
+      : geometricallyAffected.filter((token) => areOpposedCombatTokens(attacker, token))
     const hostiles = affected.filter((token) =>
       areOpposedCombatTokens(attacker, token) &&
-      targetHitPoints(token, input.characters).current > 0 &&
+      (input.canAffectTarget?.(token) ?? true))
+    const friendlies = affected.filter((token) =>
+      token.id !== attacker.id &&
+      !areOpposedCombatTokens(attacker, token) &&
       (input.canAffectTarget?.(token) ?? true))
     // Spell slots are normally conserved for clusters, but recharge weapons
     // may be worthwhile against a lone priority target.
     if (hostiles.length < (input.minimumHostiles ?? 2) || !hostiles.some((token) => token.id === focusTarget.id)) continue
-    const expectedDamage = hostiles.reduce((sum, hostile) =>
-      sum + (input.expectedDamageForTarget?.(hostile) ?? averageDamage), 0) *
-      (input.savingThrow ? 0.75 : 1)
+    const saveMultiplier = input.savingThrow ? 0.75 : 1
+    const expectedHostileDamage = hostiles.reduce((sum, hostile) =>
+      sum + (input.expectedDamageForTarget?.(hostile) ?? averageDamage), 0) * saveMultiplier
+    const expectedFriendlyDamage = friendlies.reduce((sum, friendly) =>
+      sum + (input.expectedDamageForTarget?.(friendly) ?? averageDamage), 0) * saveMultiplier
+    const expectedDamage = expectedHostileDamage - expectedFriendlyDamage
+    const hostileControlValue = hostiles.reduce((sum, hostile) =>
+      sum + (input.controlValueForTarget?.(hostile) ?? 0), 0)
+    const friendlyControlValue = friendlies.reduce((sum, friendly) =>
+      sum + (input.controlValueForTarget?.(friendly) ?? 0), 0)
+    const controlValue = hostileControlValue - friendlyControlValue
     const focusBonus = hostiles.some((token) => token.id === focusTarget.id) ? 24 : 0
-    const score = expectedDamage + hostiles.length * 40 + focusBonus
+    const score = expectedDamage + controlValue +
+      (hostiles.length - friendlies.length) * 40 + focusBonus
     const key = `${targetCell.col},${targetCell.row}`
     if (!best || score > best.score || (score === best.score && key < best.key)) {
       best = {
         targetCell,
         targetTokenIds: affected.map((token) => token.id),
         hostileCount: hostiles.length,
+        friendlyCount: friendlies.length,
         expectedDamage,
+        controlValue,
         score,
         key,
       }
@@ -1198,8 +2063,14 @@ function exactMonsterRouteForPlan(
   if (!path || path.doorsToOpen.length > 1) return undefined
   const verticalDistanceFeet = Math.abs((path.elevationsFeet.at(-1) ?? actorElevationFeet) - actorElevationFeet)
   const available = (plan.movementMode === 'fly'
-    ? monster.speed.fly ?? dnd5eMonsterMapSpeed(monster)
-    : dnd5eMonsterMapSpeed(monster)) * (plan.dashed ? 2 : 1)
+    ? plannerTokenEffectiveFlySpeed(
+        enemy,
+        monster.speed.fly ?? dnd5eMonsterMapSpeed(monster),
+      )
+    : plannerTokenEffectiveSpeed(
+        enemy,
+        dnd5eMonsterMapSpeed(monster),
+      )) * (plan.dashed ? 2 : 1)
   const movementCostFeet = path.movementCostFeet + verticalDistanceFeet
   if (movementCostFeet > available + 1e-4) return undefined
   return { movementCostFeet, points: path.points }
@@ -1222,17 +2093,20 @@ function createTacticalCandidates(input: {
   characters: readonly Character[]
   canUseBonusAction: boolean
   canUseAction: boolean
+  combatId?: string
+  round?: number
   preferredTargetId?: string
   simulationOptimization?: Dnd5eMonsterTurnPlannerOptions['simulationOptimization']
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
 }): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
   const { map, enemy, monster, target, characters } = input
   const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
   const geometry = mapGeometryRuntimeForMap(map.id)
   const startDistanceFeet = tokenThreeDimensionalDistanceFeet(map, geometry, enemy, target)
   const start = tokenAnchorCellFromPixel(enemy.x, enemy.y, enemy, map)
-  const movementSpeed = dnd5eMonsterMapSpeed(monster)
-  const flySpeed = Math.max(0, monster.speed.fly ?? 0)
-  const walkSpeed = Math.max(0, monster.speed.walk ?? 0)
+  const movementSpeed = plannerTokenEffectiveSpeed(enemy, dnd5eMonsterMapSpeed(monster))
+  const flySpeed = plannerTokenEffectiveFlySpeed(enemy, monster.speed.fly ?? 0)
+  const walkSpeed = plannerTokenEffectiveSpeed(enemy, monster.speed.walk ?? 0)
   const currentElevationFeet = mapGeometryTokenElevation(geometry, enemy)
   const currentGroundFeet = mapGeometryTerrainElevationAtPoint(geometry, enemy)
   const targetElevationFeet = mapGeometryTokenElevation(geometry, target)
@@ -1251,9 +2125,14 @@ function createTacticalCandidates(input: {
     directGroundRouteBlocked ||
     flySpeed > walkSpeed
   )
-  const desiredElevationFeet = shouldFly
-    ? monsterFlightElevation(map, enemy, target, flySpeed)
-    : mapGeometryTerrainElevationAtPoint(geometry, target)
+  const canMove = !isMovementLocked(
+    targetConditions(enemy, characters, input.reconciledActiveEffects),
+  )
+  const desiredElevationFeet = !canMove
+    ? currentElevationFeet
+    : shouldFly
+      ? monsterFlightElevation(map, enemy, target, flySpeed)
+      : mapGeometryTerrainElevationAtPoint(geometry, target)
   const verticalCostFeet = shouldFly ? Math.abs(desiredElevationFeet - currentElevationFeet) : 0
   const movementProfile: MonsterMovementProfile = {
     fromElevationFeet: currentElevationFeet,
@@ -1261,15 +2140,27 @@ function createTacticalCandidates(input: {
     canFly: shouldFly,
     mode: shouldFly ? 'fly' : 'walk',
   }
-  const canMove = !isTokenMovementLocked(enemy)
+  const draggedTargets = sourceLinkedRelationTargets({
+    map,
+    characters,
+    sourceActorId: enemy.id,
+    reconciledActiveEffects: input.reconciledActiveEffects,
+  })
+  const dragMovementDivisor = draggedTargets.some((draggedTarget) =>
+    plannerTokenSizeRank(draggedTarget, characters) >
+      plannerTokenSizeRank(enemy, characters) - 2)
+    ? 2
+    : 1
   const standFromProne = enemy.dnd5eCombatState?.conditions?.some((condition) =>
     ['prone', '倒地'].includes(condition.toLowerCase())) === true
   const standCostFeet = standFromProne ? Math.floor(movementSpeed / 2) : 0
   const normalHorizontalFeet = canMove
-    ? Math.max(0, (shouldFly ? flySpeed : movementSpeed) - verticalCostFeet - standCostFeet)
+    ? Math.max(0, (shouldFly ? flySpeed : movementSpeed) / dragMovementDivisor -
+      verticalCostFeet - standCostFeet)
     : 0
   const dashHorizontalFeet = canMove
-    ? Math.max(0, (shouldFly ? flySpeed : movementSpeed) * 2 - verticalCostFeet - standCostFeet)
+    ? Math.max(0, (shouldFly ? flySpeed : movementSpeed) * 2 / dragMovementDivisor -
+      verticalCostFeet - standCostFeet)
     : 0
   const role = monsterTacticalRole(monster)
   const behaviorStyle = dnd5eMonsterEffectiveBehaviorStyle(enemy, role)
@@ -1288,8 +2179,32 @@ function createTacticalCandidates(input: {
     targetCell,
     preferred / feetPerCell,
     input.simulationOptimization?.maxReachablePositions,
-  )
-  const hasNimbleEscape = input.canUseBonusAction && monsterHasNimbleEscape(monster)
+  ).filter((reachable) => {
+    if (draggedTargets.length === 0) return true
+    const delta = {
+      x: reachable.position.x - enemy.x,
+      y: reachable.position.y - enemy.y,
+    }
+    return draggedTargets.every((draggedTarget) => !mapGeometryMovementBlocked({
+      geometry,
+      map,
+      token: draggedTarget,
+      to: {
+        x: draggedTarget.x + delta.x,
+        y: draggedTarget.y + delta.y,
+      },
+      fromElevationFeet: mapGeometryTokenElevation(geometry, draggedTarget),
+      toElevationFeet: mapGeometryTokenElevation(geometry, draggedTarget) +
+        (desiredElevationFeet - currentElevationFeet),
+    }).blocked)
+  })
+  const actorActiveEffects = tokenActiveEffects(enemy, characters)
+  const maximumAttacksPerTurn = dnd5eActiveMaximumAttacksPerTurn(actorActiveEffects)
+  const actionOrBonusActionOnly = dnd5eActiveActionOrBonusActionOnly(actorActiveEffects)
+  const hasNimbleEscape =
+    input.canUseBonusAction &&
+    !actionOrBonusActionOnly &&
+    monsterHasNimbleEscape(monster)
   const targetHp = targetHitPoints(target, characters)
   const targetAc = targetArmorClass(target, characters)
   const targetIsConcentrating = targetConcentrating(target, characters)
@@ -1332,6 +2247,10 @@ function createTacticalCandidates(input: {
   }
   const legalActions = (input.canUseAction ? monster.actions : [])
     .map((action, index) => ({ action, index }))
+    .filter(({ action }) =>
+      maximumAttacksPerTurn == null ||
+      actionSequence(monster, action).filter((part) => part.attack != null).length <=
+        maximumAttacksPerTurn)
     .filter(({ action }) => dnd5eMonsterActionAutomation(action) === 'headless')
     .filter(({ action }) =>
       action.usage?.kind !== 'recharge' ||
@@ -1339,6 +2258,15 @@ function createTacticalCandidates(input: {
     .filter(({ action }) =>
       action.usage?.kind !== 'per-day' ||
       (enemy.dnd5eCombatState?.monsterActionUsesByActionId?.[action.id]?.current ?? action.usage.max) > 0)
+    .filter(({ action }) =>
+      action.relationRequirement?.kind !== 'none-from-source' ||
+      sourceLinkedRelationTargets({
+        map,
+        characters,
+        sourceActorId: enemy.id,
+        slotGroup: action.relationRequirement.slotGroup,
+        reconciledActiveEffects: input.reconciledActiveEffects,
+      }).length === 0)
   const legalAreaActions = input.canUseAction
     ? legalActions.flatMap(({ action, index }) => action.rule?.kind === 'area-saving-throw'
       ? dnd5eMonsterAreaSavingThrowVariants(action).map((variant) => ({
@@ -1382,7 +2310,16 @@ function createTacticalCandidates(input: {
     )
     for (const { action, index } of legalActions) {
       const attackValue = actionExpectedValue({
-        map, monster, action, attacker: at, target, characters, distanceFeet,
+        map,
+        monster,
+        action,
+        attacker: at,
+        target,
+        characters,
+        distanceFeet,
+        combatId: input.combatId,
+        round: input.round,
+        reconciledActiveEffects: input.reconciledActiveEffects,
       })
       if (!attackValue) continue
       const usesNimbleEscape = hasNimbleEscape && opportunityRiskAt > 0
@@ -1439,6 +2376,23 @@ function createTacticalCandidates(input: {
       })
     }
     for (const { action, index, rule } of legalAreaActions) {
+      const outcomeValueByTargetId = new Map<string, {
+        expectedAdditionalDamage: number
+        controlValue: number
+      }>()
+      const outcomeValueForTarget = (candidate: Token) => {
+        const cached = outcomeValueByTargetId.get(candidate.id)
+        if (cached) return cached
+        const value = monsterAreaFailedSaveOutcomeValue({
+          map,
+          attacker: at,
+          target: candidate,
+          characters,
+          rule,
+        })
+        outcomeValueByTargetId.set(candidate.id, value)
+        return value
+      }
       const areaPlacement = bestMonsterAreaPlacement({
         map,
         attacker: at,
@@ -1446,20 +2400,33 @@ function createTacticalCandidates(input: {
         area: rule.area,
         averageDamage: rule.damage?.average ?? 0,
         savingThrow: true,
-        minimumHostiles: rule.conditionOnFailedSave ? 2 : 1,
+        targetMode: rule.target,
+        minimumHostiles: 1,
         characters,
-        expectedDamageForTarget: (candidate) => rule.damage
-          ? resolvePlannerDamage(
-              candidate,
-              rule.damage.average,
-              rule.damage.type,
-              {
-                delivery: 'other',
-                magical: false,
-                sourceMoralAlignment: plannerMoralAlignment(monster.alignment),
-              },
-            )
-          : 0,
+        expectedDamageForTarget: (candidate) => {
+          const source = {
+            delivery: 'other' as const,
+            magical: false,
+            sourceMoralAlignment: plannerMoralAlignment(monster.alignment),
+          }
+          const baseDamage = rule.damage
+            ? resolvePlannerDamage(
+                candidate,
+                rule.damage.average,
+                rule.damage.type,
+                source,
+              )
+            : 0
+          const fallingDamage = resolvePlannerDamage(
+            candidate,
+            outcomeValueForTarget(candidate).expectedAdditionalDamage,
+            'bludgeoning',
+            source,
+          )
+          return baseDamage + fallingDamage
+        },
+        controlValueForTarget: (candidate) =>
+          outcomeValueForTarget(candidate).controlValue,
       })
       if (!areaPlacement) continue
       const usesNimbleEscape = hasNimbleEscape && opportunityRiskAt > 0
@@ -1514,9 +2481,16 @@ function createTacticalCandidates(input: {
           targetConcentrating: targetIsConcentrating,
           targetSupportCount: targetSupportCountAt,
           hitProbability: 0.75,
-          controlValue: rule.conditionOnFailedSave
-            ? areaPlacement.hostileCount * 15.6
-            : areaPlacement.hostileCount > 1 ? areaPlacement.hostileCount * 2 : 0,
+          controlValue:
+            rule.conditionOnFailedSave ||
+            rule.activeEffectOnFailedSave ||
+            rule.forcedMovementOnFailedSave
+              ? areaPlacement.controlValue
+              : areaPlacement.hostileCount - areaPlacement.friendlyCount > 1
+                ? (areaPlacement.hostileCount - areaPlacement.friendlyCount) * 2
+                : 0,
+          affectedEnemyCount: areaPlacement.hostileCount,
+          affectedAllyCount: areaPlacement.friendlyCount,
           resourceCost: action.usage?.kind === 'recharge' ? 5 : action.usage?.kind === 'per-day' ? 8 : 0,
           targetDistanceFeet: distanceFeet,
           preferredDistanceFeet: preferred,
@@ -2029,6 +3003,73 @@ function createMonsterProtectionCandidates(input: {
   }))
 }
 
+function createMonsterReleaseCandidates(input: {
+  map: BattleMap
+  enemy: Token
+  monster: Dnd5eMonsterStatBlock
+  targets: readonly Token[]
+  characters: readonly Character[]
+  canUseBonusAction: boolean
+  canUseAction: boolean
+  combatId?: string
+  round?: number
+  preferredTargetId?: string
+  simulationOptimization?: Dnd5eMonsterTurnPlannerOptions['simulationOptimization']
+  reconciledActiveEffects?: PlannerReconciledActiveEffects
+  currentTacticalCandidates: readonly MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[]
+}): MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>[] {
+  const reconciled = input.reconciledActiveEffects
+  if (!reconciled) return []
+  const currentIds = new Set(input.currentTacticalCandidates.map((candidate) => candidate.id))
+  const candidates = new Map<string, MonsterDecisionCandidate<Dnd5eMonsterTurnPlan>>()
+
+  for (const heldTarget of input.map.tokens) {
+    const roots = sourceLinkedGrappleRootEffects(
+      heldTarget,
+      input.characters,
+      reconciled,
+    ).filter((effect) => effect.relation?.sourceActorId === input.enemy.id)
+    for (const root of roots) {
+      const releasedEffects = plannerActiveEffectsAfterRelease(
+        reconciled,
+        heldTarget.id,
+        root.id,
+      )
+      const unlocked = input.targets.flatMap((target) => createTacticalCandidates({
+        map: input.map,
+        enemy: input.enemy,
+        monster: input.monster,
+        target,
+        characters: input.characters,
+        canUseBonusAction: input.canUseBonusAction,
+        canUseAction: input.canUseAction,
+        combatId: input.combatId,
+        round: input.round,
+        preferredTargetId: input.preferredTargetId,
+        simulationOptimization: input.simulationOptimization,
+        reconciledActiveEffects: releasedEffects,
+      }))
+      for (const candidate of unlocked) {
+        // Releasing is useful only when it unlocks a new action, target, route,
+        // or destination. Avoid tie candidates that would drop a grapple for
+        // no tactical gain.
+        if (currentIds.has(candidate.id)) continue
+        const id = `release-grapple:${heldTarget.id}:${root.id}:${candidate.id}`
+        candidates.set(id, {
+          ...candidate,
+          id,
+          payload: {
+            ...candidate.payload,
+            releaseGrapple: { targetId: heldTarget.id, effectId: root.id },
+            message: `${input.enemy.label}释放对${heldTarget.label}的擒抱；${candidate.payload.message}`,
+          },
+        })
+      }
+    }
+  }
+  return [...candidates.values()]
+}
+
 export function planDnd5eMonsterTurn(
   map: BattleMap,
   enemy: Token,
@@ -2037,6 +3078,7 @@ export function planDnd5eMonsterTurn(
 ): Dnd5eMonsterTurnPlan {
   const monster = enemy.poolId ? getDnd5eSrdMonster(enemy.poolId) : undefined
   if (!monster) return { moved: false, attacked: false, message: `${enemy.label} 缺少 SRD 5.1 stat block。` }
+  const reconciledActiveEffects = plannerReconciledActiveEffects(map, characters)
   if (enemy.dnd5eCombatState?.turnedByClericId) {
     const source = map.tokens.find((token) => token.id === enemy.dnd5eCombatState?.turnedByClericId)
     if (!source) {
@@ -2045,7 +3087,11 @@ export function planDnd5eMonsterTurn(
     const feetPerCell = Math.max(1, map.feetPerCell ?? 5)
     const start = tokenAnchorCellFromPixel(enemy.x, enemy.y, enemy, map)
     const sourceCell = tokenAnchorCellFromPixel(source.x, source.y, source, map)
-    const movementCells = Math.max(0, Math.floor(dnd5eMonsterMapSpeed(monster) * 2 / feetPerCell))
+    const movementCells = isMovementLocked(
+      targetConditions(enemy, characters, reconciledActiveEffects),
+    )
+      ? 0
+      : Math.max(0, Math.floor(dnd5eMonsterMapSpeed(monster) * 2 / feetPerCell))
     const end = moveAway(start, sourceCell, map, map.tokens, enemy, movementCells)
     const moved = end.col !== start.col || end.row !== start.row
     const position = moved ? tokenCenterForAnchorCell(end, enemy, map) : undefined
@@ -2072,33 +3118,62 @@ export function planDnd5eMonsterTurn(
   const role = monsterTacticalRole(monster)
   const behaviorStyle = dnd5eMonsterEffectiveBehaviorStyle(enemy, role)
   const hp = targetHitPoints(enemy, characters)
-  const candidates = [
-    ...targets.flatMap((target) => createTacticalCandidates({
+  const canUseAction = (options.turnEconomy?.action.current ?? 1) > 0
+  const canUseBonusAction = (options.turnEconomy?.bonusAction.current ?? 1) > 0
+  const tacticalCandidates = targets.flatMap((target) => createTacticalCandidates({
     map,
     enemy,
     monster,
     target,
     characters,
-    canUseBonusAction: (options.turnEconomy?.bonusAction.current ?? 1) > 0,
-    canUseAction: (options.turnEconomy?.action.current ?? 1) > 0,
+    canUseBonusAction,
+    canUseAction,
+    combatId: options.combatId,
+    round: options.round,
     preferredTargetId: preferredTarget.id,
     simulationOptimization: options.simulationOptimization,
-    })),
+    reconciledActiveEffects,
+  }))
+  const candidates = [
+    ...createMonsterEscapeCandidates({
+      map,
+      enemy,
+      monster,
+      characters,
+      canUseAction,
+      reconciledActiveEffects,
+    }),
+    ...tacticalCandidates,
+    ...createMonsterReleaseCandidates({
+      map,
+      enemy,
+      monster,
+      targets,
+      characters,
+      canUseBonusAction,
+      canUseAction,
+      combatId: options.combatId,
+      round: options.round,
+      preferredTargetId: preferredTarget.id,
+      simulationOptimization: options.simulationOptimization,
+      reconciledActiveEffects,
+      currentTacticalCandidates: tacticalCandidates,
+    }),
     ...createMonsterHealingCandidates({
       map,
       enemy,
       monster,
       characters,
-      canUseAction: (options.turnEconomy?.action.current ?? 1) > 0,
-      canUseBonusAction: (options.turnEconomy?.bonusAction.current ?? 1) > 0,
+      canUseAction,
+      canUseBonusAction,
     }),
     ...createMonsterProtectionCandidates({
       map,
       enemy,
       monster,
       characters,
-      canUseAction: (options.turnEconomy?.action.current ?? 1) > 0,
-      canUseBonusAction: (options.turnEconomy?.bonusAction.current ?? 1) > 0,
+      canUseAction,
+      canUseBonusAction,
     }),
   ]
   const provider = options.decisionProvider ?? DETERMINISTIC_TACTICAL_MONSTER_DECISION_PROVIDER_V3

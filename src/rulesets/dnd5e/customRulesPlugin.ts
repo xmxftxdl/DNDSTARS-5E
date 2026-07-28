@@ -165,7 +165,7 @@ export function validateDnd5eCustomRulesPluginDraft(draft: Dnd5eCustomRulesPlugi
     if (!feature.name.trim() || !feature.summary.trim() || !feature.description.trim()) {
       errors.push(`特性 ${feature.id || '未命名'} 缺少名称、摘要或正文。`)
     }
-    if (feature.automation !== 'manual' && !feature.action) {
+    if (feature.automation !== 'manual' && !feature.action && !feature.staticModifiers) {
       errors.push(`自动化特性 ${feature.name || feature.id} 缺少战斗行动。`)
     }
     if (feature.action && (

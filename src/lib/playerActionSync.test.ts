@@ -42,13 +42,20 @@ describe('player action sync barrier', () => {
       patch: {
         type: 'dnd5e-weapon-attack',
         targetTokenId: 'enemy-token',
-        dnd5eWeaponAttackOptions: { coverOverride: 'none', recklessAttack: true },
+        dnd5eWeaponAttackOptions: {
+          coverOverride: 'none',
+          recklessAttack: true,
+          declarativeIntentFeatureIds: ['plugin:subclass.strike'],
+        },
       },
     })
 
     expect(normalizeRemotePlayerActionForDm(forged)).toMatchObject({
       sourceMode: 'player',
-      dnd5eWeaponAttackOptions: { recklessAttack: true },
+      dnd5eWeaponAttackOptions: {
+        recklessAttack: true,
+        declarativeIntentFeatureIds: ['plugin:subclass.strike'],
+      },
     })
     expect(normalizeRemotePlayerActionForDm(forged).dnd5eWeaponAttackOptions?.coverOverride).toBeUndefined()
   })

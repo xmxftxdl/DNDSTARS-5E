@@ -4,6 +4,7 @@ import {
   dnd5ePluginRaceDefinition,
   type Dnd5ePluginFlexibleAbilityBonus,
 } from './pluginApi'
+import { dnd5eCoreRaceMechanics } from './coreRaceMechanics'
 
 export type Dnd5eCoreAbilityGenerationMethod = 'beginner-recommended' | 'standard-array' | 'point-buy' | 'roll-4d6'
 export type Dnd5eAbilityGenerationMethod = Dnd5eCoreAbilityGenerationMethod | `${string}:${string}`
@@ -267,7 +268,7 @@ export function applyDnd5eRacialAbilityBonuses(base: Abilities, bonuses: Abiliti
 export function dnd5eRaceSpeed(race: string): number {
   const pluginRace = dnd5ePluginRaceDefinition(race)
   if (pluginRace) return pluginRace.speedFeet
-  return ['矮人', '半身人', '侏儒'].includes(race) ? 25 : 30
+  return dnd5eCoreRaceMechanics(race)?.speedFeet ?? 30
 }
 
 export function dnd5eFlexibleRacialAbilityBonus(race: string): Dnd5ePluginFlexibleAbilityBonus | undefined {

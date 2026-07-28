@@ -19,7 +19,9 @@ import {
   type Dnd5eActionResult,
   type Dnd5eHeadlessCombatState,
   type Dnd5eMonsterAreaActionResolutionV1,
+  type Dnd5eSpellForcedMovement,
 } from './headlessCombatEngine'
+import { dnd5eConditionsFromActiveEffects } from './activeEffects'
 import {
   createDnd5eMapCombatSnapshot,
   planDnd5eMapResultApplication,
@@ -33,6 +35,10 @@ import {
   type Dnd5eMonsterAreaSavingThrowVariant,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
+import {
+  dnd5eForcedMovementFall,
+  dnd5eForcedPushDestination,
+} from './spellAction'
 
 export type Dnd5eMonsterAreaActionRejectReason =
   | 'invalid-actor'
@@ -54,6 +60,94 @@ export interface PreparedDnd5eMonsterAreaAction {
   variant: Dnd5eMonsterAreaSavingThrowVariant
   areaTargetCell: GridCell
   areaTargetOrientation?: 0 | 1 | 2 | 3
+}
+
+export interface Dnd5eMonsterAreaForcedMovementPlan extends Dnd5eSpellForcedMovement {
+  sourceElevationFeet: number
+  sourceGroundElevationFeet: number
+  landingGroundElevationFeet: number
+  groundedAtSource: boolean
+  fallDistanceFeet: number
+}
+
+function isBanishedMonsterAreaCreature(
+  token: Token,
+  character: Character | undefined,
+): boolean {
+  const tokenState = token.dnd5eCombatState
+  const characterState = character?.dnd5eCombatState
+  if (
+    tokenState?.hurlThroughHellSourceId ||
+    characterState?.hurlThroughHellSourceId
+  ) return true
+  const conditions = [
+    ...(character?.conditions ?? []),
+    ...(tokenState?.conditions ?? []),
+    ...dnd5eConditionsFromActiveEffects(tokenState?.activeEffects),
+    ...dnd5eConditionsFromActiveEffects(characterState?.activeEffects),
+  ]
+  return conditions.some((condition) =>
+    ['banished', '\u653e\u9010'].includes(condition.trim().toLowerCase()))
+}
+
+function isPresentMonsterAreaCreature(
+  token: Token,
+  characters: readonly Character[],
+): boolean {
+  if (token.type === 'obstacle') return false
+  const character = token.characterId
+    ? characters.find((candidate) => candidate.id === token.characterId)
+    : undefined
+  if (isBanishedMonsterAreaCreature(token, character)) return false
+  if (character) {
+    // An unconscious or stable player at 0 HP remains a creature in the area.
+    // Three failed death saves is the persisted marker for a dead character.
+    return character.currentHp > 0 || (character.deathSaveFailures ?? 0) < 3
+  }
+  if (token.maxHp != null) {
+    return (token.hp ?? token.maxHp) > 0 ||
+      token.dnd5eCombatState?.stableAtZero === true ||
+      token.dnd5eCombatState?.monsterRegenerationPendingAtZero === true ||
+      token.dnd5eCombatState?.undeadFortitudePending != null
+  }
+  return true
+}
+
+/**
+ * Converts a structured monster-area push into map-authoritative destinations.
+ * A zero-distance entry is intentional: Headless still requires one signed
+ * outcome for every submitted target, even when a wall, token or map edge
+ * prevents movement.
+ */
+export function dnd5eMonsterAreaForcedMovementPlans(
+  prepared: PreparedDnd5eMonsterAreaAction,
+): readonly Dnd5eMonsterAreaForcedMovementPlan[] {
+  const forcedMovement = prepared.variant.forcedMovementOnFailedSave
+  if (!forcedMovement) return []
+  const geometry = mapGeometryRuntimeForMap(prepared.map.id)
+  return prepared.targetTokens.map((target) => {
+    const destination = dnd5eForcedPushDestination(
+      prepared.map,
+      prepared.actorToken,
+      target,
+      forcedMovement.maximumDistanceFeet,
+    )
+    const fall = dnd5eForcedMovementFall({
+      geometry,
+      target,
+      to: destination.to,
+    })
+    return {
+      targetId: target.id,
+      ...destination,
+      toElevationFeet: fall.toElevationFeet,
+      sourceElevationFeet: fall.sourceElevationFeet,
+      sourceGroundElevationFeet: fall.sourceGroundElevationFeet,
+      landingGroundElevationFeet: fall.landingGroundElevationFeet,
+      groundedAtSource: fall.groundedAtSource,
+      fallDistanceFeet: fall.fallDistanceFeet,
+    }
+  })
 }
 
 function applyTurnEconomy(
@@ -166,7 +260,9 @@ export function prepareDnd5eMonsterAreaAction(input: {
   const authoritativeTargets = tokensInCells(input.map, input.map.tokens, cellsForAoe(variant.area, orientFrom, targetCell))
     .filter((candidate) =>
       candidate.type !== 'obstacle' && candidate.id !== actorToken.id &&
-      areOpposedCombatTokens(actorToken, candidate) &&
+      isPresentMonsterAreaCreature(candidate, input.characters) &&
+      (variant.target === 'all-creatures-except-self' ||
+        areOpposedCombatTokens(actorToken, candidate)) &&
       !mapGeometryLineOfEffectBlocked({
         geometry,
         from: effectOrigin,
@@ -180,12 +276,37 @@ export function prepareDnd5eMonsterAreaAction(input: {
     return { ok: false, reason: 'invalid-target' }
   }
 
+  const authoritativeTargetIds = new Set(authoritativeTargets.map((target) => target.id))
+  const snapshotMap: BattleMap = {
+    ...input.map,
+    // Neutral NPCs are valid creature targets for indiscriminate breaths.
+    // Promote only this transaction's affected NPCs into the Headless snapshot;
+    // the result is mapped back onto the original token type by stable ID.
+    tokens: input.map.tokens.map((token) =>
+      authoritativeTargetIds.has(token.id) && token.type === 'npc'
+        ? { ...token, type: 'enemy' as const }
+        : token),
+  }
+  const initiativeTokenIds = new Set(input.initiativeOrder.map((entry) => entry.tokenId))
+  const snapshotInitiativeOrder = [
+    ...input.initiativeOrder,
+    ...authoritativeTargets.flatMap((target) =>
+      initiativeTokenIds.has(target.id)
+        ? []
+        : [{
+            tokenId: target.id,
+            label: target.label,
+            emoji: target.emoji ?? '',
+            color: target.color ?? '',
+            roll: 0,
+          }]),
+  ]
   const snapshot = createDnd5eMapCombatSnapshot({
     combatId: input.combatId,
     round: input.round,
-    map: input.map,
+    map: snapshotMap,
     characters: input.characters,
-    initiativeOrder: input.initiativeOrder,
+    initiativeOrder: snapshotInitiativeOrder,
   })
   const actorIndex = snapshot.state.initiativeOrder.indexOf(actorToken.id)
   if (

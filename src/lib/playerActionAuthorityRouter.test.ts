@@ -195,6 +195,8 @@ describe('player action authority router', () => {
     expect(reservePlayerActionExecution(makeAction({ id: 'fighter-feature', type: 'dnd5e-fighter-feature' }), recent, { now: 1007 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: 'class-feature', type: 'dnd5e-class-feature' }), recent, { now: 1008 })).toBe(true)
     expect(reservePlayerActionExecution(makeAction({ id: 'class-feature', type: 'dnd5e-class-feature' }), recent, { now: 1009 })).toBe(false)
+    expect(reservePlayerActionExecution(makeAction({ id: 'racial-feature', type: 'dnd5e-racial-action' }), recent, { now: 1009 })).toBe(true)
+    expect(reservePlayerActionExecution(makeAction({ id: 'racial-feature', type: 'dnd5e-racial-action' }), recent, { now: 1009 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: 'plugin-feature', type: 'dnd5e-plugin-action' }), recent, { now: 1010 })).toBe(true)
     expect(reservePlayerActionExecution(makeAction({ id: 'plugin-feature', type: 'dnd5e-plugin-action' }), recent, { now: 1011 })).toBe(false)
     expect(reservePlayerActionExecution(makeAction({ id: 'item-use', type: 'dnd5e-item-use' }), recent, { now: 1012 })).toBe(true)

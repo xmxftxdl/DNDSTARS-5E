@@ -284,6 +284,8 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   prepared: PreparedDnd5eOpportunityAttack
   d20: number
   d20Second?: number
+  halflingLuckyD20?: number
+  halflingLuckyD20Second?: number
   blessRoll?: number
   baneRoll?: number
   bardicInspirationRoll?: number
@@ -296,6 +298,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
   hurlThroughHellDamageRolls?: readonly number[]
   standAgainstTide?: Dnd5eStandAgainstTideUse
   damageRolls: readonly number[]
+  savageAttacksRoll?: number
   classDamageRolls?: readonly Dnd5eClassDamageRolls[]
 }): { result: Dnd5eActionResult; application?: Dnd5eMapResultPlan } {
   const { prepared } = input
@@ -307,6 +310,8 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     criticalThreshold: prepared.criticalThreshold,
     d20: input.d20,
     d20Second: input.d20Second,
+    halflingLuckyD20: input.halflingLuckyD20,
+    halflingLuckyD20Second: input.halflingLuckyD20Second,
     blessRoll: input.blessRoll,
     baneRoll: input.baneRoll,
     bardicInspirationRoll: input.bardicInspirationRoll,
@@ -321,6 +326,7 @@ export function resolvePreparedDnd5eOpportunityAttack(input: {
     mode: prepared.attackMode,
     reactionFeature: prepared.reactionFeature,
     damage: { ...prepared.damage, rolls: input.damageRolls },
+    savageAttacksRoll: input.savageAttacksRoll,
     classDamageContext: prepared.classDamageContext,
     classDamageRolls: input.classDamageRolls,
   })

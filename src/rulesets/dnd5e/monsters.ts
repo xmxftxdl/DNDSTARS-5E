@@ -6,6 +6,7 @@ import { getDnd5eRoomMonster } from './roomMonsterCatalog'
 import type { Dnd5eDamageType } from './damageTypes'
 import type { Dnd5eStandardConditionId } from './conditions'
 import type { Dnd5eConditionalDamageDefense } from './damageDefenses'
+import type { Dnd5eActiveEffectModifiers } from './activeEffects'
 import { DND5E_SRD_SPELL_NAMES_ZH } from './spellNamesZh'
 
 export { DND5E_DAMAGE_TYPES, type Dnd5eDamageType } from './damageTypes'
@@ -142,6 +143,8 @@ export type Dnd5eMonsterMechanicEffectV2 =
       id: string
       kind: 'attack'
       target: Dnd5eMonsterMechanicEffectTargetV2
+      /** Legacy mechanics omit this field and resolve as melee attacks. */
+      attackMode?: 'melee' | 'ranged'
       toHit: number
       economy?: 'none' | 'reaction'
       damage: Dnd5eMonsterDamage
@@ -215,13 +218,58 @@ export interface Dnd5eMonsterSavingThrowDamageOnHitEffect {
   }
 }
 
-export type Dnd5eMonsterOnHitEffect = Dnd5eMonsterSavingThrowDamageOnHitEffect
+/**
+ * A saving throw caused by a weapon hit whose only additional outcome is a
+ * condition. Keeping this separate from saving-throw-damage avoids inventing
+ * a zero-damage component for effects such as a bone devil's poisoned sting.
+ */
+export interface Dnd5eMonsterSavingThrowConditionOnHitEffect {
+  id: string
+  kind: 'saving-throw-condition'
+  ability: AbilityKey
+  dc: number
+  conditionOnFailedSave: Dnd5eMonsterFailedSaveCondition
+}
+
+export interface Dnd5eMonsterSourceLinkedConditionOnHitEffect {
+  id: string
+  kind: 'source-linked-condition'
+  relation: {
+    kind: 'grapple'
+    /**
+     * Stable source-local capacity bucket. Different actions may intentionally
+     * share one slot group (for example, two claws backed by the same pool).
+     */
+    slotGroup: string
+    capacity: number
+    maxDistanceFeet: number
+    /** Tiny=0, Small=1, Medium=2, Large=3, Huge=4, Gargantuan=5. */
+    targetMaxSizeRank: number
+    whenCapacityFull: 'skip-application' | 'linked-target-only'
+    attackAdvantageAgainstLinkedTarget?: boolean
+  }
+  escapeDc: number
+  conditions: readonly {
+    condition: 'grappled' | 'restrained'
+    /** Dependent conditions end together with their source-specific parent. */
+    dependsOnCondition?: 'grappled' | 'restrained'
+  }[]
+}
+
+export type Dnd5eMonsterOnHitEffect =
+  | Dnd5eMonsterSavingThrowDamageOnHitEffect
+  | Dnd5eMonsterSavingThrowConditionOnHitEffect
+  | Dnd5eMonsterSourceLinkedConditionOnHitEffect
 
 export interface Dnd5eMonsterWeaponAttack {
   mode: 'melee' | 'ranged' | 'melee-or-ranged'
+  /** Explicit ability used by the attack. Older catalog rows are inferred conservatively. */
+  attackAbility?: 'str' | 'dex'
   toHit: number
   reachFeet?: number
   rangeFeet?: { normal: number; long: number }
+  /** A target restriction on the attack itself, not merely an on-hit rider. */
+  targetMaxSizeRank?: number
   target: string
   damage: readonly Dnd5eMonsterDamage[]
   /**
@@ -249,13 +297,31 @@ export interface Dnd5eMonsterWeaponAttack {
 
 export interface Dnd5eMonsterAreaSavingThrowEffect {
   area: SkillAoeTargeting
-  target: 'hostile'
+  target: 'hostile' | 'all-creatures-except-self'
   ability: AbilityKey
   dc: number
   /** Omit for pure control effects such as Frightful Presence. */
   damage?: Dnd5eMonsterDamage
   damageOnSuccessfulSave?: 'none' | 'half'
   conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
+  forcedMovementOnFailedSave?: {
+    direction: 'away-from-source'
+    maximumDistanceFeet: number
+  }
+  activeEffectOnFailedSave?: {
+    id: string
+    label: string
+    durationRounds: number
+    repeatSaveAtEndOfTargetTurn: boolean
+    modifiers: Pick<
+      Dnd5eActiveEffectModifiers,
+      | 'speedMultiplier'
+      | 'preventReactions'
+      | 'maximumAttacksPerTurn'
+      | 'actionOrBonusActionOnly'
+      | 'strengthRollMode'
+    >
+  }
   /** Source-specific immunity granted after this Frightful Presence save. */
   frightfulPresenceImmunityRounds?: number
 }
@@ -299,6 +365,17 @@ export type Dnd5eMonsterSpecialActionRule =
       requiredCondition: Dnd5eStandardConditionId
       requireSameSource: boolean
       damage: Dnd5eMonsterDamage
+    }
+  | {
+      /**
+       * A defensive reaction that raises AC against one qualifying melee
+       * attack. The Headless engine only spends the reaction when the bonus
+       * actually changes the hit into a miss.
+       */
+      kind: 'parry'
+      armorClassBonus: number
+      requiresSight: true
+      requiresWieldedMeleeWeapon: true
     }
   | Dnd5eMonsterAreaSavingThrowRule
 
@@ -357,6 +434,44 @@ export interface Dnd5eMonsterTrait {
     kind: 'ambusher'
     initiativeAdvantageWhenSurprising: true
   } | {
+    /** Doppelganger-style first-round advantage against a still-surprised target. */
+    kind: 'ambusher-attack-advantage'
+    requiredRound: 1
+    targetState: 'currently-surprised'
+  } | {
+    /** Advantage on concrete melee attacks against a target below maximum HP. */
+    kind: 'blood-frenzy'
+    attackMode: 'melee'
+    targetHitPoints: 'below-maximum'
+  } | {
+    /** Extra damage on every qualifying hit against a still-surprised target. */
+    kind: 'surprise-attack'
+    requiredRound: 1
+    targetState: 'currently-surprised'
+    applyOn: 'each-qualifying-hit'
+    extraDamage: Omit<Dnd5eMonsterDamage, 'type'> & { type: 'inherit-primary' }
+  } | {
+    /**
+     * SRD monster Reckless. Catalog monsters use the tactical default of
+     * activating this optional feature at turn start.
+     */
+    kind: 'reckless'
+    activation: 'turn-start-tactical-default'
+    outgoing: {
+      delivery: 'weapon-attack'
+      mode: 'melee'
+      rollMode: 'advantage'
+      duration: 'current-turn'
+    }
+    incoming: {
+      rollMode: 'advantage'
+      duration: 'until-source-turn-start'
+    }
+  } | {
+    /** Marilith-style reaction refresh at the start of every creature's turn. */
+    kind: 'reactive'
+    reactionRefresh: 'every-turn-start'
+  } | {
     /** Conditional damage after a straight-line approach; path qualification remains authoritative. */
     kind: 'charge-damage'
     minimumStraightMovementFeet: number
@@ -390,6 +505,28 @@ export interface Dnd5eMonsterTrait {
     saveDc: number
     condition: 'disease'
     maximumTriggerDistanceFeet: number
+  } | {
+    /** Unlimited survival when one qualifying damage instance would reduce the creature to 0 HP. */
+    kind: 'relentless'
+    maximumDamage: number
+  } | {
+    /**
+     * An optional magical gaze offered at another creature's turn start.
+     * The Headless transaction remains authoritative for mutual visual
+     * contact, range, surprise, the avert-eyes choice and staged conditions.
+     */
+    kind: 'turn-start-gaze'
+    ruleId: string
+    rangeFeet: number
+    ability: AbilityKey
+    dc: number
+    magical: true
+    allowAvertEyes: true
+    requiresMutualVisualSight: true
+    initialCondition: 'restrained'
+    failureCondition: 'petrified'
+    /** Medusa petrifies immediately when the first save misses by this much. */
+    immediateFailureMargin?: number
   }
 }
 
@@ -432,6 +569,11 @@ export interface Dnd5eMonsterAction {
   legendaryCost?: number
   /** Structured non-weapon rule resolved entirely by the Headless engine. */
   rule?: Dnd5eMonsterSpecialActionRule
+  /** Source-linked relation precondition shared by weapon and special actions. */
+  relationRequirement?: {
+    kind: 'none-from-source'
+    slotGroup: string
+  }
   /** 传奇动作直接调用普通武器动作时指向其 ID。 */
   referencedActionId?: string
   movement?: {
@@ -644,13 +786,166 @@ const ADULT_DRAGON_FRIGHTFUL_PRESENCE_DCS = {
   'adult-white-dragon': 14,
 } as const
 
+function bronzeDragonBreathVariants(input: {
+  dc: number
+  lightningLengthFeet: number
+  lightningWidthFeet: number
+  lightningAverage: number
+  lightningDice: number
+  repulsionDistanceFeet: number
+}): readonly Dnd5eMonsterAreaSavingThrowVariant[] {
+  return [
+    {
+      id: 'lightning-breath',
+      name: '\u95ea\u7535\u5410\u606f',
+      area: {
+        shape: 'line', origin: 'self',
+        lengthFeet: input.lightningLengthFeet,
+        widthFeet: input.lightningWidthFeet,
+        aimRangeFeet: input.lightningLengthFeet,
+      },
+      target: 'all-creatures-except-self',
+      ability: 'dex',
+      dc: input.dc,
+      damage: {
+        average: input.lightningAverage,
+        count: input.lightningDice,
+        sides: 10,
+        bonus: 0,
+        type: 'lightning',
+      },
+      damageOnSuccessfulSave: 'half',
+    },
+    {
+      id: 'repulsion-breath',
+      name: '\u6392\u65a5\u5410\u606f',
+      area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
+      target: 'all-creatures-except-self',
+      ability: 'str',
+      dc: input.dc,
+      forcedMovementOnFailedSave: {
+        direction: 'away-from-source',
+        maximumDistanceFeet: input.repulsionDistanceFeet,
+      },
+    },
+  ]
+}
+
+function copperDragonBreathVariants(input: {
+  dc: number
+  acidLengthFeet: number
+  acidWidthFeet: number
+  acidAverage: number
+  acidDice: number
+  slowingLengthFeet: number
+}): readonly Dnd5eMonsterAreaSavingThrowVariant[] {
+  return [
+    {
+      id: 'acid-breath',
+      name: '\u9178\u6db2\u5410\u606f',
+      area: {
+        shape: 'line', origin: 'self',
+        lengthFeet: input.acidLengthFeet,
+        widthFeet: input.acidWidthFeet,
+        aimRangeFeet: input.acidLengthFeet,
+      },
+      target: 'all-creatures-except-self',
+      ability: 'dex',
+      dc: input.dc,
+      damage: {
+        average: input.acidAverage,
+        count: input.acidDice,
+        sides: 8,
+        bonus: 0,
+        type: 'acid',
+      },
+      damageOnSuccessfulSave: 'half',
+    },
+    {
+      id: 'slowing-breath',
+      name: '\u8fdf\u7f13\u5410\u606f',
+      area: {
+        shape: 'cone', origin: 'self',
+        lengthFeet: input.slowingLengthFeet,
+        aimRangeFeet: input.slowingLengthFeet,
+      },
+      target: 'all-creatures-except-self',
+      ability: 'con',
+      dc: input.dc,
+      activeEffectOnFailedSave: {
+        id: 'slowing-breath-effect',
+        label: '\u8fdf\u7f13\u5410\u606f',
+        durationRounds: 10,
+        repeatSaveAtEndOfTargetTurn: true,
+        modifiers: {
+          speedMultiplier: 0.5,
+          preventReactions: true,
+          maximumAttacksPerTurn: 1,
+          actionOrBonusActionOnly: true,
+        },
+      },
+    },
+  ]
+}
+
+function goldDragonBreathVariants(input: {
+  dc: number
+  lengthFeet: number
+  fireAverage: number
+  fireDice: number
+}): readonly Dnd5eMonsterAreaSavingThrowVariant[] {
+  return [
+    {
+      id: 'fire-breath',
+      name: '\u706b\u7130\u5410\u606f',
+      area: {
+        shape: 'cone', origin: 'self',
+        lengthFeet: input.lengthFeet,
+        aimRangeFeet: input.lengthFeet,
+      },
+      target: 'all-creatures-except-self',
+      ability: 'dex',
+      dc: input.dc,
+      damage: {
+        average: input.fireAverage,
+        count: input.fireDice,
+        sides: 10,
+        bonus: 0,
+        type: 'fire',
+      },
+      damageOnSuccessfulSave: 'half',
+    },
+    {
+      id: 'weakening-breath',
+      name: '\u8870\u5f31\u5410\u606f',
+      area: {
+        shape: 'cone', origin: 'self',
+        lengthFeet: input.lengthFeet,
+        aimRangeFeet: input.lengthFeet,
+      },
+      target: 'all-creatures-except-self',
+      ability: 'str',
+      dc: input.dc,
+      activeEffectOnFailedSave: {
+        id: 'weakening-breath-effect',
+        label: '\u8870\u5f31\u5410\u606f',
+        durationRounds: 10,
+        repeatSaveAtEndOfTargetTurn: true,
+        modifiers: {
+          strengthRollMode: 'disadvantage',
+        },
+      },
+    },
+  ]
+}
+
 const ADULT_DRAGON_SINGLE_BREATH_RULES = {
   'adult-black-dragon': {
     actionId: 'acid-breath',
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 60, widthFeet: 5, aimRangeFeet: 60 },
-      target: 'hostile', ability: 'dex', dc: 18,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 18,
       damage: { average: 54, count: 12, sides: 8, bonus: 0, type: 'acid' },
       damageOnSuccessfulSave: 'half',
     },
@@ -660,7 +955,7 @@ const ADULT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 90, widthFeet: 5, aimRangeFeet: 90 },
-      target: 'hostile', ability: 'dex', dc: 19,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 19,
       damage: { average: 66, count: 12, sides: 10, bonus: 0, type: 'lightning' },
       damageOnSuccessfulSave: 'half',
     },
@@ -670,7 +965,7 @@ const ADULT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-      target: 'hostile', ability: 'con', dc: 18,
+      target: 'all-creatures-except-self', ability: 'con', dc: 18,
       damage: { average: 56, count: 16, sides: 6, bonus: 0, type: 'poison' },
       damageOnSuccessfulSave: 'half',
     },
@@ -680,7 +975,7 @@ const ADULT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-      target: 'hostile', ability: 'dex', dc: 21,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 21,
       damage: { average: 63, count: 18, sides: 6, bonus: 0, type: 'fire' },
       damageOnSuccessfulSave: 'half',
     },
@@ -690,7 +985,7 @@ const ADULT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-      target: 'hostile', ability: 'con', dc: 19,
+      target: 'all-creatures-except-self', ability: 'con', dc: 19,
       damage: { average: 54, count: 12, sides: 8, bonus: 0, type: 'cold' },
       damageOnSuccessfulSave: 'half',
     },
@@ -705,7 +1000,7 @@ const ADULT_DRAGON_MULTI_BREATH_RULES = {
         id: 'fire-breath',
         name: '火焰吐息',
         area: { shape: 'line', origin: 'self', lengthFeet: 60, widthFeet: 5, aimRangeFeet: 60 },
-        target: 'hostile', ability: 'dex', dc: 18,
+        target: 'all-creatures-except-self', ability: 'dex', dc: 18,
         damage: { average: 45, count: 13, sides: 6, bonus: 0, type: 'fire' },
         damageOnSuccessfulSave: 'half',
       },
@@ -713,7 +1008,7 @@ const ADULT_DRAGON_MULTI_BREATH_RULES = {
         id: 'sleep-breath',
         name: '睡眠吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-        target: 'hostile', ability: 'con', dc: 18,
+        target: 'all-creatures-except-self', ability: 'con', dc: 18,
         conditionOnFailedSave: {
           condition: 'unconscious',
           durationRounds: 100,
@@ -723,6 +1018,37 @@ const ADULT_DRAGON_MULTI_BREATH_RULES = {
       },
     ],
   },
+  'adult-bronze-dragon': {
+    actionId: 'breath-weapons',
+    variants: bronzeDragonBreathVariants({
+      dc: 19,
+      lightningLengthFeet: 90,
+      lightningWidthFeet: 5,
+      lightningAverage: 66,
+      lightningDice: 12,
+      repulsionDistanceFeet: 60,
+    }),
+  },
+  'adult-copper-dragon': {
+    actionId: 'breath-weapons',
+    variants: copperDragonBreathVariants({
+      dc: 18,
+      acidLengthFeet: 60,
+      acidWidthFeet: 5,
+      acidAverage: 54,
+      acidDice: 12,
+      slowingLengthFeet: 60,
+    }),
+  },
+  'adult-gold-dragon': {
+    actionId: 'breath-weapons',
+    variants: goldDragonBreathVariants({
+      dc: 21,
+      lengthFeet: 60,
+      fireAverage: 66,
+      fireDice: 12,
+    }),
+  },
   'adult-silver-dragon': {
     actionId: 'breath-weapons',
     variants: [
@@ -730,7 +1056,7 @@ const ADULT_DRAGON_MULTI_BREATH_RULES = {
         id: 'cold-breath',
         name: '寒冷吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-        target: 'hostile', ability: 'con', dc: 20,
+        target: 'all-creatures-except-self', ability: 'con', dc: 20,
         damage: { average: 58, count: 13, sides: 8, bonus: 0, type: 'cold' },
         damageOnSuccessfulSave: 'half',
       },
@@ -738,7 +1064,7 @@ const ADULT_DRAGON_MULTI_BREATH_RULES = {
         id: 'paralyzing-breath',
         name: '麻痹吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 60, aimRangeFeet: 60 },
-        target: 'hostile', ability: 'con', dc: 20,
+        target: 'all-creatures-except-self', ability: 'con', dc: 20,
         conditionOnFailedSave: {
           condition: 'paralyzed',
           durationRounds: 10,
@@ -768,7 +1094,7 @@ const ANCIENT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 90, widthFeet: 10, aimRangeFeet: 90 },
-      target: 'hostile', ability: 'dex', dc: 22,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 22,
       damage: { average: 67, count: 15, sides: 8, bonus: 0, type: 'acid' }, damageOnSuccessfulSave: 'half',
     },
   },
@@ -777,7 +1103,7 @@ const ANCIENT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 120, widthFeet: 10, aimRangeFeet: 120 },
-      target: 'hostile', ability: 'dex', dc: 23,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 23,
       damage: { average: 88, count: 16, sides: 10, bonus: 0, type: 'lightning' }, damageOnSuccessfulSave: 'half',
     },
   },
@@ -786,7 +1112,7 @@ const ANCIENT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 90, aimRangeFeet: 90 },
-      target: 'hostile', ability: 'con', dc: 22,
+      target: 'all-creatures-except-self', ability: 'con', dc: 22,
       damage: { average: 77, count: 22, sides: 6, bonus: 0, type: 'poison' }, damageOnSuccessfulSave: 'half',
     },
   },
@@ -795,7 +1121,7 @@ const ANCIENT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 90, aimRangeFeet: 90 },
-      target: 'hostile', ability: 'dex', dc: 24,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 24,
       damage: { average: 91, count: 26, sides: 6, bonus: 0, type: 'fire' }, damageOnSuccessfulSave: 'half',
     },
   },
@@ -804,7 +1130,7 @@ const ANCIENT_DRAGON_SINGLE_BREATH_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 90, aimRangeFeet: 90 },
-      target: 'hostile', ability: 'con', dc: 22,
+      target: 'all-creatures-except-self', ability: 'con', dc: 22,
       damage: { average: 72, count: 16, sides: 8, bonus: 0, type: 'cold' }, damageOnSuccessfulSave: 'half',
     },
   },
@@ -818,7 +1144,7 @@ const ANCIENT_DRAGON_MULTI_BREATH_RULES = {
         id: 'fire-breath',
         name: '火焰吐息',
         area: { shape: 'line', origin: 'self', lengthFeet: 90, widthFeet: 10, aimRangeFeet: 90 },
-        target: 'hostile', ability: 'dex', dc: 21,
+        target: 'all-creatures-except-self', ability: 'dex', dc: 21,
         damage: { average: 56, count: 16, sides: 6, bonus: 0, type: 'fire' },
         damageOnSuccessfulSave: 'half',
       },
@@ -826,7 +1152,7 @@ const ANCIENT_DRAGON_MULTI_BREATH_RULES = {
         id: 'sleep-breath',
         name: '睡眠吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 90, aimRangeFeet: 90 },
-        target: 'hostile', ability: 'con', dc: 21,
+        target: 'all-creatures-except-self', ability: 'con', dc: 21,
         conditionOnFailedSave: {
           condition: 'unconscious',
           durationRounds: 100,
@@ -836,6 +1162,37 @@ const ANCIENT_DRAGON_MULTI_BREATH_RULES = {
       },
     ],
   },
+  'ancient-bronze-dragon': {
+    actionId: 'breath-weapons',
+    variants: bronzeDragonBreathVariants({
+      dc: 23,
+      lightningLengthFeet: 120,
+      lightningWidthFeet: 10,
+      lightningAverage: 88,
+      lightningDice: 16,
+      repulsionDistanceFeet: 60,
+    }),
+  },
+  'ancient-copper-dragon': {
+    actionId: 'breath-weapons',
+    variants: copperDragonBreathVariants({
+      dc: 22,
+      acidLengthFeet: 90,
+      acidWidthFeet: 10,
+      acidAverage: 63,
+      acidDice: 14,
+      slowingLengthFeet: 90,
+    }),
+  },
+  'ancient-gold-dragon': {
+    actionId: 'breath-weapons',
+    variants: goldDragonBreathVariants({
+      dc: 24,
+      lengthFeet: 90,
+      fireAverage: 71,
+      fireDice: 13,
+    }),
+  },
   'ancient-silver-dragon': {
     actionId: 'breath-weapons',
     variants: [
@@ -843,7 +1200,7 @@ const ANCIENT_DRAGON_MULTI_BREATH_RULES = {
         id: 'cold-breath',
         name: '寒冷吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 90, aimRangeFeet: 90 },
-        target: 'hostile', ability: 'con', dc: 24,
+        target: 'all-creatures-except-self', ability: 'con', dc: 24,
         damage: { average: 67, count: 15, sides: 8, bonus: 0, type: 'cold' },
         damageOnSuccessfulSave: 'half',
       },
@@ -851,7 +1208,7 @@ const ANCIENT_DRAGON_MULTI_BREATH_RULES = {
         id: 'paralyzing-breath',
         name: '麻痹吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 90, aimRangeFeet: 90 },
-        target: 'hostile', ability: 'con', dc: 24,
+        target: 'all-creatures-except-self', ability: 'con', dc: 24,
         conditionOnFailedSave: {
           condition: 'paralyzed',
           durationRounds: 10,
@@ -868,7 +1225,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 10,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 10,
       conditionOnFailedSave: {
         condition: 'blinded',
         durationRounds: 10,
@@ -881,7 +1238,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 15, widthFeet: 5, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 11,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 11,
       damage: { average: 22, count: 5, sides: 8, bonus: 0, type: 'acid' },
       damageOnSuccessfulSave: 'half',
     },
@@ -891,7 +1248,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 30, widthFeet: 5, aimRangeFeet: 30 },
-      target: 'hostile', ability: 'dex', dc: 12,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 12,
       damage: { average: 22, count: 4, sides: 10, bonus: 0, type: 'lightning' },
       damageOnSuccessfulSave: 'half',
     },
@@ -901,7 +1258,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 20, widthFeet: 5, aimRangeFeet: 20 },
-      target: 'hostile', ability: 'dex', dc: 16,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 16,
       damage: { average: 66, count: 12, sides: 10, bonus: 0, type: 'lightning' },
       damageOnSuccessfulSave: 'half',
     },
@@ -911,7 +1268,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'con', dc: 11,
+      target: 'all-creatures-except-self', ability: 'con', dc: 11,
       damage: { average: 21, count: 6, sides: 6, bonus: 0, type: 'poison' },
       damageOnSuccessfulSave: 'half',
     },
@@ -921,7 +1278,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 15,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 15,
       damage: { average: 24, count: 7, sides: 6, bonus: 0, type: 'fire' },
       damageOnSuccessfulSave: 'half',
     },
@@ -931,7 +1288,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 12,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 12,
       damage: { average: 21, count: 6, sides: 6, bonus: 0, type: 'fire' },
       damageOnSuccessfulSave: 'half',
     },
@@ -941,7 +1298,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 10,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 10,
       damage: { average: 5, count: 2, sides: 4, bonus: 0, type: 'cold' },
       damageOnSuccessfulSave: 'half',
     },
@@ -951,7 +1308,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'con', dc: 19,
+      target: 'all-creatures-except-self', ability: 'con', dc: 19,
       damage: { average: 45, count: 10, sides: 8, bonus: 0, type: 'poison' },
       damageOnSuccessfulSave: 'half',
     },
@@ -961,7 +1318,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 11,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 11,
       damage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'fire' },
       damageOnSuccessfulSave: 'half',
     },
@@ -971,7 +1328,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 13,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 13,
       damage: { average: 24, count: 7, sides: 6, bonus: 0, type: 'fire' },
       damageOnSuccessfulSave: 'half',
     },
@@ -981,7 +1338,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'con', dc: 12,
+      target: 'all-creatures-except-self', ability: 'con', dc: 12,
       damage: { average: 22, count: 5, sides: 8, bonus: 0, type: 'cold' },
       damageOnSuccessfulSave: 'half',
     },
@@ -991,7 +1348,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-      target: 'hostile', ability: 'dex', dc: 12,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 12,
       damage: { average: 18, count: 4, sides: 8, bonus: 0, type: 'cold' },
       damageOnSuccessfulSave: 'half',
     },
@@ -1001,7 +1358,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 30, widthFeet: 5, aimRangeFeet: 30 },
-      target: 'hostile', ability: 'dex', dc: 14,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 14,
       damage: { average: 49, count: 11, sides: 8, bonus: 0, type: 'acid' },
       damageOnSuccessfulSave: 'half',
     },
@@ -1011,7 +1368,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'line', origin: 'self', lengthFeet: 60, widthFeet: 5, aimRangeFeet: 60 },
-      target: 'hostile', ability: 'dex', dc: 16,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 16,
       damage: { average: 55, count: 10, sides: 10, bonus: 0, type: 'lightning' },
       damageOnSuccessfulSave: 'half',
     },
@@ -1021,7 +1378,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
-      target: 'hostile', ability: 'con', dc: 14,
+      target: 'all-creatures-except-self', ability: 'con', dc: 14,
       damage: { average: 42, count: 12, sides: 6, bonus: 0, type: 'poison' },
       damageOnSuccessfulSave: 'half',
     },
@@ -1031,7 +1388,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
-      target: 'hostile', ability: 'dex', dc: 17,
+      target: 'all-creatures-except-self', ability: 'dex', dc: 17,
       damage: { average: 56, count: 16, sides: 6, bonus: 0, type: 'fire' },
       damageOnSuccessfulSave: 'half',
     },
@@ -1041,7 +1398,7 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
     rule: {
       kind: 'area-saving-throw',
       area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
-      target: 'hostile', ability: 'con', dc: 15,
+      target: 'all-creatures-except-self', ability: 'con', dc: 15,
       damage: { average: 45, count: 10, sides: 8, bonus: 0, type: 'cold' },
       damageOnSuccessfulSave: 'half',
     },
@@ -1049,6 +1406,37 @@ const CORE_SINGLE_AREA_ACTION_RULES = {
 } as const
 
 const CORE_MULTI_AREA_ACTION_RULES = {
+  'bronze-dragon-wyrmling': {
+    actionId: 'breath-weapons',
+    variants: bronzeDragonBreathVariants({
+      dc: 12,
+      lightningLengthFeet: 40,
+      lightningWidthFeet: 5,
+      lightningAverage: 16,
+      lightningDice: 3,
+      repulsionDistanceFeet: 30,
+    }),
+  },
+  'copper-dragon-wyrmling': {
+    actionId: 'breath-weapons',
+    variants: copperDragonBreathVariants({
+      dc: 11,
+      acidLengthFeet: 20,
+      acidWidthFeet: 5,
+      acidAverage: 18,
+      acidDice: 4,
+      slowingLengthFeet: 15,
+    }),
+  },
+  'gold-dragon-wyrmling': {
+    actionId: 'breath-weapons',
+    variants: goldDragonBreathVariants({
+      dc: 13,
+      lengthFeet: 15,
+      fireAverage: 22,
+      fireDice: 4,
+    }),
+  },
   'brass-dragon-wyrmling': {
     actionId: 'breath-weapons',
     variants: [
@@ -1056,7 +1444,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'fire-breath',
         name: '火焰吐息',
         area: { shape: 'line', origin: 'self', lengthFeet: 20, widthFeet: 5, aimRangeFeet: 20 },
-        target: 'hostile', ability: 'dex', dc: 11,
+        target: 'all-creatures-except-self', ability: 'dex', dc: 11,
         damage: { average: 14, count: 4, sides: 6, bonus: 0, type: 'fire' },
         damageOnSuccessfulSave: 'half',
       },
@@ -1064,7 +1452,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'sleep-breath',
         name: '睡眠吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-        target: 'hostile', ability: 'con', dc: 11,
+        target: 'all-creatures-except-self', ability: 'con', dc: 11,
         conditionOnFailedSave: {
           condition: 'unconscious',
           durationRounds: 10,
@@ -1074,6 +1462,37 @@ const CORE_MULTI_AREA_ACTION_RULES = {
       },
     ],
   },
+  'young-bronze-dragon': {
+    actionId: 'breath-weapons',
+    variants: bronzeDragonBreathVariants({
+      dc: 15,
+      lightningLengthFeet: 60,
+      lightningWidthFeet: 5,
+      lightningAverage: 55,
+      lightningDice: 10,
+      repulsionDistanceFeet: 40,
+    }),
+  },
+  'young-copper-dragon': {
+    actionId: 'breath-weapons',
+    variants: copperDragonBreathVariants({
+      dc: 14,
+      acidLengthFeet: 40,
+      acidWidthFeet: 5,
+      acidAverage: 40,
+      acidDice: 9,
+      slowingLengthFeet: 30,
+    }),
+  },
+  'young-gold-dragon': {
+    actionId: 'breath-weapons',
+    variants: goldDragonBreathVariants({
+      dc: 17,
+      lengthFeet: 30,
+      fireAverage: 55,
+      fireDice: 10,
+    }),
+  },
   'silver-dragon-wyrmling': {
     actionId: 'breath-weapons',
     variants: [
@@ -1081,7 +1500,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'cold-breath',
         name: '寒冷吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-        target: 'hostile', ability: 'con', dc: 13,
+        target: 'all-creatures-except-self', ability: 'con', dc: 13,
         damage: { average: 18, count: 4, sides: 8, bonus: 0, type: 'cold' },
         damageOnSuccessfulSave: 'half',
       },
@@ -1089,7 +1508,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'paralyzing-breath',
         name: '麻痹吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 15, aimRangeFeet: 15 },
-        target: 'hostile', ability: 'con', dc: 13,
+        target: 'all-creatures-except-self', ability: 'con', dc: 13,
         conditionOnFailedSave: {
           condition: 'paralyzed',
           durationRounds: 10,
@@ -1105,7 +1524,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'fire-breath',
         name: '火焰吐息',
         area: { shape: 'line', origin: 'self', lengthFeet: 40, widthFeet: 5, aimRangeFeet: 40 },
-        target: 'hostile', ability: 'dex', dc: 14,
+        target: 'all-creatures-except-self', ability: 'dex', dc: 14,
         damage: { average: 42, count: 12, sides: 6, bonus: 0, type: 'fire' },
         damageOnSuccessfulSave: 'half',
       },
@@ -1113,7 +1532,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'sleep-breath',
         name: '睡眠吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
-        target: 'hostile', ability: 'con', dc: 14,
+        target: 'all-creatures-except-self', ability: 'con', dc: 14,
         conditionOnFailedSave: {
           condition: 'unconscious',
           durationRounds: 50,
@@ -1130,7 +1549,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'cold-breath',
         name: '寒冷吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
-        target: 'hostile', ability: 'con', dc: 17,
+        target: 'all-creatures-except-self', ability: 'con', dc: 17,
         damage: { average: 54, count: 12, sides: 8, bonus: 0, type: 'cold' },
         damageOnSuccessfulSave: 'half',
       },
@@ -1138,7 +1557,7 @@ const CORE_MULTI_AREA_ACTION_RULES = {
         id: 'paralyzing-breath',
         name: '麻痹吐息',
         area: { shape: 'cone', origin: 'self', lengthFeet: 30, aimRangeFeet: 30 },
-        target: 'hostile', ability: 'con', dc: 17,
+        target: 'all-creatures-except-self', ability: 'con', dc: 17,
         conditionOnFailedSave: {
           condition: 'paralyzed',
           durationRounds: 10,
@@ -1404,7 +1823,7 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
                 lengthFeet: isChimera ? 15 : 60,
                 aimRangeFeet: isChimera ? 15 : 60,
               },
-              target: 'hostile' as const,
+              target: 'all-creatures-except-self' as const,
               ability: isChimera ? 'dex' as const : 'con' as const,
               dc: isChimera ? 15 : 18,
               damage: isChimera
@@ -1466,7 +1885,7 @@ function applyCoreMonsterMechanicalRules(monster: Dnd5eMonsterStatBlock): Dnd5eM
             widthFeet: 5,
             aimRangeFeet: 30,
           },
-          target: 'hostile',
+          target: 'all-creatures-except-self',
           ability: 'dex',
           dc: 13,
           damage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'acid' },
@@ -1772,6 +2191,26 @@ const CATALOG_COMPLEX_POISON_ATTACKS = {
   conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
 }>>
 
+const CATALOG_SAVING_THROW_CONDITION_ATTACKS = {
+  'bone-devil': {
+    actionId: 'sting',
+    effectId: 'sting-poisoned',
+    ability: 'con',
+    dc: 14,
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  effectId: string
+  ability: AbilityKey
+  dc: number
+  conditionOnFailedSave: Dnd5eMonsterFailedSaveCondition
+}>>
+
 const CATALOG_PRONE_BITE_DCS = {
   mastiff: 11,
   'winter-wolf': 14,
@@ -1782,6 +2221,102 @@ const CATALOG_PRONE_ATTACK_SAVES = {
   'stone-giant': { actionId: 'rock', dc: 17 },
   tarrasque: { actionId: 'tail', dc: 20 },
 } as const
+
+const CATALOG_SOURCE_LINKED_CONDITION_ATTACKS = {
+  ankheg: {
+    actionId: 'bite',
+    effectId: 'bite-grapple',
+    slotGroup: 'bite',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 3,
+    whenCapacityFull: 'linked-target-only',
+    attackAdvantageAgainstLinkedTarget: true,
+    escapeDc: 13,
+    conditions: [{ condition: 'grappled' }],
+  },
+  behir: {
+    actionId: 'constrict',
+    effectId: 'constrict-grapple',
+    slotGroup: 'constrict',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 3,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 16,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'constrictor-snake': {
+    actionId: 'constrict',
+    effectId: 'constrict-grapple',
+    slotGroup: 'constrict',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 14,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'giant-constrictor-snake': {
+    actionId: 'constrict',
+    effectId: 'constrict-grapple',
+    slotGroup: 'constrict',
+    capacity: 1,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 16,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'giant-octopus': {
+    actionId: 'tentacles',
+    effectId: 'tentacles-grapple',
+    slotGroup: 'tentacles',
+    capacity: 1,
+    maxDistanceFeet: 15,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'linked-target-only',
+    escapeDc: 16,
+    conditions: [
+      { condition: 'grappled' },
+      { condition: 'restrained', dependsOnCondition: 'grappled' },
+    ],
+  },
+  'giant-scorpion': {
+    actionId: 'claw',
+    effectId: 'claw-grapple',
+    slotGroup: 'claw',
+    capacity: 2,
+    maxDistanceFeet: 5,
+    targetMaxSizeRank: 5,
+    whenCapacityFull: 'skip-application',
+    escapeDc: 12,
+    conditions: [{ condition: 'grappled' }],
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  effectId: string
+  slotGroup: string
+  capacity: number
+  maxDistanceFeet: number
+  targetMaxSizeRank: number
+  whenCapacityFull: 'skip-application' | 'linked-target-only'
+  attackAdvantageAgainstLinkedTarget?: boolean
+  escapeDc: number
+  conditions: readonly {
+    condition: 'grappled' | 'restrained'
+    dependsOnCondition?: 'grappled' | 'restrained'
+  }[]
+}>>
 
 const CATALOG_MAGICAL_WEAPON_TRAIT_MONSTERS = new Set([
   'androsphinx',
@@ -1802,6 +2337,136 @@ const CATALOG_MAGICAL_WEAPON_TRAIT_MONSTERS = new Set([
   'unicorn',
 ])
 
+const CATALOG_RELENTLESS_DAMAGE_THRESHOLDS = {
+  boar: 7,
+  'giant-boar': 10,
+  'wereboar-boar': 14,
+  'wereboar-human': 14,
+  'wereboar-hybrid': 14,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_BLOOD_FRENZY_TRAIT_INDEX = {
+  'giant-shark': 0,
+  'hunter-shark': 0,
+  quipper: 0,
+  sahuagin: 0,
+  'swarm-of-quippers': 0,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_SURPRISE_ATTACK_TRAITS = {
+  bugbear: {
+    traitIndex: 1,
+    extraDamage: {
+      average: 7,
+      count: 2,
+      sides: 6,
+      bonus: 0,
+      type: 'inherit-primary',
+    },
+  },
+  doppelganger: {
+    traitIndex: 2,
+    extraDamage: {
+      average: 10,
+      count: 3,
+      sides: 6,
+      bonus: 0,
+      type: 'inherit-primary',
+    },
+  },
+} as const
+
+const CATALOG_AMBUSHER_ATTACK_TRAIT_INDEX = {
+  doppelganger: 1,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_RECKLESS_TRAIT_INDEX = {
+  berserker: 0,
+  minotaur: 2,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_REACTIVE_TRAIT_INDEX = {
+  marilith: 2,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_PARRY_ARMOR_CLASS_BONUSES = {
+  'bandit-captain': 2,
+  erinyes: 4,
+  gladiator: 3,
+  knight: 2,
+  marilith: 5,
+  noble: 2,
+} as const satisfies Readonly<Record<string, number>>
+
+const CATALOG_LEGENDARY_ACTION_REFERENCES = {
+  unicorn: {
+    legacyActionId: 'hooves',
+    actionId: 'legendary-hooves',
+    referencedActionId: 'hooves',
+  },
+  'vampire-vampire': {
+    legacyActionId: 'unarmed-strike',
+    actionId: 'legendary-unarmed-strike',
+    referencedActionId: 'unarmed-strike',
+  },
+} as const
+
+interface Dnd5eCatalogMultiattackOverride {
+  sequence: readonly string[]
+  sequenceAttackMode?: 'melee' | 'ranged'
+  alternatives?: readonly {
+    id: string
+    sequence: readonly string[]
+    sequenceAttackMode?: 'melee' | 'ranged'
+  }[]
+}
+
+/**
+ * The SRD generator deliberately leaves prose containing "or"/"alternatively"
+ * for DM adjudication. These reviewed overrides keep each legal sequence as a
+ * separate stable action so the Host, tactical planner, and simulator can use
+ * the existing atomic Multiattack transaction without guessing player intent.
+ */
+const CATALOG_MULTIATTACK_OVERRIDES: Readonly<Record<string, Dnd5eCatalogMultiattackOverride>> = {
+  'half-red-dragon-veteran': {
+    sequence: ['longsword', 'longsword', 'shortsword'],
+  },
+  veteran: {
+    sequence: ['longsword', 'longsword', 'shortsword'],
+  },
+  assassin: {
+    sequence: ['shortsword', 'shortsword'],
+  },
+  behir: {
+    sequence: ['bite', 'constrict'],
+  },
+  'giant-scorpion': {
+    sequence: ['claw', 'claw', 'sting'],
+  },
+  'barbed-devil': {
+    sequence: ['tail', 'claw', 'claw'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-hurl-flame',
+      sequence: ['hurl-flame', 'hurl-flame'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+  'bone-devil': {
+    sequence: ['claw', 'claw', 'sting'],
+    sequenceAttackMode: 'melee',
+  },
+  centaur: {
+    sequence: ['pike', 'hooves'],
+    sequenceAttackMode: 'melee',
+    alternatives: [{
+      id: 'multiattack-longbow',
+      sequence: ['longbow', 'longbow'],
+      sequenceAttackMode: 'ranged',
+    }],
+  },
+}
+
 function applyCatalogMonsterActionRules(
   monster: Dnd5eMonsterStatBlock,
 ): Dnd5eMonsterStatBlock {
@@ -1817,210 +2482,445 @@ function applyCatalogMonsterActionRules(
   const complexPoisonAttack = CATALOG_COMPLEX_POISON_ATTACKS[
     monster.slug as keyof typeof CATALOG_COMPLEX_POISON_ATTACKS
   ]
+  const savingThrowConditionAttack = CATALOG_SAVING_THROW_CONDITION_ATTACKS[
+    monster.slug as keyof typeof CATALOG_SAVING_THROW_CONDITION_ATTACKS
+  ]
   const proneBiteDc = CATALOG_PRONE_BITE_DCS[
     monster.slug as keyof typeof CATALOG_PRONE_BITE_DCS
   ]
   const proneAttackSave = CATALOG_PRONE_ATTACK_SAVES[
     monster.slug as keyof typeof CATALOG_PRONE_ATTACK_SAVES
   ]
-  const multiattackSequence =
-    monster.slug === 'half-red-dragon-veteran' || monster.slug === 'veteran'
-      ? ['longsword', 'longsword', 'shortsword'] as const
-      : monster.slug === 'assassin'
-        ? ['shortsword', 'shortsword'] as const
-        : undefined
+  const sourceLinkedConditionAttack = CATALOG_SOURCE_LINKED_CONDITION_ATTACKS[
+    monster.slug as keyof typeof CATALOG_SOURCE_LINKED_CONDITION_ATTACKS
+  ]
+  const legendaryActionReference = CATALOG_LEGENDARY_ACTION_REFERENCES[
+    monster.slug as keyof typeof CATALOG_LEGENDARY_ACTION_REFERENCES
+  ]
+  const multiattackOverride = CATALOG_MULTIATTACK_OVERRIDES[monster.slug]
 
   return {
     ...monster,
-    actions: monster.actions.map((action) => {
-      const assassinPoisonWeaponAttack = monster.slug === 'assassin' &&
-        (action.id === 'shortsword' || action.id === 'light-crossbow')
-        ? CATALOG_ASSASSIN_POISON_WEAPON_ATTACKS[action.id]
-        : undefined
-      if (fixedDamageAttack && action.id === fixedDamageAttack.actionId) {
-        return {
-          ...action,
-          kind: 'weapon-attack' as const,
-          automation: 'headless' as const,
-          attack: {
-            mode: 'melee' as const,
-            toHit: fixedDamageAttack.toHit,
-            reachFeet: 5,
-            target: 'one creature',
-            damage: [{
-              average: 1,
-              count: 0,
-              sides: 4,
-              bonus: 1,
-              type: fixedDamageAttack.damageType,
-            }],
-          },
+    actions: [
+      ...monster.actions.map((action) => {
+        const assassinPoisonWeaponAttack = monster.slug === 'assassin' &&
+          (action.id === 'shortsword' || action.id === 'light-crossbow')
+          ? CATALOG_ASSASSIN_POISON_WEAPON_ATTACKS[action.id]
+          : undefined
+        if (fixedDamageAttack && action.id === fixedDamageAttack.actionId) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              mode: 'melee' as const,
+              toHit: fixedDamageAttack.toHit,
+              reachFeet: 5,
+              target: 'one creature',
+              damage: [{
+                average: 1,
+                count: 0,
+                sides: 4,
+                bonus: 1,
+                type: fixedDamageAttack.damageType,
+              }],
+            },
+          }
         }
-      }
-      if (baseWeaponAttack && action.id === baseWeaponAttack.actionId) {
-        return {
-          ...action,
-          kind: 'weapon-attack' as const,
-          automation: 'headless' as const,
-          attack: baseWeaponAttack.attack,
+        if (baseWeaponAttack && action.id === baseWeaponAttack.actionId) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: baseWeaponAttack.attack,
+          }
         }
-      }
-      if (multiattackSequence && action.id === 'multiattack') {
+        if (multiattackOverride && action.id === 'multiattack') {
+          return {
+            ...action,
+            kind: 'multiattack' as const,
+            automation: 'headless' as const,
+            sequence: multiattackOverride.sequence,
+            sequenceAttackMode: multiattackOverride.sequenceAttackMode,
+          }
+        }
+        if (
+          savingThrowConditionAttack &&
+          action.id === savingThrowConditionAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              onHitEffects: [
+                ...(action.attack.onHitEffects ?? []),
+                {
+                  id: savingThrowConditionAttack.effectId,
+                  kind: 'saving-throw-condition' as const,
+                  ability: savingThrowConditionAttack.ability,
+                  dc: savingThrowConditionAttack.dc,
+                  conditionOnFailedSave:
+                    savingThrowConditionAttack.conditionOnFailedSave,
+                },
+              ],
+            },
+          }
+        }
+        if (monster.slug === 'ankheg' && action.id === 'acid-spray') {
+          return {
+            ...action,
+            relationRequirement: {
+              kind: 'none-from-source' as const,
+              slotGroup: 'bite',
+            },
+          }
+        }
+        if (
+          sourceLinkedConditionAttack &&
+          action.id === sourceLinkedConditionAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              ...(monster.slug === 'behir'
+                ? { targetMaxSizeRank: 3 }
+                : {}),
+              onHitEffects: [
+                ...(action.attack.onHitEffects ?? []),
+                {
+                  id: sourceLinkedConditionAttack.effectId,
+                  kind: 'source-linked-condition' as const,
+                  relation: {
+                    kind: 'grapple' as const,
+                    slotGroup: sourceLinkedConditionAttack.slotGroup,
+                    capacity: sourceLinkedConditionAttack.capacity,
+                    maxDistanceFeet: sourceLinkedConditionAttack.maxDistanceFeet,
+                    targetMaxSizeRank: sourceLinkedConditionAttack.targetMaxSizeRank,
+                    whenCapacityFull: sourceLinkedConditionAttack.whenCapacityFull,
+                    attackAdvantageAgainstLinkedTarget:
+                      'attackAdvantageAgainstLinkedTarget' in sourceLinkedConditionAttack
+                        ? sourceLinkedConditionAttack.attackAdvantageAgainstLinkedTarget
+                        : undefined,
+                  },
+                  escapeDc: sourceLinkedConditionAttack.escapeDc,
+                  conditions: sourceLinkedConditionAttack.conditions,
+                },
+              ],
+            },
+          }
+        }
+        if (assassinPoisonWeaponAttack) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: assassinPoisonWeaponAttack,
+          }
+        }
+        if (
+          complexPoisonAttack &&
+          action.id === complexPoisonAttack.actionId &&
+          action.attack
+        ) {
+          const stableAtZero = 'stableAtZero' in complexPoisonAttack &&
+            complexPoisonAttack.stableAtZero
+          const conditionOnFailedSave = 'conditionOnFailedSave' in complexPoisonAttack
+            ? complexPoisonAttack.conditionOnFailedSave
+            : undefined
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              onHit: `DC ${complexPoisonAttack.dc} Constitution save; ` +
+                `${complexPoisonAttack.damage.count}d${complexPoisonAttack.damage.sides} poison damage, ` +
+                `${complexPoisonAttack.damageOnSuccessfulSave} on a success.`,
+              onHitEffects: [{
+                id: 'poison-save-damage',
+                kind: 'saving-throw-damage' as const,
+                ability: 'con' as const,
+                dc: complexPoisonAttack.dc,
+                damage: [complexPoisonAttack.damage],
+                damageOnSuccessfulSave: complexPoisonAttack.damageOnSuccessfulSave,
+                conditionOnFailedSave,
+                onEffectDamageReducesTargetToZero: stableAtZero
+                  ? {
+                      stabilize: true as const,
+                      conditions: [
+                        { condition: 'poisoned' as const, durationRounds: 600 },
+                        {
+                          condition: 'paralyzed' as const,
+                          durationRounds: 600,
+                          dependsOnCondition: 'poisoned' as const,
+                        },
+                      ],
+                    }
+                  : undefined,
+              }],
+            },
+          }
+        }
+        if (
+          poisonSaveDamageAttack &&
+          action.id === poisonSaveDamageAttack.actionId &&
+          action.attack
+        ) {
+          return {
+            ...action,
+            kind: 'weapon-attack' as const,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              damage: action.attack.damage.filter((damage) => damage.type !== 'poison'),
+              onHit: `DC ${poisonSaveDamageAttack.dc} Constitution save; ` +
+                `${poisonSaveDamageAttack.damage.count}d${poisonSaveDamageAttack.damage.sides} ` +
+                'poison damage, half on a success.',
+              onHitEffects: [{
+                id: 'poison-save-damage',
+                kind: 'saving-throw-damage' as const,
+                ability: 'con' as const,
+                dc: poisonSaveDamageAttack.dc,
+                damage: [poisonSaveDamageAttack.damage],
+                damageOnSuccessfulSave: 'half' as const,
+              }],
+            },
+          }
+        }
+        if (proneBiteDc != null && action.id === 'bite' && action.attack) {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              onHit: `DC ${proneBiteDc} Strength save; prone on a failure.`,
+              onHitRule: {
+                kind: 'saving-throw-condition' as const,
+                ability: 'str' as const,
+                dc: proneBiteDc,
+                condition: 'prone' as const,
+              },
+            },
+          }
+        }
+        if (proneAttackSave && action.id === proneAttackSave.actionId && action.attack) {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              onHit: `DC ${proneAttackSave.dc} Strength save; prone on a failure.`,
+              onHitRule: {
+                kind: 'saving-throw-condition' as const,
+                ability: 'str' as const,
+                dc: proneAttackSave.dc,
+                condition: 'prone' as const,
+              },
+            },
+          }
+        }
+        if (monster.slug === 'balor' && action.id === 'longsword' && action.attack) {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              criticalExtraDamage: [
+                { average: 13, count: 3, sides: 8, bonus: 0, type: 'slashing' as const },
+                { average: 13, count: 3, sides: 8, bonus: 0, type: 'lightning' as const },
+              ],
+            },
+          }
+        }
+        if (monster.slug === 'pit-fiend' && action.id === 'mace' && action.attack) {
+          return {
+            ...action,
+            automation: 'headless' as const,
+            attack: {
+              ...action.attack,
+              damage: [
+                ...action.attack.damage,
+                { average: 21, count: 6, sides: 6, bonus: 0, type: 'fire' as const },
+              ],
+            },
+          }
+        }
+        if (monster.slug === 'barbed-devil' && action.id === 'hurl-flame' && action.attack) {
+          return { ...action, automation: 'headless' as const }
+        }
+        return action
+      }),
+      ...(multiattackOverride?.alternatives ?? []).map((alternative) => {
+        const base = monster.actions.find((action) => action.id === 'multiattack')
+        const child = monster.actions.find((action) => action.id === alternative.sequence[0])
         return {
-          ...action,
+          id: alternative.id,
+          name: `${base?.name ?? 'Multiattack'}：${child?.name ?? alternative.sequence[0]} ×${alternative.sequence.length}`,
+          description: base?.description ?? '',
           kind: 'multiattack' as const,
           automation: 'headless' as const,
-          sequence: multiattackSequence,
+          sequence: alternative.sequence,
+          sequenceAttackMode: alternative.sequenceAttackMode,
         }
+      }),
+    ],
+    reactions: monster.reactions?.map((reaction) => {
+      const armorClassBonus = CATALOG_PARRY_ARMOR_CLASS_BONUSES[
+        monster.slug as keyof typeof CATALOG_PARRY_ARMOR_CLASS_BONUSES
+      ]
+      if (armorClassBonus == null || reaction.id !== 'parry') return reaction
+      return {
+        ...reaction,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'parry' as const,
+          armorClassBonus,
+          requiresSight: true as const,
+          requiresWieldedMeleeWeapon: true as const,
+        },
       }
-      if (assassinPoisonWeaponAttack) {
-        return {
-          ...action,
-          kind: 'weapon-attack' as const,
-          automation: 'headless' as const,
-          attack: assassinPoisonWeaponAttack,
-        }
-      }
-      if (
-        complexPoisonAttack &&
-        action.id === complexPoisonAttack.actionId &&
-        action.attack
-      ) {
-        const stableAtZero = 'stableAtZero' in complexPoisonAttack &&
-          complexPoisonAttack.stableAtZero
-        const conditionOnFailedSave = 'conditionOnFailedSave' in complexPoisonAttack
-          ? complexPoisonAttack.conditionOnFailedSave
-          : undefined
-        return {
-          ...action,
-          kind: 'weapon-attack' as const,
-          automation: 'headless' as const,
-          attack: {
-            ...action.attack,
-            onHit: `DC ${complexPoisonAttack.dc} Constitution save; ` +
-              `${complexPoisonAttack.damage.count}d${complexPoisonAttack.damage.sides} poison damage, ` +
-              `${complexPoisonAttack.damageOnSuccessfulSave} on a success.`,
-            onHitEffects: [{
-              id: 'poison-save-damage',
-              kind: 'saving-throw-damage' as const,
-              ability: 'con' as const,
-              dc: complexPoisonAttack.dc,
-              damage: [complexPoisonAttack.damage],
-              damageOnSuccessfulSave: complexPoisonAttack.damageOnSuccessfulSave,
-              conditionOnFailedSave,
-              onEffectDamageReducesTargetToZero: stableAtZero
-                ? {
-                    stabilize: true as const,
-                    conditions: [
-                      { condition: 'poisoned' as const, durationRounds: 600 },
-                      {
-                        condition: 'paralyzed' as const,
-                        durationRounds: 600,
-                        dependsOnCondition: 'poisoned' as const,
-                      },
-                    ],
-                  }
-                : undefined,
-            }],
-          },
-        }
-      }
-      if (
-        poisonSaveDamageAttack &&
-        action.id === poisonSaveDamageAttack.actionId &&
-        action.attack
-      ) {
-        return {
-          ...action,
-          kind: 'weapon-attack' as const,
-          automation: 'headless' as const,
-          attack: {
-            ...action.attack,
-            damage: action.attack.damage.filter((damage) => damage.type !== 'poison'),
-            onHit: `DC ${poisonSaveDamageAttack.dc} Constitution save; ` +
-              `${poisonSaveDamageAttack.damage.count}d${poisonSaveDamageAttack.damage.sides} ` +
-              'poison damage, half on a success.',
-            onHitEffects: [{
-              id: 'poison-save-damage',
-              kind: 'saving-throw-damage' as const,
-              ability: 'con' as const,
-              dc: poisonSaveDamageAttack.dc,
-              damage: [poisonSaveDamageAttack.damage],
-              damageOnSuccessfulSave: 'half' as const,
-            }],
-          },
-        }
-      }
-      if (proneBiteDc != null && action.id === 'bite' && action.attack) {
-        return {
-          ...action,
-          automation: 'headless' as const,
-          attack: {
-            ...action.attack,
-            onHit: `DC ${proneBiteDc} Strength save; prone on a failure.`,
-            onHitRule: {
-              kind: 'saving-throw-condition' as const,
-              ability: 'str' as const,
-              dc: proneBiteDc,
-              condition: 'prone' as const,
-            },
-          },
-        }
-      }
-      if (proneAttackSave && action.id === proneAttackSave.actionId && action.attack) {
-        return {
-          ...action,
-          automation: 'headless' as const,
-          attack: {
-            ...action.attack,
-            onHit: `DC ${proneAttackSave.dc} Strength save; prone on a failure.`,
-            onHitRule: {
-              kind: 'saving-throw-condition' as const,
-              ability: 'str' as const,
-              dc: proneAttackSave.dc,
-              condition: 'prone' as const,
-            },
-          },
-        }
-      }
-      if (monster.slug === 'balor' && action.id === 'longsword' && action.attack) {
-        return {
-          ...action,
-          automation: 'headless' as const,
-          attack: {
-            ...action.attack,
-            criticalExtraDamage: [
-              { average: 13, count: 3, sides: 8, bonus: 0, type: 'slashing' as const },
-              { average: 13, count: 3, sides: 8, bonus: 0, type: 'lightning' as const },
-            ],
-          },
-        }
-      }
-      if (monster.slug === 'pit-fiend' && action.id === 'mace' && action.attack) {
-        return {
-          ...action,
-          automation: 'headless' as const,
-          attack: {
-            ...action.attack,
-            damage: [
-              ...action.attack.damage,
-              { average: 21, count: 6, sides: 6, bonus: 0, type: 'fire' as const },
-            ],
-          },
-        }
-      }
-      if (monster.slug === 'barbed-devil' && action.id === 'hurl-flame' && action.attack) {
-        return { ...action, automation: 'headless' as const }
-      }
-      return action
     }),
+    legendaryActions: monster.legendaryActions?.map((action) =>
+      legendaryActionReference &&
+      action.id === legendaryActionReference.legacyActionId
+        ? {
+            ...action,
+            id: legendaryActionReference.actionId,
+            referencedActionId: legendaryActionReference.referencedActionId,
+          }
+        : action),
   }
 }
 
 function applyCatalogMonsterTraitRules(
   monster: Dnd5eMonsterStatBlock,
 ): Dnd5eMonsterStatBlock {
-  const traits = monster.traits.map((trait) => {
+  const traits = monster.traits.map((trait, traitIndex) => {
+    const bloodFrenzyTraitIndex = CATALOG_BLOOD_FRENZY_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_BLOOD_FRENZY_TRAIT_INDEX
+    ]
+    if (bloodFrenzyTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'blood-frenzy' as const,
+          attackMode: 'melee' as const,
+          targetHitPoints: 'below-maximum' as const,
+        },
+      }
+    }
+    const surpriseAttack = CATALOG_SURPRISE_ATTACK_TRAITS[
+      monster.slug as keyof typeof CATALOG_SURPRISE_ATTACK_TRAITS
+    ]
+    if (surpriseAttack?.traitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'surprise-attack' as const,
+          requiredRound: 1 as const,
+          targetState: 'currently-surprised' as const,
+          applyOn: 'each-qualifying-hit' as const,
+          extraDamage: surpriseAttack.extraDamage,
+        },
+      }
+    }
+    const ambusherAttackTraitIndex = CATALOG_AMBUSHER_ATTACK_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_AMBUSHER_ATTACK_TRAIT_INDEX
+    ]
+    if (ambusherAttackTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'ambusher-attack-advantage' as const,
+          requiredRound: 1 as const,
+          targetState: 'currently-surprised' as const,
+        },
+      }
+    }
+    const recklessTraitIndex = CATALOG_RECKLESS_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_RECKLESS_TRAIT_INDEX
+    ]
+    if (recklessTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'reckless' as const,
+          activation: 'turn-start-tactical-default' as const,
+          outgoing: {
+            delivery: 'weapon-attack' as const,
+            mode: 'melee' as const,
+            rollMode: 'advantage' as const,
+            duration: 'current-turn' as const,
+          },
+          incoming: {
+            rollMode: 'advantage' as const,
+            duration: 'until-source-turn-start' as const,
+          },
+        },
+      }
+    }
+    const reactiveTraitIndex = CATALOG_REACTIVE_TRAIT_INDEX[
+      monster.slug as keyof typeof CATALOG_REACTIVE_TRAIT_INDEX
+    ]
+    if (reactiveTraitIndex === traitIndex) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'reactive' as const,
+          reactionRefresh: 'every-turn-start' as const,
+        },
+      }
+    }
+    const relentlessMaximumDamage = CATALOG_RELENTLESS_DAMAGE_THRESHOLDS[
+      monster.slug as keyof typeof CATALOG_RELENTLESS_DAMAGE_THRESHOLDS
+    ]
+    if (
+      relentlessMaximumDamage != null &&
+      /^(?:Relentless|坚韧不屈|鍧氶煣涓嶅眻)$/i.test(trait.name.trim())
+    ) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'relentless' as const,
+          maximumDamage: relentlessMaximumDamage,
+        },
+      }
+    }
+    if (
+      (monster.slug === 'basilisk' || monster.slug === 'medusa') &&
+      /^(?:Petrifying Gaze|石化凝视)$/i.test(trait.name.trim())
+    ) {
+      return {
+        ...trait,
+        automation: 'headless' as const,
+        rule: {
+          kind: 'turn-start-gaze' as const,
+          ruleId: 'petrifying-gaze',
+          rangeFeet: 30,
+          ability: 'con' as const,
+          dc: monster.slug === 'medusa' ? 14 : 12,
+          magical: true as const,
+          allowAvertEyes: true as const,
+          requiresMutualVisualSight: true as const,
+          initialCondition: 'restrained' as const,
+          failureCondition: 'petrified' as const,
+          ...(monster.slug === 'medusa' ? { immediateFailureMargin: 5 } : {}),
+        },
+      }
+    }
     if (
       CATALOG_MAGICAL_WEAPON_TRAIT_MONSTERS.has(monster.slug) &&
       /^(?:Magic Weapons|Angelic Weapons|Hellish Weapons|魔法武器|天使武器|地狱武器|炼狱武器)$/i.test(trait.name.trim())
@@ -2138,6 +3038,40 @@ export function dnd5eMonsterProficiencyBonus(challengeRating: string): number {
   if (rating <= 24) return 7
   if (rating <= 28) return 8
   return 9
+}
+
+/**
+ * Returns the actual ability behind a monster weapon attack without equating
+ * "melee" with Strength. Legacy SRD rows omit this field, so compare both the
+ * attack and primary-damage modifiers against STR/DEX plus proficiency. Ties
+ * remain unknown rather than imposing an incorrect ability-specific effect.
+ */
+export function dnd5eMonsterWeaponAttackAbility(
+  monster: Pick<Dnd5eMonsterStatBlock, 'abilities' | 'challenge'>,
+  attack: Pick<Dnd5eMonsterWeaponAttack, 'attackAbility' | 'mode' | 'toHit' | 'damage'>,
+): 'str' | 'dex' | undefined {
+  if (attack.attackAbility) return attack.attackAbility
+  const proficiency = dnd5eMonsterProficiencyBonus(monster.challenge.rating)
+  const primaryDamageBonus = attack.damage[0]?.bonus
+  const candidates = (['str', 'dex'] as const).map((ability) => {
+    const modifier = Math.floor((monster.abilities[ability] - 10) / 2)
+    const attackDelta = attack.toHit - proficiency - modifier
+    const damageDelta = primaryDamageBonus == null ? undefined : primaryDamageBonus - modifier
+    return {
+      ability,
+      attackExact: attackDelta === 0,
+      damageExact: damageDelta === 0,
+      sharedDelta: damageDelta != null && attackDelta === damageDelta,
+    }
+  })
+  const exact = candidates.filter((candidate) =>
+    candidate.attackExact && (primaryDamageBonus == null || candidate.damageExact))
+  if (exact.length === 1) return exact[0]!.ability
+  const partialExact = candidates.filter((candidate) =>
+    candidate.attackExact || candidate.damageExact)
+  if (partialExact.length === 1) return partialExact[0]!.ability
+  const consistent = candidates.filter((candidate) => candidate.sharedDelta)
+  return consistent.length === 1 ? consistent[0]!.ability : undefined
 }
 
 /** The map pathfinder distinguishes ground, climb, and swim terrain. */
