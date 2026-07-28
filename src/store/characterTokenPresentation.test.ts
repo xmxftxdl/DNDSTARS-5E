@@ -1867,6 +1867,33 @@ describe('character token presentation', () => {
         tokenPortrait: '/assets/portraits/oni-storm-shrine-glaive-token.png',
       })
     }
+    for (const poolId of ['srd-5.1:orc', 'orc']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/orc-red-steppe-greataxe-initiative.png',
+        tokenPortrait: '/assets/portraits/orc-red-steppe-greataxe-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:otyugh', 'otyugh']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/otyugh-city-refuse-barrel-initiative.png',
+        tokenPortrait: '/assets/portraits/otyugh-city-refuse-barrel-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:owl', 'owl']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/owl-moonlit-roadside-watch-initiative.png',
+        tokenPortrait: '/assets/portraits/owl-moonlit-roadside-watch-token.png',
+      })
+    }
     for (const poolId of ['srd-5.1:axe-beak', 'axe-beak']) {
       const projected = projectCharacterTokenPresentations([
         token({ type: 'enemy', characterId: undefined, poolId }),
@@ -2836,6 +2863,21 @@ describe('character token presentation', () => {
         poolId: 'srd-5.1:oni',
         visualVariantId: 'snow-city-cone-of-cold',
         asset: 'oni-snow-city-cone-of-cold',
+      },
+      {
+        poolId: 'srd-5.1:orc',
+        visualVariantId: 'storm-coast-javelin',
+        asset: 'orc-storm-coast-javelin',
+      },
+      {
+        poolId: 'srd-5.1:otyugh',
+        visualVariantId: 'fungal-cavern-slam',
+        asset: 'otyugh-fungal-cavern-slam',
+      },
+      {
+        poolId: 'srd-5.1:owl',
+        visualVariantId: 'snow-barn-flyby',
+        asset: 'owl-snow-barn-flyby',
       },
       {
         poolId: 'srd-5.1:ancient-black-dragon',

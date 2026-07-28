@@ -4224,6 +4224,66 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
+  orc: {
+    emoji: '👹',
+    color: '#3f6212',
+    tokenPortrait: '/assets/portraits/orc-red-steppe-greataxe-token.png',
+    initiativePortrait: '/assets/portraits/orc-red-steppe-greataxe-initiative.png',
+    visualVariants: [
+      {
+        id: 'red-steppe-greataxe',
+        label: '赤原巨斧冲锋',
+        tokenPortrait: '/assets/portraits/orc-red-steppe-greataxe-token.png',
+        initiativePortrait: '/assets/portraits/orc-red-steppe-greataxe-initiative.png',
+      },
+      {
+        id: 'storm-coast-javelin',
+        label: '雷岸标枪投击',
+        tokenPortrait: '/assets/portraits/orc-storm-coast-javelin-token.png',
+        initiativePortrait: '/assets/portraits/orc-storm-coast-javelin-initiative.png',
+      },
+    ],
+  },
+  otyugh: {
+    emoji: '👁️',
+    color: '#57534e',
+    tokenPortrait: '/assets/portraits/otyugh-city-refuse-barrel-token.png',
+    initiativePortrait: '/assets/portraits/otyugh-city-refuse-barrel-initiative.png',
+    visualVariants: [
+      {
+        id: 'city-refuse-barrel',
+        label: '城下垃圾坑伏击',
+        tokenPortrait: '/assets/portraits/otyugh-city-refuse-barrel-token.png',
+        initiativePortrait: '/assets/portraits/otyugh-city-refuse-barrel-initiative.png',
+      },
+      {
+        id: 'fungal-cavern-slam',
+        label: '菌光洞窟触击',
+        tokenPortrait: '/assets/portraits/otyugh-fungal-cavern-slam-token.png',
+        initiativePortrait: '/assets/portraits/otyugh-fungal-cavern-slam-initiative.png',
+      },
+    ],
+  },
+  owl: {
+    emoji: '🦉',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/owl-moonlit-roadside-watch-token.png',
+    initiativePortrait: '/assets/portraits/owl-moonlit-roadside-watch-initiative.png',
+    visualVariants: [
+      {
+        id: 'moonlit-roadside-watch',
+        label: '月路静候',
+        tokenPortrait: '/assets/portraits/owl-moonlit-roadside-watch-token.png',
+        initiativePortrait: '/assets/portraits/owl-moonlit-roadside-watch-initiative.png',
+      },
+      {
+        id: 'snow-barn-flyby',
+        label: '雪仓飞掠',
+        tokenPortrait: '/assets/portraits/owl-snow-barn-flyby-token.png',
+        initiativePortrait: '/assets/portraits/owl-snow-barn-flyby-initiative.png',
+      },
+    ],
+  },
   'axe-beak': {
     emoji: '🐦',
     color: '#713f12',
@@ -4432,7 +4492,6 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
-  orc: { emoji: '👹', color: '#ef4444' },
   owlbear: { emoji: '🦉', color: '#78350f' },
 }
 
