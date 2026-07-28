@@ -1,0 +1,71 @@
+{
+  "format": "dndstars5e-local-collection",
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "local.replace-me.2014-rules",
+    "name": "Local 2014 Rules Collection",
+    "version": "0.1.0",
+    "apiVersion": 2,
+    "rulesetId": "dnd5e-2014-srd-5.1",
+    "publisher": "Local DM",
+    "license": "Private local use",
+    "description": "Local collection manifest only; source prose remains on the DM device.",
+    "contentCategory": "mixed"
+  },
+  "provenance": {
+    "sourceTitle": "Locally controlled 2014 rules data"
+  },
+  "json": {
+    "races": "races.json",
+    "subclasses": "subclasses.json",
+    "spells": "spells.json",
+    "items": "items.json",
+    "monsters": "monsters.json"
+  },
+  "csv": {
+    "features": "features.csv",
+    "feats": "feats.csv"
+  },
+  "expected": {
+    "races": {
+      "count": 0,
+      "ids": [],
+      "imageRequired": true
+    },
+    "features": {
+      "count": 0,
+      "ids": [],
+      "imageRequired": true
+    },
+    "feats": {
+      "count": 0,
+      "ids": [],
+      "imageRequired": true
+    },
+    "spells": {
+      "count": 0,
+      "ids": [],
+      "imageRequired": true
+    },
+    "items": {
+      "count": 0,
+      "ids": [],
+      "imageRequired": true
+    },
+    "subclasses": {
+      "count": 0,
+      "ids": []
+    },
+    "monsters": {
+      "count": 0,
+      "ids": [],
+      "imageRequired": true
+    }
+  },
+  "content": {
+    "backgrounds": [],
+    "abilityGenerationMethods": [],
+    "headlessActions": []
+  },
+  "images": []
+}

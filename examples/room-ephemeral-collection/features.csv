@@ -1,0 +1,2 @@
+id,name,summary,description,automation,staticModifiers
+steady-room-step,Steady Room Step,Original example passive feature.,Original example text that remains in the local collection.,manual,"{""initiativeBonus"":1}"

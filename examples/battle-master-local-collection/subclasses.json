@@ -1,0 +1,1320 @@
+[
+  {
+    "schemaVersion": 1,
+    "id": "battle-master-2014",
+    "classId": "fighter",
+    "name": "战斗大师（2014·本地）",
+    "summary": "本地结构化子职：选择战技、管理卓越骰，并让受支持的战技伤害与鼓舞临时生命接入 Host/Headless。",
+    "resources": [
+      {
+        "id": "superiority-dice",
+        "label": "卓越骰",
+        "minimumLevel": 3,
+        "maximum": {
+          "kind": "fixed",
+          "value": 4
+        },
+        "maximumByClassLevel": [
+          {
+            "level": 7,
+            "maximum": 5
+          },
+          {
+            "level": 15,
+            "maximum": 6
+          }
+        ],
+        "resetOn": "short-rest",
+        "die": {
+          "sides": 8,
+          "sidesByClassLevel": [
+            {
+              "level": 10,
+              "sides": 10
+            },
+            {
+              "level": 18,
+              "sides": 12
+            }
+          ]
+        }
+      }
+    ],
+    "choiceGroups": [
+      {
+        "id": "maneuvers",
+        "level": 3,
+        "name": "战斗大师战技",
+        "description": "选择会持久化到本地人物卡；只有已选战技会出现在战斗面板。",
+        "maxSelections": 3,
+        "maxSelectionsByLevel": [
+          {
+            "level": 7,
+            "maxSelections": 5
+          },
+          {
+            "level": 10,
+            "maxSelections": 7
+          },
+          {
+            "level": 15,
+            "maxSelections": 9
+          }
+        ],
+        "options": [
+          {
+            "id": "commanders-strike",
+            "name": "指挥官打击",
+            "summary": "Host 消耗动作、附赠动作与卓越骰，并结算盟友的反应攻击。"
+          },
+          {
+            "id": "disarming-attack",
+            "name": "缴械攻击",
+            "summary": "Host 结算额外伤害、力量豁免与主手武器掉落状态。"
+          },
+          {
+            "id": "distracting-strike",
+            "name": "扰乱打击",
+            "summary": "Host 结算额外伤害，并为下一名其他攻击者提供一次优势。"
+          },
+          {
+            "id": "evasive-footwork",
+            "name": "闪避步法",
+            "summary": "Host 掷卓越骰并在本次移动期间提高护甲等级。"
+          },
+          {
+            "id": "feinting-attack",
+            "name": "佯攻",
+            "summary": "提前激活；Host 消耗附赠动作，结算优势与额外伤害。"
+          },
+          {
+            "id": "goading-attack",
+            "name": "挑衅攻击",
+            "summary": "Host 结算额外伤害、感知豁免与攻击劣势状态。"
+          },
+          {
+            "id": "lunging-attack",
+            "name": "突刺攻击",
+            "summary": "提前激活；Host 将本次近战触及增加 5 尺并结算额外伤害。"
+          },
+          {
+            "id": "maneuvering-attack",
+            "name": "调遣攻击",
+            "summary": "Host 结算额外伤害，并按已确认路径移动使用反应的盟友。"
+          },
+          {
+            "id": "menacing-attack",
+            "name": "恐吓攻击",
+            "summary": "Host 结算额外伤害、感知豁免与恐慌状态持续时间。"
+          },
+          {
+            "id": "parry",
+            "name": "招架",
+            "summary": "目标确认后，Host 在受伤前消耗反应和卓越骰并结算减伤。"
+          },
+          {
+            "id": "precision-attack",
+            "name": "精准攻击",
+            "summary": "提前激活；Host 在攻击骰掷出后加入卓越骰命中加值。"
+          },
+          {
+            "id": "pushing-attack",
+            "name": "推击",
+            "summary": "Host 结算额外伤害、体型、力量豁免及至多 15 尺推动。"
+          },
+          {
+            "id": "rally",
+            "name": "鼓舞",
+            "summary": "附赠动作消耗卓越骰并自动给予临时生命。"
+          },
+          {
+            "id": "riposte",
+            "name": "反击",
+            "summary": "目标确认后，Host 消耗反应与卓越骰并结算一次反击。"
+          },
+          {
+            "id": "sweeping-attack",
+            "name": "横扫攻击",
+            "summary": "Host 校验第二目标、触及和护甲等级后结算横扫伤害。"
+          },
+          {
+            "id": "trip-attack",
+            "name": "绊摔攻击",
+            "summary": "Host 结算额外伤害、体型、力量豁免与倒地状态。"
+          }
+        ]
+      }
+    ],
+    "combatHooks": [
+      {
+        "id": "arm-disarming-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-disarming-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-distracting-strike",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-distracting-strike",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-goading-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-goading-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-maneuvering-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-maneuvering-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-menacing-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-menacing-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-pushing-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-pushing-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-trip-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-trip-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-feinting-attack",
+        "timing": "before-attack-roll",
+        "abilityId": "maneuver-feinting-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "single-attempt",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-lunging-attack",
+        "timing": "before-attack-roll",
+        "abilityId": "maneuver-lunging-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "single-attempt",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-precision-attack",
+        "timing": "after-attack-roll",
+        "abilityId": "maneuver-precision-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "single-attempt",
+        "exclusiveGroup": "battle-master-maneuver"
+      },
+      {
+        "id": "arm-sweeping-attack",
+        "timing": "after-attack-hit",
+        "abilityId": "maneuver-sweeping-attack",
+        "decision": "actor-choice",
+        "activation": "prearm",
+        "retention": "until-triggered",
+        "exclusiveGroup": "battle-master-maneuver"
+      }
+    ],
+    "abilities": [
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-disarming-attack",
+        "name": "缴械攻击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、消耗资源、结算力量豁免，并记录目标主手武器掉落状态。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "disarming-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "缴械攻击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "disarming-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-distracting-strike",
+        "name": "扰乱打击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、消耗资源，并让下一名不同于你的攻击者获得一次攻击优势。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "distracting-strike"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "扰乱打击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "distracting-strike",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-goading-attack",
+        "name": "挑衅攻击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、消耗资源、结算感知豁免，并维护目标攻击其他生物时的劣势。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "goading-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "挑衅攻击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "goading-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-maneuvering-attack",
+        "name": "调遣攻击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、消耗资源，并按已确认的目标与路径结算盟友反应移动。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "maneuvering-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "调遣攻击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "maneuvering-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-menacing-attack",
+        "name": "恐吓攻击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、消耗资源、结算感知豁免，并维护恐慌状态持续时间。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "menacing-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "恐吓攻击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "menacing-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-pushing-attack",
+        "name": "推击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、校验体型、结算力量豁免，并按地图合法终点推动目标。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "pushing-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "推击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "pushing-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-trip-attack",
+        "name": "绊摔攻击·伤害事务",
+        "description": "提前激活；命中后由 Host 追加卓越骰伤害、校验体型、结算力量豁免，并在失败时施加倒地。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "trip-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "绊摔攻击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "damage",
+            "target": "target",
+            "rollId": "superiority-damage"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "trip-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-rally",
+        "name": "鼓舞",
+        "description": "选择友方目标，消耗附赠动作与一枚卓越骰；Host 按当前卓越骰面数公开掷骰，并由 Headless 给予骰值加魅力调整值的临时生命。",
+        "level": 3,
+        "trigger": {
+          "kind": "active-use"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "rally"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "bonusAction",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "ally",
+          "rangeFeet": 60,
+          "includeSelf": true
+        },
+        "rolls": [
+          {
+            "id": "rally-temporary-hit-points",
+            "kind": "healing",
+            "label": "鼓舞·临时生命",
+            "dice": {
+              "count": 1,
+              "sides": 8,
+              "modifier": {
+                "kind": "ability-modifier",
+                "ability": "cha"
+              }
+            },
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "kind": "temporary-hit-points",
+            "target": "target",
+            "rollId": "rally-temporary-hit-points"
+          }
+        ],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "rally",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "rally-temporary-hit-points"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-commanders-strike",
+        "name": "指挥官打击",
+        "description": "消耗附赠动作与一枚卓越骰，指定盟友消耗反应进行一次武器攻击；命中后把卓越骰加入伤害。",
+        "level": 3,
+        "trigger": {
+          "kind": "active-use"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "commanders-strike"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "bonusAction",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "ally",
+          "includeSelf": false
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "指挥官打击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "commanders-strike",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-evasive-footwork",
+        "name": "闪避步法",
+        "description": "开始移动前消耗一枚卓越骰；本次连续移动结束前，卓越骰结果加入护甲等级。",
+        "level": 3,
+        "trigger": {
+          "kind": "active-use"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "evasive-footwork"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "self"
+        },
+        "rolls": [
+          {
+            "id": "superiority-ac",
+            "kind": "healing",
+            "label": "闪避步法·护甲加值",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              }
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "evasive-footwork",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-ac"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-feinting-attack",
+        "name": "佯攻",
+        "description": "在五尺内选定目标，消耗附赠动作与卓越骰；本回合下一次对该目标的近战攻击获得优势，命中时追加卓越骰伤害。",
+        "level": 3,
+        "trigger": {
+          "kind": "before-attack-roll"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "feinting-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "bonusAction",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy",
+          "rangeFeet": 5
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "佯攻·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "feinting-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-lunging-attack",
+        "name": "突刺攻击",
+        "description": "进行近战武器攻击时消耗卓越骰，使本次攻击触及增加五尺；命中时追加卓越骰伤害。",
+        "level": 3,
+        "trigger": {
+          "kind": "before-attack-roll"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "lunging-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "突刺攻击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "lunging-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-parry",
+        "name": "招架",
+        "description": "受到另一生物的近战武器伤害时，消耗反应与卓越骰，使伤害减少卓越骰加敏捷调整值。",
+        "level": 3,
+        "trigger": {
+          "kind": "before-damage-taken"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "parry"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "reaction",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "self"
+        },
+        "rolls": [
+          {
+            "id": "superiority-reduction",
+            "kind": "healing",
+            "label": "招架·减伤",
+            "dice": {
+              "count": 1,
+              "sides": 8,
+              "modifier": {
+                "kind": "ability-modifier",
+                "ability": "dex"
+              }
+            },
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              }
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "parry",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-reduction"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-precision-attack",
+        "name": "精准攻击",
+        "description": "攻击骰掷出后、命中结果锁定前消耗一枚卓越骰，并把骰值加入本次武器攻击检定。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-roll"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "precision-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "self"
+        },
+        "rolls": [
+          {
+            "id": "superiority-attack-bonus",
+            "kind": "healing",
+            "label": "精准攻击·命中加值",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              }
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "precision-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-attack-bonus"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-riposte",
+        "name": "反击",
+        "description": "敌方近战攻击未命中时，消耗反应与卓越骰，对其进行一次近战武器攻击；命中时追加卓越骰伤害。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-miss"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "riposte"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "reaction",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "self"
+        },
+        "rolls": [
+          {
+            "id": "superiority-damage",
+            "kind": "damage",
+            "label": "反击·卓越骰伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "double-dice"
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "riposte",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "maneuver-sweeping-attack",
+        "name": "横扫攻击",
+        "description": "近战武器命中后，消耗卓越骰并选择原目标五尺内且在自身触及内的另一目标；骰值达到其护甲等级时造成等同骰值的武器伤害。",
+        "level": 3,
+        "trigger": {
+          "kind": "after-attack-hit"
+        },
+        "predicates": {
+          "subclassChoices": [
+            {
+              "groupId": "maneuvers",
+              "optionId": "sweeping-attack"
+            }
+          ]
+        },
+        "cost": {
+          "economy": "none",
+          "resources": [
+            {
+              "resourceId": "superiority-dice",
+              "amount": 1
+            }
+          ]
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "enemy"
+        },
+        "rolls": [
+          {
+            "id": "superiority-sweep-damage",
+            "kind": "damage",
+            "label": "横扫攻击·第二目标伤害",
+            "dice": {
+              "count": 1,
+              "sides": 8
+            },
+            "damageType": "parent-weapon",
+            "hostRoll": {
+              "timing": "on-trigger",
+              "die": {
+                "kind": "resource-die",
+                "resourceId": "superiority-dice"
+              },
+              "critical": "normal"
+            }
+          }
+        ],
+        "effects": [],
+        "mechanic": {
+          "kind": "battle-master-2014",
+          "maneuver": "sweeping-attack",
+          "resourceId": "superiority-dice",
+          "superiorityRollId": "superiority-sweep-damage"
+        },
+        "automation": "full"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "student-of-war",
+        "name": "战争学徒",
+        "description": "工具熟练选择保留为人物卡手动记录，不进入战斗自动化。",
+        "level": 3,
+        "trigger": {
+          "kind": "active-use"
+        },
+        "targeting": {
+          "kind": "self"
+        },
+        "effects": [
+          {
+            "kind": "temporary-hit-points",
+            "target": "actor",
+            "amount": {
+              "kind": "fixed",
+              "value": 0
+            }
+          }
+        ],
+        "automation": "manual"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "know-your-enemy",
+        "name": "知己知彼",
+        "description": "观察与属性比较属于探索信息流程，当前由 DM 手动提供结果。",
+        "level": 7,
+        "trigger": {
+          "kind": "active-use"
+        },
+        "targeting": {
+          "kind": "single-creature",
+          "relation": "any",
+          "rangeFeet": 60,
+          "includeSelf": false
+        },
+        "effects": [
+          {
+            "kind": "temporary-hit-points",
+            "target": "actor",
+            "amount": {
+              "kind": "fixed",
+              "value": 0
+            }
+          }
+        ],
+        "automation": "manual"
+      },
+      {
+        "schemaVersion": 1,
+        "id": "relentless",
+        "name": "不屈战技",
+        "description": "自身回合开始时由 Headless 检查卓越骰；若当前为零，则恢复一枚。",
+        "level": 15,
+        "trigger": {
+          "kind": "turn-start"
+        },
+        "targeting": {
+          "kind": "self"
+        },
+        "effects": [
+          {
+            "kind": "restore-resource",
+            "resourceId": "superiority-dice",
+            "amount": {
+              "kind": "fixed",
+              "value": 1
+            },
+            "whenEmpty": true
+          }
+        ],
+        "automation": "full"
+      }
+    ]
+  }
+]
