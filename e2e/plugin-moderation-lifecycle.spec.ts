@@ -149,7 +149,7 @@ test('插件人工审核支持通过、举报暂停和拒绝版本', async ({ br
   await installIdentity(reporterContext, reporter)
   const reporterPage = await reporterContext.newPage()
   await reporterPage.goto(`${REVIEW}/plugins`, { waitUntil: 'domcontentloaded' })
-  await reporterPage.getByRole('button', { name: '公开目录' }).click()
+  await reporterPage.getByRole('button', { name: '扩展市场' }).click()
   await reporterPage.getByRole('textbox', { name: '搜索插件' }).fill(pluginId)
   await reporterPage.getByRole('button', { name: '搜索', exact: true }).click()
   const published = reporterPage.locator('article').filter({ hasText: pluginId })

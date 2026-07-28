@@ -12,6 +12,7 @@ import {
   PackageCheck,
   Puzzle,
   RefreshCw,
+  ReceiptText,
   Search,
   ShieldCheck,
   Trash2,
@@ -20,6 +21,12 @@ import {
   Wrench,
 } from 'lucide-react'
 import AccountAuthPanel from '../components/AccountAuthPanel'
+import MarketplacePublicationDialog, {
+  type MarketplacePublicationInput,
+} from '../components/marketplace/MarketplacePublicationDialog'
+import CreatorOnboardingPanel from '../components/marketplace/CreatorOnboardingPanel'
+import CreatorEarningsPanel from '../components/marketplace/CreatorEarningsPanel'
+import MarketplaceOrdersPanel from '../components/marketplace/MarketplaceOrdersPanel'
 import PageHeader from '../components/PageHeader'
 import Dnd5eCustomPluginBuilder from '../components/rules/Dnd5eCustomPluginBuilder'
 import {
@@ -45,10 +52,13 @@ import {
   subscribeRoomRules,
 } from '../lib/roomRulesState'
 import { dnd5ePluginCompatibilityReport } from '../rulesets/dnd5e/pluginCompatibility'
+import { dnd5ePluginCapabilityLabel } from '../rulesets/dnd5e/pluginCapabilityLabels'
 import {
   downloadPublicPlugin,
   loadPluginCatalog,
   loadPluginModerationQueue,
+  moderateMarketplaceCreator,
+  moderateMarketplacePayout,
   moderatePluginVersion,
   publishAccountPluginVersion,
   reportPublicPlugin,
@@ -56,6 +66,7 @@ import {
   type PluginCatalogVersion,
   type PluginModerationQueue,
 } from '../lib/pluginCatalogApi'
+import { formatMarketplacePrice } from '../../shared/marketplace-publication.mjs'
 
 const EMPTY_LIBRARY: AccountPluginLibrary = {
   plugins: [],
@@ -102,6 +113,7 @@ function PluginCatalogBrowser({
   onError,
   onNotice,
   onSaved,
+  onInstall,
 }: {
   accountId?: string
   busy: boolean
@@ -109,6 +121,11 @@ function PluginCatalogBrowser({
   onError: (message: string | null) => void
   onNotice: (message: string | null) => void
   onSaved: () => Promise<void>
+  onInstall?: (
+    plugin: PluginCatalogEntry,
+    version: PluginCatalogVersion,
+    downloaded: { fileName: string; bytes: ArrayBuffer },
+  ) => Promise<string>
 }) {
   const [plugins, setPlugins] = useState<PluginCatalogEntry[]>([])
   const [query, setQuery] = useState('')
@@ -142,31 +159,36 @@ function PluginCatalogBrowser({
     try {
       const downloaded = await downloadPublicPlugin(plugin.id, version)
       if (accountId) {
-        await uploadAccountPlugin({
-          manifest: {
-            id: plugin.id,
-            name: plugin.name,
-            version: version.version,
-            apiVersion: 2,
-            rulesetId: 'dnd5e-2014-srd-5.1',
-            stateSchemaVersion: version.stateSchemaVersion,
-            manifestSchemaVersion: version.manifestSchemaVersion,
-            minimumGameProtocolVersion: version.minimumGameProtocolVersion,
-            dependencies: version.dependencies,
-            conflicts: version.conflicts,
-            declaredCapabilities: version.declaredCapabilities,
-            distributionPolicy: version.distributionPolicy,
-            contentCategory: version.contentCategory,
-            publisher: plugin.publisher.displayName,
-            license: version.license,
-            description: plugin.description,
-          },
-          integrity: version.integrity,
-          fileName: downloaded.fileName,
-          bytes: downloaded.bytes,
-        })
+        const message = onInstall
+          ? await onInstall(plugin, version, downloaded)
+          : `已将 ${plugin.name} v${version.version} 保存到账号插件库。`
+        if (!onInstall) {
+          await uploadAccountPlugin({
+            manifest: {
+              id: plugin.id,
+              name: plugin.name,
+              version: version.version,
+              apiVersion: 2,
+              rulesetId: 'dnd5e-2014-srd-5.1',
+              stateSchemaVersion: version.stateSchemaVersion,
+              manifestSchemaVersion: version.manifestSchemaVersion,
+              minimumGameProtocolVersion: version.minimumGameProtocolVersion,
+              dependencies: version.dependencies,
+              conflicts: version.conflicts,
+              declaredCapabilities: version.declaredCapabilities,
+              distributionPolicy: version.distributionPolicy,
+              contentCategory: version.contentCategory,
+              publisher: plugin.publisher.displayName,
+              license: version.license,
+              description: plugin.description,
+            },
+            integrity: version.integrity,
+            fileName: downloaded.fileName,
+            bytes: downloaded.bytes,
+          })
+        }
         await onSaved()
-        onNotice(`已将 ${plugin.name} v${version.version} 保存到账号插件库。`)
+        onNotice(message)
       } else {
         downloadBytes(downloaded.bytes, downloaded.fileName)
         onNotice(`已下载 ${plugin.name} v${version.version}；登录后可跨设备保存。`)
@@ -250,7 +272,7 @@ function PluginCatalogBrowser({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-semibold text-slate-100">{plugin.name}</h2>
+                      <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="font-semibold text-slate-100 hover:text-arcane-200">{plugin.name}</Link>
                       <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-slate-400">
                         v{latest.version}
                       </span>
@@ -260,9 +282,16 @@ function PluginCatalogBrowser({
                     </div>
                     <p className="mt-1 font-mono text-xs text-slate-600">{plugin.id}</p>
                   </div>
-                  <Globe2 className="h-5 w-5 shrink-0 text-emerald-300" />
+                  <div className="text-right">
+                    <Globe2 className="ml-auto h-5 w-5 text-emerald-300" />
+                    {latest.marketplace && (
+                      <p className="mt-2 text-sm font-bold text-emerald-200">
+                        {formatMarketplacePrice(latest.marketplace.pricing)}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-400">{plugin.description || '发布者未填写说明。'}</p>
+                <Link to={`/app/extensions/catalog/${encodeURIComponent(plugin.id)}`} className="mt-3 block line-clamp-3 text-sm leading-6 text-slate-400 hover:text-slate-200">{latest.storeDescription || plugin.description || '发布者未填写说明。'}</Link>
                 <p className="mt-3 text-xs text-slate-500">
                   发布者：
                   <Link
@@ -274,6 +303,16 @@ function PluginCatalogBrowser({
                   {' '}· 许可证：{latest.license}
                 </p>
                 {latest.changelog && <p className="mt-2 text-xs text-slate-600">更新：{latest.changelog}</p>}
+                {latest.marketplace && (
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                    <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-cyan-200">
+                      {latest.marketplace.rightsStatus === 'creator-declared' ? '作者已提交权利声明' : '旧版内容'}
+                    </span>
+                    {latest.marketplace.rightsManifest?.containsAi && (
+                      <span className="rounded-full bg-violet-500/10 px-2 py-1 text-violet-200">含 AI 辅助内容</span>
+                    )}
+                  </div>
+                )}
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -282,7 +321,7 @@ function PluginCatalogBrowser({
                     className="inline-flex items-center gap-2 rounded-xl bg-arcane-500/15 px-3 py-2 text-sm font-semibold text-arcane-100 disabled:opacity-50"
                   >
                     {accountId ? <Cloud className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-                    {accountId ? '保存到我的插件' : '下载'}
+                    {accountId ? '安装并激活' : '下载'}
                   </button>
                   <button
                     type="button"
@@ -309,7 +348,12 @@ function PluginModerationPanel({
   onError: (message: string | null) => void
   onNotice: (message: string | null) => void
 }) {
-  const [queue, setQueue] = useState<PluginModerationQueue>({ pending: [], reports: [] })
+  const [queue, setQueue] = useState<PluginModerationQueue>({
+    pending: [],
+    reports: [],
+    creatorApplications: [],
+    payouts: [],
+  })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -353,6 +397,127 @@ function PluginModerationPanel({
   return (
     <div className="space-y-5">
       <section>
+        <h2 className="mb-3 font-semibold text-slate-100">创作者认证（{queue.creatorApplications.length}）</h2>
+        <div className="space-y-3">
+          {queue.creatorApplications.length === 0 && <p className="rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-600">当前没有待审核的创作者申请。</p>}
+          {queue.creatorApplications.map((creator) => (
+            <article key={creator.accountId} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+              <h3 className="font-semibold text-slate-100">{creator.displayName}</h3>
+              <p className="mt-1 text-xs text-slate-500">{creator.accountId} · {creator.countryOrRegion} · 核验引用 {creator.verificationReference}</p>
+              <div className="mt-4 flex gap-2">
+                <button type="button" disabled={busy != null} onClick={() => void (async () => {
+                  setBusy(`creator:${creator.accountId}`)
+                  try {
+                    await moderateMarketplaceCreator({ accountId: creator.accountId, action: 'approve' })
+                    onNotice('创作者实名认证已通过。')
+                    await refresh()
+                  } catch (cause) {
+                    onError(accountApiErrorMessage(cause))
+                  } finally {
+                    setBusy(null)
+                  }
+                })()} className="rounded-xl bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100">通过</button>
+                <button type="button" disabled={busy != null} onClick={() => void (async () => {
+                  const note = window.prompt('填写拒绝原因：')?.trim()
+                  if (!note) return
+                  setBusy(`creator:${creator.accountId}`)
+                  try {
+                    await moderateMarketplaceCreator({ accountId: creator.accountId, action: 'reject', note })
+                    onNotice('创作者认证申请已拒绝。')
+                    await refresh()
+                  } catch (cause) {
+                    onError(accountApiErrorMessage(cause))
+                  } finally {
+                    setBusy(null)
+                  }
+                })()} className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-200">拒绝</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section>
+        <h2 className="mb-3 font-semibold text-slate-100">提现审核（{queue.payouts.length}）</h2>
+        <div className="space-y-3">
+          {queue.payouts.length === 0 && <p className="rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-600">当前没有待处理的提现申请。</p>}
+          {queue.payouts.map((payout) => (
+            <article key={payout.payoutId} className="rounded-2xl border border-white/8 bg-black/15 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-slate-100">{payout.creatorAccountId}</h3>
+                  <p className="mt-1 text-xs text-slate-500">{payout.payoutId} · {payout.status}</p>
+                  {payout.verifiedRecipientReference && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      已验证收款引用：{payout.verifiedRecipientReference}
+                    </p>
+                  )}
+                </div>
+                <p className="text-lg font-semibold text-emerald-200">
+                  {new Intl.NumberFormat('zh-CN', {
+                    style: 'currency',
+                    currency: payout.currency,
+                  }).format(payout.amountMinor / 100)}
+                </p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {payout.status === 'pending' && (
+                  <button type="button" disabled={busy != null} onClick={() => void (async () => {
+                    setBusy(`payout:${payout.payoutId}`)
+                    try {
+                      await moderateMarketplacePayout({ payoutId: payout.payoutId, action: 'approve' })
+                      onNotice('提现申请已批准，等待线下打款。')
+                      await refresh()
+                    } catch (cause) {
+                      onError(accountApiErrorMessage(cause))
+                    } finally {
+                      setBusy(null)
+                    }
+                  })()} className="rounded-xl bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100">批准</button>
+                )}
+                {payout.status === 'approved' && (
+                  <button type="button" disabled={busy != null} onClick={() => void (async () => {
+                    const reference = window.prompt('请输入支付平台或银行转账流水号：')?.trim()
+                    if (!reference) return
+                    setBusy(`payout:${payout.payoutId}`)
+                    try {
+                      await moderateMarketplacePayout({
+                        payoutId: payout.payoutId,
+                        action: 'mark-paid',
+                        externalTransferReference: reference,
+                      })
+                      onNotice('提现已经标记为打款完成。')
+                      await refresh()
+                    } catch (cause) {
+                      onError(accountApiErrorMessage(cause))
+                    } finally {
+                      setBusy(null)
+                    }
+                  })()} className="rounded-xl bg-cyan-500/12 px-3 py-2 text-xs font-semibold text-cyan-100">确认已打款</button>
+                )}
+                <button type="button" disabled={busy != null} onClick={() => void (async () => {
+                  const note = window.prompt('请输入拒绝原因，预占金额会退回创作者余额：')?.trim()
+                  if (!note) return
+                  setBusy(`payout:${payout.payoutId}`)
+                  try {
+                    await moderateMarketplacePayout({
+                      payoutId: payout.payoutId,
+                      action: 'reject',
+                      note,
+                    })
+                    onNotice('提现申请已拒绝，余额已经退回。')
+                    await refresh()
+                  } catch (cause) {
+                    onError(accountApiErrorMessage(cause))
+                  } finally {
+                    setBusy(null)
+                  }
+                })()} className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-200">拒绝</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section>
         <h2 className="mb-3 font-semibold text-slate-100">待审核版本（{queue.pending.length}）</h2>
         <div className="space-y-3">
           {queue.pending.length === 0 && <p className="rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-600">当前没有待审核版本。</p>}
@@ -361,6 +526,20 @@ function PluginModerationPanel({
               <h3 className="font-semibold text-slate-100">{plugin.name} v{version.version}</h3>
               <p className="mt-1 text-xs text-slate-500">{plugin.id} · {plugin.publisher.displayName} · {version.license}</p>
               <p className="mt-3 text-sm text-slate-400">{version.changelog || '未填写更新说明。'}</p>
+              {version.marketplace && (
+                <div className="mt-3 grid gap-2 rounded-xl border border-white/8 bg-black/15 p-3 text-xs text-slate-400 sm:grid-cols-2">
+                  <p>价格：<strong className="text-slate-200">{formatMarketplacePrice(version.marketplace.pricing)}</strong></p>
+                  <p>分成：创作者 60% · 平台 40%</p>
+                  <p>权利状态：{version.marketplace.rightsStatus === 'creator-declared' ? '作者已声明' : '旧版未核验'}</p>
+                  <p>AI 内容：{version.marketplace.rightsManifest?.containsAi ? '包含，需检查披露' : '未声明包含'}</p>
+                  {version.automatedAnalysis && (
+                    <div className="sm:col-span-2">
+                      <p>自动解析：{version.automatedAnalysis.riskLevel === 'review' ? '需要人工复核' : '已阻止'}</p>
+                      {version.automatedAnalysis.findings.map((finding) => <p key={finding}>• {finding}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mt-4 flex gap-2">
                 <button type="button" disabled={busy != null} onClick={() => void decide(plugin.id, version.version, 'approve')} className="rounded-xl bg-emerald-500/12 px-3 py-2 text-xs font-semibold text-emerald-100">通过</button>
                 <button type="button" disabled={busy != null} onClick={() => void decide(plugin.id, version.version, 'reject')} className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs text-rose-200">拒绝</button>
@@ -405,11 +584,16 @@ export default function PluginsPage() {
     getRoomRulesSnapshot,
   )
   const [roomSession] = useState(() => getRoomSession())
-  const [section, setSection] = useState<'library' | 'catalog' | 'create' | 'moderation'>('library')
+  const [section, setSection] = useState<
+    'library' | 'catalog' | 'orders' | 'create' | 'creator' | 'moderation'
+  >(() => new URLSearchParams(window.location.search).get('section') === 'orders'
+    ? 'orders'
+    : 'library')
   const [pluginAdmin, setPluginAdmin] = useState(false)
   const [library, setLibrary] = useState<AccountPluginLibrary>(EMPTY_LIBRARY)
   const [loading, setLoading] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [publicationPlugin, setPublicationPlugin] = useState<AccountPluginVersion | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const host = window.DNDSTARS_5E_RULES_PLUGINS
@@ -532,6 +716,62 @@ export default function PluginsPage() {
     }
   }
 
+  const installCatalogVersion = async (
+    plugin: PluginCatalogEntry,
+    version: PluginCatalogVersion,
+    downloaded: { fileName: string; bytes: ArrayBuffer },
+  ): Promise<string> => {
+    if (!host) throw new Error('插件沙箱尚未初始化')
+    const saved = await uploadAccountPlugin({
+      manifest: {
+        id: plugin.id,
+        name: plugin.name,
+        version: version.version,
+        apiVersion: 2,
+        rulesetId: 'dnd5e-2014-srd-5.1',
+        stateSchemaVersion: version.stateSchemaVersion,
+        manifestSchemaVersion: version.manifestSchemaVersion,
+        minimumGameProtocolVersion: version.minimumGameProtocolVersion,
+        dependencies: version.dependencies,
+        conflicts: version.conflicts,
+        declaredCapabilities: version.declaredCapabilities,
+        distributionPolicy: version.distributionPolicy,
+        contentCategory: version.contentCategory,
+        publisher: plugin.publisher.displayName,
+        license: version.license,
+        description: plugin.description,
+      },
+      integrity: version.integrity,
+      fileName: downloaded.fileName,
+      bytes: downloaded.bytes,
+    })
+    await host.installBytes({
+      id: saved.id,
+      version: saved.version,
+      integrity: saved.integrity,
+      fileName: downloaded.fileName,
+      bytes: downloaded.bytes,
+    })
+    const manifest = host.listActive().find((candidate) =>
+      candidate.id === saved.id && candidate.version === saved.version)
+    if (!manifest) throw new Error('插件已保存，但未通过沙箱激活检查')
+    if (roomSession?.role === 'dm') {
+      const next = await activateRoomPluginPackage({
+        session: roomSession,
+        host,
+        package: {
+          bytes: downloaded.bytes,
+          fileName: downloaded.fileName,
+          integrity: saved.integrity,
+          manifest,
+        },
+      })
+      setRoomRulesSnapshot(next)
+      return `已安装 ${plugin.name} v${version.version}，并激活到当前房间；玩家端将自动下载。`
+    }
+    return `已安装并在本机激活 ${plugin.name} v${version.version}；进入房间后可由 DM 启用。`
+  }
+
   const exportPlugin = async (plugin: AccountPluginVersion) => {
     const key = `${plugin.id}@${plugin.version}:download`
     setBusyKey(key)
@@ -572,23 +812,17 @@ export default function PluginsPage() {
     }
   }
 
-  const publishVersion = async (plugin: AccountPluginVersion) => {
-    const changelog = window.prompt('填写本版本更新说明（可留空）：') ?? ''
-    const tags = (window.prompt('填写搜索标签，用逗号分隔（可留空）：') ?? '')
-      .split(',').map((tag) => tag.trim()).filter(Boolean)
+  const publishVersion = async (plugin: AccountPluginVersion, input: MarketplacePublicationInput) => {
     const key = `${plugin.id}@${plugin.version}:publish`
     setBusyKey(key)
     setNotice(null)
     setError(null)
     try {
-      const result = await publishAccountPluginVersion(plugin, {
-        visibility: 'public',
-        changelog,
-        tags,
-      })
+      const result = await publishAccountPluginVersion(plugin, input)
       setNotice(result.status === 'pending'
         ? `${plugin.name} v${plugin.version} 已提交审核；通过前不会出现在公开搜索中。`
         : `${plugin.name} v${plugin.version} 已发布到公开目录。`)
+      setPublicationPlugin(null)
     } catch (cause) {
       setError(accountApiErrorMessage(cause))
     } finally {
@@ -615,8 +849,8 @@ export default function PluginsPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
-        title="插件中心"
-        description="在账号中保存规则包，再由 DM 将精确版本安全启用到房间。"
+        title="扩展市场"
+        description="浏览、安装与管理经过审核的扩展；安装后由安全沙箱激活，DM 可同步到当前房间。"
         actions={account ? (
           <div className="flex flex-wrap gap-2">
             <input
@@ -642,6 +876,14 @@ export default function PluginsPage() {
           </div>
         ) : undefined}
       />
+      {publicationPlugin && (
+        <MarketplacePublicationDialog
+          plugin={publicationPlugin}
+          busy={busyKey != null}
+          onClose={() => setPublicationPlugin(null)}
+          onSubmit={(input) => publishVersion(publicationPlugin, input)}
+        />
+      )}
 
       {!roomSession && (
         <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-white/8 bg-black/15 px-4 py-3 text-sm">
@@ -708,8 +950,10 @@ export default function PluginsPage() {
           <nav className="mb-5 flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/15 p-2">
             {[
               { id: 'library' as const, label: '我的插件', icon: Puzzle },
-              { id: 'catalog' as const, label: '公开目录', icon: Globe2 },
+              { id: 'catalog' as const, label: '扩展市场', icon: Globe2 },
+              { id: 'orders' as const, label: '我的订单', icon: ReceiptText },
               { id: 'create' as const, label: '创建插件', icon: Wrench },
+              { id: 'creator' as const, label: '创作者中心', icon: Users },
               ...(pluginAdmin ? [{ id: 'moderation' as const, label: '审核管理', icon: ShieldCheck }] : []),
             ].map(({ id, label, icon: Icon }) => (
               <button
@@ -743,6 +987,15 @@ export default function PluginsPage() {
 
           {section === 'moderation' ? (
             <PluginModerationPanel onError={setError} onNotice={setNotice} />
+          ) : section === 'creator' ? (
+            <>
+              <CreatorOnboardingPanel onChanged={(profile) => {
+                setNotice(profile.status === 'pending' ? '创作者认证申请已提交。' : null)
+              }} />
+              <CreatorEarningsPanel />
+            </>
+          ) : section === 'orders' ? (
+            <MarketplaceOrdersPanel />
           ) : section === 'catalog' ? (
             <PluginCatalogBrowser
               accountId={account.accountId}
@@ -751,6 +1004,7 @@ export default function PluginsPage() {
               onError={setError}
               onNotice={setNotice}
               onSaved={refresh}
+              onInstall={installCatalogVersion}
             />
           ) : section === 'create' ? (
             <Dnd5eCustomPluginBuilder
@@ -877,7 +1131,7 @@ export default function PluginsPage() {
                                 )}
                                 {plugin.conflicts.length > 0 && <p>冲突：{plugin.conflicts.join('、')}</p>}
                                 {plugin.declaredCapabilities.length > 0 && (
-                                  <p>Headless capability：{plugin.declaredCapabilities.join('、')}</p>
+                                  <p>Headless 能力：{plugin.declaredCapabilities.map(dnd5ePluginCapabilityLabel).join('、')}</p>
                                 )}
                               </div>
                             )}
@@ -915,7 +1169,7 @@ export default function PluginsPage() {
                               <button
                                 type="button"
                                 disabled={busyKey != null}
-                                onClick={() => void publishVersion(plugin)}
+                                onClick={() => setPublicationPlugin(plugin)}
                                 className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 disabled:opacity-50"
                               >
                                 <Globe2 className="h-4 w-4" />

@@ -1,9 +1,23 @@
 import { createHash, createHmac } from 'node:crypto'
 
-const TENCENT_EDITION = 'international'
-const TENCENT_SES_ENDPOINT = 'ses.intl.tencentcloudapi.com'
-const TENCENT_SMS_ENDPOINT = 'sms.intl.tencentcloudapi.com'
-const TENCENT_SES_REGION = 'ap-singapore'
+const TENCENT_CLOUD_EDITIONS = {
+  international: {
+    sesEndpoint: 'ses.intl.tencentcloudapi.com',
+    smsEndpoint: 'sms.intl.tencentcloudapi.com',
+    defaultSesRegion: 'ap-singapore',
+    sesRegions: new Set(['ap-singapore']),
+    defaultSmsRegion: 'ap-singapore',
+    smsRegions: new Set(['ap-singapore', 'eu-frankfurt']),
+  },
+  mainland: {
+    sesEndpoint: 'ses.tencentcloudapi.com',
+    smsEndpoint: 'sms.tencentcloudapi.com',
+    defaultSesRegion: 'ap-guangzhou',
+    sesRegions: new Set(['ap-guangzhou', 'ap-hongkong']),
+    defaultSmsRegion: 'ap-guangzhou',
+    smsRegions: new Set(['ap-guangzhou']),
+  },
+}
 
 function nonEmpty(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -23,33 +37,37 @@ function hmac(key, value, encoding) {
 }
 
 function credentialConfig(env) {
-  const edition = nonEmpty(env.STARS_TENCENTCLOUD_EDITION)
+  const edition = nonEmpty(env.STARS_TENCENTCLOUD_EDITION)?.toLowerCase()
   const secretId = nonEmpty(env.STARS_TENCENTCLOUD_SECRET_ID)
   const secretKey = nonEmpty(env.STARS_TENCENTCLOUD_SECRET_KEY)
   if (
-    edition !== TENCENT_EDITION ||
+    !edition ||
+    !TENCENT_CLOUD_EDITIONS[edition] ||
     !secretId ||
     !/^AKID[A-Za-z0-9]+$/.test(secretId) ||
     !secretKey ||
     secretKey.length < 16
   ) return null
-  return { secretId, secretKey }
+  return { secretId, secretKey, edition, provider: TENCENT_CLOUD_EDITIONS[edition] }
 }
 
 function emailConfig(env) {
   const credentials = credentialConfig(env)
   const fromEmailAddress = nonEmpty(env.STARS_TENCENT_SES_FROM_EMAIL)
   const templateId = positiveInteger(env.STARS_TENCENT_SES_TEMPLATE_ID)
+  const region = nonEmpty(env.STARS_TENCENT_SES_REGION) ?? credentials?.provider.defaultSesRegion
   if (
     !credentials ||
     !fromEmailAddress ||
     !/^[^\r\n]*<[^<>\s@]+@[^<>\s@]+>$|^[^<>\s@]+@[^<>\s@]+$/.test(fromEmailAddress) ||
-    !templateId
+    !templateId ||
+    !credentials.provider.sesRegions.has(region)
   ) return null
   return {
     ...credentials,
     fromEmailAddress,
     templateId,
+    region,
     subject: nonEmpty(env.STARS_TENCENT_SES_SUBJECT) ?? 'Astral Trace 账号验证码',
   }
 }
@@ -58,11 +76,20 @@ function smsConfig(env) {
   const credentials = credentialConfig(env)
   const sdkAppId = nonEmpty(env.STARS_TENCENT_SMS_SDK_APP_ID)
   const templateId = nonEmpty(env.STARS_TENCENT_SMS_TEMPLATE_ID)
-  if (!credentials || !sdkAppId || !/^\d+$/.test(sdkAppId) || !templateId || !/^\d+$/.test(templateId)) return null
+  const region = nonEmpty(env.STARS_TENCENT_SMS_REGION) ?? credentials?.provider.defaultSmsRegion
+  if (
+    !credentials ||
+    !sdkAppId ||
+    !/^\d+$/.test(sdkAppId) ||
+    !templateId ||
+    !/^\d+$/.test(templateId) ||
+    !credentials.provider.smsRegions.has(region)
+  ) return null
   return {
     ...credentials,
     sdkAppId,
     templateId,
+    region,
     signName: nonEmpty(env.STARS_TENCENT_SMS_SIGN_NAME),
   }
 }
@@ -178,11 +205,11 @@ export async function deliverTencentVerification(
     const config = emailConfig(env)
     if (!config) throw new Error('tencent-email-not-configured')
     await callTencentCloud({
-      endpoint: TENCENT_SES_ENDPOINT,
       service: 'ses',
       action: 'SendEmail',
       version: '2020-10-02',
-      region: TENCENT_SES_REGION,
+      endpoint: config.provider.sesEndpoint,
+      region: config.region,
       secretId: config.secretId,
       secretKey: config.secretKey,
       payload: {
@@ -204,10 +231,11 @@ export async function deliverTencentVerification(
     const config = smsConfig(env)
     if (!config) throw new Error('tencent-sms-not-configured')
     const response = await callTencentCloud({
-      endpoint: TENCENT_SMS_ENDPOINT,
+      endpoint: config.provider.smsEndpoint,
       service: 'sms',
       action: 'SendSms',
       version: '2021-01-11',
+      region: config.region,
       secretId: config.secretId,
       secretKey: config.secretKey,
       payload: {

@@ -29,6 +29,7 @@ import { getRoomClientId } from '../lib/roomSession'
 
 interface AccountAuthPanelProps {
   account: AccountSession | null
+  initialMode?: 'login' | 'register'
   onAuthenticated?: (session: AccountSession) => void
   onLoggedOut?: () => void
   onError?: (message: string | null) => void
@@ -44,11 +45,12 @@ const EMPTY_CONFIG: AccountAuthConfig = {
 
 export default function AccountAuthPanel({
   account,
+  initialMode = 'login',
   onAuthenticated,
   onLoggedOut,
   onError,
 }: AccountAuthPanelProps) {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode)
   const [config, setConfig] = useState<AccountAuthConfig>(EMPTY_CONFIG)
   const [configLoading, setConfigLoading] = useState(true)
   const [channel, setChannel] = useState<AccountVerificationChannel>('email')

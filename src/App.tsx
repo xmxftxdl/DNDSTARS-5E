@@ -20,7 +20,12 @@ import { startAccountCharacterVaultSync } from './lib/accountCharacterVault'
 import { getAccountSession, subscribeAccountSession } from './lib/accountSession'
 
 const AccountCampaignsPage = lazy(() => import('./pages/AccountCampaignsPage'))
+const AccountProfilePage = lazy(() => import('./pages/AccountProfilePage'))
 const PublicLandingPage = lazy(() => import('./pages/PublicLandingPage'))
+const PublicCombatPage = lazy(() => import('./pages/PublicCombatPage'))
+const PublicExtensionPage = lazy(() => import('./pages/PublicExtensionPage'))
+const PublicBlogPage = lazy(() => import('./pages/PublicBlogPage'))
+const PublicPricingPage = lazy(() => import('./pages/PublicPricingPage'))
 const RoomLobbyPage = lazy(() => import('./pages/RoomLobbyPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CombatSimulationPage = lazy(() => import('./pages/CombatSimulationPage'))
@@ -29,6 +34,7 @@ const CharactersPage = lazy(() => import('./pages/CharactersPage'))
 const RulesPluginsPage = lazy(() => import('./pages/RulesPluginsPage'))
 const PluginsPage = lazy(() => import('./pages/PluginsPage'))
 const PluginPublisherPage = lazy(() => import('./pages/PluginPublisherPage'))
+const PluginCatalogDetailPage = lazy(() => import('./pages/PluginCatalogDetailPage'))
 const SpellbookPage = lazy(() => import('./pages/SpellbookPage'))
 const CommunicationsPage = lazy(() => import('./pages/CommunicationsPage'))
 const RoomHandoutNotification = lazy(() => import('./components/RoomHandoutNotification'))
@@ -70,7 +76,7 @@ export default function App() {
   const defaultCampaignPath = `${campaignBasePath}/${endpointMode === 'player' ? 'maps' : 'overview'}`
   const campaignRouteMatch = location.pathname.match(/^\/campaign\/([^/]+)(?:\/|$)/)
   const campaignSectionMatch = location.pathname.match(/^\/campaign\/[^/]+\/([^/]+)(?:\/|$)/)
-  const publicWebsitePaths = new Set(['/', '/combat', '/extensions', '/blog', '/pricing'])
+  const publicWebsitePaths = new Set(['/', '/combat', '/extension', '/extensions', '/blog', '/pricing'])
   const publicWebsiteRequested = publicWebsitePaths.has(location.pathname) &&
     !(bypassRoomLobby && location.pathname === '/')
   const legacyWorkspacePaths = new Set([
@@ -190,13 +196,12 @@ export default function App() {
   if (publicWebsiteRequested) {
     return (
       <Routes>
-        {Array.from(publicWebsitePaths).map((path) => (
-          <Route
-            key={path}
-            path={path}
-            element={lazyPage('星痕产品网站', <PublicLandingPage />)}
-          />
-        ))}
+        <Route path="/" element={lazyPage('星痕产品网站', <PublicLandingPage />)} />
+        <Route path="/combat" element={lazyPage('星痕战斗系统', <PublicCombatPage />)} />
+        <Route path="/extension" element={lazyPage('星痕扩展中心', <PublicExtensionPage />)} />
+        <Route path="/extensions" element={<Navigate to="/extension" replace />} />
+        <Route path="/blog" element={lazyPage('星痕博客', <PublicBlogPage />)} />
+        <Route path="/pricing" element={lazyPage('星痕价格', <PublicPricingPage />)} />
       </Routes>
     )
   }
@@ -212,6 +217,7 @@ export default function App() {
         <SharedSyncRecoveryBanner />
         <AccountAppShell
           accountName={account?.username ?? account?.displayName}
+          accountAvatar={account?.avatar}
           activeCampaignPath={activeCampaignPath}
         >
           <Routes>
@@ -224,9 +230,17 @@ export default function App() {
               element={lazyPage('创建或加入房间', <RoomLobbyPage notice={roomNotice} embedded />)}
             />
             <Route path="/app/extensions" element={lazyPage('我的扩展', <PluginsPage />)} />
+            <Route path="/app/profile" element={account
+              ? lazyPage('个人资料', <AccountProfilePage />)
+              : <Navigate to="/app?auth=login" replace />}
+            />
             <Route
               path="/app/extensions/publishers/:publisherId"
               element={lazyPage('扩展发布者', <PluginPublisherPage />)}
+            />
+            <Route
+              path="/app/extensions/catalog/:pluginId"
+              element={lazyPage('扩展商品详情', <PluginCatalogDetailPage />)}
             />
             <Route path="/plugin" element={<Navigate to="/app/extensions" replace />} />
             <Route path="/plugins" element={<Navigate to="/app/extensions" replace />} />

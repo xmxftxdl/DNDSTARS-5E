@@ -11,6 +11,11 @@ const BASE_ENV = {
   STARS_TENCENTCLOUD_SECRET_KEY: 'secret-key-for-tests',
 }
 
+const MAINLAND_ENV = {
+  ...BASE_ENV,
+  STARS_TENCENTCLOUD_EDITION: 'mainland',
+}
+
 describe('腾讯云验证码发送适配器', () => {
   it('只有完整配置的渠道才会对注册页开放', () => {
     expect(tencentVerificationCapabilities(BASE_ENV)).toEqual({ email: false, phone: false })
@@ -20,7 +25,23 @@ describe('腾讯云验证码发送适配器', () => {
       STARS_TENCENT_SES_TEMPLATE_ID: '10001',
     })).toEqual({ email: true, phone: false })
     expect(tencentVerificationCapabilities({
+      ...MAINLAND_ENV,
+      STARS_TENCENT_SES_FROM_EMAIL: 'Astral Trace <no-reply@mail.astraltracevtt.com>',
+      STARS_TENCENT_SES_TEMPLATE_ID: '10001',
+    })).toEqual({ email: true, phone: false })
+    expect(tencentVerificationCapabilities({
+      ...MAINLAND_ENV,
+      STARS_TENCENT_SES_FROM_EMAIL: 'no-reply@mail.astraltracevtt.com',
+      STARS_TENCENT_SES_TEMPLATE_ID: '10001',
+      STARS_TENCENT_SES_REGION: 'ap-singapore',
+    })).toEqual({ email: false, phone: false })
+    expect(tencentVerificationCapabilities({
       ...BASE_ENV,
+      STARS_TENCENT_SMS_SDK_APP_ID: '2400000000',
+      STARS_TENCENT_SMS_TEMPLATE_ID: '20001',
+    })).toEqual({ email: false, phone: true })
+    expect(tencentVerificationCapabilities({
+      ...MAINLAND_ENV,
       STARS_TENCENT_SMS_SDK_APP_ID: '2400000000',
       STARS_TENCENT_SMS_TEMPLATE_ID: '20001',
     })).toEqual({ email: false, phone: true })
@@ -91,6 +112,29 @@ describe('腾讯云验证码发送适配器', () => {
     })
   })
 
+  it('中国站 SES 使用大陆端点和广州默认地域发送验证码', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      Response: { MessageId: 'message-cn', RequestId: 'request-cn' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await deliverTencentVerification('email', 'player@example.com', '123456', {
+      env: {
+        ...MAINLAND_ENV,
+        STARS_TENCENT_SES_FROM_EMAIL: 'Astral Trace <no-reply@mail.astraltracevtt.com>',
+        STARS_TENCENT_SES_TEMPLATE_ID: '10001',
+      },
+      fetchImpl,
+      timestamp: 1_700_000_000,
+    })
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://ses.tencentcloudapi.com')
+    expect(new Headers(init?.headers).get('X-TC-Region')).toBe('ap-guangzhou')
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      Destination: ['player@example.com'],
+      Template: { TemplateID: 10001, TemplateData: '{"code":"123456"}' },
+      TriggerType: 1,
+    })
+  })
+
   it('按 Global SMS 模板发送手机号验证码并拒绝业务失败', async () => {
     const env = {
       ...BASE_ENV,
@@ -110,6 +154,7 @@ describe('腾讯云验证码发送适配器', () => {
       timestamp: 1_700_000_000,
     })
     const [, init] = successFetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(new Headers(init?.headers).get('X-TC-Region')).toBe('ap-singapore')
     expect(JSON.parse(String(init?.body))).toMatchObject({
       PhoneNumberSet: ['+8613800138000'],
       SmsSdkAppId: '2400000000',
@@ -129,5 +174,24 @@ describe('腾讯云验证码发送适配器', () => {
       fetchImpl: rejectedFetch,
       timestamp: 1_700_000_000,
     })).rejects.toThrow('tencent-sms-rejected:FailedOperation')
+  })
+
+  it('中国站短信使用大陆端点和广州默认地域', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      Response: { SendStatusSet: [{ Code: 'Ok' }], RequestId: 'request-cn-sms' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await deliverTencentVerification('phone', '+8613800138000', '654321', {
+      env: {
+        ...MAINLAND_ENV,
+        STARS_TENCENT_SMS_SDK_APP_ID: '2400000000',
+        STARS_TENCENT_SMS_TEMPLATE_ID: '20001',
+        STARS_TENCENT_SMS_SIGN_NAME: 'Astral Trace',
+      },
+      fetchImpl,
+      timestamp: 1_700_000_000,
+    })
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://sms.tencentcloudapi.com')
+    expect(new Headers(init?.headers).get('X-TC-Region')).toBe('ap-guangzhou')
   })
 })
