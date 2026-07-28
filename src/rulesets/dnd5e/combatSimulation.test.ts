@@ -1264,6 +1264,103 @@ describe('D&D 5e combat simulator', () => {
     expect(run(giantWolfSpider)).toEqual(withPoison)
   })
 
+  it('keeps a mapped stable-at-zero monster incapacitated for victory but alive in survival stats', () => {
+    const hero = fighter({ equipment: {} })
+    const mappedResult = (stableAtZero: boolean) => {
+      const map: BattleMap = {
+        id: stableAtZero ? 'stable-zero-map' : 'dead-zero-map',
+        name: 'Zero HP state simulation',
+        width: 300,
+        height: 300,
+        gridSize: 50,
+        gridOffsetX: 0,
+        gridOffsetY: 0,
+        showGrid: true,
+        feetPerCell: 5,
+        tokens: [
+          {
+            id: 'hero-token',
+            label: hero.name,
+            x: 50,
+            y: 50,
+            color: '#ffffff',
+            emoji: '',
+            size: 1,
+            type: 'player',
+            characterId: hero.id,
+          },
+          {
+            id: 'goblin-token',
+            label: 'Goblin',
+            x: 100,
+            y: 50,
+            color: '#ff0000',
+            emoji: '',
+            size: 1,
+            type: 'enemy',
+            poolId: 'srd-5.1:goblin',
+            hp: 0,
+            maxHp: 7,
+            dnd5eCombatState: stableAtZero ? { stableAtZero: true } : undefined,
+          },
+        ],
+      }
+      return simulateDnd5eCombats({
+        characters: [hero],
+        monsters: [{ monsterId: 'srd-5.1:goblin', count: 1 }],
+        trials: 3,
+        seed: 24681357,
+        maxRounds: 1,
+        battlefield: { map, geometry: createEmptyMapGeometry(map.id) },
+      })
+    }
+
+    const stable = mappedResult(true)
+    const dead = mappedResult(false)
+
+    expect(stable.playerWins).toBe(3)
+    expect(stable.averageMonsterSurvivors).toBe(1)
+    expect(stable.participantSummaries.find((entry) => entry.side === 'monsters')
+      ?.survivalRate).toBe(1)
+    expect(stable.deathCauses).toEqual([])
+    expect(dead.playerWins).toBe(3)
+    expect(dead.averageMonsterSurvivors).toBe(0)
+    expect(dead.participantSummaries.find((entry) => entry.side === 'monsters')
+      ?.survivalRate).toBe(0)
+    expect(mappedResult(true)).toEqual(stable)
+  })
+
+  it('counts poison-stabilized zero-HP targets as survivors without recording a death cause', () => {
+    const giantCentipede = getDnd5eSrdMonster('srd-5.1:giant-centipede')!
+    const fragileTarget = fighter({
+      initiativeBonus: -100,
+      speed: 0,
+      ac: 1,
+      maxHp: 11,
+      currentHp: 11,
+      equipment: {},
+    })
+    const run = () => simulateDnd5eCombats({
+      characters: [fragileTarget],
+      monsters: [{ monsterId: giantCentipede.id, count: 1 }],
+      trials: 20,
+      seed: 13572468,
+      maxRounds: 1,
+      initialDistanceFeet: 5,
+    })
+
+    const result = run()
+    const player = result.participantSummaries.find((entry) => entry.side === 'players')
+
+    expect(result.monsterWins).toBeGreaterThan(0)
+    expect(result.averagePlayerSurvivors).toBe(1)
+    expect(player?.survivalRate).toBe(1)
+    expect(player?.averageRemainingHp).toBeLessThan(fragileTarget.maxHp)
+    expect(result.roundSummaries.every((round) => round.averagePlayerDeaths === 0)).toBe(true)
+    expect(result.deathCauses.some((cause) => cause.victimName === fragileTarget.name)).toBe(false)
+    expect(run()).toEqual(result)
+  })
+
   it('does not fall back from Headless when an Assassin Multiattack defeats its target early', () => {
     const assassin = getDnd5eSrdMonster('srd-5.1:assassin')!
     const fragileTarget = fighter({

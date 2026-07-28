@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DependencyList } from 'react'
-import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Line, Group, Circle, Text, Rect, Arrow, Shape } from 'react-konva'
 import Konva from 'konva'
 import { getImage } from '../../lib/imageStore'
 import {
@@ -4263,7 +4263,7 @@ function SpareTheDyingEffect({ projectile }: { projectile: MapProjectile }) {
 
 function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
-  const coneRefs = useRef<Array<Konva.Line | null>>([])
+  const coneRefs = useRef<Array<Konva.Shape | null>>([])
   const sprayRefs = useRef<Array<Konva.Circle | null>>([])
   const impactRef = useRef<Konva.Group>(null)
   const dropRefs = useRef<Array<Konva.Circle | null>>([])
@@ -4299,7 +4299,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
         if (!cone) return
         const layerScale = [1, 0.62, 0.3][index] ?? 1
         const layerWidth = width * layerScale
-        cone.points([
+        cone.setAttr('sprayPoints', [
           projectile.from.x - nx * 2,
           projectile.from.y - ny * 2,
           projectile.from.x + ux * headDistance * 0.48 + nx * (layerWidth * 0.48 + wobble),
@@ -4315,7 +4315,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
           projectile.from.x + nx * 2,
           projectile.from.y + ny * 2,
         ])
-        cone.opacity(fade * [0.34, 0.5, 0.85][index])
+        cone.opacity(fade * ([0.52, 0.72, 0.94][index] ?? 1))
       })
       sprayRefs.current.forEach((drop, index) => {
         if (!drop) return
@@ -4364,20 +4364,28 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
   return (
     <Group ref={effectRef} listening={false}>
       {[
-        { fill: '#3f6212', stroke: accent, shadow: glow, blur: 28 },
-        { fill: '#84cc16', stroke: '#bef264', shadow: '#84cc16', blur: 20 },
-        { fill: '#d9f99d', stroke: '#f7fee7', shadow: '#d9f99d', blur: 14 },
+        { fill: '#4d7c0f', stroke: accent, shadow: glow, blur: 32 },
+        { fill: '#84cc16', stroke: '#d9f99d', shadow: '#a3e635', blur: 24 },
+        { fill: '#ecfccb', stroke: '#f7fee7', shadow: '#d9f99d', blur: 18 },
       ].map((style, index) => (
-        <Line
+        <Shape
           key={index}
           ref={(node) => { coneRefs.current[index] = node }}
-          points={[projectile.from.x, projectile.from.y]}
-          closed
+          sceneFunc={(context, shape) => {
+            const points = shape.getAttr('sprayPoints') as number[] | undefined
+            if (!points || points.length < 6) return
+            context.beginPath()
+            context.moveTo(points[0] ?? 0, points[1] ?? 0)
+            for (let pointIndex = 2; pointIndex < points.length; pointIndex += 2) {
+              context.lineTo(points[pointIndex] ?? 0, points[pointIndex + 1] ?? 0)
+            }
+            context.closePath()
+            context.fillStrokeShape(shape)
+          }}
           fill={style.fill}
           stroke={style.stroke}
           strokeWidth={index === 0 ? 2.2 : index === 1 ? 1.5 : 1}
           lineJoin="round"
-          tension={0.24}
           shadowColor={style.shadow}
           shadowBlur={style.blur}
           perfectDrawEnabled={false}
@@ -4435,7 +4443,7 @@ function AcidSplashEffect({ projectile }: { projectile: MapProjectile }) {
 
 function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
   const effectRef = useRef<Konva.Group>(null)
-  const plumeRefs = useRef<Array<Konva.Line | null>>([])
+  const plumeRefs = useRef<Array<Konva.Shape | null>>([])
   const cloudRefs = useRef<Array<Konva.Circle | null>>([])
   const accent = projectile.accentColor ?? '#22c55e'
   const glow = projectile.glowColor ?? '#86efac'
@@ -4466,9 +4474,9 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
       const fade = raw > 0.82 ? Math.max(0, (1 - raw) / 0.18) : 1
       plumeRefs.current.forEach((plume, index) => {
         if (!plume) return
-        const scale = index === 0 ? 1 : 0.62
+        const scale = [1, 0.7, 0.36][index] ?? 1
         const roll = Math.sin(elapsed * 0.01 + index * 2.4) * width * 0.16
-        plume.points([
+        plume.setAttr('sprayPoints', [
           projectile.from.x,
           projectile.from.y,
           projectile.from.x + ux * headDistance * 0.42 + nx * (width * 0.42 * scale + roll),
@@ -4482,7 +4490,7 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
           projectile.from.x + ux * headDistance * 0.42 - nx * (width * 0.42 * scale - roll),
           projectile.from.y + uy * headDistance * 0.42 - ny * (width * 0.42 * scale - roll),
         ])
-        plume.opacity(fade * (index === 0 ? 0.3 : 0.42))
+        plume.opacity(fade * ([0.46, 0.64, 0.78][index] ?? 1))
       })
       cloudRefs.current.forEach((cloud, index) => {
         if (!cloud) return
@@ -4512,18 +4520,28 @@ function PoisonSprayEffect({ projectile }: { projectile: MapProjectile }) {
   return (
     <Group ref={effectRef} listening={false}>
       {[
-        { fill: '#052e16', stroke: accent, shadow: glow, blur: 30 },
-        { fill: '#166534', stroke: '#86efac', shadow: '#22c55e', blur: 20 },
+        { fill: '#14532d', stroke: accent, shadow: glow, blur: 34 },
+        { fill: '#3f6212', stroke: '#86efac', shadow: '#22c55e', blur: 26 },
+        { fill: '#a3e635', stroke: '#d9f99d', shadow: '#bef264', blur: 18 },
       ].map((style, index) => (
-        <Line
+        <Shape
           key={index}
           ref={(node) => { plumeRefs.current[index] = node }}
-          points={[projectile.from.x, projectile.from.y]}
-          closed
+          sceneFunc={(context, shape) => {
+            const points = shape.getAttr('sprayPoints') as number[] | undefined
+            if (!points || points.length < 6) return
+            context.beginPath()
+            context.moveTo(points[0] ?? 0, points[1] ?? 0)
+            for (let pointIndex = 2; pointIndex < points.length; pointIndex += 2) {
+              context.lineTo(points[pointIndex] ?? 0, points[pointIndex + 1] ?? 0)
+            }
+            context.closePath()
+            context.fillStrokeShape(shape)
+          }}
           fill={style.fill}
           stroke={style.stroke}
-          strokeWidth={index === 0 ? 2.2 : 1.2}
-          tension={0.3}
+          strokeWidth={index === 0 ? 2.4 : index === 1 ? 1.6 : 1}
+          lineJoin="round"
           shadowColor={style.shadow}
           shadowBlur={style.blur}
           perfectDrawEnabled={false}
