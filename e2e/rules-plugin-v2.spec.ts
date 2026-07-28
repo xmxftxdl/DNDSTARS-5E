@@ -138,7 +138,8 @@ async function uploadTemplateFromDm(page: Page) {
 }
 
 test('插件状态迁移只在受限 Worker 内按连续 schema 执行', async ({ page }) => {
-  await page.goto(DM, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${DM}/app/extensions`, { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => Boolean(window.DNDSTARS_5E_RULES_PLUGINS))
   const result = await page.evaluate(async () => {
     const host = window.DNDSTARS_5E_RULES_PLUGINS
     if (!host) throw new Error('plugin host missing')
