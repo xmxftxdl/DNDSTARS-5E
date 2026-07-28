@@ -1679,11 +1679,18 @@ export default function MapsPage() {
     })
     return new Promise<number>((resolve) => {
       pendingD20ConfirmationsRef.current.set(interrupt.id, { originalValue, resolve })
+      // The initiating client already owns the authoritative interrupt payload.
+      // Render it immediately instead of waiting for the SSE round trip; the
+      // shared queue remains the source of truth for every other client.
+      setSharedRollConfirmationPrompt(interrupt)
       void publishCombatInterrupt(interrupt).catch(() => {
         const pending = pendingD20ConfirmationsRef.current.get(interrupt.id)
         if (!pending) return
         pendingD20ConfirmationsRef.current.delete(interrupt.id)
         pending.resolve(originalValue)
+        setSharedRollConfirmationPrompt((current) =>
+          current?.id === interrupt.id ? null : current,
+        )
       })
     })
   }
@@ -6812,6 +6819,7 @@ export default function MapsPage() {
     for (const effect of input.effects) {
       const mode = dnd5eSavingThrowMode(input.target, effect.ability, {
         effectVisible: true,
+        condition: effect.conditionOnFailedSave?.condition,
         sourceCreatureType: input.attacker.creatureType,
         sourceIsSpell: false,
       })
