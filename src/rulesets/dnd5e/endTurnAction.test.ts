@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { SharedPlayerActionState } from '../../lib/sharedCombatTypes'
 import type { BattleMap, Token } from '../../store/maps'
 import type { Character } from '../../types/character'
-import { createDnd5eConditionEffect } from './activeEffects'
+import { createDnd5eConditionEffect, createDnd5eMechanicalEffect } from './activeEffects'
 import { buildDnd5eCustomMonster, createDnd5eCustomMonsterDraft, createDnd5eCustomMonsterMechanicDraft } from './customMonsterWorkshop'
 import { prepareDnd5ePlayerEndTurn, resolveDnd5ePlayerEndTurn } from './endTurnAction'
 import { setDnd5eRoomMonsterCatalog } from './monsters'
@@ -372,5 +372,41 @@ describe('D&D 5e map end-turn authority bridge', () => {
     if (!resolved.ok) return
     expect(resolved.application.map.tokens.find((token) => token.id === monster.id)?.dnd5eCombatState)
       .toMatchObject({ schemaVersion: 2 })
+  })
+
+  it('prepares a poisoned repeat save with Protection from Poison advantage', () => {
+    const actor = barbarian(false)
+    const protection = createDnd5eMechanicalEffect({
+      id: 'protection-from-poison',
+      definitionId: 'srd-5.1:spell:protection-from-poison',
+      label: 'Protection from Poison',
+      kind: 'buff',
+      source: { kind: 'spell', actorId: actor.id, rulesId: 'protection-from-poison' },
+      targetId: 'barbarian-token',
+    })
+    const poisoned = createDnd5eConditionEffect({
+      id: 'quasit-poison',
+      condition: 'poisoned',
+      targetId: 'barbarian-token',
+      source: { kind: 'monster', actorId: 'quasit', rulesId: 'monster:quasit:claw:poison' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      repeatSave: { ability: 'con', dc: 10, timing: 'target-turn-end', onSuccess: 'remove' },
+    })
+    actor.dnd5eCombatState = {
+      schemaVersion: 2,
+      activeEffects: [protection, poisoned],
+    }
+
+    const prepared = prepareDnd5ePlayerEndTurn(fixture(actor))
+
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) return
+    expect(prepared.prepared.activeEffectSavingThrows).toEqual([
+      expect.objectContaining({
+        effect: expect.objectContaining({ id: poisoned.id }),
+        dc: 10,
+        mode: 'advantage',
+      }),
+    ])
   })
 })

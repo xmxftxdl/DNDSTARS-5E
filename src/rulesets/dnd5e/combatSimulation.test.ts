@@ -11,6 +11,7 @@ import {
   getDnd5eSrdMonster,
   type Dnd5eMonsterStatBlock,
 } from './monsters'
+import { createDnd5eConditionEffect } from './activeEffects'
 import { createEmptyMapGeometry } from '../../lib/mapGeometry'
 import type { BattleMap } from '../../store/maps'
 
@@ -697,6 +698,47 @@ describe('D&D 5e combat simulator', () => {
     expect(checkpoints).toBe(request.trials)
   })
 
+  it('settles one authoritative end-turn repeat save per actor turn deterministically', async () => {
+    const poisoned = createDnd5eConditionEffect({
+      id: 'quasit-poison',
+      condition: 'poisoned',
+      targetId: 'player:fighter',
+      source: { kind: 'monster', actorId: 'quasit', rulesId: 'monster:quasit:claw:poison' },
+      duration: { type: 'rounds', remainingRounds: 10, tickOn: 'target-turn-end' },
+      repeatSave: { ability: 'con', dc: 1, timing: 'target-turn-end', onSuccess: 'remove' },
+    })
+    const request = {
+      characters: [fighter({
+        initiativeBonus: 30,
+        conditions: ['poisoned'],
+        dnd5eCombatState: {
+          schemaVersion: 2,
+          activeEffects: [poisoned],
+        },
+      })],
+      monsters: [{ monsterId: 'srd-5.1:goblin', count: 1 }],
+      trials: 4,
+      seed: 24681357,
+      maxRounds: 2,
+    } as const
+
+    const synchronous = simulateDnd5eCombats(request)
+    const repeated = simulateDnd5eCombats(request)
+    const asynchronous = await simulateDnd5eCombatsAsync(request)
+
+    expect(repeated).toEqual(synchronous)
+    expect(asynchronous).toEqual(synchronous)
+    const firstPlayerTurn = synchronous.decisionLog.find((entry) =>
+      entry.actorName === '测试战士')
+    expect(firstPlayerTurn?.executionSteps.some((step) =>
+      step.kind === 'roll' && step.text.includes('CON'))).toBe(true)
+    expect(firstPlayerTurn?.executionSteps.some((step) =>
+      step.kind === 'condition' && step.text.includes('condition:poisoned'))).toBe(true)
+    expect(firstPlayerTurn?.executionSteps.filter((step) =>
+      step.kind === 'transaction')).toHaveLength(2)
+    expect(firstPlayerTurn?.outcome.headlessTransactions).toBe(1)
+  })
+
   it('lets player spellcasters choose and commit an area spell against clustered enemies', () => {
     const caster = wizard()
     const map: BattleMap = {
@@ -1169,6 +1211,57 @@ describe('D&D 5e combat simulator', () => {
     expect(withPoison.actionUsage.find((entry) => entry.actionId === 'multiattack')
       ?.headlessTransactions).toBeGreaterThan(0)
     expect(run(assassin)).toEqual(withPoison)
+  })
+
+  it('keeps complex zero-HP poison riders deterministic in seeded Headless simulation', () => {
+    const giantWolfSpider = getDnd5eSrdMonster('srd-5.1:giant-wolf-spider')!
+    const spiderWithoutPoison: Dnd5eMonsterStatBlock = {
+      ...giantWolfSpider,
+      id: 'dm-custom:giant-wolf-spider-without-poison',
+      slug: 'giant-wolf-spider-without-poison',
+      name: 'Giant Wolf Spider without poison',
+      englishName: 'Giant Wolf Spider without poison',
+      actions: giantWolfSpider.actions.map((action) =>
+        action.kind === 'weapon-attack' && action.attack
+          ? {
+              ...action,
+              attack: {
+                ...action.attack,
+                onHit: undefined,
+                onHitEffects: [],
+              },
+            }
+          : { ...action },
+      ),
+    }
+    const durableTarget = fighter({
+      initiativeBonus: -100,
+      speed: 0,
+      ac: 1,
+      maxHp: 1_000,
+      currentHp: 1_000,
+      equipment: {},
+    })
+    const run = (monster: Dnd5eMonsterStatBlock) => simulateDnd5eCombats({
+      characters: [durableTarget],
+      monsters: [{ monsterId: monster.id, count: 1 }],
+      customMonsters: [monster],
+      trials: 20,
+      seed: 60221407,
+      maxRounds: 1,
+      initialDistanceFeet: 5,
+    })
+    const withPoison = run(giantWolfSpider)
+    const withoutPoison = run(spiderWithoutPoison)
+    const monsterDamage = (result: ReturnType<typeof simulateDnd5eCombats>) =>
+      result.participantSummaries.find((entry) => entry.side === 'monsters')?.averageDamage ?? 0
+
+    expect(monsterDamage(withPoison)).toBeGreaterThan(monsterDamage(withoutPoison))
+    expect(withPoison.actionUsage.find((entry) => entry.actionId === 'bite'))
+      .toMatchObject({ headlessTransactions: expect.any(Number) })
+    expect(withPoison.actionUsage.find((entry) => entry.actionId === 'bite')
+      ?.headlessTransactions).toBeGreaterThan(0)
+    expect(run(giantWolfSpider)).toEqual(withPoison)
   })
 
   it('does not fall back from Headless when an Assassin Multiattack defeats its target early', () => {

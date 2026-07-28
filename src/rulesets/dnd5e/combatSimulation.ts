@@ -43,9 +43,14 @@ import {
   dnd5eMonsterHasMagicResistance,
   dnd5eMonsterLimitedMagicImmunityRule,
   dnd5eMonsterPackTacticsApplies,
+  dnd5eMonsterRechargeActions,
   dnd5eMonsterWeaponAttacksAreMagical,
   dnd5eMonsterWeaponAttackAtDistance,
 } from './monsterGenericAbilities'
+import {
+  dnd5eEligibleMonsterMechanics,
+  dnd5eMonsterMechanicDiceRequirements,
+} from './monsterAutomation'
 import {
   resolveDnd5eDamageDefenses,
   type Dnd5eConditionalDamageDefense,
@@ -61,6 +66,7 @@ import {
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
   type Dnd5eActiveEffectInstance,
+  type Dnd5eActiveEffectSavingThrowRoll,
 } from './activeEffects'
 import { dnd5eSavingThrowMode } from './passiveDefenses'
 import { resolveDnd5eAttackOutcome } from './attackResolution'
@@ -97,6 +103,8 @@ import {
   startDnd5eHeadlessCombat,
   type Dnd5eCombatEvent,
   type Dnd5eHeadlessCombatState,
+  type Dnd5eMonsterMechanicRoll,
+  type Dnd5eMonsterRechargeRoll,
   type Dnd5eSpellForcedMovement,
 } from './headlessCombatEngine'
 import { setDnd5eRoomMonsterCatalog } from './roomMonsterCatalog'
@@ -2739,6 +2747,7 @@ function executeHeadlessWeaponAction(input: {
         ? (part.monsterAttack?.onHitEffects ?? []).map((effect) => {
             const saveMode = dnd5eSavingThrowMode(targetCombatant, effect.ability, {
               effectVisible: true,
+              condition: effect.conditionOnFailedSave?.condition,
               sourceCreatureType: actor.monster?.creatureType,
               sourceIsSpell: false,
             })
@@ -3267,6 +3276,11 @@ function resolveControlRepeatSaves(
       })
       if (!result.ok) continue
       headless.state = result.state
+      const resolvedActor = headless.state.combatants[actor.id]
+      if (resolvedActor) {
+        actor.hp = Math.max(0, resolvedActor.currentHp)
+        actor.activeEffects = normalizeDnd5eActiveEffects(resolvedActor.classState.activeEffects)
+      }
       const committed = result.transaction?.status === 'committed'
       if (committed) transactions += 1
       if (captureLog) {
@@ -3281,48 +3295,203 @@ function resolveControlRepeatSaves(
   return { transactions, steps }
 }
 
-function rechargeMonsterActions(
-  actor: SimulationActor,
+function simulationActiveEffectSavingThrows(
+  state: Dnd5eHeadlessCombatState,
+  targetId: string,
+  timing: 'target-turn-start' | 'target-turn-end',
   random: SeededRandom,
-  captureLog: boolean,
-): Dnd5eCombatSimulationExecutionStep[] {
-  const steps: Dnd5eCombatSimulationExecutionStep[] = []
-  for (const action of actor.actions) {
-    if (action.usage?.kind !== 'recharge' || actor.rechargeReady.get(action.id) !== false) continue
-    const roll = random.die(action.usage.dieSides)
-    const ready = roll >= action.usage.minimum
-    actor.rechargeReady.set(action.id, ready)
-    if (captureLog) {
-      steps.push({
-        kind: 'roll',
-        text: `${action.name}充能：D${action.usage.dieSides}=${roll}，需要 ${action.usage.minimum}+，${ready ? '充能完成' : '本回合仍不可用'}`,
+): Dnd5eActiveEffectSavingThrowRoll[] {
+  const target = state.combatants[targetId]
+  if (!target) return []
+  return normalizeDnd5eActiveEffects(target.classState.activeEffects)
+    .filter((effect) => effect.repeatSave?.timing === timing)
+    .map((effect) => {
+      const repeatSave = effect.repeatSave!
+      const source = effect.source.actorId ? state.combatants[effect.source.actorId] : undefined
+      const mode = dnd5eSavingThrowMode(target, repeatSave.ability, {
+        effectVisible: effect.visibility !== 'dm-only',
+        condition: effect.standardCondition,
+        sourceCreatureType: source?.creatureType,
+        sourceIsSpell: effect.source.kind === 'spell',
       })
-    }
-  }
-  return steps
+      const failureDamage = repeatSave.damageOnFailure
+      return {
+        effectId: effect.id,
+        d20: random.die(20),
+        d20Second: mode !== 'normal' ? random.die(20) : undefined,
+        blessRoll: dnd5eCombatantHasConcentrationEffect(state, target.id, 'bless')
+          ? random.die(4)
+          : undefined,
+        baneRoll: dnd5eCombatantHasConcentrationEffect(state, target.id, 'bane')
+          ? random.die(4)
+          : undefined,
+        damageRolls: failureDamage
+          ? Array.from({ length: failureDamage.count }, () => random.die(failureDamage.sides))
+          : undefined,
+      }
+    })
 }
 
-function regenerateMonster(
-  actor: SimulationActor,
-  captureLog: boolean,
-): Dnd5eCombatSimulationExecutionStep[] {
-  const regeneration = actor.monster?.traits.find((trait) =>
-    trait.automation === 'headless' && trait.rule?.kind === 'regeneration')?.rule
-  if (!regeneration || regeneration.kind !== 'regeneration') {
-    actor.damageTypesSinceTurn.clear()
-    return []
+function simulationMonsterMechanicRolls(
+  state: Dnd5eHeadlessCombatState,
+  actorId: string,
+  event: 'turn-start' | 'turn-end',
+  round: number,
+  random: SeededRandom,
+): Dnd5eMonsterMechanicRoll[] {
+  const actor = state.combatants[actorId]
+  const monster = actor?.statBlockId ? getDnd5eSrdMonster(actor.statBlockId) : undefined
+  if (!actor || !monster) return []
+  return dnd5eEligibleMonsterMechanics(monster, event, {
+    combatId: state.combatId,
+    round,
+    actorId,
+    currentHp: actor.currentHp,
+    maxHp: actor.maxHp,
+    usedKeys: actor.classState.declarativeUsedTurnKeys,
+  }).map((mechanic) => ({
+    actorId,
+    mechanicId: mechanic.id,
+    effectRolls: dnd5eMonsterMechanicDiceRequirements(mechanic).map((requirement) => ({
+      effectId: requirement.effectId,
+      rolls: Array.from({ length: requirement.count }, () => random.die(requirement.sides)),
+    })),
+  }))
+}
+
+function simulationMonsterRechargeRolls(
+  state: Dnd5eHeadlessCombatState,
+  actorId: string,
+  random: SeededRandom,
+): Dnd5eMonsterRechargeRoll[] {
+  const actor = state.combatants[actorId]
+  const monster = actor?.statBlockId ? getDnd5eSrdMonster(actor.statBlockId) : undefined
+  if (!actor || !monster) return []
+  return dnd5eMonsterRechargeActions(monster).flatMap((action) => {
+    const usage = action.usage
+    if (
+      usage?.kind !== 'recharge' ||
+      actor.classState.monsterRechargeReadyByActionId?.[action.id] !== false
+    ) return []
+    return [{
+      actorId,
+      actionId: action.id,
+      roll: random.die(usage.dieSides),
+    }]
+  })
+}
+
+function settleSimulationEndTurn(input: {
+  actor: SimulationActor
+  actors: SimulationActor[]
+  holder: { state: Dnd5eHeadlessCombatState }
+  random: SeededRandom
+  captureLog: boolean
+  battlefield?: SimulationBattlefield
+}): { transactions: number; steps: Dnd5eCombatSimulationExecutionStep[] } {
+  const { actor, actors, holder, random } = input
+  synchronizeHeadlessActors(holder, actors, input.battlefield)
+  const livingActorIds = new Set(
+    actors.filter((candidate) => candidate.hp > 0 || candidate.id === actor.id)
+      .map((candidate) => candidate.id),
+  )
+  holder.state.initiativeOrder = holder.state.initiativeOrder.filter((actorId) =>
+    livingActorIds.has(actorId))
+  const actorIndex = holder.state.initiativeOrder.indexOf(actor.id)
+  const actorCombatant = holder.state.combatants[actor.id]
+  if (actorIndex < 0 || !actorCombatant) return { transactions: 0, steps: [] }
+  holder.state.initiativeIndex = actorIndex
+
+  // Legacy simulation fallbacks record suppression types outside Headless.
+  // Fold them back into authoritative state before the next creature starts.
+  for (const candidate of actors) {
+    if (candidate.damageTypesSinceTurn.size === 0) continue
+    const combatant = holder.state.combatants[candidate.id]
+    if (!combatant) continue
+    combatant.classState.monsterRegenerationSuppressedDamageTypes = [
+      ...new Set([
+        ...(combatant.classState.monsterRegenerationSuppressedDamageTypes ?? []),
+        ...candidate.damageTypesSinceTurn,
+      ]),
+    ]
   }
-  const suppressed = regeneration.suppressedByDamageTypes.some((type) =>
-    actor.damageTypesSinceTurn.has(type))
-  actor.damageTypesSinceTurn.clear()
-  if (suppressed || (regeneration.requiresPositiveHp && actor.hp <= 0)) {
-    return captureLog ? [{ kind: 'result', text: '再生被本回合受到的伤害类型或濒死状态压制' }] : []
+
+  const nextIndex = (actorIndex + 1) % holder.state.initiativeOrder.length
+  const nextActorId = holder.state.initiativeOrder[nextIndex]
+  const nextRound = nextIndex === 0 ? holder.state.round + 1 : holder.state.round
+  const result = resolveDnd5eHeadlessAction(holder.state, {
+    type: 'end-turn',
+    actorId: actor.id,
+    activeEffectSavingThrows: simulationActiveEffectSavingThrows(
+      holder.state,
+      actor.id,
+      'target-turn-end',
+      random,
+    ),
+    turnStartActiveEffectSavingThrows: simulationActiveEffectSavingThrows(
+      holder.state,
+      nextActorId,
+      'target-turn-start',
+      random,
+    ),
+    currentMonsterMechanicRolls: simulationMonsterMechanicRolls(
+      holder.state,
+      actor.id,
+      'turn-end',
+      holder.state.round,
+      random,
+    ),
+    nextMonsterMechanicRolls: simulationMonsterMechanicRolls(
+      holder.state,
+      nextActorId,
+      'turn-start',
+      nextRound,
+      random,
+    ),
+    nextMonsterRechargeRolls: simulationMonsterRechargeRolls(
+      holder.state,
+      nextActorId,
+      random,
+    ),
+  }, {
+    transactionId: `${holder.state.combatId}:${holder.state.round}:${actor.id}:end-turn`,
+    now: holder.state.round,
+  })
+  if (!result.ok) {
+    return {
+      transactions: 0,
+      steps: input.captureLog
+        ? [
+            { kind: 'result', text: `Headless 回合结束事务回滚：${actor.name}（${result.reason}）` },
+            transactionStep(false),
+          ]
+        : [],
+    }
   }
-  const hpBefore = actor.hp
-  actor.hp = Math.min(actor.maxHp, actor.hp + regeneration.amount)
-  return captureLog && actor.hp > hpBefore
-    ? [{ kind: 'result', text: `再生恢复 ${actor.hp - hpBefore} HP：${hpBefore} → ${actor.hp}` }]
-    : []
+
+  holder.state = result.state
+  for (const candidate of actors) {
+    const resolved = holder.state.combatants[candidate.id]
+    if (!resolved) continue
+    candidate.hp = Math.max(0, resolved.currentHp)
+    candidate.activeEffects = normalizeDnd5eActiveEffects(resolved.classState.activeEffects)
+    candidate.position = resolved.position.x
+    candidate.positionY = resolved.position.y
+    candidate.elevationFeet = resolved.elevationFeet ?? candidate.elevationFeet
+    for (const [actionId, ready] of Object.entries(
+      resolved.classState.monsterRechargeReadyByActionId ?? {},
+    )) {
+      candidate.rechargeReady.set(actionId, ready)
+    }
+  }
+  actors.find((candidate) => candidate.id === nextActorId)?.damageTypesSinceTurn.clear()
+  const committed = result.transaction?.status === 'committed'
+  return {
+    transactions: committed ? 1 : 0,
+    steps: input.captureLog
+      ? [...executionStepsFromEvents(result.events, actors), transactionStep(committed)]
+      : [],
+  }
 }
 
 function simulationHeadlessCombatant(
@@ -3507,10 +3676,6 @@ function simulateTrial(
             text: `回合开始：${actor.name}，HP ${actor.hp}/${actor.maxHp}，位置 (${Math.round(actor.position)}, ${Math.round(actor.positionY)})`,
           }]
         : []
-      turnSteps.push(
-        ...rechargeMonsterActions(actor, random, captureExecutionLog),
-        ...regenerateMonster(actor, captureExecutionLog),
-      )
       const opponents = actors.filter((candidate) =>
         effectiveSide(candidate, actors) !== actingSide && candidate.hp > 0)
       if (opponents.length === 0) return finish(actingSide, round)
@@ -3545,6 +3710,19 @@ function simulateTrial(
       executed.transactions += repeatSaves.transactions
       if (captureExecutionLog && repeatSaves.steps.length > 0) {
         executed.steps = [...(executed.steps ?? []), ...repeatSaves.steps]
+      }
+      const actionTransactions = executed.transactions
+      const endTurn = settleSimulationEndTurn({
+        actor,
+        actors,
+        holder: headless,
+        random,
+        captureLog: captureExecutionLog,
+        battlefield,
+      })
+      executed.transactions += endTurn.transactions
+      if (captureExecutionLog && endTurn.steps.length > 0) {
+        executed.steps = [...(executed.steps ?? []), ...endTurn.steps]
       }
       synchronizeControlledActors(headless, actors)
       if (battlefield) synchronizeBattlefieldTokens(battlefield, actors)
@@ -3640,12 +3818,13 @@ function simulateTrial(
             executed: Boolean(executed.action),
             hits: executed.hits,
             damage: executed.damage,
-            headlessTransactions: executed.transactions,
+            headlessTransactions: actionTransactions,
             targetHpBefore: selectedTarget ? targetHpBefore : undefined,
             targetHpAfter: selectedTarget?.hp,
           },
         })
       }
+      telemetry.headlessTransactionCount += executed.transactions
       actor.damageDealt += executed.damage
       if (executed.action) {
         const key = `${actingSide}:${actor.name}:${executed.action.id}`
@@ -3666,9 +3845,8 @@ function simulateTrial(
         usage.hits += executed.hits
         usage.totalDamage += executed.damage
         usage.totalHealing += executed.healing ?? 0
-        usage.headlessTransactions += executed.transactions
+        usage.headlessTransactions += actionTransactions
         telemetry.actionUsage.set(key, usage)
-        telemetry.headlessTransactionCount += executed.transactions
         if (actingSide === 'players') roundTotal.playerDamage += executed.damage
         else roundTotal.monsterDamage += executed.damage
       }

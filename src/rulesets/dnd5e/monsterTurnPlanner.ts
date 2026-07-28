@@ -900,6 +900,7 @@ function actionExpectedValue(input: {
   expectedDamage: number
   hitProbability: number
   firstAttack: Dnd5eMonsterWeaponAttack
+  controlValue: number
 } | undefined {
   const { map, monster, action, attacker, target, characters, distanceFeet } = input
   const sequence = actionSequence(monster, action)
@@ -934,6 +935,7 @@ function actionExpectedValue(input: {
   })
   const targetDodging = targetIsDodging(target, characters)
   let expectedDamage = 0
+  let controlValue = 0
   let probabilityTotal = 0
   let firstAttack: Dnd5eMonsterWeaponAttack | undefined
   const weaponDamageSource: PlannerDamageSourceDetails = {
@@ -1005,6 +1007,16 @@ function actionExpectedValue(input: {
         ), 0)
       const saveFactor = 1 - successProbability +
         (effect.damageOnSuccessfulSave === 'half' ? successProbability / 2 : 0)
+      if (
+        effect.conditionOnFailedSave &&
+        !targetConditions(target, characters).includes(effect.conditionOnFailedSave.condition)
+      ) {
+        const durationWeight = Math.min(2, Math.max(
+          1,
+          effect.conditionOnFailedSave.durationRounds / 10,
+        ))
+        controlValue += hitProbability * (1 - successProbability) * 6 * durationWeight
+      }
       return effectSum + damageOnFailure * saveFactor
     }, 0)
     expectedDamage += (weaponDamage + onHitDamage) * hitProbability
@@ -1015,6 +1027,7 @@ function actionExpectedValue(input: {
     expectedDamage,
     hitProbability: probabilityTotal / sequence.length,
     firstAttack,
+    controlValue,
   }
 }
 
@@ -1407,6 +1420,7 @@ function createTacticalCandidates(input: {
           targetConcentrating: targetIsConcentrating,
           targetSupportCount: targetSupportCountAt,
           hitProbability: attackValue.hitProbability,
+          controlValue: attackValue.controlValue,
           targetDistanceFeet: distanceFeet,
           preferredDistanceFeet: preferred,
           movementFeet: route.movementCostFeet,

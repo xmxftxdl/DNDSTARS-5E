@@ -60,6 +60,148 @@ describe('D&D 5e monster action schema', () => {
     }
   })
 
+  it('strictly validates compound poison conditions and effect-specific zero-HP outcomes', () => {
+    const validZeroHp = structuredClone(
+      DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'giant-spider')!,
+    )
+    const validQuasit = structuredClone(
+      DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'quasit')!,
+    )
+    expect(dnd5eMonsterActionAutomation(
+      validZeroHp.actions.find((action) => action.id === 'bite')!,
+    )).toBe('headless')
+    expect(dnd5eMonsterActionAutomation(
+      validQuasit.actions.find((action) => action.id === 'claw-bite-in-beast-form')!,
+    )).toBe('headless')
+    expect(validateDnd5eMonsterSchema(validZeroHp)).toEqual([])
+    expect(validateDnd5eMonsterSchema(validQuasit)).toEqual([])
+
+    const invalidConditionMutations: Array<(effect: Record<string, unknown>) => void> = [
+      (effect) => {
+        ;(effect.conditionOnFailedSave as Record<string, unknown>).condition = 'not-a-condition'
+      },
+      (effect) => {
+        ;(effect.conditionOnFailedSave as Record<string, unknown>).durationRounds = 0
+      },
+      (effect) => {
+        ;(effect.conditionOnFailedSave as Record<string, unknown>).repeatSaveAtEndOfTargetTurn = 'yes'
+      },
+      (effect) => {
+        ;(effect.conditionOnFailedSave as Record<string, unknown>).unexpected = true
+      },
+    ]
+    const invalidZeroHpMutations: Array<(effect: Record<string, unknown>) => void> = [
+      (effect) => {
+        ;(effect.onEffectDamageReducesTargetToZero as Record<string, unknown>).stabilize = false
+      },
+      (effect) => {
+        ;(effect.onEffectDamageReducesTargetToZero as Record<string, unknown>).conditions = []
+      },
+      (effect) => {
+        const outcome = effect.onEffectDamageReducesTargetToZero as {
+          conditions: Array<Record<string, unknown>>
+        }
+        outcome.conditions[0]!.durationRounds = 0
+      },
+      (effect) => {
+        const outcome = effect.onEffectDamageReducesTargetToZero as {
+          conditions: Array<Record<string, unknown>>
+        }
+        outcome.conditions[1]!.dependsOnCondition = 'stunned'
+      },
+      (effect) => {
+        const outcome = effect.onEffectDamageReducesTargetToZero as {
+          conditions: Array<Record<string, unknown>>
+        }
+        outcome.conditions[1]!.dependsOnCondition = 'paralyzed'
+      },
+      (effect) => {
+        const outcome = effect.onEffectDamageReducesTargetToZero as {
+          conditions: Array<Record<string, unknown>>
+        }
+        outcome.conditions[1]!.condition = 'poisoned'
+      },
+      (effect) => {
+        const outcome = effect.onEffectDamageReducesTargetToZero as {
+          conditions: Array<Record<string, unknown>>
+        }
+        outcome.conditions[1]!.unexpected = true
+      },
+      (effect) => {
+        ;(effect.onEffectDamageReducesTargetToZero as Record<string, unknown>).unexpected = true
+      },
+    ]
+
+    for (const mutate of invalidConditionMutations) {
+      const monster = structuredClone(validQuasit)
+      const effect = (
+        monster.actions.find((action) => action.id === 'claw-bite-in-beast-form')!
+          .attack!.onHitEffects as unknown as Array<Record<string, unknown>>
+      )[0]!
+      mutate(effect)
+      expect(validateDnd5eMonsterSchema(monster)).toContainEqual(expect.objectContaining({
+        actionId: 'claw-bite-in-beast-form',
+        code: 'invalid-stat-block',
+      }))
+    }
+
+    for (const mutate of invalidZeroHpMutations) {
+      const monster = structuredClone(validZeroHp)
+      const effect = (
+        monster.actions.find((action) => action.id === 'bite')!
+          .attack!.onHitEffects as unknown as Array<Record<string, unknown>>
+      )[0]!
+      mutate(effect)
+      expect(validateDnd5eMonsterSchema(monster)).toContainEqual(expect.objectContaining({
+        actionId: 'bite',
+        code: 'invalid-stat-block',
+      }))
+    }
+  })
+
+  it('rejects a two-condition zero-HP dependency cycle', () => {
+    const monster = structuredClone(
+      DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'giant-spider')!,
+    )
+    const effect = (
+      monster.actions.find((action) => action.id === 'bite')!
+        .attack!.onHitEffects as unknown as Array<Record<string, unknown>>
+    )[0]!
+    const outcome = effect.onEffectDamageReducesTargetToZero as {
+      conditions: Array<Record<string, unknown>>
+    }
+    outcome.conditions[0]!.dependsOnCondition = 'paralyzed'
+    outcome.conditions[1]!.dependsOnCondition = 'poisoned'
+
+    expect(validateDnd5eMonsterSchema(monster)).toContainEqual(expect.objectContaining({
+      actionId: 'bite',
+      code: 'invalid-stat-block',
+    }))
+  })
+
+  it('rejects a longer zero-HP dependency cycle', () => {
+    const monster = structuredClone(
+      DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'giant-spider')!,
+    )
+    const effect = (
+      monster.actions.find((action) => action.id === 'bite')!
+        .attack!.onHitEffects as unknown as Array<Record<string, unknown>>
+    )[0]!
+    const outcome = effect.onEffectDamageReducesTargetToZero as {
+      conditions: Array<Record<string, unknown>>
+    }
+    outcome.conditions = [
+      { condition: 'poisoned', durationRounds: 600, dependsOnCondition: 'paralyzed' },
+      { condition: 'paralyzed', durationRounds: 600, dependsOnCondition: 'stunned' },
+      { condition: 'stunned', durationRounds: 600, dependsOnCondition: 'poisoned' },
+    ]
+
+    expect(validateDnd5eMonsterSchema(monster)).toContainEqual(expect.objectContaining({
+      actionId: 'bite',
+      code: 'invalid-stat-block',
+    }))
+  })
+
   it('strictly validates alternate ranged damage only on hybrid attacks', () => {
     const monster = structuredClone(DND5E_SRD_MONSTERS.find((entry) => entry.slug === 'bugbear')!)
     const javelin = monster.actions.find((action) => action.id === 'javelin')!

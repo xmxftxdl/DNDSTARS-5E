@@ -4,8 +4,8 @@ import { DND5E_SRD_MONSTERS, type Dnd5eMonsterStatBlock } from './monsters'
 
 const ACTION_BASELINE = {
   total: 952,
-  headlessMinimum: 599,
-  dmAdjudicationMaximum: 108,
+  headlessMinimum: 605,
+  dmAdjudicationMaximum: 102,
   unstructuredMaximum: 216,
   blockedByChildMaximum: 29,
 } as const

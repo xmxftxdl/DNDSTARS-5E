@@ -4044,6 +4044,126 @@ const SRD_MONSTER_PRESENTATION: Record<string, SrdMonsterPresentation> = {
       },
     ],
   },
+  nalfeshnee: {
+    emoji: '👹',
+    color: '#7f1d1d',
+    tokenPortrait: '/assets/portraits/nalfeshnee-abyssal-fortress-charge-token.png',
+    initiativePortrait: '/assets/portraits/nalfeshnee-abyssal-fortress-charge-initiative.png',
+    visualVariants: [
+      {
+        id: 'abyssal-fortress-charge',
+        label: '深渊要塞破门',
+        tokenPortrait: '/assets/portraits/nalfeshnee-abyssal-fortress-charge-token.png',
+        initiativePortrait: '/assets/portraits/nalfeshnee-abyssal-fortress-charge-initiative.png',
+      },
+      {
+        id: 'moonlit-fungal-teleport',
+        label: '月夜菌林传送',
+        tokenPortrait: '/assets/portraits/nalfeshnee-moonlit-fungal-teleport-token.png',
+        initiativePortrait: '/assets/portraits/nalfeshnee-moonlit-fungal-teleport-initiative.png',
+      },
+    ],
+  },
+  'night-hag': {
+    emoji: '🧙',
+    color: '#4c1d95',
+    tokenPortrait: '/assets/portraits/night-hag-bedchamber-nightmare-haunting-token.png',
+    initiativePortrait: '/assets/portraits/night-hag-bedchamber-nightmare-haunting-initiative.png',
+    visualVariants: [
+      {
+        id: 'bedchamber-nightmare-haunting',
+        label: '寝宫梦魇侵扰',
+        tokenPortrait: '/assets/portraits/night-hag-bedchamber-nightmare-haunting-token.png',
+        initiativePortrait: '/assets/portraits/night-hag-bedchamber-nightmare-haunting-initiative.png',
+      },
+      {
+        id: 'dead-marsh-ethereal',
+        label: '死沼以太现身',
+        tokenPortrait: '/assets/portraits/night-hag-dead-marsh-ethereal-token.png',
+        initiativePortrait: '/assets/portraits/night-hag-dead-marsh-ethereal-initiative.png',
+      },
+    ],
+  },
+  nightmare: {
+    emoji: '🐎',
+    color: '#9a3412',
+    tokenPortrait: '/assets/portraits/nightmare-infernal-causeway-gallop-token.png',
+    initiativePortrait: '/assets/portraits/nightmare-infernal-causeway-gallop-initiative.png',
+    visualVariants: [
+      {
+        id: 'infernal-causeway-gallop',
+        label: '炼狱长桥驰骋',
+        tokenPortrait: '/assets/portraits/nightmare-infernal-causeway-gallop-token.png',
+        initiativePortrait: '/assets/portraits/nightmare-infernal-causeway-gallop-initiative.png',
+      },
+      {
+        id: 'moonlit-cathedral-ethereal',
+        label: '月夜圣堂以太',
+        tokenPortrait: '/assets/portraits/nightmare-moonlit-cathedral-ethereal-token.png',
+        initiativePortrait: '/assets/portraits/nightmare-moonlit-cathedral-ethereal-initiative.png',
+      },
+    ],
+  },
+  noble: {
+    emoji: '👑',
+    color: '#7c2d12',
+    tokenPortrait: '/assets/portraits/noble-sunlit-palace-challenge-token.png',
+    initiativePortrait: '/assets/portraits/noble-sunlit-palace-challenge-initiative.png',
+    visualVariants: [
+      {
+        id: 'sunlit-palace-challenge',
+        label: '日耀宫廷决斗',
+        tokenPortrait: '/assets/portraits/noble-sunlit-palace-challenge-token.png',
+        initiativePortrait: '/assets/portraits/noble-sunlit-palace-challenge-initiative.png',
+      },
+      {
+        id: 'storm-battlement-defense',
+        label: '风暴城垛守备',
+        tokenPortrait: '/assets/portraits/noble-storm-battlement-defense-token.png',
+        initiativePortrait: '/assets/portraits/noble-storm-battlement-defense-initiative.png',
+      },
+    ],
+  },
+  'ochre-jelly': {
+    emoji: '🟡',
+    color: '#a16207',
+    tokenPortrait: '/assets/portraits/ochre-jelly-mine-wall-pseudopod-token.png',
+    initiativePortrait: '/assets/portraits/ochre-jelly-mine-wall-pseudopod-initiative.png',
+    visualVariants: [
+      {
+        id: 'mine-wall-pseudopod',
+        label: '矿坑攀壁伪足',
+        tokenPortrait: '/assets/portraits/ochre-jelly-mine-wall-pseudopod-token.png',
+        initiativePortrait: '/assets/portraits/ochre-jelly-mine-wall-pseudopod-initiative.png',
+      },
+      {
+        id: 'flooded-aqueduct-surge',
+        label: '水渠破栏涌动',
+        tokenPortrait: '/assets/portraits/ochre-jelly-flooded-aqueduct-surge-token.png',
+        initiativePortrait: '/assets/portraits/ochre-jelly-flooded-aqueduct-surge-initiative.png',
+      },
+    ],
+  },
+  octopus: {
+    emoji: '🐙',
+    color: '#9f1239',
+    tokenPortrait: '/assets/portraits/octopus-coral-wreck-camouflage-token.png',
+    initiativePortrait: '/assets/portraits/octopus-coral-wreck-camouflage-initiative.png',
+    visualVariants: [
+      {
+        id: 'coral-wreck-camouflage',
+        label: '珊瑚沉船伪装',
+        tokenPortrait: '/assets/portraits/octopus-coral-wreck-camouflage-token.png',
+        initiativePortrait: '/assets/portraits/octopus-coral-wreck-camouflage-initiative.png',
+      },
+      {
+        id: 'moonlit-kelp-ink-cloud',
+        label: '月夜海藻墨云',
+        tokenPortrait: '/assets/portraits/octopus-moonlit-kelp-ink-cloud-token.png',
+        initiativePortrait: '/assets/portraits/octopus-moonlit-kelp-ink-cloud-initiative.png',
+      },
+    ],
+  },
   'axe-beak': {
     emoji: '🐦',
     color: '#713f12',

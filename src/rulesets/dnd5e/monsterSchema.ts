@@ -70,6 +70,75 @@ function validateDamageList(raw: unknown): boolean {
   return Array.isArray(raw) && raw.length >= 1 && raw.length <= 16 && raw.every(validateDamage)
 }
 
+function failedSaveConditionIsValid(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  const allowedKeys = new Set([
+    'condition',
+    'durationRounds',
+    'repeatSaveAtEndOfTargetTurn',
+    'breakOnDamage',
+  ])
+  return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
+    STANDARD_CONDITIONS.has(String(raw.condition)) &&
+    finiteInteger(raw.durationRounds, 1, 10_000) &&
+    typeof raw.repeatSaveAtEndOfTargetTurn === 'boolean' &&
+    (raw.breakOnDamage == null || typeof raw.breakOnDamage === 'boolean')
+}
+
+function zeroHitPointOutcomeIsValid(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
+  if (
+    !Object.keys(raw).every((key) => key === 'stabilize' || key === 'conditions') ||
+    raw.stabilize !== true ||
+    !Array.isArray(raw.conditions) ||
+    raw.conditions.length < 1 ||
+    raw.conditions.length > 8
+  ) return false
+  const conditions = raw.conditions
+  const conditionIds = new Set<string>()
+  for (const entry of conditions) {
+    if (
+      !isRecord(entry) ||
+      !Object.keys(entry).every((key) =>
+        key === 'condition' || key === 'durationRounds' || key === 'dependsOnCondition') ||
+      !STANDARD_CONDITIONS.has(String(entry.condition)) ||
+      !finiteInteger(entry.durationRounds, 1, 10_000) ||
+      (entry.dependsOnCondition != null &&
+        !STANDARD_CONDITIONS.has(String(entry.dependsOnCondition))) ||
+      conditionIds.has(String(entry.condition))
+    ) return false
+    conditionIds.add(String(entry.condition))
+  }
+  const dependenciesAreValid = conditions.every((entry) =>
+    !isRecord(entry) ||
+    entry.dependsOnCondition == null ||
+    (
+      entry.dependsOnCondition !== entry.condition &&
+      conditionIds.has(String(entry.dependsOnCondition))
+    ))
+  if (!dependenciesAreValid) return false
+
+  const dependencyByCondition = new Map<string, string>()
+  for (const entry of conditions) {
+    if (isRecord(entry) && entry.dependsOnCondition != null) {
+      dependencyByCondition.set(
+        String(entry.condition),
+        String(entry.dependsOnCondition),
+      )
+    }
+  }
+  for (const condition of conditionIds) {
+    const dependencyPath = new Set<string>()
+    let current: string | undefined = condition
+    while (current != null) {
+      if (dependencyPath.has(current)) return false
+      dependencyPath.add(current)
+      current = dependencyByCondition.get(current)
+    }
+  }
+  return true
+}
+
 function onHitEffectIsValid(raw: unknown): boolean {
   if (!isRecord(raw)) return false
   const allowedKeys = new Set([
@@ -79,6 +148,8 @@ function onHitEffectIsValid(raw: unknown): boolean {
     'dc',
     'damage',
     'damageOnSuccessfulSave',
+    'conditionOnFailedSave',
+    'onEffectDamageReducesTargetToZero',
   ])
   return Object.keys(raw).every((key) => allowedKeys.has(key)) &&
     requiredText(raw.id, 96) &&
@@ -87,7 +158,10 @@ function onHitEffectIsValid(raw: unknown): boolean {
     ABILITY_KEYS.includes(raw.ability as typeof ABILITY_KEYS[number]) &&
     finiteInteger(raw.dc, 1, 100) &&
     validateDamageList(raw.damage) &&
-    (raw.damageOnSuccessfulSave === 'none' || raw.damageOnSuccessfulSave === 'half')
+    (raw.damageOnSuccessfulSave === 'none' || raw.damageOnSuccessfulSave === 'half') &&
+    (raw.conditionOnFailedSave == null || failedSaveConditionIsValid(raw.conditionOnFailedSave)) &&
+    (raw.onEffectDamageReducesTargetToZero == null ||
+      zeroHitPointOutcomeIsValid(raw.onEffectDamageReducesTargetToZero))
 }
 
 function areaTargetingIsValid(raw: unknown): boolean {
@@ -124,14 +198,7 @@ function areaSavingThrowEffectIsValid(raw: unknown): boolean {
     (raw.damage == null || validateDamage(raw.damage)) &&
     !(raw.damage == null && raw.damageOnSuccessfulSave != null) &&
     !(raw.damage != null && !['none', 'half'].includes(String(raw.damageOnSuccessfulSave ?? 'none'))) &&
-    (raw.conditionOnFailedSave == null || (
-      isRecord(raw.conditionOnFailedSave) &&
-      STANDARD_CONDITIONS.has(String(raw.conditionOnFailedSave.condition)) &&
-      finiteInteger(raw.conditionOnFailedSave.durationRounds, 1, 10_000) &&
-      typeof raw.conditionOnFailedSave.repeatSaveAtEndOfTargetTurn === 'boolean' &&
-      (raw.conditionOnFailedSave.breakOnDamage == null ||
-        typeof raw.conditionOnFailedSave.breakOnDamage === 'boolean')
-    )) &&
+    (raw.conditionOnFailedSave == null || failedSaveConditionIsValid(raw.conditionOnFailedSave)) &&
     !(raw.damage == null && raw.conditionOnFailedSave == null) &&
     (raw.frightfulPresenceImmunityRounds == null ||
       finiteInteger(raw.frightfulPresenceImmunityRounds, 1, 14_400))

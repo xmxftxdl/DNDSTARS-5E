@@ -1786,6 +1786,60 @@ describe('character token presentation', () => {
         tokenPortrait: '/assets/portraits/mummy-lord-royal-pyramid-scarabs-token.png',
       })
     }
+    for (const poolId of ['srd-5.1:nalfeshnee', 'nalfeshnee']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/nalfeshnee-abyssal-fortress-charge-initiative.png',
+        tokenPortrait: '/assets/portraits/nalfeshnee-abyssal-fortress-charge-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:night-hag', 'night-hag']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/night-hag-bedchamber-nightmare-haunting-initiative.png',
+        tokenPortrait: '/assets/portraits/night-hag-bedchamber-nightmare-haunting-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:nightmare', 'nightmare']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/nightmare-infernal-causeway-gallop-initiative.png',
+        tokenPortrait: '/assets/portraits/nightmare-infernal-causeway-gallop-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:noble', 'noble']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/noble-sunlit-palace-challenge-initiative.png',
+        tokenPortrait: '/assets/portraits/noble-sunlit-palace-challenge-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:ochre-jelly', 'ochre-jelly']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/ochre-jelly-mine-wall-pseudopod-initiative.png',
+        tokenPortrait: '/assets/portraits/ochre-jelly-mine-wall-pseudopod-token.png',
+      })
+    }
+    for (const poolId of ['srd-5.1:octopus', 'octopus']) {
+      const projected = projectCharacterTokenPresentations([
+        token({ type: 'enemy', characterId: undefined, poolId }),
+      ], [])
+      expect(projected[0]).toMatchObject({
+        portrait: '/assets/portraits/octopus-coral-wreck-camouflage-initiative.png',
+        tokenPortrait: '/assets/portraits/octopus-coral-wreck-camouflage-token.png',
+      })
+    }
     for (const poolId of ['srd-5.1:axe-beak', 'axe-beak']) {
       const projected = projectCharacterTokenPresentations([
         token({ type: 'enemy', characterId: undefined, poolId }),
@@ -2710,6 +2764,36 @@ describe('character token presentation', () => {
         poolId: 'srd-5.1:mummy-lord',
         visualVariantId: 'moonlit-sandstorm-word',
         asset: 'mummy-lord-moonlit-sandstorm-word',
+      },
+      {
+        poolId: 'srd-5.1:nalfeshnee',
+        visualVariantId: 'moonlit-fungal-teleport',
+        asset: 'nalfeshnee-moonlit-fungal-teleport',
+      },
+      {
+        poolId: 'srd-5.1:night-hag',
+        visualVariantId: 'dead-marsh-ethereal',
+        asset: 'night-hag-dead-marsh-ethereal',
+      },
+      {
+        poolId: 'srd-5.1:nightmare',
+        visualVariantId: 'moonlit-cathedral-ethereal',
+        asset: 'nightmare-moonlit-cathedral-ethereal',
+      },
+      {
+        poolId: 'srd-5.1:noble',
+        visualVariantId: 'storm-battlement-defense',
+        asset: 'noble-storm-battlement-defense',
+      },
+      {
+        poolId: 'srd-5.1:ochre-jelly',
+        visualVariantId: 'flooded-aqueduct-surge',
+        asset: 'ochre-jelly-flooded-aqueduct-surge',
+      },
+      {
+        poolId: 'srd-5.1:octopus',
+        visualVariantId: 'moonlit-kelp-ink-cloud',
+        asset: 'octopus-moonlit-kelp-ink-cloud',
       },
       {
         poolId: 'srd-5.1:ancient-black-dragon',

@@ -197,6 +197,22 @@ export interface Dnd5eMonsterSavingThrowDamageOnHitEffect {
   dc: number
   damage: readonly Dnd5eMonsterDamage[]
   damageOnSuccessfulSave: 'none' | 'half'
+  /** A condition applied by this same saving throw only when the save fails. */
+  conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
+  /**
+   * A special outcome caused by this effect's final damage component. It is
+   * eligible only when removing this effect's damage would leave the target
+   * above 0 hit points, so base weapon damage cannot trigger it accidentally.
+   */
+  onEffectDamageReducesTargetToZero?: {
+    stabilize: true
+    conditions: readonly {
+      condition: Dnd5eStandardConditionId
+      durationRounds: number
+      /** The dependent condition ends when this source-specific condition ends. */
+      dependsOnCondition?: Dnd5eStandardConditionId
+    }[]
+  }
 }
 
 export type Dnd5eMonsterOnHitEffect = Dnd5eMonsterSavingThrowDamageOnHitEffect
@@ -239,14 +255,16 @@ export interface Dnd5eMonsterAreaSavingThrowEffect {
   /** Omit for pure control effects such as Frightful Presence. */
   damage?: Dnd5eMonsterDamage
   damageOnSuccessfulSave?: 'none' | 'half'
-  conditionOnFailedSave?: {
-    condition: Dnd5eStandardConditionId
-    durationRounds: number
-    repeatSaveAtEndOfTargetTurn: boolean
-    breakOnDamage?: boolean
-  }
+  conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
   /** Source-specific immunity granted after this Frightful Presence save. */
   frightfulPresenceImmunityRounds?: number
+}
+
+export interface Dnd5eMonsterFailedSaveCondition {
+  condition: Dnd5eStandardConditionId
+  durationRounds: number
+  repeatSaveAtEndOfTargetTurn: boolean
+  breakOnDamage?: boolean
 }
 
 export interface Dnd5eMonsterAreaSavingThrowVariant extends Dnd5eMonsterAreaSavingThrowEffect {
@@ -1698,6 +1716,62 @@ const CATALOG_POISON_SAVE_DAMAGE_ATTACKS = {
   damage: Dnd5eMonsterDamage
 }>>
 
+const CATALOG_COMPLEX_POISON_ATTACKS = {
+  'giant-centipede': {
+    actionId: 'bite',
+    dc: 11,
+    damage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'poison' },
+    damageOnSuccessfulSave: 'none',
+    stableAtZero: true,
+  },
+  'giant-spider': {
+    actionId: 'bite',
+    dc: 11,
+    damage: { average: 9, count: 2, sides: 8, bonus: 0, type: 'poison' },
+    damageOnSuccessfulSave: 'half',
+    stableAtZero: true,
+  },
+  'giant-wasp': {
+    actionId: 'sting',
+    dc: 11,
+    damage: { average: 10, count: 3, sides: 6, bonus: 0, type: 'poison' },
+    damageOnSuccessfulSave: 'half',
+    stableAtZero: true,
+  },
+  'giant-wolf-spider': {
+    actionId: 'bite',
+    dc: 11,
+    damage: { average: 7, count: 2, sides: 6, bonus: 0, type: 'poison' },
+    damageOnSuccessfulSave: 'half',
+    stableAtZero: true,
+  },
+  'phase-spider': {
+    actionId: 'bite',
+    dc: 11,
+    damage: { average: 18, count: 4, sides: 8, bonus: 0, type: 'poison' },
+    damageOnSuccessfulSave: 'half',
+    stableAtZero: true,
+  },
+  quasit: {
+    actionId: 'claw-bite-in-beast-form',
+    dc: 10,
+    damage: { average: 5, count: 2, sides: 4, bonus: 0, type: 'poison' },
+    damageOnSuccessfulSave: 'none',
+    conditionOnFailedSave: {
+      condition: 'poisoned',
+      durationRounds: 10,
+      repeatSaveAtEndOfTargetTurn: true,
+    },
+  },
+} as const satisfies Readonly<Record<string, {
+  actionId: string
+  dc: number
+  damage: Dnd5eMonsterDamage
+  damageOnSuccessfulSave: 'none' | 'half'
+  stableAtZero?: true
+  conditionOnFailedSave?: Dnd5eMonsterFailedSaveCondition
+}>>
+
 const CATALOG_PRONE_BITE_DCS = {
   mastiff: 11,
   'winter-wolf': 14,
@@ -1739,6 +1813,9 @@ function applyCatalogMonsterActionRules(
   ]
   const poisonSaveDamageAttack = CATALOG_POISON_SAVE_DAMAGE_ATTACKS[
     monster.slug as keyof typeof CATALOG_POISON_SAVE_DAMAGE_ATTACKS
+  ]
+  const complexPoisonAttack = CATALOG_COMPLEX_POISON_ATTACKS[
+    monster.slug as keyof typeof CATALOG_COMPLEX_POISON_ATTACKS
   ]
   const proneBiteDc = CATALOG_PRONE_BITE_DCS[
     monster.slug as keyof typeof CATALOG_PRONE_BITE_DCS
@@ -1802,6 +1879,50 @@ function applyCatalogMonsterActionRules(
           kind: 'weapon-attack' as const,
           automation: 'headless' as const,
           attack: assassinPoisonWeaponAttack,
+        }
+      }
+      if (
+        complexPoisonAttack &&
+        action.id === complexPoisonAttack.actionId &&
+        action.attack
+      ) {
+        const stableAtZero = 'stableAtZero' in complexPoisonAttack &&
+          complexPoisonAttack.stableAtZero
+        const conditionOnFailedSave = 'conditionOnFailedSave' in complexPoisonAttack
+          ? complexPoisonAttack.conditionOnFailedSave
+          : undefined
+        return {
+          ...action,
+          kind: 'weapon-attack' as const,
+          automation: 'headless' as const,
+          attack: {
+            ...action.attack,
+            onHit: `DC ${complexPoisonAttack.dc} Constitution save; ` +
+              `${complexPoisonAttack.damage.count}d${complexPoisonAttack.damage.sides} poison damage, ` +
+              `${complexPoisonAttack.damageOnSuccessfulSave} on a success.`,
+            onHitEffects: [{
+              id: 'poison-save-damage',
+              kind: 'saving-throw-damage' as const,
+              ability: 'con' as const,
+              dc: complexPoisonAttack.dc,
+              damage: [complexPoisonAttack.damage],
+              damageOnSuccessfulSave: complexPoisonAttack.damageOnSuccessfulSave,
+              conditionOnFailedSave,
+              onEffectDamageReducesTargetToZero: stableAtZero
+                ? {
+                    stabilize: true as const,
+                    conditions: [
+                      { condition: 'poisoned' as const, durationRounds: 600 },
+                      {
+                        condition: 'paralyzed' as const,
+                        durationRounds: 600,
+                        dependsOnCondition: 'poisoned' as const,
+                      },
+                    ],
+                  }
+                : undefined,
+            }],
+          },
         }
       }
       if (

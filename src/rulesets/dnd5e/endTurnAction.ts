@@ -118,6 +118,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
     const source = effect.source.actorId ? snapshot.state.combatants[effect.source.actorId] : undefined
     let mode = dnd5eSavingThrowMode(actorCombatant, repeatSave.ability, {
       effectVisible: effect.visibility !== 'dm-only',
+      condition: effect.standardCondition,
       sourceCreatureType: source?.creatureType,
       sourceIsSpell: effect.source.kind === 'spell',
     })
@@ -192,6 +193,7 @@ export function prepareDnd5ePlayerEndTurn(input: {
       dc: repeatSave.dc,
       mode: dnd5eSavingThrowMode(nextCombatant, repeatSave.ability, {
         effectVisible: effect.visibility !== 'dm-only',
+        condition: effect.standardCondition,
         sourceCreatureType: source?.creatureType,
         sourceIsSpell: effect.source.kind === 'spell',
       }),

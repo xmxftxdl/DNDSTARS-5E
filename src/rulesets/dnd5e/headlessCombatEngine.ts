@@ -113,6 +113,7 @@ import {
   dnd5eActiveWeaponDamageD4Mode,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
+  removeDnd5eActiveEffectsByIds,
   removeDnd5eActiveEffectsForEvent,
   type Dnd5eActiveEffectBreakTrigger,
   type Dnd5eActiveEffectDuration,
@@ -1654,6 +1655,7 @@ export function applyDnd5eStandardConditionEffect(
     repeatSave?: Dnd5eActiveEffectInstance['repeatSave']
     escapeCheck?: Dnd5eActiveEffectInstance['escapeCheck']
     breakOn?: Dnd5eActiveEffectInstance['breakOn']
+    dependsOnEffectId?: string
     sourceKind?: Dnd5eActiveEffectInstance['source']['kind']
     pluginId?: string
     spellLevel?: number
@@ -1675,6 +1677,7 @@ export function applyDnd5eStandardConditionEffect(
     repeatSave: input.repeatSave,
     escapeCheck: input.escapeCheck,
     breakOn: input.breakOn,
+    dependsOnEffectId: input.dependsOnEffectId,
     appliedRound: undefined,
     appliedTurnKey: input.appliedTurnKey,
     stackingKey: input.definitionId ?? `condition:${input.condition}:${input.rulesId}`,
@@ -1918,9 +1921,13 @@ function removeDnd5eEffectsByPredicate(
   events: Dnd5eCombatEvent[],
 ): Dnd5eActiveEffectInstance[] {
   const effects = reconciledDnd5eActiveEffects(target)
-  const removed = effects.filter(predicate)
+  const resolved = removeDnd5eActiveEffectsByIds({
+    effects,
+    ids: effects.filter(predicate).map((effect) => effect.id),
+  })
+  const removed = resolved.removed
   if (removed.length === 0) return []
-  commitDnd5eActiveEffects(target, effects.filter((effect) => !predicate(effect)))
+  commitDnd5eActiveEffects(target, resolved.effects)
   clearTemporaryHitPointsFromRemovedEffects(target, removed, events)
   for (const effect of removed) {
     events.push({
@@ -2147,8 +2154,13 @@ function advanceDnd5eActiveEffectsAtBoundary(input: {
       next.push(effect)
     }
     if (removed.length === 0 && JSON.stringify(next) === JSON.stringify(effects)) continue
-    commitDnd5eActiveEffects(target, next)
-    for (const effect of removed) {
+    const removal = removeDnd5eActiveEffectsByIds({
+      effects,
+      ids: removed.map((effect) => effect.id),
+    })
+    const retainedIds = new Set(removal.effects.map((effect) => effect.id))
+    commitDnd5eActiveEffects(target, next.filter((effect) => retainedIds.has(effect.id)))
+    for (const effect of removal.removed) {
       input.events.push({
         type: 'active-effect-removed', targetId: target.id, effectId: effect.id,
         definitionId: effect.definitionId, reason: 'expired',
@@ -2232,6 +2244,7 @@ function resolveDnd5eActiveEffectSaves(input: {
       const source = effect.source.actorId ? input.state.combatants[effect.source.actorId] : undefined
       let mode = dnd5eSavingThrowMode(input.target, repeatSave.ability, {
         effectVisible: effect.visibility !== 'dm-only',
+        condition: effect.standardCondition,
         sourceCreatureType: source?.creatureType,
         sourceIsSpell: effect.source.kind === 'spell',
       })
@@ -3518,6 +3531,7 @@ function applyDamage(
   bypassUndeadFortitude = false,
   bypassWardingBondTransfer = false,
   suppressAfterDealtDamageTrigger = false,
+  zeroHitPointOutcome?: 'stable',
 ): void {
   const hpBefore = target.currentHp
   const targetMonster = target.statBlockId ? getDnd5eSrdMonster(target.statBlockId) : undefined
@@ -3607,9 +3621,15 @@ function applyDamage(
       [source.id]: Math.min(1_000_000_000, (target.classState.monsterThreatByTargetId?.[source.id] ?? 0) + effectiveDamage),
     }
   }
-  const massiveDamage = target.currentHp === 0 && remainingDamageAfterZero >= target.maxHp
+  const specialStableAtZero = zeroHitPointOutcome === 'stable' &&
+    hpBefore > 0 &&
+    target.currentHp === 0
+  const massiveDamage = !specialStableAtZero &&
+    target.currentHp === 0 &&
+    remainingDamageAfterZero >= target.maxHp
   const undeadFortitudeRule = dnd5eUndeadFortitudeRule(target)
-  const undeadFortitudeRequired = target.currentHp === 0 && hpBefore > 0 && amount > 0 && !massiveDamage &&
+  const undeadFortitudeRequired = !specialStableAtZero &&
+    target.currentHp === 0 && hpBefore > 0 && amount > 0 && !massiveDamage &&
     !bypassUndeadFortitude &&
     undeadFortitudeRule?.kind === 'undead-fortitude' &&
     !(undeadFortitudeRule.excludedOnCritical && critical) &&
@@ -3627,12 +3647,25 @@ function applyDamage(
     target.deathSaves = { successes: 0, failures: 0, stable: false, dead: false }
     events.push({ type: 'undead-fortitude-save-required', targetId: target.id, dc, damage: amount })
   }
-  const relentlessRage = target.currentHp === 0 && hpBefore > 0 && !massiveDamage && target.classState.raging &&
+  const relentlessRage =
+    target.currentHp === 0 && hpBefore > 0 && !massiveDamage && target.classState.raging &&
     dnd5eCombatantClassLevel(target, 'barbarian') >= 11
   if (relentlessRage) {
     const dc = Math.max(10, target.classState.relentlessRageDc ?? 10)
     target.classState.relentlessRagePendingDc = dc
     events.push({ type: 'relentless-rage-save-required', targetId: target.id, dc })
+    if (specialStableAtZero) {
+      target.classState.undeadFortitudePending = undefined
+      target.classState.monsterOnHitSavePending = undefined
+      target.classState.monsterRegenerationPendingAtZero = undefined
+      target.deathSaves = { successes: 0, failures: 0, stable: true, dead: false }
+      applyZeroHitPointConditions(target, events)
+      events.push({
+        type: 'creature-stabilized',
+        actorId: source?.id ?? target.id,
+        targetId: target.id,
+      })
+    }
   } else if (target.currentHp === 0) {
     if (state && (target.concentrating || target.classState.concentrationSpellId)) {
       endDnd5eConcentration(state, target, events)
@@ -3645,7 +3678,18 @@ function applyDamage(
       target.classState.huntersMarkTargetId = undefined
     }
     endBarbarianRage(target, events)
-    if (massiveDamage) {
+    if (specialStableAtZero) {
+      target.classState.undeadFortitudePending = undefined
+      target.classState.monsterOnHitSavePending = undefined
+      target.classState.monsterRegenerationPendingAtZero = undefined
+      target.deathSaves = { successes: 0, failures: 0, stable: true, dead: false }
+      applyZeroHitPointConditions(target, events)
+      events.push({
+        type: 'creature-stabilized',
+        actorId: source?.id ?? target.id,
+        targetId: target.id,
+      })
+    } else if (massiveDamage) {
       target.classState.undeadFortitudePending = undefined
       target.classState.monsterOnHitSavePending = undefined
       target.deathSaves = { successes: 0, failures: 3, stable: false, dead: true }
@@ -4073,6 +4117,8 @@ interface Dnd5eDamageComponent {
 
 interface Dnd5eSourcedDamageComponent extends Dnd5eDamageComponent {
   damageSource: Dnd5eDamageSourceDetails
+  /** Stable provenance retained through attack-wide reductions and defenses. */
+  onHitEffectId?: string
 }
 
 function subtractFromWeaponDamage(
@@ -8333,10 +8379,14 @@ function resolveDnd5eMonsterOnHitEffects(input: {
   state: Dnd5eHeadlessCombatState
   actor: Dnd5eCombatant
   target: Dnd5eCombatant
+  actionId: string
   effects: readonly Dnd5eMonsterOnHitEffect[]
   supplied: readonly Dnd5eMonsterOnHitEffectRoll[] | undefined
   events: Dnd5eCombatEvent[]
-}): Dnd5eSourcedDamageComponent[] | undefined {
+}): {
+  damageComponents: Dnd5eSourcedDamageComponent[]
+  effects: readonly Dnd5eMonsterOnHitEffect[]
+} | undefined {
   const supplied = input.supplied ?? []
   if (supplied.length !== input.effects.length) return undefined
   const resolvedComponents: Dnd5eSourcedDamageComponent[] = []
@@ -8349,6 +8399,7 @@ function resolveDnd5eMonsterOnHitEffects(input: {
     if (resolution.damageRolls.length !== effect.damage.length) return undefined
     const mode = dnd5eSavingThrowMode(input.target, effect.ability, {
       effectVisible: true,
+      condition: effect.conditionOnFailedSave?.condition,
       sourceCreatureType: input.actor.creatureType,
       sourceIsSpell: false,
     })
@@ -8395,6 +8446,7 @@ function resolveDnd5eMonsterOnHitEffects(input: {
         }).total,
         type: definition.type,
         damageSource: dnd5eMonsterOnHitDamageSource(input.actor),
+        onHitEffectId: effect.id,
       }))
     } catch {
       return undefined
@@ -8407,8 +8459,112 @@ function resolveDnd5eMonsterOnHitEffects(input: {
       successfulSave: effect.damageOnSuccessfulSave,
     })
     resolvedComponents.push(...scaleDnd5eDamageComponents(damageComponents, finalDamage))
+    if (!save.success && effect.conditionOnFailedSave) {
+      const condition = effect.conditionOnFailedSave
+      const rulesId = `monster:${input.actor.id}:${input.actionId}:${effect.id}`
+      applyDnd5eStandardConditionEffect(input.target, input.actor, {
+        id: dnd5eActiveEffectId(
+          'monster-on-hit-save',
+          input.actor.id,
+          input.actionId,
+          effect.id,
+          input.target.id,
+          condition.condition,
+        ),
+        definitionId: `${rulesId}:${condition.condition}`,
+        rulesId,
+        condition: condition.condition,
+        duration: {
+          type: 'rounds',
+          remainingRounds: condition.durationRounds,
+          tickOn: 'target-turn-end',
+        },
+        repeatSave: condition.repeatSaveAtEndOfTargetTurn
+          ? {
+              ability: effect.ability,
+              dc: effect.dc,
+              timing: 'target-turn-end',
+              onSuccess: 'remove',
+            }
+          : undefined,
+        breakOn: condition.breakOnDamage ? ['takes-damage'] : undefined,
+        sourceKind: 'monster',
+      }, input.events)
+    }
   }
-  return resolvedComponents
+  return { damageComponents: resolvedComponents, effects: input.effects }
+}
+
+function dnd5eEffectiveHitPointPoolToZero(target: Dnd5eCombatant): number {
+  return Math.max(0, target.temporaryHp) +
+    Math.max(0, target.currentHp) +
+    (target.classState.wildShapeFormId
+      ? Math.max(0, target.classState.wildShapeOriginalCurrentHp ?? 0)
+      : 0)
+}
+
+function dnd5eMonsterOnHitZeroOutcome(
+  target: Dnd5eCombatant,
+  components: readonly Dnd5eSourcedDamageComponent[],
+  effects: readonly Dnd5eMonsterOnHitEffect[],
+): Dnd5eMonsterOnHitEffect | undefined {
+  const hitPointPool = dnd5eEffectiveHitPointPoolToZero(target)
+  if (hitPointPool <= 0) return undefined
+  const totalDamage = components.reduce((sum, component) => sum + Math.max(0, component.total), 0)
+  if (totalDamage < hitPointPool) return undefined
+  return effects.find((effect) => {
+    if (!effect.onEffectDamageReducesTargetToZero) return false
+    const effectDamage = components.reduce((sum, component) =>
+      sum + (component.onHitEffectId === effect.id ? Math.max(0, component.total) : 0), 0)
+    return effectDamage > 0 && totalDamage - effectDamage < hitPointPool
+  })
+}
+
+function applyDnd5eMonsterOnHitZeroOutcome(
+  target: Dnd5eCombatant,
+  actor: Dnd5eCombatant,
+  actionId: string,
+  effect: Dnd5eMonsterOnHitEffect,
+  events: Dnd5eCombatEvent[],
+): void {
+  const outcome = effect.onEffectDamageReducesTargetToZero
+  if (!outcome) return
+  const rulesId = `monster:${actor.id}:${actionId}:${effect.id}:zero`
+  const effectIdByCondition = new Map<Dnd5eStandardConditionId, string>()
+  const pending = [...outcome.conditions]
+  while (pending.length > 0) {
+    const nextIndex = pending.findIndex((condition) =>
+      condition.dependsOnCondition == null ||
+      effectIdByCondition.has(condition.dependsOnCondition))
+    if (nextIndex < 0) break
+    const [condition] = pending.splice(nextIndex, 1)
+    const dependsOnEffectId = condition.dependsOnCondition
+      ? effectIdByCondition.get(condition.dependsOnCondition)
+      : undefined
+    if (condition.dependsOnCondition && !dependsOnEffectId) continue
+    const effectId = dnd5eActiveEffectId(
+      'monster-on-hit-zero',
+      actor.id,
+      actionId,
+      effect.id,
+      target.id,
+      condition.condition,
+    )
+    const applied = applyDnd5eStandardConditionEffect(target, actor, {
+      id: effectId,
+      definitionId: `${rulesId}:${condition.condition}`,
+      rulesId,
+      condition: condition.condition,
+      duration: {
+        type: 'rounds',
+        remainingRounds: condition.durationRounds,
+        tickOn: 'target-turn-end',
+      },
+      dependsOnEffectId,
+      sourceKind: 'monster',
+    }, events)
+    if (applied) effectIdByCondition.set(condition.condition, effectId)
+  }
 }
 
 function resolveMonsterAction(
@@ -8487,6 +8643,7 @@ function resolveMonsterAction(
       ),
       target.conditions,
     )
+    const attackActionId = sequenceWeaponIds?.[index] ?? actionDefinition.id
     const magicWeaponBonus = dnd5eActiveMagicWeaponBonus(
       actor.classState.activeEffects,
       sequenceWeaponIds?.[index],
@@ -8619,6 +8776,7 @@ function resolveMonsterAction(
     }
     const weaponDamageSource = dnd5eMonsterWeaponDamageSource(actor)
     let damageComponents: Dnd5eSourcedDamageComponent[] = []
+    let resolvedOnHitEffects: readonly Dnd5eMonsterOnHitEffect[]
     try {
       for (let damageIndex = 0; damageIndex < attackDefinition.damage.length; damageIndex += 1) {
         const damageDefinition = attackDefinition.damage[damageIndex]
@@ -8678,12 +8836,14 @@ function resolveMonsterAction(
         state,
         actor,
         target,
+        actionId: attackActionId,
         effects: attackDefinition.onHitEffects ?? [],
         supplied: supplied.onHitEffectRolls,
         events,
       })
       if (!onHitDamageComponents) return fail(state, events, 'invalid-dice')
-      damageComponents.push(...onHitDamageComponents)
+      resolvedOnHitEffects = onHitDamageComponents.effects
+      damageComponents.push(...onHitDamageComponents.damageComponents)
       let cuttingWordsReduction = consumeCuttingWords(state, actor, supplied.cuttingWordsDamage, events)
       if (cuttingWordsReduction == null) return fail(state, events, 'invalid-class-feature')
       for (const component of damageComponents) {
@@ -8740,6 +8900,11 @@ function resolveMonsterAction(
         })
       }
     }
+    const zeroHitPointEffect = dnd5eMonsterOnHitZeroOutcome(
+      target,
+      damageComponents,
+      resolvedOnHitEffects,
+    )
     applyDamage(
       target,
       damageComponents.reduce((sum, component) => sum + component.total, 0),
@@ -8748,7 +8913,25 @@ function resolveMonsterAction(
       actor,
       state,
       damageComponents.flatMap((component) => component.type ? [component.type] : []),
+      false,
+      false,
+      false,
+      zeroHitPointEffect ? 'stable' : undefined,
     )
+    if (
+      zeroHitPointEffect &&
+      target.currentHp === 0 &&
+      target.deathSaves.stable &&
+      !target.deathSaves.dead
+    ) {
+      applyDnd5eMonsterOnHitZeroOutcome(
+        target,
+        actor,
+        attackActionId,
+        zeroHitPointEffect,
+        events,
+      )
+    }
     if (target.currentHp <= 0 || target.deathSaves.dead) {
       targetsDefeatedDuringAction.add(target.id)
     }
@@ -12160,8 +12343,14 @@ function resolveDnd5eHeadlessActionInternal(
     actor.classState.relentlessRagePendingDc = undefined
     if (resolved.success) {
       actor.currentHp = 1
+      actor.deathSaves = { successes: 0, failures: 0, stable: false, dead: false }
+      removeZeroHitPointUnconscious(actor, 'healed', events)
       actor.classState.relentlessRageDc = action.dc + 5
     } else {
+      if (!actor.deathSaves.stable && dnd5eUsesDeathSavingThrows(actor)) {
+        actor.deathSaves = { successes: 0, failures: 0, stable: false, dead: false }
+        applyZeroHitPointConditions(actor, events)
+      }
       endDnd5eConcentration(state, actor, events)
       endBarbarianRage(actor, events)
     }

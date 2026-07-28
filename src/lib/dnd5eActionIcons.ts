@@ -326,6 +326,10 @@ const DND5E_PAINTED_ITEM_ASSETS: Readonly<Record<string, string>> = {
   'srd-5.1:magic-item:armor-leather-armor-plus-1': '/assets/icons/armor-leather-armor-plus-1-item-action.png',
   'srd-5.1:magic-item:armor-leather-armor-plus-2': '/assets/icons/armor-leather-armor-plus-2-item-action.png',
   'srd-5.1:magic-item:armor-leather-armor-plus-3': '/assets/icons/armor-leather-armor-plus-3-item-action.png',
+  'srd-5.1:magic-item:armor-of-invulnerability': '/assets/icons/armor-of-invulnerability-item-action.png',
+  'srd-5.1:magic-item:armor-of-resistance': '/assets/icons/armor-of-resistance-item-action.png',
+  'srd-5.1:magic-item:armor-of-vulnerability': '/assets/icons/armor-of-vulnerability-item-action.png',
+  'srd-5.1:magic-item:arrow-catching-shield': '/assets/icons/arrow-catching-shield-item-action.png',
 }
 
 const TEXT_RULES: readonly [RegExp, Dnd5eActionIconMotif][] = [

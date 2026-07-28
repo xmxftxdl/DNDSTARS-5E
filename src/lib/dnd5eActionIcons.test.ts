@@ -285,4 +285,24 @@ describe('D&D 5e combat action icon registry', () => {
       })
     }
   })
+
+  it('为下一组魔法护甲与盾牌绑定独立绘制图标', () => {
+    const cases = [
+      ['armor-of-invulnerability', 'armor-of-invulnerability-item-action.png', 'legendary', '#B86A12'],
+      ['armor-of-resistance', 'armor-of-resistance-item-action.png', 'rare', '#2563A8'],
+      ['armor-of-vulnerability', 'armor-of-vulnerability-item-action.png', 'rare', '#2563A8'],
+      ['arrow-catching-shield', 'arrow-catching-shield-item-action.png', 'rare', '#2563A8'],
+    ] as const
+
+    for (const [id, filename, rarityBackdropId, background] of cases) {
+      const item = DND5E_SRD_ITEM_TEMPLATES.find((candidate) => candidate.id === `srd-5.1:magic-item:${id}`)
+      expect(item).toBeDefined()
+      expect(dnd5eItemActionIcon(item!)).toMatchObject({
+        asset: `/assets/icons/${filename}`,
+        assetMode: 'foreground',
+        rarityBackdropId,
+        background,
+      })
+    }
+  })
 })

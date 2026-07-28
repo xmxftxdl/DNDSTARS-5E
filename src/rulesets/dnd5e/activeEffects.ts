@@ -163,6 +163,8 @@ export interface Dnd5eActiveEffectInstance {
   repeatSave?: Dnd5eActiveEffectRepeatSave
   escapeCheck?: Dnd5eActiveEffectEscapeCheck
   breakOn?: Dnd5eActiveEffectBreakTrigger[]
+  /** This effect is valid only while the referenced source-specific effect exists. */
+  dependsOnEffectId?: string
   stackingKey: string
   stackingPolicy: Dnd5eActiveEffectStackingPolicy
   potency?: number
@@ -207,6 +209,7 @@ export function createDnd5eConditionEffect(input: {
   repeatSave?: Dnd5eActiveEffectRepeatSave
   escapeCheck?: Dnd5eActiveEffectEscapeCheck
   breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
+  dependsOnEffectId?: string
   stackingPolicy?: Dnd5eActiveEffectStackingPolicy
   stackingKey?: string
   potency?: number
@@ -232,6 +235,7 @@ export function createDnd5eConditionEffect(input: {
     repeatSave: input.repeatSave ? { ...input.repeatSave } : undefined,
     escapeCheck: input.escapeCheck ? { ...input.escapeCheck } : undefined,
     breakOn: input.breakOn ? [...new Set(input.breakOn)] : undefined,
+    dependsOnEffectId: input.dependsOnEffectId,
     stackingKey: input.stackingKey ?? definitionId,
     stackingPolicy: input.stackingPolicy ?? 'refresh-duration',
     potency: input.potency,
@@ -250,6 +254,7 @@ export function createDnd5eMechanicalEffect(input: {
   repeatSave?: Dnd5eActiveEffectRepeatSave
   escapeCheck?: Dnd5eActiveEffectEscapeCheck
   breakOn?: readonly Dnd5eActiveEffectBreakTrigger[]
+  dependsOnEffectId?: string
   stackingPolicy?: Dnd5eActiveEffectStackingPolicy
   stackingKey?: string
   potency?: number
@@ -275,6 +280,7 @@ export function createDnd5eMechanicalEffect(input: {
     repeatSave: input.repeatSave ? { ...input.repeatSave } : undefined,
     escapeCheck: input.escapeCheck ? { ...input.escapeCheck } : undefined,
     breakOn: input.breakOn ? [...new Set(input.breakOn)] : undefined,
+    dependsOnEffectId: input.dependsOnEffectId,
     stackingKey: input.stackingKey ?? input.definitionId,
     stackingPolicy: input.stackingPolicy ?? 'refresh-duration',
     potency: input.potency,
@@ -534,6 +540,12 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
           magicWeapon,
         }
       : undefined
+    const dependsOnEffectId = typeof candidate.dependsOnEffectId === 'string' &&
+      candidate.dependsOnEffectId.trim().length > 0 &&
+      candidate.dependsOnEffectId.length <= 320 &&
+      candidate.dependsOnEffectId.trim() !== candidate.id.trim()
+      ? candidate.dependsOnEffectId.trim()
+      : undefined
     effects.push({
       ...(candidate as unknown as Dnd5eActiveEffectInstance),
       id: candidate.id.trim(),
@@ -551,6 +563,7 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
       duration: normalizedDuration,
       repeatSave,
       escapeCheck,
+      dependsOnEffectId,
       potency,
       breakOn: Array.isArray(candidate.breakOn)
         ? [...new Set(candidate.breakOn.filter((entry): entry is Dnd5eActiveEffectBreakTrigger => BREAK_TRIGGERS.has(entry as Dnd5eActiveEffectBreakTrigger)))]
@@ -581,7 +594,32 @@ export function normalizeDnd5eActiveEffects(value: unknown): Dnd5eActiveEffectIn
         : undefined,
     })
   }
-  return effects
+  let connected = effects
+  for (;;) {
+    const byId = new Map(connected.map((effect) => [effect.id, effect]))
+    const ids = new Set(byId.keys())
+    const next = connected.filter((effect) =>
+      effect.dependsOnEffectId == null || ids.has(effect.dependsOnEffectId))
+    if (next.length !== connected.length) {
+      connected = next
+      continue
+    }
+    const cyclicOrDependingOnCycle = new Set<string>()
+    for (const effect of next) {
+      const path = new Set<string>()
+      let current: Dnd5eActiveEffectInstance | undefined = effect
+      while (current?.dependsOnEffectId) {
+        if (path.has(current.id)) {
+          for (const id of path) cyclicOrDependingOnCycle.add(id)
+          break
+        }
+        path.add(current.id)
+        current = byId.get(current.dependsOnEffectId)
+      }
+    }
+    if (cyclicOrDependingOnCycle.size === 0) return next
+    connected = next.filter((effect) => !cyclicOrDependingOnCycle.has(effect.id))
+  }
 }
 
 export interface Dnd5eActiveEffectValidationResult {
@@ -607,6 +645,9 @@ export function validateDnd5eActiveEffectsStrict(value: unknown): Dnd5eActiveEff
     if (raw.repeatSave != null && effect.repeatSave == null) issues.push(`activeEffects[${index}].repeatSave 损坏`)
     if (raw.escapeCheck != null && effect.escapeCheck == null) issues.push(`activeEffects[${index}].escapeCheck 损坏`)
     if (raw.potency != null && effect.potency == null) issues.push(`activeEffects[${index}].potency 无效`)
+    if (raw.dependsOnEffectId != null && effect.dependsOnEffectId == null) {
+      issues.push(`activeEffects[${index}].dependsOnEffectId is invalid`)
+    }
     if (isRecord(raw.source) && raw.source.spellLevel != null && effect.source.spellLevel == null) {
       issues.push(`activeEffects[${index}].source.spellLevel 无效`)
     }
@@ -940,26 +981,48 @@ export function removeDnd5eActiveEffectById(input: {
   effects?: readonly Dnd5eActiveEffectInstance[]
   id: string
 }): { effects: Dnd5eActiveEffectInstance[]; removed: Dnd5eActiveEffectInstance[] } {
-  const removed: Dnd5eActiveEffectInstance[] = []
-  const effects = normalizeDnd5eActiveEffects(input.effects).filter((effect) => {
-    if (effect.id !== input.id) return true
-    removed.push(effect)
-    return false
+  return removeDnd5eActiveEffectsByIds({
+    effects: input.effects,
+    ids: [input.id],
   })
-  return { effects, removed }
 }
 
 export function removeDnd5eActiveEffectsByStandardCondition(input: {
   effects?: readonly Dnd5eActiveEffectInstance[]
   condition: Dnd5eStandardConditionId
 }): { effects: Dnd5eActiveEffectInstance[]; removed: Dnd5eActiveEffectInstance[] } {
-  const removed: Dnd5eActiveEffectInstance[] = []
-  const effects = normalizeDnd5eActiveEffects(input.effects).filter((effect) => {
-    if (effect.standardCondition !== input.condition) return true
-    removed.push(effect)
-    return false
+  const effects = normalizeDnd5eActiveEffects(input.effects)
+  return removeDnd5eActiveEffectsByIds({
+    effects,
+    ids: effects
+      .filter((effect) => effect.standardCondition === input.condition)
+      .map((effect) => effect.id),
   })
-  return { effects, removed }
+}
+
+/**
+ * Removes requested effects and every transitive dependent in one mutation.
+ * The closure keeps source-linked conditions valid at every shared boundary.
+ */
+export function removeDnd5eActiveEffectsByIds(input: {
+  effects?: readonly Dnd5eActiveEffectInstance[]
+  ids: readonly string[]
+}): { effects: Dnd5eActiveEffectInstance[]; removed: Dnd5eActiveEffectInstance[] } {
+  const effects = normalizeDnd5eActiveEffects(input.effects)
+  const removedIds = new Set(input.ids)
+  for (;;) {
+    const sizeBefore = removedIds.size
+    for (const effect of effects) {
+      if (effect.dependsOnEffectId && removedIds.has(effect.dependsOnEffectId)) {
+        removedIds.add(effect.id)
+      }
+    }
+    if (removedIds.size === sizeBefore) break
+  }
+  return {
+    effects: effects.filter((effect) => !removedIds.has(effect.id)),
+    removed: effects.filter((effect) => removedIds.has(effect.id)),
+  }
 }
 
 export function applyDnd5eActiveEffect(input: {
@@ -1005,13 +1068,13 @@ export function removeDnd5eActiveEffectsForEvent(input: {
   effects?: readonly Dnd5eActiveEffectInstance[]
   trigger: Dnd5eActiveEffectBreakTrigger
 }): { effects: Dnd5eActiveEffectInstance[]; removed: Dnd5eActiveEffectInstance[] } {
-  const removed: Dnd5eActiveEffectInstance[] = []
-  const effects = normalizeDnd5eActiveEffects(input.effects).filter((effect) => {
-    const matches = effect.breakOn?.includes(input.trigger) === true
-    if (matches) removed.push(effect)
-    return !matches
+  const effects = normalizeDnd5eActiveEffects(input.effects)
+  return removeDnd5eActiveEffectsByIds({
+    effects,
+    ids: effects
+      .filter((effect) => effect.breakOn?.includes(input.trigger) === true)
+      .map((effect) => effect.id),
   })
-  return { effects, removed }
 }
 
 export function dnd5eActiveEffectRemainingLabel(effect: Dnd5eActiveEffectInstance): string {

@@ -21,6 +21,7 @@ import {
   dnd5eActiveWeaponDamageD4Mode,
   dnd5eConditionsFromActiveEffects,
   normalizeDnd5eActiveEffects,
+  removeDnd5eActiveEffectsByStandardCondition,
   removeDnd5eActiveEffectsForEvent,
   validateDnd5eActiveEffectsStrict,
 } from './activeEffects'
@@ -341,6 +342,59 @@ describe('D&D 5e ActiveEffectInstance', () => {
       ok: false,
       issues: expect.arrayContaining([expect.stringContaining('repeatSave')]),
     })
+  })
+
+  it('cascades removal through source-specific effect dependencies', () => {
+    const poisoned = createDnd5eConditionEffect({
+      id: 'venom:poisoned',
+      condition: 'poisoned',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+    })
+    const paralyzed = createDnd5eConditionEffect({
+      id: 'venom:paralyzed',
+      condition: 'paralyzed',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+      duration: { type: 'rounds', remainingRounds: 600, tickOn: 'target-turn-end' },
+      dependsOnEffectId: poisoned.id,
+    })
+    const removed = removeDnd5eActiveEffectsByStandardCondition({
+      effects: [poisoned, paralyzed],
+      condition: 'poisoned',
+    })
+    expect(removed.effects).toEqual([])
+    expect(removed.removed.map((effect) => effect.id)).toEqual([
+      poisoned.id,
+      paralyzed.id,
+    ])
+  })
+
+  it('rejects dangling, self-referencing, and cyclic effect dependencies at strict boundaries', () => {
+    const parent = createDnd5eConditionEffect({
+      id: 'parent',
+      condition: 'poisoned',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+    })
+    const child = createDnd5eConditionEffect({
+      id: 'child',
+      condition: 'paralyzed',
+      targetId: 'target',
+      source: { kind: 'monster', actorId: 'spider', rulesId: 'venom' },
+      dependsOnEffectId: parent.id,
+    })
+    expect(validateDnd5eActiveEffectsStrict([parent, child])).toMatchObject({ ok: true })
+    expect(validateDnd5eActiveEffectsStrict([child])).toMatchObject({ ok: false })
+    expect(validateDnd5eActiveEffectsStrict([{
+      ...parent,
+      dependsOnEffectId: parent.id,
+    }])).toMatchObject({ ok: false })
+    expect(validateDnd5eActiveEffectsStrict([
+      { ...parent, dependsOnEffectId: child.id },
+      { ...child, dependsOnEffectId: parent.id },
+    ])).toMatchObject({ ok: false })
   })
 
   it('migrates old timed mechanics once and then treats them as native active effects', () => {
