@@ -2635,11 +2635,6 @@ export default function MapsPage() {
 
   useEffect(() => {
     if (!activeMapId) return
-    return subscribeSharedResourceInvalidation('maps', () => useMapStore.getState().loadShared())
-  }, [activeMapId])
-
-  useEffect(() => {
-    if (!activeMapId) return
     if (mode === 'dm' && combatActive) return
     let cancelled = false
     const load = async () => {
@@ -6309,6 +6304,7 @@ export default function MapsPage() {
     state: Dnd5eHeadlessCombatState,
     previousRound: number,
     actorCharacterId?: string,
+    events: readonly Dnd5eCombatEvent[] = [],
   ) => {
     roundRef.current = state.round
     initiativeIndexRef.current = state.initiativeIndex
@@ -6330,6 +6326,7 @@ export default function MapsPage() {
         state.round,
       )
     }
+    syncDnd5eReactiveReactionEconomy(state, events)
     void publishCombatState({
       active: true,
       round: state.round,
@@ -10531,7 +10528,12 @@ export default function MapsPage() {
       applyDnd5eCombatApplication(settled.application)
       logDnd5eMonsterMechanics(settled.result.events)
       await persistDnd5eAuthorityState()
-      applyDnd5eTurnAdvance(settled.result.state, roundRef.current)
+      applyDnd5eTurnAdvance(
+        settled.result.state,
+        roundRef.current,
+        undefined,
+        settled.result.events,
+      )
       for (const save of settled.result.events.filter((event) => event.type === 'saving-throw-resolved')) {
         if (save.type !== 'saving-throw-resolved') continue
         pushCombatLog(
@@ -11990,7 +11992,12 @@ export default function MapsPage() {
         settled.result.state.round !== liveRound ||
         settled.result.state.initiativeIndex !== preparedTurn.prepared.state.initiativeIndex
       ) {
-        applyDnd5eTurnAdvance(settled.result.state, liveRound, dnd5eActionActor.id)
+        applyDnd5eTurnAdvance(
+          settled.result.state,
+          liveRound,
+          dnd5eActionActor.id,
+          settled.result.events,
+        )
       }
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
@@ -12172,7 +12179,12 @@ export default function MapsPage() {
         )
         pushCombatLog(`${targetName} 的龙威感知豁免 ${save.total} vs DC ${save.dc}：${save.success ? '成功，并在24小时内免疫该来源' : condition?.type === 'condition-applied' && condition.condition === 'charmed' ? '失败，陷入魅惑' : '失败，陷入恐慌'}。`, 'system')
       }
-      applyDnd5eTurnAdvance(settledEndTurn.result.state, liveRound, dnd5eActionActor?.id)
+      applyDnd5eTurnAdvance(
+        settledEndTurn.result.state,
+        liveRound,
+        dnd5eActionActor?.id,
+        settledEndTurn.result.events,
+      )
       completePlayerActionRequest(action)
       acknowledgePlayerAction(action, 'accepted')
       return

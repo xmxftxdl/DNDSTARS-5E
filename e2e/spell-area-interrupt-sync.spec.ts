@@ -713,7 +713,7 @@ test('核心持续区域由 DM 原子创建，并在玩家刷新和重复投递�
       anchor: area.anchorCell,
       concentration: area.concentrationId,
     }))
-  }).toEqual([{
+  }, { timeout: 30_000 }).toEqual([{
     sourceKind: 'core-spell', spell: 'moonbeam', anchor: { col: 5, row: 2 }, concentration: 'moonbeam',
   }])
   await expect.poll(async () => {

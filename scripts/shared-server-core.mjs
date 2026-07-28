@@ -9895,9 +9895,13 @@ function addEventClient(ctx, channel, res, viewer) {
   ctx.eventClients.set(storageKey, clients)
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-store',
+    // no-transform + X-Accel-Buffering keep room invalidations streaming through
+    // reverse proxies instead of being released in a delayed batch.
+    'Cache-Control': 'no-store, no-transform',
     Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   })
+  res.flushHeaders?.()
   res.write(`event: ready\ndata: ${JSON.stringify({
     channel,
     streamId: ctx.serverInstanceId ?? 'legacy-stream',
@@ -9909,7 +9913,16 @@ function addEventClient(ctx, channel, res, viewer) {
     const projected = projectEventPayloadForViewer(channel, payload, viewer)
     if (projected !== undefined) res.write(`event: message\ndata: ${JSON.stringify(projected)}\n\n`)
   }
+  const heartbeat = setInterval(() => {
+    if (res.destroyed || res.writableEnded) return
+    res.write(`: heartbeat ${Date.now()}\n\n`)
+  }, 15_000)
+  heartbeat.unref?.()
+  let removed = false
   return () => {
+    if (removed) return
+    removed = true
+    clearInterval(heartbeat)
     delete res._starsEventViewer
     clients.delete(res)
     if (clients.size === 0) ctx.eventClients.delete(storageKey)

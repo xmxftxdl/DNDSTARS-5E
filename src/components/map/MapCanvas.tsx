@@ -1703,6 +1703,8 @@ function SpellStatusTokenBadge(input: {
             y={-size * 0.48}
             width={size * 0.96}
             height={size * 0.96}
+            globalCompositeOperation="screen"
+            opacity={0.94}
             listening={false}
           />
         </Group>
@@ -1723,7 +1725,8 @@ function SpellStatusTokenBadge(input: {
       )}
       <Circle
         radius={size / 2}
-        stroke="rgba(255,255,255,0.42)"
+        stroke={input.mark.borderColor}
+        opacity={0.58}
         strokeWidth={tokenLineWidth(input.radius, 0.7)}
         listening={false}
       />
@@ -5169,11 +5172,17 @@ function ThunderwaveMaterialEffect({
   areaWidth: number
 }) {
   const effectRef = useRef<Konva.Group>(null)
+  const trailRef = useRef<Konva.Group>(null)
+  const frontRef = useRef<Konva.Group>(null)
+  const bandRefs = useRef<Array<Konva.Group | null>>([])
+  const debrisRefs = useRef<Array<Konva.Line | null>>([])
 
   useEffect(() => {
     const effect = effectRef.current
+    const trail = trailRef.current
+    const front = frontRef.current
     const layer = effect?.getLayer()
-    if (!effect || !layer) return
+    if (!effect || !trail || !front || !layer) return
     const duration = Math.max(
       1,
       projectile.durationMs ?? THUNDERWAVE_ANIMATION_DURATION_MS,
@@ -5185,9 +5194,33 @@ function ThunderwaveMaterialEffect({
     const animation = new Konva.Animation((frame) => {
       const elapsed = initialElapsed + (frame?.time ?? 0)
       const raw = Math.min(1, elapsed / duration)
-      const fade = raw < 0.94 ? 1 : Math.max(0, (1 - raw) / 0.06)
+      const travelRaw = Math.min(1, raw / 0.76)
+      const travel = 1 - Math.pow(1 - travelRaw, 3)
+      const frontX = distance * travel
+      const fade = raw < 0.82 ? 1 : Math.max(0, (1 - raw) / 0.18)
       effect.opacity(fade)
-      effect.scaleY(0.97 + Math.sin(elapsed * 0.018) * 0.055)
+      trail.clipWidth(Math.max(areaWidth * 0.08, frontX + areaWidth * 0.18))
+      trail.opacity(0.26 + Math.sin(elapsed * 0.021) * 0.06)
+      front.x(frontX)
+      front.scaleX(0.78 + Math.sin(elapsed * 0.025) * 0.08)
+      front.scaleY(0.94 + Math.sin(elapsed * 0.019) * 0.07)
+      front.opacity(raw < 0.08 ? raw / 0.08 : fade)
+      bandRefs.current.forEach((band, index) => {
+        if (!band) return
+        const delay = index * 0.075
+        const bandRaw = Math.max(0, Math.min(1, (travelRaw - delay) / Math.max(0.01, 1 - delay)))
+        band.x(distance * (1 - Math.pow(1 - bandRaw, 2.6)))
+        band.opacity(Math.sin(bandRaw * Math.PI) * (0.58 - index * 0.09))
+        band.scaleX(0.7 + bandRaw * 0.45)
+      })
+      debrisRefs.current.forEach((debris, index) => {
+        if (!debris) return
+        const lag = areaWidth * (0.2 + (index % 4) * 0.12)
+        debris.x(Math.max(0, frontX - lag))
+        debris.y(Math.sin(elapsed * (0.009 + index * 0.0017) + index) * areaWidth * 0.34)
+        debris.rotation(-22 + index * 17 + raw * 160)
+        debris.opacity(Math.min(0.9, travelRaw * 2.5) * fade)
+      })
       if (raw >= 1) animation.stop()
     }, layer)
     // Remote events can arrive halfway through their lifetime. Keep the
@@ -5198,7 +5231,7 @@ function ThunderwaveMaterialEffect({
     return () => {
       animation.stop()
     }
-  }, [projectile.durationMs, projectile.issuedAt])
+  }, [areaWidth, distance, projectile.durationMs, projectile.issuedAt])
 
   return (
     <Group
@@ -5211,16 +5244,94 @@ function ThunderwaveMaterialEffect({
       ) * 180 / Math.PI}
       listening={false}
     >
-      <KonvaImage
-        image={image}
-        x={-distance * 0.055}
-        y={-areaWidth * 0.5}
-        width={distance * 1.14}
-        height={areaWidth}
-        shadowColor="#38bdf8"
-        shadowBlur={24}
-        perfectDrawEnabled={false}
-      />
+      <Group
+        ref={trailRef}
+        clip={{ x: -areaWidth * 0.08, y: -areaWidth * 0.55, width: areaWidth * 0.08, height: areaWidth * 1.1 }}
+        listening={false}
+      >
+        <KonvaImage
+          image={image}
+          x={-distance * 0.055}
+          y={-areaWidth * 0.5}
+          width={distance * 1.14}
+          height={areaWidth}
+          opacity={0.82}
+          shadowColor="#38bdf8"
+          shadowBlur={20}
+          perfectDrawEnabled={false}
+        />
+      </Group>
+      {[0, 1, 2].map((index) => (
+        <Group
+          key={`thunderwave-band:${index}`}
+          ref={(node) => { bandRefs.current[index] = node }}
+          opacity={0}
+          listening={false}
+        >
+          <Line
+            points={[
+              0, -areaWidth * (0.48 - index * 0.04),
+              areaWidth * (0.1 + index * 0.025), -areaWidth * 0.24,
+              -areaWidth * (0.045 + index * 0.015), 0,
+              areaWidth * (0.1 + index * 0.025), areaWidth * 0.24,
+              0, areaWidth * (0.48 - index * 0.04),
+            ]}
+            stroke={index === 0 ? '#e0f2fe' : '#7dd3fc'}
+            strokeWidth={Math.max(2, areaWidth * (0.045 - index * 0.008))}
+            lineCap="round"
+            lineJoin="round"
+            shadowColor="#38bdf8"
+            shadowBlur={14 - index * 2}
+            perfectDrawEnabled={false}
+          />
+        </Group>
+      ))}
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((index) => (
+        <Line
+          key={`thunderwave-debris:${index}`}
+          ref={(node) => { debrisRefs.current[index] = node }}
+          points={[
+            -areaWidth * 0.055, -areaWidth * 0.025,
+            areaWidth * 0.07, 0,
+            -areaWidth * 0.03, areaWidth * 0.055,
+          ]}
+          closed
+          fill={index % 2 === 0 ? '#94a3b8' : '#cbd5e1'}
+          stroke="#e2e8f0"
+          strokeWidth={Math.max(0.7, areaWidth * 0.012)}
+          opacity={0}
+          perfectDrawEnabled={false}
+          listening={false}
+        />
+      ))}
+      <Group ref={frontRef} listening={false}>
+        {[0, 1, 2].map((index) => {
+          const offset = -areaWidth * index * 0.075
+          return (
+          <Line
+            key={`thunderwave-front:${index}`}
+            points={[
+              offset - areaWidth * 0.02, -areaWidth * 0.5,
+              offset + areaWidth * 0.09, -areaWidth * 0.36,
+              offset - areaWidth * 0.045, -areaWidth * 0.2,
+              offset + areaWidth * 0.1, 0,
+              offset - areaWidth * 0.045, areaWidth * 0.2,
+              offset + areaWidth * 0.09, areaWidth * 0.36,
+              offset - areaWidth * 0.02, areaWidth * 0.5,
+            ]}
+            stroke={index === 0 ? '#ffffff' : index === 1 ? '#bae6fd' : '#38bdf8'}
+            strokeWidth={Math.max(1.6, areaWidth * (0.04 - index * 0.008))}
+            lineCap="round"
+            lineJoin="round"
+            tension={0.34}
+            opacity={0.96 - index * 0.18}
+            shadowColor={index === 0 ? '#e0f2fe' : '#38bdf8'}
+            shadowBlur={18 - index * 3}
+            perfectDrawEnabled={false}
+          />
+          )
+        })}
+      </Group>
     </Group>
   )
 }

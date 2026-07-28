@@ -10415,9 +10415,11 @@ function resolveDnd5ePendingMonsterMechanicTrigger(
         if (!spendReaction(owner, events)) return fail(state, events, 'reaction-unavailable')
         events.push({ type: 'turn-resource-spent', actorId: owner.id, resource: 'reaction' })
       }
-      const critical = supplied.d20 === 20
       let attack
+      let hit: boolean
+      let critical: boolean
       let damage = 0
+      let targetArmorClass = dnd5eTargetArmorClassForAttack(state, owner.id, target.id)
       try {
         const attackModifier = consumeDnd5eMonsterMechanicRollModifiers(owner, 'attack', events)
         const mode = resolveDnd5eRollMode({
@@ -10431,14 +10433,41 @@ function resolveDnd5ePendingMonsterMechanicTrigger(
           rolls: attackDice,
           mode,
           modifier: effect.toHit + attackModifier.bonus,
-          targetAc: target.armorClass,
+          targetAc: targetArmorClass,
         })
-        if (attack.hit) {
+        ;({ hit, critical } = resolveDnd5eAttackOutcome({
+          attack,
+          targetArmorClass,
+          automaticCritical: dnd5eHitIsAutomaticCritical(state, owner.id, target),
+        }))
+        if (hit) {
           const expectedRolls = effect.damage.count * (critical ? 2 : 1)
           if (
             supplied.damageRolls.length !== expectedRolls ||
             supplied.damageRolls.some((roll) => !Number.isInteger(roll) || roll < 1 || roll > effect.damage.sides)
           ) return fail(state, events, 'invalid-dice')
+        } else if (supplied.damageRolls.length > 0) return fail(state, events, 'invalid-dice')
+      } catch {
+        return fail(state, events, 'invalid-dice')
+      }
+      const monsterParry = applyDnd5eMonsterParryReaction({
+        state,
+        attacker: owner,
+        target,
+        attack,
+        targetArmorClass,
+        hit,
+        critical,
+        meleeAttack: (effect.attackMode ?? 'melee') === 'melee',
+        events,
+      })
+      ;({
+        hit,
+        critical,
+        armorClass: targetArmorClass,
+      } = monsterParry)
+      if (hit) {
+        try {
           damage = rules.resolveDamage({
             count: effect.damage.count,
             sides: effect.damage.sides,
@@ -10450,16 +10479,16 @@ function resolveDnd5ePendingMonsterMechanicTrigger(
             0,
             damage + consumeDnd5eMonsterMechanicRollModifiers(owner, 'damage', events).bonus,
           )
-        } else if (supplied.damageRolls.length > 0) return fail(state, events, 'invalid-dice')
-      } catch {
-        return fail(state, events, 'invalid-dice')
+        } catch {
+          return fail(state, events, 'invalid-dice')
+        }
       }
-      events.push({
+      emitDnd5eAttackResolved(state, {
         type: 'attack-resolved', actorId: owner.id, targetId: target.id,
-        d20: attack.roll.d20, total: attack.roll.total, armorClass: target.armorClass,
-        hit: attack.hit, critical: attack.hit && critical,
-      })
-      if (attack.hit) {
+        d20: attack.roll.d20, total: attack.roll.total, armorClass: targetArmorClass,
+        hit, critical,
+      }, events)
+      if (hit) {
         damage = adjustDamageForTarget(target, damage, effect.damage.type)
         applyDamage(target, damage, critical, events, owner, state, [effect.damage.type])
       }
@@ -11953,7 +11982,10 @@ function spendDnd5eMonsterSpellEconomy(
     : castingTime === 'reaction'
       ? 'reaction'
       : 'action'
-  if (!spend(actor, resource)) return false
+  const spentResource = resource === 'reaction'
+    ? spendReaction(actor, events)
+    : spend(actor, resource)
+  if (!spentResource) return false
   events.push({ type: 'turn-resource-spent', actorId: actor.id, resource })
   return true
 }
@@ -13969,7 +14001,10 @@ export function resolveDnd5eSandboxedPluginCapabilities(
     if (pluginEconomy === 'reaction' && dnd5eReactionsPrevented(actor)) {
       return fail(state, events, 'reaction-unavailable')
     }
-    if (!spend(actor, pluginEconomy)) {
+    const spentPluginEconomy = pluginEconomy === 'reaction'
+      ? spendReaction(actor, events)
+      : spend(actor, pluginEconomy)
+    if (!spentPluginEconomy) {
       return fail(
         state,
         events,
@@ -14795,7 +14830,10 @@ function resolveDnd5eHeadlessActionInternal(
         if (economy === 'reaction' && dnd5eReactionsPrevented(actor)) {
           return fail(state, events, 'reaction-unavailable')
         }
-        if (!spend(actor, economy)) {
+        const spentPluginEconomy = economy === 'reaction'
+          ? spendReaction(actor, events)
+          : spend(actor, economy)
+        if (!spentPluginEconomy) {
           return fail(
             state,
             events,

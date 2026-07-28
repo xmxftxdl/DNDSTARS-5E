@@ -6,6 +6,7 @@ import {
 } from './customMonsterWorkshop'
 import {
   createDnd5eCombatant,
+  dnd5eCombatantCanSee,
   dnd5eCombatantPairKey,
   dnd5eMonsterMechanicSavingThrowKindForAction,
   dnd5ePendingMonsterMechanicResolutions,
@@ -14,6 +15,7 @@ import {
   type Dnd5eCombatant,
 } from './headlessCombatEngine'
 import { getDnd5eSrdMonster, setDnd5eRoomMonsterCatalog } from './monsters'
+import { dnd5eReactionsPrevented } from './passiveDefenses'
 
 const abilities = { str: 12, dex: 12, con: 12, int: 10, wis: 10, cha: 10 }
 
@@ -182,6 +184,7 @@ describe('custom monster authoritative trigger snapshots', () => {
       armorClass: nobleMonster.armorClass.value,
       currentHp: nobleMonster.hitPoints.average,
       maxHp: nobleMonster.hitPoints.average,
+      position: { x: 5, y: 0 },
     })
     const guard = combatant('guard', 'dm', 10, { statBlockId: guardMonster.id })
     const state = startDnd5eHeadlessCombat('legacy-mechanic-parry', [noble, guard])
@@ -204,6 +207,19 @@ describe('custom monster authoritative trigger snapshots', () => {
     if (!pending || pending.type !== 'monster-mechanic-trigger-pending') {
       throw new Error('Expected pending legacy mechanic')
     }
+    expect(moved.state.combatants[noble.id].turn.reactionAvailable).toBe(true)
+    expect(dnd5eReactionsPrevented(moved.state.combatants[noble.id])).toBe(false)
+    expect(dnd5eCombatantCanSee(moved.state, noble.id, guard.id)).toBe(true)
+    expect(getDnd5eSrdMonster(nobleMonster.id)?.reactions).toContainEqual(
+      expect.objectContaining({
+        id: 'parry',
+        automation: 'headless',
+        rule: expect.objectContaining({ kind: 'parry', armorClassBonus: 2 }),
+      }),
+    )
+    expect(getDnd5eSrdMonster(nobleMonster.id)?.actions.some((action) =>
+      action.attack != null && action.attack.mode !== 'ranged',
+    )).toBe(true)
     expect(dnd5ePendingMonsterMechanicResolutions(moved.state)[0]?.attacks[0])
       .toMatchObject({ attackMode: 'melee' })
 

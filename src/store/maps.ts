@@ -75,7 +75,6 @@ function uid(): string {
 
 let lastSharedMapsSnapshot = ''
 let lastSharedMapsUpdatedAt = 0
-let mapSaveSeq = 0
 let lastLocalMapsWriteAt = 0
 const LOCAL_TOKEN_HIT_POINT_EDIT_TTL_MS = 30000
 const PENDING_LOCAL_TOKEN_HIT_POINT_EDITS_STORAGE_KEY = 'stars-map-token-hit-point-edits-v1'
@@ -90,6 +89,111 @@ const pendingLocalTokenHitPointEdits = new Map<string, PendingLocalTokenHitPoint
 let pendingLocalTokenHitPointEditsHydrated = false
 
 const pendingTokenKey = (mapId: string, tokenId: string) => `${mapId}:${tokenId}`
+
+/**
+ * Serializes full-map persistence without letting rapid edits build an
+ * unbounded FIFO of stale snapshots. One request may be in flight while a
+ * single trailing request is retained; every newer request replaces that
+ * trailing payload.
+ *
+ * Callers that require durability wait for their generation (or a newer one)
+ * to save successfully. Best-effort callers keep the historical fire-and-
+ * forget behavior and resolve even when the final underlying save fails.
+ */
+export function createLatestMapsPublishPump<T>(
+  persist: (
+    value: T,
+    options: { retryPendingHitPoints: boolean },
+  ) => Promise<void>,
+): (
+  value: T,
+  options?: { retryPendingHitPoints?: boolean; requireSaved?: boolean },
+) => Promise<void> {
+  type PendingPublish = {
+    generation: number
+    value: T
+    retryPendingHitPoints: boolean
+  }
+  type PublishWaiter = {
+    generation: number
+    requireSaved: boolean
+    resolve: () => void
+    reject: (reason: unknown) => void
+  }
+
+  let generation = 0
+  let running = false
+  let pending: PendingPublish | null = null
+  let waiters: PublishWaiter[] = []
+
+  const settleThrough = (
+    savedGeneration: number,
+    outcome?: { failure: unknown },
+  ) => {
+    const completed = waiters.filter((waiter) => waiter.generation <= savedGeneration)
+    waiters = waiters.filter((waiter) => waiter.generation > savedGeneration)
+    for (const waiter of completed) {
+      if (outcome && waiter.requireSaved) waiter.reject(outcome.failure)
+      else waiter.resolve()
+    }
+  }
+
+  const drain = async () => {
+    if (running) return
+    running = true
+    try {
+      while (pending) {
+        const request = pending
+        pending = null
+        try {
+          await persist(request.value, {
+            retryPendingHitPoints: request.retryPendingHitPoints,
+          })
+          settleThrough(request.generation)
+        } catch (error) {
+          // TypeScript does not model assignments made by publish calls while
+          // the awaited persistence promise is suspended.
+          const trailing = pending as PendingPublish | null
+          if (trailing) {
+            // A failed HP write must retain its conflict-retry semantics when a
+            // newer non-HP snapshot has already replaced the trailing request.
+            trailing.retryPendingHitPoints =
+              trailing.retryPendingHitPoints || request.retryPendingHitPoints
+            continue
+          }
+          settleThrough(request.generation, { failure: error })
+        }
+      }
+    } finally {
+      running = false
+      // A caller cannot normally enqueue between the final loop check and this
+      // assignment, but retaining this guard makes the pump robust to unusual
+      // thenables used by tests or integrations.
+      if (pending) void drain()
+    }
+  }
+
+  return (value, options = {}) => {
+    const requestedGeneration = ++generation
+    const promise = new Promise<void>((resolve, reject) => {
+      waiters.push({
+        generation: requestedGeneration,
+        requireSaved: options.requireSaved === true,
+        resolve,
+        reject,
+      })
+    })
+    pending = {
+      generation: requestedGeneration,
+      value,
+      retryPendingHitPoints:
+        options.retryPendingHitPoints === true ||
+        pending?.retryPendingHitPoints === true,
+    }
+    if (!running) void drain()
+    return promise
+  }
+}
 
 function pendingTokenEditStorage(): Storage | null {
   if (typeof window === 'undefined') return null
@@ -331,43 +435,45 @@ function stripViewerControlProjection(token: Token): Omit<Token, 'viewerControll
   return persisted
 }
 
+async function persistMapsState(
+  state: Pick<MapState, 'maps' | 'selectedId'>,
+  options: { retryPendingHitPoints: boolean },
+): Promise<void> {
+  let maps = state.maps
+  if (isPlayerPort()) {
+    const shared = await loadSharedResource<SharedMapsState>('maps')
+    if (shared?.maps) maps = mergePlayerTokenCombatFields(maps, shared.maps)
+  }
+  const persistedMaps = maps.map((map) => ({
+    ...map,
+    tokens: map.tokens.map(stripViewerControlProjection),
+  }))
+  const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
+  const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
+  lastLocalMapsWriteAt = updatedAt
+  const saved = await saveMapsStateWithPendingHitPointRetry({
+    payload,
+    retryPendingHitPoints: options.retryPendingHitPoints,
+    save: (nextPayload) => saveSharedResourceWithResult('maps', nextPayload),
+    load: () => loadSharedResource<SharedMapsState>('maps'),
+  })
+  const result = saved.result
+  if (result.status !== 'saved') {
+    lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
+    throw new Error(`maps-save-rejected:${result.status}`)
+  }
+  lastLocalMapsWriteAt = saved.payload.updatedAt ?? lastLocalMapsWriteAt
+  lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? Date.now()
+  lastSharedMapsSnapshot = JSON.stringify(saved.payload)
+}
+
+const enqueueLatestMapsPublish = createLatestMapsPublishPump(persistMapsState)
+
 function publishMapsState(
   state: Pick<MapState, 'maps' | 'selectedId'>,
   options: { retryPendingHitPoints?: boolean; requireSaved?: boolean } = {},
 ): Promise<void> {
-  const seq = ++mapSaveSeq
-  return (async () => {
-    let maps = state.maps
-    if (isPlayerPort()) {
-      const shared = await loadSharedResource<SharedMapsState>('maps')
-      if (seq !== mapSaveSeq) return
-      if (shared?.maps) maps = mergePlayerTokenCombatFields(maps, shared.maps)
-    }
-    const persistedMaps = maps.map((map) => ({
-      ...map,
-      tokens: map.tokens.map(stripViewerControlProjection),
-    }))
-    const updatedAt = Math.max(Date.now(), lastSharedMapsUpdatedAt + 1, lastLocalMapsWriteAt + 1)
-    const payload: SharedMapsState = { maps: persistedMaps, selectedId: state.selectedId, updatedAt }
-    if (seq !== mapSaveSeq) return
-    lastLocalMapsWriteAt = updatedAt
-    const saved = await saveMapsStateWithPendingHitPointRetry({
-      payload,
-      retryPendingHitPoints: options.retryPendingHitPoints === true,
-      save: (nextPayload) => saveSharedResourceWithResult('maps', nextPayload),
-      load: () => loadSharedResource<SharedMapsState>('maps'),
-    })
-    const result = saved.result
-    if (result.status !== 'saved') {
-      if (seq === mapSaveSeq) lastLocalMapsWriteAt = lastSharedMapsUpdatedAt
-      if (options.requireSaved) throw new Error(`maps-save-rejected:${result.status}`)
-      return
-    }
-    if (seq !== mapSaveSeq) return
-    lastLocalMapsWriteAt = saved.payload.updatedAt ?? lastLocalMapsWriteAt
-    lastSharedMapsUpdatedAt = saved.payload.updatedAt ?? Date.now()
-    lastSharedMapsSnapshot = JSON.stringify(saved.payload)
-  })()
+  return enqueueLatestMapsPublish(state, options)
 }
 
 export interface Token {

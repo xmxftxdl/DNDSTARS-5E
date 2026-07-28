@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
-const DM = 'http://127.0.0.1:6173'
-const PLAYER = 'http://127.0.0.1:6174'
+const E2E_PORT_BASE = Math.max(1_024, Number(process.env.STARS_E2E_PORT_BASE) || 6_173)
+const DM = `http://127.0.0.1:${E2E_PORT_BASE}`
+const PLAYER = `http://127.0.0.1:${E2E_PORT_BASE + 1}`
 
 async function putState(request: APIRequestContext, name: string, payload: unknown) {
   const current = await request.get(`${DM}/api/state/${name}`)
@@ -670,6 +671,79 @@ test('area spell VFX follow selected map geometry', async ({ browser, request },
   await context.close()
 })
 
+test('Thunderwave pushes a traveling pressure front away from the caster', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const now = Date.now()
+  const mapId = `thunderwave-pressure-front-${now}`
+  const caster = {
+    id: 'thunderwave-pressure-caster',
+    label: 'Thunderwave Caster',
+    x: 140,
+    y: 245,
+    color: '#3b82f6',
+    emoji: '🧙',
+    size: 1,
+    type: 'player',
+  }
+  await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'maps', {
+    selectedId: mapId,
+    updatedAt: now,
+    maps: [{
+      id: mapId,
+      name: 'Thunderwave Pressure Front E2E',
+      width: 760,
+      height: 520,
+      gridSize: 70,
+      gridOffsetX: 0,
+      gridOffsetY: 0,
+      showGrid: true,
+      feetPerCell: 5,
+      tokens: [caster],
+    }],
+  })
+
+  const context = await browser.newContext({ viewport: { width: 1_100, height: 820 } })
+  const player = await context.newPage()
+  await player.goto(`${PLAYER}/maps`, { waitUntil: 'domcontentloaded' })
+  await player.waitForURL(/\/campaign\/local\/maps$/)
+  const canvas = player.getByTestId('map-canvas')
+  await expect(canvas).toBeVisible()
+  await player.waitForTimeout(800)
+
+  await player.evaluate(async ({ activeMapId, sourceTokenId }) => {
+    const presentation = await import('/src/lib/combatPresentation.ts')
+    await presentation.publishAreaSpellPresentation({
+      id: `e2e-thunderwave-pressure-${Date.now()}`,
+      mapId: activeMapId,
+      transactionId: `e2e-thunderwave-pressure-tx-${Date.now()}`,
+      sourceTokenId,
+      spellId: 'thunderwave',
+      targetCell: { col: 5, row: 3 },
+      shape: 'line',
+      lengthFeet: 15,
+      widthFeet: 15,
+    })
+  }, { activeMapId: mapId, sourceTokenId: caster.id })
+
+  await expect.poll(async () =>
+    (await canvas.getAttribute('data-combat-projectile-kinds') ?? '')
+      .split(',')
+      .includes('thunderwave'),
+  ).toBe(true)
+  await player.waitForTimeout(260)
+  await canvas.screenshot({
+    path: process.env.THUNDERWAVE_PUSH_VFX_SCREENSHOT_PATH ??
+      testInfo.outputPath('thunderwave-push-vfx.png'),
+  })
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-combat-projectile-count')),
+  ).toBe(0)
+  await context.close()
+})
+
 test('persistent buff and debuff spell badges stack without overlap', async ({ browser, request }, testInfo) => {
   const now = Date.now()
   const mapId = `persistent-spell-badges-${now}`
@@ -711,6 +785,7 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
   ] as const
   const sourceTokens = statusKinds.map((kind, index) => ({
     id: `${kind}-source`,
+    characterId: `${kind}-source-character`,
     label: `${kind} source`,
     x: 80 + Math.floor(index / 7) * 105,
     y: 45 + (index % 7) * 78,
@@ -718,6 +793,40 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
     emoji: '🧙',
     size: 1,
     type: 'player',
+  }))
+  const sourceCharacters = statusKinds.map((kind) => ({
+    id: `${kind}-source-character`,
+    rulesetId: 'dnd5e-2014-srd-5.1',
+    dnd5eClassId: 'bard',
+    dnd5eClassLevels: { bard: 5 },
+    name: `${kind} Bard`,
+    player: 'E2E',
+    avatar: '🎵',
+    accent: 'from-fuchsia-500 to-pink-500',
+    race: 'Human',
+    charClass: 'Bard',
+    level: 5,
+    background: 'Entertainer',
+    experience: 6_500,
+    reputation: 0,
+    abilities: { str: 8, dex: 14, con: 12, int: 10, wis: 12, cha: 18 },
+    savingThrows: ['dex', 'cha'],
+    skills: ['performance'],
+    maxHp: 32,
+    currentHp: 32,
+    tempHp: 0,
+    hitDice: '5d8',
+    ac: 14,
+    speed: 30,
+    initiativeBonus: 2,
+    saveDC: 15,
+    passivePerception: 11,
+    inspiration: 0,
+    conditions: [],
+    notes: '',
+    dmNotes: '',
+    visibleToPlayers: true,
+    dnd5eCombatState: { schemaVersion: 2, activeEffects: [] },
   }))
   const targetToken = {
     id: 'persistent-status-target',
@@ -809,6 +918,11 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
     },
   }
   await request.delete(`${DM}/api/events/_all`)
+  await putState(request, 'characters', {
+    characters: sourceCharacters,
+    selectedId: sourceCharacters[0].id,
+    updatedAt: now,
+  })
   await putState(request, 'maps', {
     selectedId: mapId,
     updatedAt: now,
@@ -833,6 +947,13 @@ test('persistent buff and debuff spell badges stack without overlap', async ({ b
   const canvas = player.getByTestId('map-canvas')
   await expect(canvas).toBeVisible()
   await expect(canvas).toHaveAttribute('data-spell-status-token-count', '28')
+  await expect.poll(async () => {
+    const colors = (await canvas.getAttribute('data-spell-status-token-colors') ?? '')
+      .split(',')
+      .filter(Boolean)
+    return colors.length === statusKinds.length &&
+      colors.every((entry) => entry.endsWith(':#26072C:#F9D5FF'))
+  }).toBe(true)
 
   await player.evaluate(async ({ activeMapId, kinds, targetTokenId }) => {
     const presentation = await import('/src/lib/combatPresentation.ts')

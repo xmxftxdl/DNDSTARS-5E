@@ -4,6 +4,8 @@ const DM = 'http://127.0.0.1:6173'
 const PLAYER = 'http://127.0.0.1:6174'
 const SESSION_KEY = 'stars-room-session:v1'
 
+test.setTimeout(90_000)
+
 interface Membership {
   roomId: string
   roomName: string

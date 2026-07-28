@@ -3040,6 +3040,30 @@ describe('room privacy projections and event channel ACLs', () => {
     const post = (channel: string, headers: Record<string, string>, body: object) => fetch(eventUrl(channel), {
       method: 'POST', headers, body: JSON.stringify(body),
     })
+    const eventStream = await fetch(eventUrl('_all'), { headers: playerHeaders })
+    expect(eventStream.status).toBe(200)
+    expect(eventStream.headers.get('content-type')).toContain('text/event-stream')
+    expect(eventStream.headers.get('cache-control')).toContain('no-transform')
+    expect(eventStream.headers.get('x-accel-buffering')).toBe('no')
+    const eventReader = eventStream.body?.getReader()
+    expect(eventReader).toBeDefined()
+    const readyChunk = await eventReader!.read()
+    expect(new TextDecoder().decode(readyChunk.value)).toContain('event: ready')
+    const dmInvalidation = await fetch(`${offServer.base}/api/state/maps${query}`, {
+      method: 'PUT',
+      headers: dmHeaders,
+      body: JSON.stringify({ maps: [], selectedId: null, updatedAt: Date.now() }),
+    })
+    expect(dmInvalidation.status).toBe(200)
+    const messageChunk = await Promise.race([
+      eventReader!.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('event-stream-message-timeout')), 2_000).unref()
+      }),
+    ])
+    expect(new TextDecoder().decode(messageChunk.value)).toContain('"name":"maps"')
+    await eventReader!.cancel()
+
     expect((await post('player-action-dm-to-player', playerHeaders, { id: 'forged-ack' })).status).toBe(403)
     expect((await post('player-action-player-to-dm', dmHeaders, { id: 'forged-request' })).status).toBe(403)
     expect((await post('shared-state-changed', playerHeaders, { name: 'maps' })).status).toBe(403)

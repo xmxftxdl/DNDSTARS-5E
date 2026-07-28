@@ -28,6 +28,7 @@ import {
 } from './characters'
 import {
   clearPendingLocalTokenHitPointEditsForTest,
+  createLatestMapsPublishPump,
   markPendingLocalTokenHitPointEdit,
   mergePendingLocalTokenHitPointEdits,
   mergePlayerTokenCombatFields,
@@ -654,5 +655,72 @@ describe('地图 Token HP 本地写入竞争保护', () => {
     expect(save).toHaveBeenCalledTimes(2)
     expect(load).toHaveBeenCalledTimes(1)
     expect(writes[1].maps[0].tokens[0]).toMatchObject({ x: 275, hp: 4, maxHp: 12 })
+  })
+})
+
+describe('地图共享发布 latest-wins 泵', () => {
+  it('连续 20 次 HP 更新最多保留一笔处理中和一笔最新待处理保存', async () => {
+    let releaseFirstSave!: () => void
+    const firstSaveBlocked = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    const persisted: Array<{ hp: number }> = []
+    const persist = vi.fn(async (value: { hp: number }) => {
+      persisted.push(value)
+      if (persisted.length === 1) await firstSaveBlocked
+    })
+    const publish = createLatestMapsPublishPump(persist)
+
+    const requests = Array.from({ length: 20 }, (_, index) =>
+      publish({ hp: index + 1 }, { retryPendingHitPoints: true }))
+
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(persisted).toEqual([{ hp: 1 }])
+
+    releaseFirstSave()
+    await Promise.all(requests)
+
+    expect(persist).toHaveBeenCalledTimes(2)
+    expect(persisted).toEqual([{ hp: 1 }, { hp: 20 }])
+  })
+
+  it('requireSaved 会跨过失败的当前代并等待更新代真正保存成功', async () => {
+    let releaseFirstSave!: () => void
+    let releaseLatestSave!: () => void
+    const firstSaveBlocked = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    const latestSaveBlocked = new Promise<void>((resolve) => {
+      releaseLatestSave = resolve
+    })
+    let attempt = 0
+    const persist = vi.fn(async () => {
+      attempt += 1
+      if (attempt === 1) {
+        await firstSaveBlocked
+        throw new Error('first-save-failed')
+      }
+      await latestSaveBlocked
+    })
+    const publish = createLatestMapsPublishPump(persist)
+    let durableState: 'pending' | 'resolved' | 'rejected' = 'pending'
+
+    const durable = publish({ hp: 4 }, { requireSaved: true }).then(
+      () => { durableState = 'resolved' },
+      (error) => {
+        durableState = 'rejected'
+        throw error
+      },
+    )
+    const newer = publish({ hp: 3 })
+
+    releaseFirstSave()
+    await vi.waitFor(() => expect(persist).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    expect(durableState).toBe('pending')
+
+    releaseLatestSave()
+    await Promise.all([durable, newer])
+    expect(durableState).toBe('resolved')
   })
 })

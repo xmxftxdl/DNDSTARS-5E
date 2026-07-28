@@ -320,6 +320,59 @@ describe('SRD monster Parry in Headless combat', () => {
     })
   })
 
+  it('shares one Reactive budget between an opportunity attack and Parry on the same turn', () => {
+    const attacker = combatant('attacker', 20)
+    const marilith = parryMonster('marilith', 10)
+    const state = startDnd5eHeadlessCombat(
+      'monster-parry:marilith-shared-reaction',
+      [attacker, marilith],
+    )
+    const begun = resolveDnd5eHeadlessAction(state, {
+      type: 'begin-turn',
+      actorId: attacker.id,
+    })
+    expectSuccessfulAttack(begun)
+
+    const opportunity = resolveDnd5eHeadlessAction(begun.state, {
+      type: 'opportunity-attack',
+      actorId: marilith.id,
+      targetId: attacker.id,
+      attackModifier: 0,
+      d20: 10,
+      damage: {
+        count: 1,
+        sides: 8,
+        bonus: 0,
+        rolls: [1],
+        type: 'slashing',
+      },
+    })
+    expectSuccessfulAttack(opportunity)
+    const reactiveTurnKey =
+      opportunity.state.combatants[marilith.id].classState.monsterReactiveAvailableTurnKey
+    expect(reactiveTurnKey).toBeTruthy()
+    expect(opportunity.state.combatants[marilith.id]).toMatchObject({
+      turn: { reactionAvailable: false },
+      classState: { monsterReactiveUsedTurnKey: reactiveTurnKey },
+    })
+
+    const attack = resolveDnd5eHeadlessAction(
+      opportunity.state,
+      weaponAttack({
+        actorId: attacker.id,
+        targetId: marilith.id,
+        total: marilith.armorClass,
+      }),
+    )
+    expectSuccessfulAttack(attack)
+    expect(parryEvents(attack.events, marilith.id)).toHaveLength(0)
+    expect(attack.state.combatants[marilith.id]).toMatchObject({
+      currentHp: marilith.currentHp - 1,
+      turn: { reactionAvailable: false },
+      classState: { monsterReactiveUsedTurnKey: reactiveTurnKey },
+    })
+  })
+
   it('distinguishes melee spell attacks from short-ranged and entity-origin spells', () => {
     for (const spell of DND5E_SRD_COMBAT_SPELLS.filter(
       (candidate) => candidate.effect === 'spell-attack',
